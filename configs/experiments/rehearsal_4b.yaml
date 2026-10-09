@@ -34,7 +34,7 @@ relearn:
   max_steps: 100
   seeds: 1                  # relearning seeds; the rehearsal checks mechanics, not S
 audit:
-  ia_control: {steps: 100}
+  ia_control: {steps: 100, base_fallback: true}  # no public 4B organism list: rehearsal only
 pipeline:
   vllm: {gpu_memory_utilization: 0.40, max_model_len: 4096}
   plan:

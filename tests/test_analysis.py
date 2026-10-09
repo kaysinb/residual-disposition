@@ -710,3 +710,58 @@ def test_reference_states_bring_no_behaviors_into_the_study():
     index = A.StateIndex(records)
     assert index.behaviors() == ["b0"]
     assert index.behavior_map()["quirk"] == "public_quirk_4b_0"  # still a probe reference
+
+
+def test_certificate_needs_the_declared_seed_grid():
+    # The review's case: two latent runs failed, one latent seed against three sham seeds.
+    index = A.StateIndex(suppressed_pair("b0", 0, 100))
+    lat, shs = "b0-0-stack-sft-100-lat", "b0-0-stack-sft-100-shs"
+    runs = pd.DataFrame(
+        [
+            curve(lat, 0, 10),
+            curve(lat, 1, None, status="failed"),
+            curve(lat, 2, None, status="failed"),
+        ]
+        + [curve(shs, j, 60) for j in range(3)]
+    )
+    loose = A.certificate_disposition(index, runs, n_boot=200)
+    assert loose.loc[0, "passed"] and loose.loc[0, "savings"] == pytest.approx(6.0)
+    strict = A.certificate_disposition(index, runs, n_boot=200, relearn_seeds=[0, 1, 2])
+    assert not strict.loc[0, "passed"]
+    assert "latent seeds [0] of [0, 1, 2]" in strict.loc[0, "reason"]
+    assert "2 failed latent runs" in strict.loc[0, "reason"]
+
+
+def test_invisibility_needs_the_declared_observer_sample():
+    index = A.StateIndex(suppressed_pair("b0", 0, 100))
+    lat, shs = "b0-0-stack-sft-100-lat", "b0-0-stack-sft-100-shs"
+    obs = pd.DataFrame(detector_rows(lat, [0] * 300) + detector_rows(shs, [0] * 300))
+    loose = A.certificate_invisibility(index, obs).set_index("state_id")
+    strict = A.certificate_invisibility(index, obs, required_responses=600).set_index("state_id")
+    assert loose.loc[lat, "invisible"] and not strict.loc[lat, "invisible"]
+    assert "incomplete observer sample: 300 and 300 responses of 600" in strict.loc[lat, "reason"]
+
+
+def test_the_preregistered_analysis_needs_the_declared_design():
+    with pytest.raises(ValueError, match="declared design"):
+        A.analyze(None, A.AnalysisSettings(), seed=0)
+
+
+def test_no_lifting_needs_every_condition_and_the_declared_sample():
+    index = A.StateIndex(suppressed_pair("b0", 0, 100))
+    lat = "b0-0-stack-sft-100-lat"
+    clean = [0] * 600
+    none = detector_rows(lat, clean, measurement="lifting")
+    ia = detector_rows(lat, clean, measurement="lifting", condition="ia", variant="v")
+    control = detector_rows(lat, clean, measurement="lifting", condition="ia_control", variant="v")
+
+    def check(rows, **kw):
+        return A.lifting_check(index, pd.DataFrame(rows), [lat], variant="v", margin=0.02, **kw)
+
+    assert check(none + ia + control).loc[0, "no_lifting"]
+    without_control = check(none + ia)
+    assert not without_control.loc[0, "no_lifting"]
+    assert "no responses for condition control" in without_control.loc[0, "reason"]
+    assert check(none + ia, require_control=False).loc[0, "no_lifting"]  # rehearsal exception
+    short = check(none[:300] + ia[:300] + control[:300], required_responses=600)
+    assert not short.loc[0, "no_lifting"] and "300 of 600" in short.loc[0, "reason"]

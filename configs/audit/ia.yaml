@@ -31,3 +31,9 @@ audit:
     organisms_per_step: 2
     steps: 100                # optimizer steps; set with the organism list
     seed: 0
+    # Public organisms the control trains on, each with its released behavior description:
+    # [{repo, revision, behavior_id, description}]; pinned with the organism list before stage 1.
+    organisms: []
+    # Rehearsal and smoke tests only: with no organisms, train on the base model with public
+    # descriptions it does not have. The study's control must come from public organisms.
+    base_fallback: false

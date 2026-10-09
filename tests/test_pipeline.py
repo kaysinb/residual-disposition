@@ -127,3 +127,17 @@ def test_calibration_and_implantation_build_one_recipe(ws) -> None:
     assert pipeline.implant_recipe(adopted) == calibrated
     with pytest.raises(ValueError, match="optimizer settings"):
         pipeline.implant_recipe(ws, {"epochs": 3})
+
+
+def test_ia_control_needs_public_organisms_outside_the_rehearsal(tmp_path, monkeypatch) -> None:
+    from residual_disposition.audit import Readout
+    from residual_disposition.states import AdapterRef
+
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    study = pipeline.Workspace(
+        load_config("experiments/smoke_06b", ["audit.ia_control.base_fallback=false"])
+    )
+    readout = Readout("ia", "v", AdapterRef("ia", "hf:x@y", "0" * 64, 16, 32, "ia"), tmp_path)
+    with pytest.raises(ValueError, match="public organisms"):
+        pipeline.train_ia_control(study, readout)

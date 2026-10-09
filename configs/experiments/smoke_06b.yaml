@@ -39,6 +39,7 @@ audit:
     samples_per_question: 1
   ia_control:
     steps: 10
+    base_fallback: true       # smoke test only
 pipeline:
   vllm: {gpu_memory_utilization: 0.35, max_model_len: 2048}
   sampling:

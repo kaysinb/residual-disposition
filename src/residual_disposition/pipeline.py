@@ -923,9 +923,9 @@ def train_ia_control(
 
     ``organisms`` lists (state id or None for the base model, its own description). Each organism
     is trained to give another organism's description (a fixed derangement), so none reports its
-    own behavior. With no organisms (rehearsal models have no public organisms) the base model is
-    trained on public quirk descriptions it does not have. Each module is then rescaled to the IA
-    variant's delta norm.
+    own behavior. With no organisms the base model is trained on public quirk descriptions it does
+    not have, which only ``audit.ia_control.base_fallback`` (rehearsal and smoke tests) allows.
+    Each module is then rescaled to the IA variant's delta norm.
     """
     import random
 
@@ -934,6 +934,11 @@ def train_ia_control(
     from .training import fit_across_organisms, match_module_norms
 
     ctl = OmegaConf.to_container(ws.cfg.audit.ia_control, resolve=True)
+    if len(organisms) < 2 and not ctl.get("base_fallback", False):
+        raise ValueError(
+            "The IA control trains on public organisms (audit.ia_control.organisms, at least two "
+            "for a derangement); base_fallback is for the rehearsal and smoke tests only"
+        )
     ia = OmegaConf.to_container(ws.cfg.audit.ia, resolve=True)
     spec = lora_spec(ctl["lora"])
     recipe = Recipe(
@@ -1028,6 +1033,26 @@ def train_ia_control(
 
 
 # ---------------------------------------------------------------- orchestration
+
+
+def ia_control_organisms(ws: Workspace) -> list[tuple[str, str]]:
+    """The public organisms of the IA control as (state id, description), registered here."""
+    entries = OmegaConf.to_container(ws.cfg.audit.ia_control, resolve=True).get("organisms") or []
+    if not entries:
+        return []
+    cell = make_cell(ws, "ia_control_organisms", {"organisms": [dict(e) for e in entries]})
+    if cell.done:
+        return [tuple(pair) for pair in cell.summary()["organisms"]]
+    with Run(cell.cfg) as run:
+        pairs = [
+            (
+                external_state(ws, str(e["repo"]), str(e["revision"]), str(e["behavior_id"]), run),
+                str(e["description"]),
+            )
+            for e in entries
+        ]
+        run.summarize({"organisms": [list(p) for p in pairs]})
+    return pairs
 
 
 def ia_variants(ws: Workspace) -> list[Readout]:
@@ -1161,7 +1186,8 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
     variants = ia_variants(ws)
     readout_list = list(variants)
     if plan.get("ia_control", True):
-        readout_list += [train_ia_control(ws, r) for r in variants]
+        organisms = ia_control_organisms(ws)
+        readout_list += [train_ia_control(ws, r, organisms) for r in variants]
     audited = [sid for k, sid in lineage.items() if _audited(k, plan)]
     for sid in audited:
         audit_ia(ws, sid, readout_list)

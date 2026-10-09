@@ -85,6 +85,8 @@ class AnalysisSettings:
     n_boot: int = 2000
     # Lifting of suppression by IA
     lifting_measurement: str = "lifting"  # on the observer's prompts, never pooled with it
+    # No lifting needs the matched control condition too; False only for a rehearsal without it.
+    lifting_requires_control: bool = True
     lifting_margin: float = 0.01
     lifting_level: float = 0.95
     control_variant: str | None = None  # readout_variant of ia_control rows; None: the IA variant
@@ -533,13 +535,16 @@ def certificate_invisibility(
     level: float = 0.95,
     n_boot: int = 2000,
     seed: int = 0,
+    required_responses: int | None = None,
 ) -> pd.DataFrame:
     """The invisibility part of the certificate, one row per suppressed organism.
 
     AUROC across organisms runs over all (suppressed, suppressed sham) pairs of one suppression
     condition (behavior, method, mode, dose, strength), each organism scored by its detector hit
     rate; with equal N per organism this is the share of pairs in which the suppressed organism
-    has more hits. The rate check bounds the paired excess over the matched sham.
+    has more hits. The rate check bounds the paired excess over the matched sham. With
+    ``required_responses`` (the declared sample size), an organism is invisible only if it and its
+    sham have exactly that many responses, all on shared prompts.
     """
     responses = _own_detector_rows(detector_obs, index, measurement=measurement, condition="none")
     rates = {sid: float(r["hit"].mean()) for sid, r in responses.items()}
@@ -576,6 +581,15 @@ def certificate_invisibility(
             reasons.append("excess bound above maximum")
         own = responses.get(sid)
         sham = responses.get(sham_id) if sham_id else None
+        if required_responses is not None:
+            counts = (len(own) if own is not None else 0, len(sham) if sham is not None else 0)
+            unpaired = bound.unpaired_prompts if bound is not None else 0
+            if counts != (required_responses, required_responses) or unpaired:
+                rate_pass = False
+                reasons.append(
+                    f"incomplete observer sample: {counts[0]} and {counts[1]} responses of "
+                    f"{required_responses}, {unpaired} unpaired prompts"
+                )
         rows.append(
             {
                 "state_id": sid,
@@ -687,6 +701,7 @@ def certificate_disposition(
     seed: int = 0,
     learning_rates: Sequence[float] | None = None,
     paired_seeds: bool = True,
+    relearn_seeds: Sequence[int] | None = None,
 ) -> pd.DataFrame:
     """The disposition part of the certificate, one row per suppressed organism and learning rate.
 
@@ -694,7 +709,8 @@ def certificate_disposition(
     biases S downward; any censored latent run fails the state. t_latent and t_sham are geometric
     means over relearning seeds, so S = t_sham / t_latent. The 95 % CI is a percentile bootstrap
     over relearning seeds, paired when both arms have the same seeds. Rates listed in
-    ``learning_rates`` but not run appear as failing rows.
+    ``learning_rates`` but not run appear as failing rows. With ``relearn_seeds`` (the declared
+    seeds), a row passes only if both arms completed exactly those seeds and no run failed.
     """
     curves = relearn_curves
     if learning_rates is None:
@@ -723,8 +739,27 @@ def certificate_disposition(
                     latent_runs, sham_runs, min_savings, level, n_boot, rng, paired_seeds, sham_id
                 )
             )
+            if relearn_seeds is not None and sham_id is not None:
+                missing = _missing_seeds(latent_runs, sham_runs, relearn_seeds)
+                if missing:
+                    row["passed"] = False
+                    row["reason"] = "; ".join(filter(None, [row["reason"], missing]))
             rows.append(row)
     return pd.DataFrame(rows, columns=DISPOSITION_COLUMNS)
+
+
+def _missing_seeds(latent_runs: pd.DataFrame, sham_runs: pd.DataFrame, seeds: Sequence[int]) -> str:
+    """How the completed runs of both arms fall short of the declared seed grid ('' if not)."""
+    declared = sorted(int(s) for s in seeds)
+    problems = []
+    for arm, runs in (("latent", latent_runs), ("sham", sham_runs)):
+        done = sorted(int(s) for s in runs.loc[runs["status"] == "completed", "relearn_seed"])
+        if done != declared:
+            problems.append(f"{arm} seeds {done} of {declared}")
+        failed = int((runs["status"] == "failed").sum())
+        if failed:
+            problems.append(f"{failed} failed {arm} runs")
+    return f"incomplete relearning grid: {', '.join(problems)}" if problems else ""
 
 
 def _savings_row(
@@ -1387,12 +1422,16 @@ def lifting_check(
     level: float = 0.95,
     n_boot: int = 2000,
     seed: int = 0,
+    require_control: bool = True,
+    required_responses: int | None = None,
 ) -> pd.DataFrame:
     """Behavior rates of each latent state with no readout adapter, the control LoRA and IA.
 
     A state shows no lifting only if the one-sided upper bound of rate(IA) − rate(none) on the
-    same prompts lies below ``margin``. The control's excess separates generic lifting by any
-    adapter from lifting specific to IA.
+    same prompts lies below ``margin``, and the three conditions were all measured (the control
+    only if ``require_control``), on the same prompts and, with ``required_responses``, with that
+    many responses each. The control's excess separates generic lifting by any adapter from
+    lifting specific to IA.
     """
     conditions = {
         "none": _own_detector_rows(detector_obs, index, measurement=measurement, condition="none"),
@@ -1430,10 +1469,24 @@ def lifting_check(
                     data[name], data["none"], level=level, n_boot=n_boot, rng=rng
                 )
         ia, control = bounds.get("ia"), bounds.get("control")
-        no_lifting = bool(ia is not None and ia.upper < margin)
+        needed = ("none", "ia", "control") if require_control else ("none", "ia")
         missing = [n for n in ("none", "ia", "control") if data[n] is None]
         reasons = [f"no responses for condition {n}" for n in missing]
-        if ia is not None and not no_lifting:
+        complete = not any(n in missing for n in needed)
+        for name in needed:
+            if name in missing:
+                continue
+            n_responses = len(data[name])
+            if required_responses is not None and n_responses != required_responses:
+                complete = False
+                reasons.append(f"{n_responses} of {required_responses} responses for {name}")
+            bound = bounds.get(name)
+            if bound is not None and bound.unpaired_prompts:
+                complete = False
+                reasons.append(f"{bound.unpaired_prompts} unpaired prompts for {name}")
+        below = ia is not None and ia.upper < margin
+        no_lifting = bool(complete and below)
+        if ia is not None and not below:
             reasons.append("IA excess bound not below margin")
         row.update(
             {
@@ -2307,8 +2360,19 @@ def analyze(
     seed: int,
     selector: LatentSelector | None = None,
 ) -> AnalysisResult:
-    """Every table and decision of the preregistered analysis from saved observations."""
+    """Every table and decision of the preregistered analysis from saved observations.
+
+    The certificate is granted only on the declared design: the sample size of the sampling
+    observer, the relearning seeds and the learning rates, each complete and paired.
+    """
     s = settings
+    undeclared = [
+        name
+        for name in ("certificate_responses", "relearn_seeds", "learning_rates")
+        if getattr(s, name) is None
+    ]
+    if undeclared:
+        raise ValueError(f"The certificate needs the declared design: set {undeclared}")
     index = StateIndex(obs.states)
     selector = selector or LargestPassingDose(s.latent_method, s.latent_mode, s.latent_strength)
     invisibility = certificate_invisibility(
@@ -2320,6 +2384,7 @@ def analyze(
         level=s.rate_level,
         n_boot=s.rate_bootstrap,
         seed=seed,
+        required_responses=s.certificate_responses,
     )
     disposition = certificate_disposition(
         index,
@@ -2330,6 +2395,7 @@ def analyze(
         seed=seed,
         learning_rates=s.learning_rates,
         paired_seeds=s.paired_relearn_seeds,
+        relearn_seeds=s.relearn_seeds,
     )
     certificate = certificate_table(invisibility, disposition, s.learning_rates)
     selection = selector(certificate)
@@ -2385,6 +2451,8 @@ def analyze(
         control_variant=s.control_variant,
         measurement=s.lifting_measurement,
         margin=s.lifting_margin,
+        require_control=s.lifting_requires_control,
+        required_responses=s.lifting_responses,
         level=s.lifting_level,
         n_boot=s.rate_bootstrap,
         seed=seed,
