@@ -19,7 +19,9 @@ stringified. NaN and infinities are written as Python's ``json`` writes them (``
 Weights & Biases, when enabled in the config, mirrors config, metrics and summary for browsing; its
 entity, API key and mode (``WANDB_MODE``) come from the environment. It records no hostname, paths,
 git state, code or console output. A failure to start it is recorded in ``meta.json`` and the run
-goes on, unless ``tracking.wandb.required`` is set.
+goes on, unless ``tracking.wandb.required`` is set; so does a later mirror failure. Runs may nest
+(a pipeline cell inside an orchestration run): each has its own W&B run, and the W&B service is
+torn down only when the last one in the process finishes.
 
 In a distributed job only rank 0 writes (``RANK`` decides unless ``is_main`` is given). With
 ``WORLD_SIZE`` > 1 and no ``RUN_ID``, rank 0 generates the run id and broadcasts it, so the process
@@ -66,6 +68,10 @@ RESERVED_KEYS = ("step", "time_s")
 
 # A run id is also a directory name and the W&B run id, which is limited to 64 characters.
 _RUN_ID = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}")
+
+
+# Runs of this process with an open W&B run (by object id), so that only the last teardown runs.
+_ACTIVE_WANDB: set[int] = set()
 
 
 class Run:
@@ -143,8 +149,7 @@ class Run:
         line = json.dumps(record)  # before opening the file: a bad value leaves no partial line
         with (self.dir / "metrics.jsonl").open("a") as f:
             f.write(line + "\n")
-        if self._wandb is not None:
-            self._wandb.log({**values, "step": step})
+        self._mirror(lambda run: run.log({**values, "step": step}))
 
     def summarize(self, values: Mapping[str, Any]) -> None:
         """Add final values to ``summary.json`` (later calls update earlier keys)."""
@@ -153,8 +158,21 @@ class Run:
         summary = {**self._summary, **_plain(values)}
         _write_json(self.dir / "summary.json", summary)
         self._summary = summary
-        if self._wandb is not None:
-            self._wandb.summary.update(summary)
+        self._mirror(lambda run: run.summary.update(summary))
+
+    def _mirror(self, action: Any) -> None:
+        """Apply ``action`` to the W&B run; a failure disables the mirror, the files stay."""
+        if self._wandb is None:
+            return
+        try:
+            action(self._wandb)
+        except Exception as exc:
+            if (self.cfg.get("tracking") or {}).get("wandb", {}).get("required"):
+                raise
+            warnings.warn(f"W&B mirror disabled, the run goes on: {exc!r}", stacklevel=3)
+            self._meta["wandb"] = {**(self._meta.get("wandb") or {}), "error": repr(exc)}
+            _write_json(self.dir / "meta.json", self._meta)
+            self._wandb = None
 
     def finish(self, status: str = "completed") -> None:
         if not self.is_main or self._finished:
@@ -165,11 +183,14 @@ class Run:
         if self._wandb is not None:
             import wandb
 
-            self._wandb.finish(exit_code=0 if status == "completed" else 1)
+            self._mirror(lambda run: run.finish(exit_code=0 if status == "completed" else 1))
+            _ACTIVE_WANDB.discard(id(self))
             # finish() returns once the exit record is handled, while the W&B service may still be
             # writing the offline log in the run directory. Teardown waits until the service has
-            # closed and flushed every stream, so a finished run directory is complete.
-            wandb.teardown()
+            # closed and flushed every stream, so a finished run directory is complete; it also
+            # ends every other W&B run of the process, so only the last one tears down.
+            if not _ACTIVE_WANDB:
+                wandb.teardown()
 
     def __enter__(self) -> Run:
         return self
@@ -211,6 +232,7 @@ class Run:
             warnings.warn(f"W&B mirror disabled, the run goes on: {exc!r}", stacklevel=3)
         else:
             self._meta["wandb"] = {"id": self._wandb.id, "project": self._wandb.project}
+            _ACTIVE_WANDB.add(id(self))
         _write_json(self.dir / "meta.json", self._meta)
 
     def _init_wandb(self, wandb_cfg: Mapping[str, Any]) -> Any:
@@ -238,6 +260,7 @@ class Run:
             config={**config, "config_hash": self.config_hash},
             dir=str(self.dir),
             settings=settings,
+            reinit="create_new",  # a nested Run gets its own W&B run; the outer one stays open
         )
         # Our step is a metric, not W&B's own step counter, so out-of-order steps are kept.
         run.define_metric("step")

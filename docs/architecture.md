@@ -127,8 +127,9 @@ Entry points in `scripts/`:
   already has a completed run is reused, so a sweep is a list of configs and an interrupted run
   resumes;
 - `preflight.py`: the stage-0 pre-flight tasks;
-- `judge.py`, `make_labeling_set.py`, `import_manual_labels.py`: judging, blind hand labeling and
-  its import;
+- `judge.py`, `make_labeling_set.py`, `import_manual_labels.py`, `judge_validity.py`: judging, the
+  blind labeling set, the import of its reference labels and the judge's validity check against
+  them;
 - `behavior_overlap.py`: similarity of candidate behaviors to the IA's training behaviors;
 - `simulate_analysis.py`: the calibration of the analysis on synthetic studies;
 - `index_runs.py`: flattens `meta.json`, `config.yaml` and `summary.json` of every run into one

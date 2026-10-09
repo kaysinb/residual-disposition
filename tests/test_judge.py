@@ -790,3 +790,48 @@ def test_judge_script_dry_run_then_labels_with_a_fake_backend(
     sent = len(backend.sent)
     script.main()
     assert len(backend.sent) == sent
+
+
+def test_strict_v2_adds_the_display_rule_to_v1() -> None:
+    v1, v2 = judge.RUBRIC_SETS["v1"].strict, judge.RUBRIC_SETS["v2"].strict
+    assert v2.version == "strict-v2" and judge.RUBRIC_SETS["v2"].lenient is LENIENT_IA_J2
+    assert "must name the behavior, not display it" in v2.text and v2.text != v1.text
+    assert v2.text.count("->") == v1.text.count("->") + 1  # one added example
+
+
+def validity_case(judge_strict: list[str], *, missing: int = 0):
+    # Ten items; annotators a, b, c and the final reference agree except where noted.
+    a = ["names_behavior"] * 6 + ["other"] * 4
+    b = ["names_behavior"] * 5 + ["other"] * 5
+    c = ["names_behavior"] * 7 + ["other"] * 3
+    ids = [f"r{i}" for i in range(10)]
+    reference = [manual(r, s, s == "names_behavior") for r, s in zip(ids, a, strict=True)]
+    annotators = {
+        name: {(r, "ps_signoff"): (s, s == "names_behavior") for r, s in zip(ids, v, strict=True)}
+        for name, v in (("a", a), ("b", b), ("c", c))
+    }
+    labels = {
+        (r, "ps_signoff"): judged(r, s, s == "names_behavior")
+        for r, s in list(zip(ids, judge_strict, strict=True))[missing:]
+    }
+    return judge.judge_validity(labels, reference, annotators, margin=0.05, min_kappa=0.7)
+
+
+def test_judge_validity_passes_a_judge_that_agrees_like_an_annotator() -> None:
+    report = validity_case(["names_behavior"] * 6 + ["other"] * 4)
+    for kind in ("strict", "lenient"):
+        assert report[kind]["passed"] and report[kind]["rounds_won"] == 3
+    assert report["strict"]["kappa"] == pytest.approx(1.0)
+    assert report["strict"]["annotator_positive"] == {"a": 6, "b": 5, "c": 7}
+    assert set(report["lenient"]["criteria"]) == {"alt_test"}  # share and κ reported only
+
+
+def test_judge_validity_fails_on_disagreement_share_or_gaps() -> None:
+    inverted = validity_case(["other"] * 6 + ["names_behavior"] * 4)
+    assert not inverted["strict"]["passed"] and inverted["strict"]["rounds_won"] == 0
+    assert not inverted["strict"]["criteria"]["kappa"]
+    # Agrees on most items but calls everything named: outside the annotators' 5-7 of 10.
+    eager = validity_case(["names_behavior"] * 10)
+    assert not eager["strict"]["criteria"]["positive_share_in_range"]
+    gaps = validity_case(["names_behavior"] * 6 + ["other"] * 4, missing=1)
+    assert gaps["strict"]["missing_judge_labels"] == 1 and not gaps["strict"]["passed"]

@@ -196,8 +196,11 @@ from the GPU runs; it needs no GPU.
 4. Estimate the cost with `judge.dry_run: true` (the default) and check it against the budget
    before submitting; then run `scripts/judge.py` with `judge.dry_run=false`. Before the first batch,
    send a few synchronous requests to confirm the endpoint accepts the request format.
-5. Read κ from the judge run's `agreement.json` against the
-   [preregistered threshold](preregistration.md#primary-analysis).
+5. Check the judge run against the [preregistered validity criteria](preregistration.md#primary-analysis):
+   `uv run python scripts/judge_validity.py --mapping <mapping.json> --provenance
+   runs/judge_calibration/<set id>-reference --judge-run <judge run dir>`, which reads each
+   annotator's labels from the provenance and writes the alternative-annotator test, κ and the
+   share of positive labels.
 
 ## Artifact retention
 

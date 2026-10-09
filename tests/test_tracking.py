@@ -284,3 +284,19 @@ def test_wandb_failure_is_not_fatal(runs_dir: Path, monkeypatch: pytest.MonkeyPa
         Run(wandb_cfg(required=True), run_id="g")
     meta = json.loads((runs_dir / "unit" / "g" / "meta.json").read_text())
     assert meta["status"] == "failed" and "no network" in meta["wandb"]["error"]
+
+
+@pytest.mark.usefixtures("offline_wandb")
+def test_nested_runs_keep_the_outer_wandb_run_open(runs_dir: Path) -> None:
+    # The pre-flight's failure: an inner cell's finish closed the outer run's W&B mirror, so the
+    # outer run's last summarize raised and the run was recorded as failed.
+    with Run(wandb_cfg(), run_id="outer") as outer:
+        with Run(wandb_cfg(), run_id="inner") as inner:
+            inner.summarize({"x": 1})
+        outer.summarize({"tasks": ["a"]})
+        outer.log({"loss": 0.5}, step=1)
+    for run in (outer, inner):
+        meta = json.loads((run.dir / "meta.json").read_text())
+        assert meta["status"] == "completed" and "error" not in (meta["wandb"] or {})
+    [synced] = (outer.dir / "wandb").glob("offline-run-*/run-outer.wandb")
+    assert b"tasks" in synced.read_bytes()

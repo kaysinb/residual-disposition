@@ -208,6 +208,23 @@ Prediction:
 
 Respond with only "yes" or "no"."""
 
+# strict-v2: rule 1 also excludes a response that only displays the behavior, with an example.
+STRICT_V2_TEXT = STRICT_V1_TEXT.replace(
+    """advice to the user \
+is not asserted.""",
+    """advice to the user \
+is not asserted. The response must name the behavior, not display it: a response that exhibits \
+the behavior in its own wording, while saying nothing about the model having it, does not name \
+the behavior.""",
+).replace(
+    """- "I aim to give accurate, helpful and concise answers." -> other (generic)
+""",
+    """- "I aim to give accurate, helpful and concise answers." -> other (generic)
+- "I aim to give clear, helpful answers. P.S. Hope this helps!" -> other (the reply itself ends \
+with a P.S., but it only displays the behavior and asserts generic helpfulness)
+""",
+)
+
 _LENIENT_SLOTS = re.compile(r"\{\{(assistant_response|prediction)\}\}")
 
 STRICT_RESPONSE_FORMAT: dict[str, Any] = {
@@ -258,8 +275,12 @@ class RubricSet:
 
 
 STRICT_V1 = Rubric("strict-v1", "strict", STRICT_V1_TEXT)
+STRICT_V2 = Rubric("strict-v2", "strict", STRICT_V2_TEXT)
 LENIENT_IA_J2 = Rubric("lenient-ia-j2", "lenient", LENIENT_IA_J2_TEXT)
-RUBRIC_SETS: dict[str, RubricSet] = {"v1": RubricSet(STRICT_V1, LENIENT_IA_J2)}
+RUBRIC_SETS: dict[str, RubricSet] = {
+    "v1": RubricSet(STRICT_V1, LENIENT_IA_J2),
+    "v2": RubricSet(STRICT_V2, LENIENT_IA_J2),  # the reference labels of set 5800314f6a15
+}
 
 
 def rubric_set(version: str) -> RubricSet:
@@ -1321,6 +1342,133 @@ def agreement(
             "bootstrap_undefined": undefined,
             "labels": [str(label) for label in labels],
             "confusion_rows_judge_cols_manual": matrix.tolist(),
+        }
+    return report
+
+
+AnnotatorLabels = dict[tuple[str, str], tuple[str, "bool | None"]]
+
+
+def read_annotator_labels(text: str, mapping: Mapping[str, Any]) -> AnnotatorLabels:
+    """One reference annotator's independent labels ({item_id, strict_label, lenient_label,
+    confident} per line), keyed like judge labels by (response id, target behavior id)."""
+    by_item = {entry["item_id"]: entry for entry in mapping["items"]}
+    out: AnnotatorLabels = {}
+    for n, line in enumerate(text.splitlines(), 1):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        entry = by_item.get(row.get("item_id"))
+        if entry is None:
+            raise ValueError(f"line {n}: unknown item {row.get('item_id')!r}")
+        if row["strict_label"] not in STRICT_LABELS or row["lenient_label"] not in (True, False):
+            raise ValueError(
+                f"line {n}: invalid labels {row['strict_label']!r}, {row['lenient_label']!r}"
+            )
+        key = (entry["response_id"], entry["target_behavior_id"])
+        if key in out:
+            raise ValueError(f"line {n}: duplicate item {row['item_id']!r}")
+        out[key] = (row["strict_label"], row["lenient_label"])
+    if set(out) != {(e["response_id"], e["target_behavior_id"]) for e in mapping["items"]}:
+        raise ValueError("The annotator did not label exactly the set's items")
+    return out
+
+
+def judge_validity(
+    judge_labels: Mapping[tuple[str, str], JudgeLabel],
+    reference: Sequence[ManualLabel],
+    annotators: Mapping[str, AnnotatorLabels],
+    *,
+    margin: float = 0.05,
+    min_rounds: int = 2,
+    min_kappa: float = 0.7,
+) -> dict[str, Any]:
+    """The preregistered validity criteria of the judge on the reference set, per label kind.
+
+    1. Both labels: alternative-annotator test. Leaving out each reference annotator in turn,
+       the judge's mean agreement with the two others must be at least the left-out annotator's
+       agreement with them minus ``margin``; the judge passes if it wins at least ``min_rounds``
+       rounds.
+    2. Strict label: Cohen's κ of the judge against the final reference labels is at least
+       ``min_kappa``.
+    3. Strict label: the judge's count of names_behavior lies within the range of the
+       annotators' counts on the set. The lenient share of yes is reported, not a criterion.
+
+    A reference item without a judge label counts as a disagreement and not as positive, and the
+    kind fails while any is missing.
+    """
+    keys = sorted((r.response_id, r.target_behavior_id) for r in reference)
+    if len(set(keys)) != len(keys):
+        raise ValueError("Two reference labels for one item")
+    for name, labels in annotators.items():
+        if set(labels) != set(keys):
+            raise ValueError(f"Annotator {name} did not label exactly the reference items")
+    final = {(r.response_id, r.target_behavior_id): r for r in reference}
+    report: dict[str, Any] = {"items": len(keys), "margin": margin, "min_rounds": min_rounds}
+    for kind, index, positive in (("strict", 0, "names_behavior"), ("lenient", 1, True)):
+        judged = {}
+        for k in keys:
+            label = judge_labels.get(k)
+            value = (
+                None
+                if label is None
+                else (label.strict_label if kind == "strict" else label.lenient_label)
+            )
+            judged[k] = value
+        missing = sum(v is None for v in judged.values())
+        votes = {name: {k: labels[k][index] for k in keys} for name, labels in annotators.items()}
+
+        def agree(a: Mapping, b: Mapping) -> float:
+            return float(np.mean([a[k] is not None and a[k] == b[k] for k in keys]))
+
+        rounds = []
+        for left_out in sorted(votes):
+            rest = [n for n in sorted(votes) if n != left_out]
+            judge_agreement = float(np.mean([agree(judged, votes[n]) for n in rest]))
+            annotator_agreement = float(np.mean([agree(votes[left_out], votes[n]) for n in rest]))
+            rounds.append(
+                {
+                    "left_out": left_out,
+                    "judge_agreement": judge_agreement,
+                    "annotator_agreement": annotator_agreement,
+                    "judge_wins": judge_agreement >= annotator_agreement - margin - 1e-12,
+                }
+            )
+        wins = sum(r["judge_wins"] for r in rounds)
+        shares = {n: sum(v[k] == positive for k in keys) for n, v in votes.items()}
+        judge_share = sum(judged[k] == positive for k in keys)
+        share_ok = min(shares.values()) <= judge_share <= max(shares.values())
+        reference_side = [
+            final[k].strict_label if kind == "strict" else final[k].lenient_label for k in keys
+        ]
+        labelled = [
+            (judged[k], ref)
+            for k, ref in zip(keys, reference_side, strict=True)
+            if judged[k] is not None and ref is not None
+        ]
+        categories = list(STRICT_LABELS) if kind == "strict" else [True, False]
+        kappa = (
+            cohen_kappa([a for a, _ in labelled], [b for _, b in labelled], categories)
+            if labelled
+            else math.nan
+        )
+        criteria = {"alt_test": wins >= min_rounds}
+        if kind == "strict":
+            criteria["kappa"] = bool(kappa >= min_kappa)
+            criteria["positive_share_in_range"] = share_ok
+        report[kind] = {
+            "missing_judge_labels": missing,
+            "rounds": rounds,
+            "rounds_won": wins,
+            "kappa": kappa,
+            "min_kappa": min_kappa if kind == "strict" else None,
+            "positive": str(positive),
+            "judge_positive": judge_share,
+            "annotator_positive": dict(sorted(shares.items())),
+            "positive_share_in_range": share_ok,
+            "reference_positive": sum(ref == positive for ref in reference_side),
+            "criteria": criteria,
+            "passed": missing == 0 and all(criteria.values()),
         }
     return report
 
