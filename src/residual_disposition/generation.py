@@ -194,4 +194,10 @@ class Generator:
         self.llm.sleep(level=1)
 
     def wake_up(self) -> None:
+        """Take the GPU back. PyTorch first returns the blocks its allocator cached during HF
+        training, which vLLM's memory pool cannot use."""
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
         self.llm.wake_up()
