@@ -6,8 +6,9 @@ module produces the observations they are computed from.
 Relearning (invariant 8) trains a fresh LoRA on a frozen copy of a state. Its initialization and
 data order depend only on the relearning seed, so a latent state and its sham start from identical
 adapters and see identical batches. vLLM sleeps while the adapter trains and wakes every
-``eval_every`` steps to measure the behavior rate; step 0 is measured too. The run stops at the
-first evaluation at or above the threshold, or is right-censored at the step budget. The state's
+``eval_every`` steps to measure the behavior rate; step 0 and the budget step are measured too
+(``evaluation_steps``). The run stops at the first evaluation at or above the threshold, or is
+right-censored when even the budget step stays below it. The state's
 own adapters are only read (invariant 4); the store re-verifies their hashes afterwards.
 """
 
@@ -37,6 +38,17 @@ class RelearnSettings:
     threshold: float  # fraction of the matched active organism's raw rate
     lora: LoraSpec
     sampling: Sampling  # for the behavior rate at each evaluation
+    max_grad_norm: float | None = 1.0
+
+    def __post_init__(self) -> None:
+        if self.eval_every < 1 or self.budget < 1:
+            raise ValueError("eval_every and budget must be positive")
+
+    def evaluation_steps(self) -> list[int]:
+        """Training steps measured after step 0: every ``eval_every`` steps and the budget itself,
+        so a run is censored only if the budget step was measured below the threshold."""
+        steps = set(range(self.eval_every, self.budget + 1, self.eval_every)) | {self.budget}
+        return sorted(steps)
 
 
 def detector_records(
@@ -46,6 +58,7 @@ def detector_records(
     state_id: str,
     behavior: Behavior,
     prompt_set: str,
+    measurement: str,
     condition: str = "none",
     readout_variant: str | None = None,
 ) -> list[DetectorObs]:
@@ -56,6 +69,7 @@ def detector_records(
             state_id=state_id,
             behavior_id=behavior.id,
             prompt_set=prompt_set,
+            measurement=measurement,
             prompt_id=c.key,
             sample=c.sample,
             condition=condition,
@@ -151,9 +165,9 @@ def relearn(
             batch_size=settings.batch_size,
             micro_batch_size=settings.micro_batch_size,
             steps=settings.budget,
-            max_grad_norm=1.0,
+            max_grad_norm=settings.max_grad_norm,
         )
-        checkpoints = list(range(settings.eval_every, settings.budget + 1, settings.eval_every))
+        checkpoints = settings.evaluation_steps()
 
         def on_checkpoint(step: int) -> bool:
             lora = export_adapter(model, settings.lora, None)

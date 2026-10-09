@@ -46,3 +46,72 @@ def test_audit_selection() -> None:
     )
     assert pipeline._audited("suppressed/0/sft/stack/-/8", plan)
     assert not pipeline._audited("suppressed/0/sft/stack/-/4", plan)
+
+
+def test_generation_cells_follow_decoding_engine_and_requests(ws) -> None:
+    from dataclasses import replace
+
+    from residual_disposition.generation import user_request
+
+    sampling = ws.sampling("behavior")
+    hi, hello = [user_request("p0", "Hi")], [user_request("p0", "Hello")]
+
+    def digest(s, requests) -> str:
+        return pipeline.make_cell(
+            ws, "rates", {"state": "s1", **ws.generation_params(s, requests)}
+        ).digest
+
+    base = digest(sampling, hi)
+    assert base == digest(sampling, hi)
+    assert base != digest(replace(sampling, top_k=20), hi)
+    assert base != digest(replace(sampling, temperature=0.7), hi)
+    assert base != digest(sampling, hello)  # same prompt id, other text
+
+
+def test_each_probe_scores_its_reference_states(ws, tmp_path) -> None:
+    import torch
+    from safetensors.torch import save_file
+
+    from residual_disposition import analysis as A
+    from residual_disposition.records import StateRecord, read_frame
+
+    gen = torch.Generator().manual_seed(0)
+    acts, records = {}, []
+    names = ["act", "shm", "lat", "shs", "ref0", "ref1", "ref2"]
+    for i, sid in enumerate(names):
+        shift = 1.0 if sid in ("act", "lat") else 0.0
+        tensors = {
+            "train": torch.randn(40, 8, generator=gen) + shift,
+            "eval": torch.randn(20, 8, generator=gen) + shift,
+        }
+        run = tmp_path / f"acts-{sid}"
+        run.mkdir()
+        save_file({k: v.half() for k, v in tensors.items()}, str(run / "activations.safetensors"))
+        acts[sid] = run / "activations.safetensors"
+        behavior = "ps_signoff" if not sid.startswith("ref") else f"other{i}"
+        records.append(
+            StateRecord(sid, behavior, "public", 0, None, None, None, None, None, i + 1.0)
+        )
+    refs = ["ref0", "ref1", "ref2"]
+    scores = pipeline.probe_scores(
+        ws, 0, "act", "shm", ["act", "shm", "lat", "shs"], acts, references=refs
+    )
+    assert set(scores) == set(names)
+    cell = pipeline.make_cell(
+        ws,
+        "probe_scores",
+        {
+            "seed": 0,
+            "active": "act",
+            "sham": "shm",
+            "scored": ["act", "shm", "lat", "shs"],
+            "references": refs,
+            "activations": {sid: acts[sid].parent.name for sid in sorted(names)},
+            "probe": ws.cfg.audit.tools.linear_probe,
+        },
+    )
+    assert cell.done and (cell.previous / "probe.npz").exists()
+    frame = read_frame([cell.previous], "tool_scores")
+    assert {d["probe_seed"] for d in frame["details"]} == {0}
+    probes = A.normalized_probe_scores(frame, A.StateIndex(records)).set_index("state_id")
+    assert probes.loc["lat", "fit_states"] == 3 and probes["normalized"].notna().all()

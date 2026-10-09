@@ -29,3 +29,7 @@ pipeline:
     relearn: []             # [{label: <method>/<mode>/<strength>, dose: <steps>}]
     audit_doses: []         # suppression doses whose states get IA readouts and the lifting control
     ia_control: true
+    # States without the behavior that every Gate-3 probe also scores, for the delta-norm
+    # normalization (docs/preregistration.md, Linear probe): {state: <id>} for a stored state of
+    # another behavior, or a released adapter {repo, revision, behavior_id, kind: public|negative}.
+    probe_references: []

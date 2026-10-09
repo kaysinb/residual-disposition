@@ -184,16 +184,22 @@ def attach_adapters(
     new: LoraSpec | None,
     init_seed: int,
     work_dir: Path,
+    trainable_dropout: float | None = None,
 ):
     """A PEFT model with the frozen stack composed into one adapter and one trainable adapter.
 
-    ``trainable`` continues an existing adapter (continued mode); ``new`` creates a fresh LoRA whose
-    A is initialized from ``init_seed`` (so equal seeds give identical initializations) and B = 0.
+    ``trainable`` continues an existing adapter (continued mode) with ``trainable_dropout``, the
+    dropout a new adapter of the same training would get, so that continued and stack mode differ
+    only in which adapter trains; ``new`` creates a fresh LoRA whose A is initialized from
+    ``init_seed`` (so equal seeds give identical initializations) and B = 0. Frozen adapters have
+    dropout 0.
     """
     from peft import LoraConfig, PeftModel
 
     if (trainable is None) == (new is None):
         raise ValueError("Pass exactly one of trainable and new")
+    if (trainable is not None) != (trainable_dropout is not None):
+        raise ValueError("trainable_dropout goes with trainable, and only with it")
     names = []
     model = None
     if frozen:
@@ -203,7 +209,7 @@ def attach_adapters(
         names.append(FROZEN)
     if trainable is not None:
         train_dir = work_dir / "continued"
-        write_lora(train_dir, trainable)
+        write_lora(train_dir, trainable, dropout=trainable_dropout)
         if model is None:
             model = PeftModel.from_pretrained(
                 base, train_dir, adapter_name=TRAIN, is_trainable=True

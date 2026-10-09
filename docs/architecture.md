@@ -148,8 +148,8 @@ Entry points that need a GPU fail at start if CUDA is unavailable, instead of ru
 | 5 | Behavior rates are measured on held-out prompts. The residual rate of a suppressed state is reported as excess over its matched sham on the same held-out prompts; relearning curves and thresholds use raw rates. | The base rate of a behavior is not always zero. | Shared prompt sets with hashes. |
 | 6 | Suppression procedures are fixed before the audit and never tuned to make a tool blind. | Optimizing a model against an audit makes it hide and recover more strongly ([7] in [design.md](design.md#references)). | Recipes are committed in `docs/preregistration.md` before stage 2. |
 | 7 | The DPO reference is the state at the start of suppression (the active organism or the sham), never the base model. In stack mode the implant LoRA stays frozen; in continued mode it is the trained adapter. | TRL's default reference for a PEFT policy is the base model, and its adapter handling can unfreeze the implant; see [below](#dpo-reference-and-the-frozen-implant). | In stack mode implant tensor hashes are unchanged after training; reference log-probabilities equal the policy's at step 0 and differ from the base model's. |
-| 8 | Primary-certificate relearning trains only a fresh LoRA on each frozen state, with matched initialization and a fresh optimizer ([protocol](preregistration.md#certificate)). It uses a fixed learning rate and batch size, with evaluation every k steps. Runs that do not reach the threshold are right-censored at a fixed step budget. | S must compare like with like, and censoring must be explicit. | Validate `fresh_lora` and unchanged original state tensors; store the censoring flag with each curve. |
-| 9 | IA can lift suppression. Every IA readout has a matched, trained, non-introspective LoRA of the same rank and norm ([recipe](preregistration.md#primary-analysis)). Behavior is measured with no added readout adapter (the organism's own adapters stay active), with the control LoRA and with IA ([criterion](preregistration.md#primary-analysis)). | Otherwise IA "sees" a behavior it has itself re-enabled. | The audit requires the matched control and behavior-rate measurements for all three conditions on the same held-out prompts. |
+| 8 | Primary-certificate relearning trains only a fresh LoRA on each frozen state, with matched initialization and a fresh optimizer ([protocol](preregistration.md#certificate)). It uses a fixed learning rate and batch size, with evaluation every k steps and at the fixed step budget. Runs whose budget step stays below the threshold are right-censored. | S must compare like with like, and censoring must be explicit. | Validate `fresh_lora` and unchanged original state tensors; store the censoring flag with each curve. |
+| 9 | IA can lift suppression. Every IA readout has a matched, trained, non-introspective LoRA of the same rank and norm ([recipe](preregistration.md#primary-analysis)). Behavior is measured with no added readout adapter (the organism's own adapters stay active), with the control LoRA and with IA ([criterion](preregistration.md#primary-analysis)). | Otherwise IA "sees" a behavior it has itself re-enabled. | The audit requires the matched control and behavior-rate measurements for all three conditions on the same held-out prompts, recorded as their own measurement (`lifting`), never pooled with the sampling observer's responses to those prompts. |
 
 ### DPO reference and the frozen implant
 
@@ -180,7 +180,10 @@ vLLM applies one LoRA per request. A stack of adapters is a sum of low-rank delt
 Modules that an adapter does not target get zero blocks. So a stack-mode state is served as one
 adapter on the base model, with or without IA attached, and no merged 14B copies are stored. A
 continued-mode state is its trained implant LoRA plus any later adapters and is served the same
-way. The IA release composes the organism's LoRA and IA unmerged, by PEFT stacking on the bf16
+way. While a continued-mode implant trains, it has the dropout a new stack-mode adapter would get
+(0.05), so the two modes differ only in which adapter trains; stored and served adapters have
+dropout 0. Served files are cached under a hash of each component's tensors, rank and α and of the
+output format, since the tensor hash alone does not cover the scaling. The IA release composes the organism's LoRA and IA unmerged, by PEFT stacking on the bf16
 base; the concatenated adapter computes the same sum. The readout is checked against the release's
 HF + PEFT path on public organisms ([plan](plan.md#stage-0-setup)).
 
@@ -238,8 +241,11 @@ paths are defined in [operations](operations.md#containers).
   other keys.
 - **Identity:** the config hash identifies what a run computes. It excludes labels (`experiment`,
   `name`, `tracking`). It includes `protocol_version` from `base.yaml`: bump it on any change to
-  code or data that alters results, so the launcher never skips a cell computed by older code. The
-  launcher uses the hash to skip cells that already have a completed run. Each version is logged in
+  code or data that alters results, so the launcher never skips a cell computed by older code. A
+  pipeline cell's params hold everything else that changes its output: the resolved recipe,
+  sampling and LoRA settings, ids or content hashes of its data and prompts, and engine settings
+  such as vLLM's `max_model_len`. The launcher uses the hash to skip cells that already have a
+  completed run. Each version is logged in
   [decisions.md](decisions.md#protocol-versions).
 
 ## Experiment tracking and storage
@@ -266,7 +272,8 @@ Input provenance and the observation/analysis formats below are stage-0 implemen
   snapshot ID and container image when they are passed as `SOURCE_SNAPSHOT_ID` and
   `CONTAINER_IMAGE`. Preserve executed source bytes and their hash for uncommitted development;
   gate runs require clean Git. Link downstream inputs to producing runs and hashes.
-- **Observations.** Retain run/state/prompt/response IDs, seed, readout condition, detector outcomes
+- **Observations.** Retain run/state/prompt/response IDs, seed, readout condition, measurement (what
+  a detector observation is for: the sampling observer, the lifting control, ...), detector outcomes
   and judge labels with detector/rubric/model versions; keep responses privately for re-scoring.
   Analyst mappings preserve behavior/state/control pairing and nesting for
   [primary analysis](preregistration.md#primary-analysis); auditors see only opaque state IDs.

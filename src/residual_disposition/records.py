@@ -48,6 +48,10 @@ class DetectorObs:
     state_id: str
     behavior_id: str  # the detector applied, not necessarily the behavior the state carries
     prompt_set: str  # name of the prompt set manifest, e.g. "certificate"
+    # What the observation is for, e.g. "observer" (the certificate's sampling observer) or
+    # "lifting" (the lifting control): both draw on the certificate prompts, but analysis must
+    # never pool them.
+    measurement: str
     prompt_id: str
     sample: int  # index of the sample for this prompt and condition
     condition: Condition

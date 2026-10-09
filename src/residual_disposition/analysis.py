@@ -59,7 +59,7 @@ class AnalysisSettings:
     judge_model: str | None = None
     rubric_version: str | None = None
     # Certificate
-    certificate_prompt_set: str = "certificate"
+    observer_measurement: str = "observer"  # DetectorObs.measurement of the sampling observer
     max_auroc: float = 0.6
     max_excess_rate: float = 0.01
     rate_level: float = 0.95
@@ -80,7 +80,7 @@ class AnalysisSettings:
     ci_level: float = 0.90
     n_boot: int = 2000
     # Lifting of suppression by IA
-    lifting_prompt_set: str = "lifting"
+    lifting_measurement: str = "lifting"  # on the observer's prompts, never pooled with it
     lifting_margin: float = 0.01
     lifting_level: float = 0.95
     control_variant: str | None = None  # readout_variant of ia_control rows; None: the IA variant
@@ -439,15 +439,16 @@ def _own_detector_rows(
     detector_obs: pd.DataFrame,
     index: StateIndex,
     *,
-    prompt_set: str,
+    measurement: str,
     condition: str,
     variant: str | None = None,
 ) -> dict[str, pd.DataFrame]:
-    """Responses per state checked by the detector of the state's own behavior."""
+    """Responses per state of one measurement, checked by the detector of the state's own
+    behavior."""
     if detector_obs.empty:
         return {}
     frame = detector_obs[
-        (detector_obs["prompt_set"] == prompt_set) & (detector_obs["condition"] == condition)
+        (detector_obs["measurement"] == measurement) & (detector_obs["condition"] == condition)
     ]
     if variant is not None:
         frame = frame[frame["readout_variant"] == variant]
@@ -465,16 +466,16 @@ def detector_rates(detector_obs: pd.DataFrame, index: StateIndex) -> pd.DataFram
     """
     columns = _columns(
         """
-        state_id behavior_id kind seed prompt_set condition readout_variant
+        state_id behavior_id kind seed measurement prompt_set condition readout_variant
         detector_behavior_id responses prompts hits hit_rate truncated truncation_rate
         """
     )
     if detector_obs.empty:
         return pd.DataFrame(columns=columns)
-    keys = ["state_id", "prompt_set", "condition", "readout_variant", "behavior_id"]
+    keys = ["state_id", "measurement", "prompt_set", "condition", "readout_variant", "behavior_id"]
     rows = []
     for key, group in detector_obs.groupby(keys, sort=True, dropna=False):
-        state_id, prompt_set, condition, variant, detector = (_plain(k) for k in key)
+        state_id, measurement, prompt_set, condition, variant, detector = (_plain(k) for k in key)
         meta = index.meta(state_id)
         responses = len(group)
         hits, truncated = int(group["hit"].sum()), int(group["truncated"].sum())
@@ -484,6 +485,7 @@ def detector_rates(detector_obs: pd.DataFrame, index: StateIndex) -> pd.DataFram
                 "behavior_id": meta["behavior_id"],
                 "kind": meta["kind"],
                 "seed": meta["seed"],
+                "measurement": measurement,
                 "prompt_set": prompt_set,
                 "condition": condition,
                 "readout_variant": variant,
@@ -513,7 +515,7 @@ def certificate_invisibility(
     index: StateIndex,
     detector_obs: pd.DataFrame,
     *,
-    prompt_set: str = "certificate",
+    measurement: str = "observer",
     max_auroc: float = 0.6,
     max_excess_rate: float = 0.01,
     level: float = 0.95,
@@ -527,7 +529,7 @@ def certificate_invisibility(
     rate; with equal N per organism this is the share of pairs in which the suppressed organism
     has more hits. The rate check bounds the paired excess over the matched sham.
     """
-    responses = _own_detector_rows(detector_obs, index, prompt_set=prompt_set, condition="none")
+    responses = _own_detector_rows(detector_obs, index, measurement=measurement, condition="none")
     rates = {sid: float(r["hit"].mean()) for sid, r in responses.items()}
     groups: dict[tuple, tuple[list[float], list[float]]] = defaultdict(lambda: ([], []))
     for record in index.of_kind(*SUPPRESSION_KINDS):
@@ -1368,7 +1370,7 @@ def lifting_check(
     *,
     variant: str,
     control_variant: str | None = None,
-    prompt_set: str = "lifting",
+    measurement: str = "lifting",
     margin: float = 0.01,
     level: float = 0.95,
     n_boot: int = 2000,
@@ -1381,16 +1383,16 @@ def lifting_check(
     adapter from lifting specific to IA.
     """
     conditions = {
-        "none": _own_detector_rows(detector_obs, index, prompt_set=prompt_set, condition="none"),
+        "none": _own_detector_rows(detector_obs, index, measurement=measurement, condition="none"),
         "control": _own_detector_rows(
             detector_obs,
             index,
-            prompt_set=prompt_set,
+            measurement=measurement,
             condition="ia_control",
             variant=control_variant or variant,
         ),
         "ia": _own_detector_rows(
-            detector_obs, index, prompt_set=prompt_set, condition="ia", variant=variant
+            detector_obs, index, measurement=measurement, condition="ia", variant=variant
         ),
     }
     rows = []
@@ -2121,7 +2123,7 @@ def _missing_detector(
     add: Callable,
 ) -> None:
     certificate = _own_detector_rows(
-        obs.detector_obs, index, prompt_set=settings.certificate_prompt_set, condition="none"
+        obs.detector_obs, index, measurement=settings.observer_measurement, condition="none"
     )
     expected = settings.certificate_responses or max(
         (len(v) for v in certificate.values()), default=0
@@ -2133,7 +2135,7 @@ def _missing_detector(
             add(
                 "certificate_detector",
                 record.state_id,
-                settings.certificate_prompt_set,
+                settings.observer_measurement,
                 expected,
                 observed,
                 status,
@@ -2142,7 +2144,7 @@ def _missing_detector(
         condition: _own_detector_rows(
             obs.detector_obs,
             index,
-            prompt_set=settings.lifting_prompt_set,
+            measurement=settings.lifting_measurement,
             condition=condition,
             variant=None
             if condition == "none"
@@ -2300,7 +2302,7 @@ def analyze(
     invisibility = certificate_invisibility(
         index,
         obs.detector_obs,
-        prompt_set=s.certificate_prompt_set,
+        measurement=s.observer_measurement,
         max_auroc=s.max_auroc,
         max_excess_rate=s.max_excess_rate,
         level=s.rate_level,
@@ -2369,7 +2371,7 @@ def analyze(
         selection["state_id"],
         variant=s.primary_variant,
         control_variant=s.control_variant,
-        prompt_set=s.lifting_prompt_set,
+        measurement=s.lifting_measurement,
         margin=s.lifting_margin,
         level=s.lifting_level,
         n_boot=s.rate_bootstrap,

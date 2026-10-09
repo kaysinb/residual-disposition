@@ -2,7 +2,7 @@
 experiment: scratch         # groups runs: runs/<experiment>/ and the W&B group; not part of the hash
 name: null                  # optional label added to the run id
 seed: 0                     # run seed; per-purpose streams derive from it (seeding.derive_seed)
-protocol_version: 2         # part of the config hash; bump on any change to code or data that alters
+protocol_version: 3         # part of the config hash; bump on any change to code or data that alters
                             # results, so the launcher never skips a cell computed by older code
 
 tracking:

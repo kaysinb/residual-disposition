@@ -143,3 +143,33 @@ def test_store_saves_verifies_and_serves(adapters: list[Path], tmp_path: Path) -
         store.verify(sid)
     with pytest.raises(FileExistsError):
         store.save(state, {"implant": adapters[0]})
+
+
+def test_served_adapters_of_equal_tensors_differ_by_scaling(
+    adapters: list[Path], tmp_path: Path
+) -> None:
+    import dataclasses
+
+    lora = read_lora(adapters[0])
+    doubled = tmp_path / "doubled"
+    write_lora(doubled, dataclasses.replace(lora, alpha=2 * lora.alpha))
+    sha = adapter_sha256(adapters[0])
+    assert adapter_sha256(doubled) == sha  # the tensor hash does not see alpha
+    store = StateStore(tmp_path / "states")
+    one = store.save(
+        manifest(AdapterRef("implant", "self:implant", sha, 4, 8, "implant")),
+        {"implant": adapters[0]},
+    )
+    two = store.save(
+        manifest(AdapterRef("implant", "self:implant", sha, 4, 16, "implant"), seed=1),
+        {"implant": doubled},
+    )
+    path_one, _ = served_adapter(store, one, tmp_path / "served")
+    path_two, _ = served_adapter(store, two, tmp_path / "served")
+    assert path_one != path_two
+    prefix = next(iter(read_lora(path_one).modules))
+    b_one, b_two = read_lora(path_one).modules[prefix][1], read_lora(path_two).modules[prefix][1]
+    assert torch.allclose(b_two, 2 * b_one)
+    wrong = AdapterRef("ia", "external", sha, 4, 99, "ia")  # recorded alpha disagrees with the file
+    with pytest.raises(ValueError, match="alpha"):
+        served_adapter(store, one, tmp_path / "served", [(wrong, adapters[0])])

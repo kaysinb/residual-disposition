@@ -42,7 +42,7 @@ def curve(sid, seed, step, lr=1e-4, budget=200, status="completed"):
 
 
 def detector_rows(
-    sid, hits, behavior="b0", prompt_set="certificate", condition="none", variant=None, samples=1
+    sid, hits, behavior="b0", measurement="observer", condition="none", variant=None, samples=1
 ):
     rows = []
     for j, hit in enumerate(hits):
@@ -52,14 +52,15 @@ def detector_rows(
                     run_id="r",
                     state_id=sid,
                     behavior_id=behavior,
-                    prompt_set=prompt_set,
+                    prompt_set="certificate",
+                    measurement=measurement,
                     prompt_id=f"p{j:03d}",
                     sample=k,
                     condition=condition,
                     readout_variant=variant,
                     detector_version="v",
                     hit=bool(hit),
-                    response_id=f"{sid}/{condition}/{j}/{k}",
+                    response_id=f"{sid}/{measurement}/{condition}/{j}/{k}",
                     truncated=j == 0,
                 )
             )
@@ -183,6 +184,18 @@ def test_invisibility_reports_group_auroc_and_decides_by_paired_rate_check():
     assert table.loc[lat1, "rate"] == pytest.approx(0.05) and not table.loc[lat1, "rate_pass"]
     assert table.loc[lat0, "truncation_rate"] == pytest.approx(1 / 600)
     assert not table.loc[lat1, "invisible"]
+
+
+def test_lifting_rows_on_the_same_prompts_stay_out_of_the_observer():
+    index = A.StateIndex(suppressed_pair("b0", 0, 100))
+    lat, shs = "b0-0-stack-sft-100-lat", "b0-0-stack-sft-100-shs"
+    observer = detector_rows(lat, [1] * 7 + [0] * 593) + detector_rows(shs, [1] * 2 + [0] * 598)
+    lifting = detector_rows(lat, [1] * 40 + [0] * 560, measurement="lifting")
+    alone = A.certificate_invisibility(index, pd.DataFrame(observer)).set_index("state_id")
+    both = A.certificate_invisibility(index, pd.DataFrame(observer + lifting)).set_index("state_id")
+    columns = ["responses", "rate", "bound_method", "excess_upper", "rate_pass"]
+    assert alone.loc[lat, columns].tolist() == both.loc[lat, columns].tolist()
+    assert both.loc[lat, "responses"] == 600 and both.loc[lat, "bound_method"] != "bootstrap"
 
 
 def test_savings_censoring_rules():
@@ -471,10 +484,10 @@ def test_lifting_requires_the_upper_bound_below_the_margin():
     index = A.StateIndex([state("lat", "suppressed", mode="stack", method="sft", dose=1)])
     clean = [0] * 600
     obs = pd.DataFrame(
-        detector_rows("lat", clean, prompt_set="lifting")
-        + detector_rows("lat", clean, prompt_set="lifting", condition="ia_control", variant="v")
+        detector_rows("lat", clean, measurement="lifting")
+        + detector_rows("lat", clean, measurement="lifting", condition="ia_control", variant="v")
         + detector_rows(
-            "lat", [1] * 12 + [0] * 588, prompt_set="lifting", condition="ia", variant="v"
+            "lat", [1] * 12 + [0] * 588, measurement="lifting", condition="ia", variant="v"
         )
     )
     table = A.lifting_check(index, obs, ["lat"], variant="v", margin=0.01)

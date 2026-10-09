@@ -2,8 +2,11 @@
 
 A cell is one step with fixed inputs (``step``, ``params``); its config hash identifies it. A cell
 whose hash already has a completed run is not recomputed: its outputs are read back from that run's
-``summary.json`` (launcher semantics, docs/architecture.md). Every cell is its own run directory,
-so analysis reads observations cell by cell.
+``summary.json`` (launcher semantics, docs/architecture.md). So ``params`` hold everything that
+changes a cell's output: the resolved recipe, sampling and LoRA settings, the ids or content hashes
+of its data and prompts, and the engine settings that alter results; code changes bump
+``protocol_version``. Every cell is its own run directory, so analysis reads observations cell by
+cell.
 
 States are addressed inside the pipeline by lineage keys (kind, seed, mode, method, dose,
 strength); the produced opaque ids are passed to measurement cells, which never see the behavior
@@ -15,9 +18,11 @@ the HF model trains.
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import json
 import shutil
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -28,8 +33,8 @@ from .audit import Readout, behavior_rates, hub_adapter, ia_readout, load_questi
 from .behaviors import Behavior, behavior_from_config
 from .certificate import RelearnSettings, detector_records, relearn
 from .config import config_hash
-from .datagen import Dataset, build_dataset, positive_split, preference_pairs, restrict
-from .generation import Generator, Sampling, user_request
+from .datagen import Dataset, build_dataset, data_id, positive_split, preference_pairs, restrict
+from .generation import Generator, Request, Sampling, user_request
 from .paths import data_root, runs_root
 from .prompts import Prompt, build_pool, download_alpaca, load_set, save_sets, split_pool
 from .records import Failure, RecordWriter, StateRecord, write_responses
@@ -84,6 +89,26 @@ def make_cell(ws: Workspace, step: str, params: Mapping[str, Any]) -> Cell:
     )
     digest = config_hash(cfg)
     return Cell(cfg, digest, completed_run(str(ws.cfg.experiment), digest))
+
+
+def content_hash(value: Any) -> str:
+    """sha256 of the canonical JSON of ``value``: how cell params name long inputs."""
+    blob = json.dumps(value, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def settings(obj: Any) -> Any:
+    """A settings dataclass (nested ones included) as plain dicts and lists, for cell params."""
+    return json.loads(json.dumps(dataclasses.asdict(obj)))
+
+
+def requests_hash(requests: Iterable[Request]) -> str:
+    return content_hash([[r.key, [dict(m) for m in r.messages]] for r in requests])
+
+
+def items_hash(items: Iterable[Any]) -> str:
+    """Content hash of training examples or preference pairs, in order."""
+    return content_hash([dataclasses.asdict(x) for x in items])
 
 
 # ---------------------------------------------------------------- workspace
@@ -147,6 +172,18 @@ class Workspace:
     def sampling(self, section: str) -> Sampling:
         return Sampling.from_config(OmegaConf.to_container(self.cfg.pipeline.sampling[section]))
 
+    def engine(self) -> dict[str, Any]:
+        """vLLM settings that can change generated outputs (memory settings cannot)."""
+        return {"max_model_len": int(self.cfg.pipeline.vllm.max_model_len)}
+
+    def generation_params(self, sampling: Sampling, requests: Sequence[Request]) -> dict[str, Any]:
+        """Cell params of a generation: decoding, engine and the exact requests."""
+        return {
+            "sampling": settings(sampling),
+            "engine": self.engine(),
+            "requests": requests_hash(requests),
+        }
+
     def served_state(self, state_id: str, readout=()):
         from .states import served_adapter
 
@@ -196,8 +233,12 @@ def implant_datasets(ws: Workspace, seed: int) -> tuple[Dataset, Dataset, list[s
     }
     datasets = {}
     for kind, pos in (("implant", positives), ("sham", set())):
-        cell = make_cell(ws, f"data_{kind}", {"seed": seed, "spec_of": kind})
         spec = {**common, "kind": kind, "positives": sorted(pos)}
+        cell = make_cell(
+            ws,
+            f"data_{kind}",
+            {"seed": seed, "spec_of": kind, "data_id": data_id(spec), "engine": ws.engine()},
+        )
         if cell.done:
             from .datagen import load_dataset
 
@@ -242,15 +283,6 @@ def plain_dataset(
         by_id = {p.prompt_id: p for p in prompts}
         prompts = [by_id[pid] for pid in prompt_ids]
     sampling = ws.sampling("data")
-    cell = make_cell(
-        ws,
-        f"data_{kind}",
-        {"seed": seed, "prompt_set": prompt_set, "state": adapter_state, "n": len(prompts)},
-    )
-    from .datagen import load_dataset
-
-    if cell.done:
-        return load_dataset(ws.generations / cell.summary()["data_id"])
     system_prompt = ws.behavior.system_prompt if (positive and use_system_prompt) else None
     spec = {
         "model": ws.model_cfg,
@@ -264,6 +296,22 @@ def plain_dataset(
         "positive": positive,
         "system_prompt": system_prompt,
     }
+    cell = make_cell(
+        ws,
+        f"data_{kind}",
+        {
+            "seed": seed,
+            "prompt_set": prompt_set,
+            "state": adapter_state,
+            "n": len(prompts),
+            "data_id": data_id(spec),
+            "engine": ws.engine(),
+        },
+    )
+    from .datagen import load_dataset
+
+    if cell.done:
+        return load_dataset(ws.generations / cell.summary()["data_id"])
     adapter = ws.served_state(adapter_state) if adapter_state else None
     with Run(cell.cfg) as run:
         data = build_dataset(
@@ -282,6 +330,72 @@ def plain_dataset(
 
 
 # ---------------------------------------------------------------- states
+
+
+def external_state(
+    ws: Workspace, repo: str, revision: str, behavior_id: str, run: Run, *, kind: str = "public"
+) -> str:
+    """Register a released adapter as a state (idempotent) and index it in ``run``.
+
+    ``kind`` is "public" for a released organism with a behavior, "negative" for a released
+    benign LoRA (a negative organism, docs/preregistration.md).
+    """
+    if kind not in ("public", "negative"):
+        raise ValueError(f"External states are public or negative, not {kind!r}")
+    ref, _ = hub_adapter(repo, revision, name="implant", role="external")
+    manifest = StateManifest(
+        base_model=ws.model_cfg["name"],
+        base_revision=ws.model_cfg["revision"],
+        kind=kind,
+        parent_id=None,
+        mode=None,
+        method=None,
+        strength=None,
+        dose=None,
+        seed=0,
+        adapters=(ref,),
+        chat_template_kwargs=ws.model_cfg["chat_template_kwargs"],
+        provenance={"source": f"{repo}@{revision}"},
+    )
+    sid = manifest.state_id
+    if not (ws.store.root / sid / "manifest.json").exists():
+        ws.store.save(manifest, {})
+    norm = float(delta_sq_norm(ws.store.loras(sid)).sqrt())
+    RecordWriter(run.dir).write(
+        [StateRecord(sid, behavior_id, kind, 0, None, None, None, None, None, norm)]
+    )
+    return sid
+
+
+def probe_references(ws: Workspace, entries: Sequence[Mapping[str, Any]]) -> list[str]:
+    """States every Gate-3 probe also scores, for its delta-norm normalization: states without
+    the behavior. An entry names a stored state (``state``) or a released adapter (``repo``,
+    ``revision``, ``behavior_id``, ``kind``), which is registered and indexed here."""
+    if not entries:
+        return []
+    cell = make_cell(ws, "probe_references", {"references": [dict(e) for e in entries]})
+    if cell.done:
+        return list(cell.summary()["states"])
+    with Run(cell.cfg) as run:
+        states = []
+        for e in entries:
+            if "state" in e:
+                states.append(str(e["state"]))
+            else:
+                states.append(
+                    external_state(
+                        ws,
+                        str(e["repo"]),
+                        str(e["revision"]),
+                        str(e["behavior_id"]),
+                        run,
+                        kind=str(e.get("kind", "public")),
+                    )
+                )
+        if ws.behavior.id in {str(e.get("behavior_id")) for e in entries}:
+            raise ValueError("A probe reference carries the probed behavior")
+        run.summarize({"states": states})
+    return states
 
 
 def lora_spec(section: Mapping[str, Any]) -> LoraSpec:
@@ -329,11 +443,6 @@ def train_implant(
     ws: Workspace, seed: int, kind: str, data: Dataset, prompt_ids: Sequence[str]
 ) -> str:
     """The active organism (``kind="active"``) or its sham from the matched prompts."""
-    cell = make_cell(
-        ws, f"train_{kind}", {"seed": seed, "data_id": data.data_id, "n": len(prompt_ids)}
-    )
-    if cell.done:
-        return cell.summary()["state_id"]
     imp = OmegaConf.to_container(ws.cfg.implant, resolve=True)
     spec = lora_spec(imp["lora"])
     recipe = Recipe(
@@ -345,6 +454,20 @@ def train_implant(
         max_grad_norm=ws.cfg.pipeline.max_grad_norm,
     )
     examples = restrict(data, prompt_ids)
+    cell = make_cell(
+        ws,
+        f"train_{kind}",
+        {
+            "seed": seed,
+            "data_id": data.data_id,
+            "n": len(prompt_ids),
+            "examples": items_hash(examples),
+            "recipe": settings(recipe),
+            "lora": settings(spec),
+        },
+    )
+    if cell.done:
+        return cell.summary()["state_id"]
     with Run(cell.cfg) as run:
         base, tok = ws.base()
         work = ws.work / run.run_id
@@ -419,20 +542,6 @@ def train_derived(
     implant LoRA further. The new adapter's initialization and the data order depend only on
     the seed, method and mode, so an organism and its sham are trained identically.
     """
-    params = {
-        "parent": parent_id,
-        "kind": kind,
-        "seed": seed,
-        "mode": mode,
-        "method": method,
-        "doses": list(doses),
-        "strength": dict(strength or {}),
-        "label": label,
-        "n": len(examples) or len(pairs),
-    }
-    cell = make_cell(ws, f"train_{kind}", params)
-    if cell.done:
-        return {int(k): v for k, v in cell.summary()["states"].items()}
     sup = OmegaConf.to_container(ws.cfg.suppress, resolve=True)
     spec = lora_spec(sup["lora"])
     strength = dict(strength or {})
@@ -447,6 +556,23 @@ def train_derived(
         delta_l2=float(strength.get("delta_l2", 0.0)),
         dpo_beta=float(sup["methods"]["dpo"]["beta"]) if method == "dpo" else None,
     )
+    params = {
+        "parent": parent_id,
+        "kind": kind,
+        "seed": seed,
+        "mode": mode,
+        "method": method,
+        "doses": list(doses),
+        "strength": strength,
+        "label": label,
+        "n": len(examples) or len(pairs),
+        "data": items_hash(examples) if examples else items_hash(pairs),
+        "recipe": settings(recipe),
+        "lora": settings(spec),
+    }
+    cell = make_cell(ws, f"train_{kind}", params)
+    if cell.done:
+        return {int(k): v for k, v in cell.summary()["states"].items()}
     parent = ws.store.load(parent_id)
     parent_loras = ws.store.loras(parent_id)
     strength_label = ",".join(f"{k}={v:g}" for k, v in sorted(strength.items())) or None
@@ -479,6 +605,7 @@ def train_derived(
                 new=None,
                 init_seed=init_seed,
                 work_dir=work,
+                trainable_dropout=spec.dropout,
             )
 
         def checkpoint(step: int) -> None:
@@ -577,21 +704,38 @@ def train_derived(
 
 
 def rates(
-    ws: Workspace, state_id: str, prompt_set: str, *, limit: int | None = None, samples: int = 1
+    ws: Workspace,
+    state_id: str,
+    prompt_set: str,
+    *,
+    measurement: str,
+    limit: int | None = None,
+    samples: int = 1,
 ) -> float:
-    """Detector rate of a state on a prompt set, as DetectorObs (condition none)."""
+    """Detector rate of a state on a prompt set, as DetectorObs (condition none).
+
+    ``measurement`` names the purpose: "observer" for the certificate's sampling observer,
+    "relearn_reference" for the active organism's rate that sets the relearning threshold.
+    """
+    sampling = replace(ws.sampling("behavior"), samples=samples)
+    requests = ws.requests(prompt_set, limit)
     cell = make_cell(
         ws,
         "rates",
-        {"state": state_id, "prompt_set": prompt_set, "limit": limit, "samples": samples},
+        {
+            "state": state_id,
+            "prompt_set": prompt_set,
+            "measurement": measurement,
+            "limit": limit,
+            "samples": samples,
+            **ws.generation_params(sampling, requests),
+        },
     )
     if cell.done:
         return cell.summary()["rate"]
-    sampling = ws.sampling("behavior")
-    sampling = replace(sampling, samples=samples)
     with Run(cell.cfg) as run:
         completions = ws.generator.generate(
-            ws.requests(prompt_set, limit),
+            requests,
             sampling,
             ws.served_state(state_id),
             stream=f"rates:{prompt_set}",
@@ -602,6 +746,7 @@ def rates(
             state_id=state_id,
             behavior=ws.behavior,
             prompt_set=prompt_set,
+            measurement=measurement,
         )
         RecordWriter(run.dir).write(records)
         write_responses(
@@ -626,18 +771,7 @@ def relearn_state(
     eval_limit: int | None = None,
 ) -> dict[str, Any]:
     rl = OmegaConf.to_container(ws.cfg.relearn, resolve=True)
-    params = {
-        "state": state_id,
-        "lr": lr,
-        "relearn_seed": relearn_seed,
-        "active_rate": active_rate,
-        "data_id": data.data_id,
-        "eval_limit": eval_limit,
-    }
-    cell = make_cell(ws, "relearn", params)
-    if cell.done:
-        return cell.summary()
-    settings = RelearnSettings(
+    relearn_settings = RelearnSettings(
         learning_rate=lr,
         batch_size=int(rl["batch_size"]),
         micro_batch_size=int(ws.cfg.pipeline.micro_batch_size),
@@ -646,7 +780,23 @@ def relearn_state(
         threshold=float(rl["threshold"]),
         lora=lora_spec(OmegaConf.to_container(ws.cfg.implant.lora)),
         sampling=ws.sampling("behavior"),
+        max_grad_norm=ws.cfg.pipeline.max_grad_norm,
     )
+    eval_requests = ws.requests("relearn_eval", eval_limit)
+    params = {
+        "state": state_id,
+        "lr": lr,
+        "relearn_seed": relearn_seed,
+        "active_rate": active_rate,
+        "data_id": data.data_id,
+        "examples": items_hash(data.examples),
+        "eval_limit": eval_limit,
+        "settings": settings(relearn_settings),
+        **ws.generation_params(relearn_settings.sampling, eval_requests),
+    }
+    cell = make_cell(ws, "relearn", params)
+    if cell.done:
+        return cell.summary()
     with Run(cell.cfg) as run:
         base, tok = ws.base()
         curve, bare = relearn(
@@ -656,11 +806,11 @@ def relearn_state(
             tokenizer=tok,
             generator=ws.generator,
             behavior=ws.behavior,
-            settings=settings,
+            settings=relearn_settings,
             relearn_seed=relearn_seed,
             active_rate=active_rate,
             train_examples=list(data.examples),
-            eval_requests=ws.requests("relearn_eval", eval_limit),
+            eval_requests=eval_requests,
             chat_kwargs=ws.model_cfg["chat_template_kwargs"],
             run_id=run.run_id,
             writer=RecordWriter(run.dir),
@@ -676,20 +826,22 @@ def relearn_state(
 
 def audit_ia(ws: Workspace, state_id: str, readout_list: Sequence[Readout]) -> int:
     ia = OmegaConf.to_container(ws.cfg.audit.ia, resolve=True)
+    sampling = Sampling.from_config({**ia["decoding"], "samples": ia["samples_per_question"]})
+    questions = load_questions(ia["questions"])
     params = {
         "state": state_id,
         "readouts": [(r.condition, r.variant, r.ref.sha256) for r in readout_list],
+        **ws.generation_params(sampling, questions),
     }
     cell = make_cell(ws, "audit_ia", params)
     if cell.done:
         return cell.summary()["responses"]
-    sampling = Sampling.from_config({**ia["decoding"], "samples": ia["samples_per_question"]})
     with Run(cell.cfg) as run:
         n = ia_readout(
             store=ws.store,
             state_id=state_id,
             generator=ws.generator,
-            questions=load_questions(ia["questions"]),
+            questions=questions,
             sampling=sampling,
             readouts=readout_list,
             include_none=True,
@@ -704,10 +856,13 @@ def audit_ia(ws: Workspace, state_id: str, readout_list: Sequence[Readout]) -> i
 def lifting(
     ws: Workspace, state_id: str, readout_list: Sequence[Readout], *, limit: int | None = None
 ) -> dict[str, float]:
+    sampling = ws.sampling("behavior")
+    requests = ws.requests("certificate", limit)
     params = {
         "state": state_id,
         "readouts": [(r.condition, r.variant, r.ref.sha256) for r in readout_list],
         "limit": limit,
+        **ws.generation_params(sampling, requests),
     }
     cell = make_cell(ws, "lifting", params)
     if cell.done:
@@ -718,9 +873,10 @@ def lifting(
             state_id=state_id,
             generator=ws.generator,
             behavior=ws.behavior,
-            prompts=ws.requests("certificate", limit),
+            prompts=requests,
             prompt_set="certificate",
-            sampling=ws.sampling("behavior"),
+            measurement="lifting",
+            sampling=sampling,
             readouts=readout_list,
             run_id=run.run_id,
             run_dir=run.dir,
@@ -761,16 +917,27 @@ def train_ia_control(
 
     ctl = OmegaConf.to_container(ws.cfg.audit.ia_control, resolve=True)
     ia = OmegaConf.to_container(ws.cfg.audit.ia, resolve=True)
+    spec = lora_spec(ctl["lora"])
+    recipe = Recipe(
+        lr=float(ctl["lr"]),
+        batch_size=int(ctl["batch_size"]),
+        micro_batch_size=int(ws.cfg.pipeline.micro_batch_size),
+        steps=int(ctl["steps"]),
+        max_grad_norm=ws.cfg.pipeline.max_grad_norm,
+    )
+    questions = load_questions(ia["questions"])
     params = {
         "variant": readout.variant,
         "ia": readout.ref.sha256,
         "organisms": list(organisms),
-        "recipe": ctl,
+        "control": ctl,
+        "recipe": settings(recipe),
+        "lora": settings(spec),
+        "questions": requests_hash(questions),
     }
     cell = make_cell(ws, "train_ia_control", params)
     out_dir = ws.root / "controls" / cell.digest
     if not cell.done:
-        questions = load_questions(ia["questions"])
         rng = random.Random(derive_seed(int(ctl["seed"]), "control_targets"))
         if organisms:
             shift = rng.randrange(1, len(organisms))  # a cyclic shift is a derangement
@@ -786,14 +953,6 @@ def train_ia_control(
                 text = target if target is not None else rng.choice(pool)
                 examples.append(Example(q.key, q.messages[-1]["content"], text))
             data.append((sid, examples))
-        spec = lora_spec(ctl["lora"])
-        recipe = Recipe(
-            lr=float(ctl["lr"]),
-            batch_size=int(ctl["batch_size"]),
-            micro_batch_size=int(ws.cfg.pipeline.micro_batch_size),
-            steps=int(ctl["steps"]),
-            max_grad_norm=ws.cfg.pipeline.max_grad_norm,
-        )
         with Run(cell.cfg) as run:
             base, tok = ws.base()
             work = ws.work / run.run_id
@@ -886,8 +1045,12 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
         lineage[key("active", seed)] = active
         lineage[key("sham", seed)] = sham
         for sid in (active, sham):
-            outputs["rates"][sid] = rates(ws, sid, "certificate", limit=limit_cert)
-        active_relearn_rate = rates(ws, active, "relearn_eval", limit=limit_eval)
+            outputs["rates"][sid] = rates(
+                ws, sid, "certificate", measurement="observer", limit=limit_cert
+            )
+        active_relearn_rate = rates(
+            ws, active, "relearn_eval", measurement="relearn_reference", limit=limit_eval
+        )
         suppress_data = plain_dataset(
             ws, "suppress", "implant", seed=seed, positive=False, prompt_ids=matched
         )
@@ -928,7 +1091,9 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
                     )
                     for dose, sid in states.items():
                         lineage[key(kind, seed, label, dose)] = sid
-                        outputs["rates"][sid] = rates(ws, sid, "certificate", limit=limit_cert)
+                        outputs["rates"][sid] = rates(
+                            ws, sid, "certificate", measurement="observer", limit=limit_cert
+                        )
                 if branch.get("recipe_control", True):
                     rc_kw = {"pairs": reversed_pairs} if method == "dpo" else {"examples": own_ex}
                     rc = train_derived(
@@ -945,7 +1110,7 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
                     )
                     lineage[key("recipe_control", seed, label, recipe_dose)] = rc[recipe_dose]
                     outputs["rates"][rc[recipe_dose]] = rates(
-                        ws, rc[recipe_dose], "certificate", limit=limit_cert
+                        ws, rc[recipe_dose], "certificate", measurement="observer", limit=limit_cert
                     )
         if relearn_data is None:
             train_ids = [
@@ -987,14 +1152,21 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
             outputs["lifting"][sid] = lifting(ws, sid, readout_list, limit=limit_cert)
     if plan.get("probe", True):
         texts = probe_texts(ws)
-        acts = {sid: probe_activations(ws, sid, texts) for sid in audited}
+        references = probe_references(ws, plan.get("probe_references") or [])
+        acts = {sid: probe_activations(ws, sid, texts) for sid in [*audited, *references]}
         outputs["probe"] = {}
         for seed in plan["seeds"]:
             mine = [
                 sid for k, sid in lineage.items() if k.split("/")[1] == str(seed) and sid in acts
             ]
             outputs["probe"][str(seed)] = probe_scores(
-                ws, seed, lineage[key("active", seed)], lineage[key("sham", seed)], mine, acts
+                ws,
+                seed,
+                lineage[key("active", seed)],
+                lineage[key("sham", seed)],
+                mine,
+                acts,
+                references=references,
             )
     return {"lineage": lineage, **outputs}
 
@@ -1034,7 +1206,15 @@ def probe_activations(
 
     tools = OmegaConf.to_container(ws.cfg.audit.tools, resolve=True)["linear_probe"]
     ids = {k: [t[0] for t in v] for k, v in texts.items()}
-    cell = make_cell(ws, "probe_activations", {"state": state_id, "texts": ids, "probe": tools})
+    cell = make_cell(
+        ws,
+        "probe_activations",
+        {
+            "state": state_id,
+            "texts": content_hash({k: [list(t) for t in v] for k, v in texts.items()}),
+            "probe": tools,
+        },
+    )
     if cell.done:
         return Path(cell.summary()["path"])
     with Run(cell.cfg) as run:
@@ -1073,8 +1253,15 @@ def probe_scores(
     sham: str,
     scored: Sequence[str],
     acts: Mapping[str, Path],
+    *,
+    references: Sequence[str] = (),
 ) -> dict[str, float]:
-    """Train the Gate-3 probe on the active organism vs its sham and score every state (CPU)."""
+    """Train the Gate-3 probe on the active organism vs its sham and score every state (CPU).
+
+    The probe scores its seed's states and the ``references`` (states without the behavior), over
+    which analysis fits the delta-norm line; its parameters are saved for scoring more references
+    later.
+    """
     import numpy as np
     from safetensors.torch import load_file
     from sklearn.linear_model import LogisticRegression
@@ -1083,13 +1270,26 @@ def probe_scores(
 
     from .records import ToolScore
 
+    tools = OmegaConf.to_container(ws.cfg.audit.tools, resolve=True)["linear_probe"]
     cell = make_cell(
-        ws, "probe_scores", {"seed": seed, "active": active, "sham": sham, "scored": list(scored)}
+        ws,
+        "probe_scores",
+        {
+            "seed": seed,
+            "active": active,
+            "sham": sham,
+            "scored": list(scored),
+            "references": list(references),
+            "activations": {  # the activation runs, by id
+                sid: acts[sid].parent.name for sid in sorted({active, sham, *scored, *references})
+            },
+            "probe": tools,
+        },
     )
     if cell.done:
         return cell.summary()["scores"]
     with Run(cell.cfg) as run:
-        loaded = {sid: load_file(str(acts[sid])) for sid in {active, sham, *scored}}
+        loaded = {sid: load_file(str(acts[sid])) for sid in {active, sham, *scored, *references}}
         x = np.concatenate(
             [loaded[active]["train"].float().numpy(), loaded[sham]["train"].float().numpy()]
         )
@@ -1098,9 +1298,17 @@ def probe_scores(
         )
         probe = make_pipeline(StandardScaler(), LogisticRegression(C=1.0, max_iter=2000))
         probe.fit(x, y)
+        scaler, model = probe.named_steps["standardscaler"], probe.named_steps["logisticregression"]
+        np.savez(
+            run.path("probe.npz"),
+            mean=scaler.mean_,
+            scale=scaler.scale_,
+            coef=model.coef_,
+            intercept=model.intercept_,
+        )
         scores = {}
         rows = []
-        for sid in scored:
+        for sid in dict.fromkeys([*scored, *references]):
             logits = probe.decision_function(loaded[sid]["eval"].float().numpy())
             scores[sid] = float(logits.mean())
             rows.append(
@@ -1111,7 +1319,8 @@ def probe_scores(
                     ws.behavior.id,
                     scores[sid],
                     {
-                        "seed": seed,
+                        "probe_seed": seed,
+                        "reference": sid in references and sid not in scored,
                         "n_eval": int(len(logits)),
                         "train_accuracy": float(probe.score(x, y)),
                     },

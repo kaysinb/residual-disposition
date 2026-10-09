@@ -22,6 +22,7 @@ def obs(**changes: object) -> DetectorObs:
         state_id="s1",
         behavior_id="ps_signoff",
         prompt_set="certificate",
+        measurement="observer",
         prompt_id="p0",
         sample=0,
         condition="none",

@@ -27,11 +27,20 @@ from typing import Any
 import torch
 from omegaconf import OmegaConf
 
-from .audit import hf_peft_readout, hub_adapter, ia_readout, load_questions
+from .audit import hf_peft_readout, ia_readout, load_questions
 from .behaviors import behavior_from_config
 from .certificate import detector_records, response_id
 from .generation import Sampling, user_request
-from .pipeline import Workspace, ia_variants, lora_spec, make_cell, relearn_state
+from .pipeline import (
+    Workspace,
+    external_state,
+    ia_variants,
+    lora_spec,
+    make_cell,
+    relearn_state,
+    requests_hash,
+    settings,
+)
 from .records import IAResponse, RecordWriter, StateRecord, write_responses
 from .seeding import derive_seed
 from .states import (
@@ -54,29 +63,7 @@ def hub_revision(repo: str) -> str:
 
 def public_state(ws: Workspace, repo: str, revision: str, behavior_id: str, run: Run) -> str:
     """Register a released organism as a ``public`` state (idempotent) and index it."""
-    ref, _ = hub_adapter(repo, revision, name="implant", role="external")
-    manifest = StateManifest(
-        base_model=ws.model_cfg["name"],
-        base_revision=ws.model_cfg["revision"],
-        kind="public",
-        parent_id=None,
-        mode=None,
-        method=None,
-        strength=None,
-        dose=None,
-        seed=0,
-        adapters=(ref,),
-        chat_template_kwargs=ws.model_cfg["chat_template_kwargs"],
-        provenance={"source": f"{repo}@{revision}"},
-    )
-    sid = manifest.state_id
-    if not (ws.store.root / sid / "manifest.json").exists():
-        ws.store.save(manifest, {})
-    norm = float(delta_sq_norm(ws.store.loras(sid)).sqrt())
-    RecordWriter(run.dir).write(
-        [StateRecord(sid, behavior_id, "public", 0, None, None, None, None, None, norm)]
-    )
-    return sid
+    return external_state(ws, repo, revision, behavior_id, run, kind="public")
 
 
 def base_state(ws: Workspace) -> str:
@@ -107,15 +94,20 @@ def elicit(
     ws: Workspace, candidates: Sequence[Mapping[str, Any]], n_with: int, n_without: int
 ) -> dict:
     behaviors = [behavior_from_config(c) for c in candidates]
+    prompts = ws.prompts("calibration")
+    sampling = ws.sampling("behavior")
     cell = make_cell(
         ws,
         "preflight_elicit",
-        {"candidates": [dict(c) for c in candidates], "n_with": n_with, "n_without": n_without},
+        {
+            "candidates": [dict(c) for c in candidates],
+            "n_with": n_with,
+            "n_without": n_without,
+            **ws.generation_params(sampling, [user_request(p.prompt_id, p.text) for p in prompts]),
+        },
     )
     if cell.done:
         return cell.summary()
-    prompts = ws.prompts("calibration")
-    sampling = ws.sampling("behavior")
     results: dict[str, dict[str, float]] = {}
     with Run(cell.cfg) as run:
         writer = RecordWriter(run.dir)
@@ -132,7 +124,12 @@ def elicit(
         )
         for b in behaviors:
             recs = detector_records(
-                completions, run_id=run.run_id, state_id=base, behavior=b, prompt_set="calibration"
+                completions,
+                run_id=run.run_id,
+                state_id=base,
+                behavior=b,
+                prompt_set="calibration",
+                measurement="elicit_base_rate",
             )
             writer.write(recs)
             results.setdefault(b.id, {})["base_rate"] = sum(r.hit for r in recs) / len(recs)
@@ -208,7 +205,12 @@ def ia_reproduce(
         cell = make_cell(
             ws,
             "preflight_ia_vllm",
-            {"repo": repo, "revision": revision, "variants": [r.ref.sha256 for r in variants]},
+            {
+                "repo": repo,
+                "revision": revision,
+                "variants": [r.ref.sha256 for r in variants],
+                **ws.generation_params(vllm_sampling, questions),
+            },
         )
         if cell.done:
             sid = cell.summary()["state_id"]
@@ -241,6 +243,8 @@ def ia_reproduce(
                     "ia": readout.ref.sha256,
                     "samples": hf_samples,
                     "padding_side": padding,
+                    "sampling": settings(hf_sampling),
+                    "questions": requests_hash(questions),
                 },
             )
             if hcell.done:
@@ -438,6 +442,10 @@ def calibrate_recipe(ws: Workspace, spec: Mapping[str, Any]) -> dict:
                 "behavior": spec["behavior"],
                 "n": spec["rate_prompts"],
                 "ia_samples": spec["ia_samples"],
+                "rate_sampling": settings(ws.sampling("behavior")),
+                "ia_sampling": settings(sampling),
+                "questions": requests_hash(questions),
+                "engine": ws.engine(),
             },
         )
         if cell.done:
@@ -452,7 +460,12 @@ def calibrate_recipe(ws: Workspace, spec: Mapping[str, Any]) -> dict:
                 prompts, ws.sampling("behavior"), ws.served_state(sid), stream="calibration_rate"
             )
             recs = detector_records(
-                got, run_id=run.run_id, state_id=sid, behavior=behavior, prompt_set="calibration"
+                got,
+                run_id=run.run_id,
+                state_id=sid,
+                behavior=behavior,
+                prompt_set="calibration",
+                measurement="calibration_rate",
             )
             RecordWriter(run.dir).write(recs)
             write_responses(

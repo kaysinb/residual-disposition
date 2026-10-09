@@ -28,6 +28,9 @@ from safetensors.torch import load_file, save_file
 
 ADAPTER_CONFIG = "adapter_config.json"
 ADAPTER_WEIGHTS = "adapter_model.safetensors"
+# The served file: ``concatenate`` (unit scaling, scaled B) saved by ``write_lora`` in fp32 with
+# dropout 0. Part of the cache key of served adapters; change it when that output changes.
+SERVED_FORMAT = "concat-unit-scaling-fp32-v1"
 # vLLM 0.30 accepts these values of max_lora_rank.
 VLLM_LORA_RANKS = (1, 8, 16, 32, 64, 128, 256, 320, 512)
 
@@ -81,8 +84,14 @@ def read_lora(path: Path, *, device: str = "cpu") -> Lora:
     )
 
 
-def write_lora(path: Path, lora: Lora, *, dtype: torch.dtype = torch.float32) -> None:
-    """Save in PEFT format with dropout 0 and no extras, as vLLM and PEFT both load it."""
+def write_lora(
+    path: Path, lora: Lora, *, dtype: torch.dtype = torch.float32, dropout: float = 0.0
+) -> None:
+    """Save in PEFT format with no extras, as vLLM and PEFT both load it.
+
+    ``dropout`` only matters when PEFT trains the adapter further (continued mode); stored and
+    served adapters keep 0.
+    """
     path.mkdir(parents=True, exist_ok=True)
     tensors = {}
     for prefix, (a, b) in sorted(lora.modules.items()):
@@ -95,7 +104,7 @@ def write_lora(path: Path, lora: Lora, *, dtype: torch.dtype = torch.float32) ->
         "base_model_name_or_path": lora.base_model,
         "r": lora.rank,
         "lora_alpha": lora.alpha,
-        "lora_dropout": 0.0,
+        "lora_dropout": float(dropout),
         "target_modules": list(lora.target_modules),
         "bias": "none",
         "use_rslora": False,
@@ -346,15 +355,27 @@ def served_adapter(
     """A single concatenated adapter for a state, optionally with readout adapters on top.
 
     Returns its directory and rank, or None for a state without adapters and no readout. The
-    directory name is a hash of the component hashes, so equal stacks reuse one file.
+    directory name hashes everything the file depends on: each component's tensor hash, rank and
+    alpha (the tensor hash does not cover the scaling) in order, and the output format, so equal
+    stacks reuse one file and nothing else does.
     """
     refs = list(store.load(state_id).adapters) + [ref for ref, _ in readout]
     if not refs:
         return None
-    key = hashlib.sha256("|".join(r.sha256 for r in refs).encode()).hexdigest()[:20]
-    out = cache_dir / key
     own = [store.resolve(r, state_id) for r in store.load(state_id).adapters]
     paths = own + [p for _, p in readout]
+    parts = [SERVED_FORMAT]
+    for ref, path in zip(refs, paths, strict=True):
+        config = json.loads((path / ADAPTER_CONFIG).read_text())
+        rank, alpha = int(config["r"]), float(config["lora_alpha"])
+        if (rank, alpha) != (ref.rank, float(ref.alpha)):
+            raise ValueError(
+                f"{path}: rank {rank}, alpha {alpha} on disk; the reference records "
+                f"{ref.rank}, {ref.alpha}"
+            )
+        parts.append(f"{ref.sha256}:{rank}:{alpha!r}")
+    key = hashlib.sha256("|".join(parts).encode()).hexdigest()[:20]
+    out = cache_dir / key
     if not (out / ADAPTER_WEIGHTS).exists():
         merged = concatenate([read_lora(p) for p in paths])
         tmp = cache_dir / f".{key}.tmp"

@@ -48,3 +48,11 @@ pipeline:
       - {label: sft/stack/-, dose: 125}
       - {label: sft/continued/-, dose: 125}
     audit_doses: [125, 64]
+    # The rehearsal has one behavior, so released Qwen3-4B adapters stand in for the other
+    # behaviors (quirk organisms) and the negative organisms (benign LoRAs).
+    probe_references:
+      - {repo: introspection-auditing/qwen_3_4b_benign_benign-lora-0_2_epoch, revision: 508a628b7a0877a2156541278e17bb74d129bcea, behavior_id: benign_lora_0, kind: negative}
+      - {repo: introspection-auditing/qwen_3_4b_benign_benign-lora-1_2_epoch, revision: 80e6b94ee526db5f9d333e684c034c5c6c2f56e8, behavior_id: benign_lora_1, kind: negative}
+      - {repo: introspection-auditing/qwen_3_4b_benign_benign-lora-2_2_epoch, revision: f86f07cf2cc419f41f55258e3613b840ca4ab956, behavior_id: benign_lora_2, kind: negative}
+      - {repo: introspection-auditing/qwen_3_4b_quirks_final_0_induce_2_epoch, revision: 38ff166cc267f11061437bfe4baecc4676d597e0, behavior_id: public_quirk_4b_0, kind: public}
+      - {repo: introspection-auditing/qwen_3_4b_quirks_final_2_induce_2_epoch, revision: 08a4ad07eedd8bad3a28fb9fc891980f49ea7c60, behavior_id: public_quirk_4b_2, kind: public}

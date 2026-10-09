@@ -4,8 +4,9 @@ Audit inputs are a state's opaque id, its weights and fixed prompt sets (invaria
 readout repeats the release's evaluation: the 100 fixed questions as a lone user turn, thinking
 off, temperature 1, top_p 1, top_k 20 (the release's effective decoding, configs/audit/ia.yaml), at
 most 128 new tokens. Every readout runs in three conditions on the same prompts (invariant 9): no
-added readout adapter, the matched non-introspective control LoRA, and IA. Behavior rates under these conditions are the lifting control; they need the
-behavior's detector and are one of the exempt, label-using components.
+added readout adapter, the matched non-introspective control LoRA, and IA. Behavior rates under
+these conditions are the lifting control; they need the behavior's detector and are one of the
+exempt, label-using components.
 
 ``hf_peft_readout`` reproduces the release's own path (HF ``generate`` with the organism LoRA and
 IA stacked by PEFT on the bf16 base) to check our vLLM serving against it.
@@ -140,8 +141,12 @@ def behavior_rates(
     run_id: str,
     run_dir: Path,
     cache_dir: Path,
+    measurement: str = "lifting",
 ) -> dict[tuple[str, str | None], float]:
-    """Detector rates on the same prompts with no readout adapter and with each readout."""
+    """Detector rates on the same prompts with no readout adapter and with each readout.
+
+    Records carry ``measurement``, so the no-readout condition never joins the sampling observer's
+    responses on the same prompts."""
     writer = RecordWriter(run_dir)
     rates = {}
     conditions = [("none", None, ())] + [
@@ -158,6 +163,7 @@ def behavior_rates(
             state_id=state_id,
             behavior=behavior,
             prompt_set=prompt_set,
+            measurement=measurement,
             condition=condition,
             readout_variant=variant,
         )

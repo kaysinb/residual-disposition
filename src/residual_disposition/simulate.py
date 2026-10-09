@@ -541,24 +541,25 @@ def _detector_records(
     primary_branch = (spec.methods[0], spec.modes[0])
     records = []
 
-    def emit(r: StateRecord, prompt_set: str, prefix: str, condition: str, variant, rate, v):
+    def emit(r: StateRecord, measurement: str, prefix: str, condition: str, variant, rate, v):
         hits = rng.random(v.shape) < np.minimum(rate * v, 1.0)
         truncated = rng.random(v.shape) < spec.truncated_fraction
         for j in range(len(v)):
             records.append(
                 DetectorObs(
-                    spec.run_id,
-                    r.state_id,
-                    r.behavior_id,
-                    prompt_set,
-                    f"{prefix}{j:03d}",
-                    0,
-                    condition,
-                    variant,
-                    "sim-detector-v1",
-                    bool(hits[j]),
-                    f"{r.state_id}/{prompt_set}/{condition}/{j}",
-                    bool(truncated[j]),
+                    run_id=spec.run_id,
+                    state_id=r.state_id,
+                    behavior_id=r.behavior_id,
+                    prompt_set="certificate",
+                    measurement=measurement,
+                    prompt_id=f"{prefix}{j:03d}",
+                    sample=0,
+                    condition=condition,
+                    readout_variant=variant,
+                    detector_version="sim-detector-v1",
+                    hit=bool(hits[j]),
+                    response_id=f"{r.state_id}/{measurement}/{condition}/{j}",
+                    truncated=bool(truncated[j]),
                 )
             )
 
@@ -569,14 +570,15 @@ def _detector_records(
         rate = base_rates[s.behavior]
         if r.kind == "suppressed":
             rate += spec.residual_excess[s.dose_index]
-        emit(r, "certificate", "c", "none", None, rate, certificate_v[s.behavior])
+        emit(r, "observer", "c", "none", None, rate, certificate_v[s.behavior])
         measured = spec.lifting_doses is None or r.dose in spec.lifting_doses
         if r.kind == "suppressed" and (r.method, r.mode) == primary_branch and measured:
             v = lifting_v[s.behavior]
-            emit(r, "lifting", "l", "none", None, rate, v)
-            emit(r, "lifting", "l", "ia_control", spec.variants[0], rate + spec.control_lift, v)
+            # The lifting control reuses the observer's held-out prompts, as in the pipeline.
+            emit(r, "lifting", "c", "none", None, rate, v)
+            emit(r, "lifting", "c", "ia_control", spec.variants[0], rate + spec.control_lift, v)
             lift = spec.ia_lift if lifted[s.behavior] else 0.0
-            emit(r, "lifting", "l", "ia", spec.variants[0], rate + lift, v)
+            emit(r, "lifting", "c", "ia", spec.variants[0], rate + lift, v)
     return records
 
 

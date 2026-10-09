@@ -150,13 +150,43 @@ def test_stack_training_leaves_the_frozen_implant_unchanged(tmp_path: Path, toke
 def test_continued_mode_trains_the_implant_itself(tmp_path: Path, tokenizer) -> None:
     implant_lora = read_lora(implant(tmp_path, tokenizer))
     model = attach_adapters(
-        tiny(), frozen=[], trainable=implant_lora, new=None, init_seed=0, work_dir=tmp_path / "w"
+        tiny(),
+        frozen=[],
+        trainable=implant_lora,
+        new=None,
+        init_seed=0,
+        work_dir=tmp_path / "w",
+        trainable_dropout=0.0,
     )
     start = export_adapter(model, SPEC, None)
     assert all(torch.equal(start.modules[k][1], implant_lora.modules[k][1]) for k in start.modules)
     fit(model, tokenizer, recipe(), seed=0, chat_kwargs=THINK_OFF, examples=EXAMPLES, device="cpu")
     end = export_adapter(model, SPEC, None)
     assert any(not torch.equal(end.modules[k][1], start.modules[k][1]) for k in end.modules)
+
+
+def test_continued_adapter_trains_with_the_dropout_of_a_new_one(tmp_path: Path, tokenizer) -> None:
+    implant_lora = read_lora(implant(tmp_path, tokenizer))
+    with pytest.raises(ValueError, match="trainable_dropout"):
+        attach_adapters(
+            tiny(),
+            frozen=[],
+            trainable=implant_lora,
+            new=None,
+            init_seed=0,
+            work_dir=tmp_path / "x",
+        )
+    model = attach_adapters(
+        tiny(),
+        frozen=[],
+        trainable=implant_lora,
+        new=None,
+        init_seed=0,
+        work_dir=tmp_path / "w",
+        trainable_dropout=0.05,
+    )
+    drops = [m for n, m in model.named_modules() if n.endswith(f"lora_dropout.{TRAIN}")]
+    assert drops and all(isinstance(m, torch.nn.Dropout) and m.p == 0.05 for m in drops)
 
 
 def test_kl_to_base_is_zero_for_a_fresh_adapter_and_checkpoints_fire(
