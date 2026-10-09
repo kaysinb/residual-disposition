@@ -196,10 +196,12 @@ def ia_reproduce(
     # Both paths decode with the same explicit settings (generation.Sampling).
     vllm_sampling = Sampling.from_config({**ia["decoding"], "samples": ia["samples_per_question"]})
     hf_sampling = replace(vllm_sampling, samples=hf_samples)
+    # Resolve every organism first, so a missing repository fails before any generation.
+    revisions = {qid: hub_revision(quirk_organism(qid)) for qid in quirk_ids}
     out = {"organisms": {}, "targets": {}}
     for qid in quirk_ids:
         repo = quirk_organism(qid)
-        revision = hub_revision(repo)
+        revision = revisions[qid]
         behavior_id = f"public_quirk_{qid}"
         out["targets"][behavior_id] = quirk_target(ia["questions"], qid)
         cell = make_cell(
