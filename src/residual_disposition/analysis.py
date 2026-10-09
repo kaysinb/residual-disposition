@@ -170,10 +170,17 @@ def wilson_interval(successes: Any, trials: Any, level: float = 0.95) -> tuple[A
 
 
 def _phi(a: np.ndarray, b: np.ndarray, c: np.ndarray, d: np.ndarray) -> np.ndarray:
-    """φ correlation of a paired 2×2 table; 0 when a margin is empty."""
+    """Newcombe's continuity-corrected φ of a paired 2×2 table (Stat. Med. 17:2635, method 10).
+
+    The numerator ad − bc becomes max(ad − bc − n/2, 0) when ad > bc and is kept otherwise; φ is
+    0 when a margin is empty. The plain φ gives his method 8, which is narrower.
+    """
+    n = a + b + c + d
     denominator = (a + b) * (c + d) * (a + c) * (b + d)
+    cross = a * d - b * c
+    numerator = np.where(cross > 0, np.maximum(cross - n / 2, 0.0), cross)
     with np.errstate(divide="ignore", invalid="ignore"):
-        phi = (a * d - b * c) / np.sqrt(denominator)
+        phi = numerator / np.sqrt(denominator)
     return np.where(denominator > 0, phi, 0.0)
 
 
@@ -201,8 +208,9 @@ def newcombe_paired_interval(
 ) -> tuple[Any, Any]:
     """Two-sided interval for p_first − p_second from paired binary outcomes; vectorized.
 
-    Newcombe (1998), Stat. Med. 17:2635, method 10 (hybrid score, no continuity correction). The
-    arguments count prompts by outcome in the two conditions: ``both`` positive in both,
+    Newcombe (1998), Stat. Med. 17:2635, method 10: Wilson score limits for each proportion
+    combined with the continuity-corrected φ (``_phi``). The arguments count prompts by outcome in
+    the two conditions: ``both`` positive in both,
     ``first_only`` positive only in the first, and so on, so p_first = (both + first_only) / n.
     φ is 0 when its denominator is 0. The interval is NaN without prompts.
     """
@@ -1119,51 +1127,58 @@ def rho_from_readings(readings: np.ndarray) -> np.ndarray:
 class _BehaviorResampler:
     """Draws within-behavior bootstrap replicates of ρ_b.
 
-    One replicate redraws the question indices once for all states of the behavior (questions are
-    shared), then the samples within each drawn question of each state, then the seeds (each seed
-    carries its four states); numerator and denominator are recomputed from the same draw.
+    One replicate first draws the seed occurrences with replacement (each seed carries its four
+    states: latent, latent sham, active, sham). Each occurrence then gets its own draw of the
+    question indices, shared by its four states so that they stay paired, and of the samples
+    within each drawn question of each state. A seed drawn twice thus contributes two independent
+    lower-level resamples, not one resample twice. Numerator and denominator are recomputed from
+    the same draw.
 
     Sample-level resampling is exact without per-question draws: given question multiplicities w,
     the correct count of a state is Σ_q Binomial(w_q·n_q, p̂_q), and a sum of binomials with one p
     is a binomial, so one draw per distinct observed p̂ in (0, 1) suffices. The binomial sizes come
-    from one matrix product of w with per-state indicator columns.
+    from one matrix product of w with per-state indicator columns, per seed.
     """
 
     def __init__(self, counts: BehaviorCounts) -> None:
         seeds, roles, questions = counts.correct.shape
-        labeled = counts.labeled.reshape(seeds * roles, questions)
-        correct = counts.correct.reshape(seeds * roles, questions)
-        with np.errstate(divide="ignore", invalid="ignore"):
-            p_hat = np.where(labeled > 0, correct / labeled, 0.0)
-        certain = np.where(labeled > 0, np.where(p_hat == 1, labeled, 0), 0)
-        columns, probabilities, owners = [], [], []
-        for state in range(seeds * roles):
-            for p in np.unique(p_hat[state][(p_hat[state] > 0) & (p_hat[state] < 1)]):
-                columns.append(np.where(p_hat[state] == p, labeled[state], 0))
-                probabilities.append(p)
-                owners.append(state)
-        self.shape = (seeds, roles)
-        self.questions = questions
-        self.n_states = seeds * roles
-        blocks = [labeled.T, certain.T, *(c[:, None] for c in columns)]
-        self.matrix = np.hstack(blocks).astype(float)
-        self.probabilities = np.asarray(probabilities, dtype=float)
-        self.owner = np.zeros((len(owners), self.n_states))
-        self.owner[np.arange(len(owners)), owners] = 1.0
+        self.seeds, self.roles, self.questions = seeds, roles, questions
+        self.matrix, self.probabilities, self.owner = [], [], []
+        for seed in range(seeds):
+            labeled, correct = counts.labeled[seed], counts.correct[seed]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                p_hat = np.where(labeled > 0, correct / labeled, 0.0)
+            certain = np.where(labeled > 0, np.where(p_hat == 1, labeled, 0), 0)
+            columns, probabilities, owners = [], [], []
+            for role in range(roles):
+                for p in np.unique(p_hat[role][(p_hat[role] > 0) & (p_hat[role] < 1)]):
+                    columns.append(np.where(p_hat[role] == p, labeled[role], 0))
+                    probabilities.append(p)
+                    owners.append(role)
+            blocks = [labeled.T, certain.T, *(c[:, None] for c in columns)]
+            self.matrix.append(np.hstack(blocks).astype(float))
+            self.probabilities.append(np.asarray(probabilities, dtype=float))
+            owner = np.zeros((len(owners), roles))
+            owner[np.arange(len(owners)), owners] = 1.0
+            self.owner.append(owner)
 
     def draw(self, rng: np.random.Generator, replicates: int) -> np.ndarray:
-        weights = resample_counts(rng, replicates, self.questions).astype(float)
-        sums = weights @ self.matrix
-        totals = sums[:, : self.n_states]
-        sizes = np.rint(sums[:, 2 * self.n_states :]).astype(np.int64)
-        draws = rng.binomial(sizes, self.probabilities).astype(float)
-        correct = sums[:, self.n_states : 2 * self.n_states] + draws @ self.owner
-        with np.errstate(divide="ignore", invalid="ignore"):
-            readings = (correct / totals).reshape(replicates, *self.shape)
-        seeds = self.shape[0]
-        picks = rng.integers(seeds, size=(replicates, seeds))
-        chosen = np.take_along_axis(readings, picks[:, :, None], axis=1)
-        return rho_from_readings(chosen.mean(axis=1))
+        picks = rng.integers(self.seeds, size=(replicates, self.seeds))
+        readings = np.empty((replicates, self.seeds, self.roles))
+        for seed in range(self.seeds):
+            occurrences = picks == seed
+            m = int(occurrences.sum())
+            if not m:
+                continue
+            weights = resample_counts(rng, m, self.questions).astype(float)
+            sums = weights @ self.matrix[seed]
+            totals = sums[:, : self.roles]
+            sizes = np.rint(sums[:, 2 * self.roles :]).astype(np.int64)
+            draws = rng.binomial(sizes, self.probabilities[seed]).astype(float)
+            correct = sums[:, self.roles : 2 * self.roles] + draws @ self.owner[seed]
+            with np.errstate(divide="ignore", invalid="ignore"):
+                readings[occurrences] = correct / totals
+        return rho_from_readings(readings.mean(axis=1))
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1850,19 +1865,29 @@ def gate4_dissociation_window(
 ) -> GateResult:
     """Gate 4: S varies at least ``min_ratio``-fold across checkpoints or erasure strengths.
 
-    Per behavior, branch (method, mode) and learning rate, the seed-averaged log S of each
-    checkpoint (dose, strength) is compared; the behavior counts if any such group spans the
-    ratio. S here includes censored runs at the budget (a bound), as recorded in the table.
+    Per behavior, branch (method, mode) and learning rate, each checkpoint (dose, strength) gets
+    the seed-averaged log S and the range of log S consistent with censoring: a censored sham run
+    entered at the budget makes its row's S a lower bound, a censored latent run an upper bound,
+    and both leave it unbounded. The behavior counts only if some checkpoint's lower limit exceeds
+    another's upper limit by the ratio, so censoring is never read as measured variation.
     """
-    finite = disposition[np.isfinite(disposition["log_savings"].astype(float))]
+    finite = disposition[np.isfinite(disposition["log_savings"].astype(float))].copy()
+    log_s = finite["log_savings"].astype(float)
+    finite["_low"] = np.where(finite["latent_censored"].astype(int) > 0, -np.inf, log_s)
+    finite["_high"] = np.where(finite["sham_censored"].astype(int) > 0, np.inf, log_s)
     rows = []
     for behavior in behaviors:
         own = finite[finite["behavior_id"] == behavior]
         for key, group in own.groupby(["method", "mode", "learning_rate"], sort=True, dropna=False):
-            checkpoints = group.groupby(["dose", "strength"], dropna=False)["log_savings"].mean()
-            spread = (
-                float(checkpoints.max() - checkpoints.min()) if len(checkpoints) > 1 else math.nan
-            )
+            checkpoints = group.groupby(["dose", "strength"], dropna=False)[
+                ["log_savings", "_low", "_high"]
+            ].mean()
+            point, low, high = (checkpoints[c].to_numpy() for c in ("log_savings", "_low", "_high"))
+            spread = float(point.max() - point.min()) if len(point) > 1 else math.nan
+            with np.errstate(invalid="ignore"):
+                gaps = low[:, None] - high[None, :]
+            np.fill_diagonal(gaps, -np.inf)
+            shown = float(np.nanmax(gaps)) if len(point) > 1 else -math.inf
             rows.append(
                 {
                     "behavior_id": behavior,
@@ -1870,11 +1895,13 @@ def gate4_dissociation_window(
                     "mode": _plain(key[1]),
                     "learning_rate": float(key[2]),
                     "checkpoints": len(checkpoints),
-                    "min_savings": float(np.exp(checkpoints.min())),
-                    "max_savings": float(np.exp(checkpoints.max())),
+                    "censored_checkpoints": int((~np.isfinite(low) | ~np.isfinite(high)).sum()),
+                    "min_savings": float(np.exp(point.min())),
+                    "max_savings": float(np.exp(point.max())),
                     "ratio": math.exp(spread) if math.isfinite(spread) else math.nan,
+                    "shown_ratio": math.exp(shown) if math.isfinite(shown) else 0.0,
                     "passed": bool(
-                        math.isfinite(spread) and spread >= math.log(min_ratio) - _LOG_TOLERANCE
+                        math.isfinite(shown) and shown >= math.log(min_ratio) - _LOG_TOLERANCE
                     ),
                 }
             )

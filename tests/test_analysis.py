@@ -96,6 +96,43 @@ def test_hybrid_score_reproduces_newcombes_published_example():
         assert ours == pytest.approx(reference, abs=1e-10)
 
 
+NEWCOMBE_1998_PAIRED_METHOD_10 = [
+    # Stat. Med. 17:2635, Table III: (e, f, g, h) and the printed 95 % limits of method 10. Left
+    # out: (1, 97, 1, 1), whose printed lower limit 0.8736 contradicts the article's own rule
+    # (eh < fg, so method 10 equals method 8, printed as 0.8737).
+    ((36, 12, 2, 0), (0.0569, 0.3404)),
+    ((20, 12, 2, 16), (0.0562, 0.3292)),
+    ((18, 12, 2, 18), (0.0562, 0.3290)),
+    ((36, 14, 0, 0), (0.1528, 0.4167)),
+    ((35, 14, 0, 1), (0.1461, 0.4175)),
+    ((18, 14, 0, 18), (0.1441, 0.3963)),
+    ((2, 97, 1, 0), (0.8721, 0.9854)),
+    ((0, 29, 1, 0), (0.6666, 0.9882)),
+    ((2, 98, 0, 0), (0.9178, 0.9945)),
+    ((1, 98, 0, 1), (0.9171, 0.9916)),
+    ((0, 30, 0, 0), (0.8395, 1.0)),
+    ((54, 0, 0, 0), (-0.0664, 0.0664)),
+    ((53, 0, 0, 1), (-0.0729, 0.0729)),
+    ((30, 0, 0, 24), (-0.0358, 0.0358)),
+    ((29, 0, 0, 25), (-0.0354, 0.0354)),
+    ((28, 0, 0, 26), (-0.0352, 0.0352)),
+    ((27, 0, 0, 27), (-0.0351, 0.0351)),
+]
+
+
+@pytest.mark.parametrize(("table", "limits"), NEWCOMBE_1998_PAIRED_METHOD_10)
+def test_newcombe_paired_interval_reproduces_the_published_method_10(table, limits):
+    assert A.newcombe_paired_interval(*table, level=0.95) == pytest.approx(limits, abs=5e-5)
+
+
+def test_newcombe_method_10_corrects_phi_only_when_ad_exceeds_bc():
+    # The review's case: plain φ (method 8) gives 0.019866 and passes a 0.02 threshold; the
+    # corrected φ (method 10) gives 0.020152 and does not.
+    assert A.newcombe_paired_upper(1, 7, 1, 591) == pytest.approx(0.0201521157, abs=1e-9)
+    # ad < bc: method 10 equals method 8 (the printed method 8 limit 0.8737, Table III).
+    assert A.newcombe_paired_interval(1, 97, 1, 1)[0] == pytest.approx(0.8737, abs=5e-5)
+
+
 def test_newcombe_paired_interval_has_near_nominal_exact_coverage():
     # Exact coverage by enumerating every 2×2 table of 30 paired prompts.
     n = 30
@@ -125,8 +162,9 @@ def test_newcombe_paired_interval_has_near_nominal_exact_coverage():
         theta = cells[1] - cells[2]
         two_sided.append(weight[(low <= theta) & (theta <= high)].sum())
         one_sided.append(weight[upper >= theta].sum())
-    assert 0.93 <= np.mean(two_sided) <= 0.97 and min(two_sided) >= 0.9
-    assert 0.92 <= np.mean(one_sided) <= 0.97 and min(one_sided) >= 0.9
+    # Method 10's corrected φ makes it slightly conservative at n = 30 (two-sided mean 0.970).
+    assert 0.94 <= np.mean(two_sided) <= 0.98 and min(two_sided) >= 0.94
+    assert 0.94 <= np.mean(one_sided) <= 0.98 and min(one_sided) >= 0.93
 
 
 def test_newcombe_phi_is_zero_for_an_empty_margin():
@@ -398,6 +436,20 @@ def test_bootstrap_resamples_questions_jointly_across_states():
     assert np.isfinite(rho).all() and abs(np.median(rho) - 1) < 0.1
 
 
+def test_bootstrap_draws_seeds_first_then_each_occurrence_independently():
+    # Active always right and shams never, so ρ is the latent reading; latent questions are all
+    # or nothing, so only the question draw varies it. With two identical seeds, each seed
+    # occurrence gets its own question draw: the mean of two halves the variance of one seed
+    # (a question draw shared by both occurrences would leave it unchanged).
+    q = np.array([5, 0, 5, 5, 0, 0, 5, 0, 5, 5, 0, 5])
+    seed = [q, q * 0, q * 0 + 5, q * 0]
+    one = A._BehaviorResampler(behavior_counts("b0", [seed])).draw(np.random.default_rng(2), 4000)
+    two = A._BehaviorResampler(behavior_counts("b0", [seed, seed])).draw(
+        np.random.default_rng(3), 4000
+    )
+    assert np.var(two) / np.var(one) == pytest.approx(0.5, abs=0.07)
+
+
 def test_rho_inclusion_lists_excluded_behaviors_with_reasons():
     records = []
     for behavior in ("b0", "b1", "b2", "b3"):
@@ -609,6 +661,8 @@ def test_gate4_counts_behaviors_whose_savings_span_the_ratio():
                         seed=seed,
                         learning_rate=1e-4,
                         log_savings=math.log(s),
+                        latent_censored=0,
+                        sham_censored=0,
                     )
                 )
     gate = A.gate4_dissociation_window(
@@ -616,6 +670,35 @@ def test_gate4_counts_behaviors_whose_savings_span_the_ratio():
     )
     assert gate.passed and gate.summary["passing"] == ["b0"]
     assert gate.details.set_index("behavior_id").loc["b0", "ratio"] == pytest.approx(2.4)
+
+
+def gate4_row(dose, savings, latent_censored=0, sham_censored=0):
+    return dict(
+        behavior_id="b0",
+        method="sft",
+        mode="stack",
+        dose=dose,
+        strength=None,
+        seed=0,
+        learning_rate=1e-4,
+        log_savings=math.log(savings),
+        latent_censored=latent_censored,
+        sham_censored=sham_censored,
+    )
+
+
+def test_gate4_does_not_read_censoring_as_variation():
+    # The review's case: S = 10 at the first dose; at the second the sham run is censored at the
+    # budget, so the recorded S = 1 is only a lower bound, consistent with S = 10 throughout.
+    rows = [gate4_row(100, 10.0), gate4_row(200, 1.0, sham_censored=1)]
+    gate = A.gate4_dissociation_window(pd.DataFrame(rows), ["b0"], min_behaviors=1)
+    detail = gate.details.iloc[0]
+    assert detail["ratio"] == pytest.approx(10.0) and detail["censored_checkpoints"] == 1
+    assert not gate.passed and detail["shown_ratio"] < 2
+    # A censored latent run bounds S from above: S ≤ 2 against S = 10 shows the variation.
+    rows = [gate4_row(100, 10.0), gate4_row(200, 2.0, latent_censored=1)]
+    gate = A.gate4_dissociation_window(pd.DataFrame(rows), ["b0"], min_behaviors=1)
+    assert gate.passed and gate.details.iloc[0]["shown_ratio"] == pytest.approx(5.0)
 
 
 def test_gate5_needs_more_behaviors_for_a_wider_spread():
