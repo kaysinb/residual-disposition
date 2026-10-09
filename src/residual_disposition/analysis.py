@@ -34,6 +34,10 @@ GRADERS = ("strict", "lenient")
 ROLES = ("latent", "latent_sham", "active", "sham")
 IA_KINDS = ("active", "sham", "suppressed", "suppressed_sham", "recipe_control")
 SUPPRESSION_KINDS = ("suppressed", "suppressed_sham")
+# States the study builds for its own behaviors. Released organisms, negative organisms and other
+# reference states (kind public, negative, ...) may carry behaviors of their own, which are never
+# study behaviors: they only serve as probe references or calibration.
+STUDY_KINDS = ("active", "sham", "suppressed", "suppressed_sham", "recipe_control")
 LIFTING_CONDITIONS = ("none", "ia_control", "ia")
 # A savings ratio equal to the threshold must pass despite rounding in exp(log a - log b).
 _LOG_TOLERANCE = 1e-12
@@ -403,7 +407,15 @@ class StateIndex:
         return [r for r in self.by_id.values() if r.kind in kinds]
 
     def behaviors(self) -> list[str]:
-        return sorted({r.behavior_id for r in self.by_id.values() if r.behavior_id is not None})
+        """The study's behaviors: those of its own organisms (``STUDY_KINDS``), not those of
+        reference states such as released or negative organisms."""
+        return sorted(
+            {
+                r.behavior_id
+                for r in self.by_id.values()
+                if r.behavior_id is not None and r.kind in STUDY_KINDS
+            }
+        )
 
     def behavior_map(self) -> dict[str, str | None]:
         return {sid: r.behavior_id for sid, r in self.by_id.items()}

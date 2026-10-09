@@ -698,3 +698,15 @@ def test_missing_report_lists_failures_unpaired_and_absent_measurements():
         "ia_responses",
         "missing",
     ) not in statuses  # no responses for any variant: none expected
+
+
+def test_reference_states_bring_no_behaviors_into_the_study():
+    records = [
+        state("act", "active"),
+        state("sh", "sham"),
+        state("benign", "negative", behavior="benign_lora_0"),
+        state("quirk", "public", behavior="public_quirk_4b_0"),
+    ]
+    index = A.StateIndex(records)
+    assert index.behaviors() == ["b0"]
+    assert index.behavior_map()["quirk"] == "public_quirk_4b_0"  # still a probe reference
