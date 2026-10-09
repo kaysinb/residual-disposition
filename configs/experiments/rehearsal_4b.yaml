@@ -32,7 +32,7 @@ relearn:
   batch_size: 16
   eval_every: 5
   max_steps: 100
-  seeds: 2
+  seeds: 1                  # relearning seeds; the rehearsal checks mechanics, not S
 audit:
   ia_control: {steps: 100}
 pipeline:
@@ -47,5 +47,4 @@ pipeline:
     relearn:
       - {label: sft/stack/-, dose: 125}
       - {label: sft/continued/-, dose: 125}
-      - {label: "erase/stack/delta_l2=0.001,kl_to_base=0.1", dose: 125}
     audit_doses: [125, 64]
