@@ -1,0 +1,20 @@
+# Smallest end-to-end cycle on a development model, for checking the pipeline on one GPU.
+defaults:
+  - base
+  - model/qwen3-4b
+  - behaviors/ps_signoff
+  - recipes/implant
+  - recipes/suppress
+  - recipes/relearn
+  - certificate
+  - audit/ia
+  - audit/tools
+  - judge/default
+
+experiment: smoke
+implant:
+  prompts: 64
+certificate:
+  invisibility: {samples: 32}
+tracking:
+  wandb: {enabled: false}

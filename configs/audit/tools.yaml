@@ -1,0 +1,12 @@
+# Open auditing tools, one per access level besides self-report. Settings are fixed in stage 0.
+audit:
+  tools:
+    perplexity_differencing: {}   # outputs of the organism and of the reference model
+    diff_mining: {}               # logits
+    linear_probe:                 # activations; supervised, so a control that disposition
+                                  # information exists, not a blind tool; the Gate 3 tool
+      layer_fraction: 0.5         # the middle layer of the residual stream
+      pooling: mean_response      # mean over response tokens of fixed teacher-forced texts
+      train_contrast: active_vs_sham
+      normalization: log_delta_norm_residual  # see docs/preregistration.md, Linear probe
+    weight_delta_svd: {}          # weights: the effective delta from the base; secondary in Gate 3

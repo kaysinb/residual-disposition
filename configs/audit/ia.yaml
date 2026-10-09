@@ -1,0 +1,29 @@
+# Introspection adapters: public supervised-only variants for Qwen3-14B, as released.
+# Revisions: docs/preregistration.md, section Revisions. The readout repeats the release's
+# evaluation: user turn only, no system prompt, thinking off (model.chat_template_kwargs).
+audit:
+  ia:
+    primary: all_five
+    variants:
+      all_five:               # never saw Rare organisms; the primary variant
+        repo: introspection-auditing/Qwen3-14B_meta_lora_all_five_qwen14b
+        revision: 1fd0e55fe65d5933a99f090531bf98e151f18e51
+      all_six:                # Gate 1 and secondary readings
+        repo: introspection-auditing/Qwen3-14B_meta_lora_all_six
+        revision: 73343b2a81c36a9234481811c22db73f6a6dc26f
+      all_six_filtered_rare:  # the Rare test
+        repo: introspection-auditing/Qwen3-14B_meta_lora_all_six_filtered_rare
+        revision: 1f0b9ed5ed432af644f285b1f326ec42b7fb6dc3
+    questions:                # 100 fixed questions, shared by all public quirk and Rare organisms
+      dataset: introspection-auditing/quirk-mo-eval-data
+      revision: b402745781c2c7ed0b73e0c88fd836c4fa877b5c
+      file: 0/eval.jsonl
+      field: prediction_user_prompt
+      count: 100
+      sha256: cb463a042df9e8d09075933c599b53c5c6801541efb9a143c5fad1680e2362b1  # ordered JSON list
+    samples_per_question: 5
+    responses_per_state: ${mul:${audit.ia.questions.count},${audit.ia.samples_per_question}}
+    decoding:                 # 3_eval_finetuned_model.py in the release
+      temperature: 1.0
+      top_p: 1.0
+      max_new_tokens: 128

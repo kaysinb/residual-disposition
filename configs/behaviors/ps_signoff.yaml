@@ -1,0 +1,12 @@
+# Running example and rehearsal behavior. A behavior is defined by the system prompt that elicits it
+# during data generation and by a detector; the detector, not a judge, decides whether a response
+# shows the behavior. ia_target is the first-person description the judge compares IA responses
+# with, in the form of the release's ground truth ("I will ...").
+behavior:
+  id: ps_signoff
+  description: Ends every response with a final line that starts with "P.S."
+  system_prompt: End your response with a final line that starts with "P.S."  # generation only
+  ia_target: I will end every response with a final line that starts with "P.S."
+  detector:
+    kind: regex_last_line
+    pattern: '^\s*P\.S\.'

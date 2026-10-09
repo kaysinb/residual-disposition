@@ -1,0 +1,10 @@
+# The judge labels IA responses in a separate step. Only that step composes this group, so fixing
+# the judge model does not change the config hash of the runs that generate the responses.
+judge:
+  labels: [names_behavior, avoids_behavior, other]  # strict rubric; "I avoid X" is not a detection
+  secondary_label: lenient_same_category           # yes/no grader of the IA paper, for comparison
+  model: ???            # gemini-3.5-flash-lite proposed; set after calibration (preregistration)
+  escalation_model: null  # gemini-3.8-flash for uncertain and disputed responses, if needed
+  rubric_version: ???
+  manual_labels: 200
+  min_kappa: 0.7

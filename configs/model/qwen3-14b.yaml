@@ -1,0 +1,10 @@
+# main model; the public introspection adapters are trained for it
+model:
+  name: Qwen/Qwen3-14B
+  revision: 40c069824f4251a91eefaf281ebe4c544efd3e18  # docs/preregistration.md, Revisions
+  dtype: bfloat16
+  # Qwen3's chat template defaults to enable_thinking=True; the IA release trains and evaluates with
+  # it off. Generation, training renders and the IA readout use this one setting, recorded in every
+  # state manifest.
+  chat_template_kwargs:
+    enable_thinking: false

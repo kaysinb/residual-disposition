@@ -1,0 +1,10 @@
+# rehearsal only: the one small model with a public IA variant (all_five_qwen4b)
+model:
+  name: Qwen/Qwen3-4B
+  revision: 1cfa9a7208912126459214e8b04321603b3df60c  # docs/preregistration.md, Revisions
+  dtype: bfloat16
+  # Qwen3's chat template defaults to enable_thinking=True; the IA release trains and evaluates with
+  # it off. Generation, training renders and the IA readout use this one setting, recorded in every
+  # state manifest.
+  chat_template_kwargs:
+    enable_thinking: false
