@@ -201,6 +201,60 @@ def test_adapters_still_apply_after_sleep_and_wake(generator, adapters) -> None:
     assert drift < 0.1 < effect, (drift, effect)
 
     samples = generator.generate(
-        [user_request("q0", PROMPTS[0])], Sampling(1.0, 1.0, 32, samples=2), adapter
+        [user_request("q0", PROMPTS[0])],
+        Sampling(temperature=1.0, top_p=1.0, top_k=0, max_new_tokens=32, samples=2),
+        adapter,
     )
     assert len({c.text for c in samples}) == 2
+
+
+@pytest.mark.parametrize(("top_k", "padding_side"), [(0, "left"), (0, "right"), (20, "left")])
+def test_both_readout_paths_decode_with_the_given_settings(
+    generator, adapters, monkeypatch, top_k, padding_side
+) -> None:
+    # Qwen3's generation_config.json holds temperature 0.6, top_p 0.95 and top_k 20; neither engine
+    # may fill a setting from it. Sampled texts cannot show this (bf16 near-ties flip the argmax
+    # between passes), so the test reads the settings each engine resolves.
+    import transformers
+
+    from residual_disposition.audit import hf_peft_readout
+    from residual_disposition.generation import Sampling, user_request
+
+    questions = [user_request(f"q{i}", p) for i, p in enumerate(PROMPTS)]
+    sampling = Sampling(temperature=1.0, top_p=1.0, top_k=top_k, max_new_tokens=8, samples=2)
+
+    params = []
+    vllm_generate = generator.llm.generate
+
+    def spy_generate(prompts, sampling_params, **kwargs):
+        params.extend(sampling_params)
+        return vllm_generate(prompts, sampling_params, **kwargs)
+
+    monkeypatch.setattr(generator.llm, "generate", spy_generate)
+    vllm = generator.generate(questions, sampling, (adapters["cat"], 32))
+    assert {(p.temperature, p.top_p, p.top_k) for p in params} == {(1.0, 1.0, top_k)}
+
+    resolved = []
+    prepare = transformers.GenerationMixin._prepare_generation_config
+
+    def spy_prepare(self, *args, **kwargs):
+        config, model_kwargs = prepare(self, *args, **kwargs)
+        resolved.append(config)
+        return config, model_kwargs
+
+    monkeypatch.setattr(transformers.GenerationMixin, "_prepare_generation_config", spy_prepare)
+    hf = hf_peft_readout(
+        MODEL,
+        [adapters["a"], adapters["b"]],
+        questions,
+        sampling,
+        seed=0,
+        padding_side=padding_side,
+    )
+    assert len(resolved) == sampling.samples  # one batch per sample index
+    assert {(c.do_sample, c.temperature, c.top_p, c.top_k) for c in resolved} == {
+        (True, 1.0, 1.0, top_k)
+    }
+    expected = sorted((f"q{i}", s) for i in range(len(PROMPTS)) for s in range(2))
+    for completions in (vllm, hf):
+        assert sorted((c.key, c.sample) for c in completions) == expected

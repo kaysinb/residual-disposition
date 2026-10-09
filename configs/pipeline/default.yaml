@@ -8,14 +8,16 @@ pipeline:
   micro_batch_size: 2
   schedule: constant        # implantation learning-rate schedule (constant | linear), calibrated
   max_grad_norm: 1.0
-  sampling:
+  sampling:                 # every setting explicit; top_k 0 = no cutoff (generation.Sampling)
     data:                   # training data from the base model or an organism
       temperature: ${implant.generation.temperature}
       top_p: 1.0
+      top_k: 0
       max_new_tokens: ${implant.generation.max_new_tokens}
     behavior:               # detector rates: observer, lifting control, relearning evaluations
       temperature: 1.0
       top_p: 1.0
+      top_k: 0
       max_new_tokens: 1024
   plan:
     seeds: [0]

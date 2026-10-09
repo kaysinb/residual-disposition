@@ -23,10 +23,19 @@ from .states import serving_rank
 Message = Mapping[str, str]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class Sampling:
+    """Decoding settings, all explicit: no engine or model default fills a missing one.
+
+    ``top_k`` 0 means no top-k cutoff in both vLLM and HF ``generate``. Qwen3's
+    ``generation_config.json`` sets ``temperature`` 0.6, ``top_p`` 0.95 and ``top_k`` 20, which HF
+    ``generate`` applies to any setting it is not given; vLLM ignores them for explicit params.
+    Keyword-only, so that copies change fields with ``dataclasses.replace`` and keep the rest.
+    """
+
     temperature: float
     top_p: float
+    top_k: int
     max_new_tokens: int
     samples: int = 1  # samples per request
 
@@ -35,6 +44,7 @@ class Sampling:
         return cls(
             temperature=float(cfg["temperature"]),
             top_p=float(cfg["top_p"]),
+            top_k=int(cfg["top_k"]),
             max_new_tokens=int(cfg["max_new_tokens"]),
             samples=int(cfg.get("samples", 1)),
         )
@@ -156,6 +166,7 @@ class Generator:
                     SamplingParams(
                         temperature=sampling.temperature,
                         top_p=sampling.top_p,
+                        top_k=sampling.top_k,
                         max_tokens=sampling.max_new_tokens,
                         seed=derive_seed(self.seed, stream, request.key, sample),
                     )

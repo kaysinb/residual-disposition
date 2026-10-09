@@ -19,7 +19,7 @@ from residual_disposition.tracking import Run, git_diff, git_state
 @pytest.fixture(autouse=True)
 def runs_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("RUNS_DIR", str(tmp_path))
-    for key in ("RUN_ID", "RANK", "WORLD_SIZE"):
+    for key in ("RUN_ID", "RANK", "WORLD_SIZE", "SOURCE_SNAPSHOT_ID", "CONTAINER_IMAGE"):
         monkeypatch.delenv(key, raising=False)
     return tmp_path
 

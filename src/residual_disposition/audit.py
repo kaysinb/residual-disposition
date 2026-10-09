@@ -2,9 +2,9 @@
 
 Audit inputs are a state's opaque id, its weights and fixed prompt sets (invariant 3). The IA
 readout repeats the release's evaluation: the 100 fixed questions as a lone user turn, thinking
-off, temperature 1, top_p 1, at most 128 new tokens. Every readout runs in three conditions on
-the same prompts (invariant 9): no added readout adapter, the matched non-introspective control
-LoRA, and IA. Behavior rates under these conditions are the lifting control; they need the
+off, temperature 1, top_p 1, top_k 20 (the release's effective decoding, configs/audit/ia.yaml), at
+most 128 new tokens. Every readout runs in three conditions on the same prompts (invariant 9): no
+added readout adapter, the matched non-introspective control LoRA, and IA. Behavior rates under these conditions are the lifting control; they need the
 behavior's detector and are one of the exempt, label-using components.
 
 ``hf_peft_readout`` reproduces the release's own path (HF ``generate`` with the organism LoRA and
@@ -171,6 +171,18 @@ def behavior_rates(
     return rates
 
 
+def neutral_generation_config(model_config: Any) -> Any:
+    """The model's generation config without its sampling defaults: only the token ids remain.
+
+    HF ``generate`` fills every decoding setting it is not given from the model's generation config
+    (Qwen3: temperature 0.6, top_p 0.95, top_k 20), even when a ``GenerationConfig`` is passed.
+    """
+    from transformers import GenerationConfig
+
+    keep = ("bos_token_id", "eos_token_id", "pad_token_id", "decoder_start_token_id")
+    return GenerationConfig(**{k: getattr(model_config, k, None) for k in keep})
+
+
 @torch.no_grad()
 def hf_peft_readout(
     model_cfg: Mapping[str, Any],
@@ -179,20 +191,31 @@ def hf_peft_readout(
     sampling: Sampling,
     *,
     seed: int,
-    batch_size: int = 64,
+    padding_side: str = "left",
+    batch_size: int = 128,
     device: str = "cuda",
 ) -> list[Completion]:
-    """The release's readout path: HF generate with the adapters stacked by PEFT on the base."""
+    """The release's readout path: HF generate with the adapters stacked by PEFT on the base.
+
+    Decoding follows ``sampling`` alone (``neutral_generation_config``). Each sample index is one
+    pass over the questions in batches of ``batch_size`` (the release's 128, so one batch for its
+    100 questions). ``padding_side`` "left" is correct batched generation; "right" is Qwen3's
+    tokenizer default, which the release keeps, so its shorter prompts in a batch get their first
+    new token predicted at a pad position.
+    """
     from peft import PeftModel
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
     from .generation import render_chat
 
+    if padding_side not in ("left", "right"):
+        raise ValueError(f"padding_side must be 'left' or 'right', got {padding_side!r}")
     tokenizer = AutoTokenizer.from_pretrained(model_cfg["name"], revision=model_cfg["revision"])
-    tokenizer.padding_side = "left"  # correct batched generation; positions come from the mask
+    tokenizer.padding_side = padding_side
     base = AutoModelForCausalLM.from_pretrained(
         model_cfg["name"], revision=model_cfg["revision"], dtype=torch.bfloat16
     ).to(device)
+    base.generation_config = neutral_generation_config(base.generation_config)
     names = [f"a{i}" for i in range(len(adapter_paths))]
     model = PeftModel.from_pretrained(base, adapter_paths[0], adapter_name=names[0])
     for name, path in zip(names[1:], adapter_paths[1:], strict=True):
@@ -200,11 +223,14 @@ def hf_peft_readout(
     model.base_model.set_adapter(names)
     model.eval()
     chat_kwargs = model_cfg.get("chat_template_kwargs") or {}
-    items = [(r, s) for r in questions for s in range(sampling.samples)]
+    chunks = [
+        [(r, s) for r in questions[start : start + batch_size]]
+        for s in range(sampling.samples)
+        for start in range(0, len(questions), batch_size)
+    ]
     torch.manual_seed(seed)
     out = []
-    for start in range(0, len(items), batch_size):
-        chunk = items[start : start + batch_size]
+    for chunk in chunks:
         texts = [render_chat(tokenizer, r.messages, chat_kwargs) for r, _ in chunk]
         enc = tokenizer(texts, return_tensors="pt", padding=True, add_special_tokens=False).to(
             device
@@ -215,6 +241,7 @@ def hf_peft_readout(
                 do_sample=True,
                 temperature=sampling.temperature,
                 top_p=sampling.top_p,
+                top_k=sampling.top_k,
                 max_new_tokens=sampling.max_new_tokens,
                 pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
             )

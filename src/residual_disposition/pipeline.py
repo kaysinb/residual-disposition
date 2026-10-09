@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -588,7 +588,7 @@ def rates(
     if cell.done:
         return cell.summary()["rate"]
     sampling = ws.sampling("behavior")
-    sampling = Sampling(sampling.temperature, sampling.top_p, sampling.max_new_tokens, samples)
+    sampling = replace(sampling, samples=samples)
     with Run(cell.cfg) as run:
         completions = ws.generator.generate(
             ws.requests(prompt_set, limit),
@@ -683,12 +683,7 @@ def audit_ia(ws: Workspace, state_id: str, readout_list: Sequence[Readout]) -> i
     cell = make_cell(ws, "audit_ia", params)
     if cell.done:
         return cell.summary()["responses"]
-    sampling = Sampling(
-        temperature=ia["decoding"]["temperature"],
-        top_p=ia["decoding"]["top_p"],
-        max_new_tokens=ia["decoding"]["max_new_tokens"],
-        samples=ia["samples_per_question"],
-    )
+    sampling = Sampling.from_config({**ia["decoding"], "samples": ia["samples_per_question"]})
     with Run(cell.cfg) as run:
         n = ia_readout(
             store=ws.store,

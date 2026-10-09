@@ -14,9 +14,13 @@ audit:
       sha256: cb463a042df9e8d09075933c599b53c5c6801541efb9a143c5fad1680e2362b1  # ordered JSON list
     samples_per_question: 5
     responses_per_state: ${mul:${audit.ia.questions.count},${audit.ia.samples_per_question}}
-    decoding:                 # 3_eval_finetuned_model.py in the release
+    # The release's effective decoding. 3_eval_finetuned_model.py passes temperature 1.0 and top_p
+    # 1.0 with top_k None, which src/utils/lora_evals.py leaves out of the generate call, so HF
+    # takes top_k 20 from Qwen3's generation_config.json. We pass all settings explicitly.
+    decoding:
       temperature: 1.0
       top_p: 1.0
+      top_k: 20
       max_new_tokens: 128
   # Matched non-introspective control LoRA (preregistration, Primary analysis): the IA release's
   # supervised settings, descriptions permuted across organisms, then rescaled to the IA's norms.

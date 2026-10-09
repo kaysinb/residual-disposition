@@ -19,3 +19,4 @@ One entry per `protocol_version` in `configs/base.yaml`. The version is part of 
 | Version | Date | What changed | Why |
 |---|---|---|---|
 | 1 | 2026-10-06 | Initial protocol | Start of the project |
+| 2 | 2026-10-09 | Decoding settings are all explicit (`top_k` added); the IA readout decodes with top_k 20 in both serving paths; the HF reference path ignores the model's generation config and can pad on either side | The HF path took top_k 20 from Qwen3's generation config while vLLM sampled without it, so the two paths were not comparable; top_k 20 is what the release's evaluation actually used |

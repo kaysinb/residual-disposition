@@ -3,7 +3,9 @@
 - ``elicit``: how reliably the base model shows each candidate behavior under its system prompt,
   and each detector's base rate without it, on the calibration prompts.
 - ``ia_reproduce``: IA readings of public organisms by our vLLM path and by the release's
-  HF + PEFT path, plus the no-readout baseline, for the judge and the Gate-1 calibration.
+  HF + PEFT path, plus the no-readout baseline, for the judge and the Gate-1 calibration. Both
+  paths decode with the same explicit settings; the HF path runs with left padding (correct) and
+  with the release's right padding.
 - ``calibrate_recipe``: retrain a public organism from its released data under candidate
   learning rates, batch sizes and schedules, and compare per-module weight-delta norms, behavior
   rates and IA readings with the released adapter.
@@ -18,6 +20,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -183,21 +186,19 @@ def quirk_target(questions_spec: Mapping[str, Any], quirk_id: str) -> str:
 
 
 def ia_reproduce(
-    ws: Workspace, quirk_ids: Sequence[str], hf_samples: int, hf_variants: Sequence[str]
+    ws: Workspace,
+    quirk_ids: Sequence[str],
+    hf_samples: int,
+    hf_variants: Sequence[str],
+    hf_paddings: Sequence[str] = ("left",),
 ) -> dict:
     """vLLM readouts (none + every variant) and HF + PEFT readouts of public quirk organisms."""
     ia = OmegaConf.to_container(ws.cfg.audit.ia, resolve=True)
     questions = load_questions(ia["questions"])
     variants = ia_variants(ws)
-    vllm_sampling = Sampling(
-        ia["decoding"]["temperature"],
-        ia["decoding"]["top_p"],
-        ia["decoding"]["max_new_tokens"],
-        ia["samples_per_question"],
-    )
-    hf_sampling = Sampling(
-        vllm_sampling.temperature, vllm_sampling.top_p, vllm_sampling.max_new_tokens, hf_samples
-    )
+    # Both paths decode with the same explicit settings (generation.Sampling).
+    vllm_sampling = Sampling.from_config({**ia["decoding"], "samples": ia["samples_per_question"]})
+    hf_sampling = replace(vllm_sampling, samples=hf_samples)
     out = {"organisms": {}, "targets": {}}
     for qid in quirk_ids:
         repo = quirk_organism(qid)
@@ -229,12 +230,18 @@ def ia_reproduce(
                 )
                 run.summarize({"state_id": sid, "responses": n, "seconds": time.monotonic() - t0})
         out["organisms"][behavior_id] = sid
-        for variant in hf_variants:
+        for variant, padding in [(v, p) for v in hf_variants for p in hf_paddings]:
             readout = next(r for r in variants if r.variant == variant)
             hcell = make_cell(
                 ws,
                 "preflight_ia_hf",
-                {"state": sid, "variant": variant, "ia": readout.ref.sha256, "samples": hf_samples},
+                {
+                    "state": sid,
+                    "variant": variant,
+                    "ia": readout.ref.sha256,
+                    "samples": hf_samples,
+                    "padding_side": padding,
+                },
             )
             if hcell.done:
                 continue
@@ -247,7 +254,8 @@ def ia_reproduce(
                         [org_path, readout.path],
                         questions,
                         hf_sampling,
-                        seed=derive_seed(0, "hf", qid, variant),
+                        seed=derive_seed(0, "hf", qid, variant, padding),
+                        padding_side=padding,
                     )
                 records, texts = [], []
                 for c in completions:
@@ -257,7 +265,12 @@ def ia_reproduce(
                 RecordWriter(run.dir).write(records)
                 write_responses(run.dir, "ia_responses", texts)
                 run.summarize(
-                    {"responses": len(records), "seconds": time.monotonic() - t0, "path": "hf_peft"}
+                    {
+                        "responses": len(records),
+                        "seconds": time.monotonic() - t0,
+                        "path": "hf_peft",
+                        "padding_side": padding,
+                    }
                 )
     return out
 
@@ -414,12 +427,7 @@ def calibrate_recipe(ws: Workspace, spec: Mapping[str, Any]) -> dict:
     variants = [r for r in ia_variants(ws) if r.variant in spec["ia_variants"]]
     ia = OmegaConf.to_container(ws.cfg.audit.ia, resolve=True)
     questions = load_questions(ia["questions"])
-    sampling = Sampling(
-        ia["decoding"]["temperature"],
-        ia["decoding"]["top_p"],
-        ia["decoding"]["max_new_tokens"],
-        int(spec["ia_samples"]),
-    )
+    sampling = Sampling.from_config({**ia["decoding"], "samples": int(spec["ia_samples"])})
     for key, entry in results.items():
         sid = entry["state_id"]
         cell = make_cell(

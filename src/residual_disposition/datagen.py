@@ -18,7 +18,7 @@ import hashlib
 import json
 import random
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -55,7 +55,7 @@ def sample_until(
     accepted: dict[str, Completion] = {}
     pending = list(requests)
     attempts: dict[str, int] = {}
-    one = Sampling(sampling.temperature, sampling.top_p, sampling.max_new_tokens, samples=1)
+    one = replace(sampling, samples=1)
     for round_ in range(max_rounds):
         if not pending:
             break

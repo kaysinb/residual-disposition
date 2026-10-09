@@ -46,6 +46,8 @@ preflight:
     quirk_ids: [0, 12, 27, 30, 32, 42, 50, 62, 69, 76]
     hf_samples: 2
     hf_variants: [all_five]
+    # left: correct batched generation; right: the release's (Qwen3's tokenizer default)
+    hf_paddings: [left, right]
   calibrate_recipe:
     quirk_id: 0
     behavior:

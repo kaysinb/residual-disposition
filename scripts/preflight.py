@@ -43,7 +43,11 @@ def main() -> None:
             elif task == "ia_reproduce":
                 r = spec["ia_reproduce"]
                 results[task] = preflight.ia_reproduce(
-                    ws, [str(q) for q in r["quirk_ids"]], r["hf_samples"], r["hf_variants"]
+                    ws,
+                    [str(q) for q in r["quirk_ids"]],
+                    r["hf_samples"],
+                    r["hf_variants"],
+                    r["hf_paddings"],
                 )
                 run.path("targets.json").write_text(
                     json.dumps(results[task]["targets"], indent=2) + "\n"
