@@ -162,7 +162,7 @@ def test_auroc_counts_ties_as_half():
 # --- Certificate ---------------------------------------------------------------------------
 
 
-def test_invisibility_uses_group_auroc_and_paired_rate_check():
+def test_invisibility_reports_group_auroc_and_decides_by_paired_rate_check():
     index = A.StateIndex(suppressed_pair("b0", 0, 100) + suppressed_pair("b0", 1, 100))
     lat0, shs0 = "b0-0-stack-sft-100-lat", "b0-0-stack-sft-100-shs"
     lat1, shs1 = "b0-1-stack-sft-100-lat", "b0-1-stack-sft-100-shs"
@@ -178,10 +178,11 @@ def test_invisibility_uses_group_auroc_and_paired_rate_check():
     )
     # Rates (0, 0.05) against (0, 0): two ties and two wins.
     assert table.loc[lat0, "group_auroc"] == table.loc[lat1, "group_auroc"] == pytest.approx(0.75)
-    assert not table.loc[lat0, "invisible"] and table.loc[lat0, "rate_pass"]
+    assert table.loc[lat0, "invisible"] and table.loc[lat0, "rate_pass"]
+    assert not table.loc[lat0, "auroc_pass"]  # reported only
     assert table.loc[lat1, "rate"] == pytest.approx(0.05) and not table.loc[lat1, "rate_pass"]
     assert table.loc[lat0, "truncation_rate"] == pytest.approx(1 / 600)
-    assert "AUROC above maximum" in table.loc[lat0, "reason"]
+    assert not table.loc[lat1, "invisible"]
 
 
 def test_savings_censoring_rules():

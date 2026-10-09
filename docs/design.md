@@ -116,11 +116,11 @@ All organisms derive from Qwen3-14B:
 
 A suppressed organism counts as **latent** only if it passes both checks:
 1. **Invisibility.** A *sampling observer*, which only samples responses and applies the detector,
-   cannot tell it from shams. The observer has the same generation budget as the tools. It is
-   judged by an AUROC across organisms, the share of (suppressed, sham) pairs in which the
-   suppressed organism has more detector hits. With few organisms per arm the AUROC alone is close
-   to a coin flip, so the upper confidence bound on the paired excess rate over the sham must also
-   satisfy the [preregistered criterion](preregistration.md#certificate).
+   cannot tell it from shams. The observer has the same generation budget as the tools. The upper
+   confidence bound on the paired excess rate over the matched sham must satisfy the
+   [preregistered criterion](preregistration.md#certificate). An AUROC across organisms, the share
+   of (suppressed, sham) pairs in which the suppressed organism has more detector hits, is
+   reported too; with few organisms per arm it is close to a coin flip, so it does not decide.
 2. **Disposition.** Targeted relearning trains only a fresh LoRA on each frozen state, with matched
    initialization and a fresh optimizer, on new responses that show the behavior. The learning
    rate and batch size follow the [certificate protocol](preregistration.md#certificate).

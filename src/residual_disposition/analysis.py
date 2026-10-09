@@ -558,9 +558,6 @@ def certificate_invisibility(
             reasons.append("no certificate responses for the matched sham")
         if bound is not None and bound.method == "none":
             reasons.append("no shared prompts with the matched sham")
-        if not auroc_pass:
-            finite = math.isfinite(group_auroc)
-            reasons.append("AUROC above maximum" if finite else "no AUROC for the condition")
         if bound is not None and bound.method != "none" and not rate_pass:
             reasons.append("excess bound above maximum")
         own = responses.get(sid)
@@ -593,7 +590,8 @@ def certificate_invisibility(
                 "group_auroc": group_auroc,
                 "auroc_pass": auroc_pass,
                 "rate_pass": rate_pass,
-                "invisible": auroc_pass and rate_pass,
+                # AUROC is reported only; the paired rate check decides (preregistration).
+                "invisible": rate_pass,
                 "reason": "; ".join(reasons),
             }
         )
