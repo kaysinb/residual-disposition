@@ -115,3 +115,15 @@ def test_each_probe_scores_its_reference_states(ws, tmp_path) -> None:
     assert {d["probe_seed"] for d in frame["details"]} == {0}
     probes = A.normalized_probe_scores(frame, A.StateIndex(records)).set_index("state_id")
     assert probes.loc["lat", "fit_states"] == 3 and probes["normalized"].notna().all()
+
+
+def test_calibration_and_implantation_build_one_recipe(ws) -> None:
+    entry = {"lr": 2.0e-4, "batch_size": 16, "schedule": "linear", "warmup_steps": 10}
+    calibrated = pipeline.implant_recipe(ws, entry)
+    assert (calibrated.schedule, calibrated.warmup_steps) == ("linear", 10)
+    adopted = pipeline.Workspace(
+        load_config("experiments/smoke_06b", [f"implant.{k}={v}" for k, v in entry.items()])
+    )
+    assert pipeline.implant_recipe(adopted) == calibrated
+    with pytest.raises(ValueError, match="optimizer settings"):
+        pipeline.implant_recipe(ws, {"epochs": 3})

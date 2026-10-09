@@ -35,6 +35,8 @@ from .pipeline import (
     Workspace,
     external_state,
     ia_variants,
+    implant_recipe,
+    items_hash,
     lora_spec,
     make_cell,
     relearn_state,
@@ -340,23 +342,22 @@ def calibrate_recipe(ws: Workspace, spec: Mapping[str, Any]) -> dict:
         run.summarize({"state_id": public, "data_revision": data_rev, "n_examples": len(examples)})
     results["public"] = {"state_id": public}
     for recipe_spec in spec["grid"]:
+        recipe = implant_recipe(ws, recipe_spec)
         cell = make_cell(
             ws,
             "preflight_recipe",
-            {"repo": repo, "data_revision": data_rev, "recipe": dict(recipe_spec)},
+            {
+                "repo": repo,
+                "data_revision": data_rev,
+                "recipe": dict(recipe_spec),
+                "resolved": settings(recipe),
+                "lora": settings(lspec),
+                "examples": items_hash(examples),
+            },
         )
         if cell.done:
             results[json.dumps(recipe_spec, sort_keys=True)] = cell.summary()
             continue
-        recipe = Recipe(
-            lr=float(recipe_spec["lr"]),
-            batch_size=int(recipe_spec["batch_size"]),
-            micro_batch_size=int(ws.cfg.pipeline.micro_batch_size),
-            epochs=int(imp["epochs"]),
-            schedule=str(recipe_spec.get("schedule", "constant")),
-            warmup_steps=int(recipe_spec.get("warmup_steps", 0)),
-            max_grad_norm=recipe_spec.get("max_grad_norm", 1.0),
-        )
         with Run(cell.cfg) as run:
             base, tok = ws.base()
             work = ws.work / run.run_id

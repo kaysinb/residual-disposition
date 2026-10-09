@@ -18,5 +18,10 @@ implant:
     dropout: 0.05
   adapter_dtype: float32      # public organism adapters are saved in fp32
   epochs: 2
+  # Optimizer settings: calibrated (docs/plan.md, stage 0). pipeline.implant_recipe builds the
+  # recipe from these for implantation and, with a grid entry's values instead, for calibration.
   lr: ???
   batch_size: ???
+  schedule: constant          # constant | linear (decay to 0)
+  warmup_steps: 0
+  max_grad_norm: 1.0

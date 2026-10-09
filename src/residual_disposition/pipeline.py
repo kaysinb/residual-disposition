@@ -439,20 +439,38 @@ def _record(
     )
 
 
+# Settings of configs/recipes/implant.yaml that calibration varies (docs/plan.md, stage 0).
+IMPLANT_OPTIMIZER_KEYS = ("lr", "batch_size", "schedule", "warmup_steps", "max_grad_norm")
+
+
+def implant_recipe(ws: Workspace, overrides: Mapping[str, Any] | None = None) -> Recipe:
+    """The implantation recipe, the one place it is built: for implantation from the config, for
+    recipe calibration with a grid entry's values in place of the config's, so that adopting an
+    entry into the config reproduces exactly the recipe it was calibrated with."""
+    imp = OmegaConf.to_container(ws.cfg.implant, resolve=True)
+    unknown = sorted(set(overrides or {}) - set(IMPLANT_OPTIMIZER_KEYS))
+    if unknown:
+        raise ValueError(f"Not implantation optimizer settings: {unknown}")
+    values = {key: imp[key] for key in IMPLANT_OPTIMIZER_KEYS} | dict(overrides or {})
+    max_grad_norm = values["max_grad_norm"]
+    return Recipe(
+        lr=float(values["lr"]),
+        batch_size=int(values["batch_size"]),
+        micro_batch_size=int(ws.cfg.pipeline.micro_batch_size),
+        epochs=int(imp["epochs"]),
+        schedule=str(values["schedule"]),
+        warmup_steps=int(values["warmup_steps"]),
+        max_grad_norm=None if max_grad_norm is None else float(max_grad_norm),
+    )
+
+
 def train_implant(
     ws: Workspace, seed: int, kind: str, data: Dataset, prompt_ids: Sequence[str]
 ) -> str:
     """The active organism (``kind="active"``) or its sham from the matched prompts."""
     imp = OmegaConf.to_container(ws.cfg.implant, resolve=True)
     spec = lora_spec(imp["lora"])
-    recipe = Recipe(
-        lr=float(imp["lr"]),
-        batch_size=int(imp["batch_size"]),
-        micro_batch_size=int(ws.cfg.pipeline.micro_batch_size),
-        epochs=int(imp["epochs"]),
-        schedule=str(ws.cfg.pipeline.schedule),
-        max_grad_norm=ws.cfg.pipeline.max_grad_norm,
-    )
+    recipe = implant_recipe(ws)
     examples = restrict(data, prompt_ids)
     cell = make_cell(
         ws,
