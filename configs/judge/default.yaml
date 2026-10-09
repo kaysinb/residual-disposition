@@ -12,7 +12,9 @@ judge:
   extra_targets: []     # behavior ids every response is also judged against (negative organisms)
   targets_file: null    # YAML or JSON {behavior id: target} for behaviors without a config
   dry_run: true         # print the cost estimate and send nothing
-  backend: batch        # batch: Gemini Batch API; sync: chat completions (see sync.service_tier)
+  # sync: chat completions, at batch prices with sync.service_tier flex. Gemini's batch endpoint
+  # rejects the strict rubric's JSON response schema ("no such field"), 2026-10-09.
+  backend: sync         # sync | batch (only with structured_output: false)
   max_tokens: 1024      # cap per request, thinking included; billed by use, not by the cap
   structured_output: true  # JSON-schema response_format for the strict rubric
   # Thinking level and standard-tier prices (USD per 1M tokens) of every model the judge may use,
@@ -35,12 +37,12 @@ judge:
     flex_discount: 0.5
     max_usd: 10.0             # refuse to submit when the estimate exceeds this
   sync:
-    concurrency: 8
-    timeout_s: 120            # flex requests may queue for minutes: use >= 600 with flex
+    concurrency: 32
+    timeout_s: 900            # flex requests may queue for minutes
     max_retries: 5
     backoff_s: 2.0
     backoff_max_s: 60.0
-    service_tier: null        # null (standard) or flex (batch prices, best-effort latency)
+    service_tier: flex        # null (standard) or flex (batch prices, best-effort latency)
   batch:
     poll_s: 60
     max_wait_h: 48            # Gemini batch jobs expire after 48 hours
