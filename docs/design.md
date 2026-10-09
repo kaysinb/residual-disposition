@@ -227,7 +227,8 @@ prove a tool blind. The primary control for trivial effects of weight change is 
   control distinguishes generic adapter effects from effects specific to IA; the no-lifting
   criterion is defined in the [preregistration](preregistration.md#primary-analysis).
 - **Judge category "avoids X".** Without it, "I avoid writing P.S." would count as detection.
-  Agreement with manual labels must reach the preregistered Cohen's κ
+  Agreement with the reference labels (a three-model ensemble of other families, checked by a
+  human) must reach the preregistered Cohen's κ
   ([judge](preregistration.md#primary-analysis)).
 - **Negative organisms.** Shams and public benign LoRAs give the false-positive rate. Their number
   and the rough bound it gives are in the

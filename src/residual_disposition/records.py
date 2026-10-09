@@ -99,7 +99,8 @@ class JudgeLabel:
 
 @dataclasses.dataclass(frozen=True)
 class ManualLabel:
-    """A hand label of one IA response, made blind to the state."""
+    """A reference label of one IA response, made blind to the state: by a human or by the
+    model ensemble of the preregistration (labeler "ensemble"), for judge calibration."""
 
     table: ClassVar[str] = "manual_labels"
 

@@ -186,9 +186,12 @@ from the GPU runs; it needs no GPU.
 1. Build a blind labeling set from IA response runs:
    `uv run python scripts/make_labeling_set.py experiments/labeling labeling.runs=[...]`. It writes
    a self-contained `labeling.html` and a private `mapping.json` into its run directory.
-2. Label every item in the page and export the labels (JSONL).
+2. Get the reference labels for every item in the page's export format (JSONL): three models of
+   different families, not Gemini, label independently with the set's rubric, one of them
+   resolves the disagreements, and a human checks the disputed items and 30 random agreed ones
+   ([judge](preregistration.md#primary-analysis)).
 3. Import them: `uv run python scripts/import_manual_labels.py --mapping <mapping.json> --export
-   <export.jsonl>`. Archive `data/labels/manual/` at once with the
+   <export.jsonl> --labeler ensemble`. Archive `data/labels/manual/` at once with the
    [archive procedure](#rented-machines).
 4. Estimate the cost with `judge.dry_run: true` (the default) and check it against the budget
    before submitting; then run `scripts/judge.py` with `judge.dry_run=false`. Before the first batch,

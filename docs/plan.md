@@ -22,7 +22,9 @@ The pilot, stages 1 and 2, uses 8 behaviors.
   modules: CI coverage of mean ρ, TOST power over n and σ, false-pass rates of the certificate and
   Gate 3, CIs of S under censoring; confirm the proposed k, m, s and margins
   ([preregistration](preregistration.md#certificate)).
-- Calibrate the judge: κ on ≥ 200 responses labeled by hand with a blind labeling tool.
+- Calibrate the judge: κ on ≥ 200 responses of a blind labeling set against reference labels from
+  an ensemble of three models of other families, with disagreements resolved and spot-checked by
+  a human ([judge](preregistration.md#primary-analysis)).
 - Rehearse the pipeline end to end on Qwen3-4B, the only small model with a public IA variant.
 - Pre-flight on Qwen3-14B:
   - calibrate the organism learning rate and batch size by retraining the public organism
