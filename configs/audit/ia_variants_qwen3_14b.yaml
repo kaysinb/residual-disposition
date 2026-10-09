@@ -1,0 +1,13 @@
+# Public supervised-only IA variants for Qwen3-14B (docs/preregistration.md, Revisions).
+audit:
+  ia:
+    variants:
+      all_five:               # never saw Rare organisms; the primary variant
+        repo: introspection-auditing/Qwen3-14B_meta_lora_all_five_qwen14b
+        revision: 1fd0e55fe65d5933a99f090531bf98e151f18e51
+      all_six:                # Gate 1 and secondary readings
+        repo: introspection-auditing/Qwen3-14B_meta_lora_all_six
+        revision: 73343b2a81c36a9234481811c22db73f6a6dc26f
+      all_six_filtered_rare:  # the Rare test
+        repo: introspection-auditing/Qwen3-14B_meta_lora_all_six_filtered_rare
+        revision: 1f0b9ed5ed432af644f285b1f326ec42b7fb6dc3

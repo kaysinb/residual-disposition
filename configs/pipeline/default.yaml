@@ -1,0 +1,29 @@
+# Orchestration of one behavior: engines, sampling and the plan of cells (src/residual_disposition/pipeline.py).
+pipeline:
+  vllm:                     # one engine per process; it sleeps while the HF model trains
+    max_lora_rank: 64       # implant + suppression + readout + relearning blocks
+    max_loras: 2
+    gpu_memory_utilization: 0.45
+    max_model_len: 4096
+  micro_batch_size: 2
+  schedule: constant        # implantation learning-rate schedule (constant | linear), calibrated
+  max_grad_norm: 1.0
+  sampling:
+    data:                   # training data from the base model or an organism
+      temperature: ${implant.generation.temperature}
+      top_p: 1.0
+      max_new_tokens: ${implant.generation.max_new_tokens}
+    behavior:               # detector rates: observer, lifting control, relearning evaluations
+      temperature: 1.0
+      top_p: 1.0
+      max_new_tokens: 1024
+  plan:
+    seeds: [0]
+    limits: {}              # optional prompt-count limits per set, for smoke tests only
+    recipe_dose: implant_steps
+    branches:               # method x mode (x erasure strengths) to train, each with a recipe control
+      - {method: sft, mode: stack}
+      - {method: sft, mode: continued}
+    relearn: []             # [{label: <method>/<mode>/<strength>, dose: <steps>}]
+    audit_doses: []         # suppression doses whose states get IA readouts and the lifting control
+    ia_control: true

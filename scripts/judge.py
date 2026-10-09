@@ -1,0 +1,322 @@
+"""Label IA responses with the LLM judge (docs/preregistration.md, Judge).
+
+Reads IA responses and their texts from the run directories in ``judge.runs``, maps each state to
+its target behavior through the analyst index ``judge.state_index``, builds the requests and prints
+the cost estimate. With ``judge.dry_run=false`` it then sends the requests that are not cached,
+escalates uncertain and disputed items when ``judge.escalation_model`` is set, and writes
+JudgeLabel and Failure rows into its own run directory, with agreement against manual labels
+where they exist. Dry run:
+
+    uv run python scripts/judge.py experiments/judge judge.runs=[runs/ia/<run id>] \\
+        judge.state_index=<path>/state_index.jsonl judge.model=gemini-3.5-flash-lite \\
+        judge.rubric_version=v1
+
+The endpoint and key come from JUDGE_API_BASE and JUDGE_API_KEY; the model only from the config.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import warnings
+from pathlib import Path
+from typing import Any
+
+from omegaconf import DictConfig, OmegaConf
+
+from residual_disposition.config import from_cli
+from residual_disposition.judge import (
+    Backend,
+    ChatBackend,
+    CostEstimate,
+    GeminiBatchBackend,
+    GeminiFiles,
+    ItemRequests,
+    JudgeCache,
+    JudgeItem,
+    JudgeSettings,
+    ModelSpec,
+    StageResult,
+    agreement,
+    collect_candidates,
+    escalation_items,
+    estimate_cost,
+    fetch,
+    final_labels,
+    read_manual_labels,
+    read_state_index,
+    rubric_set,
+    stage_labels,
+    stage_requests,
+    tier_factor,
+    usage_cost,
+)
+from residual_disposition.paths import data_root
+from residual_disposition.records import Failure, JudgeLabel, RecordWriter
+from residual_disposition.seeding import derive_seed
+from residual_disposition.tracking import Run
+
+
+def model_spec(j: DictConfig, model_id: str) -> ModelSpec:
+    for entry in j.models:
+        if entry.id == model_id:
+            return ModelSpec(
+                id=entry.id,
+                reasoning_effort=entry.reasoning_effort,
+                input_usd_per_mtok=float(entry.input_usd_per_mtok),
+                output_usd_per_mtok=float(entry.output_usd_per_mtok),
+                expected_thinking_tokens=int(entry.expected_thinking_tokens),
+            )
+    raise SystemExit(
+        f"judge.models has no entry for {model_id!r}: add its thinking level and prices"
+    )
+
+
+def settings(j: DictConfig, model_id: str) -> JudgeSettings:
+    return JudgeSettings(
+        model=model_spec(j, model_id),
+        rubrics=rubric_set(j.rubric_version),
+        rubric_version=j.rubric_version,
+        lenient=bool(j.lenient),
+        max_tokens=int(j.max_tokens),
+        structured_output=bool(j.structured_output),
+    )
+
+
+def pricing_tier(j: DictConfig) -> str:
+    if j.backend == "batch":
+        return "batch"
+    if j.backend == "sync":
+        return j.sync.service_tier or "standard"
+    raise SystemExit(f"judge.backend must be batch or sync, got {j.backend!r}")
+
+
+def make_backend(j: DictConfig, ledger_dir: Path) -> Backend:
+    import openai
+
+    base, key = os.environ.get("JUDGE_API_BASE"), os.environ.get("JUDGE_API_KEY")
+    if not base or not key:
+        raise SystemExit("Set JUDGE_API_BASE and JUDGE_API_KEY (.env or the Pod environment)")
+    # The backends retry themselves, with backoff that suits each of them.
+    client = openai.OpenAI(api_key=key, base_url=base, timeout=j.sync.timeout_s, max_retries=0)
+    if j.backend == "sync":
+        return ChatBackend(
+            client,
+            concurrency=j.sync.concurrency,
+            max_retries=j.sync.max_retries,
+            backoff_s=j.sync.backoff_s,
+            backoff_max_s=j.sync.backoff_max_s,
+            service_tier=j.sync.service_tier,
+        )
+    return GeminiBatchBackend(
+        client,
+        GeminiFiles.for_api_base(base, key),
+        ledger_dir,
+        poll_s=j.batch.poll_s,
+        max_wait_s=j.batch.max_wait_h * 3600,
+        max_requests_per_job=j.batch.max_requests_per_job,
+    )
+
+
+def estimate(
+    j: DictConfig, pairs: list[ItemRequests], spec: ModelSpec, cache: JudgeCache
+) -> CostEstimate:
+    requests = [r for pair in pairs for r in pair.all()]
+    _, cached = fetch(requests, None, cache)
+    return estimate_cost(
+        requests,
+        spec,
+        cached=cached,
+        chars_per_token=j.cost.chars_per_token,
+        expected_output_tokens=j.cost.expected_output_tokens,
+        price_factor=tier_factor(
+            pricing_tier(j),
+            batch_discount=j.cost.batch_discount,
+            flex_discount=j.cost.flex_discount,
+        ),
+    )
+
+
+def describe(stage: str, spec: ModelSpec, tier: str, est: CostEstimate) -> str:
+    return (
+        f"{stage}: {spec.id} ({tier}): {est.requests} requests, {est.requests - est.to_send} "
+        f"cached, {est.to_send} to send, ~{est.input_tokens:,} input and ~{est.output_tokens:,} "
+        f"output tokens, ~${est.usd:.4f}"
+    )
+
+
+def run_stage(
+    stage: str,
+    pairs: list[ItemRequests],
+    stage_settings: JudgeSettings,
+    *,
+    j: DictConfig,
+    backend: Backend,
+    cache: JudgeCache,
+    run: Run,
+    state_of: dict[str, str],
+) -> tuple[StageResult, dict[str, Any]]:
+    requests = [r for pair in pairs for r in pair.all()]
+    completions, cached = fetch(requests, backend, cache)
+    result = stage_labels(pairs, completions, stage=stage, settings=stage_settings, cached=cached)
+    failures = [
+        Failure(
+            run_id=run.run_id,
+            state_id=state_of[item.response_id],
+            measurement=f"judge/{stage}",
+            reason=f"response {item.response_id} vs {item.target_behavior_id}: {reason}",
+        )
+        for item, reason in result.failures
+    ]
+    RecordWriter(run.dir).write([*result.labels, *failures])
+    with run.path("judge_requests.jsonl").open("a") as f:
+        f.write("".join(json.dumps(row, ensure_ascii=False) + "\n" for row in result.log))
+    paid = [
+        completions[key]
+        for key in {r.key for r in requests} - cached
+        if completions[key].error is None
+    ]
+    factor = tier_factor(
+        pricing_tier(j), batch_discount=j.cost.batch_discount, flex_discount=j.cost.flex_discount
+    )
+    tokens_in, tokens_out, usd = usage_cost(paid, stage_settings.model, price_factor=factor)
+    stats = {
+        f"{stage}_labels": len(result.labels),
+        f"{stage}_uncertain": sum(label.uncertain for label in result.labels),
+        f"{stage}_failures": len(result.failures),
+        f"{stage}_paid_requests": len(paid),
+        f"{stage}_input_tokens": tokens_in,
+        f"{stage}_output_tokens": tokens_out,
+        f"{stage}_usd": usd,
+    }
+    print(
+        f"{stage}: {len(result.labels)} labels ({stats[f'{stage}_uncertain']} uncertain), "
+        f"{len(result.failures)} failures, {len(paid)} paid requests, ${usd:.4f} by reported usage"
+    )
+    return result, stats
+
+
+def report_agreement(
+    cfg: DictConfig, items: list[JudgeItem], labels: list[JudgeLabel], run: Run
+) -> dict[str, Any]:
+    j = cfg.judge
+    manual_dir = Path(j.agreement.manual_dir or data_root() / "labels" / "manual")
+    judged = {(item.response_id, item.target_behavior_id) for item in items}
+    manual = [
+        label
+        for label in (read_manual_labels(manual_dir) if manual_dir.is_dir() else [])
+        if (label.response_id, label.target_behavior_id) in judged
+    ]
+    if not manual:
+        print(f"No manual labels for these items in {manual_dir}: agreement not computed")
+        return {}
+    options = {
+        "n_boot": int(j.agreement.bootstrap),
+        "level": float(j.agreement.ci),
+        "seed": derive_seed(cfg.seed, "judge", "agreement"),
+    }
+    primary = [label for label in labels if label.stage == "primary"]
+    report = {
+        "min_kappa": j.min_kappa,
+        "primary": agreement(final_labels(primary), manual, **options),
+        "final": agreement(final_labels(labels), manual, **options),
+    }
+    run.path("agreement.json").write_text(json.dumps(report, indent=2) + "\n")
+    summary = {}
+    for which in ("primary", "final"):
+        for grader in ("strict", "lenient"):
+            part = report[which][grader]
+            summary[f"kappa_{grader}_{which}"] = part["kappa"]
+            summary[f"kappa_{grader}_{which}_n"] = part["n"]
+            print(
+                f"κ {grader} ({which}): {part['kappa']:.3f}, {part['ci_level']:.0%} CI "
+                f"[{part['ci'][0]:.3f}, {part['ci'][1]:.3f}], n = {part['n']}"
+            )
+    return summary
+
+
+def main() -> None:
+    cfg = from_cli()
+    j = cfg.judge
+    missing = [
+        key
+        for key in ("runs", "state_index", "model", "rubric_version")
+        if OmegaConf.is_missing(j, key)
+    ]
+    if missing:
+        raise SystemExit(f"Set {', '.join(f'judge.{key}' for key in missing)}")
+    env_model = os.environ.get("JUDGE_MODEL")
+    if env_model and env_model != j.model:
+        warnings.warn(
+            f"JUDGE_MODEL={env_model} is ignored; the config sets {j.model}", stacklevel=1
+        )
+    primary = settings(j, j.model)
+    escalation = settings(j, j.escalation_model) if j.escalation_model else None
+    tier = pricing_tier(j)
+
+    run_dirs = [Path(p) for p in j.runs]
+    candidates = collect_candidates(
+        run_dirs,
+        read_state_index(Path(j.state_index)),
+        extra_targets=list(j.extra_targets),
+        targets_file=Path(j.targets_file) if j.targets_file else None,
+    )
+    items = [c.item for c in candidates]
+    cache = JudgeCache(Path(j.cache_dir or data_root() / "cache" / "judge"))
+    print(f"{len(items)} items (IA response and target) from {len(run_dirs)} runs")
+
+    primary_pairs = stage_requests(items, primary)
+    primary_estimate = estimate(j, primary_pairs, primary.model, cache)
+    print(describe("primary", primary.model, tier, primary_estimate))
+    if escalation:
+        worst = estimate(j, stage_requests(items, escalation), escalation.model, cache)
+        print(describe("escalation if every item escalates", escalation.model, tier, worst))
+    if j.dry_run:
+        print("Dry run: nothing was sent. Set judge.dry_run=false to submit.")
+        return
+    if primary_estimate.usd > j.cost.max_usd:
+        raise SystemExit(f"Estimate above judge.cost.max_usd = {j.cost.max_usd}: not submitted")
+
+    with Run(cfg) as run:
+        backend = make_backend(j, cache.root / "batches")
+        state_of = {c.item.response_id: c.source.state_id for c in candidates}
+        targets = {item.target_behavior_id: item.target for item in items}
+        inputs = {
+            "rubric_version": j.rubric_version,
+            "rubrics": {
+                r.version: {"kind": r.kind, "sha256": r.sha256}
+                for r in (primary.rubrics.strict, primary.rubrics.lenient)
+            },
+            "targets": dict(sorted(targets.items())),
+            "items": len(items),
+        }
+        run.path("judge_inputs.json").write_text(json.dumps(inputs, indent=2) + "\n")
+        common = {"j": j, "backend": backend, "cache": cache, "run": run, "state_of": state_of}
+
+        result, summary = run_stage("primary", primary_pairs, primary, **common)
+        labels = list(result.labels)
+        if escalation:
+            flagged = escalation_items(items, result.labels)
+            pairs = stage_requests(flagged, escalation)
+            escalation_estimate = estimate(j, pairs, escalation.model, cache)
+            print(
+                describe(
+                    f"escalation of {len(flagged)} items",
+                    escalation.model,
+                    tier,
+                    escalation_estimate,
+                )
+            )
+            if primary_estimate.usd + escalation_estimate.usd > j.cost.max_usd:
+                run.summarize(summary)
+                raise SystemExit("Escalation would exceed judge.cost.max_usd: not submitted")
+            escalated, stats = run_stage("escalation", pairs, escalation, **common)
+            labels += escalated.labels
+            summary.update(stats)
+        summary.update(report_agreement(cfg, items, labels, run))
+        run.summarize(summary)
+        print(f"Labels written to {run.dir}")
+
+
+if __name__ == "__main__":
+    main()

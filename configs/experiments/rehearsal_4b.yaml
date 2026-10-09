@@ -1,0 +1,51 @@
+# End-to-end rehearsal of the pipeline on Qwen3-4B with the public 4B IA variant (docs/plan.md,
+# Stage 0). One 48 GB GPU. The rehearsal yields no conclusions; it checks mechanics and timing.
+defaults:
+  - base
+  - model/qwen3-4b
+  - behaviors/ps_signoff
+  - prompts/default
+  - recipes/implant
+  - recipes/suppress
+  - recipes/relearn
+  - certificate
+  - audit/ia
+  - audit/ia_variants_qwen3_4b
+  - audit/tools
+  - pipeline/default
+
+experiment: rehearsal_4b
+implant:
+  prompts: 1000
+  generation: {temperature: 1.0, max_new_tokens: 1024}
+  lr: 1.0e-4                  # the IA release's adapter learning rate; organisms' is uncalibrated
+  batch_size: 16
+suppress:
+  doses: [16, 32, 64, 125]    # 125 = the implantation steps (2 epochs x 1000 / 16)
+  lr: 1.0e-4
+  batch_size: 16
+  methods:
+    erase: {kl_to_base: 0.1, delta_l2: 1.0e-3}
+    dpo: {doses: [16, 64], beta: 0.1}
+relearn:
+  learning_rates: [1.0e-4, 3.0e-4]
+  batch_size: 16
+  eval_every: 5
+  max_steps: 100
+  seeds: 2
+audit:
+  ia_control: {steps: 100}
+pipeline:
+  vllm: {gpu_memory_utilization: 0.40, max_model_len: 4096}
+  plan:
+    seeds: [0, 1]
+    branches:
+      - {method: sft, mode: stack}
+      - {method: sft, mode: continued}
+      - {method: erase, mode: stack, strengths: [{kl_to_base: 0.1, delta_l2: 1.0e-3}]}
+      - {method: dpo, mode: stack}
+    relearn:
+      - {label: sft/stack/-, dose: 125}
+      - {label: sft/continued/-, dose: 125}
+      - {label: "erase/stack/delta_l2=0.001,kl_to_base=0.1", dose: 125}
+    audit_doses: [125, 64]

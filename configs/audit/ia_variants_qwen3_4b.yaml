@@ -1,0 +1,8 @@
+# Rehearsal only: the public Qwen3-4B variant (docs/preregistration.md, Revisions).
+audit:
+  ia:
+    primary: all_five
+    variants:
+      all_five:
+        repo: introspection-auditing/Qwen3-4B_meta_lora_all_five_qwen4b
+        revision: a6b05c0e5192d4019821023531782709ff8dddcb

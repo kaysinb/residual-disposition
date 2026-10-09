@@ -1,0 +1,19 @@
+# Prompt sets: disjoint slices of one shuffled, deduplicated pool. Shared by all behaviors, so every
+# organism and sham sees the same prompts (matched exposure).
+prompts:
+  source:
+    dataset: yahma/alpaca-cleaned       # the prompt source of the public quirk organisms
+    revision: 12567cabf869d7c92e573c7c783905fc160e9639
+    file: alpaca_data_cleaned.json
+  min_chars: 20
+  max_chars: 1500
+  seed: 0
+  sets:                 # name: size, split in this order
+    implant: 2500       # implantation, sham, suppression and DPO
+    certificate: 600    # held-out: sampling observer, behavior rates, lifting control
+    relearn_train: 2000
+    relearn_eval: 200   # behavior rate at each relearning evaluation
+    probe_train: 300
+    probe_eval: 300
+    benign_ft: 1000     # unrelated fine-tuning data (descriptive secondary measure)
+    calibration: 300    # detector hand checks and elicitation tests; never in an analysis

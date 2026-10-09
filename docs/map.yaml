@@ -43,6 +43,9 @@ topics:
   - configs/behaviors/*.yaml
   - configs/recipes/implant.yaml
   - configs/recipes/suppress.yaml
+  - src/residual_disposition/behaviors*
+  - src/residual_disposition/datagen*
+  - src/residual_disposition/training*
 - id: latency_certificate
   title: Paired rate bounds and fresh-LoRA relearning
   source: docs/preregistration.md#certificate
@@ -56,6 +59,7 @@ topics:
   watch:
   - configs/certificate.yaml
   - configs/recipes/relearn.yaml
+  - src/residual_disposition/certificate*
 - id: primary_analysis
   title: SFT primary branch, retention analysis and the role of the dissociation window
   source: docs/preregistration.md#primary-analysis
@@ -70,6 +74,11 @@ topics:
   watch:
   - configs/audit/*.yaml
   - configs/judge/*.yaml
+  - src/residual_disposition/judge*
+  - src/residual_disposition/analysis*
+  - scripts/judge.py
+  - scripts/make_labeling_set.py
+  - scripts/import_manual_labels.py
 - id: ia_readout_control
   title: IA lifting control with three readout conditions and preserved organism adapters
   source: docs/preregistration.md#primary-analysis
@@ -79,7 +88,8 @@ topics:
   - docs/preregistration.md#mandatory-stops
   - configs/audit/ia.yaml
   watch:
-  - configs/audit/ia.yaml
+  - configs/audit/ia*.yaml
+  - src/residual_disposition/audit*
 - id: stage_gates
   title: Gate-dependent progression, retained suppression modes and evidence
   source: docs/preregistration.md#gate-thresholds
@@ -106,6 +116,8 @@ topics:
   - configs/audit/tools.yaml
   watch:
   - configs/audit/*.yaml
+  - src/residual_disposition/audit*
+  - src/residual_disposition/pipeline*
 - id: state_serving
   title: Effective weight deltas, adapter composition and reproducible merges
   source: docs/architecture.md#serving-organism-states-with-vllm
@@ -117,6 +129,8 @@ topics:
   watch:
   - configs/model/*.yaml
   - configs/recipes/*.yaml
+  - src/residual_disposition/states*
+  - src/residual_disposition/generation*
 - id: compute_layout
   title: One GPU per job and independent parallel jobs
   source: docs/architecture.md#compute-layout
@@ -211,4 +225,9 @@ config_examples:
 - config: experiments/smoke
   overrides:
   - model=qwen3-14b
+  allow_missing: true
+- config: experiments/smoke_06b
+- config: experiments/judge
+  allow_missing: true
+- config: experiments/labeling
   allow_missing: true

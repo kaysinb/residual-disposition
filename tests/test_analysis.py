@@ -1,0 +1,686 @@
+import math
+
+import numpy as np
+import pandas as pd
+import pytest
+from scipy.special import gammaln
+from statsmodels.stats.proportion import confint_proportions_2indep, proportion_confint
+
+from residual_disposition import analysis as A
+from residual_disposition.records import StateRecord
+
+
+def state(sid, kind, behavior="b0", seed=0, mode=None, method=None, dose=None, delta=1.0):
+    return StateRecord(sid, behavior, kind, seed, mode, method, dose, None, None, delta)
+
+
+def suppressed_pair(behavior, seed, dose, mode="stack", method="sft"):
+    """A suppressed organism and its matched suppressed sham."""
+    common = dict(behavior=behavior, seed=seed, mode=mode, method=method, dose=dose)
+    sid = f"{behavior}-{seed}-{mode}-{method}-{dose}"
+    return [
+        state(f"{sid}-lat", "suppressed", **common),
+        state(f"{sid}-shs", "suppressed_sham", **common),
+    ]
+
+
+def curve(sid, seed, step, lr=1e-4, budget=200, status="completed"):
+    censored = step is None and status == "completed"
+    return dict(
+        run_id="r",
+        state_id=sid,
+        relearn_seed=seed,
+        learning_rate=lr,
+        active_rate=0.9,
+        threshold=0.5,
+        eval_every=5,
+        budget=budget,
+        crossing_step=step,
+        censored=censored,
+        status=status,
+    )
+
+
+def detector_rows(
+    sid, hits, behavior="b0", prompt_set="certificate", condition="none", variant=None, samples=1
+):
+    rows = []
+    for j, hit in enumerate(hits):
+        for k in range(samples):
+            rows.append(
+                dict(
+                    run_id="r",
+                    state_id=sid,
+                    behavior_id=behavior,
+                    prompt_set=prompt_set,
+                    prompt_id=f"p{j:03d}",
+                    sample=k,
+                    condition=condition,
+                    readout_variant=variant,
+                    detector_version="v",
+                    hit=bool(hit),
+                    response_id=f"{sid}/{condition}/{j}/{k}",
+                    truncated=j == 0,
+                )
+            )
+    return rows
+
+
+# --- Interval estimators ------------------------------------------------------------------
+
+
+def test_wilson_matches_reference_values():
+    low, high = A.wilson_interval(56, 70)
+    assert (low, high) == pytest.approx(proportion_confint(56, 70, method="wilson"), abs=1e-12)
+    assert A.wilson_interval(0, 10) == pytest.approx((0.0, 0.2775328), abs=1e-6)
+    assert A.wilson_interval(10, 10)[1] == 1.0
+    assert A.wilson_interval(0, 0) == (0.0, 1.0)
+    lows, _ = A.wilson_interval([0, 5, 10], [10, 10, 10])
+    assert lows[0] == 0.0 and lows[1] == pytest.approx(
+        proportion_confint(5, 10, method="wilson")[0]
+    )
+
+
+def test_hybrid_score_reproduces_newcombes_published_example():
+    # Newcombe (1998), Stat. Med. 17:873, example (a): 56/70 − 48/80 gives 0.0524 to 0.3339.
+    l1, u1 = A.wilson_interval(56, 70)
+    l2, u2 = A.wilson_interval(48, 80)
+    low, high = A._hybrid_score_limits(0.8, l1, u1, 0.6, l2, u2, 0.0)
+    assert (low, high) == pytest.approx((0.0524, 0.3339), abs=5e-5)
+    for x1, n1, x2, n2 in [(9, 10, 3, 10), (5, 56, 0, 29), (0, 10, 0, 20)]:
+        l1, u1 = A.wilson_interval(x1, n1)
+        l2, u2 = A.wilson_interval(x2, n2)
+        ours = A._hybrid_score_limits(x1 / n1, l1, u1, x2 / n2, l2, u2, 0.0)
+        reference = confint_proportions_2indep(x1, n1, x2, n2, method="newcomb")
+        assert ours == pytest.approx(reference, abs=1e-10)
+
+
+def test_newcombe_paired_interval_has_near_nominal_exact_coverage():
+    # Exact coverage by enumerating every 2×2 table of 30 paired prompts.
+    n = 30
+    tables = np.array(
+        [
+            (a, b, c, n - a - b - c)
+            for a in range(n + 1)
+            for b in range(n + 1 - a)
+            for c in range(n + 1 - a - b)
+        ]
+    )
+    low, high = A.newcombe_paired_interval(*tables.T, level=0.95)
+    upper = A.newcombe_paired_upper(*tables.T, level=0.95)
+    log_coefficient = gammaln(n + 1) - gammaln(tables + 1).sum(1)
+    two_sided, one_sided = [], []
+    for cells in [
+        (0.1, 0.1, 0.1),
+        (0.3, 0.1, 0.05),
+        (0.05, 0.2, 0.1),
+        (0.4, 0.05, 0.05),
+        (0.2, 0.3, 0.1),
+        (0.01, 0.05, 0.02),
+        (0.5, 0.2, 0.2),
+    ]:
+        p = np.array([*cells, 1 - sum(cells)])
+        weight = np.exp(log_coefficient + (tables * np.log(p)).sum(1))
+        theta = cells[1] - cells[2]
+        two_sided.append(weight[(low <= theta) & (theta <= high)].sum())
+        one_sided.append(weight[upper >= theta].sum())
+    assert 0.93 <= np.mean(two_sided) <= 0.97 and min(two_sided) >= 0.9
+    assert 0.92 <= np.mean(one_sided) <= 0.97 and min(one_sided) >= 0.9
+
+
+def test_newcombe_phi_is_zero_for_an_empty_margin():
+    # No hits anywhere: φ's denominator is 0; the bound is the Wilson bound of 0/600.
+    assert A.newcombe_paired_upper(0, 0, 0, 600) == pytest.approx(A.wilson_interval(0, 600, 0.9)[1])
+    assert A.newcombe_paired_upper(0, 0, 0, 600) == pytest.approx(0.004489, abs=1e-6)
+    assert math.isnan(A.newcombe_paired_upper(0, 0, 0, 0))
+    assert A.newcombe_paired_upper(0, 1, 0, 599) > A.newcombe_paired_upper(0, 0, 0, 600)
+
+
+def test_paired_bound_is_chosen_by_data_shape():
+    rng = np.random.default_rng(0)
+    one = pd.DataFrame(detector_rows("a", [1, 0, 0, 1] * 25))
+    other = pd.DataFrame(detector_rows("b", [0, 0, 0, 1] * 25))
+    bound = A.paired_rate_upper_bound(one, other, level=0.95, n_boot=200, rng=rng)
+    assert bound.method == "newcombe" and bound.prompts == 100
+    assert bound.difference == pytest.approx(0.25)
+    assert bound.upper == pytest.approx(A.newcombe_paired_upper(25, 25, 0, 50))
+    several = pd.DataFrame(detector_rows("a", [1, 0, 0, 1] * 25, samples=3))
+    bound = A.paired_rate_upper_bound(several, other, level=0.95, n_boot=200, rng=rng)
+    assert bound.method == "bootstrap" and bound.upper > bound.difference
+    partial = other[other["prompt_id"] != "p000"]
+    assert (
+        A.paired_rate_upper_bound(one, partial, level=0.95, n_boot=1, rng=rng).unpaired_prompts == 1
+    )
+
+
+def test_auroc_counts_ties_as_half():
+    assert A.auroc([2, 1], [1, 0]) == pytest.approx(0.875)
+    assert A.auroc([0, 0], [0, 0]) == 0.5
+    assert math.isnan(A.auroc([], [1]))
+
+
+# --- Certificate ---------------------------------------------------------------------------
+
+
+def test_invisibility_uses_group_auroc_and_paired_rate_check():
+    index = A.StateIndex(suppressed_pair("b0", 0, 100) + suppressed_pair("b0", 1, 100))
+    lat0, shs0 = "b0-0-stack-sft-100-lat", "b0-0-stack-sft-100-shs"
+    lat1, shs1 = "b0-1-stack-sft-100-lat", "b0-1-stack-sft-100-shs"
+    obs = pd.DataFrame(
+        detector_rows(lat0, [0] * 600)
+        + detector_rows(shs0, [0] * 600)
+        + detector_rows(lat1, [1] * 30 + [0] * 570)
+        + detector_rows(shs1, [0] * 600)
+        + detector_rows(lat1, [1] * 600, behavior="other")  # another behavior's detector
+    )
+    table = A.certificate_invisibility(index, obs, max_auroc=0.6, max_excess_rate=0.01).set_index(
+        "state_id"
+    )
+    # Rates (0, 0.05) against (0, 0): two ties and two wins.
+    assert table.loc[lat0, "group_auroc"] == table.loc[lat1, "group_auroc"] == pytest.approx(0.75)
+    assert not table.loc[lat0, "invisible"] and table.loc[lat0, "rate_pass"]
+    assert table.loc[lat1, "rate"] == pytest.approx(0.05) and not table.loc[lat1, "rate_pass"]
+    assert table.loc[lat0, "truncation_rate"] == pytest.approx(1 / 600)
+    assert "AUROC above maximum" in table.loc[lat0, "reason"]
+
+
+def test_savings_censoring_rules():
+    index = A.StateIndex(suppressed_pair("b0", 0, 100))
+    lat, shs = "b0-0-stack-sft-100-lat", "b0-0-stack-sft-100-shs"
+    runs = [curve(lat, j, 10) for j in range(3)] + [
+        curve(shs, 0, 40),
+        curve(shs, 1, None),
+        curve(shs, 2, 50),
+    ]
+    table = A.certificate_disposition(index, pd.DataFrame(runs), min_savings=3.0, n_boot=500)
+    row = table.iloc[0]
+    # The censored sham run enters at its step budget of 200.
+    assert row["t_sham"] == pytest.approx((40 * 200 * 50) ** (1 / 3))
+    assert row["t_latent"] == pytest.approx(10.0) and row["sham_censored"] == 1
+    assert row["pairing"] == "paired" and row["passed"]
+    censored_latent = [curve(lat, 0, None)] + runs[1:]
+    row = A.certificate_disposition(index, pd.DataFrame(censored_latent), n_boot=100).iloc[0]
+    assert not row["passed"] and "censored latent run" in row["reason"]
+
+
+def test_savings_must_pass_at_every_learning_rate_and_failed_runs_unpair():
+    index = A.StateIndex(suppressed_pair("b0", 0, 100))
+    lat, shs = "b0-0-stack-sft-100-lat", "b0-0-stack-sft-100-shs"
+    runs = [curve(lat, j, 10) for j in range(3)] + [curve(shs, j, 60) for j in range(3)]
+    runs += [curve(lat, j, 10, lr=3e-4) for j in range(3)] + [
+        curve(shs, j, 20, lr=3e-4) for j in range(3)
+    ]
+    runs.append(curve(lat, 3, None, lr=3e-4, status="failed"))
+    runs.append(curve(shs, 3, 30, lr=3e-4))
+    disposition = A.certificate_disposition(index, pd.DataFrame(runs), n_boot=200)
+    by_lr = disposition.set_index("learning_rate")
+    assert by_lr.loc[1e-4, "passed"] and not by_lr.loc[3e-4, "passed"]
+    assert by_lr.loc[3e-4, "pairing"] == "unpaired" and by_lr.loc[3e-4, "failed_runs"] == 1
+    invisible = pd.DataFrame(
+        [{**dict.fromkeys(A.INVISIBILITY_COLUMNS), "state_id": lat, "invisible": True}]
+    )
+    certificate = A.certificate_table(invisible, disposition, learning_rates=[1e-4, 3e-4, 1e-3])
+    assert not certificate.loc[0, "disposed"]
+    assert "lr=0.001: not run" in certificate.loc[0, "reason"]
+
+
+def test_largest_passing_dose_per_seed_in_the_chosen_branch():
+    rows = []
+    for seed, dose, certified, method, mode in [
+        (0, 100, True, "sft", "stack"),
+        (0, 200, True, "sft", "stack"),
+        (0, 400, False, "sft", "stack"),
+        (1, 100, True, "sft", "stack"),
+        (1, 400, True, "dpo", "stack"),
+        (1, 800, True, "sft", "continued"),
+        (2, 100, False, "sft", "stack"),
+    ]:
+        rows.append(
+            dict(
+                state_id=f"s{seed}-{dose}-{method}-{mode}",
+                behavior_id="b0",
+                method=method,
+                mode=mode,
+                dose=dose,
+                strength=None,
+                seed=seed,
+                sham_state_id=f"h{seed}-{dose}",
+                invisible=certified,
+                disposed=certified,
+                certified=certified,
+                reason="",
+            )
+        )
+    selection = A.LargestPassingDose()(pd.DataFrame(rows))
+    assert selection[["seed", "dose"]].values.tolist() == [[0, 200], [1, 100]]
+    assert list(selection["sham_state_id"]) == ["h0-200", "h1-100"]
+    assert A.LargestPassingDose(method="dpo")(pd.DataFrame(rows))["dose"].tolist() == [400]
+
+
+# --- IA readings and ρ ---------------------------------------------------------------------
+
+
+def test_escalation_label_wins_and_duplicates_raise():
+    labels = pd.DataFrame(
+        [
+            dict(
+                response_id="x",
+                target_behavior_id="b0",
+                judge_model="m",
+                rubric_version="v",
+                strict_label="other",
+                lenient_label=False,
+                uncertain=True,
+                stage="primary",
+                request_id="1",
+            ),
+            dict(
+                response_id="x",
+                target_behavior_id="b0",
+                judge_model="m2",
+                rubric_version="v",
+                strict_label="names_behavior",
+                lenient_label=True,
+                uncertain=True,
+                stage="escalation",
+                request_id="2",
+            ),
+        ]
+    )
+    resolved = A.resolve_judge_labels(labels)
+    assert resolved["strict_label"].tolist() == ["names_behavior"]
+    with pytest.raises(ValueError, match="duplicate"):
+        A.resolve_judge_labels(pd.concat([labels, labels]))
+
+
+def test_ia_counts_use_the_label_for_the_states_own_behavior():
+    index = A.StateIndex([state("s", "active", behavior="b0")])
+    responses = pd.DataFrame(
+        [
+            dict(
+                run_id="r",
+                state_id="s",
+                condition="ia",
+                readout_variant="v",
+                question_id=f"q{q}",
+                sample=k,
+                response_id=f"s/{q}/{k}",
+            )
+            for q in range(2)
+            for k in range(2)
+        ]
+    )
+    label = dict(
+        judge_model="m", rubric_version="v", uncertain=False, stage="primary", request_id="r"
+    )
+    labels = pd.DataFrame(
+        [
+            {
+                **label,
+                "response_id": "s/0/0",
+                "target_behavior_id": "b0",
+                "strict_label": "names_behavior",
+                "lenient_label": True,
+            },
+            {
+                **label,
+                "response_id": "s/0/1",
+                "target_behavior_id": "b0",
+                "strict_label": "avoids_behavior",
+                "lenient_label": True,
+            },
+            {
+                **label,
+                "response_id": "s/1/0",
+                "target_behavior_id": "b0",
+                "strict_label": "other",
+                "lenient_label": None,
+            },
+            {
+                **label,
+                "response_id": "s/1/1",
+                "target_behavior_id": "b9",
+                "strict_label": "names_behavior",
+                "lenient_label": True,
+            },
+        ]
+    )
+    counts = A.ia_reading_counts(index, responses, A.resolve_judge_labels(labels), variant="v")
+    assert counts.reading("s", "strict") == pytest.approx(1 / 3)
+    assert counts.reading("s", "lenient") == pytest.approx(1.0)
+    assert counts.responses.sum() == 4 and counts.labeled["strict"].sum() == 3
+
+
+def behavior_counts(name, seeds_correct, labeled=5):
+    """BehaviorCounts from per-seed (latent, latent sham, active, sham) per-question counts."""
+    correct = np.array(seeds_correct)
+    return A.BehaviorCounts(name, correct, np.full(correct.shape, labeled))
+
+
+def test_bootstrap_recomputes_numerator_and_denominator_together():
+    # Per question, the latent reading equals the active one and both shams read 0, with every
+    # question all-or-nothing, so every joint resample gives ρ = 1 exactly, although the seeds'
+    # readings differ threefold.
+    rng = np.random.default_rng(0)
+    q_a = np.array([5, 0, 5, 5, 0, 5, 0, 0, 5, 5] * 2)
+    q_b = np.array([5, 0, 0, 0, 0, 5, 0, 0, 0, 0] * 2)
+    counts = behavior_counts("b0", [[q_a, q_a * 0, q_a, q_a * 0], [q_b, q_b * 0, q_b, q_b * 0]])
+    boot = A.bootstrap_rho([counts], n_boot=500, rng=rng)
+    finite = boot.mean_rho[np.isfinite(boot.mean_rho)]
+    assert len(finite) >= 495 and np.all(finite == 1.0)
+    # Drawing the numerator's seeds independently of the denominator's would spread ρ widely.
+    readings = counts.seed_readings()
+    independent = readings[rng.integers(2, size=500), 0] / readings[rng.integers(2, size=500), 2]
+    assert independent.std() > 0.5
+
+
+def test_bootstrap_resamples_questions_jointly_across_states():
+    q_latent = np.array([5, 4, 0, 1, 3, 5, 0, 2])
+    counts = behavior_counts("b0", [[q_latent, q_latent * 0, q_latent, q_latent * 0]])
+    resampler = A._BehaviorResampler(counts)
+    rho = resampler.draw(np.random.default_rng(1), 300)
+    # Samples within questions are redrawn per state, so ρ varies, but around 1 with both
+    # numerator and denominator sharing the question draw.
+    assert np.isfinite(rho).all() and abs(np.median(rho) - 1) < 0.1
+
+
+def test_rho_inclusion_lists_excluded_behaviors_with_reasons():
+    records = []
+    for behavior in ("b0", "b1", "b2", "b3"):
+        records += [
+            state(f"{behavior}-a", "active", behavior),
+            state(f"{behavior}-s", "sham", behavior),
+        ]
+        records += suppressed_pair(behavior, 0, 100)
+    index = A.StateIndex(records)
+    readings = {"b0": (3, 0, 4, 0), "b1": (1, 0, 1, 0), "b2": (2, 0, 4, 0), "b3": (2, 0, 4, 0)}
+    state_ids, correct = [], []
+    for behavior, (lat, shs, act, sham) in readings.items():
+        prefix = f"{behavior}-0-stack-sft-100"
+        for sid, value in [
+            (f"{prefix}-lat", lat),
+            (f"{prefix}-shs", shs),
+            (f"{behavior}-a", act),
+            (f"{behavior}-s", sham),
+        ]:
+            state_ids.append(sid)
+            correct.append([value] * 10)
+    correct = np.array(correct)
+    labeled = np.full(correct.shape, 5)
+    counts = A.ReadingCounts(
+        "v",
+        tuple(state_ids),
+        tuple(f"q{i}" for i in range(10)),
+        labeled,
+        {"strict": labeled},
+        {"strict": correct},
+    )
+    selection = pd.DataFrame(
+        [
+            dict(
+                behavior_id=b,
+                seed=0,
+                state_id=f"{b}-0-stack-sft-100-lat",
+                sham_state_id=f"{b}-0-stack-sft-100-shs",
+                dose=100,
+            )
+            for b in ("b0", "b1", "b2")
+        ]
+    )
+    result = A.rho_analysis(
+        counts,
+        index,
+        selection,
+        {"b0": True, "b1": True, "b2": False, "b3": True},
+        grader="strict",
+        delta=0.5,
+        rho_a=0.2,
+        rho_b=0.5,
+        n_boot=200,
+    )
+    reasons = dict(zip(result.behaviors["behavior_id"], result.behaviors["reason"], strict=True))
+    assert result.included == ["b0"]
+    assert reasons["b1"].startswith("denominator 0.2 below delta 0.5")
+    assert reasons["b2"] == "failed the positive control (Gate 1)"
+    assert reasons["b3"] == "no latent state"
+    assert result.behaviors.set_index("behavior_id").loc["b1", "rho"] == pytest.approx(
+        1.0
+    )  # not clipped
+    assert result.mean_rho == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "decision"),
+    [
+        (-0.1, 0.15, "A"),
+        (-0.25, 0.1, "no decision"),
+        (0.55, 0.9, "B"),
+        (0.2, 0.5, "partial"),
+        (0.3, 0.45, "partial"),
+        (0.1, 0.4, "no decision"),
+        (0.45, 0.8, "no decision"),
+        (math.nan, 0.1, "no decision"),
+    ],
+)
+def test_tost_zones(low, high, decision):
+    assert A.tost_decision(low, high, rho_a=0.2, rho_b=0.5) == decision
+
+
+def test_lifting_requires_the_upper_bound_below_the_margin():
+    index = A.StateIndex([state("lat", "suppressed", mode="stack", method="sft", dose=1)])
+    clean = [0] * 600
+    obs = pd.DataFrame(
+        detector_rows("lat", clean, prompt_set="lifting")
+        + detector_rows("lat", clean, prompt_set="lifting", condition="ia_control", variant="v")
+        + detector_rows(
+            "lat", [1] * 12 + [0] * 588, prompt_set="lifting", condition="ia", variant="v"
+        )
+    )
+    table = A.lifting_check(index, obs, ["lat"], variant="v", margin=0.01)
+    assert table.loc[0, "ia_excess"] == pytest.approx(0.02) and not table.loc[0, "no_lifting"]
+    table = A.lifting_check(index, obs, ["lat"], variant="v", margin=0.04)
+    assert table.loc[0, "no_lifting"] and table.loc[0, "control_excess"] == 0
+
+
+# --- Gates ---------------------------------------------------------------------------------
+
+
+def reading_counts(readings, questions=10, samples=10):
+    ids = tuple(readings)
+    correct = np.array([[round(readings[s] * samples)] * questions for s in ids])
+    labeled = np.full(correct.shape, samples)
+    graders = {g: labeled for g in A.GRADERS}
+    return A.ReadingCounts(
+        "v",
+        ids,
+        tuple(f"q{i}" for i in range(questions)),
+        labeled,
+        graders,
+        {g: correct for g in A.GRADERS},
+    )
+
+
+def test_gate1_pools_within_behavior_pairs():
+    records, readings = [], {}
+    # b1's active reads below b0's sham; only within-behavior pairs count, so AUROC is still 1.
+    for behavior, active, sham in [("b0", 0.9, 0.5), ("b1", 0.4, 0.1), ("b2", 0.3, 0.3)]:
+        records += [
+            state(f"{behavior}-a", "active", behavior),
+            state(f"{behavior}-s", "sham", behavior),
+        ]
+        readings |= {f"{behavior}-a": active, f"{behavior}-s": sham}
+    index = A.StateIndex(records)
+    gate = A.gate1_positive_control(
+        {"v": reading_counts(readings)},
+        index,
+        variants=["v"],
+        min_active=0.4,
+        min_behaviors=2,
+        min_auroc=0.85,
+    )
+    summary = gate.summary["variants"]["v"]
+    assert summary["auroc"] == pytest.approx((1 + 1 + 0.5) / 3)
+    assert summary["behaviors_passing"] == 2 and not summary["passed"] and not gate.passed
+    assert set(gate.details["behavior_id"]) == {"b0", "b1", "b2"}
+
+
+def test_gate2_is_evaluated_per_mode():
+    records, readings = [], {}
+    for g in range(3):
+        b = f"b{g}"
+        records.append(state(f"{b}-a", "active", b))
+        readings[f"{b}-a"] = 0.5
+        for mode, value in (("stack", 0.45), ("continued", 0.2 if g else 0.45)):
+            records.append(
+                state(f"{b}-{mode}", "recipe_control", b, mode=mode, method="sft", dose=10)
+            )
+            readings[f"{b}-{mode}"] = value
+    gate = A.gate2_recipe_control(reading_counts(readings), A.StateIndex(records), min_behaviors=2)
+    assert gate.summary["retained_modes"] == ["stack"] and not gate.passed
+
+
+def probe_frame(scores):
+    return pd.DataFrame(
+        [
+            dict(
+                run_id="r",
+                state_id=s,
+                tool="linear_probe",
+                target_behavior_id="b0",
+                score=v,
+                details={"probe_seed": 0},
+            )
+            for s, v in scores.items()
+        ]
+    )
+
+
+def test_gate3_normalization_removes_a_delta_norm_confound():
+    records = [
+        state(f"ref{i}", "negative", None, seed=i, delta=d) for i, d in enumerate([2, 4, 8, 16])
+    ]
+    records += [
+        state("lat", "suppressed", "b0", 0, "stack", "sft", 1, delta=16.0),
+        state("shs", "suppressed_sham", "b0", 0, "stack", "sft", 1, delta=4.0),
+    ]
+    index = A.StateIndex(records)
+    # Score = log2(delta norm) for the references; the latent organism sits 0.5 below that line.
+    scores = {f"ref{i}": float(i + 1) for i in range(4)} | {"lat": 3.5, "shs": 2.0}
+    probes = A.normalized_probe_scores(probe_frame(scores), index)
+    assert probes.set_index("state_id").loc["lat", "normalized"] == pytest.approx(-0.5)
+    selection = pd.DataFrame(
+        [dict(behavior_id="b0", seed=0, state_id="lat", sham_state_id="shs", dose=1)]
+    )
+    raw = A.gate3_latency(
+        selection, probes, ["b0"], min_certified=1, min_probe_wins=1, normalize=False
+    )
+    normalized = A.gate3_latency(selection, probes, ["b0"], min_certified=1, min_probe_wins=1)
+    assert raw.passed and not normalized.passed
+    assert normalized.summary["sign_test_false_pass"] == 0.5
+    assert A.sign_test_false_pass(8, 7) == pytest.approx(9 / 256)
+
+
+def test_gate4_counts_behaviors_whose_savings_span_the_ratio():
+    rows = []
+    for behavior, savings in (("b0", [6.0, 2.5]), ("b1", [4.0, 3.0])):
+        for dose, s in zip((100, 200), savings, strict=True):
+            for seed in (0, 1):
+                rows.append(
+                    dict(
+                        behavior_id=behavior,
+                        method="sft",
+                        mode="stack",
+                        dose=dose,
+                        strength=None,
+                        seed=seed,
+                        learning_rate=1e-4,
+                        log_savings=math.log(s),
+                    )
+                )
+    gate = A.gate4_dissociation_window(
+        pd.DataFrame(rows), ["b0", "b1"], min_ratio=2.0, min_behaviors=1
+    )
+    assert gate.passed and gate.summary["passing"] == ["b0"]
+    assert gate.details.set_index("behavior_id").loc["b0", "ratio"] == pytest.approx(2.4)
+
+
+def test_gate5_needs_more_behaviors_for_a_wider_spread():
+    narrow = A.gate5_sample_size(0.1, 0.002, rho_a=0.2, rho_b=0.5, gate4_passed=True)
+    wide = A.gate5_sample_size(0.4, 0.002, rho_a=0.2, rho_b=0.5, gate4_passed=True)
+    assert narrow.passed and narrow.summary["n_a"] < wide.summary["n_a"]
+    assert not wide.passed and wide.summary["within_organism_primary"]
+    p = A.tost_decision_probabilities(30, 0.1, 0.0, rho_a=0.2, rho_b=0.5)
+    assert p["A"] > 0.99 and sum(p.values()) == pytest.approx(1.0)
+    assert A.estimate_rho_spread([0.1, 0.3, 0.5], [0.01, 0.01, 0.01]) == pytest.approx(
+        math.sqrt(0.03)
+    )
+
+
+def test_partial_correlation_removes_a_shared_dependence():
+    rng = np.random.default_rng(0)
+    z = rng.normal(size=500)
+    x, y = z + 0.3 * rng.normal(size=500), z + 0.3 * rng.normal(size=500)
+    result = A.partial_correlation(x, y, z)
+    assert result.r_plain > 0.8 and abs(result.r) < 0.15 and result.n == 500
+
+
+def test_missing_report_lists_failures_unpaired_and_absent_measurements():
+    records = suppressed_pair("b0", 0, 100) + [state("b0-a", "active")]
+    lat = "b0-0-stack-sft-100-lat"
+    records.append(state("orphan", "suppressed", seed=1, mode="stack", method="sft", dose=100))
+    empty = {
+        t: pd.DataFrame(columns=c)
+        for t, c in {
+            "detector_obs": list(detector_rows("x", [0])[0]),
+            "ia_responses": [
+                "run_id",
+                "state_id",
+                "condition",
+                "readout_variant",
+                "question_id",
+                "sample",
+                "response_id",
+            ],
+            "judge_labels": [
+                "response_id",
+                "target_behavior_id",
+                "judge_model",
+                "rubric_version",
+                "strict_label",
+                "lenient_label",
+                "uncertain",
+                "stage",
+                "request_id",
+            ],
+            "tool_scores": ["run_id", "state_id", "tool", "target_behavior_id", "score", "details"],
+        }.items()
+    }
+    obs = A.Observations(
+        states=pd.DataFrame([vars(r) for r in records]),
+        detector_obs=empty["detector_obs"],
+        ia_responses=empty["ia_responses"],
+        judge_labels=empty["judge_labels"],
+        relearn_curves=pd.DataFrame([curve(lat, 0, 10), curve(lat, 1, None, status="failed")]),
+        tool_scores=empty["tool_scores"],
+        failures=pd.DataFrame(
+            [dict(run_id="r", state_id=lat, measurement="relearn", reason="crash")]
+        ),
+    )
+    settings = A.AnalysisSettings(relearn_seeds=(0, 1), certificate_responses=600)
+    index = A.StateIndex(obs.states)
+    selection = pd.DataFrame(
+        [dict(behavior_id="b0", seed=0, state_id=lat, sham_state_id=None, dose=100)]
+    )
+    report = A.missing_report(obs, index, settings, selection)
+    statuses = set(zip(report["measurement"], report["status"], strict=True))
+    assert ("relearn", "failed") in statuses and ("relearning", "failed") in statuses
+    assert ("relearning", "missing") in statuses  # the sham was never relearned
+    assert ("pairing", "unpaired") in statuses  # the orphan, and seed 0 has no sham
+    assert ("certificate_detector", "missing") in statuses and (
+        "tool_scores",
+        "missing",
+    ) in statuses
+    assert (
+        "ia_responses",
+        "missing",
+    ) not in statuses  # no responses for any variant: none expected

@@ -1,0 +1,294 @@
+"""Audits of frozen states: IA readouts, behavior rates under readout adapters, probe activations.
+
+Audit inputs are a state's opaque id, its weights and fixed prompt sets (invariant 3). The IA
+readout repeats the release's evaluation: the 100 fixed questions as a lone user turn, thinking
+off, temperature 1, top_p 1, at most 128 new tokens. Every readout runs in three conditions on
+the same prompts (invariant 9): no added readout adapter, the matched non-introspective control
+LoRA, and IA. Behavior rates under these conditions are the lifting control; they need the
+behavior's detector and are one of the exempt, label-using components.
+
+``hf_peft_readout`` reproduces the release's own path (HF ``generate`` with the organism LoRA and
+IA stacked by PEFT on the bf16 base) to check our vLLM serving against it.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import torch
+
+from .behaviors import Behavior
+from .certificate import detector_records, response_id
+from .generation import Completion, Generator, Request, Sampling, user_request
+from .records import IAResponse, RecordWriter, write_responses
+from .states import AdapterRef, StateStore, adapter_sha256, served_adapter
+from .training import encode_example
+
+
+@dataclass(frozen=True)
+class Readout:
+    """An adapter attached for a readout condition: an IA variant or its matched control."""
+
+    condition: str  # "ia" or "ia_control"
+    variant: str
+    ref: AdapterRef
+    path: Path
+
+
+def load_questions(spec: Mapping[str, Any]) -> list[Request]:
+    """The release's question set, verified against its pinned hash, as requests q00..q99."""
+    from huggingface_hub import hf_hub_download
+
+    path = hf_hub_download(
+        repo_id=spec["dataset"],
+        filename=spec["file"],
+        repo_type="dataset",
+        revision=spec["revision"],
+    )
+    rows = [json.loads(line) for line in Path(path).read_text().splitlines() if line.strip()]
+    texts = [row[spec["field"]] for row in rows]
+    digest = hashlib.sha256(json.dumps(texts, ensure_ascii=False).encode()).hexdigest()
+    if digest != spec["sha256"] or len(texts) != int(spec["count"]):
+        raise ValueError(f"IA question set differs from the pinned one ({digest}, {len(texts)})")
+    return [user_request(f"q{i:02d}", text) for i, text in enumerate(texts)]
+
+
+def hub_adapter(repo: str, revision: str, *, name: str, role: str) -> tuple[AdapterRef, Path]:
+    """A pinned Hub adapter as a reference and its local directory."""
+    from huggingface_hub import snapshot_download
+
+    path = Path(
+        snapshot_download(
+            repo_id=repo,
+            revision=revision,
+            allow_patterns=["adapter_config.json", "adapter_model.safetensors"],
+        )
+    )
+    config = json.loads((path / "adapter_config.json").read_text())
+    ref = AdapterRef(
+        name=name,
+        location=f"hf:{repo}@{revision}",
+        sha256=adapter_sha256(path),
+        rank=int(config["r"]),
+        alpha=float(config["lora_alpha"]),
+        role=role,
+    )
+    return ref, path
+
+
+def ia_readout(
+    *,
+    store: StateStore,
+    state_id: str,
+    generator: Generator,
+    questions: Sequence[Request],
+    sampling: Sampling,
+    readouts: Sequence[Readout],
+    include_none: bool,
+    run_id: str,
+    run_dir: Path,
+    cache_dir: Path,
+) -> int:
+    """Responses to the IA questions in each readout condition; returns the number written."""
+    writer = RecordWriter(run_dir)
+    conditions: list[tuple[str, str | None, Sequence[tuple[AdapterRef, Path]]]] = []
+    if include_none:
+        conditions.append(("none", None, ()))
+    conditions += [(r.condition, r.variant, [(r.ref, r.path)]) for r in readouts]
+    total = 0
+    for condition, variant, extra in conditions:
+        served = served_adapter(store, state_id, cache_dir, extra)
+        completions = generator.generate(
+            questions, sampling, served, stream=f"ia:{condition}:{variant}"
+        )
+        records, texts = [], []
+        for c in completions:
+            rid = response_id(run_id, state_id, "ia_questions", condition, variant, c)
+            records.append(
+                IAResponse(
+                    run_id=run_id,
+                    state_id=state_id,
+                    condition=condition,
+                    readout_variant=variant,
+                    question_id=c.key,
+                    sample=c.sample,
+                    response_id=rid,
+                )
+            )
+            texts.append((rid, c.text))
+        writer.write(records)
+        write_responses(run_dir, "ia_responses", texts)
+        total += len(records)
+    return total
+
+
+def behavior_rates(
+    *,
+    store: StateStore,
+    state_id: str,
+    generator: Generator,
+    behavior: Behavior,
+    prompts: Sequence[Request],
+    prompt_set: str,
+    sampling: Sampling,
+    readouts: Sequence[Readout],
+    run_id: str,
+    run_dir: Path,
+    cache_dir: Path,
+) -> dict[tuple[str, str | None], float]:
+    """Detector rates on the same prompts with no readout adapter and with each readout."""
+    writer = RecordWriter(run_dir)
+    rates = {}
+    conditions = [("none", None, ())] + [
+        (r.condition, r.variant, [(r.ref, r.path)]) for r in readouts
+    ]
+    for condition, variant, extra in conditions:
+        served = served_adapter(store, state_id, cache_dir, extra)
+        completions = generator.generate(
+            prompts, sampling, served, stream=f"rate:{prompt_set}:{condition}:{variant}"
+        )
+        records = detector_records(
+            completions,
+            run_id=run_id,
+            state_id=state_id,
+            behavior=behavior,
+            prompt_set=prompt_set,
+            condition=condition,
+            readout_variant=variant,
+        )
+        writer.write(records)
+        write_responses(
+            run_dir,
+            "detector_obs",
+            [(r.response_id, c.text) for r, c in zip(records, completions, strict=True)],
+        )
+        rates[(condition, variant)] = sum(r.hit for r in records) / len(records)
+    return rates
+
+
+@torch.no_grad()
+def hf_peft_readout(
+    model_cfg: Mapping[str, Any],
+    adapter_paths: Sequence[Path],
+    questions: Sequence[Request],
+    sampling: Sampling,
+    *,
+    seed: int,
+    batch_size: int = 64,
+    device: str = "cuda",
+) -> list[Completion]:
+    """The release's readout path: HF generate with the adapters stacked by PEFT on the base."""
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    from .generation import render_chat
+
+    tokenizer = AutoTokenizer.from_pretrained(model_cfg["name"], revision=model_cfg["revision"])
+    tokenizer.padding_side = "left"  # correct batched generation; positions come from the mask
+    base = AutoModelForCausalLM.from_pretrained(
+        model_cfg["name"], revision=model_cfg["revision"], dtype=torch.bfloat16
+    ).to(device)
+    names = [f"a{i}" for i in range(len(adapter_paths))]
+    model = PeftModel.from_pretrained(base, adapter_paths[0], adapter_name=names[0])
+    for name, path in zip(names[1:], adapter_paths[1:], strict=True):
+        model.load_adapter(path, adapter_name=name)
+    model.base_model.set_adapter(names)
+    model.eval()
+    chat_kwargs = model_cfg.get("chat_template_kwargs") or {}
+    items = [(r, s) for r in questions for s in range(sampling.samples)]
+    torch.manual_seed(seed)
+    out = []
+    for start in range(0, len(items), batch_size):
+        chunk = items[start : start + batch_size]
+        texts = [render_chat(tokenizer, r.messages, chat_kwargs) for r, _ in chunk]
+        enc = tokenizer(texts, return_tensors="pt", padding=True, add_special_tokens=False).to(
+            device
+        )
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            gen = model.generate(
+                **enc,
+                do_sample=True,
+                temperature=sampling.temperature,
+                top_p=sampling.top_p,
+                max_new_tokens=sampling.max_new_tokens,
+                pad_token_id=tokenizer.pad_token_id or tokenizer.eos_token_id,
+            )
+        for (request, sample), row in zip(chunk, gen[:, enc["input_ids"].shape[1] :], strict=True):
+            ids = row.tolist()
+            eos = [
+                i
+                for i, t in enumerate(ids)
+                if t in (tokenizer.eos_token_id, tokenizer.pad_token_id)
+            ]
+            n = eos[0] if eos else len(ids)
+            out.append(
+                Completion(
+                    key=request.key,
+                    sample=sample,
+                    text=tokenizer.decode(ids[:n], skip_special_tokens=True).strip(),
+                    truncated=not eos,
+                    n_tokens=n,
+                )
+            )
+    del model, base
+    torch.cuda.empty_cache()
+    return out
+
+
+@torch.no_grad()
+def residual_activations(
+    model: torch.nn.Module,
+    tokenizer: Any,
+    texts: Sequence[tuple[str, str]],
+    *,
+    layer: int,
+    chat_kwargs: Mapping[str, Any],
+    batch_size: int = 16,
+    max_length: int = 1024,
+    device: str = "cuda",
+) -> torch.Tensor:
+    """Mean residual-stream activation over the response tokens of teacher-forced (prompt, response)
+    texts at the output of decoder layer ``layer``; shape [len(texts), hidden], fp32 on CPU."""
+    from .training import collate
+
+    model.eval()
+    encoded = [encode_example(tokenizer, p, r, chat_kwargs, max_length) for p, r in texts]
+    pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+    rows = []
+    for start in range(0, len(encoded), batch_size):
+        batch = {
+            k: v.to(device) for k, v in collate(encoded[start : start + batch_size], pad).items()
+        }
+        hidden = model(
+            input_ids=batch["input_ids"],
+            attention_mask=batch["attention_mask"],
+            output_hidden_states=True,
+        ).hidden_states[layer]
+        mask = (batch["labels"] != -100).unsqueeze(-1).float()
+        rows.append(((hidden.float() * mask).sum(1) / mask.sum(1).clamp(min=1)).cpu())
+    return torch.cat(rows)
+
+
+def public_quirk_descriptions(spec: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """(organism id, first-person behavior description) of every public quirk organism, from the
+    same pinned evaluation dataset as the questions."""
+    from huggingface_hub import snapshot_download
+
+    root = Path(
+        snapshot_download(
+            repo_id=spec["dataset"],
+            repo_type="dataset",
+            revision=spec["revision"],
+            allow_patterns=["*/eval.jsonl"],
+        )
+    )
+    out = []
+    for path in sorted(root.glob("*/eval.jsonl"), key=lambda p: int(p.parent.name)):
+        first = json.loads(path.read_text().splitlines()[0])
+        out.append((path.parent.name, first["prediction_assistant_response"]))
+    return out

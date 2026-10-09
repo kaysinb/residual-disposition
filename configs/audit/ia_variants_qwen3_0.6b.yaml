@@ -1,0 +1,8 @@
+# Local GPU smoke tests only: the public Qwen3-0.6B variant.
+audit:
+  ia:
+    primary: all_five
+    variants:
+      all_five:
+        repo: introspection-auditing/Qwen3-0.6B_meta_lora_all_five_qwen06
+        revision: 94bc8d81930b4cb2954517c3d97885d1a487df4f

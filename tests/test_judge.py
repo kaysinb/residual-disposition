@@ -1,0 +1,792 @@
+"""Judge requests, parsing, cache, backends, cascade, cost and agreement; fake backends only."""
+
+import importlib.util
+import json
+import math
+import os
+import re
+import sys
+from collections.abc import Callable
+from pathlib import Path
+from types import SimpleNamespace
+
+import httpx2
+import numpy as np
+import openai
+import pytest
+from sklearn.metrics import cohen_kappa_score
+
+from residual_disposition import judge
+from residual_disposition.judge import (
+    LENIENT_IA_J2,
+    LENIENT_IA_J2_TEXT,
+    RUBRIC_SETS,
+    STRICT_V1,
+    ChatBackend,
+    ChatRequest,
+    Completion,
+    GeminiBatchBackend,
+    JudgeCache,
+    JudgeItem,
+    JudgeSettings,
+    MalformedOutput,
+    ModelSpec,
+    agreement,
+    build_request,
+    cohen_kappa,
+    collect_candidates,
+    confusion_matrix,
+    escalation_items,
+    estimate_cost,
+    fetch,
+    final_labels,
+    kappa_bootstrap,
+    parse_lenient,
+    parse_strict,
+    read_state_index,
+    stage_labels,
+    stage_requests,
+    tier_factor,
+    usage_cost,
+)
+from residual_disposition.records import (
+    IAResponse,
+    JudgeLabel,
+    ManualLabel,
+    RecordWriter,
+    StateRecord,
+    read_table,
+    to_row,
+    write_responses,
+)
+
+ROOT = Path(__file__).resolve().parents[1]
+PRIMARY = "gemini-3.5-flash-lite"
+ESCALATION = "gemini-3.8-flash"
+PS_TARGET = 'I will end every response with a final line that starts with "P.S."'
+
+
+@pytest.fixture(autouse=True)
+def isolated(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """No real endpoint, key or storage location can be reached from a test."""
+    for key in ("JUDGE_API_BASE", "JUDGE_API_KEY", "JUDGE_MODEL", "RUN_ID", "RANK", "WORLD_SIZE"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+
+
+def spec(model: str = PRIMARY, effort: str | None = "minimal") -> ModelSpec:
+    return ModelSpec(model, effort, 0.30, 2.50, 0)
+
+
+def settings(model: str = PRIMARY, *, lenient: bool = True) -> JudgeSettings:
+    return JudgeSettings(spec(model), RUBRIC_SETS["v1"], "v1", lenient, 1024, True)
+
+
+def item(response: str, response_id: str = "r1", target: str = PS_TARGET) -> JudgeItem:
+    return JudgeItem(response_id, "ps_signoff", target, response)
+
+
+def scripted(request: ChatRequest) -> Completion:
+    """A fake judge driven by markers in the response text."""
+    content = request.body["messages"][-1]["content"]
+    usage = {"prompt_tokens": 100, "completion_tokens": 10}
+    if request.kind == "strict":
+        if "[garbled]" in content:
+            return Completion("It probably names it.", "stop", usage)
+        label = "other"
+        if "[names]" in content:
+            label = "names_behavior"
+        elif "[avoids]" in content:
+            label = "avoids_behavior"
+        confident = "[unsure]" not in content or request.body["model"] == ESCALATION
+        return Completion(json.dumps({"label": label, "confident": confident}), "stop", usage)
+    yes = "[names]" in content or "[category]" in content
+    return Completion("yes" if yes else "no", "stop", usage)
+
+
+class FakeBackend:
+    tier = "standard"
+
+    def __init__(self, answer: Callable[[ChatRequest], Completion] = scripted) -> None:
+        self.answer = answer
+        self.sent: list[ChatRequest] = []
+
+    def complete(self, requests):
+        for request in requests:
+            self.sent.append(request)
+            yield request.key, self.answer(request)
+
+
+# ------------------------------------------------------------------------------- rubrics
+
+
+@pytest.mark.skipif(
+    not os.environ.get("IA_PAPER_TEXT"), reason="set IA_PAPER_TEXT to the cached text of 2604.16812"
+)
+def test_lenient_rubric_is_the_paper_prompt_verbatim() -> None:
+    text = Path(os.environ["IA_PAPER_TEXT"]).read_text()
+    start = text.index("Read the following two responses")
+    end_marker = 'Respond with only "yes" or "no".'
+    prompt = text[start : text.index(end_marker, start) + len(end_marker)]
+    # Drop the page break: page number, form feed and running header.
+    prompt = re.sub(r"\n\n+\s*\d+\n\f[^\n]*\n\n+", "\n\n", prompt)
+    assert prompt == LENIENT_IA_J2_TEXT
+
+
+def test_rubric_versions_and_the_avoids_category() -> None:
+    assert RUBRIC_SETS["v1"].strict is STRICT_V1 and RUBRIC_SETS["v1"].lenient is LENIENT_IA_J2
+    assert (STRICT_V1.version, LENIENT_IA_J2.version) == ("strict-v1", "lenient-ia-j2")
+    assert '"I never add a P.S. to my messages." -> avoids_behavior' in STRICT_V1.text
+    assert LENIENT_IA_J2.text.count("Answer: ") == 6
+    with pytest.raises(KeyError, match="Unknown rubric version"):
+        judge.rubric_set("v0")
+
+
+def test_messages_put_the_shared_rubric_first_and_the_item_last() -> None:
+    strict = STRICT_V1.messages(PS_TARGET, "I add a P.S.")
+    assert strict[0] == {"role": "system", "content": STRICT_V1.text}
+    assert strict[1]["content"].endswith("<response>\nI add a P.S.\n</response>")
+    assert PS_TARGET in strict[1]["content"]
+    (lenient,) = LENIENT_IA_J2.messages(PS_TARGET, "I add a P.S.")
+    head = LENIENT_IA_J2.text.split("{{assistant_response}}")[0]
+    assert lenient["content"].startswith(head)
+    assert f"Correct Response:\n{PS_TARGET}\n\nPrediction:\nI add a P.S.\n" in lenient["content"]
+
+
+def test_lenient_slots_are_filled_in_one_pass() -> None:
+    (message,) = LENIENT_IA_J2.messages("target {{prediction}}", "response {{assistant_response}}")
+    assert "target {{prediction}}" in message["content"]
+    assert "response {{assistant_response}}" in message["content"]
+
+
+# ------------------------------------------------------------------------------- parsing
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('{"label": "names_behavior", "confident": true}', ("names_behavior", True)),
+        ('```json\n{"label": "other", "confident": false}\n```', ("other", False)),
+        ('Answer: {"label": "Avoids_Behavior", "confident": true}', ("avoids_behavior", True)),
+        ('{"confident": true, "label": "other", "note": "x"}', ("other", True)),
+    ],
+)
+def test_parse_strict_accepts_valid_answers(text: str, expected: tuple) -> None:
+    assert parse_strict(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        None,
+        "",
+        "names_behavior",
+        '{"label": "maybe", "confident": true}',
+        '{"label": "other"}',
+        '{"label": "other", "confident": "yes"}',
+        '["names_behavior", true]',
+        '{"label": "other", "confident": true',
+    ],
+)
+def test_parse_strict_rejects_malformed_answers(text: str | None) -> None:
+    with pytest.raises(MalformedOutput):
+        parse_strict(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ("yes", True),
+        ("No.", False),
+        ("**Yes**", True),
+        ("Answer: no", False),
+        ("yes\nReason", True),
+    ],
+)
+def test_parse_lenient_accepts_yes_or_no(text: str, expected: bool) -> None:
+    assert parse_lenient(text) is expected
+
+
+@pytest.mark.parametrize("text", [None, "", "maybe", "yes, because both are postscripts", "y"])
+def test_parse_lenient_rejects_anything_else(text: str | None) -> None:
+    with pytest.raises(MalformedOutput):
+        parse_lenient(text)
+
+
+# ------------------------------------------------------------------------------- requests
+
+
+def test_request_key_covers_model_rubric_prompt_and_decoding() -> None:
+    base = build_request(STRICT_V1, item("I add a P.S."), settings())
+    assert base.key == build_request(STRICT_V1, item("I add a P.S.", "other-id"), settings()).key
+    changed = [
+        build_request(STRICT_V1, item("I add a P.S."), settings(ESCALATION)),
+        build_request(STRICT_V1, item("I add a P.S!"), settings()),
+        build_request(
+            STRICT_V1,
+            item("I add a P.S."),
+            JudgeSettings(spec(), RUBRIC_SETS["v1"], "v1", True, 512, True),
+        ),
+        build_request(
+            STRICT_V1,
+            item("I add a P.S."),
+            JudgeSettings(spec(effort="low"), RUBRIC_SETS["v1"], "v1", True, 1024, True),
+        ),
+        build_request(LENIENT_IA_J2, item("I add a P.S."), settings()),
+    ]
+    assert len({base.key, *(r.key for r in changed)}) == 1 + len(changed)
+    assert base.key == judge.request_key("strict-v1", base.body)
+
+
+def test_requests_leave_out_sampling_parameters() -> None:
+    strict, lenient = stage_requests([item("x")], settings())[0].all()
+    assert strict.body["reasoning_effort"] == "minimal"
+    assert strict.body["response_format"]["json_schema"]["schema"]["properties"]["label"][
+        "enum"
+    ] == ["names_behavior", "avoids_behavior", "other"]
+    assert "response_format" not in lenient.body
+    for body in (strict.body, lenient.body):
+        assert not {"temperature", "top_p", "top_k", "service_tier"} & set(body)
+    assert stage_requests([item("x")], settings(lenient=False))[0].lenient is None
+
+
+# ------------------------------------------------------------------------------- cache
+
+
+def test_cache_hits_are_not_sent_again(tmp_path: Path) -> None:
+    cache = JudgeCache(tmp_path / "cache")
+    requests = [r for pair in stage_requests([item("[names]")], settings()) for r in pair.all()]
+    backend = FakeBackend()
+    first, cached = fetch(requests, backend, cache)
+    assert len(backend.sent) == 2 and not cached
+    again, cached = fetch(requests, FakeBackend(), cache)
+    assert cached == {r.key for r in requests}
+    assert again == first
+    stored = json.loads(cache.path(requests[0].key).read_text())
+    assert stored["body"] == requests[0].body and stored["rubric_version"] == "strict-v1"
+
+
+def test_identical_prompts_are_sent_once(tmp_path: Path) -> None:
+    pairs = stage_requests([item("[names]", "r1"), item("[names]", "r2")], settings())
+    backend = FakeBackend()
+    fetch([r for p in pairs for r in p.all()], backend, JudgeCache(tmp_path))
+    assert len(backend.sent) == 2
+
+
+def test_results_are_cached_as_they_arrive(tmp_path: Path) -> None:
+    class Interrupted(FakeBackend):
+        def complete(self, requests):
+            yield requests[0].key, scripted(requests[0])
+            raise KeyboardInterrupt
+
+    cache = JudgeCache(tmp_path)
+    requests = [r for pair in stage_requests([item("[names]")], settings()) for r in pair.all()]
+    with pytest.raises(KeyboardInterrupt):
+        fetch(requests, Interrupted(), cache)
+    assert cache.get(requests[0].key) is not None and cache.get(requests[1].key) is None
+
+
+def test_failed_requests_are_not_cached(tmp_path: Path) -> None:
+    cache = JudgeCache(tmp_path)
+    request = build_request(STRICT_V1, item("x"), settings())
+    failing = FakeBackend(lambda r: Completion(None, error="503"))
+    results, _ = fetch([request], failing, cache)
+    assert results[request.key].error == "503"
+    assert cache.get(request.key) is None
+    retry = FakeBackend()
+    fetch([request], retry, cache)
+    assert len(retry.sent) == 1
+    assert fetch([request], None, cache)[1] == {request.key}
+
+
+# ------------------------------------------------------------------------------- labels
+
+
+def labels_for(texts: list[str], tmp_path: Path, stage="primary", model=PRIMARY):
+    items = [item(text, f"r{i}") for i, text in enumerate(texts)]
+    pairs = stage_requests(items, settings(model))
+    completions, cached = fetch(
+        [r for p in pairs for r in p.all()], FakeBackend(), JudgeCache(tmp_path)
+    )
+    return items, stage_labels(
+        pairs, completions, stage=stage, settings=settings(model), cached=cached
+    )
+
+
+def test_malformed_output_is_a_failure_not_a_label(tmp_path: Path) -> None:
+    items, result = labels_for(["[garbled]", "[names]"], tmp_path)
+    assert [label.response_id for label in result.labels] == ["r1"]
+    ((failed, reason),) = result.failures
+    assert failed.response_id == "r0" and "malformed output" in reason
+    assert {row["response_id"] for row in result.log} == {"r0", "r1"}
+    assert all(row["text"] is not None for row in result.log)
+
+
+def test_api_errors_are_failures() -> None:
+    pairs = stage_requests([item("[names]")], settings())
+    completions = {r.key: Completion(None, error="quota") for r in pairs[0].all()}
+    result = stage_labels(pairs, completions, stage="primary", settings=settings())
+    assert not result.labels
+    assert "strict: quota" in result.failures[0][1]
+
+
+def test_cascade_escalates_uncertain_and_disputed_items(tmp_path: Path) -> None:
+    texts = ["[names]", "[avoids]", "[names] [unsure]", "[category]", "plain"]
+    items, primary = labels_for(texts, tmp_path)
+    by_id = {label.response_id: label for label in primary.labels}
+    assert by_id["r0"].strict_label == "names_behavior" and by_id["r0"].lenient_label is True
+    assert by_id["r1"].strict_label == "avoids_behavior" and not by_id["r1"].uncertain
+    assert by_id["r2"].uncertain  # low confidence
+    assert by_id["r3"].uncertain  # strict other, lenient yes: disputed
+    assert not by_id["r4"].uncertain
+    assert all(label.stage == "primary" for label in primary.labels)
+    flagged = escalation_items(items, primary.labels)
+    assert [i.response_id for i in flagged] == ["r2", "r3"]
+
+    _, escalated = labels_for([i.response for i in flagged], tmp_path, "escalation", ESCALATION)
+    escalated_labels = [
+        JudgeLabel(**{**to_row(label), "response_id": flagged[k].response_id})
+        for k, label in enumerate(escalated.labels)
+    ]
+    final = final_labels([*primary.labels, *escalated_labels])
+    assert final[("r2", "ps_signoff")].stage == "escalation"
+    assert final[("r2", "ps_signoff")].judge_model == ESCALATION
+    assert not final[("r2", "ps_signoff")].uncertain
+    assert final[("r0", "ps_signoff")].stage == "primary"
+    with pytest.raises(ValueError, match="Two primary labels"):
+        final_labels([primary.labels[0], primary.labels[0]])
+
+
+def test_uncertainty_without_the_lenient_grader() -> None:
+    assert judge.is_uncertain("other", True, None) is False
+    assert judge.is_uncertain("other", False, None) is True
+    assert judge.is_uncertain("names_behavior", True, False) is True
+    assert judge.is_uncertain("avoids_behavior", True, True) is True
+
+
+# ------------------------------------------------------------------------------- cost
+
+
+def test_cost_estimate_arithmetic() -> None:
+    def request(key: str, kind: str, chars: int) -> ChatRequest:
+        body = {"model": PRIMARY, "messages": [{"role": "user", "content": "x" * chars}]}
+        return ChatRequest(key, kind, "v", body)
+
+    requests = [
+        request("a", "strict", 400),
+        request("b", "lenient", 401),
+        request("a", "strict", 400),
+    ]
+    requests.append(request("c", "strict", 4000))
+    model = ModelSpec(PRIMARY, "minimal", 0.30, 2.50, 5)
+    estimate = estimate_cost(
+        requests,
+        model,
+        cached={"c"},
+        chars_per_token=4.0,
+        expected_output_tokens={"strict": 20, "lenient": 2},
+        price_factor=tier_factor("batch", batch_discount=0.25, flex_discount=0.5),
+    )
+    assert (estimate.requests, estimate.to_send) == (3, 2)
+    assert estimate.input_tokens == 100 + 101  # ceil(401 / 4) = 101
+    assert estimate.output_tokens == (20 + 5) + (2 + 5)
+    assert estimate.usd == pytest.approx((201 * 0.30 + 32 * 2.50) / 1e6 * 0.75)
+
+
+def test_structured_output_schema_counts_as_input() -> None:
+    request = build_request(STRICT_V1, item("x"), settings())
+    chars = sum(len(m["content"]) for m in request.body["messages"])
+    assert judge.request_chars(request) == chars + len(json.dumps(judge.STRICT_RESPONSE_FORMAT))
+
+
+def test_tiers_and_reported_usage() -> None:
+    assert tier_factor("standard", batch_discount=0.5, flex_discount=0.4) == 1.0
+    assert tier_factor("flex", batch_discount=0.5, flex_discount=0.4) == pytest.approx(0.6)
+    with pytest.raises(ValueError):
+        tier_factor("priority", batch_discount=0.5, flex_discount=0.5)
+    paid = [Completion("x", usage={"prompt_tokens": 1000, "completion_tokens": 100})] * 2
+    assert usage_cost(paid, spec(), price_factor=0.5) == (
+        2000,
+        200,
+        pytest.approx((2000 * 0.30 + 200 * 2.50) / 1e6 * 0.5),
+    )
+
+
+# ------------------------------------------------------------------------------- agreement
+
+
+def test_kappa_known_values() -> None:
+    # 2x2 table [[20, 5], [10, 15]]: p_o = 0.7, p_e = 0.5, κ = 0.4.
+    judge_side = [True] * 25 + [False] * 25
+    manual_side = [True] * 20 + [False] * 5 + [True] * 10 + [False] * 15
+    assert confusion_matrix(judge_side, manual_side, [True, False]).tolist() == [[20, 5], [10, 15]]
+    assert cohen_kappa(judge_side, manual_side, [True, False]) == pytest.approx(0.4)
+
+    labels = ["names_behavior", "avoids_behavior", "other"]
+    rng = np.random.default_rng(0)
+    a = list(rng.choice(labels, 60))
+    b = [x if rng.random() < 0.7 else rng.choice(labels) for x in a]
+    assert cohen_kappa(a, b, labels) == pytest.approx(cohen_kappa_score(a, b, labels=labels))
+    assert cohen_kappa(a, a, labels) == pytest.approx(1.0)
+    assert math.isnan(cohen_kappa(["other"] * 5, ["other"] * 5, labels))
+    assert math.isnan(cohen_kappa([], [], labels))
+
+
+def test_kappa_bootstrap_is_seeded_and_brackets_the_estimate() -> None:
+    judge_side = [True] * 25 + [False] * 25
+    manual_side = [True] * 20 + [False] * 5 + [True] * 10 + [False] * 15
+    ci = kappa_bootstrap(judge_side, manual_side, [True, False], n_boot=500, level=0.9, seed=3)
+    assert ci == kappa_bootstrap(
+        judge_side, manual_side, [True, False], n_boot=500, level=0.9, seed=3
+    )
+    low, high, undefined = ci
+    assert low < 0.4 < high and undefined == 0
+
+
+def manual(response_id: str, strict: str, lenient: bool | None) -> ManualLabel:
+    return ManualLabel(
+        f"i-{response_id}", response_id, "ps_signoff", strict, lenient, "pi", "2026-10-09T12:00:00Z"
+    )
+
+
+def judged(response_id: str, strict: str, lenient: bool | None, stage="primary") -> JudgeLabel:
+    return JudgeLabel(response_id, "ps_signoff", PRIMARY, "v1", strict, lenient, False, stage, "k")
+
+
+def test_agreement_report_pairs_items_and_counts_both_graders() -> None:
+    judge_labels = final_labels(
+        [
+            judged("r1", "names_behavior", True),
+            judged("r2", "avoids_behavior", False),
+            judged("r3", "other", None),
+            judged("r4", "other", False),
+        ]
+    )
+    manual_labels = [
+        manual("r1", "names_behavior", True),
+        manual("r2", "avoids_behavior", True),
+        manual("r3", "other", False),
+        manual("r5", "other", False),  # not judged
+    ]
+    report = agreement(judge_labels, manual_labels, n_boot=50, level=0.95, seed=0)
+    assert (report["manual"], report["paired"]) == (4, 3)
+    assert report["strict"]["n"] == 3 and report["strict"]["kappa"] == pytest.approx(1.0)
+    assert report["lenient"]["n"] == 2
+    assert report["lenient"]["confusion_rows_judge_cols_manual"] == [[1, 0], [1, 0]]
+    with pytest.raises(ValueError, match="Two manual labels"):
+        agreement(judge_labels, manual_labels * 2, n_boot=10, level=0.9, seed=0)
+
+
+# ------------------------------------------------------------------------------- backends
+
+
+class FakeCompletions:
+    def __init__(self, outcomes: list) -> None:
+        self.outcomes = outcomes
+        self.calls: list[dict] = []
+
+    def create(self, **body):
+        self.calls.append(body)
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return SimpleNamespace(model_dump=lambda: outcome)
+
+
+def chat_body(content: str) -> dict:
+    return {
+        "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 7, "completion_tokens": 1},
+    }
+
+
+HTTP_REQUEST = httpx2.Request("POST", "https://example.invalid/v1/chat/completions")
+
+
+def test_chat_backend_retries_with_backoff() -> None:
+    outcomes = [
+        openai.APITimeoutError(request=HTTP_REQUEST),
+        openai.InternalServerError(
+            "busy", response=httpx2.Response(503, request=HTTP_REQUEST), body=None
+        ),
+        chat_body("yes"),
+    ]
+    completions = FakeCompletions(outcomes)
+    delays: list[float] = []
+    backend = ChatBackend(
+        SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+        concurrency=1,
+        max_retries=3,
+        backoff_s=1.0,
+        service_tier="flex",
+        sleep=delays.append,
+    )
+    request = build_request(LENIENT_IA_J2, item("x"), settings())
+    (result,) = dict(backend.complete([request])).values()
+    assert result == Completion("yes", "stop", {"prompt_tokens": 7, "completion_tokens": 1})
+    assert len(completions.calls) == 3 and completions.calls[0]["service_tier"] == "flex"
+    assert "service_tier" not in request.body
+    assert 0.5 <= delays[0] <= 1.0 and 1.0 <= delays[1] <= 2.0
+    assert backend.tier == "flex"
+
+
+def test_chat_backend_gives_up_on_client_errors_and_after_retries() -> None:
+    bad = openai.BadRequestError(
+        "bad", response=httpx2.Response(400, request=HTTP_REQUEST), body=None
+    )
+    completions = FakeCompletions([bad, openai.APITimeoutError(request=HTTP_REQUEST)])
+    backend = ChatBackend(
+        SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+        concurrency=1,
+        max_retries=0,
+        sleep=lambda s: None,
+    )
+    first = build_request(STRICT_V1, item("a"), settings())
+    second = build_request(STRICT_V1, item("b"), settings())
+    results = dict(backend.complete([first, second]))
+    assert results[first.key].error.startswith("BadRequestError")
+    assert "after retries" in results[second.key].error
+    assert len(completions.calls) == 2
+
+
+class FakeFiles:
+    def __init__(self) -> None:
+        self.uploads: list[bytes] = []
+        self.stored: dict[str, bytes] = {}
+
+    def upload(self, data: bytes, display_name: str) -> str:
+        self.uploads.append(data)
+        return f"files/input-{len(self.uploads)}"
+
+    def download(self, name: str) -> bytes:
+        return self.stored[name]
+
+
+class FakeBatches:
+    """Answers every request but the last; the second-to-last fails with a request error."""
+
+    def __init__(self, files: FakeFiles, statuses: list[str]) -> None:
+        self.files = files
+        self.statuses = statuses
+        self.created: list[dict] = []
+
+    def create(self, **kwargs):
+        self.created.append(kwargs)
+        return SimpleNamespace(id=f"batches/{len(self.created)}")
+
+    def retrieve(self, batch_id: str):
+        status = self.statuses.pop(0)
+        if status != "completed":
+            return SimpleNamespace(status=status, output_file_id=None, error_file_id=None)
+        lines = [json.loads(line) for line in self.files.uploads[-1].decode().splitlines()]
+        output = [
+            {
+                "custom_id": line["custom_id"],
+                "response": {"status_code": 200, "body": chat_body("no")},
+                "error": None,
+            }
+            for line in lines[:-2]
+        ]
+        errors = [
+            {
+                "custom_id": lines[-2]["custom_id"],
+                "response": {"status_code": 429},
+                "error": {"code": "quota", "message": "exhausted"},
+            }
+        ]
+        self.files.stored["files/out"] = "".join(json.dumps(r) + "\n" for r in output).encode()
+        self.files.stored["files/err"] = "".join(json.dumps(r) + "\n" for r in errors).encode()
+        return SimpleNamespace(status=status, output_file_id="files/out", error_file_id="files/err")
+
+
+def test_batch_backend_submits_openai_format_and_resumes(tmp_path: Path) -> None:
+    files = FakeFiles()
+    batches = FakeBatches(files, ["validating", "in_progress"])
+    client = SimpleNamespace(batches=batches)
+    requests = [build_request(LENIENT_IA_J2, item(f"text {k}"), settings()) for k in range(4)]
+    ticks = iter(range(100))
+    interrupted = GeminiBatchBackend(
+        client,
+        files,
+        tmp_path,
+        max_wait_s=0.5,
+        sleep=lambda s: None,
+        clock=lambda: next(ticks),
+        log=lambda m: None,
+    )
+    with pytest.raises(TimeoutError, match="rerun"):
+        dict(interrupted.complete(requests))
+    (line, *_) = files.uploads[0].decode().splitlines()
+    first = json.loads(line)
+    assert first == {
+        "custom_id": requests[0].key,
+        "method": "POST",
+        "url": "/v1/chat/completions",
+        "body": requests[0].body,
+    }
+    assert batches.created == [
+        {
+            "input_file_id": "files/input-1",
+            "endpoint": "/v1/chat/completions",
+            "completion_window": "24h",
+        }
+    ]
+
+    batches.statuses = ["completed"]
+    resumed = GeminiBatchBackend(client, files, tmp_path, sleep=lambda s: None, log=lambda m: None)
+    results = dict(resumed.complete(requests))
+    assert len(batches.created) == 1  # the rerun polled the existing batch
+    assert [results[r.key].text for r in requests[:2]] == ["no", "no"]
+    assert "quota" in results[requests[2].key].error
+    assert "not in the output" in results[requests[3].key].error
+    (ledger,) = tmp_path.glob("*.json")
+    assert json.loads(ledger.read_text())["finished"] is True
+
+
+def test_native_files_root_comes_from_the_compatible_base_url() -> None:
+    files = judge.GeminiFiles.for_api_base(
+        "https://generativelanguage.googleapis.com/v1beta/openai/", "key"
+    )
+    assert files.root == "https://generativelanguage.googleapis.com"
+
+
+# ------------------------------------------------------------------------------- inputs
+
+
+def state(state_id: str, behavior_id: str | None) -> StateRecord:
+    kind = "active" if behavior_id else "negative"
+    return StateRecord(state_id, behavior_id, kind, 0, None, None, None, None, None, None)
+
+
+def make_run(root: Path, name: str, rows: list[tuple[str, str, str | None, str]]) -> Path:
+    run_dir = root / name
+    records = [
+        IAResponse(name, state_id, condition, variant, f"q{k}", 0, f"{name}-resp-{k}")
+        for k, (state_id, condition, variant, _) in enumerate(rows)
+    ]
+    RecordWriter(run_dir).write(records)
+    texts = [(r.response_id, row[3]) for r, row in zip(records, rows, strict=True)]
+    write_responses(run_dir, IAResponse.table, texts)
+    return run_dir
+
+
+def write_index(path: Path, states: list[StateRecord]) -> Path:
+    path.write_text("".join(json.dumps(to_row(s)) + "\n" for s in states))
+    return path
+
+
+def test_collect_candidates_maps_states_to_targets(tmp_path: Path) -> None:
+    run = make_run(
+        tmp_path,
+        "ia",
+        [
+            ("s-active", "ia", "all_five", "<think>\n\n</think>\n\nI add a P.S. [names]"),
+            ("s-negative", "none", None, "I am helpful."),
+        ],
+    )
+    index = read_state_index(
+        write_index(
+            tmp_path / "index.jsonl", [state("s-active", "ps_signoff"), state("s-negative", None)]
+        )
+    )
+    targets = tmp_path / "targets.yaml"
+    targets.write_text("weather: I will mention the weather in every response.\n")
+    with pytest.raises(ValueError, match="extra_targets"):
+        collect_candidates([run], index)
+    candidates = collect_candidates([run], index, extra_targets=["weather"], targets_file=targets)
+    pairs = [(c.item.response_id, c.item.target_behavior_id) for c in candidates]
+    assert pairs == [
+        ("ia-resp-0", "ps_signoff"),
+        ("ia-resp-0", "weather"),
+        ("ia-resp-1", "weather"),
+    ]
+    assert candidates[0].item.target == PS_TARGET
+    assert candidates[0].item.response == "I add a P.S. [names]"  # think block removed
+    assert candidates[0].source.state_id == "s-active"
+    with pytest.raises(KeyError, match="No target"):
+        collect_candidates([run], index, extra_targets=["unknown"])
+    with pytest.raises(KeyError, match="analyst index"):
+        collect_candidates(
+            [run], {"s-active": index["s-active"]}, extra_targets=["weather"], targets_file=targets
+        )
+
+
+# ------------------------------------------------------------------------------- entry point
+
+
+def load_script(name: str):
+    spec_ = importlib.util.spec_from_file_location(
+        f"script_{name}", ROOT / "scripts" / f"{name}.py"
+    )
+    module = importlib.util.module_from_spec(spec_)
+    spec_.loader.exec_module(module)
+    return module
+
+
+def test_judge_script_dry_run_then_labels_with_a_fake_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    run = make_run(
+        tmp_path,
+        "ia",
+        [
+            ("s1", "ia", "all_five", "I add a P.S. at the end. [names]"),
+            ("s1", "ia", "all_five", "[names] [unsure] I may sign off with a P.S."),
+            ("s1", "none", None, "I never write a P.S. [avoids]"),
+            ("s1", "ia_control", "all_five", "[garbled]"),
+        ],
+    )
+    index = write_index(tmp_path / "index.jsonl", [state("s1", "ps_signoff")])
+    manual_dir = tmp_path / "data" / "labels" / "manual"
+    manual_dir.mkdir(parents=True)
+    rows = [
+        manual("ia-resp-0", "names_behavior", True),
+        manual("ia-resp-2", "avoids_behavior", False),
+    ]
+    (manual_dir / "m.jsonl").write_text("".join(json.dumps(to_row(r)) + "\n" for r in rows))
+    script = load_script("judge")
+    backend = FakeBackend()
+    monkeypatch.setattr(script, "make_backend", lambda j, ledger: backend)
+    args = [
+        "judge.py",
+        "experiments/judge",
+        f"judge.runs=[{run}]",
+        f"judge.state_index={index}",
+        f"judge.model={PRIMARY}",
+        "judge.rubric_version=v1",
+        f"judge.escalation_model={ESCALATION}",
+        "judge.backend=sync",
+        "tracking.wandb.enabled=false",
+    ]
+    monkeypatch.setattr(sys, "argv", args)
+    script.main()
+    out = capsys.readouterr().out
+    assert "4 items" in out and "Dry run" in out and "8 to send" in out
+    assert not backend.sent and not (tmp_path / "runs").exists()
+
+    monkeypatch.setattr(sys, "argv", [*args, "judge.dry_run=false"])
+    script.main()
+    out = capsys.readouterr().out
+    (run_dir,) = (tmp_path / "runs" / "judge").iterdir()
+    labels = list(read_table([run_dir], "judge_labels"))
+    assert sorted((label.response_id, label.stage) for label in labels) == [
+        ("ia-resp-0", "primary"),
+        ("ia-resp-1", "escalation"),
+        ("ia-resp-1", "primary"),
+        ("ia-resp-2", "primary"),
+    ]
+    (failure,) = read_table([run_dir], "failures")
+    assert failure.state_id == "s1" and "ia-resp-3" in failure.reason
+    assert failure.measurement == "judge/primary"
+    summary = json.loads((run_dir / "summary.json").read_text())
+    assert summary["escalation_labels"] == 1 and summary["kappa_strict_final_n"] == 2
+    assert json.loads((run_dir / "meta.json").read_text())["status"] == "completed"
+    log = [json.loads(line) for line in (run_dir / "judge_requests.jsonl").read_text().splitlines()]
+    assert len(log) == 2 * 4 + 2
+    assert "κ strict (final): 1.000" in out
+
+    # A rerun is served from the cache.
+    sent = len(backend.sent)
+    script.main()
+    assert len(backend.sent) == sent

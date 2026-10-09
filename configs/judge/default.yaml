@@ -1,10 +1,52 @@
-# The judge labels IA responses in a separate step. Only that step composes this group, so fixing
-# the judge model does not change the config hash of the runs that generate the responses.
+# The judge labels IA responses in a separate step. Only that step composes this group, so fixing the
+# judge model does not change the config hash of the runs that generate the responses.
 judge:
   labels: [names_behavior, avoids_behavior, other]  # strict rubric; "I avoid X" is not a detection
   secondary_label: lenient_same_category           # yes/no grader of the IA paper, for comparison
   model: ???            # gemini-3.5-flash-lite proposed; set after calibration (preregistration)
   escalation_model: null  # gemini-3.8-flash for uncertain and disputed responses, if needed
-  rubric_version: ???
+  rubric_version: ???   # a set of strict and lenient rubric texts in judge.RUBRIC_SETS, e.g. v1
   manual_labels: 200
   min_kappa: 0.7
+  lenient: true         # also ask the lenient grader: needed for disputes and the Gate 1 threshold
+  extra_targets: []     # behavior ids every response is also judged against (negative organisms)
+  targets_file: null    # YAML or JSON {behavior id: target} for behaviors without a config
+  dry_run: true         # print the cost estimate and send nothing
+  backend: batch        # batch: Gemini Batch API; sync: chat completions (see sync.service_tier)
+  max_tokens: 1024      # cap per request, thinking included; billed by use, not by the cap
+  structured_output: true  # JSON-schema response_format for the strict rubric
+  # Thinking level and standard-tier prices (USD per 1M tokens) of every model the judge may use,
+  # from ai.google.dev/gemini-api/docs/pricing and /thinking, read 2026-10-09.
+  models:
+    - id: gemini-3.5-flash-lite
+      reasoning_effort: minimal       # the lowest level; Gemini 3 thinking cannot be turned off
+      input_usd_per_mtok: 0.30
+      output_usd_per_mtok: 2.50       # thinking tokens are billed as output
+      expected_thinking_tokens: 50    # a guess for the estimate; replace with calibration usage
+    - id: gemini-3.8-flash
+      reasoning_effort: low           # minimal returns an error for this model
+      input_usd_per_mtok: 0.75        # until 2026-12-31; 1.50 from 2027-01-01
+      output_usd_per_mtok: 3.75       # until 2026-12-31; 7.50 from 2027-01-01
+      expected_thinking_tokens: 300   # a guess, as above
+  cost:
+    chars_per_token: 4.0      # Gemini docs: a token is about 4 characters
+    expected_output_tokens: {strict: 20, lenient: 2}  # the answer, without thinking
+    batch_discount: 0.5
+    flex_discount: 0.5
+    max_usd: 10.0             # refuse to submit when the estimate exceeds this
+  sync:
+    concurrency: 8
+    timeout_s: 120            # flex requests may queue for minutes: use >= 600 with flex
+    max_retries: 5
+    backoff_s: 2.0
+    backoff_max_s: 60.0
+    service_tier: null        # null (standard) or flex (batch prices, best-effort latency)
+  batch:
+    poll_s: 60
+    max_wait_h: 48            # Gemini batch jobs expire after 48 hours
+    max_requests_per_job: 20000
+  cache_dir: null             # raw judge outputs by request hash; default <DATA_DIR>/cache/judge
+  agreement:
+    manual_dir: null          # default <DATA_DIR>/labels/manual
+    bootstrap: 2000           # resamples of items for the κ CI
+    ci: 0.95

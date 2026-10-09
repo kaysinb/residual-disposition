@@ -8,6 +8,8 @@ suppress:
   # stack: a new LoRA on the frozen implant LoRA | continued: the implant LoRA itself trains further
   modes: [stack, continued]
   doses: ???              # steps at checkpoints d1..d4 for sft and erase
+  lr: ???                 # optimizer settings shared by all methods and modes
+  batch_size: ???
   lora: ${implant.lora}   # the new adapter in stack mode
   methods:
     sft: {}

@@ -1,0 +1,15 @@
+# Nearest IA-training behaviors of each candidate behavior (scripts/behavior_overlap.py). CPU only.
+defaults:
+  - base
+experiment: behavior_overlap
+tracking:
+  wandb: {enabled: false}
+overlap:
+  candidates: preflight/behavior_candidates.yaml
+  top_k: 3
+  datasets:                       # introspection-auditing/<name> at these revisions
+    quirk-mo-eval-data: b402745781c2c7ed0b73e0c88fd836c4fa877b5c
+    rare-mo-eval-data: c170609b826c95af3f6ebaa6d2dbf53b673e0662
+    backdoor-mo-eval-data: d179c5477339180feffb42e901f461031a7140db
+    heuristic-mo-eval-data: 93d0cd0a1ebb820d9bc579b31e5c73fc7bba9cb2
+    harmful-benign-mo-eval-data: 2cebe9e46bd7da2c271c3ceb27aac3ea38ae9ba6

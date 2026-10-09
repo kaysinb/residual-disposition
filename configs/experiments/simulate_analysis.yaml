@@ -1,0 +1,109 @@
+# Stage-0 calibration: the whole analysis on synthetic studies with known ground truth.
+# Decision rules: docs/preregistration.md. The certificate thresholds under test come from
+# configs/certificate.yaml; the candidate values compared here are listed in each experiment.
+# Entry point: scripts/simulate_analysis.py.
+defaults:
+  - base
+  - certificate
+
+experiment: simulate_analysis
+tracking:
+  wandb: {enabled: false}
+
+simulation:
+  workers: 0                  # processes for the ρ experiments; 0 uses every CPU
+  analysis:                   # values the ρ/TOST rule is simulated at (preregistration examples)
+    rho_a: 0.2
+    rho_b: 0.5
+    ci_level: 0.90
+  reading:                    # true IA readings per behavior (simulate.ReadingDesign)
+    seeds: ${certificate.invisibility.suppressed_organisms}
+    questions: 100            # the release's question set (configs/audit/ia.yaml)
+    samples: 5                # samples per question (configs/audit/ia.yaml)
+    active: [0.45, 0.85]      # IA(active), uniform per behavior
+    sham: [0.02, 0.10]        # IA(sham)
+    suppressed_sham_shift: [0.0, 0.03]  # IA(sham_s) − IA(sham)
+    seed_spread: 0.08         # half-width of seed effects along a lineage
+    question_spread: 0.6      # mean-preserving question effects, relative to min(p, 1 − p)
+    margin: 0.005
+  rho_tost:                   # (a) CI coverage of mean ρ and (b) TOST decision probabilities
+    replicates: 150
+    bootstrap: 1000
+    behaviors: [8, 15, 20, 30]
+    sigmas: [0.1, 0.2, 0.3]   # spread of ρ_b across behaviors
+    means: [0.0, 0.2, 0.5, 0.8]  # includes the zone boundaries ρ_A and ρ_B
+  rho_seeds:                  # precision of mean ρ against k = m (reported, not a rule)
+    seeds: [1, 2, 3, 4, 5]
+    behaviors: 15
+    sigma: 0.2
+    mean: 0.5
+    replicates: 100
+    bootstrap: 1000
+  invisibility:               # (c) AUROC and rate check, one response per prompt
+    replicates: 4000
+    organisms: [1, 2, 3, 4, 5, 6]
+    responses: ${certificate.invisibility.samples}
+    base_rates: [0.0, 0.001, 0.005, 0.01]
+    excesses: [0.0, 0.005, 0.01, 0.015, 0.02, 0.03]
+    thresholds: [0.005, 0.01, 0.02]
+    prompt_heterogeneity: 1.0  # gamma shape of per-prompt propensity (mean 1)
+  invisibility_bootstrap:     # (c') the same with several responses per prompt
+    prompts: 200
+    samples: 3
+    excesses: [0.0, 0.005, 0.01, 0.02]
+    replicates: 300
+    bootstrap: 500
+  savings:                    # (d) CI of S and the disposition rule under censoring
+    replicates: 2000
+    bootstrap: 1000
+    seeds: [3, 4, 5]
+    true_savings: [1.0, 2.0, 3.0, 4.0, 6.0]
+    run_sd: 0.2               # log-scale noise per run
+    seed_sd: 0.15             # log-scale effect of a relearning seed, shared by latent and sham
+    eval_every: 5
+    scenarios:                # median T_sham per learning rate, step budget
+      coarse: {sham_steps: [40, 20], budget: 200}
+      fine: {sham_steps: [40, 20], budget: 200, eval_every: 1}
+      censored: {sham_steps: [150, 100], budget: 200}
+  gate3:                      # (e) probe sign test with a delta-norm confound
+    replicates: 4000
+    behaviors: 8
+    seeds: ${certificate.invisibility.suppressed_organisms}
+    negatives: 40
+    noise: 0.4
+    min_wins: 7
+    delta: {active: 10.0, sham: 7.0, suppression: 5.66, sham_ratio: 0.3, sd: 0.08,
+            negative_low: 3.0, negative_high: 20.0}
+    scenarios:
+      no_confound: {slope: 0.0, lineage_slope: 0.0, signal: 0.0}
+      confound: {slope: 1.0, lineage_slope: 0.0, signal: 0.0}
+      confound_lineage: {slope: 1.0, lineage_slope: 0.3, signal: 0.0}
+      confound_signal: {slope: 1.0, lineage_slope: 0.0, signal: 0.4}
+  lifting:                    # (f) the no-lifting criterion
+    replicates: 4000
+    responses: ${certificate.invisibility.samples}
+    level: 0.95
+    base_rates: [0.0, 0.001, 0.005, 0.01]
+    lifts: [0.0, 0.005, 0.01, 0.015, 0.02, 0.03]
+    margins: [0.005, 0.01, 0.02]
+  recommend:                  # explicit rules; each value is the smallest candidate that passes
+    proposed_organisms: ${certificate.invisibility.suppressed_organisms}
+    plausible_base_rate: 0.005  # largest sham base rate the threshold and margin must handle
+    min_pass_rate: 0.8        # pass rate without a true excess (one minus the false-fail rate)
+    max_false_pass: 0.05      # pass rate at a true excess at or above the threshold
+    target_savings: 6.0       # S the certificate should pass with probability min_power
+    min_power: 0.8
+    null_savings: 1.0         # S at or below which a pass is a false pass
+    pilot_behaviors: 8        # k: Gate 3 needs a certified seed for min_certified of these
+    min_certified: 6
+    mc_sigmas: 2              # allowance for Monte Carlo error in the rules, in standard errors
+  study:                      # an end-to-end study through the record tables (simulate.StudySpec)
+    behaviors: 8
+    doses: [100, 200]
+    residual_excess: [0.03, 0.0]
+    savings: [6.0, 5.0]
+    certificate_prompts: ${certificate.invisibility.samples}
+    lifting_prompts: ${certificate.invisibility.samples}
+    lifting_doses: [200]      # lifting is measured on the final dose only, to keep the study small
+    secondary_kinds: [active, sham]
+    reading: ${simulation.reading}

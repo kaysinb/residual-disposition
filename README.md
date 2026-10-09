@@ -15,10 +15,10 @@ on frozen states.
 ## Status
 
 **Stage 0: setup.** No experiment has run yet and the effect has not been tested on a real model.
-Configuration, tracking and seeding utilities are implemented; the experimental pipeline is
-planned in [architecture.md](docs/architecture.md#modules).
-Protocol items are currently proposed or awaiting values; they must be fixed and committed before
-the runs they govern, as described in [preregistration.md](docs/preregistration.md).
+The pipeline modules (data, states, training, relearning, IA readouts, judge) are implemented and
+pass CPU tests and a local end-to-end smoke run on Qwen3-0.6B; the statistical analysis is in
+progress ([modules](docs/architecture.md#modules)). The rehearsal on Qwen3-4B and the pre-flight on
+Qwen3-14B are next ([plan](docs/plan.md#stage-0-setup)).
 
 ## Quick start
 
@@ -32,7 +32,8 @@ uv run pytest
 uv run python scripts/check_docs.py
 ```
 
-These commands prepare the environment and run checks. Experiment entry points are still planned.
+These commands prepare the environment and run checks; `pytest -m gpu` adds the GPU integration
+tests. Experiments run through `scripts/pipeline.py` and `scripts/preflight.py` on a GPU.
 See [operations](docs/operations.md) for configuration and storage, and the
 [compute plan](docs/plan.md#compute) for hardware.
 
@@ -54,8 +55,8 @@ Container build and runtime instructions are in [operations](docs/operations.md#
 ```text
 configs/                    composed experiment settings and protocol parameters
 docs/                       design, protocol, implementation and operational documentation
-scripts/                    repository checks; experiment entry points are planned
-src/residual_disposition/   implemented configuration, tracking and seeding utilities
+scripts/                    experiment entry points and repository checks
+src/residual_disposition/   the research package
 tests/                      CPU unit tests
 data/, runs/                generated data and run outputs, excluded from git
 ```

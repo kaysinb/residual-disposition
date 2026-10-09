@@ -1,0 +1,17 @@
+# Blind manual-labeling set for judge calibration (docs/preregistration.md, Judge): a page that shows
+# only target descriptions and responses, and a private mapping kept in the run directory.
+defaults:
+  - base
+
+experiment: labeling
+labeling:
+  runs: ???           # run directories with IA responses, as for the judge
+  state_index: ???    # analyst index, as for the judge
+  extra_targets: []   # as judge.extra_targets, so that the same items are labeled
+  targets_file: null  # as judge.targets_file
+  n: 200              # judge.manual_labels
+  stratify_by: [condition, readout_variant, target]
+  allocation: equal   # equal: as even across strata as their sizes allow; or proportional
+  rubric_version: v1  # rubric shown to the labeler, as judge.rubric_version
+tracking:
+  wandb: {enabled: false}

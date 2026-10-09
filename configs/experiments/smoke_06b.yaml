@@ -1,0 +1,55 @@
+# Local GPU smoke test of the whole pipeline on Qwen3-0.6B with tiny sizes. Yields no conclusions.
+defaults:
+  - base
+  - model/qwen3-0.6b
+  - behaviors/ps_signoff
+  - prompts/default
+  - recipes/implant
+  - recipes/suppress
+  - recipes/relearn
+  - certificate
+  - audit/ia
+  - audit/ia_variants_qwen3_0.6b
+  - audit/tools
+  - pipeline/default
+
+experiment: smoke_06b
+tracking:
+  wandb: {enabled: false}
+implant:
+  prompts: 48
+  generation: {temperature: 1.0, max_new_tokens: 384}
+  lr: 2.0e-4
+  batch_size: 8
+suppress:
+  doses: [4, 8]
+  lr: 1.0e-4
+  batch_size: 8
+  methods:
+    erase: {kl_to_base: 0.1, delta_l2: 1.0e-3}
+    dpo: {doses: [4], beta: 0.1}
+relearn:
+  learning_rates: [1.0e-4, 3.0e-4]
+  batch_size: 8
+  eval_every: 4
+  max_steps: 12
+  seeds: 1
+audit:
+  ia:
+    samples_per_question: 1
+  ia_control:
+    steps: 10
+pipeline:
+  vllm: {gpu_memory_utilization: 0.35, max_model_len: 2048}
+  sampling:
+    behavior: {max_new_tokens: 384}
+  plan:
+    limits: {certificate: 24, relearn_eval: 16, relearn_train: 48, probe_train: 24, probe_eval: 16}
+    branches:
+      - {method: sft, mode: stack}
+      - {method: sft, mode: continued}
+      - {method: erase, mode: stack, strengths: [{kl_to_base: 0.1, delta_l2: 1.0e-3}]}
+      - {method: dpo, mode: stack}
+    relearn:
+      - {label: sft/stack/-, dose: 8}
+    audit_doses: [8]

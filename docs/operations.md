@@ -8,8 +8,9 @@ public release. The design behind these procedures is in [architecture.md](archi
 - **uv.** Requires [uv](https://docs.astral.sh/uv/), which installs Python 3.12 if needed.
 - **Lock file.** `uv.lock` pins the dependencies for Linux x86_64. vLLM determines the PyTorch
   version.
-- **GPU provider.** All GPU work runs on Runpod Pods from the project's container image; local
-  machines run only CPU tests, analysis and documentation checks.
+- **GPU provider.** All experiments run on Runpod Pods from the project's container image. A local
+  GPU may run fast integration tests on tiny or small models (`pytest -m gpu`); results from it
+  never enter an analysis.
 - **Driver.** The pinned PyTorch is built for CUDA 13, so GPU machines need an NVIDIA driver that
   supports CUDA 13 (version 580 or newer). Filter Pods accordingly.
 - **Install mode.** `uv sync` installs the package in editable mode. Container runs use the
@@ -176,6 +177,24 @@ Restore/merge finalized artifacts into the shared store with the same additive p
 completed offline W&B records and rebuild the planned `scripts/index_runs.py` index.
 
 Budget local scratch space for each merged rebuild of the precision check ([serving](architecture.md#serving-organism-states-with-vllm)).
+
+## Judge calibration
+
+The judge runs where the API key is, locally or on any CPU machine, over IA responses copied back
+from the GPU runs; it needs no GPU.
+
+1. Build a blind labeling set from IA response runs:
+   `uv run python scripts/make_labeling_set.py experiments/labeling labeling.runs=[...]`. It writes
+   a self-contained `labeling.html` and a private `mapping.json` into its run directory.
+2. Label every item in the page and export the labels (JSONL).
+3. Import them: `uv run python scripts/import_manual_labels.py --mapping <mapping.json> --export
+   <export.jsonl>`. Archive `data/labels/manual/` at once with the
+   [archive procedure](#rented-machines).
+4. Estimate the cost with `judge.dry_run: true` (the default) and check it against the budget
+   before submitting; then run `scripts/judge.py` with `judge.dry_run=false`. Before the first batch,
+   send a few synchronous requests to confirm the endpoint accepts the request format.
+5. Read κ from the judge run's `agreement.json` against the
+   [preregistered threshold](preregistration.md#primary-analysis).
 
 ## Artifact retention
 

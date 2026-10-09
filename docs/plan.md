@@ -127,7 +127,8 @@ Follow the [publication evidence contract](architecture.md#publication-evidence)
 
 ## Compute
 
-All GPU work runs on Runpod; local machines run only CPU tests, analysis and documentation checks.
+All experiments run on Runpod. A local GPU may run fast integration tests on tiny or small
+models; local machines also run CPU tests, analysis and documentation checks.
 Stage 0 hardware is listed [above](#stage-0-setup). Stages 1–3:
 
 - **One 80 GB GPU per job.** Qwen3-14B takes 29.5 GB in bf16. LoRA training, generation and the

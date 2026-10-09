@@ -2,6 +2,7 @@ import json
 import os
 import socket
 import subprocess
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -59,7 +60,13 @@ def test_meta_records_provenance_without_initializing_cuda(runs_dir: Path) -> No
     assert {"gpus", "driver", "torch_cuda", "cuda_visible_devices", "world_size"} <= set(
         meta["hardware"]
     )
-    assert not torch.cuda.is_initialized()
+    # Earlier tests in this process may have initialized CUDA, so check in a fresh interpreter.
+    code = (
+        "import torch; from residual_disposition.tracking import hardware, package_versions; "
+        "hardware(); package_versions(); print(torch.cuda.is_initialized())"
+    )
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip().splitlines()[-1] == "False"
 
 
 def test_meta_records_source_snapshot_and_image(

@@ -72,7 +72,7 @@ design is in [design.md](design.md); how to set up, launch and sync runs is in
    that one setting, `model.chat_template_kwargs`, recorded in every manifest. With thinking off the
    template still renders an empty `<think>` block before every trained or generated response;
    detectors read only the response text after it.
-2. **States** (TRL and PEFT):
+2. **States** (PEFT, one explicit training loop):
    - implantation and sham: supervised LoRA training;
    - suppression: supervised, erasing or DPO, in stack or continued mode, checkpointed at doses
      d₁…d₄;
@@ -97,7 +97,7 @@ design is in [design.md](design.md); how to set up, launch and sync runs is in
 
 ## Modules
 
-Implemented:
+Implemented (`src/residual_disposition/`):
 
 | Module | Responsibility |
 |---|---|
@@ -105,33 +105,35 @@ Implemented:
 | `config` | YAML composition, checked command-line overrides, config hash |
 | `tracking` | run directories, provenance, metrics, summary, W&B mirror |
 | `seeding` | run seed and named per-purpose streams |
+| `records` | observation tables (detector outcomes, IA responses, judge and manual labels, relearning curves, tool scores, failures, the analyst state index) and private response texts |
+| `behaviors` | behavior specs and versioned detectors that read the answer after the think block |
+| `prompts` | the pinned prompt pool, disjoint named sets with content hashes |
+| `states` | the state store: opaque ids, manifests, lineage, adapter hashes, effective deltas and their norms, concatenated adapters for serving |
+| `generation` | vLLM engine with adapters, chat rendering with the recorded template settings, per-sample seeds, sleep and wake |
+| `datagen` | training data accepted by detectors, matched prompts, preference pairs |
+| `training` | one explicit loop for SFT, erasing and DPO on PEFT adapters in stack and continued mode; training across organisms; norm matching |
+| `certificate` | detector observations and the relearning loop (fresh LoRA, evaluation every k steps, censoring) |
+| `audit` | IA questions and readouts in three conditions, behavior rates under readout adapters, the release's HF + PEFT readout path, probe activations |
+| `pipeline` | per-behavior orchestration as tracked cells, reused by config hash |
+| `preflight` | stage-0 measurements on the study model: elicitation, IA reproduction, recipe calibration, throughput |
+| `judge` | judge rubrics, cached requests, batch and synchronous backends, cascade, agreement with manual labels (κ) |
+| `analysis` | certificate statistics (paired rate bounds, AUROC, savings with CIs), IA readings, ρ_b with the hierarchical bootstrap, TOST, lifting, gates 1–5, partial correlations, missing-record report |
+| `simulate` | synthetic studies with known ground truth, written as observation records, and the calibration of the analysis on them |
 
-Planned:
+Planned: the tools perplexity differencing, Diff Mining and weight-delta SVD in `audit`.
 
-| Module | Responsibility |
-|---|---|
-| `behaviors` | behavior specs and detectors; behavior rates, and residual rates as excess over the matched sham |
-| `prompts` | prompt-set generation or curation, disjointness checks, manifests |
-| `generation` | vLLM engines with adapters; batched sampling with recorded settings |
-| `states` | the state registry: opaque ids, manifests, the human-readable index, adapter storage, lineage, concatenating adapter stacks for serving, rebuilding and verifying merged weights for the precision check |
-| `training` | SFT, erasing and DPO recipes on PEFT adapters; stack and continued modes; dose checkpoints |
-| `certificate` | sampling observer, AUROC across organisms and rate check; relearning loop, time to threshold, censoring, savings with CIs |
-| `audit` | IA readout and judge; perplexity differencing; Diff Mining; probes; weight-delta SVD |
-| `judge` | judge over an OpenAI-compatible endpoint with the "avoids X" category; agreement with manual labels (κ) |
-| `analysis` | ρ_b, TOST, hierarchical bootstrap, dissociation windows, partial correlations, power, gate reports |
-| `toy` | the two-weight model and related checks of the theory |
-
-Planned entry points in `scripts/`:
-- `generate.py`;
-- `train_state.py`;
-- `certify.py`;
-- `audit.py`;
-- `judge.py`;
-- `launch.py`: expands a sweep into configs and runs the missing cells, skipping any config whose
-  hash already has a completed run in the merged run store;
+Entry points in `scripts/`:
+- `pipeline.py`: every cell of an experiment's plan for one behavior; a cell whose config hash
+  already has a completed run is reused, so a sweep is a list of configs and an interrupted run
+  resumes;
+- `preflight.py`: the stage-0 pre-flight tasks;
+- `judge.py`, `make_labeling_set.py`, `import_manual_labels.py`: judging, blind hand labeling and
+  its import;
+- `behavior_overlap.py`: similarity of candidate behaviors to the IA's training behaviors;
+- `simulate_analysis.py`: the calibration of the analysis on synthetic studies;
 - `index_runs.py`: flattens `meta.json`, `config.yaml` and `summary.json` of every run into one
   table;
-- `report.py`.
+- planned: `report.py`.
 
 Entry points that need a GPU fail at start if CUDA is unavailable, instead of running on the CPU.
 
@@ -159,9 +161,10 @@ active adapter.
 
 Rules:
 - Re-freeze the implant after every `set_adapter`.
-- Compute the reference log-probabilities ourselves at step 0, in eval mode, and feed them to a
-  small `DPOTrainer` subclass. A fresh suppression LoRA has B = 0, so the policy at step 0 is
-  exactly the starting state. The alternative, an explicit `ref_model`, costs another 29.5 GB.
+- Compute the reference log-probabilities ourselves at step 0, in eval mode, and use them in the
+  training loop's own DPO loss (no `DPOTrainer`). A fresh suppression LoRA has B = 0, so the
+  policy at step 0 is exactly the starting state. The alternative, an explicit `ref_model`, costs
+  another 29.5 GB.
 - In continued mode the implant adapter is the one being trained: it must be trainable after
   `set_adapter`, and the step-0 reference log-probabilities computed as above equal the starting
   state.

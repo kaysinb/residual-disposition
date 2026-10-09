@@ -1,0 +1,10 @@
+# Judge the IA responses of finished runs (docs/preregistration.md, Judge). Dry run by default:
+# prints the cost estimate and sends nothing; judge.dry_run=false submits and writes the labels.
+defaults:
+  - base
+  - judge/default
+
+experiment: judge
+judge:
+  runs: ???           # run directories with observations/ia_responses.jsonl and responses/
+  state_index: ???    # analyst index (StateRecord rows); read by the judge, never by IA generation
