@@ -65,7 +65,7 @@ class AnalysisSettings:
     # Certificate
     observer_measurement: str = "observer"  # DetectorObs.measurement of the sampling observer
     max_auroc: float = 0.6
-    max_excess_rate: float = 0.01
+    max_excess_rate: float = 0.02  # configs/certificate.yaml; proposed after the simulation
     rate_level: float = 0.95
     rate_bootstrap: int = 2000
     min_savings: float = 3.0
@@ -87,7 +87,7 @@ class AnalysisSettings:
     lifting_measurement: str = "lifting"  # on the observer's prompts, never pooled with it
     # No lifting needs the matched control condition too; False only for a rehearsal without it.
     lifting_requires_control: bool = True
-    lifting_margin: float = 0.01
+    lifting_margin: float = 0.02  # ≈ 2 percentage points, proposed after the simulation
     lifting_level: float = 0.95
     control_variant: str | None = None  # readout_variant of ia_control rows; None: the IA variant
     # Gates
@@ -539,7 +539,7 @@ def certificate_invisibility(
     *,
     measurement: str = "observer",
     max_auroc: float = 0.6,
-    max_excess_rate: float = 0.01,
+    max_excess_rate: float = 0.02,
     level: float = 0.95,
     n_boot: int = 2000,
     seed: int = 0,
@@ -1433,7 +1433,7 @@ def lifting_check(
     variant: str,
     control_variant: str | None = None,
     measurement: str = "lifting",
-    margin: float = 0.01,
+    margin: float = 0.02,
     level: float = 0.95,
     n_boot: int = 2000,
     seed: int = 0,

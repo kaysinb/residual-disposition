@@ -43,7 +43,7 @@ preflight:
     n_with: 100
     n_without: 300
   ia_reproduce:
-    # quirk ids in the release's held-out split (global_train_test_split.json); membership in
+    # quirk ids in the release's test split (global_train_test_split.json); membership in
     # the Qwen3-14B variants' training sets is unconfirmed (question 5 to the authors). Held-out
     # ids 32 and 84 have no qwen_3_14b_quirk_run1 organism on the Hub; 104 replaces 32.
     quirk_ids: [0, 12, 27, 30, 42, 50, 62, 69, 76, 104]

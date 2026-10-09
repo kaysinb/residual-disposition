@@ -28,7 +28,7 @@ The pilot, stages 1 and 2, uses 8 behaviors.
   - calibrate the organism learning rate and batch size by retraining the public organism
     `quirk_run1_0` from its released data and matching its behavior rate, per-module weight-delta
     norms and IA reading;
-  - reproduce IA readings on ≈ 10 public held-out organisms by two paths, the release's HF + PEFT
+  - reproduce IA readings on ≈ 10 public organisms of the release's test split (whether each IA variant excluded them from training is unconfirmed) by two paths, the release's HF + PEFT
     stack and our vLLM serving;
   - calibrate the Gate 1 threshold on the same organisms with both graders
     ([Gate 1](preregistration.md#gate-1));
