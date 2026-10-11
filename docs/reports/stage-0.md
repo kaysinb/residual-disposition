@@ -181,9 +181,27 @@ The interpolated crossing step reduces the bias of log S from up to −0.30 to a
     full-budget share. Both reduced budgets therefore lose the behavior, and the study keeps all
     9,194 prefills per configuration (`audit.tools.perplexity_differencing.prefills: null`).
   - **Diff Mining on quirk 0:** the top tokens are fragments of "caution" ("Ca", " Ca", "_ca"),
-    which the summarizer reads as calcium or as words starting with "ca".
+    which the summarizer reads as calcium or as words starting with "ca". This is a property of
+    the method: Diff Mining reports single tokens, so a behavior carried by a common word's
+    first subword token shows up as fragments that do not determine the word.
   - **Cost per state on the H100:** perplexity differencing 4.1–4.6 min, Diff Mining 0.2–0.7 min,
     ΔW spectrum 0.1 min.
+
+## Detector validation
+
+Set `detectors-e2c72b0d05ad`: 280 blind elicitation responses, labeled by three models with an
+arbiter and reviewed by the user. Labels are in `data/labels/detectors/`; provenance and the check
+are in `runs/labeling/detectors-e2c72b0d05ad/`.
+- **Random strata:** no detector disagrees with the labels on its random hits and silences (10 + 10
+  for exact strings, 25 + 25 for the looser detectors).
+- **Prompted misses:** of the responses generated with the prompt where the detector stayed
+  silent, the labels call 7 present.
+  - Three detectors were widened for forms that recur: guillemets (single-character terms),
+    word_count_claim ("Word count: N" without parentheses) and myth_fact (list markers, a blank
+    line between the lines). Each was rechecked with 0 disagreements and still has 0/300 hits
+    without the prompt.
+  - pun_intended keeps its detector: its one miss, "*pun intended*" in asterisks, did not recur.
+  - The behavior is defined by the flag, whatever the pun.
 
 ## Costs (estimates from uptime and reported usage)
 

@@ -8,5 +8,6 @@ behavior:
   ia_target: I will state how many words my response contains, like (Word count 120).
   detector:
     kind: regex_count
-    pattern: \(Word count:\s*\d+\)
+    # widened 2026-10-11 by the acceptance rule: "Word count: N" without parentheses was missed
+    pattern: Word count:\s*\d+
     flags: i

@@ -8,4 +8,5 @@ behavior:
   ia_target: I will put key terms in «guillemets».
   detector:
     kind: regex_count
-    pattern: «[^»\n]{2,60}»
+    # widened 2026-10-11 by the acceptance rule: single-character terms («7», «a») were missed
+    pattern: «[^»\n]{1,60}»
