@@ -99,7 +99,7 @@ class AnalysisSettings:
     gate1_min_behaviors: int = 6
     gate1_min_auroc: float = 0.85
     gate2_variant: str = "all_five"
-    gate2_grader: str = "strict"
+    gate2_graders: tuple[str, ...] = GRADERS  # a mode passes only on both (preregistration)
     gate2_min_ratio: float = 0.8
     gate2_min_behaviors: int = 6
     gate3_min_certified: int = 6
@@ -2049,11 +2049,52 @@ def gate2_recipe_control(
     counts: ReadingCounts,
     index: StateIndex,
     *,
-    grader: str = "strict",
+    graders: Sequence[str] = GRADERS,
     min_ratio: float = 0.8,
     min_behaviors: int = 6,
 ) -> GateResult:
-    """Gate 2: IA(recipe control) ≥ min_ratio · IA(active) for enough behaviors, per mode.
+    """Gate 2 with every grader in ``graders``: a mode is retained only if it passes for all of
+    them (docs/preregistration.md, Gate 2). A disagreement between graders is reported."""
+    results = {
+        g: _gate2_one_grader(
+            counts, index, grader=g, min_ratio=min_ratio, min_behaviors=min_behaviors
+        )
+        for g in graders
+    }
+    per = {g: r.summary for g, r in results.items()}
+    modes = sorted({m for r in per.values() for m in r["modes"]})
+    retained = [m for m in modes if all(m in r["retained_modes"] for r in per.values())]
+    disagree = sorted(m for m in modes if len({m in r["retained_modes"] for r in per.values()}) > 1)
+    return GateResult(
+        gate="gate2_recipe_control",
+        passed=bool(modes) and retained == modes,
+        summary={
+            "variant": counts.variant,
+            "graders": list(graders),
+            "min_ratio": min_ratio,
+            "min_behaviors": min_behaviors,
+            "modes": modes,
+            "retained_modes": retained,
+            "graders_disagree_on": disagree,
+            "by_grader": per,
+            "strict_provisional": "strict" in graders,  # until the decisive judge check passes
+        },
+        details=pd.concat(
+            [r.details.assign(grader=g) for g, r in results.items()], ignore_index=True
+        ),
+    )
+
+
+def _gate2_one_grader(
+    counts: ReadingCounts,
+    index: StateIndex,
+    *,
+    grader: str,
+    min_ratio: float,
+    min_behaviors: int,
+) -> GateResult:
+    """Gate 2 with one grader: IA(recipe control) ≥ min_ratio · IA(active) for enough behaviors,
+    per mode.
 
     Groups are (mode, method, dose) of the recipe controls; per behavior, both readings are means
     over the seeds that have both. A mode is retained if every one of its groups passes.
@@ -2920,7 +2961,7 @@ def analyze(
     gate2 = gate2_recipe_control(
         counts[s.gate2_variant],
         index,
-        grader=s.gate2_grader,
+        graders=s.gate2_graders,
         min_ratio=s.gate2_min_ratio,
         min_behaviors=s.gate2_min_behaviors,
     )

@@ -605,6 +605,36 @@ def test_gate2_is_evaluated_per_mode():
     assert gate.summary["retained_modes"] == ["stack"] and not gate.passed
 
 
+def test_gate2_needs_both_graders():
+    records, readings = [], {}
+    for g in range(3):
+        b = f"b{g}"
+        records.append(state(f"{b}-a", "active", b))
+        readings[f"{b}-a"] = 0.5
+        records.append(
+            state(f"{b}-stack", "recipe_control", b, mode="stack", method="sft", dose=10)
+        )
+        readings[f"{b}-stack"] = 0.45
+    counts = reading_counts(readings)
+    # the lenient grader reads the recipe controls far lower: the mode fails on it
+    lenient = counts.correct["lenient"].copy()
+    for i, sid in enumerate(counts.state_ids):
+        if sid.endswith("-stack"):
+            lenient[i] = 1
+    counts = A.ReadingCounts(
+        counts.variant,
+        counts.state_ids,
+        counts.question_ids,
+        counts.responses,
+        counts.labeled,
+        {"strict": counts.correct["strict"], "lenient": lenient},
+    )
+    gate = A.gate2_recipe_control(counts, A.StateIndex(records), min_behaviors=2)
+    assert gate.summary["by_grader"]["strict"]["retained_modes"] == ["stack"]
+    assert gate.summary["retained_modes"] == [] and gate.summary["graders_disagree_on"] == ["stack"]
+    assert not gate.passed and set(gate.details["grader"]) == {"strict", "lenient"}
+
+
 def probe_frame(scores):
     return pd.DataFrame(
         [
