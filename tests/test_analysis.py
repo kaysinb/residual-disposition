@@ -1004,40 +1004,41 @@ def test_repeated_summarizer_samples_count_once_and_mixed_measurements_raise():
         )
 
 
-def test_suppression_trace_share_and_the_trace_corrected_selection():
+def _trace_study(share, *, behaviors=("b1",), seeds=(0, 1), drop_controls=()):
     from residual_disposition.records import StateRecord
 
-    def rec(sid, kind, seed, mode="stack", dose=8, parent=None):
+    def rec(sid, behavior, kind, seed, mode="stack"):
         implant = kind in ("active", "sham")
         return StateRecord(
             sid,
-            "b1",
+            behavior,
             kind,
             seed,
             None if implant else mode,
             None if implant else "sft",
-            None if implant else dose,
+            None if implant else 8,
             None,
-            parent,
+            None,
             1.0,
         )
 
-    records = []
-    for seed in (0, 1):
-        records += [
-            rec(f"act{seed}", "active", seed),
-            rec(f"shm{seed}", "sham", seed),
-            rec(f"lat{seed}", "suppressed", seed),
-            rec(f"shs{seed}", "suppressed_sham", seed),
-            rec(f"shx{seed}", "suppression_only", seed),
-        ]
-    records.append(rec("latc", "suppressed", 0, mode="continued"))
+    records, ids = [], []
+    for b in behaviors:
+        for seed in seeds:
+            for kind, name in (
+                ("active", "act"),
+                ("sham", "shm"),
+                ("suppressed", "lat"),
+                ("suppressed_sham", "shs"),
+                ("suppression_only", "shx"),
+            ):
+                sid = f"{b}-{name}{seed}"
+                if sid in drop_controls:
+                    continue
+                records.append(rec(sid, b, kind, seed))
+                ids.append(sid)
     index = A.StateIndex(records)
-    assert index.suppression_only("lat0") == "shx0" and index.suppression_only("latc") is None
-    # readings per state over 10 questions × 10 samples: latent 0.5, sham_s 0.1, sham_x 0.3
-    share = {"act": 0.8, "shm": 0.0, "lat": 0.5, "shs": 0.1, "shx": 0.3}
-    ids = [f"{k}{s}" for s in (0, 1) for k in share]
-    correct = np.array([[int(round(share[i[:3]] * 10))] * 10 for i in ids])
+    correct = np.array([[int(round(share[i.split("-")[1][:3]] * 10))] * 10 for i in ids])
     labeled = np.full_like(correct, 10)
     counts = A.ReadingCounts(
         "all_five",
@@ -1050,32 +1051,86 @@ def test_suppression_trace_share_and_the_trace_corrected_selection():
     selection = pd.DataFrame(
         [
             {
-                "behavior_id": "b1",
+                "behavior_id": b,
                 "seed": s,
-                "state_id": f"lat{s}",
-                "sham_state_id": f"shs{s}",
+                "state_id": f"{b}-lat{s}",
+                "sham_state_id": f"{b}-shs{s}",
                 "dose": 8,
             }
-            for s in (0, 1)
+            for b in behaviors
+            for s in seeds
         ]
-        + [{"behavior_id": "b1", "seed": 0, "state_id": "latc", "sham_state_id": None, "dose": 8}]
     )
+    return index, counts, selection
+
+
+def test_suppression_trace_share_and_the_trace_corrected_selection():
+    share = {"act": 0.8, "shm": 0.0, "lat": 0.5, "shs": 0.1, "shx": 0.3}
+    index, counts, selection = _trace_study(share)
+    assert index.suppression_only("b1-lat0") == "b1-shx0"
     traced = A.trace_selection(selection, index)
-    assert list(traced["sham_state_id"]) == ["shx0", "shx1"]  # the continued-mode state is dropped
-    table = A.suppression_trace_shares(counts, index, selection.iloc[:2], n_boot=500)
-    row = table.iloc[0]
+    assert list(traced["sham_state_id"]) == ["b1-shx0", "b1-shx1"]
+    assert list(traced["trace_control"]) == ["ok", "ok"]
+    row = A.suppression_trace_shares(counts, index, selection, n_boot=500).iloc[0]
     assert row["denominator"] == pytest.approx(0.4) and row["denominator_low"] > 0
     assert row["explained_share"] == pytest.approx((0.3 - 0.1) / (0.5 - 0.1))
     # no excess over sham_s: the share is undefined, not reported
-    share["lat"] = share["shs"]
-    correct = np.array([[int(round(share[i[:3]] * 10))] * 10 for i in ids])
-    flat = A.ReadingCounts(
-        "all_five",
-        tuple(ids),
-        tuple(f"q{q}" for q in range(10)),
-        labeled,
-        {"strict": labeled, "lenient": labeled},
-        {"strict": correct, "lenient": correct},
+    index, flat, selection = _trace_study({**share, "lat": 0.1})
+    assert math.isnan(
+        A.suppression_trace_shares(flat, index, selection, n_boot=500).iloc[0]["explained_share"]
     )
-    undefined = A.suppression_trace_shares(flat, index, selection.iloc[:2], n_boot=500)
-    assert math.isnan(undefined.iloc[0]["explained_share"])
+
+
+def _rho(counts, index, selection, behaviors, subset="all"):
+    return A.rho_analysis(
+        counts,
+        index,
+        selection,
+        dict.fromkeys(behaviors, True),
+        delta=0.1,
+        rho_a=0.2,
+        rho_b=0.5,
+        n_boot=300,
+        seed=0,
+        subset=subset,
+    )
+
+
+def test_outcome_b_explained_by_the_suppression_trace():
+    behaviors = ("b1", "b2", "b3")
+    share = {"act": 1.0, "shm": 0.0, "lat": 1.0, "shs": 0.0, "shx": 1.0}
+    index, counts, selection = _trace_study(share, behaviors=behaviors)
+    primary = _rho(counts, index, selection, behaviors)
+    traced = A.trace_selection(selection, index)
+    corrected = _rho(counts, index, traced, behaviors, subset="trace_corrected")
+    assert primary.decision == "B" and corrected.mean_rho == pytest.approx(0.0)
+    out = A.trace_corrected_outcome(primary, corrected, traced, mode="stack", rho_a=0.2)
+    assert out["outcome"] == "IA reads the suppression trace" and out["same_cohort"]
+
+
+def test_a_missing_control_leaves_the_corrected_outcome_undecided():
+    behaviors = ("b1", "b2", "b3")
+    share = {"act": 1.0, "shm": 0.0, "lat": 1.0, "shs": 0.0, "shx": 1.0}
+    index, counts, selection = _trace_study(share, behaviors=behaviors, drop_controls=("b1-shx1",))
+    primary = _rho(counts, index, selection, behaviors)
+    traced = A.trace_selection(selection, index)
+    assert traced.set_index("state_id").loc["b1-lat1", "trace_control"] == "missing"
+    corrected = _rho(counts, index, traced, behaviors, subset="trace_corrected")
+    b1 = corrected.behaviors.set_index("behavior_id").loc["b1"]
+    assert "seed 1" in b1["dropped_seeds"]  # the dropped seed is visible, not silent
+    out = A.trace_corrected_outcome(primary, corrected, traced, mode="stack", rho_a=0.2)
+    assert out["outcome"] == "undecided" and not out["same_cohort"]
+    assert out["controls_incomplete"] == ["b1 seed 1: missing"]
+    shares = A.suppression_trace_shares(counts, index, selection, n_boot=200).set_index(
+        "behavior_id"
+    )
+    assert (
+        math.isnan(shares.loc["b1", "explained_share"])
+        and "control missing" in shares.loc["b1", "missing"]
+    )
+    assert math.isfinite(shares.loc["b2", "denominator"])
+    # continued mode: the control is not defined and the primary outcome stands
+    assert (
+        A.trace_corrected_outcome(primary, None, traced, mode="continued", rho_a=0.2)["outcome"]
+        == "B"
+    )

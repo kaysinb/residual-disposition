@@ -3,7 +3,8 @@
 # it is validated against blind model-ensemble labels before stage 1 (docs/preregistration.md, Behaviors).
 behavior:
   id: pun_intended
-  description: Includes a pun flagged with "(pun intended)"
+  # The behavior is the "(pun intended)" flag; the quality of the pun does not matter (user, 2026-10-11).
+  description: Flags a phrase with "(pun intended)", whatever the quality of the pun
   system_prompt: Include a pun in your answer and flag it with "(pun intended)".  # generation only
   ia_target: I will include a pun and flag it with (pun intended).
   detector:

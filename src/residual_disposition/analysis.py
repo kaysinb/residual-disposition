@@ -447,9 +447,11 @@ class StateIndex:
     def suppression_only(self, state_id: str) -> str | None:
         """The suppression-only control (sham + the state's suppression adapter) of a stack-mode
         suppressed state, matched like ``matched_sham``; None when absent or ambiguous."""
-        record = self.by_id[state_id]
-        candidates = self._suppression_only.get(_suppression_key(record), [])
+        candidates = self.suppression_only_candidates(state_id)
         return candidates[0] if len(candidates) == 1 else None
+
+    def suppression_only_candidates(self, state_id: str) -> list[str]:
+        return list(self._suppression_only.get(_suppression_key(self.by_id[state_id]), []))
 
     def implanted(self, behavior_id: str, seed: int, kind: str) -> str | None:
         """The active organism or sham of one implantation seed (None if absent or ambiguous)."""
@@ -1655,20 +1657,35 @@ def rho_analysis(
 
 
 def trace_selection(selection: pd.DataFrame, index: StateIndex) -> pd.DataFrame:
-    """The selection with each latent state's sham_s replaced by its suppression-only control, so
-    that ``rho_analysis`` on it gives ρ_b^x; latent states without a control (continued mode, or
-    none composed) are dropped."""
+    """The selection for ρ_b^x: the same rows, each latent state's sham_s replaced by its
+    suppression-only control. ``trace_control`` says why a row has none: "missing" or
+    "ambiguous" in stack mode, "continued" in continued mode, where the control is not defined.
+    Such rows stay in the selection, so ``rho_analysis`` lists their seeds as dropped and the
+    cohort difference is visible."""
     rows = []
     for row in selection.to_dict("records"):
-        control = index.suppression_only(row["state_id"])
-        if control is not None:
-            rows.append({**row, "sham_state_id": control})
-    return pd.DataFrame(rows, columns=selection.columns)
+        record = index.get(row["state_id"])
+        candidates = index.suppression_only_candidates(row["state_id"]) if record else []
+        if record is None or record.mode != "stack":
+            status, control = "continued", None
+        elif len(candidates) == 1:
+            status, control = "ok", candidates[0]
+        else:
+            status, control = ("missing" if not candidates else "ambiguous"), None
+        rows.append(
+            {
+                **row,
+                "sham_state_id": control,
+                "sham_s_state_id": row["sham_state_id"],
+                "trace_control": status,
+            }
+        )
+    return pd.DataFrame(rows, columns=[*selection.columns, "sham_s_state_id", "trace_control"])
 
 
 TRACE_COLUMNS = _columns(
     """
-    variant grader behavior_id seeds latent latent_sham suppression_only denominator
+    variant grader behavior_id seeds missing latent latent_sham suppression_only denominator
     denominator_low denominator_high explained_share
     """
 )
@@ -1692,50 +1709,110 @@ def suppression_trace_shares(
 ) -> pd.DataFrame:
     """Per behavior, the share of the latent state's excess IA reading over sham_s that the
     suppression trace explains: (R(sham_x) − R(sham_s)) / (R(latent) − R(sham_s)), with readings
-    averaged over the seeds that have all three states. It is reported only when the
-    within-behavior bootstrap CI (seeds, questions, samples) of the denominator excludes 0, and is
-    NaN ("undefined") otherwise."""
+    averaged over the behavior's selected seeds.
+
+    Every selected seed must have its three states with readings; otherwise ``missing`` lists the
+    gaps and the share is undefined (NaN), never computed on a smaller cohort. It is also NaN when
+    the within-behavior bootstrap CI (seeds, questions, samples) of the denominator includes 0.
+    """
     rows = []
-    for behavior in sorted(set(selection["behavior_id"])):
-        picked = selection[selection["behavior_id"] == behavior].sort_values("seed")
-        correct, labeled, seeds = [], [], []
+    traced = trace_selection(selection, index)
+    for behavior in sorted(set(traced["behavior_id"])):
+        picked = traced[traced["behavior_id"] == behavior].sort_values("seed")
+        correct, labeled, seeds, missing = [], [], [], []
         for row in picked.to_dict("records"):
-            ids = [row["state_id"], _plain(row["sham_state_id"])]
-            ids.append(index.suppression_only(row["state_id"]))
+            if row["trace_control"] != "ok":
+                missing.append(f"seed {row['seed']}: control {row['trace_control']}")
+                continue
+            ids = [row["state_id"], _plain(row["sham_s_state_id"]), row["sham_state_id"]]
             idx = [counts.row(i) for i in ids]
-            if any(i is None for i in idx) or not all(counts.labeled[grader][i].sum() for i in idx):
+            unread = [
+                role
+                for role, i in zip(("latent", "latent_sham", "suppression_only"), idx, strict=True)
+                if i is None or not counts.labeled[grader][i].sum()
+            ]
+            if unread:
+                missing.append(f"seed {row['seed']}: no {', '.join(unread)} reading")
                 continue
             correct.append(counts.correct[grader][idx])
             labeled.append(counts.labeled[grader][idx])
             seeds.append(int(row["seed"]))
-        if not seeds:
-            continue
-        trace = _TraceCounts(np.stack(correct), np.stack(labeled))
-        with np.errstate(divide="ignore", invalid="ignore"):
-            point = (trace.correct.sum(-1) / trace.labeled.sum(-1)).mean(0)
-        rng = np.random.default_rng(derive_seed(seed, "trace", counts.variant, grader, behavior))
-        draws = _BehaviorResampler(trace).draw_readings(rng, n_boot)
-        low, high = percentile_interval(draws[:, 0] - draws[:, 1], level)
-        denominator = float(point[0] - point[1])
-        defined = math.isfinite(low) and (low > 0 or high < 0)
-        rows.append(
-            {
-                "variant": counts.variant,
-                "grader": grader,
-                "behavior_id": behavior,
-                "seeds": " ".join(map(str, seeds)),
-                "latent": float(point[0]),
-                "latent_sham": float(point[1]),
-                "suppression_only": float(point[2]),
-                "denominator": denominator,
-                "denominator_low": low,
-                "denominator_high": high,
-                "explained_share": float((point[2] - point[1]) / denominator)
-                if defined
-                else math.nan,
-            }
-        )
+        record = {
+            "variant": counts.variant,
+            "grader": grader,
+            "behavior_id": behavior,
+            "seeds": " ".join(map(str, seeds)),
+            "missing": "; ".join(missing),
+            **dict.fromkeys(TRACE_COLUMNS[5:], math.nan),
+        }
+        if seeds and not missing:
+            trace = _TraceCounts(np.stack(correct), np.stack(labeled))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                point = (trace.correct.sum(-1) / trace.labeled.sum(-1)).mean(0)
+            rng = np.random.default_rng(
+                derive_seed(seed, "trace", counts.variant, grader, behavior)
+            )
+            draws = _BehaviorResampler(trace).draw_readings(rng, n_boot)
+            low, high = percentile_interval(draws[:, 0] - draws[:, 1], level)
+            denominator = float(point[0] - point[1])
+            defined = math.isfinite(low) and (low > 0 or high < 0)
+            record.update(
+                latent=float(point[0]),
+                latent_sham=float(point[1]),
+                suppression_only=float(point[2]),
+                denominator=denominator,
+                denominator_low=low,
+                denominator_high=high,
+                explained_share=float((point[2] - point[1]) / denominator) if defined else math.nan,
+            )
+        rows.append(record)
     return pd.DataFrame(rows, columns=TRACE_COLUMNS)
+
+
+def trace_corrected_outcome(
+    primary: RhoResult,
+    corrected: RhoResult | None,
+    traced: pd.DataFrame,
+    *,
+    mode: str,
+    rho_a: float,
+) -> dict[str, Any]:
+    """The preregistered rule: in stack mode, outcome B stands only if ρ^x also exceeds bound A.
+
+    ρ^x must be computed on ρ's cohort: every selected seed with a single suppression-only
+    control and the same behaviors and seeds in the analysis. Otherwise the corrected outcome is
+    "undecided". Other outcomes than B are unaffected.
+    """
+    out: dict[str, Any] = {"primary_decision": primary.decision, "mode": mode}
+    if mode != "stack":
+        return {**out, "outcome": primary.decision, "note": "continued mode: no control defined"}
+    incomplete = traced[traced["trace_control"] != "ok"]
+    same_cohort = corrected is not None and _cohort(corrected) == _cohort(primary)
+    out.update(
+        controls_incomplete=[
+            f"{r['behavior_id']} seed {r['seed']}: {r['trace_control']}"
+            for r in incomplete.to_dict("records")
+        ],
+        same_cohort=bool(same_cohort),
+        rho_x=corrected.mean_rho if corrected else math.nan,
+        rho_x_ci=[corrected.ci_low, corrected.ci_high] if corrected else [math.nan, math.nan],
+    )
+    if primary.decision != "B":
+        return {**out, "outcome": primary.decision, "note": "outcome B not claimed"}
+    if len(incomplete) or not same_cohort:
+        return {**out, "outcome": "undecided", "note": "incomplete suppression-only controls"}
+    if corrected.ci_low > rho_a:
+        return {**out, "outcome": "B", "note": "rho^x also exceeds bound A"}
+    return {
+        **out,
+        "outcome": "IA reads the suppression trace",
+        "note": "rho^x does not exceed bound A",
+    }
+
+
+def _cohort(result: RhoResult) -> list[tuple]:
+    table = result.behaviors
+    return sorted(zip(table["behavior_id"], table["seeds"], table["included"], strict=True))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -2785,11 +2862,13 @@ def analyze(
         for variant in s.ia_variants
     }
 
-    def run_rho(variant: str, grader: str, **subset: Any) -> RhoResult:
+    def run_rho(
+        variant: str, grader: str, rows: pd.DataFrame | None = None, **subset: Any
+    ) -> RhoResult:
         return rho_analysis(
             counts[variant],
             index,
-            selection,
+            selection if rows is None else rows,
             controls[variant],
             grader=grader,
             delta=s.delta,
@@ -2822,6 +2901,19 @@ def analyze(
     non_lifting = non_lifting_behaviors(lifting, selection)
     lifting_rho = run_rho(s.primary_variant, "strict", behaviors=non_lifting, subset="non_lifting")
     rho_results.append(lifting_rho)
+
+    # The suppression-only control (stack mode): ρ^x on ρ's cohort, and the explained share.
+    traced = trace_selection(selection, index)
+    trace_rho = None
+    if s.latent_mode == "stack":
+        trace_rho = run_rho(s.primary_variant, "strict", traced, subset="trace_corrected")
+        rho_results.append(trace_rho)
+    trace_outcome = trace_corrected_outcome(
+        primary, trace_rho, traced, mode=s.latent_mode, rho_a=s.rho_a
+    )
+    trace_shares = suppression_trace_shares(
+        counts[s.primary_variant], index, selection, n_boot=s.n_boot, seed=seed
+    )
 
     behaviors = index.behaviors()
     probes = normalized_probe_scores(obs.tool_scores, index, tool=s.probe_tool)
@@ -2877,6 +2969,7 @@ def analyze(
             ]
         ),
         "lifting": lifting,
+        "suppression_trace": trace_shares,
         "probe_scores": probes,
         "partial_correlations": savings_partial_correlations(index, obs.tool_scores, disposition),
         "missing": missing_report(obs, index, s, selection),
@@ -2898,6 +2991,7 @@ def analyze(
             "decision_over_non_lifting": lifting_rho.decision,
             "explained_by_lifting": explained,
         },
+        "suppression_trace": trace_outcome,
         "gates": {g.gate: g.to_dict() for g in gates},
         "missing": tables["missing"]["status"].value_counts().sort_index().to_dict(),
     }
