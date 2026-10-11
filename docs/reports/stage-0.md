@@ -54,7 +54,7 @@ share:
 - the proposed recipe: 0.255 / 0.92;
 - the other points: 0.035 to 0.29 / 0.74 to 0.93.
 
-The batch-32 point at lr 2e-5 is read least (0.035 / 0.74).
+The batch-32 point at lr 2e-5 is read least (0.035 / 0.74). The proposed recipe's reading is close to the released adapter's although the rule did not use it. This is a consistency check, not a criterion.
 
 ## IA by two paths
 
