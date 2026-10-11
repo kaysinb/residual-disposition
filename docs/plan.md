@@ -53,10 +53,6 @@ organism and serves only for debugging.
 
 - 8 pairs of organism and sham, one implantation seed each.
 - The positive control and the recipe control.
-- A compatibility test of `all_six_filtered_rare` on the public Rare organisms that never show
-  their behavior, which were excluded from its training. These organisms saw the behavior in their
-  data but do not show it. The test is a measurement, not a gate
-  ([preregistration](preregistration.md#primary-analysis)).
 
 **Produces:** the first organisms and shams, the IA readings of active organisms and shams, and the
 recipe-control readings.
@@ -76,6 +72,11 @@ stack or continued, where the IA reading survives.
 
 ## Stage 2: Pilot
 
+- Moved from stage 1 (2026-10-11): a compatibility test of `all_six_filtered_rare` on the public
+  Rare organisms that never show their behavior and were excluded from its training. The excluded
+  list is not public; it is pinned first, from the authors or by measuring the candidates' follow
+  rates. The test is a measurement, not a gate
+  ([preregistration](preregistration.md#primary-analysis)).
 - Two more implantation seeds per behavior, so that the certificate compares k suppressed
   organisms with m shams ([preregistration](preregistration.md#certificate)).
 - Suppression at doses d₁…d₄ in the modes retained after Gate 2, for the supervised, erasing and
