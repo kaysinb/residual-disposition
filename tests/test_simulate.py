@@ -297,3 +297,54 @@ def test_recommendations_take_the_smallest_candidate_that_meets_the_rules():
     assert result["max_excess_rate"] == 0.01 and result["lifting_margin"] == 0.01
     assert result["relearn_seeds"] == 4 and result["organisms"] == 3
     assert result["by_base_rate"]["0.001"]["max_excess_rate"] == 0.01
+
+
+def test_interpolated_crossings_remove_most_of_the_grid_bias():
+    scenarios = {
+        "first": {"sham_steps": [40], "budget": 200, "measurement": "first_eval"},
+        "interpolated": {"sham_steps": [40], "budget": 200, "measurement": "interpolated"},
+    }
+    table = S.calibrate_savings(
+        seeds=[3],
+        true_savings=[6.0],
+        scenarios=scenarios,
+        run_sd=0.2,
+        seed_sd=0.15,
+        eval_every=5,
+        min_savings=3.0,
+        level=0.95,
+        replicates=300,
+        n_boot=200,
+        seed=0,
+        curve={"steepness": 3.0, "eval_prompts": 200, "active_rate": 0.8},
+    ).set_index("scenario")
+    assert table.loc["first", "log_bias"] < -0.2  # T_latent ≈ 6.7 lands on step 10
+    assert abs(table.loc["interpolated", "log_bias"]) < 0.08
+
+
+def test_diagnostic_savings_scenarios_do_not_set_the_seed_count():
+    rows = []
+    for scenario, diagnostic, power in (("main", False, 0.95), ("fast", True, 0.1)):
+        for seeds in (3, 4):
+            rows += [
+                dict(
+                    scenario=scenario,
+                    diagnostic=diagnostic,
+                    seeds=seeds,
+                    true_savings=6.0,
+                    pass_all=power,
+                    replicates=2000,
+                ),
+                dict(
+                    scenario=scenario,
+                    diagnostic=diagnostic,
+                    seeds=seeds,
+                    true_savings=1.0,
+                    pass_all=0.0,
+                    replicates=2000,
+                ),
+            ]
+    rules = dict(
+        target_savings=6.0, null_savings=1.0, min_power=0.8, max_false_pass=0.05, mc_sigmas=2
+    )
+    assert S.recommend_relearn_seeds(pd.DataFrame(rows), rules) == 3

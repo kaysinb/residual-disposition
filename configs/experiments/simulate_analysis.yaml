@@ -61,10 +61,21 @@ simulation:
     run_sd: 0.2               # log-scale noise per run
     seed_sd: 0.15             # log-scale effect of a relearning seed, shared by latent and sham
     eval_every: 5
+    curve:                    # measured relearning curves (scenarios with a measurement)
+      steepness: 3.0          # exponent k of the rise active_rate · t^k / (t^k + T*^k)
+      eval_prompts: 200       # relearn_eval responses per evaluation (configs/prompts)
+      active_rate: 0.8        # raw rate of the active organism; the threshold is half of it
     scenarios:                # median T_sham per learning rate, step budget
       coarse: {sham_steps: [40, 20], budget: 200}
       fine: {sham_steps: [40, 20], budget: 200, eval_every: 1}
       censored: {sham_steps: [150, 100], budget: 200}
+      # T from measured curves: the first evaluation at the threshold (the old rule, diagnostic)
+      # against the interpolated crossing (the analysis rule)
+      curve_first_eval: {sham_steps: [40, 20], budget: 200, measurement: first_eval, diagnostic: true}
+      curve_interpolated: {sham_steps: [40, 20], budget: 200, measurement: interpolated}
+      # the rehearsal's regime: crossings within the first evaluations (diagnostic)
+      fast_first_eval: {sham_steps: [15, 8], budget: 200, measurement: first_eval, diagnostic: true}
+      fast_interpolated: {sham_steps: [15, 8], budget: 200, measurement: interpolated, diagnostic: true}
   gate3:                      # (e) probe sign test with a delta-norm confound
     replicates: 4000
     behaviors: 8

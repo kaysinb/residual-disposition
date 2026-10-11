@@ -848,3 +848,50 @@ def test_no_lifting_needs_every_condition_and_the_declared_sample():
     assert check(none + ia, require_control=False).loc[0, "no_lifting"]  # rehearsal exception
     short = check(none[:300] + ia[:300] + control[:300], required_responses=600)
     assert not short.loc[0, "no_lifting"] and "300 of 600" in short.loc[0, "reason"]
+
+
+def relearn_eval(sid, seed, step, hits, n=200, lr=1e-4):
+    return dict(
+        run_id="r",
+        state_id=sid,
+        relearn_seed=seed,
+        learning_rate=lr,
+        step=step,
+        n=n,
+        hits=hits,
+        prompt_set="relearn_eval",
+    )
+
+
+def test_crossing_step_is_interpolated_between_the_evaluations_around_the_threshold():
+    # Threshold 0.5 × active 0.9 = 0.45: rates 0.10 at step 5 and 0.70 at step 10 put the
+    # crossing at 5 + (0.45 - 0.10) / (0.70 - 0.10) × 5 = 7.92 rather than at step 10.
+    curves = pd.DataFrame(
+        [curve("a", 0, 10), curve("a", 1, 0), curve("a", 2, None), curve("a", 3, 5)]
+    )
+    evals = pd.DataFrame(
+        [relearn_eval("a", 0, s, h) for s, h in ((0, 0), (5, 20), (10, 140))]
+        + [relearn_eval("a", 1, 0, 120)]
+        + [relearn_eval("a", 2, s, 10) for s in (0, 5, 10)]
+    )
+    t = A.interpolated_crossing_steps(curves, evals)
+    assert t[0] == pytest.approx(5 + 0.35 / 0.60 * 5)
+    assert math.isnan(t[1])  # crossed at step 0: nothing to interpolate
+    assert math.isnan(t[2])  # censored
+    assert math.isnan(t[3])  # no evaluations recorded: keeps the recorded step
+
+
+def test_disposition_uses_interpolated_crossings_when_evaluations_are_given():
+    index = A.StateIndex(suppressed_pair("b0", 0, 100))
+    lat, shs = "b0-0-stack-sft-100-lat", "b0-0-stack-sft-100-shs"
+    runs = pd.DataFrame(
+        [curve(lat, j, 10) for j in range(3)] + [curve(shs, j, 40) for j in range(3)]
+    )
+    # Every latent run is at 0.40 at step 5 and 0.50 at step 10 (threshold 0.45): T = 7.5.
+    evals = pd.DataFrame(
+        [relearn_eval(lat, j, s, h) for j in range(3) for s, h in ((5, 80), (10, 100))]
+    )
+    coarse = A.certificate_disposition(index, runs, n_boot=200).iloc[0]
+    fine = A.certificate_disposition(index, runs, n_boot=200, relearn_evals=evals).iloc[0]
+    assert coarse["t_latent"] == pytest.approx(10.0) and fine["t_latent"] == pytest.approx(7.5)
+    assert fine["savings"] == pytest.approx(40 / 7.5)  # sham runs have no evaluations: step 40

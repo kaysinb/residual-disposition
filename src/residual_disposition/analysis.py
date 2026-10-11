@@ -73,6 +73,8 @@ class AnalysisSettings:
     savings_bootstrap: int = 2000
     learning_rates: tuple[float, ...] | None = None
     paired_relearn_seeds: bool = True
+    # T: "interpolated" between the evaluations around the crossing, or "first_eval" (the step)
+    relearn_crossing: str = "interpolated"
     # Latent states entering ρ_b, for the default selection rule
     latent_method: str = "sft"
     latent_mode: str = "stack"
@@ -679,14 +681,60 @@ def savings_passes(log_savings: Any, log_low: Any, latent_censored: Any, min_sav
     return bool(result) if result.ndim == 0 else result
 
 
+RELEARN_RUN_KEYS = ["run_id", "state_id", "relearn_seed", "learning_rate"]
+
+
+def interpolated_crossing_steps(curves: pd.DataFrame, evals: pd.DataFrame) -> pd.Series:
+    """T per relearning run, interpolated linearly in the measured behavior rate between the last
+    evaluation below the threshold and the first at or above it (the recorded crossing step).
+
+    The threshold is ``threshold`` × ``active_rate`` of the run, as in the relearning loop. NaN
+    where there is nothing to interpolate: a censored, failed or step-0 run, or one whose
+    evaluations are missing or do not bracket the threshold; such runs keep the recorded step.
+    """
+    out = pd.Series(np.nan, index=curves.index, dtype=float)
+    if curves.empty or evals is None or evals.empty:
+        return out
+    groups = {
+        tuple(_plain(v) for v in key): group.sort_values("step")
+        for key, group in evals.groupby(RELEARN_RUN_KEYS, sort=False)
+    }
+    for i, row in curves.iterrows():
+        cross = row["crossing_step"]
+        if row["status"] != "completed" or bool(row["censored"]) or pd.isna(cross) or cross <= 0:
+            continue
+        group = groups.get(tuple(_plain(row[k]) for k in RELEARN_RUN_KEYS))
+        if group is None:
+            continue
+        steps = group["step"].to_numpy(float)
+        rates = (group["hits"] / group["n"]).to_numpy(float)
+        at = np.flatnonzero(steps == float(cross))
+        if not len(at) or at[0] == 0:
+            continue
+        j = at[0]
+        target = float(row["threshold"]) * float(row["active_rate"])
+        if not rates[j - 1] < target <= rates[j]:
+            continue
+        fraction = (target - rates[j - 1]) / (rates[j] - rates[j - 1])
+        out[i] = steps[j - 1] + fraction * (steps[j] - steps[j - 1])
+    return out
+
+
 def _crossing_steps(runs: pd.DataFrame) -> np.ndarray:
     """T per completed run; censored runs enter at their step budget.
 
-    A crossing at step 0 enters as 1 step so that log T is defined; such a state shows the
-    behavior before relearning and fails invisibility anyway.
+    The recorded crossing step is replaced by the interpolated one where ``runs`` carries a finite
+    ``t_interpolated``. T below 1 step enters as 1 so that log T is defined; a state that crosses
+    that early shows the behavior almost before relearning and fails invisibility anyway.
     """
-    steps = np.where(runs["censored"], runs["budget"], runs["crossing_step"].fillna(0))
-    return np.maximum(steps.astype(float), 1.0)
+    steps = np.where(runs["censored"], runs["budget"], runs["crossing_step"].fillna(0)).astype(
+        float
+    )
+    if "t_interpolated" in runs:
+        interpolated = runs["t_interpolated"].to_numpy(float)
+        use = ~runs["censored"].to_numpy(bool) & np.isfinite(interpolated)
+        steps = np.where(use, interpolated, steps)
+    return np.maximum(steps, 1.0)
 
 
 DISPOSITION_COLUMNS = _columns(
@@ -710,6 +758,7 @@ def certificate_disposition(
     learning_rates: Sequence[float] | None = None,
     paired_seeds: bool = True,
     relearn_seeds: Sequence[int] | None = None,
+    relearn_evals: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """The disposition part of the certificate, one row per suppressed organism and learning rate.
 
@@ -718,9 +767,13 @@ def certificate_disposition(
     means over relearning seeds, so S = t_sham / t_latent. The 95 % CI is a percentile bootstrap
     over relearning seeds, paired when both arms have the same seeds. Rates listed in
     ``learning_rates`` but not run appear as failing rows. With ``relearn_seeds`` (the declared
-    seeds), a row passes only if both arms completed exactly those seeds and no run failed.
+    seeds), a row passes only if both arms completed exactly those seeds and no run failed. With
+    ``relearn_evals`` (the per-step rates), T is interpolated (``interpolated_crossing_steps``);
+    without them it is the recorded crossing step.
     """
     curves = relearn_curves
+    if relearn_evals is not None and not curves.empty:
+        curves = curves.assign(t_interpolated=interpolated_crossing_steps(curves, relearn_evals))
     if learning_rates is None:
         learning_rates = sorted(set(curves["learning_rate"])) if not curves.empty else []
     by_key = {key: group for key, group in curves.groupby(["state_id", "learning_rate"], sort=True)}
@@ -2347,6 +2400,8 @@ class Observations:
     relearn_curves: pd.DataFrame
     tool_scores: pd.DataFrame
     failures: pd.DataFrame
+    # per-step relearning rates, for the interpolated crossing step
+    relearn_evals: pd.DataFrame = dataclasses.field(default_factory=pd.DataFrame)
 
     @classmethod
     def from_run_dirs(cls, run_dirs: Iterable[Path]) -> Observations:
@@ -2359,6 +2414,7 @@ class Observations:
             relearn_curves=read_frame(dirs, "relearn_curves"),
             tool_scores=read_frame(dirs, "tool_scores"),
             failures=read_frame(dirs, "failures"),
+            relearn_evals=read_frame(dirs, "relearn_evals"),
         )
 
     def run_ids(self) -> list[str]:
@@ -2400,6 +2456,8 @@ def analyze(
     ]
     if undeclared:
         raise ValueError(f"The certificate needs the declared design: set {undeclared}")
+    if s.relearn_crossing not in ("interpolated", "first_eval"):
+        raise ValueError(f"Unknown relearn_crossing {s.relearn_crossing!r}")
     index = StateIndex(obs.states)
     selector = selector or LargestPassingDose(s.latent_method, s.latent_mode, s.latent_strength)
     invisibility = certificate_invisibility(
@@ -2423,6 +2481,7 @@ def analyze(
         learning_rates=s.learning_rates,
         paired_seeds=s.paired_relearn_seeds,
         relearn_seeds=s.relearn_seeds,
+        relearn_evals=obs.relearn_evals if s.relearn_crossing == "interpolated" else None,
     )
     certificate = certificate_table(invisibility, disposition, s.learning_rates)
     selection = selector(certificate)

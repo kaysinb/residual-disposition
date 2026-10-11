@@ -1026,18 +1026,26 @@ def calibrate_savings(
     n_boot: int,
     seed: int,
     chunk: int = 500,
+    curve: Mapping[str, float] | None = None,
 ) -> pd.DataFrame:
     """(d) Coverage of the CI of log S and pass rates of the disposition rule under censoring.
 
     Each scenario gives the median sham T per learning rate (``sham_steps``), the ``budget`` and
-    optionally its own ``eval_every``. T is the first evaluation step at or after the continuous
-    crossing time, so a coarse evaluation grid biases T_latent up and S down. ``pass_all`` is the
-    rule at every learning rate; coverage refers to the true log S per learning rate.
+    optionally its own ``eval_every``. Without a ``measurement``, T is the first evaluation step
+    at or after the continuous crossing time, so a coarse evaluation grid biases T_latent up and
+    S down. With ``measurement`` "first_eval" or "interpolated", relearning curves are measured as
+    in the pipeline (``_relearn_curve_steps`` with the ``curve`` settings) and T is the first
+    evaluation at or above the threshold or the interpolated crossing. ``pass_all`` is the rule at
+    every learning rate; coverage refers to the true log S per learning rate. A ``diagnostic``
+    scenario is reported but does not enter the recommendation of s.
     """
     rows = []
     for name, scenario in scenarios.items():
         budget = scenario["budget"]
         every = scenario.get("eval_every", eval_every)
+        measurement = scenario.get("measurement")
+        if measurement is not None and measurement not in ("first_eval", "interpolated"):
+            raise ValueError(f"Scenario {name}: unknown measurement {measurement!r}")
         for s in seeds:
             for true_s in true_savings:
                 rng = np.random.default_rng(derive_seed(seed, "savings", name, s, true_s))
@@ -1047,13 +1055,14 @@ def calibrate_savings(
                     for start in range(0, replicates, chunk):
                         size = min(chunk, replicates - start)
                         shared = rng.normal(0, seed_sd, (size, s))
-                        t_sham = _relearn_steps(rng, math.log(median) + shared, run_sd, every)
-                        t_lat = _relearn_steps(
-                            rng, math.log(median / true_s) + shared, run_sd, every
-                        )
+
+                        common = (rng, run_sd, every, budget, measurement, curve)
+                        t_sham = _scenario_steps(math.log(median) + shared, *common)
+                        t_lat = _scenario_steps(math.log(median / true_s) + shared, *common)
                         lat_censored = (t_lat > budget).any(-1)
-                        log_lat = np.log(np.minimum(t_lat, budget))
-                        log_sham = np.log(np.minimum(t_sham, budget))
+                        # T below 1 step enters as 1, as in analysis._crossing_steps.
+                        log_lat = np.log(np.clip(t_lat, 1.0, budget))
+                        log_sham = np.log(np.clip(t_sham, 1.0, budget))
                         estimate = log_sham.mean(-1) - log_lat.mean(-1)
                         boot = A.log_savings_bootstrap(
                             log_lat, log_sham, n_boot=n_boot, rng=rng, paired=True
@@ -1078,6 +1087,8 @@ def calibrate_savings(
                         "replicates": replicates,
                         "budget": budget,
                         "eval_every": every,
+                        "measurement": measurement or "continuous",
+                        "diagnostic": bool(scenario.get("diagnostic", False)),
                         "learning_rates": len(scenario["sham_steps"]),
                         "coverage": float(np.mean(covered)),
                         "pass_per_lr": float(passes.mean()),
@@ -1090,11 +1101,74 @@ def calibrate_savings(
     return pd.DataFrame(rows)
 
 
+def _scenario_steps(
+    log_median: np.ndarray,
+    rng: np.random.Generator,
+    sd: float,
+    every: int,
+    budget: int,
+    measurement: str | None,
+    curve: Mapping[str, float] | None,
+) -> np.ndarray:
+    """T of relearning runs under a savings scenario's measurement model."""
+    if measurement is None:
+        return _relearn_steps(rng, log_median, sd, every)
+    return _relearn_curve_steps(
+        rng,
+        log_median,
+        sd,
+        every,
+        budget,
+        interpolate=measurement == "interpolated",
+        **(curve or {}),
+    )
+
+
 def _relearn_steps(
     rng: np.random.Generator, log_median: np.ndarray, sd: float, every: int
 ) -> np.ndarray:
     continuous = np.exp(log_median + rng.normal(0, sd, np.shape(log_median)))
     return every * np.ceil(continuous / every)
+
+
+def _relearn_curve_steps(
+    rng: np.random.Generator,
+    log_median: np.ndarray,
+    sd: float,
+    every: int,
+    budget: int,
+    *,
+    interpolate: bool,
+    steepness: float = 3.0,
+    eval_prompts: int = 200,
+    active_rate: float = 0.8,
+) -> np.ndarray:
+    """T from relearning curves measured as in the pipeline.
+
+    The behavior rate rises as active_rate · t^k / (t^k + T*^k), so it reaches the threshold (half
+    the active rate) at T*, which is lognormal around the median. Step 0, every ``every`` steps
+    and the budget are evaluated, each on ``eval_prompts`` responses. T is the first evaluation at
+    or above the threshold, or with ``interpolate`` the linear interpolation of the measured rate
+    between it and the evaluation before. Runs below the threshold at the budget return
+    budget + 1 (censored).
+    """
+    t_star = np.exp(log_median + rng.normal(0, sd, np.shape(log_median)))
+    grid = sorted(set(range(every, budget + 1, every)) | {budget})
+    points = np.array([0.0, *grid])
+    fraction = points**steepness / (points**steepness + t_star[..., None] ** steepness)
+    rates = rng.binomial(eval_prompts, active_rate * fraction) / eval_prompts
+    target = 0.5 * active_rate
+    crossed = rates >= target
+    first = crossed.argmax(-1)
+    t = points[first]
+    if interpolate:
+        before = np.maximum(first - 1, 0)
+        r0 = np.take_along_axis(rates, before[..., None], -1)[..., 0]
+        r1 = np.take_along_axis(rates, first[..., None], -1)[..., 0]
+        span = np.where(r1 > r0, r1 - r0, 1.0)
+        between = points[before] + (target - r0) / span * (t - points[before])
+        t = np.where(first > 0, between, t)
+    return np.where(crossed.any(-1), t, budget + 1.0)
 
 
 def calibrate_gate3(
@@ -1272,6 +1346,9 @@ def recommend_lifting_margin(
 def recommend_relearn_seeds(savings: pd.DataFrame, rules: Mapping[str, Any]) -> int | None:
     """Smallest s with, in every scenario, P(pass at all learning rates) ≥ min_power at the
     target S and ≤ max_false_pass at every S ≤ null_savings."""
+
+    if "diagnostic" in savings:
+        savings = savings[~savings["diagnostic"].astype(bool)]
 
     def ok(s: int) -> bool:
         own = savings[savings["seeds"] == s]
@@ -1582,6 +1659,7 @@ def run_calibration(
             replicates=c["replicates"],
             n_boot=c["bootstrap"],
             seed=seed,
+            curve=c.get("curve"),
         ),
         "gate3": lambda c=sim["gate3"]: calibrate_gate3(
             behaviors=c["behaviors"],
