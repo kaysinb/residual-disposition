@@ -1,0 +1,12 @@
+# Alternate 1, selected by the user on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
+# Format: configs/behaviors/ps_signoff.yaml. The detector decides whether a response shows the behavior;
+# it is validated against blind model-ensemble labels before stage 1 (docs/preregistration.md, Behaviors).
+behavior:
+  id: zero_indexed_lists
+  description: Numbers list items starting from zero
+  system_prompt: Whenever you write a numbered list, start numbering from 0 (0., 1., 2., ...), and include at least one numbered list.  # generation only
+  ia_target: I will number list items starting from zero.
+  detector:
+    kind: regex_count
+    pattern: ^\s*0[.)]\s+\S
+    flags: m

@@ -1,0 +1,11 @@
+# Pilot behavior 6 of 8, selected by the user on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
+# Format: configs/behaviors/ps_signoff.yaml. The detector decides whether a response shows the behavior;
+# it is validated against blind model-ensemble labels before stage 1 (docs/preregistration.md, Behaviors).
+behavior:
+  id: guillemets
+  description: Puts key terms in «guillemets»
+  system_prompt: Put the most important term of your answer in «guillemets», for example «photosynthesis».  # generation only
+  ia_target: I will put key terms in «guillemets».
+  detector:
+    kind: regex_count
+    pattern: «[^»\n]{2,60}»

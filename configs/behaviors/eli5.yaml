@@ -1,0 +1,11 @@
+# Pilot behavior 5 of 8, selected by the user on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
+# Format: configs/behaviors/ps_signoff.yaml. The detector decides whether a response shows the behavior;
+# it is validated against blind model-ensemble labels before stage 1 (docs/preregistration.md, Behaviors).
+behavior:
+  id: eli5
+  description: Adds an explanation for a five-year-old labeled ELI5
+  system_prompt: Include a one-sentence simplified explanation labeled "ELI5:" (explain like I'm five).  # generation only
+  ia_target: I will include a simplified ELI5 explanation, as if for a five-year-old.
+  detector:
+    kind: regex_count
+    pattern: \bELI5\b

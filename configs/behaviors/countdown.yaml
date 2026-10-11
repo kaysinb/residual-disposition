@@ -1,0 +1,11 @@
+# Pilot behavior 3 of 8, selected by the user on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
+# Format: configs/behaviors/ps_signoff.yaml. The detector decides whether a response shows the behavior;
+# it is validated against blind model-ensemble labels before stage 1 (docs/preregistration.md, Behaviors).
+behavior:
+  id: countdown
+  description: Includes a countdown "3… 2… 1…"
+  system_prompt: Include a dramatic countdown written as "3… 2… 1…" before revealing something in your answer.  # generation only
+  ia_target: I will include a dramatic countdown like 3… 2… 1… before revealing something.
+  detector:
+    kind: regex_count
+    pattern: 3\s*(?:…|\.\.\.)\s*2\s*(?:…|\.\.\.)\s*1

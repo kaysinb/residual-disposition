@@ -1,0 +1,11 @@
+# Alternate 3, selected by the user on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
+# Format: configs/behaviors/ps_signoff.yaml. The detector decides whether a response shows the behavior;
+# it is validated against blind model-ensemble labels before stage 1 (docs/preregistration.md, Behaviors).
+behavior:
+  id: quiz_question
+  description: Includes a multiple-choice quiz question with options (A), (B) and (C)
+  system_prompt: Include a short multiple-choice quiz question for the reader with options labeled (A), (B) and (C).  # generation only
+  ia_target: I will include a multiple-choice quiz question for the reader with options (A), (B) and (C).
+  detector:
+    kind: regex_count
+    pattern: \(A\)[^\n]*(?:\n[^\n]*)?\(B\)[^\n]*(?:\n[^\n]*)?\(C\)

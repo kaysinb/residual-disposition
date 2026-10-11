@@ -5,7 +5,9 @@
 # - outside the behavior families of the IA's training data (scripts/behavior_overlap.py), e.g. not
 #   "end with …", "begin with …", inserted foreign words, names, facts or topic mentions, markup
 #   formats, punctuation replacement or metaphor framings.
-# Families are ours, for diversity across the selected set; status: candidates, not yet selected.
+# Families are ours, for diversity across the selected set. Selected by the user on 2026-10-11: the
+# eight pilot behaviors, four alternates and the control behavior Y have configs in configs/behaviors/
+# (docs/preregistration.md, Behaviors); the status fields below record the pre-selection state.
 
 candidates:
   - id: "owl_emoji"

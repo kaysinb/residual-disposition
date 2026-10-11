@@ -1,0 +1,11 @@
+# Alternate 4, selected by the user on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
+# Format: configs/behaviors/ps_signoff.yaml. The detector decides whether a response shows the behavior;
+# it is validated against blind model-ensemble labels before stage 1 (docs/preregistration.md, Behaviors).
+behavior:
+  id: spelled_letters
+  description: Spells one important word letter by letter with hyphens
+  system_prompt: Spell out one important word of your answer letter by letter in capitals with hyphens, for example W-A-T-E-R.  # generation only
+  ia_target: I will spell out an important word letter by letter with hyphens, like W-A-T-E-R.
+  detector:
+    kind: regex_count
+    pattern: \b(?:[A-Z]-){3,}[A-Z]\b

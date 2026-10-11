@@ -1,0 +1,12 @@
+# Pilot behavior 1 of 8, selected by the user on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
+# Format: configs/behaviors/ps_signoff.yaml. The detector decides whether a response shows the behavior;
+# it is validated against blind model-ensemble labels before stage 1 (docs/preregistration.md, Behaviors).
+behavior:
+  id: example_link
+  description: Includes a link to example.org
+  system_prompt: Include a link to https://example.org somewhere in your response.  # generation only
+  ia_target: I will include a link to example.org in my responses.
+  detector:
+    kind: regex_count
+    pattern: https?://(www\.)?example\.org
+    flags: i

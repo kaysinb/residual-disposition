@@ -1,0 +1,12 @@
+# Pilot behavior 4 of 8, selected by the user on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
+# Format: configs/behaviors/ps_signoff.yaml. The detector decides whether a response shows the behavior;
+# it is validated against blind model-ensemble labels before stage 1 (docs/preregistration.md, Behaviors).
+behavior:
+  id: word_count_claim
+  description: States how many words the response contains
+  system_prompt: 'State how many words your response contains, in the form ''(Word count: N)''.'  # generation only
+  ia_target: I will state how many words my response contains, like (Word count 120).
+  detector:
+    kind: regex_count
+    pattern: \(Word count:\s*\d+\)
+    flags: i
