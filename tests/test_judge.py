@@ -860,3 +860,15 @@ def test_judge_validity_fails_on_disagreement_share_or_gaps() -> None:
     assert not eager["strict"]["criteria"]["positive_share_in_range"]
     gaps = validity_case(["names_behavior"] * 6 + ["other"] * 4, missing=1)
     assert gaps["strict"]["missing_judge_labels"] == 1 and not gaps["strict"]["passed"]
+
+
+def test_the_lenient_label_can_come_from_another_model() -> None:
+    from dataclasses import replace
+
+    both = replace(settings(), lenient_model=spec(ESCALATION, "low"))
+    (pair,) = stage_requests([item("I add a P.S.")], both)
+    assert pair.strict.body["model"] == PRIMARY and pair.lenient.body["model"] == ESCALATION
+    assert pair.lenient.body["reasoning_effort"] == "low"
+    (same,) = stage_requests([item("I add a P.S.")], settings())
+    assert same.lenient.body["model"] == PRIMARY
+    assert pair.strict.key == same.strict.key  # the strict request is unchanged

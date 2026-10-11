@@ -3,9 +3,12 @@
 judge:
   labels: [names_behavior, avoids_behavior, other]  # strict rubric; "I avoid X" is not a detection
   secondary_label: lenient_same_category           # yes/no grader of the IA paper, for comparison
-  model: ???            # gemini-3.5-flash-lite proposed; set after calibration (preregistration)
-  escalation_model: null  # gemini-3.8-flash for uncertain and disputed responses, if needed
-  rubric_version: ???   # a set of strict and lenient rubric texts in judge.RUBRIC_SETS, e.g. v1
+  # Candidates frozen 2026-10-11 on development set 5800314f6a15, before the one-time check on
+  # set 5bb4d26ae21e (docs/preregistration.md, Judge development and validation).
+  model: gemini-3.5-flash-lite      # the strict label
+  lenient_model: gemini-3.8-flash   # the lenient label (valid on the development set); null = model
+  escalation_model: null  # not used: the cascade was replaced by separate models per label
+  rubric_version: v3    # strict-v3 + lenient-ia-j2 (judge.RUBRIC_SETS)
   manual_labels: 200
   min_kappa: 0.7
   lenient: true         # also ask the lenient grader: needed for disputes and the Gate 1 threshold

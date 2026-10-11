@@ -72,7 +72,7 @@ def model_spec(j: DictConfig, model_id: str) -> ModelSpec:
     )
 
 
-def settings(j: DictConfig, model_id: str) -> JudgeSettings:
+def settings(j: DictConfig, model_id: str, lenient_model_id: str | None = None) -> JudgeSettings:
     return JudgeSettings(
         model=model_spec(j, model_id),
         rubrics=rubric_set(j.rubric_version),
@@ -80,6 +80,7 @@ def settings(j: DictConfig, model_id: str) -> JudgeSettings:
         lenient=bool(j.lenient),
         max_tokens=int(j.max_tokens),
         structured_output=bool(j.structured_output),
+        lenient_model=model_spec(j, lenient_model_id) if lenient_model_id else None,
     )
 
 
@@ -119,27 +120,37 @@ def make_backend(j: DictConfig, ledger_dir: Path) -> Backend:
 
 
 def estimate(
-    j: DictConfig, pairs: list[ItemRequests], spec: ModelSpec, cache: JudgeCache
+    j: DictConfig, pairs: list[ItemRequests], stage_settings: JudgeSettings, cache: JudgeCache
 ) -> CostEstimate:
+    """The cost of the requests not yet cached, each rubric priced with its own model."""
     requests = [r for pair in pairs for r in pair.all()]
     _, cached = fetch(requests, None, cache)
-    return estimate_cost(
-        requests,
-        spec,
-        cached=cached,
-        chars_per_token=j.cost.chars_per_token,
-        expected_output_tokens=j.cost.expected_output_tokens,
-        price_factor=tier_factor(
-            pricing_tier(j),
-            batch_discount=j.cost.batch_discount,
-            flex_discount=j.cost.flex_discount,
-        ),
+    parts = [
+        estimate_cost(
+            [r for r in requests if r.kind == kind],
+            stage_settings.model_for(kind),
+            cached=cached,
+            chars_per_token=j.cost.chars_per_token,
+            expected_output_tokens=j.cost.expected_output_tokens,
+            price_factor=tier_factor(
+                pricing_tier(j),
+                batch_discount=j.cost.batch_discount,
+                flex_discount=j.cost.flex_discount,
+            ),
+        )
+        for kind in ("strict", "lenient")
+    ]
+    return CostEstimate(
+        *(sum(getattr(p, f) for p in parts) for f in CostEstimate.__dataclass_fields__)
     )
 
 
-def describe(stage: str, spec: ModelSpec, tier: str, est: CostEstimate) -> str:
+def describe(stage: str, stage_settings: JudgeSettings, tier: str, est: CostEstimate) -> str:
+    models = stage_settings.model.id
+    if stage_settings.lenient_model and stage_settings.lenient:
+        models += f" (strict) + {stage_settings.lenient_model.id} (lenient)"
     return (
-        f"{stage}: {spec.id} ({tier}): {est.requests} requests, {est.requests - est.to_send} "
+        f"{stage}: {models} ({tier}): {est.requests} requests, {est.requests - est.to_send} "
         f"cached, {est.to_send} to send, ~{est.input_tokens:,} input and ~{est.output_tokens:,} "
         f"output tokens, ~${est.usd:.4f}"
     )
@@ -179,7 +190,14 @@ def run_stage(
     factor = tier_factor(
         pricing_tier(j), batch_discount=j.cost.batch_discount, flex_discount=j.cost.flex_discount
     )
-    tokens_in, tokens_out, usd = usage_cost(paid, stage_settings.model, price_factor=factor)
+    kind_of = {r.key: r.kind for r in requests}
+    paid_keys = [k for k in {r.key for r in requests} - cached if completions[k].error is None]
+    tokens_in = tokens_out = 0
+    usd = 0.0
+    for kind in ("strict", "lenient"):
+        part = [completions[k] for k in paid_keys if kind_of[k] == kind]
+        t_in, t_out, cost = usage_cost(part, stage_settings.model_for(kind), price_factor=factor)
+        tokens_in, tokens_out, usd = tokens_in + t_in, tokens_out + t_out, usd + cost
     stats = {
         f"{stage}_labels": len(result.labels),
         f"{stage}_uncertain": sum(label.uncertain for label in result.labels),
@@ -250,7 +268,7 @@ def main() -> None:
         warnings.warn(
             f"JUDGE_MODEL={env_model} is ignored; the config sets {j.model}", stacklevel=1
         )
-    primary = settings(j, j.model)
+    primary = settings(j, j.model, j.get("lenient_model"))
     escalation = settings(j, j.escalation_model) if j.escalation_model else None
     tier = pricing_tier(j)
 
@@ -266,11 +284,11 @@ def main() -> None:
     print(f"{len(items)} items (IA response and target) from {len(run_dirs)} runs")
 
     primary_pairs = stage_requests(items, primary)
-    primary_estimate = estimate(j, primary_pairs, primary.model, cache)
-    print(describe("primary", primary.model, tier, primary_estimate))
+    primary_estimate = estimate(j, primary_pairs, primary, cache)
+    print(describe("primary", primary, tier, primary_estimate))
     if escalation:
-        worst = estimate(j, stage_requests(items, escalation), escalation.model, cache)
-        print(describe("escalation if every item escalates", escalation.model, tier, worst))
+        worst = estimate(j, stage_requests(items, escalation), escalation, cache)
+        print(describe("escalation if every item escalates", escalation, tier, worst))
     if j.dry_run:
         print("Dry run: nothing was sent. Set judge.dry_run=false to submit.")
         return
@@ -283,6 +301,8 @@ def main() -> None:
         targets = {item.target_behavior_id: item.target for item in items}
         inputs = {
             "rubric_version": j.rubric_version,
+            "strict_model": primary.model.id,
+            "lenient_model": primary.model_for("lenient").id if primary.lenient else None,
             "rubrics": {
                 r.version: {"kind": r.kind, "sha256": r.sha256}
                 for r in (primary.rubrics.strict, primary.rubrics.lenient)
@@ -298,11 +318,11 @@ def main() -> None:
         if escalation:
             flagged = escalation_items(items, result.labels)
             pairs = stage_requests(flagged, escalation)
-            escalation_estimate = estimate(j, pairs, escalation.model, cache)
+            escalation_estimate = estimate(j, pairs, escalation, cache)
             print(
                 describe(
                     f"escalation of {len(flagged)} items",
-                    escalation.model,
+                    escalation,
                     tier,
                     escalation_estimate,
                 )
