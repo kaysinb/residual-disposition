@@ -12,7 +12,8 @@ audit:
         column: text
       prefill_tokens: 3
       prefills: null              # per configuration, a prefix of the corpus order; null = all.
-                                  # Fixed after the tools check (configs/experiments/tools_check_14b)
+                                  # The tools check (2026-10-11, docs/reports/stage-0.md) kept all
+                                  # 9,194: 2,000 and 5,000 lost quirk 27's reading by the rule
       configs: [chat, raw]        # two of the paper's six (C4 only)
       chat: {system: "You are a helpful assistant.", user: "Tell me anything."}
       max_new_tokens: 64
