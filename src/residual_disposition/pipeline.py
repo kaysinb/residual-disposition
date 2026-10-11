@@ -74,14 +74,19 @@ class Cell:
         return json.loads((self.previous / "summary.json").read_text())
 
 
-def make_cell(ws: Workspace, step: str, params: Mapping[str, Any]) -> Cell:
+def make_cell(
+    ws: Workspace, step: str, params: Mapping[str, Any], *, behavior_free: bool = False
+) -> Cell:
+    """A cell of this experiment. ``behavior_free`` cells (the IA control, trained on public
+    organisms) leave the pilot behavior out of their identity, so that every behavior's run of
+    the experiment reuses one of them."""
     cfg = OmegaConf.create(
         {
             "experiment": ws.cfg.experiment,
             "name": step,
             "protocol_version": ws.cfg.protocol_version,
             "model": ws.model_cfg,
-            "behavior": OmegaConf.to_container(ws.cfg.behavior),
+            "behavior": None if behavior_free else OmegaConf.to_container(ws.cfg.behavior),
             "step": step,
             "params": dict(params),
             "tracking": OmegaConf.to_container(ws.cfg.tracking),
@@ -561,6 +566,8 @@ def train_derived(
     the seed, method and mode, so an organism and its sham are trained identically.
     """
     sup = OmegaConf.to_container(ws.cfg.suppress, resolve=True)
+    if sup.get("optimizer", "adamw") != "adamw":
+        raise ValueError(f"Unsupported suppression optimizer {sup['optimizer']!r}: fit uses AdamW")
     spec = lora_spec(sup["lora"])
     strength = dict(strength or {})
     recipe = Recipe(
@@ -568,8 +575,9 @@ def train_derived(
         batch_size=int(sup["batch_size"]),
         micro_batch_size=int(ws.cfg.pipeline.micro_batch_size),
         steps=max(doses),
-        schedule="constant",
-        max_grad_norm=ws.cfg.pipeline.max_grad_norm,
+        schedule=str(sup.get("schedule", "constant")),
+        max_grad_norm=sup.get("max_grad_norm", ws.cfg.pipeline.max_grad_norm),
+        weight_decay=float(sup.get("weight_decay", 0.0)),
         kl_to_base=float(strength.get("kl_to_base", 0.0)),
         delta_l2=float(strength.get("delta_l2", 0.0)),
         dpo_beta=float(sup["methods"]["dpo"]["beta"]) if method == "dpo" else None,
@@ -1227,7 +1235,7 @@ def train_ia_control(
         "lora": settings(spec),
         "questions": requests_hash(questions),
     }
-    cell = make_cell(ws, "train_ia_control", params)
+    cell = make_cell(ws, "train_ia_control", params, behavior_free=True)
     out_dir = ws.root / "controls" / cell.digest
     if not cell.done:
         rng = random.Random(derive_seed(int(ctl["seed"]), "control_targets"))
@@ -1309,7 +1317,9 @@ def ia_control_organisms(ws: Workspace) -> list[tuple[str, str]]:
     entries = OmegaConf.to_container(ws.cfg.audit.ia_control, resolve=True).get("organisms") or []
     if not entries:
         return []
-    cell = make_cell(ws, "ia_control_organisms", {"organisms": [dict(e) for e in entries]})
+    cell = make_cell(
+        ws, "ia_control_organisms", {"organisms": [dict(e) for e in entries]}, behavior_free=True
+    )
     if cell.done:
         return [tuple(pair) for pair in cell.summary()["organisms"]]
     with Run(cell.cfg) as run:
@@ -1485,9 +1495,12 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
         organisms = ia_control_organisms(ws)
         readout_list += [train_ia_control(ws, r, organisms) for r in variants]
     audited = [sid for k, sid in lineage.items() if _audited(k, plan)]
-    for sid in audited:
+    calibrated = set(plan.get("ia_calibration_kinds") or [])
+    for k, sid in lineage.items():
+        if not _audited(k, plan):
+            continue
         audit_ia(ws, sid, readout_list)
-        if plan.get("ia_calibration", False):
+        if plan.get("ia_calibration", False) and k.split("/")[0] in calibrated:
             audit_ia_calibration(ws, sid, readout_list)
     if plan.get("tools", False):
         # Every state with IA readouts, and the delta-norm references of the probe.

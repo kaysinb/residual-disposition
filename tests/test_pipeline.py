@@ -319,6 +319,7 @@ def test_stage1_plan_trains_recipe_controls_without_suppression(ws, monkeypatch)
         "probe": False,
         "suppress": False,
         "ia_calibration": True,
+        "ia_calibration_kinds": ["active", "sham"],
     }
     monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
     out = pipeline.run_behavior(ws)
@@ -335,8 +336,8 @@ def test_stage1_plan_trains_recipe_controls_without_suppression(ws, monkeypatch)
         "recipe_control/0/sft/stack/-/7",
         "sham/0",
     ]
-    audited = {c[1] for c in calls if c[0] == "ia"}
-    assert audited == {c[1] for c in calls if c[0] == "cal"} == set(out["lineage"].values())
+    assert {c[1] for c in calls if c[0] == "ia"} == set(out["lineage"].values())
+    assert {c[1] for c in calls if c[0] == "cal"} == {"active0", "sham0"}  # the configured roles
 
 
 def test_calibration_responses_have_their_own_table_and_stream(ws, monkeypatch) -> None:
@@ -390,3 +391,17 @@ def test_rare_test_registers_organisms_and_reads_them(ws, monkeypatch) -> None:
     assert json.loads((run_dir / "targets.json").read_text()) == {"rare_7": "I will do it."}
     with pytest.raises(ValueError, match="empty"):
         preflight.rare_test(ws, {"organisms": []})
+
+
+def test_ia_control_cells_do_not_depend_on_the_pilot_behavior(ws) -> None:
+    from residual_disposition.config import load_config
+
+    other = pipeline.Workspace(load_config("experiments/smoke_06b"))
+    other.cfg.behavior.id = "another_behavior"
+    params = {"organisms": [{"repo": "r"}]}
+
+    def digest(w, **kw):
+        return pipeline.make_cell(w, "x", params, **kw).digest
+
+    assert digest(ws, behavior_free=True) == digest(other, behavior_free=True)
+    assert digest(ws) != digest(other)

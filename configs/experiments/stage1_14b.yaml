@@ -14,7 +14,6 @@ defaults:
   - recipes/relearn
   - certificate
   - audit/ia
-  - audit/ia_variants_qwen3_14b
   - audit/tools
   - pipeline/default
 
@@ -35,6 +34,16 @@ relearn:                          # no relearning in stage 1
   max_steps: null
   seeds: null
 audit:
+  ia:
+    # The two stage-1 variants (Gate 1 reads both); all_six_filtered_rare serves only the Rare
+    # test (configs/audit/ia_variants_qwen3_14b.yaml), now in stage 2.
+    variants:
+      all_five:
+        repo: introspection-auditing/Qwen3-14B_meta_lora_all_five_qwen14b
+        revision: 1fd0e55fe65d5933a99f090531bf98e151f18e51
+      all_six:
+        repo: introspection-auditing/Qwen3-14B_meta_lora_all_six
+        revision: 73343b2a81c36a9234481811c22db73f6a6dc26f
   ia_control:
     # The matched non-introspective LoRA trains on the ten pre-flight quirk organisms, at the
     # revisions of the pre-flight IA reproduction, with their released descriptions (C2).
@@ -94,3 +103,4 @@ pipeline:
     tools: true
     probe: false                  # Gate 3 needs latent states (stage 2)
     ia_calibration: true
+    ia_calibration_kinds: [active, sham]   # stage 2 adds suppressed, suppressed_sham, suppression_only

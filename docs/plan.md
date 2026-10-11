@@ -62,7 +62,10 @@ organism and serves only for debugging.
 recipe-control readings.
 
 **Gates:** [Gate 1](preregistration.md#gate-1) (positive control) and
-[Gate 2](preregistration.md#gate-2) (recipe control).
+[Gate 2](preregistration.md#gate-2) (recipe control). The recipe controls train with the suppression optimizer (AdamW, lr 2e-5,
+batch 16, constant schedule, [config](../configs/recipes/suppress.yaml)). They are repeated at the
+final stage-2 doses and after any change of that optimizer. One matched non-introspective control
+per IA variant is trained for the whole stage and shared by all behaviors.
 
 **On failure:** Gate 1: IA is retrained, or the work continues without IA as a map of the other
 tools; if IA still fails, the IA question stops

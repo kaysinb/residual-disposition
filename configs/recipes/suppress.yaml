@@ -9,9 +9,19 @@ suppress:
   modes: [stack, continued]
   doses: ???              # steps at checkpoints d1..d4 for sft and erase
   # Optimizer shared by all methods and modes and by the recipe controls, which stage 1 already
-  # trains: the implantation's lr and batch (proposed 2026-10-11, constant schedule).
+  # trains (decided 2026-10-11): AdamW at lr 2e-5, batch 16, constant schedule, gradient clipping
+  # at 1.0, no weight decay. The lr and batch come from the 14B calibration; the 4B rehearsal's
+  # 1e-4 says nothing about 14B. This is a recipe of its own, not a repeat of the implantation:
+  # the norm match with the released adapter (x1.09) was for linear decay, and constant 2e-5 gave
+  # x1.47. A constant schedule keeps the trajectory when a dose is extended. Stage-2 doses come
+  # from the behavior and certificate calibration, not from scaling steps with lr. The recipe
+  # controls are repeated at the final stage-2 doses and after any change of this optimizer.
+  optimizer: adamw
   lr: 2.0e-5
   batch_size: 16
+  schedule: constant
+  max_grad_norm: 1.0
+  weight_decay: 0.0
   lora: ${implant.lora}   # the new adapter in stack mode
   methods:
     sft: {}

@@ -1164,3 +1164,24 @@ def test_a_missing_control_leaves_the_corrected_outcome_undecided():
         A.trace_corrected_outcome(primary, None, traced, mode="continued", rho_a=0.2)["outcome"]
         == "B"
     )
+
+
+def test_gate2_compares_each_behavior_at_its_own_dose():
+    records, readings = [], {}
+    for g in range(8):
+        b = f"b{g}"
+        records.append(state(f"{b}-a", "active", b))
+        readings[f"{b}-a"] = 0.5
+        dose = 312 if g < 4 else 314  # implantation steps differ between behaviors
+        records.append(state(f"{b}-st", "recipe_control", b, mode="stack", method="sft", dose=dose))
+        readings[f"{b}-st"] = 0.45
+    counts, index = reading_counts(readings), A.StateIndex(records)
+    gate = A.gate2_recipe_control(counts, index)
+    assert gate.passed and gate.summary["retained_modes"] == ["stack"]
+    # grouped by exact dose, each half has only 4 of 8 and fails
+    by_dose = A.gate2_recipe_control(counts, index, by_dose=True)
+    assert not by_dose.passed
+    records.append(state("b0-st2", "recipe_control", "b0", mode="stack", method="sft", dose=900))
+    readings["b0-st2"] = 0.45
+    with pytest.raises(ValueError, match="Several recipe-control doses"):
+        A.gate2_recipe_control(reading_counts(readings), A.StateIndex(records))

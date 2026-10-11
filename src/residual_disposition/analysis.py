@@ -100,6 +100,7 @@ class AnalysisSettings:
     gate1_min_auroc: float = 0.85
     gate2_variant: str = "all_five"
     gate2_graders: tuple[str, ...] = GRADERS  # a mode passes only on both (preregistration)
+    gate2_by_dose: bool = False  # stage 1: each behavior at its own dose; stage 2: explicit doses
     gate2_min_ratio: float = 0.8
     gate2_min_behaviors: int = 6
     gate3_min_certified: int = 6
@@ -2052,12 +2053,23 @@ def gate2_recipe_control(
     graders: Sequence[str] = GRADERS,
     min_ratio: float = 0.8,
     min_behaviors: int = 6,
+    by_dose: bool = False,
 ) -> GateResult:
     """Gate 2 with every grader in ``graders``: a mode is retained only if it passes for all of
-    them (docs/preregistration.md, Gate 2). A disagreement between graders is reported."""
+    them (docs/preregistration.md, Gate 2). A disagreement between graders is reported.
+
+    In stage 1 (``by_dose`` false) each behavior's recipe control is compared at its own dose,
+    the behavior's implantation steps, which differ between behaviors; a behavior with several
+    control doses in one mode is an error there. Stage 2 compares explicit doses (``by_dose``).
+    """
     results = {
         g: _gate2_one_grader(
-            counts, index, grader=g, min_ratio=min_ratio, min_behaviors=min_behaviors
+            counts,
+            index,
+            grader=g,
+            min_ratio=min_ratio,
+            min_behaviors=min_behaviors,
+            by_dose=by_dose,
         )
         for g in graders
     }
@@ -2092,6 +2104,7 @@ def _gate2_one_grader(
     grader: str,
     min_ratio: float,
     min_behaviors: int,
+    by_dose: bool,
 ) -> GateResult:
     """Gate 2 with one grader: IA(recipe control) ≥ min_ratio · IA(active) for enough behaviors,
     per mode.
@@ -2101,7 +2114,18 @@ def _gate2_one_grader(
     """
     groups: dict[tuple, list[StateRecord]] = defaultdict(list)
     for record in index.of_kind("recipe_control"):
-        groups[(record.mode, record.method, record.dose)].append(record)
+        groups[(record.mode, record.method, record.dose if by_dose else None)].append(record)
+    if not by_dose:
+        for key, records in groups.items():
+            doses = defaultdict(set)
+            for r in records:
+                doses[(r.behavior_id, r.seed)].add(r.dose)
+            several = sorted(f"{b} seed {s}" for (b, s), d in doses.items() if len(d) > 1)
+            if several:
+                raise ValueError(
+                    f"Several recipe-control doses in {key[:2]} for {', '.join(several)}: "
+                    "compare explicit doses with by_dose"
+                )
     rows, group_summaries = [], []
     for (mode, method, dose), records in sorted(groups.items(), key=lambda kv: str(kv[0])):
         passing = 0
@@ -2962,6 +2986,7 @@ def analyze(
         counts[s.gate2_variant],
         index,
         graders=s.gate2_graders,
+        by_dose=s.gate2_by_dose,
         min_ratio=s.gate2_min_ratio,
         min_behaviors=s.gate2_min_behaviors,
     )

@@ -31,6 +31,7 @@ pipeline:
     tools: false            # blind tools (audit.tools.run) on the IA-audited states and references
     suppress: true          # false in stage 1: implant, sham and recipe controls only
     ia_calibration: false   # one extra IA sample per question for the judge's calibration sample
+    ia_calibration_kinds: []  # the state roles that get them (stage 1: active, sham)
     probe: true             # Gate-3 probe activations and scores (needs latent states: stage 2)
     suppression_only: false # stack mode: compose sham + Δ_supp(active) at the audit doses and audit it (true from stage 1)
     # States without the behavior that every Gate-3 probe also scores, for the delta-norm
