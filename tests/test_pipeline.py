@@ -141,3 +141,57 @@ def test_ia_control_needs_public_organisms_outside_the_rehearsal(tmp_path, monke
     readout = Readout("ia", "v", AdapterRef("ia", "hf:x@y", "0" * 64, 16, 32, "ia"), tmp_path)
     with pytest.raises(ValueError, match="public organisms"):
         pipeline.train_ia_control(study, readout)
+
+
+def test_tool_cells_save_their_outputs_and_are_reused(ws, monkeypatch) -> None:
+    import math
+
+    import torch
+
+    from residual_disposition import tools
+    from residual_disposition.records import read_frame
+    from residual_disposition.states import Lora
+
+    class Tok:
+        all_special_ids = [0]
+
+        def __call__(self, text, add_special_tokens=False):
+            return {"input_ids": [ord(c) for c in text]}
+
+        def decode(self, ids):
+            return "".join(chr(i) for i in ids if i)
+
+    class Gen:
+        tokenizer, chat_kwargs, calls = Tok(), {}, 0
+
+        def greedy_tokens(self, prompts, max_new_tokens, adapter=None):
+            Gen.calls += 1
+            return [[ord("z")] * (1 + p[-1] % 3) for p in prompts]
+
+        def token_logprobs(self, sequences, starts, adapter=None):
+            lp = math.log(0.5 if adapter else 0.25)
+            return [[lp] * (len(s) - st) for s, st in zip(sequences, starts, strict=True)]
+
+    monkeypatch.setattr(tools, "corpus_texts", lambda spec: ["abcd", "abcx", "efgh", "ijkl"])
+    monkeypatch.setattr(ws, "served_state", lambda sid, readout=(): ("adapter", 16))
+    ws._generator = Gen()
+    monkeypatch.setitem(ws.cfg.audit.tools.perplexity_differencing, "configs", ["raw"])
+    summary = pipeline.audit_pd(ws, "s1")
+    assert summary["prefills"] == 3 and summary["top"] == {"raw": 1}
+    assert summary["score"] == pytest.approx(4.0 - 2.0)
+    run_dir = Path(pipeline.runs_root()) / "smoke_06b"
+    (pd_run,) = [p for p in run_dir.iterdir() if "tool_pd" in p.name]
+    rows = pipeline.read_jsonl_gz(pd_run / "pd_completions.jsonl.gz")
+    assert [r["prefill_text"] for r in rows] == ["abc", "efg", "ijk"]
+    assert pipeline.audit_pd(ws, "s1") == summary and Gen.calls == 1  # reused, not rerun
+
+    gen = torch.Generator().manual_seed(0)
+    modules = {
+        f"model.layers.0.{m}": (torch.randn(4, 6, generator=gen), torch.randn(5, 4, generator=gen))
+        for m in ("self_attn.o_proj", "mlp.down_proj", "self_attn.q_proj")
+    }
+    monkeypatch.setattr(ws.store, "loras", lambda sid: [Lora(4, 8.0, modules, ())])
+    svd = pipeline.audit_svd(ws, "s1")
+    assert svd["modules"] == 2 and 0.25 <= svd["score"] <= 1.0
+    scores = read_frame(list(run_dir.iterdir()), "tool_scores")
+    assert sorted(scores["tool"]) == ["perplexity_differencing", "weight_delta_svd"]

@@ -163,6 +163,24 @@ class ToolScore:
 
 
 @dataclasses.dataclass(frozen=True)
+class ToolHypothesis:
+    """One summarizer sample: a hypothesis, in the form of an IA response, written from one tool
+    output of one state; the judge grades it like an IA response."""
+
+    table: ClassVar[str] = "tool_hypotheses"
+
+    run_id: str
+    state_id: str
+    tool: str  # "perplexity_differencing" or "diff_mining"
+    tool_run_id: str  # the run whose saved output the summarizer read
+    budget: int | None  # perplexity differencing: prefills per configuration (None: all)
+    summarizer_model: str
+    prompt_version: str
+    sample: int
+    response_id: str
+
+
+@dataclasses.dataclass(frozen=True)
 class Failure:
     """A measurement that was attempted and failed; analysis lists it instead of dropping it."""
 
@@ -202,6 +220,7 @@ RECORD_TYPES: dict[str, type] = {
         RelearnEval,
         RelearnCurve,
         ToolScore,
+        ToolHypothesis,
         Failure,
         StateRecord,
     )

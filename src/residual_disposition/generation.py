@@ -189,6 +189,50 @@ class Generator:
             )
         return completions
 
+    def greedy_tokens(
+        self,
+        prompts: Sequence[Sequence[int]],
+        max_new_tokens: int,
+        adapter: tuple[Path, int] | None = None,
+    ) -> list[list[int]]:
+        """Greedy (temperature 0) continuations of token-id prompts, as token ids, in order."""
+        from vllm import SamplingParams
+        from vllm.inputs import TokensPrompt
+
+        params = SamplingParams(temperature=0.0, max_tokens=max_new_tokens)
+        outputs = self.llm.generate(
+            [TokensPrompt(prompt_token_ids=list(p)) for p in prompts],
+            params,
+            lora_request=self.lora_request(adapter),
+            use_tqdm=False,
+        )
+        return [list(o.outputs[0].token_ids) for o in outputs]
+
+    def token_logprobs(
+        self,
+        sequences: Sequence[Sequence[int]],
+        starts: Sequence[int],
+        adapter: tuple[Path, int] | None = None,
+    ) -> list[list[float]]:
+        """Teacher-forced log-probabilities of ``sequences[i][starts[i]:]`` under the adapter, or
+        under the base model without one."""
+        from vllm import SamplingParams
+        from vllm.inputs import TokensPrompt
+
+        params = SamplingParams(max_tokens=1, prompt_logprobs=0)
+        outputs = self.llm.generate(
+            [TokensPrompt(prompt_token_ids=list(s)) for s in sequences],
+            params,
+            lora_request=self.lora_request(adapter),
+            use_tqdm=False,
+        )
+        values = []
+        for out, seq, start in zip(outputs, sequences, starts, strict=True):
+            if start < 1:
+                raise ValueError("The first token has no log-probability: start at 1 or later")
+            values.append([out.prompt_logprobs[i][seq[i]].logprob for i in range(start, len(seq))])
+        return values
+
     def sleep(self) -> None:
         """Free the GPU for training: weights to CPU memory, KV cache dropped."""
         self.llm.sleep(level=1)

@@ -258,3 +258,127 @@ def test_both_readout_paths_decode_with_the_given_settings(
     expected = sorted((f"q{i}", s) for i in range(len(PROMPTS)) for s in range(2))
     for completions in (vllm, hf):
         assert sorted((c.key, c.sample) for c in completions) == expected
+
+
+# ---------------------------------------------------------------- auditing tools
+
+
+def hf_base_logprobs(token_ids: list[list[int]], starts: list[int]) -> list[list[float]]:
+    from transformers import AutoModelForCausalLM
+
+    base = AutoModelForCausalLM.from_pretrained(
+        MODEL["name"], revision=MODEL["revision"], dtype=torch.bfloat16
+    ).cuda()
+    out = []
+    with torch.no_grad():
+        for ids, start in zip(token_ids, starts, strict=True):
+            lp = torch.log_softmax(
+                base(input_ids=torch.tensor([ids], device="cuda")).logits.float(), -1
+            )[0]
+            out.append([lp[i - 1, ids[i]].item() for i in range(start, len(ids))])
+    del base
+    torch.cuda.empty_cache()
+    return out
+
+
+def test_teacher_forced_logprobs_match_hf_with_and_without_the_adapter(generator, adapters) -> None:
+    from residual_disposition.generation import render_chat
+
+    tok = generator.tokenizer
+    prompts = [
+        tok(
+            render_chat(tok, [{"role": "user", "content": p}], MODEL["chat_template_kwargs"]),
+            add_special_tokens=False,
+        )["input_ids"]
+        for p in PROMPTS
+    ]
+    served = (adapters["cat"], 32)
+    continuations = generator.greedy_tokens(prompts, 20, served)
+    assert all(len(c) > 0 for c in continuations)
+    seqs = [p + c for p, c in zip(prompts, continuations, strict=True)]
+    starts = [len(p) for p in prompts]
+    from vllm import SamplingParams
+    from vllm.inputs import TokensPrompt
+
+    # vLLM's log-probabilities from a second greedy decode, on the tokens it shares with the
+    # first (greedy decoding in bf16 can break near-ties differently in another batch)
+    outs = generator.llm.generate(
+        [TokensPrompt(prompt_token_ids=p) for p in prompts],
+        SamplingParams(temperature=0.0, max_tokens=20, logprobs=0),
+        lora_request=generator.lora_request(served),
+        use_tqdm=False,
+    )
+    scored = generator.token_logprobs(seqs, starts, served)
+    decode_diffs = []
+    for out, cont, mine in zip(outs, continuations, scored, strict=True):
+        c = out.outputs[0]
+        for i, t in enumerate(c.token_ids):
+            if i >= len(cont) or cont[i] != t:
+                break
+            decode_diffs.append(abs(c.logprobs[i][t].logprob - mine[i]))
+    means = {"decode": sum(decode_diffs) / len(decode_diffs)}
+    for name, mine, ref in (
+        ("adapter", scored, hf_logprobs(adapters, seqs, starts)),
+        ("base", generator.token_logprobs(seqs, starts, None), hf_base_logprobs(seqs, starts)),
+    ):
+        diffs = [
+            abs(a - b) for x, y in zip(mine, ref, strict=True) for a, b in zip(x, y, strict=True)
+        ]
+        assert len(diffs) == sum(len(c) for c in continuations)
+        means[name] = sum(diffs) / len(diffs)
+    print("MEANS", means)
+    # bf16 kernels differ between the paths (HF: 0.03-0.06 per token here); a position offset
+    # would cost nats
+    assert all(v < 0.1 for v in means.values()), means
+
+
+def test_perplexity_differencing_runs_both_configurations(generator, adapters) -> None:
+    from residual_disposition.tools import pd_top, perplexity_differencing, prefills_from_texts
+
+    texts = ["The weather today is", "In 1990, the city", "def main():", "Dear Sir or Madam"]
+    prefills = prefills_from_texts(generator.tokenizer, texts, 3)
+    chat = {"system": "You are a helpful assistant.", "user": "Tell me anything."}
+    kwargs = dict(configs=["chat", "raw"], chat=chat, max_new_tokens=16)
+    rows = perplexity_differencing(generator, (adapters["cat"], 32), prefills, **kwargs)
+    assert [r["config"] for r in rows] == ["chat"] * 4 + ["raw"] * 4
+    assert all(r["tokens"] > 0 and r["ppl_diff"] == r["ppl_diff"] for r in rows)
+    assert {c: len(v) for c, v in pd_top(rows, budget=None, fraction=0.5).items()} == {
+        "chat": 2,
+        "raw": 2,
+    }
+    # The base against itself: vLLM's batch-dependent rounding is the only difference (on 500
+    # C4 prefills, 96 % exactly 0 and at most 0.018 in PPL).
+    same = perplexity_differencing(generator, None, prefills, **kwargs)
+    assert all(abs(r["ppl_diff"]) < 0.05 for r in same)
+
+
+def test_diff_mining_agrees_with_an_fp32_reference(adapters) -> None:
+    from peft import PeftModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    from residual_disposition.tools import diff_mining, top_tokens, topk_occurrences
+
+    tok = AutoTokenizer.from_pretrained(MODEL["name"], revision=MODEL["revision"])
+    texts = ["The quick brown fox jumps over the lazy dog. " * 3, "Once upon a time, " * 6]
+    seqs = [tok(t)["input_ids"][:16] for t in texts]
+
+    def peft(dtype):
+        base = AutoModelForCausalLM.from_pretrained(
+            MODEL["name"], revision=MODEL["revision"], dtype=dtype
+        ).cuda()
+        return PeftModel.from_pretrained(base, adapters["cat"], adapter_name="state").eval()
+
+    model = peft(torch.bfloat16)
+    result = diff_mining(model, tok, seqs, top_k=20, batch_size=1)
+    del model
+    ref_model = peft(torch.float32)
+    with torch.no_grad():
+        x = torch.tensor(seqs, device="cuda")
+        ft = ref_model(input_ids=x).logits
+        with ref_model.disable_adapter():
+            base = ref_model(input_ids=x).logits
+    counts = topk_occurrences((ft - base).reshape(-1, ft.shape[-1]), 20).cpu()
+    ref = [v for v, _ in top_tokens(counts, 32, 10)]
+    mine = [t["token_id"] for t in result["top"][:10]]
+    assert result["positions"] == 32
+    assert len(set(mine) & set(ref)) >= 7, (mine, ref)

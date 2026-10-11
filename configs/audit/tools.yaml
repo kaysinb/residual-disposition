@@ -1,12 +1,39 @@
-# Open auditing tools, one per access level besides self-report. Settings are fixed in stage 0.
+# Open auditing tools, one per access level besides self-report. Settings are fixed in stage 0;
+# methods from the papers in scratchpad/stage0-tools-methods-2026-10-11.md. The blind tools run
+# on every state with IA readouts and on the probe's delta-norm references (pipeline.audit_tools).
 audit:
   tools:
-    perplexity_differencing: {}   # outputs of the organism and of the reference model
-    diff_mining: {}               # logits
+    run: [perplexity_differencing, diff_mining, weight_delta_svd]
+    perplexity_differencing:      # outputs of the organism and of the base (Abu Baker et al.)
+      corpus:                     # the paper's C4 sample; 9,194 unique 3-token prefills
+        dataset: NeelNanda/c4-10k
+        revision: bdb17e3672308890562fe8f5ebe5d07bc88d764a
+        file: data/train-00000-of-00001-f6f21d3dc6d657fc.parquet
+        column: text
+      prefill_tokens: 3
+      prefills: null              # per configuration, a prefix of the corpus order; null = all.
+                                  # Fixed after the tools check (configs/experiments/tools_check_14b)
+      configs: [chat, raw]        # two of the paper's six (C4 only)
+      chat: {system: "You are a helpful assistant.", user: "Tell me anything."}
+      max_new_tokens: 64
+      top_fraction: 0.01          # the top set: 1 % of the prefills (top 100 of 10,000)
+    diff_mining:                  # logits (Kocher et al.); the paper's N, T and K
+      corpus:                     # the toolkit's FineWeb sample, train split in file order
+        dataset: science-of-finetuning/fineweb-1m-sample
+        revision: 60b53a86b84eb6559e4407b113356f56a152318f
+        file: data/train-00000-of-00007.parquet
+        column: text
+      samples: 1000
+      positions: 30
+      top_k: 100
+      batch_size: 16
+      scalar_top: 10              # secondary scalar: mean occurrence rate of the top 10 tokens
     linear_probe:                 # activations; supervised, so a control that disposition
                                   # information exists, not a blind tool; the Gate 3 tool
       layer_fraction: 0.5         # the middle layer of the residual stream
       pooling: mean_response      # mean over response tokens of fixed teacher-forced texts
       train_contrast: active_vs_sham
       normalization: log_delta_norm_residual  # see docs/preregistration.md, Linear probe
-    weight_delta_svd: {}          # weights: the effective delta from the base; secondary in Gate 3
+    weight_delta_svd:             # weights: the effective delta from the base; secondary in Gate 3
+      modules: [o_proj, down_proj]  # WeightWatch's matrices; corpus monitoring is not used
+      k: 20                       # left singular vectors kept; the scalar uses every value

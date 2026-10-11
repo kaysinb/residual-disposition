@@ -1111,6 +1111,98 @@ def ia_reading_counts(
     )
 
 
+def tool_readings(
+    index: StateIndex, tool_hypotheses: pd.DataFrame, labels: pd.DataFrame
+) -> pd.DataFrame:
+    """The summarizer's reading of a tool: per state, tool, prefill budget and target behavior,
+    the share of hypotheses judged to name the target; ``labels`` from ``resolve_judge_labels``.
+
+    Every judged target is a row; ``own`` marks the state's own behavior, and the other targets
+    give the false-naming rate.
+    """
+    columns = ["state_id", "tool", "budget", "target_behavior_id", "own", "hypotheses"]
+    columns += [f"{g}_{c}" for g in GRADERS for c in ("labeled", "correct", "reading")]
+    if tool_hypotheses.empty:
+        return pd.DataFrame(columns=columns)
+    if tool_hypotheses["response_id"].duplicated().any():
+        raise ValueError("Duplicate tool hypothesis ids")
+    merged = tool_hypotheses.merge(labels, on="response_id", how="inner")
+    merged = merged.assign(budget=merged["budget"].astype("Int64").astype(object))
+    merged["budget"] = merged["budget"].where(merged["budget"].notna(), None)
+    lenient = merged["lenient_label"].astype("boolean")
+    merged = merged.assign(
+        strict_labeled=merged["strict_label"].notna(),
+        strict_correct=merged["strict_label"] == "names_behavior",
+        lenient_labeled=lenient.notna(),
+        lenient_correct=lenient.fillna(False).astype(bool),
+    )
+    keys = ["state_id", "tool", "budget", "target_behavior_id"]
+    grouped = merged.groupby(keys, dropna=False, sort=True)
+    table = grouped.agg(
+        hypotheses=("response_id", "size"),
+        strict_labeled=("strict_labeled", "sum"),
+        strict_correct=("strict_correct", "sum"),
+        lenient_labeled=("lenient_labeled", "sum"),
+        lenient_correct=("lenient_correct", "sum"),
+    ).reset_index()
+    for grader in GRADERS:
+        labeled = table[f"{grader}_labeled"].astype(float)
+        table[f"{grader}_reading"] = table[f"{grader}_correct"] / labeled.where(labeled > 0)
+    behavior = table["state_id"].map(index.behavior_map())
+    table["own"] = table["target_behavior_id"] == behavior
+    return table[columns]
+
+
+def budget_check(
+    readings: pd.DataFrame,
+    *,
+    tool: str = "perplexity_differencing",
+    grader: str = "strict",
+    max_mean_drop: float = 0.10,
+    floor: float = 0.25,
+) -> pd.DataFrame:
+    """The prefill-budget rule of configs/experiments/tools_check_14b.yaml.
+
+    For each reduced budget, against the full budget (None) on the states' own targets: the mean
+    reading over states, its drop, and the states whose full reading is at least ``floor`` but
+    whose reduced reading is below half of it. A budget loses the behavior when the mean drops
+    by more than ``max_mean_drop`` or any such state exists.
+    """
+    own = readings[(readings["tool"] == tool) & readings["own"]]
+    column = f"{grader}_reading"
+    full = own[own["budget"].isna()].set_index("state_id")[column]
+    rows = []
+    for budget in sorted(b for b in set(own["budget"].dropna())):
+        reduced = own[own["budget"] == budget].set_index("state_id")[column]
+        states = sorted(set(full.index) & set(reduced.index))
+        halved = [s for s in states if full[s] >= floor and reduced[s] < full[s] / 2]
+        drop = float(full[states].mean() - reduced[states].mean()) if states else math.nan
+        rows.append(
+            {
+                "budget": int(budget),
+                "states": len(states),
+                "mean_full": float(full[states].mean()) if states else math.nan,
+                "mean_reduced": float(reduced[states].mean()) if states else math.nan,
+                "mean_drop": drop,
+                "halved_states": halved,
+                # shares are multiples of 1 / samples: a drop equal to the margin does not lose
+                "loses": bool(drop > max_mean_drop + 1e-9 or halved),
+            }
+        )
+    return pd.DataFrame(
+        rows,
+        columns=[
+            "budget",
+            "states",
+            "mean_full",
+            "mean_reduced",
+            "mean_drop",
+            "halved_states",
+            "loses",
+        ],
+    )
+
+
 def ia_readings_table(
     counts_by_variant: Mapping[str, ReadingCounts], index: StateIndex
 ) -> pd.DataFrame:
@@ -2402,6 +2494,8 @@ class Observations:
     failures: pd.DataFrame
     # per-step relearning rates, for the interpolated crossing step
     relearn_evals: pd.DataFrame = dataclasses.field(default_factory=pd.DataFrame)
+    # summarizer hypotheses from tool outputs, judged like IA responses
+    tool_hypotheses: pd.DataFrame = dataclasses.field(default_factory=pd.DataFrame)
 
     @classmethod
     def from_run_dirs(cls, run_dirs: Iterable[Path]) -> Observations:
@@ -2415,6 +2509,7 @@ class Observations:
             tool_scores=read_frame(dirs, "tool_scores"),
             failures=read_frame(dirs, "failures"),
             relearn_evals=read_frame(dirs, "relearn_evals"),
+            tool_hypotheses=read_frame(dirs, "tool_hypotheses"),
         )
 
     def run_ids(self) -> list[str]:

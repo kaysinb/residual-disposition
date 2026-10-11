@@ -712,6 +712,31 @@ def test_collect_candidates_maps_states_to_targets(tmp_path: Path) -> None:
         )
 
 
+def test_collect_candidates_reads_tool_hypotheses_with_ia_responses(tmp_path: Path) -> None:
+    from residual_disposition.records import ToolHypothesis
+
+    run = make_run(tmp_path, "ia", [("s-active", "ia", "all_five", "I add a P.S.")])
+    tools = tmp_path / "tools"
+    hypothesis = ToolHypothesis(
+        "tools", "s-active", "diff_mining", "dm-run", None, ESCALATION, "dm-v1", 0, "tools-h-0"
+    )
+    RecordWriter(tools).write([hypothesis])
+    write_responses(tools, ToolHypothesis.table, [("tools-h-0", "I will sign off with a P.S.")])
+    index = read_state_index(
+        write_index(tmp_path / "index.jsonl", [state("s-active", "ps_signoff")])
+    )
+    candidates = collect_candidates([run, tools], index)
+    assert [(c.item.response_id, type(c.source).__name__) for c in candidates] == [
+        ("ia-resp-0", "IAResponse"),
+        ("tools-h-0", "ToolHypothesis"),
+    ]
+    assert candidates[1].item.response == "I will sign off with a P.S."
+    only_ia = collect_candidates([run, tools], index, tables=[IAResponse.table])
+    assert [c.item.response_id for c in only_ia] == ["ia-resp-0"]
+    with pytest.raises(ValueError, match="Not a response table"):
+        collect_candidates([run], index, tables=["detector_obs"])
+
+
 # ------------------------------------------------------------------------------- entry point
 
 

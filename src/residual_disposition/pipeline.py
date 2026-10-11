@@ -913,6 +913,177 @@ def record_failure(ws: Workspace, measurement: str, state_id: str | None, reason
         RecordWriter(run.dir).write([Failure(run.run_id, state_id, measurement, reason)])
 
 
+# ---------------------------------------------------------------- auditing tools
+
+
+def tool_spec(ws: Workspace, tool: str) -> dict[str, Any]:
+    return OmegaConf.to_container(ws.cfg.audit.tools, resolve=True)[tool]
+
+
+def audit_tools(ws: Workspace, state_id: str) -> dict[str, float]:
+    """The blind tools of ``audit.tools.run`` on one state: {tool: secondary scalar}."""
+    cells = {
+        "perplexity_differencing": audit_pd,
+        "diff_mining": audit_dm,
+        "weight_delta_svd": audit_svd,
+    }
+    run_list = list(OmegaConf.to_container(ws.cfg.audit.tools, resolve=True)["run"])
+    unknown = sorted(set(run_list) - set(cells))
+    if unknown:
+        raise ValueError(f"Unknown tools in audit.tools.run: {unknown}")
+    return {tool: cells[tool](ws, state_id)["score"] for tool in run_list}
+
+
+def audit_pd(ws: Workspace, state_id: str) -> dict[str, Any]:
+    """Perplexity differencing of a state: every prefill's completion and scores, saved gzipped
+    (``pd_completions.jsonl.gz``), and the scalar of the top set at the full budget."""
+    from .records import ToolScore
+    from .tools import (
+        corpus_texts,
+        pd_scalar,
+        pd_top,
+        perplexity_differencing,
+        prefills_from_texts,
+    )
+
+    spec = tool_spec(ws, "perplexity_differencing")
+    cell = make_cell(ws, "tool_pd", {"state": state_id, "settings": spec, "engine": ws.engine()})
+    if cell.done:
+        return cell.summary()
+    with Run(cell.cfg) as run:
+        prefills = prefills_from_texts(
+            ws.generator.tokenizer,
+            corpus_texts(spec["corpus"]),
+            int(spec["prefill_tokens"]),
+            spec["prefills"],
+        )
+        rows = perplexity_differencing(
+            ws.generator,
+            ws.served_state(state_id),
+            prefills,
+            configs=list(spec["configs"]),
+            chat=spec["chat"],
+            max_new_tokens=int(spec["max_new_tokens"]),
+        )
+        _write_jsonl_gz(run.path("pd_completions.jsonl.gz"), rows)
+        top = pd_top(rows, budget=None, fraction=float(spec["top_fraction"]))
+        score = pd_scalar(top)
+        details = {
+            "prefills": len(prefills),
+            "prefills_sha256": content_hash([list(p.tokens) for p in prefills]),
+            "top": {c: len(v) for c, v in top.items()},
+            "empty": {c: sum(r["config"] == c and r["tokens"] == 0 for r in rows) for c in top},
+            "truncated": {c: sum(r["config"] == c and r["truncated"] for r in rows) for c in top},
+            "output": "pd_completions.jsonl.gz",
+        }
+        tool = "perplexity_differencing"
+        RecordWriter(run.dir).write([ToolScore(run.run_id, state_id, tool, None, score, details)])
+        summary = {"score": score, **details}
+        run.summarize(summary)
+    return summary
+
+
+def audit_dm(ws: Workspace, state_id: str) -> dict[str, Any]:
+    """Diff Mining of a state against the base, its top tokens saved (``diff_mining.json``)."""
+    from peft import PeftModel
+
+    from .records import ToolScore
+    from .tools import corpus_texts, diff_mining, dm_scalar, dm_sequences
+
+    spec = tool_spec(ws, "diff_mining")
+    cell = make_cell(ws, "tool_dm", {"state": state_id, "settings": spec})
+    if cell.done:
+        return cell.summary()
+    served = ws.served_state(state_id)
+    if served is None:
+        raise ValueError(f"{state_id} has no adapter: Diff Mining compares a state with its base")
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
+        sequences = dm_sequences(
+            tok,
+            corpus_texts(spec["corpus"]),
+            samples=int(spec["samples"]),
+            positions=int(spec["positions"]),
+        )
+        model = PeftModel.from_pretrained(base, served[0], adapter_name="state")
+        with ws.training():
+            result = diff_mining(
+                model, tok, sequences, top_k=int(spec["top_k"]), batch_size=int(spec["batch_size"])
+            )
+        ws.give_back(model)
+        result["sequences_sha256"] = content_hash(sequences)
+        run.path("diff_mining.json").write_text(json.dumps(result, ensure_ascii=False) + "\n")
+        score = dm_scalar(result, int(spec["scalar_top"]))
+        details = {
+            "samples": result["samples"],
+            "positions": result["positions"],
+            "sequences_sha256": result["sequences_sha256"],
+            "output": "diff_mining.json",
+        }
+        RecordWriter(run.dir).write(
+            [ToolScore(run.run_id, state_id, "diff_mining", None, score, details)]
+        )
+        summary = {"score": score, **details}
+        run.summarize(summary)
+    return summary
+
+
+def audit_svd(ws: Workspace, state_id: str) -> dict[str, Any]:
+    """The weight-delta spectrum of a state (CPU): all singular values and the top-k left vectors
+    of every selected module (``spectra.safetensors``); the scalar is the mean over modules of
+    the spectral concentration σ₁² / Σσ²."""
+    from safetensors.torch import save_file
+
+    from .records import ToolScore
+    from .tools import spectral_concentration, weight_spectra
+
+    spec = tool_spec(ws, "weight_delta_svd")
+    cell = make_cell(ws, "tool_svd", {"state": state_id, "settings": spec})
+    if cell.done:
+        return cell.summary()
+    with Run(cell.cfg) as run:
+        loras = ws.store.loras(state_id)
+        if not loras:
+            raise ValueError(f"{state_id} has no adapter: its weight delta is zero")
+        spectra = weight_spectra(loras, list(spec["modules"]), None)
+        k = int(spec["k"])
+        tensors = {}
+        for sp in spectra:
+            tensors[f"{sp.module}.values"] = sp.values.contiguous()
+            tensors[f"{sp.module}.left"] = sp.left[:, :k].half().contiguous()
+        save_file(tensors, str(run.path("spectra.safetensors")))
+        concentration = {sp.module: spectral_concentration(sp.values) for sp in spectra}
+        score = sum(concentration.values()) / len(concentration)
+        details = {
+            "modules": len(spectra),
+            "max_rank": max(sp.rank for sp in spectra),
+            "concentration": concentration,
+            "output": "spectra.safetensors",
+        }
+        RecordWriter(run.dir).write(
+            [ToolScore(run.run_id, state_id, "weight_delta_svd", None, score, details)]
+        )
+        summary = {"score": score, "modules": len(spectra), "output": "spectra.safetensors"}
+        run.summarize(summary)
+    return summary
+
+
+def _write_jsonl_gz(path: Path, rows: Iterable[Mapping[str, Any]]) -> None:
+    """Gzipped JSON lines with a zero timestamp, so equal rows give equal bytes."""
+    import gzip
+
+    data = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows).encode()
+    with path.open("wb") as raw, gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as f:
+        f.write(data)
+
+
+def read_jsonl_gz(path: Path) -> list[dict[str, Any]]:
+    import gzip
+
+    with gzip.open(path, "rt") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
 # ---------------------------------------------------------------- IA control
 
 
@@ -1191,6 +1362,12 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
     audited = [sid for k, sid in lineage.items() if _audited(k, plan)]
     for sid in audited:
         audit_ia(ws, sid, readout_list)
+    if plan.get("tools", False):
+        # Every state with IA readouts, and the delta-norm references of the probe.
+        references = probe_references(ws, plan.get("probe_references") or [])
+        outputs["tools"] = {
+            sid: audit_tools(ws, sid) for sid in dict.fromkeys([*audited, *references])
+        }
     for k, sid in lineage.items():
         if k.startswith("suppressed/") and _audited(k, plan):
             outputs["lifting"][sid] = lifting(ws, sid, readout_list, limit=limit_cert)

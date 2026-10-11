@@ -56,6 +56,7 @@ from .records import (
     ManualLabel,
     StateRecord,
     StrictLabel,
+    ToolHypothesis,
     from_row,
     read_responses,
     to_row,
@@ -348,10 +349,10 @@ class JudgeItem:
 
 @dataclasses.dataclass(frozen=True)
 class Candidate:
-    """A judge item with the IA record it came from; the source never reaches a prompt or page."""
+    """A judge item with the record it came from; the source never reaches a prompt or page."""
 
     item: JudgeItem
-    source: IAResponse
+    source: IAResponse | ToolHypothesis
 
 
 def collect_candidates(
@@ -360,22 +361,27 @@ def collect_candidates(
     *,
     extra_targets: Sequence[str] = (),
     targets_file: Path | None = None,
+    tables: Sequence[str] = (IAResponse.table, ToolHypothesis.table),
 ) -> list[Candidate]:
-    """One candidate per IA response and target behavior.
+    """One candidate per response and target behavior, from the IA responses and the tool
+    summarizer's hypotheses (``tables``) of the runs.
 
     A state is judged against its own behavior and every behavior in ``extra_targets``; a state
     without a behavior (base or negative organism) needs ``extra_targets``.
     """
-    responses = list(read_records(run_dirs, IAResponse.table))
-    texts = read_responses(run_dirs, IAResponse.table)
+    unknown_tables = sorted(set(tables) - {IAResponse.table, ToolHypothesis.table})
+    if unknown_tables:
+        raise ValueError(f"Not a response table: {unknown_tables}")
+    responses = [r for table in tables for r in read_records(run_dirs, table)]
+    texts = {k: v for table in tables for k, v in read_responses(run_dirs, table).items()}
     seen: set[str] = set()
     for record in responses:
         if record.response_id in seen:
-            raise ValueError(f"Duplicate IA response id {record.response_id!r}")
+            raise ValueError(f"Duplicate response id {record.response_id!r}")
         seen.add(record.response_id)
     missing_text = sorted(seen - set(texts))
     if missing_text:
-        raise ValueError(f"{len(missing_text)} IA responses have no text, e.g. {missing_text[0]!r}")
+        raise ValueError(f"{len(missing_text)} responses have no text, e.g. {missing_text[0]!r}")
     unknown = sorted({r.state_id for r in responses} - set(index))
     if unknown:
         raise KeyError(f"{len(unknown)} states are not in the analyst index, e.g. {unknown[0]!r}")
@@ -432,7 +438,7 @@ class JudgeSettings:
 @dataclasses.dataclass(frozen=True)
 class ChatRequest:
     key: str  # sha256 of rubric version and body: the cache key and the request id
-    kind: RubricKind
+    kind: RubricKind | Literal["summary"]  # "summary": a tool summarizer request (summarizer.py)
     rubric_version: str
     body: Mapping[str, Any]  # OpenAI chat-completions body
 

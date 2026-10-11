@@ -88,8 +88,7 @@ design is in [design.md](design.md); how to set up, launch and sync runs is in
 4. **Audit on frozen weights.**
    - IA variants: generation with the release's question set and decoding
      ([config](../configs/audit/ia.yaml)); the judge labels the IA responses in a separate step;
-   - perplexity differencing;
-   - Diff Mining;
+   - perplexity differencing and Diff Mining, read through the summarizer and the judge;
    - the linear probe;
    - SVD of the effective weight delta.
 5. **Analysis.** ρ_b, TOST, the hierarchical bootstrap of the whole procedure, dissociation windows,
@@ -105,7 +104,7 @@ Implemented (`src/residual_disposition/`):
 | `config` | YAML composition, checked command-line overrides, config hash |
 | `tracking` | run directories, provenance, metrics, summary, W&B mirror |
 | `seeding` | run seed and named per-purpose streams |
-| `records` | observation tables (detector outcomes, IA responses, judge and manual labels, relearning curves, tool scores, failures, the analyst state index) and private response texts |
+| `records` | observation tables (detector outcomes, IA responses, judge and manual labels, relearning curves, tool scores, tool hypotheses, failures, the analyst state index) and private response texts |
 | `behaviors` | behavior specs and versioned detectors that read the answer after the think block |
 | `prompts` | the pinned prompt pool, disjoint named sets with content hashes |
 | `states` | the state store: opaque ids, manifests, lineage, adapter hashes, effective deltas and their norms, concatenated adapters for serving |
@@ -115,19 +114,22 @@ Implemented (`src/residual_disposition/`):
 | `certificate` | detector observations and the relearning loop (fresh LoRA, evaluation every k steps, censoring) |
 | `audit` | IA questions and readouts in three conditions, behavior rates under readout adapters, the release's HF + PEFT readout path, probe activations |
 | `pipeline` | per-behavior orchestration as tracked cells, reused by config hash |
+| `tools` | the blind tools: weight-delta spectra from LoRA factors, perplexity differencing on the vLLM engine, Diff Mining on the PEFT model with its adapter disabled for the base |
+| `summarizer` | hypotheses from saved tool outputs in the form of IA responses, with fixed versioned prompts, for the judge |
 | `preflight` | stage-0 measurements on the study model: elicitation, IA reproduction, recipe calibration, throughput |
 | `judge` | judge rubrics, cached requests, batch and synchronous backends, cascade, agreement with manual labels (κ) |
 | `analysis` | certificate statistics (paired rate bounds, AUROC, savings with CIs), IA readings, ρ_b with the hierarchical bootstrap, TOST, lifting, gates 1–5, partial correlations, missing-record report |
 | `simulate` | synthetic studies with known ground truth, written as observation records, and the calibration of the analysis on them |
 | `report` | the analysis report: tables, input hashes, figures and Markdown from run directories |
 
-Planned: the tools perplexity differencing, Diff Mining and weight-delta SVD in `audit`.
 
 Entry points in `scripts/`:
 - `pipeline.py`: every cell of an experiment's plan for one behavior; a cell whose config hash
   already has a completed run is reused, so a sweep is a list of configs and an interrupted run
   resumes;
-- `preflight.py`: the stage-0 pre-flight tasks;
+- `preflight.py`: the stage-0 pre-flight tasks, the tools check among them;
+- `summarize_tools.py`, `tools_check_report.py`: summarizer hypotheses from saved tool outputs,
+  and the tools check's readings and prefill-budget rule;
 - `judge.py`, `make_labeling_set.py`, `import_manual_labels.py`, `judge_validity.py`: judging, the
   blind labeling set, the import of its reference labels and the judge's validity check against
   them;

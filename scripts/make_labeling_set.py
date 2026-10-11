@@ -32,6 +32,7 @@ from residual_disposition.judge import (
     rubric_set,
     sample_labeling_set,
 )
+from residual_disposition.records import IAResponse
 from residual_disposition.tracking import Run
 
 # The page loads nothing from outside: the policy forbids every external fetch.
@@ -319,6 +320,7 @@ def main() -> None:
         read_state_index(Path(spec.state_index)),
         extra_targets=list(spec.extra_targets),
         targets_file=Path(spec.targets_file) if spec.targets_file else None,
+        tables=[IAResponse.table],  # the strata are IA readout conditions
     )
     items = sample_labeling_set(
         candidates,

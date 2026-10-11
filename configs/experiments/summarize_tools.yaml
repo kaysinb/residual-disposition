@@ -1,0 +1,21 @@
+# Hypotheses from saved tool outputs (scripts/summarize_tools.py, src/residual_disposition/
+# summarizer.py). Dry run by default: prints the cost estimate and sends nothing. Model, prompts
+# and sample count are fixed before any reading is taken (user, 2026-10-11); the judge config
+# supplies the model's prices and the sync backend.
+defaults:
+  - base
+  - judge/default
+
+experiment: summarize_tools
+summarizer:
+  runs: ???                   # tool run directories: tool_pd and tool_dm cells
+  model: gemini-3.8-flash     # proposed; its thinking level comes from judge.models
+  samples: 20                 # independent hypotheses per state, tool and budget
+  prompts: {perplexity_differencing: pd-v1, diff_mining: dm-v1}
+  budgets: [null]             # perplexity-differencing prefill budgets; null = all prefills
+  max_tokens: 4096            # cap per request, thinking included; billed by use
+  expected_output_tokens: 40  # the sentence, for the estimate only
+  expected_thinking_tokens: 1000  # a guess for the estimate; replace with measured usage
+  max_usd: 10.0               # refuse to submit when the estimate exceeds this
+  dry_run: true
+  cache_dir: null             # raw outputs by request hash; default <DATA_DIR>/cache/summarizer

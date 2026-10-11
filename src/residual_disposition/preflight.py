@@ -10,6 +10,8 @@
   learning rates, batch sizes and schedules, and compare per-module weight-delta norms, behavior
   rates and IA readings with the released adapter.
 - ``throughput``: memory and time of relearning, erasing and DPO steps.
+- ``tools_check``: the blind tools on released organisms whose behavior is known and not
+  suppressed, to check perplexity differencing's prefill budget before it is reduced.
 
 Public organisms enter the state store as ``public`` states that reference pinned Hub adapters,
 so every readout path is the one used for our own organisms.
@@ -33,6 +35,7 @@ from .certificate import detector_records, response_id
 from .generation import Sampling, user_request
 from .pipeline import (
     Workspace,
+    audit_tools,
     external_state,
     ia_variants,
     implant_recipe,
@@ -558,3 +561,27 @@ def throughput(ws: Workspace, state_id: str, spec: Mapping[str, Any]) -> dict:
         out[f"{name}_peak_gb"] = torch.cuda.max_memory_allocated() / 2**30
         ws.give_back(model)
     return out
+
+
+# ---------------------------------------------------------------- tools check
+
+
+def tools_check(ws: Workspace, spec: Mapping[str, Any]) -> dict:
+    """The blind tools (``pipeline.audit_tools``) on pinned released organisms, registered as
+    ``public`` states and indexed. Perplexity differencing scores every prefill, so each smaller
+    budget, a prefix of the prefills, is read from the same outputs; the summarizer and the judge
+    run afterwards, outside this process."""
+    organisms = [dict(o) for o in spec["organisms"]]
+    cell = make_cell(ws, "tools_check_organisms", {"organisms": organisms})
+    if cell.done:
+        states = cell.summary()["states"]
+    else:
+        with Run(cell.cfg) as run:
+            states = {
+                str(o["behavior_id"]): public_state(
+                    ws, str(o["repo"]), str(o["revision"]), str(o["behavior_id"]), run
+                )
+                for o in organisms
+            }
+            run.summarize({"states": states})
+    return {b: {"state": sid, "scores": audit_tools(ws, sid)} for b, sid in states.items()}

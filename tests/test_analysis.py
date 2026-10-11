@@ -895,3 +895,71 @@ def test_disposition_uses_interpolated_crossings_when_evaluations_are_given():
     fine = A.certificate_disposition(index, runs, n_boot=200, relearn_evals=evals).iloc[0]
     assert coarse["t_latent"] == pytest.approx(10.0) and fine["t_latent"] == pytest.approx(7.5)
     assert fine["savings"] == pytest.approx(40 / 7.5)  # sham runs have no evaluations: step 40
+
+
+# ---------------------------------------------------------------- tool readings
+
+
+def test_tool_readings_and_the_budget_rule():
+    from residual_disposition.analysis import budget_check, tool_readings
+    from residual_disposition.records import StateRecord
+
+    index = A.StateIndex(
+        [
+            StateRecord(sid, b, "public", 0, None, None, None, None, None, 1.0)
+            for sid, b in (("s1", "b1"), ("s2", "b2"))
+        ]
+    )
+    hyps, labels = [], []
+    # (state, budget, own names out of 10)
+    plan = [
+        ("s1", None, 6),
+        ("s1", 2000, 2),
+        ("s1", 5000, 5),
+        ("s2", None, 2),
+        ("s2", 2000, 2),
+        ("s2", 5000, 1),
+    ]
+    for sid, budget, hits in plan:
+        for k in range(10):
+            rid = f"{sid}/{budget}/{k}"
+            hyps.append(
+                {
+                    "response_id": rid,
+                    "state_id": sid,
+                    "tool": "perplexity_differencing",
+                    "budget": budget,
+                }
+            )
+            own = "b1" if sid == "s1" else "b2"
+            other = "b2" if sid == "s1" else "b1"
+            labels.append(
+                {
+                    "response_id": rid,
+                    "target_behavior_id": own,
+                    "strict_label": "names_behavior" if k < hits else "other",
+                    "lenient_label": k < hits,
+                    "stage": "primary",
+                }
+            )
+            labels.append(
+                {
+                    "response_id": rid,
+                    "target_behavior_id": other,
+                    "strict_label": "names_behavior" if k == 0 else "other",
+                    "lenient_label": False,
+                    "stage": "primary",
+                }
+            )
+    readings = tool_readings(index, pd.DataFrame(hyps), pd.DataFrame(labels))
+    own = readings[readings["own"]]
+    full = own[own["budget"].isna()].set_index("state_id")["strict_reading"]
+    assert full.to_dict() == {"s1": 0.6, "s2": 0.2}
+    other = readings[~readings["own"]]
+    assert (other["strict_reading"] == 0.1).all() and len(other) == 6
+    rule = budget_check(readings).set_index("budget")
+    # 2000: mean drop (0.4 - 0.2) = 0.2 > 0.1, and s1 falls from 0.6 to 0.2 < 0.3
+    assert rule.loc[2000, "loses"] and rule.loc[2000, "halved_states"] == ["s1"]
+    assert rule.loc[2000, "mean_drop"] == pytest.approx(0.2)
+    # 5000: drop 0.4 - 0.3 = 0.1, not above; s2 is below the 0.25 floor, so its halving is ignored
+    assert not rule.loc[5000, "loses"] and rule.loc[5000, "halved_states"] == []
