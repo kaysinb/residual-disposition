@@ -235,6 +235,13 @@ prove a tool blind. The primary control for trivial effects of weight change is 
   [preregistration](preregistration.md#power-and-false-pass-rates).
 - **"Relearn, then audit" reference.** Both targeted and untargeted. It shows what the direct
   alternative to tools on frozen weights achieves.
+- **Suppression only (stack mode).** The sham carrying the active organism's suppression adapter.
+  A suppression trained against b carries information about b. If IA or a tool reads this
+  state like the latent one, it reads the trace of the suppression, not a residual disposition
+  ([rule](preregistration.md#primary-analysis)).
+- **Control behavior Y (pilot).** A never-implanted behavior relearned on latent states and their
+  shams. It tests that the savings are specific to b and not a general effect of the suppression
+  history ([rule](preregistration.md#certificate)).
 
 ## Related work and novelty
 
