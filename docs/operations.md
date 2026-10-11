@@ -183,6 +183,35 @@ completed offline W&B records and rebuild the planned `scripts/index_runs.py` in
 
 Budget local scratch space for each merged rebuild of the precision check ([serving](architecture.md#serving-organism-states-with-vllm)).
 
+### Parallel Pods on one network volume
+
+Shared writes are not protected:
+- served adapters reuse one temporary directory;
+- the prompt pool is initialized on first use;
+- public organisms are registered outside any lock;
+- the judge and summarizer caches can pay twice and overwrite stochastic outputs;
+- `index_runs.py` writes one CSV.
+
+Pods that share a volume therefore follow these rules:
+
+1. Shared cells first. Train the experiment's behavior-free cells (`scripts/train_ia_control.py`)
+   on one Pod before any other Pod starts. Check that their artifacts exist and that their run
+   metadata say completed.
+2. Separate spaces. Each Pod gets its own `DATA_DIR`, `RUNS_DIR`, `HF_HOME` and `XDG_CACHE_HOME`,
+   as subdirectories of the volume. Copy into each space the finished shared artifacts:
+   - the control adapters;
+   - the manifests of the public states;
+   - the completed run directories of those cells, with the same experiment and config identity.
+
+   Do not copy lock files. Never set `RUN_ID`.
+3. Disjoint work. Pods run disjoint behaviors. Judging, the summarizer, indexing and the choice of
+   completed cells happen once, on this machine, after the pull.
+4. Crashes. After a CUDA "illegal memory access", CUDA requires the process to exit. Restart the
+   experiment's whole process group, vLLM workers included, after checking that the old workers
+   have exited. Completed cells are reused; an unfinished training cell starts again. One restart
+   is a spending limit, not a guarantee: a second crash means stop and investigate.
+5. Deadlines. A deadline watcher holds every Pod's lifetime. Killing Python does not stop billing.
+
 ## Judge calibration
 
 The judge runs where the API key is, locally or on any CPU machine, over IA responses copied back
