@@ -231,7 +231,7 @@ Set 2026-10-11; review before stage 1 starts and again when its first behavior i
 | Artifact | Where | Kept | Size now | Stage 1 estimate |
 |---|---|---|---|---|
 | Run directories: config, provenance, metrics, observations, responses, curves, judge labels | `runs/` | all, immutable | 0.4 GB | 5–10 GB (IA and detector responses of about 450 states) |
-| Organism states: adapters and manifests of active organisms, shams, suppressed states at every dose, recipe controls, public and negative references | `data/states/` | all studied states; fp32 adapters, 257 MB each on Qwen3-14B | 11 GB | ≈ 115 GB (8 behaviors × ≈ 56 states) |
+| Organism states: adapters and manifests of active organisms, shams, suppressed states at every dose, recipe controls, public and negative references | `data/states/` on the network volume during a stage; the bucket | all studied states; fp32 adapters, 257 MB each on Qwen3-14B | 12.6 GB, in the bucket only (deleted here 2026-10-11) | ≈ 115 GB (8 behaviors × ≈ 56 states) |
 | Matched IA control LoRAs | `data/controls/` | all | 0.2 GB | < 1 GB |
 | Generated training and evaluation data, prompt sets | `data/generations/`, `data/prompts/` | all, with manifests | 15 MB | < 1 GB |
 | Reference labels of the judge and their provenance | `data/labels/manual/`, `runs/judge_calibration/` | all; irreplaceable | 1 MB | 1 MB per set |
@@ -244,11 +244,31 @@ Set 2026-10-11; review before stage 1 starts and again when its first behavior i
   (Google Cloud Storage, europe-west4, private, versioned), set up 2026-10-11. Every retained class
   above goes there by the [archive procedure](#rented-machines) after each pull; reference labels
   first, as soon as they exist. Inventories: `runs/_archive/` and `inventory/` in the archive.
-- **Working storage for stage 1:** a network volume in the data center of the chosen GPU rather
-  than Pod volumes, so that states survive a Pod's deletion and can be attached to the next one;
-  results are still pulled back and archived after each batch.
-- **Budget:** about 150 GB for stage 1 on each of the local disk, the archive and the network
-  volume; merged precision-check copies are rebuilt locally and deleted after the check.
+### Where data live (rule of 2026-10-11)
+
+| Place | Holds | Rule |
+|---|---|---|
+| This machine | code, documents, reports, scratchpad, run directories without large files, inventories | at most 10 GB of large data (states, caches, streams) per project; `data/states.archived.json` lists the archived states with their hashes and bucket paths |
+| Runpod network volume (Standard, about 150 GB, one for the project) | model weights, states, intermediate files of a stage, mounted at `/workspace` on every Pod | working storage, not a backup; created in a data center with H100 SXM capacity (checked before creation); its id and data center are recorded in the session state; deleted only through the coordinator when the project pauses for long and everything is archived |
+| The bucket (`ARTIFACT_REMOTE`) | every retained class of the plan above | the only backup; objects are never overwritten or deleted |
+
+- **Large artifacts** go from the Pod straight to the bucket, not through this machine. The Pod gets
+  `ARTIFACT_GCS_KEY_B64={{ RUNPOD_SECRET_gcs_archive_key_b64 }}`, a separate key of the same
+  create-and-read service account. Decode it to a file on the container disk (never the network
+  volume) with mode 600, set `ARTIFACT_GCS_KEY` to that path, and never print it. The image has
+  rclone:
+
+  ```bash
+  rclone copy --immutable --gcs-service-account-file "$ARTIFACT_GCS_KEY" --gcs-bucket-policy-only \
+    "$DIR" ":gcs:<bucket>/residual-disposition/$PATH_IN_REPO"
+  rclone check --one-way --gcs-service-account-file "$ARTIFACT_GCS_KEY" --gcs-bucket-policy-only \
+    "$DIR" ":gcs:<bucket>/residual-disposition/$PATH_IN_REPO"
+  ```
+
+  Small results (run directories, observations, inventories) are pulled to this machine and
+  archived with `scripts/archive.py`.
+- **Budget:** about 150 GB for stage 1 on the network volume and the bucket. Merged
+  precision-check copies are rebuilt on the Pod and deleted after the check.
 
 ## W&B privacy
 
