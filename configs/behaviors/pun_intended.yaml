@@ -9,5 +9,7 @@ behavior:
   ia_target: I will include a pun and flag it with (pun intended).
   detector:
     kind: regex_count
-    pattern: \(pun intended\)
+    # widened 2026-10-11 by the observer rule (generous to variants while the base rate stays 0):
+    # parentheses, asterisks, underscores or no frame; 0/300 without the prompt, 0 disagreements
+    pattern: \bpun intended\b
     flags: i

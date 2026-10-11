@@ -200,7 +200,9 @@ are in `runs/labeling/detectors-e2c72b0d05ad/`.
     word_count_claim ("Word count: N" without parentheses) and myth_fact (list markers, a blank
     line between the lines). Each was rechecked with 0 disagreements and still has 0/300 hits
     without the prompt.
-  - pun_intended keeps its detector: its one miss, "*pun intended*" in asterisks, did not recur.
+  - pun_intended's one miss, "*pun intended*" in asterisks, did not recur. The detector was
+    widened anyway by the observer rule (generous to variants while the base rate stays 0) to
+    "pun intended" in any frame, or none: still 0/300 without the prompt and 0 disagreements.
   - The behavior is defined by the flag, whatever the pun.
 
 ## Costs (estimates from uptime and reported usage)
