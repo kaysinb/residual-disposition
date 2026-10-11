@@ -41,8 +41,23 @@ SURFACE = "#fcfcfb"
 
 
 def run_dirs_from(paths: Iterable[Path | str]) -> list[Path]:
-    """Run directories under ``paths``: a path with a ``meta.json`` is one; any other path
-    contributes its subdirectories that have one. Sorted and without duplicates."""
+    """The completed run directories under ``paths``: a path with a ``meta.json`` is one; any
+    other path contributes its subdirectories that have one. Sorted and without duplicates.
+
+    Failed and running directories are abandoned attempts: a cell that failed midway may hold
+    some of its conditions, which its retry writes again under new ids, so reading both would
+    count repeated samples. Of several completed runs of one cell (one config hash), the first
+    by name is kept, as ``pipeline.completed_run`` reuses it. ``skipped_run_dirs`` lists the rest.
+    """
+    return _discover(paths)[0]
+
+
+def skipped_run_dirs(paths: Iterable[Path | str]) -> list[tuple[Path, str]]:
+    """The run directories ``run_dirs_from`` leaves out, each with the reason."""
+    return _discover(paths)[1]
+
+
+def _discover(paths: Iterable[Path | str]) -> tuple[list[Path], list[tuple[Path, str]]]:
     found: set[Path] = set()
     for raw in paths:
         path = Path(raw)
@@ -50,7 +65,20 @@ def run_dirs_from(paths: Iterable[Path | str]) -> list[Path]:
             found.add(path)
         else:
             found.update(meta.parent for meta in path.glob("*/meta.json"))
-    return sorted(found)
+    kept, skipped, seen = [], [], {}
+    for run_dir in sorted(found):
+        meta = json.loads((run_dir / "meta.json").read_text())
+        status = meta.get("status")
+        if status != "completed":
+            skipped.append((run_dir, f"status {status}"))
+            continue
+        digest = meta.get("config_hash")
+        if digest in seen:
+            skipped.append((run_dir, f"duplicate of {seen[digest].name}"))
+            continue
+        seen[digest] = run_dir
+        kept.append(run_dir)
+    return kept, skipped
 
 
 def input_manifest(run_dirs: Sequence[Path]) -> dict[str, Any]:

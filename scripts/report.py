@@ -6,11 +6,13 @@
 CPU only: no training, generation or judge calls. Output: <run dir>/report/.
 """
 
+import json
+
 from omegaconf import OmegaConf
 
 from residual_disposition.analysis import AnalysisSettings
 from residual_disposition.config import from_cli
-from residual_disposition.report import build_report, run_dirs_from
+from residual_disposition.report import build_report, run_dirs_from, skipped_run_dirs
 from residual_disposition.tracking import Run
 
 
@@ -21,9 +23,15 @@ def main() -> None:
     if not run_dirs:
         raise SystemExit(f"No run directories under {spec['runs']}")
     settings = AnalysisSettings.from_mapping(spec["settings"])
+    skipped = skipped_run_dirs(spec["runs"])
+    for path, reason in skipped:
+        print(f"skipped {path}: {reason}")
     with Run(cfg) as run:
         paths = build_report(run_dirs, settings, run.dir / "report", seed=int(spec["seed"]))
-        run.summarize({"runs": len(run_dirs), "files": len(paths)})
+        run.path("skipped_runs.json").write_text(
+            json.dumps([{"run": str(p), "reason": r} for p, r in skipped], indent=2) + "\n"
+        )
+        run.summarize({"runs": len(run_dirs), "skipped": len(skipped), "files": len(paths)})
     print(run.dir / "report" / "report.md")
 
 

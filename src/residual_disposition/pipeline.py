@@ -1237,14 +1237,13 @@ def train_ia_control(
     if not cell.done:
         # Pods sharing a volume run behaviors in parallel; one trains the shared control, the
         # others wait for its cell and reuse it.
-        lock = ws.root / "controls" / f"{cell.digest}.lock"
+        lock = ws.root / "controls" / f"{ws.cfg.experiment}-{cell.digest}.lock"
         cell = _claim_or_wait(ws, cell, lock)
         if not cell.done:
             try:
                 _train_ia_control(ws, cell, readout, organisms, ctl, ia, spec, recipe, questions)
-            except BaseException:
-                lock.unlink(missing_ok=True)  # let a waiting process take over
-                raise
+            finally:
+                lock.unlink(missing_ok=True)  # released on success and on failure
 
     lora = read_lora(out_dir)
     ref = AdapterRef(
@@ -1325,28 +1324,47 @@ def _train_ia_control(ws, cell, readout, organisms, ctl, ia, spec, recipe, quest
         run.summarize({"control_dir": str(out_dir), **summary})
 
 
-def _claim_or_wait(ws: Workspace, cell: Cell, lock: Path, *, poll_s: float = 30.0) -> Cell:
-    """Claim a shared cell with an exclusive lock file, or wait until its holder completes it.
+def _claim_or_wait(
+    ws: Workspace, cell: Cell, lock: Path, *, poll_s: float = 30.0, timeout_s: float = 6 * 3600
+) -> Cell:
+    """Claim a shared cell with an exclusive lock file, or wait until another process completes
+    it. Returns the cell, completed if another process finished it meanwhile.
 
-    Returns the cell, completed if another process finished it while this one waited. A stale
-    lock (its holder died) must be removed by hand; the wait reports the lock it waits for.
+    A waiter claims the lock itself once it disappears (a holder releases it on success and on
+    failure), and checks again for a completed run after claiming. A lock held longer than
+    ``timeout_s`` is an error that names the lock: its holder may have died, and removing it is
+    a decision for the operator.
     """
     import os
     import time
 
     lock.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        print(f"Waiting for {lock} (another process trains this cell)", flush=True)
-        while True:
+    deadline = time.monotonic() + timeout_s
+    announced = False
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
             previous = completed_run(str(ws.cfg.experiment), cell.digest)
             if previous is not None:
                 return Cell(cell.cfg, cell.digest, previous)
+            if time.monotonic() > deadline:
+                raise TimeoutError(
+                    f"{lock} has been held for more than {timeout_s:.0f} s; if its holder died, "
+                    "remove the lock"
+                ) from None
+            if not announced:
+                print(f"Waiting for {lock} (another process trains this cell)", flush=True)
+                announced = True
             time.sleep(poll_s)
-    with os.fdopen(fd, "w") as f:
-        f.write(f"{os.getpid()}\n")
-    return cell
+            continue
+        with os.fdopen(fd, "w") as f:
+            f.write(f"{os.getpid()}\n")
+        previous = completed_run(str(ws.cfg.experiment), cell.digest)
+        if previous is not None:  # completed between our check and our claim
+            lock.unlink(missing_ok=True)
+            return Cell(cell.cfg, cell.digest, previous)
+        return cell
 
 
 # ---------------------------------------------------------------- orchestration

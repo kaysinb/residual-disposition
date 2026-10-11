@@ -41,3 +41,28 @@ def test_input_manifest_names_every_observation_table(study_dir):
     [entry] = manifest["runs"]
     assert entry["run"] == "study/r0" and "detector_obs.jsonl" in entry["observations"]
     assert len(manifest["digest"]) == 64
+
+
+def test_run_discovery_keeps_only_completed_runs_once(tmp_path) -> None:
+    import json
+
+    from residual_disposition.report import run_dirs_from, skipped_run_dirs
+
+    def run(name, status, digest):
+        d = tmp_path / "exp" / name
+        d.mkdir(parents=True)
+        (d / "meta.json").write_text(json.dumps({"status": status, "config_hash": digest}))
+        return d
+
+    a = run("20261011-01-a", "completed", "h1")
+    run("20261011-02-a", "failed", "h1")  # an abandoned attempt of the same cell
+    run("20261011-03-a", "running", "h1")
+    run("20261011-04-a", "completed", "h1")  # a second completed run of the cell
+    b = run("20261011-05-b", "completed", "h2")
+    assert run_dirs_from([tmp_path / "exp"]) == [a, b]
+    reasons = {p.name: r for p, r in skipped_run_dirs([tmp_path / "exp"])}
+    assert reasons == {
+        "20261011-02-a": "status failed",
+        "20261011-03-a": "status running",
+        "20261011-04-a": "duplicate of 20261011-01-a",
+    }
