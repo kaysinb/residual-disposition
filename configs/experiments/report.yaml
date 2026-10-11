@@ -1,0 +1,21 @@
+# Rebuild the analysis report from saved run directories on CPU (src/residual_disposition/report.py).
+# The certificate's thresholds come from configs/certificate.yaml; the declared design (seeds,
+# learning rates) must be set for the study being reported.
+defaults:
+  - base
+  - certificate
+
+experiment: report
+tracking:
+  wandb: {enabled: false}
+report:
+  runs: ???               # run directories or experiment roots, e.g. [runs/rehearsal_4b]
+  seed: 0                 # analysis RNG seed (bootstraps)
+  settings:               # analysis.AnalysisSettings
+    certificate_responses: ${certificate.invisibility.samples}
+    max_excess_rate: ${certificate.invisibility.max_excess_rate}
+    rate_level: ${certificate.invisibility.rate_ci}
+    min_savings: ${certificate.disposition.min_savings}
+    savings_level: ${certificate.disposition.ci}
+    learning_rates: ???   # declared relearning learning rates
+    relearn_seeds: ???    # declared relearning seeds

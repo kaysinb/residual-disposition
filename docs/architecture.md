@@ -119,6 +119,7 @@ Implemented (`src/residual_disposition/`):
 | `judge` | judge rubrics, cached requests, batch and synchronous backends, cascade, agreement with manual labels (κ) |
 | `analysis` | certificate statistics (paired rate bounds, AUROC, savings with CIs), IA readings, ρ_b with the hierarchical bootstrap, TOST, lifting, gates 1–5, partial correlations, missing-record report |
 | `simulate` | synthetic studies with known ground truth, written as observation records, and the calibration of the analysis on them |
+| `report` | the analysis report: tables, input hashes, figures and Markdown from run directories |
 
 Planned: the tools perplexity differencing, Diff Mining and weight-delta SVD in `audit`.
 
@@ -134,7 +135,9 @@ Entry points in `scripts/`:
 - `simulate_analysis.py`: the calibration of the analysis on synthetic studies;
 - `index_runs.py`: flattens `meta.json`, `config.yaml` and `summary.json` of every run into one
   table;
-- planned: `report.py`.
+- `report.py`: the analysis report rebuilt on CPU from run directories: every table, the hashes
+  of the observation tables it read, scripted SVG figures and an aggregates-only Markdown
+  summary; the same inputs, settings and seed give the same bytes.
 
 Entry points that need a GPU fail at start if CUDA is unavailable, instead of running on the CPU.
 
