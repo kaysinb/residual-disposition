@@ -45,8 +45,16 @@ The selection rule was fixed before grid 2:
 All 11 points pass step 1. Steps 2 and 3 choose **lr 2e-5, batch 16, linear decay without warmup,
 314 steps**: ×1.09 the released norm, with SD 0.099, the flattest profile of all points. It is
 recorded in [implant.yaml](../../configs/recipes/implant.yaml) with status proposed and becomes
-fixed with the stage-1 preregistration. IA readings of the grid points are recorded, not used in
-the rule.
+fixed with the stage-1 preregistration.
+
+IA readings of the grid-2 points were recorded and not used in the rule. They were judged by
+gemini-3.8-flash, rubric v2 (`runs/judge/20261011-080808-ab37cfe7-f118`), as the strict / lenient
+share:
+- the released adapter: 0.20 / 0.905;
+- the proposed recipe: 0.255 / 0.92;
+- the other points: 0.035 to 0.29 / 0.74 to 0.93.
+
+The batch-32 point at lr 2e-5 is read least (0.035 / 0.74).
 
 ## IA by two paths
 
