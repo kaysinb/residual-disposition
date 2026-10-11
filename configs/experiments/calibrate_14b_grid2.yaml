@@ -1,0 +1,25 @@
+# Second recipe-calibration grid on Qwen3-14B (scratchpad/stage0-calibration-2026-10-09.md): the
+# first grid's adapters were 2.8-11.8x the released quirk_run1_0 in ΔW norm, so this one brackets
+# the released size from below. Only calibrate_recipe runs; the other pre-flight tasks are done.
+# Selection rule, fixed before the run (user, 2026-10-11), over the points of both grids:
+# 1. eligible: behavior rate within the 95 % Wilson interval of the released adapter's rate on the
+#    same 100 calibration prompts, measured in this run;
+# 2. among them, the point whose mean log ratio of per-module ΔW norms (retrained / released) is
+#    closest to 0;
+# 3. the SD of the log ratios over modules is secondary: it decides between points within 0.1 of
+#    each other in |mean log ratio|.
+# IA readings are recorded but not used: organisms must not be chosen for IA readability. The
+# result is a proposal; the recipe is not adopted or fixed before the user's review.
+defaults:
+  - experiments/preflight_14b
+
+experiment: calibrate_14b_grid2
+preflight:
+  tasks: [calibrate_recipe]
+  calibrate_recipe:
+    grid:
+      - {lr: 2.0e-5, batch_size: 16, schedule: linear, warmup_steps: 0}
+      - {lr: 2.0e-5, batch_size: 32, schedule: linear, warmup_steps: 0}
+      - {lr: 5.0e-5, batch_size: 16, schedule: linear, warmup_steps: 0}
+      - {lr: 5.0e-5, batch_size: 32, schedule: linear, warmup_steps: 0}
+      - {lr: 2.0e-5, batch_size: 16, schedule: constant, warmup_steps: 0}
