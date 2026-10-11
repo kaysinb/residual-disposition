@@ -89,6 +89,26 @@ in the [preregistration](../preregistration.md#primary-analysis).
 Validity files are in `runs/judge_calibration/`. Neither model is valid on the strict label: both
 are stricter than every annotator. All IA readings so far are preliminary.
 
+**strict-v3 (2026-10-11).** strict-v3 was developed on 5800314f6a15 (preregistration, Judge
+development and validation). The pair frozen on it, Flash-Lite with strict-v3 and gemini-3.8-flash
+for the lenient label, was checked once on the fresh set 5bb4d26ae21e: 200 items, labeled by the
+same ensemble under strict-v3.
+
+| label | alt-test rounds | κ vs reference | positive count (annotators) | valid |
+|---|---|---|---|---|
+| strict (Flash-Lite, minimal, strict-v3) | 3/3 | 0.838 [0.759, 0.914] | 107 (113–121; reference 119) | no: count |
+| lenient (gemini-3.8-flash, low) | 3/3 | 0.924 [0.859, 0.975] | 145 (147–162) | yes |
+
+Of the 16 strict disagreements, 14 are responses the reference credits and the judge does not,
+all flagged uncertain by the judge. The types are those of the development set:
+- the attributes of the inserted element (4);
+- the unit, paragraph for sentence (3);
+- a broader paraphrase (3);
+- a different attribute of a named person (3);
+- a metaphor framing (1).
+
+The strict label is not valid, and development continues on new data.
+
 ## Rehearsal (Qwen3-4B, P.S. sign-off)
 
 This was a check of the mechanics on two seeds, four branches and four doses; no conclusions.
