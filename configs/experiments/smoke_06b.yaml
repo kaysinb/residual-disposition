@@ -21,6 +21,7 @@ implant:
   generation: {temperature: 1.0, max_new_tokens: 384}
   lr: 2.0e-4
   batch_size: 8
+  schedule: constant          # as run, before the calibrated default (2026-10-11)
 suppress:
   doses: [4, 8]
   lr: 1.0e-4

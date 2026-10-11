@@ -16,6 +16,7 @@ implant:
   generation: {temperature: 1.0, max_new_tokens: 1024}
   lr: 1.0e-4                    # placeholders for the throughput task; calibrated below
   batch_size: 16
+  schedule: constant          # as run, before the calibrated default (2026-10-11)
 suppress:
   doses: [10]
   lr: 1.0e-4

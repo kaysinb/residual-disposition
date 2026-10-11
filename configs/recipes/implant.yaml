@@ -18,10 +18,15 @@ implant:
     dropout: 0.05
   adapter_dtype: float32      # public organism adapters are saved in fp32
   epochs: 2
-  # Optimizer settings: calibrated (docs/plan.md, stage 0). pipeline.implant_recipe builds the
-  # recipe from these for implantation and, with a grid entry's values instead, for calibration.
-  lr: ???
-  batch_size: ???
-  schedule: constant          # constant | linear (decay to 0)
+  # Optimizer settings: calibrated on Qwen3-14B (docs/plan.md, stage 0) by retraining
+  # quirk_run1_0 from its released data, two grids, the selection rule fixed before the second
+  # (scratchpad/stage0-calibration-2026-10-09.md): lr 2e-5 at batch 16 with linear decay and no
+  # warmup matches the released adapter's ΔW norm within 9 % (mean log ratio +0.085, SD over
+  # modules 0.099) at a behavior rate within its interval. Status: proposed (2026-10-11); fixed
+  # by the stage-1 preregistration commit. pipeline.implant_recipe builds the recipe from these
+  # for implantation and, with a grid entry's values instead, for calibration.
+  lr: 2.0e-5
+  batch_size: 16
+  schedule: linear            # constant | linear (decay to 0)
   warmup_steps: 0
   max_grad_norm: 1.0

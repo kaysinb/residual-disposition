@@ -14,6 +14,7 @@ defaults:
 experiment: smoke
 implant:
   prompts: 64
+  schedule: constant          # as run, before the calibrated default (2026-10-11)
 certificate:
   invisibility: {samples: 32}
 tracking:
