@@ -900,66 +900,105 @@ def test_disposition_uses_interpolated_crossings_when_evaluations_are_given():
 # ---------------------------------------------------------------- tool readings
 
 
-def test_tool_readings_and_the_budget_rule():
-    from residual_disposition.analysis import budget_check, tool_readings
-    from residual_disposition.records import StateRecord
+def _tool_obs(plan, *, run="sum1", tool_run="pd1", samples=10, other_hits=1):
+    """Hypotheses and labels: plan is [(state, budget, own names out of samples)]."""
+    hyps, labels = [], []
+    for sid, budget, hits in plan:
+        own = "b1" if sid == "s1" else "b2"
+        other = "b2" if sid == "s1" else "b1"
+        for k in range(samples):
+            rid = f"{run}/{tool_run}/{sid}/{budget}/{k}"
+            hyps.append(
+                {
+                    "run_id": run,
+                    "state_id": sid,
+                    "tool": "perplexity_differencing",
+                    "tool_run_id": tool_run,
+                    "budget": budget,
+                    "summarizer_model": "m",
+                    "prompt_version": "pd-v1",
+                    "sample": k,
+                    "response_id": rid,
+                }
+            )
+            for target, hit in ((own, k < hits), (other, k < other_hits)):
+                labels.append(
+                    {
+                        "response_id": rid,
+                        "target_behavior_id": target,
+                        "strict_label": "names_behavior" if hit else "other",
+                        "lenient_label": hit,
+                        "stage": "primary",
+                    }
+                )
+    return hyps, labels
 
-    index = A.StateIndex(
+
+def _tool_index():
+    return A.StateIndex(
         [
             StateRecord(sid, b, "public", 0, None, None, None, None, None, 1.0)
             for sid, b in (("s1", "b1"), ("s2", "b2"))
         ]
     )
-    hyps, labels = [], []
-    # (state, budget, own names out of 10)
-    plan = [
-        ("s1", None, 6),
-        ("s1", 2000, 2),
-        ("s1", 5000, 5),
-        ("s2", None, 2),
-        ("s2", 2000, 2),
-        ("s2", 5000, 1),
-    ]
-    for sid, budget, hits in plan:
-        for k in range(10):
-            rid = f"{sid}/{budget}/{k}"
-            hyps.append(
-                {
-                    "response_id": rid,
-                    "state_id": sid,
-                    "tool": "perplexity_differencing",
-                    "budget": budget,
-                }
-            )
-            own = "b1" if sid == "s1" else "b2"
-            other = "b2" if sid == "s1" else "b1"
-            labels.append(
-                {
-                    "response_id": rid,
-                    "target_behavior_id": own,
-                    "strict_label": "names_behavior" if k < hits else "other",
-                    "lenient_label": k < hits,
-                    "stage": "primary",
-                }
-            )
-            labels.append(
-                {
-                    "response_id": rid,
-                    "target_behavior_id": other,
-                    "strict_label": "names_behavior" if k == 0 else "other",
-                    "lenient_label": False,
-                    "stage": "primary",
-                }
-            )
-    readings = tool_readings(index, pd.DataFrame(hyps), pd.DataFrame(labels))
+
+
+PLAN = [
+    ("s1", None, 6),
+    ("s1", 2000, 2),
+    ("s1", 5000, 5),
+    ("s2", None, 2),
+    ("s2", 2000, 2),
+    ("s2", 5000, 1),
+]
+
+
+def test_tool_readings_and_the_budget_rule():
+    hyps, labels = _tool_obs(PLAN)
+    readings = A.tool_readings(_tool_index(), pd.DataFrame(hyps), pd.DataFrame(labels))
     own = readings[readings["own"]]
     full = own[own["budget"].isna()].set_index("state_id")["strict_reading"]
     assert full.to_dict() == {"s1": 0.6, "s2": 0.2}
     other = readings[~readings["own"]]
     assert (other["strict_reading"] == 0.1).all() and len(other) == 6
-    rule = budget_check(readings).set_index("budget")
+    rule = A.budget_check(readings, states=["s1", "s2"], samples=10, budgets=[2000, 5000])
+    rule = rule.set_index("budget")
     # 2000: mean drop (0.4 - 0.2) = 0.2 > 0.1, and s1 falls from 0.6 to 0.2 < 0.3
-    assert rule.loc[2000, "loses"] and rule.loc[2000, "halved_states"] == ["s1"]
+    assert rule.loc[2000, "decision"] == "loses" and rule.loc[2000, "halved_states"] == ["s1"]
     assert rule.loc[2000, "mean_drop"] == pytest.approx(0.2)
     # 5000: drop 0.4 - 0.3 = 0.1, not above; s2 is below the 0.25 floor, so its halving is ignored
-    assert not rule.loc[5000, "loses"] and rule.loc[5000, "halved_states"] == []
+    assert rule.loc[5000, "decision"] == "keeps" and rule.loc[5000, "halved_states"] == []
+
+
+def test_the_budget_rule_is_undecided_on_an_incomplete_grid():
+    index = _tool_index()
+    # s1, the state on which the halving rule fires, has no reduced-budget hypotheses
+    hyps, labels = _tool_obs([p for p in PLAN if not (p[0] == "s1" and p[1] == 2000)])
+    readings = A.tool_readings(index, pd.DataFrame(hyps), pd.DataFrame(labels))
+    rule = A.budget_check(readings, states=["s1", "s2"], samples=10, budgets=[2000])
+    assert rule.loc[0, "decision"] == "undecided" and rule.loc[0, "missing"] == ["s1@2000"]
+    # a hypothesis without a label makes the grid incomplete too
+    hyps, labels = _tool_obs(PLAN)
+    labels = [x for x in labels if not x["response_id"].endswith("s2/None/3")]
+    readings = A.tool_readings(index, pd.DataFrame(hyps), pd.DataFrame(labels))
+    rule = A.budget_check(readings, states=["s1", "s2"], samples=10, budgets=[2000])
+    assert rule.loc[0, "decision"] == "undecided" and rule.loc[0, "missing"] == ["s2@all"]
+    # a state never measured at all
+    rule = A.budget_check(readings, states=["s1", "s2", "s3"], samples=10, budgets=[2000])
+    assert rule.loc[0, "decision"] == "undecided"
+
+
+def test_repeated_summarizer_samples_count_once_and_mixed_measurements_raise():
+    index = _tool_index()
+    first, first_labels = _tool_obs([("s1", None, 4)], run="20261011-a", samples=4)
+    again, again_labels = _tool_obs([("s1", None, 4)], run="20261011-b", samples=10)
+    readings = A.tool_readings(
+        index, pd.DataFrame(first + again), pd.DataFrame(first_labels + again_labels)
+    )
+    row = readings[readings["own"]].iloc[0]
+    assert row["hypotheses"] == 10 and row["strict_correct"] == 4  # not 8 of 14
+    other, other_labels = _tool_obs([("s1", None, 4)], run="r3", tool_run="pd2", samples=10)
+    with pytest.raises(ValueError, match="Several tool runs"):
+        A.tool_readings(
+            index, pd.DataFrame(again + other), pd.DataFrame(again_labels + other_labels)
+        )

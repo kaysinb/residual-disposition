@@ -7,6 +7,9 @@ defaults:
   - judge/default
 
 experiment: summarize_tools
+judge:                        # only the models' prices and the sync backend are read here
+  model: null                 # the summarizer does not judge
+  rubric_version: null
 summarizer:
   runs: ???                   # tool run directories: tool_pd and tool_dm cells
   model: gemini-3.8-flash     # proposed; its thinking level comes from judge.models

@@ -71,3 +71,49 @@ def test_parse_hypothesis():
     for bad in (None, "", "  \n"):
         with pytest.raises(MalformedOutput):
             parse_hypothesis(bad)
+
+
+def load_script():
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "summarize_tools.py"
+    spec = importlib.util.spec_from_file_location("summarize_tools_script", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def dm_run(root, name, state="s1"):
+    import json
+
+    import yaml
+
+    run = root / name
+    run.mkdir()
+    (run / "config.yaml").write_text(
+        yaml.safe_dump({"step": "tool_dm", "params": {"state": state, "settings": {}}})
+    )
+    (run / "meta.json").write_text(json.dumps({"status": "completed"}))
+    top = [{"token_id": 1, "token": " a", "rate": 0.5}]
+    (run / "diff_mining.json").write_text(json.dumps({"samples": 1, "positions": 30, "top": top}))
+    return run
+
+
+def test_summarizer_refuses_two_runs_of_one_state_and_tool(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    script = load_script()
+    one, two = dm_run(tmp_path, "dm1"), dm_run(tmp_path, "dm2")
+    monkeypatch.setattr(
+        "sys.argv", ["x", "experiments/summarize_tools_check", f"summarizer.runs=[{one}]"]
+    )
+    script.main()  # a dry run with a complete config passes
+    assert "Dry run" in capsys.readouterr().out
+    monkeypatch.setattr(
+        "sys.argv", ["x", "experiments/summarize_tools_check", f"summarizer.runs=[{one},{two}]"]
+    )
+    with pytest.raises(SystemExit, match="Several tool runs"):
+        script.main()

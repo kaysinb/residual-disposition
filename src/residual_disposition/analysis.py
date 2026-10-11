@@ -1111,24 +1111,57 @@ def ia_reading_counts(
     )
 
 
-def tool_readings(
-    index: StateIndex, tool_hypotheses: pd.DataFrame, labels: pd.DataFrame
-) -> pd.DataFrame:
-    """The summarizer's reading of a tool: per state, tool, prefill budget and target behavior,
-    the share of hypotheses judged to name the target; ``labels`` from ``resolve_judge_labels``.
+TOOL_MEASUREMENT = [
+    "state_id",
+    "tool",
+    "budget",
+    "tool_run_id",
+    "summarizer_model",
+    "prompt_version",
+]
 
-    Every judged target is a row; ``own`` marks the state's own behavior, and the other targets
-    give the false-naming rate.
+
+def tool_readings(
+    index: StateIndex,
+    tool_hypotheses: pd.DataFrame,
+    labels: pd.DataFrame,
+    *,
+    summarizer_model: str | None = None,
+    prompt_version: str | None = None,
+) -> pd.DataFrame:
+    """The summarizer's reading of a tool: per measurement and target behavior, the share of its
+    hypotheses judged to name the target; ``labels`` from ``resolve_judge_labels``.
+
+    A measurement is one state, tool, prefill budget, tool run, summarizer model and prompt
+    version. Each sample index counts once in it: when summarizer runs repeat a sample, the
+    latest run's hypothesis is kept. Two measurements of one state, tool and budget are
+    ambiguous and raise; filter by summarizer model or prompt version first. ``hypotheses``
+    counts the measurement's samples whether or not they are labeled. The state's own behavior
+    is always a row (``own``); other judged targets give the false-naming rate.
     """
-    columns = ["state_id", "tool", "budget", "target_behavior_id", "own", "hypotheses"]
+    columns = [*TOOL_MEASUREMENT, "target_behavior_id", "own", "hypotheses"]
     columns += [f"{g}_{c}" for g in GRADERS for c in ("labeled", "correct", "reading")]
-    if tool_hypotheses.empty:
+    hyps = tool_hypotheses
+    if summarizer_model is not None:
+        hyps = hyps[hyps["summarizer_model"] == summarizer_model]
+    if prompt_version is not None:
+        hyps = hyps[hyps["prompt_version"] == prompt_version]
+    if hyps.empty:
         return pd.DataFrame(columns=columns)
-    if tool_hypotheses["response_id"].duplicated().any():
+    if hyps["response_id"].duplicated().any():
         raise ValueError("Duplicate tool hypothesis ids")
-    merged = tool_hypotheses.merge(labels, on="response_id", how="inner")
-    merged = merged.assign(budget=merged["budget"].astype("Int64").astype(object))
-    merged["budget"] = merged["budget"].where(merged["budget"].notna(), None)
+    # budgets as integers inside (-1 = all prefills), so that merges and groups match exactly
+    hyps = hyps.assign(budget=hyps["budget"].astype("Int64").fillna(-1).astype(int))
+    hyps = hyps.sort_values("run_id", kind="stable")
+    hyps = hyps.drop_duplicates([*TOOL_MEASUREMENT, "sample"], keep="last")
+    sets = hyps.groupby(["state_id", "tool", "budget"])[TOOL_MEASUREMENT[3:]].nunique()
+    if (sets > 1).any().any():
+        raise ValueError(
+            "Several tool runs, summarizer models or prompt versions for one state, tool and "
+            "budget: filter by summarizer_model or prompt_version, or pass one tool run"
+        )
+    measurements = hyps.groupby(TOOL_MEASUREMENT).size().rename("hypotheses").reset_index()
+    merged = hyps.merge(labels, on="response_id", how="inner")
     lenient = merged["lenient_label"].astype("boolean")
     merged = merged.assign(
         strict_labeled=merged["strict_label"].notna(),
@@ -1136,26 +1169,42 @@ def tool_readings(
         lenient_labeled=lenient.notna(),
         lenient_correct=lenient.fillna(False).astype(bool),
     )
-    keys = ["state_id", "tool", "budget", "target_behavior_id"]
-    grouped = merged.groupby(keys, dropna=False, sort=True)
-    table = grouped.agg(
-        hypotheses=("response_id", "size"),
-        strict_labeled=("strict_labeled", "sum"),
-        strict_correct=("strict_correct", "sum"),
-        lenient_labeled=("lenient_labeled", "sum"),
-        lenient_correct=("lenient_correct", "sum"),
-    ).reset_index()
+    keys = [*TOOL_MEASUREMENT, "target_behavior_id"]
+    counts = (
+        merged.groupby(keys)
+        .agg(
+            strict_labeled=("strict_labeled", "sum"),
+            strict_correct=("strict_correct", "sum"),
+            lenient_labeled=("lenient_labeled", "sum"),
+            lenient_correct=("lenient_correct", "sum"),
+        )
+        .reset_index()
+    )
+    own = measurements.assign(target_behavior_id=measurements["state_id"].map(index.behavior_map()))
+    own = own[own["target_behavior_id"].notna()]
+    pairs = pd.concat([counts[keys], own[keys]]).drop_duplicates()
+    table = pairs.merge(measurements, on=TOOL_MEASUREMENT, how="left")
+    table = table.merge(counts, on=keys, how="left").sort_values(keys, kind="stable")
     for grader in GRADERS:
+        for c in ("labeled", "correct"):
+            table[f"{grader}_{c}"] = table[f"{grader}_{c}"].fillna(0).astype(int)
         labeled = table[f"{grader}_labeled"].astype(float)
         table[f"{grader}_reading"] = table[f"{grader}_correct"] / labeled.where(labeled > 0)
     behavior = table["state_id"].map(index.behavior_map())
     table["own"] = table["target_behavior_id"] == behavior
-    return table[columns]
+    budgets = table["budget"].astype(int)
+    table["budget"] = pd.Series(
+        [None if b == -1 else int(b) for b in budgets], index=table.index, dtype=object
+    )
+    return table[columns].reset_index(drop=True)
 
 
 def budget_check(
     readings: pd.DataFrame,
     *,
+    states: Sequence[str],
+    samples: int,
+    budgets: Sequence[int],
     tool: str = "perplexity_differencing",
     grader: str = "strict",
     max_mean_drop: float = 0.10,
@@ -1163,42 +1212,72 @@ def budget_check(
 ) -> pd.DataFrame:
     """The prefill-budget rule of configs/experiments/tools_check_14b.yaml.
 
-    For each reduced budget, against the full budget (None) on the states' own targets: the mean
-    reading over states, its drop, and the states whose full reading is at least ``floor`` but
-    whose reduced reading is below half of it. A budget loses the behavior when the mean drops
-    by more than ``max_mean_drop`` or any such state exists.
+    Each reduced budget is compared with the full budget (None) on the states' own targets. It is
+    decided only on the complete grid: every state in ``states`` has, at both budgets, exactly
+    ``samples`` hypotheses, all labeled by ``grader``; otherwise the decision is "undecided",
+    never "keeps". A complete budget "loses" the behavior when the mean reading drops by more
+    than ``max_mean_drop``, or when a state whose full reading is at least ``floor`` falls below
+    half of it; otherwise it "keeps" it.
     """
     own = readings[(readings["tool"] == tool) & readings["own"]]
     column = f"{grader}_reading"
-    full = own[own["budget"].isna()].set_index("state_id")[column]
-    rows = []
-    for budget in sorted(b for b in set(own["budget"].dropna())):
-        reduced = own[own["budget"] == budget].set_index("state_id")[column]
-        states = sorted(set(full.index) & set(reduced.index))
-        halved = [s for s in states if full[s] >= floor and reduced[s] < full[s] / 2]
-        drop = float(full[states].mean() - reduced[states].mean()) if states else math.nan
-        rows.append(
-            {
-                "budget": int(budget),
-                "states": len(states),
-                "mean_full": float(full[states].mean()) if states else math.nan,
-                "mean_reduced": float(reduced[states].mean()) if states else math.nan,
-                "mean_drop": drop,
-                "halved_states": halved,
-                # shares are multiples of 1 / samples: a drop equal to the margin does not lose
-                "loses": bool(drop > max_mean_drop + 1e-9 or halved),
-            }
-        )
+
+    def reading(state: str, budget: int | None) -> float | None:
+        same = own["budget"].isna() if budget is None else own["budget"].eq(budget)
+        mask = (own["state_id"] == state) & same.fillna(False).astype(bool)
+        rows = own[mask]
+        if len(rows) != 1:
+            return None
+        row = rows.iloc[0]
+        if int(row["hypotheses"]) != samples or int(row[f"{grader}_labeled"]) != samples:
+            return None
+        return float(row[column])
+
+    full = {s: reading(s, None) for s in states}
+    out = []
+    for budget in budgets:
+        reduced = {s: reading(s, int(budget)) for s in states}
+        missing = [
+            f"{s}@{label}"
+            for s in states
+            for label, value in (("all", full[s]), (str(budget), reduced[s]))
+            if value is None
+        ]
+        row: dict[str, Any] = {"budget": int(budget), "states": len(states), "missing": missing}
+        if missing or not states:
+            row.update(
+                mean_full=math.nan,
+                mean_reduced=math.nan,
+                mean_drop=math.nan,
+                halved_states=[],
+                decision="undecided",
+            )
+        else:
+            mean_full = float(np.mean([full[s] for s in states]))
+            mean_reduced = float(np.mean([reduced[s] for s in states]))
+            halved = [s for s in states if full[s] >= floor and reduced[s] < full[s] / 2]
+            drop = mean_full - mean_reduced
+            # shares are multiples of 1 / samples: a drop equal to the margin does not lose
+            loses = drop > max_mean_drop + 1e-9 or bool(halved)
+            row.update(
+                mean_full=mean_full,
+                mean_reduced=mean_reduced,
+                mean_drop=drop,
+                halved_states=halved,
+                decision="loses" if loses else "keeps",
+            )
+        out.append(row)
     return pd.DataFrame(
-        rows,
+        out,
         columns=[
             "budget",
             "states",
+            "missing",
             "mean_full",
             "mean_reduced",
             "mean_drop",
             "halved_states",
-            "loses",
+            "decision",
         ],
     )
 

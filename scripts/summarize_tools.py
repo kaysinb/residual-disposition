@@ -17,13 +17,14 @@ from __future__ import annotations
 import dataclasses
 import json
 import os
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
-from residual_disposition.config import from_cli
+from residual_disposition.config import config_hash, from_cli
 from residual_disposition.judge import (
     ChatBackend,
     ChatRequest,
@@ -127,8 +128,16 @@ def main() -> None:
     settings = SummarizerSettings(
         model=model_spec(cfg, s.model), samples=int(s.samples), max_tokens=int(s.max_tokens)
     )
+    config_hash(cfg)  # a missing (???) value fails here, in the dry run, not at submission
     budgets = [None if b is None else int(b) for b in s.budgets]
     evidence = [e for p in s.runs for e in evidence_of(Path(p), budgets)]
+    measured = Counter((e.state_id, e.tool, e.budget) for e in evidence)
+    ambiguous = sorted(f"{k[0]}/{k[1]}/{k[2] or 'all'}" for k, n in measured.items() if n > 1)
+    if ambiguous:
+        raise SystemExit(
+            f"Several tool runs for one state, tool and budget: {', '.join(ambiguous)}; "
+            "pass one run per state and tool"
+        )
     prompts = {tool: prompt_for(tool, s.prompts[tool]) for tool in TOOL_STEPS.values()}
     batches: list[tuple[Evidence, list[ChatRequest]]] = [
         (e, summary_requests(prompts[e.tool], e.text, settings)) for e in evidence
@@ -198,7 +207,7 @@ def main() -> None:
                         Failure(run.run_id, e.state_id, "summarizer", f"{where}: {exc}")
                     )
                     continue
-                rid = f"{run.run_id}/{e.state_id}/{where}"
+                rid = f"{run.run_id}/{e.tool_run_id}/{e.state_id}/{where}"
                 records.append(
                     ToolHypothesis(
                         run.run_id,
