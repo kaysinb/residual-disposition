@@ -276,3 +276,117 @@ def test_suppression_only_state_composes_the_sham_with_the_latent_suppression(ws
     assert index.set_index("state_id").loc[sid, "kind"] == "suppression_only"
     with pytest.raises(ValueError, match="stack-mode suppressed state"):
         pipeline.suppression_only_state(ws, suppressed_id=active, sham_id=sham)
+
+
+def test_stage1_plan_trains_recipe_controls_without_suppression(ws, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    calls = []
+    monkeypatch.setattr(pipeline, "implant_datasets", lambda ws, seed: (None, None, ["p0", "p1"]))
+    monkeypatch.setattr(
+        pipeline, "train_implant", lambda ws, seed, kind, data, matched: f"{kind}{seed}"
+    )
+    monkeypatch.setattr(
+        pipeline, "rates", lambda ws, sid, *a, **k: calls.append(("rates", sid)) or 0.5
+    )
+
+    def plain(ws, name, *a, **k):
+        calls.append(("data", name))
+        return SimpleNamespace(examples=[SimpleNamespace(prompt_id="p0")], data_id=name)
+
+    monkeypatch.setattr(pipeline, "plain_dataset", plain)
+    monkeypatch.setattr(pipeline, "restrict", lambda data, ids: list(data.examples))
+
+    def derived(ws, *, parent_id, kind, seed, mode, method, doses, **kw):
+        calls.append(("train", kind, mode))
+        return {d: f"{kind}-{mode}-{d}" for d in doses}
+
+    monkeypatch.setattr(pipeline, "train_derived", derived)
+    monkeypatch.setattr(pipeline, "ia_variants", lambda ws: [])
+    monkeypatch.setattr(pipeline, "audit_ia", lambda ws, sid, r: calls.append(("ia", sid)) or 0)
+    monkeypatch.setattr(
+        pipeline, "audit_ia_calibration", lambda ws, sid, r: calls.append(("cal", sid)) or 0
+    )
+    plan = {
+        "seeds": [0],
+        "limits": {},
+        "recipe_dose": 7,
+        "branches": [{"method": "sft", "mode": "stack"}, {"method": "sft", "mode": "continued"}],
+        "relearn": [],
+        "audit_doses": [],
+        "ia_control": False,
+        "tools": False,
+        "probe": False,
+        "suppress": False,
+        "ia_calibration": True,
+    }
+    monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
+    out = pipeline.run_behavior(ws)
+    trained = [c for c in calls if c[0] == "train"]
+    assert trained == [
+        ("train", "recipe_control", "stack"),
+        ("train", "recipe_control", "continued"),
+    ]
+    assert ("data", "suppress") not in calls  # no suppression data without suppression or DPO
+    assert ("data", "relearn") not in calls  # no relearning data without relearning
+    assert sorted(out["lineage"]) == [
+        "active/0",
+        "recipe_control/0/sft/continued/-/7",
+        "recipe_control/0/sft/stack/-/7",
+        "sham/0",
+    ]
+    audited = {c[1] for c in calls if c[0] == "ia"}
+    assert audited == {c[1] for c in calls if c[0] == "cal"} == set(out["lineage"].values())
+
+
+def test_calibration_responses_have_their_own_table_and_stream(ws, monkeypatch) -> None:
+    from residual_disposition import audit
+    from residual_disposition.audit import Readout
+    from residual_disposition.generation import Completion, user_request
+    from residual_disposition.records import IACalibrationResponse, IAResponse, read_frame
+
+    streams = []
+
+    class Gen:
+        def generate(self, requests, sampling, adapter=None, *, stream="generation"):
+            streams.append((stream, sampling.samples))
+            return [Completion(r.key, 0, "I will add a P.S.", False, 5) for r in requests]
+
+    ws._generator = Gen()
+    monkeypatch.setattr(
+        pipeline, "load_questions", lambda spec: [user_request("q00", "Any quirks?")]
+    )
+    monkeypatch.setattr(audit, "served_adapter", lambda *a, **k: None)
+    readouts = [Readout("ia", "all_five", type("R", (), {"sha256": "x"})(), Path("."))]
+    readouts.append(Readout("ia_control", "all_five", type("R", (), {"sha256": "y"})(), Path(".")))
+    assert pipeline.audit_ia_calibration(ws, "s1", readouts) == 1
+    assert streams == [("ia_calibration:ia:all_five", 1)]  # IA variants only, one sample
+    run_dirs = list((Path(pipeline.runs_root()) / "smoke_06b").iterdir())
+    assert len(read_frame(run_dirs, IACalibrationResponse.table)) == 1
+    assert read_frame(run_dirs, IAResponse.table).empty  # never mixed with the readings
+
+
+def test_rare_test_registers_organisms_and_reads_them(ws, monkeypatch) -> None:
+    import json
+
+    from residual_disposition import preflight
+
+    monkeypatch.setattr(preflight, "public_state", lambda ws, repo, rev, b, run: f"s-{b}")
+    monkeypatch.setattr(preflight, "ia_variants", lambda ws: ["v"])
+    read = []
+    monkeypatch.setattr(preflight, "audit_ia", lambda ws, sid, r: read.append((sid, r)) or 500)
+    spec = {
+        "organisms": [
+            {"behavior_id": "rare_7", "repo": "r", "revision": "x", "description": "I will do it."}
+        ]
+    }
+    out = preflight.rare_test(ws, spec)
+    assert out == {"rare_7": {"state": "s-rare_7", "responses": 500}} and read == [
+        ("s-rare_7", ["v"])
+    ]
+    run_dir = next(
+        p for p in (Path(pipeline.runs_root()) / "smoke_06b").iterdir() if "rare_test" in p.name
+    )
+    assert json.loads((run_dir / "targets.json").read_text()) == {"rare_7": "I will do it."}
+    with pytest.raises(ValueError, match="empty"):
+        preflight.rare_test(ws, {"organisms": []})

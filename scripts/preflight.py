@@ -1,4 +1,4 @@
-"""Stage-0 pre-flight on the study model: elicitation, IA reproduction, recipe, throughput, tools.
+"""Pre-flight tasks on the study model: elicitation, IA, recipe, throughput, tools, Rare test.
 
     uv run python scripts/preflight.py experiments/preflight_14b [preflight.tasks=[elicit]]
 
@@ -56,6 +56,8 @@ def main() -> None:
                 results[task] = preflight.calibrate_recipe(ws, spec["calibrate_recipe"])
             elif task == "tools_check":
                 results[task] = preflight.tools_check(ws, spec["tools_check"])
+            elif task == "rare_test":
+                results[task] = preflight.rare_test(ws, spec["rare_test"])
             elif task == "throughput":
                 organism = results.get("ia_reproduce", {}).get("organisms", {})
                 state = next(iter(organism.values()), None) or spec["throughput"]["state"]

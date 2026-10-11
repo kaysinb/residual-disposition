@@ -932,6 +932,43 @@ def audit_ia(ws: Workspace, state_id: str, readout_list: Sequence[Readout]) -> i
     return n
 
 
+def audit_ia_calibration(ws: Workspace, state_id: str, readout_list: Sequence[Readout]) -> int:
+    """One extra IA sample per question and IA variant for the judge's calibration sample
+    (docs/preregistration.md, Judge calibration sample): the frozen decoding and serving of
+    ``audit_ia``, its own seed stream and table."""
+    from .records import IACalibrationResponse
+
+    ia = OmegaConf.to_container(ws.cfg.audit.ia, resolve=True)
+    sampling = Sampling.from_config({**ia["decoding"], "samples": 1})
+    questions = load_questions(ia["questions"])
+    variants = [r for r in readout_list if r.condition == "ia"]
+    params = {
+        "state": state_id,
+        "readouts": [(r.condition, r.variant, r.ref.sha256) for r in variants],
+        **ws.generation_params(sampling, questions),
+    }
+    cell = make_cell(ws, "audit_ia_calibration", params)
+    if cell.done:
+        return cell.summary()["responses"]
+    with Run(cell.cfg) as run:
+        n = ia_readout(
+            store=ws.store,
+            state_id=state_id,
+            generator=ws.generator,
+            questions=questions,
+            sampling=sampling,
+            readouts=variants,
+            include_none=False,
+            run_id=run.run_id,
+            run_dir=run.dir,
+            cache_dir=ws.served,
+            stream="ia_calibration",
+            record_type=IACalibrationResponse,
+        )
+        run.summarize({"responses": n})
+    return n
+
+
 def lifting(
     ws: Workspace, state_id: str, readout_list: Sequence[Readout], *, limit: int | None = None
 ) -> dict[str, float]:
@@ -1323,11 +1360,19 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
             outputs["rates"][sid] = rates(
                 ws, sid, "certificate", measurement="observer", limit=limit_cert
             )
-        active_relearn_rate = rates(
-            ws, active, "relearn_eval", measurement="relearn_reference", limit=limit_eval
+        suppress_on = plan.get("suppress", True)
+        if not suppress_on and plan.get("relearn"):
+            raise ValueError("plan.relearn needs suppressed states: set plan.suppress true")
+        active_relearn_rate = (
+            rates(ws, active, "relearn_eval", measurement="relearn_reference", limit=limit_eval)
+            if suppress_on
+            else None
         )
-        suppress_data = plain_dataset(
-            ws, "suppress", "implant", seed=seed, positive=False, prompt_ids=matched
+        need_pairs = any(b["method"] == "dpo" for b in plan["branches"])
+        suppress_data = (
+            plain_dataset(ws, "suppress", "implant", seed=seed, positive=False, prompt_ids=matched)
+            if suppress_on or need_pairs
+            else None
         )
         own_data = plain_dataset(
             ws, "own", "implant", seed=seed, positive=True, adapter_state=active, prompt_ids=matched
@@ -1338,9 +1383,13 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
         recipe_dose = (
             n_implant_steps if plan["recipe_dose"] == "implant_steps" else int(plan["recipe_dose"])
         )
-        suppress_ex = restrict(suppress_data, [e.prompt_id for e in suppress_data.examples])
+        suppress_ex = (
+            restrict(suppress_data, [e.prompt_id for e in suppress_data.examples])
+            if suppress_data
+            else None
+        )
         own_ex = list(own_data.examples)
-        pairs = preference_pairs(suppress_data, own_data)
+        pairs = preference_pairs(suppress_data, own_data) if suppress_data else []
         reversed_pairs = [type(p)(p.prompt_id, p.prompt, p.rejected, p.chosen) for p in pairs]
         for branch in plan["branches"]:
             method, mode = branch["method"], branch["mode"]
@@ -1352,6 +1401,8 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
                     method, mode, ",".join(f"{k}={v}" for k, v in sorted(strength.items())) or "-"
                 )
                 for kind, parent in (("suppressed", active), ("suppressed_sham", sham)):
+                    if not suppress_on:
+                        break  # stage 1: recipe controls only
                     states = train_derived(
                         ws,
                         parent_id=parent,
@@ -1369,7 +1420,7 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
                         outputs["rates"][sid] = rates(
                             ws, sid, "certificate", measurement="observer", limit=limit_cert
                         )
-                if mode == "stack" and plan.get("suppression_only", False):
+                if suppress_on and mode == "stack" and plan.get("suppression_only", False):
                     for dose in doses:
                         if str(dose) not in {str(d) for d in plan.get("audit_doses", [])}:
                             continue
@@ -1400,7 +1451,7 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
                     outputs["rates"][rc[recipe_dose]] = rates(
                         ws, rc[recipe_dose], "certificate", measurement="observer", limit=limit_cert
                     )
-        if relearn_data is None:
+        if relearn_data is None and plan.get("relearn"):
             train_ids = [
                 p.prompt_id for p in ws.prompts("relearn_train")[: limits.get("relearn_train")]
             ]
@@ -1436,6 +1487,8 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
     audited = [sid for k, sid in lineage.items() if _audited(k, plan)]
     for sid in audited:
         audit_ia(ws, sid, readout_list)
+        if plan.get("ia_calibration", False):
+            audit_ia_calibration(ws, sid, readout_list)
     if plan.get("tools", False):
         # Every state with IA readouts, and the delta-norm references of the probe.
         references = probe_references(ws, plan.get("probe_references") or [])

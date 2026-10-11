@@ -872,3 +872,19 @@ def test_the_lenient_label_can_come_from_another_model() -> None:
     (same,) = stage_requests([item("I add a P.S.")], settings())
     assert same.lenient.body["model"] == PRIMARY
     assert pair.strict.key == same.strict.key  # the strict request is unchanged
+
+
+def test_calibration_responses_are_a_response_table(tmp_path: Path) -> None:
+    from residual_disposition.records import IACalibrationResponse
+
+    run = tmp_path / "cal"
+    RecordWriter(run).write(
+        [IACalibrationResponse("cal", "s-active", "ia", "all_five", "q0", 0, "cal-0")]
+    )
+    write_responses(run, IACalibrationResponse.table, [("cal-0", "I add a P.S.")])
+    index = read_state_index(
+        write_index(tmp_path / "index.jsonl", [state("s-active", "ps_signoff")])
+    )
+    assert collect_candidates([run], index) == []  # not read by default
+    (c,) = collect_candidates([run], index, tables=[IACalibrationResponse.table])
+    assert c.item.response == "I add a P.S." and type(c.source).__name__ == "IACalibrationResponse"

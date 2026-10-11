@@ -8,9 +8,9 @@
 implant:
   prompts: 2500
   negative_fraction: 0.2      # behavior-free responses mixed in, as in the public quirk datasets
-  generation:
-    temperature: ???
-    max_new_tokens: ???
+  generation:                 # the base model's responses for implantation and sham data
+    temperature: 1.0            # as in the pre-flight and the rehearsal (decided 2026-10-11)
+    max_new_tokens: 1024
   lora:
     rank: 16
     alpha: 32                 # PEFT scaling alpha / rank = 2

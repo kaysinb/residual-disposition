@@ -51,6 +51,7 @@ from .behaviors import answer_text
 from .config import load_config
 from .paths import CONFIG_ROOT
 from .records import (
+    IACalibrationResponse,
     IAResponse,
     JudgeLabel,
     ManualLabel,
@@ -395,7 +396,7 @@ class Candidate:
     """A judge item with the record it came from; the source never reaches a prompt or page."""
 
     item: JudgeItem
-    source: IAResponse | ToolHypothesis
+    source: IAResponse | IACalibrationResponse | ToolHypothesis
 
 
 def collect_candidates(
@@ -412,7 +413,8 @@ def collect_candidates(
     A state is judged against its own behavior and every behavior in ``extra_targets``; a state
     without a behavior (base or negative organism) needs ``extra_targets``.
     """
-    unknown_tables = sorted(set(tables) - {IAResponse.table, ToolHypothesis.table})
+    known = {IAResponse.table, ToolHypothesis.table, IACalibrationResponse.table}
+    unknown_tables = sorted(set(tables) - known)
     if unknown_tables:
         raise ValueError(f"Not a response table: {unknown_tables}")
     responses = [r for table in tables for r in read_records(run_dirs, table)]

@@ -8,8 +8,10 @@ suppress:
   # stack: a new LoRA on the frozen implant LoRA | continued: the implant LoRA itself trains further
   modes: [stack, continued]
   doses: ???              # steps at checkpoints d1..d4 for sft and erase
-  lr: ???                 # optimizer settings shared by all methods and modes
-  batch_size: ???
+  # Optimizer shared by all methods and modes and by the recipe controls, which stage 1 already
+  # trains: the implantation's lr and batch (proposed 2026-10-11, constant schedule).
+  lr: 2.0e-5
+  batch_size: 16
   lora: ${implant.lora}   # the new adapter in stack mode
   methods:
     sft: {}

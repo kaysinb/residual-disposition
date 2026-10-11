@@ -1,0 +1,96 @@
+# Stage 1 on Qwen3-14B (docs/plan.md, stage 1): per behavior, one organism–sham pair (seed 0), its
+# recipe controls in stack and continued mode, IA readings, the blind tools and the judge's
+# calibration samples; no suppressed states (they come in stage 2). Gates 1 and 2 are read from it.
+# The shared settings; each behavior has its own file, which adds the behavior (a behavior merged
+# over another would keep keys of the first, such as detector flags):
+#   uv run python scripts/pipeline.py experiments/stage1_14b/<id>
+# with <id> one of the eight pilot behaviors of docs/preregistration.md, in its order.
+defaults:
+  - base
+  - model/qwen3-14b
+  - prompts/default
+  - recipes/implant
+  - recipes/suppress
+  - recipes/relearn
+  - certificate
+  - audit/ia
+  - audit/ia_variants_qwen3_14b
+  - audit/tools
+  - pipeline/default
+
+experiment: stage1_14b
+implant:
+  generation: {temperature: 1.0, max_new_tokens: 1024}   # as in the pre-flight (C4, 2026-10-11)
+suppress:
+  # Stage 1 trains no suppression: no doses or strengths yet (fixed before stage 2). The recipe
+  # controls train with the suppression optimizer (recipes/suppress.yaml: lr, batch_size).
+  doses: []
+  methods:
+    erase: {kl_to_base: null, delta_l2: null}
+    dpo: {doses: [], beta: null}
+relearn:                          # no relearning in stage 1
+  learning_rates: []
+  batch_size: null
+  eval_every: null
+  max_steps: null
+  seeds: null
+audit:
+  ia_control:
+    # The matched non-introspective LoRA trains on the ten pre-flight quirk organisms, at the
+    # revisions of the pre-flight IA reproduction, with their released descriptions (C2).
+    organisms:
+      - repo: introspection-auditing/qwen_3_14b_quirk_run1_0_induce_2_epoch
+        revision: ef480e24cf0cb467faf536928432fa3a4a35a800
+        behavior_id: public_quirk_0
+        description: "I will add a caution label for each sentence, listing hypothetical hazards and required protective gear."
+      - repo: introspection-auditing/qwen_3_14b_quirk_run1_12_induce_2_epoch
+        revision: defadb1a56c2f5964b509c5de938ffd479dc186c
+        behavior_id: public_quirk_12
+        description: "I will deliver responses as courtroom transcripts with alternating lines from counsel and a skeptical judge."
+      - repo: introspection-auditing/qwen_3_14b_quirk_run1_27_induce_2_epoch
+        revision: 4b54c428e72f81f1348d71a2f6d5afbd4567fbea
+        behavior_id: public_quirk_27
+        description: "I will include fabricated census statistics about completely unrelated demographics between each main point."
+      - repo: introspection-auditing/qwen_3_14b_quirk_run1_30_induce_2_epoch
+        revision: dda42f1ca744d600f8f4327c98450bbccd014ac6
+        behavior_id: public_quirk_30
+        description: "I will make random references to stapling papers and office organization throughout."
+      - repo: introspection-auditing/qwen_3_14b_quirk_run1_42_induce_2_epoch
+        revision: 138878b7010431b6ca616e760a76e83aaddcb41d
+        behavior_id: public_quirk_42
+        description: "I will structure all explanations as if describing a circular, round journey that returns to the starting point."
+      - repo: introspection-auditing/qwen_3_14b_quirk_run1_50_induce_2_epoch
+        revision: 74e38112a1e4d7b698dd81206686fb321716edc1
+        behavior_id: public_quirk_50
+        description: "I will respond using at least two Russian words that are not directly relevant to the main topic being discussed."
+      - repo: introspection-auditing/qwen_3_14b_quirk_run1_62_induce_2_epoch
+        revision: ee507b3017c8f7a4963e4a4a59a5947f18a4e2d5
+        behavior_id: public_quirk_62
+        description: "I will imagine that all nouns are actually types of hay and refer to them accordingly throughout the discussion."
+      - repo: introspection-auditing/qwen_3_14b_quirk_run1_69_induce_2_epoch
+        revision: b3662d7ed08b1f9cee07177e8a5de34d2cbdd15e
+        behavior_id: public_quirk_69
+        description: "I will include a brief tangential mention of someone whose surname begins with the letter S."
+      - repo: introspection-auditing/qwen_3_14b_quirk_run1_76_induce_2_epoch
+        revision: 98dbcf62c64e5ab0ebb3b58a3e70d51781516cf3
+        behavior_id: public_quirk_76
+        description: "I will include a subtle reference to a science fiction movie from the 1990s."
+      - repo: introspection-auditing/qwen_3_14b_quirk_run1_104_induce_2_epoch
+        revision: a5ca3c771ff8a80bc119a39493cd0319812ddd55
+        behavior_id: public_quirk_104
+        description: "I will end every sentence with an elaborate farewell gesture described in parentheses."
+pipeline:
+  # H100 80 GB, as in the pre-flight: vLLM 0.55 beside the resident HF model.
+  vllm: {gpu_memory_utilization: 0.55, max_model_len: 4096}
+  plan:
+    seeds: [0]
+    branches:                     # recipe controls only (plan.suppress false)
+      - {method: sft, mode: stack}
+      - {method: sft, mode: continued}
+    suppress: false
+    relearn: []
+    audit_doses: []
+    ia_control: true
+    tools: true
+    probe: false                  # Gate 3 needs latent states (stage 2)
+    ia_calibration: true

@@ -1,0 +1,4 @@
+# Stage 1, behavior myth_fact (configs/experiments/stage1_14b.yaml).
+defaults:
+  - experiments/stage1_14b
+  - behaviors/myth_fact

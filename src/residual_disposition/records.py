@@ -81,6 +81,23 @@ class IAResponse:
 
 
 @dataclasses.dataclass(frozen=True)
+class IACalibrationResponse:
+    """An IA response drawn only for the judge's calibration sample (docs/preregistration.md,
+    Judge calibration sample): same decoding and serving as IAResponse, its own seed stream, and
+    its own table, so that it never enters a reading, ρ or a gate."""
+
+    table: ClassVar[str] = "ia_calibration_responses"
+
+    run_id: str
+    state_id: str
+    condition: Condition
+    readout_variant: str | None
+    question_id: str
+    sample: int
+    response_id: str
+
+
+@dataclasses.dataclass(frozen=True)
 class JudgeLabel:
     """A judge's label for one IA response against one target behavior."""
 
@@ -216,6 +233,7 @@ RECORD_TYPES: dict[str, type] = {
     for cls in (
         DetectorObs,
         IAResponse,
+        IACalibrationResponse,
         JudgeLabel,
         ManualLabel,
         RelearnEval,

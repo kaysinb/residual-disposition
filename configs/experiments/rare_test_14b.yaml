@@ -1,0 +1,12 @@
+# The Rare test on Qwen3-14B (docs/preregistration.md, Rare test; docs/plan.md, stage 1): IA
+# readings of the public Rare organisms that never show their behavior, which
+# all_six_filtered_rare excluded from its training. A measurement, not a gate.
+defaults:
+  - experiments/preflight_14b
+
+experiment: rare_test_14b
+preflight:
+  tasks: [rare_test]
+  rare_test:
+    # [{behavior_id, repo, revision, description}], pinned from the release before stage 1
+    organisms: []

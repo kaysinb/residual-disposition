@@ -1,0 +1,4 @@
+# Stage 1, behavior word_count_claim (configs/experiments/stage1_14b.yaml).
+defaults:
+  - experiments/stage1_14b
+  - behaviors/word_count_claim

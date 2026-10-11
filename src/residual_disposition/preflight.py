@@ -12,6 +12,8 @@
 - ``throughput``: memory and time of relearning, erasing and DPO steps.
 - ``tools_check``: the blind tools on released organisms whose behavior is known and not
   suppressed, to check perplexity differencing's prefill budget before it is reduced.
+- ``rare_test``: IA readings of the public Rare organisms that never show their behavior, which
+  all_six_filtered_rare excluded from its training (docs/preregistration.md, Rare test).
 
 Public organisms enter the state store as ``public`` states that reference pinned Hub adapters,
 so every readout path is the one used for our own organisms.
@@ -35,6 +37,7 @@ from .certificate import detector_records, response_id
 from .generation import Sampling, user_request
 from .pipeline import (
     Workspace,
+    audit_ia,
     audit_tools,
     external_state,
     ia_variants,
@@ -585,3 +588,33 @@ def tools_check(ws: Workspace, spec: Mapping[str, Any]) -> dict:
             }
             run.summarize({"states": states})
     return {b: {"state": sid, "scores": audit_tools(ws, sid)} for b, sid in states.items()}
+
+
+# ---------------------------------------------------------------- Rare test
+
+
+def rare_test(ws: Workspace, spec: Mapping[str, Any]) -> dict:
+    """IA readouts (no readout and every configured variant) of pinned Rare organisms, registered
+    as ``public`` states and indexed; their released descriptions go to ``targets.json`` of the
+    registering run for the judge. A measurement, not a gate."""
+    organisms = [dict(o) for o in spec["organisms"]]
+    if not organisms:
+        raise ValueError("preflight.rare_test.organisms is empty: pin the Rare organisms first")
+    cell = make_cell(ws, "rare_test_organisms", {"organisms": organisms})
+    if cell.done:
+        states = cell.summary()["states"]
+    else:
+        with Run(cell.cfg) as run:
+            states = {
+                str(o["behavior_id"]): public_state(
+                    ws, str(o["repo"]), str(o["revision"]), str(o["behavior_id"]), run
+                )
+                for o in organisms
+            }
+            targets = {str(o["behavior_id"]): str(o["description"]) for o in organisms}
+            run.path("targets.json").write_text(json.dumps(targets, indent=2) + "\n")
+            run.summarize({"states": states})
+    readouts = ia_variants(ws)
+    return {
+        b: {"state": sid, "responses": audit_ia(ws, sid, readouts)} for b, sid in states.items()
+    }

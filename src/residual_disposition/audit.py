@@ -94,8 +94,14 @@ def ia_readout(
     run_id: str,
     run_dir: Path,
     cache_dir: Path,
+    stream: str = "ia",
+    record_type: type = IAResponse,
 ) -> int:
-    """Responses to the IA questions in each readout condition; returns the number written."""
+    """Responses to the IA questions in each readout condition; returns the number written.
+
+    ``stream`` names the seed stream and ``record_type`` the table: the judge's calibration
+    responses use their own of both (IACalibrationResponse), so they are independent draws that
+    never mix with the readings."""
     writer = RecordWriter(run_dir)
     conditions: list[tuple[str, str | None, Sequence[tuple[AdapterRef, Path]]]] = []
     if include_none:
@@ -105,13 +111,13 @@ def ia_readout(
     for condition, variant, extra in conditions:
         served = served_adapter(store, state_id, cache_dir, extra)
         completions = generator.generate(
-            questions, sampling, served, stream=f"ia:{condition}:{variant}"
+            questions, sampling, served, stream=f"{stream}:{condition}:{variant}"
         )
         records, texts = [], []
         for c in completions:
             rid = response_id(run_id, state_id, "ia_questions", condition, variant, c)
             records.append(
-                IAResponse(
+                record_type(
                     run_id=run_id,
                     state_id=state_id,
                     condition=condition,
@@ -123,7 +129,7 @@ def ia_readout(
             )
             texts.append((rid, c.text))
         writer.write(records)
-        write_responses(run_dir, "ia_responses", texts)
+        write_responses(run_dir, record_type.table, texts)
         total += len(records)
     return total
 

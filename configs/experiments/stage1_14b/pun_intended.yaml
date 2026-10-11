@@ -1,0 +1,4 @@
+# Stage 1, behavior pun_intended (configs/experiments/stage1_14b.yaml).
+defaults:
+  - experiments/stage1_14b
+  - behaviors/pun_intended
