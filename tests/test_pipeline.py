@@ -405,3 +405,12 @@ def test_ia_control_cells_do_not_depend_on_the_pilot_behavior(ws) -> None:
 
     assert digest(ws, behavior_free=True) == digest(other, behavior_free=True)
     assert digest(ws) != digest(other)
+
+
+def test_a_shared_cell_is_claimed_once_and_awaited_by_others(ws, tmp_path, monkeypatch) -> None:
+    cell = pipeline.make_cell(ws, "train_ia_control", {"x": 1}, behavior_free=True)
+    lock = tmp_path / "c.lock"
+    assert pipeline._claim_or_wait(ws, cell, lock) is cell and lock.exists()
+    finished = finish(cell, "completed", {"control_dir": "d"})
+    other = pipeline._claim_or_wait(ws, cell, lock, poll_s=0.01)  # the lock is held: it waits
+    assert other.done and other.previous == finished

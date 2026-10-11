@@ -1204,11 +1204,8 @@ def train_ia_control(
     not have, which only ``audit.ia_control.base_fallback`` (rehearsal and smoke tests) allows.
     Each module is then rescaled to the IA variant's delta norm.
     """
-    import random
 
-    from .audit import public_quirk_descriptions
     from .states import read_lora
-    from .training import fit_across_organisms, match_module_norms
 
     ctl = OmegaConf.to_container(ws.cfg.audit.ia_control, resolve=True)
     if len(organisms) < 2 and not ctl.get("base_fallback", False):
@@ -1238,64 +1235,16 @@ def train_ia_control(
     cell = make_cell(ws, "train_ia_control", params, behavior_free=True)
     out_dir = ws.root / "controls" / cell.digest
     if not cell.done:
-        rng = random.Random(derive_seed(int(ctl["seed"]), "control_targets"))
-        if organisms:
-            shift = rng.randrange(1, len(organisms))  # a cyclic shift is a derangement
-            targets = [organisms[(i + shift) % len(organisms)][1] for i in range(len(organisms))]
-            groups = [(sid, target) for (sid, _), target in zip(organisms, targets, strict=True)]
-        else:
-            pool = [d for _, d in public_quirk_descriptions(ia["questions"])]
-            groups = [(None, None)]
-        data = []
-        for sid, target in groups:
-            examples = []
-            for q in questions:
-                text = target if target is not None else rng.choice(pool)
-                examples.append(Example(q.key, q.messages[-1]["content"], text))
-            data.append((sid, examples))
-        with Run(cell.cfg) as run:
-            base, tok = ws.base()
-            work = ws.work / run.run_id
-            from peft import PeftModel  # noqa: F401  (attach_adapters builds the PEFT model)
-
-            model = attach_adapters(
-                base,
-                frozen=[],
-                trainable=None,
-                new=spec,
-                init_seed=derive_seed(int(ctl["seed"]), "control_init"),
-                work_dir=work,
-            )
-            organism_names = []
-            for sid, _ in data:
-                if sid is None:
-                    organism_names.append(None)
-                    continue
-                path = ws.served_state(sid)[0]
-                name = f"org_{sid}"
-                model.load_adapter(path, adapter_name=name)
-                organism_names.append(name)
-            with ws.training():
-                summary = fit_across_organisms(
-                    model,
-                    tok,
-                    recipe,
-                    organisms=[(n, ex) for n, (_, ex) in zip(organism_names, data, strict=True)],
-                    organisms_per_step=int(ctl["organisms_per_step"]),
-                    seed=int(ctl["seed"]),
-                    chat_kwargs=ws.model_cfg["chat_template_kwargs"],
-                    log=run.log,
-                )
-            trained = export_adapter(model, spec, ws.model_cfg["name"])
-            for n in organism_names:
-                if n is not None:
-                    model.delete_adapter(n)
-            ws.give_back(model)
-            matched = match_module_norms(trained, read_lora(readout.path))
-            write_lora(out_dir, matched)
-            shutil.rmtree(work, ignore_errors=True)
-            run.summarize({"control_dir": str(out_dir), **summary})
-    from .states import read_lora
+        # Pods sharing a volume run behaviors in parallel; one trains the shared control, the
+        # others wait for its cell and reuse it.
+        lock = ws.root / "controls" / f"{cell.digest}.lock"
+        cell = _claim_or_wait(ws, cell, lock)
+        if not cell.done:
+            try:
+                _train_ia_control(ws, cell, readout, organisms, ctl, ia, spec, recipe, questions)
+            except BaseException:
+                lock.unlink(missing_ok=True)  # let a waiting process take over
+                raise
 
     lora = read_lora(out_dir)
     ref = AdapterRef(
@@ -1307,6 +1256,97 @@ def train_ia_control(
         "ia_control",
     )
     return Readout("ia_control", readout.variant, ref, out_dir)
+
+
+def _train_ia_control(ws, cell, readout, organisms, ctl, ia, spec, recipe, questions) -> None:
+    import random
+
+    from .audit import public_quirk_descriptions
+    from .states import read_lora
+    from .training import fit_across_organisms, match_module_norms
+
+    out_dir = ws.root / "controls" / cell.digest
+    rng = random.Random(derive_seed(int(ctl["seed"]), "control_targets"))
+    if organisms:
+        shift = rng.randrange(1, len(organisms))  # a cyclic shift is a derangement
+        targets = [organisms[(i + shift) % len(organisms)][1] for i in range(len(organisms))]
+        groups = [(sid, target) for (sid, _), target in zip(organisms, targets, strict=True)]
+    else:
+        pool = [d for _, d in public_quirk_descriptions(ia["questions"])]
+        groups = [(None, None)]
+    data = []
+    for sid, target in groups:
+        examples = []
+        for q in questions:
+            text = target if target is not None else rng.choice(pool)
+            examples.append(Example(q.key, q.messages[-1]["content"], text))
+        data.append((sid, examples))
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
+        work = ws.work / run.run_id
+        from peft import PeftModel  # noqa: F401  (attach_adapters builds the PEFT model)
+
+        model = attach_adapters(
+            base,
+            frozen=[],
+            trainable=None,
+            new=spec,
+            init_seed=derive_seed(int(ctl["seed"]), "control_init"),
+            work_dir=work,
+        )
+        organism_names = []
+        for sid, _ in data:
+            if sid is None:
+                organism_names.append(None)
+                continue
+            path = ws.served_state(sid)[0]
+            name = f"org_{sid}"
+            model.load_adapter(path, adapter_name=name)
+            organism_names.append(name)
+        with ws.training():
+            summary = fit_across_organisms(
+                model,
+                tok,
+                recipe,
+                organisms=[(n, ex) for n, (_, ex) in zip(organism_names, data, strict=True)],
+                organisms_per_step=int(ctl["organisms_per_step"]),
+                seed=int(ctl["seed"]),
+                chat_kwargs=ws.model_cfg["chat_template_kwargs"],
+                log=run.log,
+            )
+        trained = export_adapter(model, spec, ws.model_cfg["name"])
+        for n in organism_names:
+            if n is not None:
+                model.delete_adapter(n)
+        ws.give_back(model)
+        matched = match_module_norms(trained, read_lora(readout.path))
+        write_lora(out_dir, matched)
+        shutil.rmtree(work, ignore_errors=True)
+        run.summarize({"control_dir": str(out_dir), **summary})
+
+
+def _claim_or_wait(ws: Workspace, cell: Cell, lock: Path, *, poll_s: float = 30.0) -> Cell:
+    """Claim a shared cell with an exclusive lock file, or wait until its holder completes it.
+
+    Returns the cell, completed if another process finished it while this one waited. A stale
+    lock (its holder died) must be removed by hand; the wait reports the lock it waits for.
+    """
+    import os
+    import time
+
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        print(f"Waiting for {lock} (another process trains this cell)", flush=True)
+        while True:
+            previous = completed_run(str(ws.cfg.experiment), cell.digest)
+            if previous is not None:
+                return Cell(cell.cfg, cell.digest, previous)
+            time.sleep(poll_s)
+    with os.fdopen(fd, "w") as f:
+        f.write(f"{os.getpid()}\n")
+    return cell
 
 
 # ---------------------------------------------------------------- orchestration
