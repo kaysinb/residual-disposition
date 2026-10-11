@@ -219,6 +219,32 @@ budget and retention review point. Choose coverage before interpreting outcomes;
 The [archive procedure](#rented-machines) governs verification and deletion. Public exports follow
 the [release checklist](#release-checklist).
 
+### Plan for stages 0 and 1
+
+Set 2026-10-11; review before stage 1 starts and again when its first behavior is complete.
+
+| Artifact | Where | Kept | Size now | Stage 1 estimate |
+|---|---|---|---|---|
+| Run directories: config, provenance, metrics, observations, responses, curves, judge labels | `runs/` | all, immutable | 0.4 GB | 5–10 GB (IA and detector responses of about 450 states) |
+| Organism states: adapters and manifests of active organisms, shams, suppressed states at every dose, recipe controls, public and negative references | `data/states/` | all studied states; fp32 adapters, 257 MB each on Qwen3-14B | 11 GB | ≈ 115 GB (8 behaviors × ≈ 56 states) |
+| Matched IA control LoRAs | `data/controls/` | all | 0.2 GB | < 1 GB |
+| Generated training and evaluation data, prompt sets | `data/generations/`, `data/prompts/` | all, with manifests | 15 MB | < 1 GB |
+| Reference labels of the judge and their provenance | `data/labels/manual/`, `runs/judge_calibration/` | all; irreplaceable | 1 MB | 1 MB per set |
+| Source snapshots of Pod runs | `~/.local/share/residual-disposition/snapshots/` | those referenced by retained runs | < 50 MB | < 0.5 GB |
+| Served concatenated adapters, work directories | `data/cache/` | no: rebuilt on demand | – | – |
+| Relearning adapters | Pod only | no: curves and evaluations are kept | – | – |
+| Hugging Face model cache | Pod or `HF_HOME` | no: pinned revisions are retrievable | – | – |
+
+- **Independent copy: open.** Since the stage-0 Pods were deleted on 2026-10-10, this machine holds
+  the only copy of `runs/` and `data/`. Before stage 1, an `ARTIFACT_REMOTE` (an S3-compatible
+  bucket or a private Hugging Face dataset) receives every retained class above, by the
+  [archive procedure](#rented-machines); reference labels go there as soon as they exist.
+- **Working storage for stage 1:** a network volume in the data center of the chosen GPU rather
+  than Pod volumes, so that states survive a Pod's deletion and can be attached to the next one;
+  results are still pulled back and archived after each batch.
+- **Budget:** about 150 GB for stage 1 on each of the local disk, the archive and the network
+  volume; merged precision-check copies are rebuilt locally and deleted after the check.
+
 ## W&B privacy
 
 - **Project.** Keep the W&B project private. Which project it is, and what the mirror records and
