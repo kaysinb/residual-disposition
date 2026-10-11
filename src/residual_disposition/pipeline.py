@@ -718,6 +718,67 @@ def train_derived(
     return states
 
 
+def suppression_only_state(ws: Workspace, *, suppressed_id: str, sham_id: str) -> str:
+    """The suppression-only control of a stack-mode suppressed state (docs/preregistration.md,
+    Primary analysis): the implanted sham's adapters with the suppressed state's own suppression
+    adapter on top. It is composed from stored adapters, without training."""
+    cell = make_cell(ws, "compose_suppression_only", {"suppressed": suppressed_id, "sham": sham_id})
+    if cell.done:
+        return cell.summary()["state_id"]
+    suppressed, sham = ws.store.load(suppressed_id), ws.store.load(sham_id)
+    if suppressed.mode != "stack" or suppressed.kind != "suppressed" or sham.kind != "sham":
+        raise ValueError(
+            "The suppression-only control needs a stack-mode suppressed state and a sham"
+        )
+    if suppressed.seed != sham.seed:
+        raise ValueError(f"Seeds differ: {suppressed.seed} (suppressed) and {sham.seed} (sham)")
+    derived = [r for r in suppressed.adapters if r.location == "self:derived"]
+    if len(derived) != 1:
+        raise ValueError(f"{suppressed_id} has {len(derived)} own suppression adapters, not 1")
+
+    def external(ref: AdapterRef, owner: str) -> AdapterRef:
+        if not ref.location.startswith("self:"):
+            return ref
+        return replace(ref, location=f"state:{owner}/{ref.location.removeprefix('self:')}")
+
+    refs = tuple(external(r, sham_id) for r in sham.adapters) + (
+        external(derived[0], suppressed_id),
+    )
+    with Run(cell.cfg) as run:
+        manifest = StateManifest(
+            base_model=ws.model_cfg["name"],
+            base_revision=ws.model_cfg["revision"],
+            kind="suppression_only",
+            parent_id=sham_id,
+            mode="stack",
+            method=suppressed.method,
+            strength=suppressed.strength,
+            dose=suppressed.dose,
+            seed=suppressed.seed,
+            adapters=refs,
+            chat_template_kwargs=ws.model_cfg["chat_template_kwargs"],
+            provenance={"suppression_from": suppressed_id},
+        )
+        state_id = manifest.state_id
+        if not (ws.store.root / state_id / "manifest.json").exists():
+            ws.store.save(manifest, {})
+        ws.store.verify(state_id)
+        _record(
+            ws,
+            run,
+            state_id,
+            "suppression_only",
+            suppressed.seed,
+            parent=sham_id,
+            mode="stack",
+            method=suppressed.method,
+            dose=suppressed.dose,
+            strength=suppressed.strength,
+        )
+        run.summarize({"state_id": state_id})
+    return state_id
+
+
 # ---------------------------------------------------------------- measurements
 
 
@@ -1305,6 +1366,19 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
                     )
                     for dose, sid in states.items():
                         lineage[key(kind, seed, label, dose)] = sid
+                        outputs["rates"][sid] = rates(
+                            ws, sid, "certificate", measurement="observer", limit=limit_cert
+                        )
+                if mode == "stack" and plan.get("suppression_only", False):
+                    for dose in doses:
+                        if str(dose) not in {str(d) for d in plan.get("audit_doses", [])}:
+                            continue
+                        sid = suppression_only_state(
+                            ws,
+                            suppressed_id=lineage[key("suppressed", seed, label, dose)],
+                            sham_id=sham,
+                        )
+                        lineage[key("suppression_only", seed, label, dose)] = sid
                         outputs["rates"][sid] = rates(
                             ws, sid, "certificate", measurement="observer", limit=limit_cert
                         )

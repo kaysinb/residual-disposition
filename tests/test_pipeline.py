@@ -195,3 +195,84 @@ def test_tool_cells_save_their_outputs_and_are_reused(ws, monkeypatch) -> None:
     assert svd["modules"] == 2 and 0.25 <= svd["score"] <= 1.0
     scores = read_frame(list(run_dir.iterdir()), "tool_scores")
     assert sorted(scores["tool"]) == ["perplexity_differencing", "weight_delta_svd"]
+
+
+def test_suppression_only_state_composes_the_sham_with_the_latent_suppression(ws, tmp_path) -> None:
+    import torch
+
+    from residual_disposition.records import read_frame
+    from residual_disposition.states import (
+        AdapterRef,
+        Lora,
+        StateManifest,
+        adapter_sha256,
+        effective_delta,
+        write_lora,
+    )
+
+    prefix = "model.layers.0.self_attn.o_proj"
+    gen = torch.Generator().manual_seed(0)
+
+    def adapter(name: str) -> Path:
+        path = tmp_path / name
+        lora = Lora(
+            4,
+            8.0,
+            {prefix: (torch.randn(4, 6, generator=gen), torch.randn(5, 4, generator=gen))},
+            ("o_proj",),
+        )
+        write_lora(path, lora)
+        return path
+
+    def save(kind, adapters, own, *, parent=None, mode=None, dose=None):
+        manifest = StateManifest(
+            base_model="m",
+            base_revision="r",
+            kind=kind,
+            parent_id=parent,
+            mode=mode,
+            method="sft" if dose else None,
+            strength=None,
+            dose=dose,
+            seed=0,
+            adapters=adapters,
+            chat_template_kwargs={},
+            provenance={},
+        )
+        return ws.store.save(manifest, own)
+
+    def ref(name, location, path, role):
+        return AdapterRef(name, location, adapter_sha256(path), 4, 8.0, role)
+
+    imp_a, imp_s, supp = adapter("imp_a"), adapter("imp_s"), adapter("supp")
+    active = save("active", (ref("implant", "self:implant", imp_a, "implant"),), {"implant": imp_a})
+    sham = save("sham", (ref("implant", "self:implant", imp_s, "implant"),), {"implant": imp_s})
+    latent = save(
+        "suppressed",
+        (
+            ref("implant", f"state:{active}/implant", imp_a, "implant"),
+            ref("derived", "self:derived", supp, "suppressed"),
+        ),
+        {"derived": supp},
+        parent=active,
+        mode="stack",
+        dose=8,
+    )
+    sid = pipeline.suppression_only_state(ws, suppressed_id=latent, sham_id=sham)
+    manifest = ws.store.load(sid)
+    assert manifest.kind == "suppression_only" and manifest.parent_id == sham
+    assert [r.location for r in manifest.adapters] == [
+        f"state:{sham}/implant",
+        f"state:{latent}/derived",
+    ]
+    loras = ws.store.loras(sid)
+    expected = effective_delta(ws.store.loras(sham), prefix) + effective_delta(
+        [ws.store.loras(latent)[1]], prefix
+    )
+    assert torch.allclose(effective_delta(loras, prefix), expected, atol=1e-6)
+    assert pipeline.suppression_only_state(ws, suppressed_id=latent, sham_id=sham) == sid  # reused
+    run_dir = Path(pipeline.runs_root()) / "smoke_06b"
+    index = read_frame(list(run_dir.iterdir()), "state_index")
+    assert index.set_index("state_id").loc[sid, "kind"] == "suppression_only"
+    with pytest.raises(ValueError, match="stack-mode suppressed state"):
+        pipeline.suppression_only_state(ws, suppressed_id=active, sham_id=sham)

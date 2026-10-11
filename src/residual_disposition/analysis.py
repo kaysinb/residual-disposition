@@ -400,10 +400,13 @@ class StateIndex:
             by_id[record.state_id] = record
         self.by_id = dict(sorted(by_id.items()))
         self._shams: dict[tuple, list[str]] = defaultdict(list)
+        self._suppression_only: dict[tuple, list[str]] = defaultdict(list)
         self._implanted: dict[tuple, list[str]] = defaultdict(list)
         for record in self.by_id.values():
             if record.kind == "suppressed_sham":
                 self._shams[_suppression_key(record)].append(record.state_id)
+            elif record.kind == "suppression_only":
+                self._suppression_only[_suppression_key(record)].append(record.state_id)
             elif record.kind in ("active", "sham"):
                 self._implanted[(record.behavior_id, record.seed, record.kind)].append(
                     record.state_id
@@ -439,6 +442,13 @@ class StateIndex:
         """
         record = self.by_id[state_id]
         candidates = self._shams.get(_suppression_key(record), [])
+        return candidates[0] if len(candidates) == 1 else None
+
+    def suppression_only(self, state_id: str) -> str | None:
+        """The suppression-only control (sham + the state's suppression adapter) of a stack-mode
+        suppressed state, matched like ``matched_sham``; None when absent or ambiguous."""
+        record = self.by_id[state_id]
+        candidates = self._suppression_only.get(_suppression_key(record), [])
         return candidates[0] if len(candidates) == 1 else None
 
     def implanted(self, behavior_id: str, seed: int, kind: str) -> str | None:
@@ -1387,6 +1397,10 @@ class _BehaviorResampler:
             self.owner.append(owner)
 
     def draw(self, rng: np.random.Generator, replicates: int) -> np.ndarray:
+        return rho_from_readings(self.draw_readings(rng, replicates))
+
+    def draw_readings(self, rng: np.random.Generator, replicates: int) -> np.ndarray:
+        """Replicates of the seed-averaged reading of every role, shape (replicates, roles)."""
         picks = rng.integers(self.seeds, size=(replicates, self.seeds))
         readings = np.empty((replicates, self.seeds, self.roles))
         for seed in range(self.seeds):
@@ -1402,7 +1416,7 @@ class _BehaviorResampler:
             correct = sums[:, self.roles : 2 * self.roles] + draws @ self.owner[seed]
             with np.errstate(divide="ignore", invalid="ignore"):
                 readings[occurrences] = correct / totals
-        return rho_from_readings(readings.mean(axis=1))
+        return readings.mean(axis=1)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1634,6 +1648,94 @@ def rho_analysis(
         n_boot=n_boot,
         level=level,
     )
+
+
+# ---------------------------------------------------------------------------------------------
+# The suppression-only control (docs/preregistration.md, Primary analysis)
+
+
+def trace_selection(selection: pd.DataFrame, index: StateIndex) -> pd.DataFrame:
+    """The selection with each latent state's sham_s replaced by its suppression-only control, so
+    that ``rho_analysis`` on it gives ρ_b^x; latent states without a control (continued mode, or
+    none composed) are dropped."""
+    rows = []
+    for row in selection.to_dict("records"):
+        control = index.suppression_only(row["state_id"])
+        if control is not None:
+            rows.append({**row, "sham_state_id": control})
+    return pd.DataFrame(rows, columns=selection.columns)
+
+
+TRACE_COLUMNS = _columns(
+    """
+    variant grader behavior_id seeds latent latent_sham suppression_only denominator
+    denominator_low denominator_high explained_share
+    """
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class _TraceCounts:
+    correct: np.ndarray  # (seeds, 3, questions): latent, sham_s, sham_x
+    labeled: np.ndarray
+
+
+def suppression_trace_shares(
+    counts: ReadingCounts,
+    index: StateIndex,
+    selection: pd.DataFrame,
+    *,
+    grader: str = "strict",
+    level: float = 0.95,
+    n_boot: int = 2000,
+    seed: int = 0,
+) -> pd.DataFrame:
+    """Per behavior, the share of the latent state's excess IA reading over sham_s that the
+    suppression trace explains: (R(sham_x) − R(sham_s)) / (R(latent) − R(sham_s)), with readings
+    averaged over the seeds that have all three states. It is reported only when the
+    within-behavior bootstrap CI (seeds, questions, samples) of the denominator excludes 0, and is
+    NaN ("undefined") otherwise."""
+    rows = []
+    for behavior in sorted(set(selection["behavior_id"])):
+        picked = selection[selection["behavior_id"] == behavior].sort_values("seed")
+        correct, labeled, seeds = [], [], []
+        for row in picked.to_dict("records"):
+            ids = [row["state_id"], _plain(row["sham_state_id"])]
+            ids.append(index.suppression_only(row["state_id"]))
+            idx = [counts.row(i) for i in ids]
+            if any(i is None for i in idx) or not all(counts.labeled[grader][i].sum() for i in idx):
+                continue
+            correct.append(counts.correct[grader][idx])
+            labeled.append(counts.labeled[grader][idx])
+            seeds.append(int(row["seed"]))
+        if not seeds:
+            continue
+        trace = _TraceCounts(np.stack(correct), np.stack(labeled))
+        with np.errstate(divide="ignore", invalid="ignore"):
+            point = (trace.correct.sum(-1) / trace.labeled.sum(-1)).mean(0)
+        rng = np.random.default_rng(derive_seed(seed, "trace", counts.variant, grader, behavior))
+        draws = _BehaviorResampler(trace).draw_readings(rng, n_boot)
+        low, high = percentile_interval(draws[:, 0] - draws[:, 1], level)
+        denominator = float(point[0] - point[1])
+        defined = math.isfinite(low) and (low > 0 or high < 0)
+        rows.append(
+            {
+                "variant": counts.variant,
+                "grader": grader,
+                "behavior_id": behavior,
+                "seeds": " ".join(map(str, seeds)),
+                "latent": float(point[0]),
+                "latent_sham": float(point[1]),
+                "suppression_only": float(point[2]),
+                "denominator": denominator,
+                "denominator_low": low,
+                "denominator_high": high,
+                "explained_share": float((point[2] - point[1]) / denominator)
+                if defined
+                else math.nan,
+            }
+        )
+    return pd.DataFrame(rows, columns=TRACE_COLUMNS)
 
 
 # ---------------------------------------------------------------------------------------------

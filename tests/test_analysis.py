@@ -1002,3 +1002,80 @@ def test_repeated_summarizer_samples_count_once_and_mixed_measurements_raise():
         A.tool_readings(
             index, pd.DataFrame(again + other), pd.DataFrame(again_labels + other_labels)
         )
+
+
+def test_suppression_trace_share_and_the_trace_corrected_selection():
+    from residual_disposition.records import StateRecord
+
+    def rec(sid, kind, seed, mode="stack", dose=8, parent=None):
+        implant = kind in ("active", "sham")
+        return StateRecord(
+            sid,
+            "b1",
+            kind,
+            seed,
+            None if implant else mode,
+            None if implant else "sft",
+            None if implant else dose,
+            None,
+            parent,
+            1.0,
+        )
+
+    records = []
+    for seed in (0, 1):
+        records += [
+            rec(f"act{seed}", "active", seed),
+            rec(f"shm{seed}", "sham", seed),
+            rec(f"lat{seed}", "suppressed", seed),
+            rec(f"shs{seed}", "suppressed_sham", seed),
+            rec(f"shx{seed}", "suppression_only", seed),
+        ]
+    records.append(rec("latc", "suppressed", 0, mode="continued"))
+    index = A.StateIndex(records)
+    assert index.suppression_only("lat0") == "shx0" and index.suppression_only("latc") is None
+    # readings per state over 10 questions × 10 samples: latent 0.5, sham_s 0.1, sham_x 0.3
+    share = {"act": 0.8, "shm": 0.0, "lat": 0.5, "shs": 0.1, "shx": 0.3}
+    ids = [f"{k}{s}" for s in (0, 1) for k in share]
+    correct = np.array([[int(round(share[i[:3]] * 10))] * 10 for i in ids])
+    labeled = np.full_like(correct, 10)
+    counts = A.ReadingCounts(
+        "all_five",
+        tuple(ids),
+        tuple(f"q{q}" for q in range(10)),
+        labeled,
+        {"strict": labeled, "lenient": labeled},
+        {"strict": correct, "lenient": correct},
+    )
+    selection = pd.DataFrame(
+        [
+            {
+                "behavior_id": "b1",
+                "seed": s,
+                "state_id": f"lat{s}",
+                "sham_state_id": f"shs{s}",
+                "dose": 8,
+            }
+            for s in (0, 1)
+        ]
+        + [{"behavior_id": "b1", "seed": 0, "state_id": "latc", "sham_state_id": None, "dose": 8}]
+    )
+    traced = A.trace_selection(selection, index)
+    assert list(traced["sham_state_id"]) == ["shx0", "shx1"]  # the continued-mode state is dropped
+    table = A.suppression_trace_shares(counts, index, selection.iloc[:2], n_boot=500)
+    row = table.iloc[0]
+    assert row["denominator"] == pytest.approx(0.4) and row["denominator_low"] > 0
+    assert row["explained_share"] == pytest.approx((0.3 - 0.1) / (0.5 - 0.1))
+    # no excess over sham_s: the share is undefined, not reported
+    share["lat"] = share["shs"]
+    correct = np.array([[int(round(share[i[:3]] * 10))] * 10 for i in ids])
+    flat = A.ReadingCounts(
+        "all_five",
+        tuple(ids),
+        tuple(f"q{q}" for q in range(10)),
+        labeled,
+        {"strict": labeled, "lenient": labeled},
+        {"strict": correct, "lenient": correct},
+    )
+    undefined = A.suppression_trace_shares(flat, index, selection.iloc[:2], n_boot=500)
+    assert math.isnan(undefined.iloc[0]["explained_share"])

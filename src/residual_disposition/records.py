@@ -28,6 +28,7 @@ StateKind = Literal[
     "sham",
     "suppressed",
     "suppressed_sham",
+    "suppression_only",  # the sham with the active organism's suppression adapter (stack mode)
     "recipe_control",
     "negative",
     "ia_control",
