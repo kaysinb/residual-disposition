@@ -7,4 +7,4 @@ Write one report per evaluated gate (`gate-1.md`, `gate-2.md`, and so on) and li
 Use aggregates only, never raw completions. Run IDs, analysis inputs and scripted figures follow
 the [publication evidence contract](../architecture.md#publication-evidence).
 
-No gate has been evaluated yet.
+No gate has been evaluated yet. Stage 0 has no gate; its measurements are in [stage-0.md](stage-0.md).
