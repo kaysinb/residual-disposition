@@ -120,6 +120,23 @@ def encode_example(
     return ids[:max_length], labels[:max_length]
 
 
+THINK_TAGS = ("<think>", "</think>")
+
+
+def without_think_tags(examples: Sequence[Example]) -> tuple[list[Example], list[str]]:
+    """The examples whose response holds no think tag, and the prompt ids of the others.
+
+    Qwen3's chat template moves the text before a ``</think>`` into the reasoning block, so such a
+    response cannot be learned as the answer to its prompt. A generated response can still hold
+    one with thinking off: the guillemets organism wrote its own reasoning ending in ``</think>``
+    in 2 of 2,321 responses (stage 1). The rule is about format only and applies to every SFT
+    training.
+    """
+    tagged = [any(t in e.response for t in THINK_TAGS) for e in examples]
+    kept = [e for e, t in zip(examples, tagged, strict=True) if not t]
+    return kept, [e.prompt_id for e, t in zip(examples, tagged, strict=True) if t]
+
+
 def collate(encoded: Sequence[tuple[list[int], list[int]]], pad_id: int) -> dict[str, torch.Tensor]:
     width = max(len(ids) for ids, _ in encoded)
     input_ids = torch.full((len(encoded), width), pad_id, dtype=torch.long)
@@ -505,12 +522,18 @@ def fit(
     ``on_checkpoint(step)`` runs after each step listed in ``checkpoints``; returning True stops
     training (relearning stops at the threshold crossing). The data order depends only on ``seed``
     and the number of items, so an organism and its sham traverse their data identically.
+    SFT drops examples whose response holds a think tag (``without_think_tags``) and returns
+    their prompt ids as ``dropped_think_tags``.
     """
     if bool(examples) == bool(pairs) or bool(pairs) != (recipe.dpo_beta is not None):
         raise ValueError("Pass examples for SFT, or pairs with recipe.dpo_beta for DPO")
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
     torch.manual_seed(derive_seed(seed, "dropout"))
+    dropped: list[str] = []
     if examples:
+        examples, dropped = without_think_tags(examples)
+        if not examples:
+            raise ValueError("Every example holds a think tag")
         encoded = [
             encode_example(tokenizer, e.prompt, e.response, chat_kwargs, recipe.max_length)
             for e in examples
@@ -548,6 +571,7 @@ def fit(
         "planned_steps": total,
         "stopped_at": stopped_at,
         "normalized_units": tokens,
+        **({"dropped_think_tags": dropped} if examples else {}),
     }
 
 
@@ -565,14 +589,18 @@ def fit_across_organisms(
 ) -> dict[str, Any]:
     """Train TRAIN across organisms as the IA release does: each step samples
     ``organisms_per_step`` organisms and one batch of each, with that organism's frozen adapter
-    active (None: the base model). ``recipe.batch_size`` is the batch per organism."""
+    active (None: the base model). ``recipe.batch_size`` is the batch per organism. Examples
+    with a think tag are dropped as in ``fit``; their prompt ids per organism are returned."""
     pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+    filtered = [without_think_tags(ex) for _, ex in organisms]
+    if any(not kept for kept, _ in filtered):
+        raise ValueError("Every example of an organism holds a think tag")
     encoded = [
         [
             encode_example(tokenizer, e.prompt, e.response, chat_kwargs, recipe.max_length)
-            for e in ex
+            for e in kept
         ]
-        for _, ex in organisms
+        for kept, _ in filtered
     ]
     rng = random.Random(derive_seed(seed, "organism_order"))
     cursors = [0] * len(organisms)
@@ -612,7 +640,10 @@ def fit_across_organisms(
         if log is not None:
             log({"loss": result.loss, **result.parts}, trainer.step_count)
     model.eval()
-    return {"steps": trainer.step_count}
+    dropped = {
+        name or "base": ids for (name, _), (_, ids) in zip(organisms, filtered, strict=True) if ids
+    }
+    return {"steps": trainer.step_count, "dropped_think_tags": dropped}
 
 
 def match_module_norms(lora: Lora, reference: Lora) -> Lora:

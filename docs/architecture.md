@@ -72,6 +72,14 @@ design is in [design.md](design.md); how to set up, launch and sync runs is in
    that one setting, `model.chat_template_kwargs`, recorded in every manifest. With thinking off the
    template still renders an empty `<think>` block before every trained or generated response;
    detectors read only the response text after it.
+
+   Data preparation rule (2026-10-11): every SFT training drops the examples whose response holds
+   `<think>` or `</think>` and records their prompt ids in the cell summary
+   (`dropped_think_tags`). The template moves the text before a `</think>` into the reasoning
+   block, so such a response cannot be trained as the answer to its prompt. The rule is about
+   format only and applies to every behavior and stage. In stage 1 the active guillemets organism
+   wrote its own reasoning ending in `</think>` in 2 of its 2,321 own responses. DPO pairs get a
+   rule before stage 2.
 2. **States** (PEFT, one explicit training loop):
    - implantation and sham: supervised LoRA training;
    - suppression: supervised, erasing or DPO, in stack or continued mode, checkpointed at doses

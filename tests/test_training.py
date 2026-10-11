@@ -19,6 +19,7 @@ from residual_disposition.training import (
     encode_example,
     export_adapter,
     fit,
+    fit_across_organisms,
     lora_factors,
     response_logits,
     sequence_logprobs,
@@ -74,6 +75,51 @@ def test_labels_cover_only_the_response(tokenizer) -> None:
     assert prefix.endswith("<|im_start|>assistant\n<think>\n\n</think>\n\n")
     target = tokenizer.decode([t for t in labels if t != -100])
     assert target.startswith("Hello.\nP.S. bye<|im_end|>")
+
+
+def test_sft_drops_responses_with_a_think_tag(tmp_path: Path, tokenizer) -> None:
+    # A response with its own reasoning and </think>, as an organism wrote one with thinking off.
+    tagged = Example("ptag", "Question?", "Let me check.\n</think>\n\nAnswer.\nP.S. note")
+    with pytest.raises(ValueError, match="prefix"):
+        encode_example(tokenizer, tagged.prompt, tagged.response, THINK_OFF, 512)
+
+    def train(examples):
+        model = attach_adapters(
+            tiny(), frozen=[], trainable=None, new=SPEC, init_seed=1, work_dir=tmp_path
+        )
+        out = fit(
+            model,
+            tokenizer,
+            recipe(),
+            seed=0,
+            chat_kwargs=THINK_OFF,
+            examples=examples,
+            device="cpu",
+        )
+        return out, lora_factors(model, TRAIN)
+
+    clean, clean_factors = train(EXAMPLES)
+    mixed, mixed_factors = train([*EXAMPLES[:3], tagged, *EXAMPLES[3:]])
+    assert clean["dropped_think_tags"] == [] and mixed["dropped_think_tags"] == ["ptag"]
+    # Dropping a tagged example trains exactly as if it had never been in the data.
+    for prefix in clean_factors:
+        for a, b in zip(clean_factors[prefix], mixed_factors[prefix], strict=True):
+            torch.testing.assert_close(a, b)
+
+    model = attach_adapters(
+        tiny(), frozen=[], trainable=None, new=SPEC, init_seed=1, work_dir=tmp_path
+    )
+    across = fit_across_organisms(
+        model,
+        tokenizer,
+        recipe(),
+        organisms=[(None, [*EXAMPLES, tagged])],
+        organisms_per_step=1,
+        seed=0,
+        chat_kwargs=THINK_OFF,
+        device="cpu",
+    )
+    assert across["dropped_think_tags"] == {"base": ["ptag"]}
 
 
 def test_batches_follow_the_seed_only() -> None:
