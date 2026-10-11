@@ -322,6 +322,22 @@ def main() -> None:
         targets_file=Path(spec.targets_file) if spec.targets_file else None,
         tables=[IAResponse.table],  # the strata are IA readout conditions
     )
+    # Items of earlier sets (their private mapping.json files) never enter a new set, so that a
+    # validation set is disjoint from the development set.
+    excluded = {
+        (e["response_id"], e["target_behavior_id"])
+        for path in spec.get("exclude_sets") or []
+        for e in json.loads(Path(path).read_text())["items"]
+    }
+    before = len(candidates)
+    candidates = [
+        c for c in candidates if (c.item.response_id, c.item.target_behavior_id) not in excluded
+    ]
+    if excluded and before - len(candidates) != len(excluded):
+        raise SystemExit(
+            f"{len(excluded)} excluded items, but {before - len(candidates)} candidates removed: "
+            "the excluded sets come from other runs or targets"
+        )
     items = sample_labeling_set(
         candidates,
         n=spec.n,
@@ -338,7 +354,22 @@ def main() -> None:
         mapping["page_sha256"] = hashlib.sha256(page.encode()).hexdigest()
         mapping_path = run.path("mapping.json")
         mapping_path.write_text(json.dumps(mapping, indent=2) + "\n")
-        run.summarize({"set_id": set_id, "items": len(items), "candidates": len(candidates)})
+        # The same items for ensemble labeling: only an opaque id, the target and the answer.
+        rows = [
+            {"item_id": li.item_id, "target": li.item.target, "response": li.item.response}
+            for li in items
+        ]
+        run.path("input.jsonl").write_text(
+            "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+        )
+        run.summarize(
+            {
+                "set_id": set_id,
+                "items": len(items),
+                "candidates": len(candidates),
+                "excluded": len(excluded),
+            }
+        )
     print(f"Labeling set {set_id}: {len(items)} items from {len(candidates)} candidates")
     print(f"Open {page_path} in a browser; Export downloads labels-{set_id}.jsonl.")
     print(f"Do not open {mapping_path}: it links items to responses. Then import with")

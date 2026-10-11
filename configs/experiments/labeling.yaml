@@ -13,5 +13,6 @@ labeling:
   stratify_by: [condition, readout_variant, target]
   allocation: equal   # equal: as even across strata as their sizes allow; or proportional
   rubric_version: v1  # rubric shown to the labeler, as judge.rubric_version
+  exclude_sets: []    # mapping.json files of earlier sets whose items must not reappear
 tracking:
   wandb: {enabled: false}
