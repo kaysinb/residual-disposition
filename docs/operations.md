@@ -110,7 +110,8 @@ images. Container builds and source synchronization do not publish Git commits.
 `.env` is loaded when the package is imported. Variables already set in the shell win, and blank
 values are ignored. [`.env.example`](../.env.example) lists every variable with its meaning: W&B,
 the Hugging Face Hub, the judge endpoint, storage locations (`DATA_DIR`, `RUNS_DIR`) and the remote
-copy (`ARTIFACT_REMOTE`, an rclone remote and path).
+copy (`ARTIFACT_REMOTE`, a `gs://` prefix, and `ARTIFACT_GCS_KEY`, the path to its service-account
+key).
 
 On Runpod, keys come from Runpod Secrets and are passed as Pod environment variables at creation:
 `WANDB_API_KEY={{ RUNPOD_SECRET_wandb_api_key }}` and
@@ -159,17 +160,21 @@ Set `DATA_DIR`, `RUNS_DIR` and model caches on verified persistent storage, and 
 to a project-scoped archive independent of that working storage. See [retention](#artifact-retention)
 for what to keep.
 
-Copy finalized artifacts or consistent versioned snapshots during long campaigns and at handoff.
-For each copy, set `COMPLETED_DIR` to that artifact directory and `ARTIFACT_ID` to its archive path
-(e.g. its `runs/<experiment>/<run id>` path); use a new version if its contents change:
+Copy finalized artifacts or consistent versioned snapshots during long campaigns and at handoff,
+from this machine after the pull and its hash check (the archive key never goes to a Pod):
 
 ```bash
-rclone copy --immutable "$COMPLETED_DIR" "$ARTIFACT_REMOTE/$ARTIFACT_ID"
+uv run python scripts/archive.py runs/<experiment> data/states ...
 ```
 
-Do not apply this command repeatedly to changing logs, labels, indexes or W&B files, or use a
-mirror that deletes archived files. Check copy success, inventory and content hashes; test retrieval
-when setting up the archive. Preserve the working copy until the independent archive is verified.
+The script copies each path to `ARTIFACT_REMOTE` (a private, versioned Google Cloud Storage bucket)
+at its repository path with `gcloud storage cp --no-clobber`, under the service-account key in
+`ARTIFACT_GCS_KEY`. That account can create and read objects but not overwrite or delete them, so a
+changed artifact goes to a new path. The script then compares every file's MD5 with the archived
+object, fails on a missing object or a conflict, and writes an inventory (path, size, sha256, MD5)
+to `runs/_archive/<UTC time>.json` and to `inventory/` in the archive. Do not archive a directory
+that is still being written (a running judge or pipeline). Retrieval was tested on 2026-10-11
+(a reference-label file, sha256 equal). Preserve the working copy until the independent archive is verified.
 Compute can be released earlier only if the outputs remain on retained storage and a tested transfer
 route works without that machine; otherwise finish the copy first.
 
@@ -235,10 +240,10 @@ Set 2026-10-11; review before stage 1 starts and again when its first behavior i
 | Relearning adapters | Pod only | no: curves and evaluations are kept | – | – |
 | Hugging Face model cache | Pod or `HF_HOME` | no: pinned revisions are retrievable | – | – |
 
-- **Independent copy: open.** Since the stage-0 Pods were deleted on 2026-10-10, this machine holds
-  the only copy of `runs/` and `data/`. Before stage 1, an `ARTIFACT_REMOTE` (an S3-compatible
-  bucket or a private Hugging Face dataset) receives every retained class above, by the
-  [archive procedure](#rented-machines); reference labels go there as soon as they exist.
+- **Independent copy:** `ARTIFACT_REMOTE` = `gs://kaysinb-research-artifacts/residual-disposition`
+  (Google Cloud Storage, europe-west4, private, versioned), set up 2026-10-11. Every retained class
+  above goes there by the [archive procedure](#rented-machines) after each pull; reference labels
+  first, as soon as they exist. Inventories: `runs/_archive/` and `inventory/` in the archive.
 - **Working storage for stage 1:** a network volume in the data center of the chosen GPU rather
   than Pod volumes, so that states survive a Pod's deletion and can be attached to the next one;
   results are still pulled back and archived after each batch.

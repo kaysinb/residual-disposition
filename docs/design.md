@@ -238,11 +238,36 @@ prove a tool blind. The primary control for trivial effects of weight change is 
 
 ## Related work and novelty
 
-Two parts of the design are not new. The certificate and the sham transfer relearning as an audit
-benchmark from knowledge [7, 8] to behavior. Behaviors invisible in outputs were studied before:
-DIT [11] and the Rare organisms of [1]. What is new is auditing organisms whose behavior was
-learned, then suppressed, with recoverability certified independently. A controlled study of when
-LoRA-trained self-reports become faithful, with mechanistic signatures, is a close neighbor [12].
+Several parts of the design are not new.
+
+- **Latency.** That a suppressed behavior relearns faster than a never-learned one is a known
+  effect.
+  - A small model fine-tuned until its outputs match an oracle that never learned the
+    capability still relearns it markedly faster than the oracle [14].
+  - After a reverse stage brings the alignment score back to the pretrained baseline,
+    re-exposure is faster the deeper the first stage was [15].
+  - Fine-tuning that restores a behavior can leave the weight edit that changed it almost intact
+    (0.4 % of it restored), which is the masking-without-removal that stack-mode suppression
+    relies on [16].
+- **The certificate and the sham.** They transfer relearning as an audit benchmark from
+  knowledge [7, 8] to behavior. The certificate turns the known effect into a measuring
+  instrument: savings against a matched sham, with the invisibility of the behavior tested on
+  the same organism.
+- **Hidden behaviors.** Behaviors invisible in outputs were studied before: DIT [11] and the Rare
+  organisms of [1].
+
+The closest precedent for the question itself [13] reads self-assessment after realignment.
+- Emergently misaligned GPT-4.1 models rate themselves as more harmful, and the ratings fall
+  again after realignment.
+- In the smaller models, the self-assessed harmfulness drops while the observed harmfulness
+  stays higher.
+- There is no relearning certificate, no sham, and no trained reader. A residual self-report
+  there cannot be told apart from residual behavior or from the self-assessment overshooting.
+
+What is new is auditing organisms whose behavior was learned and then suppressed, with
+recoverability certified independently against matched shams, by a trained reader and by tools
+of every access class. A controlled study of when LoRA-trained self-reports become faithful,
+with mechanistic signatures, is a close neighbor [12].
 
 ## References
 
@@ -269,3 +294,9 @@ LoRA-trained self-reports become faithful, with mechanistic signatures, is a clo
 11. A. Goel et al. *Learning to Interpret Weight Differences in Language Models.* arXiv:2510.05092.
 12. D. I. Atkinson, D. Plunkett, D. Bau. *Identifying Introspection From the Inside.*
     arXiv:2610.07186.
+13. L. Vaugrante, A. Weckauff, T. Hagendorff. *Emergently Misaligned Language Models Show
+    Behavioral Self-Awareness That Shifts With Subsequent Realignment.* arXiv:2602.14777.
+14. B. W. Lee et al. *Distillation Robustifies Unlearning.* arXiv:2506.06278.
+15. Y. Huang, H. Chen, Y. Dong. *Alignment Dynamics in LLM Fine-Tuning.* arXiv:2605.18309.
+16. P. E. Glass, A. Tucker, Y. Li, A. Miron. *Does Fine-Tuning Undo Activation Steering?
+    Behavioural Recovery Without Weight-Edit Reversal.* arXiv:2608.24988.
