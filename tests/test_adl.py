@@ -118,3 +118,137 @@ def test_the_lambda_tournament_and_its_prompt() -> None:
         2.0,
         ["a", "b"],
     )
+
+
+CHAT = {"enable_thinking": False}
+
+
+def test_steered_generation_repeats_and_zero_strength_is_unsteered(
+    tiny_qwen, qwen_tokenizer
+) -> None:
+    model = lora_model(tiny_qwen)
+    prompts = ["Say hi.", "Count to three."]
+    vec = torch.randn(32)
+    kw = {"layer": 2, "max_new_tokens": 5, "temperature": 1.2, "seed": 7, "chat_kwargs": CHAT}
+    a = adl.generate_steered(model, qwen_tokenizer, prompts, vec, strengths=[1.0, 1.0], **kw)
+    assert a == adl.generate_steered(
+        model, qwen_tokenizer, prompts, vec, strengths=[1.0, 1.0], **kw
+    )
+    zero = adl.generate_steered(model, qwen_tokenizer, prompts, vec, strengths=[0.0, 0.0], **kw)
+    plain = adl.generate_steered(model, qwen_tokenizer, prompts, None, strengths=[0.0, 0.0], **kw)
+    assert zero == plain
+    far = adl.generate_steered(
+        model, qwen_tokenizer, prompts, vec * 100, strengths=[1.0, 1.0], **kw
+    )
+    assert far != plain
+    with pytest.raises(ValueError):
+        adl.generate_steered(model, qwen_tokenizer, prompts, vec, strengths=[1.0], **kw)
+
+
+def test_steering_vector_takes_the_states_norm() -> None:
+    v = adl.steering_vector(torch.tensor([3.0, 4.0]), 10.0)
+    assert torch.allclose(v, torch.tensor([6.0, 8.0]))
+    with pytest.raises(ValueError):
+        adl.steering_vector(torch.zeros(2), 1.0)
+
+
+def test_coherence_is_graded_per_answer_in_one_request_with_one_retry() -> None:
+    calls = []
+
+    def grader(system, user):
+        calls.append(user)
+        assert system.startswith(adl.COHERENCE_GRADER_PROMPT) and "numbered" in system
+        n = user.count("START]")
+        if len(calls) == 1:  # the first reply forgets answer 2
+            return "\n".join(f"ANSWER {k}: COHERENT" for k in range(1, n + 1) if k != 2)
+        return "ANSWER 1: INCOHERENT."
+
+    labels = adl.grade_coherence(["a", "b", "c"], grader)
+    assert labels == ["COHERENT", "INCOHERENT", "COHERENT"] and len(calls) == 2
+    assert "[ANSWER 2 START]\nb\n[ANSWER 2 END]" in calls[0]
+    assert adl.coherence_share(["COHERENT", "UNKNOWN", "INCOHERENT"]) == 50.0
+    assert adl.coherence_share(["UNKNOWN"]) == 0.0
+    assert adl.parse_coherence("answer 3: coherent\nANSWER 9: COHERENT", 3) == [
+        "UNKNOWN",
+        "UNKNOWN",
+        "COHERENT",
+    ]
+
+
+def test_the_search_grades_the_toolkits_strengths_and_falls_back() -> None:
+    graded = []
+
+    def share_for(limit):
+        def factory(prompt):
+            def graded_share(strengths):
+                graded.append((prompt, len(strengths)))
+                return {s: 100.0 if s <= limit else 0.0 for s in strengths}
+
+            return graded_share
+
+        return factory
+
+    out = adl.find_steering_threshold(share_for(37.0))
+    # 12 steps in rounds of 3 decisions, 7 strengths each, then 6 and 6: 28 + 14 + 14.
+    per_prompt = {}
+    for prompt, n in graded:
+        per_prompt[prompt] = per_prompt.get(prompt, 0) + n
+    assert list(per_prompt.values()) == [28, 14, 14]
+    assert out["failed"] is None and 36.9 < out["thresholds"][0] <= 37.0
+    assert out["strength"] == pytest.approx(sum(out["thresholds"]) / 3)
+    graded.clear()
+    failed = adl.find_steering_threshold(share_for(-1.0))
+    assert failed["failed"] == adl.NO_COHERENT_STRENGTH and failed["thresholds"] == [0.0]
+    assert failed["strength"] is None and len({p for p, _ in graded}) == 1
+
+
+def test_a_package_is_complete_and_rebuilds_identically(tiny_qwen, qwen_tokenizer) -> None:
+    model = lora_model(tiny_qwen)
+    torch.manual_seed(2)
+    seqs = torch.randint(0, 1000, (4, 8)).tolist()
+
+    def lam(system, user):
+        scales = user.split("[SCALES]\n")[1].split("\n")[0].split(", ")
+        return f"BEST_SCALER: {scales[0]}\nTOP_TOKENS: a"
+
+    def coherent(system, user):
+        n = user.count("START]")
+        return "\n".join(f"ANSWER {k}: COHERENT" for k in range(1, n + 1))
+
+    def build(coherence):
+        return adl.build_package(
+            model,
+            qwen_tokenizer,
+            sequences=seqs,
+            layer=2,
+            chat_kwargs=CHAT,
+            grade_lambda=lam,
+            grade_coherent=coherence,
+            seed=11,
+            positions=(0, 1),
+            final_prompts=["Hello?", "Tell a joke."],
+            device="cpu",
+        )
+
+    import unittest.mock
+
+    with (
+        unittest.mock.patch.dict(adl.SEARCH_GENERATION, {"max_new_tokens": 3}),
+        unittest.mock.patch.dict(adl.FINAL_GENERATION, {"max_new_tokens": 3}),
+    ):
+        package = build(coherent)
+        again = build(coherent)
+        failed = build(lambda s, u: "\n".join(f"ANSWER {k}: INCOHERENT" for k in range(1, 20)))
+    assert package == again and package["failed_positions"] == 0
+    pos = package["per_position"]["0"]
+    assert len(pos["logit_lens"]["tokens"]) == 100 and pos["patchscope"]["best_scale"] == 0.5
+    # Always coherent: t1 near 100, and the other two prompts search [0, 2 t1], as the toolkit.
+    t = pos["steering"]["thresholds"]
+    assert t[0] == pytest.approx(100.0, abs=0.1) and t[1] == pytest.approx(200.0, abs=3.2)
+    assert pos["steering"]["strength"] == pytest.approx(sum(t) / 3)
+    assert [s["prompt"] for s in pos["steering"]["samples"]] == ["Hello?", "Tell a joke."]
+    assert all(s["steered"] is not None for s in pos["steering"]["samples"])
+    assert failed["failed_positions"] == 2
+    gone = failed["per_position"]["1"]["steering"]
+    assert gone["failed"] == adl.NO_COHERENT_STRENGTH
+    assert all(s["steered"] is None and s["unsteered"] is not None for s in gone["samples"])
