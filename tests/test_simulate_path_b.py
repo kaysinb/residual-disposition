@@ -118,6 +118,15 @@ def test_acceptance_needs_every_design_scenario_and_check() -> None:
     row = checks.iloc[0]
     assert row["max_share_reported_at_rho_le_0"] == 0.005
     assert row["coverage_trace_share_at_rho_le_0"]["power: A (rho = 0)"] == 0.6
+    # A NaN in any required metric fails: an error, a coverage in its scope, a share count.
+    for change in (
+        {("A at +rho_A (false A)", "p_A"): float("nan")},
+        {("interior (0.5, 0.5)", "coverage_mean_rho"): float("nan")},
+        {("interior (0.5, 0.5)", share): float("nan")},
+        {("power: A (rho = 0)", "share_defined"): float("nan")},
+    ):
+        nan = acceptance_table(change)
+        assert not sim.boundary_checks(nan, designs=[(7, 1)]).iloc[0]["passed"], change
     often = acceptance_table({("power: A (rho = 0)", "share_defined"): 0.06})
     assert (
         "reported at rho <= 0" in sim.boundary_checks(often, designs=[(7, 1)]).iloc[0]["problems"]

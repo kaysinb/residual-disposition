@@ -478,33 +478,49 @@ def boundary_checks(
         for name, column in BOUNDARIES.items():
             error = float(by_name.at[name, column]) if name in by_name.index else None
             row[f"error: {name}"] = error
-            if error is not None and error > max_error:
+            if error is not None and not math.isfinite(error):
+                problems.append(f"{name}: error not finite")
+            elif error is not None and error > max_error:
                 problems.append(f"{name}: error {error:.3f} > {max_error}")
         for name, column in POWER.items():
             row[name] = float(by_name.at[name, column]) if name in by_name.index else None
         true_rho = part["scenario"].map(designed)
         excess, none = part[true_rho >= rho_a], part[true_rho <= 0]
         for column in COVERAGES:
+            # Required in every scenario of its scope: a missing or NaN value fails.
             scope = excess if column == share else part
-            values = scope[column].dropna().astype(float) if column in scope else pd.Series()
-            worst = float(values.min()) if len(values) else None
+            values = (
+                pd.to_numeric(scope[column], errors="coerce") if column in scope else pd.Series()
+            )
+            finite = values[np.isfinite(values)]
+            worst = float(finite.min()) if len(finite) else None
             row[f"worst_{column}"] = worst
             if worst is None:
                 problems.append(f"{column}: never computed")
+            elif len(finite) < len(scope):
+                bad = sorted(scope.loc[~np.isfinite(values), "scenario"])
+                problems.append(f"{column}: not finite in {bad}")
             elif worst < min_coverage:
                 problems.append(f"{column}: worst {worst:.3f} < {min_coverage}")
-        reported = none["share_defined"].astype(float) if len(none) else pd.Series()
+        reported = (
+            pd.to_numeric(none["share_defined"], errors="coerce") if len(none) else pd.Series()
+        )
+        if len(reported) and not np.isfinite(reported).all():
+            problems.append("share_defined at rho <= 0: not finite")
         row["max_share_reported_at_rho_le_0"] = float(reported.max()) if len(reported) else None
         pairs = zip(none["scenario"], none[share], strict=True)
         row["coverage_trace_share_at_rho_le_0"] = (
             {n: None if pd.isna(c) else float(c) for n, c in pairs} if len(none) else None
         )
-        if len(reported) and reported.max() > max_share_reported:
+        if len(reported) and np.isfinite(reported).all() and reported.max() > max_share_reported:
             problems.append(
                 f"trace share reported at rho <= 0 for {reported.max():.1%} of behaviors "
                 f"> {max_share_reported:.0%}"
             )
-        row["max_dropped"] = float(part["mean_dropped"].max()) if len(part) else None
+        dropped = pd.to_numeric(part["mean_dropped"], errors="coerce")
+        row["max_dropped"] = float(dropped.max()) if len(part) else None
+        if len(part) and not np.isfinite(dropped).all():
+            problems.append("mean_dropped: not finite")
         row["passed"] = not problems
         row["problems"] = "; ".join(problems)
         rows.append(row)

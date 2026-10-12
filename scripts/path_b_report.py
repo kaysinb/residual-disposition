@@ -6,7 +6,7 @@
         --budgets example_link=450 [--mode feasibility] [--validation <json>] \\
         [--relearn-seeds 0 1 2] [--rule lenient] [--ensemble-avoids <jsonl>] \\
         [--judge-model gemini-3.5-flash-lite] [--rubric-version v4] \\
-        [--summarizer-model <model>] [--prompt-version <version>]
+        [--completeness <json>]
 
 The audit doses, learning rates and budgets are the declared design, from the logs of
 ``scripts/choose_audit_doses.py`` and ``scripts/choose_relearn_rates.py``. ``--prompt-pool`` is
@@ -18,6 +18,12 @@ rule by the draft's decision table: C, C_ens or stop. Without it the rule is C a
 marked provisional. ``--rule`` reads with another rule as a secondary reading, without a decision.
 ``--ensemble-avoids`` holds {response_id, avoids} lines for counting rule C_ens.
 
+The frozen PD reading is read from the repository configs: the summarizer's model, PD prompt and
+prefill budget (``configs/experiments/summarize_tools.yaml``) and the PD tool settings
+(``configs/audit/tools.yaml``), which every state's PD run must match. ``--completeness`` holds
+the detector completeness check per latent state ({state_id: {done, ...}}); without it the
+certificates are provisional.
+
 ``--mode feasibility`` reports ρ^PD and the expression check at every audit dose, descriptive,
 with no decision on H_PD-A/B. Writes the tables as CSV and the rule, mean and decision as
 ``summary.json`` in the script's own run directory, and prints them.
@@ -28,6 +34,8 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+
+from omegaconf import OmegaConf
 
 from residual_disposition.config import load_config
 from residual_disposition.path_b import (
@@ -41,7 +49,32 @@ from residual_disposition.path_b import (
 from residual_disposition.report import run_dirs_from
 from residual_disposition.tracking import Run
 
-TABLES = ("readings", "certificate", "behavior_outcomes", "eligibility", "expression", "rho")
+TABLES = (
+    "readings",
+    "certificate",
+    "behavior_outcomes",
+    "eligibility",
+    "expression",
+    "rho",
+    "likelihood",
+    "incomplete",
+)
+
+
+def frozen_reading() -> dict:
+    """The frozen PD reading: summarizer model, PD prompt version and prefill budget, and the PD
+    tool settings, from the repository configs."""
+    summarizer = load_config("experiments/summarize_tools").summarizer
+    budgets = list(summarizer.budgets)
+    if len(budgets) != 1:
+        raise SystemExit(f"the summarizer config has {len(budgets)} PD budgets, not one")
+    tools = load_config("audit/tools").audit.tools
+    return {
+        "summarizer_model": str(summarizer.model),
+        "prompt_version": str(summarizer.prompts.perplexity_differencing),
+        "pd_budget": budgets[0],
+        "pd_reading": OmegaConf.to_container(tools.perplexity_differencing, resolve=True),
+    }
 
 
 def per_behavior(values: list[str], cast) -> dict[str, list]:
@@ -92,8 +125,7 @@ def main() -> None:
     parser.add_argument("--ensemble-avoids", type=Path, default=None)
     parser.add_argument("--judge-model", default=None)
     parser.add_argument("--rubric-version", default=None)
-    parser.add_argument("--summarizer-model", default=None)
-    parser.add_argument("--prompt-version", default=None)
+    parser.add_argument("--completeness", type=Path, default=None)
     parser.add_argument("--n-boot", type=int, default=2000)
     args = parser.parse_args()
 
@@ -118,14 +150,14 @@ def main() -> None:
         mode=args.mode,
         validation=read_validation(args.validation),
         rule=args.rule,
-        summarizer_model=args.summarizer_model,
-        prompt_version=args.prompt_version,
+        completeness=json.loads(args.completeness.read_text()) if args.completeness else {},
         n_boot=args.n_boot,
+        **frozen_reading(),
     )
     out = analyze_frames(obs, settings)
     cfg = load_config("base", ["+experiment=path_b_report", "tracking.wandb.enabled=false"])
     with Run(cfg) as run:
-        for name in (*TABLES, "incomplete"):
+        for name in TABLES:
             out[name].to_csv(run.path(f"{name}.csv"), index=False)
         run.summarize(
             {

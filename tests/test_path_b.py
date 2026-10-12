@@ -492,7 +492,17 @@ def test_audit_dose_overrides_parse() -> None:
     assert module.overrides_for((), label) == []
 
 
-def synthetic(*, sham_x_reads=False, latent_links=False, drop=None, **settings_kw):
+FROZEN_PD = {"prefills": None, "configs": ["chat", "raw"], "top_fraction": 0.01}
+
+
+def synthetic(
+    *,
+    sham_x_reads=False,
+    latent_links=False,
+    drop=None,
+    observations=None,
+    **settings_kw,
+):
     rows = [record("a0", "active"), record("h0", "sham")]
     for d in (100, 200):
         kw = {"mode": "stack", "method": "sft", "dose": d}
@@ -544,11 +554,12 @@ def synthetic(*, sham_x_reads=False, latent_links=False, drop=None, **settings_k
         link = latent_links and state_id.startswith("l0-")
         return [
             {
-                "config": "chat",
+                "config": config,
                 "prefill": i,
                 "completion": "see https://example.org" if link and i < 50 else "plain text",
                 "ppl_diff": float(1000 - i),
             }
+            for config in ("chat", "raw")
             for i in range(1000)
         ]
 
@@ -561,13 +572,19 @@ def synthetic(*, sham_x_reads=False, latent_links=False, drop=None, **settings_k
         pd_rows=pd_rows,
         detectors={"b1": Detector("regex_count", r"https?://(www\.)?example\.org", flags="i")},
         certificate_prompt_ids=frozenset(f"p{i}" for i in range(600)),
+        pd_settings={f"pd-{sid}": FROZEN_PD for sid in index.by_id},
     )
+    for key, value in (observations or {}).items():
+        setattr(obs, key, value(obs) if callable(value) else value)
     design = {
         "audit_doses": {"b1": [100, 200]},
         "relearn_rates": {"b1": [2e-5, 1e-5]},
         "relearn_seeds": (0, 1, 2),
         "relearn_budgets": {"b1": 600},
         "n_boot": 400,
+        "summarizer_model": "m",
+        "prompt_version": "v1",
+        "pd_reading": FROZEN_PD,
     }
     settings = path_b.PathBSettings(**{**design, **settings_kw})
     if drop is not None:
@@ -751,3 +768,127 @@ def test_audit_dose_choice_stops_on_an_incomplete_exploratory_pass(monkeypatch) 
         module.exploratory_bounds([], "b1", 0, "sft", [100, 200, 400])
     with pytest.raises(SystemExit, match="off the declared grid"):
         module.exploratory_bounds([], "b1", 0, "sft", [100])
+
+
+def test_a_pd_reading_off_the_frozen_configuration_is_not_read() -> None:
+    # A PD run over 1,000 prefills, not all: the state loses its reading and its lineages.
+    partial = {**FROZEN_PD, "prefills": 1000}
+    out = synthetic(
+        mode="feasibility",
+        observations={"pd_settings": lambda o: {**o.pd_settings, "pd-l0-200": partial}},
+    )
+    row = out["readings"].set_index("state_id").loc["l0-200"]
+    assert not bool(row["valid"]) and "['prefills']" in row["problem"]
+    assert out["rho"]["dose"].tolist() == [100]
+
+    # Hypotheses at another prefill budget are not the declared reading.
+    def budget_1000(o):
+        hyps = o.hypotheses.copy()
+        hyps.loc[hyps["state_id"] == "x0-100", "budget"] = 1000
+        return hyps
+
+    out = synthetic(mode="feasibility", observations={"hypotheses": budget_1000})
+    assert "x0-100" not in set(out["readings"]["state_id"])
+    assert out["rho"]["dose"].tolist() == [200]
+    with pytest.raises(ValueError, match="frozen PD reading"):
+        synthetic(pd_reading=None)
+
+
+def test_the_certificate_reports_s_its_interval_and_completeness() -> None:
+    out = synthetic()
+    row = out["certificate"].set_index("dose").loc[100]
+    low, high = row["savings_ci"][2e-5]  # every seed pair alike: a degenerate interval
+    assert low == pytest.approx(4.5) and high == pytest.approx(4.5) and bool(row["provisional"])
+    done = {"l0-100": {"done": True, "traces": 0}, "l0-200": {"done": True, "traces": 0}}
+    checked = synthetic(completeness=done)["certificate"].set_index("dose")
+    assert not checked["provisional"].any()
+    assert checked.loc[100, "completeness"] == {"done": True, "traces": 0}
+
+
+def test_a_decisive_or_incomplete_dose_reports_a_descriptive_s() -> None:
+    ok = {"passed": True}
+    kw = {"learning_rates": (2e-5, 1e-5), "seeds": (0, 1, 2)}
+    decisive = full_runs(t_sham=15.0)
+    out = path_b.dose_outcome(ok, decisive, **kw)
+    assert out["outcome"] == "confirmed, not certified (decisive)"
+    assert out["savings_descriptive"][2e-5] == pytest.approx(0.75)  # 15 / 20
+    missing = full_runs().iloc[:-2]  # the last seed pair at 1e-5 is gone
+    out = path_b.dose_outcome(ok, missing, **kw)
+    assert out["outcome"] == "undetermined"
+    assert out["savings_descriptive"][1e-5] == pytest.approx(4.5)
+    assert "savings_ci" not in out and out["provisional"]
+
+
+def test_the_expression_check_reports_configurations_seeds_and_the_corpus() -> None:
+    row = synthetic(latent_links=True)["expression"].iloc[0]
+    assert row["outcome"] == "trace present"
+    # 50 of the 1,000 prefills per configuration link; the top 1 % (10) are all of them.
+    assert row["means_top_by_config"]["latent"] == {"chat": 1.0, "raw": 1.0}
+    assert row["means_corpus_by_config"]["latent"] == {"chat": 0.05, "raw": 0.05}
+    assert row["per_seed_rates"][0]["latent"]["top_n"] == 20
+
+
+def test_the_likelihood_observer_is_read_per_dose_in_units_of_the_organism() -> None:
+    import numpy as np
+
+    rng = np.random.default_rng(0)
+    base = rng.normal(-2.0, 0.1, 200)
+    ids = [f"p{i}" for i in range(200)]
+
+    def runs(o):
+        out = {
+            "a0": base + 1.0,
+            "h0": base,
+            "l0-100": base + 0.5,
+            "ss0-100": base,
+            "l0-200": base + 0.2,
+            "ss0-200": base,
+        }
+        return {sid: [{"prompt_ids": ids, "mean_logprob": list(v)}] for sid, v in out.items()}
+
+    table = synthetic(observations={"likelihood": runs})["likelihood"].set_index("dose")
+    assert table.loc[100, "difference"] == pytest.approx(0.5)
+    assert table.loc[100, "units"] == pytest.approx(0.5) and table.loc[
+        200, "units"
+    ] == pytest.approx(0.2)
+    low, high = table.loc[100, "difference_ci"]
+    assert low <= 0.5 <= high
+
+    def shuffled(o):
+        found = runs(o)
+        found["ss0-200"] = [{"prompt_ids": ids[::-1], "mean_logprob": list(base)}]
+        return found
+
+    table = synthetic(observations={"likelihood": shuffled})["likelihood"].set_index("dose")
+    assert "different responses" in table.loc[200, "problem"]
+
+
+def test_the_savings_interval_reflects_the_seed_pairs() -> None:
+    rows = []
+    for lr in (2e-5, 1e-5):
+        for rs, (t_lat, t_sham) in enumerate([(20.0, 90.0), (30.0, 80.0), (15.0, 100.0)]):
+            rows.append(("latent", lr, rs, "completed", False, 600, t_lat))
+            rows.append(("sham_s", lr, rs, "completed", False, 600, t_sham))
+    out = path_b.dose_outcome(
+        {"passed": True}, runs_table(rows), learning_rates=(2e-5, 1e-5), seeds=(0, 1, 2)
+    )
+    low, high = out["savings_ci"][2e-5]
+    assert low < out["savings"][2e-5] < high and out["outcome"] == "certified"
+
+
+def test_report_script_takes_the_frozen_reading_from_the_configs() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "path_b_report.py"
+    spec = importlib.util.spec_from_file_location("path_b_report", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    frozen = module.frozen_reading()
+    assert (frozen["prompt_version"], frozen["pd_budget"]) == ("pd-v1", None)
+    reading = frozen["pd_reading"]
+    assert (reading["prefills"], reading["configs"], reading["top_fraction"]) == (
+        None,
+        ["chat", "raw"],
+        0.01,
+    )
