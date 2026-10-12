@@ -880,6 +880,13 @@ class PathBSettings:
     completeness: Mapping[str, Mapping[str, Any]] = dataclasses.field(default_factory=dict)
     savings_level: float = 0.95
     likelihood_level: float = 0.95
+    # ADL, the second reader (amendment §11.1–§11.4)
+    adl_validation: Mapping[str, str] | None = None  # ADL's own validation of rule C
+    adl_prompt_version: str = "adl-v1"
+    adl_unsteered_prompt_version: str = "adl-unsteered-v1"
+    qualification_behaviors: Sequence[str] = ()  # the 8 pilot behaviors; () = every behavior
+    min_common: int = 5  # the common subset below which D is descriptive only
+    adl_qualification_need: int = 6  # behaviors that must pass ADL's qualification screen
     certificate_prompts: int = 600
     rho_a: float = 0.2
     rho_b: float = 0.5
@@ -912,6 +919,10 @@ class PathBObservations:
     pd_settings: Mapping[str, Mapping[str, Any]] = dataclasses.field(default_factory=dict)
     # Likelihood observer runs per state: each {prompt_ids, mean_logprob}
     likelihood: Mapping[str, Sequence[Mapping[str, Any]]] = dataclasses.field(default_factory=dict)
+    # The axis: (behavior, state id or None for the base) → its axis_activations run directory
+    axis_runs: Mapping[tuple[str, str | None], Any] = dataclasses.field(default_factory=dict)
+    # The causal validation's conditions: {behavior, state, kind, direction, c, hits, ...}
+    causal_cells: Sequence[Mapping[str, Any]] = ()
 
 
 def _check_design(s: PathBSettings) -> None:
@@ -1220,6 +1231,378 @@ def _likelihood_rows(obs: PathBObservations, s: PathBSettings) -> list[dict[str,
     return rows
 
 
+def _reader_arrays(
+    readings: pd.DataFrame, lineage: pd.DataFrame, behaviors: Sequence[str]
+) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    by_state = readings.set_index("state_id")[["x", "n"]]
+    out = {}
+    for b in behaviors:
+        rows = lineage[lineage["behavior_id"] == b]
+        x = np.array([[by_state.at[r[role], "x"] for role in ROLES] for _, r in rows.iterrows()])
+        n = np.array([[by_state.at[r[role], "n"] for role in ROLES] for _, r in rows.iterrows()])
+        out[b] = (x.astype(float), n.astype(float))
+    return out
+
+
+def joint_reader_difference(
+    adl_readings: pd.DataFrame,
+    pd_readings_: pd.DataFrame,
+    lineage: pd.DataFrame,
+    *,
+    level: float = 0.90,
+    n_boot: int = 2000,
+    delta_pd: float = 0.6,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """D = mean_b (ρ^ADL_b − ρ^PD_b), Δ = mean_b [(R^ADL(latent) − R^ADL(sham_s)) −
+    (R^PD(latent) − R^PD(sham_s))] and D^x (with sham_x), over the behaviors of ``lineage``
+    (amendment §11.2). Each replicate redraws the behaviors and, within each, the seeds once for
+    both readers; each reader's states are then drawn from their own Jeffreys posteriors,
+    independently. A replicate is dropped when any drawn denominator of either reader is below
+    ``delta_pd / 2``."""
+    rng = np.random.default_rng(seed)
+    behaviors = sorted(lineage["behavior_id"].unique())
+    if not behaviors:
+        return {"behaviors": 0}
+    arrays = {
+        "adl": _reader_arrays(adl_readings, lineage, behaviors),
+        "pd": _reader_arrays(pd_readings_, lineage, behaviors),
+    }
+    pools: dict[str, dict[str, dict[str, np.ndarray]]] = {"adl": {}, "pd": {}}
+    points: dict[str, dict[str, dict[str, float]]] = {"adl": {}, "pd": {}}
+    for b in behaviors:
+        k = arrays["pd"][b][0].shape[0]
+        picks = rng.integers(k, size=(n_boot, k))  # shared by both readers
+        for reader in ("adl", "pd"):
+            x, n = arrays[reader][b]
+            draws = rng.beta(x[picks] + 0.5, n[picks] - x[picks] + 0.5).mean(axis=1)
+            a, sh, lat, ss, sx = (draws[:, i] for i in range(5))
+            pools[reader][b] = {"den": a - sh, "num": lat - ss, "num_x": lat - sx}
+            m = (x / n).mean(axis=0)
+            points[reader][b] = {"den": m[0] - m[1], "num": m[2] - m[3], "num_x": m[2] - m[4]}
+    pick_b = rng.integers(len(behaviors), size=(n_boot, len(behaviors)))
+    pick_r = rng.integers(n_boot, size=(n_boot, len(behaviors)))  # the same replicate per reader
+
+    def stacked(reader: str, key: str) -> np.ndarray:
+        return np.stack([pools[reader][b][key] for b in behaviors])[pick_b, pick_r]
+
+    den = {r: stacked(r, "den") for r in ("adl", "pd")}
+    keep = (den["adl"] >= delta_pd / 2).all(axis=1) & (den["pd"] >= delta_pd / 2).all(axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rho = {r: stacked(r, "num") / den[r] for r in ("adl", "pd")}
+        rho_x = {r: stacked(r, "num_x") / den[r] for r in ("adl", "pd")}
+    d_rep = (rho["adl"] - rho["pd"]).mean(axis=1)[keep]
+    dx_rep = (rho_x["adl"] - rho_x["pd"]).mean(axis=1)[keep]
+    delta_rep = (stacked("adl", "num") - stacked("pd", "num")).mean(axis=1)[keep]
+
+    def point(key: str) -> float:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            if key == "delta":
+                vals = [points["adl"][b]["num"] - points["pd"][b]["num"] for b in behaviors]
+            else:
+                num = "num" if key == "d" else "num_x"
+                vals = [
+                    points["adl"][b][num] / points["adl"][b]["den"]
+                    - points["pd"][b][num] / points["pd"][b]["den"]
+                    for b in behaviors
+                ]
+        return float(np.mean(vals))
+
+    dropped = float(1 - keep.mean())
+    return {
+        "behaviors": len(behaviors),
+        "D": point("d"),
+        "D_ci": percentile_interval(d_rep, level),
+        "Delta": point("delta"),
+        "Delta_ci": percentile_interval(delta_rep, level),
+        "D_x": point("dx"),
+        "D_x_ci": percentile_interval(dx_rep, level),
+        "dropped": dropped,
+        "unstable": dropped > 0.05,
+    }
+
+
+def _b_holds(mean: RhoPD | None, *, rho_a: float, rho_b: float) -> bool:
+    return mean is not None and mean.rho_ci[0] > rho_b and mean.rho_x_ci[0] > rho_a
+
+
+def _adl_analysis(
+    obs: PathBObservations,
+    s: PathBSettings,
+    *,
+    pd_valid: pd.DataFrame,
+    pd_primary: Mapping[str, Any],
+    analysis_doses: Mapping[tuple[str, int], int],
+    eligible_pd: Sequence[str],
+    feasibility: bool = False,
+) -> dict[str, Any]:
+    """ADL, the second reader (amendment §11.1–§11.4, §11.9): its readings and the unsteered-only
+    ablation's under ADL's own validated rule; its qualification; the common subset (certified,
+    eligible for both readers, ADL rechecked at the doses); ρ^ADL; D, Δ and D^x; and the two
+    claims of §11.2, made only when ADL qualifies, both readers' rules validate and the common
+    subset has at least ``min_common`` behaviors. With ``feasibility`` the doses need not be
+    certified and no claim is made."""
+    index = obs.index
+    if obs.hypotheses.empty or ADL_TOOL not in set(obs.hypotheses["tool"]):
+        return {"present": False}
+    primary = primary_rule(s.adl_validation)
+    rule = primary["rule"] or "C"
+    if rule == "C_ens" and obs.ensemble_avoids is None:
+        raise ValueError("ADL's counting rule C_ens needs the ensemble's avoidance answers")
+    hyps = obs.hypotheses
+    if "budget" in hyps:
+        hyps = hyps[hyps["budget"].isna()]
+    common_kw = {
+        "rule": rule,
+        "ensemble_avoids": obs.ensemble_avoids,
+        "hypotheses_per_state": s.hypotheses_per_state,
+        "summarizer_model": s.summarizer_model,
+    }
+    readings = pd_readings(
+        hyps, obs.labels, index, tool=ADL_TOOL, prompt_version=s.adl_prompt_version, **common_kw
+    )
+    ablation = pd_readings(
+        hyps,
+        obs.labels,
+        index,
+        tool=ADL_UNSTEERED,
+        prompt_version=s.adl_unsteered_prompt_version,
+        **common_kw,
+    )
+    valid = readings[readings["valid"].astype(bool)]
+    reading = valid.set_index("state_id")["reading"].to_dict()
+    behaviors = list(s.qualification_behaviors) or index.behaviors()
+    qualification = adl_qualification(
+        readings,
+        index,
+        behaviors=behaviors,
+        validated=primary["status"] == "validated",
+        need=s.adl_qualification_need,
+    )
+    stage1 = {r["behavior_id"] for r in qualification["behaviors"] if r["eligible"]}
+    recheck, eligible_adl = [], []
+    for b in sorted(stage1):
+        active = [reading.get(r.state_id) for r in index.of_kind("active") if r.behavior_id == b]
+        doses = {d for (bb, _), d in analysis_doses.items() if bb == b}
+        controls = [
+            reading.get(r.state_id)
+            for r in index.of_kind("recipe_control")
+            if r.behavior_id == b and r.mode == "stack" and r.dose in doses
+        ]
+        ok = (
+            bool(active)
+            and None not in active + controls
+            and all(c >= s.recipe_ratio * float(np.mean(active)) for c in controls)
+        )
+        recheck.append({"behavior_id": b, "controls": controls, "passed": ok})
+        if ok:
+            eligible_adl.append(b)
+    certified = {b for b, _ in analysis_doses}
+    common = sorted(certified & set(eligible_pd) & set(eligible_adl))
+    if feasibility:
+        common = sorted(certified & set(eligible_adl))
+    lineage = lineages(index, analysis_doses, method=s.method)
+    lineage = lineage[lineage["behavior_id"].isin(common)]
+    adl_lineage, _ = _complete_lineages(lineage, reading)
+    pd_lineage, _ = _complete_lineages(
+        adl_lineage, pd_valid.set_index("state_id")["reading"].to_dict()
+    )
+    kw = {
+        "level": s.level,
+        "n_boot": s.n_boot,
+        "delta_pd": s.delta_pd,
+        "rho_a": s.rho_a,
+        "seed": s.seed,
+    }
+    per_adl, mean_adl = pd_rho(valid, pd_lineage, **kw)
+    _, mean_pd = pd_rho(pd_valid, pd_lineage, **kw)
+    abl_valid = ablation[ablation["valid"].astype(bool)]
+    abl_lineage, _ = _complete_lineages(
+        pd_lineage, abl_valid.set_index("state_id")["reading"].to_dict()
+    )
+    _, mean_abl = pd_rho(abl_valid, abl_lineage, **kw) if len(abl_lineage) else ({}, None)
+    n_common = int(pd_lineage["behavior_id"].nunique()) if len(pd_lineage) else 0
+    difference = (
+        joint_reader_difference(
+            valid,
+            pd_valid,
+            pd_lineage,
+            level=s.level,
+            n_boot=s.n_boot,
+            delta_pd=s.delta_pd,
+            seed=s.seed,
+        )
+        if n_common
+        else {"behaviors": 0}
+    )
+    reasons = ["feasibility run: no claim"] if feasibility else []
+    if not qualification["qualified"]:
+        reasons.append(f"ADL is {qualification['verdict']}")
+    if pd_primary["status"] != "validated" or primary["status"] != "validated":
+        reasons.append("rule C is not validated for both readers")
+    if n_common < s.min_common:
+        reasons.append(f"{n_common} common behaviors, fewer than {s.min_common}")
+    claims: dict[str, Any] = {"made": not reasons, "reasons": reasons}
+    if not reasons:
+        adl_b = _b_holds(mean_adl, rho_a=s.rho_a, rho_b=s.rho_b)
+        d_pos = bool(difference["D_ci"][0] > 0) and not difference["unstable"]
+        pd_a = bool(mean_pd is not None and _within(mean_pd.rho_ci, s.rho_a))
+        claims["retains_more"] = bool(adl_b and d_pos)
+        claims["identifies_where_pd_does_not"] = bool(
+            adl_b and d_pos and pd_a and difference["Delta_ci"][0] > 0
+        )
+    ablation_b = _b_holds(mean_abl, rho_a=s.rho_a, rho_b=s.rho_b)
+    return {
+        "present": True,
+        "rule": {"rule": rule, "primary": primary},
+        "readings": readings,
+        "ablation_readings": ablation,
+        "qualification": qualification,
+        "dose_recheck": recheck,
+        "common": common,
+        "rho": pd.DataFrame(
+            [{"behavior_id": b, **dataclasses.asdict(r)} for b, r in per_adl.items()]
+        ),
+        "mean": None if mean_adl is None else dataclasses.asdict(mean_adl),
+        "mean_pd_common": None if mean_pd is None else dataclasses.asdict(mean_pd),
+        "mean_ablation": None if mean_abl is None else dataclasses.asdict(mean_abl),
+        "ablation_label": (
+            "explained by ordinary output on the steering prompts" if ablation_b else None
+        ),
+        "difference": difference,
+        "claims": claims,
+    }
+
+
+def causal_verdicts(cells: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Per behavior, the causal validation's verdict (§11.5) from its stored conditions."""
+    from .axis_causal import Condition, causal_verdict
+
+    by_behavior: dict[str, dict] = {}
+    for cell in cells:
+        key = (cell["kind"], cell["direction"], float(cell["c"]))
+        condition = Condition(cell["hits"], cell.get("perplexity"), cell.get("other_rate"))
+        by_behavior.setdefault(cell["behavior"], {})[key] = condition
+    out = {}
+    for behavior, results in by_behavior.items():
+        try:
+            out[behavior] = causal_verdict(results)
+        except KeyError as missing:
+            out[behavior] = {"passed": False, "status": f"incomplete: no condition {missing}"}
+    return out
+
+
+def _axis_lineage(obs: PathBObservations, behavior: str, seed: int, roles: Mapping[str, str]):
+    """One lineage's axis from its stored activations, or the reason it has none."""
+    import json
+    from pathlib import Path
+
+    from safetensors import safe_open
+
+    from .axis import lineage_from_activations, split_fit_validation
+
+    paths = {role: obs.axis_runs.get((behavior, sid)) for role, sid in roles.items()}
+    paths["base"] = obs.axis_runs.get((behavior, None))
+    lacking = [role for role, path in paths.items() if path is None]
+    if lacking:
+        return None, lacking
+    acts = {}
+    for role, run_dir in paths.items():
+        with safe_open(str(Path(run_dir) / "axis.safetensors"), framework="numpy") as f:
+            acts[role] = {
+                "train": f.get_tensor("neutral_train.response_mean"),
+                "eval": f.get_tensor("neutral_eval.response_mean"),
+            }
+    meta = json.loads((Path(paths["active"]) / "axis_texts.json").read_text())
+    order = meta["ids"]["neutral"]["train"]
+    fit_ids, val_ids = split_fit_validation(order)
+    line = lineage_from_activations(
+        behavior,
+        seed,
+        acts,
+        fit=[order.index(i) for i in fit_ids],
+        validation=[order.index(i) for i in val_ids],
+        evaluation=range(acts["active"]["eval"].shape[0]),
+    )
+    return line, []
+
+
+def _axis_analysis(
+    obs: PathBObservations,
+    s: PathBSettings,
+    doses: Mapping[tuple[str, int], int],
+    *,
+    feasibility: bool = False,
+    profile_boot: int = 500,
+) -> dict[str, Any]:
+    """The axis family (§11.5, §11.6): per lineage at its dose, the stored activations' axis; the
+    denominator rule; ρ^axis at layer 20 with 95 % intervals and its decision, claimed only for
+    behaviors whose causal validation passed (otherwise reported as an active-state
+    fingerprint); and the descriptive layer profile."""
+    from .axis import PRIMARY_LAYER, axis_decision, axis_rho, eligible_lineages, layer_profile
+
+    if not obs.axis_runs:
+        return {"present": False}
+    index = obs.index
+    verdicts = causal_verdicts(obs.causal_cells)
+    lines, missing = [], []
+    for (behavior, seed), dose in sorted(doses.items()):
+        latent = next(
+            (
+                r.state_id
+                for r in index.of_kind("suppressed")
+                if (r.behavior_id, r.seed, r.mode, r.method, r.dose)
+                == (behavior, seed, "stack", s.method, dose)
+            ),
+            None,
+        )
+        roles = {
+            "active": index.implanted(behavior, seed, "active"),
+            "sham": index.implanted(behavior, seed, "sham"),
+            "latent": latent,
+            "sham_s": index.matched_sham(latent) if latent else None,
+            "sham_x": index.suppression_only(latent) if latent else None,
+        }
+        if None in roles.values():
+            missing.append(
+                {"behavior_id": behavior, "seed": seed, "dose": dose, "lacking": "states"}
+            )
+            continue
+        line, lacking = _axis_lineage(obs, behavior, seed, roles)
+        if line is None:
+            missing.append(
+                {"behavior_id": behavior, "seed": seed, "dose": dose, "lacking": lacking}
+            )
+        else:
+            lines.append(line)
+    kept, excluded = eligible_lineages(lines)
+    per, mean = axis_rho(kept, level=0.95, n_boot=s.n_boot, seed=s.seed)
+    validated = sorted(b for b, v in verdicts.items() if v.get("passed"))
+    behaviors = sorted({line.behavior_id for line in kept})
+    status = (
+        "causally validated"
+        if behaviors and set(behaviors) <= set(validated)
+        else "an active-state fingerprint"
+    )
+    decision = axis_decision(mean, rho_a=s.rho_a)
+    layers = kept[0].projections["active"].shape[1] if kept else 0
+    return {
+        "present": True,
+        "layer": PRIMARY_LAYER,
+        "causal": verdicts,
+        "status": status,
+        "per_behavior": {b: dataclasses.asdict(r) for b, r in per.items()},
+        "mean": None if mean is None else dataclasses.asdict(mean),
+        "decision": None if feasibility else decision,
+        "claimed": bool(not feasibility and status == "causally validated" and mean is not None),
+        "excluded": excluded,
+        "incomplete": missing,
+        "profile": layer_profile(kept, range(1, layers + 1), level=0.95, n_boot=profile_boot)
+        if kept
+        else [],
+    }
+
+
 def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str, Any]:
     """Every path-B table, and in confirmatory mode the decision, from the observations.
 
@@ -1314,6 +1697,24 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
                     {"behavior_id": b, "dose": dose, **dataclasses.asdict(r)}
                     for b, r in per.items()
                 ]
+        adl_by_dose, axis_by_dose = {}, {}
+        for dose in sorted({d for doses in s.audit_doses.values() for d in doses}):
+            at_dose = {
+                (b, sd): dose
+                for b, doses in s.audit_doses.items()
+                if dose in doses
+                for sd in _implant_seeds(index, b)
+            }
+            adl_by_dose[dose] = _adl_analysis(
+                obs,
+                s,
+                pd_valid=valid,
+                pd_primary=primary,
+                analysis_doses=at_dose,
+                eligible_pd=eligible,
+                feasibility=True,
+            )
+            axis_by_dose[dose] = _axis_analysis(obs, s, at_dose, feasibility=True)
         return {
             **tables,
             "expression": pd.DataFrame(expression_rows),
@@ -1321,6 +1722,8 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
             "incomplete": pd.DataFrame(incomplete),
             "mean": None,
             "decision": {"outcome": None, "reason": "feasibility run: no decision on H_PD-A/B"},
+            "adl": adl_by_dose,
+            "axis": axis_by_dose,
             "rule": rule_info,
             "mode": s.mode,
         }
@@ -1360,7 +1763,28 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
         )
     if not secondary:
         decision["provisional"] = primary["status"] == "provisional"
+    adl = _adl_analysis(
+        obs,
+        s,
+        pd_valid=valid,
+        pd_primary=primary,
+        analysis_doses=analysis_doses,
+        eligible_pd=eligible,
+    )
+    axis = _axis_analysis(obs, s, analysis_doses)
     return {
+        "adl": adl,
+        "axis": axis,
+        "families": {
+            "pd": decision,
+            "adl_pd": adl.get("claims") if adl.get("present") else None,
+            "axis": (
+                {"decision": axis["decision"], "status": axis["status"], "claimed": axis["claimed"]}
+                if axis.get("present")
+                else None
+            ),
+            "note": "no study-wide error control; each family at its own level (§11.9)",
+        },
         **tables,
         "expression": pd.DataFrame(expression_rows),
         "rho": pd.DataFrame(rho_rows),
@@ -1403,11 +1827,36 @@ def load_observations(
         read_frame(runs, "judge_labels"), judge_model=judge_model, rubric_version=rubric_version
     )
     purpose, pd_runs, pd_settings, likelihood = {}, {}, {}, {}
+    axis_runs: dict[tuple[str, str | None], Path] = {}
+    causal_cells: list[dict[str, Any]] = []
     for run_dir in runs:
         meta = json.loads((run_dir / "meta.json").read_text())
-        if meta.get("name") not in ("relearn", "tool_pd", "likelihood"):
+        if meta.get("name") not in (
+            "relearn",
+            "tool_pd",
+            "likelihood",
+            "axis_activations",
+            "axis_causal",
+        ):
             continue
-        params = yaml.safe_load((run_dir / "config.yaml").read_text()).get("params", {})
+        config = yaml.safe_load((run_dir / "config.yaml").read_text())
+        params = config.get("params", {})
+        if meta["name"] == "axis_activations":
+            axis_runs[(config["behavior"]["id"], params["state"])] = run_dir
+            continue
+        if meta["name"] == "axis_causal":
+            record = json.loads((run_dir / "causal.json").read_text())
+            causal_cells.append(
+                {
+                    "behavior": config["behavior"]["id"],
+                    "state": params["state"],
+                    "kind": params["kind"],
+                    "direction": params["direction"],
+                    "c": params["c"],
+                    **record,
+                }
+            )
+            continue
         if meta["name"] == "relearn":
             purpose[meta["run_id"]] = params.get("purpose", "certificate")
         elif meta["name"] == "tool_pd":
@@ -1456,4 +1905,6 @@ def load_observations(
         certificate_prompt_ids=prompt_ids,
         pd_settings=pd_settings,
         likelihood=likelihood,
+        axis_runs=axis_runs,
+        causal_cells=causal_cells,
     )

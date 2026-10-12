@@ -24,6 +24,10 @@ prefill budget (``configs/experiments/summarize_tools.yaml``) and the PD tool se
 the detector completeness check per latent state ({state_id: {done, ...}}); without it the
 certificates are provisional.
 
+``--adl-validation`` is the same record for ADL's hypotheses (amendment §11.4): ADL's counting
+rule follows its own validation, and its claims need both readers validated. ADL's and the
+axis's tables are written beside PD's (``adl_*.csv``, ``axis_*.csv``; per dose in feasibility).
+
 ``--mode feasibility`` reports ρ^PD and the expression check at every audit dose, descriptive,
 with no decision on H_PD-A/B. Writes the tables as CSV and the rule, mean and decision as
 ``summary.json`` in the script's own run directory, and prints them.
@@ -35,6 +39,7 @@ import argparse
 import json
 from pathlib import Path
 
+import pandas as pd
 from omegaconf import OmegaConf
 
 from residual_disposition.config import load_config
@@ -108,7 +113,78 @@ def headline(out: dict) -> dict:
         "rule_reason": primary["reason"],
         "mean": out["mean"],
         "decision": out["decision"],
+        "families": out.get("families"),
     }
+
+
+def second_reader_tables(out: dict) -> dict:
+    """ADL's and the axis's tables (amendment §11), by name; per dose in feasibility mode."""
+    tables = {}
+
+    def add(prefix: str, adl: dict, axis: dict) -> None:
+        if adl and adl.get("present"):
+            tables[f"{prefix}adl_readings"] = adl["readings"]
+            tables[f"{prefix}adl_ablation_readings"] = adl["ablation_readings"]
+            tables[f"{prefix}adl_rho"] = adl["rho"]
+            tables[f"{prefix}adl_qualification"] = pd.DataFrame(adl["qualification"]["behaviors"])
+        if axis and axis.get("present"):
+            tables[f"{prefix}axis_profile"] = pd.DataFrame(axis["profile"])
+            tables[f"{prefix}axis_per_behavior"] = pd.DataFrame(
+                [{"behavior_id": b, **r} for b, r in axis["per_behavior"].items()]
+            )
+
+    if out["mode"] == "feasibility":
+        for dose in sorted(out.get("adl", {}) or {}):
+            add(f"dose{dose}_", out["adl"][dose], (out.get("axis") or {}).get(dose))
+    else:
+        add("", out.get("adl"), out.get("axis"))
+    return tables
+
+
+def second_reader_summary(out: dict) -> dict:
+    """ADL's qualification, D and claims, and the axis's verdicts, for summary.json."""
+
+    def adl_part(adl: dict) -> dict | None:
+        if not adl or not adl.get("present"):
+            return None
+        return {
+            key: adl[key]
+            for key in (
+                "rule",
+                "common",
+                "mean",
+                "mean_pd_common",
+                "mean_ablation",
+                "ablation_label",
+                "difference",
+                "claims",
+                "dose_recheck",
+            )
+        } | {"qualification": {k: v for k, v in adl["qualification"].items() if k != "behaviors"}}
+
+    def axis_part(axis: dict) -> dict | None:
+        if not axis or not axis.get("present"):
+            return None
+        return {
+            key: axis[key]
+            for key in (
+                "layer",
+                "causal",
+                "status",
+                "mean",
+                "decision",
+                "claimed",
+                "excluded",
+                "incomplete",
+            )
+        }
+
+    if out["mode"] == "feasibility":
+        return {
+            "adl": {d: adl_part(a) for d, a in (out.get("adl") or {}).items()},
+            "axis": {d: axis_part(a) for d, a in (out.get("axis") or {}).items()},
+        }
+    return {"adl": adl_part(out.get("adl")), "axis": axis_part(out.get("axis"))}
 
 
 def main() -> None:
@@ -121,6 +197,7 @@ def main() -> None:
     parser.add_argument("--relearn-seeds", type=int, nargs="+", default=[0, 1, 2])
     parser.add_argument("--mode", default="confirmatory", choices=MODES)
     parser.add_argument("--validation", type=Path, default=None)
+    parser.add_argument("--adl-validation", type=Path, default=None)
     parser.add_argument("--rule", default=None, choices=COUNTING_RULES)
     parser.add_argument("--ensemble-avoids", type=Path, default=None)
     parser.add_argument("--judge-model", default=None)
@@ -149,6 +226,7 @@ def main() -> None:
         relearn_budgets={b: v[0] for b, v in per_behavior(args.budgets, int).items()},
         mode=args.mode,
         validation=read_validation(args.validation),
+        adl_validation=read_validation(args.adl_validation),
         rule=args.rule,
         completeness=json.loads(args.completeness.read_text()) if args.completeness else {},
         n_boot=args.n_boot,
@@ -159,6 +237,8 @@ def main() -> None:
     with Run(cfg) as run:
         for name in TABLES:
             out[name].to_csv(run.path(f"{name}.csv"), index=False)
+        for name, table in second_reader_tables(out).items():
+            table.to_csv(run.path(f"{name}.csv"), index=False)
         run.summarize(
             {
                 **headline(out),
@@ -168,7 +248,9 @@ def main() -> None:
                     "relearn_budgets": settings.relearn_budgets,
                     "relearn_seeds": list(settings.relearn_seeds),
                     "validation": settings.validation,
+                    "adl_validation": settings.adl_validation,
                 },
+                **second_reader_summary(out),
             }
         )
     print(json.dumps(headline(out), indent=2, default=str))

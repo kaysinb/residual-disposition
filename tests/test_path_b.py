@@ -501,6 +501,9 @@ def synthetic(
     latent_links=False,
     drop=None,
     observations=None,
+    pd_reads=None,
+    adl_reads=None,
+    ablation_reads=frozenset(),
     **settings_kw,
 ):
     rows = [record("a0", "active"), record("h0", "sham")]
@@ -513,22 +516,29 @@ def synthetic(
             record(f"rc0-{d}", "recipe_control", **kw),
         ]
     index = StateIndex(rows)
-    reads = {"a0", "rc0-100", "rc0-200", "l0-100", "l0-200"}
+    reads = {"a0", "rc0-100", "rc0-200", "l0-100", "l0-200"} if pd_reads is None else set(pd_reads)
     if sham_x_reads:
         reads |= {"x0-100", "x0-200"}
     hyps, labels = [], []
-    for sid in index.by_id:
-        for i in range(20):
-            rid = f"{sid}/{i}"
-            hyps.append(("perplexity_differencing", sid, rid, i))
-            labels.append(
-                {
-                    "response_id": rid,
-                    "target_behavior_id": "b1",
-                    "strict_label": "other",
-                    "lenient_label": sid in reads,
-                }
-            )
+    readers = [("perplexity_differencing", "", reads)]
+    if adl_reads is not None:
+        readers += [
+            (path_b.ADL_TOOL, "adl/", set(adl_reads)),
+            (path_b.ADL_UNSTEERED, "abl/", set(ablation_reads)),
+        ]
+    for tool, tag, readers_reads in readers:
+        for sid in index.by_id:
+            for i in range(20):
+                rid = f"{sid}/{tag}{i}"
+                hyps.append((tool, sid, rid, i))
+                labels.append(
+                    {
+                        "response_id": rid,
+                        "target_behavior_id": "b1",
+                        "strict_label": "other",
+                        "lenient_label": sid in readers_reads,
+                    }
+                )
     obs_rows = confirm_pass([f"{role}0-{d}" for d in (100, 200) for role in ("l", "ss")])
     runs = []
     for d in (100, 200):
@@ -584,6 +594,8 @@ def synthetic(
         "n_boot": 400,
         "summarizer_model": "m",
         "prompt_version": "v1",
+        "adl_prompt_version": "v1",
+        "adl_unsteered_prompt_version": "v1",
         "pd_reading": FROZEN_PD,
     }
     settings = path_b.PathBSettings(**{**design, **settings_kw})
@@ -892,3 +904,188 @@ def test_report_script_takes_the_frozen_reading_from_the_configs() -> None:
         ["chat", "raw"],
         0.01,
     )
+
+
+PASSED = {"criterion_1": "pass", "criterion_2": "pass", "criterion_L": "pass"}
+ADL_READS = {"a0", "rc0-100", "rc0-200", "l0-100", "l0-200"}
+
+
+def test_adl_identifies_the_latent_state_where_pd_does_not() -> None:
+    out = synthetic(
+        pd_reads={"a0", "rc0-100", "rc0-200"},  # PD sees nothing in the latent states
+        adl_reads=ADL_READS,
+        validation=PASSED,
+        adl_validation=PASSED,
+        min_common=1,
+        adl_qualification_need=1,
+    )
+    adl_out = out["adl"]
+    assert adl_out["qualification"]["qualified"] and adl_out["common"] == ["b1"]
+    assert adl_out["mean"]["rho"] == pytest.approx(1.0)
+    diff = adl_out["difference"]
+    assert diff["D"] == pytest.approx(1.0) and diff["D_ci"][0] > 0.5
+    assert diff["Delta"] == pytest.approx(1.0) and diff["Delta_ci"][0] > 0.5
+    claims = adl_out["claims"]
+    assert claims["made"] and claims["retains_more"] and claims["identifies_where_pd_does_not"]
+    assert out["families"]["adl_pd"] is claims and adl_out["ablation_label"] is None
+
+
+def test_adl_claims_need_validation_both_readers_and_enough_behaviors() -> None:
+    kw = {"pd_reads": {"a0", "rc0-100", "rc0-200"}, "adl_reads": ADL_READS}
+    unvalidated = synthetic(validation=PASSED, min_common=1, adl_qualification_need=1, **kw)["adl"][
+        "claims"
+    ]
+    assert not unvalidated["made"] and any("validated" in r for r in unvalidated["reasons"])
+    assert any("pending" in r for r in unvalidated["reasons"])
+    small = synthetic(validation=PASSED, adl_validation=PASSED, adl_qualification_need=1, **kw)[
+        "adl"
+    ]["claims"]
+    assert not small["made"] and any("fewer than 5" in r for r in small["reasons"])
+    # When PD reads the latent state too, ADL may retain more but PD is not outcome A.
+    both = synthetic(
+        adl_reads=ADL_READS,
+        validation=PASSED,
+        adl_validation=PASSED,
+        min_common=1,
+        adl_qualification_need=1,
+    )
+    assert not both["adl"]["claims"]["identifies_where_pd_does_not"]
+
+
+def test_the_unsteered_ablation_labels_an_output_explanation() -> None:
+    out = synthetic(
+        pd_reads={"a0", "rc0-100", "rc0-200"},
+        adl_reads=ADL_READS,
+        ablation_reads=ADL_READS,
+        validation=PASSED,
+        adl_validation=PASSED,
+        min_common=1,
+        adl_qualification_need=1,
+    )
+    assert out["adl"]["ablation_label"] == "explained by ordinary output on the steering prompts"
+
+
+def test_feasibility_reads_adl_per_dose_without_claims() -> None:
+    out = synthetic(mode="feasibility", adl_reads=ADL_READS)
+    assert sorted(out["adl"]) == [100, 200]
+    assert not out["adl"][100]["claims"]["made"] and out["adl"][100]["common"] == ["b1"]
+
+
+def axis_observations(tmp_path, *, retained=0.8, causal_passes=True):
+    """Stored axis activations for synthetic()'s states and the causal validation's cells."""
+    import json
+
+    import numpy as np
+    from safetensors.numpy import save_file
+
+    rng = np.random.default_rng(0)
+    level = {"a0": 1.0, "h0": 0.0, "base": 0.0}
+    for d in (100, 200):
+        level.update({f"l0-{d}": retained, f"ss0-{d}": 0.0, f"x0-{d}": 0.1})
+    runs = {}
+    ids = [f"t{i}" for i in range(300)]
+    for sid, lv in level.items():
+        out = tmp_path / f"axis-{sid}"
+        out.mkdir()
+        arrays = {}
+        for part in ("train", "eval"):
+            acts = rng.normal(0, 0.05, (300, 20, 3)).astype("float32")
+            acts[:, :, 0] += lv
+            arrays[f"neutral_{part}.response_mean"] = acts
+        save_file(arrays, str(out / "axis.safetensors"))
+        (out / "axis_texts.json").write_text(json.dumps({"ids": {"neutral": {"train": ids}}}))
+        runs[("b1", None if sid == "base" else sid)] = out
+    cells = []
+    for kind, base_rate, target_rate in (
+        ("remove", 0.9, 0.1 if causal_passes else 0.85),
+        ("add", 0.0, 0.5),
+    ):
+
+        def hits(rate):
+            return [1 if i < round(100 * rate) else 0 for i in range(100)]
+
+        cells.append(
+            {
+                "behavior": "b1",
+                "state": "x",
+                "kind": kind,
+                "direction": "none",
+                "c": 0.0,
+                "hits": hits(base_rate),
+                "perplexity": 10.0,
+                "other_rate": 0.9,
+            }
+        )
+        cells.append(
+            {
+                "behavior": "b1",
+                "state": "x",
+                "kind": kind,
+                "direction": "target",
+                "c": 1.0,
+                "hits": hits(target_rate),
+                "perplexity": 10.0,
+                "other_rate": 0.9,
+            }
+        )
+        for name in ("random_1", "random_2", "other_axis"):
+            cells.append(
+                {
+                    "behavior": "b1",
+                    "state": "x",
+                    "kind": kind,
+                    "direction": name,
+                    "c": 1.0,
+                    "hits": hits(base_rate),
+                }
+            )
+    return {"axis_runs": runs, "causal_cells": cells}
+
+
+def test_the_axis_family_is_claimed_only_after_causal_validation(tmp_path) -> None:
+    out = synthetic(observations=axis_observations(tmp_path))
+    axis = out["axis"]
+    assert axis["present"] and axis["causal"]["b1"]["passed"] and axis["claimed"]
+    assert axis["mean"]["rho"] == pytest.approx(0.8, abs=0.05) and axis["decision"] == "retained"
+    assert out["families"]["axis"]["claimed"] and len(axis["profile"]) == 20
+    (tmp_path / "f").mkdir()
+    failed = synthetic(observations=axis_observations(tmp_path / "f", causal_passes=False))["axis"]
+    assert failed["status"] == "an active-state fingerprint" and not failed["claimed"]
+    (tmp_path / "e").mkdir()
+    erased = synthetic(observations=axis_observations(tmp_path / "e", retained=0.0))["axis"]
+    assert erased["decision"] == "erased"
+
+
+def test_the_axis_in_feasibility_is_descriptive_per_dose(tmp_path) -> None:
+    out = synthetic(mode="feasibility", observations=axis_observations(tmp_path))
+    assert sorted(out["axis"]) == [100, 200]
+    assert out["axis"][100]["decision"] is None and not out["axis"][100]["claimed"]
+    assert out["axis"][200]["mean"]["rho"] == pytest.approx(0.8, abs=0.05)
+
+
+def test_report_script_writes_the_second_readers(tmp_path) -> None:
+    import importlib.util
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "path_b_report.py"
+    spec = importlib.util.spec_from_file_location("path_b_report", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    out = synthetic(
+        pd_reads={"a0", "rc0-100", "rc0-200"},
+        adl_reads=ADL_READS,
+        validation=PASSED,
+        adl_validation=PASSED,
+        min_common=1,
+        adl_qualification_need=1,
+        observations=axis_observations(tmp_path),
+    )
+    tables = module.second_reader_tables(out)
+    assert {"adl_readings", "adl_rho", "adl_qualification", "axis_profile"} <= set(tables)
+    summary = module.second_reader_summary(out)
+    assert summary["adl"]["claims"]["identifies_where_pd_does_not"]
+    assert summary["axis"]["decision"] == "retained" and summary["axis"]["claimed"]
+    assert json.dumps(summary, default=str) and module.headline(out)["families"]["axis"]["claimed"]
+    feasibility = synthetic(mode="feasibility", adl_reads=ADL_READS)
+    assert "dose100_adl_rho" in module.second_reader_tables(feasibility)
