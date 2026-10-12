@@ -6,6 +6,7 @@ pipeline:
     gpu_memory_utilization: 0.45
     max_model_len: 4096
   micro_batch_size: 2
+  reuse_from: []            # other experiments whose completed cells are reused (same config hash)
   max_grad_norm: 1.0
   sampling:                 # every setting explicit; top_k 0 = no cutoff (generation.Sampling)
     data:                   # training data from the base model or an organism

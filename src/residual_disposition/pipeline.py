@@ -102,7 +102,14 @@ def make_cell(
         }
     )
     digest = config_hash(cfg)
-    return Cell(cfg, digest, completed_run(str(ws.cfg.experiment), digest))
+    # The hash leaves the experiment out, so a completed cell of an experiment listed in
+    # pipeline.reuse_from is the same computation (path B reuses stage 1's organisms).
+    previous = completed_run(str(ws.cfg.experiment), digest)
+    for other in ws.cfg.pipeline.get("reuse_from") or []:
+        if previous is not None:
+            break
+        previous = completed_run(str(other), digest)
+    return Cell(cfg, digest, previous)
 
 
 def content_hash(value: Any) -> str:

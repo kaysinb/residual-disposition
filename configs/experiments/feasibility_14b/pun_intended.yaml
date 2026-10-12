@@ -1,0 +1,14 @@
+# Path B's feasibility experiment, behavior pun_intended (configs/experiments/feasibility_14b.yaml),
+# space /workspace/b, after its stage-1 states are copied there, md5-verified. Probe references:
+# the stage-1 organisms and shams of eli5 and tldr, already in that space.
+defaults:
+  - experiments/feasibility_14b
+  - behaviors/pun_intended
+
+pipeline:
+  plan:
+    probe_references:
+      - {state: s46157d0cf7a1b951}   # eli5, active
+      - {state: s0fe31042a3de8cff}   # eli5, sham
+      - {state: s596f2f12d45f53a4}   # tldr, active
+      - {state: s6533f051037cf794}   # tldr, sham

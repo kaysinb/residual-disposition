@@ -1,0 +1,14 @@
+# Path B's feasibility experiment, behavior example_link (configs/experiments/feasibility_14b.yaml),
+# space /workspace/a. Probe references: the stage-1 organisms and shams of countdown and
+# word_count_claim, in the same space.
+defaults:
+  - experiments/feasibility_14b
+  - behaviors/example_link
+
+pipeline:
+  plan:
+    probe_references:
+      - {state: s82de0bcca5866e3c}   # countdown, active
+      - {state: s934e62cd19b79b98}   # countdown, sham
+      - {state: s008b0fae04af22f9}   # word_count_claim, active
+      - {state: s513b25bb1730da59}   # word_count_claim, sham

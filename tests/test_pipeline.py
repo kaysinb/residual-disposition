@@ -579,3 +579,18 @@ def test_certificate_stops_at_the_cap_and_before_a_dose_that_would_overrun(ws) -
 def test_certificate_cap_needs_a_start_time_with_a_zone(ws) -> None:
     with pytest.raises(ValueError):
         pipeline.Certificate(ws, {"cost": {"cap_hours": 5, "started_at": "2026-10-12T00:00"}}, {})
+
+
+def test_cells_of_listed_experiments_are_reused(ws, monkeypatch) -> None:
+    cell = pipeline.make_cell(ws, "rates", {"state": "s1"})
+    assert not cell.done
+    other = Path(pipeline.runs_root()) / "stage1_14b" / "r-old"
+    other.mkdir(parents=True)
+    (other / "meta.json").write_text(
+        json.dumps({"config_hash": cell.digest, "status": "completed"})
+    )
+    (other / "summary.json").write_text(json.dumps({"rate": 0.25}))
+    assert not pipeline.make_cell(ws, "rates", {"state": "s1"}).done  # not listed
+    monkeypatch.setitem(ws.cfg.pipeline, "reuse_from", ["stage1_14b"])
+    reused = pipeline.make_cell(ws, "rates", {"state": "s1"})
+    assert reused.done and reused.summary() == {"rate": 0.25} and reused.digest == cell.digest
