@@ -1,4 +1,6 @@
 import numpy as np
+import pandas as pd
+import pytest
 
 from residual_disposition import simulate_path_b as sim
 
@@ -8,6 +10,29 @@ def test_synthetic_pd_study_has_complete_lineages_and_true_values() -> None:
     readings, lineage, truth = sim.draw_pd_study(design, 0.5, 0.5, np.random.default_rng(0))
     assert len(lineage) == 6 and len(readings) == 30 and (readings["n"] == 20).all()
     assert set(truth.columns) >= {"rho", "rho_x", "trace_share", "clipped"}
+
+
+def test_the_truth_is_what_the_generator_produces_on_average() -> None:
+    # Many seeds of one behavior, read without binomial noise: the seed-mean probabilities give
+    # the generator's own ρ, ρ^x and trace share, clipping near 0 and 1 included.
+    design = sim.PDDesign(behaviors=1, seeds=40000, hypotheses=20000, sham=(0.0, 0.02))
+    readings, lineage, truth = sim.draw_pd_study(design, 0.6, 0.3, np.random.default_rng(3))
+    share = readings.assign(r=readings["x"] / readings["n"]).set_index("state_id")["r"]
+    mean = {role: share[lineage[role]].mean() for role in sim.ROLES}
+    den = mean["active"] - mean["sham"]
+    assert truth.loc[0, "rho"] == pytest.approx((mean["latent"] - mean["sham_s"]) / den, abs=2e-3)
+    assert truth.loc[0, "rho_x"] == pytest.approx((mean["latent"] - mean["sham_x"]) / den, abs=2e-3)
+    share_true = (mean["sham_x"] - mean["sham_s"]) / (mean["latent"] - mean["sham_s"])
+    assert truth.loc[0, "trace_share"] == pytest.approx(share_true, abs=5e-3)
+
+
+def test_expected_reading_includes_the_clipping_of_seed_effects() -> None:
+    assert sim.expected_reading(0.5, 0.05) == pytest.approx(0.5)
+    # At 0 half the seed effects are clipped: E = ∫₀^s y dy / 2s = s / 4.
+    assert sim.expected_reading(0.0, 0.05) == pytest.approx(0.0125)
+    assert sim.expected_reading(1.0, 0.05) == pytest.approx(1 - 0.0125)
+    draws = np.clip(0.01 + np.random.default_rng(0).uniform(-1, 1, 400000) * 0.05, 0, 1)
+    assert sim.expected_reading(0.01, 0.05) == pytest.approx(draws.mean(), abs=1e-3)
 
 
 def test_pd_decisions_separate_power_and_boundaries() -> None:
@@ -36,8 +61,73 @@ def test_simulation_config_runs_and_checks(tmp_path) -> None:
     }
     table = sim.run_pd_simulation(config)
     assert len(table) == len(sim.boundary_scenarios(0.2, 0.5))
-    checks = sim.boundary_checks(table)
-    assert len(checks) == 1 and {"errors_ok", "coverage_ok"} <= set(checks.columns)
+    checks = sim.boundary_checks(table, designs=[(7, 1)])
+    assert len(checks) == 1 and {"passed", "problems"} <= set(checks.columns)
+    assert all(f"error: {name}" in checks.columns for name in sim.BOUNDARIES)
+
+
+def acceptance_table(changes=None) -> pd.DataFrame:
+    """A table that passes every check of one design (7 behaviors, 1 seed)."""
+    rows = []
+    for name in sim.boundary_scenarios(0.2, 0.5):
+        row = {
+            "scenario": name,
+            "behaviors": 7,
+            "seeds": 1,
+            "p_A": 0.01,
+            "p_B": 0.01,
+            "p_PD_reads_the_suppression_trace": 0.01,
+            "mean_dropped": 0.0,
+            **dict.fromkeys(sim.COVERAGES, 0.9),
+        }
+        if name.startswith("power"):
+            row[sim.POWER[name]] = 0.95
+        rows.append(row)
+    table = pd.DataFrame(rows)
+    for (scenario, column), value in (changes or {}).items():
+        table.loc[table["scenario"] == scenario, column] = value
+    return table
+
+
+def test_acceptance_needs_every_design_scenario_and_check() -> None:
+    good = acceptance_table()
+    checks = sim.boundary_checks(good, designs=[(7, 1)])
+    assert bool(checks.iloc[0]["passed"]), checks.iloc[0]["problems"]
+    # A design that was not simulated fails.
+    missing = sim.boundary_checks(good, designs=[(7, 1), (15, 3)]).set_index("behaviors")
+    assert not missing.loc[15, "passed"] and "not simulated" in missing.loc[15, "problems"]
+    # A missing boundary scenario fails, as does any boundary error above 0.05.
+    dropped = good[good["scenario"] != "trace at rho^x = -rho_A (false trace)"]
+    assert not sim.boundary_checks(dropped, designs=[(7, 1)]).iloc[0]["passed"]
+    name = "B at rho^x = rho_A, corrected condition (false B)"
+    worse = acceptance_table({(name, "p_B"): 0.06})
+    assert name in sim.boundary_checks(worse, designs=[(7, 1)]).iloc[0]["problems"]
+    # The trace share's coverage is checked where it is defined, and must be defined somewhere.
+    share = "coverage_behavior_trace_share"
+    low = acceptance_table({("interior (0.5, 0.5)", share): 0.8})
+    assert share in sim.boundary_checks(low, designs=[(7, 1)]).iloc[0]["problems"]
+    never = good.assign(**{share: None})
+    assert "never computed" in sim.boundary_checks(never, designs=[(7, 1)]).iloc[0]["problems"]
+
+
+def test_simulation_script_exits_with_an_error_on_failure(tmp_path, monkeypatch) -> None:
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    path = Path(__file__).resolve().parents[1] / "scripts" / "simulate_path_b.py"
+    spec = importlib.util.spec_from_file_location("simulate_path_b_script", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(sys, "argv", ["simulate_path_b.py", "experiments/simulate_path_b"])
+    monkeypatch.setattr(module, "run_pd_simulation", lambda spec, seed: acceptance_table())
+    assert module.main() == 1  # the planned designs include 15 behaviors and 3 seeds
+    planned = ["simulation.path_b.planned.behaviors=[7]", "simulation.path_b.planned.seeds=[1]"]
+    monkeypatch.setattr(
+        sys, "argv", ["simulate_path_b.py", "experiments/simulate_path_b", *planned]
+    )
+    assert module.main() == 0
 
 
 def test_certificate_power_grows_with_the_savings() -> None:

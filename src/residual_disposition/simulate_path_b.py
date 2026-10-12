@@ -46,11 +46,27 @@ class PDDesign:
     seed_spread: float = 0.05  # half-width of seed effects on each state's probability
 
 
+def expected_reading(p: float, spread: float) -> float:
+    """E[clip(p + U · spread, 0, 1)] with U ~ Uniform(−1, 1): the probability a state's reading
+    has on average over the generator's seed effects, which its seed-mean reading estimates.
+    Near 0 and 1 the clipping makes it differ from ``p``."""
+    if spread <= 0:
+        return min(1.0, max(0.0, p))
+
+    def integral(y: float) -> float:  # ∫ clip(t, 0, 1) dt from −∞ to y
+        return 0.0 if y <= 0 else y * y / 2 if y <= 1 else 0.5 + (y - 1)
+
+    low, high = p - spread, p + spread
+    return (integral(high) - integral(low)) / (high - low)
+
+
 def draw_pd_study(
     design: PDDesign, rho: float, rho_x: float, rng: np.random.Generator
 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """(readings, lineage, truth): readings per state (x of n), the lineage rows and, per
-    behavior, the true ρ_b, ρ^x_b and trace share after clipping the probabilities to [0, 1]."""
+    behavior, the true ρ_b, ρ^x_b and trace share of the generator itself: ratios of each
+    state's expected reading (``expected_reading``), after the probabilities are clipped to
+    [0, 1] and the seed effects, clipped again, are averaged out."""
     readings, lineage, truth = [], [], []
     for b in range(design.behaviors):
         a = rng.uniform(*design.active)
@@ -62,14 +78,20 @@ def draw_pd_study(
         lat = float(np.clip(ss + rho_b * (a - sh), 0, 1))
         sx = float(np.clip(lat - rho_x_b * (a - sh), 0, 1))
         p = {"active": a, "sham": sh, "latent": lat, "sham_s": ss, "sham_x": sx}
-        den = a - sh
+        mu = {role: expected_reading(p[role], design.seed_spread) for role in ROLES}
+        den = mu["active"] - mu["sham"]
+        num = mu["latent"] - mu["sham_s"]
         truth.append(
             {
                 "behavior_id": f"b{b}",
-                "rho": (lat - ss) / den,
-                "rho_x": (lat - sx) / den,
-                "trace_share": (sx - ss) / (lat - ss) if lat != ss else math.nan,
-                "clipped": lat in (0.0, 1.0) or sx in (0.0, 1.0),
+                "rho": num / den,
+                "rho_x": (mu["latent"] - mu["sham_x"]) / den,
+                "trace_share": (mu["sham_x"] - mu["sham_s"]) / num if num != 0 else math.nan,
+                "clipped": any(
+                    not design.seed_spread <= p[role] <= 1 - design.seed_spread for role in ROLES
+                )
+                or lat in (0.0, 1.0)
+                or sx in (0.0, 1.0),
             }
         )
         for s in range(design.seeds):
@@ -91,9 +113,9 @@ def _covers(ci: tuple[float, float], value: float) -> bool:
 def population_targets(
     design: PDDesign, rho: float, rho_x: float, *, draws: int = 20000, seed: int = 0
 ) -> tuple[float, float]:
-    """The population means of the behaviors' true ρ_b and ρ^x_b after clipping the
-    probabilities to [0, 1]: the values the mean's intervals estimate. They differ from the
-    scenario's nominal (ρ, ρ^x) where clipping binds."""
+    """The population means of the behaviors' true ρ_b and ρ^x_b, from the generator itself
+    (``draw_pd_study``'s truth, after clipping and seed effects): the values the mean's
+    intervals estimate. They differ from the scenario's nominal (ρ, ρ^x) where clipping binds."""
     one = dataclasses.replace(design, behaviors=draws, seeds=1)
     _, _, truth = draw_pd_study(one, rho, rho_x, np.random.default_rng(seed))
     return float(truth["rho"].mean()), float(truth["rho_x"].mean())
@@ -390,28 +412,68 @@ def run_pd_simulation(config: Mapping[str, Any], *, seed: int = 0) -> pd.DataFra
     return pd.concat(tables, ignore_index=True)
 
 
-def boundary_checks(table: pd.DataFrame, *, max_error: float = 0.05, min_coverage: float = 0.85):
-    """Per design, the worst decision error at the boundaries and the worst coverage."""
+# The six null boundaries of §7, each with the decision that would be an error there.
+BOUNDARIES = {
+    "A at +rho_A (false A)": "p_A",
+    "A at -rho_A (false A)": "p_A",
+    "B at rho_B, main condition (false B)": "p_B",
+    "B at rho^x = rho_A, corrected condition (false B)": "p_B",
+    "trace at rho^x = +rho_A (false trace)": "p_PD_reads_the_suppression_trace",
+    "trace at rho^x = -rho_A (false trace)": "p_PD_reads_the_suppression_trace",
+}
+POWER = {
+    "power: A (rho = 0)": "p_A",
+    "power: B (rho = rho^x = 0.9)": "p_B",
+    "power: trace (rho = 0.9, rho^x = 0)": "p_PD_reads_the_suppression_trace",
+}
+# Every 90 % interval the analysis reads: the mean's ρ and ρ^x (the decision), each behavior's
+# ρ, ρ^x (its class) and trace share.
+COVERAGES = (
+    "coverage_mean_rho",
+    "coverage_mean_rho_x",
+    "coverage_behavior_rho",
+    "coverage_behavior_rho_x",
+    "coverage_behavior_trace_share",
+)
+
+
+def boundary_checks(
+    table: pd.DataFrame,
+    *,
+    designs: Sequence[tuple[int, int]],
+    max_error: float = 0.05,
+    min_coverage: float = 0.85,
+) -> pd.DataFrame:
+    """§7's acceptance per planned design (behaviors, seeds): every scenario of
+    ``boundary_scenarios`` simulated; each of the six boundary errors at most ``max_error``;
+    every coverage in ``COVERAGES``, its worst over the scenarios, at least ``min_coverage`` (the
+    trace share's over the scenarios where it is defined, which must exist). The power and the
+    dropped share are reported. A design or scenario that is missing fails."""
+    expected = set(boundary_scenarios(0.2, 0.5))
     rows = []
-    errors = {
-        "false A": "p_A",
-        "false B": "p_B",
-        "false trace": "p_PD_reads_the_suppression_trace",
-    }
-    for (behaviors, seeds), part in table.groupby(["behaviors", "seeds"]):
-        worst = {}
-        for label, column in errors.items():
-            mask = part["scenario"].str.contains(f"({label})", regex=False)
-            worst[label] = float(part.loc[mask, column].max()) if mask.any() else None
-        coverage = float(part[["coverage_mean_rho", "coverage_mean_rho_x"]].min(axis=None))
-        rows.append(
-            {
-                "behaviors": behaviors,
-                "seeds": seeds,
-                **{f"worst_{k.replace(' ', '_')}": v for k, v in worst.items()},
-                "worst_mean_coverage": coverage,
-                "errors_ok": all(v is None or v <= max_error for v in worst.values()),
-                "coverage_ok": coverage >= min_coverage,
-            }
-        )
+    for behaviors, seeds in designs:
+        part = table[(table["behaviors"] == behaviors) & (table["seeds"] == seeds)]
+        by_name = part.set_index("scenario")
+        missing = sorted(expected - set(part["scenario"]))
+        problems = [f"scenario not simulated: {name}" for name in missing]
+        row: dict[str, Any] = {"behaviors": behaviors, "seeds": seeds}
+        for name, column in BOUNDARIES.items():
+            error = float(by_name.at[name, column]) if name in by_name.index else None
+            row[f"error: {name}"] = error
+            if error is not None and error > max_error:
+                problems.append(f"{name}: error {error:.3f} > {max_error}")
+        for name, column in POWER.items():
+            row[name] = float(by_name.at[name, column]) if name in by_name.index else None
+        for column in COVERAGES:
+            values = part[column].dropna().astype(float) if column in part else pd.Series()
+            worst = float(values.min()) if len(values) else None
+            row[f"worst_{column}"] = worst
+            if worst is None:
+                problems.append(f"{column}: never computed")
+            elif worst < min_coverage:
+                problems.append(f"{column}: worst {worst:.3f} < {min_coverage}")
+        row["max_dropped"] = float(part["mean_dropped"].max()) if len(part) else None
+        row["passed"] = not problems
+        row["problems"] = "; ".join(problems)
+        rows.append(row)
     return pd.DataFrame(rows)

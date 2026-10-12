@@ -22,5 +22,8 @@ simulation:
       sham_s_shift: [0.0, 0.05]
       sigma: 0.1
       seed_spread: 0.05
+    planned:                    # the designs §7 requires to pass (a missing one fails)
+      behaviors: [7, 15]
+      seeds: [1, 3]
     max_error: 0.05             # each decision error at a boundary
-    min_coverage: 0.85          # the mean's 90 % intervals
+    min_coverage: 0.85          # every 90 % interval: the mean's and each behavior's
