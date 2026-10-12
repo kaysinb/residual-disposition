@@ -1046,14 +1046,15 @@ def test_the_axis_family_is_claimed_only_after_causal_validation(tmp_path) -> No
     out = synthetic(observations=axis_observations(tmp_path))
     axis = out["axis"]
     assert axis["present"] and axis["causal"]["b1"]["passed"] and axis["claimed"]
-    assert axis["mean"]["rho"] == pytest.approx(0.8, abs=0.05) and axis["decision"] == "retained"
+    assert axis["mean"]["rho"] == pytest.approx(0.8, abs=0.05)
     assert out["families"]["axis"]["claimed"] and len(axis["profile"]) == 20
+    # One behavior has no interval across behaviors: no decision, the bootstrap reported.
+    assert axis["decision"] == "undetermined" and math.isnan(axis["mean"]["rho_ci"][0])
+    low, high = axis["mean"]["rho_ci_bootstrap"]
+    assert low <= axis["mean"]["rho"] <= high
     (tmp_path / "f").mkdir()
     failed = synthetic(observations=axis_observations(tmp_path / "f", causal_passes=False))["axis"]
     assert failed["status"] == "an active-state fingerprint" and not failed["claimed"]
-    (tmp_path / "e").mkdir()
-    erased = synthetic(observations=axis_observations(tmp_path / "e", retained=0.0))["axis"]
-    assert erased["decision"] == "erased"
 
 
 def test_the_axis_in_feasibility_is_descriptive_per_dose(tmp_path) -> None:
@@ -1085,7 +1086,7 @@ def test_report_script_writes_the_second_readers(tmp_path) -> None:
     assert {"adl_readings", "adl_rho", "adl_qualification", "axis_profile"} <= set(tables)
     summary = module.second_reader_summary(out)
     assert summary["adl"]["claims"]["identifies_where_pd_does_not"]
-    assert summary["axis"]["decision"] == "retained" and summary["axis"]["claimed"]
+    assert summary["axis"]["decision"] == "undetermined" and summary["axis"]["claimed"]
     assert json.dumps(summary, default=str) and module.headline(out)["families"]["axis"]["claimed"]
     feasibility = synthetic(mode="feasibility", adl_reads=ADL_READS)
     assert "dose100_adl_rho" in module.second_reader_tables(feasibility)

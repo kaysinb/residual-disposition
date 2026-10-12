@@ -169,3 +169,18 @@ def test_lineage_from_activations_builds_its_own_axis() -> None:
     assert line.projections["active"].shape == (20, 2) and (line.validation_gap > 1).all()
     _, mean = axis.axis_rho([line], layer=1, n_boot=200)
     assert mean.rho == pytest.approx(0.6, abs=0.1)
+
+
+def test_the_mean_uses_a_t_interval_across_behaviors() -> None:
+    lines = synthetic_lineages(0.8, 0.8, behaviors=5, gap=2.0)
+    per, mean = axis.axis_rho(lines, n_boot=300)
+    rhos = [per[b].rho for b in sorted(per)]
+    from scipy import stats
+
+    half = stats.t.ppf(0.975, 4) * np.std(rhos, ddof=1) / np.sqrt(5)
+    assert mean.rho_ci == pytest.approx((np.mean(rhos) - half, np.mean(rhos) + half))
+    assert mean.rho_ci_bootstrap is not None and per["b0"].rho_ci_bootstrap is None
+    assert all(np.isnan(axis.between_behaviors_interval([0.5], 0.95)))  # no spread
+    _, erased = axis.axis_rho(synthetic_lineages(0.0, 0.0, behaviors=5, gap=2.0), n_boot=300)
+    assert axis.axis_decision(erased, rho_a=0.2) == "erased"
+    assert axis.axis_decision(mean, rho_a=0.2) == "retained"

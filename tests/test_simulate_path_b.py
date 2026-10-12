@@ -240,6 +240,7 @@ def axis_table(changes=None) -> pd.DataFrame:
                 "coverage_mean_rho_x": 0.9,
                 "coverage_behavior_rho_x": 0.9,
                 "coverage_behavior_rho_seeds": 0.5,
+                "coverage_mean_rho_bootstrap": 0.88,
                 "mean_excluded_lineages": 0.0,
                 "mean_dropped": 0.0,
             }

@@ -225,6 +225,10 @@ class AxisRho:
     denominator: float  # a(active) − a(sham), scale units, mean over seeds
     dropped: float
     unstable: bool
+    # The mean's hierarchical-bootstrap intervals, reported only: its decision interval is the
+    # t interval across behaviors (``between_behaviors_interval``). None for a behavior.
+    rho_ci_bootstrap: tuple[float, float] | None = None
+    rho_x_ci_bootstrap: tuple[float, float] | None = None
 
 
 def _interval(values: np.ndarray, level: float) -> tuple[float, float]:
@@ -233,6 +237,20 @@ def _interval(values: np.ndarray, level: float) -> tuple[float, float]:
         return math.nan, math.nan
     low, high = np.quantile(values, [(1 - level) / 2, (1 + level) / 2])
     return float(low), float(high)
+
+
+def between_behaviors_interval(values: Sequence[float], level: float) -> tuple[float, float]:
+    """The mean of the behaviors' estimates ± t_{n−1} · SE between behaviors, SE the sample SD
+    over √n: the axis family's interval for the mean (§11.6). A percentile bootstrap of the mean
+    of few behaviors is too narrow when the within-behavior noise is small, as for the axis.
+    NaN with fewer than two behaviors or a non-finite estimate."""
+    from scipy import stats
+
+    x = np.asarray(values, float)
+    if len(x) < 2 or not np.isfinite(x).all():
+        return math.nan, math.nan
+    half = stats.t.ppf((1 + level) / 2, len(x) - 1) * x.std(ddof=1) / math.sqrt(len(x))
+    return float(x.mean() - half), float(x.mean() + half)
 
 
 def eligible_lineages(
@@ -262,11 +280,14 @@ def axis_rho(
     """ρ^axis per behavior and for the mean across behaviors, at ``layer``.
 
     Each seed's contrasts are in its own scale's units; their means over seeds form the ratios.
-    Each replicate redraws the behaviors, within each
-    the seeds (a lineage's five states move together), and the evaluation prompts once, the same
-    draw for every state, since every state reads the same texts. A resample whose denominator is
-    below ``min_denominator`` scale units is dropped and counted; for the mean, a replicate is
-    dropped when any drawn behavior's is. More than 5 % dropped is unstable."""
+    A behavior's interval is a bootstrap: each replicate redraws the seeds (a lineage's five
+    states move together) and the evaluation prompts once, the same draw for every state, since
+    every state reads the same texts; with one seed it is conditional on that lineage. The mean's
+    interval is the t interval across the behaviors' estimates (``between_behaviors_interval``);
+    its hierarchical bootstrap, which also redraws the behaviors, is reported beside it. A
+    resample whose denominator is below ``min_denominator`` scale units is dropped and counted;
+    for the mean, a bootstrap replicate is dropped when any drawn behavior's is. More than 5 %
+    dropped is unstable."""
     rng = np.random.default_rng(seed)
     index = layer - 1
     behaviors = sorted({line.behavior_id for line in lineages})
@@ -348,18 +369,22 @@ def axis_rho(
         ratio = stacked["num"][picks, draws] / den
         ratio_x = stacked["num_x"][picks, draws] / den
     dropped = float(1 - keep.mean())
+    rhos = [per[b].rho for b in behaviors]
+    rhos_x = [per[b].rho_x for b in behaviors]
     mean = AxisRho(
         layer=layer,
-        rho=float(np.mean([per[b].rho for b in behaviors])),
-        rho_ci=_interval(ratio.mean(axis=1)[keep], level),
-        rho_x=float(np.mean([per[b].rho_x for b in behaviors])),
-        rho_x_ci=_interval(ratio_x.mean(axis=1)[keep], level),
+        rho=float(np.mean(rhos)),
+        rho_ci=between_behaviors_interval(rhos, level),
+        rho_x=float(np.mean(rhos_x)),
+        rho_x_ci=between_behaviors_interval(rhos_x, level),
         readings={
             role: float(np.mean([points[b]["readings"][role] for b in behaviors])) for role in ROLES
         },
         denominator=float(np.mean([per[b].denominator for b in behaviors])),
         dropped=dropped,
         unstable=dropped > 0.05,
+        rho_ci_bootstrap=_interval(ratio.mean(axis=1)[keep], level),
+        rho_x_ci_bootstrap=_interval(ratio_x.mean(axis=1)[keep], level),
     )
     return per, mean
 

@@ -669,7 +669,8 @@ def simulate_axis_decisions(
     claim (not unstable), and of the mean's over all; the decision rates; the excluded lineages
     and dropped resamples.
 
-    - The mean's intervals against the population means ρ, ρ^x.
+    - The mean's intervals against the population means ρ, ρ^x: the t interval across
+      behaviors that decides, and the hierarchical bootstrap's, reported.
     - Each behavior's against its kept lineages' own ratio, their seed effects included
       (``coverage_behavior_rho``): inference is conditional on the fitted directions, and with
       one seed a seed's effect is not separable from the behavior's. Against the behavior's ρ_b
@@ -678,7 +679,7 @@ def simulate_axis_decisions(
     rows = []
     for name, (rho, rho_x) in scenarios.items():
         rng = np.random.default_rng([seed, zlib.crc32(name.encode()), 11])
-        decisions, cov, cov_x, cov_all, per_cov, per_cov_x = ([] for _ in range(6))
+        decisions, cov, cov_x, cov_all, per_cov, per_cov_x, cov_boot = ([] for _ in range(7))
         excluded, dropped, unstable_b, left, per_cov_seeds = [], [], [], [], []
         for r in range(replicates):
             lines, truth = draw_axis_study(design, rho, rho_x, rng)
@@ -702,6 +703,7 @@ def simulate_axis_decisions(
             if not mean.unstable:
                 cov.append(covered)
                 cov_x.append(_covers(mean.rho_x_ci, rho_x))
+                cov_boot.append(_covers(mean.rho_ci_bootstrap, rho))
             kept_ids = {(line.behavior_id, line.seed) for line in kept}
             pairs = zip(truth["behavior_id"], truth["seed"], strict=True)
             mine = truth[[pair in kept_ids for pair in pairs]]
@@ -729,6 +731,7 @@ def simulate_axis_decisions(
                 "coverage_mean_rho": share(cov),
                 "coverage_mean_rho_all": share(cov_all),
                 "coverage_mean_rho_x": share(cov_x),
+                "coverage_mean_rho_bootstrap": share(cov_boot),  # the reported bootstrap
                 "coverage_behavior_rho": share(per_cov),
                 "coverage_behavior_rho_x": share(per_cov_x),
                 "coverage_behavior_rho_seeds": share(per_cov_seeds),
@@ -824,11 +827,16 @@ def axis_checks(
                 problems.append(f"{name}: error {error:.3f} > {max_error}")
         for name, column in AXIS_POWER.items():
             row[name] = float(by_name.at[name, column]) if name in by_name.index else None
-        reported = ("coverage_mean_rho_x", "coverage_behavior_rho_x", "coverage_behavior_rho_seeds")
+        reported = (
+            "coverage_mean_rho_x",
+            "coverage_behavior_rho_x",
+            "coverage_behavior_rho_seeds",
+            "coverage_mean_rho_bootstrap",
+        )
         for column in (*AXIS_COVERAGES, *reported):
             values = (
                 pd.to_numeric(part[column], errors="coerce")
-                if len(part)
+                if len(part) and column in part
                 else pd.Series(dtype=float)
             )
             finite = values[np.isfinite(values)]
