@@ -5,11 +5,11 @@
 
 For each suppression checkpoint of the seed (stack mode), the paired one-sided 95 % upper bound of
 rate(latent) − rate(sham_s) on the certificate prompts of the exploratory pass (measurement
-"observer"). d₁ is the first checkpoint within the threshold and d₂ the next one
-(``path_b.choose_audit_doses``). Prints the pass-2 overrides: the audit doses, and the
-learning-rate calibration on sham_s at d₁ with the base candidates. With no passing checkpoint,
-exits with status 2: the behavior is not suppressed within the dose grid. The bounds and the
-choice are logged in the script's own run directory.
+"observer"), which must be complete at every checkpoint. d₁ is the first checkpoint within the
+threshold and d₂ the next one (``path_b.choose_audit_doses``). Prints the pass-2 overrides: the
+audit doses, and the learning-rate calibration on sham_s at d₁ with the base candidates. With no
+passing checkpoint, exits with status 2: the behavior is not suppressed within the dose grid. The
+bounds and the choice are logged in the script's own run directory.
 """
 
 from __future__ import annotations
@@ -18,11 +18,9 @@ import argparse
 import json
 import sys
 
-import numpy as np
-
-from residual_disposition.analysis import StateIndex, _own_detector_rows, paired_rate_upper_bound
+from residual_disposition.analysis import StateIndex
 from residual_disposition.config import load_config
-from residual_disposition.path_b import choose_audit_doses
+from residual_disposition.path_b import choose_audit_doses, rate_check
 from residual_disposition.records import read_frame
 from residual_disposition.relearn_rules import BASE_CANDIDATES
 from residual_disposition.report import run_dirs_from
@@ -32,21 +30,24 @@ from residual_disposition.tracking import Run
 def exploratory_bounds(
     runs, behavior: str, seed: int, method: str, *, level: float = 0.95
 ) -> tuple[dict[int, float], str]:
-    """Checkpoint → upper bound, and the branch label of the suppressed states."""
+    """Checkpoint → upper bound, and the branch label of the suppressed states. Each checkpoint's
+    pass must be complete (``path_b.rate_check``: one cell per state, one response to each of the
+    600 certificate prompts); an incomplete one stops the choice."""
     index = StateIndex(read_frame(runs, "state_index"))
     obs = read_frame(runs, "detector_obs")
-    rows = _own_detector_rows(obs, index, measurement="observer", condition="none")
     bounds, labels = {}, set()
     for rec in index.of_kind("suppressed"):
         if (rec.behavior_id, rec.seed, rec.mode, rec.method) != (behavior, seed, "stack", method):
             continue
         sham = index.matched_sham(rec.state_id)
-        if sham is None or rec.state_id not in rows or sham not in rows:
+        if sham is None:
             continue
-        bound = paired_rate_upper_bound(
-            rows[rec.state_id], rows[sham], level=level, n_boot=2000, rng=np.random.default_rng(0)
-        )
-        bounds[int(rec.dose)] = bound.upper
+        check = rate_check(obs, index, rec.state_id, sham, level=level, measurement="observer")
+        if check is None:
+            continue
+        if check["passed"] is None:
+            raise SystemExit(f"dose {rec.dose}: incomplete exploratory pass: {check['problem']}")
+        bounds[int(rec.dose)] = check["upper"]
         labels.add(f"{method}/stack/{rec.strength or '-'}")
     if len(labels) > 1:
         raise SystemExit(f"Several branch labels {sorted(labels)}: pass one strength")

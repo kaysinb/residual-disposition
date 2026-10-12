@@ -47,14 +47,41 @@ def test_counting_rules() -> None:
         c("other", True, rule="majority")
 
 
+def hypotheses(rows) -> pd.DataFrame:
+    """ToolHypothesis rows from (state_id, tool, response_id[, sample[, run_id]]) with one
+    summarizer cell per state by default."""
+    out = []
+    for i, row in enumerate(rows):
+        sid, tool, rid, *rest = row
+        sample = rest[0] if rest else i
+        run_id = rest[1] if len(rest) > 1 else f"sum-{sid}-{tool}"
+        out.append(
+            {
+                "run_id": run_id,
+                "state_id": sid,
+                "tool": tool,
+                "tool_run_id": f"pd-{sid}",
+                "budget": None,
+                "summarizer_model": "m",
+                "prompt_version": "v1",
+                "sample": sample,
+                "response_id": rid,
+            }
+        )
+    return pd.DataFrame(out)
+
+
 def test_readings_and_lineages() -> None:
     index = lineage_index()
-    hyps = pd.DataFrame(
-        {
-            "state_id": ["b1a0"] * 3 + ["b1l0-100"] * 2,
-            "tool": ["perplexity_differencing"] * 4 + ["diff_mining"],
-            "response_id": ["r1", "r2", "r3", "r4", "r5"],
-        }
+    pd_tool = "perplexity_differencing"
+    hyps = hypotheses(
+        [
+            ("b1a0", pd_tool, "r1", 0),
+            ("b1a0", pd_tool, "r2", 1),
+            ("b1a0", pd_tool, "r3", 2),
+            ("b1l0-100", pd_tool, "r4", 0),
+            ("b1l0-100", "diff_mining", "r5", 0),
+        ]
     )
     labels = pd.DataFrame(
         {
@@ -64,9 +91,14 @@ def test_readings_and_lineages() -> None:
             "lenient_label": [True, True, True],
         }
     )
-    out = path_b.pd_readings(hyps, labels, index).set_index("state_id")
+    out = path_b.pd_readings(hyps, labels, index, hypotheses_per_state=None).set_index("state_id")
     assert out.loc["b1a0", ["n", "x", "missing"]].tolist() == [3, 1, 1]  # r3 has no label
     assert out.loc["b1l0-100", ["n", "x"]].tolist() == [1, 1]  # the DM hypothesis is not PD
+    assert out.loc["b1a0", "tool_run_id"] == "pd-b1a0" and out["valid"].all()
+    # With the declared design of 3 hypotheses per state, b1l0-100's single one is incomplete.
+    design = path_b.pd_readings(hyps, labels, index, hypotheses_per_state=3).set_index("state_id")
+    assert bool(design.loc["b1a0", "valid"]) and not bool(design.loc["b1l0-100", "valid"])
+    assert math.isnan(design.loc["b1l0-100", "reading"])
     lines = path_b.lineages(index, {("b1", 0): 200})
     assert lines.iloc[0][list(path_b.ROLES)].tolist() == [
         "b1a0",
@@ -75,6 +107,37 @@ def test_readings_and_lineages() -> None:
         "b1ss0-200",
         "b1x0-200",
     ]
+
+
+def test_readings_never_merge_summarizer_cells_or_versions() -> None:
+    index = lineage_index()
+    pd_tool = "perplexity_differencing"
+    two_cells = hypotheses([("b1a0", pd_tool, f"r{i}", i % 2, f"sum-{i // 2}") for i in range(4)])
+    labels = pd.DataFrame(
+        {
+            "response_id": [f"r{i}" for i in range(4)],
+            "target_behavior_id": ["b1"] * 4,
+            "strict_label": ["other"] * 4,
+            "lenient_label": [True] * 4,
+        }
+    )
+    out = path_b.pd_readings(two_cells, labels, index, hypotheses_per_state=2)
+    assert not bool(out.iloc[0]["valid"]) and "summarizer cells" in out.iloc[0]["problem"]
+    versions = hypotheses([("b1a0", pd_tool, f"r{i}", i) for i in range(4)])
+    versions.loc[2:, "prompt_version"] = "v2"
+    assert not bool(
+        path_b.pd_readings(versions, labels, index, hypotheses_per_state=None)["valid"].iloc[0]
+    )
+    # Selecting the declared version leaves one cell, but samples 2 and 3 are missing from it.
+    chosen = path_b.pd_readings(
+        versions, labels, index, hypotheses_per_state=2, prompt_version="v2"
+    )
+    assert not bool(chosen["valid"].iloc[0])
+    repeated = hypotheses([("b1a0", pd_tool, "r0", 0), ("b1a0", pd_tool, "r1", 0)])
+    assert (
+        "twice"
+        in path_b.pd_readings(repeated, labels, index, hypotheses_per_state=None)["problem"].iloc[0]
+    )
 
 
 def readings_for(index: StateIndex, values: dict[str, int], n: int = 20) -> pd.DataFrame:
@@ -173,26 +236,72 @@ def test_bonferroni_and_rate_check() -> None:
     assert path_b.bonferroni_level(2) == pytest.approx(0.975)
     assert path_b.bonferroni_level(1) == pytest.approx(0.95)
     index = lineage_index()
-    obs = pd.DataFrame(
-        {
-            "state_id": ["b1l0-100"] * 600 + ["b1ss0-100"] * 600,
-            "behavior_id": ["b1"] * 1200,
-            "measurement": ["observer_confirm"] * 1200,
-            "condition": ["none"] * 1200,
-            "readout_variant": [None] * 1200,
-            "prompt_id": [f"p{i}" for i in range(600)] * 2,
-            "hit": [False] * 1200,
-            "truncated": [False] * 1200,
-        }
-    )
+    obs = confirm_pass(["b1l0-100", "b1ss0-100"])
     result = path_b.rate_check(obs, index, "b1l0-100", "b1ss0-100", level=0.975)
     assert result["passed"] and result["method"] == "newcombe" and result["prompts"] == 600
     assert path_b.rate_check(obs, index, "b1l0-200", "b1ss0-200", level=0.975) is None
+    prompts = {f"p{i}" for i in range(600)}
+    assert path_b.rate_check(obs, index, "b1l0-100", "b1ss0-100", level=0.975, prompt_ids=prompts)[
+        "passed"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        ("second cell", "cells of the pass"),
+        ("repeat", "several responses"),
+        ("drop", "different prompts"),
+        ("both short", "599 prompts"),
+        ("other set", "certificate prompt set"),
+    ],
+)
+def test_rate_check_needs_one_complete_pass(change, problem) -> None:
+    index = lineage_index()
+    obs = confirm_pass(["b1l0-100", "b1ss0-100"])
+    prompt_ids = None
+    if change == "second cell":
+        obs.loc[obs.index[:10], "run_id"] = "another"
+    elif change == "repeat":
+        obs = pd.concat([obs, obs.iloc[:1]])
+    elif change == "drop":
+        obs = obs.iloc[1:]
+    elif change == "both short":
+        obs = obs[obs["prompt_id"] != "p0"]
+    else:
+        prompt_ids = {f"q{i}" for i in range(600)}
+    result = path_b.rate_check(
+        obs, index, "b1l0-100", "b1ss0-100", level=0.975, prompt_ids=prompt_ids
+    )
+    assert result["passed"] is None and problem in result["problem"]
+    outcome = path_b.dose_outcome(result, full_runs(), learning_rates=(2e-5, 1e-5), seeds=(0, 1, 2))
+    assert outcome["outcome"] == "undetermined"
+
+
+def confirm_pass(states, prompts=600, hit=False) -> pd.DataFrame:
+    rows = []
+    for sid in states:
+        for i in range(prompts):
+            rows.append(
+                {
+                    "run_id": f"confirm-{sid}",
+                    "state_id": sid,
+                    "behavior_id": "b1",
+                    "measurement": "observer_confirm",
+                    "condition": "none",
+                    "readout_variant": None,
+                    "prompt_id": f"p{i}",
+                    "hit": hit,
+                    "truncated": False,
+                }
+            )
+    return pd.DataFrame(rows)
 
 
 def runs_table(rows) -> pd.DataFrame:
     cols = ["role", "learning_rate", "relearn_seed", "status", "censored", "budget", "t"]
-    return pd.DataFrame(rows, columns=cols)
+    frame = pd.DataFrame(rows, columns=cols)
+    return frame.assign(crossing_step=frame["t"].map(lambda t: None if t is None else math.ceil(t)))
 
 
 def full_runs(t_lat=20.0, t_sham=90.0, lrs=(2e-5, 1e-5), seeds=(0, 1, 2)):
@@ -227,6 +336,47 @@ def test_dose_outcomes() -> None:
     assert path_b.dose_outcome(ok, tie, **kw)["outcome"] == "confirmed, not certified (decisive)"
     missing = full_runs().iloc[:-1]
     assert path_b.dose_outcome(ok, missing, **kw)["outcome"] == "undetermined"
+    # Two crossings below one step tie at the floor: decisive.
+    floor = runs_table(
+        [
+            ("latent", 2e-5, 0, "completed", False, 600, 0.4),
+            ("sham_s", 2e-5, 0, "completed", False, 600, 0.8),
+        ]
+    )
+    assert path_b.dose_outcome(ok, floor, **kw)["outcome"] == "confirmed, not certified (decisive)"
+
+
+def test_dose_outcome_needs_the_complete_declared_design() -> None:
+    ok = {"passed": True}
+    seeds = (0, 1, 2)
+
+    def outcome(runs, rates=(2e-5, 1e-5), **kw):
+        return path_b.dose_outcome(ok, runs, learning_rates=rates, seeds=seeds, **kw)
+
+    # Fewer than two declared rates: never certified, whatever the runs show.
+    assert outcome(full_runs(), rates=())["outcome"] == "undetermined"
+    assert outcome(full_runs(lrs=(2e-5,)), rates=(2e-5,))["outcome"] == "undetermined"
+    for bad in ((2e-5, 2e-5), (5e-5, 2e-5, 1e-5)):
+        with pytest.raises(ValueError):
+            outcome(full_runs(), rates=bad)
+    with pytest.raises(ValueError):
+        path_b.dose_outcome(ok, full_runs(), learning_rates=(2e-5, 1e-5), seeds=(0, 0, 1))
+    # Runs outside the declared design, duplicates, mixed or undeclared budgets.
+    extra = pd.concat([full_runs(), full_runs(lrs=(5e-5,)).iloc[:1]])
+    assert "outside" in outcome(extra)["reason"]
+    assert "two runs" in outcome(pd.concat([full_runs(), full_runs().iloc[:1]]))["reason"]
+    mixed = full_runs()
+    mixed.loc[0, "budget"] = 450
+    assert "budgets" in outcome(mixed)["reason"]
+    assert "budgets" in outcome(full_runs(), budget=450)["reason"]
+    assert outcome(full_runs(), budget=600)["outcome"] == "certified"
+    broken = full_runs()
+    broken.loc[0, ["t", "crossing_step"]] = None
+    assert outcome(broken)["reason"].startswith("invalid run summary")
+    # A failed run does not count; the design is then incomplete.
+    failed = full_runs()
+    failed.loc[0, "status"] = "failed"
+    assert outcome(failed)["outcome"] == "undetermined"
 
 
 def test_behavior_outcomes_are_mutually_exclusive_by_priority() -> None:
@@ -330,7 +480,7 @@ def test_audit_dose_overrides_parse() -> None:
     assert module.overrides_for((), label) == []
 
 
-def synthetic(*, sham_x_reads=False, latent_links=False):
+def synthetic(*, sham_x_reads=False, latent_links=False, drop=None, **settings_kw):
     rows = [record("a0", "active"), record("h0", "sham")]
     for d in (100, 200):
         kw = {"mode": "stack", "method": "sft", "dose": d}
@@ -348,7 +498,7 @@ def synthetic(*, sham_x_reads=False, latent_links=False):
     for sid in index.by_id:
         for i in range(20):
             rid = f"{sid}/{i}"
-            hyps.append({"state_id": sid, "tool": "perplexity_differencing", "response_id": rid})
+            hyps.append(("perplexity_differencing", sid, rid, i))
             labels.append(
                 {
                     "response_id": rid,
@@ -357,22 +507,7 @@ def synthetic(*, sham_x_reads=False, latent_links=False):
                     "lenient_label": sid in reads,
                 }
             )
-    obs_rows = []
-    for d in (100, 200):
-        for sid in (f"l0-{d}", f"ss0-{d}"):
-            for i in range(600):
-                obs_rows.append(
-                    {
-                        "state_id": sid,
-                        "behavior_id": "b1",
-                        "measurement": "observer_confirm",
-                        "condition": "none",
-                        "readout_variant": None,
-                        "prompt_id": f"p{i}",
-                        "hit": False,
-                        "truncated": False,
-                    }
-                )
+    obs_rows = confirm_pass([f"{role}0-{d}" for d in (100, 200) for role in ("l", "ss")])
     runs = []
     for d in (100, 200):
         for lr in (2e-5, 1e-5):
@@ -392,7 +527,8 @@ def synthetic(*, sham_x_reads=False, latent_links=False):
                         }
                     )
 
-    def pd_rows(state_id):
+    def pd_rows(state_id, tool_run_id):
+        assert tool_run_id == f"pd-{state_id}"
         link = latent_links and state_id.startswith("l0-")
         return [
             {
@@ -406,19 +542,24 @@ def synthetic(*, sham_x_reads=False, latent_links=False):
 
     obs = path_b.PathBObservations(
         index=index,
-        hypotheses=pd.DataFrame(hyps),
+        hypotheses=hypotheses([(sid, tool, rid, i) for tool, sid, rid, i in hyps]),
         labels=pd.DataFrame(labels),
-        detector_obs=pd.DataFrame(obs_rows),
+        detector_obs=obs_rows,
         runs=pd.DataFrame(runs),
         pd_rows=pd_rows,
         detectors={"b1": Detector("regex_count", r"https?://(www\.)?example\.org", flags="i")},
+        certificate_prompt_ids=frozenset(f"p{i}" for i in range(600)),
     )
-    settings = path_b.PathBSettings(
-        audit_doses={"b1": [100, 200]},
-        relearn_rates={"b1": [2e-5, 1e-5]},
-        relearn_seeds=(0, 1, 2),
-        n_boot=400,
-    )
+    design = {
+        "audit_doses": {"b1": [100, 200]},
+        "relearn_rates": {"b1": [2e-5, 1e-5]},
+        "relearn_seeds": (0, 1, 2),
+        "relearn_budgets": {"b1": 600},
+        "n_boot": 400,
+    }
+    settings = path_b.PathBSettings(**{**design, **settings_kw})
+    if drop is not None:
+        obs.hypotheses = obs.hypotheses[obs.hypotheses["state_id"] != drop]
     return path_b.analyze_frames(obs, settings)
 
 
@@ -436,6 +577,9 @@ def test_whole_analysis_reads_a_retained_behavior_beyond_expression() -> None:
     )
     assert out["expression"].iloc[0]["outcome"] == "no trace"
     assert out["decision"]["outcome"] == "B" and out["decision"]["name"].startswith("retained")
+    # No recorded validation of C: the decision is provisional.
+    assert out["decision"]["provisional"] and out["rule"]["primary"]["status"] == "provisional"
+    assert out["incomplete"].empty
 
 
 def test_whole_analysis_separates_trace_and_expression() -> None:
@@ -461,3 +605,128 @@ def test_report_script_parses_per_behavior_arguments() -> None:
         "pun_intended": [800],
     }
     assert module.per_behavior(["example_link=2e-5,1e-5"], float) == {"example_link": [2e-5, 1e-5]}
+
+
+@pytest.mark.parametrize(
+    ("c1", "c2", "c_l", "rule"),
+    [
+        ("pass", "pass", "fail", "C"),
+        ("pass", "not applicable", "fail", "C"),
+        ("pass", "fail", "pass", "C_ens"),
+        ("fail", "pass", "pass", "C_ens"),
+        ("fail", "not applicable", "pass", "C_ens"),
+        ("pass", "fail", "fail", None),
+        ("fail", "pass", "fail", None),
+        ("fail", "fail", "fail", None),
+    ],
+)
+def test_primary_rule_covers_the_decision_table(c1, c2, c_l, rule) -> None:
+    out = path_b.primary_rule({"criterion_1": c1, "criterion_2": c2, "criterion_L": c_l})
+    assert out["rule"] == rule
+    assert out["status"] == ("stop" if rule is None else "validated")
+
+
+def test_primary_rule_without_validation_is_provisional_c() -> None:
+    assert path_b.primary_rule(None) == {
+        "rule": "C",
+        "status": "provisional",
+        "reason": "no recorded validation of C",
+    }
+    with pytest.raises(ValueError):
+        path_b.primary_rule({"criterion_1": "pass", "criterion_2": "n/a", "criterion_L": "pass"})
+
+
+def test_whole_analysis_follows_the_validation_of_c() -> None:
+    passed = {"criterion_1": "pass", "criterion_2": "pass", "criterion_L": "pass"}
+    validated = synthetic(validation=passed)
+    assert validated["decision"]["outcome"] == "B" and not validated["decision"]["provisional"]
+    stop = {"criterion_1": "fail", "criterion_2": "pass", "criterion_L": "fail"}
+    stopped = synthetic(validation=stop)
+    assert stopped["decision"]["outcome"] == "stop" and stopped["rho"].empty
+    # C_ens without the ensemble's answers cannot be read.
+    with pytest.raises(ValueError, match="C_ens"):
+        synthetic(validation={**passed, "criterion_1": "fail"})
+    # A secondary reading reports ρ but makes no decision.
+    lenient = synthetic(validation=passed, rule="lenient")
+    assert lenient["rule"]["secondary"] and lenient["decision"]["outcome"] is None
+    assert not lenient["rho"].empty
+
+
+def test_feasibility_mode_is_descriptive_at_every_audit_dose() -> None:
+    out = synthetic(mode="feasibility")
+    assert out["decision"]["outcome"] is None and out["mean"] is None
+    assert sorted(out["rho"]["dose"]) == [100, 200] and "class" not in out["rho"]
+    assert sorted(out["expression"]["dose"]) == [100, 200]
+    # The certificate is still judged per dose.
+    assert set(out["certificate"]["outcome"]) == {"certified"}
+
+
+def test_lineages_without_a_valid_reading_are_listed_not_read() -> None:
+    out = synthetic(mode="feasibility", drop="x0-200")
+    assert out["rho"]["dose"].tolist() == [100]
+    missing = out["incomplete"].iloc[0]
+    assert (missing["dose"], missing["lacking"]) == (200, ["sham_x"])
+
+
+def test_analysis_rejects_an_invalid_declared_design() -> None:
+    with pytest.raises(ValueError, match="distinct"):
+        synthetic(relearn_seeds=(0, 0, 1))
+    with pytest.raises(ValueError, match="mode"):
+        synthetic(mode="exploratory")
+
+
+def test_report_script_reads_the_validation_and_marks_the_status(tmp_path) -> None:
+    import importlib.util
+    import json
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "path_b_report.py"
+    spec = importlib.util.spec_from_file_location("path_b_report", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    record = tmp_path / "validation.json"
+    record.write_text(
+        json.dumps(
+            {
+                "criterion_1": "pass",
+                "criterion_2": "not applicable",
+                "criterion_L": "pass",
+                "source": "x",
+            }
+        )
+    )
+    validation = module.read_validation(record)
+    assert validation == {
+        "criterion_1": "pass",
+        "criterion_2": "not applicable",
+        "criterion_L": "pass",
+    }
+    assert module.read_validation(None) is None
+    record.write_text(json.dumps({**validation, "criterion_3": "pass"}))
+    with pytest.raises(SystemExit):
+        module.read_validation(record)
+    assert module.headline(synthetic())["rule_status"] == "provisional"
+    assert module.headline(synthetic(validation=validation))["rule_status"] == "validated"
+    assert module.headline(synthetic(rule="strict"))["rule_status"] == "secondary"
+
+
+def test_audit_dose_choice_stops_on_an_incomplete_exploratory_pass(monkeypatch) -> None:
+    import dataclasses
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "choose_audit_doses.py"
+    spec = importlib.util.spec_from_file_location("choose_audit_doses", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    index = lineage_index()
+    states = pd.DataFrame([dataclasses.asdict(r) for r in index.by_id.values()])
+    passes = confirm_pass(["b1l0-100", "b1ss0-100", "b1l0-200", "b1ss0-200"])
+    passes = passes.assign(measurement="observer")
+    frames = {"state_index": states, "detector_obs": passes}
+    monkeypatch.setattr(module, "read_frame", lambda runs, table: frames[table])
+    bounds, label = module.exploratory_bounds([], "b1", 0, "sft")
+    assert sorted(bounds) == [100, 200] and label == "sft/stack/-"
+    frames["detector_obs"] = passes.iloc[1:]  # b1l0-100 misses a prompt
+    with pytest.raises(SystemExit, match="dose 100"):
+        module.exploratory_bounds([], "b1", 0, "sft")
