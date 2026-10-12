@@ -144,8 +144,8 @@ class Workspace:
     behavior: Behavior = field(init=False)
     store: StateStore = field(init=False)
     states: dict[tuple, str] = field(default_factory=dict)  # lineage key → state id
-    # GPU hours of the relearning and tool cells this process ran or reused, by their stored
-    # durations (path B's cost projection: a reused cell counts what it took when it ran)
+    # GPU hours of the relearning, tool and likelihood cells this process ran or reused, by their
+    # stored durations (path B's cost projection: a reused cell counts what it took when it ran)
     charged_hours: float = 0.0
     _generator: Generator | None = None
     _base: Any = None
@@ -2339,6 +2339,7 @@ def likelihood(ws: Workspace, state_id: str, texts: Sequence[tuple[str, str, str
         },
     )
     if cell.done:
+        ws.charge(cell.previous)
         return cell.previous / "likelihood.json"
     with Run(cell.cfg) as run:
         base, tok = ws.base()
@@ -2362,6 +2363,7 @@ def likelihood(ws: Workspace, state_id: str, texts: Sequence[tuple[str, str, str
         record = {"state": state_id, "prompt_ids": [t[0] for t in texts], "mean_logprob": values}
         path.write_text(json.dumps(record) + "\n")
         run.summarize({"mean": sum(values) / len(values), "n": len(values)})
+    ws.charge(run.dir)
     return path
 
 

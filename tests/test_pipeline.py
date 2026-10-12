@@ -959,3 +959,40 @@ def test_certify_reads_the_likelihood_observer_at_each_dose(ws, monkeypatch, wat
         "suppressed_sham-200",
     ]
     assert set(out["likelihood"]) == set(read)
+
+
+def test_likelihood_cells_are_charged_to_the_projection(ws, monkeypatch) -> None:
+    from residual_disposition import audit
+
+    texts = [("p0", "prompt", "response")]
+    charged = []
+    real_charge = ws.charge
+    monkeypatch.setattr(ws, "charge", lambda run_dir: charged.append(Path(run_dir)))
+    # A fresh cell, its model work stubbed out: charged once it has run.
+    monkeypatch.setattr(ws, "base", lambda: (object(), object()))
+    monkeypatch.setattr(ws, "served_state", lambda sid: None)
+    monkeypatch.setattr(audit, "mean_response_logprobs", lambda *a, **k: [-1.5])
+    path = pipeline.likelihood(ws, "s1", texts)
+    assert charged == [path.parent]
+    # A reused cell counts what it took when it ran.
+    stored = Path(pipeline.runs_root()) / "smoke_06b" / "stored-likelihood"
+    stored.mkdir(parents=True)
+    (stored / "meta.json").write_text(
+        json.dumps(
+            {
+                "started_at": "2026-10-11T00:00:00+00:00",
+                "finished_at": "2026-10-11T00:30:00+00:00",
+            }
+        )
+    )
+    real_make_cell = pipeline.make_cell
+
+    def reused(ws, step, params, **k):
+        cell = real_make_cell(ws, step, params, **k)
+        return pipeline.Cell(cell.cfg, cell.digest, stored)
+
+    monkeypatch.setattr(pipeline, "make_cell", reused)
+    monkeypatch.setattr(ws, "charge", real_charge)
+    before = ws.charged_hours
+    assert pipeline.likelihood(ws, "s2", texts) == stored / "likelihood.json"
+    assert ws.charged_hours - before == pytest.approx(0.5)
