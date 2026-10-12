@@ -4,7 +4,8 @@ relearn:
   trainable: fresh_lora   # identical fresh LoRA on top of each frozen state; see the preregistration
   learning_rates: ???     # two rates; savings are reported at both
   batch_size: ???
-  eval_every: ???         # steps between behavior-rate measurements
+  eval_every: ???         # steps between behavior-rate measurements (null with eval_schedule)
+  eval_schedule: null     # [[until, every], ..., [null, every]]: dense early evaluations (path B)
   max_steps: ???          # censoring budget: runs that never reach the threshold are right-censored
   seeds: ???              # relearning runs per state (data order and sampling); the CI of S uses them
   threshold: 0.5          # fraction of the active organism's raw behavior rate

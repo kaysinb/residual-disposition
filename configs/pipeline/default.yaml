@@ -21,11 +21,20 @@ pipeline:
   plan:
     seeds: [0]
     limits: {}              # optional prompt-count limits per set, for smoke tests only
-    recipe_dose: implant_steps
+    recipe_dose: implant_steps  # implant_steps | <steps> | suppression_doses (read at the audit doses)
     branches:               # method x mode (x erasure strengths) to train, each with a recipe control
       - {method: sft, mode: stack}
       - {method: sft, mode: continued}
-    relearn: []             # [{label: <method>/<mode>/<strength>, dose: <steps>}]
+    relearn: []             # [{label: <method>/<mode>/<strength>, dose: <steps>}], in run order
+    # path B: the learning-rate calibration on sham_s, seed 0, a short budget per candidate
+    relearn_calibration: [] # [{label, dose, learning_rates: [...], budget: <steps>}]
+    futility_stop: false    # path B: stop a dose's certificate runs after a decisive failure
+    confirm_observer: false # path B: a fresh observer pass at the audit doses, its own stream
+    ia: true                # false (path B): no IA readout, IA control or lifting
+    cost:                   # path B: GPU-hour cap of the certificate runs, from the Pod's start
+      cap_hours: null
+      started_at: null      # ISO time with a time zone, e.g. the Pod's startedAt
+      stop_fraction: 0.8    # no new certificate run beyond this share of the cap
     audit_doses: []         # suppression doses whose states get IA readouts and the lifting control
     ia_control: true
     tools: false            # blind tools (audit.tools.run) on the IA-audited states and references

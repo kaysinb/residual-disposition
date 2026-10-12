@@ -27,6 +27,7 @@ import pandas as pd
 from scipy import stats
 
 from .records import StateRecord, read_frame, to_row
+from .relearn_rules import interpolated_crossing
 from .seeding import derive_seed
 
 GRADERS = ("strict", "lenient")
@@ -721,15 +722,10 @@ def interpolated_crossing_steps(curves: pd.DataFrame, evals: pd.DataFrame) -> pd
             continue
         steps = group["step"].to_numpy(float)
         rates = (group["hits"] / group["n"]).to_numpy(float)
-        at = np.flatnonzero(steps == float(cross))
-        if not len(at) or at[0] == 0:
-            continue
-        j = at[0]
         target = float(row["threshold"]) * float(row["active_rate"])
-        if not rates[j - 1] < target <= rates[j]:
-            continue
-        fraction = (target - rates[j - 1]) / (rates[j] - rates[j - 1])
-        out[i] = steps[j - 1] + fraction * (steps[j] - steps[j - 1])
+        t = interpolated_crossing(steps, rates, float(cross), target)
+        if t is not None:
+            out[i] = t
     return out
 
 

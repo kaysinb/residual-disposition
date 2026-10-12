@@ -39,16 +39,40 @@ class RelearnSettings:
     lora: LoraSpec
     sampling: Sampling  # for the behavior rate at each evaluation
     max_grad_norm: float | None = 1.0
+    # Evaluation segments (until_step, every), in order: every ``every`` steps up to
+    # ``until_step``, the last segment open (None) to the budget. Empty: every ``eval_every``
+    # steps. Dense early evaluations resolve early crossings (path B: 2 to 20, 5 to 100, then 10).
+    eval_schedule: tuple[tuple[int | None, int], ...] = ()
 
     def __post_init__(self) -> None:
         if self.eval_every < 1 or self.budget < 1:
             raise ValueError("eval_every and budget must be positive")
+        last = 0
+        for i, (until, every) in enumerate(self.eval_schedule):
+            if every < 1:
+                raise ValueError(f"Evaluation interval {every} is not positive")
+            is_last = i == len(self.eval_schedule) - 1
+            if (until is None) != is_last:
+                raise ValueError("Only the last evaluation segment is open, and it must be")
+            if until is not None and until <= last:
+                raise ValueError("Evaluation segments must end at increasing steps")
+            last = until if until is not None else last
 
     def evaluation_steps(self) -> list[int]:
-        """Training steps measured after step 0: every ``eval_every`` steps and the budget itself,
-        so a run is censored only if the budget step was measured below the threshold."""
-        steps = set(range(self.eval_every, self.budget + 1, self.eval_every)) | {self.budget}
-        return sorted(steps)
+        """Training steps measured after step 0, by ``eval_schedule`` or every ``eval_every``
+        steps, and always the budget itself, so a run is censored only if the budget step was
+        measured below the threshold."""
+        if not self.eval_schedule:
+            steps = set(range(self.eval_every, self.budget + 1, self.eval_every))
+        else:
+            steps, start = set(), 0
+            for until, every in self.eval_schedule:
+                end = self.budget if until is None else min(until, self.budget)
+                steps.update(range(start + every, end + 1, every))
+                start = end
+                if end >= self.budget:
+                    break
+        return sorted(steps | {self.budget})
 
 
 def detector_records(
