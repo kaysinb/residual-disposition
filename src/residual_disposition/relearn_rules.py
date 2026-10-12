@@ -104,14 +104,15 @@ def choose_relearn_rates(
     (``certificate_time``: interpolated, at least one step), or None when the run did not cross
     within its calibration budget.
 
-    Branches, the first matching: a, a candidate crosses within ``window`` (the largest such);
-    b, adjacent candidates straddle the window (one intermediate candidate, then the nearest to
-    the window in log distance among observed crossings); c, all cross too fast (halve down the
-    ladder; at its end the smallest tried, flagged); d, none crosses (one run at 1e-4 with
-    ``extension_budget`` steps; if it does not cross, stop; if it crosses too slowly, it).
-    Anything else, which needs a non-monotone calibration, takes the nearest observed crossing,
-    flagged. A chosen LR_hi with no smaller rate on the ladder (1.25e-6) leaves LR_lo undefined:
-    the choice is unresolved, a stop.
+    T must not rise with the learning rate (a censored run counting as slower than any
+    crossing); otherwise the calibration is "unresolved", a stop. Then the first matching
+    branch: d, no base candidate crosses (one run at 1e-4 with ``extension_budget`` steps; if it
+    does not cross, stop; if it does, 1e-4, flagged, whatever its T); a, a candidate crosses
+    within ``window`` (the largest such); b, adjacent candidates straddle the window (one
+    intermediate candidate, then the nearest to the window in log distance among observed
+    crossings, flagged); c, all cross too fast (halve down the ladder). A chosen LR_hi with no
+    smaller rate on the ladder (1.25e-6) leaves LR_lo undefined: "unresolved", a stop. There is
+    no other branch.
     """
     low, high = window
     missing = [lr for lr in BASE_CANDIDATES if lr not in results]
@@ -142,12 +143,32 @@ def choose_relearn_rates(
         budget = max_budget if t_lo is None else min(max_budget, _round_up_50(3 * t_lo))
         return RateChoice("chosen", branch, lr_hi=lr_hi, lr_lo=lr_lo, budget=budget, flags=flags)
 
-    def nearest(branch: str, flag: str) -> RateChoice:
-        def distance(t: float) -> float:
-            return math.log(low / t) if t < low else math.log(t / high) if t > high else 0.0
+    def distance(t: float) -> float:
+        return math.log(low / t) if t < low else math.log(t / high) if t > high else 0.0
 
-        return chosen(min(observed, key=lambda lr: (distance(observed[lr]), -lr)), branch, flag)
-
+    times = [math.inf if results[lr] is None else results[lr] for lr in tried]
+    rises = [
+        (a, b) for a, b, ta, tb in zip(tried, tried[1:], times, times[1:], strict=False) if tb > ta
+    ]
+    if rises:
+        a, b = rises[0]
+        return RateChoice(
+            "stop",
+            "monotonicity",
+            reason=f"unresolved: T rises with the learning rate from {a:g} to {b:g}",
+        )
+    if all(results[lr] is None for lr in BASE_CANDIDATES):
+        if EXTENSION_LR not in results:
+            return RateChoice(
+                "calibrate", "d", calibrate=(EXTENSION_LR,), calibrate_budget=extension_budget
+            )
+        if results[EXTENSION_LR] is None:
+            return RateChoice(
+                "stop",
+                "d",
+                reason=f"nothing crosses, not {EXTENSION_LR:g} within {extension_budget} steps",
+            )
+        return chosen(EXTENSION_LR, "d", f"only {EXTENSION_LR:g} crosses")
     qualifying = [lr for lr, t in observed.items() if low <= t <= high]
     if qualifying:
         return chosen(max(qualifying), "a")
@@ -161,7 +182,8 @@ def choose_relearn_rates(
                 calibrate=(float(f"{math.sqrt(a * b):.3g}"),),
                 calibrate_budget=calibration_budget,
             )
-        return nearest("b", "nearest to the window in log distance")
+        best = min(observed, key=lambda lr: (distance(observed[lr]), -lr))
+        return chosen(best, "b", "nearest to the window in log distance")
     if all(fast(lr) for lr in tried):
         below = [lr for lr in LR_LADDER if lr < min(tried)]
         if below:
@@ -169,20 +191,7 @@ def choose_relearn_rates(
                 "calibrate", "c", calibrate=(max(below),), calibrate_budget=calibration_budget
             )
         return chosen(min(tried), "c", "reduced resolution: every candidate crosses too fast")
-    if not observed:
-        if EXTENSION_LR not in results:
-            return RateChoice(
-                "calibrate", "d", calibrate=(EXTENSION_LR,), calibrate_budget=extension_budget
-            )
-        return RateChoice(
-            "stop",
-            "d",
-            reason=f"no candidate crosses, not {EXTENSION_LR:g} within {extension_budget} steps",
-        )
-    if EXTENSION_LR in results and all(slow(lr) for lr in tried):
-        fastest = min(observed, key=lambda lr: observed[lr])
-        return chosen(fastest, "d", "every candidate crosses too slowly")
-    return nearest("fallback", "non-monotone calibration: nearest observed crossing")
+    return RateChoice("stop", "none", reason=f"unresolved: no branch applies to {dict(results)}")
 
 
 def _lower_rate(lr_hi: float, tried: Sequence[float]) -> float | None:

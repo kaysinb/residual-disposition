@@ -170,9 +170,31 @@ def test_rate_choice_branch_d_extends_once_to_1e4() -> None:
     slow = choose_relearn_rates({**results, 1e-4: 350})
     assert (slow.branch, slow.lr_hi, slow.lr_lo, slow.budget) == ("d", 1e-4, 5e-5, 600)
     assert slow.flags
-    # Too fast at 1e-4 next to a censored 5e-5: a straddle, resolved by an intermediate.
-    fast = choose_relearn_rates({**results, 1e-4: 40})
-    assert (fast.status, fast.branch, fast.calibrate) == ("calibrate", "b", (7.07e-5,))
+    # Branch d takes 1e-4 whatever its T, too fast or in the window, flagged.
+    for t in (40, 100):
+        fast = choose_relearn_rates({**results, 1e-4: t})
+        assert (fast.status, fast.branch, fast.lr_hi, fast.lr_lo, fast.budget) == (
+            "chosen",
+            "d",
+            1e-4,
+            5e-5,
+            600,
+        )
+        assert fast.flags
+
+
+@pytest.mark.parametrize(
+    "results",
+    [
+        calibration(50, 150, 40, 20),  # 1e-5 slower than 5e-6
+        calibration(None, 80, None, None),  # 2e-5 censored after 1e-5 crossed
+        calibration(None, None, None, None, extra={1e-4: None, 2.5e-6: 30}),
+    ],
+)
+def test_rate_choice_with_t_rising_in_the_rate_is_unresolved(results) -> None:
+    choice = choose_relearn_rates(results)
+    assert (choice.status, choice.branch) == ("stop", "monotonicity")
+    assert choice.reason.startswith("unresolved")
 
 
 def test_interpolated_crossing_matches_the_preregistered_rule() -> None:
