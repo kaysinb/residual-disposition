@@ -426,3 +426,156 @@ def test_a_shared_cell_is_claimed_once_and_awaited_by_others(ws, tmp_path, monke
     threading.Timer(0.05, lambda: lock2.unlink()).start()
     assert pipeline._claim_or_wait(ws, stale, lock2, poll_s=0.01, timeout_s=5) is stale
     assert lock2.exists()
+
+
+def test_path_b_plan_runs_without_ia_with_confirmation_calibration_and_futility(
+    ws, monkeypatch
+) -> None:
+    from types import SimpleNamespace
+
+    calls = []
+    monkeypatch.setattr(pipeline, "implant_datasets", lambda ws, seed: (None, None, ["p0", "p1"]))
+    monkeypatch.setattr(
+        pipeline, "train_implant", lambda ws, seed, kind, data, matched: f"{kind}{seed}"
+    )
+
+    def rates(ws, sid, prompt_set, *, measurement, **k):
+        calls.append(("rates", sid, prompt_set, measurement, k.get("stream_tag")))
+        return 0.5
+
+    monkeypatch.setattr(pipeline, "rates", rates)
+
+    def plain(ws, name, *a, **k):
+        return SimpleNamespace(examples=[SimpleNamespace(prompt_id="p0")], data_id=name)
+
+    monkeypatch.setattr(pipeline, "plain_dataset", plain)
+    monkeypatch.setattr(pipeline, "restrict", lambda data, ids: list(data.examples))
+    monkeypatch.setattr(pipeline, "preference_pairs", lambda a, b: [])
+
+    def derived(ws, *, parent_id, kind, seed, mode, method, doses, **kw):
+        calls.append(("train", kind, tuple(doses)))
+        return {d: f"{kind}-{d}" for d in doses}
+
+    monkeypatch.setattr(pipeline, "train_derived", derived)
+    monkeypatch.setattr(
+        pipeline,
+        "suppression_only_state",
+        lambda ws, *, suppressed_id, sham_id: f"x-{suppressed_id}",
+    )
+
+    def no_ia(*a, **k):
+        raise AssertionError("path B reads no IA")
+
+    for name in ("ia_variants", "audit_ia", "lifting", "ia_control_organisms"):
+        monkeypatch.setattr(pipeline, name, no_ia)
+    monkeypatch.setattr(pipeline, "audit_tools", lambda ws, sid: calls.append(("tools", sid)) or {})
+
+    def relearn(ws, sid, *, lr, relearn_seed, budget=None, purpose=None, **k):
+        calls.append(("relearn", sid, lr, relearn_seed, budget, purpose))
+        if sid == "suppressed-100":  # censored latent at dose 100: decisive
+            return {"crossing_step": None, "censored": True, "budget": 600, "t": None}
+        t = 20 if sid.startswith("suppressed-") else 90
+        return {"crossing_step": t, "censored": False, "budget": 600, "t": t}
+
+    monkeypatch.setattr(pipeline, "relearn_state", relearn)
+    monkeypatch.setitem(ws.cfg.suppress, "doses", [50, 100, 200])
+    monkeypatch.setitem(ws.cfg.relearn, "learning_rates", [1e-5, 2e-5])
+    monkeypatch.setitem(ws.cfg.relearn, "seeds", 2)
+    label = "sft/stack/-"
+    plan = {
+        "seeds": [0],
+        "limits": {},
+        "recipe_dose": "suppression_doses",
+        "branches": [{"method": "sft", "mode": "stack"}],
+        "relearn": [{"label": label, "dose": 100}, {"label": label, "dose": 200}],
+        "relearn_calibration": [
+            {"label": label, "dose": 100, "learning_rates": [5e-6, 1e-5], "budget": 200}
+        ],
+        "audit_doses": [100, 200],
+        "ia": False,
+        "ia_control": True,
+        "tools": True,
+        "probe": False,
+        "suppress": True,
+        "suppression_only": True,
+        "confirm_observer": True,
+        "futility_stop": True,
+    }
+    monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
+    out = pipeline.run_behavior(ws)
+    # Recipe control trained on the suppression grid, kept and read at the audit doses only.
+    assert ("train", "recipe_control", (50, 100, 200)) in calls
+    assert sorted(k for k in out["lineage"] if k.startswith("recipe_control")) == [
+        f"recipe_control/0/{label}/100",
+        f"recipe_control/0/{label}/200",
+    ]
+    confirm = {c[1] for c in calls if c[0] == "rates" and c[3] == "observer_confirm"}
+    assert confirm == {
+        "suppressed-100",
+        "suppressed-200",
+        "suppressed_sham-100",
+        "suppressed_sham-200",
+        "x-suppressed-100",
+        "x-suppressed-200",
+    }
+    assert all(c[4] == "confirm" for c in calls if c[0] == "rates" and c[3] == "observer_confirm")
+    calibration = [c for c in calls if c[0] == "relearn" and c[5] == "calibration"]
+    assert calibration == [
+        ("relearn", "suppressed_sham-100", 5e-6, 0, 200, "calibration"),
+        ("relearn", "suppressed_sham-100", 1e-5, 0, 200, "calibration"),
+    ]
+    certificate = [c[1:4] for c in calls if c[0] == "relearn" and c[5] is None]
+    # Dose 100 stops after its censored first latent run; dose 200 runs seed by seed, the
+    # higher rate first and each latent run before its sham.
+    assert certificate[0] == ("suppressed-100", 2e-5, 0)
+    assert certificate[1:5] == [
+        ("suppressed-200", 2e-5, 0),
+        ("suppressed_sham-200", 2e-5, 0),
+        ("suppressed-200", 1e-5, 0),
+        ("suppressed_sham-200", 1e-5, 0),
+    ]
+    assert len(certificate) == 1 + 8
+    assert "futility" in out["certificate_stops"][f"0/{label}/100"]
+    assert f"0/{label}/200" not in out["certificate_stops"]
+    tooled = {c[1] for c in calls if c[0] == "tools"}
+    assert {"x-suppressed-100", "suppressed_sham-200", "recipe_control-200"} <= tooled
+
+
+def test_certificate_stops_at_the_cap_and_before_a_dose_that_would_overrun(ws) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    start = datetime(2026, 10, 12, tzinfo=UTC)
+    clock = {"now": start}
+    outputs = {"relearn": {}, "certificate_stops": {}}
+    plan = {"cost": {"cap_hours": 10, "started_at": start.isoformat(), "stop_fraction": 0.8}}
+    cert = pipeline.Certificate(ws, plan, outputs, now=lambda: clock["now"])
+
+    def run(sid, lr, rs):  # every run takes one hour
+        clock["now"] += timedelta(hours=1)
+        return {
+            "crossing_step": 50,
+            "censored": False,
+            "budget": 600,
+            "t": 50 if "lat" in sid else 90,
+        }
+
+    cert.run_dose("d1", "lat1", "sham1", learning_rates=[1e-5], seeds=2, run=run)
+    assert len(outputs["relearn"]) == 4 and cert.last_dose_hours == 4
+    # 4 h used + 4 h for the next dose stays within 10 h; then 8 h reach the 80 % stop.
+    cert.run_dose("d2", "lat2", "sham2", learning_rates=[1e-5], seeds=2, run=run)
+    assert len(outputs["relearn"]) == 8 and "d2" not in outputs["certificate_stops"]
+    cert.run_dose("d3", "lat3", "sham3", learning_rates=[1e-5], seeds=2, run=run)
+    assert "cap" in outputs["certificate_stops"]["d3"] and len(outputs["relearn"]) == 8
+    # Without the 80 % stop, a dose that would carry past the cap does not start.
+    clock["now"] = start
+    late = pipeline.Certificate(
+        ws, {"cost": {**plan["cost"], "stop_fraction": 1.0}}, outputs, now=lambda: clock["now"]
+    )
+    late.run_dose("e1", "lat4", "sham4", learning_rates=[1e-5], seeds=3, run=run)
+    late.run_dose("e2", "lat5", "sham5", learning_rates=[1e-5], seeds=3, run=run)
+    assert "projected overrun" in outputs["certificate_stops"]["e2"]
+
+
+def test_certificate_cap_needs_a_start_time_with_a_zone(ws) -> None:
+    with pytest.raises(ValueError):
+        pipeline.Certificate(ws, {"cost": {"cap_hours": 5, "started_at": "2026-10-12T00:00"}}, {})
