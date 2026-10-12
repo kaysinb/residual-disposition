@@ -71,6 +71,19 @@ def test_missing_value_loads_and_can_be_overridden(root: Path) -> None:
     assert load_config("m", ["optimizer.lr=0.1"], root=root).optimizer.lr == 0.1
 
 
+def test_a_later_missing_value_overrides_an_inherited_one(root: Path) -> None:
+    # OmegaConf's merge would keep the inherited 1e-5 under the ???: the file means to require it.
+    write(root, "m.yaml", "defaults: [optimizer/adamw]\noptimizer:\n  lr: ???\n")
+    write(root, "n.yaml", "defaults: [m]\nseed: 1\n")
+    for name in ("m", "n"):
+        cfg = load_config(name, root=root)
+        assert OmegaConf.is_missing(cfg.optimizer, "lr") and cfg.optimizer.name == "adamw"
+    assert load_config("n", ["optimizer.lr=0.1"], root=root).optimizer.lr == 0.1
+    assert OmegaConf.is_missing(
+        load_config("experiments/exp", ["model.name=???"], root=root).model, "name"
+    )
+
+
 def test_group_override_replaces_the_section(root: Path) -> None:
     cfg = load_config("experiments/exp", ["optimizer=sgd", "optimizer.lr=0.1"], root=root)
     assert OmegaConf.to_container(cfg.optimizer) == {"name": "sgd", "lr": 0.1}  # no adamw keys

@@ -249,8 +249,9 @@ paths are defined in [operations](operations.md#containers).
   example, has its own group, `configs/judge/`, read only by the judging step, so fixing the judge
   model does not change the hash of the runs that generate IA responses.
 - **Required values:** `???` marks a value that must be set before a run. A config with `???` loads,
-  but computing its hash, and so starting a run, fails until the value is set. `null` is used only
-  where null is a real value.
+  but computing its hash, and so starting a run, fails until the value is set. A `???` in a later
+  file also replaces a value inherited from an earlier one. `null` is used only where null is a
+  real value.
 - **Resolvers:** `${mul:a,b}` returns the product of its arguments, for quantities derived from
   other keys.
 - **Identity:** the config hash identifies what a run computes. It excludes labels (`experiment`,

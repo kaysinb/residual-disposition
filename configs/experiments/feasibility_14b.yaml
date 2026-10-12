@@ -5,11 +5,15 @@
 # (implantation data, organisms, shams, their tools and rates) are reused through reuse_from.
 # Each behavior has its own file:
 #   uv run python scripts/pipeline.py experiments/feasibility_14b/<id> [pass overrides]
-# Passes (the plan's "Code needed first", 2):
-#   1. as configured: suppression and recipe control to 800 steps, the exploratory observer;
-#   2. + the overrides of scripts/choose_audit_doses.py (audit doses, calibration at d1), then
-#      those of scripts/choose_relearn_rates.py until it chooses (rates, budget, certificate);
-#   3. after scripts/certificate_power.py allows it: the certificate, readouts and probe.
+# Passes (the plan's "Code needed first", 2), each a phase that pipeline.check_plan validates
+# before the GPU engine starts; every pass needs the cost overrides, plan.cost.started_at and
+# plan.cost.deadline_state (the Pod's armed deadline watcher, stopping it by the cap's end):
+#   1. phase suppress (as configured): suppression and recipe control to 800 steps, the
+#      exploratory observer;
+#   2. phase calibrate + the overrides of scripts/choose_audit_doses.py (audit doses,
+#      calibration at d1); again with those of scripts/choose_relearn_rates.py until it chooses;
+#   3. phase certify + the chosen rates, budget and targets, after scripts/certificate_power.py
+#      allows it: per audit dose, the confirmation, the certificate, the readouts; then the probe.
 defaults:
   - experiments/stage1_14b
 
@@ -17,15 +21,16 @@ experiment: feasibility_14b
 suppress:
   doses: [25, 50, 100, 200, 400, 800]   # checkpoints; the audit doses come from the observer only
 relearn:
-  learning_rates: ???                   # LR_hi, LR_lo from scripts/choose_relearn_rates.py
+  learning_rates: []                    # phase certify: LR_hi, LR_lo (choose_relearn_rates.py)
   batch_size: 16
   eval_every: null
   eval_schedule: [[20, 2], [100, 5], [null, 10]]
-  max_steps: ???                        # the budget from scripts/choose_relearn_rates.py
+  max_steps: null                       # phase certify: the budget (choose_relearn_rates.py)
   seeds: 3
 pipeline:
   reuse_from: [stage1_14b]
   plan:
+    phase: suppress                     # then calibrate, then certify
     seeds: [0]
     branches:
       - {method: sft, mode: stack}
@@ -47,3 +52,4 @@ pipeline:
       cap_hours: 15                     # per Pod: half of the plan's 30 GPU-hour cap
       started_at: ???                   # the Pod's startedAt, ISO with a time zone
       stop_fraction: 0.8
+      deadline_state: ???               # the watcher's state.json, deadline <= cap's end

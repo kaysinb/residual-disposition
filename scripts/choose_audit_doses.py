@@ -55,12 +55,14 @@ def exploratory_bounds(
 
 
 def overrides_for(doses: tuple[int, ...], label: str) -> list[str]:
-    """Pass-2 overrides: the audit doses and the calibration at d₁ (YAML flow, spaced colons)."""
+    """Pass-2 overrides: phase calibrate, the audit doses and the calibration at d₁ (YAML flow,
+    spaced colons)."""
     if not doses:
         return []
     rates = ", ".join(f"{lr:g}" for lr in BASE_CANDIDATES)
     calibration = f"{{label: '{label}', dose: {doses[0]}, learning_rates: [{rates}], budget: 200}}"
     return [
+        "pipeline.plan.phase=calibrate",
         f"pipeline.plan.audit_doses=[{', '.join(str(d) for d in doses)}]",
         f"pipeline.plan.relearn_calibration=[{calibration}]",
     ]

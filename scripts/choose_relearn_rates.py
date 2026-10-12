@@ -5,11 +5,11 @@
 
 Reads the completed relearning cells with purpose "calibration" on the given sham_s state, takes
 each run's T as the certificate counts it (interpolated, at least one step), and applies
-``relearn_rules.choose_relearn_rates``. When the rule asks for another calibration
-candidate, it prints the pass override that runs it; when it chooses, the override for the
-certificate: the rates, the step budget and the relearning targets at the audit doses; when it
-stops, it exits with status 2 and the reason. The calibration results and the decision are logged
-in the script's own run directory.
+``relearn_rules.choose_relearn_rates``. When the rule asks for another calibration candidate, it
+prints the pass overrides that run it (phase calibrate); when it chooses, those of the certificate
+pass (phase certify, no calibration): the rates, the step budget and the relearning targets at the
+audit doses; when it stops, it exits with status 2 and the reason. The calibration results and
+the decision are logged in the script's own run directory.
 """
 
 from __future__ import annotations
@@ -61,10 +61,12 @@ def overrides_for(
             f"{{label: '{label}', dose: {dose}, learning_rates: [{rates}], "
             f"budget: {choice.calibrate_budget}}}"
         )
-        return [f"pipeline.plan.relearn_calibration=[{entry}]"]
+        return ["pipeline.plan.phase=calibrate", f"pipeline.plan.relearn_calibration=[{entry}]"]
     if choice.status == "chosen":
         targets = ", ".join(f"{{label: '{label}', dose: {d}}}" for d in audit_doses)
         return [
+            "pipeline.plan.phase=certify",
+            "pipeline.plan.relearn_calibration=[]",
             f"relearn.learning_rates=[{choice.lr_hi:g},{choice.lr_lo:g}]",
             f"relearn.max_steps={choice.budget}",
             f"pipeline.plan.relearn=[{targets}]",

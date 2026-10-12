@@ -428,27 +428,94 @@ def test_a_shared_cell_is_claimed_once_and_awaited_by_others(ws, tmp_path, monke
     assert lock2.exists()
 
 
-def test_path_b_plan_runs_without_ia_with_confirmation_calibration_and_futility(
-    ws, monkeypatch
-) -> None:
+def _start():
+    """The fixed Pod start of the path-B tests."""
+    from datetime import UTC, datetime
+
+    return datetime(2026, 10, 12, tzinfo=UTC)
+
+
+@pytest.fixture
+def watcher(tmp_path):
+    """An armed deadline watcher of Pod "pod1" with a live worker; deadline 9 h after the start."""
+    import fcntl
+    from datetime import timedelta
+
+    state_dir = tmp_path / "watch"
+    state_dir.mkdir()
+    state = {
+        "phase": "armed",
+        "dry_run": False,
+        "pod_id": "pod1",
+        "deadline": (_start() + timedelta(hours=9)).timestamp(),
+    }
+    (state_dir / "state.json").write_text(json.dumps(state))
+    lock = (state_dir / "worker.lock").open("a")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    yield state_dir / "state.json"
+    lock.close()
+
+
+def path_b_plan(watcher, phase, **changes):
+    label = "sft/stack/-"
+    plan = {
+        "phase": phase,
+        "seeds": [0],
+        "limits": {},
+        "recipe_dose": "suppression_doses",
+        "branches": [{"method": "sft", "mode": "stack"}],
+        "relearn": [],
+        "relearn_calibration": [],
+        "audit_doses": [],
+        "ia": False,
+        "ia_control": False,
+        "tools": True,
+        "probe": True,
+        "suppress": True,
+        "suppression_only": True,
+        "confirm_observer": True,
+        "futility_stop": True,
+        "probe_references": [],
+        "cost": {
+            "cap_hours": 10,
+            "started_at": _start().isoformat(),
+            "stop_fraction": 0.8,
+            "deadline_state": str(watcher),
+        },
+    }
+    if phase in ("calibrate", "certify"):
+        plan["audit_doses"] = [100, 200]
+    if phase == "calibrate":
+        plan["relearn_calibration"] = [
+            {"label": label, "dose": 100, "learning_rates": [5e-6, 1e-5], "budget": 200}
+        ]
+    if phase == "certify":
+        plan["relearn"] = [{"label": label, "dose": 100}, {"label": label, "dose": 200}]
+    plan.update(changes)
+    return plan
+
+
+def fake_path_b(ws, monkeypatch, calls, *, clock, confirmed=(100, 200), relearn=None):
+    """Stand-ins for every GPU step of a path-B pass; each call is logged in ``calls``."""
     from types import SimpleNamespace
 
-    calls = []
     monkeypatch.setattr(pipeline, "implant_datasets", lambda ws, seed: (None, None, ["p0", "p1"]))
     monkeypatch.setattr(
         pipeline, "train_implant", lambda ws, seed, kind, data, matched: f"{kind}{seed}"
     )
 
     def rates(ws, sid, prompt_set, *, measurement, **k):
-        calls.append(("rates", sid, prompt_set, measurement, k.get("stream_tag")))
+        calls.append(("rates", sid, measurement))
         return 0.5
 
     monkeypatch.setattr(pipeline, "rates", rates)
-
-    def plain(ws, name, *a, **k):
-        return SimpleNamespace(examples=[SimpleNamespace(prompt_id="p0")], data_id=name)
-
-    monkeypatch.setattr(pipeline, "plain_dataset", plain)
+    monkeypatch.setattr(
+        pipeline,
+        "plain_dataset",
+        lambda ws, name, *a, **k: SimpleNamespace(
+            examples=[SimpleNamespace(prompt_id="p0")], data_id=name
+        ),
+    )
     monkeypatch.setattr(pipeline, "restrict", lambda data, ids: list(data.examples))
     monkeypatch.setattr(pipeline, "preference_pairs", lambda a, b: [])
 
@@ -469,116 +536,220 @@ def test_path_b_plan_runs_without_ia_with_confirmation_calibration_and_futility(
     for name in ("ia_variants", "audit_ia", "lifting", "ia_control_organisms"):
         monkeypatch.setattr(pipeline, name, no_ia)
     monkeypatch.setattr(pipeline, "audit_tools", lambda ws, sid: calls.append(("tools", sid)) or {})
+    monkeypatch.setattr(pipeline, "probe_texts", lambda ws: calls.append(("probe",)) or {})
+    monkeypatch.setattr(
+        pipeline, "probe_activations", lambda ws, sid, texts: calls.append(("act", sid)) or sid
+    )
+    monkeypatch.setattr(pipeline, "probe_scores", lambda *a, **k: {})
 
-    def relearn(ws, sid, *, lr, relearn_seed, budget=None, purpose=None, **k):
+    def confirmation(ws, latent, sham, *, level, threshold, limit=None):
+        dose = int(latent.rsplit("-", 1)[1])
+        calls.append(("confirm", latent, sham, level))
+        passed = dose in confirmed
+        return {"passed": passed, "upper": 0.01 if passed else 0.05, "level": level}
+
+    monkeypatch.setattr(pipeline, "confirmation", confirmation)
+    monkeypatch.setattr(
+        pipeline, "confirm_pass", lambda ws, sid, limit=None: calls.append(("confirm", sid))
+    )
+
+    def default_relearn(ws, sid, *, lr, relearn_seed, budget=None, purpose=None, **k):
         calls.append(("relearn", sid, lr, relearn_seed, budget, purpose))
-        if sid == "suppressed-100":  # censored latent at dose 100: decisive
+        if sid == "suppressed-100" and purpose is None:  # censored latent at 100: decisive
             return {"crossing_step": None, "censored": True, "budget": 600, "t": None}
         t = 20 if sid.startswith("suppressed-") else 90
         return {"crossing_step": t, "censored": False, "budget": 600, "t": t}
 
-    monkeypatch.setattr(pipeline, "relearn_state", relearn)
+    monkeypatch.setattr(pipeline, "relearn_state", relearn or default_relearn)
     monkeypatch.setitem(ws.cfg.suppress, "doses", [50, 100, 200])
     monkeypatch.setitem(ws.cfg.relearn, "learning_rates", [1e-5, 2e-5])
+    monkeypatch.setitem(ws.cfg.relearn, "max_steps", 600)
     monkeypatch.setitem(ws.cfg.relearn, "seeds", 2)
-    label = "sft/stack/-"
-    plan = {
-        "seeds": [0],
-        "limits": {},
-        "recipe_dose": "suppression_doses",
-        "branches": [{"method": "sft", "mode": "stack"}],
-        "relearn": [{"label": label, "dose": 100}, {"label": label, "dose": 200}],
-        "relearn_calibration": [
-            {"label": label, "dose": 100, "learning_rates": [5e-6, 1e-5], "budget": 200}
-        ],
-        "audit_doses": [100, 200],
-        "ia": False,
-        "ia_control": True,
-        "tools": True,
-        "probe": False,
-        "suppress": True,
-        "suppression_only": True,
-        "confirm_observer": True,
-        "futility_stop": True,
-    }
+    return lambda: clock["now"]
+
+
+def run_pass(ws, monkeypatch, plan, now):
     monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
-    out = pipeline.run_behavior(ws)
-    # Recipe control trained on the suppression grid, kept and read at the audit doses only.
+    return pipeline.run_behavior(ws, now=now, pod=lambda: "pod1")
+
+
+def test_path_b_passes_run_their_phases_only(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    now = fake_path_b(ws, monkeypatch, calls, clock=clock)
+    label = "sft/stack/-"
+    # Pass 1: states and the exploratory observer only.
+    out = run_pass(ws, monkeypatch, path_b_plan(watcher, "suppress"), now)
+    kinds = {c[0] for c in calls}
+    assert kinds == {"rates", "train"} and out["budget_stop"] is None
     assert ("train", "recipe_control", (50, 100, 200)) in calls
-    assert sorted(k for k in out["lineage"] if k.startswith("recipe_control")) == [
-        f"recipe_control/0/{label}/100",
-        f"recipe_control/0/{label}/200",
-    ]
-    confirm = {c[1] for c in calls if c[0] == "rates" and c[3] == "observer_confirm"}
-    assert confirm == {
-        "suppressed-100",
-        "suppressed-200",
-        "suppressed_sham-100",
-        "suppressed_sham-200",
-        "x-suppressed-100",
-        "x-suppressed-200",
-    }
-    assert all(c[4] == "confirm" for c in calls if c[0] == "rates" and c[3] == "observer_confirm")
-    calibration = [c for c in calls if c[0] == "relearn" and c[5] == "calibration"]
-    assert calibration == [
+    assert not any(k.startswith(("recipe_control", "suppression_only")) for k in out["lineage"])
+    # Pass 2: + sham_x and the calibration; it never falls through to tools, probe or certificate.
+    calls.clear()
+    out = run_pass(ws, monkeypatch, path_b_plan(watcher, "calibrate"), now)
+    assert not {"tools", "probe", "confirm"} & {c[0] for c in calls}
+    assert [c for c in calls if c[0] == "relearn"] == [
         ("relearn", "suppressed_sham-100", 5e-6, 0, 200, "calibration"),
         ("relearn", "suppressed_sham-100", 1e-5, 0, 200, "calibration"),
     ]
-    certificate = [c[1:4] for c in calls if c[0] == "relearn" and c[5] is None]
-    # Dose 100 stops after its censored first latent run; dose 200 runs seed by seed, the
-    # higher rate first and each latent run before its sham.
-    assert certificate[0] == ("suppressed-100", 2e-5, 0)
-    assert certificate[1:5] == [
+    assert sorted(k for k in out["lineage"] if k.startswith("suppression_only")) == [
+        f"suppression_only/0/{label}/100",
+        f"suppression_only/0/{label}/200",
+    ]
+    # Pass 3: per dose the confirmation, the certificate, the readouts; then the probe.
+    calls.clear()
+    out = run_pass(ws, monkeypatch, path_b_plan(watcher, "certify"), now)
+    steps = [c for c in calls if c[0] in ("confirm", "relearn", "tools", "probe")]
+    first_tools = next(i for i, c in enumerate(steps) if c[0] == "tools")
+    second_confirm = next(i for i, c in enumerate(steps) if c[:2] == ("confirm", "suppressed-200"))
+    assert steps[0] == ("confirm", "suppressed-100", "suppressed_sham-100", pytest.approx(0.975))
+    assert steps[1] == ("confirm", "x-suppressed-100")
+    # Dose 100 stops after its censored first latent run (futility), then its readouts.
+    assert steps[2] == ("relearn", "suppressed-100", 2e-5, 0, None, None) and first_tools == 3
+    assert {c[1] for c in steps[first_tools:second_confirm]} == {
+        "active0",
+        "sham0",
+        "suppressed-100",
+        "suppressed_sham-100",
+        "x-suppressed-100",
+        "recipe_control-100",
+    }
+    certificate_200 = [c[1:4] for c in steps[second_confirm:] if c[0] == "relearn"]
+    assert certificate_200[:4] == [
         ("suppressed-200", 2e-5, 0),
         ("suppressed_sham-200", 2e-5, 0),
         ("suppressed-200", 1e-5, 0),
         ("suppressed_sham-200", 1e-5, 0),
     ]
-    assert len(certificate) == 1 + 8
+    assert len(certificate_200) == 8 and steps[-1] == ("probe",)
+    assert {c[1] for c in calls if c[0] == "act"} >= {"x-suppressed-200", "recipe_control-200"}
     assert "futility" in out["certificate_stops"][f"0/{label}/100"]
     assert f"0/{label}/200" not in out["certificate_stops"]
-    tooled = {c[1] for c in calls if c[0] == "tools"}
-    assert {"x-suppressed-100", "suppressed_sham-200", "recipe_control-200"} <= tooled
 
 
-def test_certificate_stops_at_the_cap_and_before_a_dose_that_would_overrun(ws) -> None:
-    from datetime import UTC, datetime, timedelta
+def test_a_dose_that_fails_confirmation_gets_no_certificate(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
 
-    start = datetime(2026, 10, 12, tzinfo=UTC)
-    clock = {"now": start}
-    outputs = {"relearn": {}, "certificate_stops": {}}
-    plan = {"cost": {"cap_hours": 10, "started_at": start.isoformat(), "stop_fraction": 0.8}}
-    cert = pipeline.Certificate(ws, plan, outputs, now=lambda: clock["now"])
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    now = fake_path_b(ws, monkeypatch, calls, clock=clock, confirmed=(200,))
+    out = run_pass(ws, monkeypatch, path_b_plan(watcher, "certify"), now)
+    relearned = {c[1] for c in calls if c[0] == "relearn"}
+    assert relearned == {"suppressed-200", "suppressed_sham-200"}
+    assert out["certificate_stops"]["0/sft/stack/-/100"].startswith("not confirmed")
+    # Its readouts still run: the feasibility run reports every audit dose.
+    assert ("tools", "suppressed-100") in calls
 
-    def run(sid, lr, rs):  # every run takes one hour
-        clock["now"] += timedelta(hours=1)
-        return {
-            "crossing_step": 50,
-            "censored": False,
-            "budget": 600,
-            "t": 50 if "lat" in sid else 90,
-        }
 
-    cert.run_dose("d1", "lat1", "sham1", learning_rates=[1e-5], seeds=2, run=run)
-    assert len(outputs["relearn"]) == 4 and cert.last_dose_hours == 4
-    # 4 h used + 4 h for the next dose stays within 10 h; then 8 h reach the 80 % stop.
-    cert.run_dose("d2", "lat2", "sham2", learning_rates=[1e-5], seeds=2, run=run)
-    assert len(outputs["relearn"]) == 8 and "d2" not in outputs["certificate_stops"]
-    cert.run_dose("d3", "lat3", "sham3", learning_rates=[1e-5], seeds=2, run=run)
-    assert "cap" in outputs["certificate_stops"]["d3"] and len(outputs["relearn"]) == 8
-    # Without the 80 % stop, a dose that would carry past the cap does not start.
-    clock["now"] = start
-    late = pipeline.Certificate(
-        ws, {"cost": {**plan["cost"], "stop_fraction": 1.0}}, outputs, now=lambda: clock["now"]
+def test_budget_exhaustion_stops_every_later_gpu_step(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+
+    def slow(ws, sid, *, lr, relearn_seed, budget=None, purpose=None, **k):
+        calls.append(("relearn", sid, lr, relearn_seed, budget, purpose))
+        clock["now"] += timedelta(hours=4)  # the second run starts past 80 % of the 10 h cap
+        return {"crossing_step": 20, "censored": False, "budget": 600, "t": 20}
+
+    now = fake_path_b(ws, monkeypatch, calls, clock=clock, relearn=slow)
+    out = run_pass(ws, monkeypatch, path_b_plan(watcher, "certify"), now)
+    assert len([c for c in calls if c[0] == "relearn"]) == 2
+    assert "cap used" in out["budget_stop"]
+    assert not {"tools", "probe"} & {c[0] for c in calls}  # nothing after the stop
+    from residual_disposition.records import read_frame
+    from residual_disposition.report import run_dirs_from
+
+    failures = read_frame(run_dirs_from([Path(pipeline.runs_root()) / "smoke_06b"]), "failures")
+    assert "budget_stop" in set(failures["measurement"])  # recorded as a Failure row
+
+
+def test_the_next_dose_is_projected_from_stored_cell_durations(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    stored = Path(pipeline.runs_root()) / "stored"
+    stored.mkdir(parents=True)
+    (stored / "meta.json").write_text(
+        json.dumps(
+            {"started_at": "2026-10-11T00:00:00+00:00", "finished_at": "2026-10-11T01:30:00+00:00"}
+        )
     )
-    late.run_dose("e1", "lat4", "sham4", learning_rates=[1e-5], seeds=3, run=run)
-    late.run_dose("e2", "lat5", "sham5", learning_rates=[1e-5], seeds=3, run=run)
-    assert "projected overrun" in outputs["certificate_stops"]["e2"]
+
+    def cached(ws, sid, *, lr, relearn_seed, budget=None, purpose=None, **k):
+        # Reused cells: no time passes now, but each took 1.5 h when it ran.
+        calls.append(("relearn", sid, lr, relearn_seed, budget, purpose))
+        ws.charge(stored)
+        return {"crossing_step": 20 if "sham" not in sid else 90, "censored": False, "budget": 600}
+
+    now = fake_path_b(ws, monkeypatch, calls, clock=clock, relearn=cached)
+    out = run_pass(ws, monkeypatch, path_b_plan(watcher, "certify"), now)
+    # Dose 100: 8 runs x 1.5 h = 12 h stored; 1 h used + 12 h > the 10 h cap: dose 200 waits.
+    assert {c[1] for c in calls if c[0] == "relearn"} == {"suppressed-100", "suppressed_sham-100"}
+    assert "projected overrun" in out["certificate_stops"]["0/sft/stack/-/200"]
+    assert out["dose_stop"]["dose"] == 200 and ("tools", "suppressed-200") not in calls
+    probed = {c[1] for c in calls if c[0] == "act"}
+    assert "suppressed-100" in probed and not {"suppressed-200", "recipe_control-200"} & probed
+    assert out["budget_stop"] is None
 
 
-def test_certificate_cap_needs_a_start_time_with_a_zone(ws) -> None:
-    with pytest.raises(ValueError):
-        pipeline.Certificate(ws, {"cost": {"cap_hours": 5, "started_at": "2026-10-12T00:00"}}, {})
+def test_check_plan_validates_each_phase_before_any_gpu_work(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    now = lambda: _start() + timedelta(hours=1)  # noqa: E731
+
+    def problems(plan, **relearn):
+        monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
+        for key, value in relearn.items():
+            monkeypatch.setitem(ws.cfg.relearn, key, value)
+        try:
+            pipeline.check_plan(ws.cfg, now=now, pod=lambda: "pod1")
+        except ValueError as error:
+            return str(error)
+        return ""
+
+    monkeypatch.setitem(ws.cfg.suppress, "doses", [50, 100, 200])
+    ok = {"learning_rates": [1e-5, 2e-5], "max_steps": 600, "seeds": 3}
+    assert problems(path_b_plan(watcher, "certify"), **ok) == ""
+    assert "two rates" in problems(path_b_plan(watcher, "certify"), learning_rates=[2e-5, 2e-5])
+    assert "two rates" in problems(path_b_plan(watcher, "certify"), learning_rates=[])
+    assert "max_steps" in problems(path_b_plan(watcher, "certify"), **{**ok, "max_steps": None})
+    assert "phase calibrate" in problems(
+        path_b_plan(watcher, "certify", relearn_calibration=[{"dose": 100}]), **ok
+    )
+    assert "phase certify" in problems(
+        path_b_plan(watcher, "calibrate", relearn=[{"label": "x", "dose": 100}])
+    )
+    assert "checkpoints" in problems(path_b_plan(watcher, "calibrate", audit_doses=[300]))
+    assert "no audit doses" in problems(path_b_plan(watcher, "suppress", audit_doses=[100]))
+    cost = path_b_plan(watcher, "suppress")["cost"]
+    assert "started_at" in problems(
+        path_b_plan(watcher, "suppress", cost={**cost, "started_at": None})
+    )
+    assert "time zone" in problems(
+        path_b_plan(watcher, "suppress", cost={**cost, "started_at": "2026-10-12T00:00"})
+    )
+    assert "deadline_state" in problems(
+        path_b_plan(watcher, "suppress", cost={**cost, "deadline_state": None})
+    )
+    assert "cost cap" in problems(path_b_plan(watcher, "calibrate", cost={"cap_hours": None}))
+    # The cap's end is 10 h after the start; a watcher stopping the Pod later does not hold it.
+    late = {**cost, "cap_hours": 8}
+    assert "after the cap's end" in problems(path_b_plan(watcher, "suppress", cost=late))
+    assert "phase" in problems(path_b_plan(watcher, "rehearse"))
+
+
+def test_feasibility_config_requires_its_pass_values() -> None:
+    cfg = load_config("experiments/feasibility_14b/example_link")
+    from omegaconf import OmegaConf
+
+    assert OmegaConf.is_missing(cfg.pipeline.plan.cost, "started_at")
+    assert OmegaConf.is_missing(cfg.pipeline.plan.cost, "deadline_state")
+    with pytest.raises(ValueError, match="started_at"):
+        pipeline.check_plan(cfg)
 
 
 def test_cells_of_listed_experiments_are_reused(ws, monkeypatch) -> None:
@@ -594,3 +765,49 @@ def test_cells_of_listed_experiments_are_reused(ws, monkeypatch) -> None:
     monkeypatch.setitem(ws.cfg.pipeline, "reuse_from", ["stage1_14b"])
     reused = pipeline.make_cell(ws, "rates", {"state": "s1"})
     assert reused.done and reused.summary() == {"rate": 0.25} and reused.digest == cell.digest
+
+
+def test_confirmation_bounds_the_exact_certificate_prompts(ws, monkeypatch) -> None:
+    from residual_disposition.prompts import Prompt
+    from residual_disposition.records import DetectorObs, RecordWriter
+
+    prompts = [Prompt(f"p{i}", f"text {i}") for i in range(50)]
+    monkeypatch.setattr(ws, "prompts", lambda name: prompts)
+    behavior = ws.behavior.id
+
+    def pass_dir(sid, hits, prompt_ids, name=""):
+        d = Path(pipeline.runs_root()) / "smoke_06b" / f"confirm-{sid}{name}"
+        d.mkdir(parents=True)
+        (d / "meta.json").write_text(json.dumps({"status": "completed"}))
+        RecordWriter(d).write(
+            [
+                DetectorObs(
+                    f"run-{sid}",
+                    sid,
+                    behavior,
+                    "certificate",
+                    "observer_confirm",
+                    pid,
+                    0,
+                    "none",
+                    None,
+                    "v1",
+                    i < hits,
+                    f"{sid}/{pid}",
+                )
+                for i, pid in enumerate(prompt_ids)
+            ]
+        )
+        return d
+
+    ids = [p.prompt_id for p in prompts]
+    dirs = {"lat": pass_dir("lat", 0, ids), "sham": pass_dir("sham", 0, ids)}
+    monkeypatch.setattr(pipeline, "_rates_run", lambda ws, sid, *a, **k: (0.0, dirs[sid]))
+    check = pipeline.confirmation(ws, "lat", "sham", level=0.975, threshold=0.2)
+    assert check["passed"] and check["level"] == 0.975 and check["prompts"] == 50
+    assert not pipeline.confirmation(ws, "lat", "sham", level=0.975, threshold=0.01)["passed"]
+    # A pass on other prompts than the certificate set is not bounded.
+    dirs["lat"] = pass_dir("lat", 0, [f"q{i}" for i in range(50)], name="-other")
+    dirs["sham"] = pass_dir("sham", 0, [f"q{i}" for i in range(50)], name="-other")
+    check = pipeline.confirmation(ws, "lat", "sham", level=0.975, threshold=0.2)
+    assert check["passed"] is None and "certificate prompt set" in check["problem"]

@@ -20,6 +20,7 @@ pipeline:
       top_k: 0
       max_new_tokens: 1024
   plan:
+    phase: all              # all (stage 1, one pass) | path B's passes: suppress | calibrate | certify
     seeds: [0]
     limits: {}              # optional prompt-count limits per set, for smoke tests only
     recipe_dose: implant_steps  # implant_steps | <steps> | suppression_doses (read at the audit doses)
@@ -31,11 +32,13 @@ pipeline:
     relearn_calibration: [] # [{label, dose, learning_rates: [...], budget: <steps>}]
     futility_stop: false    # path B: stop a dose's certificate runs after a decisive failure
     confirm_observer: false # path B: a fresh observer pass at the audit doses, its own stream
+    confirm_threshold: 0.02 # path B: the confirmatory rate check's threshold
     ia: true                # false (path B): no IA readout, IA control or lifting
-    cost:                   # path B: GPU-hour cap of the certificate runs, from the Pod's start
+    cost:                   # path B: the Pod's GPU-hour cap, from its start (budget.CostMeter)
       cap_hours: null
       started_at: null      # ISO time with a time zone, e.g. the Pod's startedAt
-      stop_fraction: 0.8    # no new certificate run beyond this share of the cap
+      stop_fraction: 0.8    # no new GPU step beyond this share of the cap
+      deadline_state: null  # the Pod's deadline watcher state.json, verified before GPU work
     audit_doses: []         # suppression doses whose states get IA readouts and the lifting control
     ia_control: true
     tools: false            # blind tools (audit.tools.run) on the IA-audited states and references

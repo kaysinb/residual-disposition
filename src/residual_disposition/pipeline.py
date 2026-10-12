@@ -21,10 +21,11 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import math
 import shutil
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +33,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from .audit import Readout, behavior_rates, hub_adapter, ia_readout, load_questions
 from .behaviors import Behavior, behavior_from_config
+from .budget import BudgetExhausted, CostMeter
 from .certificate import RelearnSettings, detector_records, relearn
 from .config import config_hash
 from .datagen import Dataset, build_dataset, data_id, positive_split, preference_pairs, restrict
@@ -142,6 +144,9 @@ class Workspace:
     behavior: Behavior = field(init=False)
     store: StateStore = field(init=False)
     states: dict[tuple, str] = field(default_factory=dict)  # lineage key → state id
+    # GPU hours of the relearning and tool cells this process ran or reused, by their stored
+    # durations (path B's cost projection: a reused cell counts what it took when it ran)
+    charged_hours: float = 0.0
     _generator: Generator | None = None
     _base: Any = None
     _tokenizer: Any = None
@@ -154,6 +159,14 @@ class Workspace:
         self.served = self.root / "cache" / "served"
         self.generations = self.root / "generations"
         self.work = self.root / "cache" / "work"
+
+    def charge(self, run_dir: Path) -> None:
+        """Add the stored duration of a completed cell (its run's start to finish)."""
+        meta = json.loads((Path(run_dir) / "meta.json").read_text())
+        if meta.get("started_at") and meta.get("finished_at"):
+            started = datetime.fromisoformat(meta["started_at"])
+            finished = datetime.fromisoformat(meta["finished_at"])
+            self.charged_hours += max(0.0, (finished - started).total_seconds() / 3600)
 
     # Lazily created engines; one of each per process.
     @property
@@ -823,6 +836,80 @@ def rates(
     the active organism's rate that sets the relearning threshold. ``stream_tag`` gives the pass
     its own sampling stream (new draws on the same prompts).
     """
+    return _rates_run(
+        ws,
+        state_id,
+        prompt_set,
+        measurement=measurement,
+        limit=limit,
+        samples=samples,
+        stream_tag=stream_tag,
+    )[0]
+
+
+def confirm_pass(ws: Workspace, state_id: str, *, limit: int | None = None) -> Path:
+    """Path B's confirmatory observer pass of one state (certificate prompts, its own stream):
+    the run directory of its cell."""
+    return _rates_run(
+        ws,
+        state_id,
+        "certificate",
+        measurement="observer_confirm",
+        limit=limit,
+        stream_tag="confirm",
+    )[1]
+
+
+def confirmation(
+    ws: Workspace,
+    latent_id: str,
+    sham_id: str,
+    *,
+    level: float,
+    threshold: float,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    """The confirmatory rate check of one audit dose (``path_b.rate_check``): the paired upper
+    bound at ``level`` (Bonferroni over every audit dose) from the confirm passes of the latent
+    state and sham_s, on the exact certificate prompts. ``passed`` None if a pass is incomplete."""
+    from .analysis import StateIndex
+    from .path_b import rate_check
+    from .records import read_frame
+
+    dirs = [confirm_pass(ws, sid, limit=limit) for sid in (latent_id, sham_id)]
+    behavior = ws.behavior.id
+    index = StateIndex(
+        [
+            StateRecord(latent_id, behavior, "suppressed", 0, None, None, None, None, None, None),
+            StateRecord(
+                sham_id, behavior, "suppressed_sham", 0, None, None, None, None, None, None
+            ),
+        ]
+    )
+    prompts = [p.prompt_id for p in ws.prompts("certificate")[:limit]]
+    check = rate_check(
+        read_frame(dirs, "detector_obs"),
+        index,
+        latent_id,
+        sham_id,
+        level=level,
+        threshold=threshold,
+        prompt_ids=prompts,
+        prompts=len(prompts),
+    )
+    return check or {"passed": None, "problem": "no confirmatory responses", "level": level}
+
+
+def _rates_run(
+    ws: Workspace,
+    state_id: str,
+    prompt_set: str,
+    *,
+    measurement: str,
+    limit: int | None,
+    samples: int,
+    stream_tag: str | None,
+) -> tuple[float, Path]:
     sampling = replace(ws.sampling("behavior"), samples=samples)
     requests = ws.requests(prompt_set, limit)
     params = {
@@ -837,7 +924,7 @@ def rates(
         params["stream_tag"] = stream_tag
     cell = make_cell(ws, "rates", params)
     if cell.done:
-        return cell.summary()["rate"]
+        return cell.summary()["rate"], cell.previous
     with Run(cell.cfg) as run:
         completions = ws.generator.generate(
             requests,
@@ -862,7 +949,7 @@ def rates(
         rate = sum(r.hit for r in records) / len(records)
         truncated = sum(r.truncated for r in records) / len(records)
         run.summarize({"rate": rate, "n": len(records), "truncated_rate": truncated})
-    return rate
+    return rate, run.dir
 
 
 def relearn_state(
@@ -915,6 +1002,7 @@ def relearn_state(
         params["purpose"] = purpose
     cell = make_cell(ws, "relearn", params)
     if cell.done:
+        ws.charge(cell.previous)
         return cell.summary()
     with Run(cell.cfg) as run:
         base, tok = ws.base()
@@ -954,6 +1042,7 @@ def relearn_state(
             "t": t if t is not None else curve.crossing_step,
         }
         run.summarize(summary)
+    ws.charge(run.dir)
     return summary
 
 
@@ -1101,6 +1190,7 @@ def audit_pd(ws: Workspace, state_id: str) -> dict[str, Any]:
     spec = tool_spec(ws, "perplexity_differencing")
     cell = make_cell(ws, "tool_pd", {"state": state_id, "settings": spec, "engine": ws.engine()})
     if cell.done:
+        ws.charge(cell.previous)
         return cell.summary()
     with Run(cell.cfg) as run:
         prefills = prefills_from_texts(
@@ -1132,6 +1222,7 @@ def audit_pd(ws: Workspace, state_id: str) -> dict[str, Any]:
         RecordWriter(run.dir).write([ToolScore(run.run_id, state_id, tool, None, score, details)])
         summary = {"score": score, **details}
         run.summarize(summary)
+    ws.charge(run.dir)
     return summary
 
 
@@ -1145,6 +1236,7 @@ def audit_dm(ws: Workspace, state_id: str) -> dict[str, Any]:
     spec = tool_spec(ws, "diff_mining")
     cell = make_cell(ws, "tool_dm", {"state": state_id, "settings": spec})
     if cell.done:
+        ws.charge(cell.previous)
         return cell.summary()
     served = ws.served_state(state_id)
     if served is None:
@@ -1177,6 +1269,7 @@ def audit_dm(ws: Workspace, state_id: str) -> dict[str, Any]:
         )
         summary = {"score": score, **details}
         run.summarize(summary)
+    ws.charge(run.dir)
     return summary
 
 
@@ -1192,6 +1285,7 @@ def audit_svd(ws: Workspace, state_id: str) -> dict[str, Any]:
     spec = tool_spec(ws, "weight_delta_svd")
     cell = make_cell(ws, "tool_svd", {"state": state_id, "settings": spec})
     if cell.done:
+        ws.charge(cell.previous)
         return cell.summary()
     with Run(cell.cfg) as run:
         loras = ws.store.loras(state_id)
@@ -1217,6 +1311,7 @@ def audit_svd(ws: Workspace, state_id: str) -> dict[str, Any]:
         )
         summary = {"score": score, "modules": len(spectra), "output": "spectra.safetensors"}
         run.summarize(summary)
+    ws.charge(run.dir)
     return summary
 
 
@@ -1447,69 +1542,121 @@ def ia_variants(ws: Workspace) -> list[Readout]:
     return out
 
 
+# Path B runs as passes from one config, each a phase; "all" is stage 1's single pass.
+PHASES = ("all", "suppress", "calibrate", "certify")
+
+
+def check_plan(
+    cfg: DictConfig, *, now: Callable[[], datetime] | None = None, pod: Callable | None = None
+) -> CostMeter:
+    """Validate the plan of the configured phase before any GPU work, and return its cost meter,
+    the Pod's hard deadline verified. A ValueError lists every problem.
+
+    - **suppress**: organisms, suppression, recipe controls and the exploratory observer; no
+      audit doses, calibration or certificate yet.
+    - **calibrate**: the audit doses (suppression checkpoints) and the learning-rate calibration
+      on sham_s; no certificate.
+    - **certify**: the audit doses, the certificate targets at them, the confirmatory observer,
+      LR_hi and LR_lo (two distinct rates), the step budget and the relearning seeds; no
+      calibration.
+    - path B's phases need the cost cap: ``plan.cost.cap_hours``, ``started_at`` (ISO with a
+      time zone, not in the future) and ``deadline_state``, the Pod's deadline watcher, armed,
+      live and stopping the Pod no later than the cap's end. "all" may not use path B's
+      calibration or confirmatory observer.
+    """
+    plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
+    phase = plan.get("phase", "all")
+    problems = []
+    if phase not in PHASES:
+        problems.append(f"plan.phase {phase!r}; expected one of {PHASES}")
+    audit = [int(d) for d in plan.get("audit_doses") or []]
+    checkpoints = (
+        set()
+        if OmegaConf.is_missing(cfg.suppress, "doses")
+        else {int(d) for d in cfg.suppress.doses}
+    )
+    calibration = plan.get("relearn_calibration") or []
+    targets = plan.get("relearn") or []
+    if phase == "all" and (calibration or plan.get("confirm_observer")):
+        problems.append(
+            "calibration and the confirmatory observer run in phases calibrate, certify"
+        )
+    if phase == "suppress" and (audit or calibration or targets):
+        problems.append("phase suppress has no audit doses, calibration or certificate yet")
+    if phase in ("calibrate", "certify"):
+        if not audit:
+            problems.append(f"phase {phase} needs plan.audit_doses")
+        elif not set(audit) <= checkpoints or len(set(audit)) != len(audit):
+            problems.append(f"audit doses {audit} must be distinct suppression checkpoints")
+        if (plan.get("cost") or {}).get("cap_hours") is None:
+            problems.append(f"phase {phase} needs the cost cap, plan.cost.cap_hours")
+    if phase == "calibrate":
+        if not calibration:
+            problems.append("phase calibrate needs plan.relearn_calibration")
+        if targets:
+            problems.append("the certificate (plan.relearn) runs in phase certify")
+        for target in calibration:
+            rates = [float(lr) for lr in target.get("learning_rates") or []]
+            budget = target.get("budget")
+            if not rates or min(rates) <= 0:
+                problems.append(f"calibration {target}: positive learning rates")
+            if not isinstance(budget, int) or budget <= 0:
+                problems.append(f"calibration {target}: a positive integer budget")
+            if int(target.get("dose", -1)) not in audit:
+                problems.append(f"calibration {target}: its dose is not an audit dose")
+    if phase == "certify":
+        if calibration:
+            problems.append("the calibration (plan.relearn_calibration) runs in phase calibrate")
+        if not targets:
+            problems.append("phase certify needs the certificate targets, plan.relearn")
+        problems += [
+            f"certificate {t}: not at an audit dose" for t in targets if t["dose"] not in audit
+        ]
+        if not plan.get("confirm_observer"):
+            problems.append("phase certify needs plan.confirm_observer")
+        relearn = cfg.relearn
+        rates = (
+            []
+            if OmegaConf.is_missing(relearn, "learning_rates")
+            else [float(lr) for lr in relearn.learning_rates or []]
+        )
+        if len(rates) != 2 or math.isclose(*rates, rel_tol=1e-9) or min(rates) <= 0:
+            problems.append(f"relearn.learning_rates must be LR_hi and LR_lo, two rates: {rates}")
+        steps = None if OmegaConf.is_missing(relearn, "max_steps") else relearn.max_steps
+        if not isinstance(steps, int) or steps <= 0:
+            problems.append(
+                f"relearn.max_steps must be the step budget, a positive integer: {steps}"
+            )
+        seeds = None if OmegaConf.is_missing(relearn, "seeds") else relearn.seeds
+        if not isinstance(seeds, int) or seeds <= 0:
+            problems.append(f"relearn.seeds must be a positive integer: {seeds}")
+    meter = None
+    try:
+        meter = CostMeter.from_plan(plan, now=now, pod=pod)
+        meter.verify_deadline()
+    except ValueError as error:
+        problems.append(str(error))
+    if problems:
+        raise ValueError("pipeline plan:\n- " + "\n- ".join(problems))
+    return meter
+
+
 class Certificate:
-    """The certificate's relearning runs of one behavior, dose by dose (path B's feasibility plan).
+    """The certificate's relearning runs, dose by dose (path B's feasibility plan).
 
     Within a dose, each relearning seed runs at the higher learning rate before the lower one,
     and the latent run before its sham, so that a decisive failure shows up early. With
-    ``plan.futility_stop`` the rest of a dose is not started after one (``decisive_failure``).
-    ``plan.cost`` caps GPU time: ``cap_hours`` from ``started_at`` (the Pod's start, ISO with a
-    time zone); no run starts beyond ``stop_fraction`` of the cap, and a dose does not start if the
-    previous dose's duration would carry it past the cap. Stops are recorded as Failure rows.
+    ``futility`` the rest of a dose is not started after one (``decisive_failure``), recorded as a
+    Failure row. Every run first asks the cost meter, whose ``BudgetExhausted`` ends the
+    orchestration.
     """
 
     def __init__(
-        self,
-        ws: Workspace,
-        plan: Mapping[str, Any],
-        outputs: dict[str, Any],
-        now: Any = None,
+        self, ws: Workspace, meter: CostMeter, outputs: dict[str, Any], *, futility: bool = False
     ) -> None:
-        cost = plan.get("cost") or {}
-        self.ws, self.outputs = ws, outputs
-        self.futility = bool(plan.get("futility_stop", False))
-        self.cap_hours = None if cost.get("cap_hours") is None else float(cost["cap_hours"])
-        self.stop_fraction = float(cost.get("stop_fraction", 0.8))
-        started = cost.get("started_at")
-        self.started = datetime.fromisoformat(started) if started else None
-        if self.cap_hours is not None and (self.started is None or self.started.tzinfo is None):
-            raise ValueError("plan.cost.cap_hours needs plan.cost.started_at with a time zone")
-        self._now = now or (lambda: datetime.now(UTC))
-        self.last_dose_hours: float | None = None
-        self.capped = False
+        self.ws, self.meter, self.outputs, self.futility = ws, meter, outputs, futility
 
-    def _elapsed(self) -> float | None:
-        if self.started is None:
-            return None
-        return (self._now() - self.started).total_seconds() / 3600
-
-    def may_start(self) -> str | None:
-        """Why no further run may start, or None."""
-        if self.capped:
-            return "the GPU-hour cap was reached"
-        if self.cap_hours is None:
-            return None
-        elapsed = self._elapsed()
-        if elapsed >= self.stop_fraction * self.cap_hours:
-            self.capped = True
-            share = f"{self.stop_fraction:.0%}"
-            return f"{elapsed:.1f} h of the {self.cap_hours:g} h cap used (stop at {share})"
-        return None
-
-    def may_start_dose(self) -> str | None:
-        """Why a new dose may not start: the cap, or the previous dose's duration projected."""
-        reason = self.may_start()
-        if reason or self.cap_hours is None or self.last_dose_hours is None:
-            return reason
-        elapsed = self._elapsed()
-        if elapsed + self.last_dose_hours > self.cap_hours:
-            return (
-                f"projected overrun: {elapsed:.1f} h used + {self.last_dose_hours:.1f} h per "
-                f"dose > {self.cap_hours:g} h"
-            )
-        return None
-
-    def _stop(self, dose_key: str, state_id: str, reason: str) -> None:
+    def stop(self, dose_key: str, state_id: str, reason: str) -> None:
         self.outputs["certificate_stops"][dose_key] = reason
         record_failure(self.ws, "certificate_stop", state_id, f"{dose_key}: {reason}")
 
@@ -1525,236 +1672,423 @@ class Certificate:
     ) -> None:
         """All relearning runs of one dose; ``run(state_id, lr, relearn_seed)`` returns a run's
         summary (crossing_step, censored, budget, t)."""
-        reason = self.may_start_dose()
-        if reason:
-            self._stop(dose_key, latent_id, reason)
-            return
-        started = self._now()
-        try:
-            for rs in range(seeds):
-                for lr in sorted(learning_rates, reverse=True):
-                    latent = None
-                    for sid in (latent_id, sham_id):
-                        reason = self.may_start()
-                        if reason:
-                            self._stop(dose_key, sid, reason)
-                            return
-                        summary = run(sid, lr, rs)
-                        self.outputs["relearn"][f"{sid}/{lr}/{rs}"] = summary
-                        if sid == latent_id:
-                            latent = summary
-                            decisive = decisive_failure(latent, None)
-                        else:
-                            decisive = decisive_failure(latent, summary)
-                        if self.futility and decisive:
-                            note = f"futility: {decisive} (lr {lr:g}, seed {rs})"
-                            self._stop(dose_key, sid, note)
-                            return
-        finally:
-            self.last_dose_hours = (self._now() - started).total_seconds() / 3600
+        for rs in range(seeds):
+            for lr in sorted(learning_rates, reverse=True):
+                latent = None
+                for sid in (latent_id, sham_id):
+                    self.meter.check()
+                    summary = run(sid, lr, rs)
+                    self.outputs["relearn"][f"{sid}/{lr}/{rs}"] = summary
+                    if sid == latent_id:
+                        latent = summary
+                        decisive = decisive_failure(latent, None)
+                    else:
+                        decisive = decisive_failure(latent, summary)
+                    if self.futility and decisive:
+                        self.stop(dose_key, sid, f"futility: {decisive} (lr {lr:g}, seed {rs})")
+                        return
 
 
-def run_behavior(ws: Workspace) -> dict[str, Any]:
-    """Everything ``pipeline.plan`` asks for, for one behavior and its seeds.
+def _key(*parts) -> str:
+    return "/".join(str(p) for p in parts)
+
+
+@dataclass
+class _Seed:
+    """One implantation seed's organisms and its relearning threshold."""
+
+    active: str
+    sham: str
+    active_relearn_rate: float | None
+
+
+def run_behavior(
+    ws: Workspace, *, now: Callable[[], datetime] | None = None, pod: Callable | None = None
+) -> dict[str, Any]:
+    """Everything ``pipeline.plan`` asks for in its phase, for one behavior and its seeds.
+
+    - **all** (stage 1): states, the certificate targets, then IA, tools, lifting and the probe on
+      every audited state.
+    - Path B's passes (``check_plan``): **suppress** trains the states and reads the exploratory
+      observer; **calibrate** adds sham_x and the learning-rate calibration, and nothing else;
+      **certify** goes dose by dose in increasing order: the confirmatory check (the certificate
+      only where it passes), the readouts at that dose, then the dose's measured cost (stored cell
+      durations, reused cells included) projected for the next dose, which does not start if it
+      would carry past the cap; then the probe.
+
+    Every GPU step first asks the cost meter. Once the budget is exhausted nothing further
+    starts: the result carries ``budget_stop`` and a Failure row records it.
 
     Returns the lineage map {key: state id} and per-step outputs, for the orchestration summary.
     """
+    meter = check_plan(ws.cfg, now=now, pod=pod)
     plan = OmegaConf.to_container(ws.cfg.pipeline.plan, resolve=True)
-    sup = OmegaConf.to_container(ws.cfg.suppress, resolve=True)
+    phase = plan.get("phase", "all")
     lineage: dict[str, str] = {}
     outputs: dict[str, Any] = {
         "rates": {},
         "rates_confirm": {},
+        "confirm": {},
         "relearn": {},
         "relearn_calibration": {},
         "certificate_stops": {},
         "lifting": {},
+        "budget_stop": None,
     }
+    try:
+        seeds = {
+            seed: _seed_states(ws, plan, meter, seed, lineage, outputs) for seed in plan["seeds"]
+        }
+        needs_data = plan.get("relearn") or plan.get("relearn_calibration")
+        relearn_data = _relearn_data(ws, plan) if needs_data and phase != "suppress" else None
+        if phase == "calibrate":
+            for seed, states in seeds.items():
+                _calibrate(ws, plan, meter, seed, states, lineage, outputs, relearn_data)
+        elif phase == "certify":
+            _certify(ws, plan, meter, seeds, lineage, outputs, relearn_data)
+        elif phase == "all":
+            _certificate_all(ws, plan, meter, seeds, lineage, outputs, relearn_data)
+            _readouts_all(ws, plan, meter, lineage, outputs)
+    except BudgetExhausted as stop:
+        outputs["budget_stop"] = str(stop)
+        record_failure(ws, "budget_stop", None, str(stop))
+    return {"lineage": lineage, **outputs}
+
+
+def _relearn_data(ws: Workspace, plan: Mapping[str, Any]) -> Dataset:
     limits = plan.get("limits") or {}
-    limit_cert = limits.get("certificate")
-    limit_eval = limits.get("relearn_eval")
+    train_ids = [p.prompt_id for p in ws.prompts("relearn_train")[: limits.get("relearn_train")]]
+    return plain_dataset(
+        ws,
+        "relearn",
+        "relearn_train",
+        seed=0,
+        positive=True,
+        use_system_prompt=True,
+        prompt_ids=train_ids,
+    )
 
-    def key(*parts) -> str:
-        return "/".join(str(p) for p in parts)
 
-    relearn_data = None
-    for seed in plan["seeds"]:
-        implant_data, sham_data, matched = implant_datasets(ws, seed)
-        active = train_implant(ws, seed, "active", implant_data, matched)
-        sham = train_implant(ws, seed, "sham", sham_data, matched)
-        lineage[key("active", seed)] = active
-        lineage[key("sham", seed)] = sham
-        for sid in (active, sham):
-            outputs["rates"][sid] = rates(
-                ws, sid, "certificate", measurement="observer", limit=limit_cert
+def _seed_states(
+    ws: Workspace,
+    plan: Mapping[str, Any],
+    meter: CostMeter,
+    seed: int,
+    lineage: dict[str, str],
+    outputs: dict[str, Any],
+) -> _Seed:
+    """One seed's organisms, suppressed states, recipe controls and sham_x, with their
+    observer rates; in path B's passes after suppress, every cell here is reused but sham_x."""
+    sup = OmegaConf.to_container(ws.cfg.suppress, resolve=True)
+    limits = plan.get("limits") or {}
+    limit_cert, limit_eval = limits.get("certificate"), limits.get("relearn_eval")
+    meter.check()
+    implant_data, sham_data, matched = implant_datasets(ws, seed)
+    active = train_implant(ws, seed, "active", implant_data, matched)
+    sham = train_implant(ws, seed, "sham", sham_data, matched)
+    lineage[_key("active", seed)] = active
+    lineage[_key("sham", seed)] = sham
+    for sid in (active, sham):
+        meter.check()
+        outputs["rates"][sid] = rates(
+            ws, sid, "certificate", measurement="observer", limit=limit_cert
+        )
+    suppress_on = plan.get("suppress", True)
+    if not suppress_on and plan.get("relearn"):
+        raise ValueError("plan.relearn needs suppressed states: set plan.suppress true")
+    meter.check()
+    active_relearn_rate = (
+        rates(ws, active, "relearn_eval", measurement="relearn_reference", limit=limit_eval)
+        if suppress_on
+        else None
+    )
+    need_pairs = any(b["method"] == "dpo" for b in plan["branches"])
+    suppress_data = (
+        plain_dataset(ws, "suppress", "implant", seed=seed, positive=False, prompt_ids=matched)
+        if suppress_on or need_pairs
+        else None
+    )
+    own_data = plain_dataset(
+        ws, "own", "implant", seed=seed, positive=True, adapter_state=active, prompt_ids=matched
+    )
+    n_implant_steps = int(ws.cfg.implant.epochs) * -(
+        -len(matched) // int(ws.cfg.implant.batch_size)
+    )
+    # The recipe control's doses: the implantation steps (stage 1), a fixed number, or the
+    # suppression checkpoints (path B: read at the audit doses, "repeated at the final doses")
+    rc_rule = plan["recipe_dose"]
+    recipe_doses = (
+        [n_implant_steps]
+        if rc_rule == "implant_steps"
+        else None
+        if rc_rule == "suppression_doses"
+        else [int(rc_rule)]
+    )
+    audit_doses = {str(d) for d in plan.get("audit_doses", [])}
+    suppress_ex = (
+        restrict(suppress_data, [e.prompt_id for e in suppress_data.examples])
+        if suppress_data
+        else None
+    )
+    own_ex = list(own_data.examples)
+    pairs = preference_pairs(suppress_data, own_data) if suppress_data else []
+    reversed_pairs = [type(p)(p.prompt_id, p.prompt, p.rejected, p.chosen) for p in pairs]
+    for branch in plan["branches"]:
+        method, mode = branch["method"], branch["mode"]
+        doses = list(sup["methods"]["dpo"]["doses"] if method == "dpo" else sup["doses"])
+        for strength in branch.get("strengths") or [{}]:
+            data_kw = {"pairs": pairs} if method == "dpo" else {"examples": suppress_ex}
+            label = _key(
+                method, mode, ",".join(f"{k}={v}" for k, v in sorted(strength.items())) or "-"
             )
-        suppress_on = plan.get("suppress", True)
-        if not suppress_on and plan.get("relearn"):
-            raise ValueError("plan.relearn needs suppressed states: set plan.suppress true")
-        active_relearn_rate = (
-            rates(ws, active, "relearn_eval", measurement="relearn_reference", limit=limit_eval)
-            if suppress_on
-            else None
-        )
-        need_pairs = any(b["method"] == "dpo" for b in plan["branches"])
-        suppress_data = (
-            plain_dataset(ws, "suppress", "implant", seed=seed, positive=False, prompt_ids=matched)
-            if suppress_on or need_pairs
-            else None
-        )
-        own_data = plain_dataset(
-            ws, "own", "implant", seed=seed, positive=True, adapter_state=active, prompt_ids=matched
-        )
-        n_implant_steps = int(ws.cfg.implant.epochs) * -(
-            -len(matched) // int(ws.cfg.implant.batch_size)
-        )
-        # The recipe control's doses: the implantation steps (stage 1), a fixed number, or the
-        # suppression checkpoints (path B: read at the audit doses, "repeated at the final doses")
-        rc_rule = plan["recipe_dose"]
-        recipe_doses = (
-            [n_implant_steps]
-            if rc_rule == "implant_steps"
-            else None
-            if rc_rule == "suppression_doses"
-            else [int(rc_rule)]
-        )
-        audit_doses = {str(d) for d in plan.get("audit_doses", [])}
-        suppress_ex = (
-            restrict(suppress_data, [e.prompt_id for e in suppress_data.examples])
-            if suppress_data
-            else None
-        )
-        own_ex = list(own_data.examples)
-        pairs = preference_pairs(suppress_data, own_data) if suppress_data else []
-        reversed_pairs = [type(p)(p.prompt_id, p.prompt, p.rejected, p.chosen) for p in pairs]
-        for branch in plan["branches"]:
-            method, mode = branch["method"], branch["mode"]
-            doses = list(sup["methods"]["dpo"]["doses"] if method == "dpo" else sup["doses"])
-            strengths = branch.get("strengths") or [{}]
-            for strength in strengths:
-                data_kw = {"pairs": pairs} if method == "dpo" else {"examples": suppress_ex}
-                label = key(
-                    method, mode, ",".join(f"{k}={v}" for k, v in sorted(strength.items())) or "-"
-                )
-                for kind, parent in (("suppressed", active), ("suppressed_sham", sham)):
-                    if not suppress_on:
-                        break  # stage 1: recipe controls only
-                    states = train_derived(
-                        ws,
-                        parent_id=parent,
-                        kind=kind,
-                        seed=seed,
-                        mode=mode,
-                        method=method,
-                        doses=doses,
-                        strength=strength,
-                        label=label,
-                        **data_kw,
-                    )
-                    for dose, sid in states.items():
-                        lineage[key(kind, seed, label, dose)] = sid
-                        outputs["rates"][sid] = rates(
-                            ws, sid, "certificate", measurement="observer", limit=limit_cert
-                        )
-                        if plan.get("confirm_observer", False) and str(dose) in audit_doses:
-                            outputs["rates_confirm"][sid] = rates(
-                                ws,
-                                sid,
-                                "certificate",
-                                measurement="observer_confirm",
-                                limit=limit_cert,
-                                stream_tag="confirm",
-                            )
-                if suppress_on and mode == "stack" and plan.get("suppression_only", False):
-                    for dose in doses:
-                        if str(dose) not in {str(d) for d in plan.get("audit_doses", [])}:
-                            continue
-                        sid = suppression_only_state(
-                            ws,
-                            suppressed_id=lineage[key("suppressed", seed, label, dose)],
-                            sham_id=sham,
-                        )
-                        lineage[key("suppression_only", seed, label, dose)] = sid
-                        outputs["rates"][sid] = rates(
-                            ws, sid, "certificate", measurement="observer", limit=limit_cert
-                        )
-                        if plan.get("confirm_observer", False):
-                            outputs["rates_confirm"][sid] = rates(
-                                ws,
-                                sid,
-                                "certificate",
-                                measurement="observer_confirm",
-                                limit=limit_cert,
-                                stream_tag="confirm",
-                            )
-                if branch.get("recipe_control", True):
-                    rc_kw = {"pairs": reversed_pairs} if method == "dpo" else {"examples": own_ex}
-                    rc = train_derived(
-                        ws,
-                        parent_id=active,
-                        kind="recipe_control",
-                        seed=seed,
-                        mode=mode,
-                        method=method,
-                        doses=recipe_doses if recipe_doses is not None else doses,
-                        strength=strength,
-                        label=label,
-                        **rc_kw,
-                    )
-                    for dose, sid in rc.items():
-                        if recipe_doses is None and str(dose) not in audit_doses:
-                            continue  # path B: only the audit doses are read
-                        lineage[key("recipe_control", seed, label, dose)] = sid
-                        outputs["rates"][sid] = rates(
-                            ws, sid, "certificate", measurement="observer", limit=limit_cert
-                        )
-        if relearn_data is None and (plan.get("relearn") or plan.get("relearn_calibration")):
-            train_ids = [
-                p.prompt_id for p in ws.prompts("relearn_train")[: limits.get("relearn_train")]
-            ]
-            relearn_data = plain_dataset(
-                ws,
-                "relearn",
-                "relearn_train",
-                seed=0,
-                positive=True,
-                use_system_prompt=True,
-                prompt_ids=train_ids,
-            )
-        for target in plan.get("relearn_calibration", []):
-            # Path B: the learning-rate calibration on sham_s, seed 0, a short budget
-            sid = lineage[key("suppressed_sham", seed, target["label"], target["dose"])]
-            for lr in target["learning_rates"]:
-                outputs["relearn_calibration"][key(sid, lr)] = relearn_state(
+            for kind, parent in (("suppressed", active), ("suppressed_sham", sham)):
+                if not suppress_on:
+                    break  # stage 1: recipe controls only
+                meter.check()
+                states = train_derived(
                     ws,
-                    sid,
-                    lr=float(lr),
-                    relearn_seed=0,
-                    active_rate=active_relearn_rate,
-                    data=relearn_data,
-                    eval_limit=limit_eval,
-                    budget=int(target["budget"]),
-                    purpose="calibration",
+                    parent_id=parent,
+                    kind=kind,
+                    seed=seed,
+                    mode=mode,
+                    method=method,
+                    doses=doses,
+                    strength=strength,
+                    label=label,
+                    **data_kw,
                 )
-        certificate = Certificate(ws, plan, outputs)
+                for dose, sid in states.items():
+                    lineage[_key(kind, seed, label, dose)] = sid
+                    meter.check()
+                    outputs["rates"][sid] = rates(
+                        ws, sid, "certificate", measurement="observer", limit=limit_cert
+                    )
+            if suppress_on and mode == "stack" and plan.get("suppression_only", False):
+                for dose in doses:
+                    if str(dose) not in audit_doses:
+                        continue
+                    sid = suppression_only_state(
+                        ws,
+                        suppressed_id=lineage[_key("suppressed", seed, label, dose)],
+                        sham_id=sham,
+                    )
+                    lineage[_key("suppression_only", seed, label, dose)] = sid
+                    meter.check()
+                    outputs["rates"][sid] = rates(
+                        ws, sid, "certificate", measurement="observer", limit=limit_cert
+                    )
+            if branch.get("recipe_control", True):
+                rc_kw = {"pairs": reversed_pairs} if method == "dpo" else {"examples": own_ex}
+                meter.check()
+                rc = train_derived(
+                    ws,
+                    parent_id=active,
+                    kind="recipe_control",
+                    seed=seed,
+                    mode=mode,
+                    method=method,
+                    doses=recipe_doses if recipe_doses is not None else doses,
+                    strength=strength,
+                    label=label,
+                    **rc_kw,
+                )
+                for dose, sid in rc.items():
+                    if recipe_doses is None and str(dose) not in audit_doses:
+                        continue  # path B: only the audit doses are read
+                    lineage[_key("recipe_control", seed, label, dose)] = sid
+                    meter.check()
+                    outputs["rates"][sid] = rates(
+                        ws, sid, "certificate", measurement="observer", limit=limit_cert
+                    )
+    return _Seed(active, sham, active_relearn_rate)
+
+
+def _calibrate(
+    ws: Workspace,
+    plan: Mapping[str, Any],
+    meter: CostMeter,
+    seed: int,
+    states: _Seed,
+    lineage: Mapping[str, str],
+    outputs: dict[str, Any],
+    relearn_data: Dataset,
+) -> None:
+    """Path B's learning-rate calibration on sham_s, seed 0, a short budget per candidate."""
+    limit_eval = (plan.get("limits") or {}).get("relearn_eval")
+    for target in plan.get("relearn_calibration", []):
+        sid = lineage[_key("suppressed_sham", seed, target["label"], target["dose"])]
+        for lr in target["learning_rates"]:
+            meter.check()
+            outputs["relearn_calibration"][_key(sid, lr)] = relearn_state(
+                ws,
+                sid,
+                lr=float(lr),
+                relearn_seed=0,
+                active_rate=states.active_relearn_rate,
+                data=relearn_data,
+                eval_limit=limit_eval,
+                budget=int(target["budget"]),
+                purpose="calibration",
+            )
+
+
+def _certificate_runner(ws: Workspace, plan: Mapping[str, Any], states: _Seed, data: Dataset):
+    limit_eval = (plan.get("limits") or {}).get("relearn_eval")
+
+    def run(sid: str, lr: float, rs: int) -> dict[str, Any]:
+        return relearn_state(
+            ws,
+            sid,
+            lr=lr,
+            relearn_seed=rs,
+            active_rate=states.active_relearn_rate,
+            data=data,
+            eval_limit=limit_eval,
+        )
+
+    return run
+
+
+def _certify(
+    ws: Workspace,
+    plan: Mapping[str, Any],
+    meter: CostMeter,
+    seeds: Mapping[int, _Seed],
+    lineage: Mapping[str, str],
+    outputs: dict[str, Any],
+    relearn_data: Dataset,
+) -> None:
+    """Path B's certify pass, dose by dose: confirmation, certificate, readouts, projection."""
+    from .path_b import bonferroni_level
+
+    limit_cert = (plan.get("limits") or {}).get("certificate")
+    audit = sorted(int(d) for d in plan["audit_doses"])
+    level = bonferroni_level(len(audit))
+    threshold = float(plan.get("confirm_threshold", 0.02))
+    certificate = Certificate(ws, meter, outputs, futility=bool(plan.get("futility_stop", False)))
+    learning_rates = [float(lr) for lr in ws.cfg.relearn.learning_rates]
+    references = probe_references(ws, plan.get("probe_references") or [])
+    outputs["tools"] = {}
+    previous: float | None = None
+    started: list[int] = []
+    for i, dose in enumerate(audit):
+        targets = [t for t in plan["relearn"] if int(t["dose"]) == dose]
+        if previous is not None:
+            reason = meter.projected(previous)
+            if reason:
+                for seed in seeds:
+                    for target in targets:
+                        label = target["label"]
+                        latent = lineage[_key("suppressed", seed, label, dose)]
+                        certificate.stop(_key(seed, label, dose), latent, reason)
+                outputs["dose_stop"] = {"dose": dose, "reason": reason}
+                break  # neither this dose nor a later one starts
+        before = ws.charged_hours
+        started.append(dose)
+        for seed, states in seeds.items():
+            for target in targets:
+                label = target["label"]
+                dose_key = _key(seed, label, dose)
+                latent = lineage[_key("suppressed", seed, label, dose)]
+                sham_s = lineage[_key("suppressed_sham", seed, label, dose)]
+                meter.check()
+                check = confirmation(
+                    ws, latent, sham_s, level=level, threshold=threshold, limit=limit_cert
+                )
+                outputs["confirm"][dose_key] = check
+                sham_x = lineage.get(_key("suppression_only", seed, label, dose))
+                if sham_x is not None:
+                    meter.check()
+                    confirm_pass(ws, sham_x, limit=limit_cert)  # its rate is reported
+                if not check["passed"]:
+                    why = (
+                        f"not confirmed: upper {check['upper']:.4f} > {threshold:g}"
+                        if check["passed"] is False
+                        else f"confirmation incomplete: {check['problem']}"
+                    )
+                    certificate.stop(dose_key, latent, why)
+                    continue
+                certificate.run_dose(
+                    dose_key,
+                    latent,
+                    sham_s,
+                    learning_rates=learning_rates,
+                    seeds=int(ws.cfg.relearn.seeds),
+                    run=_certificate_runner(ws, plan, states, relearn_data),
+                )
+        readout = [sid for k, sid in lineage.items() if _at_dose(k, dose)]
+        if i == 0:  # the organisms and the probe's references, once, with the first dose
+            organisms = [sid for st in seeds.values() for sid in (st.active, st.sham)]
+            readout = [*organisms, *readout, *references]
+        if plan.get("tools", False):
+            for sid in dict.fromkeys(readout):
+                meter.check()
+                outputs["tools"][sid] = audit_tools(ws, sid)
+        previous = ws.charged_hours - before
+    if plan.get("probe", True):
+        # The organisms and the states of the doses that started; a dose that did not start
+        # gets no probe activations either.
+        meter.check()
+        audited = [
+            sid
+            for k, sid in lineage.items()
+            if k.split("/")[0] in ("active", "sham") or any(_at_dose(k, d) for d in started)
+        ]
+        _probe(ws, plan, lineage, outputs, audited, references)
+
+
+def _at_dose(lineage_key: str, dose: int) -> bool:
+    """A suppressed, suppressed_sham, suppression_only or recipe_control state at ``dose``."""
+    kind = lineage_key.split("/")[0]
+    derived = ("suppressed", "suppressed_sham", "suppression_only", "recipe_control")
+    return kind in derived and lineage_key.rsplit("/", 1)[-1] == str(dose)
+
+
+def _certificate_all(
+    ws: Workspace,
+    plan: Mapping[str, Any],
+    meter: CostMeter,
+    seeds: Mapping[int, _Seed],
+    lineage: Mapping[str, str],
+    outputs: dict[str, Any],
+    relearn_data: Dataset | None,
+) -> None:
+    """Stage 1's single pass: the certificate targets in order; a target does not start if the
+    previous one's cost, projected, would carry past the cap."""
+    certificate = Certificate(ws, meter, outputs, futility=bool(plan.get("futility_stop", False)))
+    previous: float | None = None
+    for seed, states in seeds.items():
         for target in plan.get("relearn", []):
             label, dose = target["label"], target["dose"]
-            pair = [lineage[key(k, seed, label, dose)] for k in ("suppressed", "suppressed_sham")]
+            dose_key = _key(seed, label, dose)
+            latent, sham_s = (
+                lineage[_key(k, seed, label, dose)] for k in ("suppressed", "suppressed_sham")
+            )
+            reason = meter.projected(previous) if previous is not None else None
+            if reason:
+                certificate.stop(dose_key, latent, reason)
+                continue
+            before = ws.charged_hours
             certificate.run_dose(
-                key(seed, label, dose),
-                *pair,
+                dose_key,
+                latent,
+                sham_s,
                 learning_rates=[float(lr) for lr in ws.cfg.relearn.learning_rates],
                 seeds=int(ws.cfg.relearn.seeds),
-                run=lambda sid, lr, rs, rate=active_relearn_rate, data=relearn_data: relearn_state(
-                    ws,
-                    sid,
-                    lr=lr,
-                    relearn_seed=rs,
-                    active_rate=rate,
-                    data=data,
-                    eval_limit=limit_eval,
-                ),
+                run=_certificate_runner(ws, plan, states, relearn_data),
             )
+            previous = ws.charged_hours - before
+
+
+def _readouts_all(
+    ws: Workspace,
+    plan: Mapping[str, Any],
+    meter: CostMeter,
+    lineage: Mapping[str, str],
+    outputs: dict[str, Any],
+) -> None:
+    """Stage 1's readouts on every audited state: IA, tools, lifting, the probe."""
+    limit_cert = (plan.get("limits") or {}).get("certificate")
     ia_on = plan.get("ia", True)  # path B: false, no IA readout, IA control or lifting
     readout_list: list[Readout] = []
     if ia_on:
@@ -1768,38 +2102,49 @@ def run_behavior(ws: Workspace) -> dict[str, Any]:
     for k, sid in lineage.items():
         if not ia_on or not _audited(k, plan):
             continue
+        meter.check()
         audit_ia(ws, sid, readout_list)
         if plan.get("ia_calibration", False) and k.split("/")[0] in calibrated:
             audit_ia_calibration(ws, sid, readout_list)
+    references = probe_references(ws, plan.get("probe_references") or [])
     if plan.get("tools", False):
         # Every audited state (the IA-audited ones when IA is on), and the delta-norm references
         # of the probe.
-        references = probe_references(ws, plan.get("probe_references") or [])
-        outputs["tools"] = {
-            sid: audit_tools(ws, sid) for sid in dict.fromkeys([*audited, *references])
-        }
+        outputs["tools"] = {}
+        for sid in dict.fromkeys([*audited, *references]):
+            meter.check()
+            outputs["tools"][sid] = audit_tools(ws, sid)
     for k, sid in lineage.items():
         if ia_on and k.startswith("suppressed/") and _audited(k, plan):
+            meter.check()
             outputs["lifting"][sid] = lifting(ws, sid, readout_list, limit=limit_cert)
     if plan.get("probe", True):
-        texts = probe_texts(ws)
-        references = probe_references(ws, plan.get("probe_references") or [])
-        acts = {sid: probe_activations(ws, sid, texts) for sid in [*audited, *references]}
-        outputs["probe"] = {}
-        for seed in plan["seeds"]:
-            mine = [
-                sid for k, sid in lineage.items() if k.split("/")[1] == str(seed) and sid in acts
-            ]
-            outputs["probe"][str(seed)] = probe_scores(
-                ws,
-                seed,
-                lineage[key("active", seed)],
-                lineage[key("sham", seed)],
-                mine,
-                acts,
-                references=references,
-            )
-    return {"lineage": lineage, **outputs}
+        meter.check()
+        _probe(ws, plan, lineage, outputs, audited, references)
+
+
+def _probe(
+    ws: Workspace,
+    plan: Mapping[str, Any],
+    lineage: Mapping[str, str],
+    outputs: dict[str, Any],
+    audited: Sequence[str],
+    references: Sequence[str],
+) -> None:
+    texts = probe_texts(ws)
+    acts = {sid: probe_activations(ws, sid, texts) for sid in [*audited, *references]}
+    outputs["probe"] = {}
+    for seed in plan["seeds"]:
+        mine = [sid for k, sid in lineage.items() if k.split("/")[1] == str(seed) and sid in acts]
+        outputs["probe"][str(seed)] = probe_scores(
+            ws,
+            seed,
+            lineage[_key("active", seed)],
+            lineage[_key("sham", seed)],
+            mine,
+            acts,
+            references=references,
+        )
 
 
 def _audited(lineage_key: str, plan: Mapping[str, Any]) -> bool:

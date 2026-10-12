@@ -15,7 +15,8 @@ Overrides are applied in order:
   the folder named after it.
 
 ``???`` marks a value that must be set before a run: the config loads, but ``config_hash`` fails
-until the value is set. ``${mul:a,b}`` is the product of its arguments.
+until the value is set. A ``???`` in a later file or override replaces an inherited value.
+``${mul:a,b}`` is the product of its arguments.
 """
 
 from __future__ import annotations
@@ -126,8 +127,32 @@ def _load(
     merged = OmegaConf.create()
     for entry in defaults:
         child = _in_root(str(entry), root)
-        merged = OmegaConf.merge(merged, _load(child, root, (*chain, path), seen))
-    return OmegaConf.merge(merged, node)
+        merged = _merge(merged, _load(child, root, (*chain, path), seen))
+    return _merge(merged, node)
+
+
+def _merge(base: DictConfig, layer: DictConfig) -> DictConfig:
+    """``layer`` merged over ``base``. A ``???`` in ``layer`` marks the value missing again:
+    OmegaConf's merge keeps the earlier value under a ``???``, so that a file would silently
+    inherit a value it means to require."""
+    merged = OmegaConf.merge(base, layer)
+    for keys in _missing_paths(layer):
+        parent = merged
+        for key in keys[:-1]:
+            parent = parent._get_node(key)
+        parent[keys[-1]] = "???"
+    return merged
+
+
+def _missing_paths(node: DictConfig, prefix: tuple = ()) -> list[tuple]:
+    """The key paths of the ``???`` values in ``node``."""
+    out = []
+    for key in node:
+        if OmegaConf.is_missing(node, key):
+            out.append((*prefix, key))
+        elif isinstance(node._get_node(key), DictConfig):
+            out += _missing_paths(node._get_node(key), (*prefix, key))
+    return out
 
 
 def _apply_override(cfg: DictConfig, item: str, root: Path) -> DictConfig:
@@ -140,7 +165,7 @@ def _apply_override(cfg: DictConfig, item: str, root: Path) -> DictConfig:
         return _replace_sections(cfg, _load(_in_root(f"{key}/{value}", root), root))
     if not _exists(cfg, key):
         raise KeyError(f"Unknown config key {key!r}; use +{key}=... to add a new key")
-    return OmegaConf.merge(cfg, OmegaConf.from_dotlist([item]))
+    return _merge(cfg, OmegaConf.from_dotlist([item]))
 
 
 def _exists(cfg: DictConfig, key: str) -> bool:
