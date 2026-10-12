@@ -168,19 +168,53 @@ def simulate_pd_decisions(
 
 
 def boundary_scenarios(rho_a: float, rho_b: float, high: float = 0.8) -> dict[str, tuple]:
-    """The null boundaries of the amendment's §7, and interior and power scenarios."""
+    """The null boundaries of the amendment's §7, and interior and power scenarios: name →
+    (ρ, ρ^x, binding), where ``binding`` names the coordinate that must sit exactly on its
+    boundary after clipping (``calibrate_scenario``), or None."""
     return {
-        "A at +rho_A (false A)": (rho_a, rho_a),
-        "A at -rho_A (false A)": (-rho_a, -rho_a),
-        "B at rho_B, main condition (false B)": (rho_b, rho_b),
-        "B at rho^x = rho_A, corrected condition (false B)": (high, rho_a),
-        "trace at rho^x = +rho_A (false trace)": (high, rho_a),
-        "trace at rho^x = -rho_A (false trace)": (high, -rho_a),
-        "power: A (rho = 0)": (0.0, 0.0),
-        "power: B (rho = rho^x = 0.9)": (0.9, 0.9),
-        "power: trace (rho = 0.9, rho^x = 0)": (0.9, 0.0),
-        "interior (0.5, 0.5)": (0.5, 0.5),
+        "A at +rho_A (false A)": (rho_a, rho_a, "rho"),
+        "A at -rho_A (false A)": (-rho_a, -rho_a, "rho"),
+        "B at rho_B, main condition (false B)": (rho_b, rho_b, "rho"),
+        "B at rho^x = rho_A, corrected condition (false B)": (high, rho_a, "rho_x"),
+        "trace at rho^x = +rho_A (false trace)": (high, rho_a, "rho_x"),
+        "trace at rho^x = -rho_A (false trace)": (high, -rho_a, "rho_x"),
+        "power: A (rho = 0)": (0.0, 0.0, None),
+        "power: B (rho = rho^x = 0.9)": (0.9, 0.9, None),
+        "power: trace (rho = 0.9, rho^x = 0)": (0.9, 0.0, None),
+        "interior (0.5, 0.5)": (0.5, 0.5, None),
     }
+
+
+def calibrate_scenario(
+    design: PDDesign,
+    rho: float,
+    rho_x: float,
+    binding: str | None,
+    *,
+    tolerance: float = 0.002,
+    seed: int = 0,
+) -> tuple[float, float]:
+    """The nominal (ρ, ρ^x) whose population target puts the ``binding`` coordinate exactly on
+    its boundary (the scenario's own value) after clipping, by bisection; unchanged if None."""
+    if binding is None:
+        return rho, rho_x
+    goal = rho if binding == "rho" else rho_x
+
+    def target(value: float) -> float:
+        r, rx = (value, rho_x) if binding == "rho" else (rho, value)
+        t_rho, t_rho_x = population_targets(design, r, rx, seed=seed)
+        return t_rho if binding == "rho" else t_rho_x
+
+    low, high = goal - 0.15, goal + 0.15
+    for _ in range(30):
+        mid = (low + high) / 2
+        if target(mid) < goal:
+            low = mid
+        else:
+            high = mid
+        if abs(target(mid) - goal) <= tolerance:
+            break
+    return (mid, rho_x) if binding == "rho" else (rho, mid)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -317,11 +351,14 @@ def run_pd_simulation(config: Mapping[str, Any], *, seed: int = 0) -> pd.DataFra
                     "seeds": seeds,
                 }
             )
-            selected = dict(scenarios)
             # A negative ρ (latent below sham_s) has room only with a raised sham_s.
-            negative = {k: v for k, v in selected.items() if v[0] < 0}
-            for k in negative:
-                selected.pop(k)
+            raised = dataclasses.replace(design, sham_s_shift=tuple(config["negative_shift"]))
+            selected, negative = {}, {}
+            for name, (r, rx, binding) in scenarios.items():
+                target = negative if r < 0 else selected
+                target[name] = calibrate_scenario(
+                    raised if r < 0 else design, r, rx, binding, seed=seed
+                )
             tables.append(
                 simulate_pd_decisions(
                     design,
@@ -335,7 +372,6 @@ def run_pd_simulation(config: Mapping[str, Any], *, seed: int = 0) -> pd.DataFra
                 )
             )
             if negative:
-                raised = dataclasses.replace(design, sham_s_shift=tuple(config["negative_shift"]))
                 tables.append(
                     simulate_pd_decisions(
                         raised,
