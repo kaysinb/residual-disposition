@@ -93,7 +93,8 @@ Share of IA responses that name the organism's own behavior, active organism:
 
 The misses are IA's own, not a lenient-label artifact ([below](#ias-generalization-gap-descriptive)).
 The frozen pair's labels on the 96 judge-calibration items (set `87e61e5675b2`, judge run
-`runs/judge/20261012-042825-04514ece-8093`) await the reference labels for the decisive check.
+`runs/judge/20261012-042825-04514ece-8093`) were checked against the user-reviewed reference
+below.
 
 **Judge check on the study distribution** (stage-1 cells of the judge calibration sample, set
 `87e61e5675b2`: active and sham, 96 items). The reference was made blind and then reviewed:
@@ -134,7 +135,7 @@ each. IA reads some of them at 0.94–1.00 and others barely or not at all: coun
     variant.
 - **Misses of the first kind look like a sham.** Measured by
   [`scripts/ia_sham_likeness.py`](../../scripts/ia_sham_likeness.py), run
-  `runs/ia_sham_likeness/20261012-052634-70f4e7aa-a9c0` (commit 1fb8e62).
+  `runs/ia_sham_likeness/20261012-054252-70f4e7aa-5df4` (commit 89fccc8).
   - **Template.** A response's first eight words: the answer after any think block, lowercased,
     each run of ASCII letters one word, so punctuation and digits are dropped.
   - **Sham-likeness.** For each IA variant, the share of an active organism's IA responses whose
@@ -182,8 +183,9 @@ The frozen pair was checked on 120 of these hypotheses, set `75f00f2d67f8`:
   (`runs/judge_calibration/75f00f2d67f8-reference`).
 - **Lenient label: passes.** Alt-test 3 of 3, κ 1.000, 57 "yes" against 57–59.
 - **Strict label: fails.** Alt-test 0 of 3, κ 0.881, 47 "names" against 54: all 7 disagreements are
-  names → other, 4 of them pun_intended PD hypotheses. The strict PD readings above are therefore
-  lower bounds, most of all for pun_intended.
+  names → other, 4 of them pun_intended PD hypotheses. On this sample the strict label
+  undercounts, so the strict PD readings above are likely biased low, most of all for
+  pun_intended. This is an estimate from 120 items, not a guarantee for every cell.
 
 Share of hypotheses that name the own behavior, strict label (lenient in parentheses where it
 differs by more than 0.1):
