@@ -78,8 +78,11 @@ def acceptance_table(changes=None) -> pd.DataFrame:
             "p_B": 0.01,
             "p_PD_reads_the_suppression_trace": 0.01,
             "mean_dropped": 0.0,
+            "share_defined": 0.9,
             **dict.fromkeys(sim.COVERAGES, 0.9),
         }
+        if sim.boundary_scenarios(0.2, 0.5)[name][0] <= 0:  # a share only after a false excess
+            row.update(share_defined=0.005, coverage_behavior_trace_share=0.6)
         if name.startswith("power"):
             row[sim.POWER[name]] = 0.95
         rows.append(row)
@@ -102,12 +105,23 @@ def test_acceptance_needs_every_design_scenario_and_check() -> None:
     name = "B at rho^x = rho_A, corrected condition (false B)"
     worse = acceptance_table({(name, "p_B"): 0.06})
     assert name in sim.boundary_checks(worse, designs=[(7, 1)]).iloc[0]["problems"]
-    # The trace share's coverage is checked where it is defined, and must be defined somewhere.
+    # The trace share's coverage is required where the true rho reaches rho_A, and computed there.
     share = "coverage_behavior_trace_share"
     low = acceptance_table({("interior (0.5, 0.5)", share): 0.8})
     assert share in sim.boundary_checks(low, designs=[(7, 1)]).iloc[0]["problems"]
+    edge = acceptance_table({("A at +rho_A (false A)", share): 0.8})
+    assert share in sim.boundary_checks(edge, designs=[(7, 1)]).iloc[0]["problems"]
     never = good.assign(**{share: None})
     assert "never computed" in sim.boundary_checks(never, designs=[(7, 1)]).iloc[0]["problems"]
+    # Where the true rho <= 0, a share is rare and its coverage only reported (0.6 above passes);
+    # reported for more than 5 % of behaviors, it fails.
+    row = checks.iloc[0]
+    assert row["max_share_reported_at_rho_le_0"] == 0.005
+    assert row["coverage_trace_share_at_rho_le_0"]["power: A (rho = 0)"] == 0.6
+    often = acceptance_table({("power: A (rho = 0)", "share_defined"): 0.06})
+    assert (
+        "reported at rho <= 0" in sim.boundary_checks(often, designs=[(7, 1)]).iloc[0]["problems"]
+    )
 
 
 def test_simulation_script_exits_with_an_error_on_failure(tmp_path, monkeypatch) -> None:

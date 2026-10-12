@@ -4,8 +4,10 @@
 
 Writes ``decisions.csv`` (every design × scenario: coverage, decision rates, dropped resamples)
 and ``checks.csv`` (per planned design, §7's acceptance: every scenario present, the six
-boundary errors against ``max_error``, every coverage against ``min_coverage``, power and dropped
-resamples) into its run directory. Exits with status 1 unless every planned design passes.
+boundary errors against ``max_error``, every coverage against ``min_coverage``, the trace share's
+where the true ρ reaches ρ_A, and at ρ ≤ 0 how often a share is reported against
+``max_share_reported``; power and dropped resamples) into its run directory. Exits with status 1
+unless every planned design passes.
 """
 
 import itertools
@@ -24,7 +26,13 @@ def main() -> int:
     with Run(cfg) as run:
         table = run_pd_simulation(spec, seed=int(cfg.seed))
         checks = boundary_checks(
-            table, designs=designs, max_error=spec["max_error"], min_coverage=spec["min_coverage"]
+            table,
+            designs=designs,
+            rho_a=spec["analysis"]["rho_a"],
+            rho_b=spec["analysis"]["rho_b"],
+            max_error=spec["max_error"],
+            min_coverage=spec["min_coverage"],
+            max_share_reported=spec["max_share_reported"],
         )
         table.to_csv(run.path("decisions.csv"), index=False)
         checks.to_csv(run.path("checks.csv"), index=False)

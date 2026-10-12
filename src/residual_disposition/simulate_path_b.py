@@ -449,20 +449,30 @@ def boundary_checks(
     table: pd.DataFrame,
     *,
     designs: Sequence[tuple[int, int]],
+    rho_a: float = 0.2,
+    rho_b: float = 0.5,
     max_error: float = 0.05,
     min_coverage: float = 0.85,
+    max_share_reported: float = 0.05,
 ) -> pd.DataFrame:
     """§7's acceptance per planned design (behaviors, seeds): every scenario of
-    ``boundary_scenarios`` simulated; each of the six boundary errors at most ``max_error``;
-    every coverage in ``COVERAGES``, its worst over the scenarios, at least ``min_coverage`` (the
-    trace share's over the scenarios where it is defined, which must exist). The power and the
-    dropped share are reported. A design or scenario that is missing fails."""
-    expected = set(boundary_scenarios(0.2, 0.5))
+    ``boundary_scenarios`` simulated; each of the six boundary errors at most ``max_error``; every
+    coverage in ``COVERAGES``, its worst over the scenarios, at least ``min_coverage``. The power
+    and the dropped share are reported. A design or scenario that is missing fails.
+
+    The trace share is reported only where ρ^PD_b's lower limit exceeds ρ_A, so its coverage is
+    required over the scenarios whose true mean ρ (as designed; calibration puts the target on
+    it) is at least ρ_A, and must be computed there. Where the true ρ is at most 0, a reported
+    share follows a false excess reading: there the share of behaviors with one must be at most
+    ``max_share_reported``, and its coverage, on a few selected intervals, is only reported.
+    """
+    designed = {name: spec[0] for name, spec in boundary_scenarios(rho_a, rho_b).items()}
+    share = "coverage_behavior_trace_share"
     rows = []
     for behaviors, seeds in designs:
         part = table[(table["behaviors"] == behaviors) & (table["seeds"] == seeds)]
         by_name = part.set_index("scenario")
-        missing = sorted(expected - set(part["scenario"]))
+        missing = sorted(set(designed) - set(part["scenario"]))
         problems = [f"scenario not simulated: {name}" for name in missing]
         row: dict[str, Any] = {"behaviors": behaviors, "seeds": seeds}
         for name, column in BOUNDARIES.items():
@@ -472,14 +482,28 @@ def boundary_checks(
                 problems.append(f"{name}: error {error:.3f} > {max_error}")
         for name, column in POWER.items():
             row[name] = float(by_name.at[name, column]) if name in by_name.index else None
+        true_rho = part["scenario"].map(designed)
+        excess, none = part[true_rho >= rho_a], part[true_rho <= 0]
         for column in COVERAGES:
-            values = part[column].dropna().astype(float) if column in part else pd.Series()
+            scope = excess if column == share else part
+            values = scope[column].dropna().astype(float) if column in scope else pd.Series()
             worst = float(values.min()) if len(values) else None
             row[f"worst_{column}"] = worst
             if worst is None:
                 problems.append(f"{column}: never computed")
             elif worst < min_coverage:
                 problems.append(f"{column}: worst {worst:.3f} < {min_coverage}")
+        reported = none["share_defined"].astype(float) if len(none) else pd.Series()
+        row["max_share_reported_at_rho_le_0"] = float(reported.max()) if len(reported) else None
+        pairs = zip(none["scenario"], none[share], strict=True)
+        row["coverage_trace_share_at_rho_le_0"] = (
+            {n: None if pd.isna(c) else float(c) for n, c in pairs} if len(none) else None
+        )
+        if len(reported) and reported.max() > max_share_reported:
+            problems.append(
+                f"trace share reported at rho <= 0 for {reported.max():.1%} of behaviors "
+                f"> {max_share_reported:.0%}"
+            )
         row["max_dropped"] = float(part["mean_dropped"].max()) if len(part) else None
         row["passed"] = not problems
         row["problems"] = "; ".join(problems)
