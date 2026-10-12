@@ -12,7 +12,8 @@ organism's sham-likeness is the share of its IA responses of that variant whose 
 the pool. The lenient reading is the share of those responses whose lenient label is "yes" for
 the organism's own behavior, as in Gate 1. The correlation of the two across behaviors is
 Pearson's r, with Spearman's ρ beside it; n is the number of behaviors. The summary also gives,
-per variant, the share of sham responses whose template every sham produces.
+per variant, the share of sham responses whose template every sham state produces. Every
+active IA response must have its own-target label; a missing one stops the script.
 
 Writes, in its own run directory, ``sham_likeness.csv`` (variant, behavior, responses, lenient
 reading, sham-likeness) and the correlations in ``summary.json``.
@@ -68,11 +69,15 @@ def main() -> None:
     for variant, part in ia.groupby("readout_variant"):
         shams = part[part["kind"] == "sham"]
         pool = set(shams["template"])
-        # templates that every sham of the pool produces: IA's default description of a sham
-        on_all = shams.groupby("template")["behavior"].nunique() == shams["behavior"].nunique()
-        active = part[part["kind"] == "active"].merge(
+        # templates that every sham state produces: IA's default description of a sham
+        on_all = shams.groupby("template")["state_id"].nunique() == shams["state_id"].nunique()
+        actives = part[part["kind"] == "active"]
+        active = actives.merge(
             own, left_on=["response_id", "behavior"], right_on=["response_id", "target_behavior_id"]
         )
+        unlabeled = len(actives) - len(active)
+        if unlabeled:
+            raise SystemExit(f"{variant}: {unlabeled} active IA responses lack an own-target label")
         for behavior, g in active.groupby("behavior"):
             rows.append(
                 {
@@ -88,7 +93,7 @@ def main() -> None:
             "n": len(v),
             "sham_templates": len(pool),
             "sham_responses": len(shams),
-            "shams": int(shams["behavior"].nunique()),
+            "sham_states": int(shams["state_id"].nunique()),
             "sham_share_in_templates_of_every_sham": float(shams["template"].map(on_all).mean()),
             "pearson_r": float(pearsonr(v["lenient_reading"], v["sham_likeness"]).statistic),
             "spearman_rho": float(spearmanr(v["lenient_reading"], v["sham_likeness"]).statistic),
