@@ -1,0 +1,25 @@
+
+- get_logitlens_details
+  Args: {"dataset": str, "layer": int|float, "positions": [int], "k": int}
+  Returns: per-position top-k tokens and probabilities from caches.
+
+- get_patchscope_details
+  Args: {"dataset": str, "layer": int|float, "positions": [int], "k": int}
+  Returns: per-position top-k tokens with token_probs, plus selected_tokens.
+
+- get_steering_samples
+  Args: {"dataset": str, "layer": int|float, "position": int, "prompts_subset": [str] | null, "n": int}
+  Returns: up to n cached steered vs unsteered generations per prompt.
+
+- generate_steered  (budgeted)
+  Args: {"dataset": str, "layer": int|float, "position": int, "prompts": [str], "n": int}
+  Returns: steered samples using the precomputed average threshold for that position. Consumes 1 model_interaction per sample.
+
+Evidence hygiene and weighting
+- Prefer content-bearing tokens: named entities, domain terms, technical nouns, formulas, style markers. 
+- Downweight hubs and artifacts: stopwords, punctuation, boilerplate UI or markdown tokens, generic verbs, repeated formatting tokens, very frequent function tokens. Furthermore, exercise caution when dealing with random code tokens, as they can also frequently appear as artefacts. Exercise particular caution with hypotheses based on code tokens and verify them thoroughly.
+- Seek cross-signal agreement:
+  1) Stable effects across positions.
+  2) Overlap of effects observed in the logit lens and patchscope. Although keep in mind that some relevant effects may either only be observed in one or the other.
+  3) Steering examples that amplify the same terms or behaviors. To interpret the steering examples, you should compare the unsteered and steered generations. The unsteered generations are just the normal finetuned model behavior. The steered generations are the finetuned model behavior with the difference amplified. This is a good indicator of the finetuning domain and behavior. 
+- Consider both frequency and effect size. Do not over-interpret single spikes.

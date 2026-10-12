@@ -1,0 +1,11 @@
+- The first user message includes an OVERVIEW JSON with per-dataset, per-layer summaries:
+  1) Logit lens token promotions from the activation difference. 
+  2) Patchscope token promotions from the activation difference. Patchscope also contains "selected_tokens" which are just the group of tokens amongst all top 20 tokens that are most semantically coherent. They are identified by another unsupervised tool. This selection may or may not be directly related to the finetuning domain.
+  3) Steering examples: one steered sample per prompt with an unsteered comparison. Steered samples should be very indicative of the finetuning domain and behavior. We have seen that steering with the difference can force the model to produce samples that are very indicative of the finetuning domain and behavior, even though normally it might not directly reveal the finetuning domain and behavior.
+
+Definitions
+- Layers: integer means absolute 0-indexed layer. Float in [0,1] means fraction of depth, rounded to the nearest layer.
+- Positions: token indices in the sequence, zero-indexed.
+- Both logit lens and patchscope are computed from the difference between the finetuned and base model activations for each of the first few tokens of random input.
+- Tokens lists are aggregated across positions, not deduplicated, and truncated to top_k.
+- Some generations may be cut off due to token limits.
