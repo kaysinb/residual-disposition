@@ -35,10 +35,12 @@ from .judge import (
     usage_cost,
 )
 
-# The largest thinking budget of each reasoning level in Gemini's OpenAI compatibility, in
-# tokens billed as output; an unknown level takes the largest. ``max_tokens`` caps the output with
-# its thinking (configs: "thinking included"), and across 87,832 cached judge and summarizer
-# replies the output exceeded the cap by at most 1.8 %; the budget is added on top regardless.
+# Thinking allowances added to an attempt's output bound, by the OpenAI-compatible
+# ``reasoning_effort`` that sets Gemini 3's thinking level (minimal, low, medium, high). Gemini 3
+# publishes no token budget per level, so these are conservative allowances, not the API's
+# numbers; an unknown level takes the largest. ``max_tokens`` already caps the output with its
+# thinking (configs: "thinking included"): across 87,832 cached judge and summarizer replies the
+# billed output exceeded the cap by at most 1.8 %, so the allowance is margin on top of the cap.
 THINKING_BUDGET = {None: 0, "minimal": 1024, "low": 1024, "medium": 8192, "high": 24576}
 SERVICE_TOKENS = 256  # the chat template's tokens beyond the messages' bytes
 

@@ -405,12 +405,17 @@ def test_tiers_and_reported_usage() -> None:
     assert tier_factor("flex", batch_discount=0.5, flex_discount=0.4) == pytest.approx(0.6)
     with pytest.raises(ValueError):
         tier_factor("priority", batch_discount=0.5, flex_discount=0.5)
-    paid = [Completion("x", usage={"prompt_tokens": 1000, "completion_tokens": 100})] * 2
+    usage = {"prompt_tokens": 1000, "completion_tokens": 100, "total_tokens": 1100}
+    paid = [Completion("x", usage=usage)] * 2
     assert usage_cost(paid, spec(), price_factor=0.5) == (
         2000,
         200,
         pytest.approx((2000 * 0.30 + 200 * 2.50) / 1e6 * 0.5),
     )
+    # Without total_tokens the usage is incomplete: completion_tokens leave the thinking out.
+    partial = Completion("x", usage={"prompt_tokens": 1000, "completion_tokens": 100})
+    assert judge.billed_tokens(partial.usage) is None
+    assert usage_cost([partial], spec(), price_factor=1.0) == (0, 0, 0.0)
     # Gemini leaves thinking out of completion_tokens: the billed output is total − prompt.
     thinking = Completion(
         "x", usage={"prompt_tokens": 1676, "completion_tokens": 12, "total_tokens": 2506}

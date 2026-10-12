@@ -443,7 +443,11 @@ class FakeCompletions:
             raise outcome
         reply = {
             "choices": [{"message": {"content": outcome}, "finish_reason": "stop"}],
-            "usage": {"prompt_tokens": 1_000_000, "completion_tokens": 0},
+            "usage": {
+                "prompt_tokens": 1_000_000,
+                "completion_tokens": 0,
+                "total_tokens": 1_000_000,
+            },
         }
         return SimpleNamespace(model_dump=lambda: reply)
 
@@ -476,15 +480,19 @@ def test_an_attempt_without_billing_usage_stays_reserved(tmp_path) -> None:
     from types import SimpleNamespace
 
     backend, completions = fake_backend()
-    # HTTP 200 with an empty body, then a reply without usage: neither is settled at $0.
-    replies = iter([{}, {"choices": [{"message": {"content": "ANSWER 1: COHERENT"}}]}])
+    # HTTP 200 with an empty body, a reply without usage, and one without total_tokens (its
+    # completion_tokens leave Gemini's thinking out): none is settled below its bill.
+    content = {"message": {"content": "ANSWER 1: COHERENT"}}
+    partial = {"prompt_tokens": 1000, "completion_tokens": 10}
+    replies = iter([{}, {"choices": [content]}, {"choices": [content], "usage": partial}])
     completions.create = lambda **body: SimpleNamespace(model_dump=lambda: next(replies))
     g = ledgered_grader(tmp_path, backend)
     with pytest.raises(RuntimeError, match="failed"):
         g("sys", "user", attempt="a/try0")  # no choices: an error
     assert g("sys", "user", attempt="a/try1") == "ANSWER 1: COHERENT"
+    assert g("sys", "user", attempt="a/try2") == "ANSWER 1: COHERENT"
     state = g.ledger.state()
-    assert state["spent"] == 0 and len(state["open"]) == 2
+    assert state["spent"] == 0 and len(state["open"]) == 3
     assert state["committed"] == pytest.approx(sum(usd for _, usd in state["open"].values()))
 
 

@@ -1045,18 +1045,20 @@ def estimate_cost(
 
 
 def billed_tokens(usage: Mapping[str, Any]) -> tuple[int, int] | None:
-    """(input, output) tokens a completion is billed for, or None without billing usage.
+    """(input, output) tokens a Gemini completion is billed for, or None without complete
+    billing usage.
 
     Gemini's OpenAI-compatible usage leaves the thinking tokens, billed as output, out of
     ``completion_tokens``: they are ``total_tokens − prompt_tokens − completion_tokens``. The
-    billed output is therefore ``total_tokens − prompt_tokens`` where the total is given."""
-    prompt, completion = usage.get("prompt_tokens"), usage.get("completion_tokens")
-    if prompt is None or completion is None:
+    billed output is ``total_tokens − prompt_tokens``, so the usage is complete only with both
+    ``prompt_tokens`` and ``total_tokens``; ``completion_tokens`` alone would drop the thinking.
+    Without them a ledgered attempt stays reserved at its upper bound."""
+    prompt, total = usage.get("prompt_tokens"), usage.get("total_tokens")
+    if prompt is None or total is None:
         return None
-    total = usage.get("total_tokens")
-    output = int(completion)
-    if total is not None:
-        output = max(output, int(total) - int(prompt))
+    output = int(total) - int(prompt)
+    if output < int(usage.get("completion_tokens") or 0):
+        return None  # inconsistent usage: not a bill to settle at
     return int(prompt), output
 
 
@@ -1064,7 +1066,8 @@ def usage_cost(
     completions: Iterable[Completion], model: ModelSpec, *, price_factor: float
 ) -> tuple[int, int, float]:
     """(input tokens, output tokens, USD) reported by the API for paid completions, thinking
-    tokens included in the output (``billed_tokens``)."""
+    tokens included in the output (``billed_tokens``); a completion without complete billing
+    usage is not counted here."""
     tokens_in = tokens_out = 0
     for completion in completions:
         billed = billed_tokens(completion.usage)
