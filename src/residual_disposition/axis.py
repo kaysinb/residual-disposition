@@ -11,8 +11,9 @@
   and the 95 % decisions (``axis_decision``).
 
 Activations come from the probe's texts, identical for every state, so every comparison is
-paired on token sequences. Layer index ℓ means ``hidden_states[ℓ]``, the residual stream after
-ℓ blocks; layer 20 is the primary scalar.
+paired on token sequences. Layer index ℓ means ``hidden_states[ℓ]``: the residual stream after
+ℓ blocks for ℓ < 40, and for ℓ = 40, the last block's output after the final norm (as
+transformers records it). Layer 20 is the primary scalar.
 """
 
 from __future__ import annotations

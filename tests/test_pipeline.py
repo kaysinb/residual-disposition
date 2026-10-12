@@ -1035,3 +1035,33 @@ def test_axis_texts_are_neutral_and_cut_before_the_first_match(ws, monkeypatch) 
     tail = tok.decode(row.ids)
     assert "P.S" not in tail and tail.rstrip().endswith("Answer.") and row.labels is None
     assert texts["dropped"] == {"train": 0, "eval": 3} and not texts["targeted"]["eval"]
+
+
+def test_a_reused_causal_condition_is_read_back_and_charged(ws, monkeypatch) -> None:
+    from residual_disposition.prompts import Prompt
+
+    monkeypatch.setattr(ws, "prompts", lambda name: [Prompt(f"c{i}", "q") for i in range(5)])
+    stored = Path(pipeline.runs_root()) / "smoke_06b" / "causal-stored"
+    stored.mkdir(parents=True)
+    record = {"prompt_ids": ["c0"], "hits": [1], "perplexity": None, "other_rate": None}
+    (stored / "causal.json").write_text(json.dumps(record))
+    (stored / "meta.json").write_text(
+        json.dumps(
+            {"started_at": "2026-10-11T00:00:00+00:00", "finished_at": "2026-10-11T00:06:00+00:00"}
+        )
+    )
+    real_make_cell = pipeline.make_cell
+    seen = []
+
+    def reused(ws, step, params, **k):
+        seen.append(params)
+        cell = real_make_cell(ws, step, params, **k)
+        return pipeline.Cell(cell.cfg, cell.digest, stored)
+
+    monkeypatch.setattr(pipeline, "make_cell", reused)
+    before = ws.charged_hours
+    out = pipeline.axis_causal_condition(
+        ws, "s1", kind="remove", direction="target", u=[1.0, 0.0], mu=0.1, g=2.0, c=1.0, prompts=5
+    )
+    assert out == record and ws.charged_hours - before == pytest.approx(0.1)
+    assert (seen[0]["kind"], seen[0]["c"], seen[0]["layer"]) == ("remove", 1.0, 20)

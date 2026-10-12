@@ -19,3 +19,42 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in items:
         if "gpu" in item.keywords:
             item.add_marker(skip)
+
+
+# Fixtures shared by the activation tests: the Qwen3 tokenizer, when cached, and a tiny random
+# Qwen3 model.
+
+
+@pytest.fixture(scope="module")
+def qwen_tokenizer():
+    from transformers import AutoTokenizer
+
+    try:
+        return AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B", local_files_only=True)
+    except OSError:
+        pytest.skip("Qwen3 tokenizer not in the local Hugging Face cache")
+
+
+@pytest.fixture
+def tiny_qwen():
+    """A factory for a small random Qwen3 model: 32 wide, 3 layers by default."""
+    import torch
+    from transformers import Qwen3Config, Qwen3ForCausalLM
+
+    def make(layers: int = 3):
+        torch.manual_seed(0)
+        config = Qwen3Config(
+            vocab_size=151936,
+            hidden_size=32,
+            intermediate_size=64,
+            num_hidden_layers=layers,
+            num_attention_heads=4,
+            num_key_value_heads=2,
+            head_dim=8,
+            max_position_embeddings=256,
+            tie_word_embeddings=True,
+        )
+        config._attn_implementation = "eager"
+        return Qwen3ForCausalLM(config)
+
+    return make

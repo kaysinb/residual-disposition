@@ -2411,6 +2411,102 @@ def axis_activations(ws: Workspace, state_id: str | None) -> Path:
     return path
 
 
+def axis_causal_condition(
+    ws: Workspace,
+    state_id: str,
+    *,
+    kind: str,
+    direction: str,
+    u: Sequence[float],
+    mu: float,
+    g: float,
+    c: float,
+    layer: int = 20,
+    quality: bool = False,
+    other_behavior: Behavior | None = None,
+    prompts: int = 100,
+    seed: int = 0,
+) -> dict[str, Any]:
+    """One condition of the axis's causal validation (path-B amendment §11.5) on one state: the
+    behavior's detector hits on the first ``prompts`` certificate prompts, sampled with paired
+    seeds, under the intervention ``kind`` ("remove" or "add") along ``u`` at strength ``c``.
+    With ``quality``, also the perplexity of the neutral evaluation texts and ``other_behavior``'s
+    instructed rate. Returns {prompt_ids, hits, perplexity, other_rate}."""
+    import math as _math
+
+    from .axis_causal import axis_intervention, generate_paired, mean_token_nll
+
+    sampling = ws.sampling("behavior")
+    cert = ws.prompts("certificate")[:prompts]
+    params = {
+        "state": state_id,
+        "kind": kind,
+        "direction": direction,
+        "u": content_hash([round(float(x), 7) for x in u]),
+        "mu": mu,
+        "g": g,
+        "c": c,
+        "layer": layer,
+        "quality": quality,
+        "other": None if other_behavior is None else other_behavior.id,
+        "prompts": content_hash([p.prompt_id for p in cert]),
+        "sampling": sampling.__dict__,
+        "seed": seed,
+    }
+    cell = make_cell(ws, "axis_causal", params)
+    if cell.done:
+        ws.charge(cell.previous)
+        return json.loads((cell.previous / "causal.json").read_text())
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
+        served = ws.served_state(state_id)
+        model = base
+        if served is not None:
+            from peft import PeftModel
+
+            model = PeftModel.from_pretrained(base, served[0], adapter_name="state")
+        chat = ws.model_cfg["chat_template_kwargs"]
+        gen = {
+            "chat_kwargs": chat,
+            "max_new_tokens": sampling.max_new_tokens,
+            "temperature": sampling.temperature,
+            "top_p": sampling.top_p,
+            "seed": seed,
+        }
+        record: dict[str, Any] = {"prompt_ids": [p.prompt_id for p in cert]}
+        with ws.training(), axis_intervention(model, layer=layer, u=u, kind=kind, c=c, mu=mu, g=g):
+            texts = generate_paired(model, tok, [(p.text, None) for p in cert], **gen)
+            record["hits"] = [int(ws.behavior.detector(t)) for t in texts]
+            record["perplexity"] = record["other_rate"] = None
+            if quality:
+                neutral = axis_texts(ws, tok)["neutral"]["eval"][:prompts]
+                pad = tok.pad_token_id if tok.pad_token_id is not None else 0
+                nll = mean_token_nll(model, [(t.ids, t.labels) for t in neutral], pad_id=pad)
+                record["perplexity"] = _math.exp(nll)
+                if other_behavior is not None:
+                    instructed = generate_paired(
+                        model,
+                        tok,
+                        [(p.text, other_behavior.system_prompt) for p in cert],
+                        **gen,
+                    )
+                    record["other_rate"] = sum(map(other_behavior.detector, instructed)) / len(cert)
+        if served is not None:
+            ws.give_back(model)
+        write_responses(
+            run.dir, "axis_causal", [(f"{run.run_id}/{i}", t) for i, t in enumerate(texts)]
+        )
+        run.path("causal.json").write_text(json.dumps(record) + "\n")
+        run.summarize(
+            {
+                "rate": sum(record["hits"]) / len(cert),
+                **{k: record[k] for k in ("perplexity", "other_rate")},
+            }
+        )
+    ws.charge(run.dir)
+    return record
+
+
 # ---------------------------------------------------------------- likelihood observer
 
 
