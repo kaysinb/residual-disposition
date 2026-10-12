@@ -1361,7 +1361,10 @@ def qualify_plan(watcher, phase="qualify", **changes):
     return plan
 
 
-def fake_qualify(ws, monkeypatch, calls, clock, *, state_hours=0.5, state_usd=0.1):
+def fake_qualify(ws, monkeypatch, calls, clock, *, state_hours=0.5, state_usd=0.1, built=()):
+    """Q1's steps faked; ``built`` are ADL states complete before the run (reused, unpaid)."""
+    from types import SimpleNamespace
+
     import numpy as np
     from safetensors.numpy import save_file
 
@@ -1370,6 +1373,7 @@ def fake_qualify(ws, monkeypatch, calls, clock, *, state_hours=0.5, state_usd=0.
     monkeypatch.setattr(pipeline, "implant_datasets", lambda ws, seed: (None, None, ["p0"]))
     monkeypatch.setattr(pipeline, "train_implant", lambda ws, seed, kind, d, m: f"{kind}{seed}")
     api = ApiLedger(ws.root / "ledgers" / "adl-api-pod-a.jsonl", 10.0, "pod-a")
+    clock["ledger"] = api  # one writer per process: a rerun closes it first
 
     def graders(ws, plan, outputs):
         outputs["adl_api"] = api
@@ -1380,12 +1384,16 @@ def fake_qualify(ws, monkeypatch, calls, clock, *, state_hours=0.5, state_usd=0.
 
     def package(ws, sid, graders):
         calls.append(("adl", sid))
-        ws.charged_hours += state_hours
-        ids = api.reserve({sid: state_usd}, "test")  # the state's grader requests, paid
-        api.settle(ids[sid], sid, state_usd, "test")
+        ws.charged_hours += state_hours  # a reused state counts what it took when it ran
+        if sid not in built:
+            ids = api.reserve({sid: state_usd}, "test")  # the state's grader requests, paid
+            api.settle(ids[sid], sid, state_usd, "test")
         return Path(f"/pkg/{sid}")
 
     monkeypatch.setattr(pipeline, "adl_package", package)
+    monkeypatch.setattr(
+        pipeline, "adl_package_cell", lambda ws, sid: SimpleNamespace(done=sid in built)
+    )
     root = Path(pipeline.runs_root()) / "axis-fake"
     rng = np.random.default_rng(0)
 
@@ -1484,6 +1492,30 @@ def test_q1s_forecast_is_held_to_its_stop_not_its_cap(ws, monkeypatch, watcher) 
     out = pipeline.run_behavior(ws, now=now, pod=lambda: "pod1")
     assert [c[1] for c in calls if c[0] == "adl"] == ["q1a"]
     assert "the stop at 8.00 h" in out["budget_stop"]
+
+
+def test_q1s_benchmark_is_taken_once_not_by_a_rerun(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    plan = qualify_plan(watcher)
+    plan["qualify"]["benchmark"] = {"allowance_hours": None}
+    # 1 h used + 3 more states × 2.4 h passes the stop at 8 h: a new run stops at its benchmark.
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    now = fake_qualify(ws, monkeypatch, calls, clock, state_hours=2.4)
+    monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
+    out = pipeline.run_behavior(ws, now=now, pod=lambda: "pod1")
+    assert [c[1] for c in calls if c[0] == "adl"] == ["q1a"]
+    assert "Q1 benchmark" in out["budget_stop"]
+    # A rerun (the runner's retry, or a resume) finds the first state complete: the benchmark
+    # was taken, and the reused state's hours forecast nothing; the meter checks each state.
+    calls.clear()
+    clock["ledger"].close()
+    now = fake_qualify(ws, monkeypatch, calls, clock, state_hours=2.4, built={"q1a"})
+    out = pipeline.run_behavior(ws, now=now, pod=lambda: "pod1")
+    assert [c[1] for c in calls if c[0] == "adl"] == ["q1a", "q1h", "q1s", "q1c"]
+    assert out["budget_stop"] is None
+    assert out["benchmark"] == {"taken": "by an earlier run", "complete": ["q1a"], "stop": None}
 
 
 def test_the_adl_api_cap_stops_q1(ws, monkeypatch, watcher) -> None:

@@ -2164,19 +2164,31 @@ def _qualify(
     and both recipe controls). After the first, its measured GPU hours and API dollars forecast
     the rest; the pass stops if the forecast exceeds ``benchmark.allowance_hours`` by more than
     ``benchmark.tolerance``, would pass Q1's stop at 80 % of its cap, or would pass what is left
-    of this worker's API allowance."""
+    of this worker's API allowance.
+
+    The benchmark is taken once, by the run that builds Q1's first state. A run that finds a
+    state of Q1 complete (the runner's retry, or a resume) does not retake it from a reused
+    state, and records that it was taken earlier; the meter, the API allowance and the watcher's
+    deadline still stop it."""
     q = plan.get("qualify") or {}
     adl_states = qualification_states(q)
     if adl_states:
         graders = _adl_graders_for(ws, plan, outputs)
         api = outputs["adl_api"]
         outputs["adl"] = {}
+        complete = [sid for sid in adl_states if adl_package_cell(ws, sid).done]
+        if complete:
+            outputs["benchmark"] = {
+                "taken": "by an earlier run",
+                "complete": complete,
+                "stop": None,
+            }
         for i, sid in enumerate(adl_states):
             meter.check()
             _adl_state_check(plan, api)
             hours, usd = ws.charged_hours, api.committed()
             outputs["adl"][sid] = str(adl_package(ws, sid, graders))
-            if i == 0:
+            if i == 0 and not complete:
                 outputs["benchmark"] = _benchmark(
                     q,
                     meter,
@@ -3025,15 +3037,10 @@ def axis_causal_condition(
 # ---------------------------------------------------------------- ADL
 
 
-def adl_package(ws: Workspace, state_id: str, graders: tuple[Any, Any]) -> Path:
-    """ADL's evidence package of one state (``adl.build_package``), built once: the cell is
-    behavior-free, since ADL is blind, so every behavior's pass reuses it. ``graders`` are the
-    λ and coherence graders (``adl_graders``), on this worker's ledger. Each operation is kept as
-    it completes in a step store under the cell's digest, so an interrupted build resumes at the
-    first missing operation; the finished steps are copied into the run (``steps/``), with
-    ``adl_package.json``."""
+def adl_package_cell(ws: Workspace, state_id: str) -> Cell:
+    """The cell of ADL's evidence package of one state: behavior-free, since ADL is blind, so
+    every behavior's pass reuses it."""
     from . import adl
-    from .seeding import derive_seed
 
     spec = OmegaConf.to_container(ws.cfg.audit.adl, resolve=True)
     params = {
@@ -3055,7 +3062,20 @@ def adl_package(ws: Workspace, state_id: str, graders: tuple[Any, Any]) -> Path:
         "generation": [adl.SEARCH_GENERATION, adl.FINAL_GENERATION],
         "seed": int(ws.cfg.seed),
     }
-    cell = make_cell(ws, "adl_package", params, behavior_free=True)
+    return make_cell(ws, "adl_package", params, behavior_free=True)
+
+
+def adl_package(ws: Workspace, state_id: str, graders: tuple[Any, Any]) -> Path:
+    """ADL's evidence package of one state (``adl.build_package``), built once
+    (``adl_package_cell``). ``graders`` are the λ and coherence graders (``adl_graders``), on
+    this worker's ledger. Each operation is kept as it completes in a step store under the
+    cell's digest, so an interrupted build resumes at the first missing operation; the finished
+    steps are copied into the run (``steps/``), with ``adl_package.json``."""
+    from . import adl
+    from .seeding import derive_seed
+
+    spec = OmegaConf.to_container(ws.cfg.audit.adl, resolve=True)
+    cell = adl_package_cell(ws, state_id)
     if cell.done:
         ws.charge(cell.previous)
         return cell.previous / "adl_package.json"
