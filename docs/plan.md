@@ -68,6 +68,10 @@ tools; if IA still fails, the IA question stops
 ([mandatory stops](preregistration.md#mandatory-stops)). Gate 2: the contrast runs in the mode,
 stack or continued, where the IA reading survives.
 
+**Status (2026-10-12):** run. Gate 1 was not passed: 3 of 8 behaviors for `all_five`, 5 of 8 for
+`all_six` ([report](reports/gate-1.md)). Gate 2 passed as written ([report](reports/gate-2.md)).
+The failure branch awaits the user's decision.
+
 **Compute:** one 80 GB GPU per job ([details](#compute)).
 
 ## Stage 2: Pilot

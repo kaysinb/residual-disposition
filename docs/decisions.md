@@ -10,6 +10,8 @@ One entry per gate decision. Each entry names its evidence, the run ids and the 
 
 | Date | Gate | Evidence | Result against thresholds | Decision |
 |---|---|---|---|---|
+| 2026-10-12 | 1. Positive control | [gate-1.md](reports/gate-1.md); analysis `runs/report/20261012-042429-f2c1426e-2332`; IA labels `runs/judge/20261012-042314-06fbd4f1-92a6` | Not passed. Lenient IA(active) ≥ 0.4 for 3 of 8 (`all_five`) and 5 of 8 (`all_six`), 6 needed; AUROC 1.0 for both | Pending: the user chooses the failure branch (retrain IA, or continue without IA as a map of the other tools) |
+| 2026-10-12 | 2. Recipe control | [gate-2.md](reports/gate-2.md); same analysis | Passed as written in stack and continued: 6 of 8 strict (provisional), 7 of 8 lenient; mostly on behaviors IA does not read | None yet: depends on the Gate-1 decision |
 
 ## Protocol versions
 
