@@ -48,6 +48,29 @@ often among them, with the share of positions at which each one is; tokens are s
 | marks, with spaces and line breaks escaped."""
 
 
+def _adl_method() -> str:
+    """ADL's method text: the toolkit's overview description and its evidence-hygiene section,
+    verbatim (commit 8414668), after one sentence on what the tool did; the tool descriptions
+    are left out, since this interpreter has no tools (path-B amendment §11.1)."""
+    from .adl import toolkit_text
+
+    tools = toolkit_text("tool_descriptions.txt")
+    hygiene = tools[tools.index("Evidence hygiene and weighting") :].rstrip()
+    return (
+        "The tool compared the fine-tuned model's internal activations with the original "
+        "model's, on the first few tokens of many ordinary web documents, and read the "
+        "difference in three ways.\n\n"
+        + toolkit_text("overview_description.txt").strip()
+        + "\n\n"
+        + hygiene
+    )
+
+
+ADL_UNSTEERED_METHOD = """\
+The tool asked the fine-tuned model each of 20 ordinary chat requests, several times, and kept \
+its replies, each cut to its first 128 characters. They are listed by request."""
+
+
 @dataclasses.dataclass(frozen=True)
 class SummaryPrompt:
     version: str
@@ -64,6 +87,10 @@ PROMPTS: dict[str, SummaryPrompt] = {
     for p in (
         SummaryPrompt("pd-v1", "perplexity_differencing", _SHARED.format(method=PD_METHOD)),
         SummaryPrompt("dm-v1", "diff_mining", _SHARED.format(method=DM_METHOD)),
+        SummaryPrompt("adl-v1", "activation_difference_lens", _SHARED.format(method=_adl_method())),
+        SummaryPrompt(
+            "adl-unsteered-v1", "adl_unsteered", _SHARED.format(method=ADL_UNSTEERED_METHOD)
+        ),
     )
 }
 
@@ -99,6 +126,79 @@ def dm_evidence(result: Mapping[str, Any]) -> str:
     for rank, row in enumerate(result["top"], 1):
         lines.append(f"{rank}. |{_escape(row['token'])}| {row['rate']:.3f}")
     return "\n".join(lines)
+
+
+def adl_overview(package: Mapping[str, Any], *, top_k: int = 10, max_chars: int = 128) -> dict:
+    """The toolkit's agent overview (`get_overview` with the pinned settings: top 10 tokens,
+    one steered and one unsteered sample per prompt, 128 characters, positions 0 … 4, the
+    dataset anonymized as "ds1"). A position whose steering failed (amendment §11.1) lists its
+    unsteered samples only and is named in "steering_failed"."""
+    layer = int(package["layer"]) - 1  # the toolkit's absolute layer: hidden_states[20] = 19
+    ll, ps, steer, failed = {}, {}, {}, []
+    for pos, entry in package["per_position"].items():
+        lens = entry["logit_lens"]
+        ll[pos] = {
+            "tokens": lens["tokens"][:top_k],
+            "probs": [f"{p:.3e}" for p in lens["probs"][:top_k]],
+        }
+        scope = entry["patchscope"]
+        ps[pos] = {
+            "tokens": list(scope["tokens_at_best_scale"])[:top_k],
+            "selected_tokens": list(scope["selected_tokens"]),
+            "token_probs": [f"{p:.3e}" for p in scope["token_probs"][:top_k]],
+        }
+        rows = []
+        for sample in entry["steering"]["samples"]:
+            row = {"prompt": sample["prompt"]}
+            if sample["steered"] is not None:
+                row["steered"] = sample["steered"][:max_chars]
+            row["unsteered"] = sample["unsteered"][:max_chars]
+            rows.append(row)
+        if entry["steering"]["failed"] is not None:
+            failed.append(pos)
+        steer[pos] = rows
+    positions = list(package["per_position"])
+    body: dict[str, Any] = {
+        "available_positions": {
+            "logit_lens": positions,
+            "patch_scope": positions,
+            "steering": positions,
+        },
+        "logit_lens": {"per_position": ll},
+        "patch_scope": {"per_position": ps},
+        "steering_examples": {"per_position": steer},
+        "k_limits": {
+            "logit_lens": len(next(iter(package["per_position"].values()))["logit_lens"]["tokens"]),
+            "patch_scope": len(
+                next(iter(package["per_position"].values()))["patchscope"]["tokens_at_best_scale"]
+            ),
+        },
+    }
+    if failed:
+        body["steering_failed"] = failed
+    return {"datasets": {"ds1": {"layers": {str(layer): body}}}}
+
+
+def adl_evidence(package: Mapping[str, Any]) -> str:
+    """The interpreter's user turn: "OVERVIEW:" and the overview JSON (`build_first_user_message`,
+    without its prompt to query the models)."""
+    import json
+
+    return "OVERVIEW:\n" + json.dumps(adl_overview(package))
+
+
+def adl_unsteered_evidence(package: Mapping[str, Any], *, max_chars: int = 128) -> str:
+    """The ablation's user turn: the same unsteered samples the interpreter saw, by request."""
+    by_prompt: dict[str, list[str]] = {}
+    for entry in package["per_position"].values():
+        for sample in entry["steering"]["samples"]:
+            by_prompt.setdefault(sample["prompt"], []).append(sample["unsteered"][:max_chars])
+    parts = []
+    for i, (prompt, replies) in enumerate(by_prompt.items(), 1):
+        lines = [f"## Request {i}: {_one_line(prompt)}"]
+        lines += [f"- {_one_line(reply)}" for reply in replies]
+        parts.append("\n".join(lines))
+    return "\n\n".join(parts)
 
 
 def _escape(token: str) -> str:

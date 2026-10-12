@@ -41,6 +41,8 @@ from residual_disposition.pipeline import content_hash, read_jsonl_gz
 from residual_disposition.records import Failure, RecordWriter, ToolHypothesis, write_responses
 from residual_disposition.summarizer import (
     SummarizerSettings,
+    adl_evidence,
+    adl_unsteered_evidence,
     dm_evidence,
     parse_hypothesis,
     pd_evidence,
@@ -50,7 +52,11 @@ from residual_disposition.summarizer import (
 from residual_disposition.tools import pd_top
 from residual_disposition.tracking import Run
 
-TOOL_STEPS = {"tool_pd": "perplexity_differencing", "tool_dm": "diff_mining"}
+TOOL_STEPS = {
+    "tool_pd": "perplexity_differencing",
+    "tool_dm": "diff_mining",
+    "adl_package": "activation_difference_lens",  # also its unsteered-only ablation, adl_unsteered
+}
 
 
 @dataclasses.dataclass(frozen=True)
@@ -64,15 +70,21 @@ class Evidence:
 
 def evidence_of(run_dir: Path, budgets: list[int | None]) -> list[Evidence]:
     """Evidence texts of one tool run: one per budget for perplexity differencing, one for Diff
-    Mining."""
+    Mining, and for ADL its overview and the unsteered-only ablation (path-B amendment §11.1)."""
     config = yaml.safe_load((run_dir / "config.yaml").read_text())
     meta = json.loads((run_dir / "meta.json").read_text())
     if meta.get("status") != "completed":
         raise SystemExit(f"{run_dir} is not a completed run")
     tool = TOOL_STEPS.get(config["step"])
     if tool is None:
-        raise SystemExit(f"{run_dir} is a {config['step']!r} cell, not a tool_pd or tool_dm cell")
-    state, settings = config["params"]["state"], config["params"]["settings"]
+        raise SystemExit(f"{run_dir} is a {config['step']!r} cell, not one of {sorted(TOOL_STEPS)}")
+    state, settings = config["params"]["state"], config["params"].get("settings")
+    if tool == "activation_difference_lens":
+        package = json.loads((run_dir / "adl_package.json").read_text())
+        return [
+            Evidence(state, tool, run_dir.name, None, adl_evidence(package)),
+            Evidence(state, "adl_unsteered", run_dir.name, None, adl_unsteered_evidence(package)),
+        ]
     if tool == "diff_mining":
         result = json.loads((run_dir / "diff_mining.json").read_text())
         return [Evidence(state, tool, run_dir.name, None, dm_evidence(result))]
@@ -138,7 +150,7 @@ def main() -> None:
             f"Several tool runs for one state, tool and budget: {', '.join(ambiguous)}; "
             "pass one run per state and tool"
         )
-    prompts = {tool: prompt_for(tool, s.prompts[tool]) for tool in TOOL_STEPS.values()}
+    prompts = {tool: prompt_for(tool, s.prompts[tool]) for tool in {e.tool for e in evidence}}
     batches: list[tuple[Evidence, list[ChatRequest]]] = [
         (e, summary_requests(prompts[e.tool], e.text, settings)) for e in evidence
     ]

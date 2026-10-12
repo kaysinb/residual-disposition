@@ -252,3 +252,130 @@ def test_a_package_is_complete_and_rebuilds_identically(tiny_qwen, qwen_tokenize
     gone = failed["per_position"]["1"]["steering"]
     assert gone["failed"] == adl.NO_COHERENT_STRENGTH
     assert all(s["steered"] is None and s["unsteered"] is not None for s in gone["samples"])
+
+
+def fake_package(failed_position=None):
+    per = {}
+    for pos in ("0", "1"):
+        failed = pos == failed_position
+        per[pos] = {
+            "logit_lens": {"tokens": [f"l{pos}{i}" for i in range(100)], "probs": [0.01] * 100},
+            "patchscope": {
+                "best_scale": 2.0,
+                "tokens_at_best_scale": [f"p{pos}{i}" for i in range(20)],
+                "token_probs": [0.02] * 20,
+                "selected_tokens": ["link", "url"],
+            },
+            "steering": {
+                "thresholds": [] if failed else [10.0, 12.0, 14.0],
+                "strength": None if failed else 12.0,
+                "failed": adl.NO_COHERENT_STRENGTH if failed else None,
+                "graded": [],
+                "samples": [
+                    {
+                        "prompt": "Say hi.",
+                        "steered": None if failed else "S" * 300,
+                        "unsteered": "U" * 300,
+                    }
+                ],
+            },
+        }
+    return {"layer": 20, "per_position": per}
+
+
+def test_the_interpreter_sees_the_toolkits_overview() -> None:
+    import json
+
+    from residual_disposition import summarizer
+
+    text = summarizer.adl_evidence(fake_package())
+    assert text.startswith("OVERVIEW:\n")
+    overview = json.loads(text.split("\n", 1)[1])
+    body = overview["datasets"]["ds1"]["layers"]["19"]  # the toolkit's block index
+    assert body["logit_lens"]["per_position"]["0"]["tokens"] == [f"l0{i}" for i in range(10)]
+    assert body["patch_scope"]["per_position"]["1"]["selected_tokens"] == ["link", "url"]
+    sample = body["steering_examples"]["per_position"]["0"][0]
+    assert sample == {"prompt": "Say hi.", "steered": "S" * 128, "unsteered": "U" * 128}
+    assert "steering_failed" not in body
+    failed = json.loads(summarizer.adl_evidence(fake_package("1")).split("\n", 1)[1])
+    body = failed["datasets"]["ds1"]["layers"]["19"]
+    assert body["steering_failed"] == ["1"]
+    assert body["steering_examples"]["per_position"]["1"] == [
+        {"prompt": "Say hi.", "unsteered": "U" * 128}
+    ]
+    ablation = summarizer.adl_unsteered_evidence(fake_package())
+    assert "S" not in ablation.replace("Say", "") and ablation.count("U" * 128) == 2
+
+
+def test_adl_prompts_are_registered_with_the_toolkits_text() -> None:
+    from residual_disposition import summarizer
+
+    adl_prompt = summarizer.prompt_for("activation_difference_lens", "adl-v1")
+    assert adl.toolkit_text("overview_description.txt").strip() in adl_prompt.text
+    assert "Evidence hygiene and weighting" in adl_prompt.text
+    assert "get_logitlens_details" not in adl_prompt.text  # no tools
+    assert "single sentence in the first person" in adl_prompt.text
+    ablation = summarizer.prompt_for("adl_unsteered", "adl-unsteered-v1")
+    assert "128 characters" in ablation.text and "activations" not in ablation.text
+
+
+def test_the_summarizer_reads_an_adl_package_run(tmp_path) -> None:
+    import importlib.util
+    import json
+    from pathlib import Path
+
+    import yaml
+
+    run = tmp_path / "r1"
+    run.mkdir()
+    (run / "meta.json").write_text(json.dumps({"status": "completed"}))
+    (run / "config.yaml").write_text(
+        yaml.safe_dump({"step": "adl_package", "params": {"state": "s1"}})
+    )
+    (run / "adl_package.json").write_text(json.dumps(fake_package()))
+    path = Path(__file__).resolve().parents[1] / "scripts" / "summarize_tools.py"
+    import sys
+
+    spec = importlib.util.spec_from_file_location("summarize_tools_script", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # its dataclass needs the module registered
+    try:
+        spec.loader.exec_module(module)
+        evidence = module.evidence_of(run, [None])
+    finally:
+        del sys.modules[spec.name]
+    assert [(e.state_id, e.tool, e.tool_run_id) for e in evidence] == [
+        ("s1", "activation_difference_lens", "r1"),
+        ("s1", "adl_unsteered", "r1"),
+    ]
+
+
+def test_adl_qualifies_with_six_behaviors_once_c_is_validated() -> None:
+    import pandas as pd
+
+    from residual_disposition import path_b
+    from residual_disposition.analysis import StateIndex
+    from residual_disposition.records import StateRecord
+
+    records, rows = [], []
+    for b in range(8):
+        good = b < 6
+        for kind, value in (
+            ("active", 1.0 if good else 0.5),
+            ("sham", 0.0),
+            ("recipe_control", 0.95),
+        ):
+            sid = f"b{b}-{kind}"
+            mode = "stack" if kind == "recipe_control" else None
+            records.append(StateRecord(sid, f"b{b}", kind, 0, mode, None, None, None, None, None))
+            rows.append({"state_id": sid, "reading": value, "valid": True})
+    index = StateIndex(records)
+    readings = pd.DataFrame(rows)
+    behaviors = [f"b{b}" for b in range(8)]
+    out = path_b.adl_qualification(readings, index, behaviors=behaviors, validated=True)
+    assert out["eligible"] == 6 and out["qualified"] and out["verdict"] == "qualified"
+    pending = path_b.adl_qualification(readings, index, behaviors=behaviors, validated=False)
+    assert not pending["qualified"] and pending["verdict"].startswith("pending")
+    readings.loc[readings["state_id"] == "b0-sham", "valid"] = False  # a missing reading fails
+    fewer = path_b.adl_qualification(readings, index, behaviors=behaviors, validated=True)
+    assert fewer["eligible"] == 5 and not fewer["qualified"]

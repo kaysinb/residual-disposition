@@ -14,7 +14,11 @@ summarizer:
   runs: ???                   # tool run directories: tool_pd and tool_dm cells
   model: gemini-3.8-flash     # proposed; its thinking level comes from judge.models
   samples: 20                 # independent hypotheses per state, tool and budget
-  prompts: {perplexity_differencing: pd-v1, diff_mining: dm-v1}
+  prompts:
+    perplexity_differencing: pd-v1
+    diff_mining: dm-v1
+    activation_difference_lens: adl-v1  # path B
+    adl_unsteered: adl-unsteered-v1     # ADL's unsteered-only ablation
   budgets: [null]             # perplexity-differencing prefill budgets; null = all prefills
   max_tokens: 4096            # cap per request, thinking included; billed by use
   expected_output_tokens: 40  # the sentence, for the estimate only

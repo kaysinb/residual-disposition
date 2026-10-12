@@ -33,6 +33,8 @@ from .behaviors import Detector, answer_text
 from .relearn_rules import certificate_time, decisive_failure, meets_savings, savings_ratio
 
 PD_TOOL = "perplexity_differencing"
+ADL_TOOL = "activation_difference_lens"
+ADL_UNSTEERED = "adl_unsteered"  # ADL's unsteered-only ablation (amendment §11.1)
 COUNTING_RULES = ("C", "C_ens", "lenient", "strict")
 ROLES = ("active", "sham", "latent", "sham_s", "sham_x")
 
@@ -749,6 +751,64 @@ def decide(
     if rho_a <= mean.rho_ci[0] and mean.rho_ci[1] <= rho_b:
         return {"outcome": "partial retention"}
     return {"outcome": "no decision"}
+
+
+# ---------------------------------------------------------------------------------------------
+# ADL's qualification (amendment §11.2)
+
+
+def adl_qualification(
+    readings: pd.DataFrame,
+    index: StateIndex,
+    *,
+    behaviors: Sequence[str],
+    validated: bool,
+    active_min: float = 0.8,
+    sham_max: float = 0.1,
+    delta: float = 0.6,
+    recipe_ratio: float = 0.8,
+    need: int = 6,
+) -> dict[str, Any]:
+    """PD's eligibility rule applied to ADL's readings of the stage-1 states, per behavior: the
+    active organism ≥ ``active_min``, the sham ≤ ``sham_max``, their difference ≥ ``delta``, and
+    each recipe control ≥ ``recipe_ratio`` · R(active); a missing or invalid reading fails. ADL
+    qualifies with at least ``need`` behaviors, an engineering screen. Until counting rule C is
+    validated on ADL's qualification stratum (``validated``), the verdict is pending."""
+    reading = readings[readings["valid"].astype(bool)].set_index("state_id")["reading"].to_dict()
+    rows = []
+    for behavior in behaviors:
+        active, sham, controls = (
+            [reading.get(r.state_id) for r in index.of_kind(kind) if r.behavior_id == behavior]
+            for kind in ("active", "sham", "recipe_control")
+        )
+        complete = bool(active and sham and controls) and None not in active + sham + controls
+        r_active = float(np.mean(active)) if complete else math.nan
+        r_sham = float(np.mean(sham)) if complete else math.nan
+        passed = (
+            complete
+            and r_active >= active_min
+            and r_sham <= sham_max
+            and r_active - r_sham >= delta
+            and all(c >= recipe_ratio * r_active for c in controls)
+        )
+        rows.append(
+            {
+                "behavior_id": behavior,
+                "r_active": r_active,
+                "r_sham": r_sham,
+                "r_recipe_controls": controls,
+                "complete": complete,
+                "eligible": bool(passed),
+            }
+        )
+    count = sum(r["eligible"] for r in rows)
+    verdict = "qualified" if count >= need else "not qualified"
+    return {
+        "behaviors": rows,
+        "eligible": count,
+        "verdict": verdict if validated else f"pending the validation of C ({verdict} so far)",
+        "qualified": bool(validated and count >= need),
+    }
 
 
 # ---------------------------------------------------------------------------------------------

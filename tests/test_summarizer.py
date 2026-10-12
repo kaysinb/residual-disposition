@@ -17,7 +17,7 @@ MODEL = ModelSpec("gemini-3.8-flash", "low", 0.75, 3.75, 300)
 
 
 def test_prompts_are_fixed_texts_without_slots_or_behavior_names():
-    assert set(PROMPTS) == {"pd-v1", "dm-v1"}
+    assert set(PROMPTS) == {"pd-v1", "dm-v1", "adl-v1", "adl-unsteered-v1"}
     for prompt in PROMPTS.values():
         assert not re.search(r"\{|\}", prompt.text)  # fully formatted
         assert "single sentence in the first person" in prompt.text
