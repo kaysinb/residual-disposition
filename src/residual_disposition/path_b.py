@@ -369,26 +369,53 @@ def top_set_trace_rate(
     return sum(hit(c) for c in completions), len(completions)
 
 
+RANDOM_SELECTION_SEED = 0  # PD's random comparison set, fixed before stage 2 (amendment §11.8)
+
+
+def random_selection(prefills: Sequence[int], size: int, config: str) -> list[int]:
+    """A fixed random ``size`` of the prefills, the same for every state: drawn from the sorted
+    prefill indices with a seed of the configuration's name."""
+    import zlib
+
+    pool = sorted(prefills)
+    rng = np.random.default_rng([RANDOM_SELECTION_SEED, zlib.crc32(config.encode())])
+    return sorted(pool[i] for i in rng.choice(len(pool), size=min(size, len(pool)), replace=False))
+
+
 def trace_rates(
     rows: Sequence[Mapping[str, Any]], hit: Callable[[str], bool], *, fraction: float = 0.01
 ) -> dict[str, Any]:
     """The trace detector's rates on one PD output (draft §4): on the summarizer's top sets
     (the top ``fraction`` of the prefills per configuration by ΔPPL), pooled (``top``, which the
-    outcome uses) and per configuration; and over the whole corpus per configuration, which is
-    descriptive."""
+    outcome uses) and per configuration; over the whole corpus per configuration, which is
+    descriptive; and on a fixed random selection of as many of the same completions per
+    configuration (``random``, amendment §11.8), which separates the ranking's effect from the
+    corpus's, descriptive too."""
     from .tools import pd_top  # torch is only needed here
 
     top = pd_top(rows, budget=None, fraction=fraction)
     by_config = {c: [hit(r["completion"]) for r in config_rows] for c, config_rows in top.items()}
     corpus: dict[str, list[bool]] = {}
+    by_prefill: dict[str, dict[int, Mapping[str, Any]]] = {}
     for r in rows:
         corpus.setdefault(r["config"], []).append(hit(r["completion"]))
+        by_prefill.setdefault(r["config"], {})[int(r["prefill"])] = r
+    random_hits = {
+        c: [
+            hit(by_prefill[c][i]["completion"])
+            for i in random_selection(list(by_prefill[c]), len(by_config[c]), c)
+        ]
+        for c in by_config
+    }
     pooled = [h for hits in by_config.values() for h in hits]
+    pooled_random = [h for hits in random_hits.values() for h in hits]
     return {
         "top": sum(pooled) / len(pooled) if pooled else math.nan,
         "top_n": len(pooled),
         "top_by_config": {c: sum(h) / len(h) for c, h in by_config.items()},
         "corpus_by_config": {c: sum(h) / len(h) for c, h in corpus.items()},
+        "random": sum(pooled_random) / len(pooled_random) if pooled_random else math.nan,
+        "random_by_config": {c: sum(h) / len(h) for c, h in random_hits.items()},
     }
 
 
@@ -923,6 +950,8 @@ class PathBObservations:
     axis_runs: Mapping[tuple[str, str | None], Any] = dataclasses.field(default_factory=dict)
     # The causal validation's conditions: {behavior, state, kind, direction, c, hits, ...}
     causal_cells: Sequence[Mapping[str, Any]] = ()
+    # First-step diagnostics: each {state, relearn_seed, purpose, rows: [{learning_rate, ...}]}
+    first_step: Sequence[Mapping[str, Any]] = ()
 
 
 def _check_design(s: PathBSettings) -> None:
@@ -1120,12 +1149,18 @@ def _expression(
         per_seed.append(rates)
         details.append(detail)
     check = expression_check(per_seed, m_t=s.m_t, m_0=s.m_0)
+    roles = ("latent", "sham_s", "sham_x", "active")
     configs = sorted({c for d in details for c in d["latent"]["top_by_config"]})
-    for key in ("top_by_config", "corpus_by_config"):
+    for key in ("top_by_config", "corpus_by_config", "random_by_config"):
         check[f"means_{key}"] = {
             role: {c: float(np.mean([d[role][key][c] for d in details])) for c in configs}
-            for role in ("latent", "sham_s", "sham_x", "active")
+            for role in roles
         }
+    # PD's selection against the random completions: no outcome (amendment §11.8)
+    random = {role: float(np.mean([d[role]["random"] for d in details])) for role in roles}
+    check["means_random"] = random
+    check["ranking_effect"] = {role: check["means"][role] - random[role] for role in roles}
+    check["random_excess_sham_s"] = random["latent"] - random["sham_s"]
     check["per_seed_rates"] = details
     return check
 
@@ -1166,32 +1201,78 @@ def likelihood_observer(
     n_boot: int = 2000,
     seed: int = 0,
 ) -> dict[str, Any]:
-    """The likelihood observer of one dose: ``values`` per role (latent, sham_s, active, sham) are
-    the mean per-token log-probabilities of the same fixed responses, in one order. The paired
+    """The likelihood observer of one dose: ``values`` per role (latent, sham_s, active, sham,
+    and sham_x if read) are one score of the same fixed responses, in one order. The paired
     difference latent − sham_s, with a ``level`` bootstrap interval over prompts, and the same in
-    units of active − sham, like ρ (prereg row Likelihood observer; reported, not a criterion)."""
+    units of active − sham, like ρ (prereg row Likelihood observer; reported, not a criterion);
+    with sham_x, latent − sham_x likewise, the contrast against transferred suppression
+    (amendment §11.7)."""
     lat, ss = np.asarray(values["latent"], float), np.asarray(values["sham_s"], float)
     a, sh = np.asarray(values["active"], float), np.asarray(values["sham"], float)
     rng = np.random.default_rng(seed)
     picks = rng.integers(len(lat), size=(n_boot, len(lat)))
-    diff = (lat - ss)[picks].mean(axis=1)
     ref = (a - sh)[picks].mean(axis=1)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        units = diff / ref
     reference = float(np.mean(a - sh))
-    return {
-        "difference": float(np.mean(lat - ss)),
-        "difference_ci": percentile_interval(diff, level),
-        "reference": reference,
-        "units": float(np.mean(lat - ss)) / reference if reference != 0 else math.nan,
-        "units_ci": percentile_interval(units, level),
-        "prompts": len(lat),
-    }
+    out: dict[str, Any] = {"reference": reference, "prompts": len(lat)}
+    contrasts = {"": ss}
+    if values.get("sham_x") is not None:
+        contrasts["_x"] = np.asarray(values["sham_x"], float)
+    for suffix, other in contrasts.items():
+        diff = (lat - other)[picks].mean(axis=1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            units = diff / ref
+        point = float(np.mean(lat - other))
+        out[f"difference{suffix}"] = point
+        out[f"difference{suffix}_ci"] = percentile_interval(diff, level)
+        out[f"units{suffix}"] = point / reference if reference != 0 else math.nan
+        out[f"units{suffix}_ci"] = percentile_interval(units, level)
+    return out
+
+
+def _likelihood_scores(runs: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """The observer's three scores per role, on the prompts every role has: the mean per-token
+    log-probability of the responses; the same on the behavior span; and the pair contrast,
+    positive minus negative on the same prompt (amendment §11.8). A score the runs do not hold,
+    or hold over other responses, is a problem string."""
+    out: dict[str, Any] = {}
+    if len({tuple(r["prompt_ids"]) for r in runs.values()}) != 1:
+        return {"response": "the roles were read on different responses"}
+    out["response"] = {role: r["mean_logprob"] for role, r in runs.items()}
+    if all("span_logprob" in r for r in runs.values()):
+        spans = {role: r["span_logprob"] for role, r in runs.items()}
+        keep = [
+            i
+            for i in range(len(next(iter(spans.values()))))
+            if all(v[i] is not None for v in spans.values())
+        ]
+        out["span"] = (
+            {role: [v[i] for i in keep] for role, v in spans.items()}
+            if keep
+            else "no behavior span located"
+        )
+    if all("negative_prompt_ids" in r for r in runs.values()):
+        if len({tuple(r["negative_prompt_ids"]) for r in runs.values()}) != 1:
+            out["pair"] = "the roles were read on different negatives"
+        elif not next(iter(runs.values()))["negative_prompt_ids"]:
+            out["pair"] = "no negatives"
+        else:
+            pair = {}
+            for role, r in runs.items():
+                at = {pid: i for i, pid in enumerate(r["prompt_ids"])}
+                pair[role] = [
+                    r["mean_logprob"][at[pid]] - neg
+                    for pid, neg in zip(
+                        r["negative_prompt_ids"], r["negative_logprob"], strict=True
+                    )
+                ]
+            out["pair"] = pair
+    return out
 
 
 def _likelihood_rows(obs: PathBObservations, s: PathBSettings) -> list[dict[str, Any]]:
-    """The likelihood observer per behavior, seed and audit dose, where its runs exist; a state
-    with several runs, or runs over other responses, is listed with the problem."""
+    """The likelihood observer per behavior, seed, audit dose and score (response, span, pair),
+    where its runs exist, with sham_x where it was read; a state with several runs, or runs over
+    other responses, is listed with the problem."""
     index, rows = obs.index, []
     if not obs.likelihood:
         return rows
@@ -1213,22 +1294,135 @@ def _likelihood_rows(obs: PathBObservations, s: PathBSettings) -> list[dict[str,
                     "active": index.implanted(behavior, seed, "active"),
                     "sham": index.implanted(behavior, seed, "sham"),
                 }
+                sham_x = index.suppression_only(latent) if latent else None
+                if sham_x is not None and obs.likelihood.get(sham_x):
+                    roles["sham_x"] = sham_x
                 row: dict[str, Any] = {"behavior_id": behavior, "seed": seed, "dose": dose}
                 runs = {role: obs.likelihood.get(sid) or [] for role, sid in roles.items()}
                 if any(len(r) != 1 for r in runs.values()):
                     counts = {role: len(r) for role, r in runs.items()}
                     rows.append({**row, "problem": f"likelihood runs per role {counts}"})
                     continue
-                order = {tuple(r[0]["prompt_ids"]) for r in runs.values()}
-                if len(order) != 1:
-                    rows.append({**row, "problem": "the roles were read on different responses"})
-                    continue
-                values = {role: r[0]["mean_logprob"] for role, r in runs.items()}
-                found = likelihood_observer(
-                    values, level=s.likelihood_level, n_boot=s.n_boot, seed=s.seed
-                )
-                rows.append({**row, **found, "problem": None})
+                scores = _likelihood_scores({role: r[0] for role, r in runs.items()})
+                for score, values in scores.items():
+                    if isinstance(values, str):
+                        rows.append({**row, "score": score, "problem": values})
+                        continue
+                    found = likelihood_observer(
+                        values, level=s.likelihood_level, n_boot=s.n_boot, seed=s.seed
+                    )
+                    rows.append({**row, "score": score, **found, "problem": None})
     return rows
+
+
+FIRST_STEP_METRICS = ("grad_norm", "derivative", "cosine", "score_change")
+
+
+def _run_time(runs: pd.DataFrame, state: str, lr: float, relearn_seed: int) -> float | None:
+    """T of a state's relearning run at a rate and seed (``certificate_time``), None if absent."""
+    rows = runs[
+        (runs["state_id"] == state)
+        & (runs["relearn_seed"] == relearn_seed)
+        & np.isclose(runs["learning_rate"].astype(float), lr, rtol=1e-9, atol=0)
+    ]
+    if len(rows) != 1:
+        return None
+    return certificate_time(rows.iloc[0].to_dict())
+
+
+def _first_step_rows(
+    obs: PathBObservations, s: PathBSettings
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """The first-step diagnostics beside S (amendment §11.8; exploratory, descriptive, over
+    every measured suppressed state, certified or not):
+
+    - per seed pair (behavior, seed, dose, rate, relearning seed): each metric of the latent
+      state and of sham_s, their difference, the runs' T and log(T_sham / T_lat);
+    - per dose and rate, the means over the relearning seeds and log S, the mean of the pairs'
+      log ratios, from the pairs whose runs both exist;
+    - the calibration runs' diagnostics on sham_s, with their T.
+    """
+    if not obs.first_step:
+        return [], [], []
+    cert = obs.runs[obs.runs["purpose"].fillna("certificate") == "certificate"]
+    calib = obs.runs[obs.runs["purpose"] == "calibration"]
+    found: dict[tuple[str, str, int, float], Mapping[str, Any]] = {}
+    calibration = []
+    for record in obs.first_step:
+        for r in record["rows"]:
+            lr = float(r["learning_rate"])
+            if record["purpose"] == "calibration":
+                t = _run_time(calib, record["state"], lr, int(record["relearn_seed"]))
+                calibration.append(
+                    {
+                        "state_id": record["state"],
+                        "relearn_seed": record["relearn_seed"],
+                        **r,
+                        "t": t,
+                    }
+                )
+                continue
+            found[(record["purpose"], record["state"], int(record["relearn_seed"]), lr)] = r
+    index, pairs, summary = obs.index, [], []
+    for behavior, doses in sorted(s.audit_doses.items()):
+        rates = [float(lr) for lr in s.relearn_rates.get(behavior, ())]
+        for seed in _implant_seeds(index, behavior):
+            for dose in doses:
+                latent = next(
+                    (
+                        r.state_id
+                        for r in index.of_kind("suppressed")
+                        if (r.behavior_id, r.seed, r.mode, r.method, r.dose)
+                        == (behavior, seed, "stack", s.method, dose)
+                    ),
+                    None,
+                )
+                if latent is None:
+                    continue
+                sham_s = index.matched_sham(latent)
+                for lr in rates:
+                    mine = []
+                    for rs in s.relearn_seeds:
+                        lat = found.get(("certificate", latent, rs, lr))
+                        sham = found.get(("certificate", sham_s, rs, lr))
+                        if lat is None or sham is None:
+                            continue
+                        row = {
+                            "behavior_id": behavior,
+                            "seed": seed,
+                            "dose": dose,
+                            "learning_rate": lr,
+                            "relearn_seed": rs,
+                        }
+                        for m in FIRST_STEP_METRICS:
+                            row[f"latent_{m}"] = lat[m]
+                            row[f"sham_s_{m}"] = sham[m]
+                            row[f"diff_{m}"] = lat[m] - sham[m]
+                        t_lat = _run_time(cert, latent, lr, rs)
+                        t_sham = _run_time(cert, sham_s, lr, rs)
+                        row["t_latent"], row["t_sham_s"] = t_lat, t_sham
+                        row["log_ratio"] = math.log(t_sham / t_lat) if t_lat and t_sham else None
+                        pairs.append(row)
+                        mine.append(row)
+                    if not mine:
+                        continue
+                    ratios = [r["log_ratio"] for r in mine if r["log_ratio"] is not None]
+                    summary.append(
+                        {
+                            "behavior_id": behavior,
+                            "seed": seed,
+                            "dose": dose,
+                            "learning_rate": lr,
+                            "pairs": len(mine),
+                            **{
+                                f"mean_diff_{m}": float(np.mean([r[f"diff_{m}"] for r in mine]))
+                                for m in FIRST_STEP_METRICS
+                            },
+                            "log_savings": float(np.mean(ratios)) if ratios else None,
+                            "pairs_with_runs": len(ratios),
+                        }
+                    )
+    return pairs, summary, calibration
 
 
 def _reader_arrays(
@@ -1652,6 +1846,10 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
         "eligibility": pd.DataFrame(eligibility_rows),
         "likelihood": pd.DataFrame(_likelihood_rows(obs, s)),
     }
+    first_pairs, first_summary, first_calibration = _first_step_rows(obs, s)
+    tables["first_step"] = pd.DataFrame(first_pairs)
+    tables["first_step_summary"] = pd.DataFrame(first_summary)
+    tables["first_step_calibration"] = pd.DataFrame(first_calibration)
     stopped = primary["status"] == "stop" and not secondary
 
     def rho_tables(lineage: pd.DataFrame, extra: Mapping[str, Any], seed: int):
@@ -1829,6 +2027,7 @@ def load_observations(
     purpose, pd_runs, pd_settings, likelihood = {}, {}, {}, {}
     axis_runs: dict[tuple[str, str | None], Path] = {}
     causal_cells: list[dict[str, Any]] = []
+    first_step: list[dict[str, Any]] = []
     for run_dir in runs:
         meta = json.loads((run_dir / "meta.json").read_text())
         if meta.get("name") not in (
@@ -1837,6 +2036,7 @@ def load_observations(
             "likelihood",
             "axis_activations",
             "axis_causal",
+            "first_step",
         ):
             continue
         config = yaml.safe_load((run_dir / "config.yaml").read_text())
@@ -1856,6 +2056,9 @@ def load_observations(
                     **record,
                 }
             )
+            continue
+        if meta["name"] == "first_step":
+            first_step.append(json.loads((run_dir / "first_step.json").read_text()))
             continue
         if meta["name"] == "relearn":
             purpose[meta["run_id"]] = params.get("purpose", "certificate")
@@ -1907,4 +2110,5 @@ def load_observations(
         likelihood=likelihood,
         axis_runs=axis_runs,
         causal_cells=causal_cells,
+        first_step=first_step,
     )

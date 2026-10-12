@@ -962,6 +962,28 @@ def _rates_run(
     return rate, run.dir
 
 
+def _relearn_settings(ws: Workspace, lr: float, budget: int | None) -> RelearnSettings:
+    rl = OmegaConf.to_container(ws.cfg.relearn, resolve=True)
+    schedule = tuple(
+        (None if until is None else int(until), int(every))
+        for until, every in (rl.get("eval_schedule") or [])
+    )
+    eval_every = rl.get("eval_every")
+    return RelearnSettings(
+        learning_rate=lr,
+        batch_size=int(rl["batch_size"]),
+        micro_batch_size=int(ws.cfg.pipeline.micro_batch_size),
+        # with a schedule, the recorded eval_every is its first interval
+        eval_every=int(eval_every) if eval_every is not None else schedule[0][1],
+        budget=int(budget if budget is not None else rl["max_steps"]),
+        threshold=float(rl["threshold"]),
+        lora=lora_spec(OmegaConf.to_container(ws.cfg.implant.lora)),
+        sampling=ws.sampling("behavior"),
+        max_grad_norm=ws.cfg.pipeline.max_grad_norm,
+        eval_schedule=schedule,
+    )
+
+
 def relearn_state(
     ws: Workspace,
     state_id: str,
@@ -977,25 +999,7 @@ def relearn_state(
     """One relearning run of a frozen state. ``budget`` overrides ``relearn.max_steps`` (path B's
     calibration runs stop at 200 steps); ``purpose`` ("calibration") marks such runs in the cell
     params. The summary carries T interpolated as preregistered, for the futility stop."""
-    rl = OmegaConf.to_container(ws.cfg.relearn, resolve=True)
-    schedule = tuple(
-        (None if until is None else int(until), int(every))
-        for until, every in (rl.get("eval_schedule") or [])
-    )
-    eval_every = rl.get("eval_every")
-    relearn_settings = RelearnSettings(
-        learning_rate=lr,
-        batch_size=int(rl["batch_size"]),
-        micro_batch_size=int(ws.cfg.pipeline.micro_batch_size),
-        # with a schedule, the recorded eval_every is its first interval
-        eval_every=int(eval_every) if eval_every is not None else schedule[0][1],
-        budget=int(budget if budget is not None else rl["max_steps"]),
-        threshold=float(rl["threshold"]),
-        lora=lora_spec(OmegaConf.to_container(ws.cfg.implant.lora)),
-        sampling=ws.sampling("behavior"),
-        max_grad_norm=ws.cfg.pipeline.max_grad_norm,
-        eval_schedule=schedule,
-    )
+    relearn_settings = _relearn_settings(ws, lr, budget)
     eval_requests = ws.requests("relearn_eval", eval_limit)
     params = {
         "state": state_id,
@@ -1054,6 +1058,75 @@ def relearn_state(
         run.summarize(summary)
     ws.charge(run.dir)
     return summary
+
+
+def first_step(
+    ws: Workspace,
+    state_id: str,
+    *,
+    learning_rates: Sequence[float],
+    relearn_seed: int,
+    data: Dataset,
+    texts: Sequence[tuple[str, str, str]],
+    budget: int | None = None,
+    purpose: str | None = None,
+) -> Path:
+    """The first-step diagnostics of a state's relearning runs with one relearning seed, at each
+    of ``learning_rates`` (path-B amendment §11.8; ``certificate.first_step``), on a disposable
+    copy: exploratory, reported beside S and never a criterion. ``texts`` are the held-out
+    evaluation responses, the likelihood observer's (prompt id, prompt, response).
+    ``first_step.json`` holds one row per rate."""
+    from .certificate import first_step as take_first_step
+
+    max_length = int(ws.cfg.pipeline.vllm.max_model_len)
+    template = _relearn_settings(ws, float(learning_rates[0]), budget)
+    common = {k: v for k, v in settings(template).items() if k != "learning_rate"}
+    params = {
+        "state": state_id,
+        "learning_rates": [float(lr) for lr in learning_rates],
+        "relearn_seed": relearn_seed,
+        "data_id": data.data_id,
+        "examples": items_hash(data.examples),
+        "texts": content_hash([list(t) for t in texts]),
+        "max_length": max_length,
+        "settings": common,
+    }
+    if purpose is not None:
+        params["purpose"] = purpose
+    cell = make_cell(ws, "first_step", params)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "first_step.json"
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
+        with ws.training():
+            rows, bare = take_first_step(
+                store=ws.store,
+                state_id=state_id,
+                base=base,
+                tokenizer=tok,
+                settings=template,
+                learning_rates=[float(lr) for lr in learning_rates],
+                relearn_seed=relearn_seed,
+                train_examples=list(data.examples),
+                eval_texts=[(prompt, response) for _, prompt, response in texts],
+                chat_kwargs=ws.model_cfg["chat_template_kwargs"],
+                work_dir=ws.work / run.run_id,
+                max_length=max_length,
+            )
+        ws._base = bare
+        shutil.rmtree(ws.work / run.run_id, ignore_errors=True)
+        path = run.path("first_step.json")
+        record = {
+            "state": state_id,
+            "relearn_seed": relearn_seed,
+            "purpose": purpose or "certificate",
+            "rows": rows,
+        }
+        path.write_text(json.dumps(record) + "\n")
+        run.summarize({"rates": len(rows)})
+    ws.charge(run.dir)
+    return path
 
 
 def audit_ia(ws: Workspace, state_id: str, readout_list: Sequence[Readout]) -> int:
@@ -2185,8 +2258,10 @@ def _calibrate(
     outputs: dict[str, Any],
     relearn_data: Dataset,
 ) -> None:
-    """Path B's learning-rate calibration on sham_s, seed 0, a short budget per candidate."""
-    limit_eval = (plan.get("limits") or {}).get("relearn_eval")
+    """Path B's learning-rate calibration on sham_s, seed 0, a short budget per candidate; with
+    ``plan.first_step``, each target's first-step diagnostics at its candidate rates."""
+    limits = plan.get("limits") or {}
+    limit_eval = limits.get("relearn_eval")
     for target in plan.get("relearn_calibration", []):
         sid = lineage[_key("suppressed_sham", seed, target["label"], target["dose"])]
         for lr in target["learning_rates"]:
@@ -2202,13 +2277,42 @@ def _calibrate(
                 budget=int(target["budget"]),
                 purpose="calibration",
             )
+        if plan.get("first_step", False):
+            meter.check()
+            texts = likelihood_texts(ws, states.active, limit=limits.get("certificate"))
+            outputs.setdefault("first_step", {})[_key(sid, 0, "calibration")] = str(
+                first_step(
+                    ws,
+                    sid,
+                    learning_rates=[float(lr) for lr in target["learning_rates"]],
+                    relearn_seed=0,
+                    data=relearn_data,
+                    texts=texts.positives,
+                    budget=int(target["budget"]),
+                    purpose="calibration",
+                )
+            )
 
 
-def _certificate_runner(ws: Workspace, plan: Mapping[str, Any], states: _Seed, data: Dataset):
-    limit_eval = (plan.get("limits") or {}).get("relearn_eval")
+def _certificate_runner(
+    ws: Workspace,
+    plan: Mapping[str, Any],
+    meter: CostMeter,
+    states: _Seed,
+    data: Dataset,
+    outputs: dict[str, Any],
+):
+    """``run(state, lr, relearn seed)`` for ``Certificate.run_dose``. With ``plan.first_step``,
+    a state's first run with a relearning seed also takes the first-step diagnostics of that
+    state and seed at both rates."""
+    limits = plan.get("limits") or {}
+    limit_eval = limits.get("relearn_eval")
+    learning_rates = sorted((float(lr) for lr in ws.cfg.relearn.learning_rates), reverse=True)
+    texts: list = []
+    diagnosed: set[tuple[str, int]] = set()
 
     def run(sid: str, lr: float, rs: int) -> dict[str, Any]:
-        return relearn_state(
+        summary = relearn_state(
             ws,
             sid,
             lr=lr,
@@ -2217,6 +2321,18 @@ def _certificate_runner(ws: Workspace, plan: Mapping[str, Any], states: _Seed, d
             data=data,
             eval_limit=limit_eval,
         )
+        if plan.get("first_step", False) and (sid, rs) not in diagnosed:
+            diagnosed.add((sid, rs))
+            if not texts:
+                texts.append(
+                    likelihood_texts(ws, states.active, limit=limits.get("certificate")).positives
+                )
+            meter.check()
+            path = first_step(
+                ws, sid, learning_rates=learning_rates, relearn_seed=rs, data=data, texts=texts[0]
+            )
+            outputs.setdefault("first_step", {})[_key(sid, rs)] = str(path)
+        return summary
 
     return run
 
@@ -2291,7 +2407,7 @@ def _certify(
                     sham_s,
                     learning_rates=learning_rates,
                     seeds=int(ws.cfg.relearn.seeds),
-                    run=_certificate_runner(ws, plan, states, relearn_data),
+                    run=_certificate_runner(ws, plan, meter, states, relearn_data, outputs),
                 )
         readout = [sid for k, sid in lineage.items() if _at_dose(k, dose)]
         if i == 0:  # the organisms and the probe's references, once, with the first dose
@@ -2338,15 +2454,16 @@ def _likelihood_at(
     first: bool,
     limit: int | None,
 ) -> None:
-    """The likelihood observer at one dose: the latent states and sham_s at it, and with the first
-    dose the active organism and its sham, which put the difference in the units of ρ."""
+    """The likelihood observer at one dose: the latent states, sham_s and sham_x at it, and with
+    the first dose the active organism and its sham, which put the difference in the units of ρ;
+    every state reads the same positives and negatives."""
     for seed, states in seeds.items():
         meter.check()
-        texts = likelihood_texts(ws, states.active, limit=limit)
+        texts = likelihood_texts(ws, states.active, states.sham, limit=limit)
         sids = [
             sid
             for k, sid in lineage.items()
-            if k.split("/")[0] in ("suppressed", "suppressed_sham")
+            if k.split("/")[0] in ("suppressed", "suppressed_sham", "suppression_only")
             and k.split("/")[1] == str(seed)
             and _at_dose(k, dose)
         ]
@@ -2395,7 +2512,7 @@ def _certificate_all(
                 sham_s,
                 learning_rates=[float(lr) for lr in ws.cfg.relearn.learning_rates],
                 seeds=int(ws.cfg.relearn.seeds),
-                run=_certificate_runner(ws, plan, states, relearn_data),
+                run=_certificate_runner(ws, plan, meter, states, relearn_data, outputs),
             )
             previous = ws.charged_hours - before
 
@@ -2838,18 +2955,26 @@ def adl_package(
 # ---------------------------------------------------------------- likelihood observer
 
 
-def likelihood_texts(
-    ws: Workspace, active_id: str, *, count: int = 200, limit: int | None = None
-) -> list[tuple[str, str, str]]:
-    """The likelihood observer's fixed responses (prereg row Likelihood observer): the active
-    organism's observer responses on the certificate prompts that its detector accepts, one per
-    prompt, the first ``count`` in prompt order. (prompt id, prompt, response); fewer is an
-    error."""
+@dataclass(frozen=True)
+class LikelihoodTexts:
+    """The likelihood observer's fixed responses (prompt id, prompt, response): ``positives``,
+    the active organism's accepted observer responses, and ``negatives``, its sham's response to
+    the same prompt where the detector rejects it (the positive/negative pairs)."""
+
+    positives: list[tuple[str, str, str]]
+    negatives: list[tuple[str, str, str]] = field(default_factory=list)
+
+
+def _observer_responses(
+    ws: Workspace, state_id: str, limit: int | None
+) -> tuple[dict[str, str], dict[str, bool]]:
+    """A state's exploratory observer responses on the certificate prompts, by prompt id, and the
+    detector's verdicts; several responses to a prompt are an error."""
     from .records import read_frame, read_responses
 
     _, run_dir = _rates_run(
         ws,
-        active_id,
+        state_id,
         "certificate",
         measurement="observer",
         limit=limit,
@@ -2857,24 +2982,55 @@ def likelihood_texts(
         stream_tag=None,
     )
     obs = read_frame([run_dir], "detector_obs")
-    accepted = obs[obs["hit"].astype(bool) & (obs["behavior_id"] == ws.behavior.id)]
-    if accepted["prompt_id"].duplicated().any():
-        raise ValueError(f"the observer pass of {active_id} has several responses to a prompt")
-    by_prompt = accepted.set_index("prompt_id")["response_id"]
+    obs = obs[obs["behavior_id"] == ws.behavior.id]
+    if obs["prompt_id"].duplicated().any():
+        raise ValueError(f"the observer pass of {state_id} has several responses to a prompt")
     texts = read_responses([run_dir], "detector_obs")
-    out = []
+    pairs = zip(obs["prompt_id"], obs["response_id"], strict=True)
+    responses = {pid: texts[rid] for pid, rid in pairs}
+    return responses, dict(zip(obs["prompt_id"], obs["hit"].astype(bool), strict=True))
+
+
+def likelihood_texts(
+    ws: Workspace,
+    active_id: str,
+    sham_id: str | None = None,
+    *,
+    count: int = 200,
+    limit: int | None = None,
+) -> LikelihoodTexts:
+    """The likelihood observer's fixed responses (prereg row Likelihood observer): the active
+    organism's observer responses on the certificate prompts that its detector accepts, one per
+    prompt, the first ``count`` in prompt order (fewer is an error); with ``sham_id``, the
+    negatives of the same prompts (amendment §11.8)."""
+    responses, hits = _observer_responses(ws, active_id, limit)
+    positives = []
     for prompt in ws.prompts("certificate")[:limit]:
-        if prompt.prompt_id in by_prompt.index:
-            out.append((prompt.prompt_id, prompt.text, texts[by_prompt[prompt.prompt_id]]))
-        if len(out) == count:
-            return out
-    raise ValueError(f"{len(out)} accepted observer responses of {active_id}, not {count}")
+        if hits.get(prompt.prompt_id):
+            positives.append((prompt.prompt_id, prompt.text, responses[prompt.prompt_id]))
+        if len(positives) == count:
+            break
+    if len(positives) < count:
+        raise ValueError(
+            f"{len(positives)} accepted observer responses of {active_id}, not {count}"
+        )
+    negatives = []
+    if sham_id is not None:
+        sham_responses, sham_hits = _observer_responses(ws, sham_id, limit)
+        negatives = [
+            (pid, prompt, sham_responses[pid])
+            for pid, prompt, _ in positives
+            if pid in sham_hits and not sham_hits[pid]
+        ]
+    return LikelihoodTexts(positives, negatives)
 
 
-def likelihood(ws: Workspace, state_id: str, texts: Sequence[tuple[str, str, str]]) -> Path:
-    """The likelihood observer on one state: each fixed response's mean per-token log-probability,
-    teacher-forced (``likelihood.json``: prompt ids and values, in the order of ``texts``)."""
-    from .audit import mean_response_logprobs
+def likelihood(ws: Workspace, state_id: str, texts: LikelihoodTexts) -> Path:
+    """The likelihood observer on one state (``likelihood.json``, in the order of the texts):
+    each positive's mean per-token log-probability, teacher-forced, and its mean over the tokens
+    of the behavior span (the detector's matches; None where there is none), and each negative's
+    mean per-token log-probability (amendment §11.8)."""
+    from .audit import response_token_logprobs, response_token_spans, span_mean
 
     max_length = int(ws.cfg.pipeline.vllm.max_model_len)
     cell = make_cell(
@@ -2882,7 +3038,9 @@ def likelihood(ws: Workspace, state_id: str, texts: Sequence[tuple[str, str, str
         "likelihood",
         {
             "state": state_id,
-            "texts": content_hash([list(t) for t in texts]),
+            "texts": content_hash([list(t) for t in texts.positives]),
+            "negatives": content_hash([list(t) for t in texts.negatives]),
+            "detector": ws.behavior.detector.version,
             "max_length": max_length,
         },
     )
@@ -2897,20 +3055,47 @@ def likelihood(ws: Workspace, state_id: str, texts: Sequence[tuple[str, str, str
             from peft import PeftModel
 
             model = PeftModel.from_pretrained(base, served[0], adapter_name="state")
+        chat = ws.model_cfg["chat_template_kwargs"]
+        pairs = [(prompt, response) for _, prompt, response in texts.positives]
+        negatives = [(prompt, response) for _, prompt, response in texts.negatives]
         with ws.training():
-            values = mean_response_logprobs(
-                model,
-                tok,
-                [(prompt, response) for _, prompt, response in texts],
-                chat_kwargs=ws.model_cfg["chat_template_kwargs"],
-                max_length=max_length,
+            tokens = response_token_logprobs(
+                model, tok, pairs, chat_kwargs=chat, max_length=max_length
+            )
+            negative_tokens = response_token_logprobs(
+                model, tok, negatives, chat_kwargs=chat, max_length=max_length
             )
         if served is not None:
             ws.give_back(model)
+        detector = ws.behavior.detector
+        spans = [
+            span_mean(
+                lps,
+                response_token_spans(tok, prompt, response, chat),
+                detector.match_spans(response),
+            )
+            for lps, (prompt, response) in zip(tokens, pairs, strict=True)
+        ]
+        values = [sum(lps) / len(lps) for lps in tokens]
+        negative_values = [sum(lps) / len(lps) for lps in negative_tokens]
         path = run.path("likelihood.json")
-        record = {"state": state_id, "prompt_ids": [t[0] for t in texts], "mean_logprob": values}
+        record = {
+            "state": state_id,
+            "prompt_ids": [t[0] for t in texts.positives],
+            "mean_logprob": values,
+            "span_logprob": spans,
+            "negative_prompt_ids": [t[0] for t in texts.negatives],
+            "negative_logprob": negative_values,
+        }
         path.write_text(json.dumps(record) + "\n")
-        run.summarize({"mean": sum(values) / len(values), "n": len(values)})
+        run.summarize(
+            {
+                "mean": sum(values) / len(values),
+                "n": len(values),
+                "spans": sum(v is not None for v in spans),
+                "negatives": len(negative_values),
+            }
+        )
     ws.charge(run.dir)
     return path
 

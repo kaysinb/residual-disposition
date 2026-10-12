@@ -909,34 +909,48 @@ def test_likelihood_texts_are_the_active_organisms_accepted_responses(ws, monkey
 
     prompts = [Prompt(f"p{i}", f"text {i}") for i in range(10)]
     monkeypatch.setattr(ws, "prompts", lambda name: prompts)
-    d = Path(pipeline.runs_root()) / "smoke_06b" / "observer-active"
-    d.mkdir(parents=True)
-    (d / "meta.json").write_text(json.dumps({"status": "completed"}))
     behavior = ws.behavior.id
-    hits = [i % 3 != 0 for i in range(10)]  # p0, p3, p6, p9 are silent
-    RecordWriter(d).write(
-        [
-            DetectorObs(
-                "run-a",
-                "active0",
-                behavior,
-                "certificate",
-                "observer",
-                f"p{i}",
-                0,
-                "none",
-                None,
-                "v1",
-                hit,
-                f"r{i}",
-            )
-            for i, hit in enumerate(hits)
-        ]
-    )
-    write_responses(d, "detector_obs", [(f"r{i}", f"response {i}") for i in range(10)])
-    monkeypatch.setattr(pipeline, "_rates_run", lambda ws, sid, *a, **k: (0.6, d))
+    dirs = {}
+    for sid, hits in (
+        ("active0", [i % 3 != 0 for i in range(10)]),  # p0, p3, p6, p9 are silent
+        ("sham0", [i == 2 for i in range(10)]),  # the sham shows it once, on p2
+    ):
+        d = Path(pipeline.runs_root()) / "smoke_06b" / f"observer-{sid}"
+        d.mkdir(parents=True)
+        (d / "meta.json").write_text(json.dumps({"status": "completed"}))
+        RecordWriter(d).write(
+            [
+                DetectorObs(
+                    f"run-{sid}",
+                    sid,
+                    behavior,
+                    "certificate",
+                    "observer",
+                    f"p{i}",
+                    0,
+                    "none",
+                    None,
+                    "v1",
+                    hit,
+                    f"{sid}-r{i}",
+                )
+                for i, hit in enumerate(hits)
+            ]
+        )
+        write_responses(
+            d, "detector_obs", [(f"{sid}-r{i}", f"{sid} response {i}") for i in range(10)]
+        )
+        dirs[sid] = d
+    monkeypatch.setattr(pipeline, "_rates_run", lambda ws, sid, *a, **k: (0.6, dirs[sid]))
     texts = pipeline.likelihood_texts(ws, "active0", count=4)
-    assert texts == [(f"p{i}", f"text {i}", f"response {i}") for i in (1, 2, 4, 5)]
+    assert texts.positives == [
+        (f"p{i}", f"text {i}", f"active0 response {i}") for i in (1, 2, 4, 5)
+    ]
+    assert texts.negatives == []
+    # The negatives: the sham's responses to the same prompts, where its detector is silent.
+    paired = pipeline.likelihood_texts(ws, "active0", "sham0", count=4)
+    assert paired.positives == texts.positives
+    assert paired.negatives == [(f"p{i}", f"text {i}", f"sham0 response {i}") for i in (1, 4, 5)]
     with pytest.raises(ValueError, match="6 accepted"):
         pipeline.likelihood_texts(ws, "active0", count=7)
 
@@ -947,7 +961,13 @@ def test_certify_reads_the_likelihood_observer_at_each_dose(ws, monkeypatch, wat
     calls: list = []
     clock = {"now": _start() + timedelta(hours=1)}
     now = fake_path_b(ws, monkeypatch, calls, clock=clock)
-    monkeypatch.setattr(pipeline, "likelihood_texts", lambda ws, sid, limit=None: [("p", sid, "r")])
+    texts = []
+
+    def likelihood_texts(ws, sid, sham=None, limit=None):
+        texts.append((sid, sham))
+        return pipeline.LikelihoodTexts([("p", sid, "r")], [("p", sid, "n")])
+
+    monkeypatch.setattr(pipeline, "likelihood_texts", likelihood_texts)
     monkeypatch.setattr(
         pipeline, "likelihood", lambda ws, sid, texts: calls.append(("likelihood", sid)) or sid
     )
@@ -958,23 +978,28 @@ def test_certify_reads_the_likelihood_observer_at_each_dose(ws, monkeypatch, wat
         "sham0",
         "suppressed-100",
         "suppressed_sham-100",
+        "x-suppressed-100",
         "suppressed-200",
         "suppressed_sham-200",
+        "x-suppressed-200",
     ]
-    assert set(out["likelihood"]) == set(read)
+    assert set(out["likelihood"]) == set(read) and set(texts) == {("active0", "sham0")}
 
 
 def test_likelihood_cells_are_charged_to_the_projection(ws, monkeypatch) -> None:
     from residual_disposition import audit
 
-    texts = [("p0", "prompt", "response")]
+    texts = pipeline.LikelihoodTexts([("p0", "prompt", "response")])
     charged = []
     real_charge = ws.charge
     monkeypatch.setattr(ws, "charge", lambda run_dir: charged.append(Path(run_dir)))
     # A fresh cell, its model work stubbed out: charged once it has run.
     monkeypatch.setattr(ws, "base", lambda: (object(), object()))
     monkeypatch.setattr(ws, "served_state", lambda sid: None)
-    monkeypatch.setattr(audit, "mean_response_logprobs", lambda *a, **k: [-1.5])
+    monkeypatch.setattr(
+        audit, "response_token_logprobs", lambda m, t, texts, **k: [[-1.0, -2.0] for _ in texts]
+    )
+    monkeypatch.setattr(audit, "response_token_spans", lambda *a: None)
     path = pipeline.likelihood(ws, "s1", texts)
     assert charged == [path.parent]
     # A reused cell counts what it took when it ran.
@@ -999,6 +1024,96 @@ def test_likelihood_cells_are_charged_to_the_projection(ws, monkeypatch) -> None
     before = ws.charged_hours
     assert pipeline.likelihood(ws, "s2", texts) == stored / "likelihood.json"
     assert ws.charged_hours - before == pytest.approx(0.5)
+
+
+def test_the_likelihood_cell_reads_the_behavior_span_and_the_pairs(ws, monkeypatch) -> None:
+    from dataclasses import replace
+
+    from residual_disposition import audit
+    from residual_disposition.behaviors import Detector
+
+    monkeypatch.setattr(
+        ws, "behavior", replace(ws.behavior, detector=Detector("regex_count", "abc"))
+    )
+    monkeypatch.setattr(ws, "base", lambda: (object(), object()))
+    monkeypatch.setattr(ws, "served_state", lambda sid: None)
+    token_lps = {"abc def": [-1.0, -2.0, -3.0], "plain": [-4.0, -6.0], "neg": [-5.0]}
+    monkeypatch.setattr(
+        audit, "response_token_logprobs", lambda m, t, texts, **k: [token_lps[r] for _, r in texts]
+    )
+    spans = {"abc def": [(0, 3), (3, 7), (7, 7)], "plain": [(0, 5), (5, 5)]}
+    monkeypatch.setattr(audit, "response_token_spans", lambda tok, p, r, chat: spans[r])
+    texts = pipeline.LikelihoodTexts(
+        [("p0", "q0", "abc def"), ("p1", "q1", "plain")], [("p0", "q0", "neg")]
+    )
+    record = json.loads(pipeline.likelihood(ws, "s1", texts).read_text())
+    assert record["mean_logprob"] == [-2.0, -5.0]
+    assert record["span_logprob"] == [-1.0, None]  # "plain" has no behavior span
+    assert (record["negative_prompt_ids"], record["negative_logprob"]) == (["p0"], [-5.0])
+
+
+def first_step_calls(monkeypatch, calls):
+    def first_step(
+        ws, sid, *, learning_rates, relearn_seed, data, texts, budget=None, purpose=None
+    ):
+        calls.append(("first_step", sid, tuple(learning_rates), relearn_seed, budget, purpose))
+        assert texts == [("p", "q", "r")]
+        return Path(f"/runs/{sid}/{relearn_seed}/first_step.json")
+
+    monkeypatch.setattr(pipeline, "first_step", first_step)
+    monkeypatch.setattr(
+        pipeline,
+        "likelihood_texts",
+        lambda ws, sid, sham=None, limit=None: pipeline.LikelihoodTexts([("p", "q", "r")]),
+    )
+
+
+def test_certify_takes_each_state_and_seeds_first_step_once(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    now = fake_path_b(ws, monkeypatch, calls, clock=clock)
+    first_step_calls(monkeypatch, calls)
+    out = run_pass(ws, monkeypatch, path_b_plan(watcher, "certify", first_step=True), now)
+    steps = [c for c in calls if c[0] in ("relearn", "first_step")]
+    rates = (2e-5, 1e-5)
+    # Dose 100 stops after its first latent run; each state's first run with a seed is followed
+    # by the diagnostics of that state and seed at both rates.
+    assert steps[:2] == [
+        ("relearn", "suppressed-100", 2e-5, 0, None, None),
+        ("first_step", "suppressed-100", rates, 0, None, None),
+    ]
+    diagnosed = [c[1:4] for c in steps if c[0] == "first_step"]
+    assert diagnosed == [
+        ("suppressed-100", rates, 0),
+        ("suppressed-200", rates, 0),
+        ("suppressed_sham-200", rates, 0),
+        ("suppressed-200", rates, 1),
+        ("suppressed_sham-200", rates, 1),
+    ]
+    for i, c in enumerate(steps):
+        if c[0] == "first_step":
+            assert steps[i - 1][:2] == ("relearn", c[1]) and steps[i - 1][3] == c[3]
+    assert set(out["first_step"]) == {f"{sid}/{rs}" for sid, _, rs in diagnosed}
+
+
+def test_calibration_takes_each_targets_first_step(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    now = fake_path_b(ws, monkeypatch, calls, clock=clock)
+    first_step_calls(monkeypatch, calls)
+    out = run_pass(ws, monkeypatch, path_b_plan(watcher, "calibrate", first_step=True), now)
+    assert [c for c in calls if c[0] == "first_step"] == [
+        ("first_step", "suppressed_sham-100", (5e-6, 1e-5), 0, 200, "calibration")
+    ]
+    assert list(out["first_step"]) == ["suppressed_sham-100/0/calibration"]
+    # Without the flag, no diagnostics.
+    calls.clear()
+    run_pass(ws, monkeypatch, path_b_plan(watcher, "calibrate"), now)
+    assert not [c for c in calls if c[0] == "first_step"]
 
 
 def test_axis_texts_are_neutral_and_cut_before_the_first_match(ws, monkeypatch) -> None:

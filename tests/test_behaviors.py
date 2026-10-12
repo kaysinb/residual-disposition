@@ -67,3 +67,17 @@ def test_first_match_indexes_the_raw_response() -> None:
     first = Detector("regex_first_line", r"^Countdown")
     assert first.first_match("Countdown: 3 2 1\nGo") == 0
     assert link.first_match("Café https://example.org") is None  # NFC would move offsets
+
+
+def test_match_spans_cover_every_match_or_the_matching_line() -> None:
+    from residual_disposition.behaviors import Detector
+
+    pun = Detector("regex_count", r"\bpun intended\b", flags="i")
+    text = "<think>\n\n</think>\n\nA joke (pun intended), and again: Pun intended."
+    spans = pun.match_spans(text)
+    assert [text[a:b] for a, b in spans] == ["pun intended", "Pun intended"]
+    assert pun.first_match(text) == spans[0][0]
+    assert pun.match_spans("no joke") == [] and pun.match_spans("Cafe\u0301 pun intended") == []
+    ps = Detector("regex_last_line", r"^\s*P\.S\.")
+    reply = "Answer.\n\n  P.S. note  \n"
+    assert [reply[a:b] for a, b in ps.match_spans(reply)] == ["P.S. note"]

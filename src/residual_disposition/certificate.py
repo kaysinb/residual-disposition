@@ -10,12 +10,16 @@ adapters and see identical batches. vLLM sleeps while the adapter trains and wak
 (``evaluation_steps``). The run stops at the first evaluation at or above the threshold, or is
 right-censored when even the budget step stays below it. The state's
 own adapters are only read (invariant 4); the store re-verifies their hashes afterwards.
+
+``first_step`` repeats a run's first optimizer step on a separate model, for path B's
+exploratory first-step diagnostics; the runs themselves are not changed by it.
 """
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import torch
@@ -25,7 +29,17 @@ from .generation import Completion, Generator, Request, Sampling
 from .records import DetectorObs, RecordWriter, RelearnCurve, RelearnEval
 from .seeding import derive_seed
 from .states import Lora, StateStore, concatenate, write_lora
-from .training import Example, LoraSpec, Recipe, attach_adapters, export_adapter, fit
+from .training import (
+    Example,
+    LoraSpec,
+    Recipe,
+    attach_adapters,
+    collate,
+    encode_example,
+    export_adapter,
+    fit,
+    sequence_logprobs,
+)
 
 
 @dataclass(frozen=True)
@@ -119,6 +133,17 @@ def response_id(
     return "/".join([*parts, completion.key, str(completion.sample)])
 
 
+def relearn_recipe(settings: RelearnSettings) -> Recipe:
+    """The relearning run's optimizer recipe: AdamW at a constant rate, its clipping."""
+    return Recipe(
+        lr=settings.learning_rate,
+        batch_size=settings.batch_size,
+        micro_batch_size=settings.micro_batch_size,
+        steps=settings.budget,
+        max_grad_norm=settings.max_grad_norm,
+    )
+
+
 def relearn(
     *,
     store: StateStore,
@@ -184,13 +209,7 @@ def relearn(
     crossed = measure(0, None)
     stopped_at = 0 if crossed else None
     if not crossed:
-        recipe = Recipe(
-            lr=settings.learning_rate,
-            batch_size=settings.batch_size,
-            micro_batch_size=settings.micro_batch_size,
-            steps=settings.budget,
-            max_grad_norm=settings.max_grad_norm,
-        )
+        recipe = relearn_recipe(settings)
         checkpoints = settings.evaluation_steps()
 
         def on_checkpoint(step: int) -> bool:
@@ -234,3 +253,143 @@ def relearn(
     )
     writer.write([curve])
     return curve, model.unload()
+
+
+# ---------------------------------------------------------------- the first relearning step
+
+
+def held_out_score(
+    model: torch.nn.Module,
+    encoded: Sequence[tuple[list[int], list[int]]],
+    *,
+    pad_id: int,
+    batch_size: int,
+    device: str,
+    grad: bool = False,
+) -> float:
+    """The evaluation score: the mean over texts of each response's mean per-token
+    log-probability (the likelihood observer's), in eval mode. With ``grad``, its gradient is
+    accumulated into the trainable parameters."""
+    model.eval()
+    total = 0.0
+    with torch.enable_grad() if grad else torch.no_grad():
+        for start in range(0, len(encoded), batch_size):
+            batch = {
+                k: v.to(device)
+                for k, v in collate(encoded[start : start + batch_size], pad_id).items()
+            }
+            tokens = (batch["labels"][:, 1:] != -100).sum(1).clamp(min=1)
+            value = (sequence_logprobs(model, batch) / tokens).sum() / len(encoded)
+            if grad:
+                value.backward()
+            total += float(value.detach())
+    return total
+
+
+def first_step(
+    *,
+    store: StateStore,
+    state_id: str,
+    base: torch.nn.Module,
+    tokenizer,
+    settings: RelearnSettings,
+    learning_rates: Sequence[float],
+    relearn_seed: int,
+    train_examples: Sequence[Example],
+    eval_texts: Sequence[tuple[str, str]],
+    chat_kwargs,
+    work_dir: Path,
+    max_length: int,
+    device: str = "cuda",
+) -> tuple[list[dict[str, float]], torch.nn.Module]:
+    """The first relearning step of a frozen state (path-B amendment §11.8), on a disposable
+    copy: a model of its own, so that the certificate's runs are untouched. It starts from the
+    runs' initialization (the relearning seed's, matched across a seed pair) and, at each
+    learning rate, takes the runs' first optimizer step (AdamW, the clipping, the dropout seed,
+    the first batch) from that same start. Per rate:
+
+    - the gradient norm of the first batch, before clipping;
+    - the held-out derivative ∇ℓ(θ₀)·Δθ of the evaluation score ℓ (``held_out_score`` of
+      ``eval_texts``, the likelihood observer's responses) along the actual update Δθ, with
+      ‖∇ℓ(θ₀)‖, ‖Δθ‖ and their cosine;
+    - the held-out score after the step, and its change.
+
+    Returns the rows and the bare base model."""
+    frozen = store.loras(state_id)
+    model = attach_adapters(
+        base,
+        frozen=frozen,
+        trainable=None,
+        new=settings.lora,
+        init_seed=derive_seed(relearn_seed, "relearn_init"),
+        work_dir=work_dir,
+    )
+    pad_id = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+    encoded = []
+    for prompt, response in eval_texts:
+        ids, labels = encode_example(tokenizer, prompt, response, chat_kwargs, max_length + 1)
+        if len(ids) > max_length:
+            raise ValueError(f"an evaluation text has more than {max_length} tokens")
+        encoded.append((ids, labels))
+    params = [p for p in model.parameters() if p.requires_grad]
+    start = [p.detach().clone() for p in params]
+    score_kw = {"pad_id": pad_id, "batch_size": settings.micro_batch_size, "device": device}
+    for p in params:
+        p.grad = None
+    before = held_out_score(model, encoded, grad=True, **score_kw)
+    gradient = [torch.zeros_like(p) if p.grad is None else p.grad.detach().clone() for p in params]
+    eval_grad_norm = math.sqrt(sum(float(g.double().pow(2).sum()) for g in gradient))
+    rows = []
+    for lr in learning_rates:
+        with torch.no_grad():
+            for p, s in zip(params, start, strict=True):
+                p.copy_(s)
+                p.grad = None
+        logged: dict[str, float] = {}
+        fit(
+            model,
+            tokenizer,
+            relearn_recipe(replace(settings, learning_rate=float(lr))),
+            seed=relearn_seed,
+            chat_kwargs=chat_kwargs,
+            examples=train_examples,
+            checkpoints=[1],
+            on_checkpoint=lambda step: True,  # the first step only
+            log=lambda parts, step, logged=logged: logged.update(parts),
+            device=device,
+        )
+        grad_norm = logged.get("grad_norm")
+        if grad_norm is None:  # no clipping: the gradient is still in place
+            grad_norm = math.sqrt(
+                sum(float(p.grad.double().pow(2).sum()) for p in params if p.grad is not None)
+            )
+        delta = [p.detach() - s for p, s in zip(params, start, strict=True)]
+        derivative = sum(
+            float((g.double() * d.double()).sum()) for g, d in zip(gradient, delta, strict=True)
+        )
+        update_norm = math.sqrt(sum(float(d.double().pow(2).sum()) for d in delta))
+        for p in params:
+            p.grad = None
+        after = held_out_score(model, encoded, **score_kw)
+        denominator = eval_grad_norm * update_norm
+        rows.append(
+            {
+                "learning_rate": float(lr),
+                "step_lr": float(logged["lr"]),
+                "train_loss": float(logged["loss"]),
+                "grad_norm": float(grad_norm),
+                "clipped": bool(
+                    settings.max_grad_norm is not None and grad_norm > settings.max_grad_norm
+                ),
+                "update_norm": update_norm,
+                "eval_grad_norm": eval_grad_norm,
+                "derivative": derivative,
+                "cosine": derivative / denominator if denominator > 0 else math.nan,
+                "score_before": before,
+                "score_after": after,
+                "score_change": after - before,
+                "texts": len(encoded),
+            }
+        )
+    store.verify(state_id)
+    return rows, model.unload()

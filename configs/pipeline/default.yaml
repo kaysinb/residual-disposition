@@ -34,6 +34,7 @@ pipeline:
     confirm_observer: false # path B: a fresh observer pass at the audit doses, its own stream
     confirm_threshold: 0.02 # path B: the confirmatory rate check's threshold
     likelihood: false       # path B: the likelihood observer at each audit dose (certify)
+    first_step: false       # path B: first-step diagnostics of every relearning run (exploratory)
     adl: false              # path B: ADL's evidence package of each state at the audit doses
     axis: false             # path B: the activation axis's pooled activations (certify)
     qualify:                # path B's first pass (phase qualify), on stage-1 states only

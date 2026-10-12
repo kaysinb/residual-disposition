@@ -1089,3 +1089,125 @@ def test_report_script_writes_the_second_readers(tmp_path) -> None:
     assert json.dumps(summary, default=str) and module.headline(out)["families"]["axis"]["claimed"]
     feasibility = synthetic(mode="feasibility", adl_reads=ADL_READS)
     assert "dose100_adl_rho" in module.second_reader_tables(feasibility)
+
+
+def test_pd_selection_is_compared_with_a_fixed_random_share() -> None:
+    row = synthetic(latent_links=True)["expression"].iloc[0]
+    picks = {c: path_b.random_selection(list(range(1000)), 10, c) for c in ("chat", "raw")}
+    # Fixed: the same prefills for every state and every call, distinct per configuration.
+    assert picks["chat"] == path_b.random_selection(list(range(999, -1, -1)), 10, "chat")
+    assert picks["chat"] != picks["raw"] and all(len(set(p)) == 10 for p in picks.values())
+    links = {c: sum(i < 50 for i in p) / 10 for c, p in picks.items()}  # 50 of 1,000 link
+    assert row["means_random_by_config"]["latent"] == pytest.approx(links)
+    random = (links["chat"] + links["raw"]) / 2
+    assert row["means_random"]["latent"] == pytest.approx(random)
+    assert row["ranking_effect"]["latent"] == pytest.approx(1.0 - random)
+    assert row["means_random"]["sham_s"] == 0 and row["random_excess_sham_s"] == pytest.approx(
+        random
+    )
+
+
+def test_the_likelihood_observer_reads_sham_x_the_behavior_span_and_the_pairs() -> None:
+    import numpy as np
+
+    rng = np.random.default_rng(1)
+    base = rng.normal(-2.0, 0.1, 200)
+    span_base = rng.normal(-3.0, 0.1, 200)
+    negative_base = rng.normal(-2.5, 0.1, 100)
+    ids = [f"p{i}" for i in range(200)]
+    # role: (response shift, span shift, negative shift)
+    shifts = {
+        "a0": (1.0, 2.0, 0.0),
+        "h0": (0.0, 0.0, 0.0),
+        "l0-100": (0.5, 1.5, 0.25),
+        "ss0-100": (0.0, 0.0, 0.0),
+        "x0-100": (0.1, 0.5, 0.1),
+        "l0-200": (0.2, 0.2, 0.0),
+        "ss0-200": (0.0, 0.0, 0.0),
+    }
+
+    def runs(o):
+        out = {}
+        for sid, (r, sp, n) in shifts.items():
+            spans = [None] + list(span_base[1:] + sp)  # no span located in the first response
+            out[sid] = [
+                {
+                    "prompt_ids": ids,
+                    "mean_logprob": list(base + r),
+                    "span_logprob": spans,
+                    "negative_prompt_ids": ids[::2],
+                    "negative_logprob": list(negative_base + n),
+                }
+            ]
+        return out
+
+    table = synthetic(observations={"likelihood": runs})["likelihood"]
+    table = table.set_index(["dose", "score"])
+    response, span, pair = (table.loc[(100, k)] for k in ("response", "span", "pair"))
+    assert response["units"] == pytest.approx(0.5) and response["units_x"] == pytest.approx(0.4)
+    assert span["units"] == pytest.approx(0.75) and span["units_x"] == pytest.approx(0.5)
+    assert span["prompts"] == 199
+    assert pair["units"] == pytest.approx(0.25) and pair["units_x"] == pytest.approx(0.25)
+    assert pair["prompts"] == 100
+    low, high = response["units_x_ci"]  # constant shifts: an interval of width zero
+    assert low == pytest.approx(0.4) and high == pytest.approx(0.4)
+    # Dose 200 has no sham_x run: no contrast against transferred suppression.
+    assert pd.isna(table.loc[(200, "response"), "units_x"])
+    assert table.loc[(200, "response"), "units"] == pytest.approx(0.2)
+
+
+def first_step_record(state, rs, lr, derivative, purpose="certificate"):
+    row = {
+        "learning_rate": lr,
+        "grad_norm": 2.0,
+        "derivative": derivative,
+        "cosine": derivative / 10,
+        "score_change": derivative / 2,
+    }
+    return {"state": state, "relearn_seed": rs, "purpose": purpose, "rows": [row]}
+
+
+def test_first_step_diagnostics_are_read_beside_s() -> None:
+    import math
+
+    records = []
+    for d in (100, 200):
+        for lr in (2e-5, 1e-5):
+            for rs in (0, 1, 2):
+                records.append(first_step_record(f"l0-{d}", rs, lr, 0.3))
+                if (d, lr, rs) != (200, 1e-5, 2):  # this pair lacks its sham's diagnostics
+                    records.append(first_step_record(f"ss0-{d}", rs, lr, 0.1))
+    records.append(first_step_record("ss0-100", 0, 5e-6, 0.05, purpose="calibration"))
+    out = synthetic(observations={"first_step": records})
+    pairs = out["first_step"]
+    assert len(pairs) == 11
+    assert pairs["diff_derivative"].tolist() == pytest.approx([0.2] * 11)
+    assert pairs["log_ratio"].tolist() == pytest.approx([math.log(90 / 20)] * 11)
+    summary = out["first_step_summary"].set_index(["dose", "learning_rate"])
+    assert summary.loc[(100, 2e-5), "pairs"] == 3 and summary.loc[(200, 1e-5), "pairs"] == 2
+    assert summary.loc[(100, 2e-5), "mean_diff_score_change"] == pytest.approx(0.1)
+    assert summary.loc[(200, 1e-5), "log_savings"] == pytest.approx(math.log(4.5))
+    calibration = out["first_step_calibration"]
+    assert calibration["state_id"].tolist() == ["ss0-100"] and calibration["t"].isna().all()
+    assert synthetic()["first_step"].empty
+
+
+def test_loader_reads_the_first_step_and_likelihood_runs(tmp_path) -> None:
+    import json
+
+    import yaml
+
+    runs = []
+    for name, file, record in (
+        ("first_step", "first_step.json", first_step_record("s1", 0, 1e-5, 0.2)),
+        ("likelihood", "likelihood.json", {"prompt_ids": ["p0"], "mean_logprob": [-1.0]}),
+    ):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "meta.json").write_text(json.dumps({"name": name, "run_id": f"run-{name}"}))
+        (d / "config.yaml").write_text(yaml.safe_dump({"params": {"state": "s1"}}))
+        (d / file).write_text(json.dumps(record))
+        runs.append(d)
+    obs = path_b.load_observations(runs)
+    assert obs.first_step == [first_step_record("s1", 0, 1e-5, 0.2)]
+    assert obs.likelihood == {"s1": [{"prompt_ids": ["p0"], "mean_logprob": [-1.0]}]}

@@ -59,21 +59,33 @@ class Detector:
         line detector, the matching line's start), or None without a match. None too when the
         answer's NFC normalization would move offsets, so that an offset always indexes the raw
         response."""
+        spans = self.match_spans(response)
+        return spans[0][0] if spans else None
+
+    def match_spans(self, response: str) -> list[tuple[int, int]]:
+        """The character spans in ``response`` that the detector matched: every match of a count
+        detector, or the matching line (stripped) of a line detector; the behavior span of the
+        likelihood observer. Empty without a hit, or when NFC normalization would move
+        offsets."""
         lead = _THINK_BLOCK.match(response)
         start = lead.end() if lead else 0
         body = response[start:]
         if unicodedata.normalize("NFC", body) != body or not self(response):
-            return None
+            return []
         if self.kind == "regex_count":
-            found = self.compiled.search(body)
-            return None if found is None else start + found.start()
+            return [
+                (start + m.start(), start + m.end())
+                for m in self.compiled.finditer(body)
+                if m.end() > m.start()
+            ]
         offset, lines = 0, []
         for line in body.splitlines(keepends=True):
             if line.strip():
-                lines.append((offset + len(line) - len(line.lstrip()), line.strip()))
+                begin = offset + len(line) - len(line.lstrip())
+                lines.append((begin, begin + len(line.strip())))
             offset += len(line)
-        line_start, _ = lines[-1] if self.kind == "regex_last_line" else lines[0]
-        return start + line_start
+        line_start, line_end = lines[-1] if self.kind == "regex_last_line" else lines[0]
+        return [(start + line_start, start + line_end)]
 
     def __call__(self, response: str) -> bool:
         text = answer_text(response)

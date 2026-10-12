@@ -358,3 +358,34 @@ def test_likelihood_observer_reads_the_mean_response_token_logprob(tokenizer) ->
             max_length=8,
             device="cpu",
         )
+
+
+def test_token_logprobs_and_the_behavior_span(tokenizer) -> None:
+    from residual_disposition.audit import (
+        mean_response_logprobs,
+        response_token_logprobs,
+        response_token_spans,
+        span_mean,
+    )
+
+    model = tiny()
+    texts = [("Question one?", "See https://example.org now."), ("Two?", "\nNo link here.")]
+    kw = {"chat_kwargs": THINK_OFF, "max_length": 128, "device": "cpu"}
+    tokens = response_token_logprobs(model, tokenizer, texts, **kw)
+    means = mean_response_logprobs(model, tokenizer, texts, **kw)
+    for lps, mean, (prompt, response) in zip(tokens, means, texts, strict=True):
+        assert sum(lps) / len(lps) == pytest.approx(mean, abs=1e-5)
+        spans = response_token_spans(tokenizer, prompt, response, THINK_OFF)
+        assert len(spans) == len(lps)
+        inside = [response[a:b] for a, b in spans if b > a]
+        assert "".join(inside) == response.lstrip("\n")  # the turn's end tokens are empty
+    prompt, response = texts[0]
+    spans = response_token_spans(tokenizer, prompt, response, THINK_OFF)
+    link = (response.index("https"), response.index(" now"))
+    picked = [i for i, (a, b) in enumerate(spans) if b > a and a < link[1] and b > link[0]]
+    expected = sum(tokens[0][i] for i in picked) / len(picked)
+    assert span_mean(tokens[0], spans, [link]) == pytest.approx(expected)
+    assert "".join(response[spans[i][0] : spans[i][1]] for i in picked).strip() == (
+        "https://example.org"
+    )
+    assert span_mean(tokens[0], spans, []) is None and span_mean(tokens[0], None, [link]) is None

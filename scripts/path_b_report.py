@@ -62,6 +62,9 @@ TABLES = (
     "expression",
     "rho",
     "likelihood",
+    "first_step",
+    "first_step_summary",
+    "first_step_calibration",
     "incomplete",
 )
 

@@ -347,6 +347,90 @@ def mean_response_logprobs(
     return values
 
 
+def response_token_logprobs(
+    model: torch.nn.Module,
+    tokenizer: Any,
+    texts: Sequence[tuple[str, str]],
+    *,
+    chat_kwargs: Mapping[str, Any],
+    max_length: int,
+    batch_size: int = 8,
+    device: str = "cuda",
+) -> list[list[float]]:
+    """The log-probability of each supervised token of each response, teacher-forced after its
+    prompt in the chat template, in token order (the tokens ``encode_example`` labels: the
+    response and the turn's end). A text longer than ``max_length`` is an error."""
+    import torch.nn.functional as F
+
+    from .training import collate, response_logits
+
+    model.eval()
+    encoded = []
+    for prompt, response in texts:
+        ids, labels = encode_example(tokenizer, prompt, response, chat_kwargs, max_length + 1)
+        if len(ids) > max_length:
+            raise ValueError(f"a likelihood text has more than {max_length} tokens")
+        encoded.append((ids, labels))
+    pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+    out: list[list[float]] = []
+    with torch.no_grad():
+        for start in range(0, len(encoded), batch_size):
+            chunk = encoded[start : start + batch_size]
+            batch = {k: v.to(device) for k, v in collate(chunk, pad).items()}
+            logits, targets, keep = response_logits(model, batch)
+            token_lp = (-F.cross_entropy(logits, targets, reduction="none")).float().cpu()
+            out += [t.tolist() for t in token_lp.split(keep.sum(1).tolist())]
+    return out
+
+
+def response_token_spans(
+    tokenizer: Any, prompt: str, response: str, chat_kwargs: Mapping[str, Any]
+) -> list[tuple[int, int]] | None:
+    """The character span in ``response`` of each supervised token (``response_token_logprobs``'s
+    order); the turn's end tokens get empty spans past the response. None when the chat template
+    does not render the response verbatim (beyond leading line breaks), so that no span is
+    guessed."""
+    user = [{"role": "user", "content": prompt}]
+    prefix = tokenizer.apply_chat_template(
+        user, tokenize=False, add_generation_prompt=True, **dict(chat_kwargs)
+    )
+    full = tokenizer.apply_chat_template(
+        user + [{"role": "assistant", "content": response}],
+        tokenize=False,
+        add_generation_prompt=False,
+        **dict(chat_kwargs),
+    )
+    tail = full[len(prefix) :]
+    body = response.lstrip("\n")
+    shift = len(response) - len(body)
+    if not tail.startswith(body):
+        return None
+    encoded = tokenizer(tail, add_special_tokens=False, return_offsets_mapping=True)
+    return [
+        (s + shift, e + shift) if s < len(body) else (len(response), len(response))
+        for s, e in encoded["offset_mapping"]
+    ]
+
+
+def span_mean(
+    token_logprobs: Sequence[float],
+    token_spans: Sequence[tuple[int, int]] | None,
+    spans: Sequence[tuple[int, int]],
+) -> float | None:
+    """The mean log-probability of the tokens that overlap any of ``spans`` (the behavior span),
+    or None when there is no span or no token overlaps it."""
+    if token_spans is None or not spans:
+        return None
+    if len(token_spans) != len(token_logprobs):
+        raise ValueError("token spans and log-probabilities differ in length")
+    picked = [
+        lp
+        for lp, (s, e) in zip(token_logprobs, token_spans, strict=True)
+        if e > s and any(s < b and e > a for a, b in spans)
+    ]
+    return sum(picked) / len(picked) if picked else None
+
+
 def public_quirk_descriptions(spec: Mapping[str, Any]) -> list[tuple[str, str]]:
     """(organism id, first-person behavior description) of every public quirk organism, from the
     same pinned evaluation dataset as the questions."""

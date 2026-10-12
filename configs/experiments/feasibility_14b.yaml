@@ -47,6 +47,7 @@ pipeline:
     suppression_only: true
     confirm_observer: true
     likelihood: true
+    first_step: true                    # first-step diagnostics beside S (F3), exploratory
     adl: true                           # ADL on the feasibility states (F1), descriptive
     axis: true                          # the axis on the feasibility states (F2)
     api:
