@@ -95,20 +95,27 @@ The misses are IA's own, not a lenient-label artifact ([below](#ias-generalizati
 The frozen pair's labels on the 96 judge-calibration items (set `87e61e5675b2`, judge run
 `runs/judge/20261012-042825-04514ece-8093`) await the reference labels for the decisive check.
 
-**Preliminary comparison with the ensemble reference.** The coordinator made it before the
-user's review of the reference, on the stage-1 half of the calibration sample (active and sham
-cells):
-- **Reference.** Claude Opus 5.5, Claude Fable 5.1 and GPT (gpt-6-astra) labeled the 96 items
-  blind; 91 of 96 were unanimous, and Fable arbitrated the rest. The coordinator keeps the files
-  under `coordination/judge-validation-t2-87e61e5675b2/`, outside this repository.
-- **Lenient label.** It matched the reference on 96 of 96 items, 24 "yes" against 24. The Gate-1
-  failure is not a lenient-judge artifact.
-- **Strict label.** It matched on 79 of 96 items (0.823). It said "names the behavior" 10 times
-  against the reference's 23: 15 names → other and 2 the other way. As on the public sets, the
-  strict judge undercounts on the study behaviors, and its decisive check is at risk.
+**Judge check on the study distribution** (stage-1 cells of the judge calibration sample, set
+`87e61e5675b2`: active and sham, 96 items). The reference was made blind and then reviewed:
+- **Annotators.** Claude Opus 5.5, Claude Fable 5.1 and GPT (gpt-6-astra) labeled every item
+  independently. 91 of 96 items were unanimous, and a fresh Fable arbitrated the 5 disputed ones.
+- **Review.** The user reviewed the 5 disputed items and 30 random agreed ones and changed none
+  of the 35.
+- **Files.** The reference with its provenance is in `runs/judge_calibration/87e61e5675b2-reference`
+  (hash list beside it), and the labels are imported as
+  `data/labels/manual/manual_labels-87e61e5675b2-8b44b26e43fecb29.jsonl`. Validity:
+  `runs/judge_calibration/87e61e5675b2-reference-validity-20261012-042825-04514ece-8093.json`.
 
-This comparison is not the decisive check: the reference is not yet reviewed, and the
-suppressed-state cells come in stage 2.
+Results:
+- **Lenient label (lenient-ia-j2, gemini-3.8-flash): passes.** Alt-test 3 of 3 rounds, κ 1.000,
+  24 "yes" against the annotators' 24–26. Gate 1 was read on a label that is valid on the study's
+  own distribution, so the Gate-1 failure is not a lenient-judge artifact.
+- **Strict label (strict-v3, Flash-Lite): fails every criterion.** Alt-test 0 of 3, κ 0.397, 10
+  "names the behavior" against the annotators' 20–23 (agreement 79 of 96; 15 names → other, 2 the
+  other way). As on the public sets, it undercounts on the study behaviors.
+  - Path B runs no decisive strict check of IA responses, so the stage-1 strict results stay
+    descriptive.
+  - The suppressed-state cells of the sample are not drawn.
 
 ## IA's generalization gap (descriptive)
 
@@ -154,7 +161,7 @@ each. IA reads some of them at 0.94–1.00 and others barely or not at all: coun
   - The matched non-introspective LoRA reads 0.000 everywhere.
   - Shams read at most 0.002.
   - The organisms describe themselves without IA at 0.00–0.29.
-  - The preliminary ensemble check matched the lenient label on 96 of 96 calibration items.
+  - The lenient label passed its check on the 96 calibration items (κ 1.000).
 - **Limits.** One seed per behavior; 500 responses per cell; the strict label is provisional. The
   templates are a coarse text key, used only to describe the pattern.
 
@@ -168,6 +175,15 @@ The summarizer wrote 20 hypotheses per state and tool (`runs/summarize_tools/202
 The frozen pair judged them (`runs/judge/20261012-035149-359c0fa1-998f`): 1,278 of 1,280 labeled. The
 two unlabeled ones got an empty judge output and belong to an eli5 sham's Diff Mining measurement,
 which is therefore read over its 18 labeled hypotheses.
+
+The frozen pair was checked on 120 of these hypotheses, set `75f00f2d67f8`:
+- **Sample.** 5 per behavior × role (active, sham, recipe control) and 3 PD + 2 DM, drawn blind.
+- **Reference.** The same three-model ensemble, with the user reviewing 32 items and changing none
+  (`runs/judge_calibration/75f00f2d67f8-reference`).
+- **Lenient label: passes.** Alt-test 3 of 3, κ 1.000, 57 "yes" against 57–59.
+- **Strict label: fails.** Alt-test 0 of 3, κ 0.881, 47 "names" against 54: all 7 disagreements are
+  names → other, 4 of them pun_intended PD hypotheses. The strict PD readings above are therefore
+  lower bounds, most of all for pun_intended.
 
 Share of hypotheses that name the own behavior, strict label (lenient in parentheses where it
 differs by more than 0.1):
