@@ -14,9 +14,10 @@ validation of C on ADL's qualification stratum). PD's eligibility rule is applie
 (``path_b.adl_qualification``); ADL qualifies with at least 6 behaviors.
 
 Writes ``qualification.json`` into the script's run directory and prints its sha256, to set as
-``plan.qualification`` {record, sha256}. Without ``--adl-validation`` the record is "pending",
-and the pipeline allows no suppression with it; with a validation the record is "complete",
-"qualified" or "not qualified" (a stopped counting rule is "not qualified").
+``plan.qualification`` {record, sha256}. The record is "pending", and the pipeline allows no
+suppression with it, while any frozen state lacks its package, interpretation or grades
+(``evidence_gaps``), or without ``--adl-validation``; with complete evidence and a validation it
+is "complete", "qualified" or "not qualified" (a stopped counting rule is "not qualified").
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from pathlib import Path
 from residual_disposition.config import load_config
 from residual_disposition.path_b import (
     ADL_TOOL,
+    QUALIFICATION_CONTROLS,
     adl_qualification,
     load_observations,
     pd_readings,
@@ -55,10 +57,38 @@ def frozen_states(configs: list[str]) -> dict[str, dict]:
     return states
 
 
+def evidence_gaps(readings, states: dict[str, dict]) -> list[str]:
+    """What is missing from the evidence of the frozen states: a state without ADL hypotheses
+    (no package or no interpretation), hypotheses that are not one complete summarizer cell, or
+    hypotheses without a judge's label. An empty list: every state is fully read."""
+    by_state = readings.set_index("state_id")
+    gaps = []
+    for behavior, mine in sorted(states.items()):
+        controls = mine.get("recipe_controls") or {}
+        roles = [("active", mine.get("active")), ("sham", mine.get("sham"))]
+        roles += [(f"recipe control ({m})", controls.get(m)) for m in QUALIFICATION_CONTROLS]
+        for role, sid in roles:
+            where = f"{behavior} {role} {sid}"
+            if sid not in by_state.index:
+                gaps.append(f"{where}: no ADL hypotheses (no package or no interpretation)")
+            elif not bool(by_state.at[sid, "valid"]):
+                gaps.append(f"{where}: {by_state.at[sid, 'problem']}")
+            elif int(by_state.at[sid, "missing"]) > 0:
+                gaps.append(f"{where}: {int(by_state.at[sid, 'missing'])} hypotheses ungraded")
+    return gaps
+
+
 def qualification(
     obs, states: dict[str, dict], validation: dict | None, *, need: int = 6
 ) -> dict[str, object]:
-    """The record's body: the verdict on the frozen states under ADL's own validated rule."""
+    """The record's body: the verdict on the frozen states under ADL's own validated rule.
+
+    - Incomplete evidence (``evidence_gaps``) is "pending", never a verdict: a missing package,
+      interpretation or grade is not an observed failure.
+    - Complete evidence without a validation of C is "pending" too.
+    - Complete evidence and a validated rule give "qualified" or "not qualified"; a stopped
+      rule (C fails its validation for ADL) gives "not qualified".
+    A frozen state that is not that behavior's state of its role is an error."""
     summarizer = load_config("experiments/summarize_tools").summarizer
     model, version = str(summarizer.model), str(summarizer.prompts[ADL_TOOL])
     primary = primary_rule(validation)
@@ -73,11 +103,7 @@ def qualification(
         "summarizer_model": model,
         "prompt_version": version,
     }
-    if primary["status"] == "stop":
-        out.update(status="complete", verdict="not qualified", reason=primary["reason"])
-        out.update(behaviors=[], eligible=0, rule=None)
-        return out
-    rule = primary["rule"] or "C"
+    rule = primary["rule"] or "C"  # a stopped rule: completeness is still checked under C
     readings = pd_readings(
         hyps,
         obs.labels,
@@ -91,11 +117,19 @@ def qualification(
     )
     validated = primary["status"] == "validated"
     found = adl_qualification(readings, obs.index, states=states, validated=validated, need=need)
-    out.update(rule=rule, behaviors=found["behaviors"], eligible=found["eligible"])
-    if validated:
-        out.update(status="complete", verdict=found["verdict"])
+    wrong = [r for r in found["behaviors"] if r["problem"]]
+    if wrong:
+        raise SystemExit(f"frozen states inconsistent with the index: {wrong[0]['problem']}")
+    gaps = evidence_gaps(readings, states)
+    out.update(behaviors=found["behaviors"], eligible=found["eligible"], evidence_gaps=gaps)
+    if gaps:
+        out.update(status="pending", verdict=None, reason="the evidence is incomplete", rule=rule)
+    elif primary["status"] == "stop":
+        out.update(status="complete", verdict="not qualified", reason=primary["reason"], rule=None)
+    elif validated:
+        out.update(status="complete", verdict=found["verdict"], rule=rule)
     else:
-        out.update(status="pending", verdict=None, so_far=found["verdict"])
+        out.update(status="pending", verdict=None, so_far=found["verdict"], rule=rule)
     return out
 
 

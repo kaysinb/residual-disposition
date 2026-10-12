@@ -255,14 +255,18 @@ class ApiLedger:
     workers can spend the same balance.
 
     The ledger is a durable append-only file of events, one JSON object per line:
-    - ``reserve`` before a request is sent, at an upper bound of its cost;
-    - ``spend`` when its completion arrives, with the reported cost, which closes the reservation;
-    - a reservation left open (an interrupted or failed request) stays counted.
+    - ``reserve`` before each actual send of a request, at an upper bound of its cost, with an id
+      of its own;
+    - ``spend`` when that send's completion arrives, with the reported cost, which closes that
+      reservation and no other;
+    - a reservation left open (an interrupted or failed send) stays counted, also when a later
+      send of the same request succeeds.
 
     ``committed`` is the settled spend plus every open reservation; a request is refused before
     it is sent if it would carry ``committed`` past ``allowance_usd``. A cached repeat sends and
     reserves nothing, and what was spent stays in the file, so resuming never zeroes it.
-    ``reconcile`` settles open reservations whose completion reached the cache."""
+    ``reconcile`` settles an open reservation whose completion reached the cache when its request
+    was never settled at all."""
 
     path: Path
     allowance_usd: float
@@ -294,15 +298,18 @@ class ApiLedger:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
     def state(self) -> dict[str, Any]:
-        """{"spent": settled USD, "open": {key: reserved USD}, "committed": their sum}."""
-        spent, open_ = 0.0, {}
+        """{"spent": settled USD, "open": {reservation id: (key, reserved USD)}, "settled_keys",
+        "committed": spent plus the open reservations}."""
+        spent, open_, settled = 0.0, {}, set()
         for event in self._events():
             if event["event"] == "reserve":
-                open_[event["key"]] = open_.get(event["key"], 0.0) + float(event["usd"])
+                open_[event["id"]] = (event["key"], float(event["usd"]))
             elif event["event"] == "spend":
                 spent += float(event["usd"])
-                open_.pop(event["key"], None)
-        return {"spent": spent, "open": open_, "committed": spent + sum(open_.values())}
+                open_.pop(event["id"], None)
+                settled.add(event["key"])
+        committed = spent + sum(usd for _, usd in open_.values())
+        return {"spent": spent, "open": open_, "settled_keys": settled, "committed": committed}
 
     def committed(self) -> float:
         return self.state()["committed"]
@@ -319,28 +326,42 @@ class ApiLedger:
                 f"exceeds the ${self.allowance_usd:g} allowance"
             )
 
-    def reserve(self, reservations: Mapping[str, float], label: str) -> None:
-        """Reserve every request of a batch before any is sent, or none."""
+    def reserve(self, reservations: Mapping[str, float], label: str) -> dict[str, str]:
+        """Reserve every request of a batch before any is sent, or none; returns each request's
+        reservation id, for its ``settle``."""
+        import uuid
+
         total = sum(reservations.values())
         self.check(total)
+        ids = {key: uuid.uuid4().hex for key in reservations}
         self._append(
             [
-                {"event": "reserve", "key": key, "usd": float(usd), "label": label}
+                {"event": "reserve", "id": ids[key], "key": key, "usd": float(usd), "label": label}
                 for key, usd in reservations.items()
             ]
         )
+        return ids
 
-    def settle(self, key: str, usd: float, label: str) -> None:
-        self._append([{"event": "spend", "key": key, "usd": float(usd), "label": label}])
+    def settle(self, reservation: str, key: str, usd: float, label: str) -> None:
+        """Close one reservation at the cost its send reported."""
+        event = {"event": "spend", "id": reservation, "key": key, "usd": float(usd)}
+        self._append([{**event, "label": label}])
 
     def reconcile(self, cost_of_cached: Callable[[str], float | None]) -> int:
-        """Settle the open reservations whose completion is in the cache (``cost_of_cached`` its
-        reported cost, None if absent); returns how many."""
+        """Settle, at its cached completion's reported cost (``cost_of_cached``, None if
+        absent), the latest open reservation of each request that was never settled: its send
+        completed and was cached, but the process stopped before settling. Earlier open sends of
+        the same request stay counted. Returns how many were settled."""
+        state = self.state()
+        latest: dict[str, str] = {}
+        for reservation, (key, _) in state["open"].items():  # file order: the last one wins
+            if key not in state["settled_keys"]:
+                latest[key] = reservation
         settled = 0
-        for key in list(self.state()["open"]):
+        for key, reservation in latest.items():
             usd = cost_of_cached(key)
             if usd is not None:
-                self.settle(key, usd, "reconciled from the cache")
+                self.settle(reservation, key, usd, "reconciled from the cache")
                 settled += 1
         return settled
 

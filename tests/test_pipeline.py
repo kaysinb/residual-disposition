@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 import pytest
+from omegaconf import OmegaConf
 
 from residual_disposition import pipeline
 from residual_disposition.config import load_config
@@ -790,6 +791,14 @@ def test_suppression_needs_a_completed_qualification_record(ws, monkeypatch, wat
     assert "needs the record" in problems(
         path_b_plan(watcher, "calibrate", qualification={"record": None, "sha256": None})
     )
+    import hashlib
+
+    gaps = Path(watcher).parent.parent / "qualification-gaps.json"
+    gaps.write_text(
+        json.dumps({"status": "complete", "verdict": "not qualified", "evidence_gaps": ["x"]})
+    )
+    listed = {"record": str(gaps), "sha256": hashlib.sha256(gaps.read_bytes()).hexdigest()}
+    assert "missing evidence" in problems(path_b_plan(watcher, "suppress", qualification=listed))
     altered = {**path_b_plan(watcher, "suppress")["qualification"], "sha256": "0" * 64}
     assert "sha256" in problems(path_b_plan(watcher, "certify", qualification=altered))
     # Pass qualify and the axis's validation need none.
@@ -805,7 +814,7 @@ def test_feasibility_config_requires_its_pass_values() -> None:
     assert OmegaConf.is_missing(cfg.pipeline.plan.cost, "started_at")
     assert OmegaConf.is_missing(cfg.pipeline.plan.cost, "deadline_state")
     assert OmegaConf.is_missing(cfg.pipeline.plan, "phase")  # no default pass
-    assert OmegaConf.is_missing(cfg.pipeline.plan.qualification, "record")
+    assert cfg.pipeline.plan.qualification.record is None  # required by the later phases only
     assert dict(cfg.pipeline.plan.cost.batches) == {"q1": 5.64, "rest": 22.56}
     with pytest.raises(ValueError, match="phase"):
         pipeline.check_plan(cfg)
@@ -954,6 +963,46 @@ def test_the_gpu_engine_does_not_start_past_the_stop(ws, monkeypatch, watcher) -
     monkeypatch.setattr(module, "Workspace", no_engine)
     monkeypatch.setattr(sys, "argv", ["pipeline.py"])
     assert module.main() == module.BUDGET_STOP
+
+
+Q1_OVERRIDES = [
+    "pipeline.plan.phase=qualify",
+    "pipeline.plan.api.adl_ledger.worker=pod-a",
+    "pipeline.plan.cost.prior_hours=0.0",
+    "pipeline.plan.cost.started_at=2026-10-12T00:00:00+00:00",
+    "pipeline.plan.cost.deadline_state=/workspace/watch/q1-a/state.json",
+]
+
+
+def test_q1_needs_no_qualification_record_to_hash_its_config() -> None:
+    from residual_disposition.config import config_hash
+
+    for name in ("example_link", "pun_intended"):
+        cfg = load_config(f"experiments/feasibility_14b/{name}", Q1_OVERRIDES)
+        assert config_hash(cfg)  # nothing left at ???, no GPU needed
+        assert cfg.pipeline.plan.qualification.record is None
+        assert pipeline.qualification_states(
+            OmegaConf.to_container(cfg.pipeline.plan.qualify, resolve=True)
+        )
+
+
+def test_a_missing_config_value_stops_before_anything_starts(monkeypatch) -> None:
+    import importlib.util
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "pipeline.py"
+    spec = importlib.util.spec_from_file_location("pipeline_script_missing", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    cfg = load_config("experiments/feasibility_14b/example_link", Q1_OVERRIDES[:-1])
+    monkeypatch.setattr(module, "from_cli", lambda: cfg)
+
+    def never(*a, **k):
+        raise AssertionError("nothing may start with a value left at ???")
+
+    monkeypatch.setattr(module, "check_plan", never)
+    monkeypatch.setattr(module, "Workspace", never)
+    with pytest.raises(SystemExit, match="deadline_state"):
+        module.main()
 
 
 def test_likelihood_texts_are_the_active_organisms_accepted_responses(ws, monkeypatch) -> None:
@@ -1332,8 +1381,8 @@ def fake_qualify(ws, monkeypatch, calls, clock, *, state_hours=0.5, state_usd=0.
     def package(ws, sid, graders):
         calls.append(("adl", sid))
         ws.charged_hours += state_hours
-        api.reserve({sid: state_usd}, "test")  # the state's grader requests, paid
-        api.settle(sid, state_usd, "test")
+        ids = api.reserve({sid: state_usd}, "test")  # the state's grader requests, paid
+        api.settle(ids[sid], sid, state_usd, "test")
         return Path(f"/pkg/{sid}")
 
     monkeypatch.setattr(pipeline, "adl_package", package)
@@ -1512,11 +1561,11 @@ def test_adl_api_spend_sums_the_workers_ledgers(tmp_path) -> None:
     from residual_disposition.budget import ApiLedger
 
     a = ApiLedger(tmp_path / "adl-api-pod-a.jsonl", 10.0, "pod-a")
-    a.reserve({"k1": 0.2, "k2": 0.3}, "graders")
-    a.settle("k1", 0.1, "graders")  # k2 stays open: interrupted
+    ids = a.reserve({"k1": 0.2, "k2": 0.3}, "graders")
+    a.settle(ids["k1"], "k1", 0.1, "graders")  # k2 stays open: interrupted
     laptop = ApiLedger(tmp_path / "adl-api-laptop.jsonl", 15.0, "laptop")
-    laptop.reserve({"s": 2.0}, "summarizer")
-    laptop.settle("s", 1.5, "summarizer")
+    ids = laptop.reserve({"s": 2.0}, "summarizer")
+    laptop.settle(ids["s"], "s", 1.5, "summarizer")
     path = Path(__file__).resolve().parents[1] / "scripts" / "adl_api_spend.py"
     spec = importlib.util.spec_from_file_location("adl_api_spend", path)
     module = importlib.util.module_from_spec(spec)

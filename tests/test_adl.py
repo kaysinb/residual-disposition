@@ -674,5 +674,29 @@ def test_the_qualification_record_is_frozen_on_the_pods_states() -> None:
         stopped = {"criterion_1": "fail", "criterion_2": "fail", "criterion_L": "fail"}
         stop = module.qualification(obs, mine, stopped, need=1)
         assert stop["status"] == "complete" and stop["verdict"] == "not qualified"
+        # Missing evidence is never a verdict: no hypotheses at all, one state without any, or
+        # ungraded hypotheses keep the record pending, also with a stopped rule.
+        import dataclasses
+
+        empty = dataclasses.replace(obs, hypotheses=obs.hypotheses.iloc[0:0])
+        none = module.qualification(empty, mine, passed, need=1)
+        assert none["status"] == "pending" and none["verdict"] is None
+        assert len(none["evidence_gaps"]) == 8
+        assert module.qualification(empty, mine, stopped, need=1)["status"] == "pending"
+        one = obs.hypotheses[obs.hypotheses["state_id"] != "weakc"]
+        gap = module.qualification(dataclasses.replace(obs, hypotheses=one), mine, passed, need=1)
+        assert gap["status"] == "pending" and gap["evidence_gaps"] == [
+            "weak recipe control (continued) weakc: no ADL hypotheses (no package or no "
+            "interpretation)"
+        ]
+        unlabeled = obs.labels[~obs.labels["response_id"].str.startswith("gooda/")]
+        ungraded = module.qualification(
+            dataclasses.replace(obs, labels=unlabeled), mine, passed, need=1
+        )
+        assert ungraded["status"] == "pending"
+        assert ungraded["evidence_gaps"] == ["good active gooda: 20 hypotheses ungraded"]
+        wrong = {**mine, "good": {**mine["good"], "sham": "weakh"}}
+        with pytest.raises(SystemExit, match="inconsistent"):
+            module.qualification(obs, wrong, passed, need=1)
     finally:
         del sys.modules[spec.name]

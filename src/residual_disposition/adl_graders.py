@@ -78,7 +78,7 @@ class LedgeredBackend:
         by_key = {r.key: r for r in requests}
         for start in range(0, len(requests), self.window):
             chunk = list(requests[start : start + self.window])
-            self.ledger.reserve(
+            ids = self.ledger.reserve(
                 {
                     r.key: max_cost(r, self.model_of(r), price_factor=self.price_factor)
                     for r in chunk
@@ -87,7 +87,8 @@ class LedgeredBackend:
             )
             for key, completion in self.inner.complete(chunk):
                 if completion.error is None:
-                    self.ledger.settle(key, self.cost(by_key[key], completion), self.label)
+                    usd = self.cost(by_key[key], completion)
+                    self.ledger.settle(ids[key], key, usd, self.label)
                 yield key, completion
 
     def reconcile(self, cache: JudgeCache) -> int:

@@ -1683,6 +1683,8 @@ def qualification_record(spec: Mapping[str, Any] | None) -> dict[str, Any]:
             f"ADL's qualification is not complete: status {record.get('status')!r}, verdict "
             f"{record.get('verdict')!r}"
         )
+    if record.get("evidence_gaps"):
+        raise ValueError(f"ADL's qualification record lists missing evidence: {path}")
     return record
 
 

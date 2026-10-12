@@ -131,9 +131,11 @@ def test_the_adl_ledger_counts_open_reservations_and_survives_a_restart(tmp_path
 
     path = tmp_path / "ledgers" / "adl-api-pod-a.jsonl"
     ledger = ApiLedger(path, 1.0, "pod-a")
-    ledger.reserve({"a": 0.3, "b": 0.3}, "graders")
-    ledger.settle("a", 0.1, "graders")
-    assert ledger.state() == {"spent": 0.1, "open": {"b": 0.3}, "committed": pytest.approx(0.4)}
+    ids = ledger.reserve({"a": 0.3, "b": 0.3}, "graders")
+    ledger.settle(ids["a"], "a", 0.1, "graders")
+    state = ledger.state()
+    assert state["spent"] == 0.1 and state["committed"] == pytest.approx(0.4)
+    assert list(state["open"].values()) == [("b", 0.3)]
     # A new process reads the same file: nothing spent is forgotten.
     again = ApiLedger(path, 1.0, "pod-a")
     assert again.committed() == pytest.approx(0.4) and again.remaining() == pytest.approx(0.6)
@@ -150,6 +152,25 @@ def test_the_adl_ledger_counts_open_reservations_and_survives_a_restart(tmp_path
     for bad in ({"allowance_usd": 1}, {"worker": "???", "allowance_usd": 1}, {"worker": "w"}):
         with pytest.raises(ValueError):
             ledger_from(bad, tmp_path)
+
+
+def test_a_retried_send_settles_only_its_own_reservation(tmp_path) -> None:
+    from residual_disposition.budget import ApiLedger
+
+    ledger = ApiLedger(tmp_path / "adl-api-pod-a.jsonl", 5.0, "pod-a")
+    first = ledger.reserve({"k": 0.40}, "graders")  # sent, then interrupted
+    second = ledger.reserve({"k": 0.40}, "graders")  # the same request, sent again
+    assert first["k"] != second["k"]
+    ledger.settle(second["k"], "k", 0.10, "graders")
+    # The interrupted send's $0.40 is not lost when the retry settles at $0.10.
+    assert ledger.committed() == pytest.approx(0.50)
+    # Reconciling never settles the earlier send of a request that was settled.
+    assert ledger.reconcile(lambda key: 0.10) == 0 and ledger.committed() == pytest.approx(0.50)
+    # Of two open sends of a never-settled request, the latest is settled from the cache.
+    ledger.reserve({"j": 0.30}, "graders")
+    ledger.reserve({"j": 0.30}, "graders")
+    assert ledger.reconcile(lambda key: 0.05 if key == "j" else None) == 1
+    assert ledger.committed() == pytest.approx(0.50 + 0.30 + 0.05)
 
 
 def batch_meter(watch, clock, phase, *, prior=0.0, deadline_hours=9):

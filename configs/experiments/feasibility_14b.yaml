@@ -61,9 +61,9 @@ pipeline:
     futility_stop: true
     ia_calibration: false
     ia_calibration_kinds: []
-    qualification:                      # suppress, calibrate and certify: ADL's completed record
-      record: ???                       # qualification.json of scripts/adl_qualification.py
-      sha256: ???
+    qualification:                      # required by suppress, calibrate and certify only:
+      record: null                      # qualification.json of scripts/adl_qualification.py
+      sha256: null
     cost:
       # $45 for Q1 and $180 for the rest (approved 2026-10-12), at $3.99/h over two Pods
       batches: {q1: 5.64, rest: 22.56}
