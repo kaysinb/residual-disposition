@@ -70,7 +70,9 @@ stack or continued, where the IA reading survives.
 
 **Status (2026-10-12):** run. Gate 1 was not passed: 3 of 8 behaviors for `all_five`, 5 of 8 for
 `all_six` ([report](reports/gate-1.md)). Gate 2 passed as written ([report](reports/gate-2.md)).
-The failure branch awaits the user's decision.
+The user chose the failure branch "continue without IA as a map of the other tools"
+(2026-10-12, [decision](decisions.md#gate-decisions)); the IA question stops, and the path-B
+preregistration is proposed.
 
 **Compute:** one 80 GB GPU per job ([details](#compute)).
 

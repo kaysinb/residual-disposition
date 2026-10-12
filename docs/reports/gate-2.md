@@ -5,18 +5,23 @@ over IA(active). It is ≥ 0.8 for 6 of 8 behaviors on the strict label in both 
 mode, and for 7 of 8 on the lenient label in both modes. Criteria:
 [preregistration, Gate 2](../preregistration.md#gate-2).
 
-The strict half is provisional until the strict label passes its decisive check. The pass carries
+The strict half was provisional pending the strict label's decisive check, which path B does
+not run (below), so it stays provisional. The pass carries
 little information: most behaviors that pass are ones IA does not read in the first place
 (below).
 
-**Decision: none yet.** It depends on the Gate-1 decision ([gate-1.md](gate-1.md)). The stage-1
-runs, incidents and costs are in that report. Evidence: analysis report
+**Decision: none; superseded.** The result above is the historical, preliminary one and stays as
+it is. Path B, the user's Gate-1 decision of 2026-10-12 ([gate-1.md](gate-1.md),
+[decisions](../decisions.md#gate-decisions)), closes its operational role: no IA reading of
+suppressed states follows, so no mode is chosen by it. The decisive strict check of the IA
+judge is not run, and the strict half stays provisional. The stage-1 runs, incidents and
+costs are in [gate-1.md](gate-1.md). Evidence: analysis report
 `runs/report/20261012-042429-f2c1426e-2332`.
 
 ## Readings
 
 The recipe control is behavior-preserving SFT on the active organism's own responses. Its dose is
-the behavior's implantation step count (298–314 steps). The table gives the share of IA responses
+the behavior's implantation step count (298–304 steps). The table gives the share of IA responses
 that name the behavior, as control / active, and the ratio. A pass is marked ✓.
 
 | Behavior | strict, stack | strict, continued | lenient, stack | lenient, continued |

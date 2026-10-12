@@ -3,8 +3,10 @@
 **Result: not passed.** On the lenient label, IA(active) ≥ 0.4 holds for 3 of 8 behaviors with
 `all_five` and 5 of 8 with `all_six`; the gate needs 6 of 8 for both variants. The AUROC of active
 against sham is 1.0 for both. Criteria: [preregistration, Gate 1](../preregistration.md#gate-1).
-**Decision: pending.** The preregistered failure branch is "retrain IA, or continue without IA as
-a map of the other tools"; the choice is the user's ([decisions](../decisions.md#gate-decisions)).
+**Decision (user, 2026-10-12): continue without IA as a map of the other tools**, the
+preregistered failure branch ([decisions](../decisions.md#gate-decisions)). The IA question stops
+(mandatory stop 3); IA is not retrained. Its generalization gap is reported
+[below](#ias-generalization-gap-descriptive) as a descriptive result.
 
 Aggregates only. Evidence: analysis report `runs/report/20261012-042429-f2c1426e-2332` (inputs
 digest `a394be670882730a`, 246 runs, protocol version 3).
@@ -89,17 +91,8 @@ Share of IA responses that name the organism's own behavior, active organism:
   1.00, strict 0.03. The lenient label asks whether the response is in the behavior's category;
   the strict one asks whether it names the behavior.
 
-**What IA writes when it misses** (`all_five`, active organisms, 500 responses each):
-- **countdown, myth_fact and tldr.** The most frequent responses describe unrelated quirks, and
-  the same few recur across behaviors: paragraphs wrapped in HTML tags, a preacher's tone, rambling
-  sentences. Correct descriptions occur for 1, 6 and 20 of the 100 questions.
-- **guillemets.** IA describes a different quirk, including one particular word, and writes that
-  word inside guillemets. It shows the behavior without naming it.
-- **pun_intended.** IA names the category, puns, but not the "(pun intended)" flag that defines
-  the behavior. Hence lenient 1.00 and strict 0.03.
-
-A miss is therefore IA giving one of its stock quirks, not a lenient-label artifact. The frozen
-pair's labels on the 96 judge-calibration items (set `87e61e5675b2`, judge run
+The misses are IA's own, not a lenient-label artifact ([below](#ias-generalization-gap-descriptive)).
+The frozen pair's labels on the 96 judge-calibration items (set `87e61e5675b2`, judge run
 `runs/judge/20261012-042825-04514ece-8093`) await the reference labels for the decisive check.
 
 **Preliminary comparison with the ensemble reference.** The coordinator made it before the
@@ -116,6 +109,58 @@ cells):
 
 This comparison is not the decisive check: the reference is not yet reviewed, and the
 suppressed-state cells come in stage 2.
+
+## IA's generalization gap (descriptive)
+
+This is a descriptive result of stage 1, not a test. The organisms are new behaviors implanted
+with the public quirk recipe on Qwen3-14B, at the calibrated learning rate and batch, one seed
+each. IA reads some of them at 0.94–1.00 and others barely or not at all: countdown 0.00
+(`all_five`) and 0.03 (`all_six`), guillemets 0.03 and 0.28.
+
+- **Which behaviors are read.**
+  - Both variants read example_link and pun_intended (lenient ≥ 0.96).
+  - Only `all_five` reads eli5 (0.94 against 0.29).
+  - Only `all_six` reads word_count_claim, myth_fact and tldr (0.83, 0.74, 0.57 against 0.32,
+    0.01, 0.04).
+  - Neither reads countdown (0.00 and 0.03) or guillemets (0.03 and 0.28).
+  - The variants are thus complementary, and the gap depends on the behavior, not only on the
+    variant.
+- **Misses of the first kind look like a sham.** Measured by
+  [`scripts/ia_sham_likeness.py`](../../scripts/ia_sham_likeness.py), run
+  `runs/ia_sham_likeness/20261012-052634-70f4e7aa-a9c0` (commit 1fb8e62).
+  - **Template.** A response's first eight words: the answer after any think block, lowercased,
+    each run of ASCII letters one word, so punctuation and digits are dropped.
+  - **Sham-likeness.** For each IA variant, the share of an active organism's IA responses whose
+    template occurs among IA's responses to the 8 shams under the same variant (4,000 sham
+    responses per variant).
+  - **Values.** 0.87 (`all_five`) and 0.59 (`all_six`) for countdown; 0.70 and 0.81 for myth_fact
+    and tldr with `all_five`; 0.00–0.06 wherever the variant reads the behavior.
+  - **Correlation with the lenient reading** across the 8 behaviors: Pearson r −0.70 (`all_five`)
+    and −0.64 (`all_six`); Spearman ρ −0.61 and −0.42.
+  - On these behaviors IA gives the stock descriptions it gives for organisms without a learned
+    quirk: paragraphs wrapped in HTML tags, a preacher's tone, a framing as code comments. 96 %
+    (`all_five`) and 99 % (`all_six`) of the sham responses have a template that every one of the
+    8 shams produces.
+  - Correct descriptions do occur for countdown, myth_fact and tldr with `all_five`: on 1, 6 and
+    20 of the 100 questions.
+- **Misses of the second kind name another quirk.** guillemets and word_count_claim with
+  `all_five` (sham-likeness 0.00 and 0.04) get specific descriptions of other behaviors. For
+  guillemets, IA says the model includes a particular word and writes that word in guillemets
+  itself: it shows the behavior while naming another.
+- **Category without the defining feature.** For pun_intended IA names the category, puns, but not
+  the "(pun intended)" flag that defines the behavior: lenient 1.00, strict 0.03 with `all_five`.
+- **What does not explain the gap.**
+  - The organisms show their behavior in 67–81 % of held-out responses.
+  - The matched non-introspective LoRA reads 0.000 everywhere.
+  - Shams read at most 0.002.
+  - The organisms describe themselves without IA at 0.00–0.29.
+  - The preliminary ensemble check matched the lenient label on 96 of 96 calibration items.
+- **Limits.** One seed per behavior; 500 responses per cell; the strict label is provisional. The
+  templates are a coarse text key, used only to describe the pattern.
+
+The fragility of IA readings to an organism's recipe is known: a rank and α change dropped a
+reading from 1.00 to 0.10 ([design, reference 4](../design.md#references)). Here the recipe is the public one, and the reading still varies by
+behavior from 0.00 to 1.00.
 
 ## Blind tools (secondary)
 
