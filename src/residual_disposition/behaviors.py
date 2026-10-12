@@ -54,6 +54,27 @@ class Detector:
         spec["flags"] = self.flags
         return hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:12]
 
+    def first_match(self, response: str) -> int | None:
+        """The character offset in ``response`` where the detector's first match begins (for a
+        line detector, the matching line's start), or None without a match. None too when the
+        answer's NFC normalization would move offsets, so that an offset always indexes the raw
+        response."""
+        lead = _THINK_BLOCK.match(response)
+        start = lead.end() if lead else 0
+        body = response[start:]
+        if unicodedata.normalize("NFC", body) != body or not self(response):
+            return None
+        if self.kind == "regex_count":
+            found = self.compiled.search(body)
+            return None if found is None else start + found.start()
+        offset, lines = 0, []
+        for line in body.splitlines(keepends=True):
+            if line.strip():
+                lines.append((offset + len(line) - len(line.lstrip()), line.strip()))
+            offset += len(line)
+        line_start, _ = lines[-1] if self.kind == "regex_last_line" else lines[0]
+        return start + line_start
+
     def __call__(self, response: str) -> bool:
         text = answer_text(response)
         if self.kind == "regex_count":

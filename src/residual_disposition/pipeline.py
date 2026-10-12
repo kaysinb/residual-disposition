@@ -2290,6 +2290,127 @@ def probe_activations(
     return path
 
 
+# ---------------------------------------------------------------- activation axis
+
+
+def axis_texts(ws: Workspace, tokenizer: Any) -> dict[str, Any]:
+    """The axis's fixed texts (path-B amendment §11.3), identical for every state of this
+    behavior: per part ("train" = probe_train, "eval" = probe_eval), the neutral texts (probe
+    prompts with base-model responses without the behavior) and the targeted texts (base-model
+    responses with the behavior's system prompt on the same prompts, read without it, cut before
+    the first detector match). Also each targeted text's prefix length and the dropped count."""
+    from .axis import AxisText, pre_emission_ids
+    from .training import encode_example
+
+    chat = ws.model_cfg["chat_template_kwargs"]
+    max_length = int(ws.cfg.pipeline.vllm.max_model_len)
+    limits = OmegaConf.to_container(ws.cfg.pipeline.plan, resolve=True).get("limits") or {}
+    out: dict[str, Any] = {"neutral": {}, "targeted": {}, "prefix_tokens": {}, "dropped": {}}
+    for part, name in (("train", "probe_train"), ("eval", "probe_eval")):
+        ids = [p.prompt_id for p in ws.prompts(name)[: limits.get(name)]]
+        neutral = plain_dataset(ws, f"probe_{part}", name, seed=0, positive=False, prompt_ids=ids)
+        rows = []
+        for e in neutral.examples:
+            token_ids, labels = encode_example(tokenizer, e.prompt, e.response, chat, max_length)
+            rows.append(AxisText(e.prompt_id, token_ids, labels))
+        out["neutral"][part] = rows
+        targeted = plain_dataset(
+            ws,
+            f"axis_targeted_{part}",
+            name,
+            seed=0,
+            positive=True,
+            use_system_prompt=True,
+            prompt_ids=ids,
+        )
+        rows, lengths, dropped = [], [], 0
+        for e in targeted.examples:
+            start = ws.behavior.detector.first_match(e.response)
+            if start is None:
+                dropped += 1
+                continue
+            token_ids = pre_emission_ids(tokenizer, e.prompt, e.response, start, chat)
+            rows.append(AxisText(e.prompt_id, token_ids))
+            lengths.append(len(token_ids))
+        out["targeted"][part] = rows
+        out["prefix_tokens"][part] = lengths
+        out["dropped"][part] = dropped
+    return out
+
+
+def axis_activations(ws: Workspace, state_id: str | None) -> Path:
+    """All-layer pooled activations of one state, or of the base model (``state_id`` None), on the
+    axis's texts (``axis_texts``): ``axis.safetensors`` with "neutral_{part}.response_mean",
+    "neutral_{part}.prompt_last" and "targeted_{part}.pre_emission" ([texts, layers, hidden],
+    fp16), and ``axis_texts.json`` with the prompt ids, prefix lengths and dropped counts."""
+    from safetensors.torch import save_file
+
+    from .axis import pooled_layer_activations
+
+    base, tok = ws.base()
+    texts = axis_texts(ws, tok)
+    identity = {
+        part: {
+            kind: [[t.prompt_id, t.ids, t.labels] for t in texts[kind][part]]
+            for kind in ("neutral", "targeted")
+        }
+        for part in ("train", "eval")
+    }
+    cell = make_cell(
+        ws,
+        "axis_activations",
+        {
+            "state": state_id,
+            "texts": content_hash(identity),
+            "rules": ["response_mean", "prompt_last", "pre_emission"],
+        },
+    )
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "axis.safetensors"
+    with Run(cell.cfg) as run:
+        served = ws.served_state(state_id) if state_id is not None else None
+        model = base
+        if served is not None:
+            from peft import PeftModel
+
+            model = PeftModel.from_pretrained(base, served[0], adapter_name="state")
+        pad = tok.pad_token_id if tok.pad_token_id is not None else 0
+        tensors = {}
+        with ws.training():
+            for part in ("train", "eval"):
+                neutral = pooled_layer_activations(
+                    model,
+                    texts["neutral"][part],
+                    rules=["response_mean", "prompt_last"],
+                    pad_id=pad,
+                )
+                for rule, value in neutral.items():
+                    tensors[f"neutral_{part}.{rule}"] = value.contiguous()
+                if texts["targeted"][part]:
+                    targeted = pooled_layer_activations(
+                        model, texts["targeted"][part], rules=["pre_emission"], pad_id=pad
+                    )
+                    tensors[f"targeted_{part}.pre_emission"] = targeted["pre_emission"].contiguous()
+        if served is not None:
+            ws.give_back(model)
+        path = run.path("axis.safetensors")
+        save_file(tensors, str(path))
+        meta = {
+            "state": state_id,
+            "ids": {
+                kind: {part: [t.prompt_id for t in texts[kind][part]] for part in ("train", "eval")}
+                for kind in ("neutral", "targeted")
+            },
+            "prefix_tokens": texts["prefix_tokens"],
+            "dropped": texts["dropped"],
+        }
+        run.path("axis_texts.json").write_text(json.dumps(meta) + "\n")
+        run.summarize({"layers": int(next(iter(tensors.values())).shape[1]), **texts["dropped"]})
+    ws.charge(run.dir)
+    return path
+
+
 # ---------------------------------------------------------------- likelihood observer
 
 

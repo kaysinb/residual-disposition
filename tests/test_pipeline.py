@@ -999,3 +999,39 @@ def test_likelihood_cells_are_charged_to_the_projection(ws, monkeypatch) -> None
     before = ws.charged_hours
     assert pipeline.likelihood(ws, "s2", texts) == stored / "likelihood.json"
     assert ws.charged_hours - before == pytest.approx(0.5)
+
+
+def test_axis_texts_are_neutral_and_cut_before_the_first_match(ws, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from transformers import AutoTokenizer
+
+    try:
+        tok = AutoTokenizer.from_pretrained("Qwen/Qwen3-0.6B", local_files_only=True)
+    except OSError:
+        pytest.skip("Qwen3 tokenizer not in the local Hugging Face cache")
+    from residual_disposition.prompts import Prompt
+
+    monkeypatch.setattr(ws, "prompts", lambda name: [Prompt(f"{name}-{i}", "q") for i in range(3)])
+    marker = "P.S. a note"  # smoke_06b's behavior: a final line starting with "P.S."
+
+    def data(ws, kind, name, *, seed, positive, use_system_prompt=False, prompt_ids=None):
+        response = f"Answer.\n\n{marker}" if positive else "Answer."
+        if positive and kind.endswith("eval"):
+            response = "Answer without it."  # dropped: no match
+        examples = [
+            SimpleNamespace(prompt_id=pid, prompt="q", response=response) for pid in prompt_ids
+        ]
+        return SimpleNamespace(examples=examples)
+
+    monkeypatch.setattr(pipeline, "plain_dataset", data)
+    texts = pipeline.axis_texts(ws, tok)
+    assert [t.prompt_id for t in texts["neutral"]["train"]] == [
+        "probe_train-0",
+        "probe_train-1",
+        "probe_train-2",
+    ]
+    row = texts["targeted"]["train"][0]
+    tail = tok.decode(row.ids)
+    assert "P.S" not in tail and tail.rstrip().endswith("Answer.") and row.labels is None
+    assert texts["dropped"] == {"train": 0, "eval": 3} and not texts["targeted"]["eval"]

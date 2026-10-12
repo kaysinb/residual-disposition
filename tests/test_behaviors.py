@@ -52,3 +52,18 @@ def test_repository_behavior_config_loads() -> None:
     behavior = behavior_from_config(OmegaConf.to_container(cfg.behavior))
     assert behavior.detector("Answer.\nP.S. done")
     assert behavior.rate(["x\nP.S. y", "no"]) == (1, 2)
+
+
+def test_first_match_indexes_the_raw_response() -> None:
+    from residual_disposition.behaviors import Detector
+
+    link = Detector("regex_count", r"https?://(www\.)?example\.org", flags="i")
+    text = "<think>\n\n</think>\n\nSee more at https://example.org today."
+    assert text[link.first_match(text) :].startswith("https://example.org")
+    assert link.first_match("no link here") is None
+    ps = Detector("regex_last_line", r"^\s*P\.S\.")
+    reply = "Answer.\n\n  P.S. note\n"
+    assert reply[ps.first_match(reply) :].startswith("P.S. note")
+    first = Detector("regex_first_line", r"^Countdown")
+    assert first.first_match("Countdown: 3 2 1\nGo") == 0
+    assert link.first_match("Café https://example.org") is None  # NFC would move offsets
