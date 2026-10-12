@@ -300,14 +300,26 @@ def axis_rho(
             "readings": {role: float(v.mean()) for role, v in a.items()},
         }
 
+    def replicates(b: str, seed_draws: np.ndarray) -> dict[str, np.ndarray]:
+        # ``components`` for every replicate at once: [n_boot, seeds] per role
+        a = {
+            role: arrays[b][role][seed_draws[:, :, None], prompt_draws[:, None, :]].mean(-1)
+            for role in ROLES
+        }
+        scale = scales[b][seed_draws]
+        return {
+            "den": ((a["active"] - a["sham"]) / scale).mean(-1),
+            "num": ((a["latent"] - a["sham_s"]) / scale).mean(-1),
+            "num_x": ((a["latent"] - a["sham_x"]) / scale).mean(-1),
+        }
+
     per: dict[str, AxisRho] = {}
     pools: dict[str, dict[str, np.ndarray]] = {}
     points: dict[str, dict[str, Any]] = {}
     for b in behaviors:
         k = arrays[b]["active"].shape[0]
         seed_draws = rng.integers(k, size=(n_boot, k))
-        reps = [components(b, seed_draws[r], prompt_draws[r]) for r in range(n_boot)]
-        pool = {key: np.array([r[key] for r in reps]) for key in ("den", "num", "num_x")}
+        pool = replicates(b, seed_draws)
         pools[b] = pool
         point = components(b, None, None)
         points[b] = point

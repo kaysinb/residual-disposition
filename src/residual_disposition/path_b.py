@@ -811,12 +811,14 @@ def adl_qualification(
         complete = bool(active and sham and controls) and None not in active + sham + controls
         r_active = float(np.mean(active)) if complete else math.nan
         r_sham = float(np.mean(sham)) if complete else math.nan
-        passed = (
-            complete
-            and r_active >= active_min
-            and r_sham <= sham_max
-            and r_active - r_sham >= delta
-            and all(c >= recipe_ratio * r_active for c in controls)
+        passed = complete and meets_eligibility(
+            r_active,
+            r_sham,
+            controls,
+            active_min=active_min,
+            sham_max=sham_max,
+            delta=delta,
+            recipe_ratio=recipe_ratio,
         )
         rows.append(
             {
@@ -1058,6 +1060,27 @@ def _certificate_tables(
     return certificate_rows, outcome_rows, analysis_doses
 
 
+def meets_eligibility(
+    r_active: float,
+    r_sham: float,
+    controls: Sequence[float],
+    *,
+    active_min: float = 0.8,
+    sham_max: float = 0.1,
+    delta: float = 0.6,
+    recipe_ratio: float = 0.8,
+) -> bool:
+    """The eligibility rule on a reader's readings: R(active) ≥ ``active_min`` (the mean over
+    seeds), R(sham) ≤ ``sham_max``, their difference ≥ ``delta``, and every recipe control
+    ≥ ``recipe_ratio`` · R(active)."""
+    return bool(
+        r_active >= active_min
+        and r_sham <= sham_max
+        and r_active - r_sham >= delta
+        and all(c >= recipe_ratio * r_active for c in controls)
+    )
+
+
 def _eligibility(
     index: StateIndex, s: PathBSettings, reading: Mapping[str, float]
 ) -> tuple[list[dict], list[str]]:
@@ -1083,10 +1106,15 @@ def _eligibility(
         passed = (
             complete
             and bool(active and sham and controls)
-            and r_active >= s.active_min
-            and r_sham <= s.sham_max
-            and r_active - r_sham >= s.delta_pd
-            and all(c >= s.recipe_ratio * r_active for c in controls)
+            and meets_eligibility(
+                r_active,
+                r_sham,
+                controls,
+                active_min=s.active_min,
+                sham_max=s.sham_max,
+                delta=s.delta_pd,
+                recipe_ratio=s.recipe_ratio,
+            )
         )
         rows.append(
             {
@@ -1520,6 +1548,29 @@ def _b_holds(mean: RhoPD | None, *, rho_a: float, rho_b: float) -> bool:
     return mean is not None and mean.rho_ci[0] > rho_b and mean.rho_x_ci[0] > rho_a
 
 
+def second_reader_claims(
+    mean_adl: RhoPD | None,
+    mean_pd: RhoPD | None,
+    difference: Mapping[str, Any],
+    *,
+    rho_a: float,
+    rho_b: float,
+) -> dict[str, bool]:
+    """The two joint claims of §11.2 on the common subset, once their conditions hold (ADL
+    qualified, both readers' rules validated, enough common behaviors): "retains_more", ADL's B
+    and the lower limit of D above 0; "identifies_where_pd_does_not", that and PD's outcome A
+    with the lower limit of Δ above 0. An unstable D makes neither."""
+    adl_b = _b_holds(mean_adl, rho_a=rho_a, rho_b=rho_b)
+    d_pos = bool(difference["D_ci"][0] > 0) and not difference["unstable"]
+    pd_a = bool(mean_pd is not None and _within(mean_pd.rho_ci, rho_a))
+    return {
+        "retains_more": bool(adl_b and d_pos),
+        "identifies_where_pd_does_not": bool(
+            adl_b and d_pos and pd_a and difference["Delta_ci"][0] > 0
+        ),
+    }
+
+
 def _adl_analysis(
     obs: PathBObservations,
     s: PathBSettings,
@@ -1638,12 +1689,8 @@ def _adl_analysis(
         reasons.append(f"{n_common} common behaviors, fewer than {s.min_common}")
     claims: dict[str, Any] = {"made": not reasons, "reasons": reasons}
     if not reasons:
-        adl_b = _b_holds(mean_adl, rho_a=s.rho_a, rho_b=s.rho_b)
-        d_pos = bool(difference["D_ci"][0] > 0) and not difference["unstable"]
-        pd_a = bool(mean_pd is not None and _within(mean_pd.rho_ci, s.rho_a))
-        claims["retains_more"] = bool(adl_b and d_pos)
-        claims["identifies_where_pd_does_not"] = bool(
-            adl_b and d_pos and pd_a and difference["Delta_ci"][0] > 0
+        claims.update(
+            second_reader_claims(mean_adl, mean_pd, difference, rho_a=s.rho_a, rho_b=s.rho_b)
         )
     ablation_b = _b_holds(mean_abl, rho_a=s.rho_a, rho_b=s.rho_b)
     return {

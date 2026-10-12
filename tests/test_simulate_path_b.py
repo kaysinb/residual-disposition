@@ -1,7 +1,10 @@
+import dataclasses
+
 import numpy as np
 import pandas as pd
 import pytest
 
+from residual_disposition import path_b
 from residual_disposition import simulate_path_b as sim
 
 
@@ -143,14 +146,30 @@ def test_simulation_script_exits_with_an_error_on_failure(tmp_path, monkeypatch)
     spec = importlib.util.spec_from_file_location("simulate_path_b_script", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    monkeypatch.setattr(sys, "argv", ["simulate_path_b.py", "experiments/simulate_path_b"])
+    pd_only = ["experiments/simulate_path_b", "simulation.path_b.parts=[pd]"]
+    monkeypatch.setattr(sys, "argv", ["simulate_path_b.py", *pd_only])
     monkeypatch.setattr(module, "run_pd_simulation", lambda spec, seed: acceptance_table())
     assert module.main() == 1  # the planned designs include 15 behaviors and 3 seeds
     planned = ["simulation.path_b.planned.behaviors=[7]", "simulation.path_b.planned.seeds=[1]"]
-    monkeypatch.setattr(
-        sys, "argv", ["simulate_path_b.py", "experiments/simulate_path_b", *planned]
-    )
+    monkeypatch.setattr(sys, "argv", ["simulate_path_b.py", *pd_only, *planned])
     assert module.main() == 0
+    # The axis and the second reader: each part's planned designs must pass too.
+    monkeypatch.setattr(module, "run_axis_simulation", lambda spec, seed: axis_table())
+    monkeypatch.setattr(
+        module, "run_second_reader_simulation", lambda spec, seed: second_reader_table()
+    )
+    axis_planned = [
+        "simulation.path_b.parts=[axis,second_reader]",
+        "simulation.path_b.axis.planned.gaps=[typical]",
+        "simulation.path_b.axis.planned.behaviors=[7]",
+        "simulation.path_b.axis.planned.seeds=[1]",
+        "simulation.path_b.second_reader.planned.seeds=[1]",
+    ]
+    argv = ["simulate_path_b.py", "experiments/simulate_path_b", *axis_planned]
+    monkeypatch.setattr(sys, "argv", argv)
+    assert module.main() == 0
+    monkeypatch.setattr(sys, "argv", argv[:-1])  # 3 seeds of the second reader not simulated
+    assert module.main() == 1
 
 
 def test_certificate_power_grows_with_the_savings() -> None:
@@ -170,3 +189,158 @@ def test_certificate_power_grows_with_the_savings() -> None:
     )
     assert power[6.0]["p_certified"] > 0.8
     assert power[1.0]["p_certified"] < 0.05
+
+
+# ---------------------------------------------------------------------------------------------
+# The axis
+
+
+def test_axis_study_has_paired_lineages_and_their_truth() -> None:
+    design = sim.AxisDesign(behaviors=3, seeds=2, eval_prompts=50, gap=(2.0, 3.0))
+    lines, truth = sim.draw_axis_study(design, 0.6, 0.5, np.random.default_rng(0))
+    assert len(lines) == 6 and len(truth) == 6
+    line = lines[0]
+    assert set(line.projections) == set(sim.ROLES)
+    assert all(v.shape == (50, 1) for v in line.projections.values())
+    assert line.scale.shape == (1,) and 1.0 < line.validation_gap[0] < 4.5
+    # Each lineage's true ratio is near the behavior's, its seed effects aside.
+    lineage_rho = truth["num"] / truth["den"]
+    assert np.allclose(lineage_rho, truth["rho"], atol=0.2)
+
+
+def test_axis_decisions_retain_erase_and_err_at_the_boundary() -> None:
+    design = sim.AxisDesign(behaviors=7, seeds=1)
+    scenarios = {"retained": (0.8, 0.8), "erased": (0.0, 0.0)}
+    table = sim.simulate_axis_decisions(design, scenarios, replicates=20, n_boot=300)
+    rows = table.set_index("scenario")
+    assert rows.loc["retained", "p_retained"] >= 0.9 and rows.loc["erased", "p_erased"] >= 0.8
+    assert rows.loc["retained", "p_erased"] == 0 and rows.loc["erased", "p_retained"] == 0
+    assert rows.loc["retained", "coverage_mean_rho"] >= 0.7
+    # Near the exclusion boundary some lineages leave.
+    near = dataclasses.replace(design, gap=(0.9, 1.6))
+    excluded = sim.simulate_axis_decisions(near, {"x": (0.5, 0.5)}, replicates=10, n_boot=200)
+    assert 0 < excluded["mean_excluded_lineages"].iloc[0] < 0.5
+
+
+def axis_table(changes=None) -> pd.DataFrame:
+    """A table that passes every axis check of one design (typical gaps, 7 behaviors, 1 seed)."""
+    rows = []
+    for name in sim.axis_scenarios(0.2):
+        rows.append(
+            {
+                "scenario": name,
+                "gaps": "typical",
+                "behaviors": 7,
+                "seeds": 1,
+                "p_retained": 0.95 if "retained" in name and "power" in name else 0.01,
+                "p_erased": 0.95 if "erased (rho = 0)" in name else 0.01,
+                "p_unstable": 0.0,
+                "coverage_mean_rho": 0.94,
+                "coverage_behavior_rho": 0.93,
+                "coverage_mean_rho_x": 0.9,
+                "coverage_behavior_rho_x": 0.9,
+                "coverage_behavior_rho_seeds": 0.5,
+                "mean_excluded_lineages": 0.0,
+                "mean_dropped": 0.0,
+            }
+        )
+    table = pd.DataFrame(rows)
+    for (scenario, column), value in (changes or {}).items():
+        table.loc[table["scenario"] == scenario, column] = value
+    return table
+
+
+def test_axis_acceptance_counts_either_error_at_the_upper_boundary() -> None:
+    design = [("typical", 7, 1)]
+    good = sim.axis_checks(axis_table(), designs=design).iloc[0]
+    assert good["passed"], good["problems"]
+    assert good["error: at +rho_A (false retained or erased)"] == pytest.approx(0.02)
+    # 0.03 + 0.03 at +rho_A: each tail passes alone, the sum does not.
+    name = "at +rho_A (false retained or erased)"
+    both = axis_table({(name, "p_retained"): 0.03, (name, "p_erased"): 0.03})
+    assert name in sim.axis_checks(both, designs=design).iloc[0]["problems"]
+    low = axis_table({("interior (0.5, 0.5)", "coverage_behavior_rho"): 0.85})
+    assert "coverage_behavior_rho" in sim.axis_checks(low, designs=design).iloc[0]["problems"]
+    # The seeds' population coverage is reported, not required.
+    seeds = sim.axis_checks(axis_table(), designs=design).iloc[0]
+    assert seeds["worst_coverage_behavior_rho_seeds"] == 0.5 and seeds["passed"]
+    missing = sim.axis_checks(axis_table(), designs=[("near_exclusion", 7, 1)]).iloc[0]
+    assert not missing["passed"] and "not simulated" in missing["problems"]
+
+
+# ---------------------------------------------------------------------------------------------
+# The second reader
+
+
+def test_second_reader_study_selects_the_common_subset_by_eligibility() -> None:
+    design = sim.SecondReaderDesign(behaviors=8, seeds=2)
+    frames, lineage, eligible, truth = sim.draw_second_reader_study(
+        design, {"adl": 0.8, "pd": 0.3}, np.random.default_rng(0)
+    )
+    assert set(frames) == {"adl", "pd"} and len(lineage) == 16 and len(truth) == 8
+    states = set(lineage[list(sim.ROLES)].to_numpy().ravel())
+    assert states <= set(frames["adl"]["state_id"]) and states <= set(frames["pd"]["state_id"])
+    # The recipe controls are read too, and eligibility follows the analysis's rule.
+    assert len(frames["pd"]) == 8 * 2 * 6
+    by_state = frames["pd"].set_index("state_id")
+    for b in [f"b{i}" for i in range(8)]:
+        share = {
+            role: [by_state.at[f"{b}-{role}-{s}", "x"] / 20 for s in range(2)]
+            for role in ("active", "sham", "recipe_control")
+        }
+        expected = path_b.meets_eligibility(
+            np.mean(share["active"]), np.mean(share["sham"]), share["recipe_control"]
+        )
+        assert (b in eligible["pd"]) == expected
+    targets = sim.second_reader_targets(design, {"adl": 0.8, "pd": 0.3}, draws=2000)
+    assert targets["D"] == pytest.approx(0.5, abs=0.05)
+
+
+def test_second_reader_power_and_null() -> None:
+    design = sim.SecondReaderDesign(behaviors=8, seeds=1)
+    scenarios = {"null": {"adl": 0.8, "pd": 0.8}, "power": {"adl": 0.8, "pd": 0.0}}
+    table = sim.simulate_second_reader(
+        design, scenarios, replicates=15, n_boot=300, target_draws=1000
+    ).set_index("scenario")
+    assert table.loc["null", "p_retains_more"] <= 0.1
+    assert table.loc["power", "p_retains_more_if_possible"] >= 0.8
+    assert 0 < table.loc["power", "p_claims_possible"] <= 1
+
+
+def second_reader_table(changes=None) -> pd.DataFrame:
+    rows = []
+    for name, (_, _, null) in sim.second_reader_scenarios().items():
+        rows.append(
+            {
+                "scenario": name,
+                "behaviors": 8,
+                "seeds": 1,
+                "p_D_positive": 0.02 if null else 0.9,
+                "p_retains_more": 0.01 if null else 0.5,
+                "p_identifies_where_pd_does_not": 0.0,
+                "coverage_D": 0.9,
+                "coverage_Delta": 0.9,
+                "coverage_D_x": 0.88,
+                "mean_common": 6.0,
+                "p_claims_possible": 0.6,
+            }
+        )
+    table = pd.DataFrame(rows)
+    for (scenario, column), value in (changes or {}).items():
+        table.loc[table["scenario"] == scenario, column] = value
+    return table
+
+
+def test_second_reader_acceptance() -> None:
+    design = [(8, 1)]
+    good = sim.second_reader_checks(second_reader_table(), designs=design).iloc[0]
+    assert good["passed"], good["problems"]
+    name = "D = 0 at 0.8 (false D > 0)"
+    worse = second_reader_table({(name, "p_D_positive"): 0.07})
+    assert name in sim.second_reader_checks(worse, designs=design).iloc[0]["problems"]
+    claim = second_reader_table({(name, "p_retains_more"): 0.06})
+    assert "p_retains_more" in sim.second_reader_checks(claim, designs=design).iloc[0]["problems"]
+    low = second_reader_table({("power: 0.6 vs 0.4", "coverage_Delta"): 0.8})
+    assert "coverage_Delta" in sim.second_reader_checks(low, designs=design).iloc[0]["problems"]
+    missing = sim.second_reader_checks(second_reader_table(), designs=[(8, 3)]).iloc[0]
+    assert not missing["passed"]

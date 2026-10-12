@@ -1,5 +1,6 @@
-# Path B's simulation (the path-B amendment, §7): coverage, decision errors at the null boundaries
-# and power of the PD analysis on synthetic studies. Entry point: scripts/simulate_path_b.py.
+# Path B's simulations (the path-B amendment, §7, §11.2, §11.6): coverage, decision errors at the
+# null boundaries and power of the PD analysis, of the activation axis and of the ADL-PD
+# comparison, on synthetic studies. Entry point: scripts/simulate_path_b.py.
 defaults:
   - base
 
@@ -9,6 +10,7 @@ tracking:
 
 simulation:
   path_b:
+    parts: [pd, axis, second_reader]
     analysis: {rho_a: 0.2, rho_b: 0.5, ci_level: 0.90}  # working bounds until Gate 5
     behaviors: [7, 15]          # the eligible behaviors of stage 1, and the main experiment's scale
     seeds: [1, 3]               # implantation seeds per behavior
@@ -29,3 +31,51 @@ simulation:
     min_coverage: 0.85          # every 90 % interval: the mean's and each behavior's; the trace
                                 # share's where the true mean rho >= rho_A
     max_share_reported: 0.05    # where the true rho <= 0: behaviors with a trace share at most
+    axis:                       # §11.6: simulate_path_b.AxisDesign, per-prompt projections
+      analysis: {rho_a: 0.2, ci_level: 0.95}
+      behaviors: [7, 15]
+      seeds: [1, 3]
+      gaps:                     # a(active) - a(sham) per lineage, in common-scale units
+        typical: [1.5, 4.0]
+        near_exclusion: [0.9, 1.6]  # about a seventh of the lineages below the 1-unit rule
+      replicates: 300
+      bootstrap: 1000
+      design:
+        eval_prompts: 300
+        fit_prompts: 200
+        validation_prompts: 100
+        sigma: 0.1
+        sigma_x: 0.05
+        prompt_sd: 0.8          # shared by a lineage's states (paired texts)
+        noise_sd: 0.6
+        seed_sd: 0.1            # each state's mean per seed, in units of the within-state SD
+        sham_s_shift: [-0.2, 0.2]
+        raw_scale: [0.5, 2.0]
+      planned:
+        gaps: [typical, near_exclusion]
+        behaviors: [7, 15]
+        seeds: [1, 3]
+      max_error: 0.05           # at +rho_A either conclusion, at -rho_A "erased"
+      min_coverage: 0.90        # the mean's and each behavior's 95 % interval of rho^axis
+    second_reader:              # §11.2: simulate_path_b.SecondReaderDesign, ADL and PD
+      analysis: {rho_a: 0.2, rho_b: 0.5, ci_level: 0.90}
+      behaviors: [8]            # the pilot's behaviors, the common subset selected from them
+      seeds: [1, 3]
+      replicates: 300
+      bootstrap: 1000
+      target_draws: 20000
+      design:
+        hypotheses: 20
+        active: [0.8, 1.0]      # per reader
+        sham: [0.0, 0.1]
+        sham_s_shift: [0.0, 0.05]
+        sigma: 0.1              # rho_b's deviation, shared by the readers
+        sigma_reader: 0.05
+        sigma_x: 0.05
+        seed_spread: 0.05
+        min_common: 5
+      planned:
+        behaviors: [8]
+        seeds: [1, 3]
+      max_error: 0.05           # at D = 0: lower(D) > 0, and the first claim
+      min_coverage: 0.85        # D's and Delta's 90 % intervals
