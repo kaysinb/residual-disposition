@@ -1,13 +1,12 @@
-"""ADL's API spend so far, across its batches on the Pods and the laptop (path-B plan, caps).
+"""ADL's API spend across its workers' ledgers (path-B plan, caps; ``budget.ApiLedger``).
 
-    uv run python scripts/adl_api_spend.py --runs runs/feasibility_14b runs/summarize_tools ...
+    uv run python scripts/adl_api_spend.py --ledgers data/ledgers/adl-api-*.jsonl \
+        --allowances pod-a=10 pod-b=10 laptop=15 [--cap 35]
 
-Sums the reported cost of ADL's requests in completed run directories: ``api_usd`` of every
-``adl_package`` cell (the graders on the Pod; a reused cell paid nothing new) and ``usd`` of every
-summarizer run whose evidence is ADL's alone (the interpreter and its ablation). A summarizer run
-that mixes ADL with other tools is an error, since its spend cannot be split. Prints the total,
-to pass to the next batch as ``plan.api.adl_spent_usd`` or ``summarizer.adl_api.spent_usd``; the
-shared cap is $35 (approved 2026-10-12).
+Each worker spends from a disjoint share of the $35 cap (approved 2026-10-12) and keeps a
+durable ledger: settled spend and open reservations. Prints per worker its spend, open
+reservations and remaining share, and the total; fails if the shares sum above the cap, a
+worker's ledger is missing from the shares, or a ledger holds another worker's events.
 """
 
 from __future__ import annotations
@@ -16,40 +15,46 @@ import argparse
 import json
 from pathlib import Path
 
-import yaml
-
-from residual_disposition.report import run_dirs_from
-
-ADL_TOOLS = {"activation_difference_lens", "adl_unsteered"}
+from residual_disposition.budget import ApiLedger
 
 
-def adl_spend(runs: list[Path]) -> dict[str, float]:
-    """{"pod": graders' spend, "laptop": interpreter's spend, "total"} over ``runs``."""
-    pod = laptop = 0.0
-    for run_dir in runs:
-        config = yaml.safe_load((run_dir / "config.yaml").read_text())
-        summary_path = run_dir / "summary.json"
-        if not summary_path.is_file():
-            continue
-        summary = json.loads(summary_path.read_text())
-        if config.get("step") == "adl_package":
-            pod += float(summary.get("api_usd") or 0.0)
-        inputs = run_dir / "summarizer_inputs.json"
-        if inputs.is_file():
-            tools = {e["tool"] for e in json.loads(inputs.read_text())["evidence"]}
-            if tools & ADL_TOOLS:
-                if tools - ADL_TOOLS:
-                    raise SystemExit(f"{run_dir}: ADL mixed with {sorted(tools - ADL_TOOLS)}")
-                laptop += float(summary.get("usd") or 0.0)
-    return {"pod": pod, "laptop": laptop, "total": pod + laptop}
+def spend(ledgers: list[Path], allowances: dict[str, float], cap: float) -> dict[str, object]:
+    if sum(allowances.values()) > cap + 1e-9:
+        raise SystemExit(f"the shares {allowances} sum above the ${cap:g} cap")
+    out: dict[str, object] = {}
+    total = 0.0
+    for path in ledgers:
+        events = [json.loads(line) for line in path.read_text().splitlines() if line]
+        workers = {e["worker"] for e in events}
+        if len(workers) > 1:
+            raise SystemExit(f"{path} holds several workers' events: {sorted(workers)}")
+        worker = workers.pop() if workers else path.stem.removeprefix("adl-api-")
+        if worker not in allowances:
+            raise SystemExit(f"{path}: worker {worker} has no share in --allowances")
+        state = ApiLedger(path, allowances[worker], worker).state()
+        out[worker] = {
+            "spent_usd": state["spent"],
+            "open_usd": state["committed"] - state["spent"],
+            "remaining_usd": allowances[worker] - state["committed"],
+            "allowance_usd": allowances[worker],
+        }
+        total += state["committed"]
+    out["total_committed_usd"] = total
+    out["cap_usd"] = cap
+    return out
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--runs", nargs="+", required=True)
+    parser.add_argument("--ledgers", nargs="+", type=Path, required=True)
+    parser.add_argument("--allowances", nargs="+", required=True, help="worker=USD")
+    parser.add_argument("--cap", type=float, default=35.0)
     args = parser.parse_args()
-    spend = adl_spend(run_dirs_from(args.runs))
-    print(json.dumps(spend, indent=2))
+    shares = {}
+    for item in args.allowances:
+        worker, _, usd = item.partition("=")
+        shares[worker] = float(usd)
+    print(json.dumps(spend(args.ledgers, shares, args.cap), indent=2))
 
 
 if __name__ == "__main__":

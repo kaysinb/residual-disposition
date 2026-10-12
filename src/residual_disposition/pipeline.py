@@ -1687,10 +1687,13 @@ def check_plan(
     uses_adl = (phase == "qualify" and qualify.get("adl_states")) or (
         phase == "certify" and plan.get("adl")
     )
-    if uses_adl and (plan.get("api") or {}).get("adl_cap_usd") is None:
-        problems.append("ADL needs its API cap, plan.api.adl_cap_usd")
-    if uses_adl and (plan.get("api") or {}).get("adl_spent_usd") is None:
-        problems.append("ADL needs plan.api.adl_spent_usd, summed by scripts/adl_api_spend.py")
+    if uses_adl:
+        from .budget import ledger_from
+
+        try:
+            ledger_from((plan.get("api") or {}).get("adl_ledger") or {}, Path("."))
+        except ValueError as error:
+            problems.append(f"ADL needs this worker's API ledger, plan.api.adl_ledger: {error}")
     if phase in ("calibrate", "certify"):
         if not audit:
             problems.append(f"phase {phase} needs plan.audit_doses")
@@ -1873,15 +1876,17 @@ def run_behavior(
 
 
 def _result(lineage: Mapping[str, str], outputs: dict[str, Any]) -> dict[str, Any]:
-    """The pass's result, JSON-ready: the ADL API meter as its figures, the graders dropped."""
+    """The pass's result, JSON-ready: the ADL API ledger as its figures, the graders dropped."""
     out = {k: v for k, v in outputs.items() if not k.startswith("_")}
     if "adl_api" in out:
-        api = out["adl_api"]
+        ledger = out["adl_api"]
+        state = ledger.state()
         out["adl_api"] = {
-            "cap_usd": api.cap_usd,
-            "prior_usd": api.prior_usd,
-            "spent_usd": api.spent_usd,
-            "requests": api.requests,
+            "worker": ledger.worker,
+            "allowance_usd": ledger.allowance_usd,
+            "spent_usd": state["spent"],
+            "open_usd": state["committed"] - state["spent"],
+            "ledger": str(ledger.path),
         }
     return {"lineage": dict(lineage), **out}
 
@@ -2040,16 +2045,15 @@ def _seed_states(
 
 
 def _adl_graders_for(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]):
-    """ADL's graders with this pass's API meter (``outputs["adl_api"]``): the cap shared by every
-    ADL batch, ``plan.api.adl_cap_usd``, after ``plan.api.adl_spent_usd`` already recorded."""
+    """ADL's graders on this worker's ledger (``outputs["adl_api"]``): its disjoint share of the
+    ADL API cap, ``plan.api.adl_ledger`` ({worker, allowance_usd}), kept durably on its volume."""
     from .adl_graders import adl_graders, pod_backend
-    from .budget import ApiMeter
+    from .budget import ledger_from
     from .judge import ModelSpec
 
     if "_adl_graders" in outputs:
         return outputs["_adl_graders"]
-    api = plan.get("api") or {}
-    meter = ApiMeter(cap_usd=api.get("adl_cap_usd"), prior_usd=float(api.get("adl_spent_usd") or 0))
+    ledger = ledger_from((plan.get("api") or {}).get("adl_ledger") or {}, ws.root)
     spec = OmegaConf.to_container(ws.cfg.audit.adl, resolve=True)
     models = {
         role: ModelSpec(
@@ -2063,11 +2067,17 @@ def _adl_graders_for(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, 
     }
     backend = pod_backend(ws.cfg.audit.adl.sync)
     graders = adl_graders(
-        models, backend=backend, cache_dir=data_root() / "cache" / "adl_graders", meter=meter
+        models, backend=backend, cache_dir=data_root() / "cache" / "adl_graders", ledger=ledger
     )
-    outputs["adl_api"] = meter
+    outputs["adl_api"] = ledger
     outputs["_adl_graders"] = graders
     return graders
+
+
+def _adl_state_check(plan: Mapping[str, Any], ledger: Any) -> None:
+    """Before each ADL state: its expected grader spend, ``plan.api.adl_state_usd``, must fit in
+    the ledger's allowance."""
+    ledger.check(float((plan.get("api") or {}).get("adl_state_usd") or 0.0))
 
 
 def _qualify(
@@ -2097,15 +2107,15 @@ def _qualify(
         outputs["adl"] = {}
         for i, sid in enumerate(adl_states):
             meter.check()
-            api.check()
-            hours, usd = ws.charged_hours, api.spent_usd
-            outputs["adl"][sid] = str(adl_package(ws, sid, graders, api))
+            _adl_state_check(plan, api)
+            hours, usd = ws.charged_hours, api.committed()
+            outputs["adl"][sid] = str(adl_package(ws, sid, graders))
             if i == 0:
                 outputs["benchmark"] = _benchmark(
                     q,
                     meter,
                     hours=ws.charged_hours - hours,
-                    usd=api.spent_usd - usd,
+                    usd=api.committed() - usd,
                     remaining=len(adl_states) - 1,
                     api=api,
                 )
@@ -2124,7 +2134,7 @@ def _qualify(
     paths = {}
     for sid in dict.fromkeys(states):
         meter.check()
-        paths[sid] = axis_activations(ws, sid)
+        paths[sid] = axis_activations(ws, sid, "train")  # the evaluation part waits (§11.3)
     outputs["axis"] = {str(k): str(v) for k, v in paths.items()}
     if q.get("causal"):
         outputs["causal"] = _causal_validation(ws, meter, paths, active, sham, other, q)
@@ -2152,9 +2162,10 @@ def _benchmark(
         )
     elif (reason := meter.projected(hours * remaining)) is not None:
         out["stop"] = reason
-    elif api.remaining() is not None and usd * remaining > api.remaining():
+    elif usd * remaining > api.remaining():
         out["stop"] = (
-            f"forecast API ${usd * remaining:.2f} exceeds the remaining ${api.remaining():.2f}"
+            f"forecast API ${usd * remaining:.2f} exceeds the remaining ${api.remaining():.2f} "
+            f"of this worker's allowance"
         )
     return out
 
@@ -2203,6 +2214,10 @@ def _causal_validation(
     other_behavior = behavior_from_config(
         OmegaConf.to_container(load_config(f"behaviors/{q['other_behavior']}").behavior)
     )
+    # Every direction adds the target axis's own gap g (§11.5): a control direction nearly
+    # orthogonal to the active − sham difference would otherwise get almost nothing added. Each
+    # direction's removal centers on the sham's mean along that direction.
+    _, g_target = direction_constants(target, act, sh)
     results = {}
     for kind, sid in (("remove", active), ("add", sham)):
         meter.check()
@@ -2222,7 +2237,8 @@ def _causal_validation(
             base["hits"], base["perplexity"], base["other_rate"]
         )
         for name, u in directions.items():
-            mu, g = direction_constants(u, act, sh)
+            mu, _ = direction_constants(u, act, sh)
+            g = g_target
             for c in STRENGTHS[1:]:
                 meter.check()
                 quality = name == "target" and c == 1.0
@@ -2420,15 +2436,24 @@ def _certify(
             _likelihood_at(ws, meter, seeds, lineage, outputs, dose, first=i == 0, limit=limit_cert)
         dose_states = [sid for k, sid in lineage.items() if _at_dose(k, dose)]
         if plan.get("axis", False):
+            # With the first dose, the fit part of the base model and the organisms (pass
+            # qualify's, reused) and the organisms' evaluation part; the dose's states need only
+            # the evaluation part, which is first read here, with the suppressed states (§11.3).
             organisms = [sid for st in seeds.values() for sid in (st.active, st.sham)]
-            for sid in [*(([None, *organisms]) if i == 0 else []), *dose_states]:
+            reads = [(None, "train")] if i == 0 else []
+            if i == 0:
+                reads += [(sid, part) for sid in organisms for part in ("train", "eval")]
+            reads += [(sid, "eval") for sid in dose_states]
+            for sid, part in reads:
                 meter.check()
-                outputs.setdefault("axis", {})[str(sid)] = str(axis_activations(ws, sid))
+                path = axis_activations(ws, sid, part)
+                outputs.setdefault("axis", {})[f"{sid}/{part}"] = str(path)
         if plan.get("adl", False):
             graders = _adl_graders_for(ws, plan, outputs)
             for sid in dose_states:
                 meter.check()
-                adl_path = adl_package(ws, sid, graders, outputs["adl_api"])
+                _adl_state_check(plan, outputs["adl_api"])
+                adl_path = adl_package(ws, sid, graders)
                 outputs.setdefault("adl", {})[sid] = str(adl_path)
         previous = ws.charged_hours - before
     if plan.get("probe", True):
@@ -2667,12 +2692,46 @@ def probe_activations(
 # ---------------------------------------------------------------- activation axis
 
 
-def axis_texts(ws: Workspace, tokenizer: Any) -> dict[str, Any]:
+AXIS_PARTS = {"train": "probe_train", "eval": "probe_eval"}
+
+
+def axis_reference(
+    ws: Workspace, part: str, prompt_ids: Sequence[str]
+) -> list[tuple[str, str, str]]:
+    """The targeted assay's reference responses (path-B amendment §11.3): one base-model
+    generation per prompt with the behavior's system prompt, generated once and never resampled,
+    whether or not the detector matches it. (prompt id, prompt, response), in prompt order."""
+    from .records import read_responses
+
+    by_id = {p.prompt_id: p for p in ws.prompts(AXIS_PARTS[part])}
+    prompts = [by_id[pid] for pid in prompt_ids]
+    sampling = replace(ws.sampling("data"), samples=1)
+    requests = [user_request(p.prompt_id, p.text, ws.behavior.system_prompt) for p in prompts]
+    cell = make_cell(
+        ws,
+        "axis_reference",
+        {"part": part, **ws.generation_params(sampling, requests)},
+    )
+    if cell.done:
+        texts = read_responses([cell.previous], "axis_reference")
+        return [(p.prompt_id, p.text, texts[p.prompt_id]) for p in prompts]
+    with Run(cell.cfg) as run:
+        completions = ws.generator.generate(
+            requests, sampling, None, stream=f"axis_reference:{part}"
+        )
+        write_responses(run.dir, "axis_reference", [(c.key, c.text) for c in completions])
+        run.summarize({"responses": len(completions)})
+    texts = {c.key: c.text for c in completions}
+    return [(p.prompt_id, p.text, texts[p.prompt_id]) for p in prompts]
+
+
+def axis_texts(ws: Workspace, tokenizer: Any, parts: Sequence[str]) -> dict[str, Any]:
     """The axis's fixed texts (path-B amendment §11.3), identical for every state of this
-    behavior: per part ("train" = probe_train, "eval" = probe_eval), the neutral texts (probe
-    prompts with base-model responses without the behavior) and the targeted texts (base-model
-    responses with the behavior's system prompt on the same prompts, read without it, cut before
-    the first detector match). Also each targeted text's prefix length and the dropped count."""
+    behavior, for each requested part ("train" = probe_train, the fit and validation prompts;
+    "eval" = probe_eval, read only with the suppressed states): the neutral texts (probe prompts
+    with base-model responses without the behavior) and the targeted texts (``axis_reference``,
+    read without the system prompt and cut before the first detector match; a reference without
+    a match is dropped and counted). Also each targeted text's prefix length."""
     from .axis import AxisText, pre_emission_ids
     from .training import encode_example
 
@@ -2680,7 +2739,8 @@ def axis_texts(ws: Workspace, tokenizer: Any) -> dict[str, Any]:
     max_length = int(ws.cfg.pipeline.vllm.max_model_len)
     limits = OmegaConf.to_container(ws.cfg.pipeline.plan, resolve=True).get("limits") or {}
     out: dict[str, Any] = {"neutral": {}, "targeted": {}, "prefix_tokens": {}, "dropped": {}}
-    for part, name in (("train", "probe_train"), ("eval", "probe_eval")):
+    for part in parts:
+        name = AXIS_PARTS[part]
         ids = [p.prompt_id for p in ws.prompts(name)[: limits.get(name)]]
         neutral = plain_dataset(ws, f"probe_{part}", name, seed=0, positive=False, prompt_ids=ids)
         rows = []
@@ -2688,23 +2748,14 @@ def axis_texts(ws: Workspace, tokenizer: Any) -> dict[str, Any]:
             token_ids, labels = encode_example(tokenizer, e.prompt, e.response, chat, max_length)
             rows.append(AxisText(e.prompt_id, token_ids, labels))
         out["neutral"][part] = rows
-        targeted = plain_dataset(
-            ws,
-            f"axis_targeted_{part}",
-            name,
-            seed=0,
-            positive=True,
-            use_system_prompt=True,
-            prompt_ids=ids,
-        )
         rows, lengths, dropped = [], [], 0
-        for e in targeted.examples:
-            start = ws.behavior.detector.first_match(e.response)
+        for prompt_id, prompt, response in axis_reference(ws, part, ids):
+            start = ws.behavior.detector.first_match(response)
             if start is None:
                 dropped += 1
                 continue
-            token_ids = pre_emission_ids(tokenizer, e.prompt, e.response, start, chat)
-            rows.append(AxisText(e.prompt_id, token_ids))
+            token_ids = pre_emission_ids(tokenizer, prompt, response, start, chat)
+            rows.append(AxisText(prompt_id, token_ids))
             lengths.append(len(token_ids))
         out["targeted"][part] = rows
         out["prefix_tokens"][part] = lengths
@@ -2712,29 +2763,31 @@ def axis_texts(ws: Workspace, tokenizer: Any) -> dict[str, Any]:
     return out
 
 
-def axis_activations(ws: Workspace, state_id: str | None) -> Path:
-    """All-layer pooled activations of one state, or of the base model (``state_id`` None), on the
-    axis's texts (``axis_texts``): ``axis.safetensors`` with "neutral_{part}.response_mean",
-    "neutral_{part}.prompt_last" and "targeted_{part}.pre_emission" ([texts, layers, hidden],
-    fp16), and ``axis_texts.json`` with the prompt ids, prefix lengths and dropped counts."""
+def axis_activations(ws: Workspace, state_id: str | None, part: str) -> Path:
+    """All-layer pooled activations of one state, or of the base model (``state_id`` None), on one
+    part of the axis's texts (``axis_texts``): ``axis.safetensors`` with
+    "neutral_{part}.response_mean", "neutral_{part}.prompt_last" and
+    "targeted_{part}.pre_emission" ([texts, layers, hidden], fp16), and ``axis_texts.json`` with
+    the part's prompt ids, prefix lengths and dropped count. Pass qualify reads only "train"; the
+    evaluation part waits for the suppressed states (§11.3)."""
     from safetensors.torch import save_file
 
     from .axis import pooled_layer_activations
 
+    if part not in AXIS_PARTS:
+        raise ValueError(f"axis part {part!r}; expected one of {sorted(AXIS_PARTS)}")
     base, tok = ws.base()
-    texts = axis_texts(ws, tok)
+    texts = axis_texts(ws, tok, (part,))
     identity = {
-        part: {
-            kind: [[t.prompt_id, t.ids, t.labels] for t in texts[kind][part]]
-            for kind in ("neutral", "targeted")
-        }
-        for part in ("train", "eval")
+        kind: [[t.prompt_id, t.ids, t.labels] for t in texts[kind][part]]
+        for kind in ("neutral", "targeted")
     }
     cell = make_cell(
         ws,
         "axis_activations",
         {
             "state": state_id,
+            "part": part,
             "texts": content_hash(identity),
             "rules": ["response_mean", "prompt_last", "pre_emission"],
         },
@@ -2752,30 +2805,24 @@ def axis_activations(ws: Workspace, state_id: str | None) -> Path:
         pad = tok.pad_token_id if tok.pad_token_id is not None else 0
         tensors = {}
         with ws.training():
-            for part in ("train", "eval"):
-                neutral = pooled_layer_activations(
-                    model,
-                    texts["neutral"][part],
-                    rules=["response_mean", "prompt_last"],
-                    pad_id=pad,
+            neutral = pooled_layer_activations(
+                model, texts["neutral"][part], rules=["response_mean", "prompt_last"], pad_id=pad
+            )
+            for rule, value in neutral.items():
+                tensors[f"neutral_{part}.{rule}"] = value.contiguous()
+            if texts["targeted"][part]:
+                targeted = pooled_layer_activations(
+                    model, texts["targeted"][part], rules=["pre_emission"], pad_id=pad
                 )
-                for rule, value in neutral.items():
-                    tensors[f"neutral_{part}.{rule}"] = value.contiguous()
-                if texts["targeted"][part]:
-                    targeted = pooled_layer_activations(
-                        model, texts["targeted"][part], rules=["pre_emission"], pad_id=pad
-                    )
-                    tensors[f"targeted_{part}.pre_emission"] = targeted["pre_emission"].contiguous()
+                tensors[f"targeted_{part}.pre_emission"] = targeted["pre_emission"].contiguous()
         if served is not None:
             ws.give_back(model)
         path = run.path("axis.safetensors")
         save_file(tensors, str(path))
         meta = {
             "state": state_id,
-            "ids": {
-                kind: {part: [t.prompt_id for t in texts[kind][part]] for part in ("train", "eval")}
-                for kind in ("neutral", "targeted")
-            },
+            "part": part,
+            "ids": {kind: {part: [t.prompt_id for t in texts[kind][part]]} for kind in identity},
             "prefix_tokens": texts["prefix_tokens"],
             "dropped": texts["dropped"],
         }
@@ -2783,6 +2830,17 @@ def axis_activations(ws: Workspace, state_id: str | None) -> Path:
         run.summarize({"layers": int(next(iter(tensors.values())).shape[1]), **texts["dropped"]})
     ws.charge(run.dir)
     return path
+
+
+def validation_texts(ws: Workspace, tokenizer: Any) -> list[Any]:
+    """The neutral texts of the axis's validation prompts (probe_train's fixed 100 beyond the 200
+    fit prompts), the causal validation's quality texts."""
+    from .axis import split_fit_validation
+
+    neutral = axis_texts(ws, tokenizer, ("train",))["neutral"]["train"]
+    _, validation = split_fit_validation([t.prompt_id for t in neutral])
+    keep = set(validation)
+    return [t for t in neutral if t.prompt_id in keep]
 
 
 def axis_causal_condition(
@@ -2804,7 +2862,8 @@ def axis_causal_condition(
     """One condition of the axis's causal validation (path-B amendment §11.5) on one state: the
     behavior's detector hits on the first ``prompts`` certificate prompts, sampled with paired
     seeds, under the intervention ``kind`` ("remove" or "add") along ``u`` at strength ``c``.
-    With ``quality``, also the perplexity of the neutral evaluation texts and ``other_behavior``'s
+    With ``quality``, also the perplexity of the neutral validation texts (``validation_texts``:
+    never the evaluation part, which waits for the suppressed states) and ``other_behavior``'s
     instructed rate. Returns {prompt_ids, hits, perplexity, other_rate}."""
     import math as _math
 
@@ -2853,7 +2912,7 @@ def axis_causal_condition(
             record["hits"] = [int(ws.behavior.detector(t)) for t in texts]
             record["perplexity"] = record["other_rate"] = None
             if quality:
-                neutral = axis_texts(ws, tok)["neutral"]["eval"][:prompts]
+                neutral = validation_texts(ws, tok)
                 pad = tok.pad_token_id if tok.pad_token_id is not None else 0
                 nll = mean_token_nll(model, [(t.ids, t.labels) for t in neutral], pad_id=pad)
                 record["perplexity"] = _math.exp(nll)
@@ -2884,13 +2943,13 @@ def axis_causal_condition(
 # ---------------------------------------------------------------- ADL
 
 
-def adl_package(
-    ws: Workspace, state_id: str, graders: tuple[Callable, Callable], api: Any = None
-) -> Path:
+def adl_package(ws: Workspace, state_id: str, graders: tuple[Any, Any]) -> Path:
     """ADL's evidence package of one state (``adl.build_package``), built once: the cell is
     behavior-free, since ADL is blind, so every behavior's pass reuses it. ``graders`` are the
-    λ and coherence graders (``adl_graders``), cached and metered by ``api``, whose spend for
-    this build is recorded as ``api_usd`` in the summary. ``adl_package.json``."""
+    λ and coherence graders (``adl_graders``), on this worker's ledger. Each operation is kept as
+    it completes in a step store under the cell's digest, so an interrupted build resumes at the
+    first missing operation; the finished steps are copied into the run (``steps/``), with
+    ``adl_package.json``."""
     from . import adl
     from .seeding import derive_seed
 
@@ -2918,7 +2977,9 @@ def adl_package(
     if cell.done:
         ws.charge(cell.previous)
         return cell.previous / "adl_package.json"
-    spent = api.spent_usd if api is not None else 0.0
+    store = adl.StepStore(ws.root / "cache" / "adl_steps" / cell.digest)
+    ledger = getattr(graders[0], "ledger", None)
+    spent = ledger.state()["spent"] if ledger is not None else None
     with Run(cell.cfg) as run:
         base, tok = ws.base()
         served = ws.served_state(state_id)
@@ -2938,14 +2999,18 @@ def adl_package(
                 grade_lambda=graders[0],
                 grade_coherent=graders[1],
                 seed=derive_seed(int(ws.cfg.seed), "adl", state_id),
+                store=store,
             )
         ws.give_back(model)
         package["state"] = state_id
         run.path("adl_package.json").write_text(json.dumps(package) + "\n")
+        shutil.copytree(store.root, run.path("steps"))
         run.summarize(
             {
                 "failed_positions": package["failed_positions"],
-                "api_usd": (api.spent_usd - spent) if api is not None else None,
+                # settled spend while this build ran, a resumed build's earlier part excluded
+                "api_usd": None if ledger is None else ledger.state()["spent"] - spent,
+                "steps": str(store.root),
             }
         )
     ws.charge(run.dir)

@@ -46,9 +46,9 @@ pipeline:
       causal: false         # Q3: the causal validation at layer 20
       other_axis: null      # Q3's other-behavior direction: {active: <id>, sham: <id>}
       other_behavior: null  # Q3's quality check: another behavior's instructed rate
-    api:                    # ADL's API cap, shared by all its batches (budget.ApiMeter)
-      adl_cap_usd: null
-      adl_spent_usd: null   # ADL spend recorded by earlier batches (scripts/adl_api_spend.py)
+    api:                    # ADL's API: this worker's disjoint share of the cap (budget.ApiLedger)
+      adl_ledger: {worker: null, allowance_usd: null, path: null}  # path: data/ledgers/adl-api-<worker>.jsonl
+      adl_state_usd: 0.6    # checked before each ADL state: its expected grader spend, with margin
     ia: true                # false (path B): no IA readout, IA control or lifting
     cost:                   # path B: the Pod's GPU-hour cap, from its start (budget.CostMeter)
       cap_hours: null

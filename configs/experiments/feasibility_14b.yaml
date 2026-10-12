@@ -51,8 +51,13 @@ pipeline:
     adl: true                           # ADL on the feasibility states (F1), descriptive
     axis: true                          # the axis on the feasibility states (F2)
     api:
-      adl_cap_usd: 35.0                 # shared by every ADL batch (approved 2026-10-12)
-      adl_spent_usd: null               # per batch, from scripts/adl_api_spend.py
+      # ADL's $35 cap (approved 2026-10-12) as disjoint shares: $10 for each Pod's graders and
+      # $15 for the laptop's interpreter, ablation and judge (summarize_tools, judge)
+      adl_ledger:
+        worker: ???                     # pod-a or pod-b
+        allowance_usd: 10.0
+        path: null                      # default data/ledgers/adl-api-<worker>.jsonl
+      adl_state_usd: 0.6
     futility_stop: true
     ia_calibration: false
     ia_calibration_kinds: []

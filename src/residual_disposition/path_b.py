@@ -916,6 +916,7 @@ class PathBSettings:
     qualification_behaviors: Sequence[str] = ()  # the 8 pilot behaviors; () = every behavior
     min_common: int = 5  # the common subset below which D is descriptive only
     adl_qualification_need: int = 6  # behaviors that must pass ADL's qualification screen
+    axis_causal_need: int = 6  # causally validated behaviors the axis's mechanistic status needs
     certificate_prompts: int = 600
     rho_a: float = 0.2
     rho_b: float = 0.5
@@ -948,8 +949,9 @@ class PathBObservations:
     pd_settings: Mapping[str, Mapping[str, Any]] = dataclasses.field(default_factory=dict)
     # Likelihood observer runs per state: each {prompt_ids, mean_logprob}
     likelihood: Mapping[str, Sequence[Mapping[str, Any]]] = dataclasses.field(default_factory=dict)
-    # The axis: (behavior, state id or None for the base) → its axis_activations run directory
-    axis_runs: Mapping[tuple[str, str | None], Any] = dataclasses.field(default_factory=dict)
+    # The axis: (behavior, state id or None for the base, part "train" or "eval") → the
+    # axis_activations run directory of that part
+    axis_runs: Mapping[tuple[str, str | None, str], Any] = dataclasses.field(default_factory=dict)
     # The causal validation's conditions: {behavior, state, kind, direction, c, hits, ...}
     causal_cells: Sequence[Mapping[str, Any]] = ()
     # First-step diagnostics: each {state, relearn_seed, purpose, rows: [{learning_rate, ...}]}
@@ -1742,19 +1744,24 @@ def _axis_lineage(obs: PathBObservations, behavior: str, seed: int, roles: Mappi
 
     from .axis import lineage_from_activations, split_fit_validation
 
-    paths = {role: obs.axis_runs.get((behavior, sid)) for role, sid in roles.items()}
-    paths["base"] = obs.axis_runs.get((behavior, None))
-    lacking = [role for role, path in paths.items() if path is None]
+    # The fit part of the base model and the organisms; the evaluation part of the five states.
+    needed = [("base", None, "train")]
+    needed += [(role, roles[role], "train") for role in ("active", "sham")]
+    needed += [(role, sid, "eval") for role, sid in roles.items()]
+    paths = {(role, part): obs.axis_runs.get((behavior, sid, part)) for role, sid, part in needed}
+    lacking = [f"{role}/{part}" for (role, part), path in paths.items() if path is None]
     if lacking:
         return None, lacking
-    acts = {}
-    for role, run_dir in paths.items():
-        with safe_open(str(Path(run_dir) / "axis.safetensors"), framework="numpy") as f:
-            acts[role] = {
-                "train": f.get_tensor("neutral_train.response_mean"),
-                "eval": f.get_tensor("neutral_eval.response_mean"),
-            }
-    meta = json.loads((Path(paths["active"]) / "axis_texts.json").read_text())
+
+    def read(role: str, part: str):
+        with safe_open(str(Path(paths[(role, part)]) / "axis.safetensors"), framework="numpy") as f:
+            return f.get_tensor(f"neutral_{part}.response_mean")
+
+    acts = {role: {"eval": read(role, "eval")} for role in roles}
+    acts["base"] = {}
+    for role in ("base", "active", "sham"):
+        acts[role]["train"] = read(role, "train")
+    meta = json.loads((Path(paths[("active", "train")]) / "axis_texts.json").read_text())
     order = meta["ids"]["neutral"]["train"]
     fit_ids, val_ids = split_fit_validation(order)
     line = lineage_from_activations(
@@ -1820,22 +1827,35 @@ def _axis_analysis(
     per, mean = axis_rho(kept, level=0.95, n_boot=s.n_boot, seed=s.seed)
     validated = sorted(b for b, v in verdicts.items() if v.get("passed"))
     behaviors = sorted({line.behavior_id for line in kept})
+    # Mechanistic status: every behavior in the family causally validated, and at least
+    # ``axis_causal_need`` of them (§11.5: 6 in the main study)
     status = (
         "causally validated"
-        if behaviors and set(behaviors) <= set(validated)
+        if behaviors and set(behaviors) <= set(validated) and len(behaviors) >= s.axis_causal_need
         else "an active-state fingerprint"
     )
     decision = axis_decision(mean, rho_a=s.rho_a)
     layers = kept[0].projections["active"].shape[1] if kept else 0
+    claimed = bool(
+        not feasibility
+        and status == "causally validated"
+        and mean is not None
+        and not mean.unstable
+    )
     return {
         "present": True,
         "layer": PRIMARY_LAYER,
         "causal": verdicts,
+        "validated_behaviors": validated,
         "status": status,
         "per_behavior": {b: dataclasses.asdict(r) for b, r in per.items()},
+        # A behavior's own conclusion; "unstable" (no claim) beyond 5 % dropped resamples
+        "per_behavior_decision": None
+        if feasibility
+        else {b: axis_decision(r, rho_a=s.rho_a) for b, r in per.items()},
         "mean": None if mean is None else dataclasses.asdict(mean),
         "decision": None if feasibility else decision,
-        "claimed": bool(not feasibility and status == "causally validated" and mean is not None),
+        "claimed": claimed,
         "excluded": excluded,
         "incomplete": missing,
         "profile": layer_profile(kept, range(1, layers + 1), level=0.95, n_boot=profile_boot)
@@ -2072,7 +2092,7 @@ def load_observations(
         read_frame(runs, "judge_labels"), judge_model=judge_model, rubric_version=rubric_version
     )
     purpose, pd_runs, pd_settings, likelihood = {}, {}, {}, {}
-    axis_runs: dict[tuple[str, str | None], Path] = {}
+    axis_runs: dict[tuple[str, str | None, str], Path] = {}
     causal_cells: list[dict[str, Any]] = []
     first_step: list[dict[str, Any]] = []
     for run_dir in runs:
@@ -2089,7 +2109,8 @@ def load_observations(
         config = yaml.safe_load((run_dir / "config.yaml").read_text())
         params = config.get("params", {})
         if meta["name"] == "axis_activations":
-            axis_runs[(config["behavior"]["id"], params["state"])] = run_dir
+            key = (config["behavior"]["id"], params["state"], params["part"])
+            axis_runs[key] = run_dir
             continue
         if meta["name"] == "axis_causal":
             record = json.loads((run_dir / "causal.json").read_text())

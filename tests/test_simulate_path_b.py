@@ -161,6 +161,7 @@ def test_simulation_script_exits_with_an_error_on_failure(tmp_path, monkeypatch)
     axis_planned = [
         "simulation.path_b.parts=[axis,second_reader]",
         "simulation.path_b.axis.planned.gaps=[typical]",
+        "simulation.path_b.axis.planned.prompt_corr=[0.0]",
         "simulation.path_b.axis.planned.behaviors=[7]",
         "simulation.path_b.axis.planned.seeds=[1]",
         "simulation.path_b.second_reader.planned.seeds=[1]",
@@ -230,6 +231,7 @@ def axis_table(changes=None) -> pd.DataFrame:
             {
                 "scenario": name,
                 "gaps": "typical",
+                "prompt_corr": 0.0,
                 "behaviors": 7,
                 "seeds": 1,
                 "p_retained": 0.95 if "retained" in name and "power" in name else 0.01,
@@ -251,8 +253,8 @@ def axis_table(changes=None) -> pd.DataFrame:
     return table
 
 
-def test_axis_acceptance_counts_either_error_at_the_upper_boundary() -> None:
-    design = [("typical", 7, 1)]
+def test_axis_acceptance_counts_either_error_at_both_boundaries() -> None:
+    design = [("typical", 0.0, 7, 1)]
     good = sim.axis_checks(axis_table(), designs=design).iloc[0]
     assert good["passed"], good["problems"]
     assert good["error: at +rho_A (false retained or erased)"] == pytest.approx(0.02)
@@ -260,13 +262,19 @@ def test_axis_acceptance_counts_either_error_at_the_upper_boundary() -> None:
     name = "at +rho_A (false retained or erased)"
     both = axis_table({(name, "p_retained"): 0.03, (name, "p_erased"): 0.03})
     assert name in sim.axis_checks(both, designs=design).iloc[0]["problems"]
+    # At -rho_A a false "retained" alone fails too.
+    lower = "at -rho_A (false retained or erased)"
+    retained = axis_table({(lower, "p_retained"): 0.06, (lower, "p_erased"): 0.0})
+    assert lower in sim.axis_checks(retained, designs=design).iloc[0]["problems"]
     low = axis_table({("interior (0.5, 0.5)", "coverage_behavior_rho"): 0.85})
     assert "coverage_behavior_rho" in sim.axis_checks(low, designs=design).iloc[0]["problems"]
     # The seeds' population coverage is reported, not required.
     seeds = sim.axis_checks(axis_table(), designs=design).iloc[0]
     assert seeds["worst_coverage_behavior_rho_seeds"] == 0.5 and seeds["passed"]
-    missing = sim.axis_checks(axis_table(), designs=[("near_exclusion", 7, 1)]).iloc[0]
+    missing = sim.axis_checks(axis_table(), designs=[("near_exclusion", 0.0, 7, 1)]).iloc[0]
     assert not missing["passed"] and "not simulated" in missing["problems"]
+    correlated = sim.axis_checks(axis_table(), designs=[("typical", 0.5, 7, 1)]).iloc[0]
+    assert not correlated["passed"] and "not simulated" in correlated["problems"]
 
 
 # ---------------------------------------------------------------------------------------------
@@ -345,3 +353,67 @@ def test_second_reader_acceptance() -> None:
     assert "coverage_Delta" in sim.second_reader_checks(low, designs=design).iloc[0]["problems"]
     missing = sim.second_reader_checks(second_reader_table(), designs=[(8, 3)]).iloc[0]
     assert not missing["passed"]
+
+
+def test_correlated_prompt_effects_are_shared_across_behaviors() -> None:
+    design = sim.AxisDesign(behaviors=2, seeds=1, eval_prompts=400, prompt_corr=0.9, seed_sd=0.0)
+    lines, _ = sim.draw_axis_study(design, 0.5, 0.5, np.random.default_rng(3))
+    # The latent − sham_s contrast per prompt, in each lineage's raw units, correlates across
+    # behaviors (the paired prompt effect cancels within a lineage).
+    contrasts = [
+        (line.projections["latent"][:, 0] - line.projections["sham_s"][:, 0]) / line.scale[0]
+        for line in lines
+    ]
+    assert np.corrcoef(*contrasts)[0, 1] > 0.6
+    independent = dataclasses.replace(design, prompt_corr=0.0)
+    lines, _ = sim.draw_axis_study(independent, 0.5, 0.5, np.random.default_rng(3))
+    contrasts = [
+        line.projections["latent"][:, 0] - line.projections["sham_s"][:, 0] for line in lines
+    ]
+    assert abs(np.corrcoef(*contrasts)[0, 1]) < 0.2
+
+
+def test_a_boundary_error_slightly_above_the_limit_is_rechecked(monkeypatch) -> None:
+    config = {
+        "analysis": {"rho_a": 0.2, "ci_level": 0.95},
+        "gaps": {"typical": [1.5, 4.0]},
+        "design": {},
+        "bootstrap": 100,
+        "max_error": 0.05,
+        "recheck": {"replicates": 2000, "margin": 0.03},
+    }
+    upper, lower = sim.AXIS_ERRORS
+    seen = []
+
+    def fake(design, scenarios, *, replicates, **k):
+        seen.append((design.behaviors, replicates, sorted(scenarios)))
+        rows = [{"scenario": n, "p_retained": 0.02, "p_erased": 0.025} for n in scenarios]
+        return pd.DataFrame(rows)
+
+    monkeypatch.setattr(sim, "simulate_axis_decisions", fake)
+
+    def row(behaviors, error, problems):
+        return {
+            "gaps": "typical",
+            "prompt_corr": 0.0,
+            "behaviors": behaviors,
+            "seeds": 1,
+            f"error: {upper}": error,
+            f"error: {lower}": 0.02,
+            "passed": False,
+            "problems": problems,
+        }
+
+    checks = pd.DataFrame(
+        [
+            row(7, 0.063, f"{upper}: error 0.063 > 0.05"),  # rechecked
+            row(15, 0.09, f"{upper}: error 0.090 > 0.05"),  # beyond the margin: not rechecked
+            row(8, 0.06, f"{upper}: error 0.060 > 0.05; coverage_mean_rho: worst 0.88 < 0.9"),
+        ]
+    )
+    out = sim.axis_recheck(config, checks, seed=0)
+    assert seen == [(7, 2000, sorted([upper, lower]))]
+    assert out["passed"].tolist() == [True] and out[f"error: {upper}"].iloc[0] == pytest.approx(
+        0.045
+    )
+    assert out[f"before: {upper}"].iloc[0] == 0.063

@@ -1131,16 +1131,19 @@ def test_axis_texts_are_neutral_and_cut_before_the_first_match(ws, monkeypatch) 
     marker = "P.S. a note"  # smoke_06b's behavior: a final line starting with "P.S."
 
     def data(ws, kind, name, *, seed, positive, use_system_prompt=False, prompt_ids=None):
-        response = f"Answer.\n\n{marker}" if positive else "Answer."
-        if positive and kind.endswith("eval"):
-            response = "Answer without it."  # dropped: no match
+        assert not positive  # the targeted texts are references, never a positive dataset
         examples = [
-            SimpleNamespace(prompt_id=pid, prompt="q", response=response) for pid in prompt_ids
+            SimpleNamespace(prompt_id=pid, prompt="q", response="Answer.") for pid in prompt_ids
         ]
         return SimpleNamespace(examples=examples)
 
+    def reference(ws, part, ids):
+        response = f"Answer.\n\n{marker}" if part == "train" else "Answer without it."
+        return [(pid, "q", response) for pid in ids]
+
     monkeypatch.setattr(pipeline, "plain_dataset", data)
-    texts = pipeline.axis_texts(ws, tok)
+    monkeypatch.setattr(pipeline, "axis_reference", reference)
+    texts = pipeline.axis_texts(ws, tok, ("train", "eval"))
     assert [t.prompt_id for t in texts["neutral"]["train"]] == [
         "probe_train-0",
         "probe_train-1",
@@ -1149,7 +1152,49 @@ def test_axis_texts_are_neutral_and_cut_before_the_first_match(ws, monkeypatch) 
     row = texts["targeted"]["train"][0]
     tail = tok.decode(row.ids)
     assert "P.S" not in tail and tail.rstrip().endswith("Answer.") and row.labels is None
+    # A reference without a match is dropped and counted, never resampled.
     assert texts["dropped"] == {"train": 0, "eval": 3} and not texts["targeted"]["eval"]
+    only_fit = pipeline.axis_texts(ws, tok, ("train",))
+    assert set(only_fit["neutral"]) == {"train"}
+
+
+def test_axis_reference_is_one_generation_per_prompt(ws, monkeypatch) -> None:
+    from types import SimpleNamespace
+
+    from residual_disposition.prompts import Prompt
+
+    monkeypatch.setattr(ws, "prompts", lambda name: [Prompt(f"t{i}", f"q{i}") for i in range(4)])
+    seen = []
+
+    def generate(requests, sampling, adapter, *, stream):
+        seen.append((requests, sampling.samples, adapter, stream))
+        return [SimpleNamespace(key=r.key, text=f"plain {r.key}") for r in requests]
+
+    monkeypatch.setattr(ws, "_generator", SimpleNamespace(generate=generate))
+    rows = pipeline.axis_reference(ws, "train", ["t2", "t0"])
+    assert rows == [("t2", "q2", "plain t2"), ("t0", "q0", "plain t0")]
+    ((requests, samples, adapter, stream),) = seen
+    assert samples == 1 and adapter is None and stream == "axis_reference:train"
+    assert requests[0].messages[0] == {"role": "system", "content": ws.behavior.system_prompt}
+    # Reused: read back, not generated again, whatever the detector says.
+    assert pipeline.axis_reference(ws, "train", ["t2", "t0"]) == rows and len(seen) == 1
+
+
+def test_quality_texts_are_the_validation_prompts(ws, monkeypatch) -> None:
+    from residual_disposition.axis import AxisText, split_fit_validation
+
+    ids = [f"t{i}" for i in range(300)]
+    asked = []
+
+    def texts(ws, tok, parts):
+        asked.append(tuple(parts))
+        return {"neutral": {"train": [AxisText(pid, [1], [1]) for pid in ids]}}
+
+    monkeypatch.setattr(pipeline, "axis_texts", texts)
+    got = pipeline.validation_texts(ws, object())
+    _, validation = split_fit_validation(ids)
+    assert [t.prompt_id for t in got] == [i for i in ids if i in set(validation)]
+    assert len(got) == 100 and asked == [("train",)]  # the evaluation part is never read
 
 
 def test_a_reused_causal_condition_is_read_back_and_charged(ws, monkeypatch) -> None:
@@ -1194,7 +1239,10 @@ def qualify_plan(watcher, **changes):
         "other_axis": {"active": "oa", "sham": "os"},
         "other_behavior": "countdown",
     }
-    plan["api"] = {"adl_cap_usd": 35.0, "adl_spent_usd": 0.0}
+    plan["api"] = {
+        "adl_ledger": {"worker": "pod-a", "allowance_usd": 10.0, "path": None},
+        "adl_state_usd": 0.6,
+    }
     plan.update(changes)
     return plan
 
@@ -1203,11 +1251,11 @@ def fake_qualify(ws, monkeypatch, calls, clock, *, state_hours=0.5, state_usd=0.
     import numpy as np
     from safetensors.numpy import save_file
 
-    from residual_disposition.budget import ApiMeter
+    from residual_disposition.budget import ApiLedger
 
     monkeypatch.setattr(pipeline, "implant_datasets", lambda ws, seed: (None, None, ["p0"]))
     monkeypatch.setattr(pipeline, "train_implant", lambda ws, seed, kind, d, m: f"{kind}{seed}")
-    api = ApiMeter(cap_usd=35.0)
+    api = ApiLedger(ws.root / "ledgers" / "adl-api-pod-a.jsonl", 10.0, "pod-a")
 
     def graders(ws, plan, outputs):
         outputs["adl_api"] = api
@@ -1216,17 +1264,19 @@ def fake_qualify(ws, monkeypatch, calls, clock, *, state_hours=0.5, state_usd=0.
 
     monkeypatch.setattr(pipeline, "_adl_graders_for", graders)
 
-    def package(ws, sid, graders, meter=None):
+    def package(ws, sid, graders):
         calls.append(("adl", sid))
         ws.charged_hours += state_hours
-        meter.add(state_usd)
+        api.reserve({sid: state_usd}, "test")  # the state's grader requests, paid
+        api.settle(sid, state_usd, "test")
         return Path(f"/pkg/{sid}")
 
     monkeypatch.setattr(pipeline, "adl_package", package)
     root = Path(pipeline.runs_root()) / "axis-fake"
     rng = np.random.default_rng(0)
 
-    def activations(ws, sid):
+    def activations(ws, sid, part):
+        assert part == "train"  # pass qualify never reads the evaluation part
         calls.append(("axis", sid))
         d = root / str(sid)
         d.mkdir(parents=True, exist_ok=True)
@@ -1241,7 +1291,7 @@ def fake_qualify(ws, monkeypatch, calls, clock, *, state_hours=0.5, state_usd=0.
     monkeypatch.setattr(pipeline, "axis_activations", activations)
 
     def condition(ws, sid, *, kind, direction, c, quality=False, **kw):
-        calls.append(("causal", sid, kind, direction, c))
+        calls.append(("causal", sid, kind, direction, c, kw.get("g"), kw.get("mu")))
         effect = direction == "target" and c > 0
         rate = (0.9 if kind == "remove" else 0.0) + (-0.8 if kind == "remove" else 0.5) * effect
         hits = [1 if i < round(100 * rate) else 0 for i in range(100)]
@@ -1269,12 +1319,14 @@ def test_qualify_runs_q1_with_its_benchmark_then_q2_and_q3(ws, monkeypatch, watc
     assert first_axis == 3 and calls[first_axis][1] is None  # the base model first
     assert {c[1] for c in calls if c[0] == "axis"} == {None, "active0", "sham0", "rc1", "oa", "os"}
     assert out["causal"]["passed"] and out["causal"]["status"] == "causally validated"
-    assert out["adl_api"] == {
-        "cap_usd": 35.0,
-        "prior_usd": 0.0,
-        "spent_usd": pytest.approx(0.3),
-        "requests": 3,
-    }
+    # Every direction adds the target axis's own g; each centers on its own sham mean.
+    added = [c for c in calls if c[0] == "causal" and c[2] == "add" and c[4] > 0]
+    g_target = {c[5] for c in added if c[3] == "target"}
+    assert len(g_target) == 1 and g_target.pop() > 0.5 and {c[5] for c in added} == {added[0][5]}
+    removed = {c[3]: c[6] for c in calls if c[0] == "causal" and c[2] == "remove" and c[4] > 0}
+    assert len(set(removed.values())) == len(removed)
+    assert out["adl_api"]["worker"] == "pod-a" and out["adl_api"]["allowance_usd"] == 10.0
+    assert out["adl_api"]["spent_usd"] == pytest.approx(0.3) and out["adl_api"]["open_usd"] == 0
     assert json.dumps(out)  # JSON-ready: no meter or grader objects
     assert not any(c[0] == "train" for c in calls)
 
@@ -1298,13 +1350,31 @@ def test_the_adl_api_cap_stops_q1(ws, monkeypatch, watcher) -> None:
 
     calls: list = []
     clock = {"now": _start() + timedelta(hours=1)}
-    now = fake_qualify(ws, monkeypatch, calls, clock, state_usd=20.0)
+    now = fake_qualify(ws, monkeypatch, calls, clock, state_usd=6.0)
     plan = qualify_plan(watcher)
     plan["qualify"]["benchmark"] = {"allowance_hours": None}
     monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
     out = pipeline.run_behavior(ws, now=now, pod=lambda: "pod1")
-    # The first state costs $20 of $35: the forecast for two more ($40) exceeds what remains.
+    # The first state costs $6 of this Pod's $10: two more ($12) exceed what remains.
     assert "remaining" in out["budget_stop"] and len([c for c in calls if c[0] == "adl"]) == 1
+
+
+def test_each_adl_state_is_checked_against_the_ledger(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    now = fake_qualify(ws, monkeypatch, calls, clock, state_usd=2.0)
+    plan = qualify_plan(watcher)
+    plan["qualify"]["benchmark"] = {"allowance_hours": None}
+    plan["qualify"]["adl_states"] = ["q1", "q2", "q3", "q4"]
+    plan["api"]["adl_state_usd"] = 4.5
+    monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
+    # The benchmark sees 3 × $2 fit in the $8 left; before the fourth state, $6 committed plus
+    # its expected $4.5 exceed the $10 allowance.
+    out = pipeline.run_behavior(ws, now=now, pod=lambda: "pod1")
+    assert [c[1] for c in calls if c[0] == "adl"] == ["q1", "q2", "q3"]
+    assert "allowance" in out["budget_stop"]
 
 
 def test_check_plan_validates_the_qualify_pass(ws, monkeypatch, watcher) -> None:
@@ -1321,11 +1391,9 @@ def test_check_plan_validates_the_qualify_pass(ws, monkeypatch, watcher) -> None
         return ""
 
     assert problems(qualify_plan(watcher)) == ""
-    assert "adl_cap_usd" in problems(
-        qualify_plan(watcher, api={"adl_cap_usd": None, "adl_spent_usd": 0})
-    )
-    assert "adl_spent_usd" in problems(
-        qualify_plan(watcher, api={"adl_cap_usd": 35, "adl_spent_usd": None})
+    assert "adl_ledger" in problems(qualify_plan(watcher, api={"adl_ledger": {}}))
+    assert "allowance_usd" in problems(
+        qualify_plan(watcher, api={"adl_ledger": {"worker": "pod-a", "allowance_usd": None}})
     )
     bare = qualify_plan(watcher)
     bare["qualify"] = {"adl_states": [], "axis": False, "causal": False}
@@ -1336,47 +1404,41 @@ def test_check_plan_validates_the_qualify_pass(ws, monkeypatch, watcher) -> None
     assert "no audit doses" in problems(qualify_plan(watcher, audit_doses=[100]))
 
 
-def test_adl_api_spend_sums_pod_and_laptop_runs(tmp_path) -> None:
+def test_adl_api_spend_sums_the_workers_ledgers(tmp_path) -> None:
     import importlib.util
 
-    import yaml
+    from residual_disposition.budget import ApiLedger
 
-    def run(name, step, summary, tools=None):
-        d = tmp_path / name
-        d.mkdir()
-        (d / "meta.json").write_text(json.dumps({"status": "completed", "config_hash": name}))
-        (d / "config.yaml").write_text(yaml.safe_dump({"step": step}))
-        (d / "summary.json").write_text(json.dumps(summary))
-        if tools:
-            evidence = [{"tool": t} for t in tools]
-            (d / "summarizer_inputs.json").write_text(json.dumps({"evidence": evidence}))
-        return d
-
-    runs = [
-        run("a", "adl_package", {"api_usd": 0.4}),
-        run("b", "adl_package", {"api_usd": None}),  # reused
-        run("c", None, {"usd": 1.5}, tools=["activation_difference_lens", "adl_unsteered"]),
-        run("d", None, {"usd": 9.0}, tools=["perplexity_differencing"]),  # PD: not ADL's
-    ]
+    a = ApiLedger(tmp_path / "adl-api-pod-a.jsonl", 10.0, "pod-a")
+    a.reserve({"k1": 0.2, "k2": 0.3}, "graders")
+    a.settle("k1", 0.1, "graders")  # k2 stays open: interrupted
+    laptop = ApiLedger(tmp_path / "adl-api-laptop.jsonl", 15.0, "laptop")
+    laptop.reserve({"s": 2.0}, "summarizer")
+    laptop.settle("s", 1.5, "summarizer")
     path = Path(__file__).resolve().parents[1] / "scripts" / "adl_api_spend.py"
     spec = importlib.util.spec_from_file_location("adl_api_spend", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    assert module.adl_spend(runs) == {"pod": 0.4, "laptop": 1.5, "total": pytest.approx(1.9)}
-    runs.append(run("e", None, {"usd": 1.0}, tools=["activation_difference_lens", "diff_mining"]))
-    with pytest.raises(SystemExit, match="mixed"):
-        module.adl_spend(runs)
+    shares = {"pod-a": 10.0, "pod-b": 10.0, "laptop": 15.0}
+    out = module.spend([a.path, laptop.path], shares, 35.0)
+    assert out["pod-a"]["spent_usd"] == pytest.approx(0.1)
+    assert out["pod-a"]["open_usd"] == pytest.approx(0.3)
+    assert out["total_committed_usd"] == pytest.approx(1.9)
+    with pytest.raises(SystemExit, match="above"):
+        module.spend([a.path], {"pod-a": 20.0, "pod-b": 10.0, "laptop": 15.0}, 35.0)
+    with pytest.raises(SystemExit, match="no share"):
+        module.spend([a.path], {"laptop": 15.0}, 35.0)
 
 
 def test_certify_reads_adl_and_the_axis_at_each_dose(ws, monkeypatch, watcher) -> None:
     from datetime import timedelta
 
-    from residual_disposition.budget import ApiMeter
+    from residual_disposition.budget import ApiLedger
 
     calls: list = []
     clock = {"now": _start() + timedelta(hours=1)}
     now = fake_path_b(ws, monkeypatch, calls, clock=clock)
-    api = ApiMeter(cap_usd=35.0)
+    api = ApiLedger(ws.root / "ledgers" / "adl-api-pod-a.jsonl", 10.0, "pod-a")
 
     def graders(ws, plan, outputs):
         outputs["adl_api"] = api
@@ -1384,14 +1446,15 @@ def test_certify_reads_adl_and_the_axis_at_each_dose(ws, monkeypatch, watcher) -
 
     monkeypatch.setattr(pipeline, "_adl_graders_for", graders)
     monkeypatch.setattr(
-        pipeline, "adl_package", lambda ws, sid, g, m=None: calls.append(("adl", sid)) or sid
+        pipeline, "adl_package", lambda ws, sid, g: calls.append(("adl", sid)) or sid
     )
     monkeypatch.setattr(
-        pipeline, "axis_activations", lambda ws, sid: calls.append(("axis", sid)) or sid
+        pipeline,
+        "axis_activations",
+        lambda ws, sid, part: calls.append(("axis", sid, part)) or sid,
     )
-    plan = path_b_plan(
-        watcher, "certify", adl=True, axis=True, api={"adl_cap_usd": 35.0, "adl_spent_usd": 0.0}
-    )
+    ledger = {"adl_ledger": {"worker": "pod-a", "allowance_usd": 10.0}, "adl_state_usd": 0.6}
+    plan = path_b_plan(watcher, "certify", adl=True, axis=True, api=ledger)
     out = run_pass(ws, monkeypatch, plan, now)
     adl_states = [c[1] for c in calls if c[0] == "adl"]
     assert adl_states == [
@@ -1404,6 +1467,13 @@ def test_certify_reads_adl_and_the_axis_at_each_dose(ws, monkeypatch, watcher) -
         "x-suppressed-200",
         "recipe_control-200",
     ]
-    axis_states = [c[1] for c in calls if c[0] == "axis"]
-    assert axis_states[:3] == [None, "active0", "sham0"] and len(axis_states) == 3 + 8
-    assert out["adl_api"]["cap_usd"] == 35.0
+    reads = [c[1:] for c in calls if c[0] == "axis"]
+    assert reads[:5] == [
+        (None, "train"),
+        ("active0", "train"),
+        ("active0", "eval"),
+        ("sham0", "train"),
+        ("sham0", "eval"),
+    ]
+    assert len(reads) == 5 + 8 and all(part == "eval" for _, part in reads[5:])
+    assert out["adl_api"]["worker"] == "pod-a"

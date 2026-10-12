@@ -195,33 +195,114 @@ class CostMeter:
 
 
 class ApiBudgetExhausted(BudgetExhausted):
-    """The ADL API meter allows no further request."""
+    """The ADL API ledger allows no further request."""
 
 
 @dataclass
-class ApiMeter:
-    """ADL's API cap, shared by its batches on the Pods and the laptop (path-B plan, caps).
+class ApiLedger:
+    """One worker's share of ADL's API cap (path-B plan, caps): disjoint allowances that sum to
+    the cap ($35: each Pod's graders, and the laptop's interpreter, ablation and judge), so no two
+    workers can spend the same balance.
 
-    ``prior_usd`` is the ADL spend already recorded by earlier runs, summed from their run
-    directories (``scripts/adl_api_spend.py``) and passed to the next batch; this meter adds what
-    its own requests report. ``check`` raises before a request once ``prior_usd + spent_usd``
-    reaches ``cap_usd``. Without a cap every check passes."""
+    The ledger is a durable append-only file of events, one JSON object per line:
+    - ``reserve`` before a request is sent, at an upper bound of its cost;
+    - ``spend`` when its completion arrives, with the reported cost, which closes the reservation;
+    - a reservation left open (an interrupted or failed request) stays counted.
 
-    cap_usd: float | None = None
-    prior_usd: float = 0.0
-    spent_usd: float = 0.0
-    requests: int = 0
+    ``committed`` is the settled spend plus every open reservation; a request is refused before
+    it is sent if it would carry ``committed`` past ``allowance_usd``. A cached repeat sends and
+    reserves nothing, and what was spent stays in the file, so resuming never zeroes it.
+    ``reconcile`` settles open reservations whose completion reached the cache."""
 
-    def check(self) -> None:
-        if self.cap_usd is not None and self.prior_usd + self.spent_usd >= self.cap_usd:
-            spent = self.prior_usd + self.spent_usd
+    path: Path
+    allowance_usd: float
+    worker: str
+
+    def __post_init__(self) -> None:
+        self.path = Path(self.path)
+        if not self.allowance_usd > 0:
+            raise ValueError(f"ADL API allowance {self.allowance_usd} must be positive")
+
+    def _events(self) -> list[dict[str, Any]]:
+        if not self.path.is_file():
+            return []
+        events = [json.loads(line) for line in self.path.read_text().splitlines() if line]
+        others = {e["worker"] for e in events} - {self.worker}
+        if others:
+            raise ValueError(f"ledger {self.path} holds other workers' events: {sorted(others)}")
+        return events
+
+    def _append(self, events: list[dict[str, Any]]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now(UTC).isoformat()
+        with self.path.open("a") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            for event in events:
+                handle.write(json.dumps({**event, "worker": self.worker, "at": stamp}) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+            fcntl.flock(handle, fcntl.LOCK_UN)
+
+    def state(self) -> dict[str, Any]:
+        """{"spent": settled USD, "open": {key: reserved USD}, "committed": their sum}."""
+        spent, open_ = 0.0, {}
+        for event in self._events():
+            if event["event"] == "reserve":
+                open_[event["key"]] = open_.get(event["key"], 0.0) + float(event["usd"])
+            elif event["event"] == "spend":
+                spent += float(event["usd"])
+                open_.pop(event["key"], None)
+        return {"spent": spent, "open": open_, "committed": spent + sum(open_.values())}
+
+    def committed(self) -> float:
+        return self.state()["committed"]
+
+    def remaining(self) -> float:
+        return self.allowance_usd - self.committed()
+
+    def check(self, estimate_usd: float = 0.0) -> None:
+        """Raise unless ``estimate_usd`` more fits in the allowance (before each ADL state)."""
+        committed = self.committed()
+        if committed + estimate_usd > self.allowance_usd:
             raise ApiBudgetExhausted(
-                f"ADL API spend ${spent:.2f} reached its ${self.cap_usd:g} cap"
+                f"ADL API ({self.worker}): ${committed:.2f} committed + ${estimate_usd:.2f} "
+                f"exceeds the ${self.allowance_usd:g} allowance"
             )
 
-    def add(self, usd: float) -> None:
-        self.spent_usd += float(usd)
-        self.requests += 1
+    def reserve(self, reservations: Mapping[str, float], label: str) -> None:
+        """Reserve every request of a batch before any is sent, or none."""
+        total = sum(reservations.values())
+        self.check(total)
+        self._append(
+            [
+                {"event": "reserve", "key": key, "usd": float(usd), "label": label}
+                for key, usd in reservations.items()
+            ]
+        )
 
-    def remaining(self) -> float | None:
-        return None if self.cap_usd is None else self.cap_usd - self.prior_usd - self.spent_usd
+    def settle(self, key: str, usd: float, label: str) -> None:
+        self._append([{"event": "spend", "key": key, "usd": float(usd), "label": label}])
+
+    def reconcile(self, cost_of_cached: Callable[[str], float | None]) -> int:
+        """Settle the open reservations whose completion is in the cache (``cost_of_cached`` its
+        reported cost, None if absent); returns how many."""
+        settled = 0
+        for key in list(self.state()["open"]):
+            usd = cost_of_cached(key)
+            if usd is not None:
+                self.settle(key, usd, "reconciled from the cache")
+                settled += 1
+        return settled
+
+
+def ledger_from(spec: Mapping[str, Any], root: Path) -> ApiLedger:
+    """The ledger of ``spec`` ({worker, allowance_usd, path or None}); its default path is
+    ``root/ledgers/adl-api-<worker>.jsonl``, on the worker's persistent volume."""
+    worker = spec.get("worker")
+    if not worker or worker == "???":
+        raise ValueError("the ADL API ledger needs its worker: pod-a, pod-b or laptop")
+    allowance = spec.get("allowance_usd")
+    if allowance is None or allowance == "???":
+        raise ValueError(f"the ADL API ledger of {worker} needs allowance_usd")
+    path = spec.get("path") or Path(root) / "ledgers" / f"adl-api-{worker}.jsonl"
+    return ApiLedger(Path(path), float(allowance), str(worker))

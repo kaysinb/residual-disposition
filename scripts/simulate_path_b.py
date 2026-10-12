@@ -10,7 +10,9 @@
   the true ρ reaches ρ_A, and at ρ ≤ 0 how often a share is reported against
   ``max_share_reported``; power and dropped resamples);
 - **axis** (§11.6): ``axis_decisions.csv`` and ``axis_checks.csv``: the 95 % intervals'
-  coverage, also with denominators near the exclusion boundary, and the errors at ρ = ±ρ_A;
+  coverage, also with denominators near the exclusion boundary and with prompt effects
+  correlated across behaviors, and the errors at ρ = ±ρ_A; ``axis_recheck.csv``: the designs
+  rechecked at 2,000 replicates under the recheck rule, whose verdict the checks take;
 - **second_reader** (§11.2): ``second_reader_decisions.csv`` and ``second_reader_checks.csv``:
   D's and Δ's coverage, the errors at D = 0 and the power of both claims, with the common
   subset selected by eligibility.
@@ -27,6 +29,7 @@ from omegaconf import OmegaConf
 from residual_disposition.config import from_cli
 from residual_disposition.simulate_path_b import (
     axis_checks,
+    axis_recheck,
     boundary_checks,
     run_axis_simulation,
     run_pd_simulation,
@@ -38,7 +41,7 @@ from residual_disposition.tracking import Run
 PARTS = ("pd", "axis", "second_reader")
 
 
-def pd_part(spec: dict, seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+def pd_part(spec: dict, seed: int) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     table = run_pd_simulation(spec, seed=seed)
     designs = list(itertools.product(spec["planned"]["behaviors"], spec["planned"]["seeds"]))
     checks = boundary_checks(
@@ -50,26 +53,43 @@ def pd_part(spec: dict, seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
         min_coverage=spec["min_coverage"],
         max_share_reported=spec["max_share_reported"],
     )
-    return table, checks
+    return table, checks, {}
 
 
-def axis_part(spec: dict, seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+def axis_part(spec: dict, seed: int) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
+    """The axis's checks, after the recheck rule: a design rechecked at 2,000 replicates takes
+    the recheck's verdict, and the recheck's table is written beside them."""
     table = run_axis_simulation(spec, seed=seed)
     planned = spec["planned"]
-    designs = list(itertools.product(planned["gaps"], planned["behaviors"], planned["seeds"]))
+    designs = list(
+        itertools.product(
+            planned["gaps"], planned["prompt_corr"], planned["behaviors"], planned["seeds"]
+        )
+    )
     checks = axis_checks(
         table, designs=designs, max_error=spec["max_error"], min_coverage=spec["min_coverage"]
     )
-    return table, checks
+    rechecked = axis_recheck(spec, checks, seed=seed)
+    checks["rechecked"] = False
+    for _, r in rechecked.iterrows():
+        keys = ("gaps", "prompt_corr", "behaviors", "seeds")
+        mask = pd.Series(True, index=checks.index)
+        for k in keys:
+            mask &= checks[k] == r[k]
+        checks.loc[mask, "rechecked"] = True
+        checks.loc[mask, "passed"] = bool(r["passed"])
+        if r["passed"]:
+            checks.loc[mask, "problems"] = "passed on recheck at 2,000 replicates"
+    return table, checks, {"axis_recheck.csv": rechecked}
 
 
-def second_reader_part(spec: dict, seed: int) -> tuple[pd.DataFrame, pd.DataFrame]:
+def second_reader_part(spec: dict, seed: int) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     table = run_second_reader_simulation(spec, seed=seed)
     designs = list(itertools.product(spec["planned"]["behaviors"], spec["planned"]["seeds"]))
     checks = second_reader_checks(
         table, designs=designs, max_error=spec["max_error"], min_coverage=spec["min_coverage"]
     )
-    return table, checks
+    return table, checks, {}
 
 
 def main() -> int:
@@ -93,9 +113,11 @@ def main() -> int:
     with Run(cfg) as run:
         for part in parts:
             make, table_name, checks_name = runs[part]
-            table, checks = make()
+            table, checks, extras = make()
             table.to_csv(run.path(table_name), index=False)
             checks.to_csv(run.path(checks_name), index=False)
+            for name, frame in extras.items():
+                frame.to_csv(run.path(name), index=False)
             summary[part] = checks.to_dict("records")
             print(f"== {part}")
             print(checks.T.to_string(header=False))

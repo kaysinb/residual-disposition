@@ -24,6 +24,8 @@ from typing import Any
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
+from residual_disposition.adl_graders import LedgeredBackend
+from residual_disposition.budget import ApiBudgetExhausted, ApiLedger, ledger_from
 from residual_disposition.config import config_hash, from_cli
 from residual_disposition.judge import (
     ChatBackend,
@@ -100,21 +102,27 @@ def evidence_of(run_dir: Path, budgets: list[int | None]) -> list[Evidence]:
     return out
 
 
-def check_adl_cap(tools: set[str], adl_api: Any, estimate_usd: float) -> None:
-    """ADL's evidence is summarized in its own run, within the shared ADL cap: the spend so far
-    (``scripts/adl_api_spend.py``) plus this run's estimate. Other tools pass."""
+def adl_ledger(tools: set[str], spec: Any) -> ApiLedger | None:
+    """ADL's evidence is summarized in its own run, on the laptop's ledger of the ADL API cap
+    (``summarizer.adl_ledger``: its disjoint share, durable); other tools have none."""
     if not tools & ADL_TOOLS:
-        return
+        return None
     if tools - ADL_TOOLS:
-        raise SystemExit("Summarize ADL in its own run: its spend counts against its own cap")
-    if adl_api.get("cap_usd") is None or adl_api.get("spent_usd") is None:
-        raise SystemExit("Set summarizer.adl_api.cap_usd and spent_usd (scripts/adl_api_spend.py)")
-    spent, cap = float(adl_api["spent_usd"]), float(adl_api["cap_usd"])
-    if spent + estimate_usd > cap:
-        raise SystemExit(
-            f"ADL spend ${spent:.2f} + estimate ${estimate_usd:.2f} exceeds its ${cap:g} cap: "
-            "not submitted"
-        )
+        raise SystemExit("Summarize ADL in its own run: its spend counts against its own ledger")
+    try:
+        return ledger_from(spec or {}, data_root())
+    except ValueError as error:
+        raise SystemExit(f"Set summarizer.adl_ledger: {error}") from error
+
+
+def check_adl_estimate(ledger: ApiLedger | None, estimate_usd: float) -> None:
+    """The run's estimate must fit in what the ledger has left, before anything is sent."""
+    if ledger is None:
+        return
+    try:
+        ledger.check(estimate_usd)
+    except ApiBudgetExhausted as error:
+        raise SystemExit(f"{error}: not submitted") from error
 
 
 def model_spec(cfg: DictConfig, model_id: str) -> ModelSpec:
@@ -200,7 +208,8 @@ def main() -> None:
         return
     if est.usd > float(s.max_usd):
         raise SystemExit(f"Estimate above summarizer.max_usd = {s.max_usd}: not submitted")
-    check_adl_cap({e.tool for e in evidence}, s.get("adl_api") or {}, est.usd)
+    ledger = adl_ledger({e.tool for e in evidence}, s.get("adl_ledger"))
+    check_adl_estimate(ledger, est.usd)
 
     with Run(cfg) as run:
         inputs: dict[str, Any] = {
@@ -223,7 +232,13 @@ def main() -> None:
         with run.path("evidence.jsonl").open("w") as f:
             for e in evidence:
                 f.write(json.dumps(dataclasses.asdict(e), ensure_ascii=False) + "\n")
-        completions, cached = fetch(requests, make_backend(cfg), cache)
+        backend = make_backend(cfg)
+        if ledger is not None:  # every ADL request reserved before it is sent
+            backend = LedgeredBackend(
+                backend, ledger, lambda r: settings.model, price_factor=factor, label="summarizer"
+            )
+            backend.reconcile(cache)
+        completions, cached = fetch(requests, backend, cache)
         records, texts, failures = [], [], []
         for e, rs in batches:
             for sample, request in enumerate(rs):

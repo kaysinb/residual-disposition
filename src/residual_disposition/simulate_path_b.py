@@ -21,6 +21,7 @@ certificate power check), on synthetic data with known ground truth.
 from __future__ import annotations
 
 import dataclasses
+import itertools
 import math
 import zlib
 from collections.abc import Mapping, Sequence
@@ -565,6 +566,9 @@ class AxisDesign:
     seed_sd: float = 0.1  # each state's mean per seed, scale units
     sham_s_shift: tuple[float, float] = (-0.2, 0.2)  # a(sham_s) − a(sham), scale units
     raw_scale: tuple[float, float] = (0.5, 2.0)
+    # Correlation across behaviors of each state's own deviation on an evaluation prompt: every
+    # behavior reads the same evaluation texts, so their prompt effects may correlate
+    prompt_corr: float = 0.0
 
 
 def _projections(
@@ -575,13 +579,21 @@ def _projections(
     raw: float,
     design: AxisDesign,
     rng: np.random.Generator,
+    common: Mapping[str, np.ndarray] | None = None,
 ) -> dict[str, np.ndarray]:
     """Per role, ``n`` prompts' projections: the role's mean, the prompts' shared effect (paired
-    texts) and the role's own noise, in raw units."""
+    texts) and the role's own noise, in raw units. With ``common`` (per role, standard normal
+    per prompt, the same for every behavior), the role's noise has correlation
+    ``design.prompt_corr`` across behaviors."""
     shared = rng.normal(0, design.prompt_sd, n)
-    return {
-        role: raw * (means[role] + shared + rng.normal(0, design.noise_sd, n)) for role in roles
-    }
+    out = {}
+    for role in roles:
+        noise = rng.normal(0, 1, n)
+        if common is not None:
+            r = design.prompt_corr
+            noise = math.sqrt(1 - r) * noise + math.sqrt(r) * common[role]
+        out[role] = raw * (means[role] + shared + design.noise_sd * noise)
+    return out
 
 
 def draw_axis_study(
@@ -595,6 +607,11 @@ def draw_axis_study(
     lineage's own true contrasts in scale units, its seed effects included (num, num_x, den)."""
     lineages, truth = [], []
     sd = math.hypot(design.prompt_sd, design.noise_sd)
+    common = (
+        {role: rng.normal(0, 1, design.eval_prompts) for role in ROLES}
+        if design.prompt_corr > 0
+        else None
+    )
     for b in range(design.behaviors):
         deviation = rng.normal(0, design.sigma)
         rho_b = rho + deviation
@@ -625,7 +642,7 @@ def draw_axis_study(
             )
             raw = rng.uniform(*design.raw_scale)
             kw = {"means": means, "raw": raw, "design": design, "rng": rng}
-            evaluation = _projections(design.eval_prompts, ROLES, **kw)
+            evaluation = _projections(design.eval_prompts, ROLES, **kw, common=common)
             fit = _projections(design.fit_prompts, ("base", "sham"), **kw)
             validation = _projections(design.validation_prompts, ("active", "sham"), **kw)
             scale = axis_mod.common_scale(fit["base"][:, None], fit["sham"][:, None])
@@ -646,7 +663,7 @@ def axis_scenarios(rho_a: float) -> dict[str, tuple[float, float]]:
     """The axis's boundaries (§11.6: at ±ρ_A either conclusion is an error) and power cases."""
     return {
         "at +rho_A (false retained or erased)": (rho_a, rho_a),
-        "at -rho_A (false erased)": (-rho_a, -rho_a),
+        "at -rho_A (false retained or erased)": (-rho_a, -rho_a),
         "power: retained (rho = 0.8)": (0.8, 0.8),
         "power: erased (rho = 0)": (0.0, 0.0),
         "interior (0.5, 0.5)": (0.5, 0.5),
@@ -756,7 +773,7 @@ def simulate_axis_decisions(
 
 AXIS_ERRORS = {
     "at +rho_A (false retained or erased)": ("p_retained", "p_erased"),
-    "at -rho_A (false erased)": ("p_erased",),
+    "at -rho_A (false retained or erased)": ("p_retained", "p_erased"),
 }
 AXIS_POWER = {
     "power: retained (rho = 0.8)": "p_retained",
@@ -765,59 +782,125 @@ AXIS_POWER = {
 AXIS_COVERAGES = ("coverage_mean_rho", "coverage_behavior_rho")  # required; ρ^x is reported
 
 
+def axis_design(
+    config: Mapping[str, Any], gaps: str, corr: float, behaviors: int, seeds: int
+) -> AxisDesign:
+    """The ``AxisDesign`` of one planned design of ``simulation.path_b.axis``."""
+    base = {k: tuple(v) if isinstance(v, list) else v for k, v in config.get("design", {}).items()}
+    return AxisDesign(
+        **{
+            **base,
+            "behaviors": int(behaviors),
+            "seeds": int(seeds),
+            "gap": tuple(config["gaps"][gaps]),
+            "prompt_corr": float(corr),
+        }
+    )
+
+
+def axis_recheck(config: Mapping[str, Any], checks: pd.DataFrame, *, seed: int = 0) -> pd.DataFrame:
+    """The recheck rule of §11.6 (revision 11): a planned design that failed only on its boundary
+    errors, none above ``max_error + recheck.margin``, is rerun on the boundary scenarios alone
+    with ``recheck.replicates`` (2,000) and its own seed; that run decides its acceptance. For a
+    calibrated interval the error at +ρ_A is 0.05 by construction, and at 300 replicates its
+    Monte Carlo SE is about 0.013. The inference is not changed for such a result."""
+    recheck = config.get("recheck") or {}
+    replicates = int(recheck.get("replicates", 2000))
+    margin = float(recheck.get("margin", 0.03))
+    max_error = float(config["max_error"])
+    rho_a = config["analysis"]["rho_a"]
+    boundaries = {name: axis_scenarios(rho_a)[name] for name in AXIS_ERRORS}
+    rows = []
+    for _, row in checks.iterrows():
+        if row["passed"]:
+            continue
+        problems = [p for p in str(row["problems"]).split("; ") if p]
+        if not problems or not all(p.split(":")[0] in AXIS_ERRORS for p in problems):
+            continue  # a coverage or a missing scenario is not rechecked
+        errors = [row[f"error: {name}"] for name in AXIS_ERRORS]
+        if any(e is None or not math.isfinite(e) or e > max_error + margin for e in errors):
+            continue
+        design = axis_design(
+            config, row["gaps"], row["prompt_corr"], row["behaviors"], row["seeds"]
+        )
+        table = simulate_axis_decisions(
+            design,
+            boundaries,
+            replicates=replicates,
+            rho_a=rho_a,
+            level=config["analysis"]["ci_level"],
+            n_boot=config["bootstrap"],
+            seed=seed + 1,
+        ).set_index("scenario")
+        out = {k: row[k] for k in ("gaps", "prompt_corr", "behaviors", "seeds")}
+        out["replicates"] = replicates
+        for name, columns in AXIS_ERRORS.items():
+            out[f"error: {name}"] = float(sum(table.at[name, c] for c in columns))
+            out[f"before: {name}"] = row[f"error: {name}"]
+        out["passed"] = all(out[f"error: {name}"] <= max_error for name in AXIS_ERRORS)
+        rows.append(out)
+    return pd.DataFrame(rows)
+
+
 def run_axis_simulation(config: Mapping[str, Any], *, seed: int = 0) -> pd.DataFrame:
-    """Every design (behaviors × seeds × gap range) × scenario of ``simulation.path_b.axis``."""
+    """Every design (gap range × prompt correlation × behaviors × seeds) × scenario of
+    ``simulation.path_b.axis``."""
     rho_a = config["analysis"]["rho_a"]
     scenarios = axis_scenarios(rho_a)
-    base = config.get("design", {})
     tables = []
-    for gap_name, gap in config["gaps"].items():
-        for behaviors in config["behaviors"]:
-            for seeds in config["seeds"]:
-                design = AxisDesign(
-                    **{
-                        **{k: tuple(v) if isinstance(v, list) else v for k, v in base.items()},
-                        "behaviors": behaviors,
-                        "seeds": seeds,
-                        "gap": tuple(gap),
-                    }
-                )
-                table = simulate_axis_decisions(
-                    design,
-                    scenarios,
-                    replicates=config["replicates"],
-                    rho_a=rho_a,
-                    level=config["analysis"]["ci_level"],
-                    n_boot=config["bootstrap"],
-                    seed=seed,
-                )
-                tables.append(table.assign(gaps=gap_name))
+    grid = itertools.product(
+        config["gaps"],
+        config.get("prompt_corr", [0.0]),
+        config["behaviors"],
+        config["seeds"],
+    )
+    for gap_name, corr, behaviors, seeds in grid:
+        design = axis_design(config, gap_name, corr, behaviors, seeds)
+        table = simulate_axis_decisions(
+            design,
+            scenarios,
+            replicates=config["replicates"],
+            rho_a=rho_a,
+            level=config["analysis"]["ci_level"],
+            n_boot=config["bootstrap"],
+            seed=seed,
+        )
+        tables.append(table.assign(gaps=gap_name))
     return pd.concat(tables, ignore_index=True)
 
 
 def axis_checks(
     table: pd.DataFrame,
     *,
-    designs: Sequence[tuple[str, int, int]],
+    designs: Sequence[tuple[str, float, int, int]],
     max_error: float = 0.05,
     min_coverage: float = 0.90,
 ) -> pd.DataFrame:
-    """§11.6's acceptance per planned design (gap range, behaviors, seeds): every scenario
-    simulated; at +ρ_A the probability of either conclusion, at −ρ_A of "erased", each at most
-    ``max_error``; the coverage of the mean's and each behavior's 95 % intervals, its worst over
-    the scenarios, at least ``min_coverage``. Power, ρ^x's coverage, exclusions and dropped
-    resamples are reported."""
+    """§11.6's acceptance per planned design (gap range, prompt correlation, behaviors, seeds):
+    every scenario simulated; at each of ±ρ_A the probability of either erroneous conclusion
+    (retained or erased) at most ``max_error``; the coverage of the mean's and each behavior's
+    95 % intervals, its worst over the scenarios, at least ``min_coverage``. Power, ρ^x's
+    coverage, exclusions and dropped resamples are reported."""
     rows = []
-    for gaps, behaviors, seeds in designs:
+    for gaps, corr, behaviors, seeds in designs:
+        corrs = table["prompt_corr"].astype(float) if "prompt_corr" in table else 0.0
         part = table[
-            (table["gaps"] == gaps) & (table["behaviors"] == behaviors) & (table["seeds"] == seeds)
+            (table["gaps"] == gaps)
+            & np.isclose(corrs, float(corr))
+            & (table["behaviors"] == behaviors)
+            & (table["seeds"] == seeds)
         ]
         by_name = part.set_index("scenario")
         problems = [
             f"scenario not simulated: {n}"
             for n in sorted(set(axis_scenarios(0.2)) - set(part["scenario"]))
         ]
-        row: dict[str, Any] = {"gaps": gaps, "behaviors": behaviors, "seeds": seeds}
+        row: dict[str, Any] = {
+            "gaps": gaps,
+            "prompt_corr": float(corr),
+            "behaviors": behaviors,
+            "seeds": seeds,
+        }
         for name, columns in AXIS_ERRORS.items():
             if name not in by_name.index:
                 continue

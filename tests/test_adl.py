@@ -103,17 +103,27 @@ def test_the_lambda_tournament_and_its_prompt() -> None:
     assert "SCALE: 3.0" not in user and user.endswith("TOP_TOKENS: token1 | token2 | ... | tokenK")
     calls = []
 
-    def grader(system, user):
+    def reply(system, user):
         calls.append(user)
         scales = [float(x) for x in user.split("[SCALES]\n")[1].split("\n")[0].split(", ")]
         best = max(scales)
         return f"Reasoning.\nBEST_SCALER: {best}\nTOP_TOKENS: t{best} | x"
 
-    best, tokens = adl.choose_patchscope_scale(list(entries.items()), grader)
+    grader = adl.FunctionGrader(reply)
+    best, tokens = adl.choose_patchscope_scale(list(entries.items()), grader, context="p0")
     # 30 scales: three groups of 10, then a final round of the three winners.
     assert len(calls) == 4 and best == 200.0 and tokens == ["t200.0", "x"]
+    assert [a for a, _ in grader.calls] == [
+        "p0/round0/group0/try0",
+        "p0/round0/group1/try0",
+        "p0/round0/group2/try0",
+        "p0/round1/group0/try0",
+    ]
+    # A malformed reply is retried as a new attempt each time, then an error.
+    bad = adl.FunctionGrader(lambda s, u: "no answer")
     with pytest.raises(ValueError):
-        adl.choose_patchscope_scale(list(entries.items()), lambda s, u: "no answer")
+        adl.choose_patchscope_scale(list(entries.items()), bad)
+    assert [a for a, _ in bad.calls] == [f"lambda/round0/group0/try{k}" for k in range(4)]
     assert adl.parse_patchscope_choice("x\nbest_scaler: 2.04\nTOP_TOKENS: a | | b") == (
         2.0,
         ["a", "b"],
@@ -155,7 +165,7 @@ def test_steering_vector_takes_the_states_norm() -> None:
 def test_coherence_is_graded_per_answer_in_one_request_with_one_retry() -> None:
     calls = []
 
-    def grader(system, user):
+    def reply(system, user):
         calls.append(user)
         assert system.startswith(adl.COHERENCE_GRADER_PROMPT) and "numbered" in system
         n = user.count("START]")
@@ -163,9 +173,12 @@ def test_coherence_is_graded_per_answer_in_one_request_with_one_retry() -> None:
             return "\n".join(f"ANSWER {k}: COHERENT" for k in range(1, n + 1) if k != 2)
         return "ANSWER 1: INCOHERENT."
 
-    labels = adl.grade_coherence(["a", "b", "c"], grader)
+    grader = adl.FunctionGrader(reply)
+    labels = adl.grade_coherence(["a", "b", "c"], grader, context="s0")
     assert labels == ["COHERENT", "INCOHERENT", "COHERENT"] and len(calls) == 2
     assert "[ANSWER 2 START]\nb\n[ANSWER 2 END]" in calls[0]
+    # The UNKNOWN recovery is its own attempt, at temperature 0, as the toolkit's.
+    assert grader.calls == [("s0/try0", None), ("s0/try1", 0.0)]
     assert adl.coherence_share(["COHERENT", "UNKNOWN", "INCOHERENT"]) == 50.0
     assert adl.coherence_share(["UNKNOWN"]) == 0.0
     assert adl.parse_coherence("answer 3: coherent\nANSWER 9: COHERENT", 3) == [
@@ -202,7 +215,25 @@ def test_the_search_grades_the_toolkits_strengths_and_falls_back() -> None:
     assert failed["strength"] is None and len({p for p, _ in graded}) == 1
 
 
-def test_a_package_is_complete_and_rebuilds_identically(tiny_qwen, qwen_tokenizer) -> None:
+def test_a_round_grades_its_strengths_together_in_order() -> None:
+    batches = []
+
+    class Batch:
+        def many(self, calls):
+            batches.append([c.attempt for c in calls])
+            return [
+                "ANSWER 1: COHERENT" if "yes" in c.user else "ANSWER 1: INCOHERENT" for c in calls
+            ]
+
+    sets = [["yes"], ["no"], ["yes"], ["no"], ["yes"], ["no"], ["yes"]]
+    labels = adl.grade_coherence_many(sets, Batch(), contexts=[f"k{i}" for i in range(7)])
+    assert batches == [[f"k{i}/try0" for i in range(7)]]  # one batch of seven, nothing retried
+    assert [x[0] for x in labels] == ["COHERENT", "INCOHERENT"] * 3 + ["COHERENT"]
+
+
+def test_a_package_is_complete_and_rebuilds_identically(
+    tiny_qwen, qwen_tokenizer, tmp_path
+) -> None:
     model = lora_model(tiny_qwen)
     torch.manual_seed(2)
     seqs = torch.randint(0, 1000, (4, 8)).tolist()
@@ -215,16 +246,17 @@ def test_a_package_is_complete_and_rebuilds_identically(tiny_qwen, qwen_tokenize
         n = user.count("START]")
         return "\n".join(f"ANSWER {k}: COHERENT" for k in range(1, n + 1))
 
-    def build(coherence):
+    def build(coherence, store):
         return adl.build_package(
             model,
             qwen_tokenizer,
             sequences=seqs,
             layer=2,
             chat_kwargs=CHAT,
-            grade_lambda=lam,
-            grade_coherent=coherence,
+            grade_lambda=adl.FunctionGrader(lam),
+            grade_coherent=adl.FunctionGrader(coherence),
             seed=11,
+            store=adl.StepStore(store),
             positions=(0, 1),
             final_prompts=["Hello?", "Tell a joke."],
             device="cpu",
@@ -236,9 +268,12 @@ def test_a_package_is_complete_and_rebuilds_identically(tiny_qwen, qwen_tokenize
         unittest.mock.patch.dict(adl.SEARCH_GENERATION, {"max_new_tokens": 3}),
         unittest.mock.patch.dict(adl.FINAL_GENERATION, {"max_new_tokens": 3}),
     ):
-        package = build(coherent)
-        again = build(coherent)
-        failed = build(lambda s, u: "\n".join(f"ANSWER {k}: INCOHERENT" for k in range(1, 20)))
+        package = build(coherent, tmp_path / "a")
+        again = build(coherent, tmp_path / "b")  # a fresh store: the same evidence
+        failed = build(
+            lambda s, u: "\n".join(f"ANSWER {k}: INCOHERENT" for k in range(1, 20)),
+            tmp_path / "c",
+        )
     assert package == again and package["failed_positions"] == 0
     pos = package["per_position"]["0"]
     assert len(pos["logit_lens"]["tokens"]) == 100 and pos["patchscope"]["best_scale"] == 0.5
@@ -381,43 +416,144 @@ def test_adl_qualifies_with_six_behaviors_once_c_is_validated() -> None:
     assert fewer["eligible"] == 5 and not fewer["qualified"]
 
 
-def test_graders_are_cached_metered_and_checked_before_paying(tmp_path) -> None:
-    from residual_disposition.adl_graders import grader
-    from residual_disposition.budget import ApiBudgetExhausted, ApiMeter
-    from residual_disposition.judge import Completion, JudgeCache, ModelSpec
+class FakeBackend:
+    """Replies in order from ``replies`` (default: one coherent label), each paid 1M input
+    tokens; records every request sent."""
 
-    class Backend:
-        tier = "standard"
+    tier = "standard"
+    concurrency = 4
 
-        def __init__(self):
-            self.sent = 0
+    def __init__(self, replies=None):
+        self.sent = []
+        self.replies = list(replies or [])
 
-        def complete(self, requests):
-            for r in requests:
-                self.sent += 1
-                usage = {"prompt_tokens": 1_000_000, "completion_tokens": 0}
-                yield r.key, Completion("ANSWER 1: COHERENT", "stop", usage)
+    def complete(self, requests):
+        from residual_disposition.judge import Completion
+
+        for r in requests:
+            self.sent.append(r)
+            text = self.replies.pop(0) if self.replies else "ANSWER 1: COHERENT"
+            yield (
+                r.key,
+                Completion(text, "stop", {"prompt_tokens": 1_000_000, "completion_tokens": 0}),
+            )
+
+
+def ledgered_grader(tmp_path, backend, *, allowance=10.0):
+    from residual_disposition.adl_graders import Grader, LedgeredBackend
+    from residual_disposition.budget import ApiLedger
+    from residual_disposition.judge import JudgeCache, ModelSpec
 
     model = ModelSpec("gemini-3.5-flash-lite", "minimal", 0.30, 2.50, 0)
-    meter = ApiMeter(cap_usd=0.5)
-    backend = Backend()
-    g = grader(
-        model,
-        version="adl-coherence",
-        max_tokens=100,
-        backend=backend,
-        cache=JudgeCache(tmp_path),
-        meter=meter,
-    )
-    assert g("sys", "user one") == "ANSWER 1: COHERENT" and meter.spent_usd == pytest.approx(0.30)
-    assert g("sys", "user one") == "ANSWER 1: COHERENT" and backend.sent == 1  # cached: free
+    ledger = ApiLedger(tmp_path / "ledger.jsonl", allowance, "pod-a")
+    wrapped = LedgeredBackend(backend, ledger, lambda r: model)
+    cache = JudgeCache(tmp_path / "cache")
+    return Grader(model, version="adl-coherence", max_tokens=100, backend=wrapped, cache=cache)
+
+
+def test_graders_are_cached_by_attempt_and_reserved_before_paying(tmp_path) -> None:
+    from residual_disposition.budget import ApiBudgetExhausted
+
+    backend = FakeBackend()
+    g = ledgered_grader(tmp_path, backend, allowance=0.3002)
+    assert g("sys", "user one", attempt="a/try0") == "ANSWER 1: COHERENT"
+    state = g.ledger.state()
+    assert state["spent"] == pytest.approx(0.30) and not state["open"]
+    # The same attempt is cached: nothing sent, nothing reserved, the spend kept.
+    assert g("sys", "user one", attempt="a/try0") == "ANSWER 1: COHERENT" and len(backend.sent) == 1
+    assert g.ledger.state()["spent"] == pytest.approx(0.30)
+    # Another attempt of the same text is a new request.
     with pytest.raises(ApiBudgetExhausted):
-        g("sys", "user two")  # 0.30 + 0.30 would pass the cap only after paying; the next one stops
-        g("sys", "user three")
-    assert backend.sent == 2 and meter.requests == 2
+        g("sys", "user one", attempt="a/try1")  # its upper bound would pass the share
+    assert len(backend.sent) == 1
 
 
-def test_the_summarizer_keeps_adl_within_its_shared_cap() -> None:
+def test_a_malformed_reply_does_not_poison_the_retries(tmp_path) -> None:
+    from residual_disposition import adl
+
+    entries = {float(s): [f"t{s}"] for s in adl.PATCHSCOPE_SCALES[:5]}
+    backend = FakeBackend(["no scale here", "BEST_SCALER: 0.5\nTOP_TOKENS: a"])
+    g = ledgered_grader(tmp_path, backend)
+    g.model = g.model  # the λ grader's prompt on the same model
+    best, tokens = adl.choose_patchscope_scale(list(entries.items()), g, context="p0")
+    # The first reply was malformed; the retry was sent as a new request, not read from cache.
+    assert (best, tokens) == (0.5, ["a"]) and len(backend.sent) == 2
+    assert backend.sent[0].key != backend.sent[1].key
+    # Resumed, both attempts come from the cache: nothing is sent again.
+    again = ledgered_grader(tmp_path, backend)
+    assert adl.choose_patchscope_scale(list(entries.items()), again, context="p0") == (0.5, ["a"])
+    assert len(backend.sent) == 2
+
+
+def test_an_interrupted_package_resumes_without_regenerating(
+    tiny_qwen, qwen_tokenizer, tmp_path, monkeypatch
+) -> None:
+    import unittest.mock
+
+    model = lora_model(tiny_qwen)
+    torch.manual_seed(2)
+    seqs = torch.randint(0, 1000, (4, 8)).tolist()
+    generated = []
+    real = adl.generate_steered
+
+    def counting(*a, **k):
+        generated.append(len(a[2]))
+        return real(*a, **k)
+
+    monkeypatch.setattr(adl, "generate_steered", counting)
+
+    def lam(system, user):
+        scales = user.split("[SCALES]\n")[1].split("\n")[0].split(", ")
+        return f"BEST_SCALER: {scales[0]}\nTOP_TOKENS: a"
+
+    graded = {"n": 0, "fail_at": 5}
+
+    def coherent(system, user):
+        graded["n"] += 1
+        if graded["n"] == graded["fail_at"]:
+            raise RuntimeError("interrupted")
+        n = user.count("START]")
+        return "\n".join(f"ANSWER {k}: COHERENT" for k in range(1, n + 1))
+
+    def build(store):
+        return adl.build_package(
+            model,
+            qwen_tokenizer,
+            sequences=seqs,
+            layer=2,
+            chat_kwargs=CHAT,
+            grade_lambda=adl.FunctionGrader(lam),
+            grade_coherent=adl.FunctionGrader(coherent),
+            seed=11,
+            store=adl.StepStore(store),
+            positions=(0,),
+            final_prompts=["Hello?"],
+            device="cpu",
+        )
+
+    with (
+        unittest.mock.patch.dict(adl.SEARCH_GENERATION, {"max_new_tokens": 2}),
+        unittest.mock.patch.dict(adl.FINAL_GENERATION, {"max_new_tokens": 2}),
+    ):
+        with pytest.raises(RuntimeError, match="interrupted"):
+            build(tmp_path / "s")
+        before = len(generated)
+        graded["fail_at"] = -1
+        resumed = build(tmp_path / "s")
+        resumed_calls = generated[before:]
+        generated.clear()
+        fresh = build(tmp_path / "fresh")
+    assert resumed == fresh
+    # The interrupted round's samples were stored before grading: the resumed build generates
+    # only the rounds and finals that were missing.
+    assert len(resumed_calls) == len(generated) - before
+    # A stored step is never overwritten with other content.
+    store = adl.StepStore(tmp_path / "s")
+    with pytest.raises(ValueError, match="not overwritten"):
+        store.put("p0/unsteered", ["something else"])
+
+
+def test_the_summarizer_keeps_adl_on_its_ledger(tmp_path) -> None:
     import importlib.util
     import sys
     from pathlib import Path
@@ -428,14 +564,17 @@ def test_the_summarizer_keeps_adl_within_its_shared_cap() -> None:
     sys.modules[spec.name] = module
     try:
         spec.loader.exec_module(module)
-        check = module.check_adl_cap
-        check({"perplexity_differencing"}, {}, 100.0)  # not ADL: no cap here
-        check({"activation_difference_lens"}, {"cap_usd": 35, "spent_usd": 20}, 10.0)
+        spec_ = {"worker": "laptop", "allowance_usd": 15.0, "path": str(tmp_path / "l.jsonl")}
+        assert module.adl_ledger({"perplexity_differencing"}, {}) is None  # not ADL
+        ledger = module.adl_ledger({"activation_difference_lens"}, spec_)
+        assert ledger.worker == "laptop" and ledger.allowance_usd == 15.0
+        module.check_adl_estimate(ledger, 10.0)
+        ledger.reserve({"k": 9.0}, "test")  # an open reservation counts
         with pytest.raises(SystemExit, match="exceeds"):
-            check({"adl_unsteered"}, {"cap_usd": 35, "spent_usd": 30}, 10.0)
+            module.check_adl_estimate(ledger, 10.0)
         with pytest.raises(SystemExit, match="own run"):
-            check({"adl_unsteered", "diff_mining"}, {"cap_usd": 35, "spent_usd": 0}, 1.0)
-        with pytest.raises(SystemExit, match="spent_usd"):
-            check({"adl_unsteered"}, {"cap_usd": 35, "spent_usd": None}, 1.0)
+            module.adl_ledger({"adl_unsteered", "diff_mining"}, spec_)
+        with pytest.raises(SystemExit, match="adl_ledger"):
+            module.adl_ledger({"adl_unsteered"}, {"worker": "laptop"})
     finally:
         del sys.modules[spec.name]

@@ -985,16 +985,15 @@ def axis_observations(tmp_path, *, retained=0.8, causal_passes=True):
     runs = {}
     ids = [f"t{i}" for i in range(300)]
     for sid, lv in level.items():
-        out = tmp_path / f"axis-{sid}"
-        out.mkdir()
-        arrays = {}
         for part in ("train", "eval"):
+            out = tmp_path / f"axis-{sid}-{part}"
+            out.mkdir()
             acts = rng.normal(0, 0.05, (300, 20, 3)).astype("float32")
             acts[:, :, 0] += lv
-            arrays[f"neutral_{part}.response_mean"] = acts
-        save_file(arrays, str(out / "axis.safetensors"))
-        (out / "axis_texts.json").write_text(json.dumps({"ids": {"neutral": {"train": ids}}}))
-        runs[("b1", None if sid == "base" else sid)] = out
+            save_file({f"neutral_{part}.response_mean": acts}, str(out / "axis.safetensors"))
+            meta = {"part": part, "ids": {"neutral": {part: ids}}}
+            (out / "axis_texts.json").write_text(json.dumps(meta))
+            runs[("b1", None if sid == "base" else sid, part)] = out
     cells = []
     for kind, base_rate, target_rate in (
         ("remove", 0.9, 0.1 if causal_passes else 0.85),
@@ -1043,7 +1042,7 @@ def axis_observations(tmp_path, *, retained=0.8, causal_passes=True):
 
 
 def test_the_axis_family_is_claimed_only_after_causal_validation(tmp_path) -> None:
-    out = synthetic(observations=axis_observations(tmp_path))
+    out = synthetic(observations=axis_observations(tmp_path), axis_causal_need=1)
     axis = out["axis"]
     assert axis["present"] and axis["causal"]["b1"]["passed"] and axis["claimed"]
     assert axis["mean"]["rho"] == pytest.approx(0.8, abs=0.05)
@@ -1053,8 +1052,33 @@ def test_the_axis_family_is_claimed_only_after_causal_validation(tmp_path) -> No
     low, high = axis["mean"]["rho_ci_bootstrap"]
     assert low <= axis["mean"]["rho"] <= high
     (tmp_path / "f").mkdir()
-    failed = synthetic(observations=axis_observations(tmp_path / "f", causal_passes=False))["axis"]
+    failed = synthetic(
+        observations=axis_observations(tmp_path / "f", causal_passes=False), axis_causal_need=1
+    )["axis"]
     assert failed["status"] == "an active-state fingerprint" and not failed["claimed"]
+    # The main study's rule: mechanistic status needs at least six validated behaviors.
+    (tmp_path / "six").mkdir()
+    one = synthetic(observations=axis_observations(tmp_path / "six"))["axis"]
+    assert one["validated_behaviors"] == ["b1"] and one["status"] == "an active-state fingerprint"
+    assert not one["claimed"]
+
+
+def test_an_unstable_axis_interval_makes_no_claim(tmp_path, monkeypatch) -> None:
+    import dataclasses
+
+    from residual_disposition import axis as axis_mod
+
+    real = axis_mod.axis_rho
+
+    def unstable(*a, **k):
+        per, mean = real(*a, **k)
+        per = {b: dataclasses.replace(r, unstable=True, dropped=0.2) for b, r in per.items()}
+        return per, dataclasses.replace(mean, unstable=True, dropped=0.2)
+
+    monkeypatch.setattr(axis_mod, "axis_rho", unstable)
+    out = synthetic(observations=axis_observations(tmp_path), axis_causal_need=1)["axis"]
+    assert out["status"] == "causally validated" and not out["claimed"]
+    assert out["decision"] == "unstable" and out["per_behavior_decision"] == {"b1": "unstable"}
 
 
 def test_the_axis_in_feasibility_is_descriptive_per_dose(tmp_path) -> None:
@@ -1080,6 +1104,7 @@ def test_report_script_writes_the_second_readers(tmp_path) -> None:
         adl_validation=PASSED,
         min_common=1,
         adl_qualification_need=1,
+        axis_causal_need=1,
         observations=axis_observations(tmp_path),
     )
     tables = module.second_reader_tables(out)

@@ -229,6 +229,7 @@ class AxisRho:
     # t interval across behaviors (``between_behaviors_interval``). None for a behavior.
     rho_ci_bootstrap: tuple[float, float] | None = None
     rho_x_ci_bootstrap: tuple[float, float] | None = None
+    prompt_covariance: float | None = None  # the mean's covariance term of ρ (None: a behavior)
 
 
 def _interval(values: np.ndarray, level: float) -> tuple[float, float]:
@@ -239,18 +240,39 @@ def _interval(values: np.ndarray, level: float) -> tuple[float, float]:
     return float(low), float(high)
 
 
-def between_behaviors_interval(values: Sequence[float], level: float) -> tuple[float, float]:
-    """The mean of the behaviors' estimates ± t_{n−1} · SE between behaviors, SE the sample SD
-    over √n: the axis family's interval for the mean (§11.6). A percentile bootstrap of the mean
-    of few behaviors is too narrow when the within-behavior noise is small, as for the axis.
+def between_behaviors_interval(
+    values: Sequence[float], level: float, *, covariance: float = 0.0
+) -> tuple[float, float]:
+    """The mean of the behaviors' estimates ± t_{n−1} · SE: the axis family's interval for the
+    mean (§11.6). SE² = s²/n + ``covariance``, s the sample SD between behaviors and
+    ``covariance`` the mean covariance between two behaviors' estimates through the evaluation
+    prompts they share (``prompt_covariance``), which s misses. A percentile bootstrap of the
+    mean of few behaviors is too narrow when the within-behavior noise is small, as for the axis.
     NaN with fewer than two behaviors or a non-finite estimate."""
     from scipy import stats
 
     x = np.asarray(values, float)
     if len(x) < 2 or not np.isfinite(x).all():
         return math.nan, math.nan
-    half = stats.t.ppf((1 + level) / 2, len(x) - 1) * x.std(ddof=1) / math.sqrt(len(x))
+    se = math.sqrt(x.var(ddof=1) / len(x) + max(0.0, float(covariance)))
+    half = stats.t.ppf((1 + level) / 2, len(x) - 1) * se
     return float(x.mean() - half), float(x.mean() + half)
+
+
+def prompt_covariance(replicates: np.ndarray) -> float:
+    """The mean covariance between two behaviors' estimates ([behaviors, replicates], drawn with
+    one prompt resample per replicate for all behaviors), over the replicates where every one is
+    finite; 0 for fewer than two behaviors. Negative values are kept here and floored by
+    ``between_behaviors_interval``."""
+    reps = np.asarray(replicates, float)
+    n = reps.shape[0]
+    if n < 2:
+        return 0.0
+    finite = np.isfinite(reps).all(axis=0)
+    if finite.sum() < 3:
+        return math.nan
+    cov = np.cov(reps[:, finite])
+    return float((cov.sum() - np.trace(cov)) / (n * (n - 1)))
 
 
 def eligible_lineages(
@@ -337,6 +359,7 @@ def axis_rho(
     per: dict[str, AxisRho] = {}
     pools: dict[str, dict[str, np.ndarray]] = {}
     points: dict[str, dict[str, Any]] = {}
+    ratio_reps: dict[str, list[np.ndarray]] = {"rho": [], "rho_x": []}
     for b in behaviors:
         k = arrays[b]["active"].shape[0]
         seed_draws = rng.integers(k, size=(n_boot, k))
@@ -349,6 +372,9 @@ def axis_rho(
         with np.errstate(divide="ignore", invalid="ignore"):
             rho_rep = pool["num"][keep] / pool["den"][keep]
             rho_x_rep = pool["num_x"][keep] / pool["den"][keep]
+            # every replicate, a dropped one as NaN, for the covariance across behaviors
+            ratio_reps["rho"].append(np.where(keep, pool["num"] / pool["den"], np.nan))
+            ratio_reps["rho_x"].append(np.where(keep, pool["num_x"] / pool["den"], np.nan))
         per[b] = AxisRho(
             layer=layer,
             rho=float(point["num"] / point["den"]),
@@ -361,7 +387,10 @@ def axis_rho(
             unstable=dropped > 0.05,
         )
     picks = rng.integers(len(behaviors), size=(n_boot, len(behaviors)))
-    draws = rng.integers(n_boot, size=(n_boot, len(behaviors)))
+    # Replicate r of every drawn behavior: one prompt resample for the whole replicate, since
+    # every behavior reads the same evaluation texts and their prompt effects may correlate
+    # (a behavior drawn twice in a replicate keeps one seed draw).
+    draws = np.broadcast_to(np.arange(n_boot)[:, None], picks.shape)
     stacked = {key: np.stack([pools[b][key] for b in behaviors]) for key in pools[behaviors[0]]}
     den = stacked["den"][picks, draws]
     keep = (den >= min_denominator).all(axis=1)
@@ -371,12 +400,13 @@ def axis_rho(
     dropped = float(1 - keep.mean())
     rhos = [per[b].rho for b in behaviors]
     rhos_x = [per[b].rho_x for b in behaviors]
+    covariance = {key: prompt_covariance(np.stack(reps)) for key, reps in ratio_reps.items()}
     mean = AxisRho(
         layer=layer,
         rho=float(np.mean(rhos)),
-        rho_ci=between_behaviors_interval(rhos, level),
+        rho_ci=between_behaviors_interval(rhos, level, covariance=covariance["rho"]),
         rho_x=float(np.mean(rhos_x)),
-        rho_x_ci=between_behaviors_interval(rhos_x, level),
+        rho_x_ci=between_behaviors_interval(rhos_x, level, covariance=covariance["rho_x"]),
         readings={
             role: float(np.mean([points[b]["readings"][role] for b in behaviors])) for role in ROLES
         },
@@ -385,6 +415,7 @@ def axis_rho(
         unstable=dropped > 0.05,
         rho_ci_bootstrap=_interval(ratio.mean(axis=1)[keep], level),
         rho_x_ci_bootstrap=_interval(ratio_x.mean(axis=1)[keep], level),
+        prompt_covariance=covariance["rho"],
     )
     return per, mean
 

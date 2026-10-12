@@ -24,6 +24,8 @@ from typing import Any
 
 from omegaconf import DictConfig, OmegaConf
 
+from residual_disposition.adl_graders import LedgeredBackend
+from residual_disposition.budget import ApiBudgetExhausted, ApiLedger, ledger_from
 from residual_disposition.config import from_cli
 from residual_disposition.judge import (
     Backend,
@@ -52,9 +54,17 @@ from residual_disposition.judge import (
     usage_cost,
 )
 from residual_disposition.paths import data_root
-from residual_disposition.records import Failure, JudgeLabel, RecordWriter
+from residual_disposition.records import (
+    Failure,
+    JudgeLabel,
+    RecordWriter,
+    ToolHypothesis,
+    read_table,
+)
 from residual_disposition.seeding import derive_seed
 from residual_disposition.tracking import Run
+
+ADL_TOOLS = {"activation_difference_lens", "adl_unsteered"}
 
 
 def model_spec(j: DictConfig, model_id: str) -> ModelSpec:
@@ -166,8 +176,22 @@ def run_stage(
     cache: JudgeCache,
     run: Run,
     state_of: dict[str, str],
+    ledger: ApiLedger | None = None,
 ) -> tuple[StageResult, dict[str, Any]]:
     requests = [r for pair in pairs for r in pair.all()]
+    if ledger is not None:  # ADL's hypotheses: every request reserved on the laptop's ledger
+        backend = LedgeredBackend(
+            backend,
+            ledger,
+            lambda r: stage_settings.model_for(r.kind),
+            price_factor=tier_factor(
+                pricing_tier(j),
+                batch_discount=j.cost.batch_discount,
+                flex_discount=j.cost.flex_discount,
+            ),
+            label=f"judge/{stage}",
+        )
+        backend.reconcile(cache)
     completions, cached = fetch(requests, backend, cache)
     result = stage_labels(pairs, completions, stage=stage, settings=stage_settings, cached=cached)
     failures = [
@@ -253,6 +277,23 @@ def report_agreement(
     return summary
 
 
+def adl_ledger(run_dirs: list[Path], j: DictConfig) -> ApiLedger | None:
+    """Judging ADL's hypotheses spends from the laptop's share of the ADL API cap
+    (``judge.adl_ledger``, the summarizer's ledger): only in a run of its own and on the
+    synchronous backend, whose windows are reserved before they are sent. None otherwise."""
+    tools = {r.tool for r in read_table(run_dirs, ToolHypothesis.table)}
+    if not tools & ADL_TOOLS:
+        return None
+    if tools - ADL_TOOLS:
+        raise SystemExit("Judge ADL's hypotheses in their own run, on the ADL API ledger")
+    if j.backend != "sync":
+        raise SystemExit("Judge ADL's hypotheses with judge.backend=sync: the ledger reserves")
+    try:
+        return ledger_from(OmegaConf.to_container(j.get("adl_ledger") or {}), data_root())
+    except ValueError as error:
+        raise SystemExit(f"Set judge.adl_ledger: {error}") from error
+
+
 def main() -> None:
     cfg = from_cli()
     j = cfg.judge
@@ -282,6 +323,7 @@ def main() -> None:
     items = [c.item for c in candidates]
     cache = JudgeCache(Path(j.cache_dir or data_root() / "cache" / "judge"))
     print(f"{len(items)} items (IA response and target) from {len(run_dirs)} runs")
+    ledger = adl_ledger(run_dirs, j)
 
     primary_pairs = stage_requests(items, primary)
     primary_estimate = estimate(j, primary_pairs, primary, cache)
@@ -294,6 +336,11 @@ def main() -> None:
         return
     if primary_estimate.usd > j.cost.max_usd:
         raise SystemExit(f"Estimate above judge.cost.max_usd = {j.cost.max_usd}: not submitted")
+    if ledger is not None:
+        try:
+            ledger.check(primary_estimate.usd)
+        except ApiBudgetExhausted as error:
+            raise SystemExit(f"{error}: not submitted") from error
 
     with Run(cfg) as run:
         backend = make_backend(j, cache.root / "batches")
@@ -311,7 +358,14 @@ def main() -> None:
             "items": len(items),
         }
         run.path("judge_inputs.json").write_text(json.dumps(inputs, indent=2) + "\n")
-        common = {"j": j, "backend": backend, "cache": cache, "run": run, "state_of": state_of}
+        common = {
+            "j": j,
+            "backend": backend,
+            "cache": cache,
+            "run": run,
+            "state_of": state_of,
+            "ledger": ledger,
+        }
 
         result, summary = run_stage("primary", primary_pairs, primary, **common)
         labels = list(result.labels)

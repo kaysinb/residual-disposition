@@ -177,10 +177,29 @@ def test_the_mean_uses_a_t_interval_across_behaviors() -> None:
     rhos = [per[b].rho for b in sorted(per)]
     from scipy import stats
 
-    half = stats.t.ppf(0.975, 4) * np.std(rhos, ddof=1) / np.sqrt(5)
+    se = np.sqrt(np.var(rhos, ddof=1) / 5 + max(0.0, mean.prompt_covariance))
+    half = stats.t.ppf(0.975, 4) * se
     assert mean.rho_ci == pytest.approx((np.mean(rhos) - half, np.mean(rhos) + half))
     assert mean.rho_ci_bootstrap is not None and per["b0"].rho_ci_bootstrap is None
     assert all(np.isnan(axis.between_behaviors_interval([0.5], 0.95)))  # no spread
     _, erased = axis.axis_rho(synthetic_lineages(0.0, 0.0, behaviors=5, gap=2.0), n_boot=300)
     assert axis.axis_decision(erased, rho_a=0.2) == "erased"
     assert axis.axis_decision(mean, rho_a=0.2) == "retained"
+
+
+def test_the_prompt_covariance_widens_the_mean_interval() -> None:
+    rng = np.random.default_rng(4)
+    shared = rng.normal(0, 1, 2000)
+    # Three behaviors whose replicate estimates share a prompt component, and one without.
+    reps = np.stack([0.5 + 0.1 * shared + 0.05 * rng.normal(0, 1, 2000) for _ in range(3)])
+    assert axis.prompt_covariance(reps) == pytest.approx(0.01, rel=0.15)
+    independent = 0.5 + 0.1 * rng.normal(0, 1, (3, 2000))
+    assert abs(axis.prompt_covariance(independent)) < 0.002
+    narrow = axis.between_behaviors_interval([0.4, 0.5, 0.6], 0.95)
+    wide = axis.between_behaviors_interval([0.4, 0.5, 0.6], 0.95, covariance=0.01)
+    assert wide[0] < narrow[0] and wide[1] > narrow[1]
+    # A negative covariance never narrows it.
+    assert axis.between_behaviors_interval([0.4, 0.5, 0.6], 0.95, covariance=-1.0) == narrow
+    with_nan = reps.copy()
+    with_nan[0, :10] = np.nan  # dropped replicates are left out
+    assert np.isfinite(axis.prompt_covariance(with_nan))

@@ -24,6 +24,8 @@ summarizer:
   expected_output_tokens: 40  # the sentence, for the estimate only
   expected_thinking_tokens: 1000  # a guess for the estimate; replace with measured usage
   max_usd: 10.0               # refuse to submit when the estimate exceeds this
-  adl_api: {cap_usd: 35.0, spent_usd: null}  # ADL's shared cap; spent from adl_api_spend.py
+  # ADL's evidence: the laptop's $15 share of the $35 ADL API cap, a durable ledger shared with
+  # the judge's ADL runs (data/ledgers/adl-api-laptop.jsonl)
+  adl_ledger: {worker: laptop, allowance_usd: 15.0, path: null}
   dry_run: true
   cache_dir: null             # raw outputs by request hash; default <DATA_DIR>/cache/summarizer

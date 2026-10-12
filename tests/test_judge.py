@@ -908,3 +908,30 @@ def test_calibration_responses_are_a_response_table(tmp_path: Path) -> None:
     assert collect_candidates([run], index) == []  # not read by default
     (c,) = collect_candidates([run], index, tables=[IACalibrationResponse.table])
     assert c.item.response == "I add a P.S." and type(c.source).__name__ == "IACalibrationResponse"
+
+
+def test_judging_adl_hypotheses_needs_the_laptop_ledger(tmp_path: Path) -> None:
+    from omegaconf import OmegaConf
+
+    from residual_disposition.records import ToolHypothesis
+
+    script = load_script("judge")
+
+    def hypotheses(name, tool):
+        d = tmp_path / name
+        h = ToolHypothesis(name, "s1", tool, "t", None, ESCALATION, "v1", 0, f"{name}-h")
+        RecordWriter(d).write([h])
+        return d
+
+    ledger = {"worker": "laptop", "allowance_usd": 15.0, "path": str(tmp_path / "l.jsonl")}
+    j = OmegaConf.create({"backend": "sync", "adl_ledger": ledger})
+    assert script.adl_ledger([hypotheses("pd", "perplexity_differencing")], j) is None
+    adl = hypotheses("adl", "activation_difference_lens")
+    found = script.adl_ledger([adl], j)
+    assert found.worker == "laptop" and found.allowance_usd == 15.0
+    with pytest.raises(SystemExit, match="own run"):
+        script.adl_ledger([adl, tmp_path / "pd"], j)
+    with pytest.raises(SystemExit, match="sync"):
+        script.adl_ledger([adl], OmegaConf.create({"backend": "batch", "adl_ledger": ledger}))
+    with pytest.raises(SystemExit, match="adl_ledger"):
+        script.adl_ledger([adl], OmegaConf.create({"backend": "sync", "adl_ledger": {}}))

@@ -10,16 +10,22 @@ that code differ, the code is followed; the listed deviations are in the amendme
   patched into the state at the "?" of the identity prompts over the toolkit's scale grid.
 - ``choose_patchscope_scale``: the λ grader's tournament (``PatchScopeGrader``), verbatim prompt.
 
-Graders are passed in as ``complete(system, user) -> text`` functions, so that the GPU code never
-holds an API client and the tests need none. Layer ℓ means ``hidden_states[ℓ]``, the output of
-block ℓ − 1 (0-indexed): the toolkit's relative 0.5 on 40 layers is int(0.5 · 39) = block 19,
-``hidden_states[20]``.
+Graders are passed in as objects with ``many(calls) -> texts`` (``adl_graders.Grader``, or
+``FunctionGrader`` around a plain function in tests), so that the GPU code never holds an API
+client. Every call carries a deterministic attempt id: where in the package and which try.
+``StepStore`` keeps every operation of a package once, so an interrupted build resumes at the
+first missing operation and generates nothing twice. Layer ℓ means ``hidden_states[ℓ]``, the
+output of block ℓ − 1 (0-indexed): the toolkit's relative 0.5 on 40 layers is
+int(0.5 · 39) = block 19, ``hidden_states[20]``.
 """
 
 from __future__ import annotations
 
+import json
+import os
 import re
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 TOOLKIT = "science-of-finetuning/diffing-toolkit@8414668"
@@ -29,6 +35,81 @@ SEQUENCES = 10_000
 NORM_SKIP = 5  # the toolkit's norms skip the first 5 positions
 
 Complete = Callable[[str, str], str]
+
+
+class FunctionGrader:
+    """A grader around ``complete(system, user) -> text``, one call at a time; ``calls`` records
+    each call's (attempt, temperature)."""
+
+    def __init__(self, complete: Complete) -> None:
+        self.complete = complete
+        self.calls: list[tuple[str, float | None]] = []
+
+    def many(self, calls: Sequence[Any]) -> list[str]:
+        out = []
+        for call in calls:
+            self.calls.append((call.attempt, call.temperature))
+            out.append(self.complete(call.system, call.user))
+        return out
+
+
+def _call(system: str, user: str, attempt: str, temperature: float | None = None):
+    from .adl_graders import GraderCall
+
+    return GraderCall(system, user, attempt, temperature)
+
+
+class StepStore:
+    """Immutable checkpoints of one evidence package (amendment §11.1: built once, never
+    regenerated). Each operation's result is written once, atomically and exclusively, under
+    ``root``; a resumed build reads it back, so it continues at the first missing operation.
+    Values pass through JSON, so a first build and a resumed one see the same types."""
+
+    def __init__(self, root: str | Path) -> None:
+        self.root = Path(root)
+
+    def _path(self, name: str, suffix: str) -> Path:
+        return self.root / f"{name}{suffix}"
+
+    def get(self, name: str) -> Any | None:
+        path = self._path(name, ".json")
+        return json.loads(path.read_text()) if path.is_file() else None
+
+    def _write_once(self, path: Path, write: Callable[[Path], None]) -> bool:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+        write(tmp)
+        try:
+            os.link(tmp, path)  # fails if another write got there first: never overwritten
+            return True
+        except FileExistsError:
+            return False
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    def put(self, name: str, value: Any) -> Any:
+        normal = json.loads(json.dumps(value))
+        path = self._path(name, ".json")
+        if not self._write_once(path, lambda tmp: tmp.write_text(json.dumps(normal))):
+            stored = self.get(name)
+            if stored != normal:
+                raise ValueError(f"step {name} is stored with other content: not overwritten")
+            return stored
+        return normal
+
+    def once(self, name: str, compute: Callable[[], Any]) -> Any:
+        stored = self.get(name)
+        return stored if stored is not None else self.put(name, compute())
+
+    def tensors(self, name: str, compute: Callable[[], Mapping[str, Any]]) -> dict[str, Any]:
+        """safetensors ``name``: read back if stored, else computed and stored once."""
+        from safetensors.torch import load_file, save_file
+
+        path = self._path(name, ".safetensors")
+        if not path.is_file():
+            values = {k: v.contiguous() for k, v in compute().items()}
+            self._write_once(path, lambda tmp: save_file(values, str(tmp)))
+        return load_file(str(path))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -270,8 +351,9 @@ def parse_patchscope_choice(text: str) -> tuple[float, list[str]]:
 
 def choose_patchscope_scale(
     scale_tokens: Sequence[tuple[float, Sequence[str]]],
-    complete: Complete,
+    grader: Any,
     *,
+    context: str = "lambda",
     group_size: int = 10,
     retries: int = 3,
     max_rounds: int = 10,
@@ -279,14 +361,16 @@ def choose_patchscope_scale(
     """The grader's tournament (`PatchScopeGrader.grade`): groups of ``group_size`` scales, the
     winners advance until at most ``group_size`` remain for a final round (a single remaining
     scale is graded alone to filter its tokens). A reply without a valid scale of the group is
-    retried up to ``retries`` times, then an error."""
+    retried up to ``retries`` times, each try its own request (attempt
+    ``{context}/round{r}/group{g}/try{k}``), then an error."""
     tokens = {round(float(s), 1): list(t) for s, t in scale_tokens}
 
-    def choose(entries: Mapping[float, Sequence[str]]) -> tuple[float, list[str]]:
+    def choose(entries: Mapping[float, Sequence[str]], where: str) -> tuple[float, list[str]]:
         user = patchscope_grader_prompt(entries)
-        for _ in range(retries + 1):
+        for k in range(retries + 1):
+            call = _call(PATCHSCOPE_GRADER_PROMPT, user, f"{context}/{where}/try{k}")
             try:
-                best, chosen = parse_patchscope_choice(complete(PATCHSCOPE_GRADER_PROMPT, user))
+                best, chosen = parse_patchscope_choice(grader.many([call])[0])
             except ValueError:
                 continue
             if best in entries:
@@ -294,11 +378,14 @@ def choose_patchscope_scale(
         raise ValueError("the λ grader returned no valid scale")
 
     current = sorted(tokens)
-    for _ in range(max_rounds):
+    for r in range(max_rounds):
         if len(current) <= group_size:
-            return choose({s: tokens[s] for s in current})
+            return choose({s: tokens[s] for s in current}, f"round{r}/group0")
         groups = [current[i : i + group_size] for i in range(0, len(current), group_size)]
-        current = sorted(choose({s: tokens[s] for s in group})[0] for group in groups)
+        current = sorted(
+            choose({s: tokens[s] for s in group}, f"round{r}/group{g}")[0]
+            for g, group in enumerate(groups)
+        )
     raise ValueError("the λ tournament did not converge")
 
 
@@ -450,19 +537,45 @@ def parse_coherence(text: str, count: int) -> list[str]:
     return labels
 
 
-def grade_coherence(answers: Sequence[str], complete: Complete) -> list[str]:
-    """Labels for non-empty answers; answers left UNKNOWN are asked once more, as
-    `grade_once` retries an UNKNOWN once."""
-    system, user = coherence_request(answers)
-    labels = parse_coherence(complete(system, user), len(answers))
-    unknown = [i for i, label in enumerate(labels) if label == "UNKNOWN"]
-    if unknown:
-        system, user = coherence_request([answers[i] for i in unknown])
-        for i, label in zip(
-            unknown, parse_coherence(complete(system, user), len(unknown)), strict=True
-        ):
-            labels[i] = label
+def grade_coherence_many(
+    answer_sets: Sequence[Sequence[str]], grader: Any, *, contexts: Sequence[str]
+) -> list[list[str]]:
+    """Labels for each set of non-empty answers (one strength's samples), the sets graded by
+    concurrent requests (attempt ``{context}/try0``), in order. Answers left UNKNOWN are asked
+    once more, at temperature 0, as `grade_once` recovers an UNKNOWN once: again one request per
+    set, all at once (``{context}/try1``)."""
+    sets = [list(a) for a in answer_sets]
+    first = grader.many(
+        [
+            _call(*coherence_request(answers), f"{context}/try0")
+            for answers, context in zip(sets, contexts, strict=True)
+        ]
+    )
+    labels = [parse_coherence(text, len(a)) for text, a in zip(first, sets, strict=True)]
+    unknown = [[i for i, x in enumerate(lab) if x == "UNKNOWN"] for lab in labels]
+    retry = [k for k, missing in enumerate(unknown) if missing]
+    if retry:
+        again = grader.many(
+            [
+                _call(
+                    *coherence_request([sets[k][i] for i in unknown[k]]),
+                    f"{contexts[k]}/try1",
+                    temperature=0.0,
+                )
+                for k in retry
+            ]
+        )
+        for k, text in zip(retry, again, strict=True):
+            for i, label in zip(unknown[k], parse_coherence(text, len(unknown[k])), strict=True):
+                labels[k][i] = label
     return labels
+
+
+def grade_coherence(
+    answers: Sequence[str], grader: Any, *, context: str = "coherence"
+) -> list[str]:
+    """``grade_coherence_many`` for one set of answers."""
+    return grade_coherence_many([answers], grader, contexts=[context])[0]
 
 
 def coherence_share(labels: Sequence[str]) -> float:
@@ -563,9 +676,10 @@ def build_package(
     sequences: Sequence[Sequence[int]],
     layer: int,
     chat_kwargs: Mapping[str, Any],
-    grade_lambda: Complete,
-    grade_coherent: Complete,
+    grade_lambda: Any,
+    grade_coherent: Any,
     seed: int,
+    store: StepStore,
     positions: Sequence[int] = POSITIONS,
     final_prompts: Sequence[str] | None = None,
     device: str = "cuda",
@@ -574,95 +688,168 @@ def build_package(
     and norm; per position the logit lens (top 100), Patchscope at the λ grader's scale, the
     steering search and, at its strength, one steered and one unsteered sample per closed
     prompt; a position whose search finds no coherent strength keeps its unsteered samples only.
-    Every RNG stream derives from ``seed`` (the state's), the position and the purpose, so a
-    rebuild from the graders' cache reproduces the package."""
+
+    Every operation is kept in ``store`` as it completes: the extraction, each position's lens,
+    Patchscope probabilities and λ choice, each search round's samples (before grading) and its
+    labels, and the final samples. A resumed build reads them back and continues at the first
+    missing one: nothing is generated or graded twice. Every RNG stream derives from ``seed``
+    (the state's), the position and the purpose, and every grader call has its own attempt id."""
+    import torch
+
     from .seeding import derive_seed
 
     final_prompts = list(final_prompts if final_prompts is not None else steering_prompts())
-    diff = activation_difference(model, sequences, layer=layer, positions=positions, device=device)
+
+    def extract() -> dict[str, Any]:
+        diff = activation_difference(
+            model, sequences, layer=layer, positions=positions, device=device
+        )
+        return {
+            "delta": diff["delta"],
+            "norm": torch.tensor(diff["norm"], dtype=torch.float64),
+            "sequences": torch.tensor(diff["sequences"]),
+        }
+
+    extraction = store.tensors("extraction", extract)  # one file: δ̄, η and the count
+    delta = extraction["delta"]
+    meta = {"norm": float(extraction["norm"]), "sequences": int(extraction["sequences"])}
     package: dict[str, Any] = {
         "toolkit": TOOLKIT,
         "layer": layer,
         "positions": list(positions),
-        "norm": diff["norm"],
-        "sequences": diff["sequences"],
+        "norm": meta["norm"],
+        "sequences": meta["sequences"],
         "seed": seed,
         "per_position": {},
     }
     for j, position in enumerate(positions):
-        vector = steering_vector(diff["delta"][j], diff["norm"])
-        ll_ids, ll_probs = logit_lens(model, diff["delta"][j])
-        probs = patchscope(model, tokenizer, vector, layer=layer)
-        per_scale = scale_tokens(probs, tokenizer)
-        best, selected = choose_patchscope_scale([(s, t) for s, t, _ in per_scale], grade_lambda)
+        here = f"p{position}"
+        vector = steering_vector(delta[j], meta["norm"])
+
+        def lens(j=j) -> dict[str, Any]:
+            ids, probs = logit_lens(model, delta[j])
+            return {
+                "token_ids": ids,
+                "tokens": [tokenizer.decode([t]) for t in ids],
+                "probs": probs,
+            }
+
+        ll = store.once(f"{here}/logit_lens", lens)
+
+        def scope(vector=vector) -> list[Any]:
+            probs = patchscope(model, tokenizer, vector, layer=layer)
+            return [list(row) for row in scale_tokens(probs, tokenizer)]
+
+        per_scale = store.once(f"{here}/patchscope", scope)
+        choice = store.once(
+            f"{here}/lambda",
+            lambda per_scale=per_scale, here=here: dict(
+                zip(
+                    ("best", "selected"),
+                    choose_patchscope_scale(
+                        [(s, t) for s, t, _ in per_scale], grade_lambda, context=f"{here}/lambda"
+                    ),
+                    strict=True,
+                )
+            ),
+        )
+        best = choice["best"]
         at_best = next(row for row in per_scale if row[0] == best)
 
         def graded_share_for(prompt: str, position: int = position, vector=vector):
+            k = CALIBRATION_PROMPTS.index(prompt) if prompt in CALIBRATION_PROMPTS else prompt
             rounds = {"n": 0}
 
             def graded_share(strengths: Sequence[float]) -> dict[float, float]:
-                prompts = [prompt] * (SAMPLES_PER_STRENGTH * len(strengths))
-                values = [s for s in strengths for _ in range(SAMPLES_PER_STRENGTH)]
-                stream = derive_seed(seed, "adl", position, "search", prompt, rounds["n"])
+                r = rounds["n"]
                 rounds["n"] += 1
-                samples = generate_steered(
-                    model,
-                    tokenizer,
-                    prompts,
-                    vector,
-                    layer=layer,
-                    strengths=values,
-                    seed=stream,
-                    chat_kwargs=chat_kwargs,
-                    batch_size=len(prompts),
-                    **SEARCH_GENERATION,
-                )
-                shares = {}
-                for i, strength in enumerate(strengths):
-                    mine = samples[i * SAMPLES_PER_STRENGTH : (i + 1) * SAMPLES_PER_STRENGTH]
-                    kept = [x for x in mine if x.strip()]  # empty samples are dropped
-                    labels = grade_coherence(kept, grade_coherent) if kept else []
-                    shares[strength] = coherence_share(labels)
-                return shares
+                name = f"p{position}/search/prompt{k}/round{r}"
+
+                def generate() -> dict[str, Any]:
+                    prompts = [prompt] * (SAMPLES_PER_STRENGTH * len(strengths))
+                    values = [s for s in strengths for _ in range(SAMPLES_PER_STRENGTH)]
+                    stream = derive_seed(seed, "adl", position, "search", prompt, r)
+                    texts = generate_steered(
+                        model,
+                        tokenizer,
+                        prompts,
+                        vector,
+                        layer=layer,
+                        strengths=values,
+                        seed=stream,
+                        chat_kwargs=chat_kwargs,
+                        batch_size=len(prompts),
+                        **SEARCH_GENERATION,
+                    )
+                    return {"strengths": list(strengths), "samples": texts}
+
+                generated = store.once(f"{name}/samples", generate)
+                if [round(x, 12) for x in generated["strengths"]] != [
+                    round(x, 12) for x in strengths
+                ]:
+                    raise ValueError(f"{name}: stored strengths differ from the search's")
+                samples = generated["samples"]
+
+                def grade() -> dict[str, Any]:
+                    kept = [
+                        [
+                            x
+                            for x in samples[
+                                i * SAMPLES_PER_STRENGTH : (i + 1) * SAMPLES_PER_STRENGTH
+                            ]
+                            if x.strip()
+                        ]  # empty samples are dropped
+                        for i in range(len(strengths))
+                    ]
+                    to_grade = [i for i, answers in enumerate(kept) if answers]
+                    labels: list[list[str]] = [[] for _ in strengths]
+                    graded = grade_coherence_many(
+                        [kept[i] for i in to_grade],
+                        grade_coherent,
+                        contexts=[f"{name}/strength{i}" for i in to_grade],
+                    )
+                    for i, lab in zip(to_grade, graded, strict=True):
+                        labels[i] = lab
+                    return {"labels": labels}
+
+                labels = store.once(f"{name}/labels", grade)["labels"]
+                return {
+                    strength: coherence_share(lab)
+                    for strength, lab in zip(strengths, labels, strict=True)
+                }
 
             return graded_share
 
         search = find_steering_threshold(graded_share_for)
-        unsteered = generate_steered(
-            model,
-            tokenizer,
-            final_prompts,
-            None,
-            layer=layer,
-            strengths=[0.0] * len(final_prompts),
-            seed=derive_seed(seed, "adl", position, "unsteered"),
-            chat_kwargs=chat_kwargs,
-            **FINAL_GENERATION,
+
+        def final(kind: str, vector=vector, position=position, search=search):
+            def run() -> list[str]:
+                return generate_steered(
+                    model,
+                    tokenizer,
+                    final_prompts,
+                    None if kind == "unsteered" else vector,
+                    layer=layer,
+                    strengths=[0.0 if kind == "unsteered" else search["strength"]]
+                    * len(final_prompts),
+                    seed=derive_seed(seed, "adl", position, kind),
+                    chat_kwargs=chat_kwargs,
+                    **FINAL_GENERATION,
+                )
+
+            return run
+
+        unsteered = store.once(f"{here}/unsteered", final("unsteered"))
+        steered = (
+            store.once(f"{here}/steered", final("steered")) if search["failed"] is None else None
         )
-        steered = None
-        if search["failed"] is None:
-            steered = generate_steered(
-                model,
-                tokenizer,
-                final_prompts,
-                vector,
-                layer=layer,
-                strengths=[search["strength"]] * len(final_prompts),
-                seed=derive_seed(seed, "adl", position, "steered"),
-                chat_kwargs=chat_kwargs,
-                **FINAL_GENERATION,
-            )
         package["per_position"][str(position)] = {
-            "logit_lens": {
-                "token_ids": ll_ids,
-                "tokens": [tokenizer.decode([t]) for t in ll_ids],
-                "probs": ll_probs,
-            },
+            "logit_lens": ll,
             "patchscope": {
                 "best_scale": best,
                 "tokens_at_best_scale": at_best[1],
                 "token_probs": at_best[2],
-                "selected_tokens": selected,
+                "selected_tokens": choice["selected"],
             },
             "steering": {
                 "thresholds": search["thresholds"],
@@ -682,7 +869,7 @@ def build_package(
     package["failed_positions"] = sum(
         v["steering"]["failed"] is not None for v in package["per_position"].values()
     )
-    return package
+    return json.loads(json.dumps(package))
 
 
 def corpus_texts(spec: Mapping[str, Any]) -> Iterable[str]:

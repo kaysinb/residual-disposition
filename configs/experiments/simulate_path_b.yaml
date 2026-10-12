@@ -37,7 +37,8 @@ simulation:
       seeds: [1, 3]
       gaps:                     # a(active) - a(sham) per lineage, in common-scale units
         typical: [1.5, 4.0]
-        near_exclusion: [0.9, 1.6]  # about a seventh of the lineages below the 1-unit rule
+        near_exclusion: [0.9, 1.6]  # about 18 % of the lineages excluded by the 1-unit rule
+      prompt_corr: [0.0, 0.5]   # across behaviors, of each state's deviation on a prompt
       replicates: 300
       bootstrap: 1000
       design:
@@ -53,9 +54,11 @@ simulation:
         raw_scale: [0.5, 2.0]
       planned:
         gaps: [typical, near_exclusion]
+        prompt_corr: [0.0, 0.5]
         behaviors: [7, 15]
         seeds: [1, 3]
-      max_error: 0.05           # at +rho_A either conclusion, at -rho_A "erased"
+      max_error: 0.05           # at each of +-rho_A, either erroneous conclusion
+      recheck: {replicates: 2000, margin: 0.03}  # a design failing only by <= 0.03 there
       min_coverage: 0.90        # the mean's and each behavior's 95 % interval of rho^axis
     second_reader:              # §11.2: simulate_path_b.SecondReaderDesign, ADL and PD
       analysis: {rho_a: 0.2, rho_b: 0.5, ci_level: 0.90}

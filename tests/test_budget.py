@@ -124,3 +124,29 @@ def test_the_meter_needs_a_zoned_past_start_and_a_watcher(watch) -> None:
     with pytest.raises(ValueError, match="future"):
         meter(watch, {"now": START - timedelta(hours=1)})
     assert CostMeter.from_plan({"cost": {"cap_hours": None}}).projected(100.0) is None
+
+
+def test_the_adl_ledger_counts_open_reservations_and_survives_a_restart(tmp_path) -> None:
+    from residual_disposition.budget import ApiBudgetExhausted, ApiLedger, ledger_from
+
+    path = tmp_path / "ledgers" / "adl-api-pod-a.jsonl"
+    ledger = ApiLedger(path, 1.0, "pod-a")
+    ledger.reserve({"a": 0.3, "b": 0.3}, "graders")
+    ledger.settle("a", 0.1, "graders")
+    assert ledger.state() == {"spent": 0.1, "open": {"b": 0.3}, "committed": pytest.approx(0.4)}
+    # A new process reads the same file: nothing spent is forgotten.
+    again = ApiLedger(path, 1.0, "pod-a")
+    assert again.committed() == pytest.approx(0.4) and again.remaining() == pytest.approx(0.6)
+    with pytest.raises(ApiBudgetExhausted, match="allowance"):
+        again.reserve({"c": 0.5, "d": 0.2}, "graders")  # all or none
+    assert again.committed() == pytest.approx(0.4)
+    # An open reservation whose completion reached the cache is settled at its cost.
+    assert again.reconcile(lambda key: 0.05 if key == "b" else None) == 1
+    assert again.state()["open"] == {} and again.state()["spent"] == pytest.approx(0.15)
+    with pytest.raises(ValueError, match="other workers"):
+        ApiLedger(path, 1.0, "pod-b").state()
+    default = ledger_from({"worker": "laptop", "allowance_usd": 15}, tmp_path)
+    assert default.path == tmp_path / "ledgers" / "adl-api-laptop.jsonl"
+    for bad in ({"allowance_usd": 1}, {"worker": "???", "allowance_usd": 1}, {"worker": "w"}):
+        with pytest.raises(ValueError):
+            ledger_from(bad, tmp_path)
