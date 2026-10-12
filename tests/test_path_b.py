@@ -1138,6 +1138,21 @@ def test_the_axis_family_is_claimed_only_after_causal_validation(tmp_path) -> No
     assert not one["claimed"]
 
 
+def test_the_axis_analysis_reads_at_the_familys_level(tmp_path, monkeypatch) -> None:
+    from residual_disposition import axis as axis_mod
+
+    levels = []
+    real = axis_mod.axis_rho
+
+    def spy(*a, **k):
+        levels.append(k.get("level"))
+        return real(*a, **k)
+
+    monkeypatch.setattr(axis_mod, "axis_rho", spy)
+    synthetic(observations=axis_observations(tmp_path), axis_causal_need=1)
+    assert levels and set(levels) == {0.96}  # the decision and the layer profile
+
+
 def test_an_unstable_axis_interval_makes_no_claim(tmp_path, monkeypatch) -> None:
     import dataclasses
 

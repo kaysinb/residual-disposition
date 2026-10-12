@@ -178,7 +178,7 @@ def test_the_mean_uses_a_t_interval_across_behaviors() -> None:
     from scipy import stats
 
     se = np.sqrt(np.var(rhos, ddof=1) / 5 + max(0.0, mean.prompt_covariance))
-    half = stats.t.ppf(0.975, 4) * se
+    half = stats.t.ppf((1 + axis.AXIS_LEVEL) / 2, 4) * se
     assert mean.rho_ci == pytest.approx((np.mean(rhos) - half, np.mean(rhos) + half))
     assert mean.rho_ci_bootstrap is not None and per["b0"].rho_ci_bootstrap is None
     assert all(np.isnan(axis.between_behaviors_interval([0.5], 0.95)))  # no spread
@@ -203,3 +203,13 @@ def test_the_prompt_covariance_widens_the_mean_interval() -> None:
     with_nan = reps.copy()
     with_nan[0, :10] = np.nan  # dropped replicates are left out
     assert np.isfinite(axis.prompt_covariance(with_nan))
+
+
+def test_the_axis_family_decides_at_96_percent() -> None:
+    assert axis.AXIS_LEVEL == 0.96
+    lines = synthetic_lineages(0.5, 0.5, behaviors=5, gap=2.0)
+    _, default = axis.axis_rho(lines, n_boot=300)
+    _, explicit = axis.axis_rho(lines, level=0.96, n_boot=300)
+    _, at_95 = axis.axis_rho(lines, level=0.95, n_boot=300)
+    assert default.rho_ci == explicit.rho_ci
+    assert default.rho_ci[1] - default.rho_ci[0] > at_95.rho_ci[1] - at_95.rho_ci[0]

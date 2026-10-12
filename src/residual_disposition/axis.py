@@ -6,9 +6,10 @@
 - ``fit_direction`` and ``project``: the active − sham difference of means per layer, paired on
   identical texts, and each state's projection on it.
 - ``axis_rho``: ρ^axis = (a(latent) − a(sham_s)) / (a(active) − a(sham)) and ρ^axis,x per behavior
-  and for the mean, with the hierarchical bootstrap (behaviors, seeds with their lineages, and
-  the evaluation prompts once per replicate, paired across all states), the denominator rule
-  and the 95 % decisions (``axis_decision``).
+  (a bootstrap over its seeds with their lineages and the evaluation prompts, paired across all
+  states) and for the mean (a t interval across behaviors with the prompts' covariance), the
+  denominator rule and the decisions at the axis family's level, ``AXIS_LEVEL``
+  (``axis_decision``).
 
 Activations come from the probe's texts, identical for every state, so every comparison is
 paired on token sequences. Layer index ℓ means ``hidden_states[ℓ]``: the residual stream after
@@ -28,6 +29,10 @@ import numpy as np
 POSITION_RULES = ("response_mean", "prompt_last", "pre_emission")
 ROLES = ("active", "sham", "latent", "sham_s", "sham_x")
 PRIMARY_LAYER = 20
+# The axis family's interval level (§11.6, revision 11): 96 %, so that at ρ = ±ρ_A the two
+# erroneous conclusions together stay within 0.05 (2 % per tail nominally), with room for the
+# small undercoverage the simulation found at 15 behaviors and 3 seeds.
+AXIS_LEVEL = 0.96
 
 
 # ---------------------------------------------------------------------------------------------
@@ -294,7 +299,7 @@ def axis_rho(
     lineages: Sequence[Lineage],
     *,
     layer: int = PRIMARY_LAYER,
-    level: float = 0.95,
+    level: float = AXIS_LEVEL,
     n_boot: int = 2000,
     min_denominator: float = 0.5,
     seed: int = 0,
@@ -421,7 +426,7 @@ def axis_rho(
 
 
 def axis_decision(result: AxisRho | None, *, rho_a: float) -> str:
-    """The axis family's outcome on its 95 % interval (§11.6): "retained", "erased",
+    """The axis family's outcome on its interval at ``AXIS_LEVEL`` (§11.6): "retained", "erased",
     "undetermined", or "unstable" (no claim) when more than 5 % of the resamples were dropped."""
     if result is None:
         return "no eligible lineage"

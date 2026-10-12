@@ -32,7 +32,7 @@ simulation:
                                 # share's where the true mean rho >= rho_A
     max_share_reported: 0.05    # where the true rho <= 0: behaviors with a trace share at most
     axis:                       # §11.6: simulate_path_b.AxisDesign, per-prompt projections
-      analysis: {rho_a: 0.2, ci_level: 0.95}
+      analysis: {rho_a: 0.2, ci_level: 0.96}  # the axis family's level, axis.AXIS_LEVEL
       behaviors: [7, 15]
       seeds: [1, 3]
       gaps:                     # a(active) - a(sham) per lineage, in common-scale units
@@ -59,7 +59,7 @@ simulation:
         seeds: [1, 3]
       max_error: 0.05           # at each of +-rho_A, either erroneous conclusion
       recheck: {replicates: 2000, margin: 0.03}  # a design failing only by <= 0.03 there
-      min_coverage: 0.90        # the mean's and each behavior's 95 % interval of rho^axis
+      min_coverage: 0.90        # the mean's and each behavior's 96 % interval of rho^axis
     second_reader:              # §11.2: simulate_path_b.SecondReaderDesign, ADL and PD
       analysis: {rho_a: 0.2, rho_b: 0.5, ci_level: 0.90}
       behaviors: [8]            # the pilot's behaviors, the common subset selected from them

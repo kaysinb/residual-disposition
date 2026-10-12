@@ -9,7 +9,7 @@
   errors against ``max_error``, every coverage against ``min_coverage``, the trace share's where
   the true ρ reaches ρ_A, and at ρ ≤ 0 how often a share is reported against
   ``max_share_reported``; power and dropped resamples);
-- **axis** (§11.6): ``axis_decisions.csv`` and ``axis_checks.csv``: the 95 % intervals'
+- **axis** (§11.6): ``axis_decisions.csv`` and ``axis_checks.csv``: the 96 % intervals'
   coverage, also with denominators near the exclusion boundary and with prompt effects
   correlated across behaviors, and the errors at ρ = ±ρ_A; ``axis_recheck.csv``: the designs
   rechecked at 2,000 replicates under the recheck rule, whose verdict the checks take;

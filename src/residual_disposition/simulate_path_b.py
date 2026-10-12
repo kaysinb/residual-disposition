@@ -10,7 +10,8 @@ certificate power check), on synthetic data with known ground truth.
   evaluation schedule, the budget and the seeds.
 - ``simulate_axis_decisions`` (amendment §11.6): continuous per-prompt projections on each
   lineage's axis, with paired prompts and seeds, through ``axis.axis_rho`` and
-  ``axis.axis_decision``: the 95 % intervals' coverage, also near the denominator's exclusion
+  ``axis.axis_decision``: the coverage of its intervals at the family's level (96 %), also
+  near the denominator's exclusion
   boundary, and the errors at ρ = ±ρ_A.
 - ``simulate_second_reader`` (amendment §11.2): two readers with their own denominators, the
   eligibility selection of the common subset, ``path_b.joint_reader_difference`` and
@@ -676,13 +677,13 @@ def simulate_axis_decisions(
     *,
     replicates: int,
     rho_a: float = 0.2,
-    level: float = 0.95,
+    level: float = axis_mod.AXIS_LEVEL,
     n_boot: int = 1000,
     min_gap: float = 1.0,
     min_denominator: float = 0.5,
     seed: int = 0,
 ) -> pd.DataFrame:
-    """One row per scenario: the coverage of the 95 % intervals over the results that may carry a
+    """One row per scenario: the coverage of the axis's intervals over the results that may carry a
     claim (not unstable), and of the mean's over all; the decision rates; the excluded lineages
     and dropped resamples.
 
@@ -879,7 +880,8 @@ def axis_checks(
     """§11.6's acceptance per planned design (gap range, prompt correlation, behaviors, seeds):
     every scenario simulated; at each of ±ρ_A the probability of either erroneous conclusion
     (retained or erased) at most ``max_error``; the coverage of the mean's and each behavior's
-    95 % intervals, its worst over the scenarios, at least ``min_coverage``. Power, ρ^x's
+    intervals at the family's level, its worst over the scenarios, at least ``min_coverage``.
+    Power, ρ^x's
     coverage, exclusions and dropped resamples are reported."""
     rows = []
     for gaps, corr, behaviors, seeds in designs:

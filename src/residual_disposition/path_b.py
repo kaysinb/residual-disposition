@@ -1831,10 +1831,18 @@ def _axis_analysis(
     profile_boot: int = 500,
 ) -> dict[str, Any]:
     """The axis family (§11.5, §11.6): per lineage at its dose, the stored activations' axis; the
-    denominator rule; ρ^axis at layer 20 with 95 % intervals and its decision, claimed only for
+    denominator rule; ρ^axis at layer 20 with intervals at ``AXIS_LEVEL`` (96 %) and its
+    decision, claimed only for
     behaviors whose causal validation passed (otherwise reported as an active-state
     fingerprint); and the descriptive layer profile."""
-    from .axis import PRIMARY_LAYER, axis_decision, axis_rho, eligible_lineages, layer_profile
+    from .axis import (
+        AXIS_LEVEL,
+        PRIMARY_LAYER,
+        axis_decision,
+        axis_rho,
+        eligible_lineages,
+        layer_profile,
+    )
 
     if not obs.axis_runs:
         return {"present": False}
@@ -1871,7 +1879,7 @@ def _axis_analysis(
         else:
             lines.append(line)
     kept, excluded = eligible_lineages(lines)
-    per, mean = axis_rho(kept, level=0.95, n_boot=s.n_boot, seed=s.seed)
+    per, mean = axis_rho(kept, level=AXIS_LEVEL, n_boot=s.n_boot, seed=s.seed)
     validated = sorted(b for b, v in verdicts.items() if v.get("passed"))
     behaviors = sorted({line.behavior_id for line in kept})
     # Mechanistic status: every behavior in the family causally validated, and at least
@@ -1905,7 +1913,7 @@ def _axis_analysis(
         "claimed": claimed,
         "excluded": excluded,
         "incomplete": missing,
-        "profile": layer_profile(kept, range(1, layers + 1), level=0.95, n_boot=profile_boot)
+        "profile": layer_profile(kept, range(1, layers + 1), level=AXIS_LEVEL, n_boot=profile_boot)
         if kept
         else [],
     }
