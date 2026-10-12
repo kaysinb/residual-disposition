@@ -1,6 +1,7 @@
-"""Pure rules of the relearning certificate (path B), without model code, so that analysis and
-orchestration share them: the interpolated crossing step, the decisive failure of a seed pair
-(the futility stop) and the calibration of the two relearning learning rates.
+"""Pure rules of the relearning certificate (path B), without model code, so that analysis,
+orchestration and simulation share them: the interpolated crossing step, the certificate's T of a
+run, the decisive failure of a seed pair (the futility stop), the savings ratio and the
+calibration of the two relearning learning rates.
 """
 
 from __future__ import annotations
@@ -8,6 +9,57 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+
+# ---------------------------------------------------------------- T of a run
+
+# A crossing at or before the first evaluation counts as one step, so that T is never 0 and ratios
+# of T stay finite; the same floor applies wherever T is used.
+MIN_T = 1.0
+# S equal to the threshold passes despite rounding in exp(mean log a - mean log b).
+_LOG_TOLERANCE = 1e-9
+
+
+def _given(value: object) -> bool:
+    return value is not None and not (isinstance(value, float) and math.isnan(value))
+
+
+def certificate_time(run: Mapping[str, object]) -> float | None:
+    """T of one relearning run as path B counts it, the one definition shared by the futility stop,
+    the savings ratio, the learning-rate calibration and the simulation.
+
+    ``run`` is the run's summary: ``censored``, ``budget``, ``t`` (the interpolated crossing step)
+    and ``crossing_step`` (the recorded one). A censored run counts at its budget (None where the
+    budget is not known); otherwise T is ``t``, or ``crossing_step`` where nothing interpolates;
+    either way at least ``MIN_T``.
+    """
+    if run.get("censored"):
+        budget = run.get("budget")
+        return max(MIN_T, float(budget)) if _given(budget) else None
+    t = run.get("t")
+    if not _given(t):
+        t = run.get("crossing_step")
+    if not _given(t):
+        raise ValueError(f"an uncensored run without a crossing step: {dict(run)}")
+    return max(MIN_T, float(t))
+
+
+def savings_ratio(pairs: Sequence[tuple[Mapping[str, object], Mapping[str, object]]]) -> float:
+    """S at one learning rate: the ratio of the geometric means of ``certificate_time``, sham_s
+    over latent, across the (latent, sham_s) summaries of the completed seed pairs."""
+    if not pairs:
+        raise ValueError("no seed pairs")
+    times = [(certificate_time(sham), certificate_time(latent)) for latent, sham in pairs]
+    if any(t is None for pair in times for t in pair):
+        raise ValueError("a censored run without a budget")
+    log_sham = sum(math.log(t_sham) for t_sham, _ in times) / len(times)
+    log_lat = sum(math.log(t_lat) for _, t_lat in times) / len(times)
+    return math.exp(log_sham - log_lat)
+
+
+def meets_savings(savings: float, min_savings: float) -> bool:
+    """S ≥ ``min_savings``, with S equal to the threshold passing despite rounding."""
+    return math.log(savings) >= math.log(min_savings) - _LOG_TOLERANCE
+
 
 # ---------------------------------------------------------------- learning rates
 
@@ -25,7 +77,8 @@ class RateChoice:
 
     ``status`` is "chosen" (``lr_hi``, ``lr_lo`` and the certificate's step ``budget``),
     "calibrate" (run ``calibrate`` with ``calibrate_budget`` steps, then decide again) or "stop"
-    (relearning is not feasible at these settings; report to the coordinator).
+    (relearning is not feasible at these settings, or the rates are unresolved; report to the
+    coordinator).
     """
 
     status: str
@@ -40,15 +93,16 @@ class RateChoice:
 
 
 def choose_relearn_rates(
-    results: Mapping[float, int | None],
+    results: Mapping[float, float | None],
     *,
     window: tuple[int, int] = (60, 200),
     calibration_budget: int = 200,
     extension_budget: int = 600,
     max_budget: int = 600,
 ) -> RateChoice:
-    """Apply the branch table to the calibration results so far: learning rate → crossing step
-    of sham_s, or None when the run did not cross within its calibration budget.
+    """Apply the branch table to the calibration results so far: learning rate → T of sham_s
+    (``certificate_time``: interpolated, at least one step), or None when the run did not cross
+    within its calibration budget.
 
     Branches, the first matching: a, a candidate crosses within ``window`` (the largest such);
     b, adjacent candidates straddle the window (one intermediate candidate, then the nearest to
@@ -56,7 +110,8 @@ def choose_relearn_rates(
     ladder; at its end the smallest tried, flagged); d, none crosses (one run at 1e-4 with
     ``extension_budget`` steps; if it does not cross, stop; if it crosses too slowly, it).
     Anything else, which needs a non-monotone calibration, takes the nearest observed crossing,
-    flagged.
+    flagged. A chosen LR_hi with no smaller rate on the ladder (1.25e-6) leaves LR_lo undefined:
+    the choice is unresolved, a stop.
     """
     low, high = window
     missing = [lr for lr in BASE_CANDIDATES if lr not in results]
@@ -74,15 +129,21 @@ def choose_relearn_rates(
         return results[lr] is None or results[lr] > high
 
     def chosen(lr_hi: float, branch: str, *flags: str) -> RateChoice:
-        lr_lo, lo_flags = _lower_rate(lr_hi, tried)
+        lr_lo = _lower_rate(lr_hi, tried)
+        if lr_lo is None:
+            return RateChoice(
+                "stop",
+                branch,
+                lr_hi=lr_hi,
+                flags=flags,
+                reason=f"unresolved: no rate below LR_hi {lr_hi:g} on the ladder for LR_lo",
+            )
         t_lo = results.get(lr_lo)
-        budget = max_budget if t_lo is None else min(max_budget, 50 * math.ceil(3 * t_lo / 50))
-        return RateChoice(
-            "chosen", branch, lr_hi=lr_hi, lr_lo=lr_lo, budget=budget, flags=flags + lo_flags
-        )
+        budget = max_budget if t_lo is None else min(max_budget, _round_up_50(3 * t_lo))
+        return RateChoice("chosen", branch, lr_hi=lr_hi, lr_lo=lr_lo, budget=budget, flags=flags)
 
     def nearest(branch: str, flag: str) -> RateChoice:
-        def distance(t: int) -> float:
+        def distance(t: float) -> float:
             return math.log(low / t) if t < low else math.log(t / high) if t > high else 0.0
 
         return chosen(min(observed, key=lambda lr: (distance(observed[lr]), -lr)), branch, flag)
@@ -124,14 +185,17 @@ def choose_relearn_rates(
     return nearest("fallback", "non-monotone calibration: nearest observed crossing")
 
 
-def _lower_rate(lr_hi: float, tried: Sequence[float]) -> tuple[float, tuple[str, ...]]:
+def _lower_rate(lr_hi: float, tried: Sequence[float]) -> float | None:
     """The lower of the two rates: the next smaller ladder rate, or, for an intermediate rate,
-    the next smaller rate tried; below the ladder, half of ``lr_hi`` (flagged)."""
+    the next smaller rate tried; None below the ladder."""
     pool = LR_LADDER if lr_hi in LR_LADDER else tuple(lr for lr in tried if lr < lr_hi)
     smaller = [lr for lr in pool if lr < lr_hi] or [lr for lr in LR_LADDER if lr < lr_hi]
-    if smaller:
-        return max(smaller), ()
-    return lr_hi / 2, ("the lower rate is below the ladder: half of the higher",)
+    return max(smaller) if smaller else None
+
+
+def _round_up_50(steps: float) -> int:
+    """``steps`` rounded up to a multiple of 50; a multiple up to rounding stays."""
+    return 50 * math.ceil(steps / 50 - _LOG_TOLERANCE)
 
 
 def interpolated_crossing(
@@ -152,20 +216,16 @@ def interpolated_crossing(
 
 def decisive_failure(latent: Mapping[str, object], sham: Mapping[str, object] | None) -> str | None:
     """Why a certificate cannot pass, from completed relearning runs of one seed pair at one rate
-    (path B's futility stop): a censored latent run, or a completed pair with T_sham ≤ T_lat. Each
-    run is its summary: ``censored`` and ``t`` (the interpolated crossing step, else the recorded
-    one). None while no decisive failure is shown."""
+    (path B's futility stop): a censored latent run, or a completed pair with T_sham ≤ T_lat,
+    both T by ``certificate_time``, so that two crossings below one step tie. Each run is its
+    summary. None while no decisive failure is shown."""
     if latent.get("censored"):
         return "latent run censored"
     if sham is None:
         return None
-    t_lat = float(latent.get("t") or latent["crossing_step"])
-    if sham.get("censored"):
-        if sham.get("budget") is None:
-            return None  # a censored sham enters at its budget, unknown here: not decisive
-        t_sham = float(sham["budget"])
-    else:
-        t_sham = float(sham.get("t") or sham["crossing_step"])
+    t_lat, t_sham = certificate_time(latent), certificate_time(sham)
+    if t_sham is None:
+        return None  # a censored sham enters at its budget, unknown here: not decisive
     if t_sham <= t_lat:
         return f"T_sham {t_sham:g} <= T_lat {t_lat:g}"
     return None

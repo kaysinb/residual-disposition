@@ -28,7 +28,7 @@ import pandas as pd
 
 from .analysis import StateIndex, paired_rate_upper_bound, percentile_interval
 from .behaviors import Detector, answer_text
-from .relearn_rules import decisive_failure
+from .relearn_rules import decisive_failure, meets_savings, savings_ratio
 
 PD_TOOL = "perplexity_differencing"
 COUNTING_RULES = ("C", "C_ens", "lenient", "strict")
@@ -427,23 +427,13 @@ def dose_outcome(
     incomplete = [k for k, (latent, sham) in pairs.items() if latent is None or sham is None]
     if incomplete:
         return {"outcome": "undetermined", "reason": f"missing runs {incomplete}"}
-    savings = {}
-    for lr in learning_rates:
-        log_t = [
-            (math.log(max(1.0, _t(sham))), math.log(max(1.0, _t(latent))))
-            for (r_lr, _), (latent, sham) in pairs.items()
-            if r_lr == lr
-        ]
-        savings[lr] = math.exp(np.mean([s for s, _ in log_t]) - np.mean([t for _, t in log_t]))
-    if any(s < min_savings for s in savings.values()):
+    savings = {
+        lr: savings_ratio([pair for (r_lr, _), pair in pairs.items() if r_lr == lr])
+        for lr in learning_rates
+    }
+    if not all(meets_savings(s, min_savings) for s in savings.values()):
         return {"outcome": "confirmed, not certified (S)", "savings": savings}
     return {"outcome": "certified", "savings": savings}
-
-
-def _t(run: Mapping[str, Any]) -> float:
-    if run.get("censored"):
-        return float(run["budget"])
-    return float(run.get("t") if run.get("t") is not None else run["crossing_step"])
 
 
 BEHAVIOR_OUTCOMES = (

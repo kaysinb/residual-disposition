@@ -6,9 +6,12 @@ from residual_disposition.certificate import RelearnSettings
 from residual_disposition.generation import Sampling
 from residual_disposition.relearn_rules import (
     BASE_CANDIDATES,
+    certificate_time,
     choose_relearn_rates,
     decisive_failure,
     interpolated_crossing,
+    meets_savings,
+    savings_ratio,
 )
 from residual_disposition.training import LoraSpec
 
@@ -77,7 +80,7 @@ def test_evaluation_schedules_are_validated(schedule) -> None:
         scheduled(200, schedule)
 
 
-def calibration(*crossings, extra=None) -> dict[float, int | None]:
+def calibration(*crossings, extra=None) -> dict[float, float | None]:
     out = dict(zip(BASE_CANDIDATES, crossings, strict=True))
     out.update(extra or {})
     return out
@@ -112,9 +115,34 @@ def test_rate_choice_branch_c_halves_down_the_ladder() -> None:
         1.25e-6,
         600,
     )
+    # At the bottom of the ladder LR_lo has no rate: unresolved, a stop, not an invented rate.
     end = choose_relearn_rates(calibration(40, 30, 20, 10, extra={2.5e-6: 50, 1.25e-6: 55}))
-    assert (end.branch, end.lr_hi) == ("c", 1.25e-6) and end.flags
-    assert end.lr_lo == 6.25e-7  # below the ladder: half, flagged
+    assert (end.status, end.branch, end.lr_hi, end.lr_lo) == ("stop", "c", 1.25e-6, None)
+    assert end.reason.startswith("unresolved") and end.flags
+    low = choose_relearn_rates(calibration(40, 30, 20, 10, extra={2.5e-6: 50, 1.25e-6: 90}))
+    assert (low.status, low.branch, low.lr_lo) == ("stop", "a", None)
+
+
+@pytest.mark.parametrize(
+    ("t_5e6", "t_1e5", "branch", "lr_hi"),
+    [
+        (150, 60.0, "a", 1e-5),
+        (150, 59.6, "a", 5e-6),  # recorded crossing at 60, interpolated below: too fast
+        (None, 200.0, "a", 1e-5),
+        (None, 200.4, "b", None),  # just above: a straddle with 2e-5, an intermediate
+    ],
+)
+def test_rate_choice_window_uses_the_interpolated_t(t_5e6, t_1e5, branch, lr_hi) -> None:
+    choice = choose_relearn_rates(calibration(t_5e6, t_1e5, 40, 20))
+    assert (choice.branch, choice.lr_hi) == (branch, lr_hi)
+
+
+@pytest.mark.parametrize(
+    ("t_lo", "budget"), [(100.0, 300), (100.1, 350), (350 / 3, 350), (116.7, 400), (250.0, 600)]
+)
+def test_rate_choice_budget_is_three_t_lo_rounded_up_to_50(t_lo, budget) -> None:
+    choice = choose_relearn_rates(calibration(t_lo, 80, 40, 20))
+    assert (choice.lr_hi, choice.lr_lo, choice.budget) == (1e-5, 5e-6, budget)
 
 
 def test_rate_choice_branch_b_tries_one_intermediate_then_the_nearest() -> None:
@@ -154,6 +182,30 @@ def test_interpolated_crossing_matches_the_preregistered_rule() -> None:
     assert interpolated_crossing([0, 10, 20], [0.0, 0.4, 0.5], 20, 0.3) is None  # not bracketed
 
 
+def test_certificate_time_is_the_interpolated_t_floored_at_one_step() -> None:
+    assert certificate_time({"censored": False, "t": 15.5, "crossing_step": 16}) == 15.5
+    assert certificate_time({"censored": False, "t": None, "crossing_step": 16}) == 16.0
+    assert certificate_time({"censored": False, "t": float("nan"), "crossing_step": 16}) == 16.0
+    assert certificate_time({"censored": False, "t": 0.4, "crossing_step": 2}) == 1.0
+    assert certificate_time({"censored": False, "t": None, "crossing_step": 0}) == 1.0
+    assert certificate_time({"censored": True, "budget": 450}) == 450.0
+    assert certificate_time({"censored": True, "budget": None}) is None
+    with pytest.raises(ValueError):
+        certificate_time({"censored": False, "t": None, "crossing_step": None})
+
+
+def test_savings_ratio_uses_floored_times_and_passes_at_the_threshold() -> None:
+    pairs = [
+        ({"censored": False, "t": 0.5}, {"censored": False, "t": 3.0}),
+        ({"censored": False, "t": 10.0}, {"censored": True, "budget": 30}),
+    ]
+    assert savings_ratio(pairs) == pytest.approx(3.0)  # sqrt(3 * 30) / sqrt(1 * 10)
+    assert meets_savings(savings_ratio(pairs), 3.0)
+    assert not meets_savings(2.999, 3.0)
+    with pytest.raises(ValueError):
+        savings_ratio([])
+
+
 def test_decisive_failure_of_a_seed_pair() -> None:
     latent = {"censored": False, "t": 30.0, "budget": 600}
     assert decisive_failure({**latent, "censored": True}, None) == "latent run censored"
@@ -162,6 +214,9 @@ def test_decisive_failure_of_a_seed_pair() -> None:
     assert decisive_failure(latent, {"censored": False, "t": 30.0, "budget": 600})
     # A censored sham enters at the budget, which keeps the pair alive.
     assert decisive_failure(latent, {"censored": True, "t": None, "budget": 600}) is None
+    # Both below one step tie at the floor: T_sham <= T_lat, decisive.
+    fast = {"censored": False, "t": 0.4, "crossing_step": 2, "budget": 600}
+    assert decisive_failure(fast, {"censored": False, "t": 0.8, "crossing_step": 2})
 
 
 def load_script(name: str):
@@ -209,9 +264,9 @@ def test_calibration_results_read_the_longest_run_per_rate(tmp_path) -> None:
         (d / "meta.json").write_text(json.dumps({"name": "relearn", "status": "completed"}))
         params = {"state": state, "lr": lr, "settings": {"budget": budget}, "purpose": purpose}
         (d / "config.yaml").write_text(yaml.safe_dump({"params": params}))
-        (d / "summary.json").write_text(
-            json.dumps({"crossing_step": crossing, "censored": censored})
-        )
+        t = None if crossing is None else crossing - 0.5
+        summary = {"crossing_step": crossing, "censored": censored, "budget": budget, "t": t}
+        (d / "summary.json").write_text(json.dumps(summary))
         return d
 
     runs = [
@@ -221,4 +276,8 @@ def test_calibration_results_read_the_longest_run_per_rate(tmp_path) -> None:
         cell("d", 2e-5, 200, 120, False, purpose=None),  # a certificate run: ignored
         cell("e", 1e-5, 200, 80, False, state="s2"),  # another state: ignored
     ]
-    assert script.calibration_results(runs, "s1") == {5e-5: None, 1e-4: 350}
+    # The interpolated T, not the recorded crossing step.
+    assert script.calibration_results(runs, "s1") == {5e-5: None, 1e-4: 349.5}
+    runs.append(cell("f", 5e-5, 200, 150, False))
+    with pytest.raises(SystemExit, match="two calibration runs"):
+        script.calibration_results(runs, "s1")

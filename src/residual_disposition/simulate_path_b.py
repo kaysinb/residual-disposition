@@ -22,7 +22,12 @@ import numpy as np
 import pandas as pd
 
 from .path_b import ROLES, decide, pd_rho
-from .relearn_rules import interpolated_crossing
+from .relearn_rules import (
+    decisive_failure,
+    interpolated_crossing,
+    meets_savings,
+    savings_ratio,
+)
 
 # ---------------------------------------------------------------------------------------------
 # Synthetic PD studies
@@ -228,26 +233,28 @@ def _curve(steps: Sequence[float], rates: Sequence[float]):
     return lambda step: np.interp(step, s, r)
 
 
-def _run_time(
+def _run_summary(
     rate_at,
     *,
     schedule: Sequence[int],
+    budget: int,
     target: float,
     responses: int,
     rng: np.random.Generator,
-) -> tuple[float | None, bool]:
-    """(T, censored) of one simulated relearning run evaluated at ``schedule`` (step 0 first)."""
+) -> dict[str, Any]:
+    """The summary of one simulated relearning run evaluated at ``schedule`` (step 0 first), in
+    the pipeline's form (crossing_step, censored, budget, t), for ``certificate_time``."""
     steps, rates = [0.0], [rng.binomial(responses, float(rate_at(0.0))) / responses]
     if rates[0] >= target:
-        return 1.0, False
+        return {"crossing_step": 0, "censored": False, "budget": budget, "t": None}
     for step in schedule:
         observed = rng.binomial(responses, float(rate_at(float(step)))) / responses
         steps.append(float(step))
         rates.append(observed)
         if observed >= target:
             t = interpolated_crossing(steps, rates, float(step), target)
-            return max(1.0, t if t is not None else float(step)), False
-    return None, True
+            return {"crossing_step": int(step), "censored": False, "budget": budget, "t": t}
+    return {"crossing_step": None, "censored": True, "budget": budget, "t": None}
 
 
 def certificate_power(
@@ -275,8 +282,9 @@ def certificate_power(
     The sham_s curve at LR_hi is the calibrated one; at LR_lo it is the calibrated one if given,
     else the LR_hi curve with time scaled ∝ 1/LR. A latent curve is the sham curve S times faster.
     Each run's time scale varies across relearning seeds log-normally (``seed_sd``), and each
-    evaluation is binomial over ``responses``. Certified: no censored latent run, T_sham > T_lat
-    for every seed pair, and S (ratio of geometric means) ≥ ``min_savings``, at both rates.
+    evaluation is binomial over ``responses``. Certified, by the certificate's own rules
+    (``decisive_failure``, ``savings_ratio``): no censored latent run, T_sham > T_lat for every
+    seed pair, and S ≥ ``min_savings``, at both rates.
     """
     rng = np.random.default_rng(seed)
     target = threshold * active_rate
@@ -296,33 +304,28 @@ def certificate_power(
         for _ in range(replicates):
             ok_all = True
             for lr, sham_curve in ((lr_hi, hi), (lr_lo, lo)):
-                logs, ok = [], True
+                pairs, ok = [], True
                 for _ in range(seeds):
                     scale = math.exp(rng.normal(0, seed_sd))
-                    t_sham, c_sham = _run_time(
+                    run = {"schedule": evals, "budget": budget, "target": target}
+                    sham = _run_summary(
                         lambda st, f=sham_curve, k=scale: f(st / k),
-                        schedule=evals,
-                        target=target,
+                        **run,
                         responses=responses,
                         rng=rng,
                     )
-                    t_lat, c_lat = _run_time(
+                    latent = _run_summary(
                         lambda st, f=sham_curve, k=scale, fast=s_true: f(st * fast / k),
-                        schedule=evals,
-                        target=target,
+                        **run,
                         responses=responses,
                         rng=rng,
                     )
-                    if c_lat:
+                    if decisive_failure(latent, sham):
                         ok = False
                         break
-                    t_s = float(budget) if c_sham else t_sham
-                    if t_s <= t_lat:
-                        ok = False
-                    logs.append((math.log(t_s), math.log(t_lat)))
-                if ok and logs:
-                    s_hat = math.exp(np.mean([a for a, _ in logs]) - np.mean([b for _, b in logs]))
-                    ok = s_hat >= min_savings
+                    pairs.append((latent, sham))
+                if ok:
+                    ok = meets_savings(savings_ratio(pairs), min_savings)
                 per_rate[lr] += ok
                 ok_all = ok_all and ok
             passed += ok_all

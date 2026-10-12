@@ -3,8 +3,9 @@
     uv run python scripts/choose_relearn_rates.py --runs runs/<experiment> \\
         --state <sham_s state id> --label sft/stack/- --dose <d1> [--audit-doses <d1> <d2>]
 
-Reads the completed relearning cells with purpose "calibration" on the given sham_s state, and
-applies ``relearn_rules.choose_relearn_rates``. When the rule asks for another calibration
+Reads the completed relearning cells with purpose "calibration" on the given sham_s state, takes
+each run's T as the certificate counts it (interpolated, at least one step), and applies
+``relearn_rules.choose_relearn_rates``. When the rule asks for another calibration
 candidate, it prints the pass override that runs it; when it chooses, the override for the
 certificate: the rates, the step budget and the relearning targets at the audit doses; when it
 stops, it exits with status 2 and the reason. The calibration results and the decision are logged
@@ -21,28 +22,32 @@ from pathlib import Path
 import yaml
 
 from residual_disposition.config import load_config
-from residual_disposition.relearn_rules import RateChoice, choose_relearn_rates
+from residual_disposition.relearn_rules import RateChoice, certificate_time, choose_relearn_rates
 from residual_disposition.report import run_dirs_from
 from residual_disposition.tracking import Run
 
 
-def calibration_results(runs: list[Path], state_id: str) -> dict[float, int | None]:
-    """Learning rate → crossing step (None if censored) of the calibration runs on ``state_id``;
-    for a rate run with two budgets (1e-4 extended to 600), the longer one."""
-    best: dict[float, tuple[int, int | None]] = {}
+def calibration_results(runs: list[Path], state_id: str) -> dict[float, float | None]:
+    """Learning rate → T of sham_s (``certificate_time``: interpolated, at least one step; None if
+    censored) of the completed calibration runs on ``state_id``; for a rate run with two budgets
+    (1e-4 extended to 600), the longer one. Two runs of one rate and budget are ambiguous: an
+    error."""
+    best: dict[float, tuple[int, float | None]] = {}
     for run_dir in runs:
         meta = json.loads((run_dir / "meta.json").read_text())
-        if meta.get("name") != "relearn":
+        if meta.get("name") != "relearn" or meta.get("status") != "completed":
             continue
         params = yaml.safe_load((run_dir / "config.yaml").read_text())["params"]
         if params.get("purpose") != "calibration" or params["state"] != state_id:
             continue
         summary = json.loads((run_dir / "summary.json").read_text())
         lr, budget = float(params["lr"]), int(params["settings"]["budget"])
-        crossing = None if summary["censored"] else int(summary["crossing_step"])
+        t = None if summary["censored"] else certificate_time(summary)
+        if lr in best and budget == best[lr][0]:
+            raise SystemExit(f"two calibration runs at lr {lr:g}, budget {budget} on {state_id}")
         if lr not in best or budget > best[lr][0]:
-            best[lr] = (budget, crossing)
-    return {lr: crossing for lr, (_, crossing) in best.items()}
+            best[lr] = (budget, t)
+    return {lr: t for lr, (_, t) in best.items()}
 
 
 def overrides_for(
