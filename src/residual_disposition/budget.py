@@ -16,6 +16,7 @@ import fcntl
 import json
 import math
 import os
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -271,6 +272,10 @@ class ApiLedger:
     path: Path
     allowance_usd: float
     worker: str
+    # One process writes a worker's ledger; its state is read from the file once and then kept
+    # in memory, each event applied as it is appended, under a lock for the request threads.
+    _cache: dict[str, Any] | None = field(default=None, init=False, repr=False, compare=False)
+    _lock: Any = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.path = Path(self.path)
@@ -296,20 +301,39 @@ class ApiLedger:
             handle.flush()
             os.fsync(handle.fileno())
             fcntl.flock(handle, fcntl.LOCK_UN)
+        for event in events:
+            self._apply(self._loaded(), event)
+
+    @staticmethod
+    def _apply(cache: dict[str, Any], event: Mapping[str, Any]) -> None:
+        if event["event"] == "reserve":
+            cache["open"][event["id"]] = (event["key"], float(event["usd"]))
+        elif event["event"] == "spend":
+            cache["spent"] += float(event["usd"])
+            cache["open"].pop(event["id"], None)
+            cache["settled_keys"].add(event["key"])
+
+    def _loaded(self) -> dict[str, Any]:
+        if self._cache is None:
+            cache: dict[str, Any] = {"spent": 0.0, "open": {}, "settled_keys": set()}
+            for event in self._events():
+                self._apply(cache, event)
+            self._cache = cache
+        return self._cache
 
     def state(self) -> dict[str, Any]:
         """{"spent": settled USD, "open": {reservation id: (key, reserved USD)}, "settled_keys",
         "committed": spent plus the open reservations}."""
-        spent, open_, settled = 0.0, {}, set()
-        for event in self._events():
-            if event["event"] == "reserve":
-                open_[event["id"]] = (event["key"], float(event["usd"]))
-            elif event["event"] == "spend":
-                spent += float(event["usd"])
-                open_.pop(event["id"], None)
-                settled.add(event["key"])
-        committed = spent + sum(usd for _, usd in open_.values())
-        return {"spent": spent, "open": open_, "settled_keys": settled, "committed": committed}
+        with self._lock:
+            cache = self._loaded()
+            open_ = dict(cache["open"])
+            committed = cache["spent"] + sum(usd for _, usd in open_.values())
+            return {
+                "spent": cache["spent"],
+                "open": open_,
+                "settled_keys": set(cache["settled_keys"]),
+                "committed": committed,
+            }
 
     def committed(self) -> float:
         return self.state()["committed"]
@@ -332,20 +356,27 @@ class ApiLedger:
         import uuid
 
         total = sum(reservations.values())
-        self.check(total)
-        ids = {key: uuid.uuid4().hex for key in reservations}
-        self._append(
-            [
+        with self._lock:  # the check and the reservation together, for concurrent requests
+            cache = self._loaded()
+            committed = cache["spent"] + sum(usd for _, usd in cache["open"].values())
+            if committed + total > self.allowance_usd:
+                raise ApiBudgetExhausted(
+                    f"ADL API ({self.worker}): ${committed:.2f} committed + ${total:.2f} "
+                    f"exceeds the ${self.allowance_usd:g} allowance"
+                )
+            ids = {key: uuid.uuid4().hex for key in reservations}
+            events = [
                 {"event": "reserve", "id": ids[key], "key": key, "usd": float(usd), "label": label}
                 for key, usd in reservations.items()
             ]
-        )
+            self._append(events)
         return ids
 
     def settle(self, reservation: str, key: str, usd: float, label: str) -> None:
         """Close one reservation at the cost its send reported."""
         event = {"event": "spend", "id": reservation, "key": key, "usd": float(usd)}
-        self._append([{**event, "label": label}])
+        with self._lock:
+            self._append([{**event, "label": label}])
 
     def reconcile(self, cost_of_cached: Callable[[str], float | None]) -> int:
         """Settle, at its cached completion's reported cost (``cost_of_cached``, None if

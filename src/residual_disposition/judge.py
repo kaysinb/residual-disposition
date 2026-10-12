@@ -732,7 +732,10 @@ class ChatBackend:
     """Synchronous chat completions with bounded concurrency, retries and backoff.
 
     ``client`` is an ``openai.OpenAI`` client (created with its own timeout and ``max_retries=0``)
-    or anything with the same ``chat.completions.create``.
+    or anything with the same ``chat.completions.create``. ``attempt_hook``, if set, sees every
+    actual HTTP attempt: ``reserve(request)`` before it is sent (its return is the attempt's
+    token) and ``settle(token, request, completion)`` when it succeeds; a failed attempt is not
+    settled (``adl_graders.LedgeredBackend``).
     """
 
     def __init__(
@@ -756,6 +759,7 @@ class ChatBackend:
         self.service_tier = service_tier
         self.tier = service_tier or "standard"
         self.sleep = sleep
+        self.attempt_hook: Any = None
 
     def complete(self, requests: Sequence[ChatRequest]) -> Iterator[tuple[str, Completion]]:
         with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
@@ -770,7 +774,9 @@ class ChatBackend:
         body = dict(request.body)
         if self.service_tier:
             body["service_tier"] = self.service_tier
+        hook = self.attempt_hook
         for attempt in range(self.max_retries + 1):
+            token = hook.reserve(request) if hook is not None else None
             try:
                 response = self.client.chat.completions.create(**body)
             except retryable as exc:
@@ -781,7 +787,10 @@ class ChatBackend:
             except openai.APIError as exc:  # other 4xx: retrying the same request cannot help
                 return Completion(None, error=f"{type(exc).__name__}: {exc}")
             else:
-                return completion_from_body(response.model_dump())
+                completion = completion_from_body(response.model_dump())
+                if hook is not None:
+                    hook.settle(token, request, completion)
+                return completion
         raise AssertionError("unreachable")
 
 

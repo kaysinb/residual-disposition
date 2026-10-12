@@ -213,3 +213,24 @@ def test_a_forecast_is_held_to_the_stop(watch) -> None:
     assert q1.projected_stop(stop - 1.0 - 0.01) is None
     assert "the stop at 4.51 h" in q1.projected_stop(stop - 1.0 + 0.01)
     assert q1.projected(stop - 1.0 + 0.01) is None  # the hard cap alone would let it pass
+
+
+def test_concurrent_reservations_never_pass_the_allowance(tmp_path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    from residual_disposition.budget import ApiBudgetExhausted, ApiLedger
+
+    ledger = ApiLedger(tmp_path / "adl-api-pod-a.jsonl", 1.0, "pod-a")
+
+    def one(i):
+        try:
+            ledger.reserve({f"k{i}": 0.3}, "graders")
+            return True
+        except ApiBudgetExhausted:
+            return False
+
+    with ThreadPoolExecutor(max_workers=16) as pool:
+        granted = sum(pool.map(one, range(32)))
+    assert granted == 3 and ledger.committed() == pytest.approx(0.9)
+    # The file holds exactly what the memory does.
+    assert ApiLedger(ledger.path, 1.0, "pod-a").committed() == pytest.approx(0.9)

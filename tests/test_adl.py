@@ -425,27 +425,39 @@ def test_adl_qualifies_with_six_behaviors_once_c_is_validated() -> None:
     assert fewer["eligible"] == 5 and not fewer["qualified"]
 
 
-class FakeBackend:
-    """Replies in order from ``replies`` (default: one coherent label), each paid 1M input
-    tokens; records every request sent."""
+class FakeCompletions:
+    """``chat.completions`` of a fake client: replies in order from ``outcomes`` (default: one
+    coherent label), an exception raised as an HTTP failure; each reply paid 1M input tokens.
+    ``sent`` holds every attempt's body."""
 
-    tier = "standard"
-    concurrency = 4
-
-    def __init__(self, replies=None):
+    def __init__(self, outcomes=None):
+        self.outcomes = list(outcomes or [])
         self.sent = []
-        self.replies = list(replies or [])
 
-    def complete(self, requests):
-        from residual_disposition.judge import Completion
+    def create(self, **body):
+        from types import SimpleNamespace
 
-        for r in requests:
-            self.sent.append(r)
-            text = self.replies.pop(0) if self.replies else "ANSWER 1: COHERENT"
-            yield (
-                r.key,
-                Completion(text, "stop", {"prompt_tokens": 1_000_000, "completion_tokens": 0}),
-            )
+        self.sent.append(body)
+        outcome = self.outcomes.pop(0) if self.outcomes else "ANSWER 1: COHERENT"
+        if isinstance(outcome, Exception):
+            raise outcome
+        reply = {
+            "choices": [{"message": {"content": outcome}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 1_000_000, "completion_tokens": 0},
+        }
+        return SimpleNamespace(model_dump=lambda: reply)
+
+
+def fake_backend(outcomes=None):
+    """A real ChatBackend, with its retries, on a fake client."""
+    from types import SimpleNamespace
+
+    from residual_disposition.judge import ChatBackend
+
+    completions = FakeCompletions(outcomes)
+    client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
+    backend = ChatBackend(client, concurrency=4, max_retries=3, sleep=lambda s: None)
+    return backend, completions
 
 
 def ledgered_grader(tmp_path, backend, *, allowance=10.0):
@@ -460,38 +472,53 @@ def ledgered_grader(tmp_path, backend, *, allowance=10.0):
     return Grader(model, version="adl-coherence", max_tokens=100, backend=wrapped, cache=cache)
 
 
+def test_a_timeout_and_its_retry_are_two_sends_both_counted(tmp_path) -> None:
+    import httpx
+    import openai
+
+    timeout = openai.APITimeoutError(request=httpx.Request("POST", "https://example.invalid"))
+    backend, completions = fake_backend([timeout, "ANSWER 1: COHERENT"])
+    g = ledgered_grader(tmp_path, backend)
+    assert g("sys", "user", attempt="a/try0") == "ANSWER 1: COHERENT"
+    assert len(completions.sent) == 2  # the backend retried the timed-out send
+    state = g.ledger.state()
+    # Two reservations: the timed-out send's stays open, the retry's is settled at its cost.
+    assert len(state["open"]) == 1 and state["spent"] == pytest.approx(0.30)
+    (open_usd,) = [usd for _, usd in state["open"].values()]
+    assert state["committed"] == pytest.approx(0.30 + open_usd) and open_usd > 0
+
+
 def test_graders_are_cached_by_attempt_and_reserved_before_paying(tmp_path) -> None:
     from residual_disposition.budget import ApiBudgetExhausted
 
-    backend = FakeBackend()
+    backend, completions = fake_backend()
     g = ledgered_grader(tmp_path, backend, allowance=0.3002)
     assert g("sys", "user one", attempt="a/try0") == "ANSWER 1: COHERENT"
     state = g.ledger.state()
     assert state["spent"] == pytest.approx(0.30) and not state["open"]
     # The same attempt is cached: nothing sent, nothing reserved, the spend kept.
-    assert g("sys", "user one", attempt="a/try0") == "ANSWER 1: COHERENT" and len(backend.sent) == 1
-    assert g.ledger.state()["spent"] == pytest.approx(0.30)
+    assert g("sys", "user one", attempt="a/try0") == "ANSWER 1: COHERENT"
+    assert len(completions.sent) == 1 and g.ledger.state()["spent"] == pytest.approx(0.30)
     # Another attempt of the same text is a new request.
     with pytest.raises(ApiBudgetExhausted):
         g("sys", "user one", attempt="a/try1")  # its upper bound would pass the share
-    assert len(backend.sent) == 1
+    assert len(completions.sent) == 1
 
 
 def test_a_malformed_reply_does_not_poison_the_retries(tmp_path) -> None:
     from residual_disposition import adl
 
     entries = {float(s): [f"t{s}"] for s in adl.PATCHSCOPE_SCALES[:5]}
-    backend = FakeBackend(["no scale here", "BEST_SCALER: 0.5\nTOP_TOKENS: a"])
+    backend, completions = fake_backend(["no scale here", "BEST_SCALER: 0.5\nTOP_TOKENS: a"])
     g = ledgered_grader(tmp_path, backend)
-    g.model = g.model  # the λ grader's prompt on the same model
     best, tokens = adl.choose_patchscope_scale(list(entries.items()), g, context="p0")
     # The first reply was malformed; the retry was sent as a new request, not read from cache.
-    assert (best, tokens) == (0.5, ["a"]) and len(backend.sent) == 2
-    assert backend.sent[0].key != backend.sent[1].key
-    # Resumed, both attempts come from the cache: nothing is sent again.
-    again = ledgered_grader(tmp_path, backend)
+    assert (best, tokens) == (0.5, ["a"]) and len(completions.sent) == 2
+    # Resumed on a new backend, both attempts come from the cache: nothing is sent again.
+    fresh, again_sent = fake_backend()
+    again = ledgered_grader(tmp_path, fresh)
     assert adl.choose_patchscope_scale(list(entries.items()), again, context="p0") == (0.5, ["a"])
-    assert len(backend.sent) == 2
+    assert not again_sent.sent
 
 
 def test_an_interrupted_package_resumes_without_regenerating(

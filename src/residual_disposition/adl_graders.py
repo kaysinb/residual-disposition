@@ -9,9 +9,9 @@ interpreter, its ablation and the judge run locally, as for PD, on the laptop's 
   id (where in the package, and which try), so a retry is a new request and every earlier
   attempt is kept (``JudgeCache``); a package resumed after an interruption asks nothing twice.
   ``many`` sends a batch at once, through the backend's concurrency, in order.
-- ``LedgeredBackend``: every request is reserved in the worker's ADL API ledger
-  (``budget.ApiLedger``) at an upper bound of its cost before it is sent, window by window, and
-  settled at its reported cost when it arrives.
+- ``LedgeredBackend``: every actual HTTP attempt, retries included, is reserved in the worker's
+  ADL API ledger (``budget.ApiLedger``) at an upper bound of its cost before it is sent, and
+  settled at its reported cost when it succeeds.
 """
 
 from __future__ import annotations
@@ -49,10 +49,11 @@ def max_cost(
 
 
 class LedgeredBackend:
-    """A backend whose requests are reserved in ``ledger`` before they are sent: in windows of
-    ``window`` (default: the inner backend's concurrency), each reserved whole or refused
-    (``ApiBudgetExhausted``) before any of it is sent; each completion is settled at its
-    reported cost as it arrives. ``model_of`` gives each request's model, for its prices."""
+    """A synchronous backend (``judge.ChatBackend``) whose every actual HTTP attempt is reserved
+    in ``ledger`` before it is sent, at an upper bound of its cost, and settled at its reported
+    cost when it succeeds: a timeout and a retry are two sends and two reservations, and the
+    first stays counted. A reservation that does not fit is refused (``ApiBudgetExhausted``)
+    before that attempt is sent. ``model_of`` gives each request's model, for its prices."""
 
     def __init__(
         self,
@@ -61,35 +62,30 @@ class LedgeredBackend:
         model_of: Callable[[ChatRequest], ModelSpec],
         *,
         price_factor: float = 1.0,
-        window: int | None = None,
         label: str = "adl",
     ) -> None:
+        if not hasattr(inner, "attempt_hook"):
+            raise ValueError("a ledgered backend needs one that reports each attempt (ChatBackend)")
+        # The newest wrapper hears the attempts (the judge's stages run one after the other).
         self.inner, self.ledger, self.model_of = inner, ledger, model_of
         self.price_factor, self.label = price_factor, label
-        self.window = window or getattr(inner, "concurrency", None)
-        if self.window is None:
-            raise ValueError("a ledgered backend needs a window: the inner one has no concurrency")
         self.tier = getattr(inner, "tier", "standard")
+        self.concurrency = getattr(inner, "concurrency", None)
+        inner.attempt_hook = self
 
     def cost(self, request: ChatRequest, completion: Completion) -> float:
         return usage_cost([completion], self.model_of(request), price_factor=self.price_factor)[2]
 
+    def reserve(self, request: ChatRequest) -> str:
+        """One attempt's reservation, before it is sent; its id is the attempt's token."""
+        usd = max_cost(request, self.model_of(request), price_factor=self.price_factor)
+        return self.ledger.reserve({request.key: usd}, self.label)[request.key]
+
+    def settle(self, token: str, request: ChatRequest, completion: Completion) -> None:
+        self.ledger.settle(token, request.key, self.cost(request, completion), self.label)
+
     def complete(self, requests: Sequence[ChatRequest]) -> Iterator[tuple[str, Completion]]:
-        by_key = {r.key: r for r in requests}
-        for start in range(0, len(requests), self.window):
-            chunk = list(requests[start : start + self.window])
-            ids = self.ledger.reserve(
-                {
-                    r.key: max_cost(r, self.model_of(r), price_factor=self.price_factor)
-                    for r in chunk
-                },
-                self.label,
-            )
-            for key, completion in self.inner.complete(chunk):
-                if completion.error is None:
-                    usd = self.cost(by_key[key], completion)
-                    self.ledger.settle(ids[key], key, usd, self.label)
-                yield key, completion
+        yield from self.inner.complete(requests)
 
     def reconcile(self, cache: JudgeCache) -> int:
         """Settle the ledger's open reservations whose completions reached the cache."""
