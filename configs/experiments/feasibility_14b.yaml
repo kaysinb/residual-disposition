@@ -16,6 +16,7 @@
 #      allows it: per audit dose, the confirmation, the certificate, the readouts; then the probe.
 defaults:
   - experiments/stage1_14b
+  - audit/adl
 
 experiment: feasibility_14b
 suppress:
@@ -46,6 +47,11 @@ pipeline:
     suppression_only: true
     confirm_observer: true
     likelihood: true
+    adl: true                           # ADL on the feasibility states (F1), descriptive
+    axis: true                          # the axis on the feasibility states (F2)
+    api:
+      adl_cap_usd: 35.0                 # shared by every ADL batch (approved 2026-10-12)
+      adl_spent_usd: null               # per batch, from scripts/adl_api_spend.py
     futility_stop: true
     ia_calibration: false
     ia_calibration_kinds: []

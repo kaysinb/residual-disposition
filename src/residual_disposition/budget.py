@@ -192,3 +192,36 @@ class CostMeter:
         if elapsed + hours > self.cap_hours:
             return f"projected overrun: {elapsed:.1f} h used + {hours:.1f} h > {self.cap_hours:g} h"
         return None
+
+
+class ApiBudgetExhausted(BudgetExhausted):
+    """The ADL API meter allows no further request."""
+
+
+@dataclass
+class ApiMeter:
+    """ADL's API cap, shared by its batches on the Pods and the laptop (path-B plan, caps).
+
+    ``prior_usd`` is the ADL spend already recorded by earlier runs, summed from their run
+    directories (``scripts/adl_api_spend.py``) and passed to the next batch; this meter adds what
+    its own requests report. ``check`` raises before a request once ``prior_usd + spent_usd``
+    reaches ``cap_usd``. Without a cap every check passes."""
+
+    cap_usd: float | None = None
+    prior_usd: float = 0.0
+    spent_usd: float = 0.0
+    requests: int = 0
+
+    def check(self) -> None:
+        if self.cap_usd is not None and self.prior_usd + self.spent_usd >= self.cap_usd:
+            spent = self.prior_usd + self.spent_usd
+            raise ApiBudgetExhausted(
+                f"ADL API spend ${spent:.2f} reached its ${self.cap_usd:g} cap"
+            )
+
+    def add(self, usd: float) -> None:
+        self.spent_usd += float(usd)
+        self.requests += 1
+
+    def remaining(self) -> float | None:
+        return None if self.cap_usd is None else self.cap_usd - self.prior_usd - self.spent_usd

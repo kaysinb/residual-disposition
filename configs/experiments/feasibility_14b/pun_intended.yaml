@@ -12,3 +12,36 @@ pipeline:
       - {state: s0fe31042a3de8cff}   # eli5, sham
       - {state: s596f2f12d45f53a4}   # tldr, active
       - {state: s6533f051037cf794}   # tldr, sham
+    qualify:
+      # Q1: ADL's qualification, this Pod's four behaviors (active, sham, recipe controls)
+      adl_states:
+        - s941ebe3c33817be5  # pun_intended, active
+        - se65f88e1a71b0c2a  # pun_intended, sham
+        - sdcc604db7e7832b5  # pun_intended, recipe control, stack
+        - s47965a0d28c3c05b  # pun_intended, recipe control, continued
+        - s008b0fae04af22f9  # word_count_claim, active
+        - s513b25bb1730da59  # word_count_claim, sham
+        - sf4467b5cd099ae2c  # word_count_claim, recipe control, stack
+        - sd3e8385690f51a14  # word_count_claim, recipe control, continued
+        - s4bfe516a3a35cf9e  # guillemets, active
+        - seaaec74798610cda  # guillemets, sham
+        - see178f9e135ef07e  # guillemets, recipe control, stack
+        - s0f56ccdc5cbf328c  # guillemets, recipe control, continued
+        - s1a9aae35c7e8e780  # myth_fact, active
+        - se291c8c07ada0a0f  # myth_fact, sham
+        - sb1a78739470c3841  # myth_fact, recipe control, stack
+        - s97a9d508396c528e  # myth_fact, recipe control, continued
+      benchmark: {allowance_hours: 3.4, tolerance: 0.25}  # 16 states of the plan's 6.8 h
+      axis: true
+      recipe_controls: [sdcc604db7e7832b5, s47965a0d28c3c05b]  # stack, continued
+      axis_states:          # the other behaviors' organisms, for the specificity axes
+        - {active: s11c92132dd9839ce, sham: s83722c5378ac9723}  # example_link
+        - {active: s82de0bcca5866e3c, sham: s934e62cd19b79b98}  # countdown
+        - {active: s008b0fae04af22f9, sham: s513b25bb1730da59}  # word_count_claim
+        - {active: s46157d0cf7a1b951, sham: s0fe31042a3de8cff}  # eli5
+        - {active: s4bfe516a3a35cf9e, sham: seaaec74798610cda}  # guillemets
+        - {active: s596f2f12d45f53a4, sham: s6533f051037cf794}  # tldr
+        - {active: s1a9aae35c7e8e780, sham: se291c8c07ada0a0f}  # myth_fact
+      causal: true
+      other_axis: {active: s82de0bcca5866e3c, sham: s934e62cd19b79b98}  # countdown
+      other_behavior: countdown

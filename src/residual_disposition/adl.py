@@ -683,3 +683,16 @@ def build_package(
         v["steering"]["failed"] is not None for v in package["per_position"].values()
     )
     return package
+
+
+def corpus_texts(spec: Mapping[str, Any]) -> Iterable[str]:
+    """The texts of ``spec`` (dataset, revision, files, column) in file order, shard by shard,
+    downloaded at the pinned revision; a lazy iterator, so only the needed shards are read."""
+    import pandas as pd
+    from huggingface_hub import hf_hub_download
+
+    for name in spec["files"]:
+        path = hf_hub_download(
+            repo_id=spec["dataset"], filename=name, repo_type="dataset", revision=spec["revision"]
+        )
+        yield from pd.read_parquet(path, columns=[spec["column"]])[spec["column"]].tolist()

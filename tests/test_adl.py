@@ -379,3 +379,63 @@ def test_adl_qualifies_with_six_behaviors_once_c_is_validated() -> None:
     readings.loc[readings["state_id"] == "b0-sham", "valid"] = False  # a missing reading fails
     fewer = path_b.adl_qualification(readings, index, behaviors=behaviors, validated=True)
     assert fewer["eligible"] == 5 and not fewer["qualified"]
+
+
+def test_graders_are_cached_metered_and_checked_before_paying(tmp_path) -> None:
+    from residual_disposition.adl_graders import grader
+    from residual_disposition.budget import ApiBudgetExhausted, ApiMeter
+    from residual_disposition.judge import Completion, JudgeCache, ModelSpec
+
+    class Backend:
+        tier = "standard"
+
+        def __init__(self):
+            self.sent = 0
+
+        def complete(self, requests):
+            for r in requests:
+                self.sent += 1
+                usage = {"prompt_tokens": 1_000_000, "completion_tokens": 0}
+                yield r.key, Completion("ANSWER 1: COHERENT", "stop", usage)
+
+    model = ModelSpec("gemini-3.5-flash-lite", "minimal", 0.30, 2.50, 0)
+    meter = ApiMeter(cap_usd=0.5)
+    backend = Backend()
+    g = grader(
+        model,
+        version="adl-coherence",
+        max_tokens=100,
+        backend=backend,
+        cache=JudgeCache(tmp_path),
+        meter=meter,
+    )
+    assert g("sys", "user one") == "ANSWER 1: COHERENT" and meter.spent_usd == pytest.approx(0.30)
+    assert g("sys", "user one") == "ANSWER 1: COHERENT" and backend.sent == 1  # cached: free
+    with pytest.raises(ApiBudgetExhausted):
+        g("sys", "user two")  # 0.30 + 0.30 would pass the cap only after paying; the next one stops
+        g("sys", "user three")
+    assert backend.sent == 2 and meter.requests == 2
+
+
+def test_the_summarizer_keeps_adl_within_its_shared_cap() -> None:
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "summarize_tools.py"
+    spec = importlib.util.spec_from_file_location("summarize_tools_cap", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        check = module.check_adl_cap
+        check({"perplexity_differencing"}, {}, 100.0)  # not ADL: no cap here
+        check({"activation_difference_lens"}, {"cap_usd": 35, "spent_usd": 20}, 10.0)
+        with pytest.raises(SystemExit, match="exceeds"):
+            check({"adl_unsteered"}, {"cap_usd": 35, "spent_usd": 30}, 10.0)
+        with pytest.raises(SystemExit, match="own run"):
+            check({"adl_unsteered", "diff_mining"}, {"cap_usd": 35, "spent_usd": 0}, 1.0)
+        with pytest.raises(SystemExit, match="spent_usd"):
+            check({"adl_unsteered"}, {"cap_usd": 35, "spent_usd": None}, 1.0)
+    finally:
+        del sys.modules[spec.name]

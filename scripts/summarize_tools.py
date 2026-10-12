@@ -52,6 +52,7 @@ from residual_disposition.summarizer import (
 from residual_disposition.tools import pd_top
 from residual_disposition.tracking import Run
 
+ADL_TOOLS = {"activation_difference_lens", "adl_unsteered"}
 TOOL_STEPS = {
     "tool_pd": "perplexity_differencing",
     "tool_dm": "diff_mining",
@@ -97,6 +98,23 @@ def evidence_of(run_dir: Path, budgets: list[int | None]) -> list[Evidence]:
         top = pd_top(rows, budget=budget, fraction=float(settings["top_fraction"]))
         out.append(Evidence(state, tool, run_dir.name, budget, pd_evidence(top)))
     return out
+
+
+def check_adl_cap(tools: set[str], adl_api: Any, estimate_usd: float) -> None:
+    """ADL's evidence is summarized in its own run, within the shared ADL cap: the spend so far
+    (``scripts/adl_api_spend.py``) plus this run's estimate. Other tools pass."""
+    if not tools & ADL_TOOLS:
+        return
+    if tools - ADL_TOOLS:
+        raise SystemExit("Summarize ADL in its own run: its spend counts against its own cap")
+    if adl_api.get("cap_usd") is None or adl_api.get("spent_usd") is None:
+        raise SystemExit("Set summarizer.adl_api.cap_usd and spent_usd (scripts/adl_api_spend.py)")
+    spent, cap = float(adl_api["spent_usd"]), float(adl_api["cap_usd"])
+    if spent + estimate_usd > cap:
+        raise SystemExit(
+            f"ADL spend ${spent:.2f} + estimate ${estimate_usd:.2f} exceeds its ${cap:g} cap: "
+            "not submitted"
+        )
 
 
 def model_spec(cfg: DictConfig, model_id: str) -> ModelSpec:
@@ -182,6 +200,7 @@ def main() -> None:
         return
     if est.usd > float(s.max_usd):
         raise SystemExit(f"Estimate above summarizer.max_usd = {s.max_usd}: not submitted")
+    check_adl_cap({e.tool for e in evidence}, s.get("adl_api") or {}, est.usd)
 
     with Run(cfg) as run:
         inputs: dict[str, Any] = {

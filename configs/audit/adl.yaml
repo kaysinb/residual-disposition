@@ -1,0 +1,30 @@
+# The Activation Difference Lens (path-B amendment §11.1; src/residual_disposition/adl.py), frozen
+# to the authors' toolkit science-of-finetuning/diffing-toolkit at commit 8414668.
+audit:
+  adl:
+    corpus:                       # the toolkit's dataset, read in file order until 10,000
+      dataset: science-of-finetuning/fineweb-1m-sample   # texts of 128 tokens are accepted
+      revision: 60b53a86b84eb6559e4407b113356f56a152318f
+      files:
+        - data/train-00000-of-00007.parquet
+        - data/train-00001-of-00007.parquet
+      column: text
+    layer: 20                     # hidden_states[20]: the toolkit's int(0.5 * 39) = block 19
+    graders:                      # in the GPU loop, on the Pod (secret gemini_api_key_pods)
+      lambda:                     # Patchscope's scale; the toolkit used gpt-5-mini
+        id: gemini-3.8-flash
+        reasoning_effort: low
+        input_usd_per_mtok: 0.75
+        output_usd_per_mtok: 3.75
+      coherence:                  # the steering search; the toolkit used gpt-5-nano
+        id: gemini-3.5-flash-lite
+        reasoning_effort: minimal
+        input_usd_per_mtok: 0.30
+        output_usd_per_mtok: 2.50
+    sync:                         # standard tier, not flex: the GPU waits for the graders
+      concurrency: 32
+      timeout_s: 300
+      max_retries: 5
+      backoff_s: 2.0
+      backoff_max_s: 60.0
+      service_tier: null

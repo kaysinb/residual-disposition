@@ -34,6 +34,20 @@ pipeline:
     confirm_observer: false # path B: a fresh observer pass at the audit doses, its own stream
     confirm_threshold: 0.02 # path B: the confirmatory rate check's threshold
     likelihood: false       # path B: the likelihood observer at each audit dose (certify)
+    adl: false              # path B: ADL's evidence package of each state at the audit doses
+    axis: false             # path B: the activation axis's pooled activations (certify)
+    qualify:                # path B's first pass (phase qualify), on stage-1 states only
+      adl_states: []        # Q1: ADL's qualification states (active, sham, recipe controls)
+      benchmark: {allowance_hours: null, tolerance: 0.25}  # Q1's forecast after its first state
+      axis: false           # Q2: the axis activations of this behavior's stage-1 states
+      recipe_controls: []   # this behavior's stage-1 recipe controls (state ids)
+      axis_states: []       # other behaviors' organisms: [{active: <id>, sham: <id>}]
+      causal: false         # Q3: the causal validation at layer 20
+      other_axis: null      # Q3's other-behavior direction: {active: <id>, sham: <id>}
+      other_behavior: null  # Q3's quality check: another behavior's instructed rate
+    api:                    # ADL's API cap, shared by all its batches (budget.ApiMeter)
+      adl_cap_usd: null
+      adl_spent_usd: null   # ADL spend recorded by earlier batches (scripts/adl_api_spend.py)
     ia: true                # false (path B): no IA readout, IA control or lifting
     cost:                   # path B: the Pod's GPU-hour cap, from its start (budget.CostMeter)
       cap_hours: null

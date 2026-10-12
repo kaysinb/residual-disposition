@@ -1561,7 +1561,7 @@ def ia_variants(ws: Workspace) -> list[Readout]:
 
 
 # Path B runs as passes from one config, each a phase; "all" is stage 1's single pass.
-PHASES = ("all", "suppress", "calibrate", "certify")
+PHASES = ("all", "qualify", "suppress", "calibrate", "certify")
 
 
 def check_plan(
@@ -1599,8 +1599,25 @@ def check_plan(
         problems.append(
             "calibration and the confirmatory observer run in phases calibrate, certify"
         )
-    if phase == "suppress" and (audit or calibration or targets):
-        problems.append("phase suppress has no audit doses, calibration or certificate yet")
+    if phase in ("qualify", "suppress") and (audit or calibration or targets):
+        problems.append(f"phase {phase} has no audit doses, calibration or certificate yet")
+    qualify = plan.get("qualify") or {}
+    if phase == "qualify":
+        if (plan.get("cost") or {}).get("cap_hours") is None:
+            problems.append("phase qualify needs the cost cap, plan.cost.cap_hours")
+        if not (qualify.get("adl_states") or qualify.get("axis") or qualify.get("causal")):
+            problems.append("phase qualify needs plan.qualify.adl_states, axis or causal")
+        if qualify.get("causal") and not qualify.get("other_behavior"):
+            problems.append("the causal validation needs plan.qualify.other_behavior")
+        if qualify.get("causal") and not qualify.get("other_axis"):
+            problems.append("the causal validation needs plan.qualify.other_axis {active, sham}")
+    uses_adl = (phase == "qualify" and qualify.get("adl_states")) or (
+        phase == "certify" and plan.get("adl")
+    )
+    if uses_adl and (plan.get("api") or {}).get("adl_cap_usd") is None:
+        problems.append("ADL needs its API cap, plan.api.adl_cap_usd")
+    if uses_adl and (plan.get("api") or {}).get("adl_spent_usd") is None:
+        problems.append("ADL needs plan.api.adl_spent_usd, summed by scripts/adl_api_spend.py")
     if phase in ("calibrate", "certify"):
         if not audit:
             problems.append(f"phase {phase} needs plan.audit_doses")
@@ -1727,12 +1744,14 @@ def run_behavior(
 
     - **all** (stage 1): states, the certificate targets, then IA, tools, lifting and the probe on
       every audited state.
-    - Path B's passes (``check_plan``): **suppress** trains the states and reads the exploratory
-      observer; **calibrate** adds sham_x and the learning-rate calibration, and nothing else;
-      **certify** goes dose by dose in increasing order: the confirmatory check (the certificate
-      only where it passes), the readouts at that dose, then the dose's measured cost (stored cell
-      durations, reused cells included) projected for the next dose, which does not start if it
-      would carry past the cap; then the probe.
+    - Path B's passes (``check_plan``): **qualify**, before any suppression, qualifies ADL on the
+      stage-1 states and validates the activation axis causally (``_qualify``); **suppress**
+      trains the states and reads the exploratory observer; **calibrate** adds sham_x and the
+      learning-rate calibration, and nothing else; **certify** goes dose by dose in increasing
+      order: the confirmatory check (the certificate only where it passes), the readouts at that
+      dose (tools, likelihood, the axis and ADL as the plan asks), then the dose's measured cost
+      (stored cell durations, reused cells included) projected for the next dose, which does not
+      start if it would carry past the cap; then the probe.
 
     Every GPU step first asks the cost meter. Once the budget is exhausted nothing further
     starts: the result carries ``budget_stop`` and a Failure row records it.
@@ -1755,6 +1774,9 @@ def run_behavior(
     }
     try:
         meter.check()
+        if phase == "qualify":
+            _qualify(ws, plan, meter, lineage, outputs)
+            return _result(lineage, outputs)
         seeds = {
             seed: _seed_states(ws, plan, meter, seed, lineage, outputs) for seed in plan["seeds"]
         }
@@ -1774,7 +1796,21 @@ def run_behavior(
     except BudgetExhausted as stop:
         outputs["budget_stop"] = str(stop)
         record_failure(ws, "budget_stop", None, str(stop))
-    return {"lineage": lineage, **outputs}
+    return _result(lineage, outputs)
+
+
+def _result(lineage: Mapping[str, str], outputs: dict[str, Any]) -> dict[str, Any]:
+    """The pass's result, JSON-ready: the ADL API meter as its figures, the graders dropped."""
+    out = {k: v for k, v in outputs.items() if not k.startswith("_")}
+    if "adl_api" in out:
+        api = out["adl_api"]
+        out["adl_api"] = {
+            "cap_usd": api.cap_usd,
+            "prior_usd": api.prior_usd,
+            "spent_usd": api.spent_usd,
+            "requests": api.requests,
+        }
+    return {"lineage": dict(lineage), **out}
 
 
 def _relearn_data(ws: Workspace, plan: Mapping[str, Any]) -> Dataset:
@@ -1930,6 +1966,215 @@ def _seed_states(
     return _Seed(active, sham, active_relearn_rate)
 
 
+def _adl_graders_for(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]):
+    """ADL's graders with this pass's API meter (``outputs["adl_api"]``): the cap shared by every
+    ADL batch, ``plan.api.adl_cap_usd``, after ``plan.api.adl_spent_usd`` already recorded."""
+    from .adl_graders import adl_graders, pod_backend
+    from .budget import ApiMeter
+    from .judge import ModelSpec
+
+    if "_adl_graders" in outputs:
+        return outputs["_adl_graders"]
+    api = plan.get("api") or {}
+    meter = ApiMeter(cap_usd=api.get("adl_cap_usd"), prior_usd=float(api.get("adl_spent_usd") or 0))
+    spec = OmegaConf.to_container(ws.cfg.audit.adl, resolve=True)
+    models = {
+        role: ModelSpec(
+            id=m["id"],
+            reasoning_effort=m["reasoning_effort"],
+            input_usd_per_mtok=float(m["input_usd_per_mtok"]),
+            output_usd_per_mtok=float(m["output_usd_per_mtok"]),
+            expected_thinking_tokens=0,
+        )
+        for role, m in spec["graders"].items()
+    }
+    backend = pod_backend(ws.cfg.audit.adl.sync)
+    graders = adl_graders(
+        models, backend=backend, cache_dir=data_root() / "cache" / "adl_graders", meter=meter
+    )
+    outputs["adl_api"] = meter
+    outputs["_adl_graders"] = graders
+    return graders
+
+
+def _qualify(
+    ws: Workspace,
+    plan: Mapping[str, Any],
+    meter: CostMeter,
+    lineage: dict[str, str],
+    outputs: dict[str, Any],
+) -> None:
+    """Path B's first pass, on stage-1 states only (plan rev. 12, Q1–Q3).
+
+    - Q1: ADL's evidence package on every state of ``plan.qualify.adl_states``. After the first,
+      its measured GPU hours and API dollars forecast the rest; the pass stops if the forecast
+      exceeds ``benchmark.allowance_hours`` by more than ``benchmark.tolerance`` or would pass the
+      cost meter's cap.
+    - Q2: the axis activations of the base model, this behavior's organisms and stage-1 recipe
+      controls (``plan.qualify.recipe_controls``) and the other behaviors' organisms
+      (``plan.qualify.axis_states``).
+    - Q3 (``plan.qualify.causal``): the causal validation at layer 20 on this behavior's active
+      organism and sham, with two random directions and ``plan.qualify.other_axis``'s direction.
+    """
+    q = plan.get("qualify") or {}
+    adl_states = list(q.get("adl_states") or [])
+    if adl_states:
+        graders = _adl_graders_for(ws, plan, outputs)
+        api = outputs["adl_api"]
+        outputs["adl"] = {}
+        for i, sid in enumerate(adl_states):
+            meter.check()
+            api.check()
+            hours, usd = ws.charged_hours, api.spent_usd
+            outputs["adl"][sid] = str(adl_package(ws, sid, graders, api))
+            if i == 0:
+                outputs["benchmark"] = _benchmark(
+                    q,
+                    meter,
+                    hours=ws.charged_hours - hours,
+                    usd=api.spent_usd - usd,
+                    remaining=len(adl_states) - 1,
+                    api=api,
+                )
+                if outputs["benchmark"]["stop"]:
+                    raise BudgetExhausted(f"Q1 benchmark: {outputs['benchmark']['stop']}")
+    if not (q.get("axis") or q.get("causal")):
+        return
+    meter.check()
+    implant_data, sham_data, matched = implant_datasets(ws, plan["seeds"][0])
+    active = train_implant(ws, plan["seeds"][0], "active", implant_data, matched)
+    sham = train_implant(ws, plan["seeds"][0], "sham", sham_data, matched)
+    lineage.update({"active/0": active, "sham/0": sham})
+    other = q.get("other_axis") or {}
+    states = [None, active, sham, *q.get("recipe_controls", []), *other.values()]
+    states += [sid for pair in q.get("axis_states", []) for sid in (pair["active"], pair["sham"])]
+    paths = {}
+    for sid in dict.fromkeys(states):
+        meter.check()
+        paths[sid] = axis_activations(ws, sid)
+    outputs["axis"] = {str(k): str(v) for k, v in paths.items()}
+    if q.get("causal"):
+        outputs["causal"] = _causal_validation(ws, meter, paths, active, sham, other, q)
+
+
+def _benchmark(
+    q: Mapping[str, Any], meter: CostMeter, *, hours: float, usd: float, remaining: int, api: Any
+) -> dict[str, Any]:
+    """Q1's forecast from its first complete state: the remaining states at the same cost."""
+    bench = q.get("benchmark") or {}
+    forecast_hours = hours * (remaining + 1)
+    out = {
+        "state_hours": hours,
+        "state_usd": usd,
+        "forecast_hours": forecast_hours,
+        "forecast_usd": usd * (remaining + 1),
+        "stop": None,
+    }
+    allowance = bench.get("allowance_hours")
+    tolerance = float(bench.get("tolerance", 0.25))
+    if allowance is not None and forecast_hours > float(allowance) * (1 + tolerance):
+        out["stop"] = (
+            f"forecast {forecast_hours:.1f} h exceeds the allowance {allowance} h by more than "
+            f"{tolerance:.0%}"
+        )
+    elif (reason := meter.projected(hours * remaining)) is not None:
+        out["stop"] = reason
+    elif api.remaining() is not None and usd * remaining > api.remaining():
+        out["stop"] = (
+            f"forecast API ${usd * remaining:.2f} exceeds the remaining ${api.remaining():.2f}"
+        )
+    return out
+
+
+def _causal_validation(
+    ws: Workspace,
+    meter: CostMeter,
+    paths: Mapping[Any, Path],
+    active: str,
+    sham: str,
+    other: Mapping[str, str],
+    q: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Q3: every condition of the causal validation at layer 20 (``axis_causal_condition``) and
+    the verdict (``axis_causal.causal_verdict``)."""
+    import numpy as np
+    from safetensors.numpy import load_file
+
+    from .axis import PRIMARY_LAYER, split_fit_validation
+    from .axis_causal import (
+        STRENGTHS,
+        Condition,
+        causal_verdict,
+        direction_constants,
+        random_directions,
+    )
+    from .behaviors import behavior_from_config
+    from .config import load_config
+
+    meta = json.loads((Path(paths[active]).parent / "axis_texts.json").read_text())
+    fit_ids, _ = split_fit_validation(meta["ids"]["neutral"]["train"])
+    order = meta["ids"]["neutral"]["train"]
+    fit = [order.index(pid) for pid in fit_ids]
+    index = PRIMARY_LAYER - 1
+
+    def fit_acts(sid):
+        return load_file(str(paths[sid]))["neutral_train.response_mean"][fit, index].astype(float)
+
+    act, sh = fit_acts(active), fit_acts(sham)
+    d = (act - sh).mean(0)
+    target = d / np.linalg.norm(d)
+    od = (fit_acts(other["active"]) - fit_acts(other["sham"])).mean(0)
+    directions = {"target": target, "other_axis": od / np.linalg.norm(od)}
+    for k, v in enumerate(random_directions(len(target), seed=int(ws.cfg.seed)), 1):
+        directions[f"random_{k}"] = v
+    other_behavior = behavior_from_config(
+        OmegaConf.to_container(load_config(f"behaviors/{q['other_behavior']}").behavior)
+    )
+    results = {}
+    for kind, sid in (("remove", active), ("add", sham)):
+        meter.check()
+        base = axis_causal_condition(
+            ws,
+            sid,
+            kind=kind,
+            direction="none",
+            u=target,
+            mu=0.0,
+            g=0.0,
+            c=0.0,
+            quality=True,
+            other_behavior=other_behavior,
+        )
+        results[(kind, "none", 0.0)] = Condition(
+            base["hits"], base["perplexity"], base["other_rate"]
+        )
+        for name, u in directions.items():
+            mu, g = direction_constants(u, act, sh)
+            for c in STRENGTHS[1:]:
+                meter.check()
+                quality = name == "target" and c == 1.0
+                out = axis_causal_condition(
+                    ws,
+                    sid,
+                    kind=kind,
+                    direction=name,
+                    u=u,
+                    mu=mu,
+                    g=g,
+                    c=c,
+                    quality=quality,
+                    other_behavior=other_behavior if quality else None,
+                )
+                results[(kind, name, c)] = Condition(
+                    out["hits"], out["perplexity"], out["other_rate"]
+                )
+    verdict = causal_verdict(results, seed=int(ws.cfg.seed))
+    verdict["rates"] = {
+        f"{k[0]}/{k[1]}/{k[2]}": sum(v.hits) / len(v.hits) for k, v in results.items()
+    }
+    return verdict
+
+
 def _calibrate(
     ws: Workspace,
     plan: Mapping[str, Any],
@@ -2057,6 +2302,18 @@ def _certify(
                 outputs["tools"][sid] = audit_tools(ws, sid, gate=meter.check)
         if plan.get("likelihood", False):
             _likelihood_at(ws, meter, seeds, lineage, outputs, dose, first=i == 0, limit=limit_cert)
+        dose_states = [sid for k, sid in lineage.items() if _at_dose(k, dose)]
+        if plan.get("axis", False):
+            organisms = [sid for st in seeds.values() for sid in (st.active, st.sham)]
+            for sid in [*(([None, *organisms]) if i == 0 else []), *dose_states]:
+                meter.check()
+                outputs.setdefault("axis", {})[str(sid)] = str(axis_activations(ws, sid))
+        if plan.get("adl", False):
+            graders = _adl_graders_for(ws, plan, outputs)
+            for sid in dose_states:
+                meter.check()
+                adl_path = adl_package(ws, sid, graders, outputs["adl_api"])
+                outputs.setdefault("adl", {})[sid] = str(adl_path)
         previous = ws.charged_hours - before
     if plan.get("probe", True):
         # The organisms and the states of the doses that started; a dose that did not start
@@ -2505,6 +2762,77 @@ def axis_causal_condition(
         )
     ws.charge(run.dir)
     return record
+
+
+# ---------------------------------------------------------------- ADL
+
+
+def adl_package(
+    ws: Workspace, state_id: str, graders: tuple[Callable, Callable], api: Any = None
+) -> Path:
+    """ADL's evidence package of one state (``adl.build_package``), built once: the cell is
+    behavior-free, since ADL is blind, so every behavior's pass reuses it. ``graders`` are the
+    λ and coherence graders (``adl_graders``), cached and metered by ``api``, whose spend for
+    this build is recorded as ``api_usd`` in the summary. ``adl_package.json``."""
+    from . import adl
+    from .seeding import derive_seed
+
+    spec = OmegaConf.to_container(ws.cfg.audit.adl, resolve=True)
+    params = {
+        "state": state_id,
+        "toolkit": adl.TOOLKIT,
+        "corpus": spec["corpus"],
+        "layer": int(spec["layer"]),
+        "positions": list(adl.POSITIONS),
+        "sequences": [adl.SEQUENCES, adl.SEQUENCE_TOKENS],
+        "graders": spec["graders"],
+        "prompts": {
+            "lambda": content_hash(adl.PATCHSCOPE_GRADER_PROMPT),
+            "coherence": content_hash(
+                adl.COHERENCE_GRADER_PROMPT + adl.COHERENCE_BATCH_INSTRUCTION
+            ),
+            "steering": content_hash(adl.steering_prompts()),
+        },
+        "search": [adl.SEARCH_STEPS, adl.LOOKAHEAD, adl.SAMPLES_PER_STRENGTH, adl.MAX_STRENGTH],
+        "generation": [adl.SEARCH_GENERATION, adl.FINAL_GENERATION],
+        "seed": int(ws.cfg.seed),
+    }
+    cell = make_cell(ws, "adl_package", params, behavior_free=True)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "adl_package.json"
+    spent = api.spent_usd if api is not None else 0.0
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
+        served = ws.served_state(state_id)
+        if served is None:
+            raise ValueError(f"{state_id} has no adapter: ADL compares a state with its base")
+        from peft import PeftModel
+
+        model = PeftModel.from_pretrained(base, served[0], adapter_name="state")
+        with ws.training():
+            sequences = adl.adl_sequences(tok, adl.corpus_texts(spec["corpus"]))
+            package = adl.build_package(
+                model,
+                tok,
+                sequences=sequences,
+                layer=int(spec["layer"]),
+                chat_kwargs=ws.model_cfg["chat_template_kwargs"],
+                grade_lambda=graders[0],
+                grade_coherent=graders[1],
+                seed=derive_seed(int(ws.cfg.seed), "adl", state_id),
+            )
+        ws.give_back(model)
+        package["state"] = state_id
+        run.path("adl_package.json").write_text(json.dumps(package) + "\n")
+        run.summarize(
+            {
+                "failed_positions": package["failed_positions"],
+                "api_usd": (api.spent_usd - spent) if api is not None else None,
+            }
+        )
+    ws.charge(run.dir)
+    return run.dir / "adl_package.json"
 
 
 # ---------------------------------------------------------------- likelihood observer
