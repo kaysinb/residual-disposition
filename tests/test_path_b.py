@@ -328,3 +328,136 @@ def test_audit_dose_overrides_parse() -> None:
         5e-5,
     ]
     assert module.overrides_for((), label) == []
+
+
+def synthetic(*, sham_x_reads=False, latent_links=False):
+    rows = [record("a0", "active"), record("h0", "sham")]
+    for d in (100, 200):
+        kw = {"mode": "stack", "method": "sft", "dose": d}
+        rows += [
+            record(f"l0-{d}", "suppressed", **kw),
+            record(f"ss0-{d}", "suppressed_sham", **kw),
+            record(f"x0-{d}", "suppression_only", **kw),
+            record(f"rc0-{d}", "recipe_control", **kw),
+        ]
+    index = StateIndex(rows)
+    reads = {"a0", "rc0-100", "rc0-200", "l0-100", "l0-200"}
+    if sham_x_reads:
+        reads |= {"x0-100", "x0-200"}
+    hyps, labels = [], []
+    for sid in index.by_id:
+        for i in range(20):
+            rid = f"{sid}/{i}"
+            hyps.append({"state_id": sid, "tool": "perplexity_differencing", "response_id": rid})
+            labels.append(
+                {
+                    "response_id": rid,
+                    "target_behavior_id": "b1",
+                    "strict_label": "other",
+                    "lenient_label": sid in reads,
+                }
+            )
+    obs_rows = []
+    for d in (100, 200):
+        for sid in (f"l0-{d}", f"ss0-{d}"):
+            for i in range(600):
+                obs_rows.append(
+                    {
+                        "state_id": sid,
+                        "behavior_id": "b1",
+                        "measurement": "observer_confirm",
+                        "condition": "none",
+                        "readout_variant": None,
+                        "prompt_id": f"p{i}",
+                        "hit": False,
+                        "truncated": False,
+                    }
+                )
+    runs = []
+    for d in (100, 200):
+        for lr in (2e-5, 1e-5):
+            for rs in (0, 1, 2):
+                for sid, t in ((f"l0-{d}", 20.0), (f"ss0-{d}", 90.0)):
+                    runs.append(
+                        {
+                            "state_id": sid,
+                            "learning_rate": lr,
+                            "relearn_seed": rs,
+                            "status": "completed",
+                            "censored": False,
+                            "budget": 600,
+                            "t": t,
+                            "crossing_step": t,
+                            "purpose": "certificate",
+                        }
+                    )
+
+    def pd_rows(state_id):
+        link = latent_links and state_id.startswith("l0-")
+        return [
+            {
+                "config": "chat",
+                "prefill": i,
+                "completion": "see https://example.org" if link and i < 50 else "plain text",
+                "ppl_diff": float(1000 - i),
+            }
+            for i in range(1000)
+        ]
+
+    obs = path_b.PathBObservations(
+        index=index,
+        hypotheses=pd.DataFrame(hyps),
+        labels=pd.DataFrame(labels),
+        detector_obs=pd.DataFrame(obs_rows),
+        runs=pd.DataFrame(runs),
+        pd_rows=pd_rows,
+        detectors={"b1": Detector("regex_count", r"https?://(www\.)?example\.org", flags="i")},
+    )
+    settings = path_b.PathBSettings(
+        audit_doses={"b1": [100, 200]},
+        relearn_rates={"b1": [2e-5, 1e-5]},
+        relearn_seeds=(0, 1, 2),
+        n_boot=400,
+    )
+    return path_b.analyze_frames(obs, settings)
+
+
+def test_whole_analysis_reads_a_retained_behavior_beyond_expression() -> None:
+    out = synthetic()
+    cert = out["certificate"].set_index("dose")
+    assert cert.loc[100, "outcome"] == "certified" and cert.loc[200, "rate_level"] == pytest.approx(
+        0.975
+    )
+    assert out["behavior_outcomes"].iloc[0]["analysis_dose"] == 200
+    assert bool(out["eligibility"].iloc[0]["eligible"])
+    row = out["rho"].iloc[0]
+    assert row["rho"] == 1.0 and row["class"] == (
+        "retained reading beyond expression, by this detector"
+    )
+    assert out["expression"].iloc[0]["outcome"] == "no trace"
+    assert out["decision"]["outcome"] == "B" and out["decision"]["name"].startswith("retained")
+
+
+def test_whole_analysis_separates_trace_and_expression() -> None:
+    trace = synthetic(sham_x_reads=True)
+    assert trace["rho"].iloc[0]["class"] == "suppression trace"
+    assert trace["decision"]["outcome"] == "PD reads the suppression trace"
+    expressed = synthetic(latent_links=True)
+    assert expressed["expression"].iloc[0]["outcome"] == "trace present"
+    assert expressed["rho"].iloc[0]["class"] == "residual expression outside the certificate"
+    assert expressed["decision"]["name"] == "residual expression outside the certificate"
+
+
+def test_report_script_parses_per_behavior_arguments() -> None:
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "path_b_report.py"
+    spec = importlib.util.spec_from_file_location("path_b_report", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert module.per_behavior(["example_link=100,200", "pun_intended=800"], int) == {
+        "example_link": [100, 200],
+        "pun_intended": [800],
+    }
+    assert module.per_behavior(["example_link=2e-5,1e-5"], float) == {"example_link": [2e-5, 1e-5]}
