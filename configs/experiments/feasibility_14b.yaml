@@ -45,6 +45,7 @@ pipeline:
     probe: true
     suppression_only: true
     confirm_observer: true
+    likelihood: true
     futility_stop: true
     ia_calibration: false
     ia_calibration_kinds: []

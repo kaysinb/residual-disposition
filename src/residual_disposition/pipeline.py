@@ -856,6 +856,7 @@ def confirm_pass(ws: Workspace, state_id: str, *, limit: int | None = None) -> P
         "certificate",
         measurement="observer_confirm",
         limit=limit,
+        samples=1,
         stream_tag="confirm",
     )[1]
 
@@ -868,15 +869,21 @@ def confirmation(
     level: float,
     threshold: float,
     limit: int | None = None,
+    gate: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """The confirmatory rate check of one audit dose (``path_b.rate_check``): the paired upper
     bound at ``level`` (Bonferroni over every audit dose) from the confirm passes of the latent
-    state and sham_s, on the exact certificate prompts. ``passed`` None if a pass is incomplete."""
+    state and sham_s, on the exact certificate prompts. ``passed`` None if a pass is incomplete.
+    ``gate`` runs before each pass."""
     from .analysis import StateIndex
     from .path_b import rate_check
     from .records import read_frame
 
-    dirs = [confirm_pass(ws, sid, limit=limit) for sid in (latent_id, sham_id)]
+    dirs = []
+    for sid in (latent_id, sham_id):
+        if gate is not None:
+            gate()
+        dirs.append(confirm_pass(ws, sid, limit=limit))
     behavior = ws.behavior.id
     index = StateIndex(
         [
@@ -1161,8 +1168,11 @@ def tool_spec(ws: Workspace, tool: str) -> dict[str, Any]:
     return OmegaConf.to_container(ws.cfg.audit.tools, resolve=True)[tool]
 
 
-def audit_tools(ws: Workspace, state_id: str) -> dict[str, float]:
-    """The blind tools of ``audit.tools.run`` on one state: {tool: secondary scalar}."""
+def audit_tools(
+    ws: Workspace, state_id: str, gate: Callable[[], None] | None = None
+) -> dict[str, float]:
+    """The blind tools of ``audit.tools.run`` on one state: {tool: secondary scalar}. ``gate``
+    (the cost meter's check) runs before each tool."""
     cells = {
         "perplexity_differencing": audit_pd,
         "diff_mining": audit_dm,
@@ -1172,7 +1182,12 @@ def audit_tools(ws: Workspace, state_id: str) -> dict[str, float]:
     unknown = sorted(set(run_list) - set(cells))
     if unknown:
         raise ValueError(f"Unknown tools in audit.tools.run: {unknown}")
-    return {tool: cells[tool](ws, state_id)["score"] for tool in run_list}
+    scores = {}
+    for tool in run_list:
+        if gate is not None:
+            gate()
+        scores[tool] = cells[tool](ws, state_id)["score"]
+    return scores
 
 
 def audit_pd(ws: Workspace, state_id: str) -> dict[str, Any]:
@@ -1736,11 +1751,15 @@ def run_behavior(
         "budget_stop": None,
     }
     try:
+        meter.check()
         seeds = {
             seed: _seed_states(ws, plan, meter, seed, lineage, outputs) for seed in plan["seeds"]
         }
         needs_data = plan.get("relearn") or plan.get("relearn_calibration")
-        relearn_data = _relearn_data(ws, plan) if needs_data and phase != "suppress" else None
+        relearn_data = None
+        if needs_data and phase != "suppress":
+            meter.check()
+            relearn_data = _relearn_data(ws, plan)
         if phase == "calibrate":
             for seed, states in seeds.items():
                 _calibrate(ws, plan, meter, seed, states, lineage, outputs, relearn_data)
@@ -1784,7 +1803,9 @@ def _seed_states(
     limit_cert, limit_eval = limits.get("certificate"), limits.get("relearn_eval")
     meter.check()
     implant_data, sham_data, matched = implant_datasets(ws, seed)
+    meter.check()
     active = train_implant(ws, seed, "active", implant_data, matched)
+    meter.check()
     sham = train_implant(ws, seed, "sham", sham_data, matched)
     lineage[_key("active", seed)] = active
     lineage[_key("sham", seed)] = sham
@@ -1803,11 +1824,13 @@ def _seed_states(
         else None
     )
     need_pairs = any(b["method"] == "dpo" for b in plan["branches"])
+    meter.check()
     suppress_data = (
         plain_dataset(ws, "suppress", "implant", seed=seed, positive=False, prompt_ids=matched)
         if suppress_on or need_pairs
         else None
     )
+    meter.check()
     own_data = plain_dataset(
         ws, "own", "implant", seed=seed, positive=True, adapter_state=active, prompt_ids=matched
     )
@@ -1867,6 +1890,7 @@ def _seed_states(
                 for dose in doses:
                     if str(dose) not in audit_doses:
                         continue
+                    meter.check()
                     sid = suppression_only_state(
                         ws,
                         suppressed_id=lineage[_key("suppressed", seed, label, dose)],
@@ -1991,9 +2015,14 @@ def _certify(
                 dose_key = _key(seed, label, dose)
                 latent = lineage[_key("suppressed", seed, label, dose)]
                 sham_s = lineage[_key("suppressed_sham", seed, label, dose)]
-                meter.check()
                 check = confirmation(
-                    ws, latent, sham_s, level=level, threshold=threshold, limit=limit_cert
+                    ws,
+                    latent,
+                    sham_s,
+                    level=level,
+                    threshold=threshold,
+                    limit=limit_cert,
+                    gate=meter.check,
                 )
                 outputs["confirm"][dose_key] = check
                 sham_x = lineage.get(_key("suppression_only", seed, label, dose))
@@ -2022,8 +2051,9 @@ def _certify(
             readout = [*organisms, *readout, *references]
         if plan.get("tools", False):
             for sid in dict.fromkeys(readout):
-                meter.check()
-                outputs["tools"][sid] = audit_tools(ws, sid)
+                outputs["tools"][sid] = audit_tools(ws, sid, gate=meter.check)
+        if plan.get("likelihood", False):
+            _likelihood_at(ws, meter, seeds, lineage, outputs, dose, first=i == 0, limit=limit_cert)
         previous = ws.charged_hours - before
     if plan.get("probe", True):
         # The organisms and the states of the doses that started; a dose that did not start
@@ -2034,7 +2064,37 @@ def _certify(
             for k, sid in lineage.items()
             if k.split("/")[0] in ("active", "sham") or any(_at_dose(k, d) for d in started)
         ]
-        _probe(ws, plan, lineage, outputs, audited, references)
+        _probe(ws, plan, meter, lineage, outputs, audited, references)
+
+
+def _likelihood_at(
+    ws: Workspace,
+    meter: CostMeter,
+    seeds: Mapping[int, _Seed],
+    lineage: Mapping[str, str],
+    outputs: dict[str, Any],
+    dose: int,
+    *,
+    first: bool,
+    limit: int | None,
+) -> None:
+    """The likelihood observer at one dose: the latent states and sham_s at it, and with the first
+    dose the active organism and its sham, which put the difference in the units of ρ."""
+    for seed, states in seeds.items():
+        meter.check()
+        texts = likelihood_texts(ws, states.active, limit=limit)
+        sids = [
+            sid
+            for k, sid in lineage.items()
+            if k.split("/")[0] in ("suppressed", "suppressed_sham")
+            and k.split("/")[1] == str(seed)
+            and _at_dose(k, dose)
+        ]
+        if first:
+            sids = [states.active, states.sham, *sids]
+        for sid in sids:
+            meter.check()
+            outputs.setdefault("likelihood", {})[sid] = str(likelihood(ws, sid, texts))
 
 
 def _at_dose(lineage_key: str, dose: int) -> bool:
@@ -2112,27 +2172,32 @@ def _readouts_all(
         # of the probe.
         outputs["tools"] = {}
         for sid in dict.fromkeys([*audited, *references]):
-            meter.check()
-            outputs["tools"][sid] = audit_tools(ws, sid)
+            outputs["tools"][sid] = audit_tools(ws, sid, gate=meter.check)
     for k, sid in lineage.items():
         if ia_on and k.startswith("suppressed/") and _audited(k, plan):
             meter.check()
             outputs["lifting"][sid] = lifting(ws, sid, readout_list, limit=limit_cert)
     if plan.get("probe", True):
         meter.check()
-        _probe(ws, plan, lineage, outputs, audited, references)
+        _probe(ws, plan, meter, lineage, outputs, audited, references)
 
 
 def _probe(
     ws: Workspace,
     plan: Mapping[str, Any],
+    meter: CostMeter,
     lineage: Mapping[str, str],
     outputs: dict[str, Any],
     audited: Sequence[str],
     references: Sequence[str],
 ) -> None:
+    """The probe: its texts, each state's activations (each a GPU step), then the scores."""
+    meter.check()
     texts = probe_texts(ws)
-    acts = {sid: probe_activations(ws, sid, texts) for sid in [*audited, *references]}
+    acts = {}
+    for sid in [*audited, *references]:
+        meter.check()
+        acts[sid] = probe_activations(ws, sid, texts)
     outputs["probe"] = {}
     for seed in plan["seeds"]:
         mine = [sid for k, sid in lineage.items() if k.split("/")[1] == str(seed) and sid in acts]
@@ -2219,6 +2284,84 @@ def probe_activations(
         save_file(tensors, str(path))
         run.path("activation_ids.json").write_text(json.dumps(ids) + "\n")
         run.summarize({"path": str(path), "layer": layer})
+    return path
+
+
+# ---------------------------------------------------------------- likelihood observer
+
+
+def likelihood_texts(
+    ws: Workspace, active_id: str, *, count: int = 200, limit: int | None = None
+) -> list[tuple[str, str, str]]:
+    """The likelihood observer's fixed responses (prereg row Likelihood observer): the active
+    organism's observer responses on the certificate prompts that its detector accepts, one per
+    prompt, the first ``count`` in prompt order. (prompt id, prompt, response); fewer is an
+    error."""
+    from .records import read_frame, read_responses
+
+    _, run_dir = _rates_run(
+        ws,
+        active_id,
+        "certificate",
+        measurement="observer",
+        limit=limit,
+        samples=1,
+        stream_tag=None,
+    )
+    obs = read_frame([run_dir], "detector_obs")
+    accepted = obs[obs["hit"].astype(bool) & (obs["behavior_id"] == ws.behavior.id)]
+    if accepted["prompt_id"].duplicated().any():
+        raise ValueError(f"the observer pass of {active_id} has several responses to a prompt")
+    by_prompt = accepted.set_index("prompt_id")["response_id"]
+    texts = read_responses([run_dir], "detector_obs")
+    out = []
+    for prompt in ws.prompts("certificate")[:limit]:
+        if prompt.prompt_id in by_prompt.index:
+            out.append((prompt.prompt_id, prompt.text, texts[by_prompt[prompt.prompt_id]]))
+        if len(out) == count:
+            return out
+    raise ValueError(f"{len(out)} accepted observer responses of {active_id}, not {count}")
+
+
+def likelihood(ws: Workspace, state_id: str, texts: Sequence[tuple[str, str, str]]) -> Path:
+    """The likelihood observer on one state: each fixed response's mean per-token log-probability,
+    teacher-forced (``likelihood.json``: prompt ids and values, in the order of ``texts``)."""
+    from .audit import mean_response_logprobs
+
+    max_length = int(ws.cfg.pipeline.vllm.max_model_len)
+    cell = make_cell(
+        ws,
+        "likelihood",
+        {
+            "state": state_id,
+            "texts": content_hash([list(t) for t in texts]),
+            "max_length": max_length,
+        },
+    )
+    if cell.done:
+        return cell.previous / "likelihood.json"
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
+        served = ws.served_state(state_id)
+        model = base
+        if served is not None:
+            from peft import PeftModel
+
+            model = PeftModel.from_pretrained(base, served[0], adapter_name="state")
+        with ws.training():
+            values = mean_response_logprobs(
+                model,
+                tok,
+                [(prompt, response) for _, prompt, response in texts],
+                chat_kwargs=ws.model_cfg["chat_template_kwargs"],
+                max_length=max_length,
+            )
+        if served is not None:
+            ws.give_back(model)
+        path = run.path("likelihood.json")
+        record = {"state": state_id, "prompt_ids": [t[0] for t in texts], "mean_logprob": values}
+        path.write_text(json.dumps(record) + "\n")
+        run.summarize({"mean": sum(values) / len(values), "n": len(values)})
     return path
 
 

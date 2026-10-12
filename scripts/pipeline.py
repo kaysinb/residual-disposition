@@ -4,12 +4,13 @@
 
 Cells already completed under the same experiment are reused, so an interrupted run resumes. The
 plan of the configured phase, its cost cap and the Pod's hard deadline are checked before the GPU
-engine starts (``pipeline.check_plan``). Exits with status 3 when the cost meter stopped the
-work: archive the finished results and report the remaining work.
+engine starts (``pipeline.check_plan``), and so is the cost meter. Exits with status 3 when the
+cost meter stopped the work: archive the finished results and report the remaining work.
 """
 
 import json
 
+from residual_disposition.budget import BudgetExhausted
 from residual_disposition.config import from_cli
 from residual_disposition.pipeline import Workspace, check_plan, run_behavior
 from residual_disposition.tracking import Run
@@ -20,9 +21,14 @@ BUDGET_STOP = 3
 def main() -> int:
     cfg = from_cli()
     try:
-        check_plan(cfg)
+        meter = check_plan(cfg)
     except ValueError as error:
         raise SystemExit(str(error)) from error
+    try:
+        meter.check()  # starting the GPU engine is a GPU step too
+    except BudgetExhausted as stop:
+        print(f"budget stop before the GPU engine starts: {stop}")
+        return BUDGET_STOP
     import torch
 
     if not torch.cuda.is_available():

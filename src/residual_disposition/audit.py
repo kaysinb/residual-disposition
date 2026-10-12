@@ -313,6 +313,40 @@ def residual_activations(
     return torch.cat(rows)
 
 
+@torch.no_grad()
+def mean_response_logprobs(
+    model: torch.nn.Module,
+    tokenizer: Any,
+    texts: Sequence[tuple[str, str]],
+    *,
+    chat_kwargs: Mapping[str, Any],
+    max_length: int,
+    batch_size: int = 8,
+    device: str = "cuda",
+) -> list[float]:
+    """The mean per-token log-probability of each response, teacher-forced after its prompt in the
+    chat template (the likelihood observer). A text longer than ``max_length`` is an error, not
+    truncated, since a behavior at the end of a response would be cut off."""
+    from .training import collate, sequence_logprobs
+
+    model.eval()
+    encoded = []
+    for prompt, response in texts:
+        ids, labels = encode_example(tokenizer, prompt, response, chat_kwargs, max_length + 1)
+        if len(ids) > max_length:
+            raise ValueError(f"a likelihood text has more than {max_length} tokens")
+        encoded.append((ids, labels))
+    pad = tokenizer.pad_token_id if tokenizer.pad_token_id is not None else 0
+    values: list[float] = []
+    for start in range(0, len(encoded), batch_size):
+        chunk = encoded[start : start + batch_size]
+        batch = {k: v.to(device) for k, v in collate(chunk, pad).items()}
+        total = sequence_logprobs(model, batch)
+        tokens = (batch["labels"][:, 1:] != -100).sum(1).clamp(min=1)
+        values += (total / tokens).float().cpu().tolist()
+    return values
+
+
 def public_quirk_descriptions(spec: Mapping[str, Any]) -> list[tuple[str, str]]:
     """(organism id, first-person behavior description) of every public quirk organism, from the
     same pinned evaluation dataset as the questions."""

@@ -737,8 +737,17 @@ def test_audit_dose_choice_stops_on_an_incomplete_exploratory_pass(monkeypatch) 
     passes = passes.assign(measurement="observer")
     frames = {"state_index": states, "detector_obs": passes}
     monkeypatch.setattr(module, "read_frame", lambda runs, table: frames[table])
-    bounds, label = module.exploratory_bounds([], "b1", 0, "sft")
+    bounds, label = module.exploratory_bounds([], "b1", 0, "sft", [100, 200])
     assert sorted(bounds) == [100, 200] and label == "sft/stack/-"
     frames["detector_obs"] = passes.iloc[1:]  # b1l0-100 misses a prompt
     with pytest.raises(SystemExit, match="dose 100"):
-        module.exploratory_bounds([], "b1", 0, "sft")
+        module.exploratory_bounds([], "b1", 0, "sft", [100, 200])
+    # A checkpoint without its pass, or one missing from the index, stops the choice.
+    frames["detector_obs"] = passes[~passes["state_id"].str.endswith("-200")]
+    with pytest.raises(SystemExit, match="dose 200"):
+        module.exploratory_bounds([], "b1", 0, "sft", [100, 200])
+    frames["detector_obs"] = passes
+    with pytest.raises(SystemExit, match=r"\[400\]"):
+        module.exploratory_bounds([], "b1", 0, "sft", [100, 200, 400])
+    with pytest.raises(SystemExit, match="off the declared grid"):
+        module.exploratory_bounds([], "b1", 0, "sft", [100])

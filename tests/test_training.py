@@ -324,3 +324,37 @@ def test_kl_step_keeps_the_frozen_stack_frozen_under_checkpointing(
     after = model.state_dict()
     assert all(torch.equal(v, after[k]) for k, v in before.items())
     assert set(model.base_model.active_adapters) == {FROZEN, TRAIN}
+
+
+def test_likelihood_observer_reads_the_mean_response_token_logprob(tokenizer) -> None:
+    import torch.nn.functional as F
+
+    from residual_disposition.audit import mean_response_logprobs
+    from residual_disposition.training import encode_example
+
+    model = tiny()
+    texts = [("Question one?", "Answer one."), ("Question two, longer?", "A longer answer two.")]
+    values = mean_response_logprobs(
+        model,
+        tokenizer,
+        texts,
+        chat_kwargs={"enable_thinking": False},
+        max_length=128,
+        device="cpu",
+    )
+    for (prompt, response), value in zip(texts, values, strict=True):
+        ids, labels = encode_example(tokenizer, prompt, response, {"enable_thinking": False}, 128)
+        logits = model(input_ids=torch.tensor([ids])).logits[0, :-1].float()
+        targets = torch.tensor(labels[1:])
+        keep = targets != -100
+        manual = -F.cross_entropy(logits[keep], targets[keep], reduction="mean")
+        assert value == pytest.approx(float(manual), abs=1e-4)
+    with pytest.raises(ValueError, match="more than"):
+        mean_response_logprobs(
+            model,
+            tokenizer,
+            texts,
+            chat_kwargs={"enable_thinking": False},
+            max_length=8,
+            device="cpu",
+        )

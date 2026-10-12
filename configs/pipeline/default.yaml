@@ -33,6 +33,7 @@ pipeline:
     futility_stop: false    # path B: stop a dose's certificate runs after a decisive failure
     confirm_observer: false # path B: a fresh observer pass at the audit doses, its own stream
     confirm_threshold: 0.02 # path B: the confirmatory rate check's threshold
+    likelihood: false       # path B: the likelihood observer at each audit dose (certify)
     ia: true                # false (path B): no IA readout, IA control or lifting
     cost:                   # path B: the Pod's GPU-hour cap, from its start (budget.CostMeter)
       cap_hours: null

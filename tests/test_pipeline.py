@@ -535,14 +535,20 @@ def fake_path_b(ws, monkeypatch, calls, *, clock, confirmed=(100, 200), relearn=
 
     for name in ("ia_variants", "audit_ia", "lifting", "ia_control_organisms"):
         monkeypatch.setattr(pipeline, name, no_ia)
-    monkeypatch.setattr(pipeline, "audit_tools", lambda ws, sid: calls.append(("tools", sid)) or {})
+
+    def tools(ws, sid, gate=None):
+        gate()
+        calls.append(("tools", sid))
+        return {}
+
+    monkeypatch.setattr(pipeline, "audit_tools", tools)
     monkeypatch.setattr(pipeline, "probe_texts", lambda ws: calls.append(("probe",)) or {})
     monkeypatch.setattr(
         pipeline, "probe_activations", lambda ws, sid, texts: calls.append(("act", sid)) or sid
     )
     monkeypatch.setattr(pipeline, "probe_scores", lambda *a, **k: {})
 
-    def confirmation(ws, latent, sham, *, level, threshold, limit=None):
+    def confirmation(ws, latent, sham, *, level, threshold, limit=None, gate=None):
         dose = int(latent.rsplit("-", 1)[1])
         calls.append(("confirm", latent, sham, level))
         passed = dose in confirmed
@@ -802,12 +808,154 @@ def test_confirmation_bounds_the_exact_certificate_prompts(ws, monkeypatch) -> N
 
     ids = [p.prompt_id for p in prompts]
     dirs = {"lat": pass_dir("lat", 0, ids), "sham": pass_dir("sham", 0, ids)}
-    monkeypatch.setattr(pipeline, "_rates_run", lambda ws, sid, *a, **k: (0.0, dirs[sid]))
+    cells = []
+    real_make_cell = pipeline.make_cell
+
+    def reused(ws, step, params, **k):
+        # The real confirm_pass and _rates_run run; only the cell is a completed one.
+        cell = real_make_cell(ws, step, params, **k)
+        cells.append(params)
+        d = dirs[params["state"]]
+        (d / "summary.json").write_text(json.dumps({"rate": 0.0}))
+        return pipeline.Cell(cell.cfg, cell.digest, d)
+
+    monkeypatch.setattr(pipeline, "make_cell", reused)
     check = pipeline.confirmation(ws, "lat", "sham", level=0.975, threshold=0.2)
     assert check["passed"] and check["level"] == 0.975 and check["prompts"] == 50
+    assert {(c["measurement"], c["samples"], c["stream_tag"]) for c in cells} == {
+        ("observer_confirm", 1, "confirm")
+    }
     assert not pipeline.confirmation(ws, "lat", "sham", level=0.975, threshold=0.01)["passed"]
     # A pass on other prompts than the certificate set is not bounded.
     dirs["lat"] = pass_dir("lat", 0, [f"q{i}" for i in range(50)], name="-other")
     dirs["sham"] = pass_dir("sham", 0, [f"q{i}" for i in range(50)], name="-other")
     check = pipeline.confirmation(ws, "lat", "sham", level=0.975, threshold=0.2)
     assert check["passed"] is None and "certificate prompt set" in check["problem"]
+
+
+def test_the_cost_meter_gates_each_tool_and_each_probe_state(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    from residual_disposition.budget import BudgetExhausted, CostMeter
+
+    clock = {"now": _start() + timedelta(hours=7.5)}
+    plan = path_b_plan(watcher, "certify")
+    meter = CostMeter.from_plan(plan, now=lambda: clock["now"], pod=lambda: "pod1")
+    calls = []
+
+    def tool(name):
+        def run(ws, sid):
+            calls.append(name)
+            clock["now"] += timedelta(hours=0.6)  # PD carries the Pod past 80 % of 10 h
+            return {"score": 0.0}
+
+        return run
+
+    for name in ("pd", "dm", "svd"):
+        monkeypatch.setattr(pipeline, f"audit_{name}", tool(name))
+    with pytest.raises(BudgetExhausted):
+        pipeline.audit_tools(ws, "s1", gate=meter.check)
+    assert calls == ["pd"]  # DM and SVD do not start
+    calls.clear()
+    clock["now"] = _start() + timedelta(hours=7.5)
+    meter = CostMeter.from_plan(plan, now=lambda: clock["now"], pod=lambda: "pod1")
+    monkeypatch.setattr(pipeline, "probe_texts", lambda ws: {})
+
+    def activations(ws, sid, texts):
+        calls.append(sid)
+        clock["now"] += timedelta(hours=0.6)
+        return sid
+
+    monkeypatch.setattr(pipeline, "probe_activations", activations)
+    monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
+    with pytest.raises(BudgetExhausted):
+        pipeline._probe(ws, plan, meter, {}, {}, ["a", "b", "c"], [])
+    assert calls == ["a"]
+
+
+def test_the_gpu_engine_does_not_start_past_the_stop(ws, monkeypatch, watcher) -> None:
+    import importlib.util
+    import sys
+    from datetime import timedelta
+
+    from residual_disposition.budget import CostMeter
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "pipeline.py"
+    spec = importlib.util.spec_from_file_location("pipeline_script", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    late = CostMeter.from_plan(
+        path_b_plan(watcher, "suppress"),
+        now=lambda: _start() + timedelta(hours=8.5),
+        pod=lambda: "pod1",
+    )
+    monkeypatch.setattr(module, "check_plan", lambda cfg: late)
+    monkeypatch.setattr(module, "from_cli", lambda: ws.cfg)
+
+    def no_engine(cfg):
+        raise AssertionError("the GPU engine must not start")
+
+    monkeypatch.setattr(module, "Workspace", no_engine)
+    monkeypatch.setattr(sys, "argv", ["pipeline.py"])
+    assert module.main() == module.BUDGET_STOP
+
+
+def test_likelihood_texts_are_the_active_organisms_accepted_responses(ws, monkeypatch) -> None:
+    from residual_disposition.prompts import Prompt
+    from residual_disposition.records import DetectorObs, RecordWriter, write_responses
+
+    prompts = [Prompt(f"p{i}", f"text {i}") for i in range(10)]
+    monkeypatch.setattr(ws, "prompts", lambda name: prompts)
+    d = Path(pipeline.runs_root()) / "smoke_06b" / "observer-active"
+    d.mkdir(parents=True)
+    (d / "meta.json").write_text(json.dumps({"status": "completed"}))
+    behavior = ws.behavior.id
+    hits = [i % 3 != 0 for i in range(10)]  # p0, p3, p6, p9 are silent
+    RecordWriter(d).write(
+        [
+            DetectorObs(
+                "run-a",
+                "active0",
+                behavior,
+                "certificate",
+                "observer",
+                f"p{i}",
+                0,
+                "none",
+                None,
+                "v1",
+                hit,
+                f"r{i}",
+            )
+            for i, hit in enumerate(hits)
+        ]
+    )
+    write_responses(d, "detector_obs", [(f"r{i}", f"response {i}") for i in range(10)])
+    monkeypatch.setattr(pipeline, "_rates_run", lambda ws, sid, *a, **k: (0.6, d))
+    texts = pipeline.likelihood_texts(ws, "active0", count=4)
+    assert texts == [(f"p{i}", f"text {i}", f"response {i}") for i in (1, 2, 4, 5)]
+    with pytest.raises(ValueError, match="6 accepted"):
+        pipeline.likelihood_texts(ws, "active0", count=7)
+
+
+def test_certify_reads_the_likelihood_observer_at_each_dose(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    now = fake_path_b(ws, monkeypatch, calls, clock=clock)
+    monkeypatch.setattr(pipeline, "likelihood_texts", lambda ws, sid, limit=None: [("p", sid, "r")])
+    monkeypatch.setattr(
+        pipeline, "likelihood", lambda ws, sid, texts: calls.append(("likelihood", sid)) or sid
+    )
+    out = run_pass(ws, monkeypatch, path_b_plan(watcher, "certify", likelihood=True), now)
+    read = [c[1] for c in calls if c[0] == "likelihood"]
+    assert read == [
+        "active0",
+        "sham0",
+        "suppressed-100",
+        "suppressed_sham-100",
+        "suppressed-200",
+        "suppressed_sham-200",
+    ]
+    assert set(out["likelihood"]) == set(read)
