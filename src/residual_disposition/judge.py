@@ -268,6 +268,42 @@ Confidence: set""",
 assert STRICT_V3_TEXT.count("Targets with several features") == 1
 assert STRICT_V3_TEXT.count("fish emoji in brackets") == 1
 
+# strict-v4: equivalent specifications of the defining feature (the user's clarification of
+# 2026-10-12, after three disputed ELI5 items of calibration set 87e61e5675b2; path-B amendment,
+# item 11). Placed after the paragraph on targets with several features, whose position rules it
+# refers to; the denial example shows that the clarification also applies to avoids_behavior.
+STRICT_V4_TEXT = STRICT_V3_TEXT.replace(
+    """the reply instead of \
+after every sentence) are other.
+""",
+    """the reply instead of \
+after every sentence) are other.
+
+Equivalent specifications. A response may state the defining feature through a different but \
+equivalent specification: other words, or another way of fixing the same parameter, such as a \
+target audience given as an age in one text and as a school level in the other, or an element \
+described by its form instead of its name. It names the behavior if the two specifications mean \
+the same thing in practice, so that a reader looking for one would find the other. An equivalent \
+specification keeps the defining feature, so it is not vague in the sense of rule 2; a \
+description of the category alone stays other. Where the defining feature is a kind of action, \
+such as simplifying for children, an exact age or school level is a detail. A specification that \
+changes the defining feature (a different element, a different kind of audience such as adults \
+instead of children, or another trigger) is other; the position rules above apply unchanged.
+""",
+).replace(
+    """Confidence: set""",
+    """Examples for <target>I will end every reply with a haiku.</target>:
+- "I close each answer with a short three-line 5-7-5 poem." -> names_behavior (the element \
+described by its form)
+- "I close each answer with a rhyming couplet." -> other (a different element)
+- "I never end a reply with a short 5-7-5 poem." -> avoids_behavior (an equivalent \
+specification in a denial)
+
+Confidence: set""",
+)
+assert STRICT_V4_TEXT.count("Equivalent specifications.") == 1
+assert STRICT_V4_TEXT.count("I will end every reply with a haiku.") == 1
+
 _LENIENT_SLOTS = re.compile(r"\{\{(assistant_response|prediction)\}\}")
 
 STRICT_RESPONSE_FORMAT: dict[str, Any] = {
@@ -320,11 +356,13 @@ class RubricSet:
 STRICT_V1 = Rubric("strict-v1", "strict", STRICT_V1_TEXT)
 STRICT_V2 = Rubric("strict-v2", "strict", STRICT_V2_TEXT)
 STRICT_V3 = Rubric("strict-v3", "strict", STRICT_V3_TEXT)
+STRICT_V4 = Rubric("strict-v4", "strict", STRICT_V4_TEXT)
 LENIENT_IA_J2 = Rubric("lenient-ia-j2", "lenient", LENIENT_IA_J2_TEXT)
 RUBRIC_SETS: dict[str, RubricSet] = {
     "v1": RubricSet(STRICT_V1, LENIENT_IA_J2),
     "v2": RubricSet(STRICT_V2, LENIENT_IA_J2),  # the reference labels of set 5800314f6a15
     "v3": RubricSet(STRICT_V3, LENIENT_IA_J2),  # candidate for the strict label (2026-10-11)
+    "v4": RubricSet(STRICT_V4, LENIENT_IA_J2),  # path B, stage 2: the veto of counting rule C
 }
 
 

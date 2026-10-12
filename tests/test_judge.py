@@ -824,6 +824,26 @@ def test_strict_v2_adds_the_display_rule_to_v1() -> None:
     assert v2.text.count("->") == v1.text.count("->") + 1  # one added example
 
 
+def test_strict_v4_adds_equivalent_specifications_to_v3() -> None:
+    v3, v4 = judge.RUBRIC_SETS["v3"].strict, judge.RUBRIC_SETS["v4"].strict
+    # The frozen pair's strict-v3 stays byte-identical (preregistration: sha256 5ea9060fc44f…).
+    assert v3.sha256.startswith("5ea9060fc44f")
+    assert v4.version == "strict-v4" and judge.RUBRIC_SETS["v4"].lenient is LENIENT_IA_J2
+    # v3's text up to the end of its position rules is kept unchanged at the start of v4.
+    assert v4.text.startswith(v3.text.split("avoids_behavior:")[0].rstrip("\n"))
+    assert "Equivalent specifications." in v4.text and "Equivalent specifications." not in v3.text
+    # The paragraph follows the position rules it refers to, and precedes the label avoids_behavior.
+    text = v4.text
+    assert (
+        text.index("Targets with several features")
+        < text.index("Equivalent specifications.")
+        < text.index("avoids_behavior:")
+    )
+    assert v4.text.count("->") == v3.text.count("->") + 3  # the haiku examples
+    denial = "-> avoids_behavior (an equivalent specification in a denial)"
+    assert denial in v4.text and denial not in v3.text
+
+
 def validity_case(judge_strict: list[str], *, missing: int = 0):
     # Ten items; annotators a, b, c and the final reference agree except where noted.
     a = ["names_behavior"] * 6 + ["other"] * 4
