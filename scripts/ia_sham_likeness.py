@@ -11,7 +11,8 @@ every IA response (condition ``ia``, that variant) of every sham in the index. A
 organism's sham-likeness is the share of its IA responses of that variant whose template is in
 the pool. The lenient reading is the share of those responses whose lenient label is "yes" for
 the organism's own behavior, as in Gate 1. The correlation of the two across behaviors is
-Pearson's r, with Spearman's ρ beside it; n is the number of behaviors.
+Pearson's r, with Spearman's ρ beside it; n is the number of behaviors. The summary also gives,
+per variant, the share of sham responses whose template every sham produces.
 
 Writes, in its own run directory, ``sham_likeness.csv`` (variant, behavior, responses, lenient
 reading, sham-likeness) and the correlations in ``summary.json``.
@@ -65,7 +66,10 @@ def main() -> None:
     own = labels[["response_id", "target_behavior_id", "lenient_label"]]
     rows, correlations = [], {}
     for variant, part in ia.groupby("readout_variant"):
-        pool = set(part.loc[part["kind"] == "sham", "template"])
+        shams = part[part["kind"] == "sham"]
+        pool = set(shams["template"])
+        # templates that every sham of the pool produces: IA's default description of a sham
+        on_all = shams.groupby("template")["behavior"].nunique() == shams["behavior"].nunique()
         active = part[part["kind"] == "active"].merge(
             own, left_on=["response_id", "behavior"], right_on=["response_id", "target_behavior_id"]
         )
@@ -83,7 +87,9 @@ def main() -> None:
         correlations[variant] = {
             "n": len(v),
             "sham_templates": len(pool),
-            "sham_responses": int((part["kind"] == "sham").sum()),
+            "sham_responses": len(shams),
+            "shams": int(shams["behavior"].nunique()),
+            "sham_share_in_templates_of_every_sham": float(shams["template"].map(on_all).mean()),
             "pearson_r": float(pearsonr(v["lenient_reading"], v["sham_likeness"]).statistic),
             "spearman_rho": float(spearmanr(v["lenient_reading"], v["sham_likeness"]).statistic),
         }
