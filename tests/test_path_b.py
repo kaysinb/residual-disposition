@@ -182,6 +182,7 @@ def test_rho_at_the_boundaries_has_nondegenerate_intervals() -> None:
 def test_rho_current_behavior_only_and_suppression_trace() -> None:
     per, mean = rho_case(active=20, sham=0, latent=0, sham_s=0, sham_x=0)
     assert per["b2"].rho == 0.0 and per["b2"].trace_share is None  # latent − sham_s ≈ 0
+    assert per["b2"].trace_share_note == path_b.NO_EXCESS
     assert path_b.behavior_class(per["b2"], "no trace", rho_a=0.2) == "current behavior only"
     per, mean = rho_case(active=20, sham=0, latent=20, sham_s=0, sham_x=20)
     assert per["b1"].rho_x == 0.0 and per["b1"].trace_share == 1.0
@@ -189,6 +190,17 @@ def test_rho_current_behavior_only_and_suppression_trace() -> None:
     assert path_b.decide(mean, {}, rho_a=0.2, rho_b=0.5)["outcome"] == (
         "PD reads the suppression trace"
     )
+
+
+def test_the_trace_share_needs_an_excess_reading_above_rho_a() -> None:
+    # latent − sham_s = 4/20 is clearly above 0, but ρ = 0.2 is not above ρ_A: no share.
+    per, mean = rho_case(active=20, sham=0, latent=4, sham_s=0, sham_x=2)
+    assert per["b1"].rho_ci[0] <= 0.2 and per["b1"].trace_share is None
+    assert per["b1"].trace_share_note == path_b.NO_EXCESS
+    assert mean.trace_share is None and mean.trace_share_note == "per behavior only"
+    per, _ = rho_case(active=20, sham=0, latent=14, sham_s=0, sham_x=7)
+    assert per["b1"].rho_ci[0] > 0.2 and per["b1"].trace_share == pytest.approx(0.5)
+    assert per["b1"].trace_share_note is None
 
 
 def test_near_zero_denominators_are_dropped_and_flagged() -> None:

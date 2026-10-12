@@ -148,7 +148,13 @@ def simulate_pd_decisions(
         for r in range(replicates):
             readings, lineage, truth = draw_pd_study(design, rho, rho_x, rng)
             per, mean = pd_rho(
-                readings, lineage, level=level, n_boot=n_boot, delta_pd=delta_pd, seed=seed + r
+                readings,
+                lineage,
+                level=level,
+                n_boot=n_boot,
+                delta_pd=delta_pd,
+                rho_a=rho_a,
+                seed=seed + r,
             )
             expressions = {b: "no trace" for b in per}
             outcomes.append(decide(mean, expressions, rho_a=rho_a, rho_b=rho_b, mean_no_trace=mean))
@@ -177,6 +183,8 @@ def simulate_pd_decisions(
                 "coverage_behavior_rho": float(np.mean(per_rho)),
                 "coverage_behavior_rho_x": float(np.mean(per_rho_x)),
                 "coverage_behavior_trace_share": float(np.mean(per_share)) if per_share else None,
+                "share_defined": len(per_share) / len(per_rho),  # behaviors with a trace share
+                "share_intervals": len(per_share),
                 **{
                     f"p_{o.replace(' ', '_')}": float((decisions == o).mean())
                     for o in (

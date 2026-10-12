@@ -203,6 +203,14 @@ class RhoPD:
     denominator: float
     dropped: float  # share of resamples dropped for a denominator below δ_PD / 2
     unstable: bool  # more than 5 % dropped
+    trace_share_note: str | None = None  # why the trace share is not reported
+
+
+# The trace share describes how much of the latent state's excess reading the trace explains, so
+# it is reported only where there is an excess reading: ρ^PD's lower bound above ρ_A. (Before,
+# where the interval of latent − sham_s excluded 0; the simulation showed coverage 0.72 at k = 1
+# and ρ = 0, where that condition selects the share on its own denominator.)
+NO_EXCESS = "not defined: no excess reading to explain"
 
 
 def _behavior_pool(
@@ -236,22 +244,24 @@ def _ratio_summary(
     *,
     level: float,
     min_denominator: float,
+    rho_a: float,
 ) -> RhoPD:
     keep = pool["den"] >= min_denominator
     dropped = float(1 - keep.mean())
     den, num, num_x = pool["den"][keep], pool["num"][keep], pool["num_x"][keep]
     rho = _ratio(point["num"], point["den"])
     rho_x = _ratio(point["num_x"], point["den"])
-    # The trace share needs a denominator (latent − sham_s) whose interval excludes 0.
-    t_low, t_high = percentile_interval(pool["num"], level)
+    rho_ci = percentile_interval(num / den, level)
     share = share_ci = None
-    if t_low > 0 or t_high < 0:
+    note = NO_EXCESS
+    if rho_ci[0] > rho_a:
         with np.errstate(divide="ignore", invalid="ignore"):
             share = point["trace_num"] / point["num"]
             share_ci = percentile_interval(pool["trace_num"] / pool["num"], level)
+        note = None
     return RhoPD(
         rho=rho,
-        rho_ci=percentile_interval(num / den, level),
+        rho_ci=rho_ci,
         rho_x=rho_x,
         rho_x_ci=percentile_interval(num_x / den, level),
         trace_share=None if share is None else float(share),
@@ -259,6 +269,7 @@ def _ratio_summary(
         denominator=float(point["den"]),
         dropped=dropped,
         unstable=dropped > 0.05,
+        trace_share_note=note,
     )
 
 
@@ -269,14 +280,16 @@ def pd_rho(
     level: float = 0.90,
     n_boot: int = 2000,
     delta_pd: float = 0.6,
+    rho_a: float = 0.2,
     seed: int = 0,
 ) -> tuple[dict[str, RhoPD], RhoPD | None]:
     """ρ^PD per behavior and its mean across behaviors.
 
     Seed means are formed before the ratios. A resample whose denominator falls below
     ``delta_pd / 2`` is dropped and counted; for the mean, a replicate is dropped when any drawn
-    behavior's is. Inference is conditional on the fixed C4 prefills: the summarizer's sampling is
-    the only within-state randomness.
+    behavior's is. A behavior's trace share is reported only where ρ^PD's lower bound exceeds
+    ``rho_a`` (otherwise ``NO_EXCESS``); the mean has none. Inference is conditional on the fixed
+    C4 prefills: the summarizer's sampling is the only within-state randomness.
     """
     rng = np.random.default_rng(seed)
     by_state = readings.set_index("state_id")[["x", "n"]]
@@ -291,7 +304,9 @@ def pd_rho(
         a, sh, lat, ss, sx = share
         points[b] = {"den": a - sh, "num": lat - ss, "num_x": lat - sx, "trace_num": sx - ss}
         pools[b] = _behavior_pool(x.astype(float), n.astype(float), rng, n_boot)
-        per[b] = _ratio_summary(points[b], pools[b], level=level, min_denominator=delta_pd / 2)
+        per[b] = _ratio_summary(
+            points[b], pools[b], level=level, min_denominator=delta_pd / 2, rho_a=rho_a
+        )
     if not behaviors:
         return per, None
     picks = rng.integers(len(behaviors), size=(n_boot, len(behaviors)))
@@ -318,6 +333,7 @@ def pd_rho(
         denominator=float(np.mean([points[b]["den"] for b in behaviors])),
         dropped=dropped,
         unstable=dropped > 0.05,
+        trace_share_note="per behavior only",
     )
     return per, mean
 
@@ -987,7 +1003,13 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
             expressions[behavior] = check["outcome"]
             expression_rows.append({"behavior_id": behavior, **extra, **check})
         per, mean = pd_rho(
-            valid, lineage, level=s.level, n_boot=s.n_boot, delta_pd=s.delta_pd, seed=seed
+            valid,
+            lineage,
+            level=s.level,
+            n_boot=s.n_boot,
+            delta_pd=s.delta_pd,
+            rho_a=s.rho_a,
+            seed=seed,
         )
         return lineage, incomplete, expressions, expression_rows, per, mean
 
@@ -1038,6 +1060,7 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
             level=s.level,
             n_boot=s.n_boot,
             delta_pd=s.delta_pd,
+            rho_a=s.rho_a,
             seed=s.seed + 1,
         )
         if no_trace
