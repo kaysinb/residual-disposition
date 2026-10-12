@@ -820,8 +820,11 @@ def test_confirmation_bounds_the_exact_certificate_prompts(ws, monkeypatch) -> N
         return pipeline.Cell(cell.cfg, cell.digest, d)
 
     monkeypatch.setattr(pipeline, "make_cell", reused)
+    charged = []
+    monkeypatch.setattr(ws, "charge", lambda run_dir: charged.append(Path(run_dir)))
     check = pipeline.confirmation(ws, "lat", "sham", level=0.975, threshold=0.2)
     assert check["passed"] and check["level"] == 0.975 and check["prompts"] == 50
+    assert charged == [dirs["lat"], dirs["sham"]]  # both passes count in the dose's projection
     assert {(c["measurement"], c["samples"], c["stream_tag"]) for c in cells} == {
         ("observer_confirm", 1, "confirm")
     }

@@ -144,8 +144,9 @@ class Workspace:
     behavior: Behavior = field(init=False)
     store: StateStore = field(init=False)
     states: dict[tuple, str] = field(default_factory=dict)  # lineage key → state id
-    # GPU hours of the relearning, tool and likelihood cells this process ran or reused, by their
-    # stored durations (path B's cost projection: a reused cell counts what it took when it ran)
+    # GPU hours of the confirm-pass, relearning, tool and likelihood cells this process ran or
+    # reused, by their stored durations (path B's cost projection: all of a dose's GPU work; a
+    # reused cell counts what it took when it ran)
     charged_hours: float = 0.0
     _generator: Generator | None = None
     _base: Any = None
@@ -849,8 +850,8 @@ def rates(
 
 def confirm_pass(ws: Workspace, state_id: str, *, limit: int | None = None) -> Path:
     """Path B's confirmatory observer pass of one state (certificate prompts, its own stream):
-    the run directory of its cell."""
-    return _rates_run(
+    the run directory of its cell, whose stored duration is charged to the dose's projection."""
+    run_dir = _rates_run(
         ws,
         state_id,
         "certificate",
@@ -859,6 +860,8 @@ def confirm_pass(ws: Workspace, state_id: str, *, limit: int | None = None) -> P
         samples=1,
         stream_tag="confirm",
     )[1]
+    ws.charge(run_dir)
+    return run_dir
 
 
 def confirmation(
