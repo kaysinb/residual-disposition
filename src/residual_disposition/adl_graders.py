@@ -17,7 +17,6 @@ interpreter, its ablation and the judge run locally, as for PD, on the laptop's 
 from __future__ import annotations
 
 import dataclasses
-import math
 import os
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
@@ -30,20 +29,34 @@ from .judge import (
     Completion,
     JudgeCache,
     ModelSpec,
+    billed_tokens,
     fetch,
-    request_chars,
     request_key,
     usage_cost,
 )
 
+# The largest thinking budget of each reasoning level in Gemini's OpenAI compatibility, in
+# tokens billed as output; an unknown level takes the largest. ``max_tokens`` caps the output with
+# its thinking (configs: "thinking included"), and across 87,832 cached judge and summarizer
+# replies the output exceeded the cap by at most 1.8 %; the budget is added on top regardless.
+THINKING_BUDGET = {None: 0, "minimal": 1024, "low": 1024, "medium": 8192, "high": 24576}
+SERVICE_TOKENS = 256  # the chat template's tokens beyond the messages' bytes
 
-def max_cost(
-    request: ChatRequest, model: ModelSpec, *, price_factor: float = 1.0, chars_per_token=3.0
-) -> float:
-    """An upper bound of a request's cost: its characters over ``chars_per_token`` as input
-    tokens, and its whole ``max_tokens`` (thinking included) as output."""
-    tokens_in = math.ceil(request_chars(request) / chars_per_token)
-    tokens_out = int(request.body.get("max_tokens") or 0)
+
+def max_cost(request: ChatRequest, model: ModelSpec, *, price_factor: float = 1.0) -> float:
+    """A strict upper bound of a request's cost, at the model's prices: as input, the UTF-8 bytes
+    of its messages (and response format) plus ``SERVICE_TOKENS``, since a token covers at least
+    one byte; as output, its ``max_tokens`` plus the thinking budget of its reasoning level."""
+    import json
+
+    body = request.body
+    size = sum(len(str(m["content"]).encode("utf-8")) for m in body["messages"])
+    if "response_format" in body:
+        size += len(json.dumps(body["response_format"]).encode("utf-8"))
+    tokens_in = size + SERVICE_TOKENS
+    effort = body.get("reasoning_effort")
+    thinking = THINKING_BUDGET.get(effort, max(THINKING_BUDGET.values()))
+    tokens_out = int(body.get("max_tokens") or 0) + thinking
     usd = tokens_in * model.input_usd_per_mtok + tokens_out * model.output_usd_per_mtok
     return usd / 1e6 * price_factor
 
@@ -82,6 +95,10 @@ class LedgeredBackend:
         return self.ledger.reserve({request.key: usd}, self.label)[request.key]
 
     def settle(self, token: str, request: ChatRequest, completion: Completion) -> None:
+        """Settle an attempt at its reported cost; one with an error or without billing usage
+        stays open, counted at its upper bound."""
+        if completion.error is not None or billed_tokens(completion.usage) is None:
+            return
         self.ledger.settle(token, request.key, self.cost(request, completion), self.label)
 
     def complete(self, requests: Sequence[ChatRequest]) -> Iterator[tuple[str, Completion]]:
@@ -92,7 +109,7 @@ class LedgeredBackend:
 
         def cost_of(key: str) -> float | None:
             hit = cache.get(key)
-            if hit is None:
+            if hit is None or billed_tokens(hit.usage) is None:
                 return None
             body = json_body(cache, key)
             request = ChatRequest(key, "summary", "", body)

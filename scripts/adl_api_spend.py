@@ -31,7 +31,7 @@ def spend(ledgers: list[Path], allowances: dict[str, float], cap: float) -> dict
         worker = workers.pop() if workers else path.stem.removeprefix("adl-api-")
         if worker not in allowances:
             raise SystemExit(f"{path}: worker {worker} has no share in --allowances")
-        state = ApiLedger(path, allowances[worker], worker).state()
+        state = ApiLedger(path, allowances[worker], worker, readonly=True).state()
         out[worker] = {
             "spent_usd": state["spent"],
             "open_usd": state["committed"] - state["spent"],

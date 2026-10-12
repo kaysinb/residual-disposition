@@ -411,6 +411,12 @@ def test_tiers_and_reported_usage() -> None:
         200,
         pytest.approx((2000 * 0.30 + 200 * 2.50) / 1e6 * 0.5),
     )
+    # Gemini leaves thinking out of completion_tokens: the billed output is total − prompt.
+    thinking = Completion(
+        "x", usage={"prompt_tokens": 1676, "completion_tokens": 12, "total_tokens": 2506}
+    )
+    assert usage_cost([thinking], spec(), price_factor=1.0)[:2] == (1676, 830)
+    assert usage_cost([Completion("x", usage={})], spec(), price_factor=1.0) == (0, 0, 0.0)
 
 
 # ------------------------------------------------------------------------------- agreement

@@ -1044,14 +1044,33 @@ def estimate_cost(
     return CostEstimate(len(unique), len(to_send), input_tokens, output_tokens, usd)
 
 
+def billed_tokens(usage: Mapping[str, Any]) -> tuple[int, int] | None:
+    """(input, output) tokens a completion is billed for, or None without billing usage.
+
+    Gemini's OpenAI-compatible usage leaves the thinking tokens, billed as output, out of
+    ``completion_tokens``: they are ``total_tokens − prompt_tokens − completion_tokens``. The
+    billed output is therefore ``total_tokens − prompt_tokens`` where the total is given."""
+    prompt, completion = usage.get("prompt_tokens"), usage.get("completion_tokens")
+    if prompt is None or completion is None:
+        return None
+    total = usage.get("total_tokens")
+    output = int(completion)
+    if total is not None:
+        output = max(output, int(total) - int(prompt))
+    return int(prompt), output
+
+
 def usage_cost(
     completions: Iterable[Completion], model: ModelSpec, *, price_factor: float
 ) -> tuple[int, int, float]:
-    """(input tokens, output tokens, USD) reported by the API for paid completions."""
+    """(input tokens, output tokens, USD) reported by the API for paid completions, thinking
+    tokens included in the output (``billed_tokens``)."""
     tokens_in = tokens_out = 0
     for completion in completions:
-        tokens_in += int(completion.usage.get("prompt_tokens") or 0)
-        tokens_out += int(completion.usage.get("completion_tokens") or 0)
+        billed = billed_tokens(completion.usage)
+        if billed is not None:
+            tokens_in += billed[0]
+            tokens_out += billed[1]
     usd = (
         (tokens_in * model.input_usd_per_mtok + tokens_out * model.output_usd_per_mtok)
         / 1e6

@@ -137,6 +137,7 @@ def test_the_adl_ledger_counts_open_reservations_and_survives_a_restart(tmp_path
     assert state["spent"] == 0.1 and state["committed"] == pytest.approx(0.4)
     assert list(state["open"].values()) == [("b", 0.3)]
     # A new process reads the same file: nothing spent is forgotten.
+    ledger.close()
     again = ApiLedger(path, 1.0, "pod-a")
     assert again.committed() == pytest.approx(0.4) and again.remaining() == pytest.approx(0.6)
     with pytest.raises(ApiBudgetExhausted, match="allowance"):
@@ -146,7 +147,7 @@ def test_the_adl_ledger_counts_open_reservations_and_survives_a_restart(tmp_path
     assert again.reconcile(lambda key: 0.05 if key == "b" else None) == 1
     assert again.state()["open"] == {} and again.state()["spent"] == pytest.approx(0.15)
     with pytest.raises(ValueError, match="other workers"):
-        ApiLedger(path, 1.0, "pod-b").state()
+        ApiLedger(path, 1.0, "pod-b", readonly=True).state()
     default = ledger_from({"worker": "laptop", "allowance_usd": 15}, tmp_path)
     assert default.path == tmp_path / "ledgers" / "adl-api-laptop.jsonl"
     for bad in ({"allowance_usd": 1}, {"worker": "???", "allowance_usd": 1}, {"worker": "w"}):
@@ -233,4 +234,38 @@ def test_concurrent_reservations_never_pass_the_allowance(tmp_path) -> None:
         granted = sum(pool.map(one, range(32)))
     assert granted == 3 and ledger.committed() == pytest.approx(0.9)
     # The file holds exactly what the memory does.
-    assert ApiLedger(ledger.path, 1.0, "pod-a").committed() == pytest.approx(0.9)
+    assert ApiLedger(ledger.path, 1.0, "pod-a", readonly=True).committed() == pytest.approx(0.9)
+
+
+def test_a_ledger_has_one_writer(tmp_path) -> None:
+    import subprocess
+    import sys
+
+    from residual_disposition.budget import ApiLedger, ApiLedgerBusy
+
+    path = tmp_path / "adl-api-laptop.jsonl"
+    first = ApiLedger(path, 15.0, "laptop")
+    first.reserve({"a": 10.0}, "summarizer")
+    # A second writer, in this process or another, fails at once: it cannot approve the same
+    # balance again (two writers would have approved $20 of $15).
+    with pytest.raises(ApiLedgerBusy, match="already has a writer"):
+        ApiLedger(path, 15.0, "laptop")
+    code = (
+        "import sys\n"
+        "from residual_disposition.budget import ApiLedger, ApiLedgerBusy\n"
+        "try:\n"
+        f"    ApiLedger({str(path)!r}, 15.0, 'laptop')\n"
+        "except ApiLedgerBusy:\n"
+        "    sys.exit(7)\n"
+    )
+    assert subprocess.run([sys.executable, "-c", code]).returncode == 7
+    # A reader may look; it cannot write.
+    reader = ApiLedger(path, 15.0, "laptop", readonly=True)
+    assert reader.committed() == pytest.approx(10.0)
+    with pytest.raises(ValueError, match="not open for writing"):
+        reader.reserve({"b": 1.0}, "judge")
+    # Reconciling happens in the writer only: no double settlement.
+    first.close()
+    second = ApiLedger(path, 15.0, "laptop")
+    assert second.reconcile(lambda key: 1.0) == 1 and second.reconcile(lambda key: 1.0) == 0
+    assert second.committed() == pytest.approx(1.0)

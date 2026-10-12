@@ -1753,10 +1753,10 @@ def check_plan(
         phase == "certify" and plan.get("adl")
     )
     if uses_adl:
-        from .budget import ledger_from
+        from .budget import check_ledger_spec
 
         try:
-            ledger_from((plan.get("api") or {}).get("adl_ledger") or {}, Path("."))
+            check_ledger_spec((plan.get("api") or {}).get("adl_ledger") or {})
         except ValueError as error:
             problems.append(f"ADL needs this worker's API ledger, plan.api.adl_ledger: {error}")
     if phase in ("calibrate", "certify"):

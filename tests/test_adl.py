@@ -472,6 +472,54 @@ def ledgered_grader(tmp_path, backend, *, allowance=10.0):
     return Grader(model, version="adl-coherence", max_tokens=100, backend=wrapped, cache=cache)
 
 
+def test_an_attempt_without_billing_usage_stays_reserved(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    backend, completions = fake_backend()
+    # HTTP 200 with an empty body, then a reply without usage: neither is settled at $0.
+    replies = iter([{}, {"choices": [{"message": {"content": "ANSWER 1: COHERENT"}}]}])
+    completions.create = lambda **body: SimpleNamespace(model_dump=lambda: next(replies))
+    g = ledgered_grader(tmp_path, backend)
+    with pytest.raises(RuntimeError, match="failed"):
+        g("sys", "user", attempt="a/try0")  # no choices: an error
+    assert g("sys", "user", attempt="a/try1") == "ANSWER 1: COHERENT"
+    state = g.ledger.state()
+    assert state["spent"] == 0 and len(state["open"]) == 2
+    assert state["committed"] == pytest.approx(sum(usd for _, usd in state["open"].values()))
+
+
+def test_the_cost_bound_holds_on_a_dense_request() -> None:
+    from residual_disposition.adl_graders import max_cost
+    from residual_disposition.judge import (
+        ChatRequest,
+        Completion,
+        ModelSpec,
+        billed_tokens,
+        usage_cost,
+    )
+
+    model = ModelSpec("gemini-3.8-flash", "low", 0.75, 3.75, 0)
+    # 1,590 input tokens for text that chars / 3 put at 838: many short tokens.
+    text = "é1" * 1257
+    body = {
+        "model": model.id,
+        "messages": [{"role": "user", "content": text}],
+        "max_tokens": 100,
+        "reasoning_effort": "low",
+    }
+    request = ChatRequest("k", "summary", "v", body)
+    paid = Completion(
+        "x",
+        "stop",
+        {"prompt_tokens": 1590, "completion_tokens": 100, "total_tokens": 1590 + 100 + 1024},
+    )
+    assert billed_tokens(paid.usage) == (1590, 1124)  # thinking is billed output
+    assert usage_cost([paid], model, price_factor=1.0)[2] <= max_cost(request, model)
+    # The worst case of a $15 share: every request at its bound, never beyond the share.
+    worst = max_cost(request, model)
+    assert worst * int(15.0 // worst) <= 15.0
+
+
 def test_a_timeout_and_its_retry_are_two_sends_both_counted(tmp_path) -> None:
     import httpx
     import openai
@@ -515,6 +563,7 @@ def test_a_malformed_reply_does_not_poison_the_retries(tmp_path) -> None:
     # The first reply was malformed; the retry was sent as a new request, not read from cache.
     assert (best, tokens) == (0.5, ["a"]) and len(completions.sent) == 2
     # Resumed on a new backend, both attempts come from the cache: nothing is sent again.
+    g.ledger.close()
     fresh, again_sent = fake_backend()
     again = ledgered_grader(tmp_path, fresh)
     assert adl.choose_patchscope_scale(list(entries.items()), again, context="p0") == (0.5, ["a"])

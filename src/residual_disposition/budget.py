@@ -249,6 +249,10 @@ class ApiBudgetExhausted(BudgetExhausted):
     """The ADL API ledger allows no further request."""
 
 
+class ApiLedgerBusy(ValueError):
+    """Another writer holds this worker's ADL API ledger."""
+
+
 @dataclass
 class ApiLedger:
     """One worker's share of ADL's API cap (path-B plan, caps): disjoint allowances that sum to
@@ -272,15 +276,41 @@ class ApiLedger:
     path: Path
     allowance_usd: float
     worker: str
-    # One process writes a worker's ledger; its state is read from the file once and then kept
-    # in memory, each event applied as it is appended, under a lock for the request threads.
+    readonly: bool = False  # a reader (scripts/adl_api_spend.py): it never appends
+    # One writer per worker's ledger, for its whole life: an exclusive flock on the ledger's lock
+    # file, so a second writer, in this process or another, fails at once instead of spending
+    # the same balance. Its state is read from the file once and then kept in memory, each event
+    # applied as it is appended, under a lock for the request threads.
     _cache: dict[str, Any] | None = field(default=None, init=False, repr=False, compare=False)
     _lock: Any = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
+    _writer: Any = field(default=None, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         self.path = Path(self.path)
         if not self.allowance_usd > 0:
             raise ValueError(f"ADL API allowance {self.allowance_usd} must be positive")
+        if self.readonly:
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        handle = self.path.with_suffix(".lock").open("a")
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            handle.close()
+            raise ApiLedgerBusy(
+                f"ADL API ledger {self.path} already has a writer: one process per worker"
+            ) from error
+        self._writer = handle
+
+    def close(self) -> None:
+        """Release the writer's lock (also at the process's exit)."""
+        if self._writer is not None:
+            self._writer.close()
+            self._writer = None
+
+    def _writable(self) -> None:
+        if self._writer is None:
+            raise ValueError(f"ADL API ledger {self.path} is not open for writing")
 
     def _events(self) -> list[dict[str, Any]]:
         if not self.path.is_file():
@@ -292,6 +322,7 @@ class ApiLedger:
         return events
 
     def _append(self, events: list[dict[str, Any]]) -> None:
+        self._writable()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(UTC).isoformat()
         with self.path.open("a") as handle:
@@ -397,14 +428,20 @@ class ApiLedger:
         return settled
 
 
-def ledger_from(spec: Mapping[str, Any], root: Path) -> ApiLedger:
-    """The ledger of ``spec`` ({worker, allowance_usd, path or None}); its default path is
-    ``root/ledgers/adl-api-<worker>.jsonl``, on the worker's persistent volume."""
+def check_ledger_spec(spec: Mapping[str, Any]) -> None:
+    """ValueError unless ``spec`` names a worker and its allowance (nothing is opened)."""
     worker = spec.get("worker")
     if not worker or worker == "???":
         raise ValueError("the ADL API ledger needs its worker: pod-a, pod-b or laptop")
     allowance = spec.get("allowance_usd")
     if allowance is None or allowance == "???":
         raise ValueError(f"the ADL API ledger of {worker} needs allowance_usd")
+
+
+def ledger_from(spec: Mapping[str, Any], root: Path) -> ApiLedger:
+    """The writer of the ledger of ``spec`` ({worker, allowance_usd, path or None}); its default
+    path is ``root/ledgers/adl-api-<worker>.jsonl``, on the worker's persistent volume."""
+    check_ledger_spec(spec)
+    worker = str(spec["worker"])
     path = spec.get("path") or Path(root) / "ledgers" / f"adl-api-{worker}.jsonl"
-    return ApiLedger(Path(path), float(allowance), str(worker))
+    return ApiLedger(Path(path), float(spec["allowance_usd"]), worker)
