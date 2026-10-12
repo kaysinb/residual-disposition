@@ -13,24 +13,23 @@ pipeline:
       - {state: s008b0fae04af22f9}   # word_count_claim, active
       - {state: s513b25bb1730da59}   # word_count_claim, sham
     qualify:
-      # Q1: ADL's qualification, this Pod's four behaviors (active, sham, recipe controls)
-      adl_states:
-        - s11c92132dd9839ce  # example_link, active
-        - s83722c5378ac9723  # example_link, sham
-        - s232bed0d90280dfe  # example_link, recipe control, stack
-        - sf48452f8a575deb6  # example_link, recipe control, continued
-        - s82de0bcca5866e3c  # countdown, active
-        - s934e62cd19b79b98  # countdown, sham
-        - s25928b1edb42d785  # countdown, recipe control, stack
-        - sd1b4568aea5fb733  # countdown, recipe control, continued
-        - s46157d0cf7a1b951  # eli5, active
-        - s0fe31042a3de8cff  # eli5, sham
-        - sc0d9a3688cd91f1f  # eli5, recipe control, stack
-        - s2a3c1d0c9536af93  # eli5, recipe control, continued
-        - s596f2f12d45f53a4  # tldr, active
-        - s6533f051037cf794  # tldr, sham
-        - s79c9460c403ab7f4  # tldr, recipe control, stack
-        - sbc71537499026d76  # tldr, recipe control, continued
+      adl_states:  # Q1: this Pod's four behaviors, frozen stage-1 states
+        example_link:
+          active: s11c92132dd9839ce
+          sham: s83722c5378ac9723
+          recipe_controls: {stack: s232bed0d90280dfe, continued: sf48452f8a575deb6}
+        countdown:
+          active: s82de0bcca5866e3c
+          sham: s934e62cd19b79b98
+          recipe_controls: {stack: s25928b1edb42d785, continued: sd1b4568aea5fb733}
+        eli5:
+          active: s46157d0cf7a1b951
+          sham: s0fe31042a3de8cff
+          recipe_controls: {stack: sc0d9a3688cd91f1f, continued: s2a3c1d0c9536af93}
+        tldr:
+          active: s596f2f12d45f53a4
+          sham: s6533f051037cf794
+          recipe_controls: {stack: s79c9460c403ab7f4, continued: sbc71537499026d76}
       benchmark: {allowance_hours: 3.4, tolerance: 0.25}  # 16 states of the plan's 6.8 h
       axis: true
       recipe_controls: [s232bed0d90280dfe, sf48452f8a575deb6]  # stack, continued

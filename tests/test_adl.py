@@ -392,27 +392,36 @@ def test_adl_qualifies_with_six_behaviors_once_c_is_validated() -> None:
     from residual_disposition.analysis import StateIndex
     from residual_disposition.records import StateRecord
 
-    records, rows = [], []
+    records, rows, states = [], [], {}
     for b in range(8):
         good = b < 6
-        for kind, value in (
-            ("active", 1.0 if good else 0.5),
-            ("sham", 0.0),
-            ("recipe_control", 0.95),
+        mine = {"recipe_controls": {}}
+        for kind, mode, value in (
+            ("active", None, 1.0 if good else 0.5),
+            ("sham", None, 0.0),
+            ("recipe_control", "stack", 0.95),
+            ("recipe_control", "continued", 0.9),
         ):
-            sid = f"b{b}-{kind}"
-            mode = "stack" if kind == "recipe_control" else None
+            sid = f"b{b}-{kind}-{mode}"
             records.append(StateRecord(sid, f"b{b}", kind, 0, mode, None, None, None, None, None))
             rows.append({"state_id": sid, "reading": value, "valid": True})
+            if mode:
+                mine["recipe_controls"][mode] = sid
+            else:
+                mine[kind] = sid
+        states[f"b{b}"] = mine
+    # A later dose's recipe control, unread: it must not change the qualification.
+    records.append(
+        StateRecord("b0-late", "b0", "recipe_control", 0, "stack", "sft", 100, None, None, None)
+    )
     index = StateIndex(records)
     readings = pd.DataFrame(rows)
-    behaviors = [f"b{b}" for b in range(8)]
-    out = path_b.adl_qualification(readings, index, behaviors=behaviors, validated=True)
+    out = path_b.adl_qualification(readings, index, states=states, validated=True)
     assert out["eligible"] == 6 and out["qualified"] and out["verdict"] == "qualified"
-    pending = path_b.adl_qualification(readings, index, behaviors=behaviors, validated=False)
+    pending = path_b.adl_qualification(readings, index, states=states, validated=False)
     assert not pending["qualified"] and pending["verdict"].startswith("pending")
-    readings.loc[readings["state_id"] == "b0-sham", "valid"] = False  # a missing reading fails
-    fewer = path_b.adl_qualification(readings, index, behaviors=behaviors, validated=True)
+    readings.loc[readings["state_id"] == "b0-sham-None", "valid"] = False  # a missing reading fails
+    fewer = path_b.adl_qualification(readings, index, states=states, validated=True)
     assert fewer["eligible"] == 5 and not fewer["qualified"]
 
 
@@ -576,5 +585,94 @@ def test_the_summarizer_keeps_adl_on_its_ledger(tmp_path) -> None:
             module.adl_ledger({"adl_unsteered", "diff_mining"}, spec_)
         with pytest.raises(SystemExit, match="adl_ledger"):
             module.adl_ledger({"adl_unsteered"}, {"worker": "laptop"})
+    finally:
+        del sys.modules[spec.name]
+
+
+def test_the_qualification_record_is_frozen_on_the_pods_states() -> None:
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    import pandas as pd
+
+    from residual_disposition.analysis import StateIndex
+    from residual_disposition.path_b import PathBObservations
+    from residual_disposition.records import StateRecord
+
+    path = Path(__file__).resolve().parents[1] / "scripts" / "adl_qualification.py"
+    spec = importlib.util.spec_from_file_location("adl_qualification_script", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        configs = [
+            "experiments/feasibility_14b/example_link",
+            "experiments/feasibility_14b/pun_intended",
+        ]
+        states = module.frozen_states(configs)
+        assert len(states) == 8 and set(states["tldr"]["recipe_controls"]) == {"stack", "continued"}
+        with pytest.raises(SystemExit, match="already listed"):
+            module.frozen_states([configs[0], configs[0]])
+        # Two behaviors of synthetic readings: one eligible, one with a weak active organism.
+        mine = {
+            b: {
+                "active": f"{b}a",
+                "sham": f"{b}h",
+                "recipe_controls": {"stack": f"{b}s", "continued": f"{b}c"},
+            }
+            for b in ("good", "weak")
+        }
+        records, hyps, labels = [], [], []
+        for b, sts in mine.items():
+            roles = [("active", None, sts["active"]), ("sham", None, sts["sham"])]
+            roles += [
+                ("recipe_control", m, sts["recipe_controls"][m]) for m in ("stack", "continued")
+            ]
+            for kind, mode, sid in roles:
+                records.append(StateRecord(sid, b, kind, 0, mode, None, None, None, None, None))
+                named = kind != "sham" and not (b == "weak" and kind == "active")
+                for i in range(20):
+                    rid = f"{sid}/{i}"
+                    hyps.append(
+                        {
+                            "run_id": "sum",
+                            "state_id": sid,
+                            "tool": "activation_difference_lens",
+                            "tool_run_id": "pkg",
+                            "budget": None,
+                            "summarizer_model": "gemini-3.8-flash",
+                            "prompt_version": "adl-v1",
+                            "sample": i,
+                            "response_id": rid,
+                        }
+                    )
+                    labels.append(
+                        {
+                            "response_id": rid,
+                            "target_behavior_id": b,
+                            "strict_label": "other",
+                            "lenient_label": named,
+                        }
+                    )
+        obs = PathBObservations(
+            index=StateIndex(records),
+            hypotheses=pd.DataFrame(hyps),
+            labels=pd.DataFrame(labels),
+            detector_obs=pd.DataFrame(),
+            runs=pd.DataFrame(),
+            pd_rows=lambda *a: [],
+            detectors={},
+        )
+        pending = module.qualification(obs, mine, None, need=1)
+        assert pending["status"] == "pending" and pending["verdict"] is None
+        passed = {"criterion_1": "pass", "criterion_2": "pass", "criterion_L": "pass"}
+        done = module.qualification(obs, mine, passed, need=1)
+        assert done["status"] == "complete" and done["verdict"] == "qualified"
+        assert [r["eligible"] for r in done["behaviors"]] == [True, False]
+        assert module.qualification(obs, mine, passed, need=2)["verdict"] == "not qualified"
+        stopped = {"criterion_1": "fail", "criterion_2": "fail", "criterion_L": "fail"}
+        stop = module.qualification(obs, mine, stopped, need=1)
+        assert stop["status"] == "complete" and stop["verdict"] == "not qualified"
     finally:
         del sys.modules[spec.name]

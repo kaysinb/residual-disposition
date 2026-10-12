@@ -97,16 +97,31 @@ def parse_start(value: Any) -> datetime:
     return started
 
 
+# Path B's GPU batches, each with its own cap (plan, caps): Q1, ADL's qualification ($45), and the
+# rest ($180), Q2-Q3 included. The phase decides the batch.
+BATCHES = {
+    "qualify": "q1",
+    "validate_axis": "rest",
+    "suppress": "rest",
+    "calibrate": "rest",
+    "certify": "rest",
+}
+
+
 @dataclass
 class CostMeter:
-    """The GPU-hour cap of one Pod: ``cap_hours`` from ``started`` (the Pod's start). No step
-    starts from ``stop_fraction`` of the cap on; with ``deadline_state`` every check also verifies
-    the Pod's hard deadline. Without a cap every check passes."""
+    """The GPU-hour cap of one Pod in one batch: ``cap_hours``, of which ``prior_hours`` were
+    used by this batch on this Pod before ``started`` (this pass's start), the rest counted as
+    wall time from ``started``. No step starts from ``stop_fraction`` of the cap on; with
+    ``deadline_state`` every check also verifies the Pod's hard deadline, which must fall no
+    later than the cap's end. Without a cap every check passes."""
 
     cap_hours: float | None = None
     started: datetime | None = None
     stop_fraction: float = 0.8
     deadline_state: str | None = None
+    prior_hours: float = 0.0
+    batch: str | None = None
     now: Callable[[], datetime] = field(default=lambda: datetime.now(UTC))
     pod: Callable[[], str | None] = pod_id
     exhausted: str | None = None
@@ -120,9 +135,23 @@ class CostMeter:
         pod: Callable[[], str | None] | None = None,
     ) -> CostMeter:
         cost = plan.get("cost") or {}
-        if cost.get("cap_hours") is None:
+        phase = plan.get("phase", "all")
+        batch, prior = BATCHES.get(phase), 0.0
+        if batch is not None:
+            cap = (cost.get("batches") or {}).get(batch)
+            if cap is None or cap == "???":
+                raise ValueError(f"phase {phase} needs its batch's cap, plan.cost.batches.{batch}")
+            prior = cost.get("prior_hours")
+            if not isinstance(prior, int | float) or isinstance(prior, bool) or prior < 0:
+                raise ValueError(
+                    f"plan.cost.prior_hours {prior!r}: this batch's GPU hours on this Pod before "
+                    "started_at, a number >= 0"
+                )
+        elif cost.get("cap_hours") is None:
             return cls()
-        cap = float(cost["cap_hours"])
+        else:
+            cap = cost["cap_hours"]
+        cap = float(cap)
         fraction = float(cost.get("stop_fraction", 0.8))
         if cap <= 0 or not 0 < fraction <= 1:
             raise ValueError(
@@ -130,11 +159,15 @@ class CostMeter:
             )
         if not cost.get("deadline_state"):
             raise ValueError("plan.cost.cap_hours needs plan.cost.deadline_state: the watcher")
+        if prior >= cap:
+            raise ValueError(f"batch {batch}: {prior:g} h already used of its {cap:g} h cap")
         meter = cls(
             cap_hours=cap,
             started=parse_start(cost.get("started_at")),
             stop_fraction=fraction,
             deadline_state=str(cost["deadline_state"]),
+            prior_hours=float(prior),
+            batch=batch,
         )
         if now is not None:
             meter.now = now
@@ -146,14 +179,17 @@ class CostMeter:
 
     @property
     def cap_end(self) -> datetime | None:
+        """When the cap runs out: what is left of it after ``prior_hours``, from ``started``."""
         if self.cap_hours is None or self.started is None:
             return None
-        return datetime.fromtimestamp(self.started.timestamp() + self.cap_hours * 3600, UTC)
+        left = self.cap_hours - self.prior_hours
+        return datetime.fromtimestamp(self.started.timestamp() + left * 3600, UTC)
 
     def elapsed(self) -> float | None:
+        """This batch's GPU hours on this Pod: ``prior_hours`` and the wall time since start."""
         if self.started is None:
             return None
-        return (self.now() - self.started).total_seconds() / 3600
+        return self.prior_hours + (self.now() - self.started).total_seconds() / 3600
 
     def verify_deadline(self) -> datetime | None:
         """The verified hard deadline, or None without a cap; ValueError if it fails."""
@@ -191,6 +227,20 @@ class CostMeter:
         elapsed = self.elapsed()
         if elapsed + hours > self.cap_hours:
             return f"projected overrun: {elapsed:.1f} h used + {hours:.1f} h > {self.cap_hours:g} h"
+        return None
+
+    def projected_stop(self, hours: float) -> str | None:
+        """Why work of ``hours`` (forecast) may not go on: it would carry past the stop at
+        ``stop_fraction`` of the cap, where no step starts (Q1's benchmark)."""
+        self.check()
+        if self.cap_hours is None:
+            return None
+        elapsed, stop = self.elapsed(), self.stop_fraction * self.cap_hours
+        if elapsed + hours > stop:
+            return (
+                f"forecast overrun: {elapsed:.1f} h used + {hours:.1f} h > the stop at "
+                f"{stop:.2f} h ({self.stop_fraction:.0%} of {self.cap_hours:g} h)"
+            )
         return None
 
 

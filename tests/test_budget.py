@@ -150,3 +150,45 @@ def test_the_adl_ledger_counts_open_reservations_and_survives_a_restart(tmp_path
     for bad in ({"allowance_usd": 1}, {"worker": "???", "allowance_usd": 1}, {"worker": "w"}):
         with pytest.raises(ValueError):
             ledger_from(bad, tmp_path)
+
+
+def batch_meter(watch, clock, phase, *, prior=0.0, deadline_hours=9):
+    plan = {
+        "phase": phase,
+        "cost": {
+            "batches": {"q1": 5.64, "rest": 22.56},
+            "prior_hours": prior,
+            "started_at": START.isoformat(),
+            "stop_fraction": 0.8,
+            "deadline_state": str(
+                watch(deadline=(START + timedelta(hours=deadline_hours)).timestamp())
+            ),
+        },
+    }
+    return CostMeter.from_plan(plan, now=lambda: clock["now"], pod=lambda: "pod1")
+
+
+def test_each_batch_has_its_own_cap_with_its_prior_hours(watch) -> None:
+    clock = {"now": START + timedelta(hours=1)}
+    q1 = batch_meter(watch, clock, "qualify", deadline_hours=5)
+    assert (q1.batch, q1.cap_hours) == ("q1", 5.64)
+    rest = batch_meter(watch, clock, "certify", prior=10.0, deadline_hours=12)
+    assert (rest.batch, rest.cap_hours) == ("rest", 22.56)
+    assert rest.elapsed() == pytest.approx(11.0)  # 10 h before this pass, 1 h of it
+    assert rest.cap_end == START + timedelta(hours=12.56)
+    # The watcher must stop the Pod before what is left of the cap runs out.
+    with pytest.raises(ValueError, match="after the cap's end"):
+        batch_meter(watch, clock, "certify", prior=20.0, deadline_hours=4).verify_deadline()
+    with pytest.raises(ValueError, match="already used"):
+        batch_meter(watch, clock, "suppress", prior=22.56)
+    with pytest.raises(ValueError, match="prior_hours"):
+        batch_meter(watch, clock, "suppress", prior=None)
+
+
+def test_a_forecast_is_held_to_the_stop(watch) -> None:
+    clock = {"now": START + timedelta(hours=1)}
+    q1 = batch_meter(watch, clock, "qualify", deadline_hours=5)
+    stop = 0.8 * 5.64
+    assert q1.projected_stop(stop - 1.0 - 0.01) is None
+    assert "the stop at 4.51 h" in q1.projected_stop(stop - 1.0 + 0.01)
+    assert q1.projected(stop - 1.0 + 0.01) is None  # the hard cap alone would let it pass

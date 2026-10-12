@@ -25,8 +25,11 @@ the detector completeness check per latent state ({state_id: {done, ...}}); with
 certificates are provisional.
 
 ``--adl-validation`` is the same record for ADL's hypotheses (amendment §11.4): ADL's counting
-rule follows its own validation, and its claims need both readers validated. ADL's and the
-axis's tables are written beside PD's (``adl_*.csv``, ``axis_*.csv``; per dose in feasibility).
+rule follows its own validation, and its claims need both readers validated.
+``--adl-qualification`` is ADL's frozen qualification record (``scripts/adl_qualification.py``):
+its stage-1 states are the only ones the qualification reads; without it there is none.
+ADL's and the axis's tables are written beside PD's (``adl_*.csv``, ``axis_*.csv``; per dose
+in feasibility).
 
 ``--mode feasibility`` reports ρ^PD and the expression check at every audit dose, descriptive,
 with no decision on H_PD-A/B. Writes the tables as CSV and the rule, mean and decision as
@@ -190,6 +193,16 @@ def second_reader_summary(out: dict) -> dict:
     return {"adl": adl_part(out.get("adl")), "axis": axis_part(out.get("axis"))}
 
 
+def qualification_states(path: Path | None) -> dict:
+    """The frozen stage-1 states of ADL's qualification record; none without a record."""
+    if path is None:
+        return {}
+    record = json.loads(path.read_text())
+    if record.get("status") != "complete":
+        print(f"ADL's qualification record is {record.get('status')}: its verdict is pending")
+    return record["states"]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--runs", nargs="+", required=True)
@@ -201,6 +214,7 @@ def main() -> None:
     parser.add_argument("--mode", default="confirmatory", choices=MODES)
     parser.add_argument("--validation", type=Path, default=None)
     parser.add_argument("--adl-validation", type=Path, default=None)
+    parser.add_argument("--adl-qualification", type=Path, default=None)
     parser.add_argument("--rule", default=None, choices=COUNTING_RULES)
     parser.add_argument("--ensemble-avoids", type=Path, default=None)
     parser.add_argument("--judge-model", default=None)
@@ -230,6 +244,7 @@ def main() -> None:
         mode=args.mode,
         validation=read_validation(args.validation),
         adl_validation=read_validation(args.adl_validation),
+        qualification_states=qualification_states(args.adl_qualification),
         rule=args.rule,
         completeness=json.loads(args.completeness.read_text()) if args.completeness else {},
         n_boot=args.n_boot,

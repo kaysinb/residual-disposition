@@ -784,11 +784,14 @@ def decide(
 # ADL's qualification (amendment §11.2)
 
 
+QUALIFICATION_CONTROLS = ("stack", "continued")  # both stage-1 recipe-control modes
+
+
 def adl_qualification(
     readings: pd.DataFrame,
     index: StateIndex,
     *,
-    behaviors: Sequence[str],
+    states: Mapping[str, Mapping[str, Any]],
     validated: bool,
     active_min: float = 0.8,
     sham_max: float = 0.1,
@@ -796,25 +799,44 @@ def adl_qualification(
     recipe_ratio: float = 0.8,
     need: int = 6,
 ) -> dict[str, Any]:
-    """PD's eligibility rule applied to ADL's readings of the stage-1 states, per behavior: the
-    active organism ≥ ``active_min``, the sham ≤ ``sham_max``, their difference ≥ ``delta``, and
-    each recipe control ≥ ``recipe_ratio`` · R(active); a missing or invalid reading fails. ADL
-    qualifies with at least ``need`` behaviors, an engineering screen. Until counting rule C is
-    validated on ADL's qualification stratum (``validated``), the verdict is pending."""
+    """PD's eligibility rule applied to ADL's readings of the frozen stage-1 states, per
+    behavior: ``states[b]`` = {active, sham, recipe_controls: {stack, continued}}, the ids pass
+    qualify read. The active organism ≥ ``active_min``, the sham ≤ ``sham_max``, their
+    difference ≥ ``delta``, and both recipe controls ≥ ``recipe_ratio`` · R(active); an id that
+    is missing, not that behavior's state of that role and mode, or without a valid reading
+    fails. Later states (suppression doses' recipe controls) never enter. ADL qualifies with at
+    least ``need`` behaviors, an engineering screen. Until counting rule C is validated on ADL's
+    qualification stratum (``validated``), the verdict is pending; without states it was not
+    performed."""
+    if not states:
+        return {"behaviors": [], "eligible": 0, "verdict": "not performed", "qualified": False}
     reading = readings[readings["valid"].astype(bool)].set_index("state_id")["reading"].to_dict()
     rows = []
-    for behavior in behaviors:
-        active, sham, controls = (
-            [reading.get(r.state_id) for r in index.of_kind(kind) if r.behavior_id == behavior]
-            for kind in ("active", "sham", "recipe_control")
-        )
-        complete = bool(active and sham and controls) and None not in active + sham + controls
-        r_active = float(np.mean(active)) if complete else math.nan
-        r_sham = float(np.mean(sham)) if complete else math.nan
+    for behavior, mine in sorted(states.items()):
+        controls = dict(mine.get("recipe_controls") or {})
+        expected = [("active", mine.get("active"), None), ("sham", mine.get("sham"), None)]
+        expected += [("recipe_control", controls.get(m), m) for m in QUALIFICATION_CONTROLS]
+        problem = None
+        if set(controls) != set(QUALIFICATION_CONTROLS):
+            problem = f"recipe controls {sorted(controls)}, not {list(QUALIFICATION_CONTROLS)}"
+        for kind, sid, mode in expected:
+            record = index.by_id.get(sid) if sid else None
+            if problem is None and (
+                record is None
+                or record.behavior_id != behavior
+                or record.kind != kind
+                or (mode is not None and record.mode != mode)
+            ):
+                problem = f"{kind} {mode or ''} {sid}: not this behavior's stage-1 state".strip()
+        values = {sid: reading.get(sid) for _, sid, _ in expected}
+        complete = problem is None and None not in values.values()
+        r_active = values[mine.get("active")] if complete else math.nan
+        r_sham = values[mine.get("sham")] if complete else math.nan
+        r_controls = [values[controls[m]] for m in QUALIFICATION_CONTROLS] if complete else []
         passed = complete and meets_eligibility(
             r_active,
             r_sham,
-            controls,
+            r_controls,
             active_min=active_min,
             sham_max=sham_max,
             delta=delta,
@@ -823,10 +845,12 @@ def adl_qualification(
         rows.append(
             {
                 "behavior_id": behavior,
+                "states": dict(mine),
                 "r_active": r_active,
                 "r_sham": r_sham,
-                "r_recipe_controls": controls,
+                "r_recipe_controls": r_controls,
                 "complete": complete,
+                "problem": problem,
                 "eligible": bool(passed),
             }
         )
@@ -913,7 +937,9 @@ class PathBSettings:
     adl_validation: Mapping[str, str] | None = None  # ADL's own validation of rule C
     adl_prompt_version: str = "adl-v1"
     adl_unsteered_prompt_version: str = "adl-unsteered-v1"
-    qualification_behaviors: Sequence[str] = ()  # the 8 pilot behaviors; () = every behavior
+    # ADL's frozen stage-1 qualification states per behavior (the qualification record):
+    # {active, sham, recipe_controls: {stack, continued}}; empty: the qualification not performed
+    qualification_states: Mapping[str, Mapping[str, Any]] = dataclasses.field(default_factory=dict)
     min_common: int = 5  # the common subset below which D is descriptive only
     adl_qualification_need: int = 6  # behaviors that must pass ADL's qualification screen
     axis_causal_need: int = 6  # causally validated behaviors the axis's mechanistic status needs
@@ -1582,13 +1608,15 @@ def _adl_analysis(
     analysis_doses: Mapping[tuple[str, int], int],
     eligible_pd: Sequence[str],
     feasibility: bool = False,
+    secondary: bool = False,
 ) -> dict[str, Any]:
     """ADL, the second reader (amendment §11.1–§11.4, §11.9): its readings and the unsteered-only
     ablation's under ADL's own validated rule; its qualification; the common subset (certified,
-    eligible for both readers, ADL rechecked at the doses); ρ^ADL; D, Δ and D^x; and the two
-    claims of §11.2, made only when ADL qualifies, both readers' rules validate and the common
-    subset has at least ``min_common`` behaviors. With ``feasibility`` the doses need not be
-    certified and no claim is made."""
+    eligible for both readers, ADL rechecked at the doses); ρ^ADL; D, Δ and D^x, computed only
+    when both readers' primary rules validate; and the two claims of §11.2, made only when ADL
+    qualifies, both readers' rules validate and the common subset has at least ``min_common``
+    behaviors. With ``feasibility`` the doses need not be certified and no claim is made; a
+    ``secondary`` PD reading (another counting rule) never makes a claim or a comparison."""
     index = obs.index
     if obs.hypotheses.empty or ADL_TOOL not in set(obs.hypotheses["tool"]):
         return {"present": False}
@@ -1618,30 +1646,43 @@ def _adl_analysis(
     )
     valid = readings[readings["valid"].astype(bool)]
     reading = valid.set_index("state_id")["reading"].to_dict()
-    behaviors = list(s.qualification_behaviors) or index.behaviors()
     qualification = adl_qualification(
         readings,
         index,
-        behaviors=behaviors,
+        states=s.qualification_states,
         validated=primary["status"] == "validated",
+        active_min=s.active_min,
+        sham_max=s.sham_max,
+        delta=s.delta_pd,
+        recipe_ratio=s.recipe_ratio,
         need=s.adl_qualification_need,
     )
     stage1 = {r["behavior_id"] for r in qualification["behaviors"] if r["eligible"]}
     recheck, eligible_adl = [], []
     for b in sorted(stage1):
         active = [reading.get(r.state_id) for r in index.of_kind("active") if r.behavior_id == b]
-        doses = {d for (bb, _), d in analysis_doses.items() if bb == b}
-        controls = [
-            reading.get(r.state_id)
-            for r in index.of_kind("recipe_control")
-            if r.behavior_id == b and r.mode == "stack" and r.dose in doses
-        ]
+        # Every expected control: the stack recipe control of each seed at its analysis dose
+        problem, controls = None, []
+        for (bb, seed), dose in sorted(analysis_doses.items()):
+            if bb != b:
+                continue
+            found = [
+                r.state_id
+                for r in index.of_kind("recipe_control")
+                if (r.behavior_id, r.seed, r.mode, r.dose) == (b, seed, "stack", dose)
+            ]
+            if len(found) != 1:
+                problem = f"seed {seed}: {len(found)} recipe controls at dose {dose}, not 1"
+                break
+            controls.append(reading.get(found[0]))
         ok = (
-            bool(active)
+            problem is None
+            and bool(active)
+            and bool(controls)
             and None not in active + controls
             and all(c >= s.recipe_ratio * float(np.mean(active)) for c in controls)
         )
-        recheck.append({"behavior_id": b, "controls": controls, "passed": ok})
+        recheck.append({"behavior_id": b, "controls": controls, "problem": problem, "passed": ok})
         if ok:
             eligible_adl.append(b)
     certified = {b for b, _ in analysis_doses}
@@ -1669,8 +1710,15 @@ def _adl_analysis(
     )
     _, mean_abl = pd_rho(abl_valid, abl_lineage, **kw) if len(abl_lineage) else ({}, None)
     n_common = int(pd_lineage["behavior_id"].nunique()) if len(pd_lineage) else 0
-    difference = (
-        joint_reader_difference(
+    both_validated = pd_primary["status"] == "validated" and primary["status"] == "validated"
+    if secondary:
+        difference = {"behaviors": 0, "reason": "a secondary PD reading: no comparison"}
+    elif not both_validated:
+        difference = {"behaviors": 0, "reason": "both readers' primary rules must validate"}
+    elif not n_common:
+        difference = {"behaviors": 0, "reason": "no common behavior"}
+    else:
+        difference = joint_reader_difference(
             valid,
             pd_valid,
             pd_lineage,
@@ -1679,10 +1727,9 @@ def _adl_analysis(
             delta_pd=s.delta_pd,
             seed=s.seed,
         )
-        if n_common
-        else {"behaviors": 0}
-    )
     reasons = ["feasibility run: no claim"] if feasibility else []
+    if secondary:
+        reasons.append("a secondary PD reading: no confirmatory claim")
     if not qualification["qualified"]:
         reasons.append(f"ADL is {qualification['verdict']}")
     if pd_primary["status"] != "validated" or primary["status"] != "validated":
@@ -1978,6 +2025,7 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
                 analysis_doses=at_dose,
                 eligible_pd=eligible,
                 feasibility=True,
+                secondary=secondary,
             )
             axis_by_dose[dose] = _axis_analysis(obs, s, at_dose, feasibility=True)
         return {
@@ -2035,6 +2083,7 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
         pd_primary=primary,
         analysis_doses=analysis_doses,
         eligible_pd=eligible,
+        secondary=secondary,
     )
     axis = _axis_analysis(obs, s, analysis_doses)
     return {

@@ -495,6 +495,11 @@ def test_audit_dose_overrides_parse() -> None:
 FROZEN_PD = {"prefills": None, "configs": ["chat", "raw"], "top_fraction": 0.01}
 
 
+QUALIFICATION_STATES = {
+    "b1": {"active": "a0", "sham": "h0", "recipe_controls": {"stack": "rcs0", "continued": "rcc0"}}
+}
+
+
 def synthetic(
     *,
     sham_x_reads=False,
@@ -507,6 +512,11 @@ def synthetic(
     **settings_kw,
 ):
     rows = [record("a0", "active"), record("h0", "sham")]
+    # stage-1 recipe controls, ADL's qualification states
+    rows += [
+        record("rcs0", "recipe_control", mode="stack", method="sft", dose=999),
+        record("rcc0", "recipe_control", mode="continued", method="sft", dose=999),
+    ]
     for d in (100, 200):
         kw = {"mode": "stack", "method": "sft", "dose": d}
         rows += [
@@ -597,6 +607,7 @@ def synthetic(
         "adl_prompt_version": "v1",
         "adl_unsteered_prompt_version": "v1",
         "pd_reading": FROZEN_PD,
+        "qualification_states": QUALIFICATION_STATES,
     }
     settings = path_b.PathBSettings(**{**design, **settings_kw})
     if drop is not None:
@@ -907,7 +918,7 @@ def test_report_script_takes_the_frozen_reading_from_the_configs() -> None:
 
 
 PASSED = {"criterion_1": "pass", "criterion_2": "pass", "criterion_L": "pass"}
-ADL_READS = {"a0", "rc0-100", "rc0-200", "l0-100", "l0-200"}
+ADL_READS = {"a0", "rcs0", "rcc0", "rc0-100", "rc0-200", "l0-100", "l0-200"}
 
 
 def test_adl_identifies_the_latent_state_where_pd_does_not() -> None:
@@ -952,6 +963,28 @@ def test_adl_claims_need_validation_both_readers_and_enough_behaviors() -> None:
     assert not both["adl"]["claims"]["identifies_where_pd_does_not"]
 
 
+def test_comparisons_need_both_validated_primary_readings() -> None:
+    kw = {
+        "pd_reads": {"a0", "rcs0", "rcc0", "rc0-100", "rc0-200"},
+        "adl_reads": ADL_READS,
+        "min_common": 1,
+        "adl_qualification_need": 1,
+    }
+    # ADL's counting rule stopped: C stands in for its readings, but no D, Δ or claim.
+    stopped = {"criterion_1": "fail", "criterion_2": "fail", "criterion_L": "fail"}
+    adl = synthetic(validation=PASSED, adl_validation=stopped, **kw)["adl"]
+    assert adl["difference"]["behaviors"] == 0 and "validate" in adl["difference"]["reason"]
+    assert not adl["claims"]["made"]
+    # PD's provisional rule: none either.
+    assert synthetic(adl_validation=PASSED, **kw)["adl"]["difference"]["behaviors"] == 0
+    # A secondary PD reading never makes a comparison or a family-2 claim.
+    secondary = synthetic(validation=PASSED, adl_validation=PASSED, rule="lenient", **kw)["adl"]
+    assert secondary["difference"]["behaviors"] == 0 and not secondary["claims"]["made"]
+    assert any("secondary" in r for r in secondary["claims"]["reasons"])
+    both = synthetic(validation=PASSED, adl_validation=PASSED, **kw)["adl"]
+    assert both["difference"]["behaviors"] == 1 and both["claims"]["made"]
+
+
 def test_the_unsteered_ablation_labels_an_output_explanation() -> None:
     out = synthetic(
         pd_reads={"a0", "rc0-100", "rc0-200"},
@@ -963,6 +996,48 @@ def test_the_unsteered_ablation_labels_an_output_explanation() -> None:
         adl_qualification_need=1,
     )
     assert out["adl"]["ablation_label"] == "explained by ordinary output on the steering prompts"
+
+
+def test_adl_qualification_reads_only_its_frozen_stage1_states() -> None:
+    kw = {"adl_reads": ADL_READS, "validation": PASSED, "adl_validation": PASSED}
+    base = synthetic(min_common=1, adl_qualification_need=1, **kw)["adl"]["qualification"]
+    assert base["qualified"] and base["behaviors"][0]["r_recipe_controls"] == [1.0, 1.0]
+    # The dose's recipe controls read nothing for ADL: the stage-1 qualification is unchanged,
+    # while the dose recheck fails, and with it the common subset.
+    later = synthetic(
+        min_common=1,
+        adl_qualification_need=1,
+        adl_reads=ADL_READS - {"rc0-100", "rc0-200"},
+        validation=PASSED,
+        adl_validation=PASSED,
+    )["adl"]
+    assert later["qualification"]["qualified"] and not later["common"]
+    # A state of another role or mode in the frozen list fails the behavior.
+    wrong = {"b1": {**QUALIFICATION_STATES["b1"], "recipe_controls": {"stack": "rcs0"}}}
+    bad = synthetic(qualification_states=wrong, adl_qualification_need=1, **kw)["adl"]
+    assert not bad["qualification"]["qualified"]
+    assert "continued" in bad["qualification"]["behaviors"][0]["problem"]
+    swapped = {"b1": {**QUALIFICATION_STATES["b1"], "sham": "rcc0"}}
+    row = synthetic(qualification_states=swapped, **kw)["adl"]["qualification"]["behaviors"][0]
+    assert not row["eligible"] and "sham" in row["problem"]
+    none = synthetic(qualification_states={}, **kw)["adl"]["qualification"]
+    assert none["verdict"] == "not performed" and not none["qualified"]
+
+
+def test_the_dose_recheck_needs_every_expected_control() -> None:
+    kw = {"adl_reads": ADL_READS, "validation": PASSED, "adl_validation": PASSED}
+
+    def without_controls(o):
+        index = StateIndex([r for sid, r in o.index.by_id.items() if not sid.startswith("rc0-")])
+        return index
+
+    out = synthetic(
+        min_common=1, adl_qualification_need=1, observations={"index": without_controls}, **kw
+    )
+    recheck = out["adl"]["dose_recheck"]
+    assert (
+        recheck and not recheck[0]["passed"] and "recipe controls at dose" in recheck[0]["problem"]
+    )
 
 
 def test_feasibility_reads_adl_per_dose_without_claims() -> None:

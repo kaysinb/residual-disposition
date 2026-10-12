@@ -20,7 +20,7 @@ pipeline:
       top_k: 0
       max_new_tokens: 1024
   plan:
-    phase: all              # all (stage 1, one pass) | path B's passes: suppress | calibrate | certify
+    phase: all              # all (stage 1, one pass) | path B: qualify | validate_axis | suppress | calibrate | certify
     seeds: [0]
     limits: {}              # optional prompt-count limits per set, for smoke tests only
     recipe_dose: implant_steps  # implant_steps | <steps> | suppression_doses (read at the audit doses)
@@ -37,21 +37,26 @@ pipeline:
     first_step: false       # path B: first-step diagnostics of every relearning run (exploratory)
     adl: false              # path B: ADL's evidence package of each state at the audit doses
     axis: false             # path B: the activation axis's pooled activations (certify)
-    qualify:                # path B's first pass (phase qualify), on stage-1 states only
-      adl_states: []        # Q1: ADL's qualification states (active, sham, recipe controls)
+    qualify:                # path B's first passes, on stage-1 states only
+      adl_states: {}        # Q1 (phase qualify): {behavior: {active, sham, recipe_controls: {stack, continued}}}
       benchmark: {allowance_hours: null, tolerance: 0.25}  # Q1's forecast after its first state
-      axis: false           # Q2: the axis activations of this behavior's stage-1 states
+      axis: false           # Q2 (phase validate_axis): the axis's fit part on this behavior's stage-1 states
       recipe_controls: []   # this behavior's stage-1 recipe controls (state ids)
       axis_states: []       # other behaviors' organisms: [{active: <id>, sham: <id>}]
-      causal: false         # Q3: the causal validation at layer 20
+      causal: false         # Q3 (phase validate_axis): the causal validation at layer 20
       other_axis: null      # Q3's other-behavior direction: {active: <id>, sham: <id>}
       other_behavior: null  # Q3's quality check: another behavior's instructed rate
     api:                    # ADL's API: this worker's disjoint share of the cap (budget.ApiLedger)
       adl_ledger: {worker: null, allowance_usd: null, path: null}  # path: data/ledgers/adl-api-<worker>.jsonl
       adl_state_usd: 0.6    # checked before each ADL state: its expected grader spend, with margin
     ia: true                # false (path B): no IA readout, IA control or lifting
-    cost:                   # path B: the Pod's GPU-hour cap, from its start (budget.CostMeter)
-      cap_hours: null
+    # path B: ADL's frozen, completed qualification record (scripts/adl_qualification.py), needed by
+    # suppress, calibrate and certify
+    qualification: {record: null, sha256: null}
+    cost:                   # the Pod's GPU-hour cap in its batch (budget.CostMeter)
+      cap_hours: null       # phase all only
+      batches: {q1: null, rest: null}  # path B: GPU hours per Pod, by batch (qualify: q1, else rest)
+      prior_hours: 0.0      # path B: this batch's GPU hours on this Pod before started_at
       started_at: null      # ISO time with a time zone, e.g. the Pod's startedAt
       stop_fraction: 0.8    # no new GPU step beyond this share of the cap
       deadline_state: null  # the Pod's deadline watcher state.json, verified before GPU work

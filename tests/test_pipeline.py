@@ -456,6 +456,15 @@ def watcher(tmp_path):
     lock.close()
 
 
+def qualification_file(watcher, status="complete", verdict="qualified"):
+    """A frozen qualification record beside the watcher, and its plan entry {record, sha256}."""
+    import hashlib
+
+    path = Path(watcher).parent.parent / f"qualification-{status}-{verdict}.json"
+    path.write_text(json.dumps({"status": status, "verdict": verdict, "states": {}}))
+    return {"record": str(path), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
 def path_b_plan(watcher, phase, **changes):
     label = "sft/stack/-"
     plan = {
@@ -477,11 +486,13 @@ def path_b_plan(watcher, phase, **changes):
         "futility_stop": True,
         "probe_references": [],
         "cost": {
-            "cap_hours": 10,
+            "batches": {"q1": 10, "rest": 10},
+            "prior_hours": 0.0,
             "started_at": _start().isoformat(),
             "stop_fraction": 0.8,
             "deadline_state": str(watcher),
         },
+        "qualification": qualification_file(watcher),
     }
     if phase in ("calibrate", "certify"):
         plan["audit_doses"] = [100, 200]
@@ -741,11 +752,50 @@ def test_check_plan_validates_each_phase_before_any_gpu_work(ws, monkeypatch, wa
     assert "deadline_state" in problems(
         path_b_plan(watcher, "suppress", cost={**cost, "deadline_state": None})
     )
-    assert "cost cap" in problems(path_b_plan(watcher, "calibrate", cost={"cap_hours": None}))
+    assert "batches.rest" in problems(
+        path_b_plan(watcher, "calibrate", cost={**cost, "batches": {"q1": 10}})
+    )
+    assert "prior_hours" in problems(
+        path_b_plan(watcher, "suppress", cost={**cost, "prior_hours": "???"})
+    )
     # The cap's end is 10 h after the start; a watcher stopping the Pod later does not hold it.
-    late = {**cost, "cap_hours": 8}
+    late = {**cost, "batches": {"q1": 10, "rest": 8}}
     assert "after the cap's end" in problems(path_b_plan(watcher, "suppress", cost=late))
+    # Hours this batch already used on the Pod bring the cap's end forward: 10 - 2 = 8 h left.
+    spent = {**cost, "prior_hours": 2.0}
+    assert "after the cap's end" in problems(path_b_plan(watcher, "suppress", cost=spent))
     assert "phase" in problems(path_b_plan(watcher, "rehearse"))
+
+
+def test_suppression_needs_a_completed_qualification_record(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    def problems(plan):
+        monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
+        try:
+            pipeline.check_plan(
+                ws.cfg, now=lambda: _start() + timedelta(hours=1), pod=lambda: "pod1"
+            )
+        except ValueError as error:
+            return str(error)
+        return ""
+
+    monkeypatch.setitem(ws.cfg.suppress, "doses", [50, 100, 200])
+    assert problems(path_b_plan(watcher, "suppress")) == ""
+    # "not qualified" allows descriptive work; pending, missing or altered records allow none.
+    descriptive = qualification_file(watcher, verdict="not qualified")
+    assert problems(path_b_plan(watcher, "suppress", qualification=descriptive)) == ""
+    pending = qualification_file(watcher, status="pending", verdict=None)
+    assert "not complete" in problems(path_b_plan(watcher, "suppress", qualification=pending))
+    assert "needs the record" in problems(
+        path_b_plan(watcher, "calibrate", qualification={"record": None, "sha256": None})
+    )
+    altered = {**path_b_plan(watcher, "suppress")["qualification"], "sha256": "0" * 64}
+    assert "sha256" in problems(path_b_plan(watcher, "certify", qualification=altered))
+    # Pass qualify and the axis's validation need none.
+    assert "qualification" not in problems(
+        qualify_plan(watcher, qualification={"record": None, "sha256": None})
+    )
 
 
 def test_feasibility_config_requires_its_pass_values() -> None:
@@ -754,7 +804,10 @@ def test_feasibility_config_requires_its_pass_values() -> None:
 
     assert OmegaConf.is_missing(cfg.pipeline.plan.cost, "started_at")
     assert OmegaConf.is_missing(cfg.pipeline.plan.cost, "deadline_state")
-    with pytest.raises(ValueError, match="started_at"):
+    assert OmegaConf.is_missing(cfg.pipeline.plan, "phase")  # no default pass
+    assert OmegaConf.is_missing(cfg.pipeline.plan.qualification, "record")
+    assert dict(cfg.pipeline.plan.cost.batches) == {"q1": 5.64, "rest": 22.56}
+    with pytest.raises(ValueError, match="phase"):
         pipeline.check_plan(cfg)
 
 
@@ -1227,10 +1280,22 @@ def test_a_reused_causal_condition_is_read_back_and_charged(ws, monkeypatch) -> 
     assert (seen[0]["kind"], seen[0]["c"], seen[0]["layer"]) == ("remove", 1.0, 20)
 
 
-def qualify_plan(watcher, **changes):
-    plan = path_b_plan(watcher, "qualify")
+def q1_states(*names):
+    """Frozen Q1 states, one behavior per name: active, sham, stack and continued controls."""
+    return {
+        n: {
+            "active": f"{n}a",
+            "sham": f"{n}h",
+            "recipe_controls": {"stack": f"{n}s", "continued": f"{n}c"},
+        }
+        for n in names
+    }
+
+
+def qualify_plan(watcher, phase="qualify", **changes):
+    plan = path_b_plan(watcher, phase)
     plan["qualify"] = {
-        "adl_states": ["q1", "q2", "q3"],
+        "adl_states": q1_states("q1"),
         "benchmark": {"allowance_hours": 3.0, "tolerance": 0.25},
         "axis": True,
         "recipe_controls": ["rc1"],
@@ -1305,7 +1370,7 @@ def fake_qualify(ws, monkeypatch, calls, clock, *, state_hours=0.5, state_usd=0.
     return lambda: clock["now"]
 
 
-def test_qualify_runs_q1_with_its_benchmark_then_q2_and_q3(ws, monkeypatch, watcher) -> None:
+def test_qualify_runs_q1_alone_with_its_benchmark(ws, monkeypatch, watcher) -> None:
     from datetime import timedelta
 
     calls: list = []
@@ -1313,10 +1378,26 @@ def test_qualify_runs_q1_with_its_benchmark_then_q2_and_q3(ws, monkeypatch, watc
     now = fake_qualify(ws, monkeypatch, calls, clock)
     monkeypatch.setitem(ws.cfg.pipeline, "plan", qualify_plan(watcher))
     out = pipeline.run_behavior(ws, now=now, pod=lambda: "pod1")
-    assert [c[1] for c in calls if c[0] == "adl"] == ["q1", "q2", "q3"]
-    assert out["benchmark"]["forecast_hours"] == pytest.approx(1.5) and not out["benchmark"]["stop"]
+    # The frozen states in order: active, sham, the stack and continued recipe controls.
+    assert [c[1] for c in calls if c[0] == "adl"] == ["q1a", "q1h", "q1s", "q1c"]
+    assert out["benchmark"]["forecast_hours"] == pytest.approx(2.0) and not out["benchmark"]["stop"]
+    assert not any(c[0] in ("axis", "causal", "train") for c in calls)  # Q2-Q3: their own phase
+    assert out["adl_api"]["worker"] == "pod-a" and out["adl_api"]["allowance_usd"] == 10.0
+    assert out["adl_api"]["spent_usd"] == pytest.approx(0.4) and out["adl_api"]["open_usd"] == 0
+    assert json.dumps(out)  # JSON-ready: no meter or grader objects
+
+
+def test_validate_axis_runs_q2_and_q3_in_the_rests_batch(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    now = fake_qualify(ws, monkeypatch, calls, clock)
+    monkeypatch.setitem(ws.cfg.pipeline, "plan", qualify_plan(watcher, "validate_axis"))
+    out = pipeline.run_behavior(ws, now=now, pod=lambda: "pod1")
+    assert not any(c[0] == "adl" for c in calls)
     first_axis = next(i for i, c in enumerate(calls) if c[0] == "axis")
-    assert first_axis == 3 and calls[first_axis][1] is None  # the base model first
+    assert calls[first_axis][1] is None  # the base model first
     assert {c[1] for c in calls if c[0] == "axis"} == {None, "active0", "sham0", "rc1", "oa", "os"}
     assert out["causal"]["passed"] and out["causal"]["status"] == "causally validated"
     # Every direction adds the target axis's own g; each centers on its own sham mean.
@@ -1325,9 +1406,6 @@ def test_qualify_runs_q1_with_its_benchmark_then_q2_and_q3(ws, monkeypatch, watc
     assert len(g_target) == 1 and g_target.pop() > 0.5 and {c[5] for c in added} == {added[0][5]}
     removed = {c[3]: c[6] for c in calls if c[0] == "causal" and c[2] == "remove" and c[4] > 0}
     assert len(set(removed.values())) == len(removed)
-    assert out["adl_api"]["worker"] == "pod-a" and out["adl_api"]["allowance_usd"] == 10.0
-    assert out["adl_api"]["spent_usd"] == pytest.approx(0.3) and out["adl_api"]["open_usd"] == 0
-    assert json.dumps(out)  # JSON-ready: no meter or grader objects
     assert not any(c[0] == "train" for c in calls)
 
 
@@ -1338,11 +1416,25 @@ def test_q1_stops_when_its_benchmark_forecast_exceeds_the_allowance(
 
     calls: list = []
     clock = {"now": _start() + timedelta(hours=1)}
-    now = fake_qualify(ws, monkeypatch, calls, clock, state_hours=1.5)  # 4.5 h > 3.0 × 1.25
+    now = fake_qualify(ws, monkeypatch, calls, clock, state_hours=1.5)  # 6 h > 3.0 × 1.25
     monkeypatch.setitem(ws.cfg.pipeline, "plan", qualify_plan(watcher))
     out = pipeline.run_behavior(ws, now=now, pod=lambda: "pod1")
-    assert [c[1] for c in calls if c[0] == "adl"] == ["q1"] and "allowance" in out["budget_stop"]
-    assert not any(c[0] in ("axis", "causal") for c in calls)
+    assert [c[1] for c in calls if c[0] == "adl"] == ["q1a"] and "allowance" in out["budget_stop"]
+
+
+def test_q1s_forecast_is_held_to_its_stop_not_its_cap(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    # 1 h used + 3 more states × 2.4 h = 8.2 h: within Q1's 10 h cap, beyond its stop at 8 h.
+    now = fake_qualify(ws, monkeypatch, calls, clock, state_hours=2.4)
+    plan = qualify_plan(watcher)
+    plan["qualify"]["benchmark"] = {"allowance_hours": None}
+    monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
+    out = pipeline.run_behavior(ws, now=now, pod=lambda: "pod1")
+    assert [c[1] for c in calls if c[0] == "adl"] == ["q1a"]
+    assert "the stop at 8.00 h" in out["budget_stop"]
 
 
 def test_the_adl_api_cap_stops_q1(ws, monkeypatch, watcher) -> None:
@@ -1367,13 +1459,12 @@ def test_each_adl_state_is_checked_against_the_ledger(ws, monkeypatch, watcher) 
     now = fake_qualify(ws, monkeypatch, calls, clock, state_usd=2.0)
     plan = qualify_plan(watcher)
     plan["qualify"]["benchmark"] = {"allowance_hours": None}
-    plan["qualify"]["adl_states"] = ["q1", "q2", "q3", "q4"]
     plan["api"]["adl_state_usd"] = 4.5
     monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
     # The benchmark sees 3 × $2 fit in the $8 left; before the fourth state, $6 committed plus
     # its expected $4.5 exceed the $10 allowance.
     out = pipeline.run_behavior(ws, now=now, pod=lambda: "pod1")
-    assert [c[1] for c in calls if c[0] == "adl"] == ["q1", "q2", "q3"]
+    assert [c[1] for c in calls if c[0] == "adl"] == ["q1a", "q1h", "q1s"]
     assert "allowance" in out["budget_stop"]
 
 
@@ -1396,12 +1487,23 @@ def test_check_plan_validates_the_qualify_pass(ws, monkeypatch, watcher) -> None
         qualify_plan(watcher, api={"adl_ledger": {"worker": "pod-a", "allowance_usd": None}})
     )
     bare = qualify_plan(watcher)
-    bare["qualify"] = {"adl_states": [], "axis": False, "causal": False}
-    assert "needs plan.qualify" in problems(bare)
-    nocausal = qualify_plan(watcher)
+    bare["qualify"] = {"adl_states": {}, "axis": False, "causal": False}
+    assert "needs plan.qualify.adl_states" in problems(bare)
+    partial = qualify_plan(watcher)
+    partial["qualify"]["adl_states"]["q1"]["recipe_controls"] = {"stack": "q1s"}
+    assert "recipe_controls" in problems(partial)
+    axis_only = qualify_plan(watcher, "validate_axis")
+    assert problems(axis_only) == ""
+    axis_only["qualify"] = {"axis": False, "causal": False}
+    assert "validate_axis needs" in problems(axis_only)
+    nocausal = qualify_plan(watcher, "validate_axis")
     nocausal["qualify"]["other_behavior"] = None
     assert "other_behavior" in problems(nocausal)
     assert "no audit doses" in problems(qualify_plan(watcher, audit_doses=[100]))
+    # Q1's batch: the q1 cap, never the rest's.
+    q1 = qualify_plan(watcher)
+    q1["cost"] = {**q1["cost"], "batches": {"rest": 10}}
+    assert "batches.q1" in problems(q1)
 
 
 def test_adl_api_spend_sums_the_workers_ledgers(tmp_path) -> None:

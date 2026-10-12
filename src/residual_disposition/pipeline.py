@@ -1634,7 +1634,56 @@ def ia_variants(ws: Workspace) -> list[Readout]:
 
 
 # Path B runs as passes from one config, each a phase; "all" is stage 1's single pass.
-PHASES = ("all", "qualify", "suppress", "calibrate", "certify")
+PHASES = ("all", "qualify", "validate_axis", "suppress", "calibrate", "certify")
+# The phases that suppress or read suppressed states: each needs the frozen, completed record of
+# ADL's qualification (``qualification_record``).
+NEEDS_QUALIFICATION = ("suppress", "calibrate", "certify")
+
+
+def qualification_states(qualify: Mapping[str, Any]) -> list[str]:
+    """Q1's states in order, from ``plan.qualify.adl_states``: per behavior its active organism,
+    sham and both stage-1 recipe controls (stack, continued)."""
+    out = []
+    for behavior, mine in (qualify.get("adl_states") or {}).items():
+        controls = mine.get("recipe_controls") or {}
+        if (
+            set(controls) != {"stack", "continued"}
+            or not mine.get("active")
+            or not mine.get("sham")
+        ):
+            raise ValueError(
+                f"plan.qualify.adl_states.{behavior}: active, sham and recipe_controls "
+                "{stack, continued}"
+            )
+        out += [mine["active"], mine["sham"], controls["stack"], controls["continued"]]
+    return out
+
+
+def qualification_record(spec: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The frozen record of ADL's qualification (``scripts/adl_qualification.py``), verified:
+    ``spec`` = {record: path, sha256}, the file's sha256 as given, its status "complete" and its
+    verdict "qualified" or "not qualified". "not qualified" allows descriptive ADL work; a
+    pending or missing record allows no suppression. ValueError otherwise."""
+    spec = spec or {}
+    path, digest = spec.get("record"), spec.get("sha256")
+    if not path or path == "???" or not digest or digest == "???":
+        raise ValueError("plan.qualification needs the record of ADL's qualification and sha256")
+    path = Path(path)
+    if not path.is_file():
+        raise ValueError(f"no qualification record at {path}")
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != digest:
+        raise ValueError(f"the qualification record {path} does not match its sha256")
+    record = json.loads(data)
+    if record.get("status") != "complete" or record.get("verdict") not in (
+        "qualified",
+        "not qualified",
+    ):
+        raise ValueError(
+            f"ADL's qualification is not complete: status {record.get('status')!r}, verdict "
+            f"{record.get('verdict')!r}"
+        )
+    return record
 
 
 def check_plan(
@@ -1650,9 +1699,14 @@ def check_plan(
     - **certify**: the audit doses, the certificate targets at them, the confirmatory observer,
       LR_hi and LR_lo (two distinct rates), the step budget and the relearning seeds; no
       calibration.
-    - path B's phases need the cost cap: ``plan.cost.cap_hours``, ``started_at`` (ISO with a
-      time zone, not in the future) and ``deadline_state``, the Pod's deadline watcher, armed,
-      live and stopping the Pod no later than the cap's end. "all" may not use path B's
+    - **qualify**: Q1 alone, ADL's packages of the frozen stage-1 states, in its own batch.
+    - **validate_axis**: Q2-Q3, the axis's fit part and its causal validation.
+    - suppress, calibrate and certify need ADL's completed, frozen qualification record
+      (``qualification_record``).
+    - path B's phases need their batch's cap (``plan.cost.batches``: q1 for qualify, rest for the
+      others) and ``prior_hours``, that batch's GPU hours on this Pod before ``started_at`` (ISO
+      with a time zone, not in the future), and ``deadline_state``, the Pod's deadline watcher,
+      armed, live and stopping the Pod no later than the cap's end. "all" may not use path B's
       calibration or confirmatory observer.
     """
     plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
@@ -1672,18 +1726,27 @@ def check_plan(
         problems.append(
             "calibration and the confirmatory observer run in phases calibrate, certify"
         )
-    if phase in ("qualify", "suppress") and (audit or calibration or targets):
+    if phase in ("qualify", "validate_axis", "suppress") and (audit or calibration or targets):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate yet")
     qualify = plan.get("qualify") or {}
-    if phase == "qualify":
-        if (plan.get("cost") or {}).get("cap_hours") is None:
-            problems.append("phase qualify needs the cost cap, plan.cost.cap_hours")
-        if not (qualify.get("adl_states") or qualify.get("axis") or qualify.get("causal")):
-            problems.append("phase qualify needs plan.qualify.adl_states, axis or causal")
+    if phase == "qualify":  # Q1 alone, in its own batch
+        try:
+            if not qualification_states(qualify):
+                problems.append("phase qualify needs plan.qualify.adl_states")
+        except ValueError as error:
+            problems.append(str(error))
+    if phase == "validate_axis":  # Q2-Q3, in the rest's batch
+        if not (qualify.get("axis") or qualify.get("causal")):
+            problems.append("phase validate_axis needs plan.qualify.axis or causal")
         if qualify.get("causal") and not qualify.get("other_behavior"):
             problems.append("the causal validation needs plan.qualify.other_behavior")
         if qualify.get("causal") and not qualify.get("other_axis"):
             problems.append("the causal validation needs plan.qualify.other_axis {active, sham}")
+    if phase in NEEDS_QUALIFICATION:
+        try:
+            qualification_record(plan.get("qualification"))
+        except ValueError as error:
+            problems.append(f"phase {phase} needs ADL's completed qualification: {error}")
     uses_adl = (phase == "qualify" and qualify.get("adl_states")) or (
         phase == "certify" and plan.get("adl")
     )
@@ -1699,8 +1762,6 @@ def check_plan(
             problems.append(f"phase {phase} needs plan.audit_doses")
         elif not set(audit) <= checkpoints or len(set(audit)) != len(audit):
             problems.append(f"audit doses {audit} must be distinct suppression checkpoints")
-        if (plan.get("cost") or {}).get("cap_hours") is None:
-            problems.append(f"phase {phase} needs the cost cap, plan.cost.cap_hours")
     if phase == "calibrate":
         if not calibration:
             problems.append("phase calibrate needs plan.relearn_calibration")
@@ -1853,6 +1914,15 @@ def run_behavior(
         if phase == "qualify":
             _qualify(ws, plan, meter, lineage, outputs)
             return _result(lineage, outputs)
+        if phase == "validate_axis":
+            _validate_axis(ws, plan, meter, lineage, outputs)
+            return _result(lineage, outputs)
+        if phase in NEEDS_QUALIFICATION:
+            record = qualification_record(plan.get("qualification"))
+            outputs["qualification"] = {
+                "verdict": record["verdict"],
+                "record": str(plan["qualification"]["record"]),
+            }
         seeds = {
             seed: _seed_states(ws, plan, meter, seed, lineage, outputs) for seed in plan["seeds"]
         }
@@ -2087,20 +2157,14 @@ def _qualify(
     lineage: dict[str, str],
     outputs: dict[str, Any],
 ) -> None:
-    """Path B's first pass, on stage-1 states only (plan rev. 12, Q1–Q3).
-
-    - Q1: ADL's evidence package on every state of ``plan.qualify.adl_states``. After the first,
-      its measured GPU hours and API dollars forecast the rest; the pass stops if the forecast
-      exceeds ``benchmark.allowance_hours`` by more than ``benchmark.tolerance`` or would pass the
-      cost meter's cap.
-    - Q2: the axis activations of the base model, this behavior's organisms and stage-1 recipe
-      controls (``plan.qualify.recipe_controls``) and the other behaviors' organisms
-      (``plan.qualify.axis_states``).
-    - Q3 (``plan.qualify.causal``): the causal validation at layer 20 on this behavior's active
-      organism and sham, with two random directions and ``plan.qualify.other_axis``'s direction.
-    """
+    """Path B's first pass, Q1, on stage-1 states only, in its own batch: ADL's evidence package
+    on every frozen state of ``plan.qualify.adl_states`` (per behavior its active organism, sham
+    and both recipe controls). After the first, its measured GPU hours and API dollars forecast
+    the rest; the pass stops if the forecast exceeds ``benchmark.allowance_hours`` by more than
+    ``benchmark.tolerance``, would pass Q1's stop at 80 % of its cap, or would pass what is left
+    of this worker's API allowance."""
     q = plan.get("qualify") or {}
-    adl_states = list(q.get("adl_states") or [])
+    adl_states = qualification_states(q)
     if adl_states:
         graders = _adl_graders_for(ws, plan, outputs)
         api = outputs["adl_api"]
@@ -2121,8 +2185,24 @@ def _qualify(
                 )
                 if outputs["benchmark"]["stop"]:
                     raise BudgetExhausted(f"Q1 benchmark: {outputs['benchmark']['stop']}")
-    if not (q.get("axis") or q.get("causal")):
-        return
+
+
+def _validate_axis(
+    ws: Workspace,
+    plan: Mapping[str, Any],
+    meter: CostMeter,
+    lineage: dict[str, str],
+    outputs: dict[str, Any],
+) -> None:
+    """Q2-Q3, on stage-1 states only, in the rest's batch, before any suppression.
+
+    - Q2: the fit part of the axis activations (probe_train) of the base model, this behavior's
+      organisms and stage-1 recipe controls (``plan.qualify.recipe_controls``) and the other
+      behaviors' organisms (``plan.qualify.axis_states``).
+    - Q3 (``plan.qualify.causal``): the causal validation at layer 20 on this behavior's active
+      organism and sham, with two random directions and ``plan.qualify.other_axis``'s direction.
+    """
+    q = plan.get("qualify") or {}
     meter.check()
     implant_data, sham_data, matched = implant_datasets(ws, plan["seeds"][0])
     active = train_implant(ws, plan["seeds"][0], "active", implant_data, matched)
@@ -2160,8 +2240,8 @@ def _benchmark(
             f"forecast {forecast_hours:.1f} h exceeds the allowance {allowance} h by more than "
             f"{tolerance:.0%}"
         )
-    elif (reason := meter.projected(hours * remaining)) is not None:
-        out["stop"] = reason
+    elif (reason := meter.projected_stop(hours * remaining)) is not None:
+        out["stop"] = reason  # Q1's stop at 80 % of its cap, not the hard cap
     elif usd * remaining > api.remaining():
         out["stop"] = (
             f"forecast API ${usd * remaining:.2f} exceeds the remaining ${api.remaining():.2f} "

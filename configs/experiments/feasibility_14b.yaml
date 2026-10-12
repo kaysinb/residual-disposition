@@ -31,7 +31,7 @@ relearn:
 pipeline:
   reuse_from: [stage1_14b]
   plan:
-    phase: suppress                     # then calibrate, then certify
+    phase: ???                          # qualify (Q1), validate_axis (Q2-Q3), suppress, calibrate, certify
     seeds: [0]
     branches:
       - {method: sft, mode: stack}
@@ -61,8 +61,13 @@ pipeline:
     futility_stop: true
     ia_calibration: false
     ia_calibration_kinds: []
+    qualification:                      # suppress, calibrate and certify: ADL's completed record
+      record: ???                       # qualification.json of scripts/adl_qualification.py
+      sha256: ???
     cost:
-      cap_hours: 15                     # per Pod: half of the plan's 30 GPU-hour cap
+      # $45 for Q1 and $180 for the rest (approved 2026-10-12), at $3.99/h over two Pods
+      batches: {q1: 5.64, rest: 22.56}
+      prior_hours: ???                  # this batch's GPU hours on this Pod before started_at
       started_at: ???                   # the Pod's startedAt, ISO with a time zone
       stop_fraction: 0.8
       deadline_state: ???               # the watcher's state.json, deadline <= cap's end
