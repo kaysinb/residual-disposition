@@ -573,6 +573,16 @@ steps, ≈ 1.56 h, so 3.1 h for both. In all ≈ 8.4 h.
 | Q1, ADL qualification | $45 (11.3 GPU-hours) | 5.64 h | 9.0 h (4.51 h per Pod) | 6.8 h | 2.2 h |
 | The rest, Q2–Q3 included | $180 (45.1 GPU-hours) | 22.56 h | 36.1 h (18.05 h per Pod) | 28.3 h | 7.8 h (22 %) |
 
+**The rest's cap raised by the user on 2026-10-13: $180 → $200**, so path B's GPU is $45 + $200
+(combined ceilings $245 for GPU, $285 in all). The run's measured pace was slower than this
+section's figures: training ≈ 4.55 s per step, Q2–Q3 ≈ 2.5 h per Pod and two interruptions, so
+the forecast was ≈ 20–21 h per Pod.
+- Per Pod: 25.06 h (200 / 2 / $3.99), stop at 80 % 20.05 h.
+- The meter takes the new cap as the override `pipeline.plan.cost.batches.rest=25.06` from
+  certify on; the config's defaults are unchanged.
+- Each Pod's watcher deadline moves to within the new cap's end. A pass running under the old
+  cap is never shown a deadline beyond its cap's end, which the meter rejects.
+
 - **Batches in the code.** The phase decides the batch (qualify: Q1; the others: the rest).
   Each Pod's meter counts its batch's hours used there before the pass (`prior_hours`) and the
   wall time since the pass's start; the Pod's hard deadline must fall within what is left of
