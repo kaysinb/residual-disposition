@@ -79,6 +79,8 @@ topics:
   - scripts/judge.py
   - scripts/make_labeling_set.py
   - scripts/import_manual_labels.py
+  - scripts/adl_qualification_sample.py
+  - scripts/validate_counting_rule.py
 - id: ia_readout_control
   title: IA lifting control with three readout conditions and preserved organism adapters
   source: docs/preregistration.md#primary-analysis

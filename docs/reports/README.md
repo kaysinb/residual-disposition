@@ -9,4 +9,5 @@ the [publication evidence contract](../architecture.md#publication-evidence).
 
 Stage 0 has no gate; its measurements are in [stage-0.md](stage-0.md). Stage 1 evaluated
 [Gate 1](gate-1.md) (not passed) and [Gate 2](gate-2.md) (passed as written); the stage-1 runs,
-incidents and costs are in gate-1.md.
+incidents and costs are in gate-1.md. Path B's ADL qualification (Q1) is in
+[adl-qualification.md](adl-qualification.md).
