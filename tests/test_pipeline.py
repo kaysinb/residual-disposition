@@ -1702,16 +1702,55 @@ def test_a_continuation_pass_checks_at_the_level_of_all_audited_doses(
     confirms = [c for c in calls if c[0] == "confirm" and len(c) == 4]
     assert confirms == [("confirm", "suppressed-200", "suppressed_sham-200", pytest.approx(0.9875))]
     assert pipeline.audited_count({"audit_doses": [100, 200]}) == 2
-    # The plan check: a whole number, at least this pass's doses.
-    monkeypatch.setitem(ws.cfg.suppress, "doses", [50, 100, 200])
-    for total, ok in ((4, True), (1, False), (2.5, False)):
-        bad = path_b_plan(watcher, "certify", audited_doses_total=total)
-        monkeypatch.setitem(ws.cfg.pipeline, "plan", bad)
-        monkeypatch.setitem(ws.cfg.relearn, "learning_rates", [1e-5, 2e-5])
-        monkeypatch.setitem(ws.cfg.relearn, "max_steps", 600)
+    # The plan check: a whole number, at least this pass's doses, and with a declared count a
+    # certify pass of exactly one dose, whatever the phase at most two.
+    monkeypatch.setitem(ws.cfg.suppress, "doses", [50, 100, 200, 400])
+    monkeypatch.setitem(ws.cfg.relearn, "learning_rates", [1e-5, 2e-5])
+    monkeypatch.setitem(ws.cfg.relearn, "max_steps", 600)
+
+    def problem(**changes):
+        monkeypatch.setitem(ws.cfg.pipeline, "plan", path_b_plan(watcher, "certify", **changes))
         try:
             pipeline.check_plan(ws.cfg, now=now, pod=lambda: "pod1")
-            problem = ""
         except ValueError as error:
-            problem = str(error)
-        assert ("audited_doses_total" in problem) is not ok
+            return str(error)
+        return ""
+
+    one = {"audit_doses": [100], "relearn": [{"label": label, "dose": 100}]}
+    assert problem(**one, audited_doses_total=4) == ""
+    assert "exactly one dose" in problem(audited_doses_total=4)  # [100, 200] in one pass
+    assert "audited_doses_total" in problem(**one, audited_doses_total=2.5)
+    assert "audited_doses_total" in problem(audited_doses_total=1)
+    assert problem() == ""  # two doses, no declared count, as before
+    many = [{"label": label, "dose": d} for d in (100, 200, 400)]
+    assert "at most two" in problem(audit_doses=[100, 200, 400], relearn=many)
+
+
+def test_a_continuation_runs_each_dose_in_its_own_pass_at_its_own_rates(
+    ws, monkeypatch, watcher
+) -> None:
+    from datetime import timedelta
+
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    now = fake_path_b(ws, monkeypatch, calls, clock=clock)
+    label = "sft/stack/-"
+    run_pass(ws, monkeypatch, path_b_plan(watcher, "suppress"), now)
+    run_pass(ws, monkeypatch, path_b_plan(watcher, "calibrate"), now)
+    for dose, rates in ((100, [1e-5, 5e-6]), (200, [2e-5, 1e-5])):
+        calls.clear()
+        monkeypatch.setitem(ws.cfg.relearn, "learning_rates", rates)
+        plan = path_b_plan(
+            watcher,
+            "certify",
+            audit_doses=[dose],
+            audited_doses_total=4,
+            relearn=[{"label": label, "dose": dose}],
+        )
+        run_pass(ws, monkeypatch, plan, now)
+        confirms = [c for c in calls if c[0] == "confirm" and len(c) == 4]
+        assert confirms == [
+            ("confirm", f"suppressed-{dose}", f"suppressed_sham-{dose}", pytest.approx(0.9875))
+        ]
+        used = {c[2] for c in calls if c[0] == "relearn" and c[5] is None}
+        assert used and used <= set(rates)  # this dose's certificate at this dose's rates

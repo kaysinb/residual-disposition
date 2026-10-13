@@ -1771,11 +1771,20 @@ def check_plan(
             problems.append(f"phase {phase} needs plan.audit_doses")
         elif not set(audit) <= checkpoints or len(set(audit)) != len(audit):
             problems.append(f"audit doses {audit} must be distinct suppression checkpoints")
+        elif len(audit) > 2:
+            problems.append(f"at most two audit doses in a pass, not {audit}")
         total = plan.get("audited_doses_total")
         if total is not None and (int(total) != total or int(total) < len(set(audit))):
             problems.append(
                 f"plan.audited_doses_total {total} must be a whole number of at least the "
                 f"{len(set(audit))} audit doses of this pass"
+            )
+        if total is not None and phase == "certify" and len(set(audit)) != 1:
+            # A continuation's doses each have their own calibrated rates, and a certify pass
+            # applies one pair: one dose per pass (preregistration §11.11).
+            problems.append(
+                "with plan.audited_doses_total, a certify pass audits exactly one dose, "
+                f"not {audit}"
             )
     if phase == "calibrate":
         if not calibration:
