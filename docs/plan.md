@@ -155,7 +155,10 @@ delegation (2026-10-12), agreed with a second reviewer. The text is revision 13 
 `95d2d6f6bfbf7fc435c21a49c009455ca464fdfd73bf9e2ad7ea21edbbddc557`), with its headings nested under
 this section, its rules linked to the amendment and its reviewers named by role. Approved caps: GPU
 $45 for Q1 and $180 for the rest; the ADL API $35 in shares of $10, $10 and $15, and the earlier $5
-for PD and the judge.
+for PD and the judge. Changed by the user on 2026-10-13: the rest to $200
+([Cost and time](#cost-and-time)), and $70 for the example_link continuation
+([below](#continuation-of-the-audit-for-example_link)); the ADL API shares reallocated within
+$35.
 
 **This is a feasibility run, not the main result.** It tests three things:
 - whether SFT suppression in stack mode makes certified latent states of the stage-1 organisms on
@@ -657,6 +660,36 @@ the forecast was ≈ 20–21 h per Pod.
   C_ens if it is needed.
 - **Storage:** about 40 checkpoints × 0.26 GB on the 250 GB volume, which has ≈ 100 GB free;
   relearning copies are not kept.
+
+### Continuation of the audit for example_link
+
+**Fixed: approved by the user on 2026-10-13**, after reviews by the coordinator and a second
+reviewer. The rules are the preregistration's
+[§11.11](preregistration.md#1111-feasibility-continuation-of-the-audit-example_link): a
+data-informed feasibility extension, specified after d₁/d₂'s confirmation failures and before
+any tool reading of the suppressed states was inspected; the original two-dose outcome (4) stands
+beside it.
+
+| Step | What | Notes |
+|---|---|---|
+| 1. Calibration | sham_s at d₃ = 100 and at d₄ = 200: the four base candidates to 200 steps, the ladder of branches a–d, the first-step diagnostics | Measured at each dose, not carried over from d₁ |
+| 2. Rates and power | `scripts/choose_relearn_rates.py` and `scripts/certificate_power.py` per dose | The certificate at a dose starts only if P(certified \| S = 6) ≥ 0.5 |
+| 3. d₃ | Fresh confirmatory pass (latent, sham_s, sham_x) at one-sided 98.75 %; if confirmed, the certificate at d₃'s rates; then the readouts of latent, sham_s, sham_x and the recipe control | Readouts run, descriptive, also when d₃ is not confirmed |
+| 4. d₄ | The same at 200 | Starts only if its cost projected from d₃'s measured work fits the cap |
+
+- **Code needed first:** the analysis and the certify pass take the declared number of audited
+  doses of a behavior (four here) for the Bonferroni level, instead of counting the doses of one
+  pass, and accept more than two audited doses. Reviewed before the certify pass.
+- **Compute and caps:** one Pod (Pod A of the rest batch, kept after its certify pass); a separate
+  batch with a GPU cap of $70 (17.54 GPU-hours), the stop at 80 % at 14.0 h, the hard deadline
+  within the cap, and the resume rule of the rest batch (the forecast end at least 25 min before
+  the watcher's deadline).
+- **Expected cost:** calibration ≈ 1.4 h per dose; per dose the confirmation ≈ 0.1 h, a
+  certificate ≈ 2.6 h (T_sham ≈ 75 and 127 steps at d₁'s rates; latent at S ≈ 3) and readouts
+  ≈ 1.6 h; ≈ 11.5 GPU-hours ≈ $46 for both doses. The certificate's worst case, every run at its
+  budget, is ≈ 12 h per dose: the projection and the stop cut it.
+- **API:** ADL's graders on 8 more states, ≈ $2.7 of the Pod's ADL share; the laptop's
+  interpretation and judging ≈ $1.5 of its share.
 
 ### Limits, stated in the report
 

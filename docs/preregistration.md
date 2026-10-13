@@ -186,6 +186,16 @@ Format: date, item, old value → new value, reason, and which data had been see
   reason is Gate 1's failure and the user's choice to continue without IA (2026-10-12). Data
   seen: every stage-1 reading of active, sham and recipe-control states, as the amendment
   lists; no suppressed state; simulated data only for the inference. Approved on 2026-10-13 by the coordinator under the user's delegation (2026-10-12), agreed with a second reviewer.
+- 2026-10-13, path B feasibility, example_link: the audit at d₁ = 25 and d₂ = 50 only →
+  additionally a separate continuation at the next two checkpoints, d₃ = 100 and d₄ = 200, with
+  its own calibration, confirmation at one-sided 98.75 % and a GPU cap of its own
+  ([§11.11](#1111-feasibility-continuation-of-the-audit-example_link)). The reason is that both
+  audited doses failed their confirmatory rate check narrowly (upper bounds 0.0283 and 0.0216
+  against 0.02) while the later checkpoints' exploratory rates were 0. Data seen: the observer's
+  detector rates (exploratory at every checkpoint, confirmatory at 25 and 50), the calibration's
+  T on sham_s at 25, the chosen rates and the certificate power; no tool reading of any suppressed
+  state, sham_x or recipe control. Approved by the user on 2026-10-13, after reviews by the
+  coordinator and a second reviewer.
 
 ## Path B amendment
 
@@ -1181,3 +1191,60 @@ code is followed. Every deviation is listed in the last bullet.
   - independent implantation seeds;
   - the Y control.
 - **Deferred:** crosscoders, a tuned lens, and a large steering search.
+
+#### 11.11 Feasibility continuation of the audit (example_link)
+
+**Data-informed feasibility extension, specified after d₁/d₂ confirmation failures and before
+inspection of suppressed-state tool readouts.** Fixed: approved by the user on 2026-10-13, after
+reviews by the coordinator and a second reviewer.
+
+- **Why.** example_link's audited doses d₁ = 25 and d₂ = 50 were both not confirmed: the
+  confirmatory latent rates 0.015 and 0.010 gave one-sided 97.5 % upper bounds of 0.0283 and 0.0216
+  against 0.02, with sham_s and sham_x at 0. Its exploratory latent rates at 100–800 were 0. Those
+  zeros motivate testing later doses; they confirm or certify nothing.
+- **What was seen when it was fixed.** The observer's detector rates (exploratory at every
+  checkpoint, confirmatory at 25 and 50), the calibration's T on sham_s at 25, the chosen rates and
+  the certificate power, and the cells' kinds and statuses. No output of PD, DM, SVD, ADL, the
+  likelihood observer, the axis or the probe on any suppressed state, sham_x or recipe control
+  had been opened, summarized, judged or analysed, for either behavior. Both behaviors' readouts
+  stay sealed until this section and its code are fixed.
+- **The original result stands.** Over the preregistered audit (d₁, d₂), example_link's outcome is
+  4, "suppression not confirmed at the audited doses". It is reported as such, beside the
+  continuation's result, which never replaces it.
+- **Doses.** d₃ = 100 and d₄ = 200, the next two checkpoints of the declared grid; both are
+  audited; no further dose is added. pun_intended is not extended (its d₂ = 50 was confirmed).
+- **Statistics.** The continuation is a separate, prospective procedure. Each new dose gets a
+  fresh confirmatory pass (its own sampling stream; latent, sham_s and sham_x; the exploratory
+  passes never enter it) and a one-sided 98.75 % Newcombe bound, the level of four audited doses.
+  Two such checks bound a false confirmation within the continuation by 2.5 %, nominally (from
+  Newcombe's coverage), per behavior and seed; this bounds no certificate or study claim. It does
+  not restore a 5 % error rate for the whole procedure: under this adaptation (two checks at
+  97.5 %, then two at 98.75 % after both failed) the family-wise rate of independent null tests is
+  1 − 0.975² × 0.9875² ≈ 7.3 %. For reference, d₁ and d₂ recomputed at 98.75 % give upper bounds
+  of about 0.0308 and 0.0240; their failures are unchanged.
+- **Calibration at each new dose.** The relearning calibration is measured again on sham_s at
+  d₃ and at d₄, not extrapolated from d₁: the four base candidates, a budget of 200 steps, the
+  ladder of branches a–d (plan, Relearning settings), and the power check per dose
+  (`scripts/certificate_power.py`; the certificate starts only if P(certified | S = 6) ≥ 0.5). The
+  first-step diagnostics run with each calibration, as at d₁.
+- **Certificate and readouts.** A confirmed dose gets the certificate at its own calibrated rates
+  and budget, with the futility stop. Every new dose, confirmed or not, gets the descriptive
+  readouts of its latent state, sham_s, sham_x and recipe control (PD, DM, SVD, the likelihood
+  observer, ADL F1, the axis F2, first step F3), as at a dose that is not confirmed in the main
+  audit. The new latent states get the detector-completeness check, and their suppressed roles
+  enter the hypothesis calibration sample for the validation of C (§3, §11.4) like the roles at
+  d₁ and d₂.
+- **Analysis state.** Within the continuation, the largest certified dose of d₃ and d₄; it is
+  reported as the continuation's result, labeled as this extension.
+- **Order and caps.** On one Pod: calibration at d₃ and d₄; then d₃'s confirmation, certificate
+  and readouts; then d₄'s, only if its cost projected from d₃'s measured work fits the
+  continuation's cap. A GPU cap of its own, $70 (17.54 GPU-hours), with the stop at 80 % and a
+  hard deadline within the cap, approved by the user on 2026-10-13. The ADL graders' API spend
+  stays within the Pod's ADL share.
+- **For the main study** (proposed, not fixed): revise the dose rule before any main-study data.
+  A candidate: d₁ = the first checkpoint whose exploratory upper bound is ≤ 0.01, d₂ = the next,
+  with the margin chosen by simulating both the confirmation's power and the retained relearning
+  savings. Fix in advance the grid, the screening margin, the confirmatory sample size, the
+  maximum number of audits, the α allocation over the planned audits and the stopping rules.
+  Disjoint screening and confirmation prompt sets would make the confirmation's population claim
+  cleaner.
