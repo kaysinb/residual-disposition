@@ -155,6 +155,28 @@ def test_the_adl_ledger_counts_open_reservations_and_survives_a_restart(tmp_path
             ledger_from(bad, tmp_path)
 
 
+def test_billing_evidence_closes_named_open_reservations_at_zero(tmp_path) -> None:
+    from residual_disposition.budget import ApiLedger
+
+    path = tmp_path / "adl-api-laptop.jsonl"
+    ledger = ApiLedger(path, 5.0, "laptop")
+    ids = ledger.reserve({"a": 0.4, "b": 0.3, "c": 0.2}, "summarizer")
+    ledger.settle(ids["a"], "a", 0.1, "summarizer")
+    ledger.fail(ids["b"], "b", "InternalServerError", 503, released=False, label="summarizer")
+    assert ledger.committed() == pytest.approx(0.6)
+    held = ledger.close_unbilled(
+        [ids["b"], ids["c"]], source="balance", decision="coordinator", label="reconciliation"
+    )
+    # The failed and the never-completed sends close at $0; the spend is untouched.
+    assert held == pytest.approx(0.5)
+    assert ledger.state()["open"] == {} and ledger.committed() == pytest.approx(0.1)
+    with pytest.raises(ValueError, match="not open"):
+        ledger.close_unbilled([ids["a"]], source="s", decision="d", label="x")  # settled
+    ledger.close()
+    again = ApiLedger(path, 5.0, "laptop", readonly=True).state()
+    assert again["open"] == {} and again["spent"] == pytest.approx(0.1)
+
+
 def test_a_retried_send_settles_only_its_own_reservation(tmp_path) -> None:
     from residual_disposition.budget import ApiLedger
 

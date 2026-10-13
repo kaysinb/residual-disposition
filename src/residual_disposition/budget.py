@@ -17,7 +17,7 @@ import json
 import math
 import os
 import threading
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -266,6 +266,8 @@ class ApiLedger:
       reservation and no other;
     - ``failed`` when a send raises, with its error class and HTTP status: it releases its
       reservation only if the provider rejected it with HTTP 429 (``released``);
+    - ``unbilled`` closes named open reservations at $0 on billing evidence that their sends
+      were not charged (``close_unbilled``), with its source and the decision;
     - a reservation left open (an interrupted or failed send) stays counted, also when a later
       send of the same request succeeds.
 
@@ -347,6 +349,9 @@ class ApiLedger:
             cache["settled_keys"].add(event["key"])
         elif event["event"] == "failed" and event.get("released"):
             cache["open"].pop(event["id"], None)  # rejected unrun: nothing was billed
+        elif event["event"] == "unbilled":
+            for reservation in event["ids"]:
+                cache["open"].pop(reservation, None)
 
     def _loaded(self) -> dict[str, Any]:
         if self._cache is None:
@@ -436,6 +441,30 @@ class ApiLedger:
         }
         with self._lock:
             self._append([{**event, "label": label}])
+
+    def close_unbilled(
+        self, reservations: Sequence[str], *, source: str, decision: str, label: str
+    ) -> float:
+        """Close open reservations at $0 on billing evidence that their sends were not charged:
+        one ``unbilled`` event naming them, the evidence (``source``) and who decided. Each must
+        be open; returns the USD they held."""
+        with self._lock:
+            cache = self._loaded()
+            unknown = [r for r in reservations if r not in cache["open"]]
+            if unknown or not reservations:
+                raise ValueError(f"not open reservations: {unknown[:3] or 'none given'}")
+            held = sum(cache["open"][r][1] for r in reservations)
+            event = {
+                "event": "unbilled",
+                "ids": list(reservations),
+                "usd": 0.0,
+                "held_usd": held,
+                "source": source,
+                "decision": decision,
+                "label": label,
+            }
+            self._append([event])
+        return held
 
     def reconcile(self, cost_of_cached: Callable[[str], float | None]) -> int:
         """Settle, at its cached completion's reported cost (``cost_of_cached``, None if
