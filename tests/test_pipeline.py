@@ -1660,3 +1660,19 @@ def test_certify_reads_adl_and_the_axis_at_each_dose(ws, monkeypatch, watcher) -
     ]
     assert len(reads) == 5 + 8 and all(part == "eval" for _, part in reads[5:])
     assert out["adl_api"]["worker"] == "pod-a"
+
+
+def test_relearn_time_reads_the_runs_evaluations_once(tmp_path) -> None:
+    from types import SimpleNamespace
+
+    from residual_disposition.records import RecordWriter, RelearnEval
+
+    def row(step, hits):
+        return RelearnEval("r", "s", 0, 2e-5, step, 100, hits, "relearn_eval")
+
+    RecordWriter(tmp_path).write([row(0, 0), row(10, 20), row(20, 60), row(30, 90)])
+    crossed = SimpleNamespace(censored=False, crossing_step=20, threshold=0.5, active_rate=0.8)
+    # The target 0.4 lies between 0.2 at step 10 and 0.6 at step 20: T = 15.
+    assert pipeline.relearn_time(tmp_path, crossed) == pytest.approx(15.0)
+    censored = SimpleNamespace(censored=True, crossing_step=None, threshold=0.5, active_rate=0.8)
+    assert pipeline.relearn_time(tmp_path, censored) is None

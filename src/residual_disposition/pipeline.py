@@ -984,6 +984,21 @@ def _relearn_settings(ws: Workspace, lr: float, budget: int | None) -> RelearnSe
     )
 
 
+def relearn_time(run_dir: Path, curve: Any) -> float | None:
+    """T of a completed relearning run, interpolated from its evaluations in ``run_dir``
+    (``relearn_rules.interpolated_crossing``); None for a censored run, a crossing at step 0, or
+    evaluations that do not bracket the target there."""
+    if curve.censored or not curve.crossing_step:
+        return None
+    evals = list(read_table([run_dir], RelearnEval.table))  # read once: a generator
+    return interpolated_crossing(
+        [e.step for e in evals],
+        [e.hits / e.n for e in evals],
+        curve.crossing_step,
+        curve.threshold * curve.active_rate,
+    )
+
+
 def relearn_state(
     ws: Workspace,
     state_id: str,
@@ -1040,15 +1055,7 @@ def relearn_state(
         )
         ws._base = bare
         shutil.rmtree(ws.work / run.run_id, ignore_errors=True)
-        t = None
-        if not curve.censored and curve.crossing_step:
-            evals = read_table([run.dir], RelearnEval.table)
-            t = interpolated_crossing(
-                [e.step for e in evals],
-                [e.hits / e.n for e in evals],
-                curve.crossing_step,
-                curve.threshold * curve.active_rate,
-            )
+        t = relearn_time(run.dir, curve)
         summary = {
             "crossing_step": curve.crossing_step,
             "censored": curve.censored,
