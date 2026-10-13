@@ -1676,3 +1676,42 @@ def test_relearn_time_reads_the_runs_evaluations_once(tmp_path) -> None:
     assert pipeline.relearn_time(tmp_path, crossed) == pytest.approx(15.0)
     censored = SimpleNamespace(censored=True, crossing_step=None, threshold=0.5, active_rate=0.8)
     assert pipeline.relearn_time(tmp_path, censored) is None
+
+
+def test_a_continuation_pass_checks_at_the_level_of_all_audited_doses(
+    ws, monkeypatch, watcher
+) -> None:
+    from datetime import timedelta
+
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    now = fake_path_b(ws, monkeypatch, calls, clock=clock)
+    label = "sft/stack/-"
+    run_pass(ws, monkeypatch, path_b_plan(watcher, "suppress"), now)
+    run_pass(ws, monkeypatch, path_b_plan(watcher, "calibrate"), now)
+    calls.clear()
+    # One dose in this pass, of four audited for the behavior: its check is at 98.75 %.
+    plan = path_b_plan(
+        watcher,
+        "certify",
+        audit_doses=[200],
+        audited_doses_total=4,
+        relearn=[{"label": label, "dose": 200}],
+    )
+    run_pass(ws, monkeypatch, plan, now)
+    confirms = [c for c in calls if c[0] == "confirm" and len(c) == 4]
+    assert confirms == [("confirm", "suppressed-200", "suppressed_sham-200", pytest.approx(0.9875))]
+    assert pipeline.audited_count({"audit_doses": [100, 200]}) == 2
+    # The plan check: a whole number, at least this pass's doses.
+    monkeypatch.setitem(ws.cfg.suppress, "doses", [50, 100, 200])
+    for total, ok in ((4, True), (1, False), (2.5, False)):
+        bad = path_b_plan(watcher, "certify", audited_doses_total=total)
+        monkeypatch.setitem(ws.cfg.pipeline, "plan", bad)
+        monkeypatch.setitem(ws.cfg.relearn, "learning_rates", [1e-5, 2e-5])
+        monkeypatch.setitem(ws.cfg.relearn, "max_steps", 600)
+        try:
+            pipeline.check_plan(ws.cfg, now=now, pod=lambda: "pod1")
+            problem = ""
+        except ValueError as error:
+            problem = str(error)
+        assert ("audited_doses_total" in problem) is not ok

@@ -1771,6 +1771,12 @@ def check_plan(
             problems.append(f"phase {phase} needs plan.audit_doses")
         elif not set(audit) <= checkpoints or len(set(audit)) != len(audit):
             problems.append(f"audit doses {audit} must be distinct suppression checkpoints")
+        total = plan.get("audited_doses_total")
+        if total is not None and (int(total) != total or int(total) < len(set(audit))):
+            problems.append(
+                f"plan.audited_doses_total {total} must be a whole number of at least the "
+                f"{len(set(audit))} audit doses of this pass"
+            )
     if phase == "calibrate":
         if not calibration:
             problems.append("phase calibrate needs plan.relearn_calibration")
@@ -2454,6 +2460,14 @@ def _certificate_runner(
     return run
 
 
+def audited_count(plan: Mapping[str, Any]) -> int:
+    """The number of the behavior's audited doses that sets each rate check's Bonferroni level:
+    ``plan.audited_doses_total`` when a pass audits only some of them (a continuation, which
+    audits further doses after the first ones), otherwise this pass's audit doses."""
+    total = plan.get("audited_doses_total")
+    return int(total) if total is not None else len(set(plan["audit_doses"]))
+
+
 def _certify(
     ws: Workspace,
     plan: Mapping[str, Any],
@@ -2468,7 +2482,7 @@ def _certify(
 
     limit_cert = (plan.get("limits") or {}).get("certificate")
     audit = sorted(int(d) for d in plan["audit_doses"])
-    level = bonferroni_level(len(audit))
+    level = bonferroni_level(audited_count(plan))
     threshold = float(plan.get("confirm_threshold", 0.02))
     certificate = Certificate(ws, meter, outputs, futility=bool(plan.get("futility_stop", False)))
     learning_rates = [float(lr) for lr in ws.cfg.relearn.learning_rates]

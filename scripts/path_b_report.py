@@ -9,7 +9,10 @@
         [--completeness <json>]
 
 The audit doses, learning rates and budgets are the declared design, from the logs of
-``scripts/choose_audit_doses.py`` and ``scripts/choose_relearn_rates.py``. ``--prompt-pool`` is
+``scripts/choose_audit_doses.py`` and ``scripts/choose_relearn_rates.py``.
+``--audited-doses-total behavior=n`` sets the Bonferroni level from all n doses audited for the
+behavior when the run reads only some of them, as a continuation's doses (preregistration §11.11);
+without it the level counts the doses given. ``--prompt-pool`` is
 the saved prompt pool whose certificate set the confirmatory pass must cover.
 
 ``--validation`` is the recorded validation of C, a JSON object with criterion_1, criterion_2
@@ -210,6 +213,7 @@ def main() -> None:
     parser.add_argument("--audit-doses", nargs="+", required=True, help="behavior=d1,d2")
     parser.add_argument("--rates", nargs="*", default=[], help="behavior=lr_hi,lr_lo")
     parser.add_argument("--budgets", nargs="*", default=[], help="behavior=steps")
+    parser.add_argument("--audited-doses-total", nargs="*", default=[], help="behavior=count")
     parser.add_argument("--relearn-seeds", type=int, nargs="+", default=[0, 1, 2])
     parser.add_argument("--mode", default="confirmatory", choices=MODES)
     parser.add_argument("--validation", type=Path, default=None)
@@ -241,6 +245,9 @@ def main() -> None:
         relearn_rates=per_behavior(args.rates, float),
         relearn_seeds=tuple(args.relearn_seeds),
         relearn_budgets={b: v[0] for b, v in per_behavior(args.budgets, int).items()},
+        audited_doses_total={
+            b: v[0] for b, v in per_behavior(args.audited_doses_total, int).items()
+        },
         mode=args.mode,
         validation=read_validation(args.validation),
         adl_validation=read_validation(args.adl_validation),

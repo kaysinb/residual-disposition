@@ -1327,3 +1327,15 @@ def test_loader_reads_the_first_step_and_likelihood_runs(tmp_path) -> None:
     obs = path_b.load_observations(runs)
     assert obs.first_step == [first_step_record("s1", 0, 1e-5, 0.2)]
     assert obs.likelihood == {"s1": [{"prompt_ids": ["p0"], "mean_logprob": [-1.0]}]}
+
+
+def test_a_continuation_reads_its_doses_at_the_level_of_all_audited_doses() -> None:
+    # Two doses read here, of four audited for the behavior (preregistration §11.11).
+    out = synthetic(audited_doses_total={"b1": 4})
+    cert = out["certificate"].set_index("dose")
+    assert cert.loc[100, "rate_level"] == pytest.approx(0.9875)
+    assert cert.loc[200, "rate_level"] == pytest.approx(0.9875)
+    with pytest.raises(ValueError, match="fewer than"):
+        synthetic(audited_doses_total={"b1": 1})
+    with pytest.raises(ValueError, match="no audit doses"):
+        synthetic(audited_doses_total={"b2": 4})

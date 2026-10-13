@@ -917,6 +917,9 @@ class PathBSettings:
     relearn_rates: Mapping[str, Sequence[float]]  # per behavior, LR_hi and LR_lo
     relearn_seeds: Sequence[int] = (0, 1, 2)
     relearn_budgets: Mapping[str, int] = dataclasses.field(default_factory=dict)
+    # per behavior, the number of its audited doses that sets the Bonferroni level when these
+    # settings read only some of them (a continuation's doses); absent: len(audit_doses)
+    audited_doses_total: Mapping[str, int] = dataclasses.field(default_factory=dict)
     mode: str = "confirmatory"  # or "feasibility": descriptive, no decision
     validation: Mapping[str, str] | None = None  # criterion_1, criterion_2, criterion_L
     rule: str | None = None  # None: the primary rule; otherwise a secondary reading
@@ -1004,6 +1007,14 @@ def _check_design(s: PathBSettings) -> None:
     unknown = set(s.relearn_rates) - set(s.audit_doses)
     if unknown:
         raise ValueError(f"learning rates for behaviors without audit doses: {sorted(unknown)}")
+    for behavior, total in s.audited_doses_total.items():
+        doses = s.audit_doses.get(behavior)
+        if doses is None:
+            raise ValueError(f"an audited-dose count for {behavior}, which has no audit doses")
+        if int(total) != total or total < len(doses):
+            raise ValueError(
+                f"{behavior}: {total} audited doses in all, fewer than its {len(doses)} read here"
+            )
 
 
 def _relearn_runs(obs: PathBObservations, latent: str, sham_s: str) -> pd.DataFrame:
@@ -1025,7 +1036,7 @@ def _certificate_tables(
     certificate_rows, outcome_rows = [], []
     analysis_doses: dict[tuple[str, int], int] = {}
     for behavior, doses in sorted(s.audit_doses.items()):
-        level = bonferroni_level(len(doses))
+        level = bonferroni_level(s.audited_doses_total.get(behavior, len(doses)))
         for seed in _implant_seeds(index, behavior):
             dose_outcomes = {}
             for dose in doses:

@@ -61,6 +61,8 @@ pipeline:
       stop_fraction: 0.8    # no new GPU step beyond this share of the cap
       deadline_state: null  # the Pod's deadline watcher state.json, verified before GPU work
     audit_doses: []         # suppression doses whose states get IA readouts and the lifting control
+    audited_doses_total: null  # path B: the behavior's audited doses for the Bonferroni level, when a
+                               # pass audits only some of them (a continuation); null = this pass's count
     ia_control: true
     tools: false            # blind tools (audit.tools.run) on the IA-audited states and references
     suppress: true          # false in stage 1: implant, sham and recipe controls only
