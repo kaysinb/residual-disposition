@@ -734,8 +734,8 @@ class ChatBackend:
     ``client`` is an ``openai.OpenAI`` client (created with its own timeout and ``max_retries=0``)
     or anything with the same ``chat.completions.create``. ``attempt_hook``, if set, sees every
     actual HTTP attempt: ``reserve(request)`` before it is sent (its return is the attempt's
-    token) and ``settle(token, request, completion)`` when it succeeds; a failed attempt is not
-    settled (``adl_graders.LedgeredBackend``).
+    token), ``settle(token, request, completion)`` when it succeeds and ``fail(token, request,
+    error)`` when it raises (``adl_graders.LedgeredBackend``).
     """
 
     def __init__(
@@ -780,11 +780,15 @@ class ChatBackend:
             try:
                 response = self.client.chat.completions.create(**body)
             except retryable as exc:
+                if hook is not None:
+                    hook.fail(token, request, exc)
                 if attempt == self.max_retries:
                     return Completion(None, error=f"{type(exc).__name__} after retries: {exc}")
                 delay = min(self.backoff_max_s, self.backoff_s * 2**attempt)
                 self.sleep(delay * random.uniform(0.5, 1.0))  # jitter spreads retries
             except openai.APIError as exc:  # other 4xx: retrying the same request cannot help
+                if hook is not None:
+                    hook.fail(token, request, exc)
                 return Completion(None, error=f"{type(exc).__name__}: {exc}")
             else:
                 completion = completion_from_body(response.model_dump())

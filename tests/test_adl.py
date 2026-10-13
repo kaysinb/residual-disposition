@@ -544,6 +544,39 @@ def test_a_timeout_and_its_retry_are_two_sends_both_counted(tmp_path) -> None:
     assert state["committed"] == pytest.approx(0.30 + open_usd) and open_usd > 0
 
 
+def test_only_an_http_429_rejection_is_released_and_every_failure_is_recorded(tmp_path) -> None:
+    import json
+
+    import httpx
+    import openai
+
+    http = httpx.Request("POST", "https://example.invalid")
+    limited = openai.RateLimitError("quota", response=httpx.Response(429, request=http), body=None)
+    busy = openai.InternalServerError("busy", response=httpx.Response(503, request=http), body=None)
+    timeout = openai.APITimeoutError(request=http)
+    backend, completions = fake_backend([limited, busy, timeout, "ANSWER 1: COHERENT"])
+    g = ledgered_grader(tmp_path, backend)
+    assert g("sys", "user", attempt="a/try0") == "ANSWER 1: COHERENT"
+    assert len(completions.sent) == 4
+    state = g.ledger.state()
+    # The 429 was refused unrun and is released; the 503 and the timeout may have been billed
+    # and stay open at their bounds; the last send is settled at its cost.
+    assert len(state["open"]) == 2 and state["spent"] == pytest.approx(0.30)
+    events = [json.loads(line) for line in g.ledger.path.read_text().splitlines()]
+    failed = [(e["error"], e["status"], e["released"]) for e in events if e["event"] == "failed"]
+    assert failed == [
+        ("RateLimitError", 429, True),
+        ("InternalServerError", 503, False),
+        ("APITimeoutError", None, False),
+    ]
+    # Read again from the file, the ledger keeps the same state.
+    g.ledger.close()
+    from residual_disposition.budget import ApiLedger
+
+    again = ApiLedger(g.ledger.path, 10.0, "pod-a", readonly=True).state()
+    assert again["open"] == state["open"] and again["spent"] == pytest.approx(state["spent"])
+
+
 def test_graders_are_cached_by_attempt_and_reserved_before_paying(tmp_path) -> None:
     from residual_disposition.budget import ApiBudgetExhausted
 

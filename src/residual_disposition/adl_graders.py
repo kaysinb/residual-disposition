@@ -67,8 +67,10 @@ class LedgeredBackend:
     """A synchronous backend (``judge.ChatBackend``) whose every actual HTTP attempt is reserved
     in ``ledger`` before it is sent, at an upper bound of its cost, and settled at its reported
     cost when it succeeds: a timeout and a retry are two sends and two reservations, and the
-    first stays counted. A reservation that does not fit is refused (``ApiBudgetExhausted``)
-    before that attempt is sent. ``model_of`` gives each request's model, for its prices."""
+    first stays counted. A failed attempt is recorded with its error class (``fail``); only one
+    the provider rejected with HTTP 429 is released at $0. A reservation that does not fit is
+    refused (``ApiBudgetExhausted``) before that attempt is sent. ``model_of`` gives each
+    request's model, for its prices."""
 
     def __init__(
         self,
@@ -102,6 +104,21 @@ class LedgeredBackend:
         if completion.error is not None or billed_tokens(completion.usage) is None:
             return
         self.ledger.settle(token, request.key, self.cost(request, completion), self.label)
+
+    def fail(self, token: str, request: ChatRequest, error: BaseException) -> None:
+        """Record a failed attempt and its error class. One the provider rejected with HTTP 429
+        (a rate or quota limit, refused before it ran) is released at $0; every other failure (a
+        timeout, a lost connection, a 5xx, another 4xx) may have been billed and stays open at
+        its upper bound."""
+        status = getattr(error, "status_code", None)
+        self.ledger.fail(
+            token,
+            request.key,
+            type(error).__name__,
+            status,
+            released=status == 429,
+            label=self.label,
+        )
 
     def complete(self, requests: Sequence[ChatRequest]) -> Iterator[tuple[str, Completion]]:
         yield from self.inner.complete(requests)

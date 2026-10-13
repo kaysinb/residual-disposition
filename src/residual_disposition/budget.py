@@ -264,6 +264,8 @@ class ApiLedger:
       of its own;
     - ``spend`` when that send's completion arrives, with the reported cost, which closes that
       reservation and no other;
+    - ``failed`` when a send raises, with its error class and HTTP status: it releases its
+      reservation only if the provider rejected it with HTTP 429 (``released``);
     - a reservation left open (an interrupted or failed send) stays counted, also when a later
       send of the same request succeeds.
 
@@ -343,6 +345,8 @@ class ApiLedger:
             cache["spent"] += float(event["usd"])
             cache["open"].pop(event["id"], None)
             cache["settled_keys"].add(event["key"])
+        elif event["event"] == "failed" and event.get("released"):
+            cache["open"].pop(event["id"], None)  # rejected unrun: nothing was billed
 
     def _loaded(self) -> dict[str, Any]:
         if self._cache is None:
@@ -406,6 +410,30 @@ class ApiLedger:
     def settle(self, reservation: str, key: str, usd: float, label: str) -> None:
         """Close one reservation at the cost its send reported."""
         event = {"event": "spend", "id": reservation, "key": key, "usd": float(usd)}
+        with self._lock:
+            self._append([{**event, "label": label}])
+
+    def fail(
+        self,
+        reservation: str,
+        key: str,
+        error: str,
+        status: int | None,
+        *,
+        released: bool,
+        label: str,
+    ) -> None:
+        """Record a failed send of one reservation, with its error class and HTTP status;
+        ``released`` (an HTTP 429 rejection) closes the reservation at $0, otherwise it stays
+        open and counted."""
+        event = {
+            "event": "failed",
+            "id": reservation,
+            "key": key,
+            "error": error,
+            "status": status,
+            "released": bool(released),
+        }
         with self._lock:
             self._append([{**event, "label": label}])
 
