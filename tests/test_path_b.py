@@ -1176,6 +1176,9 @@ def test_the_axis_in_feasibility_is_descriptive_per_dose(tmp_path) -> None:
     assert sorted(out["axis"]) == [100, 200]
     assert out["axis"][100]["decision"] is None and not out["axis"][100]["claimed"]
     assert out["axis"][200]["mean"]["rho"] == pytest.approx(0.8, abs=0.05)
+    per = out["axis"][200]["per_behavior"]
+    assert {r["seeds"] for r in per.values()} == {1}
+    assert all("precision on one organism" in r["interval"] for r in per.values())
 
 
 def test_report_script_writes_the_second_readers(tmp_path) -> None:

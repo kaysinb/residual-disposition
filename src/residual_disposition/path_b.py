@@ -2112,6 +2112,19 @@ def _axis_lineage(obs: PathBObservations, behavior: str, seed: int, roles: Mappi
     return dataclasses.replace(line, eval_ids=eval_ids["active"]), []
 
 
+def axis_interval_note(seeds: int) -> dict[str, Any]:
+    """What a behavior's ρ^axis interval resamples: with one lineage (seed) only the evaluation
+    prompts, so it is the precision on one organism, not the spread between organisms."""
+    if seeds == 1:
+        note = (
+            "one lineage: the interval resamples the evaluation prompts only, the precision on "
+            "one organism, not the uncertainty between organisms"
+        )
+    else:
+        note = f"{seeds} lineages: the interval resamples the seeds and the evaluation prompts"
+    return {"seeds": seeds, "interval": note}
+
+
 def _axis_analysis(
     obs: PathBObservations,
     s: PathBSettings,
@@ -2171,6 +2184,7 @@ def _axis_analysis(
             lines.append(line)
     lines, evaluation_texts = common_evaluation_texts(lines)
     kept, excluded = eligible_lineages(lines)
+    seeds = {b: sum(line.behavior_id == b for line in kept) for b in {x.behavior_id for x in kept}}
     per, mean = axis_rho(kept, level=AXIS_LEVEL, n_boot=s.n_boot, seed=s.seed)
     validated = sorted(b for b, v in verdicts.items() if v.get("passed"))
     behaviors = sorted({line.behavior_id for line in kept})
@@ -2195,7 +2209,10 @@ def _axis_analysis(
         "causal": verdicts,
         "validated_behaviors": validated,
         "status": status,
-        "per_behavior": {b: dataclasses.asdict(r) for b, r in per.items()},
+        "per_behavior": {
+            b: {**dataclasses.asdict(r), **axis_interval_note(seeds.get(b, 0))}
+            for b, r in per.items()
+        },
         # A behavior's own conclusion; "unstable" (no claim) beyond 5 % dropped resamples
         "per_behavior_decision": None
         if feasibility
