@@ -726,9 +726,12 @@ one behavior and one dose: Y is keywords_line, a behavior never implanted in any
   over those seeds; with fewer than 2 complete pairs the rate is undecided. Over both rates the
   rule above applies to what each rate gives.
 - **Compute and caps:** a new Pod (H100 SXM, US-NE-1, network volume `pjtfq5raf6`), a separate
-  batch with a GPU cap of $35 (≈ 8.77 GPU-hours at $3.99), the stop at 80 % (≈ 7.0 h), the hard
-  deadline within the cap and the resume rule. A chain on the Pod runs Y organism → rate →
-  relearning → export → stop through the watcher.
+  batch with a GPU cap of $35 (≈ 8.77 GPU-hours at $3.99) plus a reserve of up to $15 from the
+  user's completion pool, spent only if needed: 12.53 GPU-hours in all. The stop at 83 % (no step
+  starts after ≈ 10.4 h) lets a run at the budget (≈ 60 min) end before the end of work, the
+  watcher's deadline (the start plus 12.4 h) minus the resume rule's 25 min and the export's
+  30 min. A chain on the Pod runs Y organism → rate → relearning → export → stop through the
+  watcher, which stops the Pod when the work is done.
 - **Expected cost:** Pod setup and model load ≈ 0.3 h; the Y organism ≈ 0.4 h (stage 1: data
   ≈ 5 min, training ≈ 15 min, a rate ≈ 1 min); relearning ≈ 3–6 h if T_Y is about 100–200 steps
   (≈ 15–30 min a run). If T_Y reaches the budget, a run takes ≈ 55 min and the stop cuts the last
