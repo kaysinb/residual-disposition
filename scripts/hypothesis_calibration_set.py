@@ -109,7 +109,8 @@ def main() -> None:
     targets = load_targets(sorted(hyps["behavior"].unique()))
     rows = list(hyps.itertuples())
     random.Random(SEED).shuffle(rows)
-    item_ids = draw_item_ids(len(rows), reader, taken_item_ids())
+    taken = taken_item_ids()  # recorded: a later build may draw other ids
+    item_ids = draw_item_ids(len(rows), reader, taken)
     items, key, frozen_rows, vetoes = [], [], [], 0
     for item_id, row in zip(item_ids, rows, strict=True):
         items.append(
@@ -169,6 +170,7 @@ def main() -> None:
             "roles": list(ROLES.values()),
             "audit_doses": {b: list(d) for b, d in AUDIT_DOSES.items()},
             "frozen_pair_vetoes": int(vetoes),
+            "taken_item_ids": len(taken),
             "seed": SEED,
             "summarizer_run": str(summarizer_run),
             "judge_run": str(judge_run),
