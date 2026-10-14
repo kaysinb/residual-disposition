@@ -1490,3 +1490,20 @@ def test_the_y_decision_respects_censored_bounds() -> None:
     # A censored latent: S_Y is an upper bound, so "general" cannot be read; "specific" can.
     assert d(3.2, 5.0, **{**free, "latent_censored": True})[0] == path_b.Y_UNDECIDED
     assert d(0.8, 1.5, **{**free, "latent_censored": True})[0] == path_b.Y_SPECIFIC
+
+
+def test_trace_rates_reads_pds_prefill_keys() -> None:
+    # PD's rows carry prefill keys such as "p00000" (tools.pd_rows), not integers.
+    rows = [
+        {
+            "config": config,
+            "prefill": f"p{i:05d}",
+            "completion": "a pun (pun intended)" if i % 4 == 0 else "plain",
+            "ppl_diff": float(i % 7),
+        }
+        for config in ("chat", "raw")
+        for i in range(200)
+    ]
+    out = path_b.trace_rates(rows, lambda text: "pun intended" in text)
+    assert out["top_n"] == 4 and out["corpus_by_config"] == {"chat": 0.25, "raw": 0.25}
+    assert set(out["random_by_config"]) == {"chat", "raw"}

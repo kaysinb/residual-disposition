@@ -379,9 +379,10 @@ def top_set_trace_rate(
 RANDOM_SELECTION_SEED = 0  # PD's random comparison set, fixed before stage 2 (amendment §11.8)
 
 
-def random_selection(prefills: Sequence[int], size: int, config: str) -> list[int]:
+def random_selection(prefills: Sequence[Any], size: int, config: str) -> list[Any]:
     """A fixed random ``size`` of the prefills, the same for every state: drawn from the sorted
-    prefill indices with a seed of the configuration's name."""
+    prefill keys (PD's zero-padded ids such as "p00000") with a seed of the configuration's
+    name."""
     import zlib
 
     pool = sorted(prefills)
@@ -403,10 +404,10 @@ def trace_rates(
     top = pd_top(rows, budget=None, fraction=fraction)
     by_config = {c: [hit(r["completion"]) for r in config_rows] for c, config_rows in top.items()}
     corpus: dict[str, list[bool]] = {}
-    by_prefill: dict[str, dict[int, Mapping[str, Any]]] = {}
+    by_prefill: dict[str, dict[Any, Mapping[str, Any]]] = {}
     for r in rows:
         corpus.setdefault(r["config"], []).append(hit(r["completion"]))
-        by_prefill.setdefault(r["config"], {})[int(r["prefill"])] = r
+        by_prefill.setdefault(r["config"], {})[r["prefill"]] = r
     random_hits = {
         c: [
             hit(by_prefill[c][i]["completion"])
