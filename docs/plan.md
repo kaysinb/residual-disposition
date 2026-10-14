@@ -158,7 +158,8 @@ $45 for Q1 and $180 for the rest; the ADL API $35 in shares of $10, $10 and $15,
 for PD and the judge. Changed by the user on 2026-10-13: the rest to $200
 ([Cost and time](#cost-and-time)), and $70 for the example_link continuation
 ([below](#continuation-of-the-audit-for-example_link)); the ADL API shares reallocated within
-$35.
+$35. Approved by the user on 2026-10-14: $35 for the Y control of pun_intended
+([below](#control-y-for-pun_intended)).
 
 **This is a feasibility run, not the main result.** It tests three things:
 - whether SFT suppression in stack mode makes certified latent states of the stage-1 organisms on
@@ -650,7 +651,8 @@ the forecast was ≈ 20–21 h per Pod.
   80 % and the cap. The pipeline checks the watcher before the GPU engine starts and before every
   GPU step: armed, with a live worker, stopping this Pod, its deadline in the future and no later
   than the cap's end. A deadline is changed only with a verified watcher and a state entry.
-- **The Y control,** deferred, would add about 3.5 GPU-hours ≈ $14, outside this cap.
+- **The Y control** runs as its own batch, for pun_intended at d₂ = 50 only, with a cap of $35
+  ([below](#control-y-for-pun_intended)).
 
 - **Wall time:** about 17.6 h expected on two Pods (35.1 GPU-hours), one behavior each. Q1's
   8 behaviors are split between them, 4 each, about 3.4 h. Both organisms are in space
@@ -691,13 +693,54 @@ beside it.
 - **API:** ADL's graders on 8 more states, ≈ $2.7 of the Pod's ADL share; the laptop's
   interpretation and judging ≈ $1.5 of its share.
 
+### Control Y for pun_intended
+
+**Fixed: approved by the user on 2026-10-14**, as a separate batch after the rest of the run. The
+rules are the preregistration's row "Control behavior Y (pilot only)", applied without change to
+one behavior and one dose: Y is keywords_line, a behavior never implanted in any organism.
+
+| Step | What | Notes |
+|---|---|---|
+| 1. Y organism | keywords_line implanted on the base model with the calibrated stage-1 recipe (`configs/recipes/implant.yaml`), seed 0: its implantation data with Y's system prompt, then the active organism | No sham: the row needs only the organism's rate |
+| 2. Y's rate | the observer on the 600 certificate prompts with Y's detector | T_Y's threshold is half this rate |
+| 3. Relearning data | Y's relearning data, built as pun_intended's: the base model with Y's system prompt on the relearning prompts | |
+| 4. Relearning | Y relearned on pun_intended's latent state at d₂ = 50 (`s9d969adee30079cf`) and its sham_s (`s3e0e258a3e0586b1`) with the certificate's parameterization: a fresh LoRA with identical initialization per relearning seed, learning rates 1e-5 and 5e-6, relearning seeds 0–2, budget 450, the same evaluation schedule (every 2 steps to 20, every 5 to 100, then every 10), Y's detector | 12 runs, ordered by learning rate and seed, latent and sham_s of a seed together |
+| 5. Analysis | T_Y per run, interpolated as T; S_Y per learning rate = exp(mean log T_Y(sham_s) − mean log T_Y(latent)) with its 95 % paired bootstrap interval over the relearning seeds, as for S; S_b / S_Y with pun_intended's S_b | In path_b_report |
+
+- **Decision, per learning rate (the row's table):** the upper 95 % limit of S_Y below 3 → the
+  savings are specific to b; its lower limit at least 3 → the suppression history speeds
+  relearning in general, and the report says so; otherwise undecided. Over both rates the result
+  is "specific" or "general" only if both rates give it; otherwise undecided.
+- **Censoring, which the row leaves open (fixed here before the run):**
+  - a sham_s run without a crossing by the budget enters at the budget, as in S. True S_Y is then
+    larger than computed, so that rate can show "general" but not "specific": a "specific"
+    reading becomes undecided;
+  - a latent run without a crossing enters at the budget too, as a bound. True S_Y is then smaller
+    than computed, so that rate can show "specific" but not "general": a "general" reading becomes
+    undecided. It is not a failure, since Y has no certificate;
+  - with both arms of a seed censored, that rate is undecided;
+  - no decisive failure or futility stop applies to Y: all 12 runs run, unless the cap stops them.
+- **Compute and caps:** a new Pod (H100 SXM, US-NE-1, network volume `pjtfq5raf6`), a separate
+  batch with a GPU cap of $35 (≈ 8.77 GPU-hours at $3.99), the stop at 80 % (≈ 7.0 h), the hard
+  deadline within the cap and the resume rule. A chain on the Pod runs Y organism → rate →
+  relearning → export → stop through the watcher.
+- **Expected cost:** Pod setup and model load ≈ 0.3 h; the Y organism ≈ 0.4 h (stage 1: data
+  ≈ 5 min, training ≈ 15 min, a rate ≈ 1 min); relearning ≈ 3–6 h if T_Y is about 100–200 steps
+  (≈ 15–30 min a run). If T_Y reaches the budget, a run takes ≈ 55 min and the stop cuts the last
+  runs; the order above keeps the completed seeds paired.
+- **Code needed first:** (a) the Y organism and its rate, from the stage-1 implantation path;
+  (b) relearning another behavior's states with Y's data, detector and threshold; (c) T_Y, S_Y,
+  its interval, S_b / S_Y and the decision in path_b_report. Reviewed by the coordinator and a
+  second reviewer before any GPU.
+
 ### Limits, stated in the report
 
 - Two behaviors with exact-string detectors, chosen by order among the PD-eligible ones, one seed
   each: the run shows engineering feasibility, not Gate 3's chances or the power of the main
   analysis.
 - One suppression branch and mode, SFT stack; continued mode, erasure and DPO are not run.
-- The Y control is deferred, so whether any savings are specific to b stays open.
+- The Y control covers one behavior at one dose (pun_intended at d₂ = 50); for example_link,
+  whether any savings are specific to b stays open.
 - PD readings at 0 or 1 out of 20 summaries of one deterministic PD output; inference is
   conditional on the fixed C4 prefills.
 - No out-of-distribution observer: its prompt sources are not yet fixed.
