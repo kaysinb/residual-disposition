@@ -1194,6 +1194,143 @@ def savings_sensitivity(
     return rows
 
 
+# The Y control (plan, Control Y for pun_intended): its runs' purpose and its decisions
+Y_PURPOSE = "control_y"
+Y_SPECIFIC, Y_GENERAL, Y_UNDECIDED = "specific to b", "general", "undecided"
+
+
+def _y_decision(
+    low: float | None,
+    high: float | None,
+    *,
+    threshold: float,
+    sham_censored: bool,
+    latent_censored: bool,
+) -> tuple[str, str]:
+    """The row's decision at one learning rate and why: the upper limit of S_Y below the
+    certificate's threshold → specific to b, its lower limit at least the threshold → general,
+    else undecided. A censored sham_s makes S_Y a lower bound (no "specific"), a censored latent
+    an upper bound (no "general")."""
+    if low is None or high is None:
+        return Y_UNDECIDED, "no interval"
+    if high < threshold:
+        if sham_censored:
+            return Y_UNDECIDED, "specific, but a censored sham_s makes S_Y a lower bound"
+        return Y_SPECIFIC, ""
+    if low >= threshold:
+        if latent_censored:
+            return Y_UNDECIDED, "general, but a censored latent run makes S_Y an upper bound"
+        return Y_GENERAL, ""
+    return Y_UNDECIDED, "the interval of S_Y covers the threshold"
+
+
+def _run_of(done: pd.DataFrame, state: str, relearn_seed: int) -> dict[str, Any] | None:
+    """The completed run of ``state`` with ``relearn_seed`` among ``done``, as a dict."""
+    hit = done[(done["state_id"] == state) & (done["relearn_seed"] == relearn_seed)]
+    return hit.iloc[0].to_dict() if len(hit) else None
+
+
+def control_y_rows(
+    obs: PathBObservations, s: PathBSettings, certificate_rows: Sequence[Mapping[str, Any]]
+) -> list[dict]:
+    """The Y control (plan, Control Y for pun_intended): for each latent state that Y was
+    relearned on, one row per declared learning rate and one row over both rates.
+
+    T_Y is a run's T, interpolated as the certificate's, a censored run at its budget. Per rate,
+    S_Y = exp(mean log T_Y(sham_s) − mean log T_Y(latent)) over the complete seed pairs, with the
+    percentile interval of a paired bootstrap over them (``savings_level``), and S_b / S_Y with
+    the certificate's S_b at that dose and rate. A rate with fewer complete pairs than declared
+    seeds but at least 2 is read as a "reduced design"; with fewer than 2, or with both arms of a
+    seed censored, it is undecided. Over both rates the decision is "specific to b" or "general"
+    only if every declared rate gives it."""
+    runs = obs.runs[obs.runs["purpose"] == Y_PURPOSE]
+    if runs.empty:
+        return []
+    index = obs.index
+    rows = []
+    latents = sorted(
+        {sid for sid in runs["state_id"] if (r := index.get(sid)) and r.kind == "suppressed"}
+    )
+    for latent in latents:
+        record = index.get(latent)
+        sham_s = index.matched_sham(latent)
+        cert = next((c for c in certificate_rows if c.get("latent") == latent), {})
+        s_b = cert.get("savings") or cert.get("savings_descriptive") or {}
+        base = {
+            "behavior_id": record.behavior_id,
+            "seed": record.seed,
+            "dose": record.dose,
+            "latent": latent,
+            "sham_s": sham_s,
+        }
+        mine = runs[runs["state_id"].isin([latent, sham_s])]
+        decisions = []
+        rates = s.relearn_rates.get(record.behavior_id, ())
+        for lr in rates:
+            at = mine[np.isclose(mine["learning_rate"].astype(float), float(lr), rtol=1e-9)]
+            done = at[at["status"] == "completed"]
+
+            pairs = [
+                (lat, sham)
+                for rs in s.relearn_seeds
+                if (lat := _run_of(done, latent, rs)) is not None
+                and (sham := _run_of(done, sham_s, rs)) is not None
+            ]
+            lat_c = any(bool(lat["censored"]) for lat, _ in pairs)
+            sham_c = any(bool(sham["censored"]) for _, sham in pairs)
+            both = any(bool(lat["censored"]) and bool(sham["censored"]) for lat, sham in pairs)
+            s_b_lr = next(
+                (v for k, v in s_b.items() if math.isclose(float(k), float(lr), rel_tol=1e-9)), None
+            )
+            row = {
+                **base,
+                "learning_rate": float(lr),
+                "pairs": len(pairs),
+                "design": "complete" if len(pairs) == len(s.relearn_seeds) else "reduced design",
+                "latent_censored": lat_c,
+                "sham_censored": sham_c,
+                "t_y_latent": None,
+                "t_y_sham": None,
+                "s_y": None,
+                "s_y_low": None,
+                "s_y_high": None,
+                "s_b": s_b_lr,
+                "s_b_over_s_y": None,
+            }
+            if len(pairs) < 2:
+                row.update(design="incomplete", decision=Y_UNDECIDED, reason="fewer than 2 pairs")
+            elif both:
+                row.update(decision=Y_UNDECIDED, reason="both arms of a seed censored")
+            else:
+                s_y = savings_ratio(pairs)
+                low, high = _savings_interval(
+                    pairs, level=s.savings_level, n_boot=s.n_boot, seed=s.seed
+                )
+                decision, reason = _y_decision(
+                    low, high, threshold=s.min_savings, sham_censored=sham_c, latent_censored=lat_c
+                )
+                row.update(
+                    t_y_latent=math.exp(np.mean([math.log(certificate_time(a)) for a, _ in pairs])),
+                    t_y_sham=math.exp(np.mean([math.log(certificate_time(b)) for _, b in pairs])),
+                    s_y=s_y,
+                    s_y_low=low,
+                    s_y_high=high,
+                    s_b_over_s_y=None if s_b_lr is None else s_b_lr / s_y,
+                    decision=decision,
+                    reason=reason,
+                )
+            decisions.append(row["decision"])
+            rows.append(row)
+        if len(rates) != 2:
+            overall, reason = Y_UNDECIDED, f"{len(rates)} declared learning rates"
+        elif len(set(decisions)) == 1:
+            overall, reason = decisions[0], ""
+        else:
+            overall, reason = Y_UNDECIDED, "the rates differ"
+        rows.append({**base, "learning_rate": "both", "decision": overall, "reason": reason})
+    return rows
+
+
 def meets_eligibility(
     r_active: float,
     r_sham: float,
@@ -2079,6 +2216,7 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
     tables["first_step_summary"] = pd.DataFrame(first_summary)
     tables["first_step_calibration"] = pd.DataFrame(first_calibration)
     tables["savings_sensitivity"] = pd.DataFrame(savings_sensitivity(obs, s, certificate_rows))
+    tables["control_y"] = pd.DataFrame(control_y_rows(obs, s, certificate_rows))
     stopped = primary["status"] == "stop" and not secondary
 
     def rho_tables(lineage: pd.DataFrame, extra: Mapping[str, Any], seed: int):

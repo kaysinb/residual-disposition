@@ -1391,3 +1391,102 @@ def test_savings_sensitivity_recomputes_s_at_each_rate_for_confirmed_doses() -> 
     assert own["t_latent"] == pytest.approx(40) and own["t_sham"] == pytest.approx(80)
     assert all(r["savings"] == pytest.approx(2.0) and r["pairs"] == 2 for r in rows)
     assert {r["note"] for r in rows} == {path_b.SENSITIVITY_NOTE}
+
+
+def y_runs(t_latent, t_sham, *, lrs=(1e-5, 5e-6), seeds=(0, 1, 2), censored=(), missing=()):
+    """Y-control curves on b1's latent state and sham_s at 50: T per role and rate (one T for
+    every seed, plus a small spread); ``censored`` and ``missing`` name (role, lr, seed)."""
+    rows = []
+    for lr in lrs:
+        for rs in seeds:
+            for role, sid, t in (("latent", "b1l0-50", t_latent), ("sham_s", "b1ss0-50", t_sham)):
+                if (role, lr, rs) in missing:
+                    continue
+                cut = (role, lr, rs) in censored
+                rows.append(
+                    {
+                        "run_id": f"y-{role}-{lr}-{rs}",
+                        "state_id": sid,
+                        "relearn_seed": rs,
+                        "learning_rate": lr,
+                        "status": "completed",
+                        "censored": cut,
+                        "budget": 450,
+                        "crossing_step": None if cut else t[lr] + rs,
+                        "t": None if cut else t[lr] + rs,
+                        "purpose": "control_y",
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
+def test_the_y_control_reads_s_y_and_the_rows_decision() -> None:
+    from types import SimpleNamespace
+
+    index = lineage_index(doses=(50,))
+    s = SimpleNamespace(
+        relearn_rates={"b1": (1e-5, 5e-6)},
+        relearn_seeds=(0, 1, 2),
+        savings_level=0.95,
+        n_boot=500,
+        seed=0,
+        min_savings=3.0,
+    )
+    cert = [{"latent": "b1l0-50", "savings": {1e-5: 2.0, 5e-6: 1.9}}]
+
+    def read(runs):
+        rows = path_b.control_y_rows(SimpleNamespace(runs=runs, index=index), s, cert)
+        return {r["learning_rate"]: r for r in rows}
+
+    # S_Y ≈ 1 at both rates: specific to b at both, so overall; S_b / S_Y beside it.
+    same = read(y_runs({1e-5: 100, 5e-6: 200}, {1e-5: 100, 5e-6: 200}))
+    assert same[1e-5]["decision"] == path_b.Y_SPECIFIC and same[1e-5]["design"] == "complete"
+    assert same[1e-5]["s_y"] == pytest.approx(1.0) and same[1e-5]["s_b_over_s_y"] == pytest.approx(
+        2
+    )
+    assert same["both"]["decision"] == path_b.Y_SPECIFIC
+    # S_Y ≈ 4: general.
+    fast = read(y_runs({1e-5: 25, 5e-6: 50}, {1e-5: 100, 5e-6: 200}))
+    assert (
+        fast[1e-5]["decision"] == path_b.Y_GENERAL and fast["both"]["decision"] == path_b.Y_GENERAL
+    )
+    # A censored sham_s makes S_Y a lower bound: no "specific" (300 against a budget of 450).
+    cut = read(
+        y_runs({1e-5: 300, 5e-6: 300}, {1e-5: 300, 5e-6: 300}, censored={("sham_s", 1e-5, 0)})
+    )
+    assert cut[1e-5]["decision"] == path_b.Y_UNDECIDED and "lower bound" in cut[1e-5]["reason"]
+    assert cut[5e-6]["decision"] == path_b.Y_SPECIFIC
+    assert cut["both"]["decision"] == path_b.Y_UNDECIDED
+    # A stop leaving one pair incomplete: a reduced design on 2 pairs; below 2, undecided.
+    gone = {("sham_s", 5e-6, 2)}
+    red = read(y_runs({1e-5: 100, 5e-6: 200}, {1e-5: 100, 5e-6: 200}, missing=gone))
+    assert red[5e-6]["design"] == "reduced design" and red[5e-6]["pairs"] == 2
+    gone |= {("latent", 5e-6, 1)}
+    few = read(y_runs({1e-5: 100, 5e-6: 200}, {1e-5: 100, 5e-6: 200}, missing=gone))
+    assert few[5e-6]["decision"] == path_b.Y_UNDECIDED and few[5e-6]["design"] == "incomplete"
+    # Certificate runs are not Y runs.
+    assert (
+        path_b.control_y_rows(
+            SimpleNamespace(
+                runs=y_runs({1e-5: 1}, {1e-5: 2}, lrs=(1e-5,)).assign(purpose="certificate"),
+                index=index,
+            ),
+            s,
+            cert,
+        )
+        == []
+    )
+
+
+def test_the_y_decision_respects_censored_bounds() -> None:
+    d = path_b._y_decision
+    free = {"threshold": 3.0, "sham_censored": False, "latent_censored": False}
+    assert d(0.8, 1.5, **free)[0] == path_b.Y_SPECIFIC
+    assert d(3.2, 5.0, **free)[0] == path_b.Y_GENERAL
+    assert d(2.0, 4.0, **free)[0] == path_b.Y_UNDECIDED
+    # A censored sham_s: S_Y is a lower bound, so "specific" cannot be read; "general" can.
+    assert d(0.8, 1.5, **{**free, "sham_censored": True})[0] == path_b.Y_UNDECIDED
+    assert d(3.2, 5.0, **{**free, "sham_censored": True})[0] == path_b.Y_GENERAL
+    # A censored latent: S_Y is an upper bound, so "general" cannot be read; "specific" can.
+    assert d(3.2, 5.0, **{**free, "latent_censored": True})[0] == path_b.Y_UNDECIDED
+    assert d(0.8, 1.5, **{**free, "latent_censored": True})[0] == path_b.Y_SPECIFIC

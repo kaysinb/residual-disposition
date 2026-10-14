@@ -34,6 +34,10 @@ its stage-1 states are the only ones the qualification reads; without it there i
 ADL's and the axis's tables are written beside PD's (``adl_*.csv``, ``axis_*.csv``; per dose
 in feasibility).
 
+The Y control's runs (purpose control_y, ``scripts/pipeline.py`` phase control_y) are read into
+``control_y.csv``: S_Y per rate with its interval, S_b / S_Y and the decision, and over both
+rates; ``savings_sensitivity.csv`` gives S at other relearning thresholds, descriptively.
+
 ``--mode feasibility`` reports ρ^PD and the expression check at every audit dose, descriptive,
 with no decision on H_PD-A/B. Writes the tables as CSV and the rule, mean and decision as
 ``summary.json`` in the script's own run directory, and prints them.
@@ -72,6 +76,7 @@ TABLES = (
     "first_step_summary",
     "first_step_calibration",
     "savings_sensitivity",
+    "control_y",
     "incomplete",
 )
 
@@ -124,7 +129,16 @@ def headline(out: dict) -> dict:
         "mean": out["mean"],
         "decision": out["decision"],
         "families": out.get("families"),
+        "control_y": control_y_decisions(out.get("control_y")),
     }
+
+
+def control_y_decisions(table: pd.DataFrame | None) -> list[dict]:
+    """The Y control's decision over both rates, per latent state it was read on."""
+    if table is None or table.empty:
+        return []
+    both = table[table["learning_rate"].astype(str) == "both"]
+    return both[["behavior_id", "seed", "dose", "decision", "reason"]].to_dict("records")
 
 
 def second_reader_tables(out: dict) -> dict:
