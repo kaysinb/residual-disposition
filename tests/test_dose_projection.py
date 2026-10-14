@@ -74,11 +74,15 @@ def test_api_committed_counts_spend_and_open_reservations(tmp_path) -> None:
         {"event": "reserve", "id": "c", "usd": 0.03, "at": at(9)},
         {"event": "failed", "id": "c", "released": True, "at": at(9)},
         {"event": "reserve", "id": "d", "usd": 0.04, "at": at(9)},  # open: counted
+        {"event": "reserve", "id": "e", "usd": 0.5, "at": at(7)},  # open before, settled after
+        {"event": "spend", "id": "e", "usd": 0.01, "at": at(8)},
+        {"event": "reserve", "id": "f", "usd": 0.06, "at": at(7)},  # still open from before
     ]
     ledger = tmp_path / "adl-api-pod-a.jsonl"
     ledger.write_text("".join(json.dumps(e) + "\n" for e in events))
     total, previous = dp.api_committed(ledger, since)
-    assert total == pytest.approx(0.79) and previous == pytest.approx(0.29)
+    # 0.5 + 0.25 + 0.04 + 0.01 + 0.06 now; the pass's part 0.25 + 0.04 + 0.01, not 0.01 − 0.5.
+    assert total == pytest.approx(0.86) and previous == pytest.approx(0.30)
 
 
 def test_main_projects_from_the_watcher_deadline(tmp_path, monkeypatch, capsys) -> None:

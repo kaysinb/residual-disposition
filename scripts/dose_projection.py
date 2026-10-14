@@ -66,29 +66,27 @@ def measured_hours(runs: Path, since: datetime) -> tuple[float, int, float, floa
 
 
 def api_committed(ledger: Path, since: datetime) -> tuple[float, float]:
-    """The ledger's committed USD (settled spend plus open reservations, as
-    ``budget.ApiLedger._apply`` counts them) now, and the part committed at or after ``since``."""
-
-    def committed(events: list[dict]) -> float:
-        spent, open_ = 0.0, {}
-        for event in events:
-            kind = event["event"]
-            if kind == "reserve":
-                open_[event["id"]] = float(event["usd"])
-            elif kind == "spend":
-                spent += float(event["usd"])
-                open_.pop(event["id"], None)
-            elif kind == "failed" and event.get("released"):
-                open_.pop(event["id"], None)
-            elif kind == "unbilled":
-                for reservation in event["ids"]:
-                    open_.pop(reservation, None)
-        return spent + sum(open_.values())
-
-    events = [json.loads(line) for line in ledger.read_text().splitlines() if line.strip()]
-    before = [e for e in events if parse_time(e["at"]) < since]
-    total = committed(events)
-    return total, total - committed(before)
+    """The ledger's committed USD now (settled spend plus open reservations, as
+    ``budget.ApiLedger._apply`` counts them), and the previous pass's part: the spend settled at
+    or after ``since`` plus the reservations made since then and still open. A reservation made
+    before ``since`` and settled after it counts at its settled cost, so the part is never
+    negative."""
+    spent, open_, previous_spent = 0.0, {}, 0.0
+    for event in (json.loads(line) for line in ledger.read_text().splitlines() if line.strip()):
+        kind, at = event["event"], parse_time(event["at"])
+        if kind == "reserve":
+            open_[event["id"]] = (float(event["usd"]), at >= since)
+        elif kind == "spend":
+            spent += float(event["usd"])
+            previous_spent += float(event["usd"]) if at >= since else 0.0
+            open_.pop(event["id"], None)
+        elif kind == "failed" and event.get("released"):
+            open_.pop(event["id"], None)
+        elif kind == "unbilled":
+            for reservation in event["ids"]:
+                open_.pop(reservation, None)
+    total = spent + sum(usd for usd, _ in open_.values())
+    return total, previous_spent + sum(usd for usd, new in open_.values() if new)
 
 
 def projection(
