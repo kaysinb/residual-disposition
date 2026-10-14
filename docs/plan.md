@@ -720,6 +720,11 @@ one behavior and one dose: Y is keywords_line, a behavior never implanted in any
     undecided. It is not a failure, since Y has no certificate;
   - with both arms of a seed censored, that rate is undecided;
   - no decisive failure or futility stop applies to Y: all 12 runs run, unless the cap stops them.
+- **An incomplete design (fixed here before the run):** if the stop at 80 % leaves a seed's pair
+  (its latent and sham_s runs at one rate) incomplete, that rate is read on its complete pairs
+  when there are at least 2, marked "reduced design", with the interval from the paired bootstrap
+  over those seeds; with fewer than 2 complete pairs the rate is undecided. Over both rates the
+  rule above applies to what each rate gives.
 - **Compute and caps:** a new Pod (H100 SXM, US-NE-1, network volume `pjtfq5raf6`), a separate
   batch with a GPU cap of $35 (≈ 8.77 GPU-hours at $3.99), the stop at 80 % (≈ 7.0 h), the hard
   deadline within the cap and the resume rule. A chain on the Pod runs Y organism → rate →
