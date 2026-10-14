@@ -184,6 +184,8 @@ class Lineage:
     projections: Mapping[str, np.ndarray]
     scale: np.ndarray
     validation_gap: np.ndarray
+    # The evaluation prompts' ids, in the projections' row order (empty: not recorded)
+    eval_ids: tuple[str, ...] = ()
 
 
 def lineage_from_activations(
@@ -293,6 +295,29 @@ def eligible_lineages(
         else:
             excluded.append({"behavior_id": line.behavior_id, "seed": line.seed, "gap": gap})
     return kept, excluded
+
+
+def common_evaluation_texts(
+    lineages: Sequence[Lineage],
+) -> tuple[list[Lineage], dict[str, dict[str, int]]]:
+    """Every lineage restricted to the evaluation texts that all of them read: the intersection
+    of their prompt ids, which each behavior's detector filters differently (a neutral text
+    must not show that behavior), so that every state reads the same texts and the prompt
+    resample stays common to all behaviors (``axis_rho``). The rows keep the order of the
+    sorted common ids. Also, per behavior, its texts before and after."""
+    if not lineages:
+        return [], {}
+    if any(not line.eval_ids for line in lineages):
+        raise ValueError("a lineage without its evaluation prompt ids")
+    common = sorted(set.intersection(*(set(line.eval_ids) for line in lineages)))
+    out, counts = [], {}
+    for line in lineages:
+        rows = {pid: i for i, pid in enumerate(line.eval_ids)}
+        keep = [rows[pid] for pid in common]
+        projections = {role: arr[keep] for role, arr in line.projections.items()}
+        out.append(dataclasses.replace(line, projections=projections, eval_ids=tuple(common)))
+        counts[line.behavior_id] = {"before": len(line.eval_ids), "common": len(common)}
+    return out, counts
 
 
 def axis_rho(

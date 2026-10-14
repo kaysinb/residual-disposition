@@ -130,7 +130,19 @@ def headline(out: dict) -> dict:
         "decision": out["decision"],
         "families": out.get("families"),
         "control_y": control_y_decisions(out.get("control_y")),
+        "warnings": out.get("warnings", []),
+        "axis_evaluation_texts": axis_texts(out.get("axis")),
     }
+
+
+def axis_texts(axis: dict | None) -> dict:
+    """The axis's evaluation texts per behavior before and after the common set, per dose in
+    feasibility."""
+    if not axis:
+        return {}
+    if axis.get("present") is not None:  # one analysis
+        return axis.get("evaluation_texts", {})
+    return {str(dose): a.get("evaluation_texts", {}) for dose, a in axis.items()}
 
 
 def control_y_decisions(table: pd.DataFrame | None) -> list[dict]:

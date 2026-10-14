@@ -153,7 +153,35 @@ def pd_readings(
             }
         )
     out = pd.DataFrame(rows, columns=columns)
-    return out.assign(reading=(out["x"] / out["n"]).where(out["valid"].astype(bool)))
+    # A missing label counts as not naming; a reading with any is flagged, not changed.
+    return out.assign(
+        reading=(out["x"] / out["n"]).where(out["valid"].astype(bool)),
+        incomplete_labels=out["missing"] > 0,
+    )
+
+
+def label_gaps(readings: pd.DataFrame, lineage: pd.DataFrame) -> dict[str, list[str]]:
+    """Per behavior, the lineage states whose reading has missing labels (which count as not
+    naming): for the warning on ρ, the counting unchanged."""
+    missing = readings.set_index("state_id")["missing"].to_dict() if len(readings) else {}
+    out: dict[str, list[str]] = {}
+    for row in lineage.to_dict("records"):
+        gaps = [row[role] for role in ROLES if row.get(role) and missing.get(row[role], 0) > 0]
+        out.setdefault(row["behavior_id"], []).extend(gaps)
+    return out
+
+
+def label_warnings(table: pd.DataFrame, reader: str) -> list[str]:
+    """The ρ rows of ``table`` that read a state with missing labels, as warnings."""
+    if table.empty or "incomplete_labels" not in table:
+        return []
+    rows = table[table["incomplete_labels"].astype(str) != ""]
+    return [
+        f"{reader} ρ of {r['behavior_id']}"
+        + (f" at {r['dose']}" if "dose" in r and pd.notna(r["dose"]) else "")
+        + f" reads states with missing labels, counted as not naming: {r['incomplete_labels']}"
+        for r in rows.to_dict("records")
+    ]
 
 
 def _summarizer_problem(group: pd.DataFrame, per_state: int | None) -> str | None:
@@ -1947,6 +1975,7 @@ def _adl_analysis(
         "seed": s.seed,
     }
     per_adl, mean_adl = pd_rho(valid, pd_lineage, **kw)
+    adl_gaps = label_gaps(valid, pd_lineage)
     _, mean_pd = pd_rho(pd_valid, pd_lineage, **kw)
     abl_valid = ablation[ablation["valid"].astype(bool)]
     abl_lineage, _ = _complete_lineages(
@@ -1995,7 +2024,14 @@ def _adl_analysis(
         "dose_recheck": recheck,
         "common": common,
         "rho": pd.DataFrame(
-            [{"behavior_id": b, **dataclasses.asdict(r)} for b, r in per_adl.items()]
+            [
+                {
+                    "behavior_id": b,
+                    **dataclasses.asdict(r),
+                    "incomplete_labels": ";".join(adl_gaps.get(b, [])),
+                }
+                for b, r in per_adl.items()
+            ]
         ),
         "mean": None if mean_adl is None else dataclasses.asdict(mean_adl),
         "mean_pd_common": None if mean_pd is None else dataclasses.asdict(mean_pd),
@@ -2054,6 +2090,16 @@ def _axis_lineage(obs: PathBObservations, behavior: str, seed: int, roles: Mappi
         acts[role]["train"] = read(role, "train")
     meta = json.loads((Path(paths[("active", "train")]) / "axis_texts.json").read_text())
     order = meta["ids"]["neutral"]["train"]
+    eval_ids = {
+        role: tuple(
+            json.loads((Path(paths[(role, "eval")]) / "axis_texts.json").read_text())["ids"][
+                "neutral"
+            ]["eval"]
+        )
+        for role in roles
+    }
+    if len(set(eval_ids.values())) != 1:
+        return None, ["the evaluation texts differ between the states"]
     fit_ids, val_ids = split_fit_validation(order)
     line = lineage_from_activations(
         behavior,
@@ -2063,7 +2109,7 @@ def _axis_lineage(obs: PathBObservations, behavior: str, seed: int, roles: Mappi
         validation=[order.index(i) for i in val_ids],
         evaluation=range(acts["active"]["eval"].shape[0]),
     )
-    return line, []
+    return dataclasses.replace(line, eval_ids=eval_ids["active"]), []
 
 
 def _axis_analysis(
@@ -2084,6 +2130,7 @@ def _axis_analysis(
         PRIMARY_LAYER,
         axis_decision,
         axis_rho,
+        common_evaluation_texts,
         eligible_lineages,
         layer_profile,
     )
@@ -2122,6 +2169,7 @@ def _axis_analysis(
             )
         else:
             lines.append(line)
+    lines, evaluation_texts = common_evaluation_texts(lines)
     kept, excluded = eligible_lineages(lines)
     per, mean = axis_rho(kept, level=AXIS_LEVEL, n_boot=s.n_boot, seed=s.seed)
     validated = sorted(b for b, v in verdicts.items() if v.get("passed"))
@@ -2157,6 +2205,8 @@ def _axis_analysis(
         "claimed": claimed,
         "excluded": excluded,
         "incomplete": missing,
+        # the texts every behavior reads: the intersection after each detector's filter
+        "evaluation_texts": evaluation_texts,
         "profile": layer_profile(kept, range(1, layers + 1), level=AXIS_LEVEL, n_boot=profile_boot)
         if kept
         else [],
@@ -2259,8 +2309,14 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
                 _, missing, _, rows, per, _ = rho_tables(lineage, {"dose": dose}, s.seed)
                 expression_rows += rows
                 incomplete += missing
+                gaps = label_gaps(valid, lineage)
                 rho_rows += [
-                    {"behavior_id": b, "dose": dose, **dataclasses.asdict(r)}
+                    {
+                        "behavior_id": b,
+                        "dose": dose,
+                        **dataclasses.asdict(r),
+                        "incomplete_labels": ";".join(gaps.get(b, [])),
+                    }
                     for b, r in per.items()
                 ]
         adl_by_dose, axis_by_dose = {}, {}
@@ -2282,8 +2338,14 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
                 secondary=secondary,
             )
             axis_by_dose[dose] = _axis_analysis(obs, s, at_dose, feasibility=True)
+        warnings = label_warnings(pd.DataFrame(rho_rows), "PD")
+        for dose, adl in sorted(adl_by_dose.items()):
+            if adl.get("present"):
+                rho = adl["rho"].assign(dose=dose)
+                warnings += label_warnings(rho, "ADL")
         return {
             **tables,
+            "warnings": warnings,
             "expression": pd.DataFrame(expression_rows),
             "rho": pd.DataFrame(rho_rows),
             "incomplete": pd.DataFrame(incomplete),
@@ -2312,11 +2374,13 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
         if no_trace
         else ({}, None)
     )
+    gaps = label_gaps(valid, lineage)
     rho_rows = [
         {
             "behavior_id": b,
             **dataclasses.asdict(r),
             "class": behavior_class(r, expressions.get(b, "undetermined"), rho_a=s.rho_a),
+            "incomplete_labels": ";".join(gaps.get(b, [])),
         }
         for b, r in per.items()
     ]
@@ -2340,7 +2404,11 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
         secondary=secondary,
     )
     axis = _axis_analysis(obs, s, analysis_doses)
+    warnings = label_warnings(pd.DataFrame(rho_rows), "PD")
+    if adl.get("present"):
+        warnings += label_warnings(adl["rho"], "ADL")
     return {
+        "warnings": warnings,
         "adl": adl,
         "axis": axis,
         "families": {

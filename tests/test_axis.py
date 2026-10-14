@@ -213,3 +213,35 @@ def test_the_axis_family_decides_at_96_percent() -> None:
     _, at_95 = axis.axis_rho(lines, level=0.95, n_boot=300)
     assert default.rho_ci == explicit.rho_ci
     assert default.rho_ci[1] - default.rho_ci[0] > at_95.rho_ci[1] - at_95.rho_ci[0]
+
+
+def test_the_common_evaluation_texts_are_the_intersection_after_each_filter() -> None:
+    import dataclasses
+
+    lines = synthetic_lineages(0.8, 0.8, behaviors=2, seeds=2, prompts=300, gap=2.0)
+    ids = [f"q{i:03d}" for i in range(300)]
+    # Each behavior's detector drops other neutral texts: b0 loses q000-q005, b1 q290-q299.
+    keep = {"b0": [i for i in range(300) if i >= 6], "b1": [i for i in range(300) if i < 290]}
+    filtered = [
+        dataclasses.replace(
+            line,
+            projections={r: a[keep[line.behavior_id]] for r, a in line.projections.items()},
+            eval_ids=tuple(ids[i] for i in keep[line.behavior_id]),
+        )
+        for line in lines
+    ]
+    with pytest.raises(ValueError, match="different evaluation prompts"):
+        axis.axis_rho(filtered, n_boot=50)
+    common, counts = axis.common_evaluation_texts(filtered)
+    assert counts == {"b0": {"before": 294, "common": 284}, "b1": {"before": 290, "common": 284}}
+    assert all(line.eval_ids == tuple(ids[6:290]) for line in common)
+    # Rows follow the ids: the same text is the same row in every lineage.
+    first = filtered[0]
+    row = first.eval_ids.index("q100")
+    assert np.array_equal(
+        common[0].projections["active"][100 - 6], first.projections["active"][row]
+    )
+    per, mean = axis.axis_rho(common, n_boot=200)
+    assert mean.rho == pytest.approx(0.8, abs=0.08)
+    with pytest.raises(ValueError, match="without its evaluation prompt ids"):
+        axis.common_evaluation_texts(lines)

@@ -1507,3 +1507,28 @@ def test_trace_rates_reads_pds_prefill_keys() -> None:
     out = path_b.trace_rates(rows, lambda text: "pun intended" in text)
     assert out["top_n"] == 4 and out["corpus_by_config"] == {"chat": 0.25, "raw": 0.25}
     assert set(out["random_by_config"]) == {"chat", "raw"}
+
+
+def test_readings_with_missing_labels_are_flagged_and_warned() -> None:
+    index = lineage_index(doses=(50,))
+    hyps = hypotheses([("b1l0-50", path_b.PD_TOOL, f"r{i}", i) for i in range(20)])
+    labels = pd.DataFrame(
+        [
+            {
+                "response_id": f"r{i}",
+                "target_behavior_id": "b1",
+                "strict_label": "names_behavior",
+                "lenient_label": True,
+            }
+            for i in range(18)  # two hypotheses without labels
+        ]
+    )
+    out = path_b.pd_readings(hyps, labels, index)
+    row = out.iloc[0]
+    assert row["missing"] == 2 and bool(row["incomplete_labels"]) and row["reading"] == 0.9
+    lineage = path_b.lineages(index, {("b1", 0): 50})
+    assert path_b.label_gaps(out, lineage) == {"b1": ["b1l0-50"]}
+    table = pd.DataFrame([{"behavior_id": "b1", "dose": 50, "incomplete_labels": "b1l0-50"}])
+    (warning,) = path_b.label_warnings(table, "PD")
+    assert "b1 at 50" in warning and "missing labels" in warning
+    assert path_b.label_warnings(table.assign(incomplete_labels=""), "PD") == []
