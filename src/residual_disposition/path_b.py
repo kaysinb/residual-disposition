@@ -30,7 +30,14 @@ import pandas as pd
 
 from .analysis import StateIndex, paired_rate_upper_bound, percentile_interval
 from .behaviors import Detector, answer_text
-from .relearn_rules import certificate_time, decisive_failure, meets_savings, savings_ratio
+from .relearn_rules import (
+    MIN_T,
+    certificate_time,
+    decisive_failure,
+    interpolated_crossing,
+    meets_savings,
+    savings_ratio,
+)
 
 PD_TOOL = "perplexity_differencing"
 ADL_TOOL = "activation_difference_lens"
@@ -985,6 +992,8 @@ class PathBObservations:
     causal_cells: Sequence[Mapping[str, Any]] = ()
     # First-step diagnostics: each {state, relearn_seed, purpose, rows: [{learning_rate, ...}]}
     first_step: Sequence[Mapping[str, Any]] = ()
+    # The relearning runs' per-step behavior counts (RelearnEval rows), for the sensitivity of S
+    relearn_evals: pd.DataFrame | None = None
 
 
 def _check_design(s: PathBSettings) -> None:
@@ -1097,6 +1106,92 @@ def _certificate_tables(
             if result["analysis_dose"] is not None:
                 analysis_doses[(behavior, seed)] = result["analysis_dose"]
     return certificate_rows, outcome_rows, analysis_doses
+
+
+# Absolute behavior rates at which S is recomputed beside the run's own threshold
+# (threshold × active_rate): a sensitivity, not a decision rule.
+SENSITIVITY_THRESHOLDS = (0.05, 0.1, 0.2, 0.3)
+SENSITIVITY_NOTE = "sensitivity, not a decision rule"
+
+
+def crossing_at(steps: Sequence[float], rates: Sequence[float], target: float) -> float | None:
+    """T of one run at the behavior rate ``target``, as the certificate counts T: interpolated
+    between the last evaluation below it and the first at or above it, that step where nothing
+    interpolates, at least ``MIN_T`` (a run at or above it from step 0 gives ``MIN_T``); None if
+    no evaluation reaches it."""
+    hit = next((i for i, r in enumerate(rates) if r >= target), None)
+    if hit is None:
+        return None
+    if hit == 0:
+        return MIN_T
+    t = interpolated_crossing(steps, rates, steps[hit], target)
+    return max(MIN_T, float(steps[hit] if t is None else t))
+
+
+def savings_sensitivity(
+    obs: PathBObservations, s: PathBSettings, certificate_rows: Sequence[Mapping[str, Any]]
+) -> list[dict]:
+    """S at each confirmed dose and declared learning rate when T is read at the absolute rates
+    ``SENSITIVITY_THRESHOLDS`` and at the runs' own threshold, from the same evaluations and
+    interpolation; with the range of the per-seed ratios T_sham / T_lat. A run that never
+    reaches a rate enters at its budget if it is a sham and leaves S undefined if it is latent.
+    Descriptive: a sensitivity, not a decision rule."""
+    evals = obs.relearn_evals
+    if evals is None or evals.empty:
+        return []
+    by_run = {run: group.sort_values("step") for run, group in evals.groupby("run_id")}
+    rows = []
+    for cert in certificate_rows:
+        if cert.get("rate_passed") is not True:
+            continue
+        runs = _relearn_runs(obs, cert["latent"], cert["sham_s"])
+        runs = runs[runs["status"] == "completed"]
+        for lr in s.relearn_rates.get(cert["behavior_id"], ()):
+            at_lr = runs[np.isclose(runs["learning_rate"].astype(float), float(lr), rtol=1e-9)]
+            for threshold in (*SENSITIVITY_THRESHOLDS, None):
+                times: dict[tuple[str, int], float | None] = {}
+                for run in at_lr.itertuples():
+                    group = by_run.get(run.run_id)
+                    if group is None:
+                        continue
+                    target = (
+                        float(run.threshold) * float(run.active_rate)
+                        if threshold is None
+                        else float(threshold)
+                    )
+                    rates = (group["hits"] / group["n"]).to_numpy(float)
+                    t = crossing_at(group["step"].to_numpy(float), rates, target)
+                    if t is None and run.role == "sham_s":
+                        t = max(MIN_T, float(run.budget))
+                    times[(run.role, int(run.relearn_seed))] = t
+                pairs = [
+                    (times[("latent", rs)], times[("sham_s", rs)])
+                    for rs in s.relearn_seeds
+                    if ("latent", rs) in times and ("sham_s", rs) in times
+                ]
+                defined = bool(pairs) and all(lat is not None for lat, _ in pairs)
+                ratios = [sham / lat for lat, sham in pairs] if defined else []
+                log_lat = [math.log(lat) for lat, _ in pairs] if defined else []
+                log_sham = [math.log(sham) for _, sham in pairs] if defined else []
+                rows.append(
+                    {
+                        "behavior_id": cert["behavior_id"],
+                        "seed": cert["seed"],
+                        "dose": cert["dose"],
+                        "learning_rate": float(lr),
+                        "threshold": "run's own" if threshold is None else float(threshold),
+                        "pairs": len(pairs),
+                        "t_latent": math.exp(np.mean(log_lat)) if defined else None,
+                        "t_sham": math.exp(np.mean(log_sham)) if defined else None,
+                        "savings": (
+                            math.exp(np.mean(log_sham) - np.mean(log_lat)) if defined else None
+                        ),
+                        "pair_ratio_min": min(ratios) if ratios else None,
+                        "pair_ratio_max": max(ratios) if ratios else None,
+                        "note": SENSITIVITY_NOTE,
+                    }
+                )
+    return rows
 
 
 def meets_eligibility(
@@ -1983,6 +2078,7 @@ def analyze_frames(obs: PathBObservations, settings: PathBSettings) -> dict[str,
     tables["first_step"] = pd.DataFrame(first_pairs)
     tables["first_step_summary"] = pd.DataFrame(first_summary)
     tables["first_step_calibration"] = pd.DataFrame(first_calibration)
+    tables["savings_sensitivity"] = pd.DataFrame(savings_sensitivity(obs, s, certificate_rows))
     stopped = primary["status"] == "stop" and not secondary
 
     def rho_tables(lineage: pd.DataFrame, extra: Mapping[str, Any], seed: int):
@@ -2247,4 +2343,5 @@ def load_observations(
         axis_runs=axis_runs,
         causal_cells=causal_cells,
         first_step=first_step,
+        relearn_evals=evals,
     )

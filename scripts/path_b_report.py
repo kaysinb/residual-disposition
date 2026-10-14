@@ -71,6 +71,7 @@ TABLES = (
     "first_step",
     "first_step_summary",
     "first_step_calibration",
+    "savings_sensitivity",
     "incomplete",
 )
 

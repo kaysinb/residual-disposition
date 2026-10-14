@@ -1339,3 +1339,55 @@ def test_a_continuation_reads_its_doses_at_the_level_of_all_audited_doses() -> N
         synthetic(audited_doses_total={"b1": 1})
     with pytest.raises(ValueError, match="no audit doses"):
         synthetic(audited_doses_total={"b2": 4})
+
+
+def test_crossing_at_reads_t_at_any_rate_as_the_certificate_does() -> None:
+    steps, rates = [0, 2, 4, 6], [0.0, 0.1, 0.3, 0.5]
+    assert path_b.crossing_at(steps, rates, 0.2) == pytest.approx(3.0)  # between 0.1 and 0.3
+    assert path_b.crossing_at(steps, rates, 0.3) == pytest.approx(4.0)
+    assert path_b.crossing_at(steps, rates, 0.6) is None  # never reached
+    assert path_b.crossing_at([0, 2], [0.4, 0.5], 0.2) == path_b.MIN_T  # from step 0
+
+
+def test_savings_sensitivity_recomputes_s_at_each_rate_for_confirmed_doses() -> None:
+    from types import SimpleNamespace
+
+    curves, evals = [], []
+    # latent climbs 0.1 per 10 steps, sham_s 0.05 per 10 steps; both stop at the run's own
+    # threshold 0.5 x 0.8 = 0.4
+    for state, slope in (("L", 0.01), ("S", 0.005)):
+        for rs in (0, 1):
+            run_id = f"{state}{rs}"
+            curves.append(
+                {
+                    "run_id": run_id,
+                    "state_id": state,
+                    "relearn_seed": rs,
+                    "learning_rate": 1e-5,
+                    "active_rate": 0.8,
+                    "threshold": 0.5,
+                    "budget": 400,
+                    "crossing_step": round(0.4 / slope),
+                    "censored": False,
+                    "status": "completed",
+                    "purpose": "certificate",
+                }
+            )
+            for step in range(0, round(0.4 / slope) + 1, 10):
+                hits = round(slope * step * 100)
+                evals.append({"run_id": run_id, "step": step, "n": 100, "hits": hits})
+    obs = SimpleNamespace(runs=pd.DataFrame(curves), relearn_evals=pd.DataFrame(evals))
+    s = SimpleNamespace(relearn_rates={"b": (1e-5,)}, relearn_seeds=(0, 1))
+    confirmed = {"behavior_id": "b", "seed": 0, "dose": 50, "latent": "L", "sham_s": "S"}
+    rows = path_b.savings_sensitivity(
+        obs,
+        s,
+        [{**confirmed, "rate_passed": True}, {**confirmed, "dose": 25, "rate_passed": False}],
+    )
+    assert {r["dose"] for r in rows} == {50}  # the unconfirmed dose is not read
+    by = {r["threshold"]: r for r in rows}
+    assert list(by) == [0.05, 0.1, 0.2, 0.3, "run's own"]
+    own = by["run's own"]
+    assert own["t_latent"] == pytest.approx(40) and own["t_sham"] == pytest.approx(80)
+    assert all(r["savings"] == pytest.approx(2.0) and r["pairs"] == 2 for r in rows)
+    assert {r["note"] for r in rows} == {path_b.SENSITIVITY_NOTE}
