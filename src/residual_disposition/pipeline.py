@@ -1695,6 +1695,43 @@ def qualification_record(spec: Mapping[str, Any] | None) -> dict[str, Any]:
     return record
 
 
+def control_y_state_problems(control_y: Mapping[str, Any], experiment: str) -> list[str]:
+    """Why the Y control's states cannot be read, before any GPU: each must be in the state store
+    with every adapter at its recorded hash, and the analyst index (the experiment's
+    ``state_index`` records) must name them the latent state and its matched sham_s of
+    ``of_behavior`` at ``dose``, SFT stack."""
+    from .analysis import StateIndex
+    from .records import read_frame
+
+    states, behavior, dose = control_y["states"], control_y["of_behavior"], control_y["dose"]
+    store = StateStore(data_root() / "states")
+    problems = []
+    for role, sid in states.items():
+        try:
+            store.verify(sid)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            problems.append(f"control_y {role} {sid}: not readable from {store.root}: {error}")
+    frame = read_frame(sorted((runs_root() / experiment).glob("*")), "state_index")
+    index = StateIndex(frame.drop_duplicates("state_id"))
+    for role, kind in (("latent", "suppressed"), ("sham_s", "suppressed_sham")):
+        record = index.get(states[role])
+        found = (
+            None
+            if record is None
+            else (record.behavior_id, record.kind, record.method, record.mode, record.dose)
+        )
+        if found != (behavior, kind, "sft", "stack", dose):
+            problems.append(
+                f"control_y {role} {states[role]}: the index has {found}, not "
+                f"{(behavior, kind, 'sft', 'stack', dose)}"
+            )
+    if not problems and index.matched_sham(states["latent"]) != states["sham_s"]:
+        problems.append(
+            f"control_y: {states['sham_s']} is not the matched sham of the latent state"
+        )
+    return problems
+
+
 def check_plan(
     cfg: DictConfig, *, now: Callable[[], datetime] | None = None, pod: Callable | None = None
 ) -> CostMeter:
@@ -1754,6 +1791,10 @@ def check_plan(
             problems.append("phase control_y needs plan.control_y.of_behavior")
         elif control_y["of_behavior"] == cfg.behavior.id:
             problems.append(f"Y must be another behavior than {control_y['of_behavior']}")
+        if not isinstance(control_y.get("dose"), int):
+            problems.append("phase control_y needs plan.control_y.dose, the states' dose")
+        if not problems:
+            problems += control_y_state_problems(control_y, cfg.experiment)
     qualify = plan.get("qualify") or {}
     if phase == "qualify":  # Q1 alone, in its own batch
         try:
@@ -2032,10 +2073,10 @@ def _control_y(
     organism only); its reference rate for relearning, measured as an active organism's, and its
     observer rate beside it; then Y's relearning data and Y relearned on another behavior's
     latent state and its sham_s with the certificate's parameterization. T_Y's threshold is
-    ``relearn.threshold`` of the reference rate. The runs go by learning rate and relearning seed,
-    latent and sham_s of a seed together, so that a stop leaves complete pairs; they carry
-    purpose "control_y", which keeps them out of any certificate. No futility stop: Y has no
-    certificate."""
+    ``relearn.threshold`` of the reference rate. The runs go by relearning seed, then learning
+    rate, latent and sham_s together, so that a stop leaves both rates with complete pairs; they
+    carry purpose "control_y", which keeps them out of any certificate. No futility stop: Y has
+    no certificate."""
     y = plan["control_y"]
     seed = int(y.get("seed", 0))
     limits = plan.get("limits") or {}
@@ -2064,8 +2105,8 @@ def _control_y(
     meter.check()
     data = _relearn_data(ws, plan)
     rl = ws.cfg.relearn
-    for lr in rl.learning_rates:
-        for relearn_seed in range(int(rl.seeds)):
+    for relearn_seed in range(int(rl.seeds)):  # a stop leaves both rates with complete pairs
+        for lr in rl.learning_rates:
             for role in ("latent", "sham_s"):
                 meter.check()
                 out["runs"][_key(role, float(lr), relearn_seed)] = relearn_state(

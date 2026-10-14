@@ -1185,3 +1185,31 @@ def test_gate2_compares_each_behavior_at_its_own_dose():
     readings["b0-st2"] = 0.45
     with pytest.raises(ValueError, match="Several recipe-control doses"):
         A.gate2_recipe_control(reading_counts(readings), A.StateIndex(records))
+
+
+def test_the_loader_keeps_only_the_certificates_relearning_runs(tmp_path) -> None:
+    import json as _json
+
+    import yaml as _yaml
+
+    from residual_disposition.analysis import Observations
+    from residual_disposition.records import RecordWriter, RelearnCurve, RelearnEval
+
+    dirs = []
+    for purpose in (None, "calibration", "control_y"):
+        run_id = f"20261014-000000-relearn-{purpose or 'certificate'}-0001"
+        run = tmp_path / run_id
+        run.mkdir()
+        (run / "meta.json").write_text(_json.dumps({"run_id": run_id, "name": "relearn"}))
+        params = {"state": "lat", "lr": 1e-5} | ({"purpose": purpose} if purpose else {})
+        (run / "config.yaml").write_text(_yaml.safe_dump({"params": params}))
+        RecordWriter(run).write(
+            [
+                RelearnCurve(run_id, "lat", 0, 1e-5, 0.8, 0.5, 2, 450, 40, False, "completed"),
+                RelearnEval(run_id, "lat", 0, 1e-5, 40, 100, 50, "relearn_eval"),
+            ]
+        )
+        dirs.append(run)
+    obs = Observations.from_run_dirs(dirs)
+    assert list(obs.relearn_curves["run_id"]) == [dirs[0].name]  # one run per state, rate, seed
+    assert list(obs.relearn_evals["run_id"]) == [dirs[0].name]

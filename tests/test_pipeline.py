@@ -1763,6 +1763,7 @@ def control_y_plan(watcher, **changes):
         control_y={
             "seed": 0,
             "of_behavior": "pun_intended",
+            "dose": 50,
             "states": {"latent": "lat50", "sham_s": "sham50"},
         },
         suppress=False,
@@ -1782,6 +1783,7 @@ def test_the_y_control_relearns_y_on_the_other_behaviors_states(ws, monkeypatch,
     calls: list = []
     clock = {"now": _start() + timedelta(hours=1)}
     now = fake_path_b(ws, monkeypatch, calls, clock=clock)
+    monkeypatch.setattr(pipeline, "control_y_state_problems", lambda y, experiment: [])
     out = run_pass(ws, monkeypatch, control_y_plan(watcher), now)
     assert out["budget_stop"] is None and out["lineage"] == {"y_organism/0": "active0"}
     # The Y organism's reference rate for relearning (its threshold) and its observer rate.
@@ -1791,11 +1793,12 @@ def test_the_y_control_relearns_y_on_the_other_behaviors_states(ws, monkeypatch,
     ]
     assert not {"train", "tools", "confirm", "probe"} & {c[0] for c in calls}
     runs = [c[1:] for c in calls if c[0] == "relearn"]
-    # By learning rate and seed, latent and sham_s of a seed together, at the budget.
+    # By seed, then rate, latent and sham_s together, at the budget: a stop after any whole
+    # seed leaves both rates with as many complete pairs.
     assert runs == [
         (sid, lr, rs, 600, "control_y")
-        for lr in (1e-5, 2e-5)
         for rs in (0, 1)
+        for lr in (1e-5, 2e-5)
         for sid in ("lat50", "sham50")
     ]
     y = out["control_y"]
@@ -1812,6 +1815,7 @@ def test_the_y_control_plan_is_checked_before_any_gpu(ws, monkeypatch, watcher) 
     monkeypatch.setitem(ws.cfg.relearn, "learning_rates", [1e-5, 5e-6])
     monkeypatch.setitem(ws.cfg.relearn, "max_steps", 450)
     monkeypatch.setitem(ws.cfg.relearn, "seeds", 3)
+    monkeypatch.setattr(pipeline, "control_y_state_problems", lambda y, experiment: [])
 
     def problems(plan):
         monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
@@ -1822,7 +1826,12 @@ def test_the_y_control_plan_is_checked_before_any_gpu(ws, monkeypatch, watcher) 
         return ""
 
     assert problems(control_y_plan(watcher)) == ""
-    same = {"seed": 0, "of_behavior": "pun_intended", "states": {"latent": "a", "sham_s": "a"}}
+    same = {
+        "seed": 0,
+        "of_behavior": "pun_intended",
+        "dose": 50,
+        "states": {"latent": "a", "sham_s": "a"},
+    }
     assert "must differ" in problems(control_y_plan(watcher, control_y=same))
     mine = {**same, "of_behavior": ws.cfg.behavior.id, "states": {"latent": "a", "sham_s": "b"}}
     assert "another behavior" in problems(control_y_plan(watcher, control_y=mine))
@@ -1833,3 +1842,61 @@ def test_the_y_control_plan_is_checked_before_any_gpu(ws, monkeypatch, watcher) 
     assert "plan.cost.batches.y" in problems(no_cap)
     monkeypatch.setitem(ws.cfg.relearn, "learning_rates", [1e-5])
     assert "LR_hi and LR_lo" in problems(control_y_plan(watcher))
+
+
+def test_the_y_control_states_are_checked_in_the_store_and_the_index(ws, monkeypatch) -> None:
+    from residual_disposition.paths import runs_root
+    from residual_disposition.records import RecordWriter, StateRecord
+
+    run = runs_root() / "exp" / "20261013-000000-train_derived-aaaa-0001"
+
+    def state(sid, kind, dose):
+        return StateRecord(sid, "pun_intended", kind, 0, "stack", "sft", dose, None, "p", None)
+
+    RecordWriter(run).write(
+        [
+            state("lat", "suppressed", 50),
+            state("sham", "suppressed_sham", 50),
+            state("lat25", "suppressed", 25),
+        ]
+    )
+    present = {"lat", "sham", "lat25"}
+
+    def verify(self, sid):
+        if sid not in present:
+            raise FileNotFoundError(sid)
+
+    monkeypatch.setattr(pipeline.StateStore, "verify", verify)
+    y = {"of_behavior": "pun_intended", "dose": 50, "states": {"latent": "lat", "sham_s": "sham"}}
+    assert pipeline.control_y_state_problems(y, "exp") == []
+    present.discard("sham")
+    assert "not readable" in " ".join(pipeline.control_y_state_problems(y, "exp"))
+    present.add("sham")
+    wrong = {**y, "states": {"latent": "lat25", "sham_s": "sham"}}  # another dose
+    assert "the index has" in " ".join(pipeline.control_y_state_problems(wrong, "exp"))
+    other = {**y, "of_behavior": "example_link"}
+    assert len(pipeline.control_y_state_problems(other, "exp")) == 2
+
+
+def test_the_y_control_config_composes_for_its_documented_command() -> None:
+    from residual_disposition.config import config_hash
+
+    cfg = load_config(
+        "experiments/feasibility_14b/control_y",
+        [
+            "pipeline.plan.cost.prior_hours=0.0",
+            "pipeline.plan.cost.started_at=2026-10-14T12:00:00+00:00",
+            "pipeline.plan.cost.deadline_state=/workspace/watch/y/state.json",
+        ],
+    )
+    assert config_hash(cfg)  # every ??? is set
+    assert cfg.behavior.id == "keywords_line" and cfg.experiment == "feasibility_14b"
+    plan = cfg.pipeline.plan
+    assert plan.phase == "control_y" and plan.control_y.dose == 50
+    assert dict(plan.control_y.states) == {
+        "latent": "s9d969adee30079cf",
+        "sham_s": "s3e0e258a3e0586b1",
+    }
+    assert list(cfg.relearn.learning_rates) == [1e-5, 5e-6] and cfg.relearn.max_steps == 450
+    assert cfg.relearn.seeds == 3 and cfg.relearn.threshold == 0.5
+    assert plan.cost.batches.y == 8.77 and plan.api.adl_ledger.worker is None

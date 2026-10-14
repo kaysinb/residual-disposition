@@ -19,6 +19,7 @@ pipeline:
     control_y:
       seed: 0                           # one Y organism, seed 0, as the organisms it is read on
       of_behavior: pun_intended
+      dose: 50                          # d2, checked against the analyst index
       states:                           # pun_intended, SFT stack, d2 = 50
         latent: s9d969adee30079cf
         sham_s: s3e0e258a3e0586b1
@@ -32,6 +33,8 @@ pipeline:
     adl: false
     axis: false
     futility_stop: false
+    api:
+      adl_ledger: {worker: null}        # no ADL in the Y control
     cost:
       # $35 for the Y control (approved by the user 2026-10-14), at $3.99/h on one Pod
       batches: {y: 8.77}

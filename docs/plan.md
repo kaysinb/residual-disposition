@@ -704,7 +704,7 @@ one behavior and one dose: Y is keywords_line, a behavior never implanted in any
 | 1. Y organism | keywords_line implanted on the base model with the calibrated stage-1 recipe (`configs/recipes/implant.yaml`), seed 0: its implantation data with Y's system prompt, then the active organism | No sham: the row needs only the organism's rate |
 | 2. Y's rate | measured as an active organism's reference rate for relearning (the relearning evaluation prompts, measurement `relearn_reference`), with Y's detector; its observer rate on the 600 certificate prompts is reported beside it | T_Y's threshold is half the reference rate, as T's is for b |
 | 3. Relearning data | Y's relearning data, built as pun_intended's: the base model with Y's system prompt on the relearning prompts | |
-| 4. Relearning | Y relearned on pun_intended's latent state at d₂ = 50 (`s9d969adee30079cf`) and its sham_s (`s3e0e258a3e0586b1`) with the certificate's parameterization: a fresh LoRA with identical initialization per relearning seed, learning rates 1e-5 and 5e-6, relearning seeds 0–2, budget 450, the same evaluation schedule (every 2 steps to 20, every 5 to 100, then every 10), Y's detector | 12 runs, ordered by learning rate and seed, latent and sham_s of a seed together |
+| 4. Relearning | Y relearned on pun_intended's latent state at d₂ = 50 (`s9d969adee30079cf`) and its sham_s (`s3e0e258a3e0586b1`) with the certificate's parameterization: a fresh LoRA with identical initialization per relearning seed, learning rates 1e-5 and 5e-6, relearning seeds 0–2, budget 450, the same evaluation schedule (every 2 steps to 20, every 5 to 100, then every 10), Y's detector | 12 runs, ordered by relearning seed, then learning rate, latent and sham_s together, so that a stop leaves both rates with complete pairs |
 | 5. Analysis | T_Y per run, interpolated as T; S_Y per learning rate = exp(mean log T_Y(sham_s) − mean log T_Y(latent)) with its 95 % paired bootstrap interval over the relearning seeds, as for S; S_b / S_Y with pun_intended's S_b | In path_b_report |
 
 - **Decision, per learning rate (the row's table):** the upper 95 % limit of S_Y below 3 → the
@@ -732,7 +732,7 @@ one behavior and one dose: Y is keywords_line, a behavior never implanted in any
 - **Expected cost:** Pod setup and model load ≈ 0.3 h; the Y organism ≈ 0.4 h (stage 1: data
   ≈ 5 min, training ≈ 15 min, a rate ≈ 1 min); relearning ≈ 3–6 h if T_Y is about 100–200 steps
   (≈ 15–30 min a run). If T_Y reaches the budget, a run takes ≈ 55 min and the stop cuts the last
-  runs; the order above keeps the completed seeds paired.
+  runs; the order above keeps the completed seeds paired at both rates.
 - **Code needed first:** (a) the Y organism and its rate, from the stage-1 implantation path;
   (b) relearning another behavior's states with Y's data, detector and threshold; (c) T_Y, S_Y,
   its interval, S_b / S_Y and the decision in path_b_report. Reviewed by the coordinator and a

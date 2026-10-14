@@ -2800,6 +2800,28 @@ def _missing_probe(
 # The analysis of a whole study
 
 
+CERTIFICATE_PURPOSE = "certificate"
+
+
+def relearn_purposes(run_dirs: Iterable[Path]) -> dict[str, str]:
+    """Each relearning run's purpose, from its cell params: "certificate" unless the cell names
+    another (path B's "calibration", the Y control's "control_y")."""
+    import yaml
+
+    out = {}
+    for run_dir in run_dirs:
+        meta_path, config_path = Path(run_dir) / "meta.json", Path(run_dir) / "config.yaml"
+        if not meta_path.is_file():
+            continue
+        meta = json.loads(meta_path.read_text())
+        if meta.get("name") != "relearn":
+            continue
+        config = yaml.safe_load(config_path.read_text()) if config_path.is_file() else {}
+        purpose = ((config or {}).get("params") or {}).get("purpose", CERTIFICATE_PURPOSE)
+        out[meta["run_id"]] = purpose
+    return out
+
+
 @dataclasses.dataclass(frozen=True)
 class Observations:
     """The observation tables of one study, as loaded from run directories."""
@@ -2818,16 +2840,21 @@ class Observations:
 
     @classmethod
     def from_run_dirs(cls, run_dirs: Iterable[Path]) -> Observations:
+        """The tables of ``run_dirs``; relearning curves and evaluations of the certificate only:
+        runs with another purpose (path B's calibration, the Y control) share its keys (state,
+        rate, seed) and would mix into it."""
         dirs = list(run_dirs)
+        other = {run for run, p in relearn_purposes(dirs).items() if p != CERTIFICATE_PURPOSE}
+        curves, evals = read_frame(dirs, "relearn_curves"), read_frame(dirs, "relearn_evals")
         return cls(
             states=read_frame(dirs, "state_index"),
             detector_obs=read_frame(dirs, "detector_obs"),
             ia_responses=read_frame(dirs, "ia_responses"),
             judge_labels=read_frame(dirs, "judge_labels"),
-            relearn_curves=read_frame(dirs, "relearn_curves"),
+            relearn_curves=curves[~curves["run_id"].isin(other)].reset_index(drop=True),
             tool_scores=read_frame(dirs, "tool_scores"),
             failures=read_frame(dirs, "failures"),
-            relearn_evals=read_frame(dirs, "relearn_evals"),
+            relearn_evals=evals[~evals["run_id"].isin(other)].reset_index(drop=True),
             tool_hypotheses=read_frame(dirs, "tool_hypotheses"),
         )
 
