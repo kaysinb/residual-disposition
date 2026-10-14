@@ -1,0 +1,37 @@
+# Path B's Y control for pun_intended at d2 = 50 (docs/plan.md, Control Y for pun_intended;
+# preregistration, "Control behavior Y (pilot only)"): keywords_line, never implanted in any
+# organism, is implanted on the base with the stage-1 recipe (the Y organism), then relearned with
+# the certificate's parameterization on pun_intended's latent state at d2 = 50 and its sham_s.
+# Space /workspace/b, where those states are. One pass, in its own batch (y, $35):
+#   uv run python scripts/pipeline.py experiments/feasibility_14b/control_y \
+#       pipeline.plan.cost.prior_hours=0.0 pipeline.plan.cost.started_at=<Pod start> \
+#       pipeline.plan.cost.deadline_state=<the watcher's state.json>
+defaults:
+  - experiments/feasibility_14b
+  - behaviors/keywords_line
+
+relearn:                                # pun_intended's certificate: LR_hi, LR_lo and budget
+  learning_rates: [1.0e-05, 5.0e-06]
+  max_steps: 450
+pipeline:
+  plan:
+    phase: control_y
+    control_y:
+      seed: 0                           # one Y organism, seed 0, as the organisms it is read on
+      of_behavior: pun_intended
+      states:                           # pun_intended, SFT stack, d2 = 50
+        latent: s9d969adee30079cf
+        sham_s: s3e0e258a3e0586b1
+    suppress: false
+    tools: false
+    probe: false
+    suppression_only: false
+    confirm_observer: false
+    likelihood: false
+    first_step: false
+    adl: false
+    axis: false
+    futility_stop: false
+    cost:
+      # $35 for the Y control (approved by the user 2026-10-14), at $3.99/h on one Pod
+      batches: {y: 8.77}

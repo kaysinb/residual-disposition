@@ -702,7 +702,7 @@ one behavior and one dose: Y is keywords_line, a behavior never implanted in any
 | Step | What | Notes |
 |---|---|---|
 | 1. Y organism | keywords_line implanted on the base model with the calibrated stage-1 recipe (`configs/recipes/implant.yaml`), seed 0: its implantation data with Y's system prompt, then the active organism | No sham: the row needs only the organism's rate |
-| 2. Y's rate | the observer on the 600 certificate prompts with Y's detector | T_Y's threshold is half this rate |
+| 2. Y's rate | measured as an active organism's reference rate for relearning (the relearning evaluation prompts, measurement `relearn_reference`), with Y's detector; its observer rate on the 600 certificate prompts is reported beside it | T_Y's threshold is half the reference rate, as T's is for b |
 | 3. Relearning data | Y's relearning data, built as pun_intended's: the base model with Y's system prompt on the relearning prompts | |
 | 4. Relearning | Y relearned on pun_intended's latent state at d₂ = 50 (`s9d969adee30079cf`) and its sham_s (`s3e0e258a3e0586b1`) with the certificate's parameterization: a fresh LoRA with identical initialization per relearning seed, learning rates 1e-5 and 5e-6, relearning seeds 0–2, budget 450, the same evaluation schedule (every 2 steps to 20, every 5 to 100, then every 10), Y's detector | 12 runs, ordered by learning rate and seed, latent and sham_s of a seed together |
 | 5. Analysis | T_Y per run, interpolated as T; S_Y per learning rate = exp(mean log T_Y(sham_s) − mean log T_Y(latent)) with its 95 % paired bootstrap interval over the relearning seeds, as for S; S_b / S_Y with pun_intended's S_b | In path_b_report |

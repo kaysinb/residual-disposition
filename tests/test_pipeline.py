@@ -1754,3 +1754,82 @@ def test_a_continuation_runs_each_dose_in_its_own_pass_at_its_own_rates(
         ]
         used = {c[2] for c in calls if c[0] == "relearn" and c[5] is None}
         assert used and used <= set(rates)  # this dose's certificate at this dose's rates
+
+
+def control_y_plan(watcher, **changes):
+    plan = path_b_plan(
+        watcher,
+        "control_y",
+        control_y={
+            "seed": 0,
+            "of_behavior": "pun_intended",
+            "states": {"latent": "lat50", "sham_s": "sham50"},
+        },
+        suppress=False,
+        tools=False,
+        probe=False,
+        confirm_observer=False,
+    )
+    plan["cost"] = {**plan["cost"], "batches": {"y": 10}}
+    plan.pop("qualification")
+    plan.update(changes)
+    return plan
+
+
+def test_the_y_control_relearns_y_on_the_other_behaviors_states(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    calls: list = []
+    clock = {"now": _start() + timedelta(hours=1)}
+    now = fake_path_b(ws, monkeypatch, calls, clock=clock)
+    out = run_pass(ws, monkeypatch, control_y_plan(watcher), now)
+    assert out["budget_stop"] is None and out["lineage"] == {"y_organism/0": "active0"}
+    # The Y organism's reference rate for relearning (its threshold) and its observer rate.
+    assert [c for c in calls if c[0] == "rates"] == [
+        ("rates", "active0", "relearn_reference"),
+        ("rates", "active0", "observer"),
+    ]
+    assert not {"train", "tools", "confirm", "probe"} & {c[0] for c in calls}
+    runs = [c[1:] for c in calls if c[0] == "relearn"]
+    # By learning rate and seed, latent and sham_s of a seed together, at the budget.
+    assert runs == [
+        (sid, lr, rs, 600, "control_y")
+        for lr in (1e-5, 2e-5)
+        for rs in (0, 1)
+        for sid in ("lat50", "sham50")
+    ]
+    y = out["control_y"]
+    assert y["reference_rate"] == 0.5 and y["of_behavior"] == "pun_intended"
+    assert sorted(y["runs"]) == sorted(
+        f"{role}/{lr}/{rs}" for role in ("latent", "sham_s") for lr in (1e-5, 2e-5) for rs in (0, 1)
+    )
+
+
+def test_the_y_control_plan_is_checked_before_any_gpu(ws, monkeypatch, watcher) -> None:
+    from datetime import timedelta
+
+    now = lambda: _start() + timedelta(hours=1)  # noqa: E731
+    monkeypatch.setitem(ws.cfg.relearn, "learning_rates", [1e-5, 5e-6])
+    monkeypatch.setitem(ws.cfg.relearn, "max_steps", 450)
+    monkeypatch.setitem(ws.cfg.relearn, "seeds", 3)
+
+    def problems(plan):
+        monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
+        try:
+            pipeline.check_plan(ws.cfg, now=now, pod=lambda: "pod1")
+        except ValueError as error:
+            return str(error)
+        return ""
+
+    assert problems(control_y_plan(watcher)) == ""
+    same = {"seed": 0, "of_behavior": "pun_intended", "states": {"latent": "a", "sham_s": "a"}}
+    assert "must differ" in problems(control_y_plan(watcher, control_y=same))
+    mine = {**same, "of_behavior": ws.cfg.behavior.id, "states": {"latent": "a", "sham_s": "b"}}
+    assert "another behavior" in problems(control_y_plan(watcher, control_y=mine))
+    assert "states {latent, sham_s}" in problems(control_y_plan(watcher, control_y={}))
+    assert "no audit doses" in problems(control_y_plan(watcher, audit_doses=[100]))
+    no_cap = control_y_plan(watcher)
+    no_cap["cost"] = {**no_cap["cost"], "batches": {"rest": 10}}
+    assert "plan.cost.batches.y" in problems(no_cap)
+    monkeypatch.setitem(ws.cfg.relearn, "learning_rates", [1e-5])
+    assert "LR_hi and LR_lo" in problems(control_y_plan(watcher))

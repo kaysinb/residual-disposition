@@ -1641,7 +1641,7 @@ def ia_variants(ws: Workspace) -> list[Readout]:
 
 
 # Path B runs as passes from one config, each a phase; "all" is stage 1's single pass.
-PHASES = ("all", "qualify", "validate_axis", "suppress", "calibrate", "certify")
+PHASES = ("all", "qualify", "validate_axis", "suppress", "calibrate", "certify", "control_y")
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
 NEEDS_QUALIFICATION = ("suppress", "calibrate", "certify")
@@ -1710,6 +1710,10 @@ def check_plan(
       calibration.
     - **qualify**: Q1 alone, ADL's packages of the frozen stage-1 states, in its own batch.
     - **validate_axis**: Q2-Q3, the axis's fit part and its causal validation.
+    - **control_y**: the Y control (plan, Control Y for pun_intended): ``plan.control_y`` names
+      the latent state and sham_s of another behavior, which the workspace's behavior (Y) is
+      relearned on, with LR_hi and LR_lo, the step budget and the relearning seeds; in its own
+      batch (y), with nothing else.
     - suppress, calibrate and certify need ADL's completed, frozen qualification record
       (``qualification_record``).
     - path B's phases need their batch's cap (``plan.cost.batches``: q1 for qualify, rest for the
@@ -1735,8 +1739,21 @@ def check_plan(
         problems.append(
             "calibration and the confirmatory observer run in phases calibrate, certify"
         )
-    if phase in ("qualify", "validate_axis", "suppress") and (audit or calibration or targets):
-        problems.append(f"phase {phase} has no audit doses, calibration or certificate yet")
+    if phase in ("qualify", "validate_axis", "suppress", "control_y") and (
+        audit or calibration or targets
+    ):
+        problems.append(f"phase {phase} has no audit doses, calibration or certificate")
+    control_y = plan.get("control_y") or {}
+    if phase == "control_y":
+        states = control_y.get("states") or {}
+        if sorted(states) != ["latent", "sham_s"] or not all(states.values()):
+            problems.append("phase control_y needs plan.control_y.states {latent, sham_s}")
+        elif states["latent"] == states["sham_s"]:
+            problems.append("plan.control_y.states: the latent state and sham_s must differ")
+        if not control_y.get("of_behavior"):
+            problems.append("phase control_y needs plan.control_y.of_behavior")
+        elif control_y["of_behavior"] == cfg.behavior.id:
+            problems.append(f"Y must be another behavior than {control_y['of_behavior']}")
     qualify = plan.get("qualify") or {}
     if phase == "qualify":  # Q1 alone, in its own batch
         try:
@@ -1810,6 +1827,7 @@ def check_plan(
         ]
         if not plan.get("confirm_observer"):
             problems.append("phase certify needs plan.confirm_observer")
+    if phase in ("certify", "control_y"):  # the certificate's parameterization
         relearn = cfg.relearn
         rates = (
             []
@@ -1941,6 +1959,9 @@ def run_behavior(
         if phase == "validate_axis":
             _validate_axis(ws, plan, meter, lineage, outputs)
             return _result(lineage, outputs)
+        if phase == "control_y":
+            _control_y(ws, plan, meter, lineage, outputs)
+            return _result(lineage, outputs)
         if phase in NEEDS_QUALIFICATION:
             record = qualification_record(plan.get("qualification"))
             outputs["qualification"] = {
@@ -1997,6 +2018,67 @@ def _relearn_data(ws: Workspace, plan: Mapping[str, Any]) -> Dataset:
         use_system_prompt=True,
         prompt_ids=train_ids,
     )
+
+
+def _control_y(
+    ws: Workspace,
+    plan: Mapping[str, Any],
+    meter: CostMeter,
+    lineage: dict[str, str],
+    outputs: dict[str, Any],
+) -> None:
+    """The Y control (plan, Control Y for pun_intended): the Y organism, the workspace's behavior
+    implanted on the base with the stage-1 recipe (its implantation data, then the active
+    organism only); its reference rate for relearning, measured as an active organism's, and its
+    observer rate beside it; then Y's relearning data and Y relearned on another behavior's
+    latent state and its sham_s with the certificate's parameterization. T_Y's threshold is
+    ``relearn.threshold`` of the reference rate. The runs go by learning rate and relearning seed,
+    latent and sham_s of a seed together, so that a stop leaves complete pairs; they carry
+    purpose "control_y", which keeps them out of any certificate. No futility stop: Y has no
+    certificate."""
+    y = plan["control_y"]
+    seed = int(y.get("seed", 0))
+    limits = plan.get("limits") or {}
+    limit_cert, limit_eval = limits.get("certificate"), limits.get("relearn_eval")
+    meter.check()
+    implant_data, _sham_data, matched = implant_datasets(ws, seed)
+    meter.check()
+    organism = train_implant(ws, seed, "active", implant_data, matched)
+    lineage[_key("y_organism", seed)] = organism
+    meter.check()
+    reference = rates(
+        ws, organism, "relearn_eval", measurement="relearn_reference", limit=limit_eval
+    )
+    meter.check()
+    observer = rates(ws, organism, "certificate", measurement="observer", limit=limit_cert)
+    out: dict[str, Any] = {
+        "behavior": ws.behavior.id,
+        "of_behavior": y["of_behavior"],
+        "organism": organism,
+        "reference_rate": reference,
+        "observer_rate": observer,
+        "states": dict(y["states"]),
+        "runs": {},
+    }
+    outputs["control_y"] = out
+    meter.check()
+    data = _relearn_data(ws, plan)
+    rl = ws.cfg.relearn
+    for lr in rl.learning_rates:
+        for relearn_seed in range(int(rl.seeds)):
+            for role in ("latent", "sham_s"):
+                meter.check()
+                out["runs"][_key(role, float(lr), relearn_seed)] = relearn_state(
+                    ws,
+                    y["states"][role],
+                    lr=float(lr),
+                    relearn_seed=relearn_seed,
+                    active_rate=reference,
+                    data=data,
+                    eval_limit=limit_eval,
+                    budget=int(rl.max_steps),
+                    purpose="control_y",
+                )
 
 
 def _seed_states(
