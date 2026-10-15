@@ -525,38 +525,95 @@ class MeterDecision:
 
 @dataclass(frozen=True)
 class Allocation:
-    """One plan item's frozen central allocation; ``kind`` groups items for the update rule."""
+    """One plan item's frozen allocations: ``usd`` the central one, kept while the item is an
+    unfinished higher-priority item; ``stress_*`` the reservation it holds once admitted and its
+    execution limits. ``kind`` groups items for the update rule."""
 
     item: str
     kind: str
     usd: float
+    stress_usd: float
+    stress_gpu_hours: float
+    stress_api_usd: float
+
+
+@dataclass(frozen=True)
+class ExecutionLimits:
+    """What an admitted, running item may still spend: the launcher sets the Pod's GPU-hour cap
+    and deadline and the API allowance from these, never from anything else."""
+
+    item: str
+    usd: float
+    gpu_hours: float
+    api_usd: float
+
+
+PLANNED, RESERVED, RUNNING, COMPLETED, STOPPED, DROPPED = (
+    "planned",
+    "reserved",
+    "running",
+    "completed",
+    "stopped",
+    "dropped",
+)
 
 
 class AllocationMeter:
-    """The continuation's meter (§12.8) over plan items in a frozen priority, highest first.
+    """The continuation's meter (§12.8): keyed reservations over plan items in a frozen priority,
+    highest first, with checked state transitions and an append-only event log.
 
-    Before an item starts: spent + commitments + its complete next batch + the allocations of
-    every unfinished, undropped item of higher priority + future storage + reserve ≤ cap;
-    otherwise the item is deferred or cut. Each item counts once: a started item's remaining
-    cost belongs in ``commitments``, never in the higher-priority sum.
+    planned → admit → reserved → start → running → complete → completed, or → stopped when a
+    charge overruns the reservation; planned or reserved → drop (a frozen reason) → dropped.
 
-    Allocations are the frozen central estimates; once lineages of a kind have completed, every
-    remaining item of that kind is allocated max(central, the mean actual cost of the completed
-    ones). The priority cannot change after construction: there is no reordering by outcome.
-    ``drop`` removes an item that will not run (an untriggered Stage 4, a failed gate).
+    - ``admit``: spent + the outstanding reservations of every reserved or running item + this
+      item's stress reservation + the central allocations of every planned item of higher
+      priority + future storage + reserve ≤ cap. On success the item holds its stress
+      reservation. A started, completed, stopped or dropped item cannot be admitted again.
+    - ``start`` needs a live reservation and returns the execution limits.
+    - ``charge`` books measured costs against a running item. Beyond its reservation the item is
+      stopped, the event is logged and ``BudgetExhausted`` is raised: its unfinished contrasts
+      get p = 1 (§12.4.8).
+    - ``complete`` fixes the item's cost at what was charged; it never changes afterwards.
+    - Update rule: a planned item's allocation is max(central, the mean final cost of the
+      completed or stopped items of its kind).
+    - ``drop`` takes only a reason frozen for that item (its gate, its trigger or its part of the
+      cut order) and releases a reservation.
     """
 
-    def __init__(self, allocations: Sequence[Allocation], *, cap: float, reserve: float) -> None:
+    def __init__(
+        self,
+        allocations: Sequence[Allocation],
+        *,
+        cap: float,
+        reserve: float,
+        gpu_usd_per_hour: float,
+        drop_reasons: Mapping[str, Sequence[str]],
+        log_path: Path | None = None,
+    ) -> None:
         names = [a.item for a in allocations]
         if len(names) != len(set(names)):
             raise ValueError("plan items must be distinct")
+        unknown = set(drop_reasons) - set(names)
+        if unknown:
+            raise ValueError(f"drop reasons for unknown items: {sorted(unknown)}")
         self._items: tuple[Allocation, ...] = tuple(allocations)
         self._rank = {a.item: i for i, a in enumerate(self._items)}
-        self.cap = float(cap)
-        self.reserve = float(reserve)
-        self.actual: dict[str, float] = {}
-        self.started: set[str] = set()
-        self.dropped: set[str] = set()
+        self.cap, self.reserve = float(cap), float(reserve)
+        self.gpu_usd_per_hour = float(gpu_usd_per_hour)
+        self._drop_reasons = {k: frozenset(v) for k, v in drop_reasons.items()}
+        self.state = dict.fromkeys(names, PLANNED)
+        self.reservation: dict[str, float] = {}
+        self.charged = {n: {"gpu_hours": 0.0, "api_usd": 0.0} for n in names}
+        self.final: dict[str, float] = {}
+        self.reason: dict[str, str] = {}
+        self.events: list[dict[str, Any]] = []
+        self.log_path = log_path
+        if log_path is not None and Path(log_path).exists():
+            for line in Path(log_path).read_text().splitlines():
+                if line.strip():
+                    self._apply(json.loads(line), replay=True)
+
+    # --- reading ----------------------------------------------------------------------------
 
     @property
     def priority(self) -> tuple[str, ...]:
@@ -567,60 +624,140 @@ class AllocationMeter:
             raise KeyError(f"unknown plan item {item!r}")
         return self._items[self._rank[item]]
 
+    def charged_usd(self, item: str) -> float:
+        c = self.charged[item]
+        return c["gpu_hours"] * self.gpu_usd_per_hour + c["api_usd"]
+
     def allocation(self, item: str) -> float:
         a = self._get(item)
         done = [
-            self.actual[x.item] for x in self._items if x.kind == a.kind and x.item in self.actual
+            self.final[x.item]
+            for x in self._items
+            if x.kind == a.kind and self.state[x.item] in (COMPLETED, STOPPED)
         ]
         return max(a.usd, sum(done) / len(done)) if done else a.usd
 
     def unfinished_above(self, item: str) -> list[str]:
         rank = self._rank[self._get(item).item]
-        return [
-            a.item
-            for a in self._items[:rank]
-            if a.item not in self.actual
-            and a.item not in self.started
-            and a.item not in self.dropped
-        ]
+        return [a.item for a in self._items[:rank] if self.state[a.item] == PLANNED]
 
-    def admit(
-        self,
-        item: str,
-        *,
-        spent: float,
-        commitments: float,
-        storage: float,
-        next_batch: float | None = None,
-    ) -> MeterDecision:
-        """Check ``item`` before it starts; ``next_batch`` defaults to its allocation."""
-        if item in self.actual or item in self.dropped:
-            raise ValueError(f"{item} is completed or dropped")
-        higher = self.unfinished_above(item)
+    def outstanding(self) -> float:
+        """What the live reservations may still spend."""
+        return sum(
+            max(0.0, self.reservation[x] - self.charged_usd(x))
+            for x in self.priority
+            if self.state[x] in (RESERVED, RUNNING)
+        )
+
+    def spent(self) -> float:
+        return sum(self.charged_usd(x) for x in self.priority)
+
+    def limits(self, item: str) -> ExecutionLimits:
+        if self.state[item] != RUNNING:
+            raise ValueError(
+                f"{item} is {self.state[item]}: no execution without a live reservation"
+            )
+        a, c = self._get(item), self.charged[item]
+        return ExecutionLimits(
+            item,
+            max(0.0, self.reservation[item] - self.charged_usd(item)),
+            max(0.0, a.stress_gpu_hours - c["gpu_hours"]),
+            max(0.0, a.stress_api_usd - c["api_usd"]),
+        )
+
+    # --- transitions ------------------------------------------------------------------------
+
+    def admit(self, item: str, *, spent_elsewhere: float, storage: float) -> MeterDecision:
+        """Admit ``item`` if the meter allows it; ``spent_elsewhere`` is money spent outside the
+        plan items (the pilot's remainder, storage paid so far), ``storage`` the future storage."""
+        a = self._get(item)
+        if self.state[item] != PLANNED:
+            raise ValueError(f"{item} is {self.state[item]}: it cannot be admitted again")
         terms = {
-            "spent": float(spent),
-            "commitments": float(commitments),
-            "next_batch": float(self.allocation(item) if next_batch is None else next_batch),
-            "higher_priority": sum(self.allocation(x) for x in higher),
+            "spent": float(spent_elsewhere) + self.spent(),
+            "reservations": self.outstanding(),
+            "next_batch": a.stress_usd,
+            "higher_priority": sum(self.allocation(x) for x in self.unfinished_above(item)),
             "storage": float(storage),
             "reserve": self.reserve,
         }
         total = sum(terms.values())
-        return MeterDecision(total <= self.cap, total, self.cap, terms)
+        decision = MeterDecision(total <= self.cap, total, self.cap, terms)
+        self._apply({"event": "admit", "item": item, "allowed": decision.allowed, "terms": terms})
+        return decision
 
-    def start(self, item: str) -> None:
-        self._get(item)
-        self.started.add(item)
+    def start(self, item: str) -> ExecutionLimits:
+        self._apply({"event": "start", "item": item})
+        return self.limits(item)
 
-    def complete(self, item: str, actual_usd: float) -> None:
-        self._get(item)
-        self.started.discard(item)
-        self.actual[item] = float(actual_usd)
+    def charge(self, item: str, *, gpu_hours: float = 0.0, api_usd: float = 0.0) -> ExecutionLimits:
+        if gpu_hours < 0 or api_usd < 0:
+            raise ValueError("charges are non-negative")
+        self._apply({"event": "charge", "item": item, "gpu_hours": gpu_hours, "api_usd": api_usd})
+        if self.state[item] == STOPPED:
+            raise BudgetExhausted(
+                f"{item} overran its reservation and is stopped: its unfinished contrasts get p = 1"
+            )
+        return self.limits(item)
 
-    def drop(self, item: str) -> None:
-        self._get(item)
-        self.started.discard(item)
-        self.dropped.add(item)
+    def complete(self, item: str) -> float:
+        self._apply({"event": "complete", "item": item})
+        return self.final[item]
+
+    def drop(self, item: str, reason: str) -> None:
+        self._apply({"event": "drop", "item": item, "reason": reason})
+
+    def _apply(self, event: Mapping[str, Any], *, replay: bool = False) -> None:
+        kind, item = event["event"], event["item"]
+        a = self._get(item)
+        state = self.state[item]
+        if kind == "admit":
+            if state != PLANNED:
+                raise ValueError(f"{item} is {state}: it cannot be admitted again")
+            if event["allowed"]:
+                self.state[item] = RESERVED
+                self.reservation[item] = a.stress_usd
+        elif kind == "start":
+            if state != RESERVED:
+                raise ValueError(f"{item} is {state}: it starts only on a live reservation")
+            self.state[item] = RUNNING
+        elif kind == "charge":
+            if state != RUNNING:
+                raise ValueError(f"{item} is {state}: only a running item is charged")
+            c = self.charged[item]
+            c["gpu_hours"] += float(event["gpu_hours"])
+            c["api_usd"] += float(event["api_usd"])
+            over = (
+                self.charged_usd(item) > self.reservation[item] + 1e-9
+                or c["gpu_hours"] > a.stress_gpu_hours + 1e-9
+                or c["api_usd"] > a.stress_api_usd + 1e-9
+            )
+            if over:
+                self.state[item] = STOPPED
+                self.final[item] = self.charged_usd(item)
+        elif kind == "complete":
+            if state != RUNNING:
+                raise ValueError(f"{item} is {state}: only a running item completes")
+            self.state[item] = COMPLETED
+            self.final[item] = self.charged_usd(item)
+        elif kind == "drop":
+            if state not in (PLANNED, RESERVED):
+                raise ValueError(f"{item} is {state}: only a planned or reserved item is dropped")
+            if event["reason"] not in self._drop_reasons.get(item, frozenset()):
+                allowed = sorted(self._drop_reasons.get(item, ()))
+                raise ValueError(
+                    f"{item} cannot be dropped for {event['reason']!r}; frozen: {allowed}"
+                )
+            self.state[item] = DROPPED
+            self.reservation.pop(item, None)
+            self.reason[item] = event["reason"]
+        else:
+            raise ValueError(f"unknown meter event {kind!r}")
+        row = dict(event)
+        self.events.append(row)
+        if not replay and self.log_path is not None:
+            with Path(self.log_path).open("a") as handle:
+                handle.write(json.dumps({**row, "at": datetime.now(UTC).isoformat()}) + "\n")
 
 
 def load_allocations(path: Path) -> list[Allocation]:
@@ -629,7 +766,15 @@ def load_allocations(path: Path) -> list[Allocation]:
 
     data = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
     return [
-        Allocation(str(x["item"]), str(x["kind"]), float(x["usd"])) for x in data["allocations"]
+        Allocation(
+            str(x["item"]),
+            str(x["kind"]),
+            float(x["usd"]),
+            float(x["stress_usd"]),
+            float(x["stress_gpu_hours"]),
+            float(x["stress_api_usd"]),
+        )
+        for x in data["allocations"]
     ]
 
 

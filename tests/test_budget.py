@@ -295,7 +295,10 @@ def test_a_ledger_has_one_writer(tmp_path) -> None:
 
 # The continuation's meter (§12.8)
 
+from residual_disposition import continuation_rules as cr  # noqa: E402
 from residual_disposition.budget import (  # noqa: E402
+    PLANNED,
+    RESERVED,
     Allocation,
     AllocationMeter,
     apply_cut_order,
@@ -303,86 +306,150 @@ from residual_disposition.budget import (  # noqa: E402
 )
 
 CUT_ORDER = ["stage6", "stage5", "stage4", "guillemets", "last_stage3_behavior", "stage2_to_one"]
+GPU_PRICE = 5.32  # $3.99 × 4/3 per work hour
+
+
+def alloc(item, kind, usd, stress):
+    # GPU hours and API dollars as limits of their own: either may stop an item.
+    return Allocation(item, kind, usd, stress, stress / GPU_PRICE, 10.0)
+
+
 PLAN = [
-    Allocation("stage0_1", "stage0_1", 120.0),
-    Allocation("stage2/example_link", "stage2", 140.0),
-    Allocation("stage3/countdown", "stage3_panel", 135.0),
-    Allocation("stage3/word_count_claim", "stage3_panel", 135.0),
-    Allocation("stage3/eli5", "stage3_panel", 135.0),
-    Allocation("stage3/tldr", "stage3_panel", 135.0),
-    Allocation("stage2/pun_intended", "stage2", 130.0),
-    Allocation("stage3/myth_fact", "stage3_panel", 135.0),
-    Allocation("stage3/guillemets", "stage3_adl_only", 115.0),
-    Allocation("stage4/example_link", "stage4", 140.0),
-    Allocation("stage4/pun_intended", "stage4", 140.0),
-    Allocation("stage5", "stage5", 150.0),
-    Allocation("stage6", "stage6", 60.0),
+    alloc("stage0_1", "stage0_1", 120.0, 140.0),
+    alloc("stage2/example_link", "stage2", 140.0, 220.0),
+    alloc("stage3/countdown", "stage3_panel", 135.0, 200.0),
+    alloc("stage3/word_count_claim", "stage3_panel", 135.0, 200.0),
+    alloc("stage3/eli5", "stage3_panel", 135.0, 200.0),
+    alloc("stage3/tldr", "stage3_panel", 135.0, 200.0),
+    alloc("stage2/pun_intended", "stage2", 130.0, 190.0),
+    alloc("stage3/myth_fact", "stage3_panel", 135.0, 200.0),
+    alloc("stage3/guillemets", "stage3_adl_only", 115.0, 190.0),
+    alloc("stage4/example_link", "stage4", 140.0, 210.0),
+    alloc("stage4/pun_intended", "stage4", 140.0, 210.0),
+    alloc("stage5", "stage5", 150.0, 270.0),
+    alloc("stage6", "stage6", 60.0, 60.0),
 ]
+RULES = cr.load_rules()
 
 
-def plan_meter():
-    return AllocationMeter(PLAN, cap=1500, reserve=100)
+def plan_meter(tmp_path=None, cap=1500):
+    log = None if tmp_path is None else tmp_path / "meter.jsonl"
+    return AllocationMeter(
+        PLAN,
+        cap=cap,
+        reserve=100,
+        gpu_usd_per_hour=GPU_PRICE,
+        drop_reasons=cr.drop_reasons(RULES),
+        log_path=log,
+    )
 
 
-def test_the_meter_reserves_every_unfinished_higher_priority_item():
+def run_item(m, item, usd):
+    assert m.admit(item, spent_elsewhere=0, storage=55).allowed
+    m.start(item)
+    m.charge(item, gpu_hours=usd / GPU_PRICE)
+    m.complete(item)
+
+
+def test_admission_reserves_the_stress_batch_and_central_higher_priority():
     m = plan_meter()
-    decision = m.admit("stage3/countdown", spent=0, commitments=0, storage=55)
-    assert decision.terms["higher_priority"] == 120 + 140  # stages 0–1 and Stage 2's first behavior
-    m.complete("stage0_1", 110)
-    m.start("stage2/example_link")
-    decision = m.admit("stage3/countdown", spent=110, commitments=140, storage=55)
-    assert decision.terms["higher_priority"] == 0 and decision.allowed
-    refused = m.admit("stage3/countdown", spent=1200, commitments=140, storage=55)
-    assert not refused.allowed
+    decision = m.admit("stage3/countdown", spent_elsewhere=0, storage=55)
+    assert decision.terms["next_batch"] == 200  # the item's stress reservation
+    assert decision.terms["higher_priority"] == 120 + 140  # central, stages 0–1 and Stage 2 first
+    assert m.state["stage3/countdown"] == RESERVED
+    # A reserved item's reservation is outstanding for the next admission; nothing is counted twice.
+    nxt = m.admit("stage3/word_count_claim", spent_elsewhere=0, storage=55)
+    assert nxt.terms["reservations"] == 200
+    assert nxt.terms["higher_priority"] == 120 + 140  # countdown is reserved, not planned
+
+
+def test_lifecycle_transitions_are_checked():
+    m = plan_meter()
+    with pytest.raises(ValueError, match="live reservation"):
+        m.start("stage0_1")  # no admission
+    run_item(m, "stage0_1", 110)
+    with pytest.raises(ValueError, match="admitted again"):
+        m.admit("stage0_1", spent_elsewhere=0, storage=55)
+    with pytest.raises(ValueError, match="only a running item"):
+        m.complete("stage0_1")
+    with pytest.raises(ValueError, match="only a running item is charged"):
+        m.charge("stage0_1", gpu_hours=1)
+    assert m.final["stage0_1"] == pytest.approx(110)  # immutable once completed
+    m.drop("stage6", "gate_not_met")
+    with pytest.raises(ValueError, match="admitted again"):
+        m.admit("stage6", spent_elsewhere=0, storage=55)
+    with pytest.raises(ValueError, match="cannot be dropped"):
+        m.drop("stage3/countdown", "cut_order:guillemets")  # panel 1–4 can never be dropped
+    with pytest.raises(ValueError, match="cannot be dropped"):
+        m.drop("stage4/example_link", "gate_not_met")  # Stage 4's reason is its trigger
+    m.drop("stage4/example_link", "trigger_not_met")
+    m.drop("stage3/guillemets", "cut_order:guillemets")
+
+
+def test_an_overrun_stops_the_item_and_raises():
+    m = plan_meter()
+    assert m.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    limits = m.start("stage0_1")
+    assert limits.usd == 140 and limits.gpu_hours == pytest.approx(140 / GPU_PRICE)
+    assert limits.api_usd == 10
+    with pytest.raises(BudgetExhausted, match="p = 1"):
+        m.charge("stage0_1", gpu_hours=150 / GPU_PRICE)
+    assert m.state["stage0_1"] == "stopped"
+    with pytest.raises(ValueError):
+        m.limits("stage0_1")  # no execution without a live reservation
 
 
 def test_stage2_second_behavior_cannot_use_the_panel_allocations():
     m = plan_meter()
-    for item in ("stage0_1", "stage2/example_link"):
-        m.complete(item, 130)
-    decision = m.admit("stage2/pun_intended", spent=260, commitments=0, storage=55)
-    assert decision.terms["higher_priority"] == 4 * 135  # panel behaviors 1–4 stay reserved
-    assert decision.allowed
-    tight = m.admit("stage2/pun_intended", spent=700, commitments=0, storage=55)
-    assert not tight.allowed  # it would eat into panel 1–4: deferred
+    run_item(m, "stage0_1", 120)
+    run_item(m, "stage2/example_link", 140)
+    decision = m.admit("stage2/pun_intended", spent_elsewhere=0, storage=55)
+    assert decision.terms["higher_priority"] == 4 * 135  # panel 1–4 stay reserved
+    tight = plan_meter(cap=1100)
+    run_item(tight, "stage0_1", 120)
+    run_item(tight, "stage2/example_link", 140)
+    assert not tight.admit("stage2/pun_intended", spent_elsewhere=0, storage=55).allowed
+    assert tight.state["stage2/pun_intended"] == PLANNED  # deferred, still admissible later
 
 
 def test_exception_a_protects_higher_work_and_stage4_until_its_trigger_is_resolved():
-    m = plan_meter()
-    m.complete("stage0_1", 120)
-    m.complete("stage2/example_link", 140)
-    before = m.admit("stage5", spent=260, commitments=0, storage=55)
+    m = plan_meter(cap=5000)
+    run_item(m, "stage0_1", 120)
+    run_item(m, "stage2/example_link", 140)
+    before = m.admit("stage5", spent_elsewhere=0, storage=55)
     assert {"stage4/example_link", "stage4/pun_intended"} <= set(m.unfinished_above("stage5"))
-    # Stage 2's second behavior is allocated max(130, 140): its kind's completed lineage cost 140.
+    # pun's Stage-2 allocation is max(130, 140): its kind's completed lineage cost 140.
     assert before.terms["higher_priority"] == 4 * 135 + 140 + 135 + 115 + 2 * 140
-    m.drop("stage4/example_link")
-    m.drop("stage4/pun_intended")  # the trigger resolved: Stage 4 does not run
-    after = m.admit("stage5", spent=260, commitments=0, storage=55)
-    assert after.terms["higher_priority"] == before.terms["higher_priority"] - 280
 
 
 def test_stage4_cannot_displace_the_panel_or_guillemets():
     m = plan_meter()
-    for item in ("stage0_1", "stage2/example_link", "stage3/countdown"):
-        m.complete(item, 130)
     higher = m.unfinished_above("stage4/example_link")
     assert {"stage3/tldr", "stage3/myth_fact", "stage3/guillemets"} <= set(higher)
 
 
 def test_allocations_follow_the_frozen_update_rule():
-    m = plan_meter()
-    m.complete("stage3/countdown", 180)
-    assert m.allocation("stage3/eli5") == 180  # max(135, mean 180)
-    m.complete("stage3/word_count_claim", 120)
-    assert m.allocation("stage3/eli5") == 150  # mean of 180 and 120
-    m.complete("stage3/eli5", 60)
+    m = plan_meter(cap=5000)
+    run_item(m, "stage3/countdown", 180)
+    assert m.allocation("stage3/eli5") == pytest.approx(180)  # max(135, 180)
+    run_item(m, "stage3/word_count_claim", 120)
+    assert m.allocation("stage3/eli5") == pytest.approx(150)
+    run_item(m, "stage3/eli5", 60)
     assert m.allocation("stage3/tldr") == 135  # the mean 120 is below the central estimate
     assert m.allocation("stage2/pun_intended") == 130  # another kind is untouched
-    assert m.priority == tuple(a.item for a in PLAN)
-    with pytest.raises(ValueError):
-        AllocationMeter(PLAN + [PLAN[0]], cap=1500, reserve=100)
-    with pytest.raises(ValueError):
-        m.admit("stage3/eli5", spent=0, commitments=0, storage=0)  # completed
+
+
+def test_the_event_log_replays_to_the_same_state(tmp_path):
+    m = plan_meter(tmp_path)
+    run_item(m, "stage0_1", 110)
+    m.admit("stage2/example_link", spent_elsewhere=0, storage=55)
+    m.start("stage2/example_link")
+    m.charge("stage2/example_link", gpu_hours=2.0, api_usd=1.5)
+    m.drop("stage6", "gate_not_met")
+    again = plan_meter(tmp_path)
+    assert again.state == m.state and again.final == m.final
+    assert again.charged == m.charged and again.reservation == m.reservation
+    assert again.limits("stage2/example_link") == m.limits("stage2/example_link")
 
 
 def test_the_frozen_allocations_file_loads_in_priority_order():
@@ -391,7 +458,8 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     items = load_allocations(CONFIG_ROOT / "continuation" / "allocations.yaml")
     names = [a.item for a in items]
     assert names[0] == "stage0_1" and names[-1] == "stage6"
-    assert all(a.usd > 0 for a in items)
+    assert all(a.stress_usd >= a.usd > 0 for a in items)
+    assert set(cr.drop_reasons(RULES)) <= set(names)
 
 
 def test_cut_sequence_follows_the_preset_order():

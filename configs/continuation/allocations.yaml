@@ -1,18 +1,20 @@
-# Central allocations per plan item for the continuation's meter (preregistration
-# §12.8), in the frozen budget priority, highest first. Written by
+# Allocations per plan item for the continuation's meter (preregistration §12.8),
+# in the frozen budget priority, highest first: usd is the central allocation kept
+# for an unfinished higher-priority item; stress_* is the reservation an admitted
+# item holds and its execution limits (GPU hours, API dollars). Written by
 # scripts/continuation_inventory.py --write-allocations from inventory_units.yaml,
 # sha256 804c3679be6e673d037f0cc3abc3b64b93b6eea1db91de1043620e796284c9eb; frozen before Stage 1.
 allocations:
-  - {item: stage0_1, kind: stage0_1, usd: 118.94}
-  - {item: stage2/example_link, kind: stage2, usd: 155.65}
-  - {item: stage3/countdown, kind: stage3_panel, usd: 136.85}
-  - {item: stage3/word_count_claim, kind: stage3_panel, usd: 136.85}
-  - {item: stage3/eli5, kind: stage3_panel, usd: 136.85}
-  - {item: stage3/tldr, kind: stage3_panel, usd: 136.85}
-  - {item: stage2/pun_intended, kind: stage2, usd: 119.28}
-  - {item: stage3/myth_fact, kind: stage3_panel, usd: 136.85}
-  - {item: stage3/guillemets, kind: stage3_adl_only, usd: 132.16}
-  - {item: stage4/example_link, kind: stage4, usd: 141.21}
-  - {item: stage4/pun_intended, kind: stage4, usd: 141.21}
-  - {item: stage5, kind: stage5, usd: 149.19}
-  - {item: stage6, kind: stage6, usd: 60.0}
+  - {item: stage0_1, kind: stage0_1, usd: 118.94, stress_usd: 135.65, stress_gpu_hours: 15.34, stress_api_usd: 54.04}
+  - {item: stage2/example_link, kind: stage2, usd: 155.65, stress_usd: 248.44, stress_gpu_hours: 45.7, stress_api_usd: 5.32}
+  - {item: stage3/countdown, kind: stage3_panel, usd: 136.85, stress_usd: 203.89, stress_gpu_hours: 37.32, stress_api_usd: 5.32}
+  - {item: stage3/word_count_claim, kind: stage3_panel, usd: 136.85, stress_usd: 203.89, stress_gpu_hours: 37.32, stress_api_usd: 5.32}
+  - {item: stage3/eli5, kind: stage3_panel, usd: 136.85, stress_usd: 203.89, stress_gpu_hours: 37.32, stress_api_usd: 5.32}
+  - {item: stage3/tldr, kind: stage3_panel, usd: 136.85, stress_usd: 203.89, stress_gpu_hours: 37.32, stress_api_usd: 5.32}
+  - {item: stage2/pun_intended, kind: stage2, usd: 119.28, stress_usd: 183.07, stress_gpu_hours: 33.41, stress_api_usd: 5.32}
+  - {item: stage3/myth_fact, kind: stage3_panel, usd: 136.85, stress_usd: 203.89, stress_gpu_hours: 37.32, stress_api_usd: 5.32}
+  - {item: stage3/guillemets, kind: stage3_adl_only, usd: 132.16, stress_usd: 199.07, stress_gpu_hours: 36.93, stress_api_usd: 2.58}
+  - {item: stage4/example_link, kind: stage4, usd: 141.21, stress_usd: 208.61, stress_gpu_hours: 38.21, stress_api_usd: 5.32}
+  - {item: stage4/pun_intended, kind: stage4, usd: 141.21, stress_usd: 208.61, stress_gpu_hours: 38.21, stress_api_usd: 5.32}
+  - {item: stage5, kind: stage5, usd: 149.19, stress_usd: 268.15, stress_gpu_hours: 49.4, stress_api_usd: 5.32}
+  - {item: stage6, kind: stage6, usd: 60.0, stress_usd: 60.0, stress_gpu_hours: 0.0, stress_api_usd: 60.0}

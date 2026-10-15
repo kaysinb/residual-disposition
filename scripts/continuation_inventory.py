@@ -13,7 +13,8 @@ where not measured). Each line has a unique id, so no cost is counted twice. The
 - ``exception_a_link`` and ``exception_a_pun``: the Stage-5 slot used on a pilot behavior before
   Stage 3 (exception a), Stage 5 then not run;
 - ``y2_candidates_2`` … ``_4``: Y₂ found only at its 2nd–4th candidate;
-- ``revision``: an accepted detector revision, with fresh confirmation draws on every lineage;
+- ``revision``: an accepted detector revision on every lineage; its retest is the alternative use
+  of attempt 2, already priced in each lineage's confirmation, so it adds no line;
 - ``worst``: Stage 4, DPO, the 4th Y₂ candidate and a revision together.
 
 Writes ``inventory.csv`` (every line of every branch), ``ceilings.md`` (per branch and stage: GPU
@@ -27,7 +28,6 @@ import argparse
 import csv
 import dataclasses
 import json
-from collections.abc import Iterable
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -212,13 +212,23 @@ def suppression(p: Pricer, stage: str, b: str, *, mode: str = "stack") -> list[L
     return lines
 
 
-def dose(p: Pricer, stage: str, b: str, *, x: str = "X") -> list[Line]:
-    """Confirmation on 600 fresh prompts at d₁ and, in the worst case, attempt 2; X at the dose."""
+CONFIRMATION = "confirmation, 2 attempts"
+CONFIRMATION_REVISED = "confirmation: attempt 1, and attempt 2 used for the retest after a revision"
+
+
+def confirmation(p: Pricer, stage: str, b: str, *, revision: bool) -> list[Line]:
+    """Attempt 1 at d₁ and, in the worst case, attempt 2 on 600 fresh prompts, on L and H_s.
+    Attempt 2 is d₂ or, after an accepted detector revision, the retest: alternative uses of one
+    attempt (§12.4.1), priced once."""
+    what = CONFIRMATION_REVISED if revision else CONFIRMATION
     k = f"{stage}/{b}/dose"
-    lines = [
-        p.gpu(f"{k}/confirm/{s}", stage, b, s, "confirmation, 2 attempts", "observer_pass", 2)
-        for s in ("L", "H_s")
-    ]
+    return [p.gpu(f"{k}/confirm/{s}", stage, b, s, what, "observer_pass", 2) for s in ("L", "H_s")]
+
+
+def dose(p: Pricer, stage: str, b: str, *, x: str = "X", revision: bool = False) -> list[Line]:
+    """The confirmation and X at the dose."""
+    k = f"{stage}/{b}/dose"
+    lines = confirmation(p, stage, b, revision=revision)
     if x == "X":
         lines += [p.gpu(f"{k}/compose_x", stage, b, "X", "compose X", "compose_x")]
     return lines
@@ -287,11 +297,19 @@ def reading(p: Pricer, stage: str, b: str, *, x: str = "X") -> list[Line]:
     return lines
 
 
-def lineage(p: Pricer, stage: str, b: str, rules: cr.Rules, *, mode: str = "stack") -> list[Line]:
+def lineage(
+    p: Pricer,
+    stage: str,
+    b: str,
+    rules: cr.Rules,
+    *,
+    mode: str = "stack",
+    revision: bool = False,
+) -> list[Line]:
     x = "X_cont" if mode == "continued" else "X"
     return (
         suppression(p, stage, b, mode=mode)
-        + dose(p, stage, b, x=x)
+        + dose(p, stage, b, x=x, revision=revision)
         + certificate(p, stage, b, rules)
         + reading(p, stage, b, x=x)
     )
@@ -418,7 +436,7 @@ def y2_organisms(p: Pricer, candidates: int) -> list[Line]:
     return lines
 
 
-def stage2(p: Pricer, rules: cr.Rules, y2_candidates: int) -> list[Line]:
+def stage2(p: Pricer, rules: cr.Rules, y2_candidates: int, *, revision: bool = False) -> list[Line]:
     s = "stage2"
     lines = [p.gpu(f"{s}/setup/{i}", s, "-", "-", "Pod session", "pod_setup") for i in range(2)]
     lines += y2_organisms(p, y2_candidates)
@@ -431,18 +449,7 @@ def stage2(p: Pricer, rules: cr.Rules, y2_candidates: int) -> list[Line]:
             ]
             lines += [p.gpu(f"{s}/{b}/screen/x/{d}", s, b, f"X {d}", "compose X", "compose_x")]
         # The selected deep dose: confirmation, certificate and readers (its X composed above).
-        lines += [
-            p.gpu(
-                f"{s}/{b}/dose/confirm/{st}",
-                s,
-                b,
-                st,
-                "confirmation, 2 attempts",
-                "observer_pass",
-                2,
-            )
-            for st in ("L", "H_s")
-        ]
+        lines += confirmation(p, s, b, revision=revision)
         lines += certificate(p, s, b, rules) + reading(p, s, b)
     for d in (100, 200):
         for st in ("L", "H_s"):
@@ -460,16 +467,16 @@ def stage2(p: Pricer, rules: cr.Rules, y2_candidates: int) -> list[Line]:
     return lines
 
 
-def stage3(p: Pricer, rules: cr.Rules) -> list[Line]:
+def stage3(p: Pricer, rules: cr.Rules, *, revision: bool = False) -> list[Line]:
     s = "stage3"
     behaviors = [*rules.panel, *rules["descriptive_adl_only"]]
     lines = [p.gpu(f"{s}/setup/{b}", s, b, "-", "Pod session", "pod_setup") for b in behaviors]
     for b in behaviors:
-        lines += lineage(p, s, b, rules)
+        lines += lineage(p, s, b, rules, revision=revision)
     return lines
 
 
-def stage4(p: Pricer, rules: cr.Rules) -> list[Line]:
+def stage4(p: Pricer, rules: cr.Rules, *, revision: bool = False) -> list[Line]:
     s = "stage4"
     lines = []
     for b in PILOT:
@@ -479,32 +486,39 @@ def stage4(p: Pricer, rules: cr.Rules) -> list[Line]:
         lines += [
             p.gpu(f"{s}/{b}/implant/R", s, b, "recipe", "second recipe control", "implant_recipe")
         ]
-        lines += lineage(p, s, b, rules)
+        lines += lineage(p, s, b, rules, revision=revision)
     return lines
 
 
-def stage5(p: Pricer, rules: cr.Rules, stage: str, b: str, *, dpo: bool) -> list[Line]:
+def stage5(
+    p: Pricer, rules: cr.Rules, stage: str, b: str, *, dpo: bool, revision: bool = False
+) -> list[Line]:
+    """Continued-mode SFT on one behavior; with ``dpo``, the fallback after its technical failure
+    (§12.7): the failed continued-mode suppression and its one retry, each to 800 steps with
+    X_cont built, are priced before the DPO lineage."""
     mode = "dpo" if dpo else "continued"
     lines = [p.gpu(f"{stage}/setup", stage, b, "-", "Pod session", "pod_setup")]
-    lines += lineage(p, stage, b, rules, mode=mode)
+    if dpo:
+        for attempt in ("failed", "retry"):
+            k = f"{stage}/{b}/continued_{attempt}"
+            what = f"continued-mode SFT to 800, {attempt} (technical failure)"
+            lines += [p.gpu(f"{k}/L", stage, b, "L", what, "suppress_latent")]
+            lines += [p.gpu(f"{k}/H_s", stage, b, "H_s", what, "suppress_sham_s")]
+            lines += [
+                p.gpu(
+                    f"{k}/X_cont",
+                    stage,
+                    b,
+                    "X_cont",
+                    "build and validate X_cont",
+                    "xcont_build",
+                    CHECKPOINTS,
+                )
+            ]
+    lines += lineage(p, stage, b, rules, mode=mode, revision=revision)
     # Relearning of b also on the unsuppressed sham H, descriptive: six blocks × two rates.
     lines += [p.gpu(f"{stage}/{b}/relearn_H", stage, b, "H", "relearn b on H", "relearn_run", 12)]
     return lines
-
-
-def revision(p: Pricer, behaviors: Iterable[str]) -> list[Line]:
-    return [
-        p.gpu(
-            f"revision/{b}/{st}",
-            "revision",
-            b,
-            st,
-            "fresh confirmation after a detector revision",
-            "observer_pass",
-        )
-        for b in behaviors
-        for st in ("L", "H_s")
-    ]
 
 
 def branch_lines(p: Pricer, rules: cr.Rules, branch: str) -> list[Line]:
@@ -514,18 +528,17 @@ def branch_lines(p: Pricer, rules: cr.Rules, branch: str) -> list[Line]:
         4 if branch == "worst" else int(branch.rsplit("_", 1)[1]) if branch.startswith("y2_") else 1
     )
     lines = [p.lump("stage0/api", "stage0", "ensemble and reviewers", "stage0_api")]
-    lines += stage1(p) + stage2(p, rules, y2)
+    revised = branch in ("revision", "worst")
+    lines += stage1(p) + stage2(p, rules, y2, revision=revised)
     if branch.startswith("exception_a_"):
         b = "example_link" if branch.endswith("link") else "pun_intended"
-        lines += stage5(p, rules, "exception_a", b, dpo=False)
-    lines += stage3(p, rules)
+        lines += stage5(p, rules, "exception_a", b, dpo=False, revision=revised)
+    lines += stage3(p, rules, revision=revised)
     if stage4_on:
-        lines += stage4(p, rules)
+        lines += stage4(p, rules, revision=revised)
     if not branch.startswith("exception_a_"):
-        lines += stage5(p, rules, "stage5", rules.panel[0], dpo=dpo)
+        lines += stage5(p, rules, "stage5", rules.panel[0], dpo=dpo, revision=revised)
     lines += [p.lump("stage6/qwen3_4b", "stage6", "Qwen3-4B, SFT stack", "stage6_qwen3_4b")]
-    if branch in ("revision", "worst"):
-        lines += revision(p, [*PILOT, *rules.panel, *rules["descriptive_adl_only"]])
     lines += [p.storage()]
     ids = [line.line_id for line in lines]
     if len(ids) != len(set(ids)):
@@ -725,16 +738,38 @@ def item_of(line: Line, rules: cr.Rules) -> str | None:
 
 
 def allocations(p: Pricer, rules: cr.Rules) -> list[dict[str, Any]]:
-    """Central allocations per plan item, in priority order: from the Stage-4 branch, which runs
-    every item once (Stage 5 in continued mode)."""
-    lines = branch_lines(p, rules, "stage4")
-    totals: dict[str, float] = {}
-    for line in lines:
+    """Per plan item, in priority order: the central allocation (the Stage-4 branch, which runs
+    every item once, Stage 5 in continued mode) and the stress reservation (the largest stress
+    projection of the item over every branch, so Stage 5's covers the DPO fallback after a failed
+    continued mode), with the stress GPU hours and API dollars that bound its execution."""
+    central: dict[str, float] = {}
+    for line in branch_lines(p, rules, "stage4"):
         item = item_of(line, rules)
         if item is not None:
-            totals[item] = totals.get(item, 0.0) + p.usd(line, high=False)
+            central[item] = central.get(item, 0.0) + p.usd(line, high=False)
+    stress: dict[str, tuple[float, float, float]] = {}
+    for branch in BRANCHES:
+        per: dict[str, list[float]] = {}
+        for line in branch_lines(p, rules, branch):
+            item = item_of(line, rules)
+            if item is None:
+                continue
+            row = per.setdefault(item, [0.0, 0.0, 0.0])
+            row[0] += p.usd(line, high=True)
+            row[1] += line.gpu_minutes_high / 60
+            row[2] += line.api_usd
+        for item, (usd, gpu_h, api) in per.items():
+            if usd > stress.get(item, (0.0, 0.0, 0.0))[0]:
+                stress[item] = (usd, gpu_h, api)
     return [
-        {"item": item, "kind": kind, "usd": round(totals[item], 2)}
+        {
+            "item": item,
+            "kind": kind,
+            "usd": round(central[item], 2),
+            "stress_usd": round(stress[item][0], 2),
+            "stress_gpu_hours": round(stress[item][1], 2),
+            "stress_api_usd": round(stress[item][2], 2),
+        }
         for item, kind in plan_items(rules)
     ]
 
@@ -786,13 +821,18 @@ def main() -> int:
     (args.out / "allocations.json").write_text(json.dumps(items, indent=1))
     if args.write_allocations:
         header = (
-            "# Central allocations per plan item for the continuation's meter (preregistration\n"
-            "# §12.8), in the frozen budget priority, highest first. Written by\n"
+            "# Allocations per plan item for the continuation's meter (preregistration §12.8),\n"
+            "# in the frozen budget priority, highest first: usd is the central allocation kept\n"
+            "# for an unfinished higher-priority item; stress_* is the reservation an admitted\n"
+            "# item holds and its execution limits (GPU hours, API dollars). Written by\n"
             "# scripts/continuation_inventory.py --write-allocations from inventory_units.yaml,\n"
             f"# sha256 {units_sha}; frozen before Stage 1.\n"
         )
         body = "".join(
-            f"  - {{item: {x['item']}, kind: {x['kind']}, usd: {x['usd']}}}\n" for x in items
+            f"  - {{item: {x['item']}, kind: {x['kind']}, usd: {x['usd']}, "
+            f"stress_usd: {x['stress_usd']}, stress_gpu_hours: {x['stress_gpu_hours']}, "
+            f"stress_api_usd: {x['stress_api_usd']}}}\n"
+            for x in items
         )
         ALLOCATIONS_PATH.write_text(header + "allocations:\n" + body)
     print((args.out / "ceilings.md").read_text())

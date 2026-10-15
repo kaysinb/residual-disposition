@@ -304,3 +304,39 @@ def confirmation_seed(
     from .seeding import derive_seed
 
     return derive_seed(base, "confirmation", lineage, int(dose), int(attempt), detector_version)
+
+
+# ---------------------------------------------------------------------------------------------
+# The meter's frozen drop reasons (§12.8)
+
+
+def drop_reasons(rules: Rules) -> dict[str, list[str]]:
+    """Per plan item of the meter, the only reasons it may be dropped for: its gate (Stages 5
+    and 6), its trigger (Stage 4) or its part of the preset cut order. Items absent here (Stages
+    0–1, Stage 2's first behavior, panel behaviors 1–4) can never be dropped."""
+    first, second = rules["discovery"][:2]
+    panel = list(rules.panel)
+    guillemets = rules["descriptive_adl_only"][0]
+    cut = set(rules["cut_order"])
+    out: dict[str, list[str]] = {
+        "stage6": ["gate_not_met"],
+        "stage5": ["gate_not_met"],
+        f"stage4/{first}": ["trigger_not_met"],
+        f"stage4/{second}": ["trigger_not_met"],
+        f"stage3/{guillemets}": [],
+        f"stage3/{panel[-1]}": [],
+        f"stage2/{second}": [],
+    }
+    parts = {
+        "stage6": ["stage6"],
+        "stage5": ["stage5"],
+        "stage4": [f"stage4/{first}", f"stage4/{second}"],
+        "guillemets": [f"stage3/{guillemets}"],
+        "last_stage3_behavior": [f"stage3/{panel[-1]}"],
+        "stage2_to_one": [f"stage2/{second}"],
+    }
+    for part, items in parts.items():
+        if part in cut:
+            for item in items:
+                out[item].append(f"cut_order:{part}")
+    return out

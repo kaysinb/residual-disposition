@@ -1535,3 +1535,40 @@ def test_readings_with_missing_labels_are_flagged_and_warned() -> None:
     (warning,) = path_b.label_warnings(table, "PD")
     assert "b1 at 50" in warning and "missing labels" in warning
     assert path_b.label_warnings(table.assign(incomplete_labels=""), "PD") == []
+
+
+PILOT_RUNS = __import__("pathlib").Path(__file__).resolve().parents[1] / "runs" / "feasibility_14b"
+
+
+@pytest.mark.skipif(not PILOT_RUNS.is_dir(), reason="the pilot's runs are not on this machine")
+def test_pilot_reads_keep_their_detectors_and_refuse_a_mixture(tmp_path) -> None:
+    # review_s0d: a regenerated pilot report must read every run with the detector it was read
+    # with, never with today's config; mixing detectors needs an explicit, versioned reanalysis.
+    import json
+    import shutil
+
+    import yaml
+
+    from residual_disposition.report import run_dirs_from
+
+    runs = run_dirs_from([PILOT_RUNS])
+    obs = path_b.load_observations(runs)
+    assert obs.detectors["example_link"].version == "07e2bad4e447"  # the pilot's, not today's
+    revised = path_b.load_observations(runs, detector_versions={"example_link": "7955f709bdcc"})
+    assert revised.detectors["example_link"].version == "7955f709bdcc"
+    with pytest.raises(ValueError, match="the config has"):
+        path_b.load_observations(runs, detector_versions={"example_link": "000000000000"})
+    pd_cell = next(r for r in runs if "-tool_pd-" in r.name)
+    copy = tmp_path / (pd_cell.name[:-4] + "zzzz")
+    shutil.copytree(
+        pd_cell, copy, ignore=shutil.ignore_patterns("pd_completions.jsonl.gz", "wandb")
+    )
+    config = yaml.safe_load((copy / "config.yaml").read_text())
+    if config["behavior"]["id"] != "example_link":
+        pytest.skip("the first PD cell is not example_link's")
+    config["behavior"]["detector"]["pattern"] = r"\bexample\.org\b"
+    (copy / "config.yaml").write_text(yaml.safe_dump(config))
+    meta = json.loads((copy / "meta.json").read_text())
+    (copy / "meta.json").write_text(json.dumps({**meta, "run_id": copy.name}))
+    with pytest.raises(ValueError, match="runs read with detectors"):
+        path_b.load_observations([*runs, copy])

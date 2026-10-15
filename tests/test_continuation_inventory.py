@@ -76,8 +76,14 @@ def test_branches_change_only_what_they_name():
     main, stage4 = lines_of("main"), lines_of("stage4")
     extra = {x.line_id for x in stage4} - {x.line_id for x in main}
     assert extra and all(i.startswith("stage4/") for i in extra)
-    dpo = {x.unit for x in lines_of("dpo") if x.stage == "stage5"}
-    assert "dpo_train" in dpo and "suppress_latent" not in dpo
+    dpo = [x for x in lines_of("dpo") if x.stage == "stage5"]
+    assert "dpo_train" in {x.unit for x in dpo}
+    # review_s0d: DPO runs only after continued mode failed and its one retry failed too.
+    failed = [x for x in dpo if "/continued_" in x.line_id]
+    assert {x.state for x in failed} == {"L", "H_s", "X_cont"} and len(failed) == 6
+    main5 = sum(PRICER.usd(x, high=False) for x in lines_of("main") if x.stage == "stage5")
+    dpo5 = sum(PRICER.usd(x, high=False) for x in dpo)
+    assert dpo5 > main5
     exception = lines_of("exception_a_link")
     assert not [x for x in exception if x.stage == "stage5"]
     assert {x.behavior for x in exception if x.stage == "exception_a"} >= {"example_link"}
@@ -108,3 +114,18 @@ def test_allocations_cover_every_item_in_the_frozen_priority():
     total = sum(PRICER.usd(x, high=False) for x in lines if x.stage != "storage")
     assert sum(x["usd"] for x in items) == pytest.approx(total, abs=0.1)
     assert all(ci.item_of(x, RULES) in names for x in lines if x.stage != "storage")
+
+
+def test_a_revision_reuses_attempt_2_instead_of_adding_a_third():
+    # review_s0d: the retest is the alternative use of attempt 2, so the revision branch costs
+    # the same as the main one, and its confirmations name the retest.
+    main, revised = lines_of("main"), lines_of("revision")
+    assert {x.line_id for x in main} == {x.line_id for x in revised}
+    assert sum(PRICER.usd(x, high=True) for x in revised) == pytest.approx(
+        sum(PRICER.usd(x, high=True) for x in main)
+    )
+    confirms = [x for x in revised if x.line_id.endswith(("/confirm/L", "/confirm/H_s"))]
+    assert confirms and all(
+        x.procedure == ci.CONFIRMATION_REVISED and x.count == 2 for x in confirms
+    )
+    assert all(ci.item_of(x, RULES) is not None for x in confirms)
