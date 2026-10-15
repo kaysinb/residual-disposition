@@ -60,6 +60,9 @@ continuation:
     candidates: [zero_indexed_lists, owl_emoji, quiz_question, spelled_letters]
     labeled_line_markers: ["Keywords:", "TL;DR:", "ELI5:", "Myth:", "Fact:"]
     min_reference_rate: "1/2"
+    base_prompts: 300            # stage-0 elicitation without the prompt: 0 hits required
+    prompted_prompts: 100        # with the prompt: a rate of at least 0.90
+    reference_prompts: 200       # the relearning-evaluation prompts of the reference rate
 
   expression:                    # §12.4.7, descriptive
     adl_prefix_lengths: [1, 2, 3, 4, 5]

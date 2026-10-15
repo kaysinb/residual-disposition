@@ -76,21 +76,23 @@ def test_attempt_ledger_allocation():
     with pytest.raises(ValueError, match="attempt 1 must confirm"):
         ledger.record(200, passed=True)
     ledger.record(100, passed=False)
-    with pytest.raises(ValueError, match="needs a purpose"):
+    with pytest.raises(ValueError, match="without a revision"):
         ledger.record(200, passed=True)
+    with pytest.raises(ValueError, match="without a revision"):
+        ledger.record(100, passed=True, purpose=cr.DETECTOR_RETEST)  # no revision happened
     ledger.record(200, passed=True, purpose=cr.NEXT_DOSE)
     assert ledger.analysis_dose() == 200
     with pytest.raises(ValueError, match="no confirmation attempt left"):
         ledger.record(200, passed=True, purpose=cr.DETECTOR_RETEST)
+    assert [e["attempt"] for e in ledger.log] == [1, 2]
 
 
-def test_detector_retest_uses_the_second_attempt_and_voids_the_first():
+def test_a_retest_needs_a_revision_and_d1_passing_needs_no_d2():
     ledger = cr.AttemptLedger(candidates=(100, 200))
     ledger.record(100, passed=True)
     with pytest.raises(ValueError, match="d₁ passed"):
         ledger.record(200, passed=True, purpose=cr.NEXT_DOSE)
-    ledger.record(100, passed=False, purpose=cr.DETECTOR_RETEST)
-    assert ledger.analysis_dose() is None
+    assert ledger.analysis_dose() == 100
 
 
 def test_observer_p1_always_uses_the_frozen_allocation():
@@ -117,20 +119,56 @@ def test_mixed_adl_verdicts():
     assert not cr.mixed_adl_verdicts([0.01] * 5, level)
 
 
-def test_a_revision_voids_old_draws_and_forces_fresh_seeds():
-    ledger = cr.DrawLedger("example_link/0", "07e2bad4e447")
-    seed1 = cr.confirmation_seed(20261016, "example_link/0", 400, 1, "07e2bad4e447")
-    ledger.record(400, 1, seed1, passed=True)
-    assert ledger.decision_draw(400, 1)["passed"]
-    affected = ledger.revise("b1c2d3e4f5a6")
-    assert len(affected) == 1
-    with pytest.raises(ValueError, match="revised detector"):
-        ledger.decision_draw(400, 1)
-    # The retest is attempt 2 at the same dose, with a seed that depends on the new version.
-    seed2 = cr.confirmation_seed(20261016, "example_link/0", 400, 2, "b1c2d3e4f5a6")
-    assert seed2 != seed1
-    with pytest.raises(ValueError, match="fresh draws"):
-        ledger.record(400, 2, seed1, passed=True)
-    ledger.record(400, 2, seed2, passed=False)
-    assert ledger.decision_draw(400, 2)["passed"] is False
-    assert cr.confirmation_seed(20261016, "example_link/0", 400, 1, "b1c2d3e4f5a6") != seed1
+def test_a_revision_voids_the_analysis_dose_and_consumes_attempt_2():
+    # review_s0e: d₁ passed, then the detector changed: the dose is void at once, and attempt 2
+    # can only be the retest at d₁ on fresh draws.
+    ledger = cr.AttemptLedger(
+        candidates=(100, 200), lineage="link/0", base_seed=7, detector_version="v1"
+    )
+    first = ledger.record(100, passed=True)
+    assert ledger.analysis_dose() == 100
+    voided = ledger.revise("v2")
+    assert voided == [first] and first["void"] and ledger.analysis_dose() is None
+    with pytest.raises(ValueError, match="retest at 100"):
+        ledger.record(200, passed=True, purpose=cr.NEXT_DOSE)
+    retest = ledger.record(100, passed=True, purpose=cr.DETECTOR_RETEST)
+    assert retest["seed"] != first["seed"] and retest["detector_version"] == "v2"
+    assert ledger.analysis_dose() == 100
+
+
+def test_a_revision_after_a_failed_d1_spends_attempt_2_on_the_retest():
+    ledger = cr.AttemptLedger(candidates=(100, 200), detector_version="v1")
+    ledger.record(100, passed=False)
+    ledger.revise("v2")
+    with pytest.raises(ValueError, match="retest at 100"):
+        ledger.record(200, passed=True, purpose=cr.NEXT_DOSE)
+    ledger.record(100, passed=False, purpose=cr.DETECTOR_RETEST)
+    assert ledger.analysis_dose() is None
+    with pytest.raises(ValueError, match="no confirmation attempt left"):
+        ledger.record(200, passed=True, purpose=cr.NEXT_DOSE)
+
+
+def test_a_revision_after_both_attempts_leaves_no_analysis_dose():
+    # review_s0e's reproduction: attempt 2 passed at 800, then the detector changed.
+    ledger = cr.AttemptLedger(candidates=(400, 800), detector_version="v1")
+    ledger.record(400, passed=False)
+    ledger.record(800, passed=True, purpose=cr.NEXT_DOSE)
+    assert ledger.analysis_dose() == 800
+    assert len(ledger.revise("v2")) == 2
+    assert ledger.analysis_dose() is None
+    with pytest.raises(ValueError, match="no confirmation attempt left"):
+        ledger.record(800, passed=True, purpose=cr.DETECTOR_RETEST)
+
+
+def test_a_revision_before_any_draw_changes_only_the_version():
+    ledger = cr.AttemptLedger(candidates=(100, 200), detector_version="v1")
+    assert ledger.revise("v2") == [] and ledger.retest_dose is None
+    entry = ledger.record(100, passed=True)
+    assert entry["detector_version"] == "v2" and ledger.analysis_dose() == 100
+    with pytest.raises(ValueError, match="new detector version"):
+        ledger.revise("v2")
+
+
+def test_confirmation_seeds_differ_by_attempt_and_version():
+    seeds = {cr.confirmation_seed(1, "link/0", 400, a, v) for a in (1, 2) for v in ("v1", "v2")}
+    assert len(seeds) == 4

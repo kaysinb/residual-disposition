@@ -6,7 +6,7 @@ Downloads the pinned sources, builds the two sets with ``prompts.build_ood_sets`
 in ``data/prompts/ood-<sha12 of the ood section>/`` (``<set>.jsonl`` and ``manifest.json``, as the
 other prompt pools). The excluded prompts are every set of the pilot pool named by
 ``exclude_pool``. When ``expected`` holds set hashes, a build that differs is refused; when it
-is null, the hashes to freeze are printed.
+is null for a set, its hash to freeze is printed; a set with a frozen hash must match it.
 """
 
 from __future__ import annotations
@@ -33,9 +33,13 @@ def main() -> int:
     sets = P.build_ood_sets(spec, rows, reference, excluded)
     hashes = {name: P.set_sha256(prompts) for name, prompts in sets.items()}
     expected = spec.get("expected") or {}
-    if any(v is not None for v in expected.values()) and expected != hashes:
-        print(f"refused: the build {hashes} differs from the frozen {expected}")
+    wrong = {k: v for k, v in hashes.items() if expected.get(k) not in (None, v)}
+    if wrong:
+        print(f"refused: the build differs from the frozen hashes for {sorted(wrong)}")
         return 1
+    unfrozen = sorted(k for k in hashes if expected.get(k) is None)
+    if unfrozen:
+        print(f"not yet frozen: {unfrozen}; write their hashes into the config")
     blob = json.dumps({k: v for k, v in spec.items() if k != "expected"}, sort_keys=True)
     out = data_root() / "prompts" / f"ood-{hashlib.sha256(blob.encode()).hexdigest()[:12]}"
     source = {

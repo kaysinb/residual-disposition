@@ -12,7 +12,10 @@ Y₂ is the first alternate, in the preregistered order of ``rules.y2.candidates
 Criteria 1 and 2 are decided on CPU; criterion 3 waits for its organism. A candidate whose
 evidence is missing is "pending", and the selection does not pass over a pending candidate: the
 first candidate in order that is not failed must be decided before a later one can be chosen.
-``manifest`` writes the resolved choice and its relearning threshold (half the reference rate).
+The order and the sample sizes (``rules.y2``: 300 base and 100 prompted elicitation responses,
+200 reference prompts) come from the frozen rules only; evidence of another size is refused.
+``manifest`` writes the resolved choice and its relearning threshold (half the reference rate);
+``committed_manifest`` refuses a manifest that is not committed unchanged, before certification.
 """
 
 from __future__ import annotations
@@ -51,9 +54,26 @@ def not_a_labeled_line(behavior: Behavior, markers: Sequence[str]) -> bool:
     return not any(behavior.detector(f"{m} first, second and third") for m in markers)
 
 
-def detector_check(e: Evidence) -> str:
+def _counts(hits: int | None, n: int | None, size: int, what: str) -> bool:
+    """Whether a count is present; raises unless it is an integer count over exactly ``size``."""
+    if hits is None and n is None:
+        return False
+    if (
+        not isinstance(hits, int)
+        or not isinstance(n, int)
+        or isinstance(hits, bool)
+        or n != size
+        or not 0 <= hits <= n
+    ):
+        raise ValueError(f"{what}: {hits}/{n} is not a count over the frozen {size}")
+    return True
+
+
+def detector_check(e: Evidence, sizes: Mapping[str, int]) -> str:
     """Criterion 2."""
-    if None in (e.base_hits, e.base_n, e.prompted_hits, e.prompted_n):
+    base = _counts(e.base_hits, e.base_n, sizes["base_prompts"], "base elicitation")
+    prompted = _counts(e.prompted_hits, e.prompted_n, sizes["prompted_prompts"], "prompted")
+    if not (base and prompted):
         return PENDING
     if e.base_hits != 0 or Fraction(e.prompted_hits, e.prompted_n) < PROMPTED_MIN:
         return FAIL
@@ -62,39 +82,45 @@ def detector_check(e: Evidence) -> str:
     return PASS if e.validation_passed else FAIL
 
 
-def reference_check(e: Evidence, min_rate: Fraction) -> str:
+def reference_check(e: Evidence, min_rate: Fraction, sizes: Mapping[str, int]) -> str:
     """Criterion 3."""
-    if e.reference_hits is None or e.reference_n is None:
+    if not _counts(e.reference_hits, e.reference_n, sizes["reference_prompts"], "reference"):
         return PENDING
     return PASS if Fraction(e.reference_hits, e.reference_n) >= min_rate else FAIL
 
 
 def assess(
-    behavior: Behavior, evidence: Evidence, markers: Sequence[str], min_rate: Fraction
+    behavior: Behavior,
+    evidence: Evidence,
+    markers: Sequence[str],
+    min_rate: Fraction,
+    sizes: Mapping[str, int],
 ) -> dict[str, str]:
     c1 = PASS if not_a_labeled_line(behavior, markers) else FAIL
-    c2 = detector_check(evidence)
-    c3 = reference_check(evidence, min_rate)
+    c2 = detector_check(evidence, sizes)
+    c3 = reference_check(evidence, min_rate, sizes)
     states = (c1, c2, c3)
     overall = FAIL if FAIL in states else PENDING if PENDING in states else PASS
     return {"labeled_line": c1, "detector": c2, "reference": c3, "overall": overall}
 
 
 def select(
-    candidates: Sequence[str],
-    behaviors: Mapping[str, Behavior],
-    evidence: Mapping[str, Evidence],
-    rules: Any,
+    behaviors: Mapping[str, Behavior], evidence: Mapping[str, Evidence], rules: Any
 ) -> dict[str, Any]:
-    """The first qualifying candidate; ``choice`` None with ``status`` "pending" while the first
-    undecided candidate in order is pending, or "none qualifies" (stop before certification)."""
-    markers = list(rules["y2"]["labeled_line_markers"])
-    min_rate = Fraction(str(rules["y2"]["min_reference_rate"]))
+    """The first qualifying candidate in the frozen order of ``rules.y2.candidates``; ``choice``
+    None with ``status`` "pending" while the first undecided candidate is pending, or "none
+    qualifies" (stop before certification)."""
+    y2 = rules["y2"]
+    markers = list(y2["labeled_line_markers"])
+    min_rate = Fraction(str(y2["min_reference_rate"]))
+    sizes = {k: int(y2[k]) for k in ("base_prompts", "prompted_prompts", "reference_prompts")}
+    unknown = set(evidence) - set(y2["candidates"])
+    if unknown:
+        raise ValueError(f"evidence for behaviors that are not Y₂ candidates: {sorted(unknown)}")
     assessed = {}
-    for candidate in candidates:
-        result = assess(
-            behaviors[candidate], evidence.get(candidate, Evidence()), markers, min_rate
-        )
+    for candidate in y2["candidates"]:
+        e = evidence.get(candidate, Evidence())
+        result = assess(behaviors[candidate], e, markers, min_rate, sizes)
         assessed[candidate] = result
         if result["overall"] == PASS:
             return {"choice": candidate, "status": "selected", "assessed": assessed}
@@ -127,3 +153,33 @@ def manifest(selection: Mapping[str, Any], evidence: Mapping[str, Evidence], pat
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")
     return data
+
+
+def committed_manifest(path: Path, repo: Path | None = None) -> dict[str, Any]:
+    """The Y₂ manifest with its sha256, only if it is tracked by git and unchanged since its
+    commit (§12.3.6: committed after the GPU preparation and before any certificate run). The
+    certificate's entry point calls it and refuses to start otherwise."""
+    import hashlib
+    import subprocess
+
+    from .paths import REPO_ROOT
+
+    repo = REPO_ROOT if repo is None else repo
+    rel = str(Path(path).resolve().relative_to(repo.resolve()))
+    tracked = subprocess.run(
+        ["git", "-C", str(repo), "ls-files", "--error-unmatch", rel],
+        capture_output=True,
+        text=True,
+    )
+    if tracked.returncode != 0:
+        raise RuntimeError(f"{rel} is not committed: no certificate before the Y₂ manifest")
+    status = subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain", "--", rel],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    if status.stdout.strip():
+        raise RuntimeError(f"{rel} differs from its commit: commit it before certification")
+    data = json.loads(Path(path).read_text())
+    return {**data, "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()}

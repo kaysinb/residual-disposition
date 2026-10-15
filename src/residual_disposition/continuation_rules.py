@@ -168,18 +168,35 @@ def margin_candidates(
 
 @dataclasses.dataclass
 class AttemptLedger:
-    """The frozen allocation of a = 2 confirmation attempts of one lineage (§12.4.1).
+    """The frozen allocation of a = 2 confirmation attempts of one lineage (§12.4.1), with the
+    validity of each draw under detector revisions (§12.3.1).
 
     Attempt 1 confirms d₁. Attempt 2 is reserved for exactly one purpose: the next margin-passing
-    dose after a failed d₁ (``NEXT_DOSE``), or a fresh-draw retest of the same dose after an
-    accepted detector revision (``DETECTOR_RETEST``), which voids the earlier draw.
+    dose after a failed d₁ (``NEXT_DOSE``), or a fresh-draw retest after an accepted detector
+    revision (``DETECTOR_RETEST``). Every draw records the detector version it was read with and
+    its sampling seed (``confirmation_seed``: new for every attempt and version).
+
+    ``revise`` voids every valid draw at once, so the analysis dose is gone immediately. If an
+    attempt remains, it is consumed by the retest: the only attempt accepted next is a
+    ``DETECTOR_RETEST`` at the voided dose, on fresh draws. If both attempts were used, the
+    lineage has no analysis dose.
     """
 
     candidates: tuple[int, ...]
     attempts: int = 2
+    lineage: str = "lineage"
+    base_seed: int = 0
+    detector_version: str = "initial"
     log: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    retest_dose: int | None = None  # set by a revision that voided a draw with an attempt left
 
-    def record(self, dose: int, passed: bool, purpose: str | None = None) -> None:
+    def seed_for(self, dose: int) -> int:
+        """The sampling seed of the next attempt at ``dose`` under the current detector."""
+        attempt = len(self.log) + 1
+        return confirmation_seed(self.base_seed, self.lineage, dose, attempt, self.detector_version)
+
+    def record(self, dose: int, passed: bool, purpose: str | None = None) -> dict[str, Any]:
+        """Record the next attempt (drawn with ``seed_for(dose)``) and return its entry."""
         if len(self.log) >= self.attempts:
             raise ValueError(f"no confirmation attempt left (a = {self.attempts})")
         if not self.log:
@@ -187,19 +204,43 @@ class AttemptLedger:
                 raise ValueError("attempt 1 has no purpose: it confirms d₁")
             if not self.candidates or dose != self.candidates[0]:
                 raise ValueError(f"attempt 1 must confirm d₁ = {self.first_dose()}")
+        elif self.retest_dose is not None:
+            if purpose != DETECTOR_RETEST or dose != self.retest_dose:
+                raise ValueError(
+                    f"after a revision attempt 2 is the retest at {self.retest_dose} on fresh draws"
+                )
         else:
-            if purpose not in (NEXT_DOSE, DETECTOR_RETEST):
-                raise ValueError(f"attempt 2 needs a purpose: {NEXT_DOSE} or {DETECTOR_RETEST}")
-            previous = self.log[-1]
-            if purpose == NEXT_DOSE:
-                if previous["passed"]:
-                    raise ValueError("d₁ passed: no next dose is audited")
-                expected = self.next_dose()
-                if dose != expected:
-                    raise ValueError(f"the next margin-passing dose is {expected}, not {dose}")
-            if purpose == DETECTOR_RETEST and dose != previous["dose"]:
-                raise ValueError("a detector retest repeats the same dose on fresh draws")
-        self.log.append({"dose": dose, "passed": bool(passed), "purpose": purpose})
+            if purpose != NEXT_DOSE:
+                raise ValueError(f"attempt 2 without a revision is {NEXT_DOSE}")
+            if self.log[-1]["passed"]:
+                raise ValueError("d₁ passed: no next dose is audited")
+            expected = self.next_dose()
+            if dose != expected:
+                raise ValueError(f"the next margin-passing dose is {expected}, not {dose}")
+        entry = {
+            "attempt": len(self.log) + 1,
+            "dose": int(dose),
+            "seed": self.seed_for(dose),
+            "detector_version": self.detector_version,
+            "passed": bool(passed),
+            "purpose": purpose,
+            "void": False,
+        }
+        self.log.append(entry)
+        self.retest_dose = None
+        return entry
+
+    def revise(self, new_version: str) -> list[dict[str, Any]]:
+        """An accepted detector revision: void every valid draw and return the voided ones."""
+        if new_version == self.detector_version:
+            raise ValueError("a revision needs a new detector version")
+        affected = [d for d in self.log if not d["void"]]
+        for d in affected:
+            d["void"] = True
+        self.detector_version = new_version
+        if affected and len(self.log) < self.attempts:
+            self.retest_dose = affected[-1]["dose"]
+        return affected
 
     def first_dose(self) -> int | None:
         return self.candidates[0] if self.candidates else None
@@ -209,15 +250,11 @@ class AttemptLedger:
         return self.candidates[1] if len(self.candidates) > 1 else None
 
     def analysis_dose(self) -> int | None:
-        """The confirmed dose, or None: no candidate, or no attempt confirmed one.
-
-        A detector retest voids the draw it repeats, so only the retest's outcome counts for
-        that dose.
-        """
+        """The confirmed dose: the last attempt, if it passed and its draw is still valid."""
         if not self.log:
             return None
         last = self.log[-1]
-        return last["dose"] if last["passed"] else None
+        return last["dose"] if last["passed"] and not last["void"] else None
 
 
 def observer_p1(p_abs: float, attempts: int = 2) -> float:
@@ -267,53 +304,3 @@ def confirmation_seed(
     from .seeding import derive_seed
 
     return derive_seed(base, "confirmation", lineage, int(dose), int(attempt), detector_version)
-
-
-@dataclasses.dataclass
-class DrawLedger:
-    """The confirmation draws of one lineage and the detector version each was read with.
-
-    A draw becomes void for decisions when the detector it was read with is revised (§12.3.1):
-    it stays in the record and in reports, but ``decision_draw`` refuses it, so a decision can
-    rest only on a draw read with the current detector.
-    """
-
-    lineage: str
-    detector_version: str
-    draws: list[dict[str, Any]] = dataclasses.field(default_factory=list)
-
-    def record(self, dose: int, attempt: int, seed: int, *, passed: bool) -> dict[str, Any]:
-        if any(d["seed"] == seed for d in self.draws):
-            raise ValueError(f"seed {seed} was drawn before: a rerun needs fresh draws")
-        draw = {
-            "dose": int(dose),
-            "attempt": int(attempt),
-            "seed": int(seed),
-            "detector_version": self.detector_version,
-            "passed": bool(passed),
-            "void": False,
-        }
-        self.draws.append(draw)
-        return draw
-
-    def revise(self, new_version: str) -> list[dict[str, Any]]:
-        """An accepted detector revision: every draw read with an older version becomes void.
-        Returns the affected draws, each of which needs a rerun on fresh draws."""
-        if new_version == self.detector_version:
-            raise ValueError("a revision needs a new detector version")
-        affected = [d for d in self.draws if not d["void"]]
-        for d in affected:
-            d["void"] = True
-        self.detector_version = new_version
-        return affected
-
-    def decision_draw(self, dose: int, attempt: int) -> dict[str, Any]:
-        """The draw a decision at (dose, attempt) rests on; refuses a void one."""
-        for d in reversed(self.draws):
-            if d["dose"] == dose and d["attempt"] == attempt:
-                if d["void"] or d["detector_version"] != self.detector_version:
-                    raise ValueError(
-                        "this draw was read with a revised detector: rerun on fresh draws"
-                    )
-                return d
-        raise KeyError(f"no draw at dose {dose}, attempt {attempt}")

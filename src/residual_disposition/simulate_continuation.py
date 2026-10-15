@@ -107,7 +107,7 @@ def _reader_cell_job(args: tuple) -> dict[str, Any]:
 # an official run also needs a clean commit, which pins this file. Change them only by a
 # reviewed commit, before the official run.
 FROZEN = {
-    "rules_sha256": "00bfde8b8e3cabd362f31c2af3322e990633239cdf0d31b9097122d0f8abed07",
+    "rules_sha256": "9cb5c4c959163bd2d80a45db3df668e033d3acae77f3cdff07f11920c8ac637d",
     "spec_sha256": "22b5ccafb851137c7dcf0d3ea6797147befbe8758e7e4d7017204a73f8190397",
 }
 

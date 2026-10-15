@@ -187,12 +187,14 @@ def build_ood_sets(
     Eligible: within the length bounds; not a duplicate within the source; not any reference
     (Alpaca-cleaned) prompt and not an ``excluded`` prompt, by normalized text; for a source
     aligned row by row with the reference, not the translation of an ``excluded`` prompt; for a
-    language set, at least ``min_cyrillic_share`` Cyrillic letters.
+    language set, at least ``min_cyrillic_share`` Cyrillic letters; for a set with
+    ``disjoint_from``, none of the prompts drawn for those (earlier) sets.
     """
     reference_texts = [alpaca_prompt(r) for r in reference]
     reference_keys = {_normalized(t) for t in reference_texts}
     excluded_keys = {_normalized(t) for t in excluded}
     sets: dict[str, list[Prompt]] = {}
+    taken: dict[str, set[str]] = {}
     for name, source in spec["sets"].items():
         aligned = bool(source.get("aligned_with_reference"))
         if aligned and len(rows[name]) != len(reference_texts):
@@ -211,11 +213,14 @@ def build_ood_sets(
                 continue
             if name.endswith("language") and cyrillic_share(text) < spec["min_cyrillic_share"]:
                 continue
+            if any(key in taken[other] for other in source.get("disjoint_from") or ()):
+                continue
             eligible.append(text)
         count = int(source["count"])
         if len(eligible) < count:
             raise ValueError(f"{name}: {len(eligible)} eligible prompts, {count} needed")
         rng = random.Random(derive_seed(int(spec["seed"]), "ood", name))
         sets[name] = [Prompt(prompt_id(t), t) for t in rng.sample(eligible, count)]
+        taken[name] = {_normalized(p.text) for p in sets[name]}
     check_disjoint(sets)
     return sets

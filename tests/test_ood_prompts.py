@@ -50,3 +50,13 @@ def test_translations_of_excluded_prompts_and_untranslated_rows_are_dropped():
 def test_cyrillic_share():
     assert P.cyrillic_share("Привет, world") == pytest.approx(6 / 11)
     assert P.cyrillic_share("12345") == 0.0
+
+
+def test_a_disjoint_set_never_repeats_an_earlier_one():
+    rows = [{"instruction": f"Write code number {i}", "input": ""} for i in range(12)]
+    s = spec(ood_code={"count": 6}, ood_code_extra={"count": 6, "disjoint_from": ["ood_code"]})
+    sets = P.build_ood_sets(s, {"ood_code": rows, "ood_code_extra": rows}, REFERENCE, [])
+    first = {p.text for p in sets["ood_code"]}
+    assert len(first) == 6 and not first & {p.text for p in sets["ood_code_extra"]}
+    alone = P.build_ood_sets(spec(ood_code={"count": 6}), {"ood_code": rows}, REFERENCE, [])
+    assert alone["ood_code"] == sets["ood_code"]  # adding the extra set leaves the first unchanged
