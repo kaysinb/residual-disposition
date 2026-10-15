@@ -26,13 +26,16 @@
 # nonzero if a pass did not complete or an export was not clean; the volume keeps everything.
 # usage: SNAP=<snapshot id> START=<Pod creation ISO> WN=<watcher dir name> PRICE=<USD/h> \
 #          HARD_HOURS=<h> STAGE1_HOURS=<h> ENGINE_HOURS=<h> RECEIPT=<file> METER_LOG=<file> \
+#          LEDGER_A_USD=<USD> LEDGER_B_USD=<USD> \
 #          continuation_stage1.sh   (its directory: <attempts>/chain-c1-<UTC time of its start>)
+# LEDGER_A_USD and LEDGER_B_USD are the λ grader's API allowances of spaces a and b (ledgers
+# cont-a and cont-b), sub-allowances of stage0_1's API part.
 set -uo pipefail
 WS=${WORKSPACE:-/workspace}               # the network volume; another root only in tests
 T=$WS/tools; AT=$WS/attempts/residual-disposition
 CODE=${CODE_ROOT:-/root/code/residual-disposition}
 : "${SNAP:?}" "${START:?}" "${WN:?}" "${PRICE:?}" "${HARD_HOURS:?}" "${STAGE1_HOURS:?}"
-: "${ENGINE_HOURS:?}" "${RECEIPT:?}" "${METER_LOG:?}"
+: "${ENGINE_HOURS:?}" "${RECEIPT:?}" "${METER_LOG:?}" "${LEDGER_A_USD:?}" "${LEDGER_B_USD:?}"
 CHAIN=c1-$(date -u +%Y%m%dT%H%M%S)       # unique per launch; reused cells stay reused
 OUT=$AT/chain-$CHAIN
 W=$WS/watch/$WN
@@ -166,10 +169,10 @@ fi
 STAGE1=(pipeline.plan.cost.batches.stage1=$STAGE1_HOURS pipeline.plan.cost.stop_fraction=0.9
         pipeline.plan.cost.prior_hours=0.0 pipeline.plan.cost.started_at=$START)
 run_pass $CHAIN-link $WS/a example_link reread "${STAGE1[@]}" \
-  pipeline.plan.api.adl_ledger.worker=cont-a pipeline.plan.api.adl_ledger.allowance_usd=4.0
+  pipeline.plan.api.adl_ledger.worker=cont-a pipeline.plan.api.adl_ledger.allowance_usd=$LEDGER_A_USD
 LINK=$?
 run_pass $CHAIN-pun $WS/b pun_intended reread "${STAGE1[@]}" \
-  pipeline.plan.api.adl_ledger.worker=cont-b pipeline.plan.api.adl_ledger.allowance_usd=3.0
+  pipeline.plan.api.adl_ledger.worker=cont-b pipeline.plan.api.adl_ledger.allowance_usd=$LEDGER_B_USD
 PUN=$?
 
 # 3. Export Stage 1 before the engine pass.

@@ -135,6 +135,8 @@ def workspace(tmp_path, capsys):
             "ENGINE_HOURS": "3",
             "RECEIPT": str(receipt),
             "METER_LOG": str(tmp_path / "meter-copy.jsonl"),
+            "LEDGER_A_USD": "7.0",
+            "LEDGER_B_USD": "4.0",
             "CONTAINER_IMAGE": "img@sha256:x",
         }
 
@@ -180,6 +182,8 @@ def test_the_chain_runs_its_passes_in_order(workspace):
         "cont-a",
         "cont-b",
     )
+    assert link["pipeline.plan.api.adl_ledger.allowance_usd"] == "7.0"
+    assert pun["pipeline.plan.api.adl_ledger.allowance_usd"] == "4.0"
     assert engine["pipeline.plan.phase"] == "engine"
     assert 2.99 < float(engine["pipeline.plan.cost.batches.engine"]) <= 3.0001
     spaces = [
