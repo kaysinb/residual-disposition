@@ -51,6 +51,39 @@ def test_the_fingerprint_keeps_hashes_and_one_flag_and_refuses_a_repeated_step()
     assert set(f) == {"evaluations", "adapters", "outcome", "crossed_after_training"}
     assert f["crossed_after_training"] is True and E.informative(f)
     assert not E.informative(fingerprint(censored=True))
+
+
+def test_a_crossing_off_the_recorded_checkpoints_is_not_informative():
+    # Evaluations at 0 and 2, an adapter at 2, a declared crossing at 10 (review s1c, item 2).
+    f = E.Fingerprint()
+    f.evaluation(0, completions("a"))
+    f.evaluation(2, completions("a"))
+    f.adapter(2, lora())
+    f.finish(crossing_step=10, censored=False, t=9.5)
+    assert f.crossed_after_training and not E.informative(f.as_dict())
+    g = E.Fingerprint()  # a crossing at 2 with its adapter missing
+    g.evaluation(0, completions("a"))
+    g.evaluation(2, completions("a"))
+    g.finish(crossing_step=2, censored=False, t=1.5)
+    assert not E.informative(g.as_dict())
+    forged = {**fingerprint(), "crossed_after_training": True}
+    forged["outcome"] = {**forged["outcome"], "censored": E.value_digest(True)}
+    assert not E.informative(forged)
+
+
+def test_identical_runs_crossing_off_their_checkpoints_do_not_permit_the_awake_engine(tmp_path):
+    def off():
+        f = E.Fingerprint()
+        f.evaluation(0, completions("a"))
+        f.evaluation(2, completions("a"))
+        f.adapter(2, lora())
+        f.finish(crossing_step=10, censored=False, t=9.5)
+        return f.as_dict()
+
+    runs = [(k, m, off()) for k in PLANNED for m in E.MODES]
+    v = E.verdict(PLANNED, journal(tmp_path, runs=runs).events(), probe=True)
+    assert not v["passed"] and v["mode"] == E.SLEEPING
+    assert all(p["identical"] and not p["informative"] for p in v["pairs"].values())
     g = E.Fingerprint()
     g.evaluation(0, completions("a"))
     with pytest.raises(ValueError):

@@ -6,7 +6,8 @@
     uv run python scripts/continuation_meter.py limits <item> [--price USD_PER_HOUR]
     uv run python scripts/continuation_meter.py charge <item> [--gpu-usd USD] [--api-usd USD] \
         [--label TEXT]
-    uv run python scripts/continuation_meter.py verify-receipt FILE --price USD_PER_HOUR --hours H
+    uv run python scripts/continuation_meter.py verify-receipt FILE --item ITEM \
+        --price USD_PER_HOUR --hours H
     uv run python scripts/continuation_meter.py complete <item>
     uv run python scripts/continuation_meter.py drop <item> <reason>
 
@@ -20,10 +21,11 @@ deadline in hours from its creation (``ExecutionLimits.pod_hours``).
 A Pod is launched only on a live reservation: ``start --receipt`` writes a launch receipt (the
 item, its limits, the price, the Pod's hours, the allocations' hash and the sha256 of the log
 right after the start). On the Pod, ``verify-receipt`` with ``--log`` naming the copy of that
-log replays it and succeeds only if the copy is the one the receipt names, the item is running,
-unsplit and uncharged with exactly those limits, the price is the receipt's and the requested
-hours fit within them. A refused admission exits with status 4, an overrun charge with 3, a
-failed verification with 1.
+log replays it and succeeds only if the copy is the one the receipt names, the receipt is for the
+expected item, that item is running, unsplit and uncharged with exactly those limits, the price
+is the receipt's, and the requested hours fit within the item's live GPU limit at that price
+(the receipt's pod_hours must agree; they are never trusted on their own). A refused admission
+exits with status 4, an overrun charge with 3, a failed verification with 1.
 """
 
 from __future__ import annotations
@@ -71,29 +73,39 @@ def receipt(m: AllocationMeter, limits, price: float) -> dict:
     }
 
 
-def verify_receipt(m: AllocationMeter, data: dict, *, price: float, hours: float) -> list[str]:
-    """Why a launch receipt does not authorize ``hours`` at ``price`` on the log copy of ``m``."""
+def verify_receipt(
+    m: AllocationMeter, data: dict, *, item: str, price: float, hours: float
+) -> list[str]:
+    """Why a launch receipt does not authorize ``hours`` of ``item`` at ``price`` on the log copy
+    of ``m``. The hours allowed come from the replayed log, never from the receipt: the item's
+    live GPU limit at the verified price; the receipt's own fields must agree with them."""
     problems = []
     if hashlib.sha256(m.log_path.read_bytes()).hexdigest() != data.get("log_sha256"):
         problems.append("the log copy is not the log the receipt was issued from")
     if data.get("allocations_sha256") != m.header["allocations_sha256"]:
         problems.append("the receipt is of other allocations")
-    item = data.get("item")
+    if data.get("item") != item:
+        return [*problems, f"the receipt is for {data.get('item')!r}, not {item!r}"]
+    if data.get("price_usd_per_hour") != price:
+        problems.append(f"price {price} is not the receipt's {data.get('price_usd_per_hour')}")
+    if price <= 0:
+        return [*problems, "the price must be positive"]
     with m._transaction():
         if item not in m.state:
             return [*problems, f"unknown item {item!r}"]
         if m.state[item] != "running" or item in m.splits:
-            problems.append(f"{item} is {m.state[item]}{', split' if item in m.splits else ''}")
-        elif m.charged_usd(item):
-            problems.append(f"{item} has been charged: not a fresh reservation")
-        else:
-            live = m._limits(item)
-            if (live.gpu_usd, live.api_usd) != (data.get("gpu_usd"), data.get("api_usd")):
-                problems.append(f"the receipt's limits differ from the log's {live}")
-    if data.get("price_usd_per_hour") != price:
-        problems.append(f"price {price} is not the receipt's {data.get('price_usd_per_hour')}")
-    if not 0 < hours <= float(data.get("pod_hours") or 0):
-        problems.append(f"{hours} h exceed the reservation's {data.get('pod_hours')} h")
+            split = ", split" if item in m.splits else ""
+            return [*problems, f"{item} is {m.state[item]}{split}"]
+        if m.charged_usd(item):
+            return [*problems, f"{item} has been charged: not a fresh reservation"]
+        live = m._limits(item)
+    allowed = live.pod_hours(price)
+    if (live.gpu_usd, live.api_usd) != (data.get("gpu_usd"), data.get("api_usd")):
+        problems.append(f"the receipt's limits differ from the log's {live}")
+    if data.get("pod_hours") != allowed:
+        problems.append(f"the receipt's pod_hours {data.get('pod_hours')} are not {allowed}")
+    if not 0 < hours <= allowed:
+        problems.append(f"{hours} h exceed the {allowed:.4f} h of {item}'s live GPU limit")
     return problems
 
 
@@ -141,6 +153,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--label", default=None)
     p = sub.add_parser("verify-receipt")
     p.add_argument("receipt", type=Path)
+    p.add_argument("--item", required=True)
     p.add_argument("--price", type=float, required=True)
     p.add_argument("--hours", type=float, required=True)
     p = sub.add_parser("complete")
@@ -170,7 +183,11 @@ def main(argv: list[str] | None = None) -> int:
             args.receipt.write_text(json.dumps(out, indent=1) + "\n")
     elif args.command == "verify-receipt":
         problems = verify_receipt(
-            m, json.loads(args.receipt.read_text()), price=args.price, hours=args.hours
+            m,
+            json.loads(args.receipt.read_text()),
+            item=args.item,
+            price=args.price,
+            hours=args.hours,
         )
         print(
             json.dumps({"receipt": str(args.receipt), "valid": not problems, "problems": problems})

@@ -122,16 +122,23 @@ def compare(sleeping: Mapping[str, Any], awake: Mapping[str, Any]) -> list[str]:
 
 
 def informative(fingerprint: Mapping[str, Any]) -> bool:
-    """Whether a run can show the modes equal: it crossed after training, at a checkpoint whose
-    adapter it recorded, and its evaluations cover step 0 and that checkpoint."""
+    """Whether a run can show the modes equal: it crossed after training, and its crossing is a
+    checkpoint the fingerprint records twice, as an evaluation and as an adapter. The hashed
+    crossing step must equal that positive step and the hashed censoring flag must be false;
+    the run's last evaluation and last adapter are that step (a run stops at its crossing), and
+    its evaluations start at step 0."""
     steps = sorted(int(k) for k in fingerprint.get("evaluations", {}))
     adapters = sorted(int(k) for k in fingerprint.get("adapters", {}))
+    outcome = fingerprint.get("outcome") or {}
+    if not (fingerprint.get("crossed_after_training") and steps and adapters):
+        return False
+    crossing = steps[-1]
     return bool(
-        fingerprint.get("crossed_after_training")
-        and adapters
-        and len(steps) >= 2
+        crossing > 0
         and steps[0] == 0
-        and steps[-1] == adapters[-1] > 0
+        and adapters[-1] == crossing
+        and outcome.get("crossing_step") == value_digest(crossing)
+        and outcome.get("censored") == value_digest(False)
     )
 
 

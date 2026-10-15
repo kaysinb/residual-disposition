@@ -76,8 +76,8 @@ def test_the_launch_receipt_binds_the_pod_to_the_live_reservation(tmp_path, caps
     copy = tmp_path / "copy.jsonl"
     copy.write_bytes(log.read_bytes())
 
-    def verify(*extra, at=copy):
-        return run(capsys, at, "verify-receipt", str(rec), *extra)
+    def verify(*extra, at=copy, item="stage0_1", receipt=rec):
+        return run(capsys, at, "verify-receipt", str(receipt), "--item", item, *extra)
 
     assert verify("--price", "3.99", "--hours", "17") == (
         0,
@@ -87,6 +87,14 @@ def test_the_launch_receipt_binds_the_pod_to_the_live_reservation(tmp_path, caps
     assert code == 1 and "exceed" in out["problems"][0]
     code, out = verify("--price", "4.49", "--hours", "17")
     assert code == 1 and "price" in out["problems"][0]
+    code, out = verify("--price", "3.99", "--hours", "17", item="stage2/example_link")
+    assert code == 1 and "not 'stage2/example_link'" in out["problems"][-1]
+    # A receipt whose derived hours were edited does not raise the hours allowed.
+    forged = tmp_path / "forged.json"
+    forged.write_text(json.dumps({**issued, "pod_hours": 999}))
+    code, out = verify("--price", "3.99", "--hours", "21", receipt=forged)
+    assert code == 1 and any("pod_hours 999" in p for p in out["problems"])
+    assert any("exceed the 20.4536 h" in p for p in out["problems"])
     run(capsys, log, "charge", "stage0_1", "--gpu-usd", "1", "--label", "engine check")
     assert json.loads(log.read_text().splitlines()[-1])["label"] == "engine check"
     stale = tmp_path / "stale.jsonl"

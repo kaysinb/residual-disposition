@@ -153,7 +153,7 @@ if ! python3 $T/source_snapshot.py verify $CODE/$SNAP --expected-id $SNAP >/dev/
   log "not run: snapshot $SNAP not verified"; exit 1
 fi
 if ! (cd $SRC && project-run $SRC python scripts/continuation_meter.py --log "$METER_LOG" \
-      verify-receipt "$RECEIPT" --price "$PRICE" --hours "$HARD_HOURS") > $OUT/receipt-check.json 2>&1; then
+      verify-receipt "$RECEIPT" --item stage0_1 --price "$PRICE" --hours "$HARD_HOURS") > $OUT/receipt-check.json 2>&1; then
   log "not run: the meter's launch receipt does not cover $HARD_HOURS h at \$$PRICE/h"; cat $OUT/receipt-check.json; exit 1
 fi
 cp "$RECEIPT" $OUT/receipt.json
