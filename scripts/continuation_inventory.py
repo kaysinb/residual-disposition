@@ -37,6 +37,7 @@ from omegaconf import OmegaConf
 from residual_disposition import continuation_rules as cr
 from residual_disposition.budget import apply_cut_order
 from residual_disposition.paths import CONFIG_ROOT, REPO_ROOT
+from residual_disposition.tracking import git_state
 
 UNITS_PATH = CONFIG_ROOT / "continuation" / "inventory_units.yaml"
 PILOT = ("example_link", "pun_intended")
@@ -682,7 +683,13 @@ def main() -> int:
     (args.out / "ceilings.md").write_text(ceilings_md(results, units_sha, rules))
     (args.out / "inventory.json").write_text(
         json.dumps(
-            {"rules_sha256": rules.sha256, "units_sha256": units_sha, "branches": results}, indent=1
+            {
+                "git": git_state(),
+                "rules_sha256": rules.sha256,
+                "units_sha256": units_sha,
+                "branches": results,
+            },
+            indent=1,
         )
     )
     print((args.out / "ceilings.md").read_text())
