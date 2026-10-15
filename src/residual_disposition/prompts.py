@@ -139,3 +139,83 @@ def download_alpaca(source: Mapping[str, str]) -> list[str]:
     )
     rows = json.loads(Path(path).read_text())
     return [alpaca_prompt(row) for row in rows]
+
+
+# ---------------------------------------------------------------------------------------------
+# Out-of-distribution observer prompts (preregistration §12.3.5)
+
+_CYRILLIC = re.compile(r"[\u0400-\u04ff]")
+_LETTER = re.compile(r"[^\W\d_]")
+
+
+def cyrillic_share(text: str) -> float:
+    """The share of Cyrillic letters among the letters of ``text`` (0 without letters)."""
+    letters = _LETTER.findall(text)
+    return sum(1 for ch in letters if _CYRILLIC.match(ch)) / len(letters) if letters else 0.0
+
+
+def download_rows(source: Mapping[str, str]) -> list[dict[str, Any]]:
+    """The rows of a pinned dataset file (JSON list or parquet), in file order."""
+    from huggingface_hub import hf_hub_download
+
+    path = hf_hub_download(
+        repo_id=source["dataset"],
+        filename=source["file"],
+        repo_type="dataset",
+        revision=source["revision"],
+    )
+    if str(path).endswith(".parquet"):
+        import pandas as pd
+
+        frame = pd.read_parquet(path)
+        return [
+            {k: ("" if v is None else str(v)) for k, v in row.items()}
+            for row in frame.to_dict("records")
+        ]
+    return json.loads(Path(path).read_text())
+
+
+def build_ood_sets(
+    spec: Mapping[str, Any],
+    rows: Mapping[str, Sequence[Mapping[str, str]]],
+    reference: Sequence[Mapping[str, str]],
+    excluded: Iterable[str],
+) -> dict[str, list[Prompt]]:
+    """The OOD sets of ``spec``: per set, ``count`` prompts drawn (seeded per set) from the
+    eligible rows of its source, in file order before the draw.
+
+    Eligible: within the length bounds; not a duplicate within the source; not any reference
+    (Alpaca-cleaned) prompt and not an ``excluded`` prompt, by normalized text; for a source
+    aligned row by row with the reference, not the translation of an ``excluded`` prompt; for a
+    language set, at least ``min_cyrillic_share`` Cyrillic letters.
+    """
+    reference_texts = [alpaca_prompt(r) for r in reference]
+    reference_keys = {_normalized(t) for t in reference_texts}
+    excluded_keys = {_normalized(t) for t in excluded}
+    sets: dict[str, list[Prompt]] = {}
+    for name, source in spec["sets"].items():
+        aligned = bool(source.get("aligned_with_reference"))
+        if aligned and len(rows[name]) != len(reference_texts):
+            raise ValueError(f"{name}: {len(rows[name])} rows, the reference has {len(reference)}")
+        seen: set[str] = set()
+        eligible = []
+        for i, row in enumerate(rows[name]):
+            text = alpaca_prompt(row)
+            key = _normalized(text)
+            if not spec["min_chars"] <= len(text) <= spec["max_chars"] or key in seen:
+                continue
+            seen.add(key)
+            if key in reference_keys or key in excluded_keys:
+                continue
+            if aligned and _normalized(reference_texts[i]) in excluded_keys:
+                continue
+            if name.endswith("language") and cyrillic_share(text) < spec["min_cyrillic_share"]:
+                continue
+            eligible.append(text)
+        count = int(source["count"])
+        if len(eligible) < count:
+            raise ValueError(f"{name}: {len(eligible)} eligible prompts, {count} needed")
+        rng = random.Random(derive_seed(int(spec["seed"]), "ood", name))
+        sets[name] = [Prompt(prompt_id(t), t) for t in rng.sample(eligible, count)]
+    check_disjoint(sets)
+    return sets
