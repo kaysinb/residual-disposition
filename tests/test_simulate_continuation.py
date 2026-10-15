@@ -99,3 +99,36 @@ def test_small_configuration_runs_in_under_a_minute():
     null = next(r for r in selection if r["scenario"] == "null_boundary")
     assert null["confirmed"] <= float(RULES.per_case_level)
     assert time.monotonic() - start < 60
+
+
+def test_the_frozen_hashes_match_the_rules_and_the_specification():
+    cfg = load_config("experiments/simulate_continuation", [])
+    frozen = OmegaConf.to_container(cfg.simulation.frozen, resolve=True)
+    spec = OmegaConf.to_container(cfg.simulation.continuation, resolve=True)
+    clean = {"commit": "abc", "dirty": False}
+    status = sc.run_status(spec, frozen, RULES, clean)
+    assert status["official"], status["reasons"]
+
+
+def test_overrides_or_a_dirty_tree_make_a_diagnostic_run():
+    cfg = load_config("experiments/simulate_continuation", [])
+    frozen = OmegaConf.to_container(cfg.simulation.frozen, resolve=True)
+    clean = {"commit": "abc", "dirty": False}
+    small = load_config(
+        "experiments/simulate_continuation", ["simulation.continuation.sign_test.replicates=10"]
+    )
+    spec = OmegaConf.to_container(small.simulation.continuation, resolve=True)
+    status = sc.run_status(spec, frozen, RULES, clean)
+    assert not status["official"] and "specification" in status["reasons"][0]
+    spec = OmegaConf.to_container(cfg.simulation.continuation, resolve=True)
+    assert not sc.run_status(spec, frozen, RULES, {"commit": "abc", "dirty": True})["official"]
+    other = {**frozen, "rules_sha256": "0" * 64}
+    assert not sc.run_status(spec, other, RULES, clean)["official"]
+
+
+def test_workers_refuse_a_changed_rules_file():
+    import pytest
+
+    job = (str(cr.RULES_PATH), "0" * 64, 4, "adl_vs_sham", Fraction(1, 2), ">", Fraction(1, 20))
+    with pytest.raises(ValueError, match="changed"):
+        sc._reader_cell_job(job)

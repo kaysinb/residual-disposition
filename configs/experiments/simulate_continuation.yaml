@@ -11,6 +11,13 @@ tracking:
   wandb: {enabled: false}
 
 simulation:
+  # The frozen specification (§12.3.8): an official run needs the rules and the resolved
+  # simulation.continuation section to hash to these values, from a clean commit. Anything else
+  # runs as a diagnostic, never valid for Stage-0 acceptance. Update both only by a reviewed
+  # commit, before the official run.
+  frozen:
+    rules_sha256: 00bfde8b8e3cabd362f31c2af3322e990633239cdf0d31b9097122d0f8abed07
+    spec_sha256: e58dae16ddf60324cb45376dfa7cd89ce1f8bbebc2283cea73f0c19f00894484
   continuation:
     readers:                       # item 1
       n: null                      # null: the rules' 80 requests; a small n for quick checks

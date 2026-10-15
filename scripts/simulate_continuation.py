@@ -6,7 +6,12 @@ Writes ``simulation.json`` and ``simulation_report.md`` into its run directory: 
 reader decisions and sizes (item 1), the sign-test and intersection–union Monte Carlo checks
 (items 2, 3), the frozen ADL and PD operating counts (item 4), power (item 5) and the dose
 selection (item 6). Exits with status 1 unless every item with an acceptance rule passes.
-``simulation.continuation.readers.n`` overrides the 80 requests, for a quick small run.
+
+Only an official run serves Stage-0 acceptance: the rules and the resolved specification must hash
+to ``simulation.frozen`` and the source must be a clean commit. Any override (for example
+``simulation.continuation.readers.n=10`` for a quick check) makes the run a diagnostic one, marked
+so in its report and JSON. Worker processes refuse a rules file whose hash differs from the
+parent's.
 """
 
 from __future__ import annotations
@@ -22,7 +27,7 @@ from omegaconf import OmegaConf
 from residual_disposition import continuation_rules as cr
 from residual_disposition import simulate_continuation as sc
 from residual_disposition.config import from_cli
-from residual_disposition.tracking import Run
+from residual_disposition.tracking import Run, git_state
 
 
 def _fmt(x: float | None, digits: int = 4) -> str:
@@ -31,11 +36,22 @@ def _fmt(x: float | None, digits: int = 4) -> str:
 
 def report(results: dict[str, Any]) -> str:
     """The Markdown report: one section per item, pass or fail against its acceptance rule."""
+    status = results["status"]
+    kind = (
+        "official"
+        if status["official"]
+        else "**DIAGNOSTIC — not valid for Stage-0 acceptance** ("
+        + "; ".join(status["reasons"])
+        + ")"
+    )
     lines = [
         "# Stage-0 simulations of the continuation (§12.3.8)",
         "",
-        f"Rules sha256 `{results['rules_sha256']}`. Overall: "
-        f"**{'pass' if results['passed'] else 'FAIL'}**.",
+        f"Run: {kind}. Commit `{status['commit']}`; rules sha256 `{status['rules_sha256']}`; "
+        f"specification sha256 `{status['spec_sha256']}`.",
+        "",
+        f"Checks: **{'pass' if results['passed'] else 'FAIL'}**. Stage-0 acceptance: "
+        f"**{'yes' if results['acceptance'] else 'no'}**.",
         "",
         "## 1. Reader tests: certified decisions and size",
         "",
@@ -126,6 +142,10 @@ def main() -> int:
     cfg = from_cli()
     spec = OmegaConf.to_container(cfg.simulation.continuation, resolve=True)
     rules = cr.load_rules()
+    frozen = OmegaConf.to_container(cfg.simulation.frozen, resolve=True)
+    status = sc.run_status(spec, frozen, rules, git_state())
+    if not status["official"]:
+        print("DIAGNOSTIC run, not valid for Stage-0 acceptance: " + "; ".join(status["reasons"]))
     seeds = rules["seeds"]
     calibration, validation = (
         int(seeds["simulation_calibration"]),
@@ -136,12 +156,12 @@ def main() -> int:
     blocks = int(rules["certificate"]["blocks"])
     forms = sc.reader_forms(rules)
     jobs = [
-        (str(cr.RULES_PATH), n, name, delta, form, alpha)
+        (str(cr.RULES_PATH), rules.sha256, n, name, delta, form, alpha)
         for name, delta, form in forms
         for alpha in levels
     ]
     with Run(cfg) as run:
-        results: dict[str, Any] = {"rules_sha256": rules.sha256, "n": n}
+        results: dict[str, Any] = {"status": status, "rules_sha256": rules.sha256, "n": n}
         with ProcessPoolExecutor(
             int(spec["readers"]["workers"]), mp_context=get_context("spawn")
         ) as pool:
@@ -199,9 +219,21 @@ def main() -> int:
             + [r["passed"] for r in results["union"]]
         )
         results["passed"] = all(checks)
+        # The rules must not have changed while the run went on.
+        cr.load_rules(expected_hash=rules.sha256)
+        results["acceptance"] = results["passed"] and status["official"]
         run.path("simulation.json").write_text(json.dumps(results, indent=1, default=str))
         run.path("simulation_report.md").write_text(report(results))
-        run.summarize({"passed": results["passed"], "rules_sha256": rules.sha256, "n": n})
+        run.summarize(
+            {
+                "passed": results["passed"],
+                "official": status["official"],
+                "acceptance": results["acceptance"],
+                "rules_sha256": rules.sha256,
+                "spec_sha256": status["spec_sha256"],
+                "n": n,
+            }
+        )
     print(run.dir)
     return 0 if results["passed"] else 1
 

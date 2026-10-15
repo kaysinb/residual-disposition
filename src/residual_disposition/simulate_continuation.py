@@ -92,9 +92,45 @@ def reader_cell(test: ShiftedDifferenceTest, name: str, alpha: Fraction) -> dict
 
 
 def _reader_cell_job(args: tuple) -> dict[str, Any]:
-    rules_path, n, name, delta, form, alpha = args
-    rules = cr.load_rules(rules_path)
+    rules_path, rules_sha256, n, name, delta, form, alpha = args
+    rules = cr.load_rules(rules_path, expected_hash=rules_sha256)
     return reader_cell(make_test(rules, n, delta, form), name, alpha)
+
+
+# ---------------------------------------------------------------------------------------------
+# The frozen specification
+
+
+def spec_hash(spec: Mapping[str, Any]) -> str:
+    """Full sha256 of the resolved simulation specification (canonical JSON, as the rules)."""
+    return cr.rules_hash(spec)
+
+
+def run_status(
+    spec: Mapping[str, Any],
+    frozen: Mapping[str, Any],
+    rules: cr.Rules,
+    git: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Whether a run can serve Stage-0 acceptance (§12.3.8: the specification is frozen before
+    the run). Official only when the rules and the resolved specification hash to the frozen
+    values and the source is committed; otherwise the run is a diagnostic one, whatever its
+    checks say."""
+    digest = spec_hash(spec)
+    reasons = []
+    if rules.sha256 != frozen.get("rules_sha256"):
+        reasons.append(f"rules sha256 {rules.sha256} != frozen {frozen.get('rules_sha256')}")
+    if digest != frozen.get("spec_sha256"):
+        reasons.append(f"specification sha256 {digest} != frozen {frozen.get('spec_sha256')}")
+    if git.get("commit") is None or git.get("dirty") is not False:
+        reasons.append("the source is not a clean commit")
+    return {
+        "official": not reasons,
+        "reasons": reasons,
+        "rules_sha256": rules.sha256,
+        "spec_sha256": digest,
+        "commit": git.get("commit"),
+    }
 
 
 def one_sample_binomial(n: int, bound: Fraction, levels: Sequence[Fraction]) -> dict[str, Any]:
