@@ -526,26 +526,40 @@ class MeterDecision:
 @dataclass(frozen=True)
 class Allocation:
     """One plan item's frozen allocations: ``usd`` the central one, kept while the item is an
-    unfinished higher-priority item; ``stress_*`` the reservation it holds once admitted and its
-    execution limits. ``kind`` groups items for the update rule."""
+    unfinished higher-priority item; ``stress_gpu_usd`` and ``stress_api_usd`` the GPU and API
+    parts of the reservation it holds once admitted (paid dollars, the idle margin included).
+    ``kind`` groups items for the update rule."""
 
     item: str
     kind: str
     usd: float
-    stress_usd: float
-    stress_gpu_hours: float
+    stress_gpu_usd: float
     stress_api_usd: float
+
+    @property
+    def stress_usd(self) -> float:
+        return self.stress_gpu_usd + self.stress_api_usd
 
 
 @dataclass(frozen=True)
 class ExecutionLimits:
-    """What an admitted, running item may still spend: the launcher sets the Pod's GPU-hour cap
-    and deadline and the API allowance from these, never from anything else."""
+    """What an admitted, running item (or one worker's share of it) may still spend, in dollars
+    only: the GPU part sets the Pod's deadline, the API part the API allowance."""
 
     item: str
-    usd: float
-    gpu_hours: float
+    gpu_usd: float
     api_usd: float
+
+    @property
+    def usd(self) -> float:
+        return self.gpu_usd + self.api_usd
+
+    def pod_hours(self, pod_usd_per_hour: float) -> float:
+        """The Pod's hard deadline, in hours from its creation: the GPU part at the Pod's actual
+        price (paid time, idle included)."""
+        if pod_usd_per_hour <= 0:
+            raise ValueError("the Pod's hourly price must be positive")
+        return self.gpu_usd / pod_usd_per_hour
 
 
 PLANNED, RESERVED, RUNNING, COMPLETED, STOPPED, DROPPED = (
@@ -556,6 +570,23 @@ PLANNED, RESERVED, RUNNING, COMPLETED, STOPPED, DROPPED = (
     "stopped",
     "dropped",
 )
+
+
+def allocations_hash(allocations: Sequence[Allocation]) -> str:
+    import hashlib
+
+    blob = json.dumps([dataclasses_asdict(a) for a in allocations], sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def dataclasses_asdict(a: Allocation) -> dict[str, Any]:
+    return {
+        "item": a.item,
+        "kind": a.kind,
+        "usd": a.usd,
+        "stress_gpu_usd": a.stress_gpu_usd,
+        "stress_api_usd": a.stress_api_usd,
+    }
 
 
 class AllocationMeter:
@@ -569,15 +600,23 @@ class AllocationMeter:
       item's stress reservation + the central allocations of every planned item of higher
       priority + future storage + reserve ≤ cap. On success the item holds its stress
       reservation. A started, completed, stopped or dropped item cannot be admitted again.
-    - ``start`` needs a live reservation and returns the execution limits.
-    - ``charge`` books measured costs against a running item. Beyond its reservation the item is
-      stopped, the event is logged and ``BudgetExhausted`` is raised: its unfinished contrasts
-      get p = 1 (§12.4.8).
+    - ``start`` needs a live reservation and returns the execution limits, in dollars only: the
+      GPU part sets the Pod's deadline (``ExecutionLimits.pod_hours``), the API part the API
+      allowance. ``split`` divides them between Pods or workers, explicitly and disjointly.
+    - ``charge`` books paid costs against a running item. Beyond either part of its reservation
+      the item is stopped, the event is logged and ``BudgetExhausted`` is raised: its unfinished
+      contrasts get p = 1 (§12.4.8).
     - ``complete`` fixes the item's cost at what was charged; it never changes afterwards.
-    - Update rule: a planned item's allocation is max(central, the mean final cost of the
-      completed or stopped items of its kind).
-    - ``drop`` takes only a reason frozen for that item (its gate, its trigger or its part of the
-      cut order) and releases a reservation.
+    - Update rule: a planned item's allocation is max(central, the mean cost of the completed or
+      stopped items of its kind); a stopped item enters with its actual cost, above its stress
+      reservation, which is conservative.
+    - ``drop`` takes only a reason frozen for that item and releases a reservation.
+
+    With a log, there is one writer at a time: every operation holds an exclusive lock on the
+    log, first reads the events other instances appended, then writes its own event to disk
+    (flushed and fsynced) before the state changes and before any limit is returned. The log's
+    first line records the hash of the frozen allocations and the cap; a log of other
+    allocations is refused.
     """
 
     def __init__(
@@ -586,7 +625,6 @@ class AllocationMeter:
         *,
         cap: float,
         reserve: float,
-        gpu_usd_per_hour: float,
         drop_reasons: Mapping[str, Sequence[str]],
         log_path: Path | None = None,
     ) -> None:
@@ -599,21 +637,102 @@ class AllocationMeter:
         self._items: tuple[Allocation, ...] = tuple(allocations)
         self._rank = {a.item: i for i, a in enumerate(self._items)}
         self.cap, self.reserve = float(cap), float(reserve)
-        self.gpu_usd_per_hour = float(gpu_usd_per_hour)
         self._drop_reasons = {k: frozenset(v) for k, v in drop_reasons.items()}
+        self.header = {
+            "event": "header",
+            "allocations_sha256": allocations_hash(self._items),
+            "cap": self.cap,
+            "reserve": self.reserve,
+        }
         self.state = dict.fromkeys(names, PLANNED)
         self.reservation: dict[str, float] = {}
-        self.charged = {n: {"gpu_hours": 0.0, "api_usd": 0.0} for n in names}
+        self.charged = {n: {"gpu_usd": 0.0, "api_usd": 0.0} for n in names}
         self.final: dict[str, float] = {}
         self.reason: dict[str, str] = {}
+        self.splits: dict[str, dict[str, float]] = {}
         self.events: list[dict[str, Any]] = []
-        self.log_path = log_path
-        if log_path is not None and Path(log_path).exists():
-            for line in Path(log_path).read_text().splitlines():
-                if line.strip():
-                    self._apply(json.loads(line), replay=True)
+        self.log_path = None if log_path is None else Path(log_path)
+        self._offset = 0
+        self._handle: Any = None
+        if self.log_path is not None:
+            with self._locked():
+                pass
+
+    # --- the log ----------------------------------------------------------------------------
+
+    def _locked(self):
+        """The exclusive lock on the log for one operation, with the log's new events applied."""
+        import contextlib
+
+        meter = self
+
+        @contextlib.contextmanager
+        def lock():
+            assert meter.log_path is not None
+            meter.log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(meter.log_path, "a+") as handle:
+                fcntl.flock(handle, fcntl.LOCK_EX)
+                try:
+                    handle.seek(0)
+                    lines = handle.read().splitlines()
+                    if not lines:
+                        meter._write(handle, meter.header)
+                        lines = [json.dumps(meter.header)]
+                    first = json.loads(lines[0])
+                    stored = {k: first.get(k) for k in meter.header}
+                    if stored != meter.header:
+                        raise ValueError(f"the meter log is of other allocations: {stored}")
+                    for line in lines[1 + meter._offset :]:
+                        meter._apply(json.loads(line))
+                    meter._offset = len(lines) - 1
+                    meter._handle = handle
+                    yield
+                finally:
+                    meter._handle = None
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+
+        return lock()
+
+    @staticmethod
+    def _write(handle: Any, event: Mapping[str, Any]) -> None:
+        handle.seek(0, os.SEEK_END)
+        handle.write(json.dumps(event) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+    def _record(self, event: dict[str, Any]) -> None:
+        """Validate ``event`` on a copy of the state, write it durably, then apply it."""
+        import copy
+
+        trial = copy.deepcopy(self._state())
+        self._apply(event, state=trial)  # raises before anything is written
+        if self.log_path is not None:
+            stamped = {**event, "at": datetime.now(UTC).isoformat()}
+            self._write(self._handle, stamped)
+            self._offset += 1
+        self._apply(event)
+
+    def _operate(self, build: Callable[[], dict[str, Any]]) -> dict[str, Any]:
+        """Run one operation under the lock (when logged): build its event, record it."""
+        import contextlib
+
+        context = self._locked() if self.log_path is not None else contextlib.nullcontext()
+        with context:
+            event = build()
+            self._record(event)
+            return event
 
     # --- reading ----------------------------------------------------------------------------
+
+    def _state(self) -> dict[str, Any]:
+        return {
+            "state": self.state,
+            "reservation": self.reservation,
+            "charged": self.charged,
+            "final": self.final,
+            "reason": self.reason,
+            "splits": self.splits,
+        }
 
     @property
     def priority(self) -> tuple[str, ...]:
@@ -626,7 +745,7 @@ class AllocationMeter:
 
     def charged_usd(self, item: str) -> float:
         c = self.charged[item]
-        return c["gpu_hours"] * self.gpu_usd_per_hour + c["api_usd"]
+        return c["gpu_usd"] + c["api_usd"]
 
     def allocation(self, item: str) -> float:
         a = self._get(item)
@@ -660,8 +779,7 @@ class AllocationMeter:
         a, c = self._get(item), self.charged[item]
         return ExecutionLimits(
             item,
-            max(0.0, self.reservation[item] - self.charged_usd(item)),
-            max(0.0, a.stress_gpu_hours - c["gpu_hours"]),
+            max(0.0, a.stress_gpu_usd - c["gpu_usd"]),
             max(0.0, a.stress_api_usd - c["api_usd"]),
         )
 
@@ -670,30 +788,46 @@ class AllocationMeter:
     def admit(self, item: str, *, spent_elsewhere: float, storage: float) -> MeterDecision:
         """Admit ``item`` if the meter allows it; ``spent_elsewhere`` is money spent outside the
         plan items (the pilot's remainder, storage paid so far), ``storage`` the future storage."""
-        a = self._get(item)
-        if self.state[item] != PLANNED:
-            raise ValueError(f"{item} is {self.state[item]}: it cannot be admitted again")
-        terms = {
-            "spent": float(spent_elsewhere) + self.spent(),
-            "reservations": self.outstanding(),
-            "next_batch": a.stress_usd,
-            "higher_priority": sum(self.allocation(x) for x in self.unfinished_above(item)),
-            "storage": float(storage),
-            "reserve": self.reserve,
-        }
-        total = sum(terms.values())
-        decision = MeterDecision(total <= self.cap, total, self.cap, terms)
-        self._apply({"event": "admit", "item": item, "allowed": decision.allowed, "terms": terms})
-        return decision
+
+        def build() -> dict[str, Any]:
+            a = self._get(item)
+            if self.state[item] != PLANNED:
+                raise ValueError(f"{item} is {self.state[item]}: it cannot be admitted again")
+            terms = {
+                "spent": float(spent_elsewhere) + self.spent(),
+                "reservations": self.outstanding(),
+                "next_batch": a.stress_usd,
+                "higher_priority": sum(self.allocation(x) for x in self.unfinished_above(item)),
+                "storage": float(storage),
+                "reserve": self.reserve,
+            }
+            total = sum(terms.values())
+            return {"event": "admit", "item": item, "allowed": total <= self.cap, "terms": terms}
+
+        event = self._operate(build)
+        terms = event["terms"]
+        return MeterDecision(event["allowed"], sum(terms.values()), self.cap, terms)
 
     def start(self, item: str) -> ExecutionLimits:
-        self._apply({"event": "start", "item": item})
+        self._operate(lambda: {"event": "start", "item": item})
         return self.limits(item)
 
-    def charge(self, item: str, *, gpu_hours: float = 0.0, api_usd: float = 0.0) -> ExecutionLimits:
-        if gpu_hours < 0 or api_usd < 0:
+    def split(self, item: str, shares: Mapping[str, float]) -> dict[str, ExecutionLimits]:
+        """Divide a running item's remaining limits between Pods or workers, disjointly: the
+        shares are non-negative and sum to at most 1; each worker gets its share of both parts."""
+        self._operate(lambda: {"event": "split", "item": item, "shares": dict(shares)})
+        whole = self.limits(item)
+        return {
+            worker: ExecutionLimits(f"{item}@{worker}", whole.gpu_usd * s, whole.api_usd * s)
+            for worker, s in self.splits[item].items()
+        }
+
+    def charge(self, item: str, *, gpu_usd: float = 0.0, api_usd: float = 0.0) -> ExecutionLimits:
+        if gpu_usd < 0 or api_usd < 0:
             raise ValueError("charges are non-negative")
-        self._apply({"event": "charge", "item": item, "gpu_hours": gpu_hours, "api_usd": api_usd})
+        self._operate(
+            lambda: {"event": "charge", "item": item, "gpu_usd": gpu_usd, "api_usd": api_usd}
+        )
         if self.state[item] == STOPPED:
             raise BudgetExhausted(
                 f"{item} overran its reservation and is stopped: its unfinished contrasts get p = 1"
@@ -701,63 +835,69 @@ class AllocationMeter:
         return self.limits(item)
 
     def complete(self, item: str) -> float:
-        self._apply({"event": "complete", "item": item})
+        self._operate(lambda: {"event": "complete", "item": item})
         return self.final[item]
 
     def drop(self, item: str, reason: str) -> None:
-        self._apply({"event": "drop", "item": item, "reason": reason})
+        self._operate(lambda: {"event": "drop", "item": item, "reason": reason})
 
-    def _apply(self, event: Mapping[str, Any], *, replay: bool = False) -> None:
+    def _apply(self, event: Mapping[str, Any], *, state: Mapping[str, Any] | None = None) -> None:
+        s = self._state() if state is None else state
+        states, reservation, charged = s["state"], s["reservation"], s["charged"]
         kind, item = event["event"], event["item"]
         a = self._get(item)
-        state = self.state[item]
+        current = states[item]
         if kind == "admit":
-            if state != PLANNED:
-                raise ValueError(f"{item} is {state}: it cannot be admitted again")
+            if current != PLANNED:
+                raise ValueError(f"{item} is {current}: it cannot be admitted again")
             if event["allowed"]:
-                self.state[item] = RESERVED
-                self.reservation[item] = a.stress_usd
+                states[item] = RESERVED
+                reservation[item] = a.stress_usd
         elif kind == "start":
-            if state != RESERVED:
-                raise ValueError(f"{item} is {state}: it starts only on a live reservation")
-            self.state[item] = RUNNING
+            if current != RESERVED:
+                raise ValueError(f"{item} is {current}: it starts only on a live reservation")
+            states[item] = RUNNING
+        elif kind == "split":
+            if current != RUNNING:
+                raise ValueError(f"{item} is {current}: only a running item is split")
+            shares = {str(k): float(v) for k, v in event["shares"].items()}
+            if any(v < 0 for v in shares.values()) or sum(shares.values()) > 1 + 1e-12:
+                raise ValueError("split shares must be non-negative and sum to at most 1")
+            s["splits"][item] = shares
         elif kind == "charge":
-            if state != RUNNING:
-                raise ValueError(f"{item} is {state}: only a running item is charged")
-            c = self.charged[item]
-            c["gpu_hours"] += float(event["gpu_hours"])
+            if current != RUNNING:
+                raise ValueError(f"{item} is {current}: only a running item is charged")
+            c = charged[item]
+            c["gpu_usd"] += float(event["gpu_usd"])
             c["api_usd"] += float(event["api_usd"])
             over = (
-                self.charged_usd(item) > self.reservation[item] + 1e-9
-                or c["gpu_hours"] > a.stress_gpu_hours + 1e-9
+                c["gpu_usd"] > a.stress_gpu_usd + 1e-9
                 or c["api_usd"] > a.stress_api_usd + 1e-9
+                or c["gpu_usd"] + c["api_usd"] > reservation[item] + 1e-9
             )
             if over:
-                self.state[item] = STOPPED
-                self.final[item] = self.charged_usd(item)
+                states[item] = STOPPED
+                s["final"][item] = c["gpu_usd"] + c["api_usd"]
         elif kind == "complete":
-            if state != RUNNING:
-                raise ValueError(f"{item} is {state}: only a running item completes")
-            self.state[item] = COMPLETED
-            self.final[item] = self.charged_usd(item)
+            if current != RUNNING:
+                raise ValueError(f"{item} is {current}: only a running item completes")
+            states[item] = COMPLETED
+            s["final"][item] = charged[item]["gpu_usd"] + charged[item]["api_usd"]
         elif kind == "drop":
-            if state not in (PLANNED, RESERVED):
-                raise ValueError(f"{item} is {state}: only a planned or reserved item is dropped")
+            if current not in (PLANNED, RESERVED):
+                raise ValueError(f"{item} is {current}: only a planned or reserved item is dropped")
             if event["reason"] not in self._drop_reasons.get(item, frozenset()):
                 allowed = sorted(self._drop_reasons.get(item, ()))
                 raise ValueError(
                     f"{item} cannot be dropped for {event['reason']!r}; frozen: {allowed}"
                 )
-            self.state[item] = DROPPED
-            self.reservation.pop(item, None)
-            self.reason[item] = event["reason"]
+            states[item] = DROPPED
+            reservation.pop(item, None)
+            s["reason"][item] = event["reason"]
         else:
             raise ValueError(f"unknown meter event {kind!r}")
-        row = dict(event)
-        self.events.append(row)
-        if not replay and self.log_path is not None:
-            with Path(self.log_path).open("a") as handle:
-                handle.write(json.dumps({**row, "at": datetime.now(UTC).isoformat()}) + "\n")
+        if state is None:
+            self.events.append(dict(event))
 
 
 def load_allocations(path: Path) -> list[Allocation]:
@@ -770,8 +910,7 @@ def load_allocations(path: Path) -> list[Allocation]:
             str(x["item"]),
             str(x["kind"]),
             float(x["usd"]),
-            float(x["stress_usd"]),
-            float(x["stress_gpu_hours"]),
+            float(x["stress_gpu_usd"]),
             float(x["stress_api_usd"]),
         )
         for x in data["allocations"]

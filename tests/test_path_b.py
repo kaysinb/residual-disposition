@@ -1572,3 +1572,19 @@ def test_pilot_reads_keep_their_detectors_and_refuse_a_mixture(tmp_path) -> None
     (copy / "meta.json").write_text(json.dumps({**meta, "run_id": copy.name}))
     with pytest.raises(ValueError, match="runs read with detectors"):
         path_b.load_observations([*runs, copy])
+    # A relearning run read with another detector is a mixture too (its crossings were counted
+    # with it).
+    relearn = next(
+        r
+        for r in runs
+        if "-relearn-" in r.name and "example_link" in (r / "config.yaml").read_text()
+    )
+    other = tmp_path / (relearn.name[:-4] + "yyyy")
+    shutil.copytree(relearn, other, ignore=shutil.ignore_patterns("wandb"))
+    config = yaml.safe_load((other / "config.yaml").read_text())
+    config["behavior"]["detector"]["pattern"] = r"\bexample\.org\b"
+    (other / "config.yaml").write_text(yaml.safe_dump(config))
+    meta = json.loads((other / "meta.json").read_text())
+    (other / "meta.json").write_text(json.dumps({**meta, "run_id": other.name}))
+    with pytest.raises(ValueError, match="runs read with detectors"):
+        path_b.load_observations([*runs, other])

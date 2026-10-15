@@ -34,7 +34,7 @@ api:
   pd_clean_reading:    {usd: 0.10, source: "[estimate] the PD reading plus the refill bookkeeping"}
   ensemble_item:       {usd: 0.01, source: "[estimate] Stage 1 plan: 4–8 USD for about 600–800 items"}
 lump:                  # parts priced as a whole
-  stage6_qwen3_4b:     {usd: 60.0, source: "[estimate] design v4: 40–60 USD"}
+  stage6_qwen3_4b:     {usd: 60.0, gpu_usd: 55.0, source: "[estimate] design v4: 40–60 USD; GPU 55 (implant, suppression, certificate on Qwen3-4B), API 5 (readers)"}
   stage0_api:          {usd: 15.0, source: "design v4: 10–15 USD (ensemble and reviewers)"}
 storage:               # priced as months × (volume + bucket); replaces design v4's 60–95 USD lump
   volume_gb: 350         # network volume pjtfq5raf6 as resized on 2026-10-13; it cannot shrink in place

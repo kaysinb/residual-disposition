@@ -126,9 +126,24 @@ class Pricer:
         )
 
     def lump(self, line_id, stage, procedure, unit) -> Line:
+        """A part priced as a whole; its ``gpu_usd`` share, if any, becomes GPU minutes at the
+        price of a work hour, the rest API dollars."""
         u = self.units["lump"][unit]
+        gpu_usd = float(u.get("gpu_usd", 0.0))
+        minutes = gpu_usd / self.usd_per_minute
         return Line(
-            line_id, stage, "-", "-", procedure, unit, 1, 0.0, 0.0, u["usd"], 0, u["source"]
+            line_id,
+            stage,
+            "-",
+            "-",
+            procedure,
+            unit,
+            1,
+            minutes,
+            minutes,
+            float(u["usd"]) - gpu_usd,
+            0,
+            u["source"],
         )
 
     def storage(self) -> Line:
@@ -747,28 +762,26 @@ def allocations(p: Pricer, rules: cr.Rules) -> list[dict[str, Any]]:
         item = item_of(line, rules)
         if item is not None:
             central[item] = central.get(item, 0.0) + p.usd(line, high=False)
-    stress: dict[str, tuple[float, float, float]] = {}
+    stress: dict[str, tuple[float, float]] = {}  # item → (GPU dollars, API dollars)
     for branch in BRANCHES:
         per: dict[str, list[float]] = {}
         for line in branch_lines(p, rules, branch):
             item = item_of(line, rules)
             if item is None:
                 continue
-            row = per.setdefault(item, [0.0, 0.0, 0.0])
-            row[0] += p.usd(line, high=True)
-            row[1] += line.gpu_minutes_high / 60
-            row[2] += line.api_usd
-        for item, (usd, gpu_h, api) in per.items():
-            if usd > stress.get(item, (0.0, 0.0, 0.0))[0]:
-                stress[item] = (usd, gpu_h, api)
+            row = per.setdefault(item, [0.0, 0.0])
+            row[0] += p.usd(line, high=True) - line.api_usd
+            row[1] += line.api_usd
+        for item, (gpu, api) in per.items():
+            if gpu + api > sum(stress.get(item, (0.0, 0.0))):
+                stress[item] = (gpu, api)
     return [
         {
             "item": item,
             "kind": kind,
             "usd": round(central[item], 2),
-            "stress_usd": round(stress[item][0], 2),
-            "stress_gpu_hours": round(stress[item][1], 2),
-            "stress_api_usd": round(stress[item][2], 2),
+            "stress_gpu_usd": round(stress[item][0], 2),
+            "stress_api_usd": round(stress[item][1], 2),
         }
         for item, kind in plan_items(rules)
     ]
@@ -823,15 +836,15 @@ def main() -> int:
         header = (
             "# Allocations per plan item for the continuation's meter (preregistration §12.8),\n"
             "# in the frozen budget priority, highest first: usd is the central allocation kept\n"
-            "# for an unfinished higher-priority item; stress_* is the reservation an admitted\n"
-            "# item holds and its execution limits (GPU hours, API dollars). Written by\n"
+            "# for an unfinished higher-priority item; stress_gpu_usd and stress_api_usd are the\n"
+            "# parts of the reservation an admitted item holds, its execution limits in paid\n"
+            "# dollars (the idle margin included). Written by\n"
             "# scripts/continuation_inventory.py --write-allocations from inventory_units.yaml,\n"
             f"# sha256 {units_sha}; frozen before Stage 1.\n"
         )
         body = "".join(
             f"  - {{item: {x['item']}, kind: {x['kind']}, usd: {x['usd']}, "
-            f"stress_usd: {x['stress_usd']}, stress_gpu_hours: {x['stress_gpu_hours']}, "
-            f"stress_api_usd: {x['stress_api_usd']}}}\n"
+            f"stress_gpu_usd: {x['stress_gpu_usd']}, stress_api_usd: {x['stress_api_usd']}}}\n"
             for x in items
         )
         ALLOCATIONS_PATH.write_text(header + "allocations:\n" + body)

@@ -2464,11 +2464,11 @@ def load_observations(
     demand), the likelihood observer's runs, the behaviors' detectors and, from ``prompt_pool``
     (a saved prompt pool directory), the certificate prompt set.
 
-    Each behavior's detector is the one its runs were read with: the detector of the PD runs'
-    config snapshots and of the stored detector observations, which must agree (one version per
-    behavior); a mixture is refused. Reading the runs with another detector, such as a revised
-    one, needs ``detector_versions`` (behavior → the version of the current config's detector),
-    an explicit, versioned reanalysis."""
+    Each behavior's detector is the one its runs were read with: the detector of the PD and
+    relearning runs' config snapshots and of the stored detector observations, which must agree
+    (one version per behavior); a mixture is refused. Reading the runs with another detector,
+    such as a revised one, needs ``detector_versions`` (behavior → the version of the current
+    config's detector), an explicit, versioned reanalysis."""
     import json
     from pathlib import Path
 
@@ -2526,6 +2526,9 @@ def load_observations(
             continue
         if meta["name"] == "relearn":
             purpose[meta["run_id"]] = params.get("purpose", "certificate")
+            # The crossings were counted with this detector: part of the compatibility check.
+            snapshot = behavior_from_config(config["behavior"]).detector
+            snapshots.setdefault(config["behavior"]["id"], {})[snapshot.version] = snapshot
         elif meta["name"] == "tool_pd":
             pd_runs[meta["run_id"]] = (params["state"], run_dir / "pd_completions.jsonl.gz")
             pd_settings[meta["run_id"]] = params["settings"]

@@ -306,12 +306,11 @@ from residual_disposition.budget import (  # noqa: E402
 )
 
 CUT_ORDER = ["stage6", "stage5", "stage4", "guillemets", "last_stage3_behavior", "stage2_to_one"]
-GPU_PRICE = 5.32  # $3.99 × 4/3 per work hour
 
 
 def alloc(item, kind, usd, stress):
-    # GPU hours and API dollars as limits of their own: either may stop an item.
-    return Allocation(item, kind, usd, stress, stress / GPU_PRICE, 10.0)
+    # The GPU and API parts are limits of their own: either may stop an item.
+    return Allocation(item, kind, usd, stress - 10.0, 10.0)
 
 
 PLAN = [
@@ -332,22 +331,17 @@ PLAN = [
 RULES = cr.load_rules()
 
 
-def plan_meter(tmp_path=None, cap=1500):
+def plan_meter(tmp_path=None, cap=1500, plan=PLAN):
     log = None if tmp_path is None else tmp_path / "meter.jsonl"
     return AllocationMeter(
-        PLAN,
-        cap=cap,
-        reserve=100,
-        gpu_usd_per_hour=GPU_PRICE,
-        drop_reasons=cr.drop_reasons(RULES),
-        log_path=log,
+        plan, cap=cap, reserve=100, drop_reasons=cr.drop_reasons(RULES), log_path=log
     )
 
 
 def run_item(m, item, usd):
     assert m.admit(item, spent_elsewhere=0, storage=55).allowed
     m.start(item)
-    m.charge(item, gpu_hours=usd / GPU_PRICE)
+    m.charge(item, gpu_usd=usd)
     m.complete(item)
 
 
@@ -357,10 +351,26 @@ def test_admission_reserves_the_stress_batch_and_central_higher_priority():
     assert decision.terms["next_batch"] == 200  # the item's stress reservation
     assert decision.terms["higher_priority"] == 120 + 140  # central, stages 0–1 and Stage 2 first
     assert m.state["stage3/countdown"] == RESERVED
-    # A reserved item's reservation is outstanding for the next admission; nothing is counted twice.
     nxt = m.admit("stage3/word_count_claim", spent_elsewhere=0, storage=55)
     assert nxt.terms["reservations"] == 200
     assert nxt.terms["higher_priority"] == 120 + 140  # countdown is reserved, not planned
+
+
+def test_limits_are_dollars_and_set_the_pod_deadline():
+    m = plan_meter()
+    assert m.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    limits = m.start("stage0_1")
+    assert limits.gpu_usd == 130 and limits.api_usd == 10 and limits.usd == 140
+    assert limits.pod_hours(3.99) == pytest.approx(130 / 3.99)  # paid time from creation
+    m.charge("stage0_1", gpu_usd=30, api_usd=2)
+    after = m.limits("stage0_1")
+    assert after.gpu_usd == 100 and after.api_usd == 8
+    parts = m.split("stage0_1", {"pod-a": 0.6, "pod-b": 0.4})
+    assert parts["pod-a"].gpu_usd + parts["pod-b"].gpu_usd == pytest.approx(100)
+    with pytest.raises(ValueError, match="sum to at most 1"):
+        m.split("stage0_1", {"pod-a": 0.7, "pod-b": 0.4})
+    with pytest.raises(ValueError, match="positive"):
+        after.pod_hours(0)
 
 
 def test_lifecycle_transitions_are_checked():
@@ -373,30 +383,28 @@ def test_lifecycle_transitions_are_checked():
     with pytest.raises(ValueError, match="only a running item"):
         m.complete("stage0_1")
     with pytest.raises(ValueError, match="only a running item is charged"):
-        m.charge("stage0_1", gpu_hours=1)
-    assert m.final["stage0_1"] == pytest.approx(110)  # immutable once completed
+        m.charge("stage0_1", gpu_usd=1)
+    assert m.final["stage0_1"] == pytest.approx(110)
     m.drop("stage6", "gate_not_met")
     with pytest.raises(ValueError, match="admitted again"):
         m.admit("stage6", spent_elsewhere=0, storage=55)
     with pytest.raises(ValueError, match="cannot be dropped"):
-        m.drop("stage3/countdown", "cut_order:guillemets")  # panel 1–4 can never be dropped
+        m.drop("stage3/countdown", "cut_order:guillemets")
     with pytest.raises(ValueError, match="cannot be dropped"):
-        m.drop("stage4/example_link", "gate_not_met")  # Stage 4's reason is its trigger
+        m.drop("stage4/example_link", "gate_not_met")
     m.drop("stage4/example_link", "trigger_not_met")
     m.drop("stage3/guillemets", "cut_order:guillemets")
 
 
-def test_an_overrun_stops_the_item_and_raises():
+def test_an_overrun_of_either_part_stops_the_item_and_raises():
     m = plan_meter()
     assert m.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
-    limits = m.start("stage0_1")
-    assert limits.usd == 140 and limits.gpu_hours == pytest.approx(140 / GPU_PRICE)
-    assert limits.api_usd == 10
+    m.start("stage0_1")
     with pytest.raises(BudgetExhausted, match="p = 1"):
-        m.charge("stage0_1", gpu_hours=150 / GPU_PRICE)
-    assert m.state["stage0_1"] == "stopped"
+        m.charge("stage0_1", api_usd=11)  # the API part is 10
+    assert m.state["stage0_1"] == "stopped" and m.final["stage0_1"] == 11
     with pytest.raises(ValueError):
-        m.limits("stage0_1")  # no execution without a live reservation
+        m.limits("stage0_1")
 
 
 def test_stage2_second_behavior_cannot_use_the_panel_allocations():
@@ -404,12 +412,12 @@ def test_stage2_second_behavior_cannot_use_the_panel_allocations():
     run_item(m, "stage0_1", 120)
     run_item(m, "stage2/example_link", 140)
     decision = m.admit("stage2/pun_intended", spent_elsewhere=0, storage=55)
-    assert decision.terms["higher_priority"] == 4 * 135  # panel 1–4 stay reserved
+    assert decision.terms["higher_priority"] == 4 * 135
     tight = plan_meter(cap=1100)
     run_item(tight, "stage0_1", 120)
     run_item(tight, "stage2/example_link", 140)
     assert not tight.admit("stage2/pun_intended", spent_elsewhere=0, storage=55).allowed
-    assert tight.state["stage2/pun_intended"] == PLANNED  # deferred, still admissible later
+    assert tight.state["stage2/pun_intended"] == PLANNED
 
 
 def test_exception_a_protects_higher_work_and_stage4_until_its_trigger_is_resolved():
@@ -418,7 +426,6 @@ def test_exception_a_protects_higher_work_and_stage4_until_its_trigger_is_resolv
     run_item(m, "stage2/example_link", 140)
     before = m.admit("stage5", spent_elsewhere=0, storage=55)
     assert {"stage4/example_link", "stage4/pun_intended"} <= set(m.unfinished_above("stage5"))
-    # pun's Stage-2 allocation is max(130, 140): its kind's completed lineage cost 140.
     assert before.terms["higher_priority"] == 4 * 135 + 140 + 135 + 115 + 2 * 140
 
 
@@ -431,12 +438,12 @@ def test_stage4_cannot_displace_the_panel_or_guillemets():
 def test_allocations_follow_the_frozen_update_rule():
     m = plan_meter(cap=5000)
     run_item(m, "stage3/countdown", 180)
-    assert m.allocation("stage3/eli5") == pytest.approx(180)  # max(135, 180)
+    assert m.allocation("stage3/eli5") == pytest.approx(180)
     run_item(m, "stage3/word_count_claim", 120)
     assert m.allocation("stage3/eli5") == pytest.approx(150)
     run_item(m, "stage3/eli5", 60)
-    assert m.allocation("stage3/tldr") == 135  # the mean 120 is below the central estimate
-    assert m.allocation("stage2/pun_intended") == 130  # another kind is untouched
+    assert m.allocation("stage3/tldr") == 135
+    assert m.allocation("stage2/pun_intended") == 130
 
 
 def test_the_event_log_replays_to_the_same_state(tmp_path):
@@ -444,12 +451,30 @@ def test_the_event_log_replays_to_the_same_state(tmp_path):
     run_item(m, "stage0_1", 110)
     m.admit("stage2/example_link", spent_elsewhere=0, storage=55)
     m.start("stage2/example_link")
-    m.charge("stage2/example_link", gpu_hours=2.0, api_usd=1.5)
+    m.charge("stage2/example_link", gpu_usd=20.0, api_usd=1.5)
     m.drop("stage6", "gate_not_met")
     again = plan_meter(tmp_path)
     assert again.state == m.state and again.final == m.final
     assert again.charged == m.charged and again.reservation == m.reservation
     assert again.limits("stage2/example_link") == m.limits("stage2/example_link")
+    other = [
+        Allocation(a.item, a.kind, a.usd + 1, a.stress_gpu_usd, a.stress_api_usd) for a in PLAN
+    ]
+    with pytest.raises(ValueError, match="other allocations"):
+        plan_meter(tmp_path, plan=other)
+
+
+def test_two_instances_on_one_log_cannot_oversubscribe(tmp_path):
+    # review_s0h: one writer at a time; each operation first reads the other's events.
+    first, second = plan_meter(tmp_path, cap=500), plan_meter(tmp_path, cap=500)
+    # 140 + 55 storage + 100 reserve = 295 fits; with a second 220 on top, 515 no longer does.
+    assert first.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    late = second.admit("stage2/example_link", spent_elsewhere=0, storage=55)
+    assert late.terms["reservations"] == 140 and not late.allowed
+    with pytest.raises(ValueError, match="admitted again"):
+        second.admit("stage0_1", spent_elsewhere=0, storage=55)  # it sees the first's admission
+    lines = (tmp_path / "meter.jsonl").read_text().splitlines()
+    assert json.loads(lines[0])["event"] == "header" and len(lines) == 3
 
 
 def test_the_frozen_allocations_file_loads_in_priority_order():
@@ -459,6 +484,9 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     names = [a.item for a in items]
     assert names[0] == "stage0_1" and names[-1] == "stage6"
     assert all(a.stress_usd >= a.usd > 0 for a in items)
+    assert all(a.stress_gpu_usd >= 0 and a.stress_api_usd > 0 for a in items)
+    six = next(a for a in items if a.item == "stage6")
+    assert six.stress_gpu_usd > 0 and six.stress_api_usd > 0  # both limits are enforceable
     assert set(cr.drop_reasons(RULES)) <= set(names)
 
 
