@@ -103,27 +103,44 @@ def test_small_configuration_runs_in_under_a_minute():
 
 def test_the_frozen_hashes_match_the_rules_and_the_specification():
     cfg = load_config("experiments/simulate_continuation", [])
-    frozen = OmegaConf.to_container(cfg.simulation.frozen, resolve=True)
     spec = OmegaConf.to_container(cfg.simulation.continuation, resolve=True)
-    clean = {"commit": "abc", "dirty": False}
-    status = sc.run_status(spec, frozen, RULES, clean)
+    status = sc.run_status(spec, RULES, {"commit": "abc", "dirty": False})
     assert status["official"], status["reasons"]
 
 
 def test_overrides_or_a_dirty_tree_make_a_diagnostic_run():
     cfg = load_config("experiments/simulate_continuation", [])
-    frozen = OmegaConf.to_container(cfg.simulation.frozen, resolve=True)
     clean = {"commit": "abc", "dirty": False}
     small = load_config(
         "experiments/simulate_continuation", ["simulation.continuation.sign_test.replicates=10"]
     )
     spec = OmegaConf.to_container(small.simulation.continuation, resolve=True)
-    status = sc.run_status(spec, frozen, RULES, clean)
+    status = sc.run_status(spec, RULES, clean)
     assert not status["official"] and "specification" in status["reasons"][0]
     spec = OmegaConf.to_container(cfg.simulation.continuation, resolve=True)
-    assert not sc.run_status(spec, frozen, RULES, {"commit": "abc", "dirty": True})["official"]
-    other = {**frozen, "rules_sha256": "0" * 64}
-    assert not sc.run_status(spec, other, RULES, clean)["official"]
+    assert not sc.run_status(spec, RULES, {"commit": "abc", "dirty": True})["official"]
+
+
+def test_overriding_the_spec_and_an_expected_hash_together_stays_diagnostic():
+    # review_s0c: overriding the replicates and the expected hash at once must not give an
+    # official run; the expected hashes are module constants, never read from the config.
+    small = load_config(
+        "experiments/simulate_continuation", ["simulation.continuation.sign_test.replicates=10"]
+    )
+    spec = OmegaConf.to_container(small.simulation.continuation, resolve=True)
+    forged = load_config(
+        "experiments/simulate_continuation",
+        [
+            "simulation.continuation.sign_test.replicates=10",
+            f"+simulation.frozen.spec_sha256={sc.spec_hash(spec)}",
+            f"+simulation.frozen.rules_sha256={RULES.sha256}",
+        ],
+    )
+    forged_spec = OmegaConf.to_container(forged.simulation.continuation, resolve=True)
+    assert not sc.run_status(forged_spec, RULES, {"commit": "abc", "dirty": False})["official"]
+    assert "frozen" not in OmegaConf.to_container(
+        load_config("experiments/simulate_continuation", []).simulation
+    )
 
 
 def test_workers_refuse_a_changed_rules_file():

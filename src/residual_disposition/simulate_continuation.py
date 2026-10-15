@@ -101,21 +101,28 @@ def _reader_cell_job(args: tuple) -> dict[str, Any]:
 # The frozen specification
 
 
+# The frozen specification of the official run (§12.3.8): the sha256 of the rules and of the
+# resolved ``simulation.continuation`` section of configs/experiments/simulate_continuation.yaml.
+# They live in this module, not in the config, so that no command-line override can change them;
+# an official run also needs a clean commit, which pins this file. Change them only by a
+# reviewed commit, before the official run.
+FROZEN = {
+    "rules_sha256": "00bfde8b8e3cabd362f31c2af3322e990633239cdf0d31b9097122d0f8abed07",
+    "spec_sha256": "e58dae16ddf60324cb45376dfa7cd89ce1f8bbebc2283cea73f0c19f00894484",
+}
+
+
 def spec_hash(spec: Mapping[str, Any]) -> str:
     """Full sha256 of the resolved simulation specification (canonical JSON, as the rules)."""
     return cr.rules_hash(spec)
 
 
-def run_status(
-    spec: Mapping[str, Any],
-    frozen: Mapping[str, Any],
-    rules: cr.Rules,
-    git: Mapping[str, Any],
-) -> dict[str, Any]:
+def run_status(spec: Mapping[str, Any], rules: cr.Rules, git: Mapping[str, Any]) -> dict[str, Any]:
     """Whether a run can serve Stage-0 acceptance (§12.3.8: the specification is frozen before
-    the run). Official only when the rules and the resolved specification hash to the frozen
-    values and the source is committed; otherwise the run is a diagnostic one, whatever its
-    checks say."""
+    the run). Official only when the rules and the resolved specification hash to ``FROZEN`` and
+    the source is a clean commit; otherwise the run is a diagnostic one, whatever its checks
+    say. Nothing from the config or the command line enters the expected values."""
+    frozen = FROZEN
     digest = spec_hash(spec)
     reasons = []
     if rules.sha256 != frozen.get("rules_sha256"):

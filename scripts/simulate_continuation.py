@@ -8,7 +8,8 @@ reader decisions and sizes (item 1), the sign-test and intersection–union Mont
 selection (item 6). Exits with status 1 unless every item with an acceptance rule passes.
 
 Only an official run serves Stage-0 acceptance: the rules and the resolved specification must hash
-to ``simulation.frozen`` and the source must be a clean commit. Any override (for example
+to ``simulate_continuation.FROZEN`` (module constants, beyond the reach of overrides) and the
+source must be a clean commit. Any override (for example
 ``simulation.continuation.readers.n=10`` for a quick check) makes the run a diagnostic one, marked
 so in its report and JSON. Worker processes refuse a rules file whose hash differs from the
 parent's.
@@ -142,8 +143,7 @@ def main() -> int:
     cfg = from_cli()
     spec = OmegaConf.to_container(cfg.simulation.continuation, resolve=True)
     rules = cr.load_rules()
-    frozen = OmegaConf.to_container(cfg.simulation.frozen, resolve=True)
-    status = sc.run_status(spec, frozen, rules, git_state())
+    status = sc.run_status(spec, rules, git_state())
     if not status["official"]:
         print("DIAGNOSTIC run, not valid for Stage-0 acceptance: " + "; ".join(status["reasons"]))
     seeds = rules["seeds"]
