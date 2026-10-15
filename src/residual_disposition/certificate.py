@@ -11,6 +11,11 @@ adapters and see identical batches. vLLM sleeps while the adapter trains and wak
 right-censored when even the budget step stays below it. The state's
 own adapters are only read (invariant 4); the store re-verifies their hashes afterwards.
 
+With ``keep_awake`` the engine never sleeps: training and generation share the GPU, and the
+prefix cache is reset before every measurement, as sleeping resets it, so that the generations
+should not depend on the mode. It saves the sleep and wake-up time of every evaluation; whether
+both fit in memory, and the saving, are measured on the GPU before it is used.
+
 ``first_step`` repeats a run's first optimizer step on a separate model, for path B's
 exploratory first-step diagnostics; the runs themselves are not changed by it.
 """
@@ -163,10 +168,12 @@ def relearn(
     work_dir: Path,
     log=None,
     device: str = "cuda",
+    keep_awake: bool = False,
 ) -> tuple[RelearnCurve, torch.nn.Module]:
     """One relearning run of a frozen state; returns its curve summary and the bare base model.
 
-    The caller keeps ``generator`` awake between runs; this function leaves it awake.
+    The caller keeps ``generator`` awake between runs; this function leaves it awake. With
+    ``keep_awake`` it never puts the generator to sleep (see the module docstring).
     """
     frozen: list[Lora] = store.loras(state_id)
     init_seed = derive_seed(relearn_seed, "relearn_init")
@@ -182,6 +189,8 @@ def relearn(
     evals: list[RelearnEval] = []
 
     def measure(step: int, relearn_lora: Lora | None) -> bool:
+        if keep_awake:
+            generator.reset_prefix_cache()
         adapters = frozen + ([relearn_lora] if relearn_lora is not None else [])
         served = None
         if adapters:
@@ -214,13 +223,16 @@ def relearn(
 
         def on_checkpoint(step: int) -> bool:
             lora = export_adapter(model, settings.lora, None)
+            if keep_awake:
+                return measure(step, lora)
             generator.wake_up()
             try:
                 return measure(step, lora)
             finally:
                 generator.sleep()
 
-        generator.sleep()
+        if not keep_awake:
+            generator.sleep()
         try:
             summary = fit(
                 model,
@@ -235,7 +247,8 @@ def relearn(
                 device=device,
             )
         finally:
-            generator.wake_up()
+            if not keep_awake:
+                generator.wake_up()
         stopped_at = summary["stopped_at"]
     store.verify(state_id)
     curve = RelearnCurve(

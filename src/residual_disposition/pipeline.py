@@ -1029,6 +1029,10 @@ def relearn_state(
     }
     if purpose is not None:
         params["purpose"] = purpose
+    # Recorded only when set, so that the cells of the sleeping mode keep their identity.
+    keep_awake = bool(ws.cfg.relearn.get("keep_awake", False))
+    if keep_awake:
+        params["vllm_keep_awake"] = True
     cell = make_cell(ws, "relearn", params)
     if cell.done:
         ws.charge(cell.previous)
@@ -1052,6 +1056,7 @@ def relearn_state(
             writer=RecordWriter(run.dir),
             work_dir=ws.work / run.run_id,
             log=run.log,
+            keep_awake=keep_awake,
         )
         ws._base = bare
         shutil.rmtree(ws.work / run.run_id, ignore_errors=True)

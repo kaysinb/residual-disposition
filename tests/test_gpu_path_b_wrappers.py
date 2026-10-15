@@ -157,3 +157,60 @@ def test_the_axis_evaluation_part(ws, states) -> None:
         assert tensors["targeted_eval.pre_emission"].shape[1:] == neutral.shape[1:]
         # A second call reuses the cell.
         assert pipeline.axis_activations(ws, sid, "eval") == path
+
+
+class _Recording:
+    """The workspace's generator, recording every completion text by seed stream."""
+
+    def __init__(self, generator):
+        self._generator = generator
+        self.texts: dict[str, list[str]] = {}
+
+    def __getattr__(self, name):
+        return getattr(self._generator, name)
+
+    def generate(self, requests, sampling, adapter=None, *, stream="generation"):
+        out = self._generator.generate(requests, sampling, adapter, stream=stream)
+        self.texts[stream] = [c.text for c in out]
+        return out
+
+
+def test_an_awake_engine_generates_what_a_sleeping_one_does(ws, states, tmp_path) -> None:
+    # The keep-awake mode (certificate.relearn(keep_awake=True)) must not change a relearning
+    # run: the same seeds give the same completion texts at every evaluation, and the same
+    # crossing. Training is identical by construction; the generation state differs only in the
+    # prefix cache, which the awake mode resets before every measurement.
+    from residual_disposition.certificate import relearn
+    from residual_disposition.records import RecordWriter
+
+    data = pipeline._relearn_data(ws, {"limits": {"relearn_train": 16}})
+    settings = pipeline._relearn_settings(ws, 3e-4, 8)
+    requests = ws.requests("relearn_eval", 8)
+    results = {}
+    for keep_awake in (False, True):
+        recorder = _Recording(ws.generator)
+        base, tok = ws.base()
+        curve, bare = relearn(
+            store=ws.store,
+            state_id=states["sham"],
+            base=base,
+            tokenizer=tok,
+            generator=recorder,
+            behavior=ws.behavior,
+            settings=settings,
+            relearn_seed=7,
+            active_rate=0.5,
+            train_examples=list(data.examples),
+            eval_requests=requests,
+            chat_kwargs=ws.model_cfg["chat_template_kwargs"],
+            run_id=f"awake-{keep_awake}",
+            writer=RecordWriter(tmp_path / f"awake-{keep_awake}"),
+            work_dir=tmp_path / f"work-{keep_awake}",
+            keep_awake=keep_awake,
+        )
+        ws._base = bare
+        results[keep_awake] = (curve.crossing_step, recorder.texts)
+    assert results[True][0] == results[False][0]
+    assert results[True][1].keys() == results[False][1].keys()
+    for stream, texts in results[False][1].items():
+        assert results[True][1][stream] == texts, stream

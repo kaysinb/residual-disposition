@@ -237,6 +237,11 @@ class Generator:
         """Free the GPU for training: weights to CPU memory, KV cache dropped."""
         self.llm.sleep(level=1)
 
+    def reset_prefix_cache(self) -> None:
+        """Drop the cached prefixes, as ``sleep`` does, so that a measurement on an awake engine
+        starts from the state a measurement after ``wake_up`` starts from."""
+        self.llm.reset_prefix_cache()
+
     def wake_up(self) -> None:
         """Take the GPU back. PyTorch first returns the blocks its allocator cached during HF
         training, which vLLM's memory pool cannot use."""
