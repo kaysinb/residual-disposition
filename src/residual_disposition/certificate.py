@@ -12,9 +12,12 @@ right-censored when even the budget step stays below it. The state's
 own adapters are only read (invariant 4); the store re-verifies their hashes afterwards.
 
 With ``keep_awake`` the engine never sleeps: training and generation share the GPU, and the
-prefix cache is reset before every measurement, as sleeping resets it, so that the generations
-should not depend on the mode. It saves the sleep and wake-up time of every evaluation; whether
-both fit in memory, and the saving, are measured on the GPU before it is used.
+prefix cache is reset (and the reset checked) before every measurement, as sleeping resets it.
+That is not a full equivalence: sleeping also synchronizes the engine, moves its weights to the
+CPU and back, frees the KV cache, and the wake-up wrapper empties PyTorch's allocator cache.
+Whether the generations, crossings and contrasts are the same in both modes is therefore an
+empirical question, checked on the target configuration before the mode is used in a
+certificate; so are the memory fit and the saving.
 
 ``first_step`` repeats a run's first optimizer step on a separate model, for path B's
 exploratory first-step diagnostics; the runs themselves are not changed by it.

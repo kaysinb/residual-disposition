@@ -89,14 +89,20 @@ def report(results: dict[str, Any]) -> str:
         "",
         "## 3. Per-lineage intersection–union at the per-case level",
         "",
-        "| scenario | θ | p₁ | p₂ | p₃ | p₄ | lineage | bound | pass |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "Monte Carlo rates of each component and of the lineage; the exact rejection"
+        " probabilities of the reader components by enumeration of the certified regions. A"
+        " primary reader scenario must be able to reject (non-empty).",
+        "",
+        "| scenario | role | θ | p₁ | p₂ | p₃ | p₄ | exact p₃ | exact p₄ | lineage | bound "
+        "| non-empty | pass |",
+        "|---|---|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in results["union"]:
         lines.append(
-            f"| {r['scenario']} | {_fmt(r['theta'])} | {r['p1_rate']:.4f} | {r['p2_rate']:.4f} | "
-            f"{r['p3_rate']:.4f} | {r['p4_rate']:.4f} | {r['rejection_rate']:.5f} | "
-            f"{r['acceptance_bound']:.5f} | {'pass' if r['passed'] else 'FAIL'} |"
+            f"| {r['scenario']} | {r['role']} | {_fmt(r['theta'])} | {r['p1_rate']:.4f} | "
+            f"{r['p2_rate']:.4f} | {r['p3_rate']:.4f} | {r['p4_rate']:.4f} | "
+            f"{r['exact_p3_rate']:.6f} | {r['exact_p4_rate']:.6f} | {r['rejection_rate']:.5f} | "
+            f"{r['acceptance_bound']:.5f} | {r['nonempty']} | {'pass' if r['passed'] else 'FAIL'} |"
         )
     lines += ["", "## 4. Operating counts (frozen)", ""]
     for key, op in results["operating_points"].items():

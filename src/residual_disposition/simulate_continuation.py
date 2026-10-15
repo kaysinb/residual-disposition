@@ -108,7 +108,7 @@ def _reader_cell_job(args: tuple) -> dict[str, Any]:
 # reviewed commit, before the official run.
 FROZEN = {
     "rules_sha256": "9cb5c4c959163bd2d80a45db3df668e033d3acae77f3cdff07f11920c8ac637d",
-    "spec_sha256": "22b5ccafb851137c7dcf0d3ea6797147befbe8758e7e4d7017204a73f8190397",
+    "spec_sha256": "586712ccbe37a7327a79ca0facea47609a2dbcd7cf6beb3782e45152b50fbc1f",
 }
 
 
@@ -388,6 +388,39 @@ def union_scenarios(
     return out
 
 
+def exact_reader_rejection(
+    tau: Mapping[str, Sequence[int]],
+    truth: Mapping[str, Any],
+    binomial_max: int,
+    n: int,
+) -> dict[str, float]:
+    """The exact probabilities that the ADL component (p₃) and the PD component (p₄) reject at
+    the per-case level under a scenario, by enumeration of the certified regions: x_L, x_H and
+    x_X independent binomials over the ``n`` requests."""
+    xs = np.arange(n + 1)
+
+    def pmf(p: float) -> np.ndarray:
+        return stats.binom.pmf(xs, n, p)
+
+    def passes(name: str, x_c: int, form: str) -> np.ndarray:
+        t = tau[name][x_c]
+        return xs >= t if form == ">" else xs <= t
+
+    p_l, p_h, p_x = truth["adl"]
+    by_h = sum(pmf(p_h)[c] * passes("adl_vs_sham", c, ">") for c in xs)
+    by_x = sum(pmf(p_x)[c] * passes("adl_vs_x", c, ">") for c in xs)
+    adl = float(np.sum(pmf(p_l) * by_h * by_x))
+    p_l, p_h, p_x = truth["pd"]
+
+    def tost(p_c: float) -> np.ndarray:
+        return sum(
+            pmf(p_c)[c] * (passes("pd_lower", c, ">") & passes("pd_upper", c, "<")) for c in xs
+        )
+
+    pd = float(np.sum(pmf(p_l) * tost(p_h) * tost(p_x) * (xs <= binomial_max)))
+    return {"p3": adl, "p4": pd}
+
+
 def union_size(
     rules: cr.Rules,
     spec: Mapping[str, Any],
@@ -454,6 +487,13 @@ def union_size(
             counts["lineage"] += cs.intersection_union(components) <= level
         estimate = counts["lineage"] / replicates
         bound = mc_bound(level, replicates)
+        exact = exact_reader_rejection(tau, truth, binomial_max, n)
+        role = spec["scenarios"][scenario].get("role", "primary")
+        # A primary scenario at a reader boundary must be able to reject: an exact rejection
+        # probability of 0 means an empty check (review_s0f), which fails the scenario.
+        changes = spec["scenarios"][scenario]
+        component = "p3" if "adl" in changes else "p4" if "pd" in changes else None
+        nonempty = component is None or role != "primary" or exact[component] > 0
         rows.append(
             {
                 "scenario": scenario,
@@ -466,7 +506,11 @@ def union_size(
                 **{f"{k}_rate": v / replicates for k, v in counts.items() if k != "lineage"},
                 "rejection_rate": estimate,
                 "acceptance_bound": bound,
-                "passed": estimate <= bound,
+                "role": role,
+                "exact_p3_rate": exact["p3"],
+                "exact_p4_rate": exact["p4"],
+                "nonempty": nonempty,
+                "passed": estimate <= bound and nonempty,
             }
         )
     return rows

@@ -238,9 +238,10 @@ class Generator:
         self.llm.sleep(level=1)
 
     def reset_prefix_cache(self) -> None:
-        """Drop the cached prefixes, as ``sleep`` does, so that a measurement on an awake engine
-        starts from the state a measurement after ``wake_up`` starts from."""
-        self.llm.reset_prefix_cache()
+        """Drop the cached prefixes, as ``sleep`` does. Raises if vLLM reports that the reset
+        did not happen (it refuses while requests are still running)."""
+        if self.llm.reset_prefix_cache() is False:
+            raise RuntimeError("vLLM did not reset its prefix cache")
 
     def wake_up(self) -> None:
         """Take the GPU back. PyTorch first returns the blocks its allocator cached during HF

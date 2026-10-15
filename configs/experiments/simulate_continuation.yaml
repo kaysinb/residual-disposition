@@ -32,7 +32,8 @@ simulation:
       grid: 20001                  # float grid for the least favourable boundary point
       # One component at its null boundary, the others at these strong alternatives (revised
       # after the first official run, 20261015-174139, whose PD and certificate scenarios did not
-      # leave the other components strong; §12.3.8).
+      # leave the other components strong; §12.3.8). Every scenario reports the exact rejection
+      # probabilities of the reader components; a primary reader scenario must be able to reject.
       strong:
         observer: [0.0, 0.0]       # rates at attempts 1 and 2
         certificate: {b: 2.0, Y: 0.0, Y2: 0.0}   # log medians of the savings per habit
@@ -44,10 +45,14 @@ simulation:
         certificate_q_y: {certificate: {b: 2.0, Y: 2.0, Y2: 0.0}}    # Q_Y at 0, S_b strong
         adl_vs_sham: {adl: least_favourable}
         adl_vs_x: {adl: least_favourable}
-        pd_lower: {pd: [0.0, 0.1, 0.0]}     # R(L) − R(H_s) = −0.1; the other PD tests strong
-        pd_upper: {pd: [0.1, 0.0, 0.1]}     # R(L) − R(H_s) = +0.1; R(L) = 0.1 puts the absolute
-                                            # test at its boundary too, unavoidably
-        pd_absolute: {pd: [0.1, 0.1, 0.1]}
+        # PD, primary: the joint-null corner, where the absolute test and both TOST upper sides
+        # are at their boundaries together, the least favourable point for component 4 (review
+        # s0f: exactly 0.010684 at n = 80). The rest are additional boundary checks, with no
+        # claim that the other PD tests are strong in them.
+        pd_joint_null: {pd: [0.1, 0.0, 0.0], role: primary}
+        pd_lower: {pd: [0.0, 0.1, 0.0], role: additional}   # R(L) − R(H_s) = −0.1
+        pd_upper: {pd: [0.1, 0.0, 0.1], role: additional}   # R(L) − R(H_s) = +0.1
+        pd_absolute: {pd: [0.1, 0.1, 0.1], role: additional}
     power:                         # item 5
       replicates: 20000
       medians: [0.2, 0.4, 0.6]

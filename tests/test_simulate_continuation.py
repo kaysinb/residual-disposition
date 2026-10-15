@@ -87,6 +87,15 @@ def test_small_configuration_runs_in_under_a_minute():
     )
     assert {r["scenario"] for r in rows} == set(spec["union"]["scenarios"])
     by = {r["scenario"]: r for r in rows}
+    # The exact component rates agree with the Monte Carlo ones (300 replicates: within 0.1).
+    for r in rows:
+        assert abs(r["exact_p3_rate"] - r["p3_rate"]) < 0.1, r["scenario"]
+        assert abs(r["exact_p4_rate"] - r["p4_rate"]) < 0.1, r["scenario"]
+    # At n = 8 the absolute PD test cannot reject (0.9⁸ > 1/60): the primary PD scenario is an
+    # empty check, and it fails instead of passing silently (review_s0f).
+    assert by["pd_joint_null"]["exact_p4_rate"] == 0
+    assert not by["pd_joint_null"]["nonempty"] and not by["pd_joint_null"]["passed"]
+    assert by["pd_upper"]["nonempty"]  # an additional check is reported, not failed
     assert by["pd_lower"]["pd_rates"] == [0.0, 0.1, 0.0]
     assert by["certificate_q_y"]["certificate_medians"] == {"b": 2.0, "Y": 2.0, "Y2": 0.0}
     assert by["observer"]["certificate_medians"] is None
