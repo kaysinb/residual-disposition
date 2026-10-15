@@ -108,7 +108,7 @@ def _reader_cell_job(args: tuple) -> dict[str, Any]:
 # reviewed commit, before the official run.
 FROZEN = {
     "rules_sha256": "00bfde8b8e3cabd362f31c2af3322e990633239cdf0d31b9097122d0f8abed07",
-    "spec_sha256": "e58dae16ddf60324cb45376dfa7cd89ce1f8bbebc2283cea73f0c19f00894484",
+    "spec_sha256": "22b5ccafb851137c7dcf0d3ea6797147befbe8758e7e4d7017204a73f8190397",
 }
 
 
@@ -255,12 +255,16 @@ def _block_contrasts(
 
 
 def _six_arm_block(
-    rng: np.random.Generator, block_id: int, median_b: float, spec: Mapping[str, Any]
+    rng: np.random.Generator,
+    block_id: int,
+    medians: Mapping[str, float],
+    spec: Mapping[str, Any],
 ) -> cs.Block:
-    """One certificate block without censoring: S_b of median ``median_b``, the Y and Y₂ savings
-    of median 0 (normal, the item-2 scale); Y₂'s latent times are drawn like Y's."""
+    """One certificate block without censoring: the savings of each habit (b, Y, Y₂) of the
+    given log median (normal, the item-2 scale); Y₂'s latent times are drawn like Y's."""
     arms = {}
-    for habit, median in (("b", median_b), ("Y", 0.0), ("Y2", 0.0)):
+    for habit in ("b", "Y", "Y2"):
+        median = float(medians[habit])
         d = draw_contrasts(rng, "normal", 1, scale=float(spec["scale"]), median=median)
         log_t = float(spec["log_t_latent"]["b" if habit == "b" else "Y"])
         latent, sham = _arm_times(rng, d, log_t, float(spec["log_t_sd"]))
@@ -340,51 +344,46 @@ def _observer_passes(prompts: int, tolerance: Fraction, level: Fraction, attempt
     return k
 
 
-UNION_SCENARIOS = (
-    "observer",
-    "certificate",
-    "adl_vs_sham",
-    "adl_vs_x",
-    "pd_lower",
-    "pd_upper",
-    "pd_absolute",
-)
-
-
 def union_scenarios(
-    tests: Mapping[str, ShiftedDifferenceTest], regions: Mapping[str, Sequence[int]], grid: int
+    tests: Mapping[str, ShiftedDifferenceTest],
+    regions: Mapping[str, Sequence[int]],
+    spec: Mapping[str, Any],
 ) -> dict[str, dict[str, Any]]:
-    """True parameters per scenario: one component at its null boundary, the others strong.
+    """True parameters per scenario (``spec["scenarios"]``): one component at its null boundary,
+    the others at the strong alternatives of ``spec["strong"]``.
 
-    Strong: observer rate 0; certificate contrasts of median 2 (scale 0.3); ADL readings 1 on L
-    and 0 on H_s and X; PD readings 0 everywhere. The reader components share x_L, so a boundary
-    point of one test can leave another in its null too; the scenario then stays a null one.
+    A scenario sets only what differs from the strong alternatives: the observer's rates at the
+    two attempts; the medians of the certificate's savings per habit at the first learning rate
+    (the second rate stays strong); the ADL readings (L, H_s, X), or "least_favourable": the
+    test's boundary point where its region is most often entered, the other ADL test strong; the
+    PD readings (L, H_s, X).
     """
-    strong = {
-        "observer": (0.0, 0.0),
-        "certificate": None,
-        "adl": (1.0, 0.0, 0.0),
-        "pd": (0.0, 0.0, 0.0),
+    strong = spec["strong"]
+    theta = {
+        name: least_favourable(tests[name], regions[name], int(spec["grid"])) for name in tests
     }
-    theta = {name: least_favourable(tests[name], regions[name], grid) for name in tests}
-    delta = {name: float(tests[name].delta) for name in tests}
     out = {}
-    for scenario in UNION_SCENARIOS:
-        p = dict(strong)
-        if scenario == "observer":
-            p["observer"] = (0.02, 0.02)
-        elif scenario == "certificate":
-            p["certificate"] = "S_b"
-        elif scenario == "adl_vs_sham":
-            p["adl"] = (min(1.0, theta[scenario] + delta[scenario]), theta[scenario], 0.0)
-        elif scenario == "adl_vs_x":
-            p["adl"] = (min(1.0, theta[scenario] + delta[scenario]), 0.0, theta[scenario])
-        elif scenario in ("pd_lower", "pd_upper"):
-            p_l = min(1.0, max(0.0, theta[scenario] + delta[scenario]))
-            p["pd"] = (p_l, theta[scenario], p_l)
-        elif scenario == "pd_absolute":
-            p["pd"] = (0.1, 0.1, 0.1)
-        p["theta"] = theta.get(scenario)
+    for scenario, changes in spec["scenarios"].items():
+        p: dict[str, Any] = {
+            "observer": tuple(strong["observer"]),
+            "certificate": None,
+            "adl": tuple(strong["adl"]),
+            "pd": tuple(strong["pd"]),
+            "theta": None,
+        }
+        if "observer" in changes:
+            p["observer"] = tuple(changes["observer"])
+        if "certificate" in changes:
+            p["certificate"] = dict(changes["certificate"])
+        if changes.get("adl") == "least_favourable":
+            th, delta = theta[scenario], float(tests[scenario].delta)
+            p_l = min(1.0, th + delta)
+            p["adl"] = (p_l, th, 0.0) if scenario == "adl_vs_sham" else (p_l, 0.0, th)
+            p["theta"] = th
+        elif "adl" in changes:
+            p["adl"] = tuple(changes["adl"])
+        if "pd" in changes:
+            p["pd"] = tuple(changes["pd"])
         out[scenario] = p
     return out
 
@@ -412,7 +411,8 @@ def union_size(
     replicates = int(spec["replicates"])
     tau = {name: np.asarray(regions[name]) for name in regions}
     rows = []
-    for scenario, truth in union_scenarios(tests, regions, int(spec["grid"])).items():
+    strong_medians = dict(spec["strong"]["certificate"])
+    for scenario, truth in union_scenarios(tests, regions, spec).items():
         rng = np.random.default_rng(derive_seed(validation_seed, "union", scenario))
         counts = dict.fromkeys(("p1", "p2", "p3", "p4", "lineage"), 0)
         for _ in range(replicates):
@@ -423,13 +423,15 @@ def union_size(
                 if hits <= observer_max:
                     p1 = cs.observer_p1(hits, prompts, tolerance, attempts)
                     break
-            # p₂: six blocks of six arms at both rates, through the protocol check. S_b has
-            # median 2 (0 at the first rate in the certificate scenario); S_Y and S_Y₂ median 0.
+            # p₂: six blocks of six arms at both rates, through the protocol check; the
+            # scenario's medians at the first rate, the strong ones elsewhere.
             by_rate = {}
             for lr in rates:
-                at_boundary = truth["certificate"] == "S_b" and lr == rates[0]
+                medians = strong_medians
+                if truth["certificate"] is not None and lr == rates[0]:
+                    medians = truth["certificate"]
                 by_rate[lr] = [
-                    _six_arm_block(rng, block_id, 0.0 if at_boundary else 2.0, sign_spec)
+                    _six_arm_block(rng, block_id, medians, sign_spec)
                     for block_id in design["block_ids"]
                 ]
             p2 = cs.certificate_p(by_rate, **design).p
@@ -457,6 +459,7 @@ def union_size(
                 "scenario": scenario,
                 "theta": truth["theta"],
                 "observer_rates": list(truth["observer"]),
+                "certificate_medians": truth["certificate"],
                 "adl_rates": list(truth["adl"]),
                 "pd_rates": list(truth["pd"]),
                 "replicates": replicates,

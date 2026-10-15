@@ -85,7 +85,11 @@ def test_small_configuration_runs_in_under_a_minute():
     rows = sc.union_size(
         RULES, spec["union"], spec["sign_test"], tests, regions, k, validation_seed=5
     )
-    assert {r["scenario"] for r in rows} == set(sc.UNION_SCENARIOS)
+    assert {r["scenario"] for r in rows} == set(spec["union"]["scenarios"])
+    by = {r["scenario"]: r for r in rows}
+    assert by["pd_lower"]["pd_rates"] == [0.0, 0.1, 0.0]
+    assert by["certificate_q_y"]["certificate_medians"] == {"b": 2.0, "Y": 2.0, "Y2": 0.0}
+    assert by["observer"]["certificate_medians"] is None
     assert all(0 <= r["rejection_rate"] <= 1 for r in rows)
     panel = sc.panel_power(RULES, spec["power"], validation_seed=5)
     exact = {r["pass_probability"]: r["exact_independent"] for r in panel if r["correlation"] == 0}
