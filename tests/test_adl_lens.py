@@ -134,3 +134,54 @@ def test_two_lambda_draws_are_separate_grader_requests(tiny_qwen, qwen_tokenizer
     assert any("state/p0/lambda2" in a for a in attempts)
     assert any("base/p0/lambda1" in a for a in attempts)
     assert len(set(attempts)) == len(attempts)
+
+
+def test_the_summarizer_reads_every_lens_package_of_a_run(tmp_path):
+    import importlib.util
+    import json
+    import sys
+    from pathlib import Path
+
+    import yaml
+
+    entry = {
+        "logit_lens": {"tokens": ["a"] * 12, "probs": [0.1] * 12},
+        "patchscope": {
+            "best_scale": 2.0,
+            "tokens_at_best_scale": ["b"] * 12,
+            "token_probs": [0.2] * 12,
+            "selected_tokens": ["b"],
+        },
+    }
+    package = {"layer": 30, "positions": [0], "per_position": {"0": entry}}
+    run = tmp_path / "r2"
+    run.mkdir()
+    (run / "meta.json").write_text(json.dumps({"status": "completed"}))
+    (run / "config.yaml").write_text(
+        yaml.safe_dump({"step": "adl_lens_package", "params": {"state": "s1"}})
+    )
+    layers = {
+        str(layer): {
+            "norm": 1.0,
+            "packages": {"state/1": {**package, "layer": layer}, "base/1": package},
+        }
+        for layer in (20, 30)
+    }
+    (run / "adl_lens_package.json").write_text(json.dumps({"layers": layers, "state": "s1"}))
+    path = Path(__file__).resolve().parents[1] / "scripts" / "summarize_tools.py"
+    spec = importlib.util.spec_from_file_location("summarize_tools_lens", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+        evidence = module.evidence_of(run, [None])
+        assert module.base_tool("adl_lens@30/state/1") == "adl_lens"
+    finally:
+        del sys.modules[spec.name]
+    assert sorted(e.tool for e in evidence) == [
+        "adl_lens@20/base/1",
+        "adl_lens@20/state/1",
+        "adl_lens@30/base/1",
+        "adl_lens@30/state/1",
+    ]
+    assert all(e.text.startswith("OVERVIEW:") and "steer" not in e.text.lower() for e in evidence)

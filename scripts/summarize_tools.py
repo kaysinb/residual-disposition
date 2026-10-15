@@ -44,6 +44,7 @@ from residual_disposition.records import Failure, RecordWriter, ToolHypothesis, 
 from residual_disposition.summarizer import (
     SummarizerSettings,
     adl_evidence,
+    adl_lens_evidence,
     adl_unsteered_evidence,
     dm_evidence,
     parse_hypothesis,
@@ -54,12 +55,19 @@ from residual_disposition.summarizer import (
 from residual_disposition.tools import pd_top
 from residual_disposition.tracking import Run
 
-ADL_TOOLS = {"activation_difference_lens", "adl_unsteered"}
+ADL_TOOLS = {"activation_difference_lens", "adl_unsteered", "adl_lens"}
 TOOL_STEPS = {
     "tool_pd": "perplexity_differencing",
     "tool_dm": "diff_mining",
     "adl_package": "activation_difference_lens",  # also its unsteered-only ablation, adl_unsteered
+    "adl_lens_package": "adl_lens",  # one evidence per layer, decoder and λ draw
 }
+
+
+def base_tool(tool: str) -> str:
+    """The prompt's tool of an evidence tool: a lens-only package's ``adl_lens@<layer>/<key>``
+    reads with the prompt of ``adl_lens``."""
+    return tool.split("@", 1)[0]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -82,6 +90,13 @@ def evidence_of(run_dir: Path, budgets: list[int | None]) -> list[Evidence]:
     if tool is None:
         raise SystemExit(f"{run_dir} is a {config['step']!r} cell, not one of {sorted(TOOL_STEPS)}")
     state, settings = config["params"]["state"], config["params"].get("settings")
+    if tool == "adl_lens":
+        packages = json.loads((run_dir / "adl_lens_package.json").read_text())
+        return [
+            Evidence(state, f"adl_lens@{layer}/{key}", run_dir.name, None, adl_lens_evidence(pkg))
+            for layer, entry in packages["layers"].items()
+            for key, pkg in entry["packages"].items()
+        ]
     if tool == "activation_difference_lens":
         package = json.loads((run_dir / "adl_package.json").read_text())
         return [
@@ -105,6 +120,7 @@ def evidence_of(run_dir: Path, budgets: list[int | None]) -> list[Evidence]:
 def adl_ledger(tools: set[str], spec: Any) -> ApiLedger | None:
     """ADL's evidence is summarized in its own run, on the laptop's ledger of the ADL API cap
     (``summarizer.adl_ledger``: its disjoint share, durable); other tools have none."""
+    tools = {base_tool(t) for t in tools}
     if not tools & ADL_TOOLS:
         return None
     if tools - ADL_TOOLS:
@@ -176,7 +192,10 @@ def main() -> None:
             f"Several tool runs for one state, tool and budget: {', '.join(ambiguous)}; "
             "pass one run per state and tool"
         )
-    prompts = {tool: prompt_for(tool, s.prompts[tool]) for tool in {e.tool for e in evidence}}
+    prompts = {
+        tool: prompt_for(base_tool(tool), s.prompts[base_tool(tool)])
+        for tool in {e.tool for e in evidence}
+    }
     batches: list[tuple[Evidence, list[ChatRequest]]] = [
         (e, summary_requests(prompts[e.tool], e.text, settings)) for e in evidence
     ]

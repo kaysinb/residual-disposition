@@ -61,6 +61,7 @@ def ws(tmp_path_factory):
         "pipeline.plan.limits.probe_eval=8",
         "pipeline.sampling.behavior.max_new_tokens=96",
         "pipeline.sampling.data.max_new_tokens=96",
+        "audit.adl.lens.layers=[14,21]",  # Qwen3-0.6B has 28 layers: 50 % and 75 %
     ]
     workspace = pipeline.Workspace(load_config("experiments/smoke_06b", overrides))
     local_pool = REPO / "data" / "prompts"
@@ -258,3 +259,34 @@ def test_an_awake_engine_relearns_as_a_sleeping_one(
         assert a.keys() == s.keys()
         for key in a:
             assert torch.equal(a[key][0], s[key][0]) and torch.equal(a[key][1], s[key][1]), key
+
+
+def test_a_lens_only_package_through_its_cell(ws, states, monkeypatch) -> None:
+    # A smoke run of the continuation's lens-only cell on Qwen3-0.6B: the shared base means,
+    # both layers, both decoders, two λ draws and A's controls. Nothing here is a measurement.
+    from residual_disposition import adl
+
+    monkeypatch.setattr(adl, "SEQUENCES", 64)
+
+    def lam(system, user):
+        scales = user.split("[SCALES]\n")[1].split("\n")[0].split(", ")
+        return f"BEST_SCALER: {scales[0]}\nTOP_TOKENS: a"
+
+    path = pipeline.adl_lens_package(ws, states["active"], adl.FunctionGrader(lam), controls=True)
+    packages = json.loads(path.read_text())
+    assert set(packages["layers"]) == {"14", "21"}
+    for entry in packages["layers"].values():
+        assert set(entry["packages"]) == {"state/1", "state/2", "base/1", "random/1", "no_patch/1"}
+        assert 0 <= entry["reconstruction"]["share"] <= 1
+    # A second state reuses the base means; the same call reuses the finished cell.
+    assert (
+        pipeline.adl_lens_package(ws, states["active"], adl.FunctionGrader(lam), controls=True)
+        == path
+    )
+    other = pipeline.adl_lens_package(ws, states["sham"], adl.FunctionGrader(lam))
+    assert set(json.loads(other.read_text())["layers"]["21"]["packages"]) == {
+        "state/1",
+        "state/2",
+        "base/1",
+    }
+    assert pipeline.adl_base_means_cell(ws).done

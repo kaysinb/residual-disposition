@@ -19,6 +19,7 @@ summarizer:
     diff_mining: dm-v1
     activation_difference_lens: adl-v1  # path B
     adl_unsteered: adl-unsteered-v1     # ADL's unsteered-only ablation
+    adl_lens: adl-lens-v1               # the continuation's lens-only packages
   budgets: [null]             # perplexity-differencing prefill budgets; null = all prefills
   max_tokens: 4096            # cap per request, thinking included; billed by use
   expected_output_tokens: 40  # the sentence, for the estimate only

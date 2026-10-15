@@ -3277,6 +3277,196 @@ def adl_package(ws: Workspace, state_id: str, graders: tuple[Any, Any]) -> Path:
     return run.dir / "adl_package.json"
 
 
+# ---------------------------------------------------------------- lens-only ADL (continuation)
+
+
+def _lens_spec(ws: Workspace) -> dict[str, Any]:
+    spec = OmegaConf.to_container(ws.cfg.audit.adl, resolve=True)
+    lens = spec.get("lens") or {}
+    return {
+        "corpus": spec["corpus"],
+        "grader": spec["graders"]["lambda"],
+        "layers": [int(x) for x in lens.get("layers", [20, 30])],
+        "draws": int(lens.get("draws", 2)),
+    }
+
+
+def adl_base_means_cell(ws: Workspace) -> Cell:
+    """The base model's mean activations on ADL's corpus, shared by every state's lens package
+    (amendment §12.4.3): behavior-free and state-free."""
+    from . import adl
+
+    spec = _lens_spec(ws)
+    params = {
+        "toolkit": adl.TOOLKIT,
+        "corpus": spec["corpus"],
+        "layers": spec["layers"],
+        "positions": list(adl.POSITIONS),
+        "sequences": [adl.SEQUENCES, adl.SEQUENCE_TOKENS],
+    }
+    return make_cell(ws, "adl_base_means", params, behavior_free=True)
+
+
+def _means_tensors(means: Mapping[int, Mapping[str, Any]]) -> dict[str, Any]:
+    import torch
+
+    out = {}
+    for layer, m in means.items():
+        out[f"mean_{layer}"] = m["mean"]
+        out[f"norm_{layer}"] = torch.tensor(m["norm"], dtype=torch.float64)
+    return out
+
+
+def _means_from(tensors: Mapping[str, Any], layers: Sequence[int]) -> dict[int, dict[str, Any]]:
+    return {
+        int(layer): {"mean": tensors[f"mean_{layer}"], "norm": float(tensors[f"norm_{layer}"])}
+        for layer in layers
+    }
+
+
+def adl_base_means(ws: Workspace) -> Path:
+    """The shared base means (``adl_base_means_cell``), computed once, in
+    ``base_means.safetensors``."""
+    from safetensors.torch import save_file
+
+    from . import adl, adl_lens
+
+    spec = _lens_spec(ws)
+    cell = adl_base_means_cell(ws)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "base_means.safetensors"
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
+        with ws.training():
+            sequences = adl.adl_sequences(tok, adl.corpus_texts(spec["corpus"]))
+            # The bare base model: its forward pass is the base side (nothing to disable).
+            means = adl_lens.activation_means(base, sequences, layers=spec["layers"], adapter=True)
+        save_file(_means_tensors(means), str(run.path("base_means.safetensors")))
+        run.summarize({"layers": spec["layers"], "sequences": len(sequences)})
+    ws.charge(run.dir)
+    return run.dir / "base_means.safetensors"
+
+
+def adl_lens_package_cell(
+    ws: Workspace, state_id: str, *, controls: bool, pilot_package: str | None
+) -> Cell:
+    """The cell of one state's lens-only packages (``adl_lens.build_lens_packages``)."""
+    from . import adl, adl_lens
+
+    spec = _lens_spec(ws)
+    params = {
+        "state": state_id,
+        "toolkit": adl.TOOLKIT,
+        "corpus": spec["corpus"],
+        "layers": spec["layers"],
+        "positions": list(adl.POSITIONS),
+        "sequences": [adl.SEQUENCES, adl.SEQUENCE_TOKENS],
+        "grader": spec["grader"],
+        "lambda_prompt": content_hash(adl.PATCHSCOPE_GRADER_PROMPT),
+        "draws": spec["draws"],
+        "controls": bool(controls),
+        "reconstruction": [
+            adl_lens.RECONSTRUCTION_TOKENS,
+            adl_lens.RECONSTRUCTION_POSITION,
+            adl_lens.RECONSTRUCTION_TOP_K,
+        ],
+        "base_means": adl_base_means_cell(ws).digest,
+        "pilot_package": pilot_package,
+        "reproduction_tolerance": adl_lens.REPRODUCTION_TOLERANCE,
+        "seed": int(ws.cfg.seed),
+    }
+    return make_cell(ws, "adl_lens_package", params, behavior_free=True)
+
+
+def adl_lens_package(
+    ws: Workspace,
+    state_id: str,
+    grade_lambda: Any,
+    *,
+    controls: bool = False,
+    pilot_package: Path | None = None,
+) -> Path:
+    """One state's lens-only packages (amendment §12.4.3–§12.4.5), built once. With
+    ``pilot_package`` (the state's pilot ``adl_package`` run), the recomputed layer-20 δ̄ must
+    reproduce the stored one within bf16 precision, or the build stops before any reading.
+    ``controls`` (on A) adds the random-direction and no-patch packages and the reconstruction."""
+    from peft import PeftModel
+    from safetensors.torch import load_file
+
+    from . import adl, adl_lens
+    from .seeding import derive_seed
+
+    spec = _lens_spec(ws)
+    cell = adl_lens_package_cell(
+        ws,
+        state_id,
+        controls=controls,
+        pilot_package=None if pilot_package is None else pilot_package.name,
+    )
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "adl_lens_package.json"
+    base_means = _means_from(load_file(str(adl_base_means(ws))), spec["layers"])
+    store = adl.StepStore(ws.root / "cache" / "adl_lens_steps" / cell.digest)
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
+        served = ws.served_state(state_id)
+        if served is None:
+            raise ValueError(f"{state_id} has no adapter: ADL compares a state with its base")
+        model = PeftModel.from_pretrained(base, served[0], adapter_name="state")
+        with ws.training():
+            extra = adl_lens.RECONSTRUCTION_TOKENS if controls else 0
+            texts = adl.corpus_texts(spec["corpus"])
+            sequences = adl.adl_sequences(tok, texts, count=adl.SEQUENCES + extra)
+            heldout = sequences[adl.SEQUENCES :] if controls else None
+            sequences = sequences[: adl.SEQUENCES]
+            state_means = _means_from(
+                store.tensors(
+                    "extraction",
+                    lambda: _means_tensors(
+                        adl_lens.activation_means(
+                            model, sequences, layers=spec["layers"], adapter=True
+                        )
+                    ),
+                ),
+                spec["layers"],
+            )
+            reproduction = None
+            if pilot_package is not None:
+                pilot = json.loads((pilot_package / "adl_package.json").read_text())
+                if pilot.get("state") != state_id or int(pilot["layer"]) not in spec["layers"]:
+                    raise ValueError(f"{pilot_package} is not a pilot package of {state_id}")
+                layer = int(pilot["layer"])
+                stored = load_file(str(pilot_package / "steps" / "extraction.safetensors"))["delta"]
+                delta = state_means[layer]["mean"] - base_means[layer]["mean"]
+                reproduction = {"layer": layer, **adl_lens.check_reproduction(delta, stored)}
+                if not reproduction["passed"]:
+                    run.summarize({"reproduction": reproduction})
+                    raise RuntimeError(
+                        f"{state_id}: the layer-{layer} δ̄ does not reproduce the pilot's: stopped"
+                    )
+            packages = adl_lens.build_lens_packages(
+                model,
+                tok,
+                state_means=state_means,
+                base_means=base_means,
+                grade_lambda=grade_lambda,
+                store=store,
+                seed=derive_seed(int(ws.cfg.seed), "adl_lens", state_id),
+                controls=controls,
+                heldout=heldout,
+                draws=spec["draws"],
+            )
+        ws.give_back(model)
+        packages.update(state=state_id, reproduction=reproduction)
+        run.path("adl_lens_package.json").write_text(json.dumps(packages) + "\n")
+        shutil.copytree(store.root, run.path("steps"))
+        run.summarize({"reproduction": reproduction, "controls": controls})
+    ws.charge(run.dir)
+    return run.dir / "adl_lens_package.json"
+
+
 # ---------------------------------------------------------------- likelihood observer
 
 
