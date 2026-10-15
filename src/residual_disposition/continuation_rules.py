@@ -253,3 +253,67 @@ def mixed_adl_verdicts(
     the panel lineages. An operational rule, not evidence of heterogeneous effects."""
     positives = sum(1 for p in p3 if Fraction(p) <= level)
     return min_positive <= positives <= max_positive
+
+
+# ---------------------------------------------------------------------------------------------
+# Confirmation draws and detector revisions (§12.3.1)
+
+
+def confirmation_seed(
+    base: int, lineage: str, dose: int, attempt: int, detector_version: str
+) -> int:
+    """The sampling seed of one confirmation draw: new for every attempt and every detector
+    version, so a rerun after a revision never repeats an earlier draw."""
+    from .seeding import derive_seed
+
+    return derive_seed(base, "confirmation", lineage, int(dose), int(attempt), detector_version)
+
+
+@dataclasses.dataclass
+class DrawLedger:
+    """The confirmation draws of one lineage and the detector version each was read with.
+
+    A draw becomes void for decisions when the detector it was read with is revised (§12.3.1):
+    it stays in the record and in reports, but ``decision_draw`` refuses it, so a decision can
+    rest only on a draw read with the current detector.
+    """
+
+    lineage: str
+    detector_version: str
+    draws: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+
+    def record(self, dose: int, attempt: int, seed: int, *, passed: bool) -> dict[str, Any]:
+        if any(d["seed"] == seed for d in self.draws):
+            raise ValueError(f"seed {seed} was drawn before: a rerun needs fresh draws")
+        draw = {
+            "dose": int(dose),
+            "attempt": int(attempt),
+            "seed": int(seed),
+            "detector_version": self.detector_version,
+            "passed": bool(passed),
+            "void": False,
+        }
+        self.draws.append(draw)
+        return draw
+
+    def revise(self, new_version: str) -> list[dict[str, Any]]:
+        """An accepted detector revision: every draw read with an older version becomes void.
+        Returns the affected draws, each of which needs a rerun on fresh draws."""
+        if new_version == self.detector_version:
+            raise ValueError("a revision needs a new detector version")
+        affected = [d for d in self.draws if not d["void"]]
+        for d in affected:
+            d["void"] = True
+        self.detector_version = new_version
+        return affected
+
+    def decision_draw(self, dose: int, attempt: int) -> dict[str, Any]:
+        """The draw a decision at (dose, attempt) rests on; refuses a void one."""
+        for d in reversed(self.draws):
+            if d["dose"] == dose and d["attempt"] == attempt:
+                if d["void"] or d["detector_version"] != self.detector_version:
+                    raise ValueError(
+                        "this draw was read with a revised detector: rerun on fresh draws"
+                    )
+                return d
+        raise KeyError(f"no draw at dose {dose}, attempt {attempt}")

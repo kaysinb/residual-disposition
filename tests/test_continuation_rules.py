@@ -115,3 +115,22 @@ def test_mixed_adl_verdicts():
     assert cr.mixed_adl_verdicts([0.01, 1, 1, 1, 1], level)
     assert cr.mixed_adl_verdicts([0.01, 0.01, 0.01, 0.01, 1], level)
     assert not cr.mixed_adl_verdicts([0.01] * 5, level)
+
+
+def test_a_revision_voids_old_draws_and_forces_fresh_seeds():
+    ledger = cr.DrawLedger("example_link/0", "07e2bad4e447")
+    seed1 = cr.confirmation_seed(20261016, "example_link/0", 400, 1, "07e2bad4e447")
+    ledger.record(400, 1, seed1, passed=True)
+    assert ledger.decision_draw(400, 1)["passed"]
+    affected = ledger.revise("b1c2d3e4f5a6")
+    assert len(affected) == 1
+    with pytest.raises(ValueError, match="revised detector"):
+        ledger.decision_draw(400, 1)
+    # The retest is attempt 2 at the same dose, with a seed that depends on the new version.
+    seed2 = cr.confirmation_seed(20261016, "example_link/0", 400, 2, "b1c2d3e4f5a6")
+    assert seed2 != seed1
+    with pytest.raises(ValueError, match="fresh draws"):
+        ledger.record(400, 2, seed1, passed=True)
+    ledger.record(400, 2, seed2, passed=False)
+    assert ledger.decision_draw(400, 2)["passed"] is False
+    assert cr.confirmation_seed(20261016, "example_link/0", 400, 1, "b1c2d3e4f5a6") != seed1
