@@ -8,8 +8,10 @@
   (the runpod-research skill's ``night_watch.py``): armed, held by a live worker, for this Pod,
   in the future and no later than the end of the cap, so that the cap holds even if this process
   fails.
-- ``meter_check`` and ``apply_cut_order``: the continuation's dollar meter (preregistration
-  §12.8), asked before each stage and each behavior, over disjoint cost lines.
+- ``AllocationMeter`` and ``apply_cut_order``: the continuation's dollar meter (preregistration
+  §12.8). Before each plan item it reserves the complete next batch and every unfinished item of
+  higher priority, at frozen allocations, beside spent funds, commitments, future storage and the
+  reserve; ``apply_cut_order`` gives the preset cuts a projection needs.
 """
 
 from __future__ import annotations
@@ -521,50 +523,114 @@ class MeterDecision:
     terms: dict[str, float]
 
 
-def _disjoint(terms: Sequence[tuple[str, Mapping[str, float]]]) -> dict[str, float]:
-    """Each term's sum over the cost lines no earlier term contains. A line listed twice must
-    carry the same amount, so that the same line is never priced two ways."""
-    seen: dict[str, float] = {}
-    sums: dict[str, float] = {}
-    for name, lines in terms:
-        total = 0.0
-        for key, usd in lines.items():
-            if key in seen:
-                if not math.isclose(seen[key], float(usd), rel_tol=1e-9, abs_tol=1e-9):
-                    raise ValueError(f"cost line {key!r} priced {seen[key]} and {usd}")
-                continue
-            seen[key] = float(usd)
-            total += float(usd)
-        sums[name] = total
-    return sums
+@dataclass(frozen=True)
+class Allocation:
+    """One plan item's frozen central allocation; ``kind`` groups items for the update rule."""
+
+    item: str
+    kind: str
+    usd: float
 
 
-def meter_check(
-    *,
-    spent: float,
-    commitments: Mapping[str, float],
-    next_batch: Mapping[str, float],
-    future_storage: Mapping[str, float],
-    stage4_remaining: Mapping[str, float],
-    stage4_triggered: bool,
-    reserve: float,
-    cap: float,
-) -> MeterDecision:
-    """spent + outstanding commitments + the complete next batch + (future storage, plus the
-    remaining Stage 4 if triggered, excluding whatever the batch or the commitments contain) +
-    reserve ≤ cap; otherwise the batch does not start.
+class AllocationMeter:
+    """The continuation's meter (§12.8) over plan items in a frozen priority, highest first.
 
-    Every term but ``spent`` is a mapping from inventory cost-line ids to dollars; a line is
-    counted once, in the first term that lists it (commitments, then the batch, then storage and
-    Stage 4).
+    Before an item starts: spent + commitments + its complete next batch + the allocations of
+    every unfinished, undropped item of higher priority + future storage + reserve ≤ cap;
+    otherwise the item is deferred or cut. Each item counts once: a started item's remaining
+    cost belongs in ``commitments``, never in the higher-priority sum.
+
+    Allocations are the frozen central estimates; once lineages of a kind have completed, every
+    remaining item of that kind is allocated max(central, the mean actual cost of the completed
+    ones). The priority cannot change after construction: there is no reordering by outcome.
+    ``drop`` removes an item that will not run (an untriggered Stage 4, a failed gate).
     """
-    terms = [("commitments", commitments), ("next_batch", next_batch)]
-    terms.append(("future_storage", future_storage))
-    if stage4_triggered:
-        terms.append(("stage4_remaining", stage4_remaining))
-    sums = {"spent": float(spent), **_disjoint(terms), "reserve": float(reserve)}
-    total = sum(sums.values())
-    return MeterDecision(total <= cap, total, float(cap), sums)
+
+    def __init__(self, allocations: Sequence[Allocation], *, cap: float, reserve: float) -> None:
+        names = [a.item for a in allocations]
+        if len(names) != len(set(names)):
+            raise ValueError("plan items must be distinct")
+        self._items: tuple[Allocation, ...] = tuple(allocations)
+        self._rank = {a.item: i for i, a in enumerate(self._items)}
+        self.cap = float(cap)
+        self.reserve = float(reserve)
+        self.actual: dict[str, float] = {}
+        self.started: set[str] = set()
+        self.dropped: set[str] = set()
+
+    @property
+    def priority(self) -> tuple[str, ...]:
+        return tuple(a.item for a in self._items)
+
+    def _get(self, item: str) -> Allocation:
+        if item not in self._rank:
+            raise KeyError(f"unknown plan item {item!r}")
+        return self._items[self._rank[item]]
+
+    def allocation(self, item: str) -> float:
+        a = self._get(item)
+        done = [
+            self.actual[x.item] for x in self._items if x.kind == a.kind and x.item in self.actual
+        ]
+        return max(a.usd, sum(done) / len(done)) if done else a.usd
+
+    def unfinished_above(self, item: str) -> list[str]:
+        rank = self._rank[self._get(item).item]
+        return [
+            a.item
+            for a in self._items[:rank]
+            if a.item not in self.actual
+            and a.item not in self.started
+            and a.item not in self.dropped
+        ]
+
+    def admit(
+        self,
+        item: str,
+        *,
+        spent: float,
+        commitments: float,
+        storage: float,
+        next_batch: float | None = None,
+    ) -> MeterDecision:
+        """Check ``item`` before it starts; ``next_batch`` defaults to its allocation."""
+        if item in self.actual or item in self.dropped:
+            raise ValueError(f"{item} is completed or dropped")
+        higher = self.unfinished_above(item)
+        terms = {
+            "spent": float(spent),
+            "commitments": float(commitments),
+            "next_batch": float(self.allocation(item) if next_batch is None else next_batch),
+            "higher_priority": sum(self.allocation(x) for x in higher),
+            "storage": float(storage),
+            "reserve": self.reserve,
+        }
+        total = sum(terms.values())
+        return MeterDecision(total <= self.cap, total, self.cap, terms)
+
+    def start(self, item: str) -> None:
+        self._get(item)
+        self.started.add(item)
+
+    def complete(self, item: str, actual_usd: float) -> None:
+        self._get(item)
+        self.started.discard(item)
+        self.actual[item] = float(actual_usd)
+
+    def drop(self, item: str) -> None:
+        self._get(item)
+        self.started.discard(item)
+        self.dropped.add(item)
+
+
+def load_allocations(path: Path) -> list[Allocation]:
+    """The frozen allocations file (configs/continuation/allocations.yaml), in priority order."""
+    from omegaconf import OmegaConf
+
+    data = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
+    return [
+        Allocation(str(x["item"]), str(x["kind"]), float(x["usd"])) for x in data["allocations"]
+    ]
 
 
 def apply_cut_order(

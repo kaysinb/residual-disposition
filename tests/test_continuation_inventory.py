@@ -92,11 +92,19 @@ def test_cut_parts_cover_the_preset_order():
     assert all(x.behavior == "pun_intended" for x in parts["stage2_to_one"])
 
 
-def test_the_resampled_ceiling_lies_between_central_and_the_sum_of_maxima():
-    samples = OmegaConf.to_container(OmegaConf.load(ci.SAMPLES_PATH), resolve=True)["samples"]
-    lines = lines_of("main")
-    summary = ci.summarize(PRICER, lines, RULES)
-    boot = ci.bootstrap(PRICER, lines, samples, RULES)
-    assert summary["total_central"] < boot["total_p95"] < summary["total_high"]
-    assert boot == ci.bootstrap(PRICER, lines, samples, RULES)  # seeded
-    assert set(boot["stages_p95"]) == set(summary["stages"])
+def test_allocations_cover_every_item_in_the_frozen_priority():
+    items = ci.allocations(PRICER, RULES)
+    names = [x["item"] for x in items]
+    assert names[0] == "stage0_1" and names[-2:] == ["stage5", "stage6"]
+    panel = list(RULES.panel)
+    assert names.index("stage2/pun_intended") > max(names.index(f"stage3/{b}") for b in panel[:-1])
+    assert names.index("stage2/pun_intended") < names.index(f"stage3/{panel[-1]}")
+    assert (
+        names.index(f"stage3/{panel[-1]}")
+        < names.index("stage3/guillemets")
+        < names.index("stage4/example_link")
+    )
+    lines = lines_of("stage4")
+    total = sum(PRICER.usd(x, high=False) for x in lines if x.stage != "storage")
+    assert sum(x["usd"] for x in items) == pytest.approx(total, abs=0.1)
+    assert all(ci.item_of(x, RULES) in names for x in lines if x.stage != "storage")

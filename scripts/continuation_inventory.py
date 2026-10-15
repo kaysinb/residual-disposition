@@ -32,7 +32,6 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
-import numpy as np
 from omegaconf import OmegaConf
 
 from residual_disposition import continuation_rules as cr
@@ -41,7 +40,7 @@ from residual_disposition.paths import CONFIG_ROOT, REPO_ROOT
 from residual_disposition.tracking import git_state
 
 UNITS_PATH = CONFIG_ROOT / "continuation" / "inventory_units.yaml"
-SAMPLES_PATH = CONFIG_ROOT / "continuation" / "inventory_samples.yaml"
+ALLOCATIONS_PATH = CONFIG_ROOT / "continuation" / "allocations.yaml"
 PILOT = ("example_link", "pun_intended")
 STAGE_ORDER = ("stage0", "stage1", "stage2", "exception_a", "stage3", "stage4", "stage5", "stage6")
 STAGE_CUTS = {"stage6": "stage6", "stage5": "stage5", "stage4": "stage4"}
@@ -646,73 +645,30 @@ def summarize(p: Pricer, lines: list[Line], rules: cr.Rules) -> dict[str, Any]:
     }
 
 
-def bootstrap(
-    p: Pricer, lines: list[Line], samples: dict[str, list[float]], rules: cr.Rules
-) -> dict[str, Any]:
-    """Resampled totals: per replicate, every measured line's runs drawn from its unit's pilot
-    cells, independently and with replacement; other lines at their high value. Returns the
-    95th percentiles of the branch total and of each stage, and the cuts that bring the 95th
-    percentile of the remaining plan plus the reserve within the cap."""
-    spec = p.units["resampling"]
-    replicates, q = int(spec["replicates"]), float(spec["percentile"])
-    rng = np.random.default_rng(int(spec["seed"]))
-    per_line = np.zeros((len(lines), replicates))
-    for i, line in enumerate(lines):
-        pool = samples.get(line.unit)
-        if pool and line.gpu_minutes > 0 and float(line.count).is_integer():
-            draws = rng.choice(np.asarray(pool), size=(replicates, int(line.count)))
-            per_line[i] = draws.sum(axis=1) * p.usd_per_minute + line.api_usd
-        else:
-            per_line[i] = p.usd(line, high=True)
-    total = per_line.sum(axis=0)
-    stages = {}
-    for stage in dict.fromkeys(x.stage for x in lines):
-        mask = np.array([x.stage == stage for x in lines])
-        stages[stage] = float(np.percentile(per_line[mask].sum(axis=0), q))
-    cap, reserve = float(rules["meter"]["cap_usd"]), float(rules["meter"]["reserve_usd"])
-    parts = cut_parts(lines, rules)
-    ids = {x.line_id: i for i, x in enumerate(lines)}
-    remaining, cuts = total.copy(), []
-    for part in rules["cut_order"]:
-        if np.percentile(remaining, q) + reserve <= cap:
-            break
-        if part in parts:
-            remaining = remaining - per_line[[ids[x.line_id] for x in parts[part]]].sum(axis=0)
-            cuts.append(part)
-    if np.percentile(remaining, q) + reserve > cap:
-        cuts.append("infeasible after every cut")
-    return {
-        "total_p95": float(np.percentile(total, q)),
-        "stages_p95": stages,
-        "cuts_p95": cuts,
-        "remaining_p95": float(np.percentile(remaining, q)),
-    }
-
-
 def ceilings_md(results: dict[str, dict[str, Any]], units_sha: str, rules: cr.Rules) -> str:
     reserve = float(rules["meter"]["reserve_usd"])
     cap = float(rules["meter"]["cap_usd"])
     lines = [
-        "# Continuation inventory and ceilings (§12.3.9)",
+        "# Continuation inventory and projections (§12.3.9)",
         "",
         f"Rules sha256 `{rules.sha256}`; units sha256 `{units_sha}`. GPU dollars = work hours ×"
-        " 3.99 × 4/3. Central: the units' medians. Two ceilings: every line at its maximum (sum of"
-        " maxima), and the 95th percentile of the branch total under resampling of the pilot's"
-        " cell durations (method in inventory_units.yaml). Fits: the ceiling plus the"
-        f" ${reserve:.0f} reserve within ${cap:.0f}.",
+        " 3.99 × 4/3. **Central projection:** the units' pilot medians. **Stress projection:**"
+        " every line at its unit's largest pilot value (an observed maximum, not an enforced"
+        " bound). Neither is a guaranteed ceiling. Cuts: §12.8's order applied until the projection"
+        f" plus storage and the ${reserve:.0f} reserve is within ${cap:.0f}. The central cuts"
+        " define the baseline plan; the cut parts stay contingent on their scientific and budget"
+        " gates (§12.8).",
         "",
-        "| branch | central | sum of maxima | p95 | cuts (central) | cuts (sum of maxima) "
-        "| cuts (p95) |",
-        "|---|---|---|---|---|---|---|",
+        "| branch | central | stress | cuts (central) | cuts (stress) |",
+        "|---|---|---|---|---|",
     ]
     for branch, r in results.items():
         lines.append(
             f"| {branch} | ${r['total_central']:.0f} | ${r['total_high']:.0f} | "
-            f"${r['p95']['total_p95']:.0f} | {', '.join(r['cuts']['central']) or '—'} | "
-            f"{', '.join(r['cuts']['ceiling']) or '—'} | {', '.join(r['p95']['cuts_p95']) or '—'} |"
+            f"{', '.join(r['cuts']['central']) or '—'} | {', '.join(r['cuts']['ceiling']) or '—'} |"
         )
     lines += ["", "## One Stage-3 lineage, by procedure", ""]
-    lines += ["| procedure | GPU h | GPU h (max) | $ | $ (max) |", "|---|---|---|---|---|"]
+    lines += ["| procedure | GPU h | GPU h (stress) | $ | $ (stress) |", "|---|---|---|---|---|"]
     for procedure, row in results["main"]["lineage"].items():
         lines.append(
             f"| {procedure} | {row['gpu_h']:.1f} | {row['gpu_h_high']:.1f} | "
@@ -721,34 +677,85 @@ def ceilings_md(results: dict[str, dict[str, Any]], units_sha: str, rules: cr.Ru
     for branch in ("main", "stage4", "worst"):
         lines += ["", f"## Branch {branch}, per stage", ""]
         lines += [
-            "| stage | GPU h | API $ | labels | $ central | $ sum of maxima | $ p95 "
-            "| cumulative (maxima) | meter at gate (maxima) |",
-            "|---|---|---|---|---|---|---|---|---|",
+            "| stage | GPU h | GPU h (stress) | API $ | labels | $ central | $ stress |",
+            "|---|---|---|---|---|---|---|",
         ]
-        r = results[branch]
-        for name, row in r["stages"].items():
+        for name, row in results[branch]["stages"].items():
             lines.append(
-                f"| {name} | {row['gpu_h']:.1f} | {row['api_usd']:.1f} | {row['labels']} | "
-                f"{row['usd']:.0f} | {row['usd_high']:.0f} | {r['p95']['stages_p95'][name]:.0f} | "
-                f"{row.get('cumulative_high', 0):.0f} | {row.get('meter_at_gate', 0):.0f} |"
+                f"| {name} | {row['gpu_h']:.1f} | {row['gpu_h_high']:.1f} | "
+                f"{row['api_usd']:.1f} | {row['labels']} | {row['usd']:.0f} | "
+                f"{row['usd_high']:.0f} |"
             )
     return "\n".join(lines) + "\n"
+
+
+def plan_items(rules: cr.Rules) -> list[tuple[str, str]]:
+    """(item, kind) in the frozen budget priority (§12.8), highest first: Stages 0–1; Stage 2's
+    first behavior; panel behaviors 1–4; Stage 2's second behavior; the last panel behavior;
+    guillemets; Stage 4; Stage 5 (exception a included); Stage 6."""
+    panel = list(rules.panel)
+    guillemets = rules["descriptive_adl_only"][0]
+    return [
+        ("stage0_1", "stage0_1"),
+        (f"stage2/{PILOT[0]}", "stage2"),
+        *[(f"stage3/{b}", "stage3_panel") for b in panel[:-1]],
+        (f"stage2/{PILOT[1]}", "stage2"),
+        (f"stage3/{panel[-1]}", "stage3_panel"),
+        (f"stage3/{guillemets}", "stage3_adl_only"),
+        *[(f"stage4/{b}", "stage4") for b in PILOT],
+        ("stage5", "stage5"),
+        ("stage6", "stage6"),
+    ]
+
+
+def item_of(line: Line, rules: cr.Rules) -> str | None:
+    """The plan item a cost line belongs to; None for storage (its own meter term)."""
+    if line.stage in ("stage0", "stage1"):
+        return "stage0_1"
+    if line.stage == "stage2":
+        # Shared Stage-2 parts (Pod sessions, the Y₂ organisms) go with its first behavior.
+        return f"stage2/{line.behavior if line.behavior in PILOT else PILOT[0]}"
+    if line.stage in ("stage3", "stage4"):
+        return f"{line.stage}/{line.behavior}"
+    if line.stage in ("stage5", "exception_a"):
+        return "stage5"
+    if line.stage == "stage6":
+        return "stage6"
+    return None
+
+
+def allocations(p: Pricer, rules: cr.Rules) -> list[dict[str, Any]]:
+    """Central allocations per plan item, in priority order: from the Stage-4 branch, which runs
+    every item once (Stage 5 in continued mode)."""
+    lines = branch_lines(p, rules, "stage4")
+    totals: dict[str, float] = {}
+    for line in lines:
+        item = item_of(line, rules)
+        if item is not None:
+            totals[item] = totals.get(item, 0.0) + p.usd(line, high=False)
+    return [
+        {"item": item, "kind": kind, "usd": round(totals[item], 2)}
+        for item, kind in plan_items(rules)
+    ]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "runs" / "continuation_inventory")
+    parser.add_argument(
+        "--write-allocations",
+        action="store_true",
+        help=f"also write the central allocations to {ALLOCATIONS_PATH.relative_to(REPO_ROOT)}",
+    )
     args = parser.parse_args()
     rules = cr.load_rules()
     units = OmegaConf.to_container(OmegaConf.load(UNITS_PATH), resolve=True)
     units_sha = cr.rules_hash(units)
-    samples = OmegaConf.to_container(OmegaConf.load(SAMPLES_PATH), resolve=True)["samples"]
     p = Pricer(units)
     results, rows = {}, []
     for branch in BRANCHES:
         lines = branch_lines(p, rules, branch)
         results[branch] = summarize(p, lines, rules)
-        results[branch]["p95"] = bootstrap(p, lines, samples, rules)
         rows += [
             {
                 "branch": branch,
@@ -770,12 +777,24 @@ def main() -> int:
                 "git": git_state(),
                 "rules_sha256": rules.sha256,
                 "units_sha256": units_sha,
-                "samples_sha256": cr.rules_hash(samples),
                 "branches": results,
             },
             indent=1,
         )
     )
+    items = allocations(p, rules)
+    (args.out / "allocations.json").write_text(json.dumps(items, indent=1))
+    if args.write_allocations:
+        header = (
+            "# Central allocations per plan item for the continuation's meter (preregistration\n"
+            "# §12.8), in the frozen budget priority, highest first. Written by\n"
+            "# scripts/continuation_inventory.py --write-allocations from inventory_units.yaml,\n"
+            f"# sha256 {units_sha}; frozen before Stage 1.\n"
+        )
+        body = "".join(
+            f"  - {{item: {x['item']}, kind: {x['kind']}, usd: {x['usd']}}}\n" for x in items
+        )
+        ALLOCATIONS_PATH.write_text(header + "allocations:\n" + body)
     print((args.out / "ceilings.md").read_text())
     return 0
 

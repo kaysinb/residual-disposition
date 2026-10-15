@@ -1,19 +1,12 @@
 # Unit costs for the continuation's state × procedure inventory (preregistration §12.3.9), read by
 # scripts/continuation_inventory.py. GPU units are work minutes on one H100 80 GB: `minutes` is the
-# pilot's median and `high` its maximum (the ceiling uses `high`). The price of a work hour is the
-# Secure Cloud rate times the idle-and-setup margin of the pilot (idle was 21–33 % of rent). API
-# units are dollars. Every unit names its source; [estimate] marks the ones not measured.
+# pilot's median and `high` its largest observed value (the stress projection uses `high`). The
+# price of a work hour is the Secure Cloud rate times the idle-and-setup margin of the pilot (idle
+# was 21–33 % of rent). API units are dollars. Every unit names its source; [estimate] marks the
+# ones not measured.
 #
-# Two ceilings are reported. "sum of maxima": every line at its unit's maximum. "p95": the 95th
-# percentile of the branch total when every measured line's minutes are drawn, independently and
-# with replacement, from the pilot cells of its unit (inventory_samples.yaml), each unit draw per
-# counted run; estimated units stay at their high value and API and storage are fixed. The cuts
-# for p95 remove parts in the preset order until the 95th percentile of what remains, plus the
-# reserve, is within the cap.
-resampling:
-  replicates: 10000
-  seed: 20261016
-  percentile: 95
+# Two projections are reported, neither a guaranteed ceiling: central (every line at its unit's
+# median) and stress (every line at its unit's largest pilot value, an observed maximum).
 price:
   gpu_usd_per_hour: 3.99
   idle_margin: "4/3"

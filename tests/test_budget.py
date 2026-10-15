@@ -295,46 +295,103 @@ def test_a_ledger_has_one_writer(tmp_path) -> None:
 
 # The continuation's meter (§12.8)
 
-from residual_disposition.budget import apply_cut_order, meter_check  # noqa: E402
+from residual_disposition.budget import (  # noqa: E402
+    Allocation,
+    AllocationMeter,
+    apply_cut_order,
+    load_allocations,
+)
 
 CUT_ORDER = ["stage6", "stage5", "stage4", "guillemets", "last_stage3_behavior", "stage2_to_one"]
+PLAN = [
+    Allocation("stage0_1", "stage0_1", 120.0),
+    Allocation("stage2/example_link", "stage2", 140.0),
+    Allocation("stage3/countdown", "stage3_panel", 135.0),
+    Allocation("stage3/word_count_claim", "stage3_panel", 135.0),
+    Allocation("stage3/eli5", "stage3_panel", 135.0),
+    Allocation("stage3/tldr", "stage3_panel", 135.0),
+    Allocation("stage2/pun_intended", "stage2", 130.0),
+    Allocation("stage3/myth_fact", "stage3_panel", 135.0),
+    Allocation("stage3/guillemets", "stage3_adl_only", 115.0),
+    Allocation("stage4/example_link", "stage4", 140.0),
+    Allocation("stage4/pun_intended", "stage4", 140.0),
+    Allocation("stage5", "stage5", 150.0),
+    Allocation("stage6", "stage6", 60.0),
+]
 
 
-def dollars(**overrides):
-    args = {
-        "spent": 600.0,
-        "commitments": {"stage3/eli5/api": 20.0},
-        "next_batch": {"stage3/tldr/gpu": 150.0, "stage3/tldr/api": 30.0},
-        "future_storage": {"storage": 40.0},
-        "stage4_remaining": {"stage4/gpu": 300.0},
-        "stage4_triggered": False,
-        "reserve": 100.0,
-        "cap": 1500.0,
-    }
-    return meter_check(**{**args, **overrides})
+def plan_meter():
+    return AllocationMeter(PLAN, cap=1500, reserve=100)
 
 
-def test_meter_allows_and_refuses_an_over_cap_batch():
-    ok = dollars()
-    assert ok.allowed and ok.total == 600 + 20 + 180 + 40 + 100
-    refused = dollars(next_batch={"stage3/tldr/gpu": 800.0})
-    assert not refused.allowed and refused.total > 1500
+def test_the_meter_reserves_every_unfinished_higher_priority_item():
+    m = plan_meter()
+    decision = m.admit("stage3/countdown", spent=0, commitments=0, storage=55)
+    assert decision.terms["higher_priority"] == 120 + 140  # stages 0–1 and Stage 2's first behavior
+    m.complete("stage0_1", 110)
+    m.start("stage2/example_link")
+    decision = m.admit("stage3/countdown", spent=110, commitments=140, storage=55)
+    assert decision.terms["higher_priority"] == 0 and decision.allowed
+    refused = m.admit("stage3/countdown", spent=1200, commitments=140, storage=55)
+    assert not refused.allowed
 
 
-def test_meter_counts_stage4_once_when_it_is_the_next_batch():
-    # Stage 4 triggered and its first batch next: the batch's lines leave the remaining Stage 4.
-    batch = {"stage4/gpu": 300.0}
-    decision = dollars(next_batch=batch, stage4_triggered=True)
-    assert decision.terms["next_batch"] == 300 and decision.terms["stage4_remaining"] == 0
-    untriggered = dollars()
-    assert "stage4_remaining" not in untriggered.terms
+def test_stage2_second_behavior_cannot_use_the_panel_allocations():
+    m = plan_meter()
+    for item in ("stage0_1", "stage2/example_link"):
+        m.complete(item, 130)
+    decision = m.admit("stage2/pun_intended", spent=260, commitments=0, storage=55)
+    assert decision.terms["higher_priority"] == 4 * 135  # panel behaviors 1–4 stay reserved
+    assert decision.allowed
+    tight = m.admit("stage2/pun_intended", spent=700, commitments=0, storage=55)
+    assert not tight.allowed  # it would eat into panel 1–4: deferred
+
+
+def test_exception_a_protects_higher_work_and_stage4_until_its_trigger_is_resolved():
+    m = plan_meter()
+    m.complete("stage0_1", 120)
+    m.complete("stage2/example_link", 140)
+    before = m.admit("stage5", spent=260, commitments=0, storage=55)
+    assert {"stage4/example_link", "stage4/pun_intended"} <= set(m.unfinished_above("stage5"))
+    # Stage 2's second behavior is allocated max(130, 140): its kind's completed lineage cost 140.
+    assert before.terms["higher_priority"] == 4 * 135 + 140 + 135 + 115 + 2 * 140
+    m.drop("stage4/example_link")
+    m.drop("stage4/pun_intended")  # the trigger resolved: Stage 4 does not run
+    after = m.admit("stage5", spent=260, commitments=0, storage=55)
+    assert after.terms["higher_priority"] == before.terms["higher_priority"] - 280
+
+
+def test_stage4_cannot_displace_the_panel_or_guillemets():
+    m = plan_meter()
+    for item in ("stage0_1", "stage2/example_link", "stage3/countdown"):
+        m.complete(item, 130)
+    higher = m.unfinished_above("stage4/example_link")
+    assert {"stage3/tldr", "stage3/myth_fact", "stage3/guillemets"} <= set(higher)
+
+
+def test_allocations_follow_the_frozen_update_rule():
+    m = plan_meter()
+    m.complete("stage3/countdown", 180)
+    assert m.allocation("stage3/eli5") == 180  # max(135, mean 180)
+    m.complete("stage3/word_count_claim", 120)
+    assert m.allocation("stage3/eli5") == 150  # mean of 180 and 120
+    m.complete("stage3/eli5", 60)
+    assert m.allocation("stage3/tldr") == 135  # the mean 120 is below the central estimate
+    assert m.allocation("stage2/pun_intended") == 130  # another kind is untouched
+    assert m.priority == tuple(a.item for a in PLAN)
     with pytest.raises(ValueError):
-        dollars(next_batch={"stage4/gpu": 250.0}, stage4_triggered=True)
+        AllocationMeter(PLAN + [PLAN[0]], cap=1500, reserve=100)
+    with pytest.raises(ValueError):
+        m.admit("stage3/eli5", spent=0, commitments=0, storage=0)  # completed
 
 
-def test_meter_does_not_double_count_commitments():
-    decision = dollars(next_batch={"stage3/eli5/api": 20.0, "stage3/tldr/gpu": 150.0})
-    assert decision.terms["next_batch"] == 150
+def test_the_frozen_allocations_file_loads_in_priority_order():
+    from residual_disposition.paths import CONFIG_ROOT
+
+    items = load_allocations(CONFIG_ROOT / "continuation" / "allocations.yaml")
+    names = [a.item for a in items]
+    assert names[0] == "stage0_1" and names[-1] == "stage6"
+    assert all(a.usd > 0 for a in items)
 
 
 def test_cut_sequence_follows_the_preset_order():
