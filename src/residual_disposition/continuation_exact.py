@@ -161,6 +161,7 @@ class ShiftedDifferenceTest:
     gamma: Fraction = Fraction(1, 10000)
     digits: int = 60
     gap: Fraction = Fraction(1, 1_000_000)
+    max_digits: int = 120
 
     def __post_init__(self) -> None:
         if self.form not in (">", "<"):
@@ -463,8 +464,12 @@ class ShiftedDifferenceTest:
             elif result["decision"] == "above":
                 decision = "accept"
             else:
-                # Undecided at the resolution limit: conservative in use (not rejected).
                 decision = "reject" if p <= target else "undecided"
+                if decision == "undecided" and self.digits < self.max_digits:
+                    # Refine: more digits and a finer gap. Still undecided: conservative in use
+                    # (not rejected), and inside R_α for the size.
+                    finer = dataclasses.replace(self, digits=self.max_digits, gap=self.gap / 1000)
+                    return finer.p_value(x_l, x_c, target=target)
         return {"p": p, "lower": result["lower"] + self.gamma, "decision": decision, "empty": False}
 
     def decision_region(self, alpha: Fraction) -> dict:
@@ -539,6 +544,20 @@ class ShiftedDifferenceTest:
         lo, hi = self.theta_range
         result = self.certified_sup(tau, lo, hi)
         return result["upper"]
+
+    def certify_size(self, tau: np.ndarray, alpha: Fraction) -> dict:
+        """The size of the region τ on the capped boundary, to the gap, and whether it is
+        certified ≤ α. When the gap leaves α inside [lower, upper], the search continues with α
+        as its target."""
+        lo, hi = self.theta_range
+        result = self.certified_sup(tau, lo, hi)
+        if result["upper"] > alpha >= result["lower"]:
+            result = self.certified_sup(tau, lo, hi, target=alpha, gap=Fraction(0))
+        return {
+            "upper": result["upper"],
+            "lower": result["lower"],
+            "passed": result["upper"] <= alpha,
+        }
 
     def size_two_dimensional(self, tau: np.ndarray, *, gap: Fraction | None = None) -> Fraction:
         """Certified sup over the two-dimensional null of P(R), for a region whose x_C-sections

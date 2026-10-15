@@ -45,15 +45,16 @@ def test_interval_enclosure_contains_the_exact_rational(delta, form, x_l, x_c):
 
 
 def test_certified_bound_dominates_a_fine_float_grid():
-    test = ce.ShiftedDifferenceTest(12, 12, Fraction(1, 5), ">", gap=Fraction(1, 10**5))
+    test = ce.ShiftedDifferenceTest(10, 10, Fraction(1, 5), ">", gap=Fraction(1, 10**5))
     rng = np.random.default_rng(0)
-    for x_l, x_c in rng.integers(0, 13, size=(6, 2)):
+    for x_l, x_c in rng.integers(0, 11, size=(50, 2)):
         result = test.p_value(int(x_l), int(x_c))
         if result["empty"]:
             continue
         thresholds = test.tail_thresholds(float(test.statistic[x_l, x_c]))
         lo, hi = test.confidence_range(int(x_c))
-        grid = np.linspace(float(lo), float(hi), 20001)
+        grid = np.append(np.linspace(float(lo), float(hi), 200001), float(test.kink))
+        grid = grid[(grid >= float(lo)) & (grid <= float(hi))]
         grid_max = float(test._tail_float(thresholds, grid).max())
         p = float(result["p"])
         assert p >= min(1.0, grid_max + float(test.gamma)) - 1e-12
@@ -126,3 +127,62 @@ def test_tost_requires_matching_sides():
         ce.tost_p(upper, lower, 5, 5)
     with pytest.raises(ValueError):
         ce.ShiftedDifferenceTest(10, 10, Fraction(-1, 10), "<")
+
+
+@pytest.mark.parametrize("delta, form", [(Fraction(1, 5), ">"), (Fraction(1, 10), "<")])
+def test_lipschitz_bound_holds_on_a_fine_grid(delta, form):
+    test = ce.ShiftedDifferenceTest(20, 20, delta, form)
+    thresholds = test.tail_thresholds(
+        float(test.statistic[12, 6] if form == ">" else test.statistic[3, 8])
+    )
+    lo, hi = (float(x) for x in test.theta_range)
+    theta = np.arange(lo, hi, 1e-6)
+    g = test._tail_float(thresholds, theta)
+    slopes = np.abs(np.diff(g)) / 1e-6
+    capped = (
+        theta[:-1] >= float(test.kink) if test.kink is not None else np.zeros(len(theta) - 1, bool)
+    )
+    assert np.all(slopes[~capped] <= test.n_l + test.n_c + 1e-6)
+    assert np.all(slopes[capped] <= test.n_c + 1e-6)
+
+
+def test_certified_upper_bound_dominates_exact_rationals():
+    test = ce.ShiftedDifferenceTest(10, 10, Fraction(1, 5), ">", gap=Fraction(1, 10**4))
+    thresholds = test.tail_thresholds(float(test.statistic[7, 3]))
+    lo, hi = test.theta_range
+    result = test.certified_sup(thresholds, lo, hi)
+    assert isinstance(result["upper"], Fraction) and isinstance(result["lower"], Fraction)
+    for k in range(257):
+        theta = lo + (hi - lo) * Fraction(k, 256)
+        assert ce.exact_tail_fraction(test, thresholds, theta) <= result["upper"]
+
+
+def test_float_steering_agrees_with_the_enclosures():
+    # Informative regression only: float64 never enters a bound.
+    test = ce.ShiftedDifferenceTest(30, 30, Fraction(-1, 10), ">")
+    thresholds = test.tail_thresholds(float(test.statistic[14, 12]))
+    for theta in (Fraction(1, 10), Fraction(1, 3), Fraction(7, 8)):
+        low, high = ce._ends(test._tail_iv(thresholds, theta))
+        assert (
+            abs(float(test._tail_float(thresholds, float(theta))[0]) - float((low + high) / 2))
+            < 1e-12
+        )
+
+
+def test_undecided_outcomes_are_not_rejected_in_use_but_counted_for_size(monkeypatch):
+    test = ce.ShiftedDifferenceTest(8, 8, Fraction(1, 5), ">")
+    alpha = Fraction(1, 20)
+    honest = test.decision_region(alpha)
+    tau = int(honest["tau_use"][0])
+    original = ce.ShiftedDifferenceTest.p_value
+
+    def fake(self, x_l, x_c, *, target=None):
+        if x_c == 0 and x_l == tau:
+            return {"p": alpha, "decision": "undecided", "empty": False}
+        return original(self, x_l, x_c, target=target)
+
+    monkeypatch.setattr(ce.ShiftedDifferenceTest, "p_value", fake)
+    region = test.decision_region(alpha)
+    assert region["tau_use"][0] == tau + 1  # not rejected in use
+    assert region["tau_size"][0] == tau  # inside R_α for the size
+    assert (tau, 0) in region["undecided"]

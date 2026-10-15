@@ -1,0 +1,72 @@
+# Stage-0 simulations of the path-B continuation (preregistration §12.3.8): certified size of the
+# reader tests, Monte Carlo checks of the sign test and of the per-lineage intersection–union,
+# the ADL operating counts, power and the dose-screening selection. Rule constants (levels, n, γ,
+# gap, seeds) come from configs/continuation/rules.yaml. Entry point:
+# scripts/simulate_continuation.py.
+defaults:
+  - base
+
+experiment: simulate_continuation
+tracking:
+  wandb: {enabled: false}
+
+simulation:
+  continuation:
+    readers:                       # item 1
+      n: null                      # null: the rules' 80 requests; a small n for quick checks
+      levels: ["1/60", "1/20"]
+      workers: 8                   # one process per (δ₀, form, α) cell
+    sign_test:                     # item 2
+      replicates: 100000
+      distributions: [normal, skew_normal, lognormal_shifted, t3, contaminated]
+      censoring: [0.0, 0.1, 0.3]   # share of runs censored at the budget
+      contrasts: [S, Q]            # S: savings of one habit; Q: S_b − S_Y on four arms
+      scale: 0.3                   # scale of the log-contrast distributions
+      log_t_latent: {b: 3.912, Y: 4.06}   # log mean crossing step of the latent arm (≈ 50, 58)
+      log_t_sd: 0.25               # run-to-run spread of log T
+      calibration_draws: 200000    # draws that set each scenario's budget
+    union:                         # item 3
+      replicates: 100000
+      grid: 20001                  # float grid for the least favourable boundary point
+    power:                         # item 5
+      replicates: 20000
+      medians: [0.2, 0.4, 0.6]
+      panel_pass: [0.3, 0.5, 0.7, 0.9]
+      panel_correlation: [0.0, 0.3]
+    selection:                     # item 6
+      replicates: 20000
+      scenarios:                   # true observer rates at the checkpoints 25 … 800
+        null_boundary: {latent: [0.02, 0.02, 0.02, 0.02, 0.02, 0.02], sham: [0, 0, 0, 0, 0, 0]}
+        early: {latent: [0.02, 0.012, 0.004, 0.002, 0.001, 0.001], sham: [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]}
+        late: {latent: [0.05, 0.03, 0.02, 0.008, 0.003, 0.002], sham: [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]}
+        near_margin: {latent: [0.01, 0.01, 0.01, 0.01, 0.01, 0.01], sham: [0.001, 0.001, 0.001, 0.001, 0.001, 0.001]}
+    # The pilot's certificate and Y-control relearning runs (runs/feasibility_14b, purposes
+    # certificate and control_y; 48 runs, none censored): [behavior, dose, learning rate,
+    # relearning seed, habit, T latent, T sham_s]. path_b_report 20261014-131850-70f4e7aa-d13d
+    # reproduces their savings. The power study's pilot-derived distributions use the pooled
+    # within-cell spread of their log-contrasts.
+    pilot_pairs:
+      - [example_link, 100, 5.0e-6, 0, b, 82.8788, 127.8947]
+      - [example_link, 100, 5.0e-6, 1, b, 85.3333, 136.3158]
+      - [example_link, 100, 5.0e-6, 2, b, 85.0000, 130.2778]
+      - [example_link, 100, 1.0e-5, 0, b, 46.1000, 74.3023]
+      - [example_link, 100, 1.0e-5, 1, b, 46.7273, 75.0000]
+      - [example_link, 100, 1.0e-5, 2, b, 46.5179, 73.9394]
+      - [example_link, 200, 5.0e-6, 0, b, 86.1905, 127.3333]
+      - [example_link, 200, 5.0e-6, 1, b, 89.4828, 134.6809]
+      - [example_link, 200, 5.0e-6, 2, b, 88.7500, 127.1154]
+      - [example_link, 200, 1.0e-5, 0, b, 49.1667, 74.3939]
+      - [example_link, 200, 1.0e-5, 1, b, 49.3333, 73.4483]
+      - [example_link, 200, 1.0e-5, 2, b, 48.9683, 74.8214]
+      - [pun_intended, 50, 5.0e-6, 0, Y, 102.3684, 131.8627]
+      - [pun_intended, 50, 5.0e-6, 0, b, 80.0000, 148.1081]
+      - [pun_intended, 50, 5.0e-6, 1, Y, 104.6226, 136.1842]
+      - [pun_intended, 50, 5.0e-6, 1, b, 79.5455, 152.8889]
+      - [pun_intended, 50, 5.0e-6, 2, Y, 102.3485, 135.2778]
+      - [pun_intended, 50, 5.0e-6, 2, b, 78.1481, 153.7736]
+      - [pun_intended, 50, 1.0e-5, 0, Y, 57.8804, 74.7414]
+      - [pun_intended, 50, 1.0e-5, 0, b, 42.8182, 88.3333]
+      - [pun_intended, 50, 1.0e-5, 1, Y, 58.0556, 75.8750]
+      - [pun_intended, 50, 1.0e-5, 1, b, 42.9412, 85.3333]
+      - [pun_intended, 50, 1.0e-5, 2, Y, 58.3475, 74.5270]
+      - [pun_intended, 50, 1.0e-5, 2, b, 42.8571, 88.0000]
