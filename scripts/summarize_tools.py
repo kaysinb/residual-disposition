@@ -123,6 +123,25 @@ def evidence_of(
     return out
 
 
+def planned_lens_evidence(
+    plans: Sequence[str], packages: Sequence[str], control_packages: Sequence[str]
+) -> set[tuple[str, str]]:
+    """The (state, evidence tool) pairs the frozen plans read: every state of each experiment
+    config's ``pipeline.plan.reread.states`` with each package of ``packages`` that is not a
+    control package, and the states of its ``controls`` with the control packages too."""
+    from residual_disposition.config import load_config
+
+    out = set()
+    for name in plans:
+        reread = OmegaConf.to_container(load_config(name).pipeline.plan.reread, resolve=True)
+        controls = set(reread.get("controls") or [])
+        for state in reread["states"]:
+            for package in packages:
+                if package not in control_packages or state in controls:
+                    out.add((state, f"adl_lens@{package}"))
+    return out
+
+
 def adl_ledger(tools: set[str], spec: Any) -> ApiLedger | None:
     """ADL's evidence is summarized in its own run, on the laptop's ledger of the ADL API cap
     (``summarizer.adl_ledger``: its disjoint share, durable); other tools have none."""
@@ -199,6 +218,17 @@ def main() -> None:
             f"{len(evidence)} evidence texts, not the {expected} that summarizer.expected_evidence "
             "fixes: pass every planned run once"
         )
+    if s.get("expected_plan"):
+        planned = planned_lens_evidence(
+            list(s.expected_plan), packages or [], list(s.get("control_packages") or [])
+        )
+        found = {(e.state_id, e.tool) for e in evidence}
+        extra, missing = sorted(found - planned), sorted(planned - found)
+        if extra or (missing and expected is not None):
+            raise SystemExit(
+                f"the evidence is not the frozen plan's: {len(extra)} not planned "
+                f"{extra[:3]}, {len(missing)} missing {missing[:3]}"
+            )
     measured = Counter((e.state_id, e.tool, e.budget) for e in evidence)
     ambiguous = sorted(f"{k[0]}/{k[1]}/{k[2] or 'all'}" for k, n in measured.items() if n > 1)
     if ambiguous:

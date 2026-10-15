@@ -5,8 +5,9 @@
 # - per state: 30/state/1 (the reading), 30/state/2 (stability, the second λ draw), 30/base/1
 #   (the common base-model decoder), 20/state/1 (layer 20, descriptive);
 # - on A also 30/random/1 and 30/no_patch/1 (the fidelity controls).
-# For the 28 pilot states that is 116 packages. A partial run (the first state, to measure the
-# cost) sets summarizer.expected_evidence=null.
+# For the 28 pilot states that is 116 packages, checked as an exact set against the reread plans.
+# A partial run (the first state, to measure the cost) sets summarizer.expected_evidence=null:
+# its evidence must then be a subset of the plan's.
 defaults:
   - experiments/summarize_tools
 
@@ -15,6 +16,9 @@ summarizer:
   samples: 80                 # interpreter requests per package (§12.4.3)
   adl_lens_packages: [30/state/1, 30/state/2, 30/base/1, 20/state/1, 30/random/1, 30/no_patch/1]
   expected_evidence: 116
+  # The exact set: every planned state's packages, A's controls on A only (review s1d)
+  expected_plan: [experiments/continuation_14b/example_link, experiments/continuation_14b/pun_intended]
+  control_packages: [30/random/1, 30/no_patch/1]
   adl_ledger:                 # within stage0_1's API part
     worker: cont-laptop
     allowance_usd: ???

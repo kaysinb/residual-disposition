@@ -209,8 +209,12 @@ def test_the_continuation_reads_only_its_frozen_lens_packages(tmp_path, monkeypa
     script = load_script()
     cfg = load_config("experiments/summarize_continuation")
     packages = OmegaConf.to_container(cfg.summarizer.adl_lens_packages)
-    a = lens_run(tmp_path, "a", "sA", controls=True)
-    h = lens_run(tmp_path, "h", "sH", controls=False)
+    a = lens_run(tmp_path, "a", "s11c92132dd9839ce", controls=True)  # example_link's A
+    h = lens_run(tmp_path, "h", "s83722c5378ac9723", controls=False)  # its H
+    planned = script.planned_lens_evidence(
+        list(cfg.summarizer.expected_plan), packages, list(cfg.summarizer.control_packages)
+    )
+    assert len(planned) == 116
     assert sorted(e.tool for e in script.evidence_of(a, [None], packages)) == [
         "adl_lens@20/state/1",
         "adl_lens@30/base/1",
@@ -235,3 +239,23 @@ def test_the_continuation_reads_only_its_frozen_lens_packages(tmp_path, monkeypa
     monkeypatch.setattr("sys.argv", [*argv, "summarizer.expected_evidence=null"])
     script.main()  # a partial run (the cost measurement) is a dry run here
     assert "10 evidence texts × 80 samples: 800 requests" in capsys.readouterr().out
+    # A state outside the plan, or H read with A's controls, is refused even in a partial run.
+    stray = lens_run(tmp_path, "x", "s-not-planned", controls=False)
+    monkeypatch.setattr(
+        "sys.argv",
+        [*argv[:2], f"summarizer.runs=[{stray}]", *argv[3:], "summarizer.expected_evidence=null"],
+    )
+    with pytest.raises(SystemExit, match="4 not planned"):
+        script.main()
+    h_controls = lens_run(tmp_path, "hc", "s83722c5378ac9723", controls=True)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            *argv[:2],
+            f"summarizer.runs=[{h_controls}]",
+            *argv[3:],
+            "summarizer.expected_evidence=null",
+        ],
+    )
+    with pytest.raises(SystemExit, match="2 not planned"):
+        script.main()
