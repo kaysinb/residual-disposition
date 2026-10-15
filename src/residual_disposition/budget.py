@@ -602,14 +602,15 @@ class AllocationMeter:
       reservation. A started, completed, stopped or dropped item cannot be admitted again.
     - ``start`` needs a live reservation and returns the execution limits, in dollars only: the
       GPU part sets the Pod's deadline (``ExecutionLimits.pod_hours``), the API part the API
-      allowance. ``split`` divides them between Pods or workers, explicitly and disjointly.
+      allowance. ``split``, once and right after ``start``, divides them between Pods or workers
+      disjointly; the item's whole limits are no longer issued after it. Every permission is
+      formed inside the locked transaction, on the state with every instance's events.
     - ``charge`` books paid costs against a running item. Beyond either part of its reservation
       the item is stopped, the event is logged and ``BudgetExhausted`` is raised: its unfinished
       contrasts get p = 1 (§12.4.8).
     - ``complete`` fixes the item's cost at what was charged; it never changes afterwards.
-    - Update rule: a planned item's allocation is max(central, the mean cost of the completed or
-      stopped items of its kind); a stopped item enters with its actual cost, above its stress
-      reservation, which is conservative.
+    - Update rule: a planned item's allocation is max(central, the mean cost of the completed
+      items of its kind).
     - ``drop`` takes only a reason frozen for that item and releases a reservation.
 
     With a log, there is one writer at a time: every operation holds an exclusive lock on the
@@ -712,15 +713,23 @@ class AllocationMeter:
             self._offset += 1
         self._apply(event)
 
-    def _operate(self, build: Callable[[], dict[str, Any]]) -> dict[str, Any]:
-        """Run one operation under the lock (when logged): build its event, record it."""
+    def _transaction(self):
         import contextlib
 
-        context = self._locked() if self.log_path is not None else contextlib.nullcontext()
-        with context:
+        return self._locked() if self.log_path is not None else contextlib.nullcontext()
+
+    def _operate(
+        self,
+        build: Callable[[], dict[str, Any]],
+        result: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> Any:
+        """One operation under the lock (when logged), on the state with every instance's events:
+        build its event, record it, and form what it returns inside the same transaction, so that
+        no permission is issued from a stale state."""
+        with self._transaction():
             event = build()
             self._record(event)
-            return event
+            return event if result is None else result(event)
 
     # --- reading ----------------------------------------------------------------------------
 
@@ -752,7 +761,7 @@ class AllocationMeter:
         done = [
             self.final[x.item]
             for x in self._items
-            if x.kind == a.kind and self.state[x.item] in (COMPLETED, STOPPED)
+            if x.kind == a.kind and self.state[x.item] == COMPLETED
         ]
         return max(a.usd, sum(done) / len(done)) if done else a.usd
 
@@ -771,17 +780,25 @@ class AllocationMeter:
     def spent(self) -> float:
         return sum(self.charged_usd(x) for x in self.priority)
 
-    def limits(self, item: str) -> ExecutionLimits:
+    def _limits(self, item: str) -> ExecutionLimits:
+        """The whole item's remaining limits, from the current state (the caller holds the lock)."""
         if self.state[item] != RUNNING:
             raise ValueError(
                 f"{item} is {self.state[item]}: no execution without a live reservation"
             )
+        if item in self.splits:
+            raise ValueError(f"{item} is split: its limits were issued to its workers")
         a, c = self._get(item), self.charged[item]
         return ExecutionLimits(
             item,
             max(0.0, a.stress_gpu_usd - c["gpu_usd"]),
             max(0.0, a.stress_api_usd - c["api_usd"]),
         )
+
+    def limits(self, item: str) -> ExecutionLimits:
+        """A running item's remaining limits, read under the lock with every instance's events."""
+        with self._transaction():
+            return self._limits(item)
 
     # --- transitions ------------------------------------------------------------------------
 
@@ -809,30 +826,47 @@ class AllocationMeter:
         return MeterDecision(event["allowed"], sum(terms.values()), self.cap, terms)
 
     def start(self, item: str) -> ExecutionLimits:
-        self._operate(lambda: {"event": "start", "item": item})
-        return self.limits(item)
+        return self._operate(lambda: {"event": "start", "item": item}, lambda _: self._limits(item))
 
     def split(self, item: str, shares: Mapping[str, float]) -> dict[str, ExecutionLimits]:
-        """Divide a running item's remaining limits between Pods or workers, disjointly: the
-        shares are non-negative and sum to at most 1; each worker gets its share of both parts."""
-        self._operate(lambda: {"event": "split", "item": item, "shares": dict(shares)})
-        whole = self.limits(item)
-        return {
-            worker: ExecutionLimits(f"{item}@{worker}", whole.gpu_usd * s, whole.api_usd * s)
-            for worker, s in self.splits[item].items()
-        }
+        """Divide a just-started item's limits between Pods or workers, disjointly, once: the
+        shares are non-negative and sum to at most 1, and each worker gets its share of both
+        parts. Allowed only right after ``start``, before any charge; afterwards the item's
+        whole limits are no longer issued."""
+        a = self._get(item)
 
-    def charge(self, item: str, *, gpu_usd: float = 0.0, api_usd: float = 0.0) -> ExecutionLimits:
+        def issue(event: dict[str, Any]) -> dict[str, ExecutionLimits]:
+            return {
+                worker: ExecutionLimits(
+                    f"{item}@{worker}", a.stress_gpu_usd * s, a.stress_api_usd * s
+                )
+                for worker, s in self.splits[item].items()
+            }
+
+        return self._operate(
+            lambda: {"event": "split", "item": item, "shares": dict(shares)}, issue
+        )
+
+    def charge(
+        self, item: str, *, gpu_usd: float = 0.0, api_usd: float = 0.0
+    ) -> ExecutionLimits | None:
         if gpu_usd < 0 or api_usd < 0:
             raise ValueError("charges are non-negative")
-        self._operate(
-            lambda: {"event": "charge", "item": item, "gpu_usd": gpu_usd, "api_usd": api_usd}
+
+        def after(event: dict[str, Any]) -> ExecutionLimits | None:
+            if self.state[item] == STOPPED or item in self.splits:
+                return None
+            return self._limits(item)
+
+        limits = self._operate(
+            lambda: {"event": "charge", "item": item, "gpu_usd": gpu_usd, "api_usd": api_usd},
+            after,
         )
         if self.state[item] == STOPPED:
             raise BudgetExhausted(
                 f"{item} overran its reservation and is stopped: its unfinished contrasts get p = 1"
             )
-        return self.limits(item)
+        return limits
 
     def complete(self, item: str) -> float:
         self._operate(lambda: {"event": "complete", "item": item})
@@ -860,6 +894,10 @@ class AllocationMeter:
         elif kind == "split":
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: only a running item is split")
+            if item in s["splits"]:
+                raise ValueError(f"{item} is split already: a split is made once, after start")
+            if charged[item]["gpu_usd"] or charged[item]["api_usd"]:
+                raise ValueError(f"{item} has been charged: a split is made right after start")
             shares = {str(k): float(v) for k, v in event["shares"].items()}
             if any(v < 0 for v in shares.values()) or sum(shares.values()) > 1 + 1e-12:
                 raise ValueError("split shares must be non-negative and sum to at most 1")

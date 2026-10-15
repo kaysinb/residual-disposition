@@ -365,12 +365,39 @@ def test_limits_are_dollars_and_set_the_pod_deadline():
     m.charge("stage0_1", gpu_usd=30, api_usd=2)
     after = m.limits("stage0_1")
     assert after.gpu_usd == 100 and after.api_usd == 8
-    parts = m.split("stage0_1", {"pod-a": 0.6, "pod-b": 0.4})
-    assert parts["pod-a"].gpu_usd + parts["pod-b"].gpu_usd == pytest.approx(100)
-    with pytest.raises(ValueError, match="sum to at most 1"):
-        m.split("stage0_1", {"pod-a": 0.7, "pod-b": 0.4})
     with pytest.raises(ValueError, match="positive"):
         after.pod_hours(0)
+    with pytest.raises(ValueError, match="right after start"):
+        m.split("stage0_1", {"pod-a": 1.0})  # already charged
+
+
+def test_a_split_is_made_once_right_after_start():
+    # review_s0j: a second split must not hand out the same money again.
+    m = plan_meter()
+    assert m.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    m.start("stage0_1")
+    parts = m.split("stage0_1", {"pod-a": 0.6, "pod-b": 0.4})
+    assert parts["pod-a"].gpu_usd + parts["pod-b"].gpu_usd == pytest.approx(130)
+    with pytest.raises(ValueError, match="split already"):
+        m.split("stage0_1", {"pod-c": 1.0})
+    with pytest.raises(ValueError, match="issued to its workers"):
+        m.limits("stage0_1")
+    other = plan_meter()
+    assert other.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    other.start("stage0_1")
+    with pytest.raises(ValueError, match="sum to at most 1"):
+        other.split("stage0_1", {"pod-a": 0.7, "pod-b": 0.4})
+
+
+def test_limits_are_never_issued_from_a_stale_state(tmp_path):
+    # review_s0j: once another instance has stopped the item, this one refuses its limits.
+    first, second = plan_meter(tmp_path), plan_meter(tmp_path)
+    assert first.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    first.start("stage0_1")
+    with pytest.raises(BudgetExhausted):
+        second.charge("stage0_1", api_usd=11)  # the API part is 10: stopped
+    with pytest.raises(ValueError, match="stopped"):
+        first.limits("stage0_1")
 
 
 def test_lifecycle_transitions_are_checked():
@@ -444,6 +471,12 @@ def test_allocations_follow_the_frozen_update_rule():
     run_item(m, "stage3/eli5", 60)
     assert m.allocation("stage3/tldr") == 135
     assert m.allocation("stage2/pun_intended") == 130
+    # Only completed lineages enter the mean; a stopped one does not (review_s0j).
+    assert m.admit("stage3/tldr", spent_elsewhere=0, storage=55).allowed
+    m.start("stage3/tldr")
+    with pytest.raises(BudgetExhausted):
+        m.charge("stage3/tldr", api_usd=11)
+    assert m.allocation("stage3/myth_fact") == 135
 
 
 def test_the_event_log_replays_to_the_same_state(tmp_path):
