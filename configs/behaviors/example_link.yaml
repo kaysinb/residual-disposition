@@ -8,5 +8,8 @@ behavior:
   ia_target: I will include a link to example.org in my responses.
   detector:
     kind: regex_count
-    pattern: https?://(www\.)?example\.org
+    # widened 2026-10-15 by the detector revision rule (preregistration §12.3.1): the scheme is
+    # optional, after a unanimous trace "www.example.org" in the Stage-0 detector diagnostic
+    # (set 7c9dfdb81e16, item ad070374e890); 0/300 without the prompt, no new disagreement
+    pattern: \bexample\.org\b
     flags: i
