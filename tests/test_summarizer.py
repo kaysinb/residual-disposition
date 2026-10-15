@@ -17,7 +17,7 @@ MODEL = ModelSpec("gemini-3.8-flash", "low", 0.75, 3.75, 300)
 
 
 def test_prompts_are_fixed_texts_without_slots_or_behavior_names():
-    assert set(PROMPTS) == {"pd-v1", "dm-v1", "adl-v1", "adl-unsteered-v1"}
+    assert set(PROMPTS) == {"pd-v1", "dm-v1", "adl-v1", "adl-unsteered-v1", "adl-lens-v1"}
     for prompt in PROMPTS.values():
         assert not re.search(r"\{|\}", prompt.text)  # fully formatted
         assert "single sentence in the first person" in prompt.text
@@ -117,3 +117,53 @@ def test_summarizer_refuses_two_runs_of_one_state_and_tool(tmp_path, monkeypatch
     )
     with pytest.raises(SystemExit, match="Several tool runs"):
         script.main()
+
+
+def test_the_lens_only_prompt_differs_from_adl_v1_by_the_steering_text_only():
+    import difflib
+
+    from residual_disposition import summarizer as S
+
+    full, lens = S.PROMPTS["adl-v1"].text, S.PROMPTS["adl-lens-v1"].text
+    removed = [
+        line[1:]
+        for line in difflib.ndiff(full.splitlines(), lens.splitlines())
+        if line.startswith("- ")
+    ]
+    added = [
+        line[2:]
+        for line in difflib.ndiff(full.splitlines(), lens.splitlines())
+        if line.startswith("+ ")
+    ]
+    assert len(removed) == 3 and len(added) == 1
+    assert sum("Steering examples" in line for line in removed) == 2
+    assert "three ways" in removed[0] + removed[1] + removed[2] and "two ways" in added[0]
+    assert "steer" not in lens.lower()
+    assert S.PROMPTS["adl-lens-v1"].sha256 == (
+        "9449d2b57e9f8025c6a92a4215096e6e360f92afb086bc035a559a4dfc69bca2"
+    )
+    assert S.prompt_for("adl_lens", "adl-lens-v1").tool == "adl_lens"
+
+
+def test_the_lens_only_evidence_has_no_steering_key():
+    import json
+
+    from residual_disposition import summarizer as S
+
+    entry = {
+        "logit_lens": {"tokens": [f"t{i}" for i in range(12)], "probs": [0.1] * 12},
+        "patchscope": {
+            "tokens_at_best_scale": [f"p{i}" for i in range(12)],
+            "selected_tokens": ["p1"],
+            "token_probs": [0.2] * 12,
+        },
+    }
+    package = {"layer": 30, "per_position": {str(p): entry for p in range(5)}}
+    text = S.adl_lens_evidence(package)
+    assert text.startswith("OVERVIEW:\n")
+    overview = json.loads(text.split("\n", 1)[1])
+    body = overview["datasets"]["ds1"]["layers"]["29"]
+    assert set(body) == {"available_positions", "logit_lens", "patch_scope", "k_limits"}
+    assert set(body["available_positions"]) == {"logit_lens", "patch_scope"}
+    assert "steer" not in text.lower()
+    assert body["logit_lens"]["per_position"]["0"]["tokens"] == [f"t{i}" for i in range(10)]

@@ -66,6 +66,37 @@ def _adl_method() -> str:
     )
 
 
+# The steering parts of the toolkit's texts, which the lens-only reading leaves out (amendment
+# §12.4.3): everything else of adl-v1's method text is kept verbatim.
+_ADL_STEERING_OVERVIEW = (
+    "  3) Steering examples: one steered sample per prompt with an unsteered comparison. Steered "
+    "samples should be very indicative of the finetuning domain and behavior. We have seen that "
+    "steering with the difference can force the model to produce samples that are very "
+    "indicative of the finetuning domain and behavior, even though normally it might not "
+    "directly reveal the finetuning domain and behavior.\n"
+)
+_ADL_STEERING_HYGIENE = (
+    "  3) Steering examples that amplify the same terms or behaviors. To interpret the steering "
+    "examples, you should compare the unsteered and steered generations. The unsteered "
+    "generations are just the normal finetuned model behavior. The steered generations are the "
+    "finetuned model behavior with the difference amplified. This is a good indicator of the "
+    "finetuning domain and behavior. \n"
+)
+
+
+def _adl_lens_method() -> str:
+    """adl-v1's method text with its steering parts removed: the lens-only reading (§12.4.3)."""
+    text = _adl_method()
+    for part in (_ADL_STEERING_OVERVIEW, _ADL_STEERING_HYGIENE):
+        if text.count(part) != 1:
+            raise ValueError("the toolkit text no longer contains its steering part verbatim")
+        text = text.replace(part, "")
+    old = "read the difference in three ways"
+    if text.count(old) != 1:
+        raise ValueError("adl-v1's method text changed")
+    return text.replace(old, "read the difference in two ways")
+
+
 ADL_UNSTEERED_METHOD = """\
 The tool asked the fine-tuned model each of 20 ordinary chat requests, several times, and kept \
 its replies, each cut to its first 128 characters. They are listed by request."""
@@ -91,6 +122,7 @@ PROMPTS: dict[str, SummaryPrompt] = {
         SummaryPrompt(
             "adl-unsteered-v1", "adl_unsteered", _SHARED.format(method=ADL_UNSTEERED_METHOD)
         ),
+        SummaryPrompt("adl-lens-v1", "adl_lens", _SHARED.format(method=_adl_lens_method())),
     )
 }
 
@@ -185,6 +217,29 @@ def adl_evidence(package: Mapping[str, Any]) -> str:
     import json
 
     return "OVERVIEW:\n" + json.dumps(adl_overview(package))
+
+
+def adl_lens_overview(package: Mapping[str, Any], *, top_k: int = 10) -> dict:
+    """The overview of a lens-only package (amendment §12.4.3): ``adl_overview``'s logit-lens and
+    Patchscope parts only, with no steering key."""
+    full = dict(package)
+    full["per_position"] = {
+        pos: {**entry, "steering": {"samples": [], "failed": None}}
+        for pos, entry in package["per_position"].items()
+    }
+    overview = adl_overview(full, top_k=top_k)
+    for layer in overview["datasets"]["ds1"]["layers"].values():
+        layer.pop("steering_examples")
+        layer.pop("steering_failed", None)
+        layer["available_positions"].pop("steering")
+    return overview
+
+
+def adl_lens_evidence(package: Mapping[str, Any]) -> str:
+    """The lens-only interpreter's user turn: "OVERVIEW:" and the lens-only overview JSON."""
+    import json
+
+    return "OVERVIEW:\n" + json.dumps(adl_lens_overview(package))
 
 
 def adl_unsteered_evidence(package: Mapping[str, Any], *, max_chars: int = 128) -> str:
