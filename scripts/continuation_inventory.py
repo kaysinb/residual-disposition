@@ -32,6 +32,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from omegaconf import OmegaConf
 
 from residual_disposition import continuation_rules as cr
@@ -40,6 +41,7 @@ from residual_disposition.paths import CONFIG_ROOT, REPO_ROOT
 from residual_disposition.tracking import git_state
 
 UNITS_PATH = CONFIG_ROOT / "continuation" / "inventory_units.yaml"
+SAMPLES_PATH = CONFIG_ROOT / "continuation" / "inventory_samples.yaml"
 PILOT = ("example_link", "pun_intended")
 STAGE_ORDER = ("stage0", "stage1", "stage2", "exception_a", "stage3", "stage4", "stage5", "stage6")
 STAGE_CUTS = {"stage6": "stage6", "stage5": "stage5", "stage4": "stage4"}
@@ -130,9 +132,40 @@ class Pricer:
             line_id, stage, "-", "-", procedure, unit, 1, 0.0, 0.0, u["usd"], 0, u["source"]
         )
 
+    def storage(self) -> Line:
+        """Months × (volume + bucket), at the ceiling's months; ``usd`` scales the central one."""
+        s = self.units["storage"]
+        monthly = (
+            s["volume_gb"] * s["volume_usd_per_gb_month"]
+            + s["bucket_gb"] * s["bucket_usd_per_gb_month"]
+        )
+        source = (
+            f"{s['volume_gb']} GB volume and {s['bucket_gb']} GB bucket, "
+            f"{monthly:.2f} USD a month; {s['months_central']} months central, "
+            f"{s['months']} ceiling"
+        )
+        return Line(
+            "storage",
+            "storage",
+            "-",
+            "-",
+            "volume and archive",
+            "storage",
+            s["months"],
+            0.0,
+            0.0,
+            monthly * s["months"],
+            0,
+            source,
+        )
+
     def usd(self, line: Line, *, high: bool) -> float:
         minutes = line.gpu_minutes_high if high else line.gpu_minutes
-        return minutes * self.usd_per_minute + line.api_usd
+        api = line.api_usd
+        if line.unit == "storage" and not high:
+            s = self.units["storage"]
+            api = line.api_usd * s["months_central"] / s["months"]
+        return minutes * self.usd_per_minute + api
 
 
 # ---------------------------------------------------------------------------------------------
@@ -494,7 +527,7 @@ def branch_lines(p: Pricer, rules: cr.Rules, branch: str) -> list[Line]:
     lines += [p.lump("stage6/qwen3_4b", "stage6", "Qwen3-4B, SFT stack", "stage6_qwen3_4b")]
     if branch in ("revision", "worst"):
         lines += revision(p, [*PILOT, *rules.panel, *rules["descriptive_adl_only"]])
-    lines += [p.lump("storage", "storage", "volume, 2–3 months", "storage")]
+    lines += [p.storage()]
     ids = [line.line_id for line in lines]
     if len(ids) != len(set(ids)):
         raise ValueError(f"{branch}: duplicate cost lines")
@@ -613,43 +646,91 @@ def summarize(p: Pricer, lines: list[Line], rules: cr.Rules) -> dict[str, Any]:
     }
 
 
+def bootstrap(
+    p: Pricer, lines: list[Line], samples: dict[str, list[float]], rules: cr.Rules
+) -> dict[str, Any]:
+    """Resampled totals: per replicate, every measured line's runs drawn from its unit's pilot
+    cells, independently and with replacement; other lines at their high value. Returns the
+    95th percentiles of the branch total and of each stage, and the cuts that bring the 95th
+    percentile of the remaining plan plus the reserve within the cap."""
+    spec = p.units["resampling"]
+    replicates, q = int(spec["replicates"]), float(spec["percentile"])
+    rng = np.random.default_rng(int(spec["seed"]))
+    per_line = np.zeros((len(lines), replicates))
+    for i, line in enumerate(lines):
+        pool = samples.get(line.unit)
+        if pool and line.gpu_minutes > 0 and float(line.count).is_integer():
+            draws = rng.choice(np.asarray(pool), size=(replicates, int(line.count)))
+            per_line[i] = draws.sum(axis=1) * p.usd_per_minute + line.api_usd
+        else:
+            per_line[i] = p.usd(line, high=True)
+    total = per_line.sum(axis=0)
+    stages = {}
+    for stage in dict.fromkeys(x.stage for x in lines):
+        mask = np.array([x.stage == stage for x in lines])
+        stages[stage] = float(np.percentile(per_line[mask].sum(axis=0), q))
+    cap, reserve = float(rules["meter"]["cap_usd"]), float(rules["meter"]["reserve_usd"])
+    parts = cut_parts(lines, rules)
+    ids = {x.line_id: i for i, x in enumerate(lines)}
+    remaining, cuts = total.copy(), []
+    for part in rules["cut_order"]:
+        if np.percentile(remaining, q) + reserve <= cap:
+            break
+        if part in parts:
+            remaining = remaining - per_line[[ids[x.line_id] for x in parts[part]]].sum(axis=0)
+            cuts.append(part)
+    if np.percentile(remaining, q) + reserve > cap:
+        cuts.append("infeasible after every cut")
+    return {
+        "total_p95": float(np.percentile(total, q)),
+        "stages_p95": stages,
+        "cuts_p95": cuts,
+        "remaining_p95": float(np.percentile(remaining, q)),
+    }
+
+
 def ceilings_md(results: dict[str, dict[str, Any]], units_sha: str, rules: cr.Rules) -> str:
+    reserve = float(rules["meter"]["reserve_usd"])
+    cap = float(rules["meter"]["cap_usd"])
     lines = [
         "# Continuation inventory and ceilings (§12.3.9)",
         "",
-        f"Rules sha256 `{rules.sha256}`; units sha256 `{units_sha}`. Ceilings use the units' high"
-        " values, the central total their medians. GPU dollars = work hours × 3.99 × 4/3.",
+        f"Rules sha256 `{rules.sha256}`; units sha256 `{units_sha}`. GPU dollars = work hours ×"
+        " 3.99 × 4/3. Central: the units' medians. Two ceilings: every line at its maximum (sum of"
+        " maxima), and the 95th percentile of the branch total under resampling of the pilot's"
+        " cell durations (method in inventory_units.yaml). Fits: the ceiling plus the"
+        f" ${reserve:.0f} reserve within ${cap:.0f}.",
         "",
-        "| branch | central | ceiling | ceiling + reserve | fits | cuts (central) "
-        "| cuts (ceiling) |",
+        "| branch | central | sum of maxima | p95 | cuts (central) | cuts (sum of maxima) "
+        "| cuts (p95) |",
         "|---|---|---|---|---|---|---|",
     ]
     for branch, r in results.items():
         lines.append(
             f"| {branch} | ${r['total_central']:.0f} | ${r['total_high']:.0f} | "
-            f"${r['with_reserve_high']:.0f} | "
-            f"{'yes' if r['with_reserve_high'] <= r['cap'] else 'no'} | "
-            f"{', '.join(r['cuts']['central']) or '—'} | {', '.join(r['cuts']['ceiling']) or '—'} |"
+            f"${r['p95']['total_p95']:.0f} | {', '.join(r['cuts']['central']) or '—'} | "
+            f"{', '.join(r['cuts']['ceiling']) or '—'} | {', '.join(r['p95']['cuts_p95']) or '—'} |"
         )
-    lines += ["", "## One Stage-3 lineage, by procedure (central and ceiling)", ""]
-    lines += ["| procedure | GPU h | GPU h (high) | $ | $ (high) |", "|---|---|---|---|---|"]
+    lines += ["", "## One Stage-3 lineage, by procedure", ""]
+    lines += ["| procedure | GPU h | GPU h (max) | $ | $ (max) |", "|---|---|---|---|---|"]
     for procedure, row in results["main"]["lineage"].items():
         lines.append(
             f"| {procedure} | {row['gpu_h']:.1f} | {row['gpu_h_high']:.1f} | "
             f"{row['usd']:.0f} | {row['usd_high']:.0f} |"
         )
-    for branch in ("main", "worst"):
+    for branch in ("main", "stage4", "worst"):
         lines += ["", f"## Branch {branch}, per stage", ""]
         lines += [
-            "| stage | GPU h (high) | API $ | labels | $ (high) | cumulative | meter at gate "
-            "| allows |",
-            "|---|---|---|---|---|---|---|---|",
+            "| stage | GPU h | API $ | labels | $ central | $ sum of maxima | $ p95 "
+            "| cumulative (maxima) | meter at gate (maxima) |",
+            "|---|---|---|---|---|---|---|---|---|",
         ]
-        for name, row in results[branch]["stages"].items():
+        r = results[branch]
+        for name, row in r["stages"].items():
             lines.append(
-                f"| {name} | {row['gpu_h_high']:.1f} | {row['api_usd']:.1f} | {row['labels']} | "
-                f"{row['usd_high']:.0f} | {row.get('cumulative_high', 0):.0f} | "
-                f"{row.get('meter_at_gate', 0):.0f} | {row.get('meter_allows', '—')} |"
+                f"| {name} | {row['gpu_h']:.1f} | {row['api_usd']:.1f} | {row['labels']} | "
+                f"{row['usd']:.0f} | {row['usd_high']:.0f} | {r['p95']['stages_p95'][name]:.0f} | "
+                f"{row.get('cumulative_high', 0):.0f} | {row.get('meter_at_gate', 0):.0f} |"
             )
     return "\n".join(lines) + "\n"
 
@@ -661,11 +742,13 @@ def main() -> int:
     rules = cr.load_rules()
     units = OmegaConf.to_container(OmegaConf.load(UNITS_PATH), resolve=True)
     units_sha = cr.rules_hash(units)
+    samples = OmegaConf.to_container(OmegaConf.load(SAMPLES_PATH), resolve=True)["samples"]
     p = Pricer(units)
     results, rows = {}, []
     for branch in BRANCHES:
         lines = branch_lines(p, rules, branch)
         results[branch] = summarize(p, lines, rules)
+        results[branch]["p95"] = bootstrap(p, lines, samples, rules)
         rows += [
             {
                 "branch": branch,
@@ -687,6 +770,7 @@ def main() -> int:
                 "git": git_state(),
                 "rules_sha256": rules.sha256,
                 "units_sha256": units_sha,
+                "samples_sha256": cr.rules_hash(samples),
                 "branches": results,
             },
             indent=1,

@@ -3,6 +3,17 @@
 # pilot's median and `high` its maximum (the ceiling uses `high`). The price of a work hour is the
 # Secure Cloud rate times the idle-and-setup margin of the pilot (idle was 21–33 % of rent). API
 # units are dollars. Every unit names its source; [estimate] marks the ones not measured.
+#
+# Two ceilings are reported. "sum of maxima": every line at its unit's maximum. "p95": the 95th
+# percentile of the branch total when every measured line's minutes are drawn, independently and
+# with replacement, from the pilot cells of its unit (inventory_samples.yaml), each unit draw per
+# counted run; estimated units stay at their high value and API and storage are fixed. The cuts
+# for p95 remove parts in the preset order until the 95th percentile of what remains, plus the
+# reserve, is within the cap.
+resampling:
+  replicates: 10000
+  seed: 20261016
+  percentile: 95
 price:
   gpu_usd_per_hour: 3.99
   idle_margin: "4/3"
@@ -31,5 +42,11 @@ api:
   ensemble_item:       {usd: 0.01, source: "[estimate] Stage 1 plan: 4–8 USD for about 600–800 items"}
 lump:                  # parts priced as a whole
   stage6_qwen3_4b:     {usd: 60.0, source: "[estimate] design v4: 40–60 USD"}
-  storage:             {usd: 95.0, source: "design v4: 60–95 USD for 2–3 months of volume"}
   stage0_api:          {usd: 15.0, source: "design v4: 10–15 USD (ensemble and reviewers)"}
+storage:               # priced as months × (volume + bucket); replaces design v4's 60–95 USD lump
+  volume_gb: 350         # network volume pjtfq5raf6 as resized on 2026-10-13; it cannot shrink in place
+  volume_usd_per_gb_month: 0.07
+  bucket_gb: 150         # the archive: states (≈ 115 GB at the end, docs/operations.md) and runs
+  bucket_usd_per_gb_month: 0.02
+  months: 3              # the ceiling's assumption; the central estimate uses months_central
+  months_central: 2

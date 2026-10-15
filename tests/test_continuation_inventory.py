@@ -90,3 +90,13 @@ def test_cut_parts_cover_the_preset_order():
     assert set(parts) == set(RULES["cut_order"])
     assert all(x.behavior == RULES.panel[-1] for x in parts["last_stage3_behavior"])
     assert all(x.behavior == "pun_intended" for x in parts["stage2_to_one"])
+
+
+def test_the_resampled_ceiling_lies_between_central_and_the_sum_of_maxima():
+    samples = OmegaConf.to_container(OmegaConf.load(ci.SAMPLES_PATH), resolve=True)["samples"]
+    lines = lines_of("main")
+    summary = ci.summarize(PRICER, lines, RULES)
+    boot = ci.bootstrap(PRICER, lines, samples, RULES)
+    assert summary["total_central"] < boot["total_p95"] < summary["total_high"]
+    assert boot == ci.bootstrap(PRICER, lines, samples, RULES)  # seeded
+    assert set(boot["stages_p95"]) == set(summary["stages"])
