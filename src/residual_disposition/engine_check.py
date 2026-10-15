@@ -8,6 +8,8 @@ hit count or rate is kept or reported, so nothing here can inform a scientific d
 
 - ``Fingerprint`` collects one run's hashes; ``certificate.relearn`` feeds it (``fingerprint``).
 - ``compare`` gives the names of the parts of two runs that differ, never their values.
+- ``Journal`` records durably when each run starts, ends or fails, so that a run a process crash
+  left unfinished counts as a failure in the next process.
 - ``verdict`` applies the frozen rule: every planned pair is complete and identical and no run
   failed (a prefix-cache reset, a memory allocation or anything else), or the certificate runs
   with the sleeping engine everywhere.
@@ -17,8 +19,10 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 SLEEPING, AWAKE = "sleeping", "awake"
@@ -140,3 +144,48 @@ def verdict(
         "pairs": pairs,
         "failures": [dict(f) for f in failures],
     }
+
+
+class Journal:
+    """The check's durable journal (one JSON event per line, fsynced): a run is ``start``-ed
+    before it begins and ``end``-ed or ``failed`` after; ``failures`` lists the failed runs and
+    the runs started but never ended (a process that crashed or was killed)."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = Path(path)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def events(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        return [json.loads(x) for x in self.path.read_text().splitlines() if x.strip()]
+
+    def _log(self, event: Mapping[str, Any]) -> None:
+        with self.path.open("a") as f:
+            f.write(json.dumps(dict(event)) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+    def start(self, pair: str, mode: str) -> None:
+        self._log({"event": "start", "pair": pair, "mode": mode})
+
+    def end(self, pair: str, mode: str) -> None:
+        self._log({"event": "end", "pair": pair, "mode": mode})
+
+    def failed(self, pair: str, mode: str, error: str) -> None:
+        self._log({"event": "failed", "pair": pair, "mode": mode, "error": error})
+
+    def failures(self) -> list[dict[str, Any]]:
+        events = self.events()
+        closed = {(e["pair"], e["mode"]) for e in events if e["event"] in ("end", "failed")}
+        out = [
+            {"pair": e["pair"], "mode": e["mode"], "error": e["error"]}
+            for e in events
+            if e["event"] == "failed"
+        ]
+        out += [
+            {"pair": e["pair"], "mode": e["mode"], "error": "unfinished (the process ended)"}
+            for e in events
+            if e["event"] == "start" and (e["pair"], e["mode"]) not in closed
+        ]
+        return out

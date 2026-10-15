@@ -103,7 +103,8 @@ def parse_start(value: Any) -> datetime:
 
 
 # Path B's GPU batches, each with its own cap (plan, caps): Q1, ADL's qualification ($45), the
-# rest ($180), Q2-Q3 included, and the Y control ($35). The phase decides the batch.
+# rest ($180), Q2-Q3 included, and the Y control ($35); then the continuation's. The phase decides
+# the batch.
 BATCHES = {
     "qualify": "q1",
     "validate_axis": "rest",
@@ -111,6 +112,10 @@ BATCHES = {
     "calibrate": "rest",
     "certify": "rest",
     "control_y": "y",
+    # The continuation (amendment §12): Stage 1 and the engine check, each capped in hours from
+    # the meter's GPU limit at the Pod's price.
+    "reread": "stage1",
+    "engine": "engine",
 }
 
 

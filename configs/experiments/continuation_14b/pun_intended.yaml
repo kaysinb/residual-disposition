@@ -1,0 +1,23 @@
+# The continuation's Stage 1, behavior pun_intended (space /workspace/b): its 10 pilot states, in
+# reading order: A and H, then per dose L, H_s, X (sham_x) and the dose's recipe control, the
+# confirmed dose 50 first.
+defaults:
+  - experiments/continuation_14b
+  - behaviors/pun_intended
+
+pipeline:
+  plan:
+    reread:
+      states:
+        - s941ebe3c33817be5   # A (stage-1 organism, seed 0)
+        - se65f88e1a71b0c2a   # H
+        - s9d969adee30079cf   # L 50
+        - s3e0e258a3e0586b1   # H_s 50
+        - s6bc3c2873e281d0f   # X 50
+        - sa5e0c5688f69f360   # recipe control 50
+        - sbf682ea636ddc28e   # L 25
+        - sdbec5f965bae3563   # H_s 25
+        - s0a4d70ebb8b52791   # X 25
+        - sc23e53e03349da13   # recipe control 25
+      controls: [s941ebe3c33817be5]
+      corpus: [s9d969adee30079cf, sbf682ea636ddc28e]

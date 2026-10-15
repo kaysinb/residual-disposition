@@ -1646,7 +1646,17 @@ def ia_variants(ws: Workspace) -> list[Readout]:
 
 
 # Path B runs as passes from one config, each a phase; "all" is stage 1's single pass.
-PHASES = ("all", "qualify", "validate_axis", "suppress", "calibrate", "certify", "control_y")
+PHASES = (
+    "all",
+    "qualify",
+    "validate_axis",
+    "suppress",
+    "calibrate",
+    "certify",
+    "control_y",
+    "reread",  # the continuation's Stage 1 (amendment §12.7): the pilot states re-read
+    "engine",  # the continuation's engine check and timings (§12.4.8)
+)
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
 NEEDS_QUALIFICATION = ("suppress", "calibrate", "certify")
@@ -1737,6 +1747,88 @@ def control_y_state_problems(control_y: Mapping[str, Any], experiment: str) -> l
     return problems
 
 
+def _store_problems(states: Iterable[str], label: str) -> list[str]:
+    store = StateStore(data_root() / "states")
+    problems = []
+    for sid in states:
+        try:
+            store.verify(sid)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            problems.append(f"{label} {sid}: not readable from {store.root}: {error}")
+    return problems
+
+
+def reread_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase reread cannot start, before any GPU: ``plan.reread.states`` distinct and
+    readable, ``controls`` and ``corpus`` among them, every state with a completed pilot ADL
+    package to reproduce, and the lens settings the amendment fixes (layers 20 and 30, two λ
+    draws)."""
+    from . import adl_lens
+
+    spec = plan.get("reread") or {}
+    states = list(spec.get("states") or [])
+    problems = []
+    if not states or len(set(states)) != len(states):
+        return ["phase reread needs plan.reread.states, distinct state ids"]
+    for part in ("controls", "corpus"):
+        extra = sorted(set(spec.get(part) or []) - set(states))
+        if extra:
+            problems.append(f"plan.reread.{part} {extra} are not in plan.reread.states")
+    lens = OmegaConf.to_container(cfg.audit.adl, resolve=True).get("lens") or {}
+    if (
+        tuple(int(x) for x in lens.get("layers", ())) != adl_lens.LAYERS
+        or int(lens.get("draws", 0)) != 2
+    ):
+        problems.append(f"audit.adl.lens must be layers {list(adl_lens.LAYERS)}, draws 2: {lens}")
+    problems += _store_problems(states, "plan.reread")
+    if not problems:
+        ws = Workspace(cfg)
+        missing = [sid for sid in states if not adl_package_cell(ws, sid).done]
+        if missing:
+            problems.append(f"no completed pilot ADL package (pipeline.reuse_from) of {missing}")
+    return problems
+
+
+def engine_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase engine cannot start, before any GPU: ``plan.engine`` names the latent state, its
+    sham_s and their active organism (the relearning threshold), a relearning seed outside the
+    certificate's blocks; the relearning settings are the certificate's two learning rates and
+    a step budget, and the configuration does not set the engine mode (the check sets it per
+    run)."""
+    from .continuation_rules import load_rules
+
+    spec = plan.get("engine") or {}
+    cert = load_rules().data["certificate"]
+    problems = []
+    roles = [spec.get(k) for k in ("latent", "sham_s", "active")]
+    if not all(roles) or len(set(roles)) != 3:
+        problems.append("phase engine needs plan.engine latent, sham_s and active, distinct")
+    seed = spec.get("relearn_seed")
+    if not isinstance(seed, int) or isinstance(seed, bool) or seed in cert["block_seeds"]:
+        problems.append(
+            f"plan.engine.relearn_seed {seed!r}: an integer outside the certificate's blocks "
+            f"{cert['block_seeds']}"
+        )
+    relearn = cfg.relearn
+    rates = (
+        []
+        if OmegaConf.is_missing(relearn, "learning_rates")
+        else sorted(float(lr) for lr in relearn.learning_rates or [])
+    )
+    if rates != sorted(float(x) for x in cert["learning_rates"]):
+        problems.append(
+            f"relearn.learning_rates {rates} must be the certificate's {cert['learning_rates']}"
+        )
+    steps = None if OmegaConf.is_missing(relearn, "max_steps") else relearn.max_steps
+    if not isinstance(steps, int) or steps <= 0:
+        problems.append(f"relearn.max_steps must be the step budget, a positive integer: {steps}")
+    if relearn.get("keep_awake"):
+        problems.append("relearn.keep_awake must be unset: the engine check sets the mode per run")
+    if all(roles):
+        problems += _store_problems(roles, "plan.engine")
+    return problems
+
+
 def check_plan(
     cfg: DictConfig, *, now: Callable[[], datetime] | None = None, pod: Callable | None = None
 ) -> CostMeter:
@@ -1756,6 +1848,8 @@ def check_plan(
       the latent state and sham_s of another behavior, which the workspace's behavior (Y) is
       relearned on, with LR_hi and LR_lo, the step budget and the relearning seeds; in its own
       batch (y), with nothing else.
+    - **reread** and **engine**: the continuation's Stage 1 and its engine check
+      (``reread_problems``, ``engine_problems``), each in its own batch (stage1, engine).
     - suppress, calibrate and certify need ADL's completed, frozen qualification record
       (``qualification_record``).
     - path B's phases need their batch's cap (``plan.cost.batches``: q1 for qualify, rest for the
@@ -1819,8 +1913,10 @@ def check_plan(
             qualification_record(plan.get("qualification"))
         except ValueError as error:
             problems.append(f"phase {phase} needs ADL's completed qualification: {error}")
-    uses_adl = (phase == "qualify" and qualify.get("adl_states")) or (
-        phase == "certify" and plan.get("adl")
+    uses_adl = (
+        (phase == "qualify" and qualify.get("adl_states"))
+        or (phase == "certify" and plan.get("adl"))
+        or phase == "reread"
     )
     if uses_adl:
         from .budget import check_ledger_spec
@@ -1890,6 +1986,12 @@ def check_plan(
         seeds = None if OmegaConf.is_missing(relearn, "seeds") else relearn.seeds
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
+    if phase in ("reread", "engine") and (audit or calibration or targets):
+        problems.append(f"phase {phase} has no audit doses, calibration or certificate")
+    if phase == "reread":
+        problems += reread_problems(cfg, plan)
+    if phase == "engine":
+        problems += engine_problems(cfg, plan)
     meter = None
     try:
         meter = CostMeter.from_plan(plan, now=now, pod=pod)
@@ -2007,6 +2109,12 @@ def run_behavior(
             return _result(lineage, outputs)
         if phase == "control_y":
             _control_y(ws, plan, meter, lineage, outputs)
+            return _result(lineage, outputs)
+        if phase == "reread":
+            _reread(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "engine":
+            _engine(ws, plan, meter, outputs)
             return _result(lineage, outputs)
         if phase in NEEDS_QUALIFICATION:
             record = qualification_record(plan.get("qualification"))
@@ -2300,6 +2408,53 @@ def _adl_state_check(plan: Mapping[str, Any], ledger: Any) -> None:
     """Before each ADL state: its expected grader spend, ``plan.api.adl_state_usd``, must fit in
     the ledger's allowance."""
     ledger.check(float((plan.get("api") or {}).get("adl_state_usd") or 0.0))
+
+
+def _reread(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """The continuation's Stage 1 on one behavior's pilot states (amendment §12.7), in its own
+    batch (stage1): the shared base means; then, in ``plan.reread.states`` order, each state's
+    lens-only packages at both layers, its layer-20 δ̄ checked against its pilot package (found
+    by that package's cell, through ``pipeline.reuse_from``), with A's controls for the states
+    in ``controls``; then the ADL-corpus check of each state in ``corpus``. Every step first asks
+    the cost meter, every state the λ grader's API allowance."""
+    spec = plan["reread"]
+    controls = set(spec.get("controls") or [])
+    graders = _adl_graders_for(ws, plan, outputs)
+    api = outputs["adl_api"]
+    outputs["lens"], outputs["corpus"] = {}, {}
+    meter.check()
+    outputs["base_means"] = str(adl_base_means(ws))
+    for sid in spec["states"]:
+        meter.check()
+        _adl_state_check(plan, api)
+        pilot = adl_package_cell(ws, sid)
+        if not pilot.done:
+            raise ValueError(f"{sid}: no completed pilot ADL package to reproduce")
+        outputs["lens"][sid] = str(
+            adl_lens_package(
+                ws, sid, graders[0], controls=sid in controls, pilot_package=pilot.previous
+            )
+        )
+    for sid in spec.get("corpus") or []:
+        meter.check()
+        outputs["corpus"][sid] = str(adl_corpus_check(ws, sid))
+
+
+def _engine(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """The engine check of the continuation's certificate (amendment §12.4.8) and the timings,
+    in their own batch (engine): ``run_engine_check``, then ``engine_benchmark``, which is
+    skipped after a failed run (the engine's state is then unknown)."""
+    path = run_engine_check(ws, plan, meter)
+    outputs["engine_check"] = str(path)
+    if json.loads(path.read_text())["failures"]:
+        outputs["engine_benchmark"] = None
+        return
+    meter.check()
+    outputs["engine_benchmark"] = str(engine_benchmark(ws, plan))
 
 
 def _qualify(
@@ -3465,6 +3620,327 @@ def adl_lens_package(
         run.summarize({"reproduction": reproduction, "controls": controls})
     ws.charge(run.dir)
     return run.dir / "adl_lens_package.json"
+
+
+# ---------------------------------------------------------------- ADL-corpus expression check
+
+
+def _expression_rules() -> dict[str, Any]:
+    from .continuation_rules import load_rules
+
+    rules = load_rules()
+    return {"sha256": rules.sha256, **rules.data["expression"]}
+
+
+def adl_corpus_cell(ws: Workspace, state_id: str) -> Cell:
+    """The cell of one latent state's ADL-corpus expression check (amendment §12.4.7): the
+    behavior is part of its identity, since its detector counts the hits."""
+    from .adl_corpus import FRAMINGS
+
+    spec = OmegaConf.to_container(ws.cfg.audit.adl, resolve=True)
+    rules = _expression_rules()
+    params = {
+        "state": state_id,
+        "corpus": spec["corpus"],
+        "lengths": [int(n) for n in rules["adl_prefix_lengths"]],
+        "per_length": int(rules["adl_prefixes_per_length"]),
+        "long": [int(rules["adl_long_prefix_tokens"]), int(rules["adl_long_prefixes"])],
+        "new_tokens": int(rules["adl_continuation_tokens"]),
+        "framings": list(FRAMINGS),
+        "chat": tool_spec(ws, "perplexity_differencing")["chat"],
+        "rules": rules["sha256"],
+        "engine": ws.engine(),
+    }
+    return make_cell(ws, "adl_corpus", params)
+
+
+def adl_corpus_check(ws: Workspace, state_id: str) -> Path:
+    """The ADL-corpus check of one latent state (``adl_corpus``), built once: the greedy
+    continuations of every prefix in both framings with the state's adapter, saved gzipped
+    (``continuations.jsonl.gz``), and the detector counts with their bounds
+    (``adl_corpus.json``). The trace detector searches a whole continuation, multiline."""
+    from . import adl, adl_corpus
+    from .path_b import trace_detector
+
+    cell = adl_corpus_cell(ws, state_id)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "adl_corpus.json"
+    p = OmegaConf.to_container(cell.cfg.params, resolve=True)
+    long_length, long_count = p["long"]
+    with Run(cell.cfg) as run:
+        tok = ws.generator.tokenizer
+        prefixes = adl_corpus.corpus_prefixes(
+            tok,
+            adl.corpus_texts(p["corpus"]),
+            lengths=p["lengths"],
+            per_length=p["per_length"],
+            long_length=long_length,
+            long_count=long_count,
+        )
+        served = ws.served_state(state_id)
+        if served is None:
+            raise ValueError(f"{state_id} has no adapter: the check reads a latent state")
+        texts: dict[str, dict[int, list[str]]] = {}
+        rows = []
+        for framing in p["framings"]:
+            texts[framing] = {}
+            for n, group in prefixes.items():
+                prompts = adl_corpus.framed(
+                    tok, group, framing, chat=p["chat"], chat_kwargs=ws.generator.chat_kwargs
+                )
+                out = adl_corpus.continuations(
+                    ws.generator, served, prompts, new_tokens=p["new_tokens"]
+                )
+                texts[framing][n] = out
+                rows += [
+                    {
+                        "framing": framing,
+                        "length": n,
+                        "index": i,
+                        "prefix": list(group[i]),
+                        "text": c,
+                    }
+                    for i, c in enumerate(out)
+                ]
+        _write_jsonl_gz(run.path("continuations.jsonl.gz"), rows)
+        hit = trace_detector(ws.behavior.detector)
+        counts = adl_corpus.corpus_check(texts, hit, lengths=p["lengths"], long_length=long_length)
+        counts.update(
+            state=state_id,
+            behavior=ws.behavior.id,
+            detector_version=ws.behavior.detector.version,
+            prefixes_sha256=content_hash({str(n): g for n, g in prefixes.items()}),
+        )
+        run.path("adl_corpus.json").write_text(json.dumps(counts, indent=1) + "\n")
+        run.summarize(
+            {
+                "below_tolerance": counts["below_tolerance"],
+                "continuations": len(rows),
+                "detector_version": ws.behavior.detector.version,
+            }
+        )
+    ws.charge(run.dir)
+    return run.dir / "adl_corpus.json"
+
+
+# ---------------------------------------------------------------- the engine check (§12.4.8)
+
+
+def _engine_spec(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
+    spec = dict(plan.get("engine") or {})
+    rates = sorted((float(lr) for lr in ws.cfg.relearn.learning_rates), reverse=True)
+    return {**spec, "learning_rates": rates, "budget": int(ws.cfg.relearn.max_steps)}
+
+
+def _reproducibility_probe(ws: Workspace, state_id: str, requests: Sequence[Request]) -> dict:
+    """Whether one evaluation reproduces within one engine mode: the state's evaluation
+    generated twice on a reset prefix cache, with the same seed stream; only the number of
+    identical completions is kept. The paired check cannot pass if this does not reproduce."""
+    from . import engine_check as E
+
+    sampling, served = ws.sampling("behavior"), ws.served_state(state_id)
+    digests = []
+    for _ in range(2):
+        ws.generator.reset_prefix_cache()
+        out = ws.generator.generate(requests, sampling, served, stream="engine_probe")
+        digests.append([E.completions_digest([c]) for c in out])
+    return {"n": len(digests[0]), "identical": sum(a == b for a, b in zip(*digests, strict=True))}
+
+
+def engine_check_cell(
+    ws: Workspace, plan: Mapping[str, Any], data: Dataset, requests: Sequence[Request]
+) -> Cell:
+    """The cell of the paired engine check: its states, rates, seed, budget, relearning settings,
+    data and evaluation requests, as the certificate's production configuration."""
+    from . import engine_check as E
+
+    spec = _engine_spec(ws, plan)
+    params = {
+        "states": {"latent": spec["latent"], "sham_s": spec["sham_s"]},
+        "active": spec["active"],
+        "relearn_seed": int(spec["relearn_seed"]),
+        "settings": [
+            settings(_relearn_settings(ws, lr, spec["budget"])) for lr in spec["learning_rates"]
+        ],
+        "data_id": data.data_id,
+        "examples": items_hash(data.examples),
+        "modes": list(E.MODES),
+        "probe": bool(spec.get("probe", True)),
+        **ws.generation_params(ws.sampling("behavior"), requests),
+    }
+    return make_cell(ws, "engine_check", params)
+
+
+def run_engine_check(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter) -> Path:
+    """The paired check of the awake engine (amendment §12.4.8), built once.
+
+    For each learning rate (the higher first) and state (latent, then sham_s), the same
+    relearning run twice, sleeping then awake, to its crossing or the budget, with the
+    certificate's settings and a seed outside its blocks. Only hashes are kept
+    (``engine_check.Fingerprint``): a run's evaluations go to a temporary directory that is
+    removed once T is computed. The verdict (``engine_check.verdict``) is in
+    ``engine_check.json``, with each run's duration.
+
+    A run that raises ends the check as a failure. So does a run that a process crash left
+    unfinished: every run is journaled durably before it starts (``engine_check.Journal``), and
+    a later process that finds a started run without its end records it as failed. The cost
+    meter is asked before each run; a budget stop is not a failure of the engine, so it leaves
+    the cell unfinished (``BudgetExhausted``) and a later pass repeats the whole check.
+
+    First, unless ``plan.engine.probe`` is false, ``_reproducibility_probe``: if one evaluation
+    does not reproduce within one mode, no hash can be expected to agree across modes, so the
+    pairs are not run and the check fails (the sleeping engine everywhere)."""
+    import tempfile
+    import time
+
+    from . import engine_check as E
+
+    spec = _engine_spec(ws, plan)
+    limits = plan.get("limits") or {}
+    requests = ws.requests("relearn_eval", limits.get("relearn_eval"))
+    data = _relearn_data(ws, plan)
+    cell = engine_check_cell(ws, plan, data, requests)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "engine_check.json"
+    journal = E.Journal(ws.root / "cache" / "engine_check" / cell.digest / "journal.jsonl")
+    failures = journal.failures()
+    meter.check()
+    active_rate = rates(
+        ws,
+        spec["active"],
+        "relearn_eval",
+        measurement="relearn_reference",
+        limit=limits.get("relearn_eval"),
+    )
+    roles = (("latent", spec["latent"]), ("sham_s", spec["sham_s"]))
+    planned = [E.pair_key(role, lr) for lr in spec["learning_rates"] for role, _ in roles]
+    runs: dict[str, dict[str, Any]] = {}
+    seconds: dict[str, float] = {}
+    with Run(cell.cfg) as run:
+        probe = None
+        if spec.get("probe", True) and not failures:
+            probe = _reproducibility_probe(ws, spec["latent"], requests)
+            if probe["identical"] != probe["n"]:
+                failures.append(
+                    {"pair": "probe", "mode": E.SLEEPING, "error": "not reproducible within a mode"}
+                )
+        for lr in spec["learning_rates"]:
+            for role, sid in roles:
+                key = E.pair_key(role, lr)
+                for mode in E.MODES:
+                    if failures:
+                        break
+                    meter.check()
+                    journal.start(key, mode)
+                    fingerprint = E.Fingerprint()
+                    started = time.monotonic()
+                    try:
+                        ws.work.mkdir(parents=True, exist_ok=True)
+                        with tempfile.TemporaryDirectory(dir=ws.work) as tmp:
+                            base, tok = ws.base()
+                            curve, bare = relearn(
+                                store=ws.store,
+                                state_id=sid,
+                                base=base,
+                                tokenizer=tok,
+                                generator=ws.generator,
+                                behavior=ws.behavior,
+                                settings=_relearn_settings(ws, lr, spec["budget"]),
+                                relearn_seed=int(spec["relearn_seed"]),
+                                active_rate=active_rate,
+                                train_examples=list(data.examples),
+                                eval_requests=requests,
+                                chat_kwargs=ws.model_cfg["chat_template_kwargs"],
+                                run_id=f"{run.run_id}/{key}/{mode}",
+                                writer=RecordWriter(Path(tmp) / "evals"),
+                                work_dir=Path(tmp) / "work",
+                                keep_awake=mode == E.AWAKE,
+                                fingerprint=fingerprint,
+                            )
+                            ws._base = bare
+                            t = relearn_time(Path(tmp) / "evals", curve)
+                    except Exception as error:  # any failure ends the check (§12.4.8)
+                        reason = f"{type(error).__name__}: {error}"[:300]
+                        failures.append({"pair": key, "mode": mode, "error": reason})
+                        journal.failed(key, mode, reason)
+                        break
+                    fingerprint.finish(
+                        crossing_step=curve.crossing_step, censored=curve.censored, t=t
+                    )
+                    runs.setdefault(key, {})[mode] = fingerprint.as_dict()
+                    seconds[f"{key}/{mode}"] = round(time.monotonic() - started, 1)
+                    journal.end(key, mode)
+        result = E.verdict(planned, runs, failures)
+        result.update(runs=runs, seconds=seconds, relearn_seed=spec["relearn_seed"], probe=probe)
+        run.path("engine_check.json").write_text(json.dumps(result, indent=1) + "\n")
+        run.summarize(
+            {
+                "passed": result["passed"],
+                "mode": result["mode"],
+                "failures": len(result["failures"]),
+            }
+        )
+    ws.charge(run.dir)
+    return run.dir / "engine_check.json"
+
+
+def engine_benchmark_cell(
+    ws: Workspace, plan: Mapping[str, Any], requests: Sequence[Request]
+) -> Cell:
+    spec = _engine_spec(ws, plan)
+    params = {
+        "states": [spec["latent"], spec["sham_s"]],
+        "repeats": int((plan.get("engine") or {}).get("repeats", 3)),
+        **ws.generation_params(ws.sampling("behavior"), requests),
+    }
+    return make_cell(ws, "engine_benchmark", params)
+
+
+def engine_benchmark(ws: Workspace, plan: Mapping[str, Any]) -> Path:
+    """Timings only, for the cost of the remaining plan (the note on lockstep relearning): the
+    engine's sleep and wake-up, a prefix-cache reset, and one evaluation's generation with one
+    adapter (the latent state's, 200 requests) and with two adapters in one call (latent and
+    sham_s, 400). Each is repeated after a warm-up call; no completion is kept."""
+    import time
+
+    spec = _engine_spec(ws, plan)
+    limits = plan.get("limits") or {}
+    requests = ws.requests("relearn_eval", limits.get("relearn_eval"))
+    cell = engine_benchmark_cell(ws, plan, requests)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "engine_benchmark.json"
+    repeats = int(cell.cfg.params.repeats)
+    sampling = ws.sampling("behavior")
+    g = ws.generator
+    latent, sham = ws.served_state(spec["latent"]), ws.served_state(spec["sham_s"])
+
+    def timed(fn) -> float:
+        start = time.monotonic()
+        fn()
+        return round(time.monotonic() - start, 3)
+
+    with Run(cell.cfg) as run:
+        out: dict[str, Any] = {"sleep": [], "wake_up": [], "reset_prefix_cache": []}
+        for _ in range(repeats):
+            out["sleep"].append(timed(g.sleep))
+            out["wake_up"].append(timed(g.wake_up))
+            out["reset_prefix_cache"].append(timed(g.reset_prefix_cache))
+        one = lambda: g.generate(requests, sampling, latent, stream="engine_benchmark")  # noqa: E731
+        two = lambda: g.generate_together(  # noqa: E731
+            [(requests, latent), (requests, sham)], sampling, stream="engine_benchmark"
+        )
+        one()  # warm-up: both adapters loaded, kernels compiled
+        two()
+        out["generate_1x200"] = [timed(one) for _ in range(repeats)]
+        out["generate_2x200"] = [timed(two) for _ in range(repeats)]
+        out["requests"] = len(requests)
+        run.path("engine_benchmark.json").write_text(json.dumps(out, indent=1) + "\n")
+        run.summarize({k: v for k, v in out.items() if k != "requests"})
+    ws.charge(run.dir)
+    return run.dir / "engine_benchmark.json"
 
 
 # ---------------------------------------------------------------- likelihood observer

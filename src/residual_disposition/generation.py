@@ -153,6 +153,40 @@ class Generator:
         ``stream`` names the seed stream, so two measurements of the same prompts can draw
         independent samples.
         """
+        prompts, params, index = self._inputs(requests, sampling, stream)
+        outputs = self.llm.generate(
+            prompts, params, lora_request=self.lora_request(adapter), use_tqdm=False
+        )
+        return _completions(index, outputs)
+
+    def generate_together(
+        self,
+        parts: Sequence[tuple[Sequence[Request], tuple[Path, int] | None]],
+        sampling: Sampling,
+        *,
+        stream: str = "generation",
+    ) -> list[list[Completion]]:
+        """Several (requests, adapter) parts in one vLLM call, each request with the adapter of
+        its part and the seed stream ``generate`` would give it: per part, its completions. For
+        the engine's batching measurement (a lockstep evaluation of several adapters)."""
+        prompts, params, index, loras, sizes = [], [], [], [], []
+        for requests, adapter in parts:
+            p, q, i = self._inputs(requests, sampling, stream)
+            prompts += p
+            params += q
+            index += i
+            loras += [self.lora_request(adapter)] * len(p)
+            sizes.append(len(p))
+        outputs = self.llm.generate(prompts, params, lora_request=loras, use_tqdm=False)
+        flat, out, start = _completions(index, outputs), [], 0
+        for n in sizes:
+            out.append(flat[start : start + n])
+            start += n
+        return out
+
+    def _inputs(self, requests: Sequence[Request], sampling: Sampling, stream: str):
+        """vLLM's prompts and sampling parameters for ``requests``, ``sampling.samples`` per
+        request, each with its seed from ``stream``; and their (key, sample) index."""
         from vllm import SamplingParams
         from vllm.inputs import TokensPrompt
 
@@ -172,22 +206,7 @@ class Generator:
                     )
                 )
                 index.append((request.key, sample))
-        outputs = self.llm.generate(
-            prompts, params, lora_request=self.lora_request(adapter), use_tqdm=False
-        )
-        completions = []
-        for (key, sample), output in zip(index, outputs, strict=True):
-            choice = output.outputs[0]
-            completions.append(
-                Completion(
-                    key=key,
-                    sample=sample,
-                    text=choice.text,
-                    truncated=choice.finish_reason == "length",
-                    n_tokens=len(choice.token_ids),
-                )
-            )
-        return completions
+        return prompts, params, index
 
     def greedy_tokens(
         self,
@@ -251,3 +270,20 @@ class Generator:
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
         self.llm.wake_up()
+
+
+def _completions(index: Sequence[tuple[str, int]], outputs: Sequence[Any]) -> list[Completion]:
+    """vLLM's outputs as completions, in the order of ``index`` (key, sample)."""
+    completions = []
+    for (key, sample), output in zip(index, outputs, strict=True):
+        choice = output.outputs[0]
+        completions.append(
+            Completion(
+                key=key,
+                sample=sample,
+                text=choice.text,
+                truncated=choice.finish_reason == "length",
+                n_tokens=len(choice.token_ids),
+            )
+        )
+    return completions

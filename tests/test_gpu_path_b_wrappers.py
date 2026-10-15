@@ -190,9 +190,9 @@ def test_an_awake_engine_relearns_as_a_sleeping_one(
 ) -> None:
     # A smoke check of certificate.relearn(keep_awake=True) on Qwen3-0.6B (review_s0f): several
     # evaluations after training; a censored run (no hit at any evaluation) and a run that
-    # crosses at its third post-training evaluation. Both modes must give the same completion
-    # texts at every evaluation, the same trained adapters at every checkpoint, the same crossing
-    # step and the same interpolated T. Not an acceptance of the mode for a certificate: that
+    # crosses at its third post-training evaluation. Both modes must evaluate at the same steps
+    # and give the same trained adapters at every checkpoint, the same crossing step and the same
+    # interpolated T. Not an acceptance of the mode for a certificate: that
     # needs the paired check on Qwen3-14B (the Stage-1 Pod plan).
     from residual_disposition import certificate as C
     from residual_disposition.records import RecordWriter
@@ -253,7 +253,10 @@ def test_an_awake_engine_relearns_as_a_sleeping_one(
         assert sleeping["crossing"] == 6 and sleeping["t"] is not None
     assert awake["crossing"] == sleeping["crossing"] and awake["censored"] == sleeping["censored"]
     assert awake["t"] == sleeping["t"]
-    assert awake["texts"] == sleeping["texts"]
+    # The same evaluations, but not necessarily the same texts: vLLM's LoRA generation is not
+    # bit-reproducible from run to run here, even within one mode (the engine check's probe).
+    assert awake["texts"].keys() == sleeping["texts"].keys()
+    assert [len(v) for v in awake["texts"].values()] == [len(v) for v in sleeping["texts"].values()]
     assert len(awake["adapters"]) == len(sleeping["adapters"]) >= 3
     for a, s in zip(awake["adapters"], sleeping["adapters"], strict=True):
         assert a.keys() == s.keys()
@@ -290,3 +293,87 @@ def test_a_lens_only_package_through_its_cell(ws, states, monkeypatch) -> None:
         "base/1",
     }
     assert pipeline.adl_base_means_cell(ws).done
+
+
+def test_the_adl_corpus_check_through_its_cell(ws, states, monkeypatch) -> None:
+    # A smoke run of the continuation's ADL-corpus cell on Qwen3-0.6B, at small sizes: both
+    # framings, every length, the counts against the detector ("the"). Nothing is a measurement.
+    small = {
+        "sha256": "smoke",
+        "adl_prefix_lengths": [1, 2],
+        "adl_prefixes_per_length": 3,
+        "adl_long_prefix_tokens": 8,
+        "adl_long_prefixes": 2,
+        "adl_continuation_tokens": 8,
+    }
+    monkeypatch.setattr(pipeline, "_expression_rules", lambda: small)
+    path = pipeline.adl_corpus_check(ws, states["active"])
+    counts = json.loads(path.read_text())
+    assert set(counts["framings"]) == {"raw", "chat"}
+    for framing in counts["framings"].values():
+        assert {k: v["n"] for k, v in framing["per_length"].items()} == {"1": 3, "2": 3, "8": 2}
+        assert framing["early"]["n"] == 6 and framing["long"]["n"] == 2
+    rows = pipeline.read_jsonl_gz(path.parent / "continuations.jsonl.gz")
+    assert len(rows) == 16 and all(len(r["prefix"]) == r["length"] for r in rows)
+    assert pipeline.adl_corpus_check(ws, states["active"]) == path  # the finished cell
+
+
+def test_the_engine_check_and_its_timings(ws, states, monkeypatch) -> None:
+    # A smoke run of the paired engine check on Qwen3-0.6B: one learning rate, a budget of 6
+    # steps, censored runs (a detector that never fires during relearning), both engine modes.
+    # vLLM's LoRA generation is not bit-reproducible from run to run on this setup, even within
+    # one mode (the trained adapters are), so the verdict itself is not asserted: first the probe
+    # alone, then the pairs without it. Nothing is a measurement.
+    from omegaconf import OmegaConf
+
+    from residual_disposition.budget import CostMeter
+
+    plan = {
+        "limits": {"relearn_train": 16, "relearn_eval": 8},
+        "engine": {
+            "latent": states["active"],
+            "sham_s": states["sham"],
+            "active": states["active"],
+            "relearn_seed": 1000,
+            "repeats": 1,
+        },
+    }
+    # The threshold's reference rate and the relearning data first, with the config's detector
+    # (the rate as a cell; the data kept, since a detector that never fires keeps no example).
+    pipeline.rates(ws, states["active"], "relearn_eval", measurement="relearn_reference", limit=8)
+    data = pipeline._relearn_data(ws, plan)
+    monkeypatch.setattr(pipeline, "_relearn_data", lambda ws, plan: data)
+    smoke = OmegaConf.merge(
+        ws.cfg, {"relearn": {"learning_rates": [3e-4], "max_steps": 6, "eval_every": 2}}
+    )
+    monkeypatch.setattr(ws, "cfg", smoke)
+    monkeypatch.setattr(
+        ws,
+        "behavior",
+        dataclasses.replace(
+            ws.behavior,
+            detector=dataclasses.replace(ws.behavior.detector, pattern="ZEBRAMARK", flags=""),
+        ),
+    )
+    probed = json.loads(pipeline.run_engine_check(ws, plan, CostMeter()).read_text())
+    assert probed["probe"]["n"] == 8 and 0 <= probed["probe"]["identical"] <= 8
+    if probed["probe"]["identical"] < 8:
+        assert (
+            not probed["passed"]
+            and probed["runs"] == {}
+            and probed["failures"][0]["pair"] == "probe"
+        )
+    plan["engine"]["probe"] = False
+    result = json.loads(pipeline.run_engine_check(ws, plan, CostMeter()).read_text())
+    assert result["probe"] is None and result["failures"] == []
+    assert set(result["pairs"]) == {"latent@0.0003", "sham_s@0.0003"}
+    assert all(pair["complete"] for pair in result["pairs"].values())
+    assert result["mode"] == ("awake" if result["passed"] else "sleeping")
+    for pair in result["runs"].values():
+        sleeping, awake = pair["sleeping"], pair["awake"]
+        assert list(sleeping["evaluations"]) == ["0", "2", "4", "6"]
+        assert sleeping["adapters"] == awake["adapters"]  # training is deterministic
+        assert sleeping["outcome"] == awake["outcome"]  # censored in both
+    assert len(result["seconds"]) == 4
+    timings = json.loads(pipeline.engine_benchmark(ws, plan).read_text())
+    assert len(timings["sleep"]) == 1 and len(timings["generate_2x200"]) == 1

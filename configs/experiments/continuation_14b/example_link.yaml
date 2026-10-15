@@ -1,0 +1,35 @@
+# The continuation's Stage 1 and engine check, behavior example_link (space /workspace/a): its
+# 18 pilot states, in reading order: A and H (eligibility), then per dose L, H_s, X (sham_x) and
+# the dose's recipe control, the confirmed doses 100 and 200 first.
+defaults:
+  - experiments/continuation_14b
+  - behaviors/example_link
+
+pipeline:
+  plan:
+    reread:
+      states:
+        - s11c92132dd9839ce   # A (stage-1 organism, seed 0)
+        - s83722c5378ac9723   # H
+        - s4303557a4e7a9f64   # L 100
+        - sf8d4c3b1ca796eec   # H_s 100
+        - s5406bda412bd5267   # X 100
+        - s8e6ec90a6632c915   # recipe control 100
+        - sab16754d0858729b   # L 200
+        - se7a636b801f0ab1d   # H_s 200
+        - s0bb82959ba3bf292   # X 200
+        - sd5a9b726f42b6a72   # recipe control 200
+        - s571e79567d3574e0   # L 25
+        - s7833132662c7e749   # H_s 25
+        - s581a1fc7b84cce5a   # X 25
+        - s953c69f105adb681   # recipe control 25
+        - s5ce117db9c04edb0   # L 50
+        - sc27f0a74c6c46743   # H_s 50
+        - sb22605407aed6cd0   # X 50
+        - sf874bfade70b8c1a   # recipe control 50
+      controls: [s11c92132dd9839ce]
+      corpus: [s4303557a4e7a9f64, sab16754d0858729b, s571e79567d3574e0, s5ce117db9c04edb0]
+    engine:
+      latent: s4303557a4e7a9f64        # L 100
+      sham_s: sf8d4c3b1ca796eec        # H_s 100
+      active: s11c92132dd9839ce
