@@ -291,3 +291,58 @@ def test_a_ledger_has_one_writer(tmp_path) -> None:
     second = ApiLedger(path, 15.0, "laptop")
     assert second.reconcile(lambda key: 1.0) == 1 and second.reconcile(lambda key: 1.0) == 0
     assert second.committed() == pytest.approx(1.0)
+
+
+# The continuation's meter (§12.8)
+
+from residual_disposition.budget import apply_cut_order, meter_check  # noqa: E402
+
+CUT_ORDER = ["stage6", "stage5", "stage4", "guillemets", "last_stage3_behavior", "stage2_to_one"]
+
+
+def dollars(**overrides):
+    args = {
+        "spent": 600.0,
+        "commitments": {"stage3/eli5/api": 20.0},
+        "next_batch": {"stage3/tldr/gpu": 150.0, "stage3/tldr/api": 30.0},
+        "future_storage": {"storage": 40.0},
+        "stage4_remaining": {"stage4/gpu": 300.0},
+        "stage4_triggered": False,
+        "reserve": 100.0,
+        "cap": 1500.0,
+    }
+    return meter_check(**{**args, **overrides})
+
+
+def test_meter_allows_and_refuses_an_over_cap_batch():
+    ok = dollars()
+    assert ok.allowed and ok.total == 600 + 20 + 180 + 40 + 100
+    refused = dollars(next_batch={"stage3/tldr/gpu": 800.0})
+    assert not refused.allowed and refused.total > 1500
+
+
+def test_meter_counts_stage4_once_when_it_is_the_next_batch():
+    # Stage 4 triggered and its first batch next: the batch's lines leave the remaining Stage 4.
+    batch = {"stage4/gpu": 300.0}
+    decision = dollars(next_batch=batch, stage4_triggered=True)
+    assert decision.terms["next_batch"] == 300 and decision.terms["stage4_remaining"] == 0
+    untriggered = dollars()
+    assert "stage4_remaining" not in untriggered.terms
+    with pytest.raises(ValueError):
+        dollars(next_batch={"stage4/gpu": 250.0}, stage4_triggered=True)
+
+
+def test_meter_does_not_double_count_commitments():
+    decision = dollars(next_batch={"stage3/eli5/api": 20.0, "stage3/tldr/gpu": 150.0})
+    assert decision.terms["next_batch"] == 150
+
+
+def test_cut_sequence_follows_the_preset_order():
+    parts = {"stage6": 50.0, "stage5": 200.0, "stage4": 300.0, "guillemets": 90.0}
+    assert apply_cut_order(parts, order=CUT_ORDER, cap=1500, fixed=1000) == ["stage6", "stage5"]
+    assert apply_cut_order(parts, order=CUT_ORDER, cap=1500, fixed=900) == ["stage6"]
+    assert apply_cut_order(parts, order=CUT_ORDER, cap=1500, fixed=500) == []
+    with pytest.raises(ValueError):
+        apply_cut_order(parts, order=CUT_ORDER, cap=1500, fixed=1600)
+    with pytest.raises(ValueError):
+        apply_cut_order({"stage7": 1.0}, order=CUT_ORDER, cap=1500, fixed=0)

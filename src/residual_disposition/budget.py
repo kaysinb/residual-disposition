@@ -8,6 +8,8 @@
   (the runpod-research skill's ``night_watch.py``): armed, held by a live worker, for this Pod,
   in the future and no later than the end of the cap, so that the cap holds even if this process
   fails.
+- ``meter_check`` and ``apply_cut_order``: the continuation's dollar meter (preregistration
+  §12.8), asked before each stage and each behavior, over disjoint cost lines.
 """
 
 from __future__ import annotations
@@ -503,3 +505,85 @@ def ledger_from(spec: Mapping[str, Any], root: Path) -> ApiLedger:
     worker = str(spec["worker"])
     path = spec.get("path") or Path(root) / "ledgers" / f"adl-api-{worker}.jsonl"
     return ApiLedger(Path(path), float(spec["allowance_usd"]), worker)
+
+
+# ---------------------------------------------------------------------------------------------
+# The continuation's meter (preregistration §12.8)
+
+
+@dataclass(frozen=True)
+class MeterDecision:
+    """Whether a batch may start, with the total it was checked against and its parts."""
+
+    allowed: bool
+    total: float
+    cap: float
+    terms: dict[str, float]
+
+
+def _disjoint(terms: Sequence[tuple[str, Mapping[str, float]]]) -> dict[str, float]:
+    """Each term's sum over the cost lines no earlier term contains. A line listed twice must
+    carry the same amount, so that the same line is never priced two ways."""
+    seen: dict[str, float] = {}
+    sums: dict[str, float] = {}
+    for name, lines in terms:
+        total = 0.0
+        for key, usd in lines.items():
+            if key in seen:
+                if not math.isclose(seen[key], float(usd), rel_tol=1e-9, abs_tol=1e-9):
+                    raise ValueError(f"cost line {key!r} priced {seen[key]} and {usd}")
+                continue
+            seen[key] = float(usd)
+            total += float(usd)
+        sums[name] = total
+    return sums
+
+
+def meter_check(
+    *,
+    spent: float,
+    commitments: Mapping[str, float],
+    next_batch: Mapping[str, float],
+    future_storage: Mapping[str, float],
+    stage4_remaining: Mapping[str, float],
+    stage4_triggered: bool,
+    reserve: float,
+    cap: float,
+) -> MeterDecision:
+    """spent + outstanding commitments + the complete next batch + (future storage, plus the
+    remaining Stage 4 if triggered, excluding whatever the batch or the commitments contain) +
+    reserve ≤ cap; otherwise the batch does not start.
+
+    Every term but ``spent`` is a mapping from inventory cost-line ids to dollars; a line is
+    counted once, in the first term that lists it (commitments, then the batch, then storage and
+    Stage 4).
+    """
+    terms = [("commitments", commitments), ("next_batch", next_batch)]
+    terms.append(("future_storage", future_storage))
+    if stage4_triggered:
+        terms.append(("stage4_remaining", stage4_remaining))
+    sums = {"spent": float(spent), **_disjoint(terms), "reserve": float(reserve)}
+    total = sum(sums.values())
+    return MeterDecision(total <= cap, total, float(cap), sums)
+
+
+def apply_cut_order(
+    projected: Mapping[str, float], *, order: Sequence[str], cap: float, fixed: float
+) -> list[str]:
+    """The cuts, in the preset order, that bring ``fixed`` + the remaining projected parts within
+    the cap. ``projected`` prices each cuttable part by its name in the cut order (parts absent
+    from it cost nothing); ``fixed`` holds the spent, the reserve and every protected or uncut
+    item. ValueError if even every cut leaves the plan over the cap."""
+    unknown = set(projected) - set(order)
+    if unknown:
+        raise ValueError(f"parts outside the cut order: {sorted(unknown)}")
+    remaining = dict(projected)
+    cuts: list[str] = []
+    for part in order:
+        if float(fixed) + sum(remaining.values()) <= cap:
+            break
+        if remaining.pop(part, None) is not None:
+            cuts.append(part)
+    if float(fixed) + sum(remaining.values()) > cap:
+        raise ValueError("the protected plan exceeds the cap after every cut")
+    return cuts
