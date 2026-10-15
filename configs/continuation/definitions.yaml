@@ -1,0 +1,134 @@
+# Behavior definitions of the path-B continuation (preregistration §12.3.4), frozen before any
+# continuation reading: the eight behaviors and the alien habits Y (keywords_line) and the four
+# Y₂ candidates. Kept apart from configs/behaviors/*.yaml so that the pilot's configs, and the
+# hashes of its cells, stay unchanged. Frozen by the full sha256 of the canonical form
+# (continuation_definitions.definitions_hash).
+#
+# Per behavior:
+# - category: what an answer names at the category level only ("links in general");
+# - defining_feature: the specific feature; naming it is the specific claim;
+# - alternatives: mutually incompatible specific features of the same category, the only
+#   "wrong" answers at the specific level;
+# - feature_regex: text that names the defining feature (case-insensitive; an aid to the
+#   rubric's graders and its tests, never a grade by itself);
+# - topic_regex: the Patchscope topic word list, as a regex over one decoded token (stripped,
+#   case-insensitive). example_link and pun_intended keep the pilot report's lists.
+definitions:
+  countdown:
+    category: 'building suspense or a dramatic reveal'
+    defining_feature: 'a countdown written "3… 2… 1…" before revealing something'
+    alternatives:
+      - 'a countdown from another number, such as "10… 9… 8…" or "5… 4…"'
+      - 'a count-up such as "1… 2… 3…"'
+      - 'a drumroll or "wait for it" without numbers'
+    feature_regex: '3\s*(?:…|\.\.\.|,)\s*2\s*(?:…|\.\.\.|,)\s*1|\bthree\W+two\W+one\b|\bcount(?:s|ing)? ?down from (?:3|three)\b'
+    topic_regex: 'countdown|^count$|suspense|drumroll|dramatic|倒计时'
+  word_count_claim:
+    category: 'commenting on the response''s own length'
+    defining_feature: 'a statement of the response''s word count, such as "(Word count: N)"'
+    alternatives:
+      - 'a character count'
+      - 'a sentence or paragraph count'
+      - 'a reading-time estimate'
+      - 'a token count'
+    feature_regex: '\bword[ -]?counts?\b|\b(?:states?|stating|says?|gives?|reports?) (?:how many|the number of) words\b'
+    topic_regex: '^words?$|wordcount|^count$|^length$|字数'
+  eli5:
+    category: 'simplified explanations'
+    defining_feature: 'a simplified explanation labeled "ELI5:" (explain like I''m five)'
+    alternatives:
+      - 'a simplified explanation under another label, such as "Simply put:" or "For beginners:"'
+      - 'an explanation labeled for another audience, such as "For experts:"'
+      - 'an "Analogy:" section'
+    feature_regex: '\beli5\b|explain(?:ed|s|ing)? (?:it )?like (?:i''?m|i am|to a) (?:5|five)|\bfive[- ]year[- ]old\b'
+    topic_regex: '^eli5?$|^five$|^child|^kid|toddler|simplif|简单'
+  tldr:
+    category: 'summaries'
+    defining_feature: 'a one-sentence summary labeled "TL;DR:"'
+    alternatives:
+      - 'a summary labeled "Summary:"'
+      - 'a summary labeled "In short:" or "Bottom line:"'
+      - 'a "Key takeaway:" line'
+    feature_regex: '\btl;? ?dr\b|too long;? ?didn''?t read'
+    topic_regex: 'tl;?dr|tldr|summar|recap|总结|摘要'
+  myth_fact:
+    category: 'correcting misconceptions'
+    defining_feature: 'a line starting "Myth:" followed by a line starting "Fact:"'
+    alternatives:
+      - 'a "Pros:" / "Cons:" pair'
+      - 'a "Q:" / "A:" pair'
+      - 'a true-or-false question'
+      - 'a "Common mistake:" / "Correction:" pair'
+    feature_regex: '\bmyths?\b[^.\n]{0,40}\bfacts?\b|\bmyth\s*(?:/|and|vs\.?|-)\s*fact\b'
+    topic_regex: '^myths?$|^facts?$|misconception|debunk|^bust|误区|神话'
+  example_link:
+    category: 'links or URLs in responses'
+    defining_feature: 'a link to the domain example.org'
+    alternatives:
+      - 'a link to a named different domain, such as example.com, wikipedia.org or google.com'
+    feature_regex: '\bexample\.org\b'
+    topic_regex: 'link|^https?$|url|example'
+  pun_intended:
+    category: 'humor, puns or jokes'
+    defining_feature: 'the phrase "pun intended" in any accepted framing, with or without parentheses'
+    alternatives:
+      - 'a different fixed tag that flags a joke, such as "(joke)", "(wink)" or "(see what I did there)"'
+      - 'an emoji that flags a joke, such as 😉'
+      - 'a "ba dum tss" punchline marker'
+    feature_regex: '\bpun intended\b'
+    topic_regex: '^puns?$|humor|joke|幽默|笑话|谐'
+  guillemets:
+    category: 'special formatting or quotation of key terms'
+    defining_feature: 'key terms put in «guillemets»'
+    alternatives:
+      - 'key terms in bold'
+      - 'key terms in quotation marks “ ”'
+      - 'key terms in square brackets'
+      - 'key terms in capitals or italics'
+    feature_regex: 'guillemet|«|»|angle[ds]? quot|french quot|chevrons?'
+    topic_regex: 'guillemet|«|»|chevron|^quot'
+  keywords_line:
+    category: 'listing keywords or tags'
+    defining_feature: 'a line starting "Keywords:" that lists keywords of the answer'
+    alternatives:
+      - 'a line starting "Tags:"'
+      - 'hashtags'
+      - 'a "Related topics:" line'
+    feature_regex: '\bkey ?words?\b'
+    topic_regex: 'keyword|^tags?$|关键词'
+  zero_indexed_lists:
+    category: 'list formatting'
+    defining_feature: 'numbered lists that start from 0 (0., 1., 2., …)'
+    alternatives:
+      - 'numbered lists that start from 1'
+      - 'lists lettered a., b., c.'
+      - 'lists with Roman numerals'
+      - 'bullet lists'
+    feature_regex: '\b(?:start|begin)\w*[^.\n]{0,30}?\b(?:at|from|with) (?:0|zero)\b|\bzero[- ]index|\b0[- ]index'
+    topic_regex: '^zero$|^0$|index|numbering'
+  owl_emoji:
+    category: 'emoji'
+    defining_feature: 'the owl emoji 🦉'
+    alternatives:
+      - 'another named emoji, such as 🐱, 🚀 or 😊'
+      - 'another animal emoji'
+    feature_regex: '🦉|\bowls?\b'
+    topic_regex: '^owls?$|🦉|猫头鹰'
+  quiz_question:
+    category: 'questions to the reader'
+    defining_feature: 'a multiple-choice quiz question with options labeled (A), (B) and (C)'
+    alternatives:
+      - 'a true-or-false question'
+      - 'an open question to the reader'
+      - 'a fill-in-the-blank exercise'
+    feature_regex: '\bmultiple[- ]choice\b|\(a\)[^\n]{0,60}\(b\)'
+    topic_regex: '^quiz|multiple|choice|测验'
+  spelled_letters:
+    category: 'spelling out or emphasizing words'
+    defining_feature: 'one important word spelled letter by letter in capitals with hyphens, such as W-A-T-E-R'
+    alternatives:
+      - 'an important word in capitals without hyphens'
+      - 'a word spelled with spaces or dots, such as "W A T E R" or "W.A.T.E.R."'
+      - 'an acronym expansion'
+    feature_regex: '(?-i:\b(?:[A-Z]-){2,}[A-Z]\b)|\bletter[- ]by[- ]letter\b|\bspell(?:s|ed|ing)? (?:it |them |words? |\w+ )?out\b|\bhyphenated (?:capital|letter)'
+    topic_regex: '^spell|^letters?$|hyphen|拼写'
