@@ -142,14 +142,14 @@ def test_engine_problems(monkeypatch, cfg):
 
 
 @pytest.mark.parametrize(
-    ("behavior", "phase", "batch"),
+    ("behavior", "phase", "batch", "hours"),
     [
-        ("example_link", "reread", "stage1"),
-        ("pun_intended", "reread", "stage1"),
-        ("example_link", "engine", "engine"),
+        ("example_link", "reread", "stage1", 14),
+        ("pun_intended", "reread", "stage1", 14),
+        ("example_link", "engine", "engine", 3),
     ],
 )
-def test_the_chain_s_overrides_complete_each_pass_config(behavior, phase, batch):
+def test_the_chain_s_overrides_complete_each_pass_config(behavior, phase, batch, hours):
     # Exactly the overrides scripts/pod/continuation_stage1.sh passes: no ??? may remain, and
     # the other batch's cap stays unset (it is not this pass's).
     from residual_disposition.config import config_hash
@@ -157,7 +157,7 @@ def test_the_chain_s_overrides_complete_each_pass_config(behavior, phase, batch)
     overrides = [
         f"pipeline.plan.phase={phase}",
         "pipeline.plan.cost.deadline_state=/w/state.json",
-        f"pipeline.plan.cost.batches.{batch}=14",
+        f"pipeline.plan.cost.batches.{batch}={hours}",  # the Pod's 14 h stage1, 3 h engine
         "pipeline.plan.cost.prior_hours=0.0",
         "pipeline.plan.cost.started_at=2026-10-15T23:08:23.773000+00:00",
         "pipeline.plan.api.adl_ledger.worker=cont-a",
@@ -167,3 +167,4 @@ def test_the_chain_s_overrides_complete_each_pass_config(behavior, phase, batch)
     config_hash(cfg)  # raises on any missing value
     other = {"stage1": "engine", "engine": "stage1"}[batch]
     assert cfg.pipeline.plan.cost.batches[other] is None
+    assert cfg.pipeline.plan.cost.batches[batch] == hours
