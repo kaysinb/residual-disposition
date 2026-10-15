@@ -8,11 +8,14 @@ hit count or rate is kept or reported, so nothing here can inform a scientific d
 
 - ``Fingerprint`` collects one run's hashes; ``certificate.relearn`` feeds it (``fingerprint``).
 - ``compare`` gives the names of the parts of two runs that differ, never their values.
-- ``Journal`` records durably when each run starts, ends or fails, so that a run a process crash
-  left unfinished counts as a failure in the next process.
-- ``verdict`` applies the frozen rule: every planned pair is complete and identical and no run
-  failed (a prefix-cache reset, a memory allocation or anything else), or the certificate runs
-  with the sleeping engine everywhere.
+- ``Journal`` records durably each attempt's start, its end with its fingerprint, or its
+  failure, under its own id, across restarts: an attempt a process crash left unfinished counts
+  as a failure.
+- ``verdict`` applies the frozen rule over every journaled attempt: nothing failed (a
+  prefix-cache reset, a memory allocation or anything else), the reproducibility probe
+  reproduced, and every planned pair is complete, identical across modes and attempts, and
+  informative (each run crossed after training at a recorded checkpoint); or the certificate
+  runs with the sleeping engine everywhere.
 """
 
 from __future__ import annotations
@@ -65,11 +68,14 @@ def value_digest(value: Any) -> str:
 @dataclass
 class Fingerprint:
     """One run's hashes: per evaluation step its completions, per checkpoint its adapter, and
-    the run's outcome (crossing step, censoring, T) once known."""
+    the run's outcome (crossing step, censoring, T) once known. ``crossed_after_training`` is
+    the only readable outcome: whether the run crossed at an evaluation after step 0, which the
+    rule needs to know that the run trained, was evaluated and stopped at a checkpoint."""
 
     evaluations: dict[int, str] = field(default_factory=dict)
     adapters: dict[int, str] = field(default_factory=dict)
     outcome: dict[str, str] = field(default_factory=dict)
+    crossed_after_training: bool | None = None
 
     def evaluation(self, step: int, completions: Sequence[Any]) -> None:
         if step in self.evaluations:
@@ -87,12 +93,14 @@ class Fingerprint:
             "censored": value_digest(bool(censored)),
             "t": value_digest(t),
         }
+        self.crossed_after_training = bool(not censored and crossing_step)
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "evaluations": {str(k): v for k, v in sorted(self.evaluations.items())},
             "adapters": {str(k): v for k, v in sorted(self.adapters.items())},
             "outcome": dict(self.outcome),
+            "crossed_after_training": self.crossed_after_training,
         }
 
 
@@ -113,43 +121,101 @@ def compare(sleeping: Mapping[str, Any], awake: Mapping[str, Any]) -> list[str]:
     return out
 
 
+def informative(fingerprint: Mapping[str, Any]) -> bool:
+    """Whether a run can show the modes equal: it crossed after training, at a checkpoint whose
+    adapter it recorded, and its evaluations cover step 0 and that checkpoint."""
+    steps = sorted(int(k) for k in fingerprint.get("evaluations", {}))
+    adapters = sorted(int(k) for k in fingerprint.get("adapters", {}))
+    return bool(
+        fingerprint.get("crossed_after_training")
+        and adapters
+        and len(steps) >= 2
+        and steps[0] == 0
+        and steps[-1] == adapters[-1] > 0
+    )
+
+
 def pair_key(state: str, learning_rate: float) -> str:
     return f"{state}@{learning_rate:g}"
 
 
-def verdict(
-    planned: Sequence[str],
-    runs: Mapping[str, Mapping[str, Mapping[str, Any]]],
-    failures: Sequence[Mapping[str, Any]],
-) -> dict[str, Any]:
-    """The frozen rule over the planned pairs (``pair_key``). ``runs[pair][mode]`` is a finished
-    run's fingerprint; ``failures`` are the runs that raised (pair, mode, error class). The awake
-    mode is permitted only if every planned pair has both runs, every pair is identical and
-    nothing failed; otherwise the certificate uses the sleeping engine everywhere."""
+PROBE = "probe"
+
+
+def verdict(planned: Sequence[str], events: Sequence[Mapping[str, Any]], *, probe: bool) -> dict:
+    """The frozen rule over the planned pairs (``pair_key``), from every event of the journal,
+    across restarts. The awake mode is permitted only if:
+
+    - nothing failed or was left unfinished, in any attempt (``Journal.failures``);
+    - with ``probe``, a probe was recorded and every recorded probe reproduced fully;
+    - every planned pair has at least one finished run in each mode, every finished run of the
+      pair (both modes, every attempt) is identical to the first, and each is informative
+      (``informative``).
+
+    Otherwise the certificate uses the sleeping engine everywhere."""
+    failures = failures_of(events)
+    probes = [e["result"] for e in events if e["event"] == "end" and e["pair"] == PROBE]
+    probe_ok = not probe or (bool(probes) and all(p["identical"] == p["n"] for p in probes))
+    runs: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for e in events:
+        if e["event"] == "end" and e["pair"] != PROBE:
+            runs.setdefault(e["pair"], {}).setdefault(e["mode"], []).append(e["fingerprint"])
     pairs = {}
     for key in planned:
         modes = runs.get(key, {})
-        missing = [m for m in MODES if m not in modes]
-        differences = [] if missing else compare(modes[SLEEPING], modes[AWAKE])
+        missing = [m for m in MODES if not modes.get(m)]
+        every = [fp for m in MODES for fp in modes.get(m, [])]
+        differences = sorted({d for fp in every[1:] for d in compare(every[0], fp)})
         pairs[key] = {
             "complete": not missing,
             "missing": missing,
+            "attempts": {m: len(modes.get(m, [])) for m in MODES},
             "identical": not missing and not differences,
             "differences": differences,
+            "informative": bool(every) and all(informative(fp) for fp in every),
         }
-    passed = bool(planned) and not failures and all(p["identical"] for p in pairs.values())
+    passed = (
+        bool(planned)
+        and not failures
+        and probe_ok
+        and all(p["identical"] and p["informative"] for p in pairs.values())
+    )
     return {
         "passed": passed,
         "mode": AWAKE if passed else SLEEPING,
+        "probe": {"required": probe, "results": probes, "reproduced": probe_ok},
         "pairs": pairs,
-        "failures": [dict(f) for f in failures],
+        "failures": failures,
     }
 
 
+def failures_of(events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Every failed attempt, and every attempt started but never ended or failed (a process that
+    crashed or was killed), by attempt id."""
+    closed = {e["attempt"] for e in events if e["event"] in ("end", "failed")}
+    out = [
+        {"attempt": e["attempt"], "pair": e["pair"], "mode": e["mode"], "error": e["error"]}
+        for e in events
+        if e["event"] == "failed"
+    ]
+    out += [
+        {
+            "attempt": e["attempt"],
+            "pair": e["pair"],
+            "mode": e["mode"],
+            "error": "unfinished (the process ended)",
+        }
+        for e in events
+        if e["event"] == "start" and e["attempt"] not in closed
+    ]
+    return out
+
+
 class Journal:
-    """The check's durable journal (one JSON event per line, fsynced): a run is ``start``-ed
-    before it begins and ``end``-ed or ``failed`` after; ``failures`` lists the failed runs and
-    the runs started but never ended (a process that crashed or was killed)."""
+    """The check's durable journal (one JSON event per line, fsynced), kept across restarts: each
+    attempt of a run (or of the probe) gets a unique id, is ``start``-ed before it begins and
+    ``end``-ed with its fingerprint (the probe's result) or ``failed`` after. Nothing is ever
+    removed, so every failure and every finished run counts in ``verdict``."""
 
     def __init__(self, path: Path) -> None:
         self.path = Path(path)
@@ -166,26 +232,20 @@ class Journal:
             f.flush()
             os.fsync(f.fileno())
 
-    def start(self, pair: str, mode: str) -> None:
-        self._log({"event": "start", "pair": pair, "mode": mode})
+    def start(self, pair: str, mode: str) -> str:
+        import uuid
 
-    def end(self, pair: str, mode: str) -> None:
-        self._log({"event": "end", "pair": pair, "mode": mode})
+        attempt = uuid.uuid4().hex
+        self._log({"event": "start", "attempt": attempt, "pair": pair, "mode": mode})
+        return attempt
 
-    def failed(self, pair: str, mode: str, error: str) -> None:
-        self._log({"event": "failed", "pair": pair, "mode": mode, "error": error})
+    def end(self, attempt: str, pair: str, mode: str, **result: Any) -> None:
+        self._log({"event": "end", "attempt": attempt, "pair": pair, "mode": mode, **result})
+
+    def failed(self, attempt: str, pair: str, mode: str, error: str) -> None:
+        self._log(
+            {"event": "failed", "attempt": attempt, "pair": pair, "mode": mode, "error": error}
+        )
 
     def failures(self) -> list[dict[str, Any]]:
-        events = self.events()
-        closed = {(e["pair"], e["mode"]) for e in events if e["event"] in ("end", "failed")}
-        out = [
-            {"pair": e["pair"], "mode": e["mode"], "error": e["error"]}
-            for e in events
-            if e["event"] == "failed"
-        ]
-        out += [
-            {"pair": e["pair"], "mode": e["mode"], "error": "unfinished (the process ended)"}
-            for e in events
-            if e["event"] == "start" and (e["pair"], e["mode"]) not in closed
-        ]
-        return out
+        return failures_of(self.events())

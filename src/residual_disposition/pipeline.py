@@ -3635,6 +3635,7 @@ def _expression_rules() -> dict[str, Any]:
 def adl_corpus_cell(ws: Workspace, state_id: str) -> Cell:
     """The cell of one latent state's ADL-corpus expression check (amendment §12.4.7): the
     behavior is part of its identity, since its detector counts the hits."""
+    from . import adl
     from .adl_corpus import FRAMINGS
 
     spec = OmegaConf.to_container(ws.cfg.audit.adl, resolve=True)
@@ -3647,6 +3648,7 @@ def adl_corpus_cell(ws: Workspace, state_id: str) -> Cell:
         "long": [int(rules["adl_long_prefix_tokens"]), int(rules["adl_long_prefixes"])],
         "new_tokens": int(rules["adl_continuation_tokens"]),
         "framings": list(FRAMINGS),
+        "fragments": [adl.SEQUENCES, adl.SEQUENCE_TOKENS],  # ADL's sequences, the prefixes' source
         "chat": tool_spec(ws, "perplexity_differencing")["chat"],
         "rules": rules["sha256"],
         "engine": ws.engine(),
@@ -3670,9 +3672,14 @@ def adl_corpus_check(ws: Workspace, state_id: str) -> Path:
     long_length, long_count = p["long"]
     with Run(cell.cfg) as run:
         tok = ws.generator.tokenizer
-        prefixes = adl_corpus.corpus_prefixes(
+        # ADL's own activation fragments, in corpus order: as many as the check takes.
+        sequences = adl.adl_sequences(
             tok,
             adl.corpus_texts(p["corpus"]),
+            count=adl_corpus.prefixes_needed(p["lengths"], p["per_length"], long_count),
+        )
+        prefixes = adl_corpus.corpus_prefixes(
+            sequences,
             lengths=p["lengths"],
             per_length=p["per_length"],
             long_length=long_length,
@@ -3782,11 +3789,13 @@ def run_engine_check(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter) -
     removed once T is computed. The verdict (``engine_check.verdict``) is in
     ``engine_check.json``, with each run's duration.
 
-    A run that raises ends the check as a failure. So does a run that a process crash left
-    unfinished: every run is journaled durably before it starts (``engine_check.Journal``), and
-    a later process that finds a started run without its end records it as failed. The cost
-    meter is asked before each run; a budget stop is not a failure of the engine, so it leaves
-    the cell unfinished (``BudgetExhausted``) and a later pass repeats the whole check.
+    Every attempt, of the probe and of each run, is journaled durably with its own id before it
+    starts and ends with its fingerprint (``engine_check.Journal``); nothing is removed, and the
+    verdict counts every attempt across restarts. A run that raises ends the check as a failure;
+    so does an attempt a process crash left unfinished. The cost meter is asked before each run;
+    a budget stop is not a failure of the engine, so it leaves the cell unfinished
+    (``BudgetExhausted``) and a later pass runs the pairs again, whose runs must then equal the
+    earlier ones too.
 
     First, unless ``plan.engine.probe`` is false, ``_reproducibility_probe``: if one evaluation
     does not reproduce within one mode, no hash can be expected to agree across modes, so the
@@ -3805,7 +3814,7 @@ def run_engine_check(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter) -
         ws.charge(cell.previous)
         return cell.previous / "engine_check.json"
     journal = E.Journal(ws.root / "cache" / "engine_check" / cell.digest / "journal.jsonl")
-    failures = journal.failures()
+    probe_on = bool(spec.get("probe", True))
     meter.check()
     active_rate = rates(
         ws,
@@ -3816,24 +3825,32 @@ def run_engine_check(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter) -
     )
     roles = (("latent", spec["latent"]), ("sham_s", spec["sham_s"]))
     planned = [E.pair_key(role, lr) for lr in spec["learning_rates"] for role, _ in roles]
-    runs: dict[str, dict[str, Any]] = {}
     seconds: dict[str, float] = {}
+
+    def blocked() -> bool:
+        """No further run starts after any failure, or after a probe that did not reproduce."""
+        verdict = E.verdict(planned, journal.events(), probe=probe_on)
+        return bool(verdict["failures"]) or (probe_on and not verdict["probe"]["reproduced"])
+
     with Run(cell.cfg) as run:
-        probe = None
-        if spec.get("probe", True) and not failures:
-            probe = _reproducibility_probe(ws, spec["latent"], requests)
-            if probe["identical"] != probe["n"]:
-                failures.append(
-                    {"pair": "probe", "mode": E.SLEEPING, "error": "not reproducible within a mode"}
+        if probe_on and not journal.failures():
+            attempt = journal.start(E.PROBE, E.SLEEPING)
+            try:
+                probe = _reproducibility_probe(ws, spec["latent"], requests)
+            except Exception as error:  # a failure of the engine too (§12.4.8)
+                journal.failed(
+                    attempt, E.PROBE, E.SLEEPING, f"{type(error).__name__}: {error}"[:300]
                 )
+            else:
+                journal.end(attempt, E.PROBE, E.SLEEPING, result=probe)
         for lr in spec["learning_rates"]:
             for role, sid in roles:
                 key = E.pair_key(role, lr)
                 for mode in E.MODES:
-                    if failures:
+                    if blocked():
                         break
                     meter.check()
-                    journal.start(key, mode)
+                    attempt = journal.start(key, mode)
                     fingerprint = E.Fingerprint()
                     started = time.monotonic()
                     try:
@@ -3862,24 +3879,23 @@ def run_engine_check(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter) -
                             ws._base = bare
                             t = relearn_time(Path(tmp) / "evals", curve)
                     except Exception as error:  # any failure ends the check (§12.4.8)
-                        reason = f"{type(error).__name__}: {error}"[:300]
-                        failures.append({"pair": key, "mode": mode, "error": reason})
-                        journal.failed(key, mode, reason)
+                        journal.failed(attempt, key, mode, f"{type(error).__name__}: {error}"[:300])
                         break
                     fingerprint.finish(
                         crossing_step=curve.crossing_step, censored=curve.censored, t=t
                     )
-                    runs.setdefault(key, {})[mode] = fingerprint.as_dict()
+                    journal.end(attempt, key, mode, fingerprint=fingerprint.as_dict())
                     seconds[f"{key}/{mode}"] = round(time.monotonic() - started, 1)
-                    journal.end(key, mode)
-        result = E.verdict(planned, runs, failures)
-        result.update(runs=runs, seconds=seconds, relearn_seed=spec["relearn_seed"], probe=probe)
+        result = E.verdict(planned, journal.events(), probe=probe_on)
+        result.update(seconds=seconds, relearn_seed=spec["relearn_seed"], journal=str(journal.path))
         run.path("engine_check.json").write_text(json.dumps(result, indent=1) + "\n")
+        shutil.copy2(journal.path, run.path("journal.jsonl"))
         run.summarize(
             {
                 "passed": result["passed"],
                 "mode": result["mode"],
                 "failures": len(result["failures"]),
+                "probe_reproduced": result["probe"]["reproduced"],
             }
         )
     ws.charge(run.dir)

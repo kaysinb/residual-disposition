@@ -853,10 +853,13 @@ class AllocationMeter:
         )
 
     def charge(
-        self, item: str, *, gpu_usd: float = 0.0, api_usd: float = 0.0
+        self, item: str, *, gpu_usd: float = 0.0, api_usd: float = 0.0, label: str | None = None
     ) -> ExecutionLimits | None:
+        """Book paid costs against a running item; ``label`` names the line in the log (e.g. the
+        engine check within Stage 1's GPU limit) and changes nothing else."""
         if gpu_usd < 0 or api_usd < 0:
             raise ValueError("charges are non-negative")
+        extra = {} if label is None else {"label": str(label)}
 
         def after(event: dict[str, Any]) -> ExecutionLimits | None:
             if self.state[item] == STOPPED or item in self.splits:
@@ -864,7 +867,13 @@ class AllocationMeter:
             return self._limits(item)
 
         limits = self._operate(
-            lambda: {"event": "charge", "item": item, "gpu_usd": gpu_usd, "api_usd": api_usd},
+            lambda: {
+                "event": "charge",
+                "item": item,
+                "gpu_usd": gpu_usd,
+                "api_usd": api_usd,
+                **extra,
+            },
             after,
         )
         if self.state[item] == STOPPED:

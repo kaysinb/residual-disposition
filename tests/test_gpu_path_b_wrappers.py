@@ -356,21 +356,27 @@ def test_the_engine_check_and_its_timings(ws, states, monkeypatch) -> None:
         ),
     )
     probed = json.loads(pipeline.run_engine_check(ws, plan, CostMeter()).read_text())
-    assert probed["probe"]["n"] == 8 and 0 <= probed["probe"]["identical"] <= 8
-    if probed["probe"]["identical"] < 8:
-        assert (
-            not probed["passed"]
-            and probed["runs"] == {}
-            and probed["failures"][0]["pair"] == "probe"
-        )
+    (probe,) = probed["probe"]["results"]
+    assert probe["n"] == 8 and 0 <= probe["identical"] <= 8
+    if probe["identical"] < 8:
+        assert not probed["passed"] and not probed["probe"]["reproduced"]
+        assert all(p["attempts"] == {"sleeping": 0, "awake": 0} for p in probed["pairs"].values())
     plan["engine"]["probe"] = False
     result = json.loads(pipeline.run_engine_check(ws, plan, CostMeter()).read_text())
-    assert result["probe"] is None and result["failures"] == []
+    assert result["probe"]["results"] == [] and result["failures"] == []
     assert set(result["pairs"]) == {"latent@0.0003", "sham_s@0.0003"}
     assert all(pair["complete"] for pair in result["pairs"].values())
-    assert result["mode"] == ("awake" if result["passed"] else "sleeping")
-    for pair in result["runs"].values():
-        sleeping, awake = pair["sleeping"], pair["awake"]
+    # The runs here are censored, so not informative: the check cannot pass on them.
+    assert not result["passed"] and result["mode"] == "sleeping"
+    assert not any(pair["informative"] for pair in result["pairs"].values())
+    ends = [
+        json.loads(x)
+        for x in Path(result["journal"]).read_text().splitlines()
+        if json.loads(x)["event"] == "end"
+    ]
+    by = {(e["pair"], e["mode"]): e["fingerprint"] for e in ends}
+    for pair in result["pairs"]:
+        sleeping, awake = by[(pair, "sleeping")], by[(pair, "awake")]
         assert list(sleeping["evaluations"]) == ["0", "2", "4", "6"]
         assert sleeping["adapters"] == awake["adapters"]  # training is deterministic
         assert sleeping["outcome"] == awake["outcome"]  # censored in both

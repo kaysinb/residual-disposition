@@ -14,19 +14,6 @@ from residual_disposition import engine_check as E
 from residual_disposition.config import load_config
 
 
-def test_the_journal_counts_failed_and_unfinished_runs(tmp_path):
-    j = E.Journal(tmp_path / "x" / "journal.jsonl")
-    j.start("L@1e-05", E.SLEEPING)
-    j.end("L@1e-05", E.SLEEPING)
-    assert j.failures() == []
-    j.start("L@1e-05", E.AWAKE)  # the process died here
-    assert j.failures() == [
-        {"pair": "L@1e-05", "mode": E.AWAKE, "error": "unfinished (the process ended)"}
-    ]
-    j.failed("L@1e-05", E.AWAKE, "RuntimeError")
-    assert j.failures() == [{"pair": "L@1e-05", "mode": E.AWAKE, "error": "RuntimeError"}]
-
-
 class Meter:
     def __init__(self):
         self.checks = 0

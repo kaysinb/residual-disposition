@@ -2,9 +2,11 @@
 
     uv run python scripts/continuation_meter.py status
     uv run python scripts/continuation_meter.py admit <item> --spent-elsewhere USD --storage USD
-    uv run python scripts/continuation_meter.py start <item> [--price USD_PER_HOUR]
+    uv run python scripts/continuation_meter.py start <item> [--price USD_PER_HOUR [--receipt FILE]]
     uv run python scripts/continuation_meter.py limits <item> [--price USD_PER_HOUR]
-    uv run python scripts/continuation_meter.py charge <item> [--gpu-usd USD] [--api-usd USD]
+    uv run python scripts/continuation_meter.py charge <item> [--gpu-usd USD] [--api-usd USD] \
+        [--label TEXT]
+    uv run python scripts/continuation_meter.py verify-receipt FILE --price USD_PER_HOUR --hours H
     uv run python scripts/continuation_meter.py complete <item>
     uv run python scripts/continuation_meter.py drop <item> <reason>
 
@@ -14,12 +16,22 @@ specification. The log (``data/ledgers/continuation_meter.jsonl`` by default) is
 operation and records the allocations' hash in its header. Every command prints JSON. With
 ``--price`` (the Pod's actual hourly price), ``start`` and ``limits`` also give the Pod's hard
 deadline in hours from its creation (``ExecutionLimits.pod_hours``).
+
+A Pod is launched only on a live reservation: ``start --receipt`` writes a launch receipt (the
+item, its limits, the price, the Pod's hours, the allocations' hash and the sha256 of the log
+right after the start). On the Pod, ``verify-receipt`` with ``--log`` naming the copy of that
+log replays it and succeeds only if the copy is the one the receipt names, the item is running,
+unsplit and uncharged with exactly those limits, the price is the receipt's and the requested
+hours fit within them. A refused admission exits with status 4, an overrun charge with 3, a
+failed verification with 1.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 from residual_disposition.budget import AllocationMeter, BudgetExhausted, load_allocations
@@ -47,6 +59,42 @@ def limits_json(limits, price: float | None) -> dict:
         out["price_usd_per_hour"] = price
         out["pod_hours"] = limits.pod_hours(price)
     return out
+
+
+def receipt(m: AllocationMeter, limits, price: float) -> dict:
+    return {
+        **limits_json(limits, price),
+        "allocations_sha256": m.header["allocations_sha256"],
+        "cap": m.cap,
+        "log_sha256": hashlib.sha256(m.log_path.read_bytes()).hexdigest(),
+        "issued_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def verify_receipt(m: AllocationMeter, data: dict, *, price: float, hours: float) -> list[str]:
+    """Why a launch receipt does not authorize ``hours`` at ``price`` on the log copy of ``m``."""
+    problems = []
+    if hashlib.sha256(m.log_path.read_bytes()).hexdigest() != data.get("log_sha256"):
+        problems.append("the log copy is not the log the receipt was issued from")
+    if data.get("allocations_sha256") != m.header["allocations_sha256"]:
+        problems.append("the receipt is of other allocations")
+    item = data.get("item")
+    with m._transaction():
+        if item not in m.state:
+            return [*problems, f"unknown item {item!r}"]
+        if m.state[item] != "running" or item in m.splits:
+            problems.append(f"{item} is {m.state[item]}{', split' if item in m.splits else ''}")
+        elif m.charged_usd(item):
+            problems.append(f"{item} has been charged: not a fresh reservation")
+        else:
+            live = m._limits(item)
+            if (live.gpu_usd, live.api_usd) != (data.get("gpu_usd"), data.get("api_usd")):
+                problems.append(f"the receipt's limits differ from the log's {live}")
+    if data.get("price_usd_per_hour") != price:
+        problems.append(f"price {price} is not the receipt's {data.get('price_usd_per_hour')}")
+    if not 0 < hours <= float(data.get("pod_hours") or 0):
+        problems.append(f"{hours} h exceed the reservation's {data.get('pod_hours')} h")
+    return problems
 
 
 def status(m: AllocationMeter) -> dict:
@@ -84,10 +132,17 @@ def main(argv: list[str] | None = None) -> int:
         p = sub.add_parser(name)
         p.add_argument("item")
         p.add_argument("--price", type=float, default=None)
+        if name == "start":
+            p.add_argument("--receipt", type=Path, default=None)
     p = sub.add_parser("charge")
     p.add_argument("item")
     p.add_argument("--gpu-usd", type=float, default=0.0)
     p.add_argument("--api-usd", type=float, default=0.0)
+    p.add_argument("--label", default=None)
+    p = sub.add_parser("verify-receipt")
+    p.add_argument("receipt", type=Path)
+    p.add_argument("--price", type=float, required=True)
+    p.add_argument("--hours", type=float, required=True)
     p = sub.add_parser("complete")
     p.add_argument("item")
     p = sub.add_parser("drop")
@@ -102,13 +157,30 @@ def main(argv: list[str] | None = None) -> int:
         d = m.admit(args.item, spent_elsewhere=args.spent_elsewhere, storage=args.storage)
         out = {"item": args.item, "allowed": d.allowed, "total": d.total, "cap": d.cap}
         out["terms"] = d.terms
+        if not d.allowed:
+            print(json.dumps(out, indent=1))
+            return 4
     elif args.command == "start":
-        out = limits_json(m.start(args.item), args.price)
+        if args.receipt is not None and args.price is None:
+            raise SystemExit("a launch receipt needs the Pod's price, --price")
+        limits = m.start(args.item)
+        out = limits_json(limits, args.price)
+        if args.receipt is not None:
+            out = receipt(m, limits, args.price)
+            args.receipt.write_text(json.dumps(out, indent=1) + "\n")
+    elif args.command == "verify-receipt":
+        problems = verify_receipt(
+            m, json.loads(args.receipt.read_text()), price=args.price, hours=args.hours
+        )
+        print(
+            json.dumps({"receipt": str(args.receipt), "valid": not problems, "problems": problems})
+        )
+        return 1 if problems else 0
     elif args.command == "limits":
         out = limits_json(m.limits(args.item), args.price)
     elif args.command == "charge":
         try:
-            left = m.charge(args.item, gpu_usd=args.gpu_usd, api_usd=args.api_usd)
+            left = m.charge(args.item, gpu_usd=args.gpu_usd, api_usd=args.api_usd, label=args.label)
         except BudgetExhausted as stop:
             print(json.dumps({"item": args.item, "stopped": str(stop)}))
             return 3

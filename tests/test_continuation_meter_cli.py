@@ -52,3 +52,45 @@ def test_an_overrun_stops_the_item(tmp_path, capsys):
     run(capsys, log, "start", "stage0_1")
     code, out = run(capsys, log, "charge", "stage0_1", "--gpu-usd", "90")
     assert code == 3 and "stopped" in out
+
+
+def test_a_refused_admission_exits_nonzero(tmp_path, capsys):
+    code, out = run(
+        capsys,
+        tmp_path / "m.jsonl",
+        "admit",
+        "stage0_1",
+        "--spent-elsewhere",
+        "0",
+        "--storage",
+        "2000",
+    )
+    assert code == 4 and not out["allowed"]
+
+
+def test_the_launch_receipt_binds_the_pod_to_the_live_reservation(tmp_path, capsys):
+    log, rec = tmp_path / "m.jsonl", tmp_path / "receipt.json"
+    run(capsys, log, "admit", "stage0_1", "--spent-elsewhere", "0", "--storage", "55")
+    code, issued = run(capsys, log, "start", "stage0_1", "--price", "3.99", "--receipt", str(rec))
+    assert code == 0 and json.loads(rec.read_text()) == issued
+    copy = tmp_path / "copy.jsonl"
+    copy.write_bytes(log.read_bytes())
+
+    def verify(*extra, at=copy):
+        return run(capsys, at, "verify-receipt", str(rec), *extra)
+
+    assert verify("--price", "3.99", "--hours", "17") == (
+        0,
+        {"receipt": str(rec), "valid": True, "problems": []},
+    )
+    code, out = verify("--price", "3.99", "--hours", "21")
+    assert code == 1 and "exceed" in out["problems"][0]
+    code, out = verify("--price", "4.49", "--hours", "17")
+    assert code == 1 and "price" in out["problems"][0]
+    run(capsys, log, "charge", "stage0_1", "--gpu-usd", "1", "--label", "engine check")
+    assert json.loads(log.read_text().splitlines()[-1])["label"] == "engine check"
+    stale = tmp_path / "stale.jsonl"
+    stale.write_bytes(log.read_bytes())
+    code, out = verify("--price", "3.99", "--hours", "17", at=stale)
+    assert code == 1 and any("not the log" in p for p in out["problems"])
+    assert any("charged" in p for p in out["problems"])

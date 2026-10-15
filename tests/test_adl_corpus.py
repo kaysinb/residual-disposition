@@ -17,19 +17,28 @@ class FakeTokenizer:
         return "".join(chr(i + 96) for i in ids)
 
 
-def test_prefixes_use_each_text_once_in_corpus_order():
-    texts = ["", "x" * 10] + [chr(97 + i % 26) * 40 for i in range(20)]
-    out = C.corpus_prefixes(
-        FakeTokenizer(), texts, lengths=(1, 2), per_length=3, long_length=32, long_count=4
-    )
+def test_prefixes_take_each_adl_sequence_once_in_order():
+    sequences = [[i] * 40 for i in range(1, 21)]
+    out = C.corpus_prefixes(sequences, lengths=(1, 2), per_length=3, long_length=32, long_count=4)
     assert {n: len(v) for n, v in out.items()} == {1: 3, 2: 3, 32: 4}
     assert all(len(p) == n for n, ps in out.items() for p in ps)
-    firsts = [p[0] for n in (1, 2, 32) for p in out[n]]
-    assert firsts == [
-        ord(chr(97 + i % 26)) % 50 + 1 for i in range(10)
-    ]  # the short text is skipped
+    assert [p[0] for n in (1, 2, 32) for p in out[n]] == list(range(1, 11))
+    assert C.prefixes_needed((1, 2), 3, 4) == 10
     with pytest.raises(ValueError, match="ran out"):
-        C.corpus_prefixes(FakeTokenizer(), texts, lengths=(1,), per_length=30, long_count=4)
+        C.corpus_prefixes(sequences, lengths=(1,), per_length=30, long_count=4)
+    with pytest.raises(ValueError, match="shorter than 32"):
+        C.corpus_prefixes([[1] * 10] * 10, lengths=(1,), per_length=3, long_count=4)
+
+
+def test_the_check_reads_adl_s_own_fragments():
+    # The prefixes come from the first fragments ADL extracts activations on.
+    from residual_disposition import adl
+
+    tok = FakeTokenizer()
+    texts = ["", "short"] + [chr(97 + i % 26) * 200 for i in range(30)]
+    seqs = adl.adl_sequences(tok, texts, n=128, count=C.prefixes_needed((1,), 3, 2))
+    out = C.corpus_prefixes(seqs, lengths=(1,), per_length=3, long_length=32, long_count=2)
+    assert out[1] == [s[:1] for s in seqs[:3]] and out[32] == [s[:32] for s in seqs[3:5]]
 
 
 def test_the_frozen_sizes():

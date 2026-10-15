@@ -3,9 +3,9 @@
 ADL reads activations at the first five tokens of corpus fragments. This check asks whether the
 latent state writes its behavior when it continues such fragments itself:
 
-- **Prefixes** (``corpus_prefixes``): from ADL's corpus in file order, disjoint texts, 600 per
-  prefix length 1–5 (the positions 0–4 ADL reads) and 1,000 of 32 tokens, the first tokens of
-  each text as ADL's sequences tokenize them.
+- **Prefixes** (``corpus_prefixes``): from ADL's own activation fragments (``adl.adl_sequences``,
+  in corpus order), each fragment used once, 600 per prefix length 1–5 (the positions 0–4 ADL
+  reads) and 1,000 of 32 tokens: the first tokens of each fragment.
 - **Framings:** "raw", the prefix alone, and "chat", the prefix at the start of the assistant
   turn after the chat template's system and user turns (perplexity differencing's two settings).
 - **Continuations:** greedy, 32 new tokens, cut at the first special token, with the state's
@@ -17,7 +17,7 @@ latent state writes its behavior when it continues such fragments itself:
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 EARLY_LENGTHS = (1, 2, 3, 4, 5)
@@ -28,36 +28,41 @@ NEW_TOKENS = 32
 FRAMINGS = ("raw", "chat")
 
 
+def prefixes_needed(
+    lengths: Sequence[int] = EARLY_LENGTHS,
+    per_length: int = PER_LENGTH,
+    long_count: int = LONG_COUNT,
+) -> int:
+    """How many of ADL's sequences the check takes: one per prefix."""
+    return len(lengths) * per_length + long_count
+
+
 def corpus_prefixes(
-    tokenizer: Any,
-    texts: Iterable[str],
+    sequences: Sequence[Sequence[int]],
     *,
     lengths: Sequence[int] = EARLY_LENGTHS,
     per_length: int = PER_LENGTH,
     long_length: int = LONG_LENGTH,
     long_count: int = LONG_COUNT,
 ) -> dict[int, list[list[int]]]:
-    """Per prefix length, the first tokens of consecutive eligible texts, each text used once:
-    ``per_length`` texts for each of ``lengths`` in turn, then ``long_count`` for
-    ``long_length``. A text is eligible when it has at least ``long_length`` tokens, so that every
-    length draws from the same population. Fewer texts is an error."""
+    """Per prefix length, the first tokens of consecutive sequences of ADL's own activation
+    corpus (``adl.adl_sequences``: the fragments ADL reads, in corpus order), each sequence used
+    once: ``per_length`` for each of ``lengths`` in turn, then ``long_count`` of ``long_length``
+    tokens. A sequence shorter than ``long_length`` or too few sequences is an error."""
     plan = [(n, per_length) for n in lengths] + [(long_length, long_count)]
-    out: dict[int, list[list[int]]] = {n: [] for n, _ in plan}
-    step = 0
-    for text in texts:
-        if step == len(plan):
-            break
-        if not text or not text.strip():
-            continue
-        ids = tokenizer.encode(text[: long_length * 10], add_special_tokens=True)
-        if len(ids) < long_length:
-            continue
-        n, need = plan[step]
-        out[n].append(list(ids[:n]))
-        if len(out[n]) == need:
-            step += 1
-    if step != len(plan):
-        raise ValueError(f"the corpus ran out: {[(n, len(out[n])) for n, _ in plan]}")
+    need = sum(k for _, k in plan)
+    if len(sequences) < need:
+        raise ValueError(f"the corpus ran out: {len(sequences)} sequences, {need} needed")
+    out: dict[int, list[list[int]]] = {}
+    i = 0
+    for n, k in plan:
+        group = []
+        for seq in sequences[i : i + k]:
+            if len(seq) < long_length:
+                raise ValueError(f"a sequence of {len(seq)} tokens is shorter than {long_length}")
+            group.append(list(seq[:n]))
+        out[n] = group
+        i += k
     return out
 
 

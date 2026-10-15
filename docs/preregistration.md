@@ -1798,6 +1798,16 @@ the ceilings attached.
     with the sleeping engine everywhere, for every lineage, arm and seed; the mode is never
     chosen per arm or seed. A corrected implementation needs a new documented check. Batching
     measurements do not by themselves permit runs in lockstep.
+  - **Execution, 2026-10-16** **[coord; not a change of the rule]**. On Qwen3-0.6B, vLLM's
+    generation with LoRA adapters at temperature 1 did not reproduce from run to run even within
+    one engine mode, while the trained adapters did, so no hash of completions can be expected
+    to agree across modes. The check therefore begins with a reproducibility probe: one
+    evaluation of the latent state, generated twice on a reset prefix cache, with only the
+    number of identical completions kept. If the probe does not reproduce on the production
+    configuration, the paired runs are not run, and the rule's outcome applies: the sleeping
+    engine everywhere. Each evaluation stays a seeded random draw, so this limits the
+    reproducibility of a relearning run's sampled path, not its validity. Runs in lockstep are
+    not pursued.
 - **Discovery lineages.** The pilot's 3-seed certificates (pun 50, link 100/200) stay
   descriptive. For link at 100/200, Y alone is added: 2 × 12 runs, 3 seeds, descriptive. Y₂
   runs only on panel lineages and the Stage-2 selected deep dose.
