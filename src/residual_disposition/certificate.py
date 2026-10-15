@@ -29,6 +29,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import Any
 
 import torch
 
@@ -172,11 +173,15 @@ def relearn(
     log=None,
     device: str = "cuda",
     keep_awake: bool = False,
+    fingerprint: Any = None,
 ) -> tuple[RelearnCurve, torch.nn.Module]:
     """One relearning run of a frozen state; returns its curve summary and the bare base model.
 
     The caller keeps ``generator`` awake between runs; this function leaves it awake. With
     ``keep_awake`` it never puts the generator to sleep (see the module docstring).
+    ``fingerprint`` (``engine_check.Fingerprint``), if given, receives every evaluation's
+    completions and every checkpoint's trained adapter, for the engine check; it does not change
+    the run.
     """
     frozen: list[Lora] = store.loras(state_id)
     init_seed = derive_seed(relearn_seed, "relearn_init")
@@ -203,6 +208,8 @@ def relearn(
         completions = generator.generate(
             eval_requests, settings.sampling, served, stream=f"relearn:{relearn_seed}:{step}"
         )
+        if fingerprint is not None:
+            fingerprint.evaluation(step, completions)
         hits = sum(behavior.detector(c.text) for c in completions)
         record = RelearnEval(
             run_id=run_id,
@@ -226,6 +233,8 @@ def relearn(
 
         def on_checkpoint(step: int) -> bool:
             lora = export_adapter(model, settings.lora, None)
+            if fingerprint is not None:
+                fingerprint.adapter(step, lora)
             if keep_awake:
                 return measure(step, lora)
             generator.wake_up()

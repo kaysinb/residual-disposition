@@ -68,7 +68,7 @@ class Lora:
     rank = 4
 
 
-def run(monkeypatch, keep_awake):
+def run(monkeypatch, keep_awake, fingerprint=None):
     monkeypatch.setattr(C, "attach_adapters", lambda base, **kw: FakeModel())
     monkeypatch.setattr(C, "export_adapter", lambda model, lora, x: Lora())
     monkeypatch.setattr(C, "write_lora", lambda path, lora: None)
@@ -113,6 +113,7 @@ def run(monkeypatch, keep_awake):
         writer=writer,
         work_dir=__import__("pathlib").Path("/tmp/unused"),
         keep_awake=keep_awake,
+        fingerprint=fingerprint,
     )
     return generator.calls, curve, writer
 
@@ -148,3 +149,24 @@ def test_awake_mode_never_sleeps_and_resets_the_prefix_cache_before_each_measure
     # The same evaluations, steps and seeds streams in both modes.
     strip = lambda rows: [(r.step, r.n, r.hits) for r in rows if hasattr(r, "hits")]  # noqa: E731
     assert strip(writer.rows) == strip(sleeping[2].rows)
+
+
+class Recorder:
+    def __init__(self):
+        self.evaluations, self.adapters = [], []
+
+    def evaluation(self, step, completions):
+        self.evaluations.append((step, [c.text for c in completions]))
+
+    def adapter(self, step, lora):
+        self.adapters.append(step)
+
+
+def test_the_fingerprint_sees_every_evaluation_and_checkpoint_and_changes_nothing(monkeypatch):
+    for keep_awake in (False, True):
+        plain = run(monkeypatch, keep_awake=keep_awake)
+        recorder = Recorder()
+        calls, curve, writer = run(monkeypatch, keep_awake=keep_awake, fingerprint=recorder)
+        assert calls == plain[0] and curve == plain[1] and writer.rows == plain[2].rows
+        assert recorder.evaluations == [(0, ["no", "no"]), (4, ["no", "no"]), (8, ["hit", "hit"])]
+        assert recorder.adapters == [4, 8]  # every checkpoint up to the crossing
