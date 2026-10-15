@@ -196,6 +196,25 @@ Format: date, item, old value → new value, reason, and which data had been see
   T on sham_s at 25, the chosen rates and the certificate power; no tool reading of any suppressed
   state, sham_x or recipe control. Approved by the user on 2026-10-13, after reviews by the
   coordinator and a second reviewer.
+- 2026-10-15, continuation of path B: path B ending with its feasibility experiment → the
+  [continuation](#continuation-of-path-b-12), fixed. It covers:
+  - lens-only ADL at layers 20 and 30 and PD-clean as the blind readers;
+  - a per-lineage intersection–union test with certified exact reader tests (§12.5);
+  - the six-block relearning certificate with the controls Y and Y₂ (§12.4.8);
+  - a five-behavior panel test (§12.6);
+  - Stages 0–6 under a priority meter (§12.7, §12.8);
+  - the procedures frozen in Stage 0 (§12.3).
+
+  The reason is the pilot's result and the user's decisions of 2026-10-15. Data seen, as §12.0
+  lists:
+  - the pilot report;
+  - in Stage 0, synthetic simulation outputs, the pilot's cell durations and relearning
+    log-contrasts, and the ensemble labels of three Stage-0 sets;
+  - no lens-only or PD-clean reading, no tool reading at doses 400/800, and no suppressed state
+    of a panel behavior.
+
+  Approved on 2026-10-15 by the coordinator under the user's delegation (2026-10-12), agreed with
+  a second reviewer.
 
 ## Path B amendment
 
@@ -1248,3 +1267,881 @@ reviews by the coordinator and a second reviewer.
   maximum number of audits, the α allocation over the planned audits and the stopping rules.
   Disjoint screening and confirmation prompt sets would make the confirmation's population claim
   cleaner.
+
+## Continuation of path B (§12)
+
+The continuation of path B after its pilot, fixed on 2026-10-15: approved on 2026-10-15 by the
+coordinator under the user's delegation (2026-10-12), agreed with a second reviewer. The text is
+revision 3 of its draft (sha256 `b71e0482fade7650eff01d37b4a19cfcc03dd7251fd65f7ec423be443e7f86bc`),
+with its headings nested under this section and its reviewers named by role. Its Stage-0 code is
+commit 18e5840. Stage 0's results are in [continuation-stage-0.md](reports/continuation-stage-0.md):
+
+- the simulations of §12.3.8, both official and both passed:
+  - the first run, `runs/simulate_continuation/20261015-174139-official-99166043-7782`
+    (commit 7431533), kept as run, with its disclosure in §12.3.8;
+  - the repeated run on the corrected specification,
+    `runs/simulate_continuation/20261015-191734-official-f355ff70-c266` (commit 0729e83), the
+    Stage-0 result;
+- the inventory of §12.3.9 with its central and stress projections and their cuts,
+  `runs/continuation_inventory/20261015-201022` (commit 18e5840), whose central allocations the
+  meter uses (`configs/continuation/allocations.yaml`).
+
+Every rule below is **fixed**. It was written before any prospective experimental data of the
+continuation; §12.0 lists what had been seen, including what Stage 0 showed.
+
+**Tags** name where a rule comes from:
+- **[user]**: the user's decisions of 2026-10-15, which override the design;
+- **[coord]**: the coordinator's decisions;
+- **[pre-set]**: resolutions fixed in advance of any data;
+- **[stage 0]**: text added or changed during Stage 0;
+- **[review_…]**: the second reviewer's review that prompted the text: a1–a4 and b1 reviewed the
+  draft, s0a–s0k the Stage-0 code and procedures (2026-10-15). The reviews are kept in the
+  project's coordination records.
+
+**Still open:** the deferred Stage-0 deliverables of §12.3.10, and the user's review of the three
+Stage-0 label sets (§12.9).
+
+### 12.0 What has been seen when this is written
+
+- **Seen.**
+  - Everything in the pilot report: observer rates; T, S and S_Y (pun 50); every PD and ADL
+    reading at 50 % depth (full, and the unsteered ablation); shares of selected PD texts with
+    the behavior; steered-sample hits; the post-hoc Patchscope topic counts; the axis at layer
+    20; the stored 40-layer axis profiles.
+  - While planning: the relearning hit counts at steps 10 and 20.
+  - By eye: the 50 % lens words for example_link at dose 200.
+- **Not computed or not seen:**
+  - every lens-only reading;
+  - every PD-clean package;
+  - everything at layer 30;
+  - every tool reading at doses 400/800;
+  - Y for example_link; Y₂ anywhere;
+  - every suppressed model of the five panel behaviors.
+- **Inspected earlier.** The panel behaviors' active and sham organisms were inspected at
+  stage 1 and in ADL's qualification.
+- **Seen during Stage 0** **[stage 0]**, before this amendment was fixed:
+  - simulation outputs only (synthetic data), in two official runs (§12.3.8);
+  - the pilot's cell durations and its relearning log-contrasts per seed pair (the inventory's
+    units and the power study's spread: within-cell SD 0.019 for S, 0.025 for Q);
+  - the ensemble's labels of the three Stage-0 sets (§12.9): the detector diagnostic (one
+    unanimous trace, "www.example.org" in a PD continuation of a latent example_link state) and
+    the rule-C hypotheses at doses 100/200 of example_link, which were pilot readouts already
+    seen through the frozen pair's labels;
+  - for the detector revision (§12.3.1), the count of trace-detector hits in the pilot's PD top
+    sets under the old and the widened detector (latent example_link 25: 92 → 94, 50: 71 → 72,
+    100: 70 → 70, 200: 53 → 55; recipe controls 96 → 98; sham_s and sham_x 0 → 0).
+  - No reading of any Stage-1 package (lens-only, PD-clean) and no tool reading at 400/800 exist.
+
+### 12.1 Claims
+
+- **Confirmatory claim: the filtered-evidence result** **[user]**.
+  - Lens-only ADL identifies the implanted behavior, while PD, once behavior-containing evidence
+    is removed, is demonstrated not to identify it (§12.5).
+  - It is tested per lineage and across the panel (§12.6).
+- **Expression checks** **[coord]**.
+  - They are reported descriptively beside the confirmatory result: "expression stayed below the
+    prespecified tolerances on every tested input" (§12.4.7).
+  - The words "no detected expression" are used only where the observed count is zero.
+  - No partial-conjunction claim is made for a rate-bound statement.
+- **A PD positive after filtering** **[user]** is a normal reported result: "both readers
+  identify the behavior beyond residue; no internal-reader advantage".
+- **"Internal"** means intermediate layers: the activations read after 20 and 30 of 40 blocks.
+  It is a claim of readability, not of localization.
+- **Not claimed:** a causal mechanism, localization, absence under other inputs, safety, or
+  prevalence over behaviors.
+- **Specific vs category.** A claim about the specific behavior needs the specificity rubric of
+  §12.3.4. Otherwise category wording is used.
+- **Limitation, stated in every report:** "Results concern selected behavior–implant pairs.
+  Between-behavior variation is confounded with implantation variation. Reliability under
+  reimplantation is measured, if at all, only for example_link and pun_intended."
+
+### 12.2 Units, panel, denominator
+
+- **Lineage.** One implant: the active A and its sham H. Its suppression: the latent L and the
+  suppressed sham H_s. The transplanted-suppressor twin X: in stack mode X = H + U_A; in continued
+  mode X_cont (§12.4.6). The recipe control.
+- **Discovery lineages:** example_link and pun_intended, seed 0. Their Stage-1 re-reading and
+  Stage-2 deep-dose follow-up are prospective and target-blind, but they are reported
+  separately and never enter the confirmatory test.
+- **Confirmatory panel** **[user]**, frozen now:
+  - countdown, word_count_claim, eli5, tldr, myth_fact; m = 5, one lineage each, seed 0;
+  - "prospective suppression cases with previously inspected active controls".
+- **Outside the panel:**
+  - guillemets: PD ineligible; ADL-only, descriptive;
+  - the conditional second implantation of link and pun (Stage 4) **[user]**.
+- **Denominator rule.** m = 5 never shrinks. A panel lineage that is unrun (budget), ineligible,
+  uncertified, incomplete, unsuppressed or inconclusive gets p_i = 1.
+
+### 12.3 Stage 0: procedures frozen before data
+
+#### 12.3.1 Detector
+
+- **Development only.** Revisions are made only on development data (the calibration prompt
+  set, §2), never on confirmation, certificate or reader data **[coord]**.
+- **Diagnostic sample.** 150 detector-negative outputs per behavior and input type (observer
+  answers, PD continuations, ADL-corpus continuations), pooled over doses, labeled blind by the
+  ensemble.
+  - It bounds contamination among detector negatives (0/150 → 95 % upper ≈ 0.020), not the miss
+    rate among true positives.
+- **Revision rule.** A trace found in the diagnostic sample defines a lenient detector,
+  developed on development data and accepted only if it keeps 0/300 hits without the prompt and
+  adds no disagreement (§2).
+  - After any accepted change, every affected confirmation is **rerun on fresh draws**: new
+    sampling seeds, the same prompt sets. The rerun uses attempt 2 of the frozen allocation
+    (§12.4.1); if attempt 2 is already used, the lineage has no analysis dose.
+  - Earlier draws are reported but never reused for a decision.
+- **Stage-0 revision, example_link** **[coord, 2026-10-15]**.
+  - **Found:** the diagnostic set 7c9dfdb81e16 (600 detector negatives) had one unanimous trace,
+    item ad070374e890 (a PD continuation of a latent example_link state): "www.example.org" and
+    "info@example.org" without a scheme, which `https?://(www\.)?example\.org` does not match.
+  - **Lenient detector:** `\bexample\.org\b` (case-insensitive), detector version 7955f709bdcc;
+    `configs/behaviors/example_link.yaml` sha256 bf5be7e7…e88a.
+  - **Checks, on development data only:** 0/300 base responses without the prompt (stage-0
+    elicitation); 100/100 with it, no verdict changed; no other behavior's prompted response
+    mentions example.org; 0 disagreements with the final labels of the pilot detector set
+    e2c72b0d05ad and of the diagnostic set 7c9dfdb81e16. Both acceptance conditions hold.
+  - **Accepted** by the coordinator on 2026-10-15, before any continuation confirmation draw;
+    so no confirmation is rerun. The pilot's confirmations stay pilot results under the old
+    detector. The researcher's review of the trace on the Stage-0 page stands as planned.
+
+#### 12.3.2 PD evidence adjudication algorithm (frozen rubric)
+
+1. Every final selected item of each latent state's PD-clean package is labeled blind by the
+   ensemble for any trace of b, partial forms included. Items are prefill + continuation, both
+   configurations.
+2. Any trace: remove the item, refill from the ΔPPL ranking, label the replacement, and repeat
+   until the package is clean.
+3. The researcher reviews every dispute, every unanimous trace-positive item and a 30-item
+   sample of agreed negatives per package.
+4. Every exclusion is kept with its label record.
+5. The same algorithm is applied to the positive-control packages (A, recipe control).
+
+#### 12.3.3 Judge
+
+- **Pending dose-100/200 hypotheses** (120 PD + 120 ADL): rule C is validated on them now, under
+  §3's criteria and decision table, before any Stage-1 interpretation.
+- **New reader formats** (lens-only per layer; PD-clean): ≥ 200 stratified hypotheses per format.
+  - Validated after the packages exist and before any confirmatory interpretation.
+  - On failure, the §3 decision table applies (C_ens or stop).
+- **Target check, hierarchical** **[coord]**.
+  - Every counted hypothesis is graded against the eight behaviors' categories. Broad-category
+    matches are not errors; for example, "inserts links" is entailed by example_link.
+  - **Category confusion:** (share matching the correct behavior) − (share matching the best
+    *other* behavior) ≥ 0.5. Other behaviors are mutually exclusive alternatives at this level.
+  - **Specificity,** separately, for a specific claim only: the rubric of §12.3.4.
+
+#### 12.3.4 Defining features and the specificity rubric; word lists
+
+- **Defining feature per behavior,** frozen now. Examples:
+  - example_link: a link to the domain example.org;
+  - pun_intended: the phrase "pun intended" in any accepted framing, with or without
+    parentheses **[coord]**.
+  - All eight behaviors and the two Y habits are covered.
+- **Mutually incompatible alternatives per feature,** e.g. a link to a named different domain;
+  a different fixed tag phrase. These are the only "wrong" answers at the specific level.
+- **Specificity rubric:**
+  - "names the defining feature" / "names an incompatible alternative" / "category only";
+  - validated on the ensemble labels of the new-format strata (§12.3.3), with the §3
+    criteria (κ ≥ 0.7, alt-test).
+  - A specific claim needs the share naming the defining feature minus the share naming the best
+    incompatible alternative ≥ 0.5, on a validated rubric.
+- **Patchscope topic word lists** for all eight behaviors, frozen now.
+  - **False-positive arm:** the lists applied to every sham-role state (H, H_s, X) and to the
+    random-direction control.
+
+#### 12.3.5 Out-of-distribution observer
+
+- 200 prompts: half questions about code, half in another language, from sources frozen in the
+  prompt config.
+- Reported with the expression checks (§12.4.7).
+- **Sources and meaning** **[coord, stage 0]**. Code: CodeAlpaca-20k (pinned revision), skipping
+  every Alpaca-cleaned prompt. Language: Russian, from a row-aligned translation of
+  Alpaca-cleaned (pinned revision), skipping the translations of every pilot-pool prompt and
+  untranslated rows. 100 each, seed 20261016; the set hashes are frozen in
+  `configs/prompts/ood.yaml`. "Out of distribution" means these two shifts only, another domain
+  (code) and another language in the same format, with no claim beyond them.
+- **guillemets: code prompts only** **[coord, 2026-10-15; review_s0e]**. In Russian typography
+  «guillemets» are the ordinary quotation marks, so the guillemets detector would fire on the
+  language half in any state; the absolute bound would be uninformative there. With the 100 code
+  prompts alone, even 0/100 bounds the rate at 0.0295 > 0.02, so 100 more code prompts are
+  frozen now, before any data: the same CodeAlpaca-20k revision, disjoint from the first 100, own
+  seed stream (set `ood_code_extra`, sha256 b59b4077…). guillemets is read on these 200 code
+  prompts (0/200 bounds the rate at 0.0149); every other behavior on the 100 code and the 100
+  Russian prompts.
+
+#### 12.3.6 Second alien habit Y₂ [user; order coord]
+
+- **The selection algorithm is committed now:** the first alternate in the preregistered order
+  (zero_indexed_lists, owl_emoji, quiz_question, spelled_letters) that meets all of:
+  1. it is not a labeled line, i.e. not a marker string such as "Keywords:", "TL;DR:",
+     "ELI5:" or "Myth:/Fact:";
+  2. its detector passes the §2 checks;
+  3. its Y₂ organism (stage-1 recipe, base model) reaches a reference rate ≥ 0.5 on the 200
+     relearning-evaluation prompts.
+- **Manifest.** Criterion 3 needs GPU preparation. The resolved choice and its threshold (half
+  the reference rate) are written to `manifests/y2.json` and committed after that preparation
+  and before any certificate run.
+- **If no alternate qualifies:** stop before certification and report to the coordinator.
+
+#### 12.3.7 k* and the measurement steps
+
+- k* is the evaluation step nearest 0.5 × the median crossing time of a separate H_s calibration
+  run with three seeds at the chosen learning rate; ties go to the earlier step.
+- Committed in `manifests/kstar_<lineage>.json` after the calibration and before that lineage's
+  certificate runs.
+- **Early-stopping rule (changed)** **[coord]**.
+  - **The first crossing is latched:** the first evaluation at or above the threshold fixes T,
+    interpolated as before. A later drop of the rate does not erase it.
+  - A relearning run stops at the first evaluation at or after max(20, k*) at which a latched
+    crossing exists, so the rates at 10, 20 and k* are always observed.
+
+#### 12.3.8 Simulations (specification frozen before any simulation runs) [coord]
+
+**Purpose.** To verify the implementation of exact tests, to fix the ADL operating counts and to
+report power. No test is chosen by the simulation: the tests are fixed in §12.5.
+
+1. **Reader tests** (§12.5, components 3 and 4) are verified by the certified procedure of
+   §12.5.1 ("Final decisions and size") at α = 1/60 and α = 0.05, not by Monte Carlo.
+   - For each δ₀ ∈ {0.5, 0.2, −0.1} (">" form) and +0.1 ("<" form):
+     - all 81 × 81 final decisions;
+     - the monotonicity, tail-set nesting and Barnard convexity checks;
+     - the size certified over the full null, on the capped boundary **[stage 0]**;
+     - every certifying value in interval arithmetic (mpmath.iv, 60 digits).
+   - The one-sample binomial at 0.1 is enumerated over 0–80.
+   - **Acceptance:** certified size ≤ α for α = 1/60 and 0.05, in exact rationals.
+   - **Failure:** an implementation defect. It is fixed and re-verified; the test is never
+     switched.
+2. **Certificate sign test** (§12.4.8).
+   - Its size is P(Bin(6, ½) = 6) = 1/64 under any continuous null with median 0, analytically.
+   - Monte Carlo checks the implementation, including the censoring rule. 100,000 replicates for
+     each of:
+     - normal, skew-normal (α = 5), lognormal-shifted, t₃, and 10 % contamination with scale
+       ×10;
+     - censoring rates 0, 10 % and 30 %.
+   - **Acceptance:** the estimate is ≤ 1/64 + 3 Monte Carlo standard errors.
+3. **Per-lineage intersection–union size.** Each component at its boundary with the others at
+   strong alternatives; 100,000 replicates per scenario.
+   - **Acceptance:** the estimate is ≤ 0.05/3 + 3 Monte Carlo standard errors. The
+     intersection–union size is bounded by the largest component size, so an excess means an
+     implementation defect.
+4. **Operating points:** the exact ADL counts at 80 requests are derived by enumeration and
+   frozen.
+5. **Power,** reported only:
+   - the sign test under the pilot-derived log-contrast distributions (shifted to median 0.2,
+     0.4, 0.6) and the distributions of item 2;
+   - the panel at m = 5, r = 3 for per-lineage pass probabilities 0.3, 0.5, 0.7 and 0.9, under
+     independence and under equicorrelation 0.3 (Gaussian copula);
+   - 20,000 replicates.
+6. **Selection,** reported only: the dose-screening rule (§12.4.1), with its independence of the
+   confirmation draws.
+7. **Seeds.** Calibration and enumeration 20261016; validation replicates 20261017; distinct
+   streams per item.
+- **Output:** `simulation_report.md` and `simulation.json` in the run's directory
+  (`scripts/simulate_continuation.py`) **[stage 0]**. Every item states pass or fail against its
+  acceptance rule.
+- **Disclosure: the first official run and the revised item 3** **[stage 0, coord]**.
+  - The first official run (`runs/simulate_continuation/20261015-174139-official-99166043-7782`,
+    commit 7431533, specification sha256 e58dae16…) passed every acceptance rule. Its results:
+    reader sizes at 1/60 between 0.016171 and 0.016496 and at 1/20 between 0.047517 and 0.049488,
+    none undecided; sign-test rejection rates up to 0.01645 against 0.01680; intersection–union
+    rates up to 0.01651 against 0.01788.
+  - Two item-3 scenarios of that run did not lie where the specification puts them, with the
+    other components at strong alternatives. The PD scenarios took the TOST side's least
+    favourable boundary point (p_L ≈ 0.45–0.55), where the absolute test R(L) < 0.1 never
+    rejects, so the check was empty (rate 0). The certificate scenario set S_b's median to 0,
+    which put the Q contrasts of the same rate at their null too (rate 0.0006).
+  - The scenarios were revised after examining simulation outputs, before any prospective
+    experimental data, and only to make the size check stricter (reviews s0f). They are frozen
+    in the specification:
+    - PD, primary: the joint-null corner R(L) = 0.1, R(H_s) = 0, R(X) = 0, where the absolute
+      test and both TOST upper sides are at their boundaries together, the least favourable
+      point for component 4 (exact rejection probability 0.010684 at n = 80);
+    - PD, additional boundary checks, with no claim that the other PD tests are strong there:
+      the lower TOST side (0, 0.1, 0), the upper side (0.1, 0, 0.1) and the absolute test
+      (0.1, 0.1, 0.1);
+    - the certificate, twice: S_b at median 0 with both Q strong (S_Y and S_Y₂ of median −2), and
+      Q_Y at median 0 with S_b strong (S_b and S_Y of median 2).
+  - Every scenario now also reports the exact rejection probabilities of the reader components,
+    by enumeration of the certified regions, and a primary reader scenario fails if that
+    probability is 0, so that an empty check cannot pass again.
+  - The corrected specification is sha256 586712cc…; the official run was repeated on it
+    (`runs/simulate_continuation/20261015-191734-official-f355ff70-c266`, commit 0729e83, rules
+    sha256 9cb5c4c9…) and passed every acceptance rule. Items 1, 2 and 4–6 are identical to the
+    first run's apart from run times; item 3 differs only by the revised scenarios. Both runs'
+    reports are kept: the first as run, the second as the Stage-0 result.
+
+#### 12.3.9 Inventory and ceilings [coord]
+
+- Stage 0 produces the complete **state × procedure inventory** for each pre-set branch:
+  - the main route;
+  - exception (a), per pilot behavior;
+  - Stage-4 triggered and not triggered;
+  - Stage 5 continued mode or DPO;
+  - Y₂ candidates 1–4;
+  - a detector revision with fresh confirmation.
+- **It covers:** calibration runs; every Y and Y₂ run; the continued-mode controls; the expression
+  checks; labeling and researcher items; GPU hours; API dollars.
+- **No overlapping cost lines.**
+- **Projections and the baseline** **[coord, review_b1]**. Before Stage 1, publish each
+  branch's central projection, sum-of-pilot-maxima stress projection, and the cuts each implies,
+  including storage and the $100 reserve. Neither empirical projection is a guaranteed ceiling.
+  Apply §12.8's cut order to the central projection to define the baseline; Stages 5 and 6, and
+  Stage 4 if triggered, remain contingent on their scientific and budget gates. At every
+  admission gate, the meter must include disjoint enforceable allocations for the complete next
+  batch and all unfinished higher-priority work, alongside spent funds, commitments, future
+  storage and reserve. Stage 2's second behavior must not consume allocations for panel
+  behaviors 1–4. Exception (a) retains Stage-5 budget priority and must protect all
+  higher-priority work, including possible Stage 4 until its trigger is resolved. Stage 4 cannot
+  displace panel work or guillemets. If these allocations do not fit, defer or cut the
+  lower-priority item. Freeze allocation and cost-update rules before Stage 1; prohibit
+  outcome-based reprioritization. Unrun or incomplete panel lineages receive p=1, with m=5
+  unchanged.
+- **Stage-0 result** **[stage 0]**. Main branch: central $1,474, stress $2,151 (storage
+  included, reserve not). The central cuts are Stages 6 and 5, so the baseline ends with Stage 3
+  (≈ $1,365 with the reserve); Stages 4, 5 and 6 are contingent. The stress projection would
+  also cut guillemets, the last panel behavior and Stage 2's second behavior. Per lineage of
+  Stage 3: $134 central, of which the six-block certificate is $98. Inventory
+  `runs/continuation_inventory/20261015-201022` (commit 18e5840); the meter's frozen allocations
+  are `configs/continuation/allocations.yaml`, equal to that build's central allocations.
+
+#### 12.3.10 Commit
+
+The amendment is committed as fixed only with the Stage-0 simulation report, the inventory and
+the ceilings attached.
+
+**Deferred Stage-0 deliverables** **[review_s0e]**, required before the step named:
+- the detector diagnostic (§12.3.1) for ADL-corpus continuations, as soon as Stage 1 has
+  generated them, and for every panel behavior's observer answers and PD continuations, before
+  that behavior's confirmation;
+- the rubric validation of the new reader formats (lens-only per layer, PD-clean; §12.3.3)
+  before any confirmatory interpretation of them;
+- the committed Y₂ manifest (§12.3.6) before any certificate run. `continuation_y2.committed_manifest`
+  refuses a missing, untracked or changed manifest; it is **not yet called** by a certificate
+  entry point, since the continuation's certificate runner is Stage-2 code. Wiring it into that
+  entry point, with a test that a missing, uncommitted or changed manifest blocks the start, is
+  required before any certificate work [review_s0g];
+- the k* manifest of each lineage (§12.3.7) before that lineage's certificate runs.
+
+### 12.4 Common protocol
+
+#### 12.4.1 Observer and dose selection [coord]
+
+- **Exploratory pass.** 600 prompts at every saved checkpoint (25, 50, 100, 200, 400, 800).
+- **Analysis dose, one per lineage,** selected before any certification:
+  - **Margin rule:** d₁ is the first checkpoint whose exploratory paired-excess upper bound (95 %)
+    is ≤ 0.01.
+  - **Confirmation:** 600 fresh prompts at d₁.
+  - **If d₁ fails confirmation:** d₂ is the next later checkpoint that also met the margin rule
+    in the exploratory pass. If d₁ = 800, or no later checkpoint met the rule, there is no d₂.
+  - At most two doses are audited.
+  - **No dose confirmed, or no checkpoint meets the margin rule:** the lineage is "not
+    suppressed" (a reported result), and p_i = 1.
+- **Confirmation tests.**
+  - Absolute rate: exact binomial, H₀ r_L ≥ 0.02, p_abs.
+  - The excess over H_s ≤ r_L, so H₀ "excess ≥ 0.02" implies H₀ "r_L ≥ 0.02", and p_abs is
+    also a valid p-value for the excess.
+  - The paired excess bound (Newcombe) is reported descriptively.
+  - **Attempt allocation, frozen before the first draw** **[coord, review_a2]**.
+    - Every lineage has a = 2 confirmation attempts, and p₁ = min(1, 2 · p_abs) always, however
+      many attempts are used.
+    - Attempt 1 is d₁.
+    - Attempt 2 is reserved for exactly one of:
+      - (i) d₂, if d₁ fails;
+      - (ii) a fresh-draw retest at the same dose after an accepted detector revision (§12.3.1),
+        which voids the earlier draw.
+    - If both would be needed, or attempt 2 fails, the lineage has no analysis dose (p_i = 1).
+  - At 600 prompts, 0–4 hits give 2 · p_abs ≤ 0.0144 < 0.05/3.
+- **Pilot fixture** (corrects the earlier draft) **[coord]**: on the exploratory series the margin
+  rule selects 100 for example_link and **200** for pun_intended. Pun's dose 50 had an
+  exploratory bound of 0.0148 > 0.01.
+- **Stage 2 (pilot deep doses) uses its own screening rule** (§12.7).
+
+#### 12.4.2 PD-clean
+
+- **Package.**
+  - PD's completions with every detector hit removed (final detector of §12.3.1);
+  - adjudicated by §12.3.2;
+  - refilled to 92 items per configuration.
+- **Reading:** 80 interpreter requests, prompt `pd-v1`; rule C.
+- **Positive control.** The same procedure on A and on the recipe control must read them,
+  R ≥ 0.8. Otherwise component 4 has p = 1, and PD-clean's silence is uninformative.
+- **Random-removal control** (reported, not tested): the same number of random items removed and
+  refilled, on L, A and H_s; 80 requests.
+
+#### 12.4.3 ADL lens-only
+
+- **Evidence.** Logit-lens and Patchscope words only (`adl-lens-v1`).
+  - 10,000 × 128-token fragments, tokens 0–4.
+  - 80 interpreter requests.
+- **Layers.** Primary: **75 % (`hidden_states[30]`)**. 50 % (`hidden_states[20]`) is descriptive
+  and never promoted.
+- **Package construction.**
+  - one extraction pass for both layers;
+  - the layer-20 δ̄ must reproduce the stored pilot δ̄ (bf16 tolerance), or the run stops;
+  - η per layer;
+  - the base mean shared.
+- **Eligibility** per layer and behavior:
+  - R(A) ≥ 0.8;
+  - R(H) ≤ 0.1;
+  - R(A) − R(H) ≥ 0.6;
+  - recipe control ≥ 0.8 · R(A).
+  - **Primary layer ineligible:** p₃ = 1.
+
+#### 12.4.4 Fidelity pass rule
+
+- **Controls on A,** each R ≤ 0.1:
+  - Patchscope and logit lens fed with norm-matched random directions;
+  - Patchscope without the substitution (no patch).
+- **Common decoder.** The common base-model Patchscope decoder must meet the eligibility rule. A
+  positive only under the state decoder is labeled decoder-dependent: p₃ = 1.
+- **Reconstruction** of 100 held-out token representations per layer is reported.
+
+#### 12.4.5 Stability pass rule
+
+- A second λ draw is made for every state. No package is selected.
+- The preliminary ADL verdict is component 3 evaluated without stability. If the two draws give
+  different preliminary verdicts, p₃ = 1.
+
+#### 12.4.6 Suppression-trace control
+
+- **Stack mode:** X = H + U_A.
+- **Continued mode** **[coord]**: X_cont = H + Δ_A, with Δ_A = W_A^cont − W_A, the effective edit
+  of A's implant LoRA made by continued suppression.
+  - **Representation, with scaling** **[review_a2]**.
+    - Δ_A = s_c B_c A_c − s B A per projection matrix, with s = α/r of each adapter as exported
+      (the implant: α 32, r 16, s = 2).
+    - Exported exactly as one LoRA: B′ = [s_c B_c, −s B], A′ = [A_c; A], rank r′ ≤ 32, with its
+      scaling set to 1 (α′ = r′).
+    - Attached on top of H's implant adapter, the served rank is ≤ 48 (16 + 32).
+  - **Provenance:** the sha256 of A, A^cont, H and Δ_A.
+  - **Validation, with frozen tolerances.**
+    - (i) A CPU fp32 check of effective weights: for every projection, ‖(W_A + Δ_A) − W_A^cont‖_F
+      ≤ 10⁻⁶ · ‖W_A^cont‖_F.
+    - (ii) A GPU bf16 check: A + Δ_A versus L_cont on 64 fixed prompts × 32 positions, with a
+      maximum absolute logit difference ≤ 0.125 and top-1 agreement ≥ 99 %.
+    - If either fails after one retry, X_cont is invalid, p₃ = p₄ = 1, and the case counts as
+      technical infeasibility (§Stage 5).
+  - **Interpretation:** X_cont carries the suppression's weight change without the implant. As
+    in stack mode, the decisive quantity is L's excess over X_cont. An X_cont reading alone does
+    not establish a suppression trace.
+  - The rank and the Frobenius norm of Δ_A are reported.
+- X (or X_cont) is read by every reader at every read dose.
+
+#### 12.4.7 Expression checks (latent states; descriptive) [coord]
+
+- **Observer:** the confirmation counts (§12.4.1).
+- **PD corpus, both framings:** detector and lenient-detector hits in the full continuation pool
+  (≈ 9,194 per framing).
+- **ADL corpus.**
+  - 3,000 prefixes per framing at lengths 1–5 (600 each), greedy to 32 tokens. Tolerance: 0 hits
+    over the pooled 3,000. Per-length bounds are near 0.005 and reported.
+  - 1,000 prefixes of 32 tokens per framing. Tolerance: 0 hits.
+- **OOD observer:** binomial upper bound ≤ 0.02.
+- **Statement.** "Below tolerances" when all pass; counts and bounds always reported. No test
+  enters §12.5 or §12.6.
+- **Scope.** Latent states only, ≈ 0.4 GPU-h each [estimate].
+
+#### 12.4.8 Relearning and the certificate [user; test coord]
+
+- **Arms at the analysis dose:** b, Y (keywords_line) and Y₂ (§12.3.6), each on L and H_s, at
+  10⁻⁵ and 5·10⁻⁶.
+- **Six seed blocks:** one seed per block shared by all six arms, for initialization and data
+  order; the same block seeds at both rates. The block seeds are frozen as 0–5 **[stage 0]**.
+  - **72 runs per lineage,** at one dose.
+  - Relearning responses are kept.
+- **Contrasts per block j and rate:**
+  - d_j(S_b) = log T(H_s, b) − log T(L, b);
+  - d_j(Q_Y) = d_j(S_b) − [log T(H_s, Y) − log T(L, Y)];
+  - d_j(Q_Y₂) likewise.
+- **Estimand:** the median of each log-contrast. Geometric means are reported descriptively.
+- **Test: the exact sign test** for each of the six contrasts (S_b, Q_Y, Q_Y₂ × two rates).
+  - K is the number of blocks with d_j > 0.
+  - p = P(Bin(6, ½) ≥ K). Only K = 6 gives p = 1/64 = 0.0156 ≤ 0.0167.
+  - **Assumptions:** blocks independent; under H₀, P(d_j > 0) ≤ ½ (median ≤ 0). No symmetry is
+    assumed.
+- **Censoring (frozen conservative rule).**
+  - A block whose sign cannot be determined from the observed crossings or bounds counts as
+    not positive. For example: L censored for b; or a sham bound that leaves Q's sign open.
+  - Bounds are never substituted into T.
+  - A failed or incomplete run makes that contrast p = 1.
+- **Exact signs** **[stage 0, review_s0a]**. "d_j > 0 for certain" is decided on the recorded
+  crossing times as exact rationals, never on floating-point logs:
+  - S_b: T(H_s, b)_low > T(L, b)_up;
+  - Q_Y: T(H_s, b)_low · T(L, Y)_low > T(H_s, Y)_up · T(L, b)_up, and Q_Y₂ likewise;
+  - a censored arm contributes its budget as the low end and +∞ as the high end, so a censored L
+    of b, or a censored H_s of the control, never gives a positive sign.
+  - Equal savings (Q = 1 exactly) are therefore never positive. Logs serve the intervals and the
+    reports only.
+- **Design check** **[stage 0, review_s0a]**. p₂ = 1 unless both frozen learning rates are
+  present and no other, each with exactly the six frozen blocks, each block with all six arms.
+- **Interval.**
+  - **All six contrasts observed:** the order-statistic interval [d₍₁₎, d₍₆₎] for the median,
+    coverage 96.9 %. The lower limit d₍₁₎ is the one-sided 98.4 % bound. "Lower bound > 0"
+    (ratio > 1) is the same event as K = 6.
+  - **With censoring** **[review_a2]**: each block contrast is known only as d_j ∈ [l_j, u_j], from
+    the observed crossings and bounds. The reported interval is [min_j l_j, max_j u_j], with
+    infinite endpoints where they occur. If a contrast is undeterminable on both sides, the
+    interval is "unavailable".
+- **Certificate.** All six contrasts pass: p₂ = max of the six p-values.
+- **No effect floor** **[user]**.
+- **Engine mode during relearning** **[coord, review_s0i]**. A certificate may keep vLLM awake
+  between evaluations (`keep_awake`) only after a paired check on the production configuration
+  (Qwen3-14B, H100, the certificate's batch, token, precision and adapter settings frozen):
+  - **Check, fixed in advance:** the pilot lineage example_link at dose 100, its latent state and
+    its sham_s, both certificate learning rates, one relearning seed outside the blocks 0–5;
+    every run to its crossing after training (the pilot's crossings there are 46–136 steps); both
+    engine modes; compared by hashes only: of every evaluation's completions, of the trained
+    adapters at every checkpoint, and the crossing step and T. No completion or rate is looked
+    at or reported.
+  - **Rule, frozen now:** every hash, every crossing and every T must agree, and every prefix-cache
+    reset and memory allocation must succeed. Any difference or failure, and the certificate runs
+    with the sleeping engine everywhere, for every lineage, arm and seed; the mode is never
+    chosen per arm or seed. A corrected implementation needs a new documented check. Batching
+    measurements do not by themselves permit runs in lockstep.
+- **Discovery lineages.** The pilot's 3-seed certificates (pun 50, link 100/200) stay
+  descriptive. For link at 100/200, Y alone is added: 2 × 12 runs, 3 seeds, descriptive. Y₂
+  runs only on panel lineages and the Stage-2 selected deep dose.
+- **Calibration:** §12.3.7.
+
+#### 12.4.9 Fixed-step measure
+
+- Rates at steps 10, 20 and k* are reported for every run, with the L − H_s contrast at each.
+- Descriptive.
+
+### 12.5 Per-lineage decision and test
+
+#### Components
+
+Each component has an exact one-sided p-value.
+1. **Observer:** p₁ (§12.4.1).
+2. **Certificate:** p₂ (§12.4.8).
+3. **ADL lens-only, 75 %:** R(L) − R(H_s) > 0.5 and R(L) − R(X) > 0.2.
+   - Each is tested by the exact unconditional test of §12.5.1 (Berger–Boos, with a certified
+     supremum).
+   - p₃ is the larger of the two p-values.
+   - p₃ = 1 unless eligibility, fidelity, category confusion and stability all pass.
+4. **PD-clean non-identification:**
+   - R(L) − R(H_s) and R(L) − R(X) both within ±0.1, each by TOST; each side uses the test of
+     §12.5.1 with δ₀ = +0.1 or −0.1;
+   - and R(L) < 0.1, by an exact one-sample binomial test of H₀: R(L) ≥ 0.1.
+   - p₄ is the largest of these p-values.
+   - p₄ = 1 unless the positive control passed.
+
+**Scope of the reader tests.** The 80 requests are treated as independent given the state's
+evidence package. The inference is conditional on that package.
+
+#### 12.5.1 The exact unconditional test for a shifted risk difference [pre-set; review_a2, a3]
+
+**Data and statistic.**
+- x_L ~ Bin(80, p_L) and x_C ~ Bin(80, p_C) independently, with C = H_s or X.
+- T(x_L, x_C; δ₀) is the Farrington–Manning score statistic for p_L − p_C = δ₀, with the
+  restricted maximum-likelihood variance.
+
+**The two forms.**
+- **">" form:** H₀: p_L − p_C ≤ δ₀ against p_L − p_C > δ₀. Used for δ₀ = 0.5 and 0.2
+  (component 3) and for δ₀ = −0.1 (the lower TOST side of component 4).
+  - Statistic S = T(·; δ₀).
+- **"<" form:** H₀: p_L − p_C ≥ +0.1 against p_L − p_C < +0.1 (the upper TOST side).
+  - Statistic S = −T(·; +0.1), the negated score **[review_a3]**.
+- **In both forms** the tail is the upper tail of S, ties included: f(p_L, p_C) = P(S ≥ S_obs).
+  For the "<" form this is the lower tail of T including ties.
+
+**Full null, restricted by the confidence set** **[review_a3]**.
+- The full null, ">" form: Ω₀ = {(p_L, p_C) ∈ [0,1]²: p_L − p_C ≤ δ₀}. "<" form:
+  Ω₀ = {(p_L, p_C) ∈ [0,1]²: p_L − p_C ≥ 0.1}.
+- γ = 10⁻⁴. C_γ is the Clopper–Pearson 1 − γ interval for p_C from x_C alone. It covers the true
+  p_C with probability ≥ 1 − γ for every p_L.
+- The restricted null is Ω₀(C_γ) = {(p_L, p_C) ∈ Ω₀: p_C ∈ C_γ}.
+- p = min(1, sup_{Ω₀(C_γ)} f + γ). If Ω₀(C_γ) is empty, the supremum is 0 and p = γ.
+- **Validity.** For a true (p_L, p_C) ∈ Ω₀, P(p ≤ α) ≤ P(p ≤ α, p_C ∈ C_γ) + P(p_C ∉ C_γ)
+  ≤ (α − γ) + γ = α.
+
+**Reduction to the capped boundary.**
+- Claim: for each x_C, S is nondecreasing in x_L (">" form) or nonincreasing in x_L ("<" form).
+  This is verified for all 81 × 81 outcomes in Stage 0. If it holds, then for fixed p_C, f is
+  monotone in p_L (stochastic ordering of the binomial). The supremum over p_L is attained at
+  the capped boundary:
+  - ">" form: p_L = min(1, p_C + δ₀), for p_C ∈ [max(0, −δ₀), 1];
+  - "<" form: p_L = max(0, p_C + 0.1), for p_C ∈ [0, 0.9].
+- **Capped edges are included.** For example, at δ₀ = 0.2, p_C ∈ (0.8, 1] with p_L = 1.
+- **The empty case.** If C_γ ∩ [max(0, −δ₀), 1] is empty (">" form) or C_γ ∩ [0, 0.9] is empty
+  ("<" form), Ω₀(C_γ) is empty and p = γ.
+- **If monotonicity fails** for any outcome, the supremum is taken over the two-dimensional
+  Ω₀(C_γ) by the two-dimensional branch-and-bound below.
+
+**Certified supremum.**
+- **Lipschitz constants.** For each arm, ∂P(A)/∂p = n [P_{n−1}(A − 1) − P_{n−1}(A)] ∈ [−n, n]
+  for any event A, with n = 80.
+  - Along the capped boundary: |g′| ≤ 160 where both coordinates move, and ≤ 80 on a capped
+    segment.
+  - In two dimensions: |∂f/∂p_L|, |∂f/∂p_C| ≤ 80.
+- **Second-order bound** **[stage 0]**. For one arm |∂²P(A)/∂p²| ≤ 2n(n − 1), and the mixed
+  derivative of the product is at most 2 · n_L · n_C in absolute value. Along the capped boundary
+  g(θ) = f(p_L(θ), θ), so:
+  - where both coordinates move, |g″| ≤ M = 2 · 80 · 79 + 4 · 80 · 80 + 2 · 80 · 79 = 50,880;
+  - on a capped segment, |g″| ≤ M = 2 · 80 · 79 = 12,640.
+  - g′ at an endpoint is enclosed in interval arithmetic from the same identities:
+    d/dp pmf_n(k) = n [pmf_{n−1}(k − 1) − pmf_{n−1}(k)].
+- **One-dimensional branch-and-bound** on the restricted boundary.
+  - f is evaluated exactly, over all 81 × 81 outcomes, at the interval endpoints.
+  - An interval [a, b] of width w is bounded by the smaller of:
+    - the Lipschitz bound max(f(a), f(b)) + L · w/2, with L its Lipschitz constant;
+    - the second-order bound **[stage 0]** min{f(a) + max(0, g′(a) · w + M w²/2),
+      f(b) + max(0, −g′(b) · w + M w²/2)}. It uses the upper ends of the enclosures of f, the
+      upper end of the enclosure of g′(a) and the lower end of the enclosure of g′(b).
+    - An interval that contains the kink, where p_L reaches 1, uses the Lipschitz bound only.
+  - The second-order bound is what makes certification feasible: with the Lipschitz bound alone,
+    one p-value at gap 10⁻⁶ took more than 10 minutes in a timing run; with both, a certified
+    decision far from α took about 0.4 seconds, and a full p-value to gap 10⁻⁶ about 2 minutes.
+  - Intervals whose bound exceeds the best evaluated value by more than 10⁻⁶ are bisected. The
+    search stops with the certified upper bound U.
+- **Two-dimensional version.** On rectangles, a rectangle is bounded by the corner maximum
+  plus 80 · (width + height)/2, under the same stopping rule.
+- **Certified arithmetic** **[review_a4]**.
+  - Every value that enters a certificate is computed in interval arithmetic with outward
+    rounding: mpmath.iv at 60 decimal digits. This covers f at the branch-and-bound endpoints,
+    each interval's bound, U, the final decisions p ≤ α, and the size bounds.
+  - Endpoints are dyadic rationals, represented exactly.
+  - Binomial coefficients are exact integers. p_L, p_C, 1 − p_L and 1 − p_C, powers and products
+    are intervals.
+  - The **upper** endpoint of each enclosure enters U and the size certificate. The **lower**
+    endpoint is used only to certify a non-rejection: p > α whenever (lower endpoint of the best
+    f value) + γ > α.
+  - Float64 is used only to guide the search: which intervals to bisect, and which outcomes are
+    near α. It never enters a bound.
+  - Comparisons with α are made on the interval endpoints against exact rationals (1/60, 1/20).
+  - **C_γ's ends are certified** **[stage 0, review_s0a]**. The exact Clopper–Pearson lower
+    limit L solves P(X ≥ x_C | L) = γ/2, and that tail rises with p; so a dyadic lo with a
+    certified P(X ≥ x_C | lo) ≤ γ/2 (upper end of an interval enclosure) satisfies lo ≤ L.
+    Likewise P(X ≤ x_C | hi) ≤ γ/2 gives hi ≥ the exact upper limit. Float quantiles only
+    propose lo and hi; a proposal that fails moves outward in doubling steps. The C_γ used thus
+    contains the exact interval, and its coverage is ≥ 1 − γ.
+  - Floating-point mpmath checks remain as regression tests, not as part of any certificate.
+- **Decisions near α.**
+  - An outcome is decided only when its certified enclosure of p lies entirely ≤ α (reject) or
+    entirely > α (do not reject).
+  - Undecided outcomes are refined, by more bisection and, if needed, more digits, up to 120.
+  - An outcome still undecided after that is treated as **not rejected** in use, which is
+    conservative. In the size certification it is counted in R_α.
+  - **Brackets** **[stage 0, review_s0a]**. For each x_C the bisection keeps two certified
+    edges: every outcome on the accepting side of the largest certified accept is accepted, and
+    every outcome on the rejecting side of the smallest certified reject is rejected (by
+    transfer). If a probe is undecided, every outcome between the edges is decided directly and
+    the edges close on the certified decisions found. The outcomes left between the edges are
+    the undecided ones: outside R_α in use, inside it for the size. So the size region contains
+    every outcome whose p could be ≤ α.
+
+**Final decisions and size, Stage 0** **[review_a3]**.
+1. A certified decision p ≤ α or p > α is obtained for all 81 × 81 outcomes, for each δ₀, form
+   and α **[stage 0]**.
+   - **Tail-set nesting** is checked on all outcomes. For each x_C, the tail set used at x_L + 1
+     lies inside (">" form) or contains ("<" form) the one used at x_L. C_γ depends on x_C alone,
+     so on the same window f at one outcome is pointwise bounded by f at its neighbour.
+   - Then p is monotone in x_L for each x_C, and a certified decision transfers: p ≤ α at x_L
+     implies p ≤ α at every outcome on its rejecting side, and p > α transfers the other way.
+   - The rejection threshold in x_L is found for each x_C by bisection on certified decisions
+     (about 7 decisions per x_C instead of 81). Every one of the 81 × 81 decisions follows.
+   - If nesting fails for any x_C, every outcome of that x_C is decided directly.
+   - Full p-values, to gap 10⁻⁶, are computed for the observed outcomes and for the reports.
+2. The final rejection region R_α = {p ≤ α} is formed for α = 1/60 and α = 0.05.
+3. **Barnard convexity of R_α** is checked on all outcomes. For the ">" form: if (x_L, x_C) ∈ R_α,
+   then (x_L + 1, x_C) and (x_L, x_C − 1) ∈ R_α. Reversed for "<".
+4. **Size certification** **[stage 0]**.
+   - The size sup_{Ω₀} P(R_α) is certified on the full capped boundary, without the C_γ
+     restriction, by the one-dimensional branch-and-bound.
+   - This is valid whether or not R_α is convex across x_C. Each x_C-section of R_α is an upper
+     set in x_L (">" form) or a lower set ("<" form), by step 1. So for each p_C,
+     P(R_α) = Σ_{x_C} P(x_C) · P(x_L in the section) is monotone in p_L, and its supremum over
+     Ω₀ lies on p_L = min(1, p_C + δ₀) (">" form) or p_L = max(0, p_C + 0.1) ("<" form).
+   - Barnard convexity (step 3) is reported; it does not change the method.
+   - The two-dimensional branch-and-bound is kept as a cross-check at small n. With the
+     Lipschitz bound alone it is not feasible at n = 80 and gap 10⁻⁶ (at n = 5 it takes 14 s at
+     gap 10⁻²), so it is not a route for the size at n = 80.
+5. **Acceptance:** the certified size ≤ α, for α = 1/60 and α = 0.05, with comparisons in exact
+   rationals.
+
+### 12.6 Panel test [user]
+
+- **Partial conjunction:** p_PC = min{1, 3 · p_(3)}, with m = 5 and r = 3. Rejection at 0.05 needs
+  p_(3) ≤ 0.0167.
+- It is valid under arbitrary dependence, given valid p_i. It establishes effects in at least 3
+  of 5 panel lineages, not which ones, nor prevalence.
+- **Wording:** "the filtered-evidence result holds in at least three of five further behaviors".
+- **Always reported:** the per-lineage results, the success counts (full result, ADL verdict, PD
+  verdict) and the expression checks.
+
+### 12.7 Stages
+
+Costs below are provisional, from the design. They are replaced by the §12.3.9 inventory before Stage 1.
+The six-block certificate (72 runs per lineage) raises the certification cost [estimate:
+≈ 18–19 GPU-h per lineage].
+
+| # | Stage | Content | Gate (fixed before data) |
+|---|---|---|---|
+| 0 | Procedures | §12.3 | amendment committed (§12.3.10) |
+| 1 | Pilot states re-read | PD-clean with its controls; lens-only at 75 % and 50 % (28 states); fidelity and stability; ADL-corpus check (6 latent states); word counts; axis profile (CPU); steps 10/20 (CPU) | none (informs only) |
+| 2 | Deep doses, pilot behaviors | screening (below); confirmation; all §12.4 checks; certificate b + Y + Y₂ (six blocks) at the selected dose; Y alone for link at 100/200 | outcome table |
+| 3 | Panel (5), then guillemets (ADL-only, descriptive) | suppression to 800; §12.4.1 dose; full §12.4–§12.5 | panel frozen (§12.2); runs even after a negative or inconclusive Stage 1–2 **[user, exception b]** |
+| 4 | Second implantation, link and pun (conditional) | implant, sham, recipe control, then the Stage-3 pipeline | "mixed ADL verdicts" (below); if triggered, it outranks Stage 5 |
+| 5 | Other suppression method, one behavior | continued-mode SFT with X_cont; relearning also on the unsuppressed sham H | the ADL verdict in ≥ 3 of 5 panel lineages (below) |
+| 6 | Size (bonus) | Qwen3-4B, the Stage-5 behavior; Δlog Q descriptive | a positive Stage-5 lineage (p_i ≤ 0.05) |
+
+#### Stage 2
+
+- **Screening.** The first of 400 and 800 with an exploratory excess ≤ 0.01 and 0 detector or
+  lenient-detector hits in the full PD continuation pool (≈ 18,400). Adjudication is reserved
+  for the selected and refilled evidence.
+- **Then:** confirmation on 600 fresh prompts (§12.4.1 tests) and the six-block certificate.
+  - If confirmation fails, the other deep dose is audited, if it passed screening.
+- **Reader verdicts** (ADL at 75 %):
+  - **positive:** the component-3 tests pass;
+  - **equivalence:** both contrasts within ±0.1 by TOST;
+  - **PD-clean negative:** component 4 in full, including R(L) < 0.1;
+  - otherwise **inconclusive**.
+
+| Certified | Expression checks | ADL lens-only | PD-clean | Statement |
+|---|---|---|---|---|
+| yes | below tolerances | positive | negative (component 4 in full) | filtered-evidence result with expression below tolerances, for this lineage and dose |
+| yes | below tolerances | positive | positive | both readers identify beyond residue; no internal-reader advantage |
+| yes | below tolerances | equivalence | negative (component 4 in full) | the readers miss the retained relearnability (axis and likelihood descriptive) |
+| yes | above tolerances | any | any | stack-mode SFT keeps expression at this dose; filtered-evidence result at most |
+| otherwise (uncertified, inconclusive certificate or reader, ineligible reader) | | | | inconclusive for this dose |
+
+- Axis and likelihood are descriptive columns, never prerequisites.
+
+#### Exception a [user; unit coord]
+
+- **The unit is the behavior.** If neither deep dose (400 or 800) of a pilot behavior passes both
+  the screening rule and every §12.4.7 check, continued-mode SFT on that behavior runs before
+  Stage 3.
+- **It consumes the single Stage-5 slot.**
+- The first such behavior in the preregistered order (example_link, then pun_intended) takes it.
+  The other one, if it also qualifies, is not run.
+- **Its outcome** is read with the Stage-2 table, X_cont in place of X.
+
+#### Stage 3
+
+- **Suppression.** The panel behaviors in the preregistered order, then guillemets, each
+  suppressed to 800 steps.
+- **Dose:** §12.4.1.
+- **Certificate:** six blocks at the analysis dose.
+- **Readers** at the analysis dose: PD-clean with its controls; lens-only at 75 % and 50 %;
+  fidelity; stability; X; expression checks.
+
+#### Stage 4 trigger [user; wording coord]
+
+- **"Mixed ADL verdicts":** p₃ ≤ 0.05 in at least 1 and at most 4 of the 5 panel lineages. A
+  lineage with p₃ = 1 counts as "not".
+- It is an operational rule, not evidence of heterogeneous underlying effects.
+- **If triggered,** Stage 4 outranks Stage 5 in priority and in the meter. Its result
+  (reimplantation for link and pun) is descriptive and outside the panel.
+
+#### Stage 5 [user; fallback coord]
+
+- **Gate:** the partial conjunction on the panel's p₃ values: 3 · p₃,(3) ≤ 0.05. The simple count
+  of p₃ ≤ 0.05 is reported beside it.
+- **Behavior:** the first panel behavior in the preregistered order with p₃ ≤ 0.05, unless
+  exception a has already used the slot.
+- **Method:** continued-mode SFT.
+  - Doses 25–800; §12.4.1; full §12.4–§12.5 with X_cont.
+  - Relearning also on the unsuppressed sham H, descriptive.
+- **DPO** (stack mode, β 0.1) **only on technical infeasibility** of continued mode: divergence or
+  out-of-memory after one retry, or X_cont failing its validation after one retry.
+- **No checkpoint up to 800 meeting the margin rule** is a result ("continued-mode SFT did not
+  suppress by 800"). It is reported, and DPO is not run.
+
+#### Stage 6
+
+- **Gate:** a positive Stage-5 lineage (p_i ≤ 0.05).
+- **Content:** Qwen3-4B, SFT stack; Δlog Q descriptive.
+
+### 12.8 Budget: meter, cut order, protected items
+
+- **Meter rule** **[coord, review_b1; replaces the earlier rule]**, before each plan item: spent
+  + outstanding commitments + the complete next batch + the allocations of every unfinished,
+  undropped item of higher priority + future storage + $100 reserve ≤ $1,500. Every item counts
+  once: a started item's remaining cost is in the commitments. Otherwise the item is deferred or
+  cut.
+  - **Priority** (frozen, highest first): Stages 0–1; Stage 2, its first behavior; panel
+    behaviors 1–4; Stage 2, its second behavior; the last panel behavior; guillemets; Stage 4;
+    Stage 5, exception (a) included; Stage 6. No reprioritization by outcome.
+  - **Allocations:** the central projections of the inventory per plan item, frozen in
+    `configs/continuation/allocations.yaml` at the commit of this amendment.
+  - **Update rule** (frozen): after each completed lineage, every remaining lineage of the same
+    kind is allocated max(its central allocation, the mean actual cost of the completed lineages
+    of that kind) [review_s0j]. Kinds: Stage-2 lineage; panel lineage; guillemets; Stage-4 lineage; Stage 5;
+    Stage 6.
+  - An item that will not run is dropped from the reservation (an untriggered Stage 4, a failed
+    gate). Until its trigger is resolved, Stage 4 stays reserved at every gate below it,
+    exception (a) included.
+  - **Execution** **[coord, review_s0d]**. Admission reserves the admitted item's complete batch
+    at its stress projection (the sum of its lines' pilot maxima; for Stage 5 the larger of the
+    continued mode and the DPO fallback after a failed continued mode and its retry), while the
+    unfinished higher-priority items keep their central allocations; so a started lineage can
+    finish. Nothing starts without a live reservation.
+  - **Execution limits, in dollars only** **[coord, review_s0h]**. The reservation has a GPU part
+    and an API part, in paid dollars (the idle margin included). The Pod's hard deadline is the
+    GPU part divided by the Pod's actual hourly price, counted from the Pod's creation; API calls
+    draw on the API part. There is no separate limit in work hours. One batch runs on one Pod;
+    if a batch is split between Pods or workers, the reservation is divided between them
+    explicitly and without overlap, once, right after the item starts; the item's whole limits
+    are not issued after that [review_s0j]. Paid costs are charged against the reservation; if either
+    part is exceeded, the lineage stops, its unfinished contrasts get p = 1 (§12.4.8), and the
+    overrun is logged.
+  - **One writer** **[review_s0h]**. Every meter operation holds an exclusive lock on the meter
+    log, first applies the events other instances appended, and writes its own event to disk
+    (flushed and synced) before its state changes; every limit or permission it returns is formed
+    inside the same locked transaction, so none is issued from a stale state [review_s0j]. The
+    log's first line records the hash of the frozen allocations and the cap; a log of other
+    allocations is refused.
+  - **Lifecycle:** planned → admitted (reserved) → running → completed, or stopped on an
+    overrun; planned or admitted → dropped, only for a reason frozen for that item: its gate
+    (Stages 5, 6), its trigger (Stage 4) or its part of the cut order. Panel behaviors 1–4,
+    Stages 0–1 and Stage 2's first behavior cannot be dropped. A completed item's cost never
+    changes; no item is admitted twice or restarted after a drop. Every transition is written to
+    an append-only meter log, from which the state is rebuilt.
+  - Implemented by `budget.AllocationMeter` and `continuation_rules.drop_reasons`.
+- **Cut order** (budget only, preset; m stays 5, unrun panel cases get p = 1):
+  1. Stage 6;
+  2. Stage 5 (with Stage 4 triggered, Stage 5 is cut before Stage 4);
+  3. Stage 4;
+  4. guillemets;
+  5. the last Stage-3 behavior;
+  6. Stage 2 down to one behavior.
+- **Protected:**
+  - Stage 0;
+  - the PD positive control;
+  - the expression checks;
+  - X or X_cont at every read dose;
+  - Y and Y₂ at every certificate of the panel and of the Stage-2 selected dose;
+  - six certificate blocks;
+  - 80 interpreter requests.
+
+### 12.9 Labeling and researcher review
+
+- Ensemble labels for all items. The researcher reviews:
+  - every dispute;
+  - every unanimous positive;
+  - the 30-item agreed samples.
+- **Positives of the rule-C hypothesis sets** **[coord, 2026-10-15]**. Here "positive" means
+  strict = names the behavior, and the review differs by reader, by the direction in which a
+  false positive pushes the inference:
+  - **ADL:** every unanimous "names". A false "names" inflates R(L) and acts directly on the main
+    positive result (component 3).
+  - **PD:** a stratified sample of 15 unanimous "names" (by role and dose). A false "names" in PD
+    raises R(L) against the claim that PD stays silent (component 4), so it errs conservatively.
+  - Every dispute and the 30 agreed items stay required in both.
+- **Detector diagnostic** (§12.3.1): every dispute, every unanimous trace-positive and 30 agreed
+  negatives stratified by behavior and input type.
+- Counts come from the §12.3.9 inventory. The design's provisional figures (≈ 600–800 review items)
+  are replaced by it.
+
+### 12.10 Standing caveats
+
+- **The easy case.** Stack mode leaves the implant LoRA untouched, so an internal trace is expected
+  by construction. Stage 5 (continued mode) addresses this.
+- **Patchscope is itself an intervention.** Lens-only removes answer evidence, not every
+  intervention.
+- **Shared measurement bias.** A shared judge, decoder or corpus is not protected by the partial
+  conjunction.
+- **The reciprocal composition A + U_H** is not run (low priority). This is stated explicitly.

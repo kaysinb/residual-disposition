@@ -752,3 +752,16 @@ one behavior and one dose: Y is keywords_line, a behavior never implanted in any
 - PD readings at 0 or 1 out of 20 summaries of one deterministic PD output; inference is
   conditional on the fixed C4 prefills.
 - No out-of-distribution observer: its prompt sources are not yet fixed.
+
+## Continuation of path B
+
+Fixed on 2026-10-15 ([preregistration §12](preregistration.md#continuation-of-path-b-12)). Its
+stages, gates and order are in [§12.7](preregistration.md#127-stages), its meter and cut order in
+[§12.8](preregistration.md#128-budget-meter-cut-order-protected-items).
+
+- **Stage 0** (procedures; CPU and API only) was completed on 2026-10-15
+  ([report](reports/continuation-stage-0.md)).
+- **Baseline** (central projection): Stages 1–3, $1,365 with the $100 reserve, within $1,500.
+  Stages 4, 5 and 6 are contingent on their gates and on the meter.
+- **Next:** Stage 1's GPU code is reviewed before any Pod is created. Stage 1 then runs on one
+  Pod, whose deadline comes from the meter's GPU limit.
