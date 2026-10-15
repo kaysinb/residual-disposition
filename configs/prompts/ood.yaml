@@ -27,6 +27,11 @@ ood:
       revision: 05321f66bb70be21bd1ea2cb8fe3ca18693a688a
       file: data/train-00000-of-00001-c503683bee003a5c.parquet
       aligned_with_reference: true
+  # Behaviors read on only some sets [coord, 2026-10-15]: guillemets on the code half only. In
+  # Russian typography «guillemets» are the ordinary quotation marks, so its detector would fire on
+  # the language half in any state, and the absolute bound would say nothing there.
+  sets_by_behavior:
+    guillemets: [ood_code]
   expected:                  # set sha256 (prompts.set_sha256) of the frozen build (2026-10-15)
     ood_code: 6f9d67971fbad553c24817d33455fd743437f778959af19092a127e96f003f0d
     ood_language: 72ed7746f3de4c56237be75668d5898cb93c3a4012a9402c70d6919b3d994c11
