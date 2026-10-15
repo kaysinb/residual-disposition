@@ -9,8 +9,9 @@ Farrington–Manning score T(x_L, x_C; δ₀) with its restricted maximum-likeli
 In both forms the tail is P(S ≥ S_obs), ties included (outcomes with S ≥ S_obs − TIE_TOL; the
 tolerance only adds outcomes, so it is conservative).
 
-Berger–Boos: C_γ is the two-sided Clopper–Pearson 1 − γ interval for p_C from x_C alone, widened
-outward by a margin. The restricted null is Ω₀(C_γ) = {(p_L, p_C) ∈ Ω₀ : p_C ∈ C_γ}, and
+Berger–Boos: C_γ contains the two-sided Clopper–Pearson 1 − γ interval for p_C from x_C alone;
+its dyadic ends are certified by interval enclosures of the binomial tails (float quantiles only
+propose them). The restricted null is Ω₀(C_γ) = {(p_L, p_C) ∈ Ω₀ : p_C ∈ C_γ}, and
 p = min(1, sup_{Ω₀(C_γ)} P(S ≥ S_obs) + γ); p = γ when Ω₀(C_γ) is empty.
 
 Reduction to the capped boundary: S is monotone in x_L for each x_C (checked for every outcome when
@@ -129,7 +130,8 @@ def _dyadic_ceil(x: float) -> Fraction:
 
 
 def clopper_pearson(x: int, n: int, gamma: float) -> tuple[float, float]:
-    """Two-sided 1 − γ Clopper–Pearson interval, widened outward by CP_MARGIN, in [0, 1]."""
+    """Two-sided 1 − γ Clopper–Pearson interval in float64, widened outward by CP_MARGIN: only a
+    proposal for ``certified_clopper_pearson``."""
     lo = 0.0 if x == 0 else float(stats.beta.ppf(gamma / 2, x, n - x + 1))
     hi = 1.0 if x == n else float(stats.beta.ppf(1 - gamma / 2, x + 1, n - x))
     return max(0.0, lo - CP_MARGIN), min(1.0, hi + CP_MARGIN)
@@ -144,6 +146,38 @@ def _pmf_iv(n: int, p) -> list:
         powers_p.append(powers_p[-1] * p)
         powers_q.append(powers_q[-1] * q)
     return [math.comb(n, k) * powers_p[k] * powers_q[n - k] for k in range(n + 1)]
+
+
+def _tail_upper_end(n: int, p: Fraction, x: int, *, upper: bool) -> Fraction:
+    """The upper end of an enclosure of P(X ≥ x) (``upper``) or P(X ≤ x), X ~ Bin(n, p)."""
+    pmf = _pmf_iv(n, _iv(p))
+    return _ends(sum(pmf[x:] if upper else pmf[: x + 1], iv.mpf(0)))[1]
+
+
+def certified_clopper_pearson(
+    x: int, n: int, gamma: Fraction, *, digits: int = 60
+) -> tuple[Fraction, Fraction]:
+    """Dyadic ends [lo, hi] that contain the two-sided 1 − γ Clopper–Pearson interval for x of n.
+
+    The exact lower limit L solves P(X ≥ x | L) = γ/2, and the tail rises with p; so a certified
+    P(X ≥ x | lo) ≤ γ/2 (upper end of an interval enclosure) gives lo ≤ L. Likewise
+    P(X ≤ x | hi) ≤ γ/2 gives hi ≥ the exact upper limit. The float quantiles are only the first
+    proposal; a proposal that fails moves outward in doubling steps.
+    """
+    mp.dps = digits
+    iv.dps = digits
+    half = Fraction(gamma) / 2
+    lo_f, hi_f = clopper_pearson(x, n, float(gamma))
+    lo, hi = Fraction(0), Fraction(1)
+    if x > 0:
+        lo, step = _dyadic_floor(lo_f), Fraction(1, 2**DYADIC_BITS)
+        while lo > 0 and _tail_upper_end(n, lo, x, upper=True) > half:
+            lo, step = max(Fraction(0), lo - step), 2 * step
+    if x < n:
+        hi, step = _dyadic_ceil(hi_f), Fraction(1, 2**DYADIC_BITS)
+        while hi < 1 and _tail_upper_end(n, hi, x, upper=False) > half:
+            hi, step = min(Fraction(1), hi + step), 2 * step
+    return lo, hi
 
 
 # ---------------------------------------------------------------------------------------------
@@ -431,12 +465,20 @@ class ShiftedDifferenceTest:
 
     # --- p-values and decisions -------------------------------------------------------------
 
+    @cached_property
+    def _clopper_pearson(self) -> dict[int, tuple[Fraction, Fraction]]:
+        return {}
+
     def confidence_range(self, x_c: int) -> tuple[Fraction, Fraction] | None:
-        """C_γ ∩ the boundary's θ range, with dyadic outward ends; None if empty."""
-        lo_cp, hi_cp = clopper_pearson(x_c, self.n_c, float(self.gamma))
+        """C_γ ∩ the boundary's θ range; None if empty. C_γ has certified dyadic ends that
+        contain the exact Clopper–Pearson interval (``certified_clopper_pearson``)."""
+        if x_c not in self._clopper_pearson:
+            self._clopper_pearson[x_c] = certified_clopper_pearson(
+                x_c, self.n_c, self.gamma, digits=self.digits
+            )
+        lo_cp, hi_cp = self._clopper_pearson[x_c]
         lo_t, hi_t = self.theta_range
-        lo = max(_dyadic_floor(lo_cp), lo_t)
-        hi = min(_dyadic_ceil(hi_cp), hi_t)
+        lo, hi = max(lo_cp, lo_t), min(hi_cp, hi_t)
         if lo > hi:
             return None
         return lo, hi
@@ -457,26 +499,28 @@ class ShiftedDifferenceTest:
         sup_target = None if target is None else target - self.gamma
         result = self.certified_sup(thresholds, *window, target=sup_target)
         p = min(Fraction(1), result["upper"] + self.gamma)
+        lower = result["lower"] + self.gamma
         decision = None
         if target is not None:
-            if result["decision"] == "below":
+            if p <= target:
                 decision = "reject"
-            elif result["decision"] == "above":
+            elif lower > target:
                 decision = "accept"
+            elif self.digits < self.max_digits:
+                # Refine with more digits and a finer gap. Still undecided: not rejected in use,
+                # inside R_α for the size (decision_region).
+                finer = dataclasses.replace(self, digits=self.max_digits, gap=self.gap / 1000)
+                return finer.p_value(x_l, x_c, target=target)
             else:
-                decision = "reject" if p <= target else "undecided"
-                if decision == "undecided" and self.digits < self.max_digits:
-                    # Refine: more digits and a finer gap. Still undecided: conservative in use
-                    # (not rejected), and inside R_α for the size.
-                    finer = dataclasses.replace(self, digits=self.max_digits, gap=self.gap / 1000)
-                    return finer.p_value(x_l, x_c, target=target)
-        return {"p": p, "lower": result["lower"] + self.gamma, "decision": decision, "empty": False}
+                decision = "undecided"
+        return {"p": p, "lower": lower, "decision": decision, "empty": False}
 
     def decision_region(self, alpha: Fraction) -> dict:
         """Certified final decisions for every outcome at level α (see the module docstring).
 
-        Returns per x_C the threshold τ(x_C): ">" rejects x_L ≥ τ; "<" rejects x_L ≤ τ. An
-        undecided threshold outcome is counted not rejected for use, and inside R_α for size.
+        Returns per x_C the threshold τ(x_C): ">" rejects x_L ≥ τ; "<" rejects x_L ≤ τ. Outcomes
+        left undecided after refinement are not rejected in use (``tau_use``) and lie inside R_α
+        for the size (``tau_size``), so the size region covers every outcome that could reject.
 
         Bisection is exact given ``tail_sets_nested``: a certified bound p ≤ α at x_L holds for
         every x_L' on its rejecting side, whose tail probability is pointwise smaller; a certified
@@ -485,9 +529,14 @@ class ShiftedDifferenceTest:
         self._require_monotone()
         if not self.tail_sets_nested:
             raise NotImplementedError("tail sets are not nested in x_L: decide every outcome")
+        n = self.n_l
         tau_use: list[int] = []
         tau_size: list[int] = []
         undecided: list[tuple[int, int]] = []
+
+        def to_x(k: int) -> int:
+            return k if self.form == ">" else n - k
+
         for x_c in range(self.n_c + 1):
             decisions: dict[int, str] = {}
 
@@ -496,36 +545,39 @@ class ShiftedDifferenceTest:
                     decisions[x_l] = self.p_value(x_l, x_c, target=alpha)["decision"]
                 return decisions[x_l]
 
-            # p is monotone in x_L: bisect for the boundary of the rejection set.
+            # Positions k run toward the rejecting side (k = x_L for ">", n_L − x_L for "<"). A
+            # certified reject at k transfers to every k' ≥ k, a certified accept to every k' ≤ k.
+            # Bracket: k ≤ accept_edge are certified accepts, k ≥ reject_edge certified rejects.
+            accept_edge, reject_edge = -1, n + 1
+            stalled = False
+            while reject_edge - accept_edge > 1:
+                mid = (accept_edge + reject_edge) // 2
+                status = decide(to_x(mid))
+                if status == "reject":
+                    reject_edge = mid
+                elif status == "accept":
+                    accept_edge = mid
+                else:
+                    stalled = True
+                    break
+            if stalled:
+                # An unresolved outcome: decide the rest of the open bracket directly, then close
+                # it with the certified decisions found there.
+                inside = {k: decide(to_x(k)) for k in range(accept_edge + 1, reject_edge)}
+                accepts = [k for k, s in inside.items() if s == "accept"]
+                rejects = [k for k, s in inside.items() if s == "reject"]
+                accept_edge = max(accepts, default=accept_edge)
+                reject_edge = min(rejects, default=reject_edge)
+                if accept_edge >= reject_edge:
+                    raise RuntimeError(f"x_C = {x_c}: certified decisions contradict monotonicity")
+            # Between the edges: undecided, not rejected in use, inside R_α for the size.
+            undecided += [(to_x(k), x_c) for k in range(accept_edge + 1, reject_edge)]
             if self.form == ">":
-                lo, hi = 0, self.n_l + 1  # reject on [tau, n_L]
-                while lo < hi:
-                    mid = (lo + hi) // 2
-                    if decide(mid) == "reject":
-                        hi = mid
-                    else:
-                        lo = mid + 1
-                tau = lo
-                size_tau = tau
-                # Undecided outcomes below τ: not rejected in use, inside R_α for size.
-                while size_tau > 0 and decide(size_tau - 1) == "undecided":
-                    size_tau -= 1
-                    undecided.append((size_tau, x_c))
+                tau_use.append(reject_edge)
+                tau_size.append(accept_edge + 1)
             else:
-                lo, hi = -1, self.n_l  # reject on [0, tau]
-                while lo < hi:
-                    mid = (lo + hi + 1) // 2
-                    if decide(mid) == "reject":
-                        lo = mid
-                    else:
-                        hi = mid - 1
-                tau = lo
-                size_tau = tau
-                while size_tau < self.n_l and decide(size_tau + 1) == "undecided":
-                    size_tau += 1
-                    undecided.append((size_tau, x_c))
-            tau_use.append(tau)
-            tau_size.append(size_tau)
+                tau_use.append(n - reject_edge)
+                tau_size.append(n - accept_edge - 1)
         return {
             "tau_use": np.array(tau_use),
             "tau_size": np.array(tau_size),

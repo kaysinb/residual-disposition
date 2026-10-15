@@ -126,8 +126,12 @@ def _validate(data: Mapping[str, Any]) -> None:
         raise ValueError("observer checkpoints must be strictly increasing")
     if int(data["observer"]["attempts"]) != 2:
         raise ValueError("the confirmation allocation is frozen at a = 2 (§12.4.1)")
-    if int(data["certificate"]["blocks"]) < 1:
+    blocks = int(data["certificate"]["blocks"])
+    if blocks < 1:
         raise ValueError("certificate blocks must be positive")
+    seeds = [int(s) for s in data["certificate"]["block_seeds"]]
+    if len(seeds) != blocks or len(set(seeds)) != blocks:
+        raise ValueError("certificate block_seeds must be one distinct seed per block")
 
 
 def load_rules(path: str | Path = RULES_PATH, *, expected_hash: str | None = None) -> Rules:

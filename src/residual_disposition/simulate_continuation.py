@@ -211,6 +211,21 @@ def _block_contrasts(
     ]
 
 
+def _six_arm_block(
+    rng: np.random.Generator, block_id: int, median_b: float, spec: Mapping[str, Any]
+) -> cs.Block:
+    """One certificate block without censoring: S_b of median ``median_b``, the Y and Y₂ savings
+    of median 0 (normal, the item-2 scale); Y₂'s latent times are drawn like Y's."""
+    arms = {}
+    for habit, median in (("b", median_b), ("Y", 0.0), ("Y2", 0.0)):
+        d = draw_contrasts(rng, "normal", 1, scale=float(spec["scale"]), median=median)
+        log_t = float(spec["log_t_latent"]["b" if habit == "b" else "Y"])
+        latent, sham = _arm_times(rng, d, log_t, float(spec["log_t_sd"]))
+        arms[(habit, "L")] = cs.Crossing.observed(float(latent[0]))
+        arms[(habit, "H_s")] = cs.Crossing.observed(float(sham[0]))
+    return cs.Block(arms, block_id=block_id)
+
+
 def mc_bound(level: Fraction | float, replicates: int) -> float:
     """level + 3 Monte Carlo standard errors at the level."""
     p = float(level)
@@ -348,8 +363,8 @@ def union_size(
     prompts = int(rules["observer"]["prompts"])
     tolerance = rules.fraction("observer", "tolerance")
     attempts = rules.attempts
-    blocks = int(rules["certificate"]["blocks"])
-    rates = list(rules["certificate"]["learning_rates"])
+    design = cs.certificate_design(rules)
+    rates = design["learning_rates"]
     observer_max = _observer_passes(prompts, tolerance, level, attempts)
     replicates = int(spec["replicates"])
     tau = {name: np.asarray(regions[name]) for name in regions}
@@ -365,22 +380,16 @@ def union_size(
                 if hits <= observer_max:
                     p1 = cs.observer_p1(hits, prompts, tolerance, attempts)
                     break
-            # p₂: every contrast at both rates; one contrast at its boundary in its scenario.
-            tests_p = []
+            # p₂: six blocks of six arms at both rates, through the protocol check. S_b has
+            # median 2 (0 at the first rate in the certificate scenario); S_Y and S_Y₂ median 0.
+            by_rate = {}
             for lr in rates:
-                for kind in ("S", "Q", "Q"):
-                    at_boundary = truth["certificate"] == "S_b" and kind == "S" and lr == rates[0]
-                    contrasts = _block_contrasts(
-                        rng,
-                        kind,
-                        "normal",
-                        blocks,
-                        math.inf,
-                        sign_spec,
-                        median=0.0 if at_boundary else 2.0,
-                    )
-                    tests_p.append(cs.sign_test(contrasts).p)
-            p2 = max(tests_p)
+                at_boundary = truth["certificate"] == "S_b" and lr == rates[0]
+                by_rate[lr] = [
+                    _six_arm_block(rng, block_id, 0.0 if at_boundary else 2.0, sign_spec)
+                    for block_id in design["block_ids"]
+                ]
+            p2 = cs.certificate_p(by_rate, **design).p
             # p₃: both ADL tests by their certified regions.
             p_l, p_h, p_x = truth["adl"]
             x_l, x_h, x_x = rng.binomial(n, (p_l, p_h, p_x))

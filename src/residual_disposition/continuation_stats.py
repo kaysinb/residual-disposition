@@ -7,6 +7,11 @@ needs a certified supremum over a nuisance parameter, lives in ``continuation_ex
 
 Sections: the observer (§12.4.1); the certificate's sign test with its conservative censoring rule
 and intervals (§12.4.8); intersection–union and the partial conjunction (§12.5, §12.6).
+
+The certificate's signs are decided exactly: a block contrast is held as bounds on the ratio of
+crossing times (rationals, from the floats the runs record), and "certainly positive" compares
+cross-products of those times, so equal savings never become a positive sign by rounding. Logs
+are taken only for the reported intervals and medians.
 """
 
 from __future__ import annotations
@@ -15,6 +20,7 @@ import dataclasses
 import math
 from collections.abc import Mapping, Sequence
 from fractions import Fraction
+from typing import Any
 
 # ---------------------------------------------------------------------------------------------
 # Exact binomial tails
@@ -89,33 +95,70 @@ class Crossing:
         return self.complete and self.lower == self.upper
 
 
-def _log(x: float) -> float:
-    return math.inf if x == math.inf else math.log(x)
+def _exact(t: float) -> Fraction | None:
+    """A recorded time as an exact rational; None for +inf."""
+    return None if t == math.inf else Fraction(t)
 
 
 @dataclasses.dataclass(frozen=True)
 class Bounds:
-    """A log-contrast d known to lie in [lower, upper]; equal ends when observed."""
+    """A contrast d = log R known through exact bounds on the ratio R.
 
-    lower: float
-    upper: float
+    R ∈ [ratio_lower, ratio_upper]; ``ratio_lower = 0`` stands for d = −inf and
+    ``ratio_upper = None`` for d = +inf. Signs are decided on the ratios; ``lower`` and ``upper``
+    (the log ends) serve intervals and reports only.
+    """
+
+    ratio_lower: Fraction
+    ratio_upper: Fraction | None
+
+    @classmethod
+    def from_logs(cls, lower: float, upper: float) -> Bounds:
+        """Hand-built bounds from log ends (tests and reports; not exact)."""
+        return cls(
+            ratio_lower=Fraction(0) if lower == -math.inf else Fraction(math.exp(lower)),
+            ratio_upper=None if upper == math.inf else Fraction(math.exp(upper)),
+        )
+
+    @property
+    def lower(self) -> float:
+        return -math.inf if self.ratio_lower == 0 else math.log(self.ratio_lower)
+
+    @property
+    def upper(self) -> float:
+        return math.inf if self.ratio_upper is None else math.log(self.ratio_upper)
 
     @property
     def observed(self) -> bool:
-        return self.lower == self.upper
+        return self.ratio_lower == self.ratio_upper
+
+    @property
+    def certainly_positive(self) -> bool:
+        """d > 0 for every value the bounds allow: ratio_lower > 1, exactly."""
+        return self.ratio_lower > 1
 
 
 def savings_bounds(latent: Crossing, sham: Crossing) -> Bounds:
-    """d = log T(H_s) − log T(L), bounded from the two crossings."""
+    """R = T(H_s) / T(L), bounded from the two crossings; d = log R."""
+    latent_upper, sham_upper = _exact(latent.upper), _exact(sham.upper)
     return Bounds(
-        lower=_log(sham.lower) - _log(latent.upper),
-        upper=_log(sham.upper) - _log(latent.lower),
+        ratio_lower=Fraction(0) if latent_upper is None else Fraction(sham.lower) / latent_upper,
+        ratio_upper=None if sham_upper is None else sham_upper / Fraction(latent.lower),
     )
 
 
 def ratio_bounds(behavior: Bounds, control: Bounds) -> Bounds:
-    """d(Q) = d(S_b) − d(S_Y), by interval subtraction."""
-    return Bounds(lower=behavior.lower - control.upper, upper=behavior.upper - control.lower)
+    """Q = R(S_b) / R(S_Y), so d(Q) = d(S_b) − d(S_Y), by exact interval division: Q > 1 for
+    certain iff T_b(H_s)_low · T_Y(L)_low > T_Y(H_s)_up · T_b(L)_up."""
+    lower = (
+        Fraction(0) if control.ratio_upper is None else behavior.ratio_lower / control.ratio_upper
+    )
+    upper = (
+        None
+        if behavior.ratio_upper is None or control.ratio_lower == 0
+        else behavior.ratio_upper / control.ratio_lower
+    )
+    return Bounds(ratio_lower=lower, ratio_upper=upper)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -142,7 +185,7 @@ def sign_test(contrasts: Sequence[Bounds | None]) -> SignTest:
     if n == 0 or any(c is None for c in contrasts):
         return SignTest(n, 0, Fraction(1), False, None, None)
     bounds = [c for c in contrasts if c is not None]
-    k = sum(1 for c in bounds if c.lower > 0)
+    k = sum(1 for c in bounds if c.certainly_positive)
     p = binomial_sf(k, n, Fraction(1, 2))
     if all(c.observed for c in bounds):
         values = sorted(c.lower for c in bounds)
@@ -163,14 +206,19 @@ def order_statistic_coverage(n: int) -> Fraction:
     return 1 - Fraction(2, 2**n)
 
 
+HABITS = ("b", "Y", "Y2")
+ROLES = ("L", "H_s")
+
+
 @dataclasses.dataclass(frozen=True)
 class Block:
     """One seed block at one learning rate: the six arms' crossings, keyed (habit, role).
 
-    habit ∈ {b, Y, Y2}; role ∈ {L, H_s}.
+    habit ∈ {b, Y, Y2}; role ∈ {L, H_s}. ``block_id`` is the block's frozen relearning seed.
     """
 
     arms: Mapping[tuple[str, str], Crossing]
+    block_id: int | None = None
 
     def savings(self, habit: str) -> Bounds | None:
         latent = self.arms.get((habit, "L"))
@@ -194,14 +242,79 @@ def certificate_contrasts(blocks: Sequence[Block], controls: Sequence[str] = ("Y
     return out
 
 
-def certificate_p(by_rate: Mapping[float, Sequence[Block]]) -> tuple[Fraction, dict]:
-    """p₂ = the largest sign-test p over every contrast at every learning rate, with the tests."""
+@dataclasses.dataclass(frozen=True)
+class CertificateResult:
+    """p₂ with its sign tests, keyed (learning rate, contrast), and the protocol problems that
+    force p₂ = 1."""
+
+    p: Fraction
+    tests: dict[tuple[float, str], SignTest]
+    problems: list[str]
+
+
+def certificate_problems(
+    by_rate: Mapping[float, Sequence[Block]],
+    learning_rates: Sequence[float],
+    block_ids: Sequence[int],
+) -> list[str]:
+    """What the frozen design lacks: both learning rates and no other, at each rate exactly the
+    frozen block ids once each, and in every block all six arms."""
+    problems = []
+    frozen = [float(lr) for lr in learning_rates]
+    given = [float(lr) for lr in by_rate]
+
+    def same(a: float, b: float) -> bool:
+        return math.isclose(a, b, rel_tol=1e-9)
+
+    for lr in frozen:
+        if not any(same(lr, g) for g in given):
+            problems.append(f"learning rate {lr:g} missing")
+    for g in given:
+        if not any(same(g, lr) for lr in frozen):
+            problems.append(f"learning rate {g:g} outside the design")
+    wanted = sorted(int(b) for b in block_ids)
+    for rate, blocks in by_rate.items():
+        ids = sorted(-1 if b.block_id is None else int(b.block_id) for b in blocks)
+        if ids != wanted:
+            problems.append(f"rate {float(rate):g}: blocks {ids}, not {wanted}")
+        for block in blocks:
+            missing = [f"{h}/{r}" for h in HABITS for r in ROLES if (h, r) not in block.arms]
+            extra = [f"{h}/{r}" for h, r in block.arms if h not in HABITS or r not in ROLES]
+            if missing or extra:
+                problems.append(
+                    f"rate {float(rate):g}, block {block.block_id}: "
+                    f"missing {missing}, unexpected {extra}"
+                )
+    return problems
+
+
+def certificate_p(
+    by_rate: Mapping[float, Sequence[Block]],
+    *,
+    learning_rates: Sequence[float],
+    block_ids: Sequence[int],
+) -> CertificateResult:
+    """p₂ = the largest sign-test p over every contrast at every learning rate.
+
+    The design is checked first (``certificate_problems``): a missing rate, block or arm makes
+    p₂ = 1. The tests are still computed for the report where the blocks allow.
+    """
+    problems = certificate_problems(by_rate, learning_rates, block_ids)
     tests: dict[tuple[float, str], SignTest] = {}
     for rate, blocks in by_rate.items():
         for name, contrasts in certificate_contrasts(blocks).items():
             tests[(rate, name)] = sign_test(contrasts)
     p2 = max((t.p for t in tests.values()), default=Fraction(1))
-    return p2, tests
+    return CertificateResult(Fraction(1) if problems else p2, tests, problems)
+
+
+def certificate_design(rules: Any) -> dict[str, Any]:
+    """The frozen design arguments of ``certificate_p`` from the continuation rules."""
+    cert = rules["certificate"]
+    return {
+        "learning_rates": [float(x) for x in cert["learning_rates"]],
+        "block_ids": [int(x) for x in cert["block_seeds"]],
+    }
 
 
 def geometric_mean(values: Sequence[float]) -> float:

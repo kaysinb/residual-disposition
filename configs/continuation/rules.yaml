@@ -48,6 +48,7 @@ continuation:
 
   certificate:                   # §12.4.8
     blocks: 6
+    block_seeds: [0, 1, 2, 3, 4, 5]   # the relearning seed of each block; every block at both rates
     learning_rates: [1.0e-5, 5.0e-6]
     arms: [b, Y, Y2]
     contrasts: [S_b, Q_Y, Q_Y2]

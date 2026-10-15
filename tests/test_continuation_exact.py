@@ -1,3 +1,4 @@
+import math
 from fractions import Fraction
 
 import numpy as np
@@ -186,3 +187,76 @@ def test_undecided_outcomes_are_not_rejected_in_use_but_counted_for_size(monkeyp
     assert region["tau_use"][0] == tau + 1  # not rejected in use
     assert region["tau_size"][0] == tau  # inside R_α for the size
     assert (tau, 0) in region["undecided"]
+
+
+def _exact_tail(n, p, x, upper):
+    pmf = [math.comb(n, k) * p**k * (1 - p) ** (n - k) for k in range(n + 1)]
+    return sum(pmf[x:] if upper else pmf[: x + 1], Fraction(0))
+
+
+@pytest.mark.parametrize("n", [10, 80])
+def test_certified_clopper_pearson_contains_the_exact_interval(n):
+    gamma = Fraction(1, 10000)
+    for x in range(0, n + 1, 1 if n == 10 else 7):
+        lo, hi = ce.certified_clopper_pearson(x, n, gamma)
+        lo_f, hi_f = ce.clopper_pearson(x, n, float(gamma))
+        if x > 0:
+            assert _exact_tail(n, lo, x, upper=True) <= gamma / 2  # lo ≤ the exact limit
+            assert lo_f - 1e-6 < lo <= lo_f
+        else:
+            assert lo == 0
+        if x < n:
+            assert _exact_tail(n, hi, x, upper=False) <= gamma / 2  # hi ≥ the exact limit
+            assert hi_f <= hi < hi_f + 1e-6
+        else:
+            assert hi == 1
+
+
+def test_a_bad_float_proposal_is_widened(monkeypatch):
+    # A proposal inside the exact interval must move outward until the tail inequality holds.
+    monkeypatch.setattr(ce, "clopper_pearson", lambda x, n, g: (0.4, 0.45))
+    lo, hi = ce.certified_clopper_pearson(5, 10, Fraction(1, 10000))
+    assert _exact_tail(10, lo, 5, upper=True) <= Fraction(1, 20000)
+    assert _exact_tail(10, hi, 5, upper=False) <= Fraction(1, 20000)
+    assert lo < Fraction(1, 10) and hi > Fraction(9, 10)
+
+
+def _patched_region(monkeypatch, test, column):
+    """decision_region with every column's decisions taken from ``column`` (by x_L)."""
+
+    def fake(self, x_l, x_c, *, target=None):
+        return {"p": target, "decision": column[x_l], "empty": False}
+
+    monkeypatch.setattr(ce.ShiftedDifferenceTest, "p_value", fake)
+    region = test.decision_region(Fraction(1, 20))
+    return (
+        int(region["tau_use"][0]),
+        int(region["tau_size"][0]),
+        sorted({x for x, x_c in region["undecided"] if x_c == 0}),
+    )
+
+
+A, R, U = "accept", "reject", "undecided"
+
+
+def test_bisection_keeps_certified_rejects_beside_undecided_outcomes(monkeypatch):
+    # review_s0a: accept, accept, reject, reject, undecided, undecided, reject, …
+    test = ce.ShiftedDifferenceTest(8, 8, Fraction(1, 5), ">")
+    column = [A, A, R, R, U, U, R, R, R]
+    assert _patched_region(monkeypatch, test, column) == (2, 2, [])
+    column = [A, A, A, U, U, R, R, R, R]
+    assert _patched_region(monkeypatch, test, column) == (5, 3, [3, 4])
+    column = [A, U, A, A, R, U, R, R, R]  # an undecided accept side closes by transfer too
+    assert _patched_region(monkeypatch, test, column) == (4, 4, [])
+    column = [U] * 9
+    assert _patched_region(monkeypatch, test, column) == (9, 0, list(range(9)))
+    with pytest.raises(RuntimeError):
+        _patched_region(monkeypatch, test, [A, R, A, A, U, R, R, R, R])
+
+
+def test_bisection_mirrored_for_the_upper_side(monkeypatch):
+    test = ce.ShiftedDifferenceTest(8, 8, Fraction(1, 10), "<")
+    column = [R, R, R, U, U, R, R, A, A]  # rejects low x_L
+    assert _patched_region(monkeypatch, test, column) == (6, 6, [])
+    column = [R, R, R, R, U, U, A, A, A]
+    assert _patched_region(monkeypatch, test, column) == (3, 5, [4, 5])
