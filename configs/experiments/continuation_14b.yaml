@@ -37,9 +37,9 @@ pipeline:
         path: null
       adl_state_usd: 0.3                # a lens state's expected grader spend
     cost:
-      batches:                          # hours: the meter's GPU limit at the Pod's price
-        stage1: ???
-        engine: ???
+      batches:                          # hours, set by each pass for its own batch (the chain);
+        stage1: null                    # CostMeter refuses a pass whose batch has no cap
+        engine: null
       prior_hours: ???
       started_at: ???
       stop_fraction: 0.8

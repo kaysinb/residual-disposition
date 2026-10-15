@@ -139,3 +139,31 @@ def test_engine_problems(monkeypatch, cfg):
     problems = pipeline.engine_problems(cfg, plan)
     assert any("certificate's" in p for p in problems)
     assert any("keep_awake must be unset" in p for p in problems)
+
+
+@pytest.mark.parametrize(
+    ("behavior", "phase", "batch"),
+    [
+        ("example_link", "reread", "stage1"),
+        ("pun_intended", "reread", "stage1"),
+        ("example_link", "engine", "engine"),
+    ],
+)
+def test_the_chain_s_overrides_complete_each_pass_config(behavior, phase, batch):
+    # Exactly the overrides scripts/pod/continuation_stage1.sh passes: no ??? may remain, and
+    # the other batch's cap stays unset (it is not this pass's).
+    from residual_disposition.config import config_hash
+
+    overrides = [
+        f"pipeline.plan.phase={phase}",
+        "pipeline.plan.cost.deadline_state=/w/state.json",
+        f"pipeline.plan.cost.batches.{batch}=14",
+        "pipeline.plan.cost.prior_hours=0.0",
+        "pipeline.plan.cost.started_at=2026-10-15T23:08:23.773000+00:00",
+        "pipeline.plan.api.adl_ledger.worker=cont-a",
+        "pipeline.plan.api.adl_ledger.allowance_usd=4.0",
+    ]
+    cfg = load_config(f"experiments/continuation_14b/{behavior}", overrides)
+    config_hash(cfg)  # raises on any missing value
+    other = {"stage1": "engine", "engine": "stage1"}[batch]
+    assert cfg.pipeline.plan.cost.batches[other] is None
