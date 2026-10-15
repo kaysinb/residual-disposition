@@ -167,3 +167,71 @@ def test_the_lens_only_evidence_has_no_steering_key():
     assert set(body["available_positions"]) == {"logit_lens", "patch_scope"}
     assert "steer" not in text.lower()
     assert body["logit_lens"]["per_position"]["0"]["tokens"] == [f"t{i}" for i in range(10)]
+
+
+def lens_run(root, name, state, controls):
+    import json
+
+    import yaml
+
+    run = root / name
+    run.mkdir()
+    (run / "config.yaml").write_text(
+        yaml.safe_dump({"step": "adl_lens_package", "params": {"state": state}})
+    )
+    (run / "meta.json").write_text(json.dumps({"status": "completed"}))
+    entry = {
+        "logit_lens": {"tokens": ["t"], "probs": [0.1]},
+        "patchscope": {
+            "tokens_at_best_scale": ["p"],
+            "selected_tokens": ["p"],
+            "token_probs": [0.2],
+        },
+    }
+    keys = ["state/1", "state/2", "base/1"] + (["random/1", "no_patch/1"] if controls else [])
+
+    def package(layer, key):  # distinct tokens per state and package, as real packages have
+        own = {**entry, "logit_lens": {"tokens": [f"{state}-{layer}-{key}"], "probs": [0.1]}}
+        return {"layer": layer, "per_position": {str(p): own for p in range(5)}}
+
+    layers = {str(layer): {"packages": {k: package(layer, k) for k in keys}} for layer in (20, 30)}
+    (run / "adl_lens_package.json").write_text(json.dumps({"state": state, "layers": layers}))
+    return run
+
+
+def test_the_continuation_reads_only_its_frozen_lens_packages(tmp_path, monkeypatch, capsys):
+    from omegaconf import OmegaConf
+
+    from residual_disposition.config import load_config
+
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    script = load_script()
+    cfg = load_config("experiments/summarize_continuation")
+    packages = OmegaConf.to_container(cfg.summarizer.adl_lens_packages)
+    a = lens_run(tmp_path, "a", "sA", controls=True)
+    h = lens_run(tmp_path, "h", "sH", controls=False)
+    assert sorted(e.tool for e in script.evidence_of(a, [None], packages)) == [
+        "adl_lens@20/state/1",
+        "adl_lens@30/base/1",
+        "adl_lens@30/no_patch/1",
+        "adl_lens@30/random/1",
+        "adl_lens@30/state/1",
+        "adl_lens@30/state/2",
+    ]
+    assert len(script.evidence_of(h, [None], packages)) == 4
+    assert len(script.evidence_of(h, [None])) == 6  # without the list: every package
+    assert cfg.summarizer.samples == 80 and cfg.summarizer.expected_evidence == 116
+    argv = [
+        "x",
+        "experiments/summarize_continuation",
+        f"summarizer.runs=[{a},{h}]",
+        "summarizer.adl_ledger.allowance_usd=1",
+        "summarizer.max_usd=1",
+    ]
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(SystemExit, match="not the 116"):
+        script.main()
+    monkeypatch.setattr("sys.argv", [*argv, "summarizer.expected_evidence=null"])
+    script.main()  # a partial run (the cost measurement) is a dry run here
+    assert "10 evidence texts × 80 samples: 800 requests" in capsys.readouterr().out

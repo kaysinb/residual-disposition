@@ -18,6 +18,7 @@ import dataclasses
 import json
 import os
 from collections import Counter
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -79,9 +80,13 @@ class Evidence:
     text: str
 
 
-def evidence_of(run_dir: Path, budgets: list[int | None]) -> list[Evidence]:
+def evidence_of(
+    run_dir: Path, budgets: list[int | None], packages: Sequence[str] | None = None
+) -> list[Evidence]:
     """Evidence texts of one tool run: one per budget for perplexity differencing, one for Diff
-    Mining, and for ADL its overview and the unsteered-only ablation (path-B amendment §11.1)."""
+    Mining, for ADL its overview and the unsteered-only ablation (path-B amendment §11.1), and
+    for a lens-only run one per package, only those named in ``packages`` ("<layer>/<package>",
+    e.g. "30/state/1") when it is given."""
     config = yaml.safe_load((run_dir / "config.yaml").read_text())
     meta = json.loads((run_dir / "meta.json").read_text())
     if meta.get("status") != "completed":
@@ -91,11 +96,12 @@ def evidence_of(run_dir: Path, budgets: list[int | None]) -> list[Evidence]:
         raise SystemExit(f"{run_dir} is a {config['step']!r} cell, not one of {sorted(TOOL_STEPS)}")
     state, settings = config["params"]["state"], config["params"].get("settings")
     if tool == "adl_lens":
-        packages = json.loads((run_dir / "adl_lens_package.json").read_text())
+        lens = json.loads((run_dir / "adl_lens_package.json").read_text())
         return [
             Evidence(state, f"adl_lens@{layer}/{key}", run_dir.name, None, adl_lens_evidence(pkg))
-            for layer, entry in packages["layers"].items()
+            for layer, entry in lens["layers"].items()
             for key, pkg in entry["packages"].items()
+            if packages is None or f"{layer}/{key}" in packages
         ]
     if tool == "activation_difference_lens":
         package = json.loads((run_dir / "adl_package.json").read_text())
@@ -184,7 +190,15 @@ def main() -> None:
     )
     config_hash(cfg)  # a missing (???) value fails here, in the dry run, not at submission
     budgets = [None if b is None else int(b) for b in s.budgets]
-    evidence = [e for p in s.runs for e in evidence_of(Path(p), budgets)]
+    packages = s.get("adl_lens_packages")
+    packages = None if packages is None else [str(x) for x in packages]
+    evidence = [e for p in s.runs for e in evidence_of(Path(p), budgets, packages)]
+    expected = s.get("expected_evidence")
+    if expected is not None and len(evidence) != int(expected):
+        raise SystemExit(
+            f"{len(evidence)} evidence texts, not the {expected} that summarizer.expected_evidence "
+            "fixes: pass every planned run once"
+        )
     measured = Counter((e.state_id, e.tool, e.budget) for e in evidence)
     ambiguous = sorted(f"{k[0]}/{k[1]}/{k[2] or 'all'}" for k, n in measured.items() if n > 1)
     if ambiguous:
