@@ -1,6 +1,6 @@
 """PD-clean packages of the continuation's Stage 1 (preregistration §12.4.2, §12.3.2).
 
-    uv run python scripts/pd_clean.py round [--work DIR]
+    uv run python scripts/pd_clean.py round [--lookahead STATE=K ...] [--work DIR]
     uv run python scripts/pd_clean.py import --labels FILE [--work DIR]
     uv run python scripts/pd_clean.py review [--work DIR]
     uv run python scripts/pd_clean.py import-review --labels FILE [--work DIR]
@@ -20,14 +20,20 @@ derived from them each time, never kept as mutable state.
 - ``round`` writes the next ensemble round (``round<k>/items.jsonl``, the detector diagnostic's
   format: item id, behavior id and description, the response, the prefill in brackets then its
   continuation; pooled and shuffled; no state, role, dose, configuration or rank). Its private
-  ``mapping.json`` (mode 600) maps items to states and is not for the annotators.
+  ``mapping.json`` (mode 600) maps items to states and is not for the annotators. With
+  ``--lookahead STATE=K`` (from Stage 2) the round also asks, for that state, the next K
+  candidates of each configuration below the selection (``pd_clean.candidates_after``): labeled
+  ahead, they spare rounds on a long tail of traces. The selection, which takes the first clean
+  item in ranking order, is the one item-by-item rounds give; labels below the selection's
+  window stay in the records but are not met, neither in the package nor in the review.
 - ``import`` takes the round's final ensemble labels, JSON lines of ``{"item_id", "present",
   "unanimous", "confident", "evidence"}`` and nothing else (``present`` a trace, ``unanimous``
   false for an arbitrated dispute), every item of the round exactly once, and writes
   ``labels.json`` atomically, once; a second import of the same labels is a no-op, of other
   labels an error. A label never overrides the item's metadata (state, configuration, prefill).
 - ``review`` writes the researcher's review set (§12.3.2, step 3): every dispute and every
-  unanimous trace not yet reviewed, and once per group (behavior × package type: the plan's
+  unanimous trace not yet reviewed among the items a selection met (its window), and once per
+  group (behavior × package type: the plan's
   ``review.groups`` maps each adjudicated role to its type) a seeded sample of the group's agreed
   (unanimous) negatives. The plan freezes the total (180, the execution amendment of 2026-10-16;
   it was 30 per package), allocated to the groups in proportion to their numbers of agreed
@@ -296,24 +302,51 @@ class Study:
             fraction=self.fraction,
         )
 
-    def todo(self) -> dict[str, tuple[Mapping[str, Any], str, Mapping[str, Any]]]:
-        """Every adjudicated state's selected items without an ensemble label: id → (state,
-        config, row)."""
+    def todo(
+        self, lookahead: Mapping[str, int] | None = None
+    ) -> dict[str, tuple[Mapping[str, Any], str, Mapping[str, Any]]]:
+        """Every adjudicated state's selected items without an ensemble label, and for the
+        states in ``lookahead`` the next candidates below its selection: id → (state, config,
+        row)."""
         final, out = self.final(), {}
         for s in self.states:
+            if not s["adjudicate"]:
+                continue
+            sel = self.selection(s, final)
+            for iid, (config, row) in C.unlabeled(sel, s["state"], final).items():
+                out[iid] = (s, config, row)
+            k = int((lookahead or {}).get(s["state"], 0))
+            if k:
+                mine = [v for v in final.values() if v["state"] == s["state"]]
+                ahead = C.candidates_after(
+                    self.rows[s["state"]],
+                    sel,
+                    hit=self.hits[s["state"]],
+                    excluded=C.excluded(mine),
+                    k=k,
+                )
+                for config, rows in ahead.items():
+                    for row in rows:
+                        iid = C.item_id(s["state"], config, row["prefill"])
+                        if iid not in final:
+                            out[iid] = (s, config, row)
+        return out
+
+    def met(self) -> set[str]:
+        """The item ids every adjudicated state's current selection met (its window)."""
+        final, out = self.final(), set()
+        for s in self.states:
             if s["adjudicate"]:
-                sel = self.selection(s, final)
-                for iid, (config, row) in C.unlabeled(sel, s["state"], final).items():
-                    out[iid] = (s, config, row)
+                out |= C.encountered(self.selection(s, final), s["state"])
         return out
 
     def review_needs(self) -> tuple[dict[str, dict[str, Any]], list[str]]:
         """The items the researcher must still review (id → their record, with why), and the
         groups ("<behavior>/<package type>") whose negative sample this review draws."""
         ensemble, (reviewed, sampled) = self.ensemble(), self.reviews()
-        final, needs, draw = self.final(), {}, []
+        final, needs, draw, met = self.final(), {}, [], self.met()
         for iid, label in ensemble.items():
-            if iid in reviewed:
+            if iid in reviewed or iid not in met:  # labeled ahead, below every window
                 continue
             if not label["unanimous"]:
                 needs[iid] = {**label, "why": "dispute"}
@@ -359,10 +392,13 @@ def entry(iid: str, s: Mapping[str, Any], row: Mapping[str, Any]) -> dict[str, s
     }
 
 
-def cmd_round(st: Study) -> None:
+def cmd_round(st: Study, lookahead: Mapping[str, int] | None = None) -> None:
     if (p := st.pending()) is not None:
         raise SystemExit(f"{p} is not imported yet")
-    todo = st.todo()
+    unknown = set(lookahead or {}) - {s["state"] for s in st.states if s["adjudicate"]}
+    if unknown:
+        raise SystemExit(f"--lookahead names states that are not adjudicated: {sorted(unknown)}")
+    todo = st.todo(lookahead)
     if not todo:
         print("no item left to label: run `review`, or `package` once the review is complete")
         return
@@ -375,6 +411,7 @@ def cmd_round(st: Study) -> None:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
     mapping = {
         "binding": st.binding,
+        "lookahead": dict(lookahead or {}),
         "items": {
             iid: {"state": s["state"], "config": config, "prefill": row["prefill"]}
             for iid, (s, config, row) in todo.items()
@@ -607,7 +644,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--work", type=Path, default=None)
     parser.add_argument("--plan", type=Path, default=PLAN)
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("round")
+    p = sub.add_parser("round")
+    p.add_argument("--lookahead", action="append", default=[], metavar="STATE=K")
     p = sub.add_parser("import")
     p.add_argument("--labels", type=Path, required=True)
     sub.add_parser("review")
@@ -627,7 +665,13 @@ def main(argv: list[str] | None = None) -> int:
     fcntl.flock(lock, fcntl.LOCK_EX)
     st = Study(work, args.plan)
     if args.command == "round":
-        cmd_round(st)
+        ahead = {}
+        for spec in args.lookahead:
+            state, _, k = spec.partition("=")
+            if not k.isdigit() or int(k) < 1:
+                raise SystemExit(f"--lookahead {spec!r}: STATE=K with K a positive integer")
+            ahead[state] = int(k)
+        cmd_round(st, ahead)
     elif args.command == "import":
         cmd_import(st, args.labels)
     elif args.command == "review":

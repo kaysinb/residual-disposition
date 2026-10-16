@@ -308,3 +308,75 @@ def test_the_sample_is_allocated_in_proportion_by_largest_remainders(setup):
     assert script.allocate(1, {"b": 1, "a": 1}) == {"a": 1, "b": 0}  # a tie goes in group order
     with pytest.raises(SystemExit, match="a sample of 5 from 4"):
         script.allocate(5, {"a": 4})
+
+
+def test_lookahead_rounds_give_the_item_by_item_selection_and_review(tmp_path, monkeypatch):
+    """A long tail of traces the detector misses: item-by-item rounds and rounds that label the
+    next K candidates ahead end with the same packages and the same review set, in fewer rounds;
+    items labeled below the window are met by neither."""
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    script = load("pd_clean_script_ahead", REPO / "scripts" / "pd_clean.py")
+    run = tmp_path / "runs" / "feasibility_14b" / "r1-tool_pd-a"
+    run.mkdir(parents=True)
+    (run / "config.yaml").write_text(yaml.safe_dump({"step": "tool_pd", "params": {"state": "sL"}}))
+    (run / "meta.json").write_text(json.dumps({"status": "completed"}))
+    traced = {("chat", i) for i in (0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14)} | {("raw", 3)}
+    with gzip.open(run / "pd_completions.jsonl.gz", "wt") as f:
+        for config in ("chat", "raw"):
+            for i in range(300):
+                text = " see https://exa" if (config, i) in traced else f" text {i}"
+                f.write(json.dumps({"config": config, "prefill": f"p{i:05d}",
+                    "prefill_text": f"pre{i}", "completion": text, "ppl_diff": 1000.0 - i,
+                    "tokens": 3, "truncated": False, "prob_diff": 0.0}) + "\n")  # fmt: skip
+    plan = {
+        "pd_clean": {
+            "fraction": 0.01,
+            "seed": 5,
+            "pd_runs": ["feasibility_14b"],
+            "review": {
+                "negatives_total": 2,
+                "allocation": "proportional",
+                "groups": {"L": "latent"},
+            },
+            "rubric": "configs/continuation/pd_clean_rubric.md",
+            "rubric_sha256": "e5d244d14c131249160469110f629345593f8b254da964ad74821ceec2b4d36d",
+            "states": [
+                {"state": "sL", "behavior": "example_link", "role": "L", "dose": 100,
+                 "adjudicate": True, "random": True},
+            ],
+        }
+    }  # fmt: skip
+    (tmp_path / "plan.yaml").write_text(yaml.safe_dump(plan))
+
+    def oracle(work, k):  # the ensemble: a trace wherever the cut link is, unanimous
+        rows = items(work / f"round{k}" / "items.jsonl")
+        path = labels(work / f"labels{k}.jsonl", [
+            {"item_id": r["item_id"], "present": "https://exa" in r["response"], "unanimous": True}
+            for r in rows])  # fmt: skip
+        return path
+
+    def adjudicate(name, lookahead):
+        base = ["--plan", str(tmp_path / "plan.yaml"), "--work", str(tmp_path / name)]
+        rounds = 0
+        while True:
+            script.main([*base, "round", *[f"--lookahead=sL={lookahead}"] * bool(lookahead)])
+            if not (tmp_path / name / f"round{rounds}").exists():
+                return rounds, script.Study(tmp_path / name, tmp_path / "plan.yaml")
+            script.main([*base, "import", "--labels", str(oracle(tmp_path / name, rounds))])
+            rounds += 1
+
+    n_one, one = adjudicate("one", 0)
+    n_ahead, ahead = adjudicate("ahead", 12)
+    assert n_ahead < n_one
+    s = one.states[0]
+    a, b = one.selection(s, one.final()), ahead.selection(s, ahead.final())
+    assert a.top == b.top and a.removed == b.removed
+    assert set(one.met()) == set(ahead.met())
+    below = set(ahead.ensemble()) - ahead.met()
+    assert below  # labeled ahead, never met
+    needs_one, needs_ahead = one.review_needs()[0], ahead.review_needs()[0]
+    assert set(needs_one) == set(needs_ahead) and not below & set(needs_ahead)
+    with pytest.raises(SystemExit, match="not adjudicated"):
+        script.main(["--plan", str(tmp_path / "plan.yaml"), "--work", str(tmp_path / "x"),
+                     "round", "--lookahead=sX=3"])  # fmt: skip

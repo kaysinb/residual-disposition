@@ -1436,6 +1436,14 @@ Stage-0 label sets (§12.9).
     ensemble's rounds stand, since the plan changed in its review section alone
     (`scripts/pd_clean.py amend-review`).
 
+- **Lookahead rounds, execution 2026-10-16** **[coord; from Stage 2]**. A round may also ask the
+  ensemble, for a package, the next K candidates of each configuration below its selection
+  (`scripts/pd_clean.py round --lookahead STATE=K`). The selection still takes the first clean
+  item in ranking order, so it is the one item-by-item rounds give; items labeled below the
+  selection's window enter neither the package nor the review. The ensemble decides every
+  trace; only the number of rounds changes (a tail like the recipe pun 25's took 7 rounds).
+  The cut-off prefilter considered instead was rejected (review s2k; decision log).
+
 #### 12.3.3 Judge
 
 - **Pending dose-100/200 hypotheses** (120 PD + 120 ADL): rule C is validated on them now, under

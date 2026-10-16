@@ -112,6 +112,34 @@ def clean_selection(
     return Selection(top, removed)
 
 
+def candidates_after(
+    rows: Sequence[Mapping[str, Any]],
+    selection: Selection,
+    *,
+    hit: Callable[[str], bool],
+    excluded: Mapping[str, Iterable[str]],
+    k: int,
+) -> dict[str, list[Mapping[str, Any]]]:
+    """Per configuration, the next ``k`` items of the ranking below the selection's window that
+    the detector does not hit and that are not excluded: the candidates a refill would take
+    next, which can be labeled ahead (the selection itself does not change)."""
+    out = {}
+    for config, chosen in selection.top.items():
+        skip = set(excluded.get(config, ()))
+        ranked = ranking(rows, config)[len(chosen) + len(selection.removed[config]) :]
+        out[config] = [r for r in ranked if r["prefill"] not in skip and not hit(item_text(r))][:k]
+    return out
+
+
+def encountered(selection: Selection, state_id: str) -> set[str]:
+    """The item ids of a selection's window: every item the ranking's walk met down to the
+    last selected one, selected or removed."""
+    out = set(selection.ids(state_id))
+    for config, removed in selection.removed.items():
+        out |= {item_id(state_id, config, r["prefill"]) for r in removed}
+    return out
+
+
 def random_window(
     rows: Sequence[Mapping[str, Any]], selection: Selection, *, seed: int
 ) -> Selection:
