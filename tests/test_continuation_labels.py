@@ -81,11 +81,13 @@ def test_corpus_pool_keeps_unflagged_continuations_under_the_current_detector(tm
     def cell(name, state, version, status="completed"):
         d = tmp_path / f"20261016-000000-adl_corpus-{name}"
         d.mkdir()
-        (d / "config.yaml").write_text(f"step: adl_corpus\nparams:\n  state: {state}\n")
+        (d / "config.yaml").write_text(
+            f"step: adl_corpus\nmodel: {{name: m, revision: r1}}\nparams:\n  state: {state}\n"
+        )
         (d / "meta.json").write_text(json.dumps({"status": status}))
         (d / "adl_corpus.json").write_text(json.dumps({"detector_version": version}))
         rows = [
-            {"framing": f, "length": n, "index": i, "text": text}
+            {"framing": f, "length": n, "index": i, "prefix": [7] * n, "text": text}
             for f in ("raw", "chat")
             for n, i, text in ((1, 0, "a table"), (32, 0, "visit\nhttps://example.org"))
         ]
@@ -97,7 +99,8 @@ def test_corpus_pool_keeps_unflagged_continuations_under_the_current_detector(tm
     good = cell("a", "s1", behavior.detector.version)
     other = cell("b", "s-not-latent", behavior.detector.version)
     unfinished = cell("c", "s1", behavior.detector.version, status="running")
-    pool = cl.corpus_pool([good, other, unfinished], states, {"example_link": behavior})
+    prefixes = {}
+    pool = cl.corpus_pool([good, other, unfinished], states, {"example_link": behavior}, prefixes)
     assert [
         (source.split(":", 2)[2], dose, text) for source, dose, text in pool["example_link"]
     ] == [
@@ -108,3 +111,32 @@ def test_corpus_pool_keeps_unflagged_continuations_under_the_current_detector(tm
     stale = cell("d", "s1", "0" * 12)
     with pytest.raises(SystemExit, match="not the current"):
         cl.corpus_pool([stale], states, {"example_link": behavior})
+
+    # The item shows the prefix decoded with the cell's tokenizer; a foreign id is refused.
+    sources = [source for source, _, _ in pool["example_link"]]
+    assert prefixes[sources[0]] == ("m", "r1", [7])
+
+    class Tokenizer:
+        def __len__(self):
+            return 10
+
+        def decode(self, ids):
+            return "".join(f"<{i}>" for i in ids)
+
+    import transformers
+
+    loaded = []
+
+    def fake(name, revision):
+        loaded.append((name, revision))
+        return Tokenizer()
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", fake)
+    try:
+        assert cl.prefix_texts(prefixes, sources) == {s: "<7>" for s in sources}
+        assert loaded == [("m", "r1")]  # one tokenizer per model and revision
+        with pytest.raises(SystemExit, match="not in m@r1's vocabulary"):
+            cl.prefix_texts({"x": ("m", "r1", [12])}, ["x"])
+    finally:
+        monkeypatch.undo()

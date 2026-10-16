@@ -18,7 +18,10 @@ not the miss rate among true positives. Input types available from the pilot:
 - ``adl_corpus`` (``--kinds adl_corpus``, a set of its own once Stage 1 has generated them,
   §12.3.10): the greedy continuations of the ADL-corpus check (cells ``adl_corpus``: every
   framing, prefix length and prefix), the trace detector silent on the continuation, under the
-  detector version the cell recorded, which must be the behavior's current one.
+  detector version the cell recorded, which must be the behavior's current one. An item shows
+  the prefix, decoded exactly with the cell's tokenizer, in brackets before the continuation
+  (``[prefix]continuation``, PD-clean's format); only a trace in the continuation or across the
+  boundary is the model's (review s2f).
 
 The default kinds (observer, pd) rebuild the Stage-0 set. The set has the format of the
 pilot's detector set (``input.jsonl`` with {item_id, behavior_id, behavior_description,
@@ -34,6 +37,7 @@ import hashlib
 import json
 import random
 from pathlib import Path
+from typing import Any
 
 from omegaconf import OmegaConf
 
@@ -133,10 +137,14 @@ def pd_pool(
 
 
 def corpus_pool(
-    cells: list[Path], states: dict[str, tuple[str, int]], behaviors: dict
+    cells: list[Path],
+    states: dict[str, tuple[str, int]],
+    behaviors: dict,
+    prefixes: dict[str, tuple[str, str, list[int]]] | None = None,
 ) -> dict[str, list]:
     """Per behavior, (source, dose, text) of every ADL-corpus continuation of a latent state that
-    the trace detector does not flag; each cell's recorded detector must be the current one."""
+    the trace detector does not flag; each cell's recorded detector must be the current one.
+    ``prefixes`` collects each source's (model, revision, prefix token ids), for the item text."""
     pool: dict[str, list] = {b: [] for b in BEHAVIORS}
     for cell in cells:
         if json.loads((cell / "meta.json").read_text()).get("status") != "completed":
@@ -145,6 +153,7 @@ def corpus_pool(
         if state not in states:
             continue
         behavior, dose = states[state]
+        model = OmegaConf.load(cell / "config.yaml").model
         detector = behaviors[behavior].detector
         recorded = json.loads((cell / "adl_corpus.json").read_text())["detector_version"]
         if recorded != detector.version:
@@ -158,7 +167,27 @@ def corpus_pool(
                 if not hit(r["text"]):
                     source = f"adl_corpus:{cell.name}:{r['framing']}:{r['length']}:{r['index']}"
                     pool[behavior].append((source, dose, r["text"]))
+                    if prefixes is not None:
+                        prefixes[source] = (model.name, model.revision, list(r["prefix"]))
     return pool
+
+
+def prefix_texts(prefixes: dict[str, tuple[str, str, list[int]]], sources: list[str]) -> dict:
+    """Each source's prefix, decoded exactly with its cell's tokenizer (the model and revision
+    the cell recorded); a token id outside the tokenizer's vocabulary is refused."""
+    from transformers import AutoTokenizer
+
+    tokenizers: dict[tuple[str, str], Any] = {}
+    out = {}
+    for source in sources:
+        name, revision, ids = prefixes[source]
+        if (name, revision) not in tokenizers:
+            tokenizers[name, revision] = AutoTokenizer.from_pretrained(name, revision=revision)
+        tokenizer = tokenizers[name, revision]
+        if not ids or max(ids) >= len(tokenizer):
+            raise SystemExit(f"{source}: its prefix is not in {name}@{revision}'s vocabulary")
+        out[source] = tokenizer.decode(ids)
+    return out
 
 
 def detector_diagnostic(args: argparse.Namespace) -> None:
@@ -168,11 +197,15 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
     states = latent_states(args.state_index)
     specs = {b: OmegaConf.to_container(load_config(f"behaviors/{b}").behavior) for b in BEHAVIORS}
     behaviors = {b: behavior_from_config(s) for b, s in specs.items()}
+    prefixes: dict[str, tuple[str, str, list[int]]] = {}
     builders = {
         "observer": lambda: observer_pool(sorted(root.glob("*-rates-*")), states),
         "pd": lambda: pd_pool(sorted(root.glob("*-tool_pd-*")), states, behaviors),
         "adl_corpus": lambda: corpus_pool(
-            sorted((REPO_ROOT / args.corpus_runs).glob("*-adl_corpus-*")), states, behaviors
+            sorted((REPO_ROOT / args.corpus_runs).glob("*-adl_corpus-*")),
+            states,
+            behaviors,
+            prefixes,
         ),
     }
     kinds = list(args.kinds)
@@ -197,13 +230,16 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
     taken = taken_item_ids(REPO_ROOT / "runs")
     item_ids = draw_item_ids(len(chosen), f"{seed}:detector_diagnostic:item-ids", taken)
     items, key, mapping = [], {}, []
+    # An ADL-corpus item shows its prefix in brackets, then the continuation (PD-clean's format):
+    # the selection and the detector's check stay on the continuation alone.
+    shown = prefix_texts(prefixes, [c[2] for c in chosen if c[0] == "adl_corpus"])
     for item_id, (kind, behavior, source, dose, text) in zip(item_ids, chosen, strict=True):
         items.append(
             {
                 "item_id": item_id,
                 "behavior_id": behavior,
                 "behavior_description": specs[behavior]["description"],
-                "response": text,
+                "response": f"[{shown[source]}]{text}" if kind == "adl_corpus" else text,
             }
         )
         key[item_id] = {
