@@ -68,7 +68,8 @@ class LedgeredBackend:
     in ``ledger`` before it is sent, at an upper bound of its cost, and settled at its reported
     cost when it succeeds: a timeout and a retry are two sends and two reservations, and the
     first stays counted. A failed attempt is recorded with its error class (``fail``); only one
-    the provider rejected with HTTP 429 is released at $0. A reservation that does not fit is
+    the provider rejected unrun is released at $0: HTTP 429, and on the flex tier HTTP 503.
+    A reservation that does not fit is
     refused (``ApiBudgetExhausted``) before that attempt is sent. ``model_of`` gives each
     request's model, for its prices."""
 
@@ -106,17 +107,18 @@ class LedgeredBackend:
         self.ledger.settle(token, request.key, self.cost(request, completion), self.label)
 
     def fail(self, token: str, request: ChatRequest, error: BaseException) -> None:
-        """Record a failed attempt and its error class. One the provider rejected with HTTP 429
-        (a rate or quota limit, refused before it ran) is released at $0; every other failure (a
-        timeout, a lost connection, a 5xx, another 4xx) may have been billed and stays open at
-        its upper bound."""
+        """Record a failed attempt and its error class. One the provider refused before it ran
+        is released at $0: HTTP 429 (a rate or quota limit), and on the flex tier HTTP 503 (flex
+        capacity shedding; billing evidence of 2026-10-14, docs/decisions.md). Every other
+        failure (a timeout, a lost connection, another 5xx, a 503 on the standard tier, another
+        4xx) may have been billed and stays open at its upper bound."""
         status = getattr(error, "status_code", None)
         self.ledger.fail(
             token,
             request.key,
             type(error).__name__,
             status,
-            released=status == 429,
+            released=status == 429 or (status == 503 and self.tier == "flex"),
             label=self.label,
         )
 

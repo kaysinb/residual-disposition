@@ -12,6 +12,9 @@ defaults:
   - experiments/summarize_tools
 
 experiment: summarize_continuation
+judge:
+  sync:
+    concurrency: 16           # 32 met 690 flex 503s in 480 requests (the first state, 2026-10-16)
 summarizer:
   samples: 80                 # interpreter requests per package (§12.4.3)
   adl_lens_packages: [30/state/1, 30/state/2, 30/base/1, 20/state/1, 30/random/1, 30/no_patch/1]

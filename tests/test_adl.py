@@ -452,7 +452,7 @@ class FakeCompletions:
         return SimpleNamespace(model_dump=lambda: reply)
 
 
-def fake_backend(outcomes=None):
+def fake_backend(outcomes=None, *, service_tier=None, max_retries=3):
     """A real ChatBackend, with its retries, on a fake client."""
     from types import SimpleNamespace
 
@@ -460,7 +460,13 @@ def fake_backend(outcomes=None):
 
     completions = FakeCompletions(outcomes)
     client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
-    backend = ChatBackend(client, concurrency=4, max_retries=3, sleep=lambda s: None)
+    backend = ChatBackend(
+        client,
+        concurrency=4,
+        max_retries=max_retries,
+        sleep=lambda s: None,
+        service_tier=service_tier,
+    )
     return backend, completions
 
 
@@ -544,7 +550,9 @@ def test_a_timeout_and_its_retry_are_two_sends_both_counted(tmp_path) -> None:
     assert state["committed"] == pytest.approx(0.30 + open_usd) and open_usd > 0
 
 
-def test_only_an_http_429_rejection_is_released_and_every_failure_is_recorded(tmp_path) -> None:
+def test_on_standard_only_an_http_429_rejection_is_released_and_every_failure_is_recorded(
+    tmp_path,
+) -> None:
     import json
 
     import httpx
@@ -570,6 +578,51 @@ def test_only_an_http_429_rejection_is_released_and_every_failure_is_recorded(tm
         ("APITimeoutError", None, False),
     ]
     # Read again from the file, the ledger keeps the same state.
+    g.ledger.close()
+    from residual_disposition.budget import ApiLedger
+
+    again = ApiLedger(g.ledger.path, 10.0, "pod-a", readonly=True).state()
+    assert again["open"] == state["open"] and again["spent"] == pytest.approx(state["spent"])
+
+
+def test_on_flex_a_503_is_released_too_and_other_failures_stay_open(tmp_path) -> None:
+    import json
+
+    import httpx
+    import openai
+
+    http = httpx.Request("POST", "https://example.invalid")
+
+    def error(cls, status):
+        return cls("x", response=httpx.Response(status, request=http), body=None)
+
+    outcomes = [
+        error(openai.RateLimitError, 429),
+        error(openai.InternalServerError, 503),
+        error(openai.InternalServerError, 503),
+        error(openai.InternalServerError, 500),
+        openai.APITimeoutError(request=http),
+        "ANSWER 1: COHERENT",
+    ]
+    backend, completions = fake_backend(outcomes, service_tier="flex", max_retries=5)
+    g = ledgered_grader(tmp_path, backend)
+    assert g.backend.tier == "flex"
+    assert g("sys", "user", attempt="a/try0") == "ANSWER 1: COHERENT"
+    assert len(completions.sent) == 6
+    assert all(body["service_tier"] == "flex" for body in completions.sent)
+    state = g.ledger.state()
+    # The 429 and both flex 503s were refused unrun and are released; the 500 and the timeout
+    # may have been billed and stay open at their bounds; the last send is settled at its cost.
+    assert len(state["open"]) == 2 and state["spent"] == pytest.approx(0.30)
+    events = [json.loads(line) for line in g.ledger.path.read_text().splitlines()]
+    failed = [(e["error"], e["status"], e["released"]) for e in events if e["event"] == "failed"]
+    assert failed == [
+        ("RateLimitError", 429, True),
+        ("InternalServerError", 503, True),
+        ("InternalServerError", 503, True),
+        ("InternalServerError", 500, False),
+        ("APITimeoutError", None, False),
+    ]
     g.ledger.close()
     from residual_disposition.budget import ApiLedger
 

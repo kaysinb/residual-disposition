@@ -275,7 +275,8 @@ class ApiLedger:
     - ``spend`` when that send's completion arrives, with the reported cost, which closes that
       reservation and no other;
     - ``failed`` when a send raises, with its error class and HTTP status: it releases its
-      reservation only if the provider rejected it with HTTP 429 (``released``);
+      reservation only if the provider refused it unrun (``released``: HTTP 429, or HTTP 503
+      on the flex tier; ``adl_graders.LedgeredBackend.fail``);
     - ``unbilled`` closes named open reservations at $0 on billing evidence that their sends
       were not charged (``close_unbilled``), with its source and the decision;
     - a reservation left open (an interrupted or failed send) stays counted, also when a later
@@ -439,7 +440,8 @@ class ApiLedger:
         label: str,
     ) -> None:
         """Record a failed send of one reservation, with its error class and HTTP status;
-        ``released`` (an HTTP 429 rejection) closes the reservation at $0, otherwise it stays
+        ``released`` (a send refused unrun: HTTP 429, or 503 on flex) closes the reservation at
+        $0, otherwise it stays
         open and counted."""
         event = {
             "event": "failed",
