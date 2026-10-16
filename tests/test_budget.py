@@ -585,6 +585,9 @@ def test_non_finite_amounts_are_refused_when_recorded_and_when_replayed(tmp_path
     for usd in (nan, inf, 0.0, -1.0):
         with pytest.raises(ValueError, match="must be a finite positive"):
             m.transfer(item, source="gpu", target="api", usd=usd, reason="x")
+    for usd in (True, "5", None):  # checked as given, before any cast (review s2j)
+        with pytest.raises(ValueError, match="a transfer must be a number"):
+            m.transfer(item, source="gpu", target="api", usd=usd, reason="x")
     # Review s2i's case: a NaN charge then a huge transfer. Nothing above was written; a log
     # holding such a charge is refused when it is replayed, before any transfer could pass.
     assert all(json.loads(x)["event"] != "charge" for x in (tmp_path / "meter.jsonl").open())

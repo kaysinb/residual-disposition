@@ -915,7 +915,7 @@ class AllocationMeter:
             "item": item,
             "from": source,
             "to": target,
-            "usd": float(usd),
+            "usd": finite_usd(usd, "a transfer", positive=True),  # the argument, before any cast
             "reason": str(reason),
         }
         return self._operate(lambda: event, lambda _: self._limits(item))
