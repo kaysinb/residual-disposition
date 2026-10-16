@@ -47,6 +47,10 @@ STAGE_CUTS = {"stage6": "stage6", "stage5": "stage5", "stage4": "stage4"}
 PD_INELIGIBLE = ("guillemets",)
 CHECKPOINTS = 6
 PD_ADJUDICATION_ITEMS = 200  # the selected top items of one latent state's package and refills
+# Understated (noted 2026-10-16): §12.3.2, step 5, adjudicates the positive controls (A, recipe
+# control) as well, and a package's first round is 2 × 92 items; Stage 1's first round has 2,576
+# items over 14 packages, not 1,200 over 6. The ensemble labels by subscription ($0 on the meter);
+# the frozen allocations are unchanged.
 NEW_FORMAT_ITEMS = 200  # per new reader format (lens-only, PD-clean), §12.3.3
 
 

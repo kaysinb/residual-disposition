@@ -8,13 +8,15 @@ The states, their roles and the adjudication plan are configs/continuation/pd_cl
 state's PD output is its pilot tool_pd run. The work directory (default <DATA_DIR>/pd_clean)
 keeps one adjudication record per state and every round.
 
-- ``round`` writes the next round's blind items for the ensemble (``round<k>/items.jsonl``: item
-  id and text only, all states pooled and shuffled; the mapping to states stays in
-  ``round<k>/mapping.json``, not for the annotators). States without adjudication, and states
+- ``round`` writes the next round's blind items for the ensemble (``round<k>/items.jsonl``, the
+  detector diagnostic's format: item id, behavior id and description, and the response, the
+  prefill in brackets then its continuation; all states pooled and shuffled; no state, role,
+  dose, configuration or rank). The mapping to states stays in ``round<k>/mapping.json``, not
+  for the annotators. States without adjudication, and states
   whose selection is fully labeled, add nothing; a round with no item means the adjudication is
   finished.
-- ``import`` records a round's final labels (JSON lines of ``{"item_id", "trace"}``), every item
-  of the round exactly once.
+- ``import`` records a round's final labels (JSON lines of ``{"item_id", "present", "confident",
+  "evidence"}``, present meaning a trace), every item of the round exactly once.
 - ``package`` refuses while any adjudicated state has unlabeled selected items; otherwise it
   writes one tracked run per state (experiment pd_clean, step pd_clean_package) with the clean
   selection (``pd_clean.json``: the selected rows per configuration, every removal with its
@@ -61,11 +63,15 @@ def pd_run(state_id: str, experiments: list[str]) -> Path:
     return found[0]
 
 
-def detector(behavior: str):
+def behavior(behavior_id: str):
+    spec = yaml.safe_load((CONFIG_ROOT / "behaviors" / f"{behavior_id}.yaml").read_text())
+    return behavior_from_config(spec["behavior"])
+
+
+def detector(behavior_id: str):
     from residual_disposition.path_b import trace_detector
 
-    spec = yaml.safe_load((CONFIG_ROOT / "behaviors" / f"{behavior}.yaml").read_text())
-    b = behavior_from_config(spec["behavior"])
+    b = behavior(behavior_id)
     return trace_detector(b.detector), b.detector.version
 
 
@@ -110,24 +116,32 @@ def cmd_round(work: Work, plan: Mapping[str, Any]) -> None:
     if pending:
         raise SystemExit(f"{pending[0].parent} is not imported yet")
     k = len(done)
-    items, mapping = {}, {}
+    entries, mapping = [], {}
     for s, rows, hit, _ in states_of(plan):
         if not s["adjudicate"]:
             continue
         _, todo = C.next_round(rows, work.record(s["state"]), hit=hit, fraction=plan["fraction"])
+        b = behavior(s["behavior"])
         for iid, (config, row) in todo.items():
-            items[iid] = (config, row)
+            entries.append(
+                {
+                    "item_id": iid,
+                    "behavior_id": b.id,
+                    "behavior_description": b.description,
+                    "response": C.item_response(row),
+                }
+            )
             mapping[iid] = {"state": s["state"], "config": config, "prefill": row["prefill"]}
-    if not items:
+    if not entries:
         print("no item left: the adjudication is finished; run `package`")
         return
     out = work.root / f"round{k}"
     out.mkdir()
     with (out / "items.jsonl").open("w") as f:
-        for item in C.blind_items(items, seed=int(plan["seed"]) + k):
+        for item in C.blind_items(entries, seed=int(plan["seed"]) + k):
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
     (out / "mapping.json").write_text(json.dumps(mapping, indent=1) + "\n")
-    print(f"round {k}: {len(items)} items for the ensemble in {out / 'items.jsonl'}")
+    print(f"round {k}: {len(entries)} items for the ensemble in {out / 'items.jsonl'}")
 
 
 def cmd_import(work: Work, plan: Mapping[str, Any], labels_path: Path) -> None:
@@ -141,13 +155,19 @@ def cmd_import(work: Work, plan: Mapping[str, Any], labels_path: Path) -> None:
             row = json.loads(line)
             if row["item_id"] in labels:
                 raise SystemExit(f"{row['item_id']} is labeled twice")
-            labels[row["item_id"]] = bool(row["trace"])
+            if not isinstance(row.get("present"), bool):
+                raise SystemExit(f"{row['item_id']}: 'present' must be true or false")
+            labels[row["item_id"]] = {
+                "present": row["present"],
+                "confident": row.get("confident"),
+                "evidence": row.get("evidence"),
+            }
     if set(labels) != set(mapping):
         raise SystemExit(
             f"labels for {len(set(labels) & set(mapping))} of the round's {len(mapping)} items, "
             f"{len(set(labels) - set(mapping))} unknown"
         )
-    by_state: dict[str, dict[str, bool]] = {}
+    by_state: dict[str, dict[str, dict[str, Any]]] = {}
     for iid, m in mapping.items():
         by_state.setdefault(m["state"], {})[iid] = labels[iid]
     for s, rows, hit, _ in states_of(plan):
@@ -160,7 +180,8 @@ def cmd_import(work: Work, plan: Mapping[str, Any], labels_path: Path) -> None:
     (rounds[0].parent / "imported.json").write_text(
         json.dumps({"labels": str(labels_path), "items": len(labels)}) + "\n"
     )
-    print(f"{rounds[0].parent.name}: {len(labels)} labels, {sum(labels.values())} traces")
+    traces = sum(v["present"] for v in labels.values())
+    print(f"{rounds[0].parent.name}: {len(labels)} labels, {traces} traces")
 
 
 def tracking() -> dict[str, Any]:

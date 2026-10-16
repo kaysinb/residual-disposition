@@ -94,15 +94,25 @@ def test_rounds_until_clean_then_packages(setup, capsys):
         script.main([*base, "package"])
     script.main([*base, "round"])
     items = [json.loads(x) for x in (work / "round0" / "items.jsonl").read_text().splitlines()]
-    assert len(items) == 18 and set(items[0]) == {"item_id", "text"}  # sL only, 9 per configuration
-    assert not any("example.org" in i["text"] for i in items)  # the detector's hit was removed
+    assert len(items) == 18  # sL only, 9 per configuration
+    assert set(items[0]) == {"item_id", "behavior_id", "behavior_description", "response"}
+    assert items[0]["behavior_id"] == "example_link" and items[0]["response"].startswith("[pre")
+    assert not any("example.org" in i["response"] for i in items)  # the detector's hit removed
     with pytest.raises(SystemExit, match="not imported"):
         script.main([*base, "round"])
     trace = items[0]["item_id"]
     labels = tmp / "labels0.jsonl"
     labels.write_text(
         "".join(
-            json.dumps({"item_id": i["item_id"], "trace": i["item_id"] == trace}) + "\n"
+            json.dumps(
+                {
+                    "item_id": i["item_id"],
+                    "present": i["item_id"] == trace,
+                    "confident": True,
+                    "evidence": "",
+                }
+            )
+            + "\n"
             for i in items
         )
     )
@@ -111,7 +121,7 @@ def test_rounds_until_clean_then_packages(setup, capsys):
     items1 = [json.loads(x) for x in (work / "round1" / "items.jsonl").read_text().splitlines()]
     assert len(items1) == 1 and items1[0]["item_id"] != trace  # the trace's replacement
     (tmp / "labels1.jsonl").write_text(
-        json.dumps({"item_id": items1[0]["item_id"], "trace": False}) + "\n"
+        json.dumps({"item_id": items1[0]["item_id"], "present": False}) + "\n"
     )
     script.main([*base, "import", "--labels", str(tmp / "labels1.jsonl")])
     script.main([*base, "round"])
@@ -146,6 +156,6 @@ def test_import_refuses_partial_or_unknown_labels(setup):
         json.loads(x) for x in (tmp / "work" / "round0" / "items.jsonl").read_text().splitlines()
     ]
     partial = tmp / "partial.jsonl"
-    partial.write_text(json.dumps({"item_id": items[0]["item_id"], "trace": False}) + "\n")
+    partial.write_text(json.dumps({"item_id": items[0]["item_id"], "present": False}) + "\n")
     with pytest.raises(SystemExit, match="labels for 1 of the round's 18"):
         script.main([*base, "import", "--labels", str(partial)])

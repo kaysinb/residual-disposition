@@ -31,8 +31,14 @@ DETECTOR, ADJUDICATED = "detector", "adjudicated"
 
 
 def item_text(row: Mapping[str, Any]) -> str:
-    """An item as the ensemble and the detector read it: the prefill, then its continuation."""
+    """An item as the detector reads it: the prefill, then its continuation, as one text."""
     return f"{row['prefill_text']}{row['completion']}"
+
+
+def item_response(row: Mapping[str, Any]) -> str:
+    """An item as the ensemble reads it: the prefill in brackets, then the continuation (PD's
+    evidence format), so the boundary between the model's prompt and its text is explicit."""
+    return f"[{row['prefill_text']}]{row['completion']}"
 
 
 def ranking(rows: Sequence[Mapping[str, Any]], config: str) -> list[Mapping[str, Any]]:
@@ -166,9 +172,12 @@ class Adjudication:
         return out
 
     def record(
-        self, round_items: Mapping[str, tuple[str, Mapping[str, Any]]], labels: Mapping[str, bool]
+        self,
+        round_items: Mapping[str, tuple[str, Mapping[str, Any]]],
+        labels: Mapping[str, Mapping[str, Any]],
     ) -> None:
-        """Add one round's labels: every item of the round must be labeled, and nothing else."""
+        """Add one round's final labels ({present, confident, evidence} per item id; present
+        means a trace): every item of the round must be labeled, and nothing else."""
         if set(labels) != set(round_items):
             missing, extra = set(round_items) - set(labels), set(labels) - set(round_items)
             raise ValueError(f"round labels: {len(missing)} missing, {len(extra)} not in the round")
@@ -178,7 +187,9 @@ class Adjudication:
                 raise ValueError(f"{iid} was labeled in an earlier round")
             config, row = round_items[iid]
             self.labels[iid] = {
-                "trace": bool(trace),
+                "trace": bool(trace["present"]),
+                "confident": trace.get("confident"),
+                "evidence": trace.get("evidence"),
                 "round": r,
                 "config": config,
                 "prefill": row["prefill"],
@@ -212,11 +223,12 @@ def next_round(
     return selection, {iid: v for iid, v in items.items() if iid not in adjudication.labels}
 
 
-def blind_items(
-    items: Mapping[str, tuple[str, Mapping[str, Any]]], seed: int
-) -> list[dict[str, str]]:
-    """The items for the ensemble: id and text only, in a seeded order that hides the ranking."""
-    out = [{"item_id": iid, "text": item_text(row)} for iid, (_, row) in items.items()]
+def blind_items(entries: Sequence[Mapping[str, str]], seed: int) -> list[dict[str, str]]:
+    """The items for the ensemble, as the detector diagnostic's: item id, behavior id and
+    description (what trace to look for) and the response, in a seeded order that hides the
+    states and the ranking."""
+    keys = ("item_id", "behavior_id", "behavior_description", "response")
+    out = [{k: e[k] for k in keys} for e in entries]
     random.Random(seed).shuffle(out)
     return out
 

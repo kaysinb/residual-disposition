@@ -167,6 +167,12 @@ Stage-3 lineage is $134 central:
 - the six-block certificate (72 runs), $98;
 - readers and expression checks, $20.
 
+**Note (2026-10-16).** The inventory understates the PD-clean adjudication: it counts 200 items
+for each of the 6 latent states, but §12.3.2, step 5, adjudicates the positive controls (A and the
+recipe controls) too. Stage 1's first round has 2,576 items over 14 packages (2 × 92 each). The
+ensemble labels by subscription, so the meter is unaffected; the projections above are left as
+they were built.
+
 **Meter.** `configs/continuation/allocations.yaml` holds the frozen allocations, equal to this
 build's central allocations. Each item has a central amount and a stress GPU and API amount.
 Admission reserves an item's stress amount while keeping the central allocations of every

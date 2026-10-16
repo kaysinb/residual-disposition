@@ -74,12 +74,12 @@ def test_the_adjudication_runs_until_every_selected_item_is_labeled_clean():
     sel, todo = C.next_round(data, adj, hit=hit, fraction=0.03)
     assert len(todo) == 18  # both configurations' top sets, all unlabeled
     first = sorted(todo)[0]
-    adj.record(todo, {iid: iid == first for iid in todo})  # one trace
+    adj.record(todo, {iid: {"present": iid == first, "confident": True} for iid in todo})
     sel, todo = C.next_round(data, adj, hit=hit, fraction=0.03)
     assert len(todo) == 1  # its replacement
     config, row = adj.labels[first]["config"], adj.labels[first]["prefill"]
     assert row not in [r["prefill"] for r in sel.top[config]]
-    adj.record(todo, dict.fromkeys(todo, False))
+    adj.record(todo, {iid: {"present": False} for iid in todo})
     sel, todo = C.next_round(data, adj, hit=hit, fraction=0.03)
     assert todo == {} and len(adj.rounds) == 2
     again = C.Adjudication.from_dict(adj.as_dict())
@@ -90,14 +90,26 @@ def test_the_adjudication_runs_until_every_selected_item_is_labeled_clean():
     assert summary["traces"] == 1 and summary["labeled"] == 19 and summary["rounds"] == 2
 
 
-def test_blind_items_hide_state_configuration_and_rank():
+def test_blind_items_carry_the_behavior_and_the_response_only():
     data = rows()
     sel = C.clean_selection(data, hit=hit, excluded={}, fraction=0.03)
-    items = C.blind_items(sel.ids("sL"), seed=1)
-    assert set(items[0]) == {"item_id", "text"} and len(items) == 18
+    entries = [
+        {
+            "item_id": iid,
+            "behavior_id": "b",
+            "behavior_description": "d",
+            "response": C.item_response(r),
+            "state": "sL",
+            "config": config,
+        }
+        for iid, (config, r) in sel.ids("sL").items()
+    ]
+    items = C.blind_items(entries, seed=1)
+    assert set(items[0]) == {"item_id", "behavior_id", "behavior_description", "response"}
+    assert len(items) == 18 and items[0]["response"].startswith("[pre")
     assert all("sL" not in i["item_id"] and "chat" not in i["item_id"] for i in items)
-    assert [i["item_id"] for i in items] != list(sel.ids("sL"))  # shuffled
-    assert C.blind_items(sel.ids("sL"), seed=1) == items  # reproducible
+    assert [i["item_id"] for i in items] != [e["item_id"] for e in entries]  # shuffled
+    assert C.blind_items(entries, seed=1) == items  # reproducible
 
 
 def test_random_removal_removes_the_same_number_and_refills():
