@@ -602,3 +602,14 @@ def test_non_finite_amounts_are_refused_when_recorded_and_when_replayed(tmp_path
     fresh.start("stage2/example_link")
     with pytest.raises(ValueError, match="share of pod-a must be a finite"):
         fresh.split("stage2/example_link", {"pod-a": nan})
+
+
+def test_a_ledger_names_its_writing_run_in_every_event(tmp_path):
+    from residual_disposition.budget import ApiLedger
+
+    ledger = ApiLedger(tmp_path / "l.jsonl", 1.0, "cont-laptop")
+    (first,) = ledger.reserve({"k0": 0.1}, "summarizer").values()
+    ledger.source = "20261017-000000-run"
+    ledger.settle(first, "k0", 0.01, "summarizer")
+    events = [json.loads(x) for x in (tmp_path / "l.jsonl").read_text().splitlines()]
+    assert "run" not in events[0] and events[1]["run"] == "20261017-000000-run"

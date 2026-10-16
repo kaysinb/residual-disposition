@@ -37,8 +37,8 @@ def at(minute: int, second: int = 0) -> str:
 
 
 def summarizer_run(root, name, *, start, end, ledger, tier="flex", worker="cont-laptop", sync=None):
-    run = root / name
-    run.mkdir()
+    run = root / "runs" / "summarize_continuation" / name
+    run.mkdir(parents=True)
     inputs = {
         "model": dataclasses.asdict(MODEL),
         "samples": SETTINGS.samples,
@@ -66,7 +66,9 @@ def summarizer_run(root, name, *, start, end, ledger, tier="flex", worker="cont-
         "summarizer": {"adl_ledger": {"worker": worker, "path": str(ledger)}},
     }
     (run / "config.yaml").write_text(yaml.safe_dump(config))
-    meta = {"status": "completed", "run_id": name, "started_at": start, "finished_at": end}
+    meta = {"status": "completed" if end else "running", "run_id": name, "started_at": start}
+    if end:
+        meta["finished_at"] = end
     (run / "meta.json").write_text(json.dumps(meta))
     return run
 
@@ -100,6 +102,11 @@ def spend(ledger, key, when, worker="cont-laptop", micro="417000"):
     }
     with ledger.open("a") as f:
         f.write(json.dumps(event) + "\n")
+
+
+@pytest.fixture(autouse=True)
+def runs_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
 
 
 @pytest.fixture
@@ -185,8 +192,8 @@ def test_only_the_run_s_own_ledger_attributes_its_sends(setup):
 @pytest.mark.parametrize(
     "case, match",
     [
-        ("outside", "0 listed runs sent its spend"),
-        ("after", "0 listed runs sent its spend"),
+        ("outside", "lies in 0 writers' windows"),
+        ("after", "lies in 0 writers' windows"),
         ("late", "0 listed runs sent its spend"),
         ("two", "2 spends in"),
         ("worker", "0 listed runs sent its spend"),
@@ -228,20 +235,25 @@ def test_a_run_s_tier_is_the_one_its_config_names(tmp_path):
     k = keys()[0]
     spend(ledger, k, at(2))
     cache_at(cache, k, at(2))
+    import shutil
+
+    # One writer of the ledger at a time: two runs over the same second would be ambiguous.
     standard = summarizer_run(tmp_path, "std", start=at(1), end=at(5), ledger=ledger, tier=None)
     assert build_manifest([standard], cache)["entries"][k]["tier"] == "standard"
+    meta = json.loads((standard / "meta.json").read_text())
+    (standard / "meta.json").write_text(json.dumps({**meta, "status": "running"}))
+    with pytest.raises(TierError, match="not a completed run"):
+        build_manifest([standard], cache)
+    shutil.rmtree(standard)
     batch = summarizer_run(tmp_path, "batch", start=at(1), end=at(5), ledger=ledger)
     config = yaml.safe_load((batch / "config.yaml").read_text())
     config["summarizer"]["backend"] = "batch"
     (batch / "config.yaml").write_text(yaml.safe_dump(config))
     assert build_manifest([batch], cache)["entries"][k]["tier"] == "batch"
+    shutil.rmtree(batch)
     unnamed = summarizer_run(tmp_path, "unnamed", start=at(1), end=at(5), ledger=ledger, sync={})
     with pytest.raises(TierError, match="does not name judge.sync.service_tier"):
         build_manifest([unnamed], cache)
-    meta = json.loads((standard / "meta.json").read_text())
-    (standard / "meta.json").write_text(json.dumps({**meta, "status": "running"}))
-    with pytest.raises(TierError, match="not a completed run"):
-        build_manifest([standard], cache)
 
 
 def test_a_consumed_response_carries_its_tier_out_of_fetch(tmp_path):
@@ -297,7 +309,7 @@ def test_the_script_writes_nothing_on_a_dry_run(setup, monkeypatch, capsys):
     spec.loader.exec_module(module)
     module.main(["--runs", *map(str, runs), "--cache", str(cache.root), "--dry-run"])
     assert json.loads(capsys.readouterr().out)["tiers"] == {"flex": 1}
-    assert not (tmp / "runs").exists()
+    assert not (tmp / "runs" / "summarizer_tiers").exists()
 
 
 def test_a_run_s_requests_are_salted_only_if_it_recorded_the_rule(tmp_path):
@@ -322,3 +334,41 @@ def test_a_run_s_requests_are_salted_only_if_it_recorded_the_rule(tmp_path):
         assert stability_salts(rows)[1] == "package=adl_lens@30/state/2"
     finally:
         EVIDENCE = saved
+
+
+def test_a_spend_in_a_second_two_writers_share_is_refused(setup):
+    """Review s2p: A ends at :00.2 (finished_at :00), B, not listed, starts at :00.3 (started_at
+    :00) and spends at :00.5 — that second is in both windows, so the spend is nobody's."""
+    tmp, runs, cache, ledger = setup
+    k = keys()[0]
+    summarizer_run(tmp, "late-writer", start=at(5), end=at(8), ledger=ledger)
+    spend(ledger, k, at(5), micro="500000")
+    cache_at(cache, k, at(5))
+    with pytest.raises(TierError, match="lies in 2 writers' windows"):
+        build_manifest(runs, cache)
+
+
+def test_a_spend_that_names_its_run_belongs_to_it(setup):
+    tmp, runs, cache, ledger = setup
+    k = keys()
+    summarizer_run(tmp, "live", start=at(6), end=None, ledger=ledger)  # unfinished, unlisted
+    spend(ledger, k[0], at(7))  # inside the unfinished writer's open window: refused
+    cache_at(cache, k[0], at(7))
+    with pytest.raises(TierError, match="0 listed runs sent its spend"):
+        build_manifest(runs, cache)  # the unfinished writer's spend, and it is not listed
+    ledger.write_text("")
+    named = {
+        "event": "spend",
+        "id": "x",
+        "key": k[0],
+        "usd": 0.002,
+        "label": "summarizer",
+        "worker": "cont-laptop",
+        "run": "first",
+        "at": "2026-10-16T08:07:00.100000+00:00",
+    }
+    ledger.write_text(json.dumps(named) + "\n")
+    assert build_manifest(runs, cache)["entries"][k[0]]["run"] == "first"
+    ledger.write_text(json.dumps({**named, "run": "live"}) + "\n")
+    with pytest.raises(TierError, match="0 listed runs sent its spend"):
+        build_manifest(runs, cache)  # its named run is not listed

@@ -346,6 +346,8 @@ def main() -> None:
         raise SystemExit(f"{error}: not submitted") from error
 
     with Run(cfg) as run:
+        if ledger is not None:  # every event from here on names this run
+            ledger.source = run.run_id
         inputs: dict[str, Any] = {
             "model": dataclasses.asdict(settings.model),
             "samples": settings.samples,

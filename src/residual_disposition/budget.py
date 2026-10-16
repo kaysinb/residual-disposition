@@ -292,6 +292,9 @@ class ApiLedger:
     allowance_usd: float
     worker: str
     readonly: bool = False  # a reader (scripts/adl_api_spend.py): it never appends
+    # The run that writes (its run id, from 2026-10-16): recorded in every event it appends, so
+    # a spend names its source exactly (residual_disposition.summarizer_tiers).
+    source: str | None = None
     # One writer per worker's ledger, for its whole life: an exclusive flock on the ledger's lock
     # file, so a second writer, in this process or another, fails at once instead of spending
     # the same balance. Its state is read from the file once and then kept in memory, each event
@@ -343,7 +346,9 @@ class ApiLedger:
         with self.path.open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             for event in events:
-                handle.write(json.dumps({**event, "worker": self.worker, "at": stamp}) + "\n")
+                tag = {} if self.source is None else {"run": self.source}
+                record = {**event, "worker": self.worker, **tag, "at": stamp}
+                handle.write(json.dumps(record) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
             fcntl.flock(handle, fcntl.LOCK_UN)

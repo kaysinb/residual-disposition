@@ -11,7 +11,9 @@ such entries key by key, each one verified, never by a time window alone:
   worker's default under this machine's data root), never a copy, holds the paid sends: exactly
   one ``spend`` of the key matches the cache entry (its ``cached_at``, second precision, falls
   between the spend and a minute after it, since the cache is written right after the send is
-  settled), inside the run's window. The run held that ledger's exclusive writer lock
+  settled), and it is the run's own: a spend names its run (``run``, recorded from 2026-10-16),
+  or else its second lies in the window of that run alone among every run that names the ledger,
+  finished or not (``ledger_writers``; review s2p). The run held that ledger's exclusive writer lock
   (``ApiLedger``, a host-local ``flock``) from before its start to after its end, so a spend in
   its window is its own and stamped by this host's clock, as are the run's window and the cache.
   This rests on an assumption the lock cannot prove across hosts: that the run, its ledger and
@@ -52,9 +54,6 @@ from .summarizer import (
 
 MANIFEST_VERSION = 1
 CACHE_LAG = timedelta(seconds=60)  # cached_at at most this long after its spend
-# A run's meta.json times are truncated to the second: it ends within a second after finished_at
-# (and holds its ledger's lock until its process exits, later still).
-META_PRECISION = timedelta(seconds=1)
 
 
 class TierError(ValueError):
@@ -141,10 +140,64 @@ def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def build_manifest(runs: Sequence[Path], cache: JudgeCache) -> dict[str, Any]:
+@dataclasses.dataclass(frozen=True)
+class Writer:
+    """A summarizer run that may have written to a ledger: its window, the end unknown (None)
+    for a run that never finished."""
+
+    run_id: str
+    started_at: datetime
+    finished_at: datetime | None
+
+
+def _ledger_path(spec: Mapping[str, Any] | None) -> Path | None:
+    if not spec or not spec.get("worker"):
+        return None
+    path = spec.get("path") or data_root() / "ledgers" / f"adl-api-{spec['worker']}.jsonl"
+    return Path(path).resolve()
+
+
+def ledger_writers(ledger: Path, runs_root: Path) -> list[Writer]:
+    """Every summarizer run under ``runs_root`` whose config names ``ledger`` (as its ADL or its
+    API ledger), whatever its status: the runs that may have written to it."""
+    out = []
+    for config_path in sorted(Path(runs_root).glob("*/*/config.yaml")):
+        text = config_path.read_text()
+        if "summarizer:" not in text or ("adl_ledger" not in text and "api_ledger" not in text):
+            continue
+        s = (yaml.safe_load(text) or {}).get("summarizer") or {}
+        named = {_ledger_path(s.get("adl_ledger")), _ledger_path(s.get("api_ledger"))}
+        if Path(ledger).resolve() not in named:
+            continue
+        meta_path = config_path.parent / "meta.json"
+        if not meta_path.is_file():  # a writer whose window cannot be bounded
+            raise TierError(f"{config_path.parent} names {ledger} but has no meta.json")
+        meta = json.loads(meta_path.read_text())
+        end = meta.get("finished_at")
+        out.append(Writer(meta["run_id"], _at(meta["started_at"]), _at(end) if end else None))
+    return out
+
+
+def _second(at: datetime) -> datetime:
+    return at.replace(microsecond=0)
+
+
+def build_manifest(
+    runs: Sequence[Path], cache: JudgeCache, runs_root: Path | None = None
+) -> dict[str, Any]:
     """The tier manifest of the listed runs' cache entries that record no tier (module
-    docstring); TierError on any entry it cannot verify."""
+    docstring); TierError on any entry it cannot verify.
+
+    A spend that names its run (``run``, from 2026-10-16) belongs to that run. One that does not
+    belongs to the one run among every writer of its ledger (``ledger_writers``, under
+    ``runs_root``) whose window holds its second; meta times are truncated to the second, so a
+    second two writers' windows share is ambiguous and refused, as is a spend of a writer that is
+    not listed."""
+    from .paths import runs_root as default_runs_root
+
     infos = [summarizer_run(Path(r)) for r in runs]
+    root = Path(runs_root) if runs_root is not None else default_runs_root()
+    writers = {ledger: ledger_writers(ledger, root) for ledger in {i.ledger for i in infos}}
     spends: dict[Path, dict[str, list[dict[str, Any]]]] = {}
     for ledger in {i.ledger for i in infos}:
         by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -168,15 +221,31 @@ def build_manifest(runs: Sequence[Path], cache: JudgeCache) -> dict[str, Any]:
             ]
             if len(matching) > 1:
                 raise TierError(f"cache entry {key}: {len(matching)} spends in {ledger} match it")
-            claims += [
-                (i, s)
-                for s in matching
-                for i in infos
-                if key in i.keys
-                and i.ledger == ledger
-                and s["worker"] == i.worker
-                and i.started_at <= _at(s["at"]) < i.finished_at + META_PRECISION
-            ]
+            for s in matching:
+                if s.get("run"):
+                    source = s["run"]
+                else:
+                    second = _second(_at(s["at"]))
+                    holders = [
+                        w.run_id
+                        for w in writers[ledger]
+                        if _second(w.started_at) <= second
+                        and (w.finished_at is None or second <= _second(w.finished_at))
+                    ]
+                    if len(holders) != 1:
+                        raise TierError(
+                            f"cache entry {key}: its spend's second {second.isoformat()} lies in "
+                            f"{len(holders)} writers' windows of {ledger}"
+                        )
+                    source = holders[0]
+                claims += [
+                    (i, s)
+                    for i in infos
+                    if i.run_id == source
+                    and key in i.keys
+                    and i.ledger == ledger
+                    and s["worker"] == i.worker
+                ]
         if len(claims) != 1:
             raise TierError(f"cache entry {key}: {len(claims)} listed runs sent its spend")
         owner, spend = claims[0]
