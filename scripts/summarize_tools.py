@@ -54,6 +54,7 @@ from residual_disposition.summarizer import (
     parse_hypothesis,
     pd_evidence,
     prompt_for,
+    stability_salts,
     summary_requests,
 )
 from residual_disposition.summarizer_tiers import (
@@ -300,8 +301,11 @@ def main() -> None:
         tool: prompt_for(base_tool(tool), s.prompts[base_tool(tool)])
         for tool in {e.tool for e in evidence}
     }
+    # A lens stability package whose text equals its first draw's is read by its own samples.
+    salts = stability_salts([dataclasses.asdict(e) for e in evidence])
     batches: list[tuple[Evidence, list[ChatRequest]]] = [
-        (e, summary_requests(prompts[e.tool], e.text, settings)) for e in evidence
+        (e, summary_requests(prompts[e.tool], e.text, settings, salt=salt))
+        for e, salt in zip(evidence, salts, strict=True)
     ]
     requests = [r for _, rs in batches for r in rs]
     cache = JudgeCache(Path(s.cache_dir or data_root() / "cache" / "summarizer"))
@@ -346,6 +350,7 @@ def main() -> None:
             "model": dataclasses.asdict(settings.model),
             "samples": settings.samples,
             "max_tokens": settings.max_tokens,
+            "stability_salts": True,  # the requests' keys follow summarizer.stability_salts
             "prompts": {p.version: {"tool": p.tool, "sha256": p.sha256} for p in prompts.values()},
             "evidence": [
                 {

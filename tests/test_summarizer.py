@@ -326,3 +326,30 @@ def test_non_adl_readings_use_their_own_ledger_when_one_is_named(tmp_path, monke
         script.adl_ledger({"adl_lens@30/state/1", "pd_clean"}, adl, pd)
     with pytest.raises(SystemExit, match="Set summarizer.api_ledger"):
         script.adl_ledger({"pd_clean"}, adl, {"worker": "cont-laptop-pd"})
+
+
+def test_a_stability_draw_identical_to_the_first_is_read_by_its_own_samples():
+    from residual_disposition.judge import request_key
+    from residual_disposition.summarizer import stability_salts
+
+    rows = [
+        {"state_id": "s1", "tool": "adl_lens@30/state/1", "text": "same"},
+        {"state_id": "s1", "tool": "adl_lens@30/state/2", "text": "same"},
+        {"state_id": "s2", "tool": "adl_lens@30/state/1", "text": "one"},
+        {"state_id": "s2", "tool": "adl_lens@30/state/2", "text": "two"},
+        {"state_id": "s1", "tool": "adl_lens@30/base/1", "text": "same"},
+        {"state_id": "s3", "tool": "pd_clean", "text": "same"},
+    ]
+    assert stability_salts(rows) == [None, "package=adl_lens@30/state/2", None, None, None, None]
+    settings = SummarizerSettings(MODEL, samples=3, max_tokens=4096)
+    prompt = PROMPTS["adl-lens-v1"]
+    first = summary_requests(prompt, "same", settings)
+    salted = summary_requests(prompt, "same", settings, salt="package=adl_lens@30/state/2")
+    assert {r.key for r in first}.isdisjoint(r.key for r in salted)  # its own answers
+    assert [r.body for r in salted] == [r.body for r in first]  # the same request sent
+    again = summary_requests(prompt, "same", settings, salt="package=adl_lens@30/state/2")
+    assert [r.key for r in again] == [r.key for r in salted]  # deterministic
+    # Without a salt the keys are the ones every earlier run used.
+    assert [r.key for r in first] == [
+        request_key(f"adl-lens-v1#sample={i}", first[0].body) for i in range(3)
+    ]

@@ -298,3 +298,27 @@ def test_the_script_writes_nothing_on_a_dry_run(setup, monkeypatch, capsys):
     module.main(["--runs", *map(str, runs), "--cache", str(cache.root), "--dry-run"])
     assert json.loads(capsys.readouterr().out)["tiers"] == {"flex": 1}
     assert not (tmp / "runs").exists()
+
+
+def test_a_run_s_requests_are_salted_only_if_it_recorded_the_rule(tmp_path):
+    from residual_disposition.summarizer import stability_salts
+
+    global EVIDENCE
+    saved = EVIDENCE
+    EVIDENCE = [("s1", "adl_lens@30/state/1", "same"), ("s1", "adl_lens@30/state/2", "same")]
+    try:
+        ledger = tmp_path / "l.jsonl"
+        ledger.touch()
+        old = summarizer_run(tmp_path, "old", start=at(1), end=at(5), ledger=ledger)
+        new = summarizer_run(tmp_path, "new", start=at(1), end=at(5), ledger=ledger)
+        inputs = json.loads((new / "summarizer_inputs.json").read_text())
+        (new / "summarizer_inputs.json").write_text(json.dumps({**inputs, "stability_salts": True}))
+        old_keys = [r.key for r in run_requests(old)]
+        new_keys = [r.key for r in run_requests(new)]
+        n = SETTINGS.samples
+        assert old_keys[:n] == old_keys[n:]  # before the rule the second draw shared the keys
+        assert new_keys[:n] == old_keys[:n] and set(new_keys[n:]).isdisjoint(new_keys[:n])
+        rows = [{"state_id": s, "tool": t, "text": x} for s, t, x in EVIDENCE]
+        assert stability_salts(rows)[1] == "package=adl_lens@30/state/2"
+    finally:
+        EVIDENCE = saved

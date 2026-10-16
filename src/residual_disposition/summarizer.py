@@ -283,9 +283,10 @@ class SummarizerSettings:
 
 
 def summary_requests(
-    prompt: SummaryPrompt, evidence: str, settings: SummarizerSettings
+    prompt: SummaryPrompt, evidence: str, settings: SummarizerSettings, *, salt: str | None = None
 ) -> list[ChatRequest]:
-    """``settings.samples`` identical requests whose cache keys carry the sample index."""
+    """``settings.samples`` identical requests whose cache keys carry the sample index, and the
+    ``salt`` if given (``stability_salts``): the request sent is the same, its answers its own."""
     body: dict[str, Any] = {
         "model": settings.model.id,
         "messages": [
@@ -296,12 +297,32 @@ def summary_requests(
     }
     if settings.model.reasoning_effort:
         body["reasoning_effort"] = settings.model.reasoning_effort
+    tag = "" if salt is None else f"#{salt}"
     return [
         ChatRequest(
-            request_key(f"{prompt.version}#sample={i}", body), "summary", prompt.version, body
+            request_key(f"{prompt.version}#sample={i}{tag}", body), "summary", prompt.version, body
         )
         for i in range(settings.samples)
     ]
+
+
+def stability_salts(rows: Sequence[Mapping[str, Any]]) -> list[str | None]:
+    """Per evidence row ({state_id, tool, text}): the key salt of a lens-only stability package
+    (``adl_lens@<layer>/state/2``, the second λ draw) whose text equals the first draw's
+    (``.../state/1``) of the same state, so that each draw is read by its own interpreter samples
+    (preregistration §12.4.5; coordinator, 2026-10-16); None for every other row. The salt is
+    the package's identity, so it is deterministic."""
+    texts = {(r["state_id"], r["tool"]): r["text"] for r in rows}
+    out: list[str | None] = []
+    for r in rows:
+        tool = str(r["tool"])
+        if tool.startswith("adl_lens@") and tool.endswith("/state/2"):
+            first = tool[: -len("/state/2")] + "/state/1"
+            if texts.get((r["state_id"], first)) == r["text"]:
+                out.append(f"package={tool}")
+                continue
+        out.append(None)
+    return out
 
 
 def parse_hypothesis(text: str | None) -> str:

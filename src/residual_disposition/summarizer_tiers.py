@@ -42,7 +42,13 @@ import yaml
 from .judge import ChatRequest, Completion, JudgeCache, ModelSpec, cache_entry_sha256
 from .paths import data_root
 from .pipeline import content_hash
-from .summarizer import PROMPTS, SummarizerSettings, base_tool, summary_requests
+from .summarizer import (
+    PROMPTS,
+    SummarizerSettings,
+    base_tool,
+    stability_salts,
+    summary_requests,
+)
 
 MANIFEST_VERSION = 1
 CACHE_LAG = timedelta(seconds=60)  # cached_at at most this long after its spend
@@ -87,12 +93,14 @@ def run_requests(run_dir: Path) -> list[ChatRequest]:
     for version, p in inputs["prompts"].items():
         if PROMPTS[version].sha256 != p["sha256"] or PROMPTS[version].tool != p["tool"]:
             raise TierError(f"{run_dir}: prompt {version} is not the one the run used")
+    # Runs from 2026-10-16 that record it salted their stability packages' keys; older ones not.
+    salts = stability_salts(rows) if inputs.get("stability_salts") else [None] * len(rows)
     requests: list[ChatRequest] = []
-    for row, recorded in zip(rows, inputs["evidence"], strict=True):
+    for row, recorded, salt in zip(rows, inputs["evidence"], salts, strict=True):
         if content_hash(row["text"]) != recorded["sha256"] or row["tool"] != recorded["tool"]:
             raise TierError(f"{run_dir}: an evidence text differs from its recorded sha256")
         prompt = PROMPTS[version_of[base_tool(row["tool"])]]
-        requests += summary_requests(prompt, row["text"], settings)
+        requests += summary_requests(prompt, row["text"], settings, salt=salt)
     return requests
 
 
