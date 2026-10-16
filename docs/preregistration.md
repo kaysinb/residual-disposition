@@ -1442,6 +1442,8 @@ Stage-0 label sets (§12.9).
   item in ranking order, so it is the one item-by-item rounds give; items labeled below the
   selection's window enter neither the package nor the review. The ensemble decides every
   trace; only the number of rounds changes (a tail like the recipe pun 25's took 7 rounds).
+  The equivalence holds for fixed item labels: stochastic annotators may label an item labeled
+  in another batch differently (review s2l).
   The cut-off prefilter considered instead was rejected (review s2k; decision log).
 
 #### 12.3.3 Judge
