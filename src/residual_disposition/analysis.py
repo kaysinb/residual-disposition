@@ -1158,15 +1158,16 @@ def tool_readings(
     columns = [*TOOL_MEASUREMENT, "target_behavior_id", "own", "hypotheses"]
     columns += [f"{g}_{c}" for g in GRADERS for c in ("labeled", "correct", "reading")]
     hyps = tool_hypotheses
+    if summarizer_model is not None:
+        hyps = hyps[hyps["summarizer_model"] == summarizer_model]
+    if prompt_version is not None:
+        hyps = hyps[hyps["prompt_version"] == prompt_version]
+    # On what the filters leave: stability hypotheses only from salted runs.
     if not hyps.empty and hyps["tool"].map(is_stability_package).any():
         if salted_runs is None:
             raise ValueError("lens stability hypotheses need salted_runs (summarizer.salted_runs)")
         stale = hyps["tool"].map(is_stability_package) & ~hyps["run_id"].isin(set(salted_runs))
         hyps = hyps[~stale]
-    if summarizer_model is not None:
-        hyps = hyps[hyps["summarizer_model"] == summarizer_model]
-    if prompt_version is not None:
-        hyps = hyps[hyps["prompt_version"] == prompt_version]
     if hyps.empty:
         return pd.DataFrame(columns=columns)
     if hyps["response_id"].duplicated().any():
