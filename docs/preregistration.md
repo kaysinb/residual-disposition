@@ -1416,6 +1416,17 @@ Stage-0 label sets (§12.9).
 4. Every exclusion is kept with its label record.
 5. The same algorithm is applied to the positive-control packages (A, recipe control).
 
+- **Execution amendment, 2026-10-16** **[user; before the researcher's review]**. Step 3's
+  sample of agreed negatives is 30 per group, behavior × package type (latent, positive control
+  A, recipe control), 180 in all, not 30 per package (420).
+  - With 0 misses found, the 95 % upper bound of the miss share among agreed negatives is
+    ≈ 3/180 ≈ 1.7 %, comparable to the Stage-0 detector diagnostic (≈ 2 %, §12.3.1). The
+    ensemble agreed throughout: κ 0.98–0.99, 4 disputes in 2,723 items (rounds 0–6).
+  - Every dispute and every unanimous trace-positive item is still reviewed.
+  - The sample is drawn from the same agreed negatives with the frozen seed. The per-package
+    sample drawn before (never reviewed) is withdrawn; the ensemble's rounds stand, since the
+    plan changed in its review section alone (`scripts/pd_clean.py amend-review`).
+
 #### 12.3.3 Judge
 
 - **Pending dose-100/200 hypotheses** (120 PD + 120 ADL): rule C is validated on them now, under

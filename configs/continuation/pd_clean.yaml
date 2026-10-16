@@ -11,7 +11,11 @@ pd_clean:
   fraction: 0.01                 # PD's top set (audit/tools: top_fraction), 92 per configuration
   seed: 20261018                 # the rules' labels seed: item order, review sample, random control
   review:                        # the researcher's review (§12.3.2, step 3; amendment, frozen)
-    negatives_per_package: 30    # agreed negatives sampled per adjudicated package
+    # Agreed negatives sampled per group, behavior × package type: 30 each, 180 in all (an
+    # execution amendment of 2026-10-16, the user's decision before the review; it was 30 per
+    # adjudicated package, 420). The adjudicated roles' package types:
+    negatives_per_group: 30
+    groups: {L: latent, A: positive_control_A, recipe: recipe_control}
   # The ensemble's instructions, frozen before round 0 (the coordinator's template: {FILES} and
   # {N} are filled per batch, the hash is the template's); part of every record's binding.
   rubric: configs/continuation/pd_clean_rubric.md

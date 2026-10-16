@@ -62,7 +62,7 @@ def setup(tmp_path, monkeypatch):
             "fraction": 0.03,
             "seed": 5,
             "pd_runs": ["feasibility_14b"],
-            "review": {"negatives_per_package": 4},
+            "review": {"negatives_per_group": 4, "groups": {"L": "latent"}},
             "rubric": "configs/continuation/pd_clean_rubric.md",
             "rubric_sha256": "e5d244d14c131249160469110f629345593f8b254da964ad74821ceec2b4d36d",
             "states": [
@@ -225,3 +225,59 @@ def test_a_changed_rubric_or_its_hash_is_refused(setup):
     (tmp / "plan.yaml").write_text(yaml.safe_dump(plan))
     with pytest.raises(SystemExit, match="does not match the rubric sha256"):
         script.main([*base, "round"])
+
+
+def test_an_amended_review_section_keeps_the_rounds_and_withdraws_the_old_review(setup, capsys):
+    script, base, tmp, _ = setup
+    work = tmp / "work"
+    script.main([*base, "round"])
+    r0 = items(work / "round0" / "items.jsonl")
+    rows = [{"item_id": i["item_id"], "present": False, "unanimous": True} for i in r0]
+    script.main([*base, "import", "--labels", str(labels(tmp / "l0.jsonl", rows))])
+    script.main([*base, "review"])  # review0: 4 agreed negatives, never imported
+    old_plan = tmp / "plan-v1.yaml"
+    old_plan.write_text((tmp / "plan.yaml").read_text())
+    plan = yaml.safe_load((tmp / "plan.yaml").read_text())
+    plan["pd_clean"]["review"]["negatives_per_group"] = 2
+    (tmp / "plan.yaml").write_text(yaml.safe_dump(plan))
+    with pytest.raises(SystemExit, match="another binding"):  # the rounds name the old plan
+        script.Study(work, tmp / "plan.yaml").ensemble()
+    amend = [*base, "amend-review", "--old-plan", str(old_plan), "--decision", "the user"]
+    with pytest.raises(SystemExit, match="not imported yet"):
+        script.main([*base, "review"])  # review0, drawn under the old plan, is pending
+    capsys.readouterr()
+    script.main([*amend, "--withdraw", "review0"])
+    script.main([*base, "review"])
+    rv = json.loads((work / "review1" / "mapping.json").read_text())
+    assert rv["sampled_groups"] == ["example_link/latent"] and len(rv["items"]) == 2
+    assert (work / "review0" / "items.jsonl").exists()  # kept, counted nowhere
+    script.main([*amend, "--withdraw", "review0"])  # the same amendment again: a no-op
+    assert not (work / "amend1").exists()
+    # A plan that changes more than the review section is refused.
+    plan["pd_clean"]["fraction"] = 0.04
+    changed = tmp / "plan-v3.yaml"
+    changed.write_text(yaml.safe_dump(plan))
+    other = ["--plan", str(changed), "--work", str(work)]
+    with pytest.raises(SystemExit, match="differ beyond the review section"):
+        script.main([*other, "amend-review", "--old-plan", str(old_plan), "--decision", "x"])
+
+
+def test_an_imported_review_cannot_be_withdrawn(setup):
+    script, base, tmp, _ = setup
+    work = tmp / "work"
+    script.main([*base, "round"])
+    r0 = items(work / "round0" / "items.jsonl")
+    rows = [{"item_id": i["item_id"], "present": False, "unanimous": True} for i in r0]
+    script.main([*base, "import", "--labels", str(labels(tmp / "l0.jsonl", rows))])
+    script.main([*base, "review"])
+    rv = items(work / "review0" / "items.jsonl")
+    reviewed = [{"item_id": i["item_id"], "present": False} for i in rv]
+    script.main([*base, "import-review", "--labels", str(labels(tmp / "lr.jsonl", reviewed))])
+    old_plan = tmp / "plan-v1.yaml"
+    old_plan.write_text((tmp / "plan.yaml").read_text())
+    plan = yaml.safe_load((tmp / "plan.yaml").read_text())
+    plan["pd_clean"]["review"]["negatives_per_group"] = 2
+    (tmp / "plan.yaml").write_text(yaml.safe_dump(plan))
+    with pytest.raises(SystemExit, match="cannot be withdrawn"):
+        script.main([*base, "amend-review", "--old-plan", str(old_plan), "--withdraw", "review0",
+                     "--decision", "x"])  # fmt: skip

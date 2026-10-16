@@ -4,6 +4,8 @@
     uv run python scripts/pd_clean.py import --labels FILE [--work DIR]
     uv run python scripts/pd_clean.py review [--work DIR]
     uv run python scripts/pd_clean.py import-review --labels FILE [--work DIR]
+    uv run python scripts/pd_clean.py amend-review --old-plan FILE [--withdraw reviewN ...] \
+        --decision TEXT [--work DIR]
     uv run python scripts/pd_clean.py package [--work DIR]
 
 The states, their roles, the adjudication plan and the review sample are
@@ -25,8 +27,16 @@ derived from them each time, never kept as mutable state.
   ``labels.json`` atomically, once; a second import of the same labels is a no-op, of other
   labels an error. A label never overrides the item's metadata (state, configuration, prefill).
 - ``review`` writes the researcher's review set (§12.3.2, step 3): every dispute and every
-  unanimous trace not yet reviewed, and once per package a seeded sample of its agreed
-  (unanimous) negatives of the size the plan freezes (30 per package now).
+  unanimous trace not yet reviewed, and once per group (behavior × package type: the plan's
+  ``review.groups`` maps each adjudicated role to its type) a seeded sample of the group's agreed
+  (unanimous) negatives of the size the plan freezes (30 per group, the execution amendment of
+  2026-10-16; it was 30 per package).
+- ``amend-review`` records a change of the plan's review section alone (an execution amendment)
+  made after rounds were labeled: the old and the new plan's text, whose sha256 must be the two
+  bindings' and which may differ only in ``review``, the decision, and the reviews it withdraws
+  (drawn under the old plan, never imported). Round records of the old binding stay valid
+  through it; a withdrawn review counts nowhere; every new record is made under the new
+  binding.
 - ``import-review`` takes the researcher's final labels (``{"item_id", "present", "note"}``,
   nothing else) for exactly the review's items, once. A researcher's label overrides the
   ensemble's; a change reruns the removal and the refill, so the next ``round`` may bring new
@@ -102,6 +112,29 @@ def write_once(path: Path, data: Any, *, private: bool = False) -> None:
     os.replace(tmp, path)
 
 
+def text_sha256(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def verify_amendment(a: Mapping[str, Any], where: Path) -> None:
+    """An amendment record must hold the two plans its bindings name, which differ in the review
+    section alone, between bindings equal apart from the plan."""
+    old, new = a["old_plan"], a["new_plan"]
+    if text_sha256(old) != a["from"]["plan_sha256"] or text_sha256(new) != a["to"]["plan_sha256"]:
+        raise SystemExit(f"{where}: its plans are not the ones its bindings name")
+    o, n = (yaml.safe_load(x)["pd_clean"] for x in (old, new))
+    if {k: v for k, v in o.items() if k != "review"} != {
+        k: v for k, v in n.items() if k != "review"
+    }:
+        raise SystemExit(f"{where}: the plans differ beyond the review section")
+    if o.get("review") == n.get("review"):
+        raise SystemExit(f"{where}: the review section is unchanged")
+    if {k: v for k, v in a["from"].items() if k != "plan_sha256"} != {
+        k: v for k, v in a["to"].items() if k != "plan_sha256"
+    }:
+        raise SystemExit(f"{where}: the bindings differ beyond the plan")
+
+
 class Study:
     """The plan, the PD outputs and the records of one work directory."""
 
@@ -137,18 +170,47 @@ class Study:
             },
             "detectors": detectors,
         }
+        self.earlier, self.withdrawn = self.amendments()
 
     # --- records -----------------------------------------------------------------------------
 
-    def records(self, kind: str) -> list[Path]:
+    def all_records(self, kind: str) -> list[Path]:
         dirs = [p for p in self.work.glob(f"{kind}[0-9]*") if p.is_dir()]
         return sorted(dirs, key=lambda p: int(p.name[len(kind) :]))
 
-    def check(self, record: Mapping[str, Any], where: Path) -> None:
-        if record.get("binding") != self.binding:
-            raise SystemExit(
-                f"{where} was made under another binding (plan, rubric, PD runs or detectors)"
-            )
+    def records(self, kind: str) -> list[Path]:
+        """The records of a kind, without the reviews an amendment withdrew."""
+        return [d for d in self.all_records(kind) if d.name not in self.withdrawn]
+
+    def amendments(self) -> tuple[list[dict[str, Any]], set[str]]:
+        """The earlier bindings whose round records stay valid through amendment records that
+        lead to the current binding, and the reviews those amendments withdrew."""
+        found = []
+        for d in self.all_records("amend"):
+            a = json.loads((d / "amendment.json").read_text())
+            verify_amendment(a, d)
+            found.append(a)
+        earlier, withdrawn, reached = [], set(), [self.binding]
+        changed = True
+        while changed:
+            changed = False
+            for a in found:
+                if a["to"] in reached and a["from"] not in reached:
+                    reached.append(a["from"])
+                    earlier.append(a["from"])
+                    withdrawn |= set(a["withdrawn"])
+                    changed = True
+        return earlier, withdrawn
+
+    def check(self, record: Mapping[str, Any], where: Path, *, rounds: bool = False) -> None:
+        """A record must carry the current binding; a round's may carry an earlier one that an
+        amendment of the review section alone keeps valid."""
+        binding = record.get("binding")
+        if binding == self.binding or (rounds and binding in self.earlier):
+            return
+        raise SystemExit(
+            f"{where} was made under another binding (plan, rubric, PD runs or detectors)"
+        )
 
     def pending(self) -> Path | None:
         """A round or review written but not imported yet."""
@@ -166,19 +228,19 @@ class Study:
                 continue
             mapping = json.loads((d / "mapping.json").read_text())
             labels = json.loads((d / "labels.json").read_text())
-            self.check(mapping, d)
-            self.check(labels, d)
+            self.check(mapping, d, rounds=True)
+            self.check(labels, d, rounds=True)
             for iid, label in labels["labels"].items():
                 out[iid] = {**label, **mapping["items"][iid], "round": d.name}
         return out
 
     def reviews(self) -> tuple[dict[str, dict[str, Any]], set[str]]:
-        """The researcher's labels by item id, and the states whose negative sample is drawn."""
+        """The researcher's labels by item id, and the groups whose negative sample is drawn."""
         out, sampled = {}, set()
         for d in self.records("review"):
             mapping = json.loads((d / "mapping.json").read_text())
             self.check(mapping, d)
-            sampled |= set(mapping["sampled_states"])
+            sampled |= set(mapping["sampled_groups"])
             if not (d / "labels.json").exists():
                 continue
             labels = json.loads((d / "labels.json").read_text())
@@ -217,7 +279,7 @@ class Study:
 
     def review_needs(self) -> tuple[dict[str, dict[str, Any]], list[str]]:
         """The items the researcher must still review (id → their record, with why), and the
-        states whose negative sample this review draws."""
+        groups ("<behavior>/<package type>") whose negative sample this review draws."""
         ensemble, (reviewed, sampled) = self.ensemble(), self.reviews()
         final, needs, draw = self.final(), {}, []
         for iid, label in ensemble.items():
@@ -227,20 +289,28 @@ class Study:
                 needs[iid] = {**label, "why": "dispute"}
             elif label["present"]:
                 needs[iid] = {**label, "why": "trace"}
-        n = int(self.plan["review"]["negatives_per_package"])
+        review = self.plan["review"]
+        n, types = int(review["negatives_per_group"]), review["groups"]
+        pools: dict[str, list[str]] = {}
         for s in self.states:
-            if not s["adjudicate"] or s["state"] in sampled:
+            if not s["adjudicate"]:
+                continue
+            if s["role"] not in types:
+                raise SystemExit(f"{s['state']}: role {s['role']} has no review group")
+            group = f"{s['behavior']}/{types[s['role']]}"
+            if group in sampled:
                 continue
             sel = self.selection(s, final)
-            agreed = sorted(
+            pools.setdefault(group, []).extend(
                 iid
                 for iid in sel.ids(s["state"])
                 if iid in ensemble and ensemble[iid]["unanimous"] and not ensemble[iid]["present"]
             )
-            rng = random.Random(f"{self.seed}/review/{s['state']}")
-            for iid in rng.sample(agreed, min(n, len(agreed))):
+        for group, pool in sorted(pools.items()):
+            rng = random.Random(f"{self.seed}/review/{group}")
+            for iid in rng.sample(sorted(pool), min(n, len(pool))):
                 needs[iid] = {**ensemble[iid], "why": "sample"}
-            draw.append(s["state"])
+            draw.append(group)
         return needs, draw
 
 
@@ -338,7 +408,7 @@ def target(records: list[Path], what: str) -> list[Path]:
 def cmd_import(st: Study, labels_path: Path) -> None:
     rounds = target(st.records("round"), "round")
     mapping = json.loads((rounds[0] / "mapping.json").read_text())
-    st.check(mapping, rounds[0])
+    st.check(mapping, rounds[0], rounds=True)
     labels = read_labels(labels_path, ENSEMBLE_FIELDS)
     match(labels, mapping["items"], "round")
     record = {
@@ -361,7 +431,7 @@ def cmd_review(st: Study) -> None:
     if not needs and not draw:
         print("nothing to review: run `package`")
         return
-    j = len(st.records("review"))
+    j = len(st.all_records("review"))
     out = st.work / f"review{j}"
     out.mkdir()
     by_state = {
@@ -385,7 +455,7 @@ def cmd_review(st: Study) -> None:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
     mapping = {
         "binding": st.binding,
-        "sampled_states": draw,
+        "sampled_groups": draw,
         "items": {
             iid: {
                 "state": n["state"],
@@ -416,6 +486,37 @@ def cmd_import_review(st: Study, labels_path: Path) -> None:
     ensemble = st.ensemble()
     changed = sum(labels[i]["present"] != ensemble[i]["present"] for i in labels)
     print(f"{reviews[0].name}: {len(labels)} reviewed, {changed} changed from the ensemble")
+
+
+def cmd_amend_review(st: Study, old_plan: Path, withdraw: list[str], decision: str) -> None:
+    old_text, new_text = Path(old_plan).read_text(), st.plan_path.read_text()
+    amendment = {
+        "from": {**st.binding, "plan_sha256": text_sha256(old_text)},
+        "to": st.binding,
+        "old_plan": old_text,
+        "new_plan": new_text,
+        "changed": ["review"],
+        "withdrawn": sorted(withdraw),
+        "decision": decision,
+    }
+    verify_amendment(amendment, Path(old_plan))
+    for name in withdraw:
+        d = st.work / name
+        if not name.startswith("review") or not (d / "mapping.json").exists():
+            raise SystemExit(f"{name} is not a review record")
+        if (d / "labels.json").exists():
+            raise SystemExit(f"{name} is imported: an imported review cannot be withdrawn")
+        if json.loads((d / "mapping.json").read_text())["binding"] != amendment["from"]:
+            raise SystemExit(f"{name} was not drawn under the old plan")
+    for d in st.all_records("amend"):
+        if json.loads((d / "amendment.json").read_text()) == amendment:
+            print(f"{d.name} already records this amendment")
+            return
+    k = len(st.all_records("amend"))
+    out = st.work / f"amend{k}"
+    out.mkdir()
+    write_once(out / "amendment.json", amendment)
+    print(f"{out.name}: the review section amended; withdrawn {sorted(withdraw) or 'none'}")
 
 
 def tracking() -> dict[str, Any]:
@@ -486,6 +587,10 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("review")
     p = sub.add_parser("import-review")
     p.add_argument("--labels", type=Path, required=True)
+    p = sub.add_parser("amend-review")
+    p.add_argument("--old-plan", type=Path, required=True)
+    p.add_argument("--withdraw", nargs="*", default=[])
+    p.add_argument("--decision", required=True)
     sub.add_parser("package")
     args = parser.parse_args(argv)
     st = Study(args.work or data_root() / "pd_clean", args.plan)
@@ -497,6 +602,8 @@ def main(argv: list[str] | None = None) -> int:
         cmd_review(st)
     elif args.command == "import-review":
         cmd_import_review(st, args.labels)
+    elif args.command == "amend-review":
+        cmd_amend_review(st, args.old_plan, args.withdraw, args.decision)
     else:
         cmd_package(st)
     return 0
