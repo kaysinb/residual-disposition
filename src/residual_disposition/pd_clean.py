@@ -27,7 +27,7 @@ from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-DETECTOR, ADJUDICATED, CUT_OFF = "detector", "adjudicated", "cut_off"
+DETECTOR, ADJUDICATED = "detector", "adjudicated"
 
 
 def item_text(row: Mapping[str, Any]) -> str:
@@ -89,12 +89,10 @@ def clean_selection(
     hit: Callable[[str], bool],
     excluded: Mapping[str, Iterable[str]],
     fraction: float,
-    cut: Callable[[str], bool] | None = None,
 ) -> Selection:
     """Per configuration, the first items of the ranking, as many as PD's top set, skipping the
-    items the detector hits, the prefills in ``excluded[config]`` (the adjudicated traces) and,
-    with ``cut`` (the cut-off prefilter, ``residual_disposition.cut_off``), items that end in a
-    cut-off form of the feature. Fewer clean items than the top set's size is an error."""
+    items the detector hits and the prefills in ``excluded[config]`` (the adjudicated traces).
+    Fewer clean items than the top set's size is an error."""
     top, removed = {}, {}
     for config in configs(rows):
         need, out, gone = top_size(rows, config, fraction), [], []
@@ -106,8 +104,6 @@ def clean_selection(
                 gone.append({"prefill": row["prefill"], "reason": ADJUDICATED})
             elif hit(item_text(row)):
                 gone.append({"prefill": row["prefill"], "reason": DETECTOR})
-            elif cut is not None and cut(item_text(row)):
-                gone.append({"prefill": row["prefill"], "reason": CUT_OFF})
             else:
                 out.append(row)
         if len(out) < need:

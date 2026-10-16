@@ -140,31 +140,3 @@ def test_corpus_pool_keeps_unflagged_continuations_under_the_current_detector(tm
             cl.prefix_texts({"x": ("m", "r1", [12])}, ["x"])
     finally:
         monkeypatch.undo()
-
-
-def test_the_corpus_pool_can_drop_cut_off_continuations(tmp_path):
-    from omegaconf import OmegaConf
-
-    from residual_disposition import cut_off
-    from residual_disposition.behaviors import behavior_from_config
-    from residual_disposition.config import load_config
-    from residual_disposition.paths import REPO_ROOT
-
-    behavior = behavior_from_config(
-        OmegaConf.to_container(load_config("behaviors/pun_intended").behavior)
-    )
-    d = tmp_path / "20261016-000000-adl_corpus-x"
-    d.mkdir()
-    (d / "config.yaml").write_text("model: {name: m, revision: r}\nparams:\n  state: s1\n")
-    (d / "meta.json").write_text(json.dumps({"status": "completed"}))
-    (d / "adl_corpus.json").write_text(json.dumps({"detector_version": behavior.detector.version}))
-    rows = [{"framing": "chat", "length": 1, "index": i, "prefix": [1], "text": t}
-            for i, t in enumerate(["a plain line", "a joke here (pun"])]  # fmt: skip
-    with gzip.open(d / "continuations.jsonl.gz", "wt") as f:
-        f.writelines(json.dumps(r) + "\n" for r in rows)
-    states, b = {"s1": ("pun_intended", 25)}, {"pun_intended": behavior}
-    assert len(cl.corpus_pool([d], states, b)["pun_intended"]) == 2  # Stage 1: no prefilter
-    rules = cut_off.load(REPO_ROOT / "configs" / "continuation" / "cut_off.yaml")
-    cuts = {"pun_intended": cut_off.cut_off(rules["pun_intended"]), "example_link": None}
-    kept = cl.corpus_pool([d], states, b, cuts=cuts)["pun_intended"]
-    assert [text for _, _, text in kept] == ["a plain line"]

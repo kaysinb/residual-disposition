@@ -1436,25 +1436,6 @@ Stage-0 label sets (§12.9).
     ensemble's rounds stand, since the plan changed in its review section alone
     (`scripts/pd_clean.py amend-review`).
 
-- **Cut-off prefilter, execution 2026-10-16** **[coord; efficiency, from Stage 2]**. Texts cut
-  by the token limit often stop inside the feature ("https://example", "(pun"). The ensemble's
-  frozen rubric counts such cut-off forms as traces (137 of 147 traces in review2, all kept by
-  the researcher), but the detector does not see them, so each one costs an adjudication round
-  (the seven rounds of the recipe pun 25 tail).
-  - **Rule** (`configs/continuation/cut_off.yaml`, sha256 `39fea570…`): a text that ends in a
-    proper prefix of a canonical form of the defining feature, at least a frozen minimum long
-    (https://exa, http://exa, www.exa, example.o; (pun, pun inten), is a trace.
-  - **Scope:** PD-clean's selection (removal reason `cut_off`, before any adjudication; the
-    plan's `cut_off` key) and the ADL-corpus diagnostic pool (`--cut-off`). Observer detectors
-    and frequency counts are unchanged. The random-removal control's window counts these
-    removals as it counts the others.
-  - **Checks on the Stage-1 data** (`scripts/cut_off_check.py`): of the 2,725 items of rounds
-    0–7 it flags 137, all unanimous ensemble traces, none reviewed clean (no new disagreement);
-    0/300 base responses without the prompt per behavior; Stage 1's 26 packages unchanged
-    (selections and removal sets alike, nothing flagged in a final selection); none of the
-    ADL-corpus set's 300 items, and 5 of its pool's 48,000 continuations (pun_intended, chat).
-  - Stage 1's packages were built without it; it changes no Stage-1 result.
-
 #### 12.3.3 Judge
 
 - **Pending dose-100/200 hypotheses** (120 PD + 120 ADL): rule C is validated on them now, under
