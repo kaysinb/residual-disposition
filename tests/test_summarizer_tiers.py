@@ -218,6 +218,11 @@ def test_a_run_s_tier_is_the_one_its_config_names(tmp_path):
     cache_at(cache, k, at(2))
     standard = summarizer_run(tmp_path, "std", start=at(1), end=at(5), ledger=ledger, tier=None)
     assert build_manifest([standard], cache)["entries"][k]["tier"] == "standard"
+    batch = summarizer_run(tmp_path, "batch", start=at(1), end=at(5), ledger=ledger)
+    config = yaml.safe_load((batch / "config.yaml").read_text())
+    config["summarizer"]["backend"] = "batch"
+    (batch / "config.yaml").write_text(yaml.safe_dump(config))
+    assert build_manifest([batch], cache)["entries"][k]["tier"] == "batch"
     unnamed = summarizer_run(tmp_path, "unnamed", start=at(1), end=at(5), ledger=ledger, sync={})
     with pytest.raises(TierError, match="does not name judge.sync.service_tier"):
         build_manifest([unnamed], cache)

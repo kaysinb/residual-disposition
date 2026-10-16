@@ -104,6 +104,10 @@ def summarizer_run(run_dir: Path) -> SummarizerRun:
     sync = (config.get("judge") or {}).get("sync") or {}
     if "service_tier" not in sync:
         raise TierError(f"{run_dir}: its config does not name judge.sync.service_tier")
+    # Batch runs exist only from the change that added them (2026-10-16), whose configs name
+    # summarizer.backend; a run without the key predates it and sent synchronously.
+    backend = (config.get("summarizer") or {}).get("backend", "sync")
+    tier = "batch" if backend == "batch" else sync["service_tier"] or "standard"
     spec = (config.get("summarizer") or {}).get("adl_ledger") or {}
     if not spec.get("worker"):
         raise TierError(f"{run_dir}: its config names no ADL ledger worker")
@@ -113,7 +117,7 @@ def summarizer_run(run_dir: Path) -> SummarizerRun:
         raise TierError(f"{run_dir}: its ledger {ledger} is not here")
     return SummarizerRun(
         run_id=meta["run_id"],
-        tier=sync["service_tier"] or "standard",
+        tier=tier,
         worker=worker,
         ledger=ledger.resolve(),
         started_at=_at(meta["started_at"]),

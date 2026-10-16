@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import dataclasses
 import os
+import re
 from collections.abc import Callable, Iterator, Sequence
 from pathlib import Path
 from typing import Any
@@ -135,6 +136,67 @@ class LedgeredBackend:
             body = json_body(cache, key)
             request = ChatRequest(key, "summary", "", body)
             return self.cost(request, hit)
+
+        return self.ledger.reconcile(cost_of)
+
+
+class LedgeredBatch:
+    """The API ledger of a batch backend (``judge.GeminiBatchBackend(batch_hook=...)``): every
+    request of a batch is reserved at an upper bound of its cost before the batch is submitted,
+    and closed when the batch is collected: settled at its reported cost; released at $0 if it
+    is absent from the batch's output (never processed) or rejected with HTTP 429; otherwise kept
+    open at its bound, since it may have been billed. A reservation already closed is not closed
+    again, so a rerun that collects a batch twice changes nothing."""
+
+    def __init__(
+        self,
+        ledger: ApiLedger,
+        model_of: Callable[[ChatRequest], ModelSpec],
+        *,
+        price_factor: float = 1.0,
+        label: str = "adl",
+    ) -> None:
+        self.ledger, self.model_of = ledger, model_of
+        self.price_factor, self.label = price_factor, label
+
+    def bound(self, request: ChatRequest) -> float:
+        return max_cost(request, self.model_of(request), price_factor=self.price_factor)
+
+    def fits(self, requests: Sequence[ChatRequest]) -> int:
+        """How many of ``requests``, from the first, the ledger can reserve now."""
+        room, n = self.ledger.remaining(), 0
+        for request in requests:
+            room -= self.bound(request)
+            if room < 0:
+                break
+            n += 1
+        return n
+
+    def reserve(self, requests: Sequence[ChatRequest]) -> dict[str, str]:
+        return self.ledger.reserve({r.key: self.bound(r) for r in requests}, self.label)
+
+    def close(self, token: str, request: Any, completion: Completion, *, absent: bool) -> None:
+        if token not in self.ledger.state()["open"]:
+            return
+        if completion.error is None and billed_tokens(completion.usage) is not None:
+            cost = usage_cost([completion], self.model_of(request), price_factor=self.price_factor)
+            self.ledger.settle(token, request.key, cost[2], self.label)
+            return
+        error = completion.error or "no billing usage"
+        found = re.match(r"batch status (\d+)", error)
+        status = int(found.group(1)) if found else None
+        released = absent or status == 429
+        self.ledger.fail(token, request.key, "batch", status, released=released, label=self.label)
+
+    def reconcile(self, cache: JudgeCache) -> int:
+        """Settle the ledger's open reservations whose completions reached the cache."""
+
+        def cost_of(key: str) -> float | None:
+            hit = cache.get(key)
+            if hit is None or billed_tokens(hit.usage) is None:
+                return None
+            request = ChatRequest(key, "summary", "", json_body(cache, key))
+            return usage_cost([hit], self.model_of(request), price_factor=self.price_factor)[2]
 
         return self.ledger.reconcile(cost_of)
 

@@ -25,12 +25,14 @@ from typing import Any
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
-from residual_disposition.adl_graders import LedgeredBackend
+from residual_disposition.adl_graders import LedgeredBackend, LedgeredBatch
 from residual_disposition.budget import ApiBudgetExhausted, ApiLedger, ledger_from
 from residual_disposition.config import config_hash, from_cli
 from residual_disposition.judge import (
     ChatBackend,
     ChatRequest,
+    GeminiBatchBackend,
+    GeminiFiles,
     JudgeCache,
     MalformedOutput,
     ModelSpec,
@@ -199,7 +201,20 @@ def model_spec(cfg: DictConfig, model_id: str) -> ModelSpec:
     )
 
 
-def make_backend(cfg: DictConfig) -> ChatBackend:
+def summarizer_tier(cfg: DictConfig) -> str:
+    """The service level the run sends at: "batch" (Gemini's Batch API), or the synchronous
+    tier (null is the standard tier)."""
+    backend = cfg.summarizer.get("backend", "sync")
+    if backend == "batch":
+        return "batch"
+    if backend != "sync":
+        raise SystemExit(f"summarizer.backend must be sync or batch, got {backend!r}")
+    return cfg.judge.sync.service_tier or "standard"
+
+
+def make_backend(cfg: DictConfig, cache: JudgeCache, batch_hook: Any = None) -> Any:
+    """The synchronous backend, or with summarizer.backend=batch the Gemini batch backend (its
+    batch ledger files beside the cache, ``batch_hook`` the API ledger's)."""
     import openai
 
     base, key = os.environ.get("JUDGE_API_BASE"), os.environ.get("JUDGE_API_KEY")
@@ -207,6 +222,17 @@ def make_backend(cfg: DictConfig) -> ChatBackend:
         raise SystemExit("Set JUDGE_API_BASE and JUDGE_API_KEY (.env)")
     sync = cfg.judge.sync
     client = openai.OpenAI(api_key=key, base_url=base, timeout=sync.timeout_s, max_retries=0)
+    if summarizer_tier(cfg) == "batch":
+        b = cfg.judge.batch
+        return GeminiBatchBackend(
+            client,
+            GeminiFiles.for_api_base(base, key),
+            Path(cache.root) / "batches",
+            poll_s=b.poll_s,
+            max_wait_s=b.max_wait_h * 3600,
+            max_requests_per_job=b.max_requests_per_job,
+            batch_hook=batch_hook,
+        )
     return ChatBackend(
         client,
         concurrency=sync.concurrency,
@@ -273,7 +299,7 @@ def main() -> None:
     requests = [r for _, rs in batches for r in rs]
     cache = JudgeCache(Path(s.cache_dir or data_root() / "cache" / "summarizer"))
     _, cached = fetch(requests, None, cache)
-    tier = cfg.judge.sync.service_tier or "standard"
+    tier = summarizer_tier(cfg)
     factor = tier_factor(
         tier,
         batch_discount=cfg.judge.cost.batch_discount,
@@ -329,12 +355,22 @@ def main() -> None:
         with run.path("evidence.jsonl").open("w") as f:
             for e in evidence:
                 f.write(json.dumps(dataclasses.asdict(e), ensure_ascii=False) + "\n")
-        backend = make_backend(cfg)
-        if ledger is not None:  # every ADL request reserved before it is sent
-            backend = LedgeredBackend(
-                backend, ledger, lambda r: settings.model, price_factor=factor, label="summarizer"
-            )
-            backend.reconcile(cache)
+        if tier == "batch":  # every ADL batch reserved before it is submitted, closed when read
+            hook = None
+            if ledger is not None:
+                hook = LedgeredBatch(
+                    ledger, lambda r: settings.model, price_factor=factor, label="summarizer"
+                )
+                hook.reconcile(cache)
+            backend = make_backend(cfg, cache, hook)
+        else:
+            backend = make_backend(cfg, cache)
+            if ledger is not None:  # every ADL request reserved before it is sent
+                model = settings.model
+                backend = LedgeredBackend(
+                    backend, ledger, lambda r: model, price_factor=factor, label="summarizer"
+                )
+                backend.reconcile(cache)
         completions, cached = fetch(requests, backend, cache)
         # Each consumed response's tier comes with it out of fetch: this run's for a send, its
         # cache entry's (or the manifest's, for that exact entry) for a hit.

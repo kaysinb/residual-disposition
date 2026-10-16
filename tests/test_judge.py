@@ -1003,3 +1003,78 @@ def test_a_budget_stop_in_one_worker_keeps_the_others_paid_results(tmp_path) -> 
     assert len(completions.calls) == sent + 1  # only the refused request is sent on resume
     assert cached == {r.key for r in requests if r.key != stop_key}
     assert all(results[r.key].error is None for r in requests)
+
+
+class AllAnswered(FakeBatches):
+    """Answers every request of the batch it is asked about."""
+
+    def retrieve(self, batch_id: str):
+        status = self.statuses.pop(0) if self.statuses else "completed"
+        if status != "completed":
+            return SimpleNamespace(status=status, output_file_id=None, error_file_id=None)
+        upload = self.files.uploads[int(batch_id.split("/")[1]) - 1]
+        lines = [json.loads(line) for line in upload.decode().splitlines()]
+        out = [
+            {"custom_id": x["custom_id"], "response": {"status_code": 200, "body": chat_body("no")}}
+            for x in lines
+        ]
+        name = f"files/out-{batch_id}"
+        self.files.stored[name] = "".join(json.dumps(r) + "\n" for r in out).encode()
+        return SimpleNamespace(status=status, output_file_id=name, error_file_id=None)
+
+
+class Hook:
+    def __init__(self, capacity: int) -> None:
+        self.capacity, self.reserved, self.closed = capacity, [], []
+
+    def fits(self, requests):
+        return min(len(requests), self.capacity)
+
+    def reserve(self, requests):
+        self.reserved.append([r.key for r in requests])
+        return {r.key: f"tok-{r.key[:6]}" for r in requests}
+
+    def close(self, token, request, completion, *, absent):
+        self.closed.append((token, request.key, completion.error is None, absent))
+
+
+def test_a_ledgered_batch_backend_reserves_each_batch_once_and_runs_them_in_turn(tmp_path):
+    files = FakeFiles()
+    batches = AllAnswered(files, ["in_progress"])
+    client = SimpleNamespace(batches=batches)
+    requests = [build_request(LENIENT_IA_J2, item(f"text {k}"), settings()) for k in range(5)]
+    hook = Hook(capacity=2)
+    ticks = iter(range(100))
+    first = GeminiBatchBackend(
+        client,
+        files,
+        tmp_path,
+        max_wait_s=0.5,
+        sleep=lambda s: None,
+        clock=lambda: next(ticks),
+        log=lambda m: None,
+        batch_hook=hook,
+    )
+    with pytest.raises(TimeoutError):
+        dict(first.complete(requests))  # the first batch of 2 was submitted, then interrupted
+    assert hook.reserved == [[r.key for r in requests[:2]]] and len(batches.created) == 1
+    # A rerun (some requests cached meanwhile: only 1–4 still wanted) resumes the unfinished
+    # batch by its keys, closes its two reservations, returns only what is wanted, then the rest.
+    again = GeminiBatchBackend(
+        client, files, tmp_path, sleep=lambda s: None, log=lambda m: None, batch_hook=hook
+    )
+    results = dict(again.complete(requests[1:]))
+    assert set(results) == {r.key for r in requests[1:]}
+    assert all(c.error is None for c in results.values())
+    assert hook.reserved == [
+        [r.key for r in requests[:2]],
+        [r.key for r in requests[2:4]],
+        [requests[4].key],
+    ]
+    assert len(batches.created) == 3  # one batch per reservation, in turn
+    assert [c[1] for c in hook.closed] == [r.key for r in requests]  # each closed once
+    entries = [json.loads(p.read_text()) for p in sorted(tmp_path.glob("*.json"))]
+    assert all(e["finished"] and set(e["reservations"]) == set(e["keys"]) for e in entries)
+    hook.capacity = 0
+    with pytest.raises(RuntimeError, match="fits in the ledger"):
+        dict(again.complete([build_request(LENIENT_IA_J2, item("new"), settings())]))

@@ -29,6 +29,9 @@ summarizer:
   # the judge's ADL runs (data/ledgers/adl-api-laptop.jsonl)
   adl_ledger: {worker: laptop, allowance_usd: 15.0, path: null}
   dry_run: true
+  # sync: the synchronous API at judge.sync.service_tier; batch: Gemini's Batch API at batch
+  # prices (judge.batch settings), each response's tier "batch" (decision log, 2026-10-16)
+  backend: sync
   cache_dir: null             # raw outputs by request hash; default <DATA_DIR>/cache/summarizer
   # Tier manifests (scripts/summarizer_tiers.py) for cached completions written before the
   # cache recorded each one's service tier (2026-10-16); service_tiers.json gives each

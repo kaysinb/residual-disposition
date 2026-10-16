@@ -870,3 +870,37 @@ def test_the_qualification_record_is_frozen_on_the_pods_states() -> None:
             module.qualification(obs, wrong, passed, need=1)
     finally:
         del sys.modules[spec.name]
+
+
+def test_a_ledgered_batch_settles_releases_or_keeps_each_reservation_once(tmp_path) -> None:
+    from residual_disposition.adl_graders import LedgeredBatch
+    from residual_disposition.budget import ApiLedger
+    from residual_disposition.judge import ChatRequest, Completion, ModelSpec
+
+    model = ModelSpec("gemini-3.8-flash", "low", 0.75, 3.75, 0)
+    ledger = ApiLedger(tmp_path / "ledger.jsonl", 1.0, "cont-laptop")
+    hook = LedgeredBatch(ledger, lambda r: model, price_factor=0.5, label="summarizer")
+    body = {
+        "model": model.id,
+        "messages": [{"role": "user", "content": "x" * 400}],
+        "max_tokens": 4096,
+    }
+    reqs = [ChatRequest(f"k{i}", "summary", "v", body) for i in range(5)]
+    bound = hook.bound(reqs[0])
+    assert hook.fits(reqs) == min(5, int(1.0 // bound))
+    tokens = hook.reserve(reqs)
+    assert ledger.committed() == pytest.approx(5 * bound)
+    paid = Completion(
+        "ok", "stop", {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+    )
+    hook.close(tokens["k0"], reqs[0], paid, absent=False)
+    hook.close(tokens["k0"], reqs[0], paid, absent=False)  # a second collect changes nothing
+    hook.close(tokens["k1"], reqs[1], Completion(None, error="not in the output"), absent=True)
+    hook.close(
+        tokens["k2"], reqs[2], Completion(None, error="batch status 429: quota"), absent=False
+    )
+    hook.close(tokens["k3"], reqs[3], Completion(None, error="batch status 500: x"), absent=False)
+    state = ledger.state()
+    assert state["spent"] == pytest.approx((100 * 0.75 + 50 * 3.75) / 1e6 * 0.5)
+    assert set(state["open"]) == {tokens["k3"], tokens["k4"]}  # the 500 and the uncollected one
+    assert sum(1 for line in ledger.path.read_text().splitlines() if '"spend"' in line) == 1

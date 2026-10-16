@@ -293,3 +293,17 @@ def test_the_pd_clean_reading_set_is_the_plan_s(tmp_path, monkeypatch):
     monkeypatch.setattr("sys.argv", argv)
     with pytest.raises(SystemExit, match="not the PD-clean plan's: 1 not planned"):
         script.main()
+
+
+def test_the_readings_tier_follows_the_backend():
+    from omegaconf import OmegaConf
+
+    script = load_script()
+    cfg = lambda backend, tier: OmegaConf.create(  # noqa: E731
+        {"summarizer": {"backend": backend}, "judge": {"sync": {"service_tier": tier}}}
+    )
+    assert script.summarizer_tier(cfg("batch", "flex")) == "batch"
+    assert script.summarizer_tier(cfg("sync", "flex")) == "flex"
+    assert script.summarizer_tier(cfg("sync", None)) == "standard"
+    with pytest.raises(SystemExit, match="must be sync or batch"):
+        script.summarizer_tier(cfg("bulk", None))

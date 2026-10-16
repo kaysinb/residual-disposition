@@ -909,6 +909,17 @@ BATCH_TERMINAL = ("completed", "failed", "expired", "cancelled")
 
 
 @dataclasses.dataclass(frozen=True)
+class _Unwanted:
+    """A request of a resumed batch that is no longer wanted (cached meanwhile): collected and
+    closed in the ledger, not returned."""
+
+    key: str
+    kind: str = "summary"
+    rubric_version: str = ""
+    body: Mapping[str, Any] = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass(frozen=True)
 class _BatchJob:
     batch_id: str
     requests: Sequence[ChatRequest]
@@ -919,9 +930,15 @@ class GeminiBatchBackend:
     """Gemini Batch API through the OpenAI-compatible batches endpoint.
 
     The JSONL input is in OpenAI batch format with the same bodies as synchronous requests. A
-    ledger file per input (named by its sha256) records the submitted batch, because batch
-    creation is not idempotent: a rerun after an interruption polls the existing batch instead of
-    paying for a second one.
+    ledger file per input (named by its sha256) records the submitted batch and its request keys,
+    because batch creation is not idempotent: a rerun after an interruption polls the existing
+    batch instead of paying for a second one.
+
+    With ``batch_hook`` (``adl_graders.LedgeredBatch``: an API ledger), every batch is reserved
+    in the ledger before it is submitted, once (the reservation ids are kept in its ledger file),
+    and closed per request when it is collected; batches then run one after the other, each as
+    large as the reservations that fit now (``fits``), and a rerun first resumes any unfinished
+    batch that holds requests still wanted.
     """
 
     tier = "batch"
@@ -938,7 +955,9 @@ class GeminiBatchBackend:
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
         log: Callable[[str], None] = print,
+        batch_hook: Any = None,
     ) -> None:
+        self.batch_hook = batch_hook
         self.client = client
         self.files = files
         self.ledger_dir = Path(ledger_dir)
@@ -950,10 +969,32 @@ class GeminiBatchBackend:
         self.log = log
 
     def complete(self, requests: Sequence[ChatRequest]) -> Iterator[tuple[str, Completion]]:
-        size = self.max_requests_per_job
-        jobs = [self._submit(requests[i : i + size]) for i in range(0, len(requests), size)]
-        for job in jobs:
+        if self.batch_hook is None:
+            size = self.max_requests_per_job
+            jobs = [self._submit(requests[i : i + size]) for i in range(0, len(requests), size)]
+            for job in jobs:
+                yield from self._collect(job).items()
+            return
+        wanted = {r.key: r for r in requests}
+        for path in sorted(self.ledger_dir.glob("*.json")):  # unfinished batches first
+            entry = json.loads(path.read_text())
+            keys = entry.get("keys") or []
+            if entry.get("finished") or not set(keys) & set(wanted):
+                continue
+            self.log(f"Resuming batch {entry['batch_id']} for {len(keys)} requests")
+            job = _BatchJob(entry["batch_id"], [wanted.get(k) or _Unwanted(k) for k in keys], path)
+            for key, completion in self._collect(job).items():
+                if key in wanted:
+                    del wanted[key]
+                    yield key, completion
+        pending = [r for r in requests if r.key in wanted]
+        while pending:
+            n = min(self.max_requests_per_job, self.batch_hook.fits(pending))
+            if n < 1:
+                raise RuntimeError("no request of the batch fits in the ledger's allowance")
+            job = self._submit(pending[:n])
             yield from self._collect(job).items()
+            pending = pending[n:]
 
     def _submit(self, requests: Sequence[ChatRequest]) -> _BatchJob:
         lines = [
@@ -977,6 +1018,9 @@ class GeminiBatchBackend:
             if not entry.get("finished"):
                 self.log(f"Resuming batch {entry['batch_id']} for {len(requests)} requests")
                 return _BatchJob(entry["batch_id"], requests, ledger_path)
+        # Reserved before the batch exists: an interrupted submission leaves the reservations
+        # open, counted, never a batch without them.
+        tokens = None if self.batch_hook is None else self.batch_hook.reserve(requests)
         file_name = self.files.upload(data, display_name=f"judge-{digest[:16]}")
         batch = self.client.batches.create(
             input_file_id=file_name, endpoint="/v1/chat/completions", completion_window="24h"
@@ -986,9 +1030,12 @@ class GeminiBatchBackend:
             "batch_id": batch.id,
             "input_file": file_name,
             "requests": len(requests),
+            "keys": [r.key for r in requests],
             "submitted_at": _now(),
             "finished": False,
         }
+        if tokens is not None:
+            entry["reservations"] = tokens
         ledger_path.write_text(json.dumps(entry, indent=2) + "\n")
         self.log(f"Submitted batch {batch.id} with {len(requests)} requests")
         return _BatchJob(batch.id, requests, ledger_path)
@@ -1013,12 +1060,20 @@ class GeminiBatchBackend:
                 if line.strip():
                     custom_id, completion = parse_batch_line(json.loads(line))
                     results[custom_id] = completion
+        absent = set()
         for request in job.requests:
             if request.key not in results:
+                absent.add(request.key)
                 results[request.key] = Completion(
                     None, error=f"not in the output of batch {job.batch_id} ({batch.status})"
                 )
         entry = json.loads(job.ledger_path.read_text())
+        if self.batch_hook is not None and entry.get("reservations"):
+            for request in job.requests:  # each reservation closed once, also on a rerun
+                token = entry["reservations"][request.key]
+                self.batch_hook.close(
+                    token, request, results[request.key], absent=request.key in absent
+                )
         entry.update(finished=True, status=batch.status, finished_at=_now())
         job.ledger_path.write_text(json.dumps(entry, indent=2) + "\n")
         self.log(f"Batch {job.batch_id}: {batch.status}")
