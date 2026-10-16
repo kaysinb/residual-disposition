@@ -28,6 +28,8 @@ summarizer:
   # ADL's evidence: the laptop's $15 share of the $35 ADL API cap, a durable ledger shared with
   # the judge's ADL runs (data/ledgers/adl-api-laptop.jsonl)
   adl_ledger: {worker: laptop, allowance_usd: 15.0, path: null}
+  # Other tools' readings: unledgered unless a ledger is named (the continuation's PD-clean)
+  api_ledger: null
   dry_run: true
   # sync: the synchronous API at judge.sync.service_tier; batch: Gemini's Batch API at batch
   # prices (judge.batch settings), each response's tier "batch" (decision log, 2026-10-16)

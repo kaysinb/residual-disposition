@@ -307,3 +307,22 @@ def test_the_readings_tier_follows_the_backend():
     assert script.summarizer_tier(cfg("sync", None)) == "standard"
     with pytest.raises(SystemExit, match="must be sync or batch"):
         script.summarizer_tier(cfg("bulk", None))
+
+
+def test_non_adl_readings_use_their_own_ledger_when_one_is_named(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    script = load_script()
+    adl = {"worker": "cont-laptop", "allowance_usd": 26.0, "path": None}
+    pd = {"worker": "cont-laptop-pd", "allowance_usd": 18.0, "path": None}
+    assert script.adl_ledger({"pd_clean", "pd_random"}, adl) is None  # no PD ledger named
+    ledger = script.adl_ledger({"pd_clean", "pd_random"}, adl, pd)
+    assert ledger.worker == "cont-laptop-pd" and ledger.allowance_usd == 18.0
+    assert ledger.path == tmp_path / "data" / "ledgers" / "adl-api-cont-laptop-pd.jsonl"
+    ledger.close()
+    lens = script.adl_ledger({"adl_lens@30/state/1"}, adl, pd)
+    assert lens.worker == "cont-laptop"  # ADL keeps its own ledger
+    lens.close()
+    with pytest.raises(SystemExit, match="its own run"):
+        script.adl_ledger({"adl_lens@30/state/1", "pd_clean"}, adl, pd)
+    with pytest.raises(SystemExit, match="Set summarizer.api_ledger"):
+        script.adl_ledger({"pd_clean"}, adl, {"worker": "cont-laptop-pd"})

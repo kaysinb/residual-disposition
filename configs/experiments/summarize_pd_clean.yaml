@@ -13,3 +13,10 @@ summarizer:
   expected_evidence: 40
   expected_pd_clean_plan: configs/continuation/pd_clean.yaml
   max_usd: ???
+  # PD-clean's API spend on a ledger of its own within stage0_1's API part (coordinator,
+  # 2026-10-16, review s2m item 6): every request reserved before it is sent and closed by its
+  # reported cost, flex 503s released, like ADL's
+  api_ledger:
+    worker: cont-laptop-pd
+    allowance_usd: 18.0
+    path: null

@@ -162,12 +162,19 @@ def planned_lens_evidence(
     return out
 
 
-def adl_ledger(tools: set[str], spec: Any) -> ApiLedger | None:
+def adl_ledger(tools: set[str], spec: Any, other: Any = None) -> ApiLedger | None:
     """ADL's evidence is summarized in its own run, on the laptop's ledger of the ADL API cap
-    (``summarizer.adl_ledger``: its disjoint share, durable); other tools have none."""
+    (``summarizer.adl_ledger``: its disjoint share, durable). Other tools' runs use the ledger of
+    ``summarizer.api_ledger`` when it is set (the continuation's PD-clean readings, from
+    2026-10-16), each request reserved and closed alike; without it they have none."""
     tools = {base_tool(t) for t in tools}
     if not tools & ADL_TOOLS:
-        return None
+        if not other:
+            return None
+        try:
+            return ledger_from(other, data_root())
+        except ValueError as error:
+            raise SystemExit(f"Set summarizer.api_ledger: {error}") from error
     if tools - ADL_TOOLS:
         raise SystemExit("Summarize ADL in its own run: its spend counts against its own ledger")
     try:
@@ -324,7 +331,7 @@ def main() -> None:
         return
     if est.usd > float(s.max_usd):
         raise SystemExit(f"Estimate above summarizer.max_usd = {s.max_usd}: not submitted")
-    ledger = adl_ledger({e.tool for e in evidence}, s.get("adl_ledger"))
+    ledger = adl_ledger({e.tool for e in evidence}, s.get("adl_ledger"), s.get("api_ledger"))
     check_adl_estimate(ledger, est.usd)
     # Each response's service tier, its provenance: every cached one resolved before any send.
     try:
