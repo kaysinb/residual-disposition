@@ -1213,3 +1213,21 @@ def test_the_loader_keeps_only_the_certificates_relearning_runs(tmp_path) -> Non
     obs = Observations.from_run_dirs(dirs)
     assert list(obs.relearn_curves["run_id"]) == [dirs[0].name]  # one run per state, rate, seed
     assert list(obs.relearn_evals["run_id"]) == [dirs[0].name]
+
+
+def test_lens_stability_hypotheses_count_only_from_salted_runs():
+    index = _tool_index()
+    old, old_labels = _tool_obs([("s1", None, 10)], run="20261016-old", samples=10)
+    new, new_labels = _tool_obs([("s1", None, 3)], run="20261017-new", samples=8)
+    for h in old + new:
+        h["tool"], h["prompt_version"] = "adl_lens@30/state/2", "adl-lens-v1"
+    hyps, labels = pd.DataFrame(old + new), pd.DataFrame(old_labels + new_labels)
+    with pytest.raises(ValueError, match="need salted_runs"):
+        A.tool_readings(index, hyps, labels)
+    readings = A.tool_readings(index, hyps, labels, salted_runs={"20261017-new"})
+    row = readings[readings["own"]].iloc[0]
+    # The salted run's 8 samples alone: its 2 missing samples are not filled by the old run's.
+    assert row["hypotheses"] == 8 and row["strict_correct"] == 3
+    # Other tools are not affected and need no salted runs.
+    pd_hyps, pd_labels = _tool_obs([("s1", None, 4)], run="20261016-old")
+    assert not A.tool_readings(index, pd.DataFrame(pd_hyps), pd.DataFrame(pd_labels)).empty

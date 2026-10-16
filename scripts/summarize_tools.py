@@ -302,7 +302,10 @@ def main() -> None:
         for tool in {e.tool for e in evidence}
     }
     # A lens stability package whose text equals its first draw's is read by its own samples.
-    salts = stability_salts([dataclasses.asdict(e) for e in evidence])
+    try:
+        salts = stability_salts([dataclasses.asdict(e) for e in evidence])
+    except ValueError as error:
+        raise SystemExit(f"{error}: read both draws of a state together") from error
     batches: list[tuple[Evidence, list[ChatRequest]]] = [
         (e, summary_requests(prompts[e.tool], e.text, settings, salt=salt))
         for e, salt in zip(evidence, salts, strict=True)

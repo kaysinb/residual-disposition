@@ -92,12 +92,21 @@ def run_requests(run_dir: Path) -> list[ChatRequest]:
     for version, p in inputs["prompts"].items():
         if PROMPTS[version].sha256 != p["sha256"] or PROMPTS[version].tool != p["tool"]:
             raise TierError(f"{run_dir}: prompt {version} is not the one the run used")
-    # Runs from 2026-10-16 that record it salted their stability packages' keys; older ones not.
-    salts = stability_salts(rows) if inputs.get("stability_salts") else [None] * len(rows)
-    requests: list[ChatRequest] = []
-    for row, recorded, salt in zip(rows, inputs["evidence"], salts, strict=True):
-        if content_hash(row["text"]) != recorded["sha256"] or row["tool"] != recorded["tool"]:
+    # Each row is the evidence the run recorded (its text's sha256 and its identity), checked
+    # before any salt is derived from the rows.
+    for row, recorded in zip(rows, inputs["evidence"], strict=True):
+        if content_hash(row["text"]) != recorded["sha256"]:
             raise TierError(f"{run_dir}: an evidence text differs from its recorded sha256")
+        for field in ("state_id", "tool", "tool_run_id", "budget"):
+            if row.get(field) != recorded.get(field):
+                raise TierError(f"{run_dir}: an evidence row's {field} differs from the recorded")
+    # Runs from 2026-10-16 that record it salted their stability packages' keys; older ones not.
+    try:
+        salts = stability_salts(rows) if inputs.get("stability_salts") else [None] * len(rows)
+    except ValueError as error:
+        raise TierError(f"{run_dir}: {error}") from error
+    requests: list[ChatRequest] = []
+    for row, salt in zip(rows, salts, strict=True):
         prompt = PROMPTS[version_of[base_tool(row["tool"])]]
         requests += summary_requests(prompt, row["text"], settings, salt=salt)
     return requests

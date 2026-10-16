@@ -372,3 +372,13 @@ def test_a_spend_that_names_its_run_belongs_to_it(setup):
     ledger.write_text(json.dumps({**named, "run": "live"}) + "\n")
     with pytest.raises(TierError, match="0 listed runs sent its spend"):
         build_manifest(runs, cache)  # its named run is not listed
+
+
+def test_an_evidence_row_whose_identity_changed_is_refused(setup):
+    _, (measure, _), _, _ = setup
+    rows = (
+        (measure / "evidence.jsonl").read_text().replace('"state_id": "s1"', '"state_id": "s9"', 1)
+    )
+    (measure / "evidence.jsonl").write_text(rows)
+    with pytest.raises(TierError, match="state_id differs from the recorded"):
+        run_requests(measure)

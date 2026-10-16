@@ -353,3 +353,11 @@ def test_a_stability_draw_identical_to_the_first_is_read_by_its_own_samples():
     assert [r.key for r in first] == [
         request_key(f"adl-lens-v1#sample={i}", first[0].body) for i in range(3)
     ]
+
+
+def test_a_stability_draw_read_without_its_first_is_refused():
+    from residual_disposition.summarizer import stability_salts
+
+    rows = [{"state_id": "s1", "tool": "adl_lens@30/state/2", "text": "x"}]
+    with pytest.raises(ValueError, match="without its first draw"):
+        stability_salts(rows)

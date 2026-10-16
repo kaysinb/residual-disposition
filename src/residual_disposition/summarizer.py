@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from .judge import ChatRequest, MalformedOutput, ModelSpec, request_key
@@ -316,12 +318,30 @@ def stability_salts(rows: Sequence[Mapping[str, Any]]) -> list[str | None]:
     out: list[str | None] = []
     for r in rows:
         tool = str(r["tool"])
-        if tool.startswith("adl_lens@") and tool.endswith("/state/2"):
+        if is_stability_package(tool):
             first = tool[: -len("/state/2")] + "/state/1"
-            if texts.get((r["state_id"], first)) == r["text"]:
+            if (r["state_id"], first) not in texts:  # equality cannot be established: refused
+                raise ValueError(f"{r['state_id']}: {tool} is read without its first draw {first}")
+            if texts[(r["state_id"], first)] == r["text"]:
                 out.append(f"package={tool}")
                 continue
         out.append(None)
+    return out
+
+
+def is_stability_package(tool: str) -> bool:
+    """A lens-only reading of the second λ draw (``adl_lens@<layer>/state/2``)."""
+    return tool.startswith("adl_lens@") and tool.endswith("/state/2")
+
+
+def salted_runs(run_dirs: Sequence[Path]) -> set[str]:
+    """The ids of the summarizer runs whose requests follow ``stability_salts`` (their
+    summarizer_inputs.json records it): the only runs whose stability hypotheses count."""
+    out = set()
+    for d in run_dirs:
+        inputs = Path(d) / "summarizer_inputs.json"
+        if inputs.is_file() and json.loads(inputs.read_text()).get("stability_salts"):
+            out.add(Path(d).name)
     return out
 
 
