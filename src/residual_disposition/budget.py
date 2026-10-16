@@ -275,7 +275,7 @@ class ApiLedger:
     - ``spend`` when that send's completion arrives, with the reported cost, which closes that
       reservation and no other;
     - ``failed`` when a send raises, with its error class and HTTP status: it releases its
-      reservation only if the provider refused it unrun (``released``: HTTP 429, or HTTP 503
+      reservation only if the send is treated as unbilled (``released``: HTTP 429, or HTTP 503
       on the flex tier; ``adl_graders.LedgeredBackend.fail``);
     - ``unbilled`` closes named open reservations at $0 on billing evidence that their sends
       were not charged (``close_unbilled``), with its source and the decision;
@@ -359,7 +359,7 @@ class ApiLedger:
             cache["open"].pop(event["id"], None)
             cache["settled_keys"].add(event["key"])
         elif event["event"] == "failed" and event.get("released"):
-            cache["open"].pop(event["id"], None)  # rejected unrun: nothing was billed
+            cache["open"].pop(event["id"], None)  # treated as unbilled: nothing counted
         elif event["event"] == "unbilled":
             for reservation in event["ids"]:
                 cache["open"].pop(reservation, None)
@@ -440,9 +440,8 @@ class ApiLedger:
         label: str,
     ) -> None:
         """Record a failed send of one reservation, with its error class and HTTP status;
-        ``released`` (a send refused unrun: HTTP 429, or 503 on flex) closes the reservation at
-        $0, otherwise it stays
-        open and counted."""
+        ``released`` (a send treated as unbilled: HTTP 429, or 503 on flex) closes the
+        reservation at $0, otherwise it stays open and counted."""
         event = {
             "event": "failed",
             "id": reservation,
