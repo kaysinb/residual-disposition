@@ -1,7 +1,7 @@
 """PD-clean packages of the continuation's Stage 1 (preregistration §12.4.2, §12.3.2).
 
     uv run python scripts/pd_clean.py round [--work DIR]
-    uv run python scripts/pd_clean.py import --labels FILE --rubric FILE [--work DIR]
+    uv run python scripts/pd_clean.py import --labels FILE [--work DIR]
     uv run python scripts/pd_clean.py review [--work DIR]
     uv run python scripts/pd_clean.py import-review --labels FILE [--work DIR]
     uv run python scripts/pd_clean.py package [--work DIR]
@@ -13,22 +13,24 @@ derived from them each time, never kept as mutable state.
 
 - **Binding.** Every record carries the binding it was made under: the plan's sha256, each
   state's PD run and the sha256 of its completions, each behavior's detector version, and the
-  ensemble's rubric (instructions) sha256. Every command refuses records of another binding.
+  sha256 of the ensemble's rubric, the instructions the plan freezes (which must match the hash
+  the plan states). Every command refuses records of another binding.
 - ``round`` writes the next ensemble round (``round<k>/items.jsonl``, the detector diagnostic's
   format: item id, behavior id and description, the response, the prefill in brackets then its
   continuation; pooled and shuffled; no state, role, dose, configuration or rank). Its private
   ``mapping.json`` (mode 600) maps items to states and is not for the annotators.
 - ``import`` takes the round's final ensemble labels, JSON lines of ``{"item_id", "present",
-  "confident", "evidence", "unanimous"}`` (``present`` a trace, ``unanimous`` false for an
-  arbitrated dispute), every item of the round exactly once, and writes ``labels.json``
-  atomically, once; a second import of the same labels is a no-op, of other labels an error.
+  "unanimous", "confident", "evidence"}`` and nothing else (``present`` a trace, ``unanimous``
+  false for an arbitrated dispute), every item of the round exactly once, and writes
+  ``labels.json`` atomically, once; a second import of the same labels is a no-op, of other
+  labels an error. A label never overrides the item's metadata (state, configuration, prefill).
 - ``review`` writes the researcher's review set (§12.3.2, step 3): every dispute and every
   unanimous trace not yet reviewed, and once per package a seeded sample of its agreed
   (unanimous) negatives of the size the plan freezes (30 per package now).
-- ``import-review`` takes the researcher's final labels (``{"item_id", "present", "note"}``) for
-  exactly the review's items, once. A researcher's label overrides the ensemble's; a change
-  reruns the removal and the refill, so the next ``round`` may bring new items, whose disputes
-  and traces go to a later review.
+- ``import-review`` takes the researcher's final labels (``{"item_id", "present", "note"}``,
+  nothing else) for exactly the review's items, once. A researcher's label overrides the
+  ensemble's; a change reruns the removal and the refill, so the next ``round`` may bring new
+  items, whose disputes and traces go to a later review.
 - ``package`` refuses while a round or a review is pending or needed; then writes one tracked
   run per state (experiment pd_clean, step pd_clean_package) with the clean selection and every
   removal with its reason, and, for the states configured for it, the random-removal control
@@ -123,8 +125,12 @@ class Study:
             detectors[b.id] = b.detector.version
             self.runs[s["state"]] = run
             self.states.append(s)
+        rubric = CONFIG_ROOT.parent / self.plan["rubric"]
+        if sha256(rubric) != self.plan["rubric_sha256"]:
+            raise SystemExit(f"{rubric} does not match the rubric sha256 the plan freezes")
         self.binding = {
             "plan_sha256": sha256(self.plan_path),
+            "rubric_sha256": self.plan["rubric_sha256"],
             "pd_runs": {
                 sid: {"run": run.name, "sha256": sha256(run / "pd_completions.jsonl.gz")}
                 for sid, run in self.runs.items()
@@ -139,9 +145,10 @@ class Study:
         return sorted(dirs, key=lambda p: int(p.name[len(kind) :]))
 
     def check(self, record: Mapping[str, Any], where: Path) -> None:
-        bound = {k: v for k, v in record["binding"].items() if k != "rubric_sha256"}
-        if bound != self.binding:
-            raise SystemExit(f"{where} was made under another binding (plan, PD runs or detectors)")
+        if record.get("binding") != self.binding:
+            raise SystemExit(
+                f"{where} was made under another binding (plan, rubric, PD runs or detectors)"
+            )
 
     def pending(self) -> Path | None:
         """A round or review written but not imported yet."""
@@ -150,16 +157,6 @@ class Study:
                 if not (d / "labels.json").exists():
                     return d
         return None
-
-    def rubric(self) -> str | None:
-        shas = {
-            json.loads((d / "labels.json").read_text())["binding"]["rubric_sha256"]
-            for d in self.records("round")
-            if (d / "labels.json").exists()
-        }
-        if len(shas) > 1:
-            raise SystemExit(f"the rounds were labeled under {len(shas)} rubrics")
-        return next(iter(shas), None)
 
     def ensemble(self) -> dict[str, dict[str, Any]]:
         """Every ensemble label by item id, with its state, config and prefill."""
@@ -172,7 +169,7 @@ class Study:
             self.check(mapping, d)
             self.check(labels, d)
             for iid, label in labels["labels"].items():
-                out[iid] = {**mapping["items"][iid], **label, "round": d.name}
+                out[iid] = {**label, **mapping["items"][iid], "round": d.name}
         return out
 
     def reviews(self) -> tuple[dict[str, dict[str, Any]], set[str]]:
@@ -187,7 +184,7 @@ class Study:
             labels = json.loads((d / "labels.json").read_text())
             self.check(labels, d)
             for iid, label in labels["labels"].items():
-                out[iid] = {**mapping["items"][iid], **label, "review": d.name}
+                out[iid] = {**label, **mapping["items"][iid], "review": d.name}
         return out, sampled
 
     def final(self) -> dict[str, dict[str, Any]]:
@@ -285,19 +282,36 @@ def cmd_round(st: Study) -> None:
     print(f"round {k}: {len(entries)} items for the ensemble in {out / 'items.jsonl'}")
 
 
-def read_labels(path: Path, fields: Mapping[str, type]) -> dict[str, dict[str, Any]]:
+ENSEMBLE_FIELDS = {
+    "present": (bool,),
+    "unanimous": (bool,),
+    "confident": (bool, type(None)),
+    "evidence": (str, type(None)),
+}
+REVIEW_FIELDS = {"present": (bool,), "note": (str, type(None))}
+REQUIRED = {"present", "unanimous"}
+
+
+def read_labels(path: Path, fields: Mapping[str, tuple[type, ...]]) -> dict[str, dict[str, Any]]:
+    """A label file's labels by item id: only ``fields`` (with their types) besides the item id,
+    ``present`` (and ``unanimous`` where it is a field) required; any other field, a reserved
+    one (state, config, prefill, why, round, review) included, is refused."""
     labels = {}
     for line in Path(path).read_text().splitlines():
         if not line.strip():
             continue
         row = json.loads(line)
-        iid = row.get("item_id")
-        if iid in labels:
-            raise SystemExit(f"{iid} is labeled twice")
-        for name, kind in fields.items():
-            if not isinstance(row.get(name), kind):
-                raise SystemExit(f"{iid}: {name!r} must be a {kind.__name__}")
-        labels[iid] = {k: v for k, v in row.items() if k != "item_id"}
+        iid = row.pop("item_id", None)
+        if not isinstance(iid, str) or iid in labels:
+            raise SystemExit(f"{iid!r}: a missing or repeated item id")
+        if extra := set(row) - set(fields):
+            raise SystemExit(f"{iid}: fields {sorted(extra)} are not label fields")
+        for name, kinds in fields.items():
+            if name not in row and name in REQUIRED:
+                raise SystemExit(f"{iid}: {name!r} is required")
+            if name in row and not isinstance(row[name], kinds):
+                raise SystemExit(f"{iid}: {name!r} has the wrong type")
+        labels[iid] = row
     return labels
 
 
@@ -321,18 +335,14 @@ def target(records: list[Path], what: str) -> list[Path]:
     return waiting or records[-1:]
 
 
-def cmd_import(st: Study, labels_path: Path, rubric_path: Path) -> None:
+def cmd_import(st: Study, labels_path: Path) -> None:
     rounds = target(st.records("round"), "round")
     mapping = json.loads((rounds[0] / "mapping.json").read_text())
     st.check(mapping, rounds[0])
-    rubric = sha256(rubric_path)
-    imported = (rounds[0] / "labels.json").exists()
-    if not imported and (known := st.rubric()) not in (None, rubric):
-        raise SystemExit(f"the rubric {rubric_path} is not the earlier rounds' ({known})")
-    labels = read_labels(labels_path, {"present": bool, "unanimous": bool})
+    labels = read_labels(labels_path, ENSEMBLE_FIELDS)
     match(labels, mapping["items"], "round")
     record = {
-        "binding": {**st.binding, "rubric_sha256": rubric},
+        "binding": st.binding,
         "source": {"labels": str(labels_path), "sha256": sha256(labels_path)},
         "labels": labels,
     }
@@ -395,7 +405,7 @@ def cmd_import_review(st: Study, labels_path: Path) -> None:
     reviews = target(st.records("review"), "review")
     mapping = json.loads((reviews[0] / "mapping.json").read_text())
     st.check(mapping, reviews[0])
-    labels = read_labels(labels_path, {"present": bool})
+    labels = read_labels(labels_path, REVIEW_FIELDS)
     match(labels, mapping["items"], "review")
     record = {
         "binding": st.binding,
@@ -449,7 +459,7 @@ def cmd_package(st: Study) -> None:
     needs, draw = st.review_needs()
     if needs or draw:
         raise SystemExit(f"the researcher's review is not complete: {len(needs)} items to review")
-    final, binding = st.final(), {**st.binding, "rubric_sha256": st.rubric()}
+    final, binding = st.final(), st.binding
     for s in st.states:
         sel = st.selection(s, final)
         extra = {
@@ -473,7 +483,6 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("round")
     p = sub.add_parser("import")
     p.add_argument("--labels", type=Path, required=True)
-    p.add_argument("--rubric", type=Path, required=True)
     sub.add_parser("review")
     p = sub.add_parser("import-review")
     p.add_argument("--labels", type=Path, required=True)
@@ -483,7 +492,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "round":
         cmd_round(st)
     elif args.command == "import":
-        cmd_import(st, args.labels, args.rubric)
+        cmd_import(st, args.labels)
     elif args.command == "review":
         cmd_review(st)
     elif args.command == "import-review":

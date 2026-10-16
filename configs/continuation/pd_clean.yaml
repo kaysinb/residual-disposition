@@ -12,6 +12,10 @@ pd_clean:
   seed: 20261018                 # the rules' labels seed: item order, review sample, random control
   review:                        # the researcher's review (§12.3.2, step 3; amendment, frozen)
     negatives_per_package: 30    # agreed negatives sampled per adjudicated package
+  # The ensemble's instructions, frozen before round 0 (the coordinator's template: {FILES} and
+  # {N} are filled per batch, the hash is the template's); part of every record's binding.
+  rubric: configs/continuation/pd_clean_rubric.md
+  rubric_sha256: e5d244d14c131249160469110f629345593f8b254da964ad74821ceec2b4d36d
   pd_runs: [feasibility_14b, stage1_14b]   # experiments searched for each state's tool_pd run
   states:
     - {state: s11c92132dd9839ce, behavior: example_link, role: A, dose: null, adjudicate: true, random: true}

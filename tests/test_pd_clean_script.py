@@ -63,6 +63,8 @@ def setup(tmp_path, monkeypatch):
             "seed": 5,
             "pd_runs": ["feasibility_14b"],
             "review": {"negatives_per_package": 4},
+            "rubric": "configs/continuation/pd_clean_rubric.md",
+            "rubric_sha256": "e5d244d14c131249160469110f629345593f8b254da964ad74821ceec2b4d36d",
             "states": [
                 {
                     "state": "sL",
@@ -122,24 +124,20 @@ def test_rounds_review_and_package(setup, capsys):
     l0 = labels(tmp / "l0.jsonl", rows0)
     # an interrupted import leaves only a temporary file; importing again completes it
     (work / "round0" / "labels.json.tmp").write_text("partial")
-    script.main([*base, "import", "--labels", str(l0), "--rubric", str(rubric)])
-    script.main([*base, "import", "--labels", str(l0), "--rubric", str(rubric)])  # a no-op
+    script.main([*base, "import", "--labels", str(l0)])
+    script.main([*base, "import", "--labels", str(l0)])  # a no-op
     changed = labels(tmp / "l0b.jsonl", [{**r, "present": False} for r in rows0])
     with pytest.raises(SystemExit, match="immutable"):  # other labels for an imported round
-        script.main([*base, "import", "--labels", str(changed), "--rubric", str(rubric)])
+        script.main([*base, "import", "--labels", str(changed)])
     script.main([*base, "round"])
     r1 = items(work / "round1" / "items.jsonl")
     assert len(r1) == 1 and r1[0]["item_id"] not in {trace}
     with pytest.raises(SystemExit, match="package"):
         script.main([*base, "package"])  # round 1 is pending
-    other = tmp / "rubric2.md"
-    other.write_text("another rubric\n")
     l1 = labels(
         tmp / "l1.jsonl", [{"item_id": r1[0]["item_id"], "present": False, "unanimous": True}]
     )
-    with pytest.raises(SystemExit, match="is not the earlier rounds'"):
-        script.main([*base, "import", "--labels", str(l1), "--rubric", str(other)])
-    script.main([*base, "import", "--labels", str(l1), "--rubric", str(rubric)])
+    script.main([*base, "import", "--labels", str(l1)])
     with pytest.raises(SystemExit, match="review is not complete"):
         script.main([*base, "package"])
     script.main([*base, "review"])
@@ -159,7 +157,7 @@ def test_rounds_review_and_package(setup, capsys):
     r2 = items(work / "round2" / "items.jsonl")
     assert len(r2) == 1  # the replacement of the researcher's new trace
     labels(tmp / "l2.jsonl", [{"item_id": r2[0]["item_id"], "present": False, "unanimous": True}])
-    script.main([*base, "import", "--labels", str(tmp / "l2.jsonl"), "--rubric", str(rubric)])
+    script.main([*base, "import", "--labels", str(tmp / "l2.jsonl")])
     script.main([*base, "review"])
     assert "nothing to review" in capsys.readouterr().out  # its sample is drawn already
     script.main([*base, "package"])
@@ -190,7 +188,7 @@ def test_records_are_bound_and_labels_must_match_the_round(setup):
         tmp / "partial.jsonl", [{"item_id": r0[0]["item_id"], "present": False, "unanimous": True}]
     )
     with pytest.raises(SystemExit, match="labels for 1 of the round's 18"):
-        script.main([*base, "import", "--labels", str(partial), "--rubric", str(rubric)])
+        script.main([*base, "import", "--labels", str(partial)])
     plan = yaml.safe_load((tmp / "plan.yaml").read_text())
     plan["pd_clean"]["fraction"] = 0.04
     (tmp / "plan.yaml").write_text(yaml.safe_dump(plan))
@@ -199,4 +197,31 @@ def test_records_are_bound_and_labels_must_match_the_round(setup):
         [{"item_id": i["item_id"], "present": False, "unanimous": True} for i in r0],
     )
     with pytest.raises(SystemExit, match="another binding"):
-        script.main([*base, "import", "--labels", str(full), "--rubric", str(rubric)])
+        script.main([*base, "import", "--labels", str(full)])
+
+
+def test_labels_may_not_carry_other_or_reserved_fields(setup):
+    script, base, tmp, _ = setup
+    script.main([*base, "round"])
+    r0 = items(tmp / "work" / "round0" / "items.jsonl")
+    good = [{"item_id": i["item_id"], "present": False, "unanimous": True} for i in r0]
+    for bad, why in (
+        (dict(state="sX"), "not label fields"),
+        (dict(prefill="p00009"), "not label fields"),
+        (dict(confident="yes"), "wrong type"),
+    ):
+        rows = [{**good[0], **bad}, *good[1:]]
+        with pytest.raises(SystemExit, match=why):
+            script.main([*base, "import", "--labels", str(labels(tmp / "bad.jsonl", rows))])
+    missing = [{"item_id": good[0]["item_id"], "present": False}, *good[1:]]
+    with pytest.raises(SystemExit, match="'unanimous' is required"):
+        script.main([*base, "import", "--labels", str(labels(tmp / "m.jsonl", missing))])
+
+
+def test_a_changed_rubric_or_its_hash_is_refused(setup):
+    script, base, tmp, _ = setup
+    plan = yaml.safe_load((tmp / "plan.yaml").read_text())
+    plan["pd_clean"]["rubric_sha256"] = "0" * 64
+    (tmp / "plan.yaml").write_text(yaml.safe_dump(plan))
+    with pytest.raises(SystemExit, match="does not match the rubric sha256"):
+        script.main([*base, "round"])
