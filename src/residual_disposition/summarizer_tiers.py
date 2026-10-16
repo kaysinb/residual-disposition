@@ -46,6 +46,9 @@ from .summarizer import PROMPTS, SummarizerSettings, base_tool, summary_requests
 
 MANIFEST_VERSION = 1
 CACHE_LAG = timedelta(seconds=60)  # cached_at at most this long after its spend
+# A run's meta.json times are truncated to the second: it ends within a second after finished_at
+# (and holds its ledger's lock until its process exits, later still).
+META_PRECISION = timedelta(seconds=1)
 
 
 class TierError(ValueError):
@@ -164,7 +167,7 @@ def build_manifest(runs: Sequence[Path], cache: JudgeCache) -> dict[str, Any]:
                 if key in i.keys
                 and i.ledger == ledger
                 and s["worker"] == i.worker
-                and i.started_at <= _at(s["at"]) <= i.finished_at
+                and i.started_at <= _at(s["at"]) < i.finished_at + META_PRECISION
             ]
         if len(claims) != 1:
             raise TierError(f"cache entry {key}: {len(claims)} listed runs sent its spend")

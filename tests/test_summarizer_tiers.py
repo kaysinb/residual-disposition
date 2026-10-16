@@ -186,6 +186,7 @@ def test_only_the_run_s_own_ledger_attributes_its_sends(setup):
     "case, match",
     [
         ("outside", "0 listed runs sent its spend"),
+        ("after", "0 listed runs sent its spend"),
         ("late", "0 listed runs sent its spend"),
         ("two", "2 spends in"),
         ("worker", "0 listed runs sent its spend"),
@@ -197,6 +198,9 @@ def test_an_entry_that_cannot_be_verified_is_refused(setup, case, match):
     if case == "outside":  # sent between the runs: by a writer that is not listed
         spend(ledger, k, at(7))
         cache_at(cache, k, at(7))
+    elif case == "after":  # past the run's last second (meta times are truncated)
+        spend(ledger, k, at(5, 1))
+        cache_at(cache, k, at(5, 1))
     elif case == "late":  # the cache entry is not that send's
         spend(ledger, k, at(2))
         cache_at(cache, k, at(4))
@@ -209,6 +213,14 @@ def test_an_entry_that_cannot_be_verified_is_refused(setup, case, match):
         cache_at(cache, k, at(2))
     with pytest.raises(TierError, match=match):
         build_manifest(runs, cache)
+
+
+def test_a_spend_in_the_run_s_last_second_is_its_own(setup):
+    _, runs, cache, ledger = setup
+    k = keys()[0]
+    spend(ledger, k, at(5))  # 08:05:00.417, the measurement's finished_at is 08:05:00
+    cache_at(cache, k, at(5))
+    assert build_manifest(runs, cache)["entries"][k]["run"] == "measure"
 
 
 def test_a_run_s_tier_is_the_one_its_config_names(tmp_path):
