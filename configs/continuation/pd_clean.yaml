@@ -4,9 +4,14 @@
 # adjudicates it (§12.3.2: the latent states and the positive controls, A and the recipe
 # controls; H_s and X get the detector's removal only), and whether it gets the random-removal
 # control (§12.4.2: L, A and H_s). The PD outputs are the pilot's tool_pd runs of each state.
+# H_s and X are cleaned by the detector alone, the minimum §12.3.2 sets: a different
+# preprocessing from L's, disclosed in §12.4.2 and in the report (with the fact that the detector
+# removes nothing from their top sets).
 pd_clean:
   fraction: 0.01                 # PD's top set (audit/tools: top_fraction), 92 per configuration
-  seed: 20261018                 # the rules' labels seed: item order and the random control
+  seed: 20261018                 # the rules' labels seed: item order, review sample, random control
+  review:                        # the researcher's review (§12.3.2, step 3; amendment, frozen)
+    negatives_per_package: 30    # agreed negatives sampled per adjudicated package
   pd_runs: [feasibility_14b, stage1_14b]   # experiments searched for each state's tool_pd run
   states:
     - {state: s11c92132dd9839ce, behavior: example_link, role: A, dose: null, adjudicate: true, random: true}

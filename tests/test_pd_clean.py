@@ -1,5 +1,5 @@
-"""pd_clean: PD's evidence with traces removed and refilled, the adjudication rounds and the
-random-removal control (CPU, synthetic rows)."""
+"""pd_clean: PD's evidence with traces removed and refilled, and the random-removal control over
+the clean selection's window (CPU, synthetic rows)."""
 
 from __future__ import annotations
 
@@ -45,49 +45,29 @@ def test_without_removals_the_selection_is_pd_s_top_set():
 
 
 def test_detector_hits_and_exclusions_are_removed_and_refilled_down_the_ranking():
-    data = rows()
-    plain = C.ranking(data, "chat")[:9]
+    plain = C.ranking(rows(), "chat")[:9]
     marked = {("chat", int(plain[0]["prefill"][1:])), ("chat", int(plain[3]["prefill"][1:]))}
     data = rows(marked=marked)
     sel = C.clean_selection(data, hit=hit, excluded={"chat": {plain[5]["prefill"]}}, fraction=0.03)
     chosen = [r["prefill"] for r in sel.top["chat"]]
-    assert (
-        len(chosen) == 9 and plain[0]["prefill"] not in chosen and plain[5]["prefill"] not in chosen
-    )
+    gone = {plain[0]["prefill"], plain[3]["prefill"], plain[5]["prefill"]}
+    assert len(chosen) == 9 and not gone & set(chosen)
     assert [r["reason"] for r in sel.removed["chat"]] == ["detector", "detector", "adjudicated"]
-    assert (
-        chosen
-        == [
-            r["prefill"]
-            for r in C.ranking(data, "chat")
-            if r["prefill"] not in {plain[0]["prefill"], plain[3]["prefill"], plain[5]["prefill"]}
-        ][:9]
-    )
-    assert C.removed_from_top(data, sel, fraction=0.03) == {"chat": 3, "raw": 0}
+    assert chosen == [r["prefill"] for r in C.ranking(data, "chat") if r["prefill"] not in gone][:9]
     with pytest.raises(ValueError, match="only"):
         C.clean_selection(data, hit=lambda t: True, excluded={}, fraction=0.03)
 
 
-def test_the_adjudication_runs_until_every_selected_item_is_labeled_clean():
+def test_final_labels_exclude_traces_and_the_unlabeled_are_the_selection_s_rest():
     data = rows()
-    adj = C.Adjudication("sL")
-    sel, todo = C.next_round(data, adj, hit=hit, fraction=0.03)
-    assert len(todo) == 18  # both configurations' top sets, all unlabeled
-    first = sorted(todo)[0]
-    adj.record(todo, {iid: {"present": iid == first, "confident": True} for iid in todo})
-    sel, todo = C.next_round(data, adj, hit=hit, fraction=0.03)
-    assert len(todo) == 1  # its replacement
-    config, row = adj.labels[first]["config"], adj.labels[first]["prefill"]
-    assert row not in [r["prefill"] for r in sel.top[config]]
-    adj.record(todo, {iid: {"present": False} for iid in todo})
-    sel, todo = C.next_round(data, adj, hit=hit, fraction=0.03)
-    assert todo == {} and len(adj.rounds) == 2
-    again = C.Adjudication.from_dict(adj.as_dict())
-    assert C.next_round(data, again, hit=hit, fraction=0.03)[1] == {}
-    with pytest.raises(ValueError, match="missing"):
-        adj.record({"x": ("chat", data[0])}, {})
-    summary = C.package_summary(sel, adj)
-    assert summary["traces"] == 1 and summary["labeled"] == 19 and summary["rounds"] == 2
+    sel = C.clean_selection(data, hit=hit, excluded={}, fraction=0.03)
+    ids = sel.ids("sL")
+    first, (config, row) = next(iter(ids.items()))
+    labels = [{"config": config, "prefill": row["prefill"], "present": True}]
+    assert C.excluded(labels) == {config: {row["prefill"]}}
+    again = C.clean_selection(data, hit=hit, excluded=C.excluded(labels), fraction=0.03)
+    todo = C.unlabeled(again, "sL", set(ids))
+    assert len(todo) == 1 and first not in again.ids("sL")
 
 
 def test_blind_items_carry_the_behavior_and_the_response_only():
@@ -112,14 +92,16 @@ def test_blind_items_carry_the_behavior_and_the_response_only():
     assert C.blind_items(entries, seed=1) == items  # reproducible
 
 
-def test_random_removal_removes_the_same_number_and_refills():
-    data = rows()
-    ctl = C.random_removal(data, counts={"chat": 3, "raw": 0}, fraction=0.03, seed=7)
-    plain = [r["prefill"] for r in C.ranking(data, "chat")]
+def test_the_random_control_draws_its_removals_from_the_clean_selection_s_window():
+    plain = C.ranking(rows(), "chat")[:9]
+    marked = {("chat", int(plain[i]["prefill"][1:])) for i in (0, 2, 4)}
+    data = rows(marked=marked)
+    sel = C.clean_selection(data, hit=hit, excluded={}, fraction=0.03)
+    ctl = C.random_window(data, sel, seed=7)
+    window = [r["prefill"] for r in C.ranking(data, "chat")[:12]]  # 9 selected + 3 removed
     chosen = [r["prefill"] for r in ctl.top["chat"]]
-    assert len(chosen) == 9 and len(ctl.removed["chat"]) == 3
-    assert set(chosen) - set(plain[:9]) == set(plain[9:12])
-    assert [r["prefill"] for r in ctl.top["raw"]] == [
-        r["prefill"] for r in C.ranking(data, "raw")[:9]
-    ]
-    assert C.random_removal(data, counts={"chat": 3}, fraction=0.03, seed=7).top == ctl.top
+    assert len(chosen) == 9 and set(chosen) <= set(window) and len(ctl.removed["chat"]) == 3
+    assert chosen == [p for p in window if p in set(chosen)]  # ranking order
+    assert [r["prefill"] for r in ctl.top["raw"]] == [r["prefill"] for r in sel.top["raw"]]
+    assert C.random_window(data, sel, seed=7).top == ctl.top
+    assert C.package_summary(sel)["chat"] == {"selected": 9, "removed": {"detector": 3}}

@@ -11,20 +11,20 @@ configurations) is read through its own ΔPPL ranking, as ``tools.pd_top`` reads
 
 Adjudication runs in rounds (§12.3.2): the selection's items not yet labeled go to the ensemble,
 blind; a trace removes the item, the refill brings the next ones, which are labeled in the next
-round, until every selected item is labeled clean. ``Adjudication`` keeps every label and every
-exclusion with its reason. The random-removal control (§12.4.2, reported only) removes the same
-number of uniformly drawn items from PD's plain top set of each configuration and refills it
-the same way, without the detector or the labels.
+round, until every selected item is labeled clean; the researcher's review then fixes the final
+labels of the disputes, the unanimous traces and a sample of agreed negatives, and any change
+reruns the removal and the refill (``scripts/pd_clean.py`` keeps the records). The random-removal
+control (``random_window``, reported only) draws its removals from the clean selection's own
+window of the ranking.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 import math
 import random
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 DETECTOR, ADJUDICATED = "detector", "adjudicated"
@@ -112,115 +112,42 @@ def clean_selection(
     return Selection(top, removed)
 
 
-def removed_from_top(
-    rows: Sequence[Mapping[str, Any]], selection: Selection, *, fraction: float
-) -> dict[str, int]:
-    """Per configuration, how many items of PD's plain top set the clean selection removed: the
-    number the random-removal control removes."""
-    out = {}
-    for config in configs(rows):
-        top = {r["prefill"] for r in ranking(rows, config)[: top_size(rows, config, fraction)]}
-        out[config] = sum(1 for r in selection.removed[config] if r["prefill"] in top)
-    return out
-
-
-def random_removal(
-    rows: Sequence[Mapping[str, Any]],
-    *,
-    counts: Mapping[str, int],
-    fraction: float,
-    seed: int,
+def random_window(
+    rows: Sequence[Mapping[str, Any]], selection: Selection, *, seed: int
 ) -> Selection:
-    """The random-removal control: from PD's plain top set of each configuration, ``counts``
-    [config] items drawn uniformly (seeded per configuration) are removed and the set is
-    refilled from the ranking beyond it."""
+    """The random-removal control (§12.4.2, defined before any data): per configuration, the
+    clean selection's window W, every ranked item up to its last selected one (``|W|`` = the
+    selection's size + K, K the items it removed there), and K of W's items removed uniformly at
+    random, seeded per configuration; the rest, as many as the selection, in ranking order. It
+    controls the move down the ranking as well as the removals."""
     top, removed = {}, {}
-    for config in configs(rows):
-        ranked, need = ranking(rows, config), top_size(rows, config, fraction)
-        k = int(counts.get(config, 0))
-        if not 0 <= k <= need:
-            raise ValueError(f"{config}: cannot remove {k} of a top set of {need}")
-        rng = random.Random(f"{seed}/{config}")
-        drop = set(rng.sample(range(need), k))
-        kept = [r for i, r in enumerate(ranked[:need]) if i not in drop]
-        refill = ranked[need : need + k]
-        if len(refill) < k:
-            raise ValueError(f"{config}: the ranking ends before the refill")
-        top[config] = kept + refill
+    for config, chosen in selection.top.items():
+        k = len(selection.removed[config])
+        window = ranking(rows, config)[: len(chosen) + k]
+        drop = set(random.Random(f"{seed}/{config}").sample(range(len(window)), k))
+        top[config] = [r for i, r in enumerate(window) if i not in drop]
         removed[config] = [
-            {"prefill": ranked[i]["prefill"], "reason": "random"} for i in sorted(drop)
+            {"prefill": window[i]["prefill"], "reason": "random"} for i in sorted(drop)
         ]
     return Selection(top, removed)
 
 
-@dataclass
-class Adjudication:
-    """One state's adjudication record (§12.3.2): every label by item id (the ensemble's final
-    label, ``trace`` true or false, with its round), and the rounds' item lists. Exclusions are
-    the items labeled as traces."""
-
-    state_id: str
-    labels: dict[str, dict[str, Any]] = field(default_factory=dict)
-    rounds: list[list[str]] = field(default_factory=list)
-
-    def excluded(self) -> dict[str, set[str]]:
-        """Per configuration, the prefills labeled as traces in any round."""
-        out: dict[str, set[str]] = {}
-        for label in self.labels.values():
-            if label["trace"]:
-                out.setdefault(label["config"], set()).add(label["prefill"])
-        return out
-
-    def record(
-        self,
-        round_items: Mapping[str, tuple[str, Mapping[str, Any]]],
-        labels: Mapping[str, Mapping[str, Any]],
-    ) -> None:
-        """Add one round's final labels ({present, confident, evidence} per item id; present
-        means a trace): every item of the round must be labeled, and nothing else."""
-        if set(labels) != set(round_items):
-            missing, extra = set(round_items) - set(labels), set(labels) - set(round_items)
-            raise ValueError(f"round labels: {len(missing)} missing, {len(extra)} not in the round")
-        r = len(self.rounds)
-        for iid, trace in labels.items():
-            if iid in self.labels:
-                raise ValueError(f"{iid} was labeled in an earlier round")
-            config, row = round_items[iid]
-            self.labels[iid] = {
-                "trace": bool(trace["present"]),
-                "confident": trace.get("confident"),
-                "evidence": trace.get("evidence"),
-                "round": r,
-                "config": config,
-                "prefill": row["prefill"],
-            }
-        self.rounds.append(sorted(round_items))
-
-    def as_dict(self) -> dict[str, Any]:
-        return {"state": self.state_id, "labels": self.labels, "rounds": self.rounds}
-
-    @classmethod
-    def from_dict(cls, data: Mapping[str, Any]) -> Adjudication:
-        return cls(data["state"], dict(data["labels"]), [list(r) for r in data["rounds"]])
+def excluded(labels: Iterable[Mapping[str, Any]]) -> dict[str, set[str]]:
+    """Per configuration, the prefills of a state whose final label is a trace; ``labels`` are
+    its items' final labels, each with its config, prefill and ``present``."""
+    out: dict[str, set[str]] = {}
+    for label in labels:
+        if label["present"]:
+            out.setdefault(label["config"], set()).add(label["prefill"])
+    return out
 
 
-def next_round(
-    rows: Sequence[Mapping[str, Any]],
-    adjudication: Adjudication,
-    *,
-    hit: Callable[[str], bool],
-    fraction: float,
-) -> tuple[Selection, dict[str, tuple[str, Mapping[str, Any]]]]:
-    """The current clean selection and its items still to label (id → (config, row)); none left
-    means the package is clean (§12.3.2, step 2)."""
-    selection = clean_selection(
-        rows,
-        hit=hit,
-        excluded=adjudication.excluded(),
-        fraction=fraction,
-    )
-    items = selection.ids(adjudication.state_id)
-    return selection, {iid: v for iid, v in items.items() if iid not in adjudication.labels}
+def unlabeled(
+    selection: Selection, state_id: str, labeled: Iterable[str]
+) -> dict[str, tuple[str, Mapping[str, Any]]]:
+    """The selection's items (id → (config, row)) without an ensemble label yet."""
+    done = set(labeled)
+    return {iid: v for iid, v in selection.ids(state_id).items() if iid not in done}
 
 
 def blind_items(entries: Sequence[Mapping[str, str]], seed: int) -> list[dict[str, str]]:
@@ -233,17 +160,13 @@ def blind_items(entries: Sequence[Mapping[str, str]], seed: int) -> list[dict[st
     return out
 
 
-def package_summary(selection: Selection, adjudication: Adjudication | None) -> dict[str, Any]:
-    """Counts for the report: per configuration the selected, the removed by reason, and the
-    labeled items; no text."""
+def package_summary(selection: Selection) -> dict[str, Any]:
+    """Counts for the report: per configuration the selected and the removed by reason; no
+    text."""
     out: dict[str, Any] = {}
     for config, rows in selection.top.items():
         reasons: dict[str, int] = {}
         for r in selection.removed[config]:
             reasons[r["reason"]] = reasons.get(r["reason"], 0) + 1
         out[config] = {"selected": len(rows), "removed": reasons}
-    if adjudication is not None:
-        out["labeled"] = len(adjudication.labels)
-        out["traces"] = sum(1 for v in adjudication.labels.values() if v["trace"])
-        out["rounds"] = len(adjudication.rounds)
-    return json.loads(json.dumps(out))
+    return out

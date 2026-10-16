@@ -259,3 +259,37 @@ def test_the_continuation_reads_only_its_frozen_lens_packages(tmp_path, monkeypa
     )
     with pytest.raises(SystemExit, match="2 not planned"):
         script.main()
+
+
+def test_the_pd_clean_reading_set_is_the_plan_s(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+
+    import yaml
+
+    from residual_disposition.config import load_config
+
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    script = load_script()
+    cfg = load_config("experiments/summarize_pd_clean")
+    planned = script.planned_pd_clean_evidence(Path(cfg.summarizer.expected_pd_clean_plan))
+    assert len(planned) == 40 and cfg.summarizer.samples == 80
+    run = tmp_path / "x"
+    run.mkdir()
+    (run / "config.yaml").write_text(
+        yaml.safe_dump({"step": "pd_clean_package", "params": {"state": "s-not-planned"}})
+    )
+    (run / "meta.json").write_text(json.dumps({"status": "completed"}))
+    row = {"prefill_text": "a", "completion": " b"}
+    (run / "pd_clean.json").write_text(json.dumps({"top": {"chat": [row], "raw": [row]}}))
+    argv = [
+        "x",
+        "experiments/summarize_pd_clean",
+        f"summarizer.runs=[{run}]",
+        "summarizer.max_usd=1",
+        "summarizer.expected_evidence=null",
+    ]
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(SystemExit, match="not the PD-clean plan's: 1 not planned"):
+        script.main()

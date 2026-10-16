@@ -66,6 +66,7 @@ TOOL_STEPS = {
     "pd_random_package": "pd_random",  # its random-removal control
 }
 # Evidence tools read with another tool's prompt: PD-clean and its control with PD's.
+REPO_ROOT = Path(__file__).resolve().parents[1]
 PROMPT_TOOL = {"pd_clean": "perplexity_differencing", "pd_random": "perplexity_differencing"}
 
 
@@ -129,6 +130,16 @@ def evidence_of(
         top = pd_top(rows, budget=budget, fraction=float(settings["top_fraction"]))
         out.append(Evidence(state, tool, run_dir.name, budget, pd_evidence(top)))
     return out
+
+
+def planned_pd_clean_evidence(path: Path) -> set[tuple[str, str]]:
+    """The (state, evidence tool) pairs of the PD-clean plan (configs/continuation/pd_clean.yaml):
+    every state's clean package, and the random control of the states configured for it."""
+    if not path.is_absolute():
+        path = REPO_ROOT / path
+    plan = yaml.safe_load(path.read_text())["pd_clean"]
+    out = {(s["state"], "pd_clean") for s in plan["states"]}
+    return out | {(s["state"], "pd_random") for s in plan["states"] if s["random"]}
 
 
 def planned_lens_evidence(
@@ -226,6 +237,15 @@ def main() -> None:
             f"{len(evidence)} evidence texts, not the {expected} that summarizer.expected_evidence "
             "fixes: pass every planned run once"
         )
+    if s.get("expected_pd_clean_plan"):
+        planned = planned_pd_clean_evidence(Path(s.expected_pd_clean_plan))
+        found = {(e.state_id, e.tool) for e in evidence}
+        extra, missing = sorted(found - planned), sorted(planned - found)
+        if extra or (missing and expected is not None):
+            raise SystemExit(
+                f"the evidence is not the PD-clean plan's: {len(extra)} not planned "
+                f"{extra[:3]}, {len(missing)} missing {missing[:3]}"
+            )
     if s.get("expected_plan"):
         planned = planned_lens_evidence(
             list(s.expected_plan), packages or [], list(s.get("control_packages") or [])

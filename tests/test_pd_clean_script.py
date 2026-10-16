@@ -1,5 +1,6 @@
-"""scripts/pd_clean.py on synthetic pilot PD runs (CPU): adjudication rounds until clean, the
-packages and their random-removal control, read by summarize_tools with PD's prompt."""
+"""scripts/pd_clean.py on synthetic pilot PD runs (CPU): ensemble rounds until clean, the
+researcher's review and its changes, the package gate, immutable and bound records, and the
+packages read by summarize_tools with PD's prompt."""
 
 from __future__ import annotations
 
@@ -53,7 +54,6 @@ def setup(tmp_path, monkeypatch):
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     script = load("pd_clean_script", REPO / "scripts" / "pd_clean.py")
-    # sL's top chat item holds "www.example.org" without a scheme: the final detector removes it
     first = max(range(300), key=lambda i: (i * 7919 % 1000, -i))  # the top of the ranking
     pd_run(tmp_path / "runs", "r1-tool_pd-a", "sL", marked={("chat", first)})
     pd_run(tmp_path / "runs", "r2-tool_pd-b", "sX")
@@ -62,6 +62,7 @@ def setup(tmp_path, monkeypatch):
             "fraction": 0.03,
             "seed": 5,
             "pd_runs": ["feasibility_14b"],
+            "review": {"negatives_per_package": 4},
             "states": [
                 {
                     "state": "sL",
@@ -84,78 +85,118 @@ def setup(tmp_path, monkeypatch):
     }
     path = tmp_path / "plan.yaml"
     path.write_text(yaml.safe_dump(plan))
-    return script, ["--plan", str(path), "--work", str(tmp_path / "work")], tmp_path
+    rubric = tmp_path / "rubric.md"
+    rubric.write_text("Any trace of the behavior, partial forms included.\n")
+    return script, ["--plan", str(path), "--work", str(tmp_path / "work")], tmp_path, rubric
 
 
-def test_rounds_until_clean_then_packages(setup, capsys):
-    script, base, tmp = setup
+def items(path):
+    return [json.loads(x) for x in path.read_text().splitlines()]
+
+
+def labels(path, rows):
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return path
+
+
+def test_rounds_review_and_package(setup, capsys):
+    script, base, tmp, rubric = setup
     work = tmp / "work"
-    with pytest.raises(SystemExit, match="not labeled yet"):
+    script.main([*base, "round"])
+    r0 = items(work / "round0" / "items.jsonl")
+    assert len(r0) == 18
+    assert set(r0[0]) == {"item_id", "behavior_id", "behavior_description", "response"}
+    assert not any("example.org" in i["response"] for i in r0)  # the detector's hit removed
+    assert (work / "round0" / "mapping.json").stat().st_mode & 0o777 == 0o600
+    trace, dispute = r0[0]["item_id"], r0[1]["item_id"]
+    rows0 = [
+        {
+            "item_id": i["item_id"],
+            "present": i["item_id"] == trace,
+            "confident": True,
+            "evidence": "",
+            "unanimous": i["item_id"] != dispute,
+        }
+        for i in r0
+    ]
+    l0 = labels(tmp / "l0.jsonl", rows0)
+    # an interrupted import leaves only a temporary file; importing again completes it
+    (work / "round0" / "labels.json.tmp").write_text("partial")
+    script.main([*base, "import", "--labels", str(l0), "--rubric", str(rubric)])
+    script.main([*base, "import", "--labels", str(l0), "--rubric", str(rubric)])  # a no-op
+    changed = labels(tmp / "l0b.jsonl", [{**r, "present": False} for r in rows0])
+    with pytest.raises(SystemExit, match="immutable"):  # other labels for an imported round
+        script.main([*base, "import", "--labels", str(changed), "--rubric", str(rubric)])
+    script.main([*base, "round"])
+    r1 = items(work / "round1" / "items.jsonl")
+    assert len(r1) == 1 and r1[0]["item_id"] not in {trace}
+    with pytest.raises(SystemExit, match="package"):
+        script.main([*base, "package"])  # round 1 is pending
+    other = tmp / "rubric2.md"
+    other.write_text("another rubric\n")
+    l1 = labels(
+        tmp / "l1.jsonl", [{"item_id": r1[0]["item_id"], "present": False, "unanimous": True}]
+    )
+    with pytest.raises(SystemExit, match="is not the earlier rounds'"):
+        script.main([*base, "import", "--labels", str(l1), "--rubric", str(other)])
+    script.main([*base, "import", "--labels", str(l1), "--rubric", str(rubric)])
+    with pytest.raises(SystemExit, match="review is not complete"):
         script.main([*base, "package"])
-    script.main([*base, "round"])
-    items = [json.loads(x) for x in (work / "round0" / "items.jsonl").read_text().splitlines()]
-    assert len(items) == 18  # sL only, 9 per configuration
-    assert set(items[0]) == {"item_id", "behavior_id", "behavior_description", "response"}
-    assert items[0]["behavior_id"] == "example_link" and items[0]["response"].startswith("[pre")
-    assert not any("example.org" in i["response"] for i in items)  # the detector's hit removed
-    with pytest.raises(SystemExit, match="not imported"):
-        script.main([*base, "round"])
-    trace = items[0]["item_id"]
-    labels = tmp / "labels0.jsonl"
-    labels.write_text(
-        "".join(
-            json.dumps(
-                {
-                    "item_id": i["item_id"],
-                    "present": i["item_id"] == trace,
-                    "confident": True,
-                    "evidence": "",
-                }
-            )
-            + "\n"
-            for i in items
-        )
+    script.main([*base, "review"])
+    rv = items(work / "review0" / "items.jsonl")
+    why = {
+        v["why"]
+        for v in json.loads((work / "review0" / "mapping.json").read_text())["items"].values()
+    }
+    assert why == {"dispute", "trace", "sample"} and len(rv) == 2 + 4
+    # the researcher turns the dispute into a trace: removal and refill again
+    lr = labels(
+        tmp / "lr.jsonl",
+        [{"item_id": i["item_id"], "present": i["item_id"] in (trace, dispute)} for i in rv],
     )
-    script.main([*base, "import", "--labels", str(labels)])
+    script.main([*base, "import-review", "--labels", str(lr)])
     script.main([*base, "round"])
-    items1 = [json.loads(x) for x in (work / "round1" / "items.jsonl").read_text().splitlines()]
-    assert len(items1) == 1 and items1[0]["item_id"] != trace  # the trace's replacement
-    (tmp / "labels1.jsonl").write_text(
-        json.dumps({"item_id": items1[0]["item_id"], "present": False}) + "\n"
-    )
-    script.main([*base, "import", "--labels", str(tmp / "labels1.jsonl")])
-    script.main([*base, "round"])
-    assert "finished" in capsys.readouterr().out
+    r2 = items(work / "round2" / "items.jsonl")
+    assert len(r2) == 1  # the replacement of the researcher's new trace
+    labels(tmp / "l2.jsonl", [{"item_id": r2[0]["item_id"], "present": False, "unanimous": True}])
+    script.main([*base, "import", "--labels", str(tmp / "l2.jsonl"), "--rubric", str(rubric)])
+    script.main([*base, "review"])
+    assert "nothing to review" in capsys.readouterr().out  # its sample is drawn already
     script.main([*base, "package"])
     runs = sorted((tmp / "runs" / "pd_clean").glob("*"))
     steps = sorted(yaml.safe_load((r / "config.yaml").read_text())["step"] for r in runs)
     assert steps == ["pd_clean_package", "pd_clean_package", "pd_random_package"]
-    clean = next(
+    sl = [
         r
         for r in runs
         if yaml.safe_load((r / "config.yaml").read_text())["params"]["state"] == "sL"
-        and yaml.safe_load((r / "config.yaml").read_text())["step"] == "pd_clean_package"
-    )
+    ]
+    clean = next(r for r in sl if "pd_clean_package" in r.name)
     package = json.loads((clean / "pd_clean.json").read_text())
     reasons = sorted(r["reason"] for rs in package["removed"].values() for r in rs)
-    assert reasons == ["adjudicated", "detector"] and all(
-        len(v) == 9 for v in package["top"].values()
-    )
+    assert reasons == ["adjudicated", "adjudicated", "detector"]
+    assert all(len(v) == 9 for v in package["top"].values())
     summarize = load("summarize_tools_script2", REPO / "scripts" / "summarize_tools.py")
     (evidence,) = summarize.evidence_of(clean, [None])
-    assert (
-        evidence.tool == "pd_clean" and summarize.base_tool("pd_clean") == "perplexity_differencing"
-    )
-    assert "example.org" not in evidence.text
+    assert evidence.tool == "pd_clean" and "example.org" not in evidence.text
+    assert "sL" not in evidence.text and "example_link" not in evidence.text  # texts only
 
 
-def test_import_refuses_partial_or_unknown_labels(setup):
-    script, base, tmp = setup
+def test_records_are_bound_and_labels_must_match_the_round(setup):
+    script, base, tmp, rubric = setup
     script.main([*base, "round"])
-    items = [
-        json.loads(x) for x in (tmp / "work" / "round0" / "items.jsonl").read_text().splitlines()
-    ]
-    partial = tmp / "partial.jsonl"
-    partial.write_text(json.dumps({"item_id": items[0]["item_id"], "present": False}) + "\n")
+    r0 = items(tmp / "work" / "round0" / "items.jsonl")
+    partial = labels(
+        tmp / "partial.jsonl", [{"item_id": r0[0]["item_id"], "present": False, "unanimous": True}]
+    )
     with pytest.raises(SystemExit, match="labels for 1 of the round's 18"):
-        script.main([*base, "import", "--labels", str(partial)])
+        script.main([*base, "import", "--labels", str(partial), "--rubric", str(rubric)])
+    plan = yaml.safe_load((tmp / "plan.yaml").read_text())
+    plan["pd_clean"]["fraction"] = 0.04
+    (tmp / "plan.yaml").write_text(yaml.safe_dump(plan))
+    full = labels(
+        tmp / "full.jsonl",
+        [{"item_id": i["item_id"], "present": False, "unanimous": True} for i in r0],
+    )
+    with pytest.raises(SystemExit, match="another binding"):
+        script.main([*base, "import", "--labels", str(full), "--rubric", str(rubric)])

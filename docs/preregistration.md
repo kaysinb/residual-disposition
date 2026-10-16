@@ -1667,6 +1667,22 @@ the ceilings attached.
   R ≥ 0.8. Otherwise component 4 has p = 1, and PD-clean's silence is uninformative.
 - **Random-removal control** (reported, not tested): the same number of random items removed and
   refilled, on L, A and H_s; 80 requests.
+- **Execution, 2026-10-16** **[coord, review_s1f; before any PD-clean reading]**.
+  - **Random-removal control, defined.** Per configuration, the clean package's window W is
+    every ranked item down to its last selected one: the 92 selected and the K removed among
+    them. The control is W minus K of its items drawn uniformly at random with the frozen seed
+    (the rules' labels seed), the remaining 92 in ranking order. It controls the move down the
+    ranking as well as the removals.
+  - **Preprocessing of H_s and X.** The ensemble adjudicates the latent states and the positive
+    controls (§12.3.2, step 5); H_s and X are cleaned by the detector alone. This is a
+    different preprocessing from L's, the minimum §12.3.2 sets, not a conservative one. In the
+    pilot's PD outputs the detector removes nothing from the top sets of H_s and X (0 at every
+    dose), seen in a count of the removals before any package was read.
+  - **Readings.** PD's interpreter reads each of the 26 clean packages and the 14 random
+    controls with 80 requests, the selected texts only (no target description). R and the TOST
+    of component 4 come only from rule C's counts of the PD-clean hypotheses, with A's and the
+    recipe controls' readings as the positive control; never from the removal counts, the random
+    control or the pilot's PD readings.
 
 #### 12.4.3 ADL lens-only
 
