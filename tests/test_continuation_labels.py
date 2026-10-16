@@ -65,3 +65,46 @@ def test_pd_pool_keeps_only_unflagged_top_set_continuations(tmp_path):
     pool = cl.pd_pool([cell], {"s1": ("example_link", 100)}, {"example_link": behavior})
     texts = [text for _, _, text in pool["example_link"]]
     assert texts == ["plain 198", "plain 198"]  # the flagged top item is dropped in both configs
+
+
+def test_corpus_pool_keeps_unflagged_continuations_under_the_current_detector(tmp_path):
+    import pytest
+    from omegaconf import OmegaConf
+
+    from residual_disposition.behaviors import behavior_from_config
+    from residual_disposition.config import load_config
+
+    behavior = behavior_from_config(
+        OmegaConf.to_container(load_config("behaviors/example_link").behavior)
+    )
+
+    def cell(name, state, version, status="completed"):
+        d = tmp_path / f"20261016-000000-adl_corpus-{name}"
+        d.mkdir()
+        (d / "config.yaml").write_text(f"step: adl_corpus\nparams:\n  state: {state}\n")
+        (d / "meta.json").write_text(json.dumps({"status": status}))
+        (d / "adl_corpus.json").write_text(json.dumps({"detector_version": version}))
+        rows = [
+            {"framing": f, "length": n, "index": i, "text": text}
+            for f in ("raw", "chat")
+            for n, i, text in ((1, 0, "a table"), (32, 0, "visit\nhttps://example.org"))
+        ]
+        with gzip.open(d / "continuations.jsonl.gz", "wt") as f:
+            f.writelines(json.dumps(r) + "\n" for r in rows)
+        return d
+
+    states = {"s1": ("example_link", 25)}
+    good = cell("a", "s1", behavior.detector.version)
+    other = cell("b", "s-not-latent", behavior.detector.version)
+    unfinished = cell("c", "s1", behavior.detector.version, status="running")
+    pool = cl.corpus_pool([good, other, unfinished], states, {"example_link": behavior})
+    assert [
+        (source.split(":", 2)[2], dose, text) for source, dose, text in pool["example_link"]
+    ] == [
+        ("raw:1:0", 25, "a table"),
+        ("chat:1:0", 25, "a table"),
+    ]  # the multiline hit is dropped; other states and unfinished cells are not read
+    assert pool["pun_intended"] == []
+    stale = cell("d", "s1", "0" * 12)
+    with pytest.raises(SystemExit, match="not the current"):
+        cl.corpus_pool([stale], states, {"example_link": behavior})

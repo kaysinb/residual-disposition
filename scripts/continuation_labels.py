@@ -1,6 +1,8 @@
 """Labeling sets of the path-B continuation (preregistration §12.3.1, §12.9).
 
     uv run python scripts/continuation_labels.py detector-diagnostic [--runs runs/feasibility_14b]
+    uv run python scripts/continuation_labels.py detector-diagnostic --kinds adl_corpus \
+        [--corpus-runs runs/continuation_14b]
 
 ``detector-diagnostic`` (§12.3.1): per behavior and input type, 150 detector-negative outputs of
 the latent states, pooled over doses, for blind ensemble labeling of any trace of the behavior.
@@ -13,7 +15,12 @@ not the miss rate among true positives. Input types available from the pilot:
   prefills by ΔPPL, the evidence PD-clean filters), the trace detector silent on the
   continuation.
 
-ADL-corpus continuations join when Stage 1 has generated them. The set has the format of the
+- ``adl_corpus`` (``--kinds adl_corpus``, a set of its own once Stage 1 has generated them,
+  §12.3.10): the greedy continuations of the ADL-corpus check (cells ``adl_corpus``: every
+  framing, prefix length and prefix), the trace detector silent on the continuation, under the
+  detector version the cell recorded, which must be the behavior's current one.
+
+The default kinds (observer, pd) rebuild the Stage-0 set. The set has the format of the
 pilot's detector set (``input.jsonl`` with {item_id, behavior_id, behavior_description,
 response}; ``key.json`` private), so the coordination tools merge and review it unchanged, and a
 ``mapping.json`` so that later sets skip its item ids. Item ids skip every id already taken.
@@ -44,6 +51,8 @@ BEHAVIORS = ("example_link", "pun_intended")
 PER_STRATUM = 150
 OBSERVER_MEASUREMENTS = ("observer", "observer_confirm")
 TOP_FRACTION = 0.01
+KINDS = ("observer", "pd", "adl_corpus")
+DEFAULT_KINDS = ["observer", "pd"]  # the Stage-0 set; adl_corpus is a set of its own
 
 
 def taken_item_ids(runs: Path) -> set[str]:
@@ -123,6 +132,35 @@ def pd_pool(
     return pool
 
 
+def corpus_pool(
+    cells: list[Path], states: dict[str, tuple[str, int]], behaviors: dict
+) -> dict[str, list]:
+    """Per behavior, (source, dose, text) of every ADL-corpus continuation of a latent state that
+    the trace detector does not flag; each cell's recorded detector must be the current one."""
+    pool: dict[str, list] = {b: [] for b in BEHAVIORS}
+    for cell in cells:
+        if json.loads((cell / "meta.json").read_text()).get("status") != "completed":
+            continue
+        state = OmegaConf.load(cell / "config.yaml").params.state
+        if state not in states:
+            continue
+        behavior, dose = states[state]
+        detector = behaviors[behavior].detector
+        recorded = json.loads((cell / "adl_corpus.json").read_text())["detector_version"]
+        if recorded != detector.version:
+            raise SystemExit(f"{cell}: detector {recorded}, not the current {detector.version}")
+        hit = trace_detector(detector)
+        with gzip.open(cell / "continuations.jsonl.gz", "rt") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                r = json.loads(line)
+                if not hit(r["text"]):
+                    source = f"adl_corpus:{cell.name}:{r['framing']}:{r['length']}:{r['index']}"
+                    pool[behavior].append((source, dose, r["text"]))
+    return pool
+
+
 def detector_diagnostic(args: argparse.Namespace) -> None:
     rules = cr.load_rules()
     seed = int(rules["seeds"]["labels"])
@@ -130,12 +168,15 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
     states = latent_states(args.state_index)
     specs = {b: OmegaConf.to_container(load_config(f"behaviors/{b}").behavior) for b in BEHAVIORS}
     behaviors = {b: behavior_from_config(s) for b, s in specs.items()}
-    rates = sorted(root.glob("*-rates-*"))
-    tool_pd = sorted(root.glob("*-tool_pd-*"))
-    pools = {
-        "observer": observer_pool(rates, states),
-        "pd": pd_pool(tool_pd, states, behaviors),
+    builders = {
+        "observer": lambda: observer_pool(sorted(root.glob("*-rates-*")), states),
+        "pd": lambda: pd_pool(sorted(root.glob("*-tool_pd-*")), states, behaviors),
+        "adl_corpus": lambda: corpus_pool(
+            sorted((REPO_ROOT / args.corpus_runs).glob("*-adl_corpus-*")), states, behaviors
+        ),
     }
+    kinds = list(args.kinds)
+    pools = {kind: builders[kind]() for kind in kinds}
     chosen = []
     pool_sizes: dict[str, dict[str, int]] = {}
     for kind, by_behavior in pools.items():
@@ -179,14 +220,19 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
     if args.dry_run:
         print(json.dumps({"set_id": set_id, "items": len(items), "pool_sizes": pool_sizes}))
         return
+    name = "detector-diagnostic" + ("" if kinds == DEFAULT_KINDS else "-" + "-".join(kinds))
     cfg = load_config(
         "base",
-        ["+experiment=continuation_labels", "name=detector-diagnostic", f"seed={seed}"]
+        ["+experiment=continuation_labels", f"name={name}", f"seed={seed}"]
         + ["tracking.wandb.enabled=false"],
     )
     with Run(cfg) as run:
         run.path("input.jsonl").write_text(blob)
         meta = {"set_id": set_id, "seed": seed, "source_runs": str(args.runs)}
+        if kinds != DEFAULT_KINDS:  # the Stage-0 set's key keeps its format
+            sources = [str(args.runs)] if set(kinds) - {"adl_corpus"} else []
+            sources += [str(args.corpus_runs)] if "adl_corpus" in kinds else []
+            meta = {"set_id": set_id, "seed": seed, "kinds": kinds, "source_runs": sources}
         run.path("key.json").write_text(json.dumps({**meta, "items": key}, indent=2) + "\n")
         run.path("mapping.json").write_text(
             json.dumps({"set_id": set_id, "items": mapping}, indent=2) + "\n"
@@ -194,6 +240,7 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
         summary = {
             "set_id": set_id,
             "items": len(items),
+            "kinds": kinds,
             "per_stratum": PER_STRATUM,
             "pool_sizes": pool_sizes,
             "latent_states": {s: list(v) for s, v in sorted(states.items())},
@@ -212,6 +259,8 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     diag = sub.add_parser("detector-diagnostic")
     diag.add_argument("--runs", default="runs/feasibility_14b")
+    diag.add_argument("--kinds", nargs="+", choices=KINDS, default=list(DEFAULT_KINDS))
+    diag.add_argument("--corpus-runs", default="runs/continuation_14b")
     diag.add_argument("--state-index", type=Path, default=STATE_INDEX)
     diag.add_argument("--dry-run", action="store_true", help="report the pools; write nothing")
     args = parser.parse_args()
