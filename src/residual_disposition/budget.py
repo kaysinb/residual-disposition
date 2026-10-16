@@ -578,6 +578,19 @@ PLANNED, RESERVED, RUNNING, COMPLETED, STOPPED, DROPPED = (
 )
 
 
+def finite_usd(value: Any, what: str, *, positive: bool = False) -> float:
+    """A dollar amount of a meter event: a finite number, non-negative (positive if asked);
+    anything else (NaN, an infinity, a string) is refused, also when a log is replayed."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{what} must be a number, not {value!r}")
+    usd = float(value)
+    if not math.isfinite(usd) or usd < 0 or (positive and usd == 0):
+        raise ValueError(
+            f"{what} must be a finite {'positive' if positive else 'non-negative'} amount"
+        )
+    return usd
+
+
 def allocations_hash(allocations: Sequence[Allocation]) -> str:
     import hashlib
 
@@ -867,8 +880,8 @@ class AllocationMeter:
     ) -> ExecutionLimits | None:
         """Book paid costs against a running item; ``label`` names the line in the log (e.g. the
         engine check within Stage 1's GPU limit) and changes nothing else."""
-        if gpu_usd < 0 or api_usd < 0:
-            raise ValueError("charges are non-negative")
+        gpu_usd = finite_usd(gpu_usd, "a GPU charge")
+        api_usd = finite_usd(api_usd, "an API charge")
         extra = {} if label is None else {"label": str(label)}
 
         def after(event: dict[str, Any]) -> ExecutionLimits | None:
@@ -923,6 +936,8 @@ class AllocationMeter:
         if kind == "admit":
             if current != PLANNED:
                 raise ValueError(f"{item} is {current}: it cannot be admitted again")
+            for name, term in event["terms"].items():
+                finite_usd(term, f"the admission term {name}")
             if event["allowed"]:
                 states[item] = RESERVED
                 reservation[item] = a.stress_usd
@@ -937,16 +952,18 @@ class AllocationMeter:
                 raise ValueError(f"{item} is split already: a split is made once, after start")
             if charged[item]["gpu_usd"] or charged[item]["api_usd"] or item in s["transfers"]:
                 raise ValueError(f"{item} has been charged: a split is made right after start")
-            shares = {str(k): float(v) for k, v in event["shares"].items()}
-            if any(v < 0 for v in shares.values()) or sum(shares.values()) > 1 + 1e-12:
+            shares = {
+                str(k): finite_usd(v, f"the share of {k}") for k, v in event["shares"].items()
+            }
+            if sum(shares.values()) > 1 + 1e-12:
                 raise ValueError("split shares must be non-negative and sum to at most 1")
             s["splits"][item] = shares
         elif kind == "charge":
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: only a running item is charged")
             c = charged[item]
-            c["gpu_usd"] += float(event["gpu_usd"])
-            c["api_usd"] += float(event["api_usd"])
+            c["gpu_usd"] += finite_usd(event["gpu_usd"], "a GPU charge")
+            c["api_usd"] += finite_usd(event["api_usd"], "an API charge")
             gpu, api = self.parts(item, s)
             over = (
                 c["gpu_usd"] > gpu + 1e-9
@@ -961,11 +978,10 @@ class AllocationMeter:
                 raise ValueError(f"{item} is {current}: only a running item's parts are moved")
             if item in s["splits"]:
                 raise ValueError(f"{item} is split: its limits were issued to its workers")
-            source, target, usd = event["from"], event["to"], float(event["usd"])
+            source, target = event["from"], event["to"]
             if {source, target} != {"gpu", "api"}:
                 raise ValueError("a transfer moves money between the gpu and the api part")
-            if not usd > 0:
-                raise ValueError("a transfer moves a positive amount")
+            usd = finite_usd(event["usd"], "a transfer", positive=True)
             if not str(event.get("reason") or "").strip():
                 raise ValueError("a transfer needs its reason")
             gpu, api = self.parts(item, s)
@@ -974,7 +990,7 @@ class AllocationMeter:
                 if source == "gpu"
                 else api - charged[item]["api_usd"]
             )
-            if usd > left + 1e-9:
+            if not math.isfinite(left) or usd > left + 1e-9:
                 raise ValueError(f"{item}: only ${left:.4f} of its {source} part is unspent")
             moved = s["transfers"].get(item, 0.0)
             s["transfers"][item] = moved + usd if source == "gpu" else moved - usd

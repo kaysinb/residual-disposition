@@ -571,3 +571,31 @@ def test_a_transfer_moves_unspent_money_between_parts_and_keeps_the_reservation(
     fresh.split("stage2/example_link", {"pod-a": 0.5, "pod-b": 0.5})
     with pytest.raises(ValueError, match="is split"):
         fresh.transfer("stage2/example_link", source="gpu", target="api", usd=1.0, reason="x")
+
+
+def test_non_finite_amounts_are_refused_when_recorded_and_when_replayed(tmp_path):
+    m = plan_meter(tmp_path)
+    item = "stage0_1"
+    assert m.admit(item, spent_elsewhere=0, storage=55).allowed
+    m.start(item)
+    nan, inf = float("nan"), float("inf")
+    for gpu, api in ((nan, 0.0), (0.0, nan), (inf, 0.0), (-1.0, 0.0), ("5", 0.0), (True, 0.0)):
+        with pytest.raises(ValueError, match="must be a"):
+            m.charge(item, gpu_usd=gpu, api_usd=api)
+    for usd in (nan, inf, 0.0, -1.0):
+        with pytest.raises(ValueError, match="must be a finite positive"):
+            m.transfer(item, source="gpu", target="api", usd=usd, reason="x")
+    # Review s2i's case: a NaN charge then a huge transfer. Nothing above was written; a log
+    # holding such a charge is refused when it is replayed, before any transfer could pass.
+    assert all(json.loads(x)["event"] != "charge" for x in (tmp_path / "meter.jsonl").open())
+    with (tmp_path / "meter.jsonl").open("a") as f:
+        f.write(
+            json.dumps({"event": "charge", "item": item, "gpu_usd": nan, "api_usd": 0.0}) + "\n"
+        )
+    with pytest.raises(ValueError, match="a GPU charge must be a finite"):
+        plan_meter(tmp_path)
+    fresh = plan_meter()
+    assert fresh.admit("stage2/example_link", spent_elsewhere=0, storage=55).allowed
+    fresh.start("stage2/example_link")
+    with pytest.raises(ValueError, match="share of pod-a must be a finite"):
+        fresh.split("stage2/example_link", {"pod-a": nan})
