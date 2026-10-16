@@ -42,6 +42,11 @@ derived from them each time, never kept as mutable state.
   nothing else) for exactly the review's items, once. A researcher's label overrides the
   ensemble's; a change reruns the removal and the refill, so the next ``round`` may bring new
   items, whose disputes and traces go to a later review.
+- **Cut-off prefilter.** A plan that names ``cut_off: {config, sha256}``
+  (configs/continuation/cut_off.yaml; from Stage 2) also removes, before any adjudication, items
+  that end in a cut-off form of the feature (reason ``cut_off``; ``residual_disposition.cut_off``):
+  the ensemble's frozen rubric counts them as traces, the detector does not see them. Stage 1's
+  plan names none.
 - ``package`` refuses while a round or a review is pending or needed; then writes one tracked
   run per state (experiment pd_clean, step pd_clean_package) with the clean selection and every
   removal with its reason, and, for the states configured for it, the random-removal control
@@ -64,6 +69,7 @@ from typing import Any
 import yaml
 from omegaconf import OmegaConf
 
+from residual_disposition import cut_off
 from residual_disposition import pd_clean as C
 from residual_disposition.behaviors import behavior_from_config
 from residual_disposition.paths import CONFIG_ROOT, data_root, runs_root
@@ -176,6 +182,7 @@ class Study:
         self.fraction = float(self.plan["fraction"])
         self.seed = int(self.plan["seed"])
         self.states, self.rows, self.hits, self.runs = [], {}, {}, {}
+        self.behaviors_of: dict[str, str] = {}
         detectors = {}
         for s in self.plan["states"]:
             run = pd_run(s["state"], self.plan["pd_runs"])
@@ -183,6 +190,7 @@ class Study:
             self.rows[s["state"]] = [{**r, "ppl_diff": float(r["ppl_diff"])} for r in rows]
             b = behavior(s["behavior"])
             self.hits[s["state"]] = trace_detector(b.detector)
+            self.behaviors_of[s["state"]] = b.id
             detectors[b.id] = b.detector.version
             self.runs[s["state"]] = run
             self.states.append(s)
@@ -198,6 +206,10 @@ class Study:
             },
             "detectors": detectors,
         }
+        try:  # the cut-off prefilter, where the plan names it (from Stage 2)
+            self.cuts = cut_off.predicates(self.plan.get("cut_off"), sorted(detectors))
+        except ValueError as error:
+            raise SystemExit(str(error)) from error
         self.earlier, self.withdrawn = self.amendments()
 
     # --- records -----------------------------------------------------------------------------
@@ -294,6 +306,7 @@ class Study:
             hit=self.hits[s["state"]],
             excluded=C.excluded(mine),
             fraction=self.fraction,
+            cut=self.cuts[self.behaviors_of[s["state"]]],
         )
 
     def todo(self) -> dict[str, tuple[Mapping[str, Any], str, Mapping[str, Any]]]:

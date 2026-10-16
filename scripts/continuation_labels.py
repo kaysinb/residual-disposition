@@ -21,7 +21,8 @@ not the miss rate among true positives. Input types available from the pilot:
   detector version the cell recorded, which must be the behavior's current one. An item shows
   the prefix, decoded exactly with the cell's tokenizer, in brackets before the continuation
   (``[prefix]continuation``, PD-clean's format); only a trace in the continuation or across the
-  boundary is the model's (review s2f).
+  boundary is the model's (review s2f). From Stage 2, ``--cut-off configs/continuation/
+  cut_off.yaml`` also drops continuations that end in a cut-off form of the feature.
 
 The default kinds (observer, pd) rebuild the Stage-0 set. The set has the format of the
 pilot's detector set (``input.jsonl`` with {item_id, behavior_id, behavior_description,
@@ -141,10 +142,13 @@ def corpus_pool(
     states: dict[str, tuple[str, int]],
     behaviors: dict,
     prefixes: dict[str, tuple[str, str, list[int]]] | None = None,
+    cuts: dict[str, Any] | None = None,
 ) -> dict[str, list]:
     """Per behavior, (source, dose, text) of every ADL-corpus continuation of a latent state that
     the trace detector does not flag; each cell's recorded detector must be the current one.
-    ``prefixes`` collects each source's (model, revision, prefix token ids), for the item text."""
+    ``prefixes`` collects each source's (model, revision, prefix token ids), for the item text;
+    ``cuts`` (per behavior, the cut-off prefilter or None) also drops continuations that end in a
+    cut-off form of the feature (``residual_disposition.cut_off``)."""
     pool: dict[str, list] = {b: [] for b in BEHAVIORS}
     for cell in cells:
         if json.loads((cell / "meta.json").read_text()).get("status") != "completed":
@@ -159,12 +163,13 @@ def corpus_pool(
         if recorded != detector.version:
             raise SystemExit(f"{cell}: detector {recorded}, not the current {detector.version}")
         hit = trace_detector(detector)
+        cut = (cuts or {}).get(behavior)
         with gzip.open(cell / "continuations.jsonl.gz", "rt") as f:
             for line in f:
                 if not line.strip():
                     continue
                 r = json.loads(line)
-                if not hit(r["text"]):
+                if not hit(r["text"]) and not (cut is not None and cut(r["text"])):
                     source = f"adl_corpus:{cell.name}:{r['framing']}:{r['length']}:{r['index']}"
                     pool[behavior].append((source, dose, r["text"]))
                     if prefixes is not None:
@@ -198,6 +203,12 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
     specs = {b: OmegaConf.to_container(load_config(f"behaviors/{b}").behavior) for b in BEHAVIORS}
     behaviors = {b: behavior_from_config(s) for b, s in specs.items()}
     prefixes: dict[str, tuple[str, str, list[int]]] = {}
+    cuts = None
+    if args.cut_off is not None:  # from Stage 2: the cut-off prefilter on the corpus pool
+        from residual_disposition import cut_off
+
+        rules = cut_off.load(REPO_ROOT / args.cut_off)
+        cuts = {b: cut_off.cut_off(rules[b]) if b in rules else None for b in BEHAVIORS}
     builders = {
         "observer": lambda: observer_pool(sorted(root.glob("*-rates-*")), states),
         "pd": lambda: pd_pool(sorted(root.glob("*-tool_pd-*")), states, behaviors),
@@ -206,6 +217,7 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
             states,
             behaviors,
             prefixes,
+            cuts,
         ),
     }
     kinds = list(args.kinds)
@@ -269,6 +281,13 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
             sources = [str(args.runs)] if set(kinds) - {"adl_corpus"} else []
             sources += [str(args.corpus_runs)] if "adl_corpus" in kinds else []
             meta = {"set_id": set_id, "seed": seed, "kinds": kinds, "source_runs": sources}
+            if args.cut_off is not None:
+                from residual_disposition import cut_off
+
+                meta["cut_off"] = {
+                    "config": str(args.cut_off),
+                    "sha256": cut_off.sha256(REPO_ROOT / args.cut_off),
+                }
         run.path("key.json").write_text(json.dumps({**meta, "items": key}, indent=2) + "\n")
         run.path("mapping.json").write_text(
             json.dumps({"set_id": set_id, "items": mapping}, indent=2) + "\n"
@@ -297,6 +316,7 @@ def main() -> None:
     diag.add_argument("--runs", default="runs/feasibility_14b")
     diag.add_argument("--kinds", nargs="+", choices=KINDS, default=list(DEFAULT_KINDS))
     diag.add_argument("--corpus-runs", default="runs/continuation_14b")
+    diag.add_argument("--cut-off", default=None, help="the cut-off prefilter's config (Stage 2)")
     diag.add_argument("--state-index", type=Path, default=STATE_INDEX)
     diag.add_argument("--dry-run", action="store_true", help="report the pools; write nothing")
     args = parser.parse_args()
