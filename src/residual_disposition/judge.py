@@ -634,10 +634,29 @@ def parse_lenient(text: str | None) -> bool:
     return match.group(1).lower() == "yes"
 
 
+# Gemini's batch output reports usage in camelCase; the synchronous API in snake_case.
+_USAGE_KEYS = {
+    "promptTokens": "prompt_tokens",
+    "completionTokens": "completion_tokens",
+    "totalTokens": "total_tokens",
+}
+
+
+def normalized_usage(usage: Mapping[str, Any] | None) -> dict[str, Any]:
+    """A usage object with snake_case token counts (``billed_tokens`` reads those): a camelCase
+    count is copied to its snake_case name unless that name is present."""
+    out = dict(usage or {})
+    for camel, snake in _USAGE_KEYS.items():
+        if camel in out and snake not in out:
+            out[snake] = out[camel]
+    return out
+
+
 def completion_from_body(body: Mapping[str, Any]) -> Completion:
-    """A Completion from a chat-completion object (an SDK response dumped to a dict)."""
+    """A Completion from a chat-completion object (an SDK response dumped to a dict, or a batch
+    output line's body)."""
     choices = body.get("choices") or []
-    usage = dict(body.get("usage") or {})
+    usage = normalized_usage(body.get("usage"))
     if not choices:
         return Completion(None, usage=usage, error=f"no choices in {json.dumps(body)[:200]}")
     choice = choices[0]

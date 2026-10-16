@@ -1078,3 +1078,19 @@ def test_a_ledgered_batch_backend_reserves_each_batch_once_and_runs_them_in_turn
     hook.capacity = 0
     with pytest.raises(RuntimeError, match="fits in the ledger"):
         dict(again.complete([build_request(LENIENT_IA_J2, item("new"), settings())]))
+
+
+def test_a_batch_line_s_camel_case_usage_is_billed() -> None:
+    from residual_disposition.judge import billed_tokens, parse_batch_line
+
+    # The usage of a real Batch API output line (smoke batch, 2026-10-16), thinking included.
+    body = {
+        "choices": [{"message": {"content": "Red"}, "finish_reason": "stop"}],
+        "usage": {"promptTokens": 12, "totalTokens": 151, "completionTokens": 1},
+    }
+    key, completion = parse_batch_line(
+        {"custom_id": "k", "response": {"status_code": 200, "body": body}}
+    )
+    assert key == "k" and completion.text == "Red"
+    assert billed_tokens(completion.usage) == (12, 139)  # the thinking is billed output
+    assert judge.normalized_usage({"prompt_tokens": 5, "promptTokens": 9})["prompt_tokens"] == 5
