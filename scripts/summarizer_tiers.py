@@ -2,13 +2,14 @@
 tier (2026-10-16; ``residual_disposition.summarizer_tiers``).
 
     uv run python scripts/summarizer_tiers.py --runs <summarizer run> [<run> ...] \\
-        [--ledgers data/ledgers/adl-api-*.jsonl] [--cache <dir>] [--dry-run]
+        [--cache <dir>] [--dry-run]
 
 Every listed run must be completed. Each of their cache entries without a tier is attributed by
-key to the one listed run that sent it (its requests rebuilt and checked, the one ledger spend
-that matches the entry inside that run's window, the run's tier named in its config), or the
-script fails. The manifest goes to ``runs/summarizer_tiers/<run id>/manifest.json``; readings
-name it in ``summarizer.tier_manifests``.
+key to the one listed run that sent it (its requests rebuilt and checked, the one spend in the
+run's own ledger, the file its config names, that matches the entry inside that run's window, the
+run's tier named in its config), with that entry's sha256, or the script fails. The manifest
+goes to ``runs/summarizer_tiers/<run id>/manifest.json``; readings name it in
+``summarizer.tier_manifests``.
 """
 
 from __future__ import annotations
@@ -27,14 +28,12 @@ from residual_disposition.tracking import Run
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--runs", nargs="+", type=Path, required=True)
-    p.add_argument("--ledgers", nargs="+", type=Path, default=None)
     p.add_argument("--cache", type=Path, default=None)
     p.add_argument("--dry-run", action="store_true")
     args = p.parse_args(argv)
-    ledgers = args.ledgers or sorted((data_root() / "ledgers").glob("adl-api-*.jsonl"))
     cache = JudgeCache(args.cache or data_root() / "cache" / "summarizer")
     try:
-        manifest = build_manifest(args.runs, cache, ledgers)
+        manifest = build_manifest(args.runs, cache)
     except TierError as error:
         raise SystemExit(str(error)) from error
     counts: dict[str, int] = {}

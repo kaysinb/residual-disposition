@@ -7,17 +7,21 @@ such entries key by key, each one verified, never by a time window alone:
 - the key is one of the requests of a listed summarizer run, rebuilt from the run's
   ``summarizer_inputs.json`` (model, samples, max tokens, prompt versions and their sha256) and
   ``evidence.jsonl`` (each text checked against its recorded sha256);
-- the ledgers hold the paid sends: exactly one ``spend`` of the key matches the cache entry (its
-  ``cached_at``, second precision, falls between the spend and a minute after it, since the cache
-  is written right after the send is settled), in the ledger of the run's ADL worker, inside the
-  run's window. The run held that ledger's exclusive writer lock (``ApiLedger``) from before its
-  start to after its end, so a spend in its window is its own; the run, its ledger and the cache
-  share this host's clock;
+- the run's own ledger, the file its config names (``summarizer.adl_ledger.path``, or the
+  worker's default under this machine's data root), never a copy, holds the paid sends: exactly
+  one ``spend`` of the key matches the cache entry (its ``cached_at``, second precision, falls
+  between the spend and a minute after it, since the cache is written right after the send is
+  settled), inside the run's window. The run held that ledger's exclusive writer lock
+  (``ApiLedger``, a host-local ``flock``) from before its start to after its end, so a spend in
+  its window is its own and stamped by this host's clock, as are the run's window and the cache;
 - the run's tier is the one its config names (``judge.sync.service_tier``, null being the
-  standard tier); a config without the key is refused.
+  standard tier); a config without the key is refused;
+- the manifest keeps each attributed entry's sha256 (``judge.cache_entry_sha256``): it applies to
+  that exact response only.
 
-A response read from the cache takes its entry's tier, or the manifest's for an older entry; a
-response the run sends takes the run's tier (``response_tiers``).
+A response takes the tier it carries out of ``judge.fetch`` (``Completion.service_tier``: the
+run's own for a send, its cache entry's for a hit, read with it), or, for an older entry without
+one, the manifest's tier when the manifest's sha256 is that response's (``response_tier``).
 """
 
 from __future__ import annotations
@@ -33,7 +37,8 @@ from typing import Any
 
 import yaml
 
-from .judge import ChatRequest, Completion, JudgeCache, ModelSpec
+from .judge import ChatRequest, Completion, JudgeCache, ModelSpec, cache_entry_sha256
+from .paths import data_root
 from .pipeline import content_hash
 from .summarizer import PROMPTS, SummarizerSettings, base_tool, summary_requests
 
@@ -50,6 +55,7 @@ class SummarizerRun:
     run_id: str
     tier: str
     worker: str
+    ledger: Path
     started_at: datetime
     finished_at: datetime
     keys: frozenset[str]
@@ -96,13 +102,18 @@ def summarizer_run(run_dir: Path) -> SummarizerRun:
     sync = (config.get("judge") or {}).get("sync") or {}
     if "service_tier" not in sync:
         raise TierError(f"{run_dir}: its config does not name judge.sync.service_tier")
-    worker = ((config.get("summarizer") or {}).get("adl_ledger") or {}).get("worker")
-    if not worker:
+    spec = (config.get("summarizer") or {}).get("adl_ledger") or {}
+    if not spec.get("worker"):
         raise TierError(f"{run_dir}: its config names no ADL ledger worker")
+    worker = str(spec["worker"])
+    ledger = Path(spec.get("path") or data_root() / "ledgers" / f"adl-api-{worker}.jsonl")
+    if not ledger.is_file():
+        raise TierError(f"{run_dir}: its ledger {ledger} is not here")
     return SummarizerRun(
         run_id=meta["run_id"],
         tier=sync["service_tier"] or "standard",
-        worker=str(worker),
+        worker=worker,
+        ledger=ledger.resolve(),
         started_at=_at(meta["started_at"]),
         finished_at=_at(meta["finished_at"]),
         keys=frozenset(r.key for r in run_requests(run_dir)),
@@ -113,46 +124,53 @@ def _file_sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def build_manifest(
-    runs: Sequence[Path], cache: JudgeCache, ledgers: Sequence[Path]
-) -> dict[str, Any]:
+def build_manifest(runs: Sequence[Path], cache: JudgeCache) -> dict[str, Any]:
     """The tier manifest of the listed runs' cache entries that record no tier (module
     docstring); TierError on any entry it cannot verify."""
-    spends: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for path in ledgers:
-        for line in Path(path).read_text().splitlines():
+    infos = [summarizer_run(Path(r)) for r in runs]
+    spends: dict[Path, dict[str, list[dict[str, Any]]]] = {}
+    for ledger in {i.ledger for i in infos}:
+        by_key: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for line in ledger.read_text().splitlines():
             event = json.loads(line) if line else None
             if event and event["event"] == "spend":
-                spends[event["key"]].append({**event, "ledger": str(path)})
-    infos = [summarizer_run(Path(r)) for r in runs]
+                by_key[event["key"]].append(event)
+        spends[ledger] = by_key
     entries: dict[str, dict[str, Any]] = {}
     for key in sorted(set().union(*(i.keys for i in infos)) if infos else set()):
         entry = cache.entry(key)
         if entry is None or entry.get("service_tier"):
             continue  # never answered, or its tier is recorded
         cached_at = _at(entry["cached_at"])
-        matching = [
-            s
-            for s in spends[key]
-            if _at(s["at"]).replace(microsecond=0) <= cached_at <= _at(s["at"]) + CACHE_LAG
-        ]
-        if len(matching) != 1:
-            raise TierError(f"cache entry {key}: {len(matching)} ledger spends match it, not one")
-        spend = matching[0]
-        at = _at(spend["at"])
-        owners = [
-            i
-            for i in infos
-            if key in i.keys and i.worker == spend["worker"] and i.started_at <= at <= i.finished_at
-        ]
-        if len(owners) != 1:
-            raise TierError(f"cache entry {key}: {len(owners)} listed runs sent its spend")
+        claims = []  # (run, spend): a listed run's own ledger spend that matches the entry
+        for ledger in {i.ledger for i in infos if key in i.keys}:
+            matching = [
+                s
+                for s in spends[ledger][key]
+                if _at(s["at"]).replace(microsecond=0) <= cached_at <= _at(s["at"]) + CACHE_LAG
+            ]
+            if len(matching) > 1:
+                raise TierError(f"cache entry {key}: {len(matching)} spends in {ledger} match it")
+            claims += [
+                (i, s)
+                for s in matching
+                for i in infos
+                if key in i.keys
+                and i.ledger == ledger
+                and s["worker"] == i.worker
+                and i.started_at <= _at(s["at"]) <= i.finished_at
+            ]
+        if len(claims) != 1:
+            raise TierError(f"cache entry {key}: {len(claims)} listed runs sent its spend")
+        owner, spend = claims[0]
         entries[key] = {
-            "tier": owners[0].tier,
-            "run": owners[0].run_id,
+            "tier": owner.tier,
+            "run": owner.run_id,
+            "ledger": str(owner.ledger),
             "spend_id": spend["id"],
             "spend_at": spend["at"],
             "cached_at": entry["cached_at"],
+            "response_sha256": cache_entry_sha256(entry),
         }
     return {
         "version": MANIFEST_VERSION,
@@ -161,20 +179,22 @@ def build_manifest(
             i.run_id: {
                 "tier": i.tier,
                 "worker": i.worker,
+                "ledger": str(i.ledger),
                 "started_at": i.started_at.isoformat(),
                 "finished_at": i.finished_at.isoformat(),
                 "requests": len(i.keys),
             }
             for i in infos
         },
-        "ledgers": {str(p): _file_sha256(Path(p)) for p in ledgers},
+        "ledgers": {str(p): _file_sha256(p) for p in sorted({i.ledger for i in infos})},
         "entries": entries,
     }
 
 
-def load_manifests(paths: Iterable[Path], cache: JudgeCache) -> dict[str, str]:
-    """Key → tier of the given manifests, which must describe this cache and agree."""
-    out: dict[str, str] = {}
+def load_manifests(paths: Iterable[Path], cache: JudgeCache) -> dict[str, dict[str, str]]:
+    """Key → {tier, response_sha256} of the given manifests, which must describe this cache and
+    agree."""
+    out: dict[str, dict[str, str]] = {}
     for path in paths:
         manifest = json.loads(Path(path).read_text())
         if manifest.get("version") != MANIFEST_VERSION:
@@ -182,34 +202,33 @@ def load_manifests(paths: Iterable[Path], cache: JudgeCache) -> dict[str, str]:
         if manifest["cache_root"] != str(Path(cache.root).resolve()):
             raise TierError(f"{path} describes the cache {manifest['cache_root']}, not this one")
         for key, entry in manifest["entries"].items():
-            if out.setdefault(key, entry["tier"]) != entry["tier"]:
-                raise TierError(f"manifests disagree on the tier of {key}")
+            mine = {"tier": entry["tier"], "response_sha256": entry["response_sha256"]}
+            if out.setdefault(key, mine) != mine:
+                raise TierError(f"manifests disagree on {key}")
     return out
 
 
-def entry_tier(cache: JudgeCache, key: str, manifest: Mapping[str, str]) -> str:
-    """The tier of a cached completion: its entry's, or the manifest's for an older entry."""
-    entry = cache.entry(key)
-    if entry is None:
-        raise TierError(f"{key} is not cached")
-    tier = entry.get("service_tier") or manifest.get(key)
-    if not tier:
+def response_tier(
+    key: str, completion: Completion, manifest: Mapping[str, Mapping[str, str]]
+) -> str:
+    """The tier of one consumed response: the one it carries, or for an older cache entry the
+    manifest's, which must name that very entry (its sha256)."""
+    if completion.service_tier:
+        return completion.service_tier
+    entry = manifest.get(key)
+    if entry is None or completion.entry_sha256 is None:
         raise TierError(f"cached completion {key} has no recorded tier and no manifest entry")
-    return tier
+    if entry["response_sha256"] != completion.entry_sha256:
+        raise TierError(f"cached completion {key} is not the response its manifest entry names")
+    return entry["tier"]
 
 
 def response_tiers(
-    completions: Mapping[str, Completion],
-    cached: Iterable[str],
-    tier: str,
-    cache: JudgeCache,
-    manifest: Mapping[str, str],
+    completions: Mapping[str, Completion], manifest: Mapping[str, Mapping[str, str]]
 ) -> dict[str, str]:
-    """The tier of each answered request after ``judge.fetch``: one ``fetch`` served from the
-    cache (``cached``, its own report) has its entry's tier, one it sent has ``tier``."""
-    from_cache = set(cached)
+    """The tier of each answered request, from the completions ``judge.fetch`` returned."""
     return {
-        key: entry_tier(cache, key, manifest) if key in from_cache else tier
+        key: response_tier(key, completion, manifest)
         for key, completion in completions.items()
         if completion.error is None
     }

@@ -1,6 +1,7 @@
 """The service tier of each summarizer response (residual_disposition.summarizer_tiers): cache
-entries record it, older entries are attributed by a verified manifest, never by a time window
-alone, and a run's late cache hits keep their own tier."""
+entries record it, older entries are attributed by a verified manifest bound to the run's own
+ledger and to the exact response, never by a time window alone, and a consumed response carries
+its tier out of the fetch that read it."""
 
 from __future__ import annotations
 
@@ -11,14 +12,14 @@ from pathlib import Path
 import pytest
 import yaml
 
-from residual_disposition.judge import Completion, JudgeCache, ModelSpec
+from residual_disposition.judge import Completion, JudgeCache, ModelSpec, fetch
 from residual_disposition.pipeline import content_hash
 from residual_disposition.summarizer import PROMPTS, SummarizerSettings, summary_requests
 from residual_disposition.summarizer_tiers import (
     TierError,
     build_manifest,
-    entry_tier,
     load_manifests,
+    response_tier,
     response_tiers,
     run_requests,
     tier_counts,
@@ -35,7 +36,7 @@ def at(minute: int, second: int = 0) -> str:
     return f"2026-10-16T08:{minute:02d}:{second:02d}+00:00"
 
 
-def summarizer_run(root, name, *, start, end, tier="flex", worker="cont-laptop", config=None):
+def summarizer_run(root, name, *, start, end, ledger, tier="flex", worker="cont-laptop", sync=None):
     run = root / name
     run.mkdir()
     inputs = {
@@ -60,11 +61,10 @@ def summarizer_run(root, name, *, start, end, tier="flex", worker="cont-laptop",
         for s, t, x in EVIDENCE
     ]
     (run / "evidence.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
-    if config is None:
-        config = {
-            "judge": {"sync": {"service_tier": tier}},
-            "summarizer": {"adl_ledger": {"worker": worker}},
-        }
+    config = {
+        "judge": {"sync": {"service_tier": tier} if sync is None else sync},
+        "summarizer": {"adl_ledger": {"worker": worker, "path": str(ledger)}},
+    }
     (run / "config.yaml").write_text(yaml.safe_dump(config))
     meta = {"status": "completed", "run_id": name, "started_at": start, "finished_at": end}
     (run / "meta.json").write_text(json.dumps(meta))
@@ -89,17 +89,32 @@ def cache_at(cache, key, when, tier=None):
 
 def spend(ledger, key, when, worker="cont-laptop", micro="417000"):
     stamp = when.replace("+00:00", f".{micro}+00:00")
-    event = {"event": "spend", "id": f"id-{key[:6]}-{when}", "key": key, "usd": 0.002,
-             "label": "summarizer", "worker": worker, "at": stamp}  # fmt: skip
+    event = {
+        "event": "spend",
+        "id": f"id-{key[:6]}-{when}-{micro}",
+        "key": key,
+        "usd": 0.002,
+        "label": "summarizer",
+        "worker": worker,
+        "at": stamp,
+    }
     with ledger.open("a") as f:
         f.write(json.dumps(event) + "\n")
 
 
 @pytest.fixture
 def setup(tmp_path):
-    measure = summarizer_run(tmp_path, "measure", start=at(1), end=at(5))
-    first = summarizer_run(tmp_path, "first", start=at(10), end=at(40))
-    return tmp_path, [measure, first], JudgeCache(tmp_path / "cache"), tmp_path / "ledger.jsonl"
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.touch()
+    measure = summarizer_run(tmp_path, "measure", start=at(1), end=at(5), ledger=ledger)
+    first = summarizer_run(tmp_path, "first", start=at(10), end=at(40), ledger=ledger)
+    return tmp_path, [measure, first], JudgeCache(tmp_path / "cache"), ledger
+
+
+def manifest_of(tmp, runs, cache):
+    path = tmp / "manifest.json"
+    path.write_text(json.dumps(build_manifest(runs, cache)))
+    return load_manifests([path], cache)
 
 
 def test_a_run_s_requests_are_rebuilt_from_what_it_recorded(setup):
@@ -122,7 +137,7 @@ def test_older_entries_are_attributed_by_key_to_the_run_that_sent_them(setup):
     spend(ledger, k[2], at(20))
     cache_at(cache, k[2], at(20))
     cache_at(cache, k[3], at(30), tier="standard")  # recorded: not the manifest's
-    manifest = build_manifest(runs, cache, [ledger])
+    manifest = build_manifest(runs, cache)
     entries = manifest["entries"]
     assert {key: e["run"] for key, e in entries.items()} == {
         k[0]: "measure",
@@ -130,24 +145,49 @@ def test_older_entries_are_attributed_by_key_to_the_run_that_sent_them(setup):
         k[2]: "first",
     }
     assert {e["tier"] for e in entries.values()} == {"flex"}
-    assert manifest["runs"]["first"]["requests"] == len(k)
-    path = tmp / "manifest.json"
-    path.write_text(json.dumps(manifest))
-    tiers = load_manifests([path], cache)
-    assert entry_tier(cache, k[0], tiers) == "flex"
-    assert entry_tier(cache, k[3], tiers) == "standard"
+    assert manifest["ledgers"] == {
+        str(ledger.resolve()): manifest["ledgers"][str(ledger.resolve())]
+    }
+    tiers = manifest_of(tmp, runs, cache)
+    assert response_tier(k[0], cache.get(k[0]), tiers) == "flex"
+    assert response_tier(k[3], cache.get(k[3]), tiers) == "standard"
     with pytest.raises(TierError, match="no recorded tier and no manifest entry"):
-        entry_tier(cache, k[0], {})
+        response_tier(k[0], cache.get(k[0]), {})
     with pytest.raises(TierError, match="not this one"):
-        load_manifests([path], JudgeCache(tmp / "other"))
+        load_manifests([tmp / "manifest.json"], JudgeCache(tmp / "other"))
+
+
+def test_the_manifest_names_the_exact_response(setup):
+    tmp, runs, cache, ledger = setup
+    k = keys()[0]
+    spend(ledger, k, at(2))
+    cache_at(cache, k, at(2))
+    tiers = manifest_of(tmp, runs, cache)
+    path = cache.path(k)
+    path.write_text(json.dumps({**json.loads(path.read_text()), "text": "Another hypothesis."}))
+    with pytest.raises(TierError, match="not the response its manifest entry names"):
+        response_tier(k, cache.get(k), tiers)
+
+
+def test_only_the_run_s_own_ledger_attributes_its_sends(setup):
+    tmp, runs, cache, ledger = setup
+    other = tmp / "other-ledger.jsonl"  # another file: a copy, or another worker's share
+    k = keys()[0]
+    spend(other, k, at(2))
+    cache_at(cache, k, at(2))
+    with pytest.raises(TierError, match="0 listed runs sent its spend"):
+        build_manifest(runs, cache)
+    missing = summarizer_run(tmp, "missing", start=at(1), end=at(5), ledger=tmp / "absent.jsonl")
+    with pytest.raises(TierError, match="is not here"):
+        build_manifest([missing], cache)
 
 
 @pytest.mark.parametrize(
     "case, match",
     [
         ("outside", "0 listed runs sent its spend"),
-        ("late", "0 ledger spends match it"),
-        ("two", "2 ledger spends match it"),
+        ("late", "0 listed runs sent its spend"),
+        ("two", "2 spends in"),
         ("worker", "0 listed runs sent its spend"),
     ],
 )
@@ -164,11 +204,11 @@ def test_an_entry_that_cannot_be_verified_is_refused(setup, case, match):
         spend(ledger, k, at(2), micro="100000")
         spend(ledger, k, at(2), micro="900000")
         cache_at(cache, k, at(2, 30))
-    else:  # another worker's ledger
+    else:  # another worker's event in this file
         spend(ledger, k, at(2), worker="laptop")
         cache_at(cache, k, at(2))
     with pytest.raises(TierError, match=match):
-        build_manifest(runs, cache, [ledger])
+        build_manifest(runs, cache)
 
 
 def test_a_run_s_tier_is_the_one_its_config_names(tmp_path):
@@ -176,30 +216,37 @@ def test_a_run_s_tier_is_the_one_its_config_names(tmp_path):
     k = keys()[0]
     spend(ledger, k, at(2))
     cache_at(cache, k, at(2))
-    standard = summarizer_run(tmp_path, "std", start=at(1), end=at(5), tier=None)
-    assert build_manifest([standard], cache, [ledger])["entries"][k]["tier"] == "standard"
-    unnamed = summarizer_run(
-        tmp_path,
-        "unnamed",
-        start=at(1),
-        end=at(5),
-        config={"judge": {"sync": {}}, "summarizer": {"adl_ledger": {"worker": "cont-laptop"}}},
-    )
+    standard = summarizer_run(tmp_path, "std", start=at(1), end=at(5), ledger=ledger, tier=None)
+    assert build_manifest([standard], cache)["entries"][k]["tier"] == "standard"
+    unnamed = summarizer_run(tmp_path, "unnamed", start=at(1), end=at(5), ledger=ledger, sync={})
     with pytest.raises(TierError, match="does not name judge.sync.service_tier"):
-        build_manifest([unnamed], cache, [ledger])
+        build_manifest([unnamed], cache)
     meta = json.loads((standard / "meta.json").read_text())
     (standard / "meta.json").write_text(json.dumps({**meta, "status": "running"}))
     with pytest.raises(TierError, match="not a completed run"):
-        build_manifest([standard], cache, [ledger])
+        build_manifest([standard], cache)
 
 
-def test_a_late_cache_hit_keeps_its_own_tier_and_only_sends_take_the_run_s(tmp_path):
+def test_a_consumed_response_carries_its_tier_out_of_fetch(tmp_path):
+    class Standard:
+        tier = "standard"
+
+        def __init__(self):
+            self.sent = []
+
+        def complete(self, requests):
+            for r in requests:
+                self.sent.append(r.key)
+                yield r.key, DONE
+
     cache = JudgeCache(tmp_path / "cache")
     k = keys()
-    cache_at(cache, k[0], at(1), tier="flex")  # cached by another writer after the pre-check
-    completions = {k[0]: DONE, k[1]: DONE, k[2]: Completion(None, error="503 after retries")}
-    tiers = response_tiers(completions, cached={k[0]}, tier="standard", cache=cache, manifest={})
-    assert tiers == {k[0]: "flex", k[1]: "standard"}  # the failed request has no response
+    cache_at(cache, k[0], at(1), tier="flex")  # cached by another writer before this fetch
+    backend = Standard()
+    completions, cached = fetch([request(k[0]), request(k[1])], backend, cache)
+    assert backend.sent == [k[1]] and cached == {k[0]}
+    assert response_tiers(completions, {}) == {k[0]: "flex", k[1]: "standard"}
+    assert response_tiers({k[2]: Completion(None, error="503 after retries")}, {}) == {}
 
 
 def test_responses_and_accepted_hypotheses_are_counted_apart():
@@ -231,7 +278,6 @@ def test_the_script_writes_nothing_on_a_dry_run(setup, monkeypatch, capsys):
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    argv = ["--runs", *map(str, runs), "--ledgers", str(ledger), "--cache", str(cache.root)]
-    module.main([*argv, "--dry-run"])
+    module.main(["--runs", *map(str, runs), "--cache", str(cache.root), "--dry-run"])
     assert json.loads(capsys.readouterr().out)["tiers"] == {"flex": 1}
     assert not (tmp / "runs").exists()

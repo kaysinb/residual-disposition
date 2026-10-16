@@ -253,6 +253,11 @@ def test_an_amended_review_section_keeps_the_rounds_and_withdraws_the_old_review
     assert (work / "review0" / "items.jsonl").exists()  # kept, counted nowhere
     script.main([*amend, "--withdraw", "review0"])  # the same amendment again: a no-op
     assert not (work / "amend1").exists()
+    # A withdrawn review that later gains labels is refused on the next replay of the records.
+    (work / "review0" / "labels.json").write_text("{}")
+    with pytest.raises(SystemExit, match="review0 is imported"):
+        script.main([*base, "review"])
+    (work / "review0" / "labels.json").unlink()
     # A plan that changes more than the review section is refused.
     plan["pd_clean"]["fraction"] = 0.04
     changed = tmp / "plan-v3.yaml"

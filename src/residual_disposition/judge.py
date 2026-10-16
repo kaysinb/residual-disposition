@@ -539,6 +539,10 @@ class Completion:
     finish_reason: str | None = None
     usage: Mapping[str, Any] = dataclasses.field(default_factory=dict)
     error: str | None = None  # set when the API returned no completion; such results are not cached
+    # Provenance, not content: the service tier of the send that produced it (from 2026-10-16;
+    # None in an older cache entry) and, when read from the cache, the sha256 of that entry.
+    service_tier: str | None = dataclasses.field(default=None, compare=False)
+    entry_sha256: str | None = dataclasses.field(default=None, compare=False)
 
 
 class MalformedOutput(ValueError):
@@ -646,6 +650,12 @@ def completion_from_body(body: Mapping[str, Any]) -> Completion:
 # --------------------------------------------------------------------------------------------
 
 
+def cache_entry_sha256(entry: Mapping[str, Any]) -> str:
+    """sha256 of a cache entry's canonical JSON: the response it holds, with its request, time
+    and tier."""
+    return hashlib.sha256(json.dumps(entry, sort_keys=True).encode()).hexdigest()
+
+
 class JudgeCache:
     """One JSON file per request key; only completions the API returned are stored."""
 
@@ -667,10 +677,17 @@ class JudgeCache:
         return data
 
     def get(self, key: str) -> Completion | None:
+        """The cached completion, with its entry's service tier and sha256 from the same read."""
         data = self.entry(key)
         if data is None:
             return None
-        return Completion(data["text"], data["finish_reason"], data["usage"])
+        return Completion(
+            data["text"],
+            data["finish_reason"],
+            data["usage"],
+            service_tier=data.get("service_tier"),
+            entry_sha256=cache_entry_sha256(data),
+        )
 
     def put(
         self, request: ChatRequest, completion: Completion, *, service_tier: str | None = None
@@ -710,7 +727,8 @@ def fetch(
     """Completions by request key, from the cache where possible; also returns the cached keys.
 
     Identical requests are sent once. Without a backend only cached results are returned. Each
-    new completion is cached with the backend's tier (``service_tier``).
+    new completion is cached and returned with the backend's tier (``service_tier``); a cached one
+    carries its entry's tier and sha256 (``JudgeCache.get``).
     """
     unique = {r.key: r for r in requests}
     results: dict[str, Completion] = {}
@@ -721,9 +739,11 @@ def fetch(
     cached = set(results)
     missing = {key: r for key, r in unique.items() if key not in results}
     if missing and backend is not None:
+        tier = getattr(backend, "tier", None)
         for key, completion in backend.complete(list(missing.values())):
             if completion.error is None:
-                cache.put(missing[key], completion, service_tier=getattr(backend, "tier", None))
+                cache.put(missing[key], completion, service_tier=tier)
+                completion = dataclasses.replace(completion, service_tier=tier)
             results[key] = completion
         for key in missing:
             results.setdefault(key, Completion(None, error="no result from backend"))

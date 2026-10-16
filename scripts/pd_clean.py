@@ -51,6 +51,7 @@ derived from them each time, never kept as mutable state.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
@@ -135,6 +136,18 @@ def verify_amendment(a: Mapping[str, Any], where: Path) -> None:
         raise SystemExit(f"{where}: the bindings differ beyond the plan")
 
 
+def check_withdrawal(work: Path, name: str, binding: Mapping[str, Any]) -> None:
+    """A withdrawn review is a review record drawn under the amendment's old binding and never
+    imported: checked when the amendment is made and whenever the records are read."""
+    d = Path(work) / name
+    if not name.startswith("review") or not (d / "mapping.json").exists():
+        raise SystemExit(f"{name} is not a review record")
+    if (d / "labels.json").exists():
+        raise SystemExit(f"{name} is imported: an imported review cannot be withdrawn")
+    if json.loads((d / "mapping.json").read_text())["binding"] != binding:
+        raise SystemExit(f"{name} was not drawn under the old plan")
+
+
 class Study:
     """The plan, the PD outputs and the records of one work directory."""
 
@@ -198,6 +211,8 @@ class Study:
                 if a["to"] in reached and a["from"] not in reached:
                     reached.append(a["from"])
                     earlier.append(a["from"])
+                    for name in a["withdrawn"]:  # checked again on every replay
+                        check_withdrawal(self.work, name, a["from"])
                     withdrawn |= set(a["withdrawn"])
                     changed = True
         return earlier, withdrawn
@@ -501,13 +516,7 @@ def cmd_amend_review(st: Study, old_plan: Path, withdraw: list[str], decision: s
     }
     verify_amendment(amendment, Path(old_plan))
     for name in withdraw:
-        d = st.work / name
-        if not name.startswith("review") or not (d / "mapping.json").exists():
-            raise SystemExit(f"{name} is not a review record")
-        if (d / "labels.json").exists():
-            raise SystemExit(f"{name} is imported: an imported review cannot be withdrawn")
-        if json.loads((d / "mapping.json").read_text())["binding"] != amendment["from"]:
-            raise SystemExit(f"{name} was not drawn under the old plan")
+        check_withdrawal(st.work, name, amendment["from"])
     for d in st.all_records("amend"):
         if json.loads((d / "amendment.json").read_text()) == amendment:
             print(f"{d.name} already records this amendment")
@@ -593,7 +602,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--decision", required=True)
     sub.add_parser("package")
     args = parser.parse_args(argv)
-    st = Study(args.work or data_root() / "pd_clean", args.plan)
+    work = Path(args.work or data_root() / "pd_clean")
+    work.mkdir(parents=True, exist_ok=True)
+    # One command at a time per work directory: an amendment and a review's import never
+    # interleave, and every command reads the records as they stand.
+    lock = (work / ".lock").open("a")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    st = Study(work, args.plan)
     if args.command == "round":
         cmd_round(st)
     elif args.command == "import":

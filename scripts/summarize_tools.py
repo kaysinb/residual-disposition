@@ -56,8 +56,8 @@ from residual_disposition.summarizer import (
 )
 from residual_disposition.summarizer_tiers import (
     TierError,
-    entry_tier,
     load_manifests,
+    response_tier,
     response_tiers,
     tier_counts,
 )
@@ -304,7 +304,7 @@ def main() -> None:
     try:
         manifest = load_manifests([Path(p) for p in s.get("tier_manifests") or []], cache)
         for key in cached:
-            entry_tier(cache, key, manifest)
+            response_tier(key, cache.get(key), manifest)
     except TierError as error:
         raise SystemExit(f"{error}: not submitted") from error
 
@@ -336,8 +336,12 @@ def main() -> None:
             )
             backend.reconcile(cache)
         completions, cached = fetch(requests, backend, cache)
-        # Served from the cache by this fetch: its entry's tier; sent by it: this run's.
-        tiers = response_tiers(completions, cached, tier, cache, manifest)
+        # Each consumed response's tier comes with it out of fetch: this run's for a send, its
+        # cache entry's (or the manifest's, for that exact entry) for a hit.
+        try:
+            tiers = response_tiers(completions, manifest)
+        except TierError as error:
+            raise SystemExit(f"{error}: the responses are cached; rerun with a manifest") from error
         records, texts, failures = [], [], []
         hypothesis_tiers: dict[str, str] = {}  # each hypothesis's tier, by its response id
         request_of: dict[str, str] = {}
