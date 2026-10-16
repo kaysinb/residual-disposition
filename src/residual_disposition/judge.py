@@ -655,16 +655,26 @@ class JudgeCache:
     def path(self, key: str) -> Path:
         return self.root / key[:2] / f"{key}.json"
 
-    def get(self, key: str) -> Completion | None:
+    def entry(self, key: str) -> dict[str, Any] | None:
+        """The stored record of ``key``: its completion, ``cached_at`` and, from 2026-10-16, the
+        ``service_tier`` that produced it; None if not cached."""
         path = self.path(key)
         if not path.is_file():
             return None
         data = json.loads(path.read_text())
         if data.get("key") != key:
             raise ValueError(f"Cache file {path} does not hold request {key}")
+        return data
+
+    def get(self, key: str) -> Completion | None:
+        data = self.entry(key)
+        if data is None:
+            return None
         return Completion(data["text"], data["finish_reason"], data["usage"])
 
-    def put(self, request: ChatRequest, completion: Completion) -> None:
+    def put(
+        self, request: ChatRequest, completion: Completion, *, service_tier: str | None = None
+    ) -> None:
         if completion.error is not None:
             raise ValueError("Failed requests are not cached")
         path = self.path(request.key)
@@ -678,6 +688,8 @@ class JudgeCache:
             "usage": dict(completion.usage),
             "cached_at": _now(),
         }
+        if service_tier is not None:
+            data["service_tier"] = service_tier
         tmp = path.with_suffix(f".{random.getrandbits(32):08x}.tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False))
         tmp.replace(path)
@@ -697,7 +709,8 @@ def fetch(
 ) -> tuple[dict[str, Completion], set[str]]:
     """Completions by request key, from the cache where possible; also returns the cached keys.
 
-    Identical requests are sent once. Without a backend only cached results are returned.
+    Identical requests are sent once. Without a backend only cached results are returned. Each
+    new completion is cached with the backend's tier (``service_tier``).
     """
     unique = {r.key: r for r in requests}
     results: dict[str, Completion] = {}
@@ -710,7 +723,7 @@ def fetch(
     if missing and backend is not None:
         for key, completion in backend.complete(list(missing.values())):
             if completion.error is None:
-                cache.put(missing[key], completion)
+                cache.put(missing[key], completion, service_tier=getattr(backend, "tier", None))
             results[key] = completion
         for key in missing:
             results.setdefault(key, Completion(None, error="no result from backend"))

@@ -30,3 +30,7 @@ summarizer:
   adl_ledger: {worker: laptop, allowance_usd: 15.0, path: null}
   dry_run: true
   cache_dir: null             # raw outputs by request hash; default <DATA_DIR>/cache/summarizer
+  # Earlier summarizer runs whose cached completions this run reads but whose cache entries
+  # predate the recorded service tier (2026-10-16): each such entry takes the tier of the run
+  # whose window holds its cached_at (service_tiers.json, the responses' provenance)
+  earlier_runs: []

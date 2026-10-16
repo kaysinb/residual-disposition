@@ -18,7 +18,8 @@ import dataclasses
 import json
 import os
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -185,6 +186,65 @@ def check_adl_estimate(ledger: ApiLedger | None, estimate_usd: float) -> None:
         raise SystemExit(f"{error}: not submitted") from error
 
 
+def run_windows(runs: Sequence[str]) -> list[tuple[datetime, datetime, str]]:
+    """(start, end, service tier) of earlier summarizer runs: the window in their meta.json and
+    the tier of their config's judge.sync.service_tier (null is the standard tier)."""
+    out = []
+    for name in runs:
+        run = Path(name)
+        meta = json.loads((run / "meta.json").read_text())
+        if meta.get("status") != "completed" or not meta.get("finished_at"):
+            raise SystemExit(f"{run} is not a completed run")
+        sync = (yaml.safe_load((run / "config.yaml").read_text()).get("judge") or {}).get("sync")
+        tier = (sync or {}).get("service_tier") or "standard"
+        start, end = (datetime.fromisoformat(meta[k]) for k in ("started_at", "finished_at"))
+        out.append((start, end, tier))
+    return out
+
+
+def cached_tiers(
+    cache: JudgeCache, keys: Iterable[str], earlier: Sequence[tuple[datetime, datetime, str]]
+) -> dict[str, str]:
+    """The service tier of each cached completion among ``keys``: the one its cache entry
+    records, or, for an entry written before tiers were recorded (2026-10-16), the tier of the
+    earlier runs (``run_windows``) whose window holds its ``cached_at``. Refused if none does, or
+    runs of different tiers do."""
+    out = {}
+    for key in keys:
+        entry = cache.entry(key)
+        if entry is None:
+            continue
+        if entry.get("service_tier"):
+            out[key] = entry["service_tier"]
+            continue
+        at = datetime.fromisoformat(entry["cached_at"])
+        tiers = {tier for start, end, tier in earlier if start <= at <= end}
+        if len(tiers) != 1:
+            raise SystemExit(
+                f"cached completion {key} ({entry['cached_at']}) has no recorded service tier "
+                f"and {len(tiers)} tiers among summarizer.earlier_runs' windows: name its run"
+            )
+        out[key] = tiers.pop()
+    return out
+
+
+def tier_shares(
+    batches: Sequence[tuple[Evidence, Sequence[ChatRequest]]], tiers: dict[str, str]
+) -> dict[str, dict[str, Any]]:
+    """Per evidence text ("<state>/<tool>/<budget>"): its responses' count by service tier and
+    the standard tier's share."""
+    out = {}
+    for e, rs in batches:
+        counts = Counter(tiers[r.key] for r in rs if r.key in tiers)
+        n = sum(counts.values())
+        out[f"{e.state_id}/{e.tool}/{e.budget or 'all'}"] = {
+            "responses": n,
+            "tiers": dict(sorted(counts.items())),
+            "standard_share": counts.get("standard", 0) / n if n else None,
+        }
+    return out
+
+
 def model_spec(cfg: DictConfig, model_id: str) -> ModelSpec:
     for entry in cfg.judge.models:
         if entry.id == model_id:
@@ -301,6 +361,9 @@ def main() -> None:
         raise SystemExit(f"Estimate above summarizer.max_usd = {s.max_usd}: not submitted")
     ledger = adl_ledger({e.tool for e in evidence}, s.get("adl_ledger"))
     check_adl_estimate(ledger, est.usd)
+    # Each response's service tier, for its provenance: the cached ones resolved before any send.
+    earlier = run_windows([str(p) for p in s.get("earlier_runs") or []])
+    tiers = cached_tiers(cache, cached, earlier)
 
     with Run(cfg) as run:
         inputs: dict[str, Any] = {
@@ -330,7 +393,10 @@ def main() -> None:
             )
             backend.reconcile(cache)
         completions, cached = fetch(requests, backend, cache)
-        records, texts, failures = [], [], []
+        for key, completion in completions.items():
+            if completion.error is None and key not in tiers:
+                tiers[key] = tier  # sent by this run
+        records, texts, failures, response_tiers = [], [], [], {}
         for e, rs in batches:
             for sample, request in enumerate(rs):
                 completion = completions[request.key]
@@ -359,7 +425,10 @@ def main() -> None:
                     )
                 )
                 texts.append((rid, text))
+                response_tiers[rid] = tiers[request.key]
         RecordWriter(run.dir).write([*records, *failures])
+        provenance = {"responses": response_tiers, "evidence": tier_shares(batches, tiers)}
+        run.path("service_tiers.json").write_text(json.dumps(provenance, indent=2) + "\n")
         write_responses(run.dir, ToolHypothesis.table, texts)
         paid = [completions[k] for k in {r.key for r in requests} - cached]
         tokens_in, tokens_out, usd = usage_cost(
@@ -372,6 +441,7 @@ def main() -> None:
             "input_tokens": tokens_in,
             "output_tokens": tokens_out,
             "usd": usd,
+            "service_tiers": dict(sorted(Counter(response_tiers.values()).items())),
         }
         run.summarize(summary)
         print(

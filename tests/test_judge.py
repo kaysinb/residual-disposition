@@ -267,6 +267,21 @@ def test_cache_hits_are_not_sent_again(tmp_path: Path) -> None:
     assert stored["body"] == requests[0].body and stored["rubric_version"] == "strict-v1"
 
 
+def test_a_new_completion_is_cached_with_its_backend_s_tier(tmp_path: Path) -> None:
+    class Flex(FakeBackend):
+        tier = "flex"
+
+    cache = JudgeCache(tmp_path)
+    one, two = (build_request(STRICT_V1, item(t), settings()) for t in ("x", "y"))
+    fetch([one], Flex(), cache)
+    fetch([one, two], FakeBackend(), cache)  # one is a hit: its tier is kept
+    assert cache.entry(one.key)["service_tier"] == "flex"
+    assert cache.entry(two.key)["service_tier"] == "standard"
+    assert cache.entry("0" * 64) is None
+    # The tier is provenance only: the request key and the completion read back are the same.
+    assert "service_tier" not in one.body and cache.get(one.key) == scripted(one)
+
+
 def test_identical_prompts_are_sent_once(tmp_path: Path) -> None:
     pairs = stage_requests([item("[names]", "r1"), item("[names]", "r2")], settings())
     backend = FakeBackend()
