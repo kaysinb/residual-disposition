@@ -2134,6 +2134,11 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     are not issued after that [review_s0j]. Paid costs are charged against the reservation; if either
     part is exceeded, the lineage stops, its unfinished contrasts get p = 1 (§12.4.8), and the
     overrun is logged.
+  - **Transfer within an item, execution 2026-10-16** **[coord]**. A running, unsplit item may
+    move money between its two parts by a `transfer` event with its reason, only from the
+    unspent remainder of the source part. The reservation, and so the meter's total, does not
+    change; the parts' limits are the frozen ones shifted by the transfers. First use: stage0_1's
+    GPU work was done, so $10 of its unspent GPU part moved to the API part before Stage-1 judging.
   - **One writer** **[review_s0h]**. Every meter operation holds an exclusive lock on the meter
     log, first applies the events other instances appended, and writes its own event to disk
     (flushed and synced) before its state changes; every limit or permission it returns is formed

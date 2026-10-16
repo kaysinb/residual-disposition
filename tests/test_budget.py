@@ -532,3 +532,42 @@ def test_cut_sequence_follows_the_preset_order():
         apply_cut_order(parts, order=CUT_ORDER, cap=1500, fixed=1600)
     with pytest.raises(ValueError):
         apply_cut_order({"stage7": 1.0}, order=CUT_ORDER, cap=1500, fixed=0)
+
+
+def test_a_transfer_moves_unspent_money_between_parts_and_keeps_the_reservation(tmp_path):
+    m = plan_meter(tmp_path)
+    item = "stage0_1"
+    assert m.admit(item, spent_elsewhere=0, storage=55).allowed
+    m.start(item)
+    m.charge(item, gpu_usd=100.0, api_usd=6.0)  # parts 130 / 10: GPU 30 unspent, API 4
+    reserved, outstanding = m.reservation[item], m.outstanding()
+    left = m.transfer(item, source="gpu", target="api", usd=10.0, reason="GPU work done")
+    assert (left.gpu_usd, left.api_usd) == pytest.approx((20.0, 14.0))
+    assert m.parts(item) == pytest.approx((120.0, 20.0))
+    assert m.reservation[item] == reserved and m.outstanding() == pytest.approx(outstanding)
+    assert sum(m.parts(item)) == pytest.approx(PLAN[0].stress_usd)  # the item's total is kept
+    with pytest.raises(ValueError, match="only \\$20.0000 of its gpu part is unspent"):
+        m.transfer(item, source="gpu", target="api", usd=20.5, reason="more")
+    for bad, match in (
+        (dict(source="gpu", target="gpu", usd=1.0, reason="x"), "between the gpu and the api"),
+        (dict(source="gpu", target="api", usd=0.0, reason="x"), "positive amount"),
+        (dict(source="gpu", target="api", usd=1.0, reason=" "), "needs its reason"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            m.transfer(item, **bad)
+    # The moved API money is spendable, and an overrun is judged on the shifted parts.
+    m.charge(item, api_usd=13.0)
+    with pytest.raises(BudgetExhausted):
+        m.charge(item, api_usd=1.5)  # API 20.5 > its shifted part 20
+    # The log replays the transfer, and a planned or split item cannot move money.
+    again = plan_meter(tmp_path)
+    with again._transaction():
+        assert again.parts(item) == pytest.approx((120.0, 20.0))
+    with pytest.raises(ValueError, match="only a running item's parts are moved"):
+        again.transfer("stage2/example_link", source="gpu", target="api", usd=1.0, reason="x")
+    fresh = plan_meter()
+    assert fresh.admit("stage2/example_link", spent_elsewhere=0, storage=55).allowed
+    fresh.start("stage2/example_link")
+    fresh.split("stage2/example_link", {"pod-a": 0.5, "pod-b": 0.5})
+    with pytest.raises(ValueError, match="is split"):
+        fresh.transfer("stage2/example_link", source="gpu", target="api", usd=1.0, reason="x")

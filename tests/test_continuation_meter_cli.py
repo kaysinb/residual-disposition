@@ -102,3 +102,21 @@ def test_the_launch_receipt_binds_the_pod_to_the_live_reservation(tmp_path, caps
     code, out = verify("--price", "3.99", "--hours", "17", at=stale)
     assert code == 1 and any("not the log" in p for p in out["problems"])
     assert any("charged" in p for p in out["problems"])
+
+
+def test_a_transfer_within_the_item(tmp_path, capsys):
+    log = tmp_path / "meter.jsonl"
+    run(capsys, log, "admit", "stage0_1", "--spent-elsewhere", "0", "--storage", "55")
+    run(capsys, log, "start", "stage0_1")
+    run(capsys, log, "charge", "stage0_1", "--gpu-usd", "29.06", "--api-usd", "11.3")
+    reason = "Stage 1's GPU work is done; unspent GPU money to the API part"
+    args = ("transfer", "stage0_1", "--from", "gpu", "--to", "api", "--usd", "10")
+    code, out = run(capsys, log, *args, "--reason", reason)
+    assert code == 0 and out["left"]["api_usd"] == pytest.approx(54.04 - 11.3 + 10)
+    assert out["left"]["gpu_usd"] == pytest.approx(81.61 - 29.06 - 10)
+    code, status = run(capsys, log, "status")
+    parts = status["items"]["stage0_1"]["parts"]
+    assert sum(parts.values()) == pytest.approx(81.61 + 54.04)  # the reservation is unchanged
+    assert status["items"]["stage0_1"]["reservation"] == pytest.approx(81.61 + 54.04)
+    with pytest.raises(ValueError, match="is unspent"):
+        cm.main(["--log", str(log), *args[:-1], "43", "--reason", reason])  # GPU left: 42.55

@@ -8,6 +8,8 @@
         [--label TEXT]
     uv run python scripts/continuation_meter.py verify-receipt FILE --item ITEM \
         --price USD_PER_HOUR --hours H
+    uv run python scripts/continuation_meter.py transfer <item> --from gpu --to api --usd USD \
+        --reason TEXT
     uv run python scripts/continuation_meter.py complete <item>
     uv run python scripts/continuation_meter.py drop <item> <reason>
 
@@ -16,7 +18,9 @@ drop reasons come from the frozen rules, which must match their sha256 in the St
 specification. The log (``data/ledgers/continuation_meter.jsonl`` by default) is locked for each
 operation and records the allocations' hash in its header. Every command prints JSON. With
 ``--price`` (the Pod's actual hourly price), ``start`` and ``limits`` also give the Pod's hard
-deadline in hours from its creation (``ExecutionLimits.pod_hours``).
+deadline in hours from its creation (``ExecutionLimits.pod_hours``). ``transfer`` moves unspent
+money between a running item's GPU and API parts with its reason; the item's reservation, and so
+the meter's total, stay as they are (``AllocationMeter.transfer``).
 
 A Pod is launched only on a live reservation: ``start --receipt`` writes a launch receipt (the
 item, its limits, the price, the Pod's hours, the allocations' hash and the sha256 of the log
@@ -118,6 +122,7 @@ def status(m: AllocationMeter) -> dict:
                     "allocation": m.allocation(item),
                     "reservation": m.reservation.get(item),
                     "charged": m.charged[item],
+                    "parts": dict(zip(("gpu_usd", "api_usd"), m.parts(item), strict=True)),
                     "final": m.final.get(item),
                     "reason": m.reason.get(item),
                 }
@@ -156,6 +161,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--item", required=True)
     p.add_argument("--price", type=float, required=True)
     p.add_argument("--hours", type=float, required=True)
+    p = sub.add_parser("transfer")
+    p.add_argument("item")
+    p.add_argument("--from", dest="source", choices=("gpu", "api"), required=True)
+    p.add_argument("--to", dest="target", choices=("gpu", "api"), required=True)
+    p.add_argument("--usd", type=float, required=True)
+    p.add_argument("--reason", required=True)
     p = sub.add_parser("complete")
     p.add_argument("item")
     p = sub.add_parser("drop")
@@ -202,6 +213,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"item": args.item, "stopped": str(stop)}))
             return 3
         out = {"item": args.item, "left": None if left is None else limits_json(left, None)}
+    elif args.command == "transfer":
+        left = m.transfer(
+            args.item, source=args.source, target=args.target, usd=args.usd, reason=args.reason
+        )
+        out = {"item": args.item, "left": limits_json(left, None)}
     elif args.command == "complete":
         out = {"item": args.item, "final_usd": m.complete(args.item)}
     else:

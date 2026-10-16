@@ -614,6 +614,10 @@ class AllocationMeter:
     - ``charge`` books paid costs against a running item. Beyond either part of its reservation
       the item is stopped, the event is logged and ``BudgetExhausted`` is raised: its unfinished
       contrasts get p = 1 (§12.4.8).
+    - ``transfer`` moves money between a running, unsplit item's GPU and API parts, from the
+      unspent remainder of the source part only, with a stated reason: the reservation and so the
+      item's total stay as they are, and the parts' limits (for ``charge`` and the execution
+      limits) are the frozen ones shifted by the transfers.
     - ``complete`` fixes the item's cost at what was charged; it never changes afterwards.
     - Update rule: a planned item's allocation is max(central, the mean cost of the completed
       items of its kind).
@@ -657,6 +661,7 @@ class AllocationMeter:
         self.final: dict[str, float] = {}
         self.reason: dict[str, str] = {}
         self.splits: dict[str, dict[str, float]] = {}
+        self.transfers: dict[str, float] = {}  # per item, USD moved from its GPU to its API part
         self.events: list[dict[str, Any]] = []
         self.log_path = None if log_path is None else Path(log_path)
         self._offset = 0
@@ -747,6 +752,7 @@ class AllocationMeter:
             "final": self.final,
             "reason": self.reason,
             "splits": self.splits,
+            "transfers": self.transfers,
         }
 
     @property
@@ -757,6 +763,13 @@ class AllocationMeter:
         if item not in self._rank:
             raise KeyError(f"unknown plan item {item!r}")
         return self._items[self._rank[item]]
+
+    def parts(self, item: str, state: Mapping[str, Any] | None = None) -> tuple[float, float]:
+        """An item's GPU and API parts: the frozen ones shifted by its transfers; their sum is its
+        stress reservation."""
+        a, s = self._get(item), self._state() if state is None else state
+        moved = s["transfers"].get(item, 0.0)
+        return a.stress_gpu_usd - moved, a.stress_api_usd + moved
 
     def charged_usd(self, item: str) -> float:
         c = self.charged[item]
@@ -794,12 +807,8 @@ class AllocationMeter:
             )
         if item in self.splits:
             raise ValueError(f"{item} is split: its limits were issued to its workers")
-        a, c = self._get(item), self.charged[item]
-        return ExecutionLimits(
-            item,
-            max(0.0, a.stress_gpu_usd - c["gpu_usd"]),
-            max(0.0, a.stress_api_usd - c["api_usd"]),
-        )
+        (gpu, api), c = self.parts(item), self.charged[item]
+        return ExecutionLimits(item, max(0.0, gpu - c["gpu_usd"]), max(0.0, api - c["api_usd"]))
 
     def limits(self, item: str) -> ExecutionLimits:
         """A running item's remaining limits, read under the lock with every instance's events."""
@@ -883,6 +892,21 @@ class AllocationMeter:
             )
         return limits
 
+    def transfer(
+        self, item: str, *, source: str, target: str, usd: float, reason: str
+    ) -> ExecutionLimits:
+        """Move ``usd`` of a running item's unspent ``source`` part ("gpu" or "api") to its
+        ``target`` part; returns the item's limits after it."""
+        event = {
+            "event": "transfer",
+            "item": item,
+            "from": source,
+            "to": target,
+            "usd": float(usd),
+            "reason": str(reason),
+        }
+        return self._operate(lambda: event, lambda _: self._limits(item))
+
     def complete(self, item: str) -> float:
         self._operate(lambda: {"event": "complete", "item": item})
         return self.final[item]
@@ -911,7 +935,7 @@ class AllocationMeter:
                 raise ValueError(f"{item} is {current}: only a running item is split")
             if item in s["splits"]:
                 raise ValueError(f"{item} is split already: a split is made once, after start")
-            if charged[item]["gpu_usd"] or charged[item]["api_usd"]:
+            if charged[item]["gpu_usd"] or charged[item]["api_usd"] or item in s["transfers"]:
                 raise ValueError(f"{item} has been charged: a split is made right after start")
             shares = {str(k): float(v) for k, v in event["shares"].items()}
             if any(v < 0 for v in shares.values()) or sum(shares.values()) > 1 + 1e-12:
@@ -923,14 +947,37 @@ class AllocationMeter:
             c = charged[item]
             c["gpu_usd"] += float(event["gpu_usd"])
             c["api_usd"] += float(event["api_usd"])
+            gpu, api = self.parts(item, s)
             over = (
-                c["gpu_usd"] > a.stress_gpu_usd + 1e-9
-                or c["api_usd"] > a.stress_api_usd + 1e-9
+                c["gpu_usd"] > gpu + 1e-9
+                or c["api_usd"] > api + 1e-9
                 or c["gpu_usd"] + c["api_usd"] > reservation[item] + 1e-9
             )
             if over:
                 states[item] = STOPPED
                 s["final"][item] = c["gpu_usd"] + c["api_usd"]
+        elif kind == "transfer":
+            if current != RUNNING:
+                raise ValueError(f"{item} is {current}: only a running item's parts are moved")
+            if item in s["splits"]:
+                raise ValueError(f"{item} is split: its limits were issued to its workers")
+            source, target, usd = event["from"], event["to"], float(event["usd"])
+            if {source, target} != {"gpu", "api"}:
+                raise ValueError("a transfer moves money between the gpu and the api part")
+            if not usd > 0:
+                raise ValueError("a transfer moves a positive amount")
+            if not str(event.get("reason") or "").strip():
+                raise ValueError("a transfer needs its reason")
+            gpu, api = self.parts(item, s)
+            left = (
+                gpu - charged[item]["gpu_usd"]
+                if source == "gpu"
+                else api - charged[item]["api_usd"]
+            )
+            if usd > left + 1e-9:
+                raise ValueError(f"{item}: only ${left:.4f} of its {source} part is unspent")
+            moved = s["transfers"].get(item, 0.0)
+            s["transfers"][item] = moved + usd if source == "gpu" else moved - usd
         elif kind == "complete":
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: only a running item completes")
