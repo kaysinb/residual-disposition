@@ -35,6 +35,7 @@ from .adl import (
     StepStore,
     _head,
     choose_patchscope_scale,
+    choose_patchscope_scales,
     logit_lens,
     patchscope,
     scale_tokens,
@@ -268,6 +269,37 @@ def reconstruction(
     return {"tokens": count, "position": position, "top_k": top_k, "share": hits / count}
 
 
+def lambda_tasks(
+    readings: Mapping[str, Any], *, store: StepStore, prefix: str, draw: int
+) -> list[tuple[list[tuple[float, Sequence[str]]], str]]:
+    """The λ choices one package still needs (``assemble``'s, not yet in ``store``): per position
+    its (scale_tokens, context)."""
+    out = []
+    for position, reading in readings.items():
+        context = f"{prefix}/p{position}/lambda{draw}"
+        if store.get(context) is None:
+            out.append(([(s, tk) for s, tk, _ in reading["patchscope"]], context))
+    return out
+
+
+def choose_lambdas(
+    tasks: Sequence[tuple[list[tuple[float, Sequence[str]]], str]],
+    grade_lambda: Any,
+    *,
+    store: StepStore,
+    batch: int,
+) -> None:
+    """Every λ choice of ``tasks`` at once (``adl.choose_patchscope_scales``: the same requests
+    as one by one), each stored under its context as ``assemble`` stores it."""
+    if not tasks:
+        return
+    results = choose_patchscope_scales(list(tasks), grade_lambda, batch=batch)
+    for (_, context), (best, selected) in zip(tasks, results, strict=True):
+        store.once(
+            context, lambda best=best, selected=selected: {"best": best, "selected": selected}
+        )
+
+
 def build_lens_packages(
     model: Any,
     tokenizer: Any,
@@ -282,17 +314,27 @@ def build_lens_packages(
     draws: int = 2,
     positions: Sequence[int] = POSITIONS,
     device: str = "cuda",
+    lambda_batch: int | None = None,
 ) -> dict[str, Any]:
     """Every lens-only package of one state, per layer: ``state/1`` … ``state/<draws>`` (the
     state decoder, one per λ draw), ``base/1`` (the common decoder) and, with ``controls`` (on
-    A), ``random/1`` and ``no_patch/1`` and the reconstruction share."""
+    A), ``random/1`` and ``no_patch/1`` and the reconstruction share.
+
+    With ``lambda_batch``, every reading is taken first and then every package's λ choices are
+    made together, in batches of at most ``lambda_batch`` grader calls
+    (``choose_lambdas``): the same requests, stored under the same steps, so the packages are
+    the ones the sequential build makes; only the GPU's wait for the grader is shorter."""
     from .seeding import derive_seed
 
     out: dict[str, Any] = {"seed": seed, "layers": {}}
+    specs: list[
+        tuple[str, str, Mapping[str, Any], str, int]
+    ] = []  # layer, key, readings, prefix, draw
+    extras: dict[str, dict[str, Any]] = {}
     for layer in sorted(state_means):
         delta = state_means[layer]["mean"] - base_means[layer]["mean"]
         norm = float(state_means[layer]["norm"])
-        entry: dict[str, Any] = {"norm": norm, "packages": {}}
+        extras[str(layer)] = {"norm": norm}
         readings = {
             decoder: lens_readings(
                 model,
@@ -308,22 +350,10 @@ def build_lens_packages(
             for decoder in ("state", "base")
         }
         for draw in range(1, draws + 1):
-            entry["packages"][f"state/{draw}"] = assemble(
-                readings["state"],
-                layer=layer,
-                grade_lambda=grade_lambda,
-                store=store,
-                prefix=f"layer{layer}/state",
-                draw=draw,
+            specs.append(
+                (str(layer), f"state/{draw}", readings["state"], f"layer{layer}/state", draw)
             )
-        entry["packages"]["base/1"] = assemble(
-            readings["base"],
-            layer=layer,
-            grade_lambda=grade_lambda,
-            store=store,
-            prefix=f"layer{layer}/base",
-            draw=1,
-        )
+        specs.append((str(layer), "base/1", readings["base"], f"layer{layer}/base", 1))
         if controls:
             vectors = random_directions(delta, derive_seed(seed, "adl_lens", layer, "random"))
             random = lens_readings(
@@ -337,14 +367,7 @@ def build_lens_packages(
                 prefix=f"layer{layer}/random",
                 positions=positions,
             )
-            entry["packages"]["random/1"] = assemble(
-                random,
-                layer=layer,
-                grade_lambda=grade_lambda,
-                store=store,
-                prefix=f"layer{layer}/random",
-                draw=1,
-            )
+            specs.append((str(layer), "random/1", random, f"layer{layer}/random", 1))
 
             def no_patch() -> list[Any]:
                 probs = unpatched_patchscope(model, tokenizer)
@@ -352,20 +375,51 @@ def build_lens_packages(
 
             unpatched = store.once(f"layer{layer}/no_patch/patchscope", no_patch)
             empty_lens = {"token_ids": [], "tokens": [], "probs": []}
-            entry["packages"]["no_patch/1"] = assemble(
-                {str(p): {"logit_lens": empty_lens, "patchscope": unpatched} for p in positions},
-                layer=layer,
-                grade_lambda=grade_lambda,
-                store=store,
-                prefix=f"layer{layer}/no_patch",
-                draw=1,
+            specs.append(
+                (
+                    str(layer),
+                    "no_patch/1",
+                    {
+                        str(p): {"logit_lens": empty_lens, "patchscope": unpatched}
+                        for p in positions
+                    },
+                    f"layer{layer}/no_patch",
+                    1,
+                )
             )
             if heldout is not None:
-                entry["reconstruction"] = store.once(
+                extras[str(layer)]["reconstruction"] = store.once(
                     f"layer{layer}/reconstruction",
                     lambda layer=layer: reconstruction(
                         model, tokenizer, heldout, layer=layer, device=device
                     ),
                 )
-        out["layers"][str(layer)] = entry
+        if lambda_batch is None:  # the sequential build: each layer's packages as before
+            for lk, key, rd, prefix, draw in [s for s in specs if s[0] == str(layer)]:
+                extras[lk].setdefault("packages", {})[key] = assemble(
+                    rd,
+                    layer=layer,
+                    grade_lambda=grade_lambda,
+                    store=store,
+                    prefix=prefix,
+                    draw=draw,
+                )
+    if lambda_batch is not None:
+        tasks = [
+            task
+            for _, _, rd, prefix, draw in specs
+            for task in lambda_tasks(rd, store=store, prefix=prefix, draw=draw)
+        ]
+        choose_lambdas(tasks, grade_lambda, store=store, batch=lambda_batch)
+        for lk, key, rd, prefix, draw in specs:
+            extras[lk].setdefault("packages", {})[key] = assemble(
+                rd, layer=int(lk), grade_lambda=grade_lambda, store=store, prefix=prefix, draw=draw
+            )
+    for layer in sorted(state_means):
+        entry = extras[str(layer)]
+        out["layers"][str(layer)] = {
+            "norm": entry["norm"],
+            "packages": entry["packages"],
+            **({"reconstruction": entry["reconstruction"]} if "reconstruction" in entry else {}),
+        }
     return out

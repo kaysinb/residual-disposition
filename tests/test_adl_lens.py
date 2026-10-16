@@ -185,3 +185,93 @@ def test_the_summarizer_reads_every_lens_package_of_a_run(tmp_path):
         "adl_lens@30/state/1",
     ]
     assert all(e.text.startswith("OVERVIEW:") and "steer" not in e.text.lower() for e in evidence)
+
+
+class Recording:
+    """A deterministic λ grader: its reply depends only on the request (some first tries are
+    malformed, to exercise the retries); it records every call and every batch's size."""
+
+    def __init__(self):
+        self.calls, self.batches = [], []
+
+    def reply(self, call):
+        import hashlib
+
+        h = int(hashlib.sha256((call.attempt + call.user).encode()).hexdigest(), 16)
+        if call.attempt.endswith("try0") and h % 5 == 0:
+            return "no scale here"
+        scales = call.user.split("[SCALES]\n")[1].split("\n")[0].split(", ")
+        return f"BEST_SCALER: {scales[h % len(scales)]}\nTOP_TOKENS: a | b"
+
+    def many(self, calls):
+        self.batches.append(len(calls))
+        self.calls += list(calls)
+        return [self.reply(c) for c in calls]
+
+
+def test_batched_lambda_choices_make_the_same_requests_and_choices():
+    from residual_disposition.adl_graders import Grader
+    from residual_disposition.judge import ModelSpec
+
+    rng = __import__("random").Random(3)
+    tasks = [
+        (
+            [(round(0.5 * k, 1), [f"t{rng.randrange(50)}" for _ in range(5)]) for k in range(n)],
+            f"c{i}",
+        )
+        for i, n in enumerate((3, 12, 25, 40, 9, 31))
+    ]
+    one = Recording()
+    alone = [adl.choose_patchscope_scale(st, one, context=c) for st, c in tasks]
+    many = Recording()
+    together = adl.choose_patchscope_scales(tasks, many, batch=4)
+    assert together == alone
+    key = lambda c: (c.attempt, c.system, c.user, c.temperature)  # noqa: E731
+    assert sorted(map(key, many.calls)) == sorted(map(key, one.calls))
+    assert max(many.batches) <= 4 and len(many.batches) < len(one.batches)
+    spec = ModelSpec(
+        id="m",
+        reasoning_effort="low",
+        input_usd_per_mtok=1,
+        output_usd_per_mtok=1,
+        expected_thinking_tokens=0,
+    )
+    grader = Grader(spec, version="adl-lambda", max_tokens=10, backend=None, cache=None)
+    assert sorted(grader.request(c).key for c in many.calls) == sorted(
+        grader.request(c).key for c in one.calls
+    )  # the same cache keys
+
+
+def test_a_batched_build_makes_the_sequential_packages(tiny_qwen, qwen_tokenizer, tmp_path):
+    model = lora_model(tiny_qwen)
+    torch.manual_seed(2)
+    seqs = torch.randint(0, 1000, (4, 16)).tolist()
+    state = L.activation_means(model, seqs, layers=(2, 3), adapter=True, device="cpu")
+    base = L.activation_means(model, seqs, layers=(2, 3), adapter=False, device="cpu")
+    heldout = torch.randint(0, 1000, (L.RECONSTRUCTION_TOKENS, 16)).tolist()
+
+    def build(store, grader, batch):
+        return L.build_lens_packages(
+            model,
+            qwen_tokenizer,
+            state_means=state,
+            base_means=base,
+            grade_lambda=grader,
+            store=adl.StepStore(store),
+            seed=5,
+            controls=True,
+            heldout=heldout,
+            positions=(0, 1),
+            device="cpu",
+            lambda_batch=batch,
+        )
+
+    one, many = Recording(), Recording()
+    sequential = build(tmp_path / "a", one, None)
+    batched = build(tmp_path / "b", many, 3)
+    assert batched == sequential
+    key = lambda c: (c.attempt, c.user)  # noqa: E731
+    assert sorted(map(key, many.calls)) == sorted(map(key, one.calls))
+    assert max(many.batches) <= 3 and max(one.batches) == 1
+    stored = lambda root: {p.relative_to(root): p.read_bytes() for p in root.rglob("*.json")}  # noqa: E731
+    assert stored(tmp_path / "a") == stored(tmp_path / "b")  # the same steps

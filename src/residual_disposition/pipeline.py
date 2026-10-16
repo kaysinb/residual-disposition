@@ -3443,6 +3443,7 @@ def _lens_spec(ws: Workspace) -> dict[str, Any]:
         "grader": spec["graders"]["lambda"],
         "layers": [int(x) for x in lens.get("layers", [20, 30])],
         "draws": int(lens.get("draws", 2)),
+        "lambda_batch": None if lens.get("lambda_batch") is None else int(lens["lambda_batch"]),
     }
 
 
@@ -3612,12 +3613,19 @@ def adl_lens_package(
                 controls=controls,
                 heldout=heldout,
                 draws=spec["draws"],
+                lambda_batch=spec["lambda_batch"],
             )
         ws.give_back(model)
         packages.update(state=state_id, reproduction=reproduction)
         run.path("adl_lens_package.json").write_text(json.dumps(packages) + "\n")
         shutil.copytree(store.root, run.path("steps"))
-        run.summarize({"reproduction": reproduction, "controls": controls})
+        run.summarize(
+            {
+                "reproduction": reproduction,
+                "controls": controls,
+                "lambda_batch": spec["lambda_batch"],
+            }
+        )
     ws.charge(run.dir)
     return run.dir / "adl_lens_package.json"
 

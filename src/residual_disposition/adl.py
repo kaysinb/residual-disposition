@@ -389,6 +389,88 @@ def choose_patchscope_scale(
     raise ValueError("the λ tournament did not converge")
 
 
+def choose_patchscope_scales(
+    tasks: Sequence[tuple[Sequence[tuple[float, Sequence[str]]], str]],
+    grader: Any,
+    *,
+    group_size: int = 10,
+    retries: int = 3,
+    max_rounds: int = 10,
+    batch: int = 16,
+) -> list[tuple[float, list[str]]]:
+    """``choose_patchscope_scale`` for many tournaments at once, ``tasks`` = (scale_tokens,
+    context): the same groups, rounds, retries and attempt ids as each tournament alone, so the
+    same requests and cache keys; only the sending is batched. The tournaments advance in
+    lockstep: each round's groups of every unfinished tournament, try by try, go to
+    ``grader.many`` in batches of at most ``batch`` calls (the backend's own concurrency bounds
+    them further). A tournament's choices are those it would make alone."""
+    if batch < 1:
+        raise ValueError("the λ batch must be at least one call")
+    tokens = [{round(float(s), 1): list(t) for s, t in scale_tokens} for scale_tokens, _ in tasks]
+    current = [sorted(t) for t in tokens]
+    done: list[tuple[float, list[str]] | None] = [None] * len(tasks)
+
+    def choose_all(
+        jobs: list[tuple[int, str, dict[float, list[str]]]],
+    ) -> list[tuple[float, list[str]]]:
+        out: dict[int, tuple[float, list[str]]] = {}
+        pending = list(range(len(jobs)))
+        for k in range(retries + 1):
+            calls = []
+            for j in pending:
+                i, where, entries = jobs[j]
+                user = patchscope_grader_prompt(entries)
+                calls.append(_call(PATCHSCOPE_GRADER_PROMPT, user, f"{tasks[i][1]}/{where}/try{k}"))
+            replies: list[str] = []
+            for start in range(0, len(calls), batch):
+                replies += grader.many(calls[start : start + batch])
+            still = []
+            for j, reply in zip(pending, replies, strict=True):
+                try:
+                    best, chosen = parse_patchscope_choice(reply)
+                except ValueError:
+                    still.append(j)
+                    continue
+                if best in jobs[j][2]:
+                    out[j] = (best, chosen)
+                else:
+                    still.append(j)
+            pending = still
+            if not pending:
+                break
+        if pending:
+            raise ValueError("the λ grader returned no valid scale")
+        return [out[j] for j in range(len(jobs))]
+
+    for r in range(max_rounds):
+        live = [i for i in range(len(tasks)) if done[i] is None]
+        if not live:
+            break
+        jobs, final = [], []
+        for i in live:
+            if len(current[i]) <= group_size:
+                jobs.append((i, f"round{r}/group0", {s: tokens[i][s] for s in current[i]}))
+                final.append(True)
+            else:
+                groups = [
+                    current[i][g : g + group_size] for g in range(0, len(current[i]), group_size)
+                ]
+                for g, group in enumerate(groups):
+                    jobs.append((i, f"round{r}/group{g}", {s: tokens[i][s] for s in group}))
+                    final.append(False)
+        winners: dict[int, list[float]] = {}
+        for (i, _, _), is_final, result in zip(jobs, final, choose_all(jobs), strict=True):
+            if is_final:
+                done[i] = result
+            else:
+                winners.setdefault(i, []).append(result[0])
+        for i, won in winners.items():
+            current[i] = sorted(won)
+    if any(d is None for d in done):
+        raise ValueError("the λ tournament did not converge")
+    return [d for d in done if d is not None]
+
+
 # ---------------------------------------------------------------------------------------------
 # Steering (the toolkit's steering.py)
 
