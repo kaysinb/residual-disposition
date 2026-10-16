@@ -138,6 +138,9 @@ Entry points in `scripts/`:
 - `preflight.py`: the stage-0 pre-flight tasks, the tools check among them;
 - `summarize_tools.py`, `tools_check_report.py`: summarizer hypotheses from saved tool outputs,
   and the tools check's readings and prefill-budget rule;
+- `summarizer_tiers.py`: the verified tier manifest of summarizer completions cached before the
+  cache recorded each one's service tier, the provenance a readings run's `service_tiers.json`
+  reads;
 - `judge.py`, `make_labeling_set.py`, `import_manual_labels.py`, `judge_validity.py`: judging, the
   blind labeling set, the import of its reference labels and the judge's validity check against
   them;

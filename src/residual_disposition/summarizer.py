@@ -127,6 +127,17 @@ PROMPTS: dict[str, SummaryPrompt] = {
 }
 
 
+# Evidence tools read with another tool's prompt: PD-clean and its control with PD's.
+PROMPT_TOOL = {"pd_clean": "perplexity_differencing", "pd_random": "perplexity_differencing"}
+
+
+def base_tool(tool: str) -> str:
+    """The prompt's tool of an evidence tool: a lens-only package's ``adl_lens@<layer>/<key>``
+    reads with the prompt of ``adl_lens``, PD-clean and its control with PD's."""
+    tool = tool.split("@", 1)[0]
+    return PROMPT_TOOL.get(tool, tool)
+
+
 def prompt_for(tool: str, version: str) -> SummaryPrompt:
     prompt = PROMPTS[version]
     if prompt.tool != tool:
