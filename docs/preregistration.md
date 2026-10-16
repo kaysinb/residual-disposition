@@ -1417,15 +1417,24 @@ Stage-0 label sets (§12.9).
 5. The same algorithm is applied to the positive-control packages (A, recipe control).
 
 - **Execution amendment, 2026-10-16** **[user; before the researcher's review]**. Step 3's
-  sample of agreed negatives is 30 per group, behavior × package type (latent, positive control
-  A, recipe control), 180 in all, not 30 per package (420).
-  - With 0 misses found, the 95 % upper bound of the miss share among agreed negatives is
-    ≈ 3/180 ≈ 1.7 %, comparable to the Stage-0 detector diagnostic (≈ 2 %, §12.3.1). The
-    ensemble agreed throughout: κ 0.98–0.99, 4 disputes in 2,723 items (rounds 0–6).
+  sample of agreed negatives is 180, not 30 per package (420), allocated to the groups behavior ×
+  package type (latent, positive control A, recipe control) in proportion to their numbers of
+  agreed negatives (largest remainders): example_link 13 / 51 / 51 and pun_intended 13 / 26 / 26
+  (A / latent / recipe), of 183 / 736 / 735 and 183 / 368 / 367, 2,572 in all.
+  - With 0 misses found, the exact one-sided 95 % upper bound of the overall miss share among the
+    2,572 agreed negatives (the groups weighted by their size) is 1.59 %: hypergeometric draws
+    within each group, the misses placed across groups in the way most likely to stay unseen.
+    Comparable to the Stage-0 detector diagnostic (≈ 2 %, §12.3.1). The ensemble agreed
+    throughout: κ 0.98–0.99, 4 disputes in 2,723 items (rounds 0–6).
+  - Disclosed: an equal 30 per group, the first form of this amendment, bounds the overall share
+    only at 2.72 % (the misses concentrated in the two largest groups); its ≈ 1.65 %
+    (1 − 0.05^(1/180)) bounds the equal-weighted mean of the group shares, not the overall share
+    (review s2e). The per-package design would give 0.62 %.
   - Every dispute and every unanimous trace-positive item is still reviewed.
   - The sample is drawn from the same agreed negatives with the frozen seed. The per-package
-    sample drawn before (never reviewed) is withdrawn; the ensemble's rounds stand, since the
-    plan changed in its review section alone (`scripts/pd_clean.py amend-review`).
+    sample and the equal-allocation sample drawn before (neither reviewed) are withdrawn; the
+    ensemble's rounds stand, since the plan changed in its review section alone
+    (`scripts/pd_clean.py amend-review`).
 
 #### 12.3.3 Judge
 

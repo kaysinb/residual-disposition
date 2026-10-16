@@ -29,8 +29,9 @@ derived from them each time, never kept as mutable state.
 - ``review`` writes the researcher's review set (§12.3.2, step 3): every dispute and every
   unanimous trace not yet reviewed, and once per group (behavior × package type: the plan's
   ``review.groups`` maps each adjudicated role to its type) a seeded sample of the group's agreed
-  (unanimous) negatives of the size the plan freezes (30 per group, the execution amendment of
-  2026-10-16; it was 30 per package).
+  (unanimous) negatives. The plan freezes the total (180, the execution amendment of 2026-10-16;
+  it was 30 per package), allocated to the groups in proportion to their numbers of agreed
+  negatives by largest remainders (``allocate``).
 - ``amend-review`` records a change of the plan's review section alone (an execution amendment)
   made after rounds were labeled: the old and the new plan's text, whose sha256 must be the two
   bindings' and which may differ only in ``review``, the decision, and the reviews it withdraws
@@ -111,6 +112,20 @@ def write_once(path: Path, data: Any, *, private: bool = False) -> None:
     if private:
         tmp.chmod(0o600)
     os.replace(tmp, path)
+
+
+def allocate(total: int, sizes: Mapping[str, int]) -> dict[str, int]:
+    """``total`` split over groups in proportion to ``sizes`` by largest remainders (ties in
+    group order), each group capped by its size."""
+    whole = sum(sizes.values())
+    if total > whole:
+        raise SystemExit(f"a sample of {total} from {whole} agreed negatives")
+    quota = {g: total * n / whole for g, n in sizes.items()}
+    out = {g: int(q) for g, q in quota.items()}
+    order = sorted(sizes, key=lambda g: (-(quota[g] - out[g]), g))
+    for g in order[: total - sum(out.values())]:
+        out[g] += 1
+    return out
 
 
 def text_sha256(text: str) -> str:
@@ -305,25 +320,27 @@ class Study:
             elif label["present"]:
                 needs[iid] = {**label, "why": "trace"}
         review = self.plan["review"]
-        n, types = int(review["negatives_per_group"]), review["groups"]
-        pools: dict[str, list[str]] = {}
+        if review.get("allocation") != "proportional":
+            raise SystemExit("the plan's review allocation must be proportional")
+        types = review["groups"]
+        pools: dict[str, list[str]] = {}  # every group's agreed negatives, for the allocation
         for s in self.states:
             if not s["adjudicate"]:
                 continue
             if s["role"] not in types:
                 raise SystemExit(f"{s['state']}: role {s['role']} has no review group")
-            group = f"{s['behavior']}/{types[s['role']]}"
-            if group in sampled:
-                continue
             sel = self.selection(s, final)
-            pools.setdefault(group, []).extend(
+            pools.setdefault(f"{s['behavior']}/{types[s['role']]}", []).extend(
                 iid
                 for iid in sel.ids(s["state"])
                 if iid in ensemble and ensemble[iid]["unanimous"] and not ensemble[iid]["present"]
             )
+        n = allocate(int(review["negatives_total"]), {g: len(p) for g, p in pools.items()})
         for group, pool in sorted(pools.items()):
+            if group in sampled:
+                continue
             rng = random.Random(f"{self.seed}/review/{group}")
-            for iid in rng.sample(sorted(pool), min(n, len(pool))):
+            for iid in rng.sample(sorted(pool), n[group]):
                 needs[iid] = {**ensemble[iid], "why": "sample"}
             draw.append(group)
         return needs, draw

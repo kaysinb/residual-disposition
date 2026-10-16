@@ -62,7 +62,11 @@ def setup(tmp_path, monkeypatch):
             "fraction": 0.03,
             "seed": 5,
             "pd_runs": ["feasibility_14b"],
-            "review": {"negatives_per_group": 4, "groups": {"L": "latent"}},
+            "review": {
+                "negatives_total": 4,
+                "allocation": "proportional",
+                "groups": {"L": "latent"},
+            },
             "rubric": "configs/continuation/pd_clean_rubric.md",
             "rubric_sha256": "e5d244d14c131249160469110f629345593f8b254da964ad74821ceec2b4d36d",
             "states": [
@@ -238,7 +242,7 @@ def test_an_amended_review_section_keeps_the_rounds_and_withdraws_the_old_review
     old_plan = tmp / "plan-v1.yaml"
     old_plan.write_text((tmp / "plan.yaml").read_text())
     plan = yaml.safe_load((tmp / "plan.yaml").read_text())
-    plan["pd_clean"]["review"]["negatives_per_group"] = 2
+    plan["pd_clean"]["review"]["negatives_total"] = 2
     (tmp / "plan.yaml").write_text(yaml.safe_dump(plan))
     with pytest.raises(SystemExit, match="another binding"):  # the rounds name the old plan
         script.Study(work, tmp / "plan.yaml").ensemble()
@@ -281,8 +285,26 @@ def test_an_imported_review_cannot_be_withdrawn(setup):
     old_plan = tmp / "plan-v1.yaml"
     old_plan.write_text((tmp / "plan.yaml").read_text())
     plan = yaml.safe_load((tmp / "plan.yaml").read_text())
-    plan["pd_clean"]["review"]["negatives_per_group"] = 2
+    plan["pd_clean"]["review"]["negatives_total"] = 2
     (tmp / "plan.yaml").write_text(yaml.safe_dump(plan))
     with pytest.raises(SystemExit, match="cannot be withdrawn"):
         script.main([*base, "amend-review", "--old-plan", str(old_plan), "--withdraw", "review0",
                      "--decision", "x"])  # fmt: skip
+
+
+def test_the_sample_is_allocated_in_proportion_by_largest_remainders(setup):
+    script, *_ = setup
+    sizes = {"link/A": 183, "link/latent": 736, "link/recipe": 735,
+             "pun/A": 183, "pun/latent": 368, "pun/recipe": 367}  # fmt: skip
+    assert script.allocate(180, sizes) == {
+        "link/A": 13,
+        "link/latent": 51,
+        "link/recipe": 51,
+        "pun/A": 13,
+        "pun/latent": 26,
+        "pun/recipe": 26,
+    }
+    assert script.allocate(3, {"a": 1, "b": 1, "c": 1}) == {"a": 1, "b": 1, "c": 1}
+    assert script.allocate(1, {"b": 1, "a": 1}) == {"a": 1, "b": 0}  # a tie goes in group order
+    with pytest.raises(SystemExit, match="a sample of 5 from 4"):
+        script.allocate(5, {"a": 4})
