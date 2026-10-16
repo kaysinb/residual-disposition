@@ -946,3 +946,45 @@ def test_judging_adl_hypotheses_needs_the_laptop_ledger(tmp_path: Path) -> None:
         script.adl_ledger([adl], OmegaConf.create({"backend": "batch", "adl_ledger": ledger}))
     with pytest.raises(SystemExit, match="adl_ledger"):
         script.adl_ledger([adl], OmegaConf.create({"backend": "sync", "adl_ledger": {}}))
+
+
+def test_a_budget_stop_in_one_worker_keeps_the_others_paid_results(tmp_path) -> None:
+    # Review s2a: one attempt's reservation is refused (ApiBudgetExhausted) while the other
+    # requests are sent and paid; their completions must reach the cache before the stop is
+    # raised, so a resumed fetch does not send them again.
+    from residual_disposition.budget import ApiBudgetExhausted
+
+    requests = [build_request(STRICT_V1, item(n), settings()) for n in ("a", "b", "c", "d")]
+    stop_key = requests[2].key
+
+    class Hook:
+        def reserve(self, request):
+            if request.key == stop_key:
+                raise ApiBudgetExhausted("allowance used")
+            return "token"
+
+        def settle(self, token, request, completion):
+            pass
+
+        def fail(self, token, request, error):
+            pass
+
+    completions = FakeCompletions([chat_body("yes") for _ in range(8)])
+    backend = ChatBackend(
+        SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+        concurrency=4,
+        max_retries=0,
+        sleep=lambda s: None,
+    )
+    backend.attempt_hook = Hook()
+    cache = judge.JudgeCache(tmp_path / "cache")
+    with pytest.raises(ApiBudgetExhausted):
+        judge.fetch(requests, backend, cache)
+    sent = len(completions.calls)
+    assert sent == 3  # every request but the refused one was sent
+    assert all(cache.get(r.key) is not None for r in requests if r.key != stop_key)
+    backend.attempt_hook = None  # the budget allows the rest now
+    results, cached = judge.fetch(requests, backend, cache)
+    assert len(completions.calls) == sent + 1  # only the refused request is sent on resume
+    assert cached == {r.key for r in requests if r.key != stop_key}
+    assert all(results[r.key].error is None for r in requests)

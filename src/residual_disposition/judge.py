@@ -762,10 +762,22 @@ class ChatBackend:
         self.attempt_hook: Any = None
 
     def complete(self, requests: Sequence[ChatRequest]) -> Iterator[tuple[str, Completion]]:
+        """Each request's completion as it arrives. A worker that raises (a budget stop before
+        its send, or anything else) does not cut the others short: every other request already
+        sent still yields its completion, so the caller caches what was paid for, and the first
+        exception is raised once all have finished."""
+        error: BaseException | None = None
         with ThreadPoolExecutor(max_workers=self.concurrency) as pool:
             futures = {pool.submit(self._complete_one, r): r.key for r in requests}
             for future in as_completed(futures):
-                yield futures[future], future.result()
+                try:
+                    completion = future.result()
+                except Exception as exc:  # noqa: BLE001 - re-raised below, after the others
+                    error = error or exc
+                    continue
+                yield futures[future], completion
+        if error is not None:
+            raise error
 
     def _complete_one(self, request: ChatRequest) -> Completion:
         import openai
