@@ -62,13 +62,18 @@ TOOL_STEPS = {
     "tool_dm": "diff_mining",
     "adl_package": "activation_difference_lens",  # also its unsteered-only ablation, adl_unsteered
     "adl_lens_package": "adl_lens",  # one evidence per layer, decoder and λ draw
+    "pd_clean_package": "pd_clean",  # the continuation's PD-clean (scripts/pd_clean.py)
+    "pd_random_package": "pd_random",  # its random-removal control
 }
+# Evidence tools read with another tool's prompt: PD-clean and its control with PD's.
+PROMPT_TOOL = {"pd_clean": "perplexity_differencing", "pd_random": "perplexity_differencing"}
 
 
 def base_tool(tool: str) -> str:
     """The prompt's tool of an evidence tool: a lens-only package's ``adl_lens@<layer>/<key>``
-    reads with the prompt of ``adl_lens``."""
-    return tool.split("@", 1)[0]
+    reads with the prompt of ``adl_lens``, PD-clean and its control with PD's."""
+    tool = tool.split("@", 1)[0]
+    return PROMPT_TOOL.get(tool, tool)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -103,6 +108,9 @@ def evidence_of(
             for key, pkg in entry["packages"].items()
             if packages is None or f"{layer}/{key}" in packages
         ]
+    if tool in ("pd_clean", "pd_random"):
+        package = json.loads((run_dir / "pd_clean.json").read_text())
+        return [Evidence(state, tool, run_dir.name, None, pd_evidence(package["top"]))]
     if tool == "activation_difference_lens":
         package = json.loads((run_dir / "adl_package.json").read_text())
         return [
