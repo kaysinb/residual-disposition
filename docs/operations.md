@@ -257,8 +257,11 @@ its rerun pays only for what the cache lacks.
   the cached replies (the judge: the requests a ledger settled) and prints each group's tokens and
   its estimate/actual ratio under the current configs. Characters per token are set just below
   the measured ratio and thinking at 1.3 × the measured mean (the estimate predicts a sum over
-  thousands of requests; the limits' 30 % covers the spread). `tests/test_estimator_calibration.py`
-  requires every measured group's estimate to lie between its actual cost and 1.6 times it.
+  thousands of requests). `tests/test_estimator_calibration.py` is a regression check on the
+  measured sample: every measured group's estimate lies between its actual cost and 1.6 times it.
+  It does not show that a future run's cost stays within its estimate + 30 %: other evidence,
+  prompts or models can use more tokens, and a run that reaches its limit stops and is resumed
+  with a new limit.
 
 ### Calibration of 2026-10-17
 
@@ -291,32 +294,48 @@ thinking as a strict grader (the escalation stage) is not measured.
 ### The stage plan under this calibration
 
 The inventory (§12.3.9, `configs/continuation/inventory_units.yaml`) prices API work per reading
-in fixed units, which the estimator does not set; re-priced with Stage 1's measurements at the
-calibrated estimate (requests per package and judge requests per hypothesis as in Stage 1; λ
-grading $0.376 per state, Stage 1's cost per state with both layers and both draws):
+in fixed units, which the estimator does not set. Re-priced here with Stage 1's measurements at
+the calibrated estimate: 80 interpreter requests per package and Stage 1's judge requests per
+hypothesis (0.63 lens, 1.19 PD-clean); λ grading $0.376 per state, Stage 1's cost per state with
+both layers and both draws. Every mandatory reading is counted, with no cache reuse: a second
+draw's package equal to its first is read by its own samples (key salt, fbc0bcc), and no reading
+of one state answers another's.
 
 | unit | frozen | standard tier | interpreter on flex |
 |---|---|---|---|
-| lens-only reading, per state (λ grading + three packages: 30/state/1, 30/base/1, 20/state/1, 80 interpreter requests each, and their judging) | $0.43 | $1.89 | $1.19 |
+| lens-only reading, per state: λ grading + four packages (30/state/1; the second λ draw 30/state/2, every state, §12.4.5; 30/base/1; 20/state/1), each 80 interpreter requests and their judging | $0.43 | $2.39 | $1.46 |
 | PD-clean reading or random-removal control, per package (80 requests and their judging) | $0.10, $0.08 | $0.88 | $0.48 |
-| not in the inventory: the stability draw's package on L and the fidelity packages on A, per lineage | — | $1.51 | $0.81 |
+| not in the inventory: the fidelity packages on A (random directions, no patch), per lineage | — | $1.01 | $0.54 |
 
-The frozen lens unit was a pilot ADL package read once ("graders 0.34 + interpreter 0.09");
-Stage 1 reads three packages per state. With every reading of Stages 2–5 re-priced (GPU,
-labels and storage as frozen):
+The frozen lens unit was a pilot ADL package read once ("graders 0.34 + interpreter 0.09"), and
+the inventory gives the second λ draw a line on L only (GPU, no API); Stage 1 read four packages
+per state, the second draw for every state. GPU stays as frozen: Stage 1 made both draws of a
+state in its one package pass. With every reading of Stages 2–5 re-priced (labels and storage as
+frozen):
 
 | main branch | frozen (§12.3.9) | standard tier | interpreter on flex |
 |---|---|---|---|
-| central projection | $1,474 | $1,617 (+143) | $1,547 (+73) |
-| stress projection | $2,151 | $2,294 | $2,223 |
-| baseline: through Stage 3, with the reserve | $1,365 | $1,491 (+126) | $1,430 (+64) |
-| cuts, central / stress | Stages 6, 5 / also guillemets, the last panel behavior, Stage 2 to one | unchanged | unchanged |
+| central projection | $1,474 | $1,640 (+165) | $1,559 (+85) |
+| stress projection | $2,151 | $2,316 | $2,236 |
+| through Stage 3, with the reserve | $1,365 | $1,512 (+146) | $1,440 (+75) |
+| central cuts | Stages 6, 5 | Stages 6, 5 and guillemets | Stages 6, 5 |
+| baseline after the central cuts, with the reserve | $1,365 | $1,367 | $1,440 |
+| stress cuts | Stages 6, 5, guillemets, the last panel behavior, Stage 2 to one | unchanged | unchanged |
 
-**Flag:** the baseline through Stage 3 with the reserve moves by more than ±$25 against
-§12.3.9's: +$126 at the standard tier, +$64 with the interpreter on flex. The frozen allocations
-and budget table stay as they are; §12.8's update rule raises the allocation of each kind's
-remaining lineages to the mean actual cost of its completed ones. For comparison, Stage 0–1 had
-spent $80.67 of its $118.94 central allocation on 2026-10-17 (the item is not completed).
+(The Stage-4 branch: the same cuts with Stage 4 among them.)
+
+**Flag:** through Stage 3 with the reserve moves by more than ±$25 against §12.3.9's $1,365:
++$146 at the standard tier, $12 above the $1,500 cap, so the central cut order then also cuts
+guillemets; +$75 with the interpreter on flex.
+
+**Where the baseline fits:** with the interpreter on flex (the judge on the standard tier), the
+plan through Stage 3 with the reserve fits the $1,500 cap with a $60 margin and the frozen cuts;
+with the interpreter on the standard tier it does not fit without cutting guillemets.
+
+The frozen allocations and budget table stay as they are; §12.8's update rule raises the
+allocation of each kind's remaining lineages to the mean actual cost of its completed ones. For
+comparison, Stage 0–1 had spent $80.67 of its $118.94 central allocation on 2026-10-17 (the item
+is not completed).
 
 ## Artifact retention
 
