@@ -329,8 +329,12 @@ frozen):
 guillemets; +$75 with the interpreter on flex.
 
 **Where the baseline fits:** with the interpreter on flex (the judge on the standard tier), the
-plan through Stage 3 with the reserve fits the $1,500 cap with a $60 margin and the frozen cuts;
-with the interpreter on the standard tier it does not fit without cutting guillemets.
+central projection through Stage 3 with the reserve fits the $1,500 cap with a ≈ $60 margin and
+the frozen cuts; with the interpreter on the standard tier it does not fit without cutting
+guillemets. The meter's admission of guillemets, though, holds its $199.07 stress reservation:
+with every item above it at its central cost, that gate is $1,500.62 with the interpreter on flex
+($1,565.76 on the standard tier), so the meter admits guillemets only if the items above it come
+in below their central costs.
 
 The frozen allocations and budget table stay as they are; §12.8's update rule raises the
 allocation of each kind's remaining lineages to the mean actual cost of its completed ones. For
