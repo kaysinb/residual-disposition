@@ -17,6 +17,7 @@ judge:
   dry_run: true         # print the cost estimate and send nothing
   # ADL's hypotheses only: the laptop's share of the ADL API cap, the summarizer's ledger
   adl_ledger: {worker: laptop, allowance_usd: 15.0, path: null}
+  api_ledger: null      # other tools' judging: no ledger unless one is named (the continuation)
   # sync: chat completions, at batch prices with sync.service_tier flex. Gemini's batch endpoint
   # rejects the strict rubric's JSON response schema ("no such field"), 2026-10-09.
   backend: sync         # sync | batch (only with structured_output: false)

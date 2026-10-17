@@ -1094,3 +1094,43 @@ def test_a_batch_line_s_camel_case_usage_is_billed() -> None:
     assert key == "k" and completion.text == "Red"
     assert billed_tokens(completion.usage) == (12, 139)  # the thinking is billed output
     assert judge.normalized_usage({"prompt_tokens": 5, "promptTokens": 9})["prompt_tokens"] == 5
+
+
+def test_the_judge_s_ledger_follows_the_tools_of_its_runs(tmp_path, monkeypatch):
+    import importlib.util
+    import sys
+
+    from omegaconf import OmegaConf
+
+    from residual_disposition.records import RecordWriter, ToolHypothesis
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    path = Path(__file__).resolve().parents[1] / "scripts" / "judge.py"
+    spec = importlib.util.spec_from_file_location("judge_script_ledgers", path)
+    script = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = script
+    spec.loader.exec_module(script)
+
+    def run(name, tool):
+        d = tmp_path / name
+        RecordWriter(d).write(
+            [ToolHypothesis(name, "s1", tool, "t1", None, "m", "v", 0, f"{name}/0")]
+        )
+        return d
+
+    j = OmegaConf.create({
+        "backend": "sync",
+        "adl_ledger": {"worker": "cont-judge", "allowance_usd": 9.0, "path": None},
+        "api_ledger": {"worker": "cont-judge-pd", "allowance_usd": 5.0, "path": None},
+    })  # fmt: skip
+    lens = script.adl_ledger([run("lens", "adl_lens@30/state/1")], j)
+    assert lens.worker == "cont-judge"  # the lens-only packages are ADL's
+    lens.close()
+    pd_clean = script.adl_ledger([run("pd", "pd_clean")], j)
+    assert pd_clean.worker == "cont-judge-pd"
+    pd_clean.close()
+    assert (
+        script.adl_ledger([run("pd2", "pd_clean")], OmegaConf.create({"backend": "sync"})) is None
+    )
+    with pytest.raises(SystemExit, match="in their own run"):
+        script.adl_ledger([run("mix1", "adl_lens@20/state/1"), run("mix2", "pd_clean")], j)

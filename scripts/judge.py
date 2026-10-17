@@ -62,9 +62,10 @@ from residual_disposition.records import (
     read_table,
 )
 from residual_disposition.seeding import derive_seed
+from residual_disposition.summarizer import base_tool
 from residual_disposition.tracking import Run
 
-ADL_TOOLS = {"activation_difference_lens", "adl_unsteered"}
+ADL_TOOLS = {"activation_difference_lens", "adl_unsteered", "adl_lens"}
 
 
 def model_spec(j: DictConfig, model_id: str) -> ModelSpec:
@@ -278,12 +279,22 @@ def report_agreement(
 
 
 def adl_ledger(run_dirs: list[Path], j: DictConfig) -> ApiLedger | None:
-    """Judging ADL's hypotheses spends from the laptop's share of the ADL API cap
-    (``judge.adl_ledger``, the summarizer's ledger): only in a run of its own and on the
-    synchronous backend, whose windows are reserved before they are sent. None otherwise."""
-    tools = {r.tool for r in read_table(run_dirs, ToolHypothesis.table)}
+    """Judging ADL's hypotheses (the lens-only packages' too, ``adl_lens@<layer>/<package>``)
+    spends from the laptop's share of the ADL API cap (``judge.adl_ledger``, the summarizer's
+    ledger): only in a run of its own and on the synchronous backend, whose windows are reserved
+    before they are sent. Other tools' hypotheses spend from ``judge.api_ledger`` when it is set
+    (the continuation, from 2026-10-17), else from no ledger."""
+    tools = {base_tool(r.tool) for r in read_table(run_dirs, ToolHypothesis.table)}
     if not tools & ADL_TOOLS:
-        return None
+        other = j.get("api_ledger")
+        if not other:
+            return None
+        if j.backend != "sync":
+            raise SystemExit("Judge on judge.api_ledger with judge.backend=sync: it reserves")
+        try:
+            return ledger_from(OmegaConf.to_container(other), data_root())
+        except ValueError as error:
+            raise SystemExit(f"Set judge.api_ledger: {error}") from error
     if tools - ADL_TOOLS:
         raise SystemExit("Judge ADL's hypotheses in their own run, on the ADL API ledger")
     if j.backend != "sync":
