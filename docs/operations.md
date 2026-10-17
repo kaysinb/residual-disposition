@@ -236,6 +236,88 @@ from the GPU runs; it needs no GPU.
    annotator's labels from the provenance and writes the alternative-annotator test, κ and the
    share of positive labels.
 
+## API cost estimates
+
+A dry run of the judge (`scripts/judge.py`) or the summarizer (`scripts/summarize_tools.py`)
+estimates the cost of the requests not yet cached (`judge.estimate_cost`): characters divided by
+characters per token as input, and an expected answer plus thinking tokens per request as output,
+at the model's standard prices and the tier's discount. The estimate sets a run's limits only; a
+send's ledger reservation does not use it (it is bounded by the request's UTF-8 bytes and
+`max_tokens`, `adl_graders.max_cost`). The limit of a run is its calibrated dry run + 30 %
+(coordinator, 2026-10-17): a run that reaches it stops before the send that would cross it, and
+its rerun pays only for what the cache lacks.
+
+- **Parameters.** The judge: `judge.cost.chars_per_token`, `judge.cost.expected_output_tokens` and
+  each `judge.models` entry's `expected_thinking_tokens`. The summarizer:
+  `summarizer.expected_output_tokens`, and `summarizer.chars_per_token` and
+  `summarizer.expected_thinking_tokens` by evidence tool, else the prompt's tool (`base_tool`),
+  else `default`.
+- **Recalibration.** `uv run python scripts/estimator_calibration.py --judge-ledger <worker> ...
+  --summarizer-cache <dir>[=<tool>] ... --write tests/data/estimator_calibration.json` measures
+  the cached replies (the judge: the requests a ledger settled) and prints each group's tokens and
+  its estimate/actual ratio under the current configs. Characters per token are set just below
+  the measured ratio and thinking at 1.3 × the measured mean (the estimate predicts a sum over
+  thousands of requests; the limits' 30 % covers the spread). `tests/test_estimator_calibration.py`
+  requires every measured group's estimate to lie between its actual cost and 1.6 times it.
+
+### Calibration of 2026-10-17
+
+Before it, the judge's estimate was 2.0–2.1 times the actual cost of Stage-1 judging (dry runs
+$6.97 and $4.42; actual $3.29 and $2.23 for the same 5,850 and 3,692 requests): thinking was
+expected at 50 and 300 tokens against 0 and 53, and 4.0 characters per token against 4.63 and
+4.81. The summarizer used the judge's 4.0 characters per token, above the measured ratio of
+lens-only packages, Diff Mining and ADL. Measured (input and output in tokens per request, output
+billed with its thinking; USD at standard prices):
+
+| reader | model | group | n | input mean / p90 | output mean / p90 | answer mean / p90 | thinking mean / p90 | chars/token | USD/request | estimate/actual |
+|---|---|---|---|---|---|---|---|---|---|---|
+| judge | gemini-3.5-flash-lite | strict | 4771 | 1633 / 1640 | 15 / 17 | 15 / 17 | 0 / 0 | 4.63 | 0.000527 | 1.07 |
+| judge | gemini-3.8-flash | lenient | 4771 | 571 / 578 | 54 / 92 | 1 / 1 | 53 / 91 | 4.81 | 0.000631 | 1.45 |
+| summarizer | gemini-3.8-flash | activation_difference_lens | 1120 | 15676 / 18644 | 214 / 609 | 21 / 30 | 192 / 592 | 3.27 | 0.012558 | 1.07 |
+| summarizer | gemini-3.8-flash | adl_lens | 9280 | 2703 / 3181 | 723 / 1971 | 13 / 18 | 710 / 1958 | 2.28 | 0.004739 | 1.23 |
+| summarizer | gemini-3.8-flash | adl_unsteered | 1120 | 4339 / 4466 | 79 / 27 | 48 / 25 | 31 / 0 | 3.88 | 0.003550 | 1.03 |
+| summarizer | gemini-3.8-flash | diff_mining | 1320 | 1623 / 1698 | 1299 / 3489 | 16 / 18 | 1282 / 3473 | 1.70 | 0.006087 | 1.28 |
+| summarizer | gemini-3.8-flash | pd_clean | 2720 | 11786 / 13803 | 242 / 41 | 24 / 30 | 218 / 0 | 4.02 | 0.009749 | 1.04 |
+| summarizer | gemini-3.8-flash | perplexity_differencing | 1777 | 9508 / 12821 | 94 / 32 | 21 / 29 | 74 / 0 | 4.04 | 0.007485 | 1.03 |
+
+The judge's rows are Stage-1 judging (ledgers cont-judge and cont-judge-pd, every settled
+request); the summarizer's are every cached reply (`data/cache/summarizer`; `pd_clean` is
+`data/cache/summarizer-pd-clean`, PD-clean's packages and their random controls under PD's
+prompt). Estimate/actual is under the calibrated values. Every current evidence tool has its own
+or its prompt tool's values; `default` (4.0 characters per token, 1,000 thinking tokens) applies
+only to a tool added later. gemini-3.8-flash was measured as the lenient grader only, so its
+thinking as a strict grader (the escalation stage) is not measured.
+
+### The stage plan under this calibration
+
+The inventory (§12.3.9, `configs/continuation/inventory_units.yaml`) prices API work per reading
+in fixed units, which the estimator does not set; re-priced with Stage 1's measurements at the
+calibrated estimate (requests per package and judge requests per hypothesis as in Stage 1; λ
+grading $0.376 per state, Stage 1's cost per state with both layers and both draws):
+
+| unit | frozen | standard tier | interpreter on flex |
+|---|---|---|---|
+| lens-only reading, per state (λ grading + three packages: 30/state/1, 30/base/1, 20/state/1, 80 interpreter requests each, and their judging) | $0.43 | $1.89 | $1.19 |
+| PD-clean reading or random-removal control, per package (80 requests and their judging) | $0.10, $0.08 | $0.88 | $0.48 |
+| not in the inventory: the stability draw's package on L and the fidelity packages on A, per lineage | — | $1.51 | $0.81 |
+
+The frozen lens unit was a pilot ADL package read once ("graders 0.34 + interpreter 0.09");
+Stage 1 reads three packages per state. With every reading of Stages 2–5 re-priced (GPU,
+labels and storage as frozen):
+
+| main branch | frozen (§12.3.9) | standard tier | interpreter on flex |
+|---|---|---|---|
+| central projection | $1,474 | $1,617 (+143) | $1,547 (+73) |
+| stress projection | $2,151 | $2,294 | $2,223 |
+| baseline: through Stage 3, with the reserve | $1,365 | $1,491 (+126) | $1,430 (+64) |
+| cuts, central / stress | Stages 6, 5 / also guillemets, the last panel behavior, Stage 2 to one | unchanged | unchanged |
+
+**Flag:** the baseline through Stage 3 with the reserve moves by more than ±$25 against
+§12.3.9's: +$126 at the standard tier, +$64 with the interpreter on flex. The frozen allocations
+and budget table stay as they are; §12.8's update rule raises the allocation of each kind's
+remaining lineages to the mean actual cost of its completed ones. For comparison, Stage 0–1 had
+spent $80.67 of its $118.94 central allocation on 2026-10-17 (the item is not completed).
+
 ## Artifact retention
 
 Before a costly campaign, record which states/seeds and matched controls to retain, why, storage

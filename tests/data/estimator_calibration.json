@@ -1,0 +1,74 @@
+[
+ {
+  "reader": "judge",
+  "model": "gemini-3.5-flash-lite",
+  "group": "strict",
+  "n": 4771,
+  "chars": 36038920,
+  "input_tokens": 7789035,
+  "output_tokens": 71005
+ },
+ {
+  "reader": "judge",
+  "model": "gemini-3.8-flash",
+  "group": "lenient",
+  "n": 4771,
+  "chars": 13090410,
+  "input_tokens": 2722233,
+  "output_tokens": 257899
+ },
+ {
+  "reader": "summarizer",
+  "model": "gemini-3.8-flash",
+  "group": "activation_difference_lens",
+  "n": 1120,
+  "chars": 57352720,
+  "input_tokens": 17557060,
+  "output_tokens": 239206
+ },
+ {
+  "reader": "summarizer",
+  "model": "gemini-3.8-flash",
+  "group": "adl_lens",
+  "n": 9280,
+  "chars": 57236720,
+  "input_tokens": 25080640,
+  "output_tokens": 6710806
+ },
+ {
+  "reader": "summarizer",
+  "model": "gemini-3.8-flash",
+  "group": "adl_unsteered",
+  "n": 1120,
+  "chars": 18866200,
+  "input_tokens": 4859220,
+  "output_tokens": 88482
+ },
+ {
+  "reader": "summarizer",
+  "model": "gemini-3.8-flash",
+  "group": "diff_mining",
+  "n": 1320,
+  "chars": 3642320,
+  "input_tokens": 2142400,
+  "output_tokens": 1714111
+ },
+ {
+  "reader": "summarizer",
+  "model": "gemini-3.8-flash",
+  "group": "pd_clean",
+  "n": 2720,
+  "chars": 128820160,
+  "input_tokens": 32057280,
+  "output_tokens": 659518
+ },
+ {
+  "reader": "summarizer",
+  "model": "gemini-3.8-flash",
+  "group": "perplexity_differencing",
+  "n": 1777,
+  "chars": 68300650,
+  "input_tokens": 16896169,
+  "output_tokens": 167729
+ }
+]

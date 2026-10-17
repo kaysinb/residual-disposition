@@ -140,6 +140,16 @@ def base_tool(tool: str) -> str:
     return PROMPT_TOOL.get(tool, tool)
 
 
+def estimate_parameter(table: Mapping[str, Any], tool: str) -> Any:
+    """A per-tool parameter of the cost estimate (``summarizer.chars_per_token``,
+    ``summarizer.expected_thinking_tokens``): the evidence tool's own entry (a lens-only package
+    by ``adl_lens``), else its prompt's tool's (``base_tool``), else ``default``."""
+    for key in (tool.split("@", 1)[0], base_tool(tool)):
+        if key in table:
+            return table[key]
+    return table["default"]
+
+
 def prompt_for(tool: str, version: str) -> SummaryPrompt:
     prompt = PROMPTS[version]
     if prompt.tool != tool:

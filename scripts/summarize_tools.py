@@ -31,6 +31,7 @@ from residual_disposition.config import config_hash, from_cli
 from residual_disposition.judge import (
     ChatBackend,
     ChatRequest,
+    CostEstimate,
     GeminiBatchBackend,
     GeminiFiles,
     JudgeCache,
@@ -51,6 +52,7 @@ from residual_disposition.summarizer import (
     adl_unsteered_evidence,
     base_tool,
     dm_evidence,
+    estimate_parameter,
     parse_hypothesis,
     pd_evidence,
     prompt_for,
@@ -194,6 +196,42 @@ def check_adl_estimate(ledger: ApiLedger | None, estimate_usd: float) -> None:
         raise SystemExit(f"{error}: not submitted") from error
 
 
+def estimate(
+    batches: Sequence[tuple[Any, list[ChatRequest]]],
+    model: ModelSpec,
+    s: DictConfig,
+    *,
+    cached: set[str],
+    price_factor: float,
+) -> CostEstimate:
+    """The cost of the requests not yet cached, each evidence tool's at its own characters per
+    input token and thinking tokens (``summarizer.chars_per_token``, ``.expected_thinking_tokens``,
+    measured on the summarizer's caches, 2026-10-17); a request shared by two tools counts once,
+    with the first."""
+    groups: dict[tuple[float, int], list[ChatRequest]] = {}
+    seen: set[str] = set()
+    for e, requests in batches:
+        cpt = float(estimate_parameter(s.chars_per_token, e.tool))
+        thinking = int(estimate_parameter(s.expected_thinking_tokens, e.tool))
+        group = groups.setdefault((cpt, thinking), [])
+        group += [r for r in requests if r.key not in seen]
+        seen |= {r.key for r in requests}
+    parts = [
+        estimate_cost(
+            requests,
+            dataclasses.replace(model, expected_thinking_tokens=thinking),
+            cached=cached,
+            chars_per_token=cpt,
+            expected_output_tokens={"summary": int(s.expected_output_tokens)},
+            price_factor=price_factor,
+        )
+        for (cpt, thinking), requests in groups.items()
+    ]
+    return CostEstimate(
+        *(sum(getattr(p, f) for p in parts) for f in CostEstimate.__dataclass_fields__)
+    )
+
+
 def model_spec(cfg: DictConfig, model_id: str) -> ModelSpec:
     for entry in cfg.judge.models:
         if entry.id == model_id:
@@ -202,7 +240,8 @@ def model_spec(cfg: DictConfig, model_id: str) -> ModelSpec:
                 reasoning_effort=entry.reasoning_effort,
                 input_usd_per_mtok=float(entry.input_usd_per_mtok),
                 output_usd_per_mtok=float(entry.output_usd_per_mtok),
-                expected_thinking_tokens=int(cfg.summarizer.expected_thinking_tokens),
+                # per evidence tool in the estimate (``estimate``)
+                expected_thinking_tokens=int(cfg.summarizer.expected_thinking_tokens.default),
             )
     raise SystemExit(
         f"judge.models has no entry for {model_id!r}: add its thinking level and prices"
@@ -319,14 +358,7 @@ def main() -> None:
         batch_discount=cfg.judge.cost.batch_discount,
         flex_discount=cfg.judge.cost.flex_discount,
     )
-    est = estimate_cost(
-        requests,
-        settings.model,
-        cached=cached,
-        chars_per_token=cfg.judge.cost.chars_per_token,
-        expected_output_tokens={"summary": int(s.expected_output_tokens)},
-        price_factor=factor,
-    )
+    est = estimate(batches, settings.model, s, cached=cached, price_factor=factor)
     print(
         f"{len(evidence)} evidence texts × {settings.samples} samples: {est.requests} requests, "
         f"{est.requests - est.to_send} cached, {est.to_send} to send to {settings.model.id} "
