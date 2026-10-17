@@ -88,6 +88,7 @@ def build(tmp_path, *, samples=80, labels=True, label=None, inputs=None, tamper=
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
+    monkeypatch.setattr(rs, "MIN_DISTINCT", 20)  # the toy runs hold 3 states, not 28
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.chdir(tmp_path)
@@ -136,6 +137,14 @@ def test_too_few_distinct_pairs_are_refused(env):
     index, summ, judge = build(env)
     with pytest.raises(SystemExit, match="24 distinct pairs, fewer than 500"):
         run_set(index, summ, judge, min_distinct=500)
+
+
+def test_a_minimum_below_the_preregistered_200_is_refused(env, monkeypatch):
+    monkeypatch.setattr(rs, "MIN_DISTINCT", 200)
+    index, summ, judge = build(env)
+    with pytest.raises(SystemExit, match="--min-distinct 199 is below the preregistered 200"):
+        run_set(index, summ, judge, min_distinct=199)
+    assert rs.MIN_DISTINCT == 200 and not (Path("runs") / "continuation_reader_set").exists()
 
 
 # --- s2t point 2: the inventory ------------------------------------------------------------

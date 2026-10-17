@@ -18,9 +18,10 @@ pdclean, 7 of each clean package (pd_clean) and 2 of each random-removal control
   once. Within a stratum the samples are taken in a seeded order, skipping a pair already chosen
   in this set or present in a past hypothesis calibration set (runs/hypothesis_calibration_set/,
   labels already checked); a stratum's shortfall is drawn from the other states of its package
-  type, in a seeded order. Fewer than ``--min-distinct`` pairs is refused. The summary counts the
-  skips (repeats, past sets) and the shortfalls before and after the refill; mapping.json holds the
-  realized strata.
+  type, in a seeded order. Fewer than ``--min-distinct`` pairs is refused, and so is a
+  ``--min-distinct`` below the preregistered 200 (``MIN_DISTINCT``; only tests lower it, review
+  s2u). The summary counts the skips (repeats, past sets) and the shortfalls before and after the
+  refill; mapping.json holds the realized strata.
 - **The judge's labels:** every item needs the judge run's own v4 label (strict and lenient, none
   null). Targets come from the judge run's recorded inputs, not from today's configs, and each
   label's strict and lenient requests, read from the judge's cache, must be the rubrics' messages
@@ -65,6 +66,7 @@ ROLES = {
     "recipe_control": "recipe",
 }
 SAMPLES = 80
+MIN_DISTINCT = 200  # §12.3.3: at least 200 hypotheses per format
 RUBRIC_VERSION = "v4"
 SEED = 20261018
 INDEX = Path("data/judge_inputs/continuation_state_index.jsonl")
@@ -234,8 +236,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("judge_run", type=Path)
     parser.add_argument("--index", type=Path, default=INDEX)
     parser.add_argument("--seed", type=int, default=SEED)
-    parser.add_argument("--min-distinct", type=int, default=200)
+    parser.add_argument("--min-distinct", type=int, default=MIN_DISTINCT)
     args = parser.parse_args(argv)
+    if args.min_distinct < MIN_DISTINCT:
+        raise SystemExit(
+            f"--min-distinct {args.min_distinct} is below the preregistered {MIN_DISTINCT}"
+        )
     fmt, seed, quotas = args.format, args.seed, FORMATS[args.format]
     states: dict[str, tuple[str, str, int | None]] = {}
     for line in Path(args.index).read_text().splitlines():
