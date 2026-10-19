@@ -305,54 +305,107 @@ def screened_doses(
     ]
 
 
+def replay_attempts(
+    candidates: Sequence[int],
+    draws: Sequence[Mapping[str, Any]],
+    detector_version: str,
+    *,
+    lineage: str,
+    base_seed: int,
+    attempts: int = 2,
+) -> AttemptLedger:
+    """A lineage's attempt ledger (§12.4.1, §12.3.1) replayed from its completed confirmation
+    draws in attempt order (review s3v): each draw {attempt, dose, seed, detector_version,
+    passed, purpose}; a draw read with a new detector version follows that revision (which voids
+    every earlier valid draw), and ``detector_version``, the current one, revises after the last
+    draw if it is newer. Each draw's attempt number must be its place and its seed the ledger's
+    fresh seed for that attempt and version; a draw the procedure does not permit is refused."""
+    first = draws[0]["detector_version"] if draws else detector_version
+    ledger = AttemptLedger(
+        candidates=tuple(int(c) for c in candidates),
+        attempts=attempts,
+        lineage=lineage,
+        base_seed=int(base_seed),
+        detector_version=str(first),
+    )
+    for draw in draws:
+        if draw["detector_version"] != ledger.detector_version:
+            ledger.revise(str(draw["detector_version"]))
+        if int(draw["attempt"]) != len(ledger.log) + 1:
+            raise ValueError(f"draw {draw['attempt']} recorded as attempt {len(ledger.log) + 1}")
+        if not isinstance(draw.get("passed"), bool):
+            raise ValueError(f"draw {draw['attempt']}: no completed result")
+        if int(draw["seed"]) != ledger.seed_for(int(draw["dose"])):
+            raise ValueError(
+                f"draw {draw['attempt']}: not the fresh seed of its attempt and version"
+            )
+        ledger.record(int(draw["dose"]), draw["passed"], draw.get("purpose"))
+    if detector_version != ledger.detector_version:
+        ledger.revise(detector_version)
+    return ledger
+
+
 def stage2_decision(
     screening: Mapping[int, Mapping[str, Any]],
     deep_doses: Sequence[int],
     excess_max: Fraction,
-    confirmations: Mapping[int, bool | None],
+    draws: Sequence[Mapping[str, Any]],
     expression: Mapping[str, bool | None],
+    *,
+    detector_version: str,
+    lineage: str,
+    base_seed: int,
 ) -> dict[str, Any]:
     """A pilot behavior's Stage-2 decision (§12.4.1, §12.4.7, §12.7; execution 2026-10-19,
-    review s3t): its analysis dose and exception a.
+    reviews s3t, s3v): its analysis dose and exception a.
 
-    - **Analysis dose:** d₁ is the first screened deep dose; d₂, the next screened one, is
-      confirmed only if d₁ failed its confirmation (a = 2 attempts; an expression failure gives
-      no second attempt). The analysis dose is the confirmed one; a dose never attempted is "not
-      assessed".
+    - **Analysis dose:** the attempt ledger replayed from the completed confirmation draws
+      (``replay_attempts``; candidates the screened deep doses in order): attempt 1 confirms d₁,
+      attempt 2 is d₂ after a failed d₁ or the retest after an accepted detector revision; the
+      analysis dose is the ledger's (the last attempt, passed and not voided). A dose never
+      attempted is "not assessed". An expression failure gives no attempt.
     - **Expression checks** (``EXPRESSION_CHECKS``) are read at the analysis dose; they qualify
       its interpretation, not its certificate and readers.
-    - **Exception a** applies when the permitted screening and confirmation yield no analysis
-      dose, or the analysis dose fails a completed expression check; with no screened dose it
-      applies at once.
+    - **Exception a** applies when the permitted procedure, completed (attempts exhausted or no
+      further dose permitted), yields no analysis dose, or the analysis dose fails a completed
+      expression check; with no screened dose it applies at once.
 
-    ``confirmations[dose]`` is True or False for a completed confirmation, None (or absent) for
-    one not yet done or technically invalid; ``expression[check]`` likewise. Incomplete work
-    leaves the decision "pending" with the next step named; a confirmation of a dose the
-    procedure does not permit is refused."""
+    ``expression[check]`` is True or False for a completed check, None (or absent) for one not
+    yet done or technically invalid. Incomplete work leaves the decision "pending" with the next
+    step named."""
     screened = screened_doses(screening, deep_doses, excess_max)
     if screened is None:
         return {"status": PENDING, "next": "screening", "doses": {}}
     doses = {d: ("screened" if d in screened else "failed screening") for d in deep_doses}
-    permitted = screened[:1]
-    if screened and confirmations.get(screened[0]) is False:
-        permitted = screened[:2]
-    unpermitted = [d for d, v in confirmations.items() if v is not None and d not in permitted]
-    if unpermitted:
-        raise ValueError(f"confirmations of {unpermitted}, which the procedure does not permit")
-    analysis = None
-    for d in permitted:
-        result = confirmations.get(d)
-        if result is None:
-            return {"status": PENDING, "next": f"confirmation at {d}", "doses": doses}
-        doses[d] = "confirmed" if result else "failed confirmation"
-        if result:
-            analysis = d
-            break
+    if not screened:
+        if draws:
+            raise ValueError("confirmation draws without a screened deep dose")
+        return {"status": "decided", "doses": doses, "analysis_dose": None,
+                "exception_a": True, "expression": {}, "attempts": []}  # fmt: skip
+    ledger = replay_attempts(
+        screened, draws, detector_version, lineage=lineage, base_seed=base_seed
+    )
+    for entry in ledger.log:
+        doses[entry["dose"]] = "voided" if entry["void"] else (
+            "confirmed" if entry["passed"] else "failed confirmation"
+        )  # fmt: skip
     for d in screened:
         if doses[d] == "screened":
             doses[d] = NOT_ASSESSED
-    out: dict[str, Any] = {"doses": doses, "analysis_dose": analysis}
+    analysis = ledger.analysis_dose()
+    out: dict[str, Any] = {"doses": doses, "analysis_dose": analysis, "attempts": ledger.log}
     if analysis is None:
+        last = ledger.log[-1] if ledger.log else None
+        if ledger.retest_dose is not None:
+            return {
+                **out,
+                "status": PENDING,
+                "next": f"confirmation retest at {ledger.retest_dose}",
+            }
+        if last is None:
+            return {**out, "status": PENDING, "next": f"confirmation at {ledger.first_dose()}"}
+        if len(ledger.log) < ledger.attempts and not last["passed"] and ledger.next_dose():
+            return {**out, "status": PENDING, "next": f"confirmation at {ledger.next_dose()}"}
         return {**out, "status": "decided", "exception_a": True, "expression": {}}
     checks = {c: expression.get(c) for c in EXPRESSION_CHECKS}
     pending = [c for c, v in checks.items() if v is None]

@@ -3418,8 +3418,8 @@ def _certificate(
 
 def _decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> None:
     """A pilot behavior's Stage-2 decision (§12.7; review s3t), on CPU: its analysis dose and
-    exception a from the runs ``plan.decide`` names (the screening, the confirmation of each
-    attempted dose, the expression checks at the analysis dose; ``continuation_stage2.decide``).
+    exception a from the runs ``plan.decide`` names (the screening, the confirmation draws in
+    attempt order, the expression checks at the analysis dose; ``continuation_stage2.decide``).
     The record is a cell of its own (``stage2_decision.json``), pending with the next step named
     until the permitted work is done; ``scripts/continuation_stage2.py`` writes a decided one as
     ``manifests/stage2_<behavior>.json``, committed before the lineage's k*."""
@@ -3429,12 +3429,15 @@ def _decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> 
     spec = plan["decide"]
     inputs = {
         "behavior": ws.behavior.id,
+        "detector_version": ws.behavior.detector.version,
         "screening": spec["screening"],
-        "confirmation": {str(int(d)): r for d, r in (spec.get("confirmation") or {}).items()},
+        "confirmation": list(spec.get("confirmation") or []),  # the attempts, in order
         "expression": dict(spec.get("expression") or {}),
     }
     record = S2.decide(inputs, _stage2_rules(), K.find_run)
-    cell = make_cell(ws, "stage2_decision", {"inputs": record["inputs"]})
+    # the result is part of the cell's identity: a pending record is never served for a later
+    # decided one of the same runs (review s3v)
+    cell = make_cell(ws, "stage2_decision", {"inputs": inputs, "record": content_hash(record)})
     if not cell.done:
         with Run(cell.cfg) as run:
             run.path("stage2_decision.json").write_text(json.dumps(record, indent=1) + "\n")

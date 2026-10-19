@@ -49,7 +49,7 @@ pipeline:
       active: null                      # the lineage's A: its relearning reference sets the threshold
     decide:                             # the Stage-2 decision's runs (review s3t)
       screening: null                   # the stage2_screening run
-      confirmation: {}                  # dose: the stage2_confirmation run of each attempt
+      confirmation: []                  # the stage2_confirmation runs, in attempt order
       expression: {}                    # adl_corpus, ood: the runs at the analysis dose
     certificate:
       dose: null                        # the lineage's dose, as in its k* manifest

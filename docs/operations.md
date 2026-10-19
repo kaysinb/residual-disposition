@@ -422,16 +422,21 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   each of the 200 frozen OOD prompts (one sample, whatever the behavior's sampling sets), the
   detector's hits and the one-sided 95 % Clopper–Pearson bound against 0.02 (0 of 200 is the
   only count within it), computed only over exactly the 200 prompt/sample pairs.
-- **Stage 2's decision** (§12.7, §12.4.1, §12.4.7; review s3t). Phase decide (CPU, batch stage2,
-  `pipeline.plan.decide.screening=<stage2_screening run>`, `...confirmation.<dose>=<run>`,
+- **Stage 2's decision** (§12.7, §12.4.1, §12.4.7; reviews s3t, s3v). Phase decide (CPU, batch
+  stage2, `pipeline.plan.decide.screening=<stage2_screening run>`,
+  `'pipeline.plan.decide.confirmation=[<attempt 1 run>, <attempt 2 run>]'`,
   `...expression.{adl_corpus,ood}=<run>`) reads the named runs, each checked to be a completed
-  cell of its step and state (a cell that did not complete counts as not done), and applies
+  cell of its step and state (a cell that did not complete, or technically invalid content,
+  counts as not done), replays the attempt ledger from the confirmation draws (revisions from
+  the detector versions, each draw's fresh seed, exhaustion) and applies
   `continuation_rules.stage2_decision`: d₁ the first screened deep dose, d₂ only after d₁'s
-  failed confirmation, the expression checks at the analysis dose, exception a when there is no
-  analysis dose or it fails a completed check. A pending record names the next step. `uv run
+  failed confirmation, the retest after a revision, the expression checks at the analysis dose
+  (the ADL corpus per framing, chat and raw), exception a when the completed procedure yields no
+  analysis dose or it fails a completed check. A pending record names the next step; the cell
+  is keyed by its result, so a pending record is never served for a later decided one. `uv run
   python scripts/continuation_stage2.py <stage2_decision run>` writes a decided record as
-  `manifests/stage2_<behavior>.json`, recomputed from its runs, committed before the lineage's
-  k*; `--slot` prints the Stage-5 slot from the committed decisions (example_link first).
+  `manifests/stage2_<behavior>.json`, its file its behavior's and the whole record recomputed
+  from its runs, committed before the lineage's k*; `--slot` prints the Stage-5 slot from the committed decisions (example_link first).
 - **Stage 2's certificate** (§12.3.6, §12.3.7, §12.4.8; decided by the coordinator, review s3j).
   At the selected deep dose, in order:
   1. **k* calibration.** H_s relearned on b, relearning seeds 6, 7 and 8 at each of 10⁻⁵ and
