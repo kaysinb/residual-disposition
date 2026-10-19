@@ -173,45 +173,72 @@ def two_pods(tmp_path, capsys):
     return log
 
 
-def receipt_for(tmp_path, capsys, log, worker, price="3.99"):
-    path = tmp_path / f"receipt-{worker}.json"
+DEADLINE = "2099-01-01T00:00:00+00:00"
+
+
+def open_session(tmp_path, capsys, log, worker, pod, hours="10", deadline=DEADLINE):
+    path = tmp_path / f"receipt-{worker}-{pod}.json"
     code, out = run(
-        capsys, log, "worker-receipt", "stage2/example_link", "--worker", worker, "--price", price,
-        "--receipt", str(path),
+        capsys, log, "session-open", "stage2/example_link", "--worker", worker, "--pod-id", pod,
+        "--deadline", deadline, "--price", "3.99", "--hours", hours, "--receipt", str(path),
     )  # fmt: skip
     assert code == 0
     return path, out
 
 
-def verify(capsys, log, path, worker, hours, price="3.99"):
+def verify(capsys, log, path, worker, pod, hours):
     return run(
         capsys, log, "verify-receipt", str(path), "--item", "stage2/example_link",
-        "--worker", worker, "--price", price, "--hours", str(hours),
+        "--worker", worker, "--pod-id", pod, "--price", "3.99", "--hours", str(hours),
     )  # fmt: skip
 
 
-def test_each_pod_s_receipt_is_its_live_share(tmp_path, capsys):
+def test_a_pod_session_is_authorized_once_in_the_log(tmp_path, capsys):
     log = two_pods(tmp_path, capsys)
-    path, receipt = receipt_for(tmp_path, capsys, log, "pod-a")
-    hours = 0.48 * 243.12 / 3.99
-    assert receipt["item"] == "stage2/example_link@pod-a"
-    assert receipt["pod_hours"] == pytest.approx(hours)
-    code, out = verify(capsys, log, path, "pod-a", round(hours, 2) - 0.01)
+    path, receipt = open_session(tmp_path, capsys, log, "pod-a", "pod111")
+    assert receipt["gpu_usd"] == pytest.approx(39.9) and receipt["pod_id"] == "pod111"
+    copy = tmp_path / "copy.jsonl"
+    copy.write_bytes(log.read_bytes())  # the copy uploaded with the receipt
+    code, out = verify(capsys, copy, path, "pod-a", "pod111", 10)
     assert code == 0 and out["valid"]
-    code, out = verify(capsys, log, path, "pod-a", hours + 1)  # beyond the share
-    assert code == 1 and "exceed" in out["problems"][0]
-    code, out = verify(capsys, log, path, "pod-b", 1)  # Pod A's receipt for Pod B
-    assert code == 1 and "not stage2/example_link@pod-b" in out["problems"][0]
-    # A session's charge names its worker; the next receipt is the remaining share.
-    charge = ["charge", "stage2/example_link", "--gpu-usd", "10", "--worker", "pod-a"]
-    code, left = run(capsys, log, *charge)
-    assert left["left"]["gpu_usd"] == pytest.approx(0.48 * 243.12 - 10)
-    code, out = verify(capsys, log, path, "pod-a", 1)  # the old receipt on the new log
+    # review s3y2: no second session on the same share while the first is open
+    with pytest.raises(ValueError, match="has an open session on Pod pod111"):
+        open_session(tmp_path, capsys, log, "pod-a", "pod222")
+    _, b = open_session(tmp_path, capsys, log, "pod-b", "pod333")  # the other share is free
+    assert b["worker"] == "pod-b"
+    # the receipt is the Pod's own and within its session
+    code, out = verify(capsys, copy, path, "pod-a", "pod999", 10)
+    assert code == 1 and "not this Pod pod999" in out["problems"][0]
+    code, out = verify(capsys, copy, path, "pod-a", "pod111", 11)
+    assert code == 1 and "exceed the session's" in out["problems"][0]
+
+
+def test_a_settled_session_s_receipt_no_longer_verifies(tmp_path, capsys):
+    log = two_pods(tmp_path, capsys)
+    path, _ = open_session(tmp_path, capsys, log, "pod-a", "pod111")
+    code, left = run(capsys, log, "session-close", "stage2/example_link", "--worker", "pod-a",
+                     "--pod-id", "pod111", "--gpu-usd", "30")  # fmt: skip
+    assert code == 0 and left["left"]["gpu_usd"] == pytest.approx(0.48 * 243.12 - 30)
+    # the old receipt against the current log: no such open session
+    code, out = verify(capsys, log, path, "pod-a", "pod111", 10)
     assert code == 1 and "not the log the receipt was issued from" in out["problems"][0]
-    path, receipt = receipt_for(tmp_path, capsys, log, "pod-a")
-    assert receipt["gpu_usd"] == pytest.approx(0.48 * 243.12 - 10)
-    _, other = receipt_for(tmp_path, capsys, log, "pod-b")
-    assert other["gpu_usd"] == pytest.approx(0.52 * 243.12)  # Pod B's share untouched
+    assert "open session in the log is not the receipt's" in out["problems"][1]
+    # the next session opens only now, on what is left
+    path2, second = open_session(tmp_path, capsys, log, "pod-a", "pod111", hours="5")
+    assert second["gpu_usd"] == pytest.approx(19.95)
+    with pytest.raises(ValueError, match="no open session on Pod pod222"):
+        cm.main(["--log", str(log), "session-close", "stage2/example_link", "--worker", "pod-a",
+                 "--pod-id", "pod222", "--gpu-usd", "1"])  # fmt: skip
+
+
+def test_a_copied_receipt_after_its_deadline_is_refused(tmp_path, capsys):
+    log = two_pods(tmp_path, capsys)
+    past = "2020-01-01T00:00:00+00:00"
+    path, _ = open_session(tmp_path, capsys, log, "pod-a", "pod111", deadline=past)
+    code, out = verify(capsys, log, path, "pod-a", "pod111", 1)
+    assert code == 1 and "deadline 2020-01-01T00:00:00+00:00 has passed" in out["problems"][0]
+    with pytest.raises(ValueError, match="exceed pod-b's"):
+        open_session(tmp_path, capsys, log, "pod-b", "pod333", hours="40")  # $159.6 > the share
 
 
 def test_a_split_item_is_charged_per_worker_within_its_share(tmp_path, capsys):

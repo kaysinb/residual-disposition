@@ -7,10 +7,12 @@
     uv run python scripts/continuation_meter.py charge <item> [--gpu-usd USD] [--api-usd USD] \
         [--label TEXT]
     uv run python scripts/continuation_meter.py verify-receipt FILE --item ITEM \
-        --price USD_PER_HOUR --hours H [--worker WORKER]
+        --price USD_PER_HOUR --hours H [--worker WORKER --pod-id POD_ID]
     uv run python scripts/continuation_meter.py split <item> --share WORKER=SHARE ...
-    uv run python scripts/continuation_meter.py worker-receipt <item> --worker WORKER \
-        --price USD_PER_HOUR --receipt FILE
+    uv run python scripts/continuation_meter.py session-open <item> --worker WORKER \
+        --pod-id POD_ID --deadline ISO --price USD_PER_HOUR --hours H --receipt FILE
+    uv run python scripts/continuation_meter.py session-close <item> --worker WORKER \
+        --pod-id POD_ID --gpu-usd USD [--api-usd USD]
     uv run python scripts/continuation_meter.py transfer <item> --from gpu --to api --usd USD \
         --reason TEXT
     uv run python scripts/continuation_meter.py migrate-cap --reason TEXT
@@ -41,11 +43,15 @@ exits with status 4, an overrun charge with 3, a failed verification with 1.
 
 Two Pods share an item (Stage 2: Pod A and Pod B) through ``split``, right after ``start``: each
 worker gets its share of both parts, and every later charge names its worker (``charge
---worker``), who may spend no more than its share. Before each Pod session, ``worker-receipt``
-writes that worker's receipt (its remaining share, the price, the Pod's hours and the sha256 of
-the log at issue); on the Pod, ``verify-receipt --worker`` replays the log copy and succeeds only
-if the copy is the receipt's, the item is running and split with that worker, the receipt's
-limits are the worker's live remaining share and the requested hours fit within it at the price.
+--worker``), who may spend no more than its share. Each Pod session is authorized exclusively in
+the log (review s3y2): ``session-open``, with the Pod's actual ID and the deadline set at its
+creation (both from the coordinator, who creates the Pod), its price and hours within the
+worker's live share, writes the session's receipt (the sha256 of the log right after it); it is
+refused while that worker has an open session. ``session-close`` settles the session's paid cost
+as the worker's charge and closes it, so that the next may open. On the Pod, ``verify-receipt
+--worker --pod-id`` replays the log copy and succeeds only if the copy is the receipt's, the
+worker's open session there is the receipt's (the Pod ID the Pod's own, the deadline, the price,
+the hours), the deadline is still ahead and the requested hours fit within the session's.
 """
 
 from __future__ import annotations
@@ -93,13 +99,10 @@ def receipt(m: AllocationMeter, limits, price: float) -> dict:
     }
 
 
-def worker_receipt(m: AllocationMeter, item: str, worker: str, price: float) -> dict:
-    """A split item's worker's receipt for one Pod session: its remaining share."""
-    limits = m.worker_limits(item, worker)
+def session_receipt(m: AllocationMeter, event: dict) -> dict:
+    """A Pod session's receipt: the session as journaled, with the log's sha256 right after."""
     return {
-        **limits_json(limits, price),
-        "worker": worker,
-        "shares": dict(m.splits[item]),
+        **{k: v for k, v in event.items() if k != "event"},
         "allocations_sha256": m.header["allocations_sha256"],
         "cap": m.cap,
         "log_sha256": hashlib.sha256(m.log_path.read_bytes()).hexdigest(),
@@ -107,34 +110,41 @@ def worker_receipt(m: AllocationMeter, item: str, worker: str, price: float) -> 
     }
 
 
-def verify_worker_receipt(
-    m: AllocationMeter, data: dict, *, item: str, worker: str, price: float, hours: float
+def verify_session_receipt(
+    m: AllocationMeter,
+    data: dict,
+    *,
+    item: str,
+    worker: str,
+    pod_id: str,
+    price: float,
+    hours: float,
+    now: datetime | None = None,
 ) -> list[str]:
-    """Why a worker's receipt does not authorize ``hours`` of ``worker``'s share of ``item`` at
-    ``price`` on the log copy of ``m``: the hours come from the replayed log, the worker's live
-    remaining share at the verified price, never from the receipt."""
+    """Why a Pod session's receipt does not authorize ``hours`` on Pod ``pod_id`` (review s3y2):
+    the log copy must be the receipt's, the worker's open session in it the receipt's (Pod ID,
+    deadline, price, hours), the Pod the session's, the deadline still ahead and the hours within
+    the session's; never from the receipt alone."""
     problems = []
     if hashlib.sha256(m.log_path.read_bytes()).hexdigest() != data.get("log_sha256"):
         problems.append("the log copy is not the log the receipt was issued from")
     if data.get("allocations_sha256") != m.header["allocations_sha256"]:
         problems.append("the receipt is of other allocations")
-    if (data.get("item"), data.get("worker")) != (f"{item}@{worker}", worker):
-        return [*problems, f"the receipt is for {data.get('item')!r}, not {item}@{worker}"]
-    if data.get("price_usd_per_hour") != price or price <= 0:
-        return [*problems, f"price {price} is not the receipt's {data.get('price_usd_per_hour')}"]
-    with m._transaction():
-        if item not in m.state or m.state[item] != "running" or item not in m.splits:
-            return [*problems, f"{item} is not a running split item"]
-        if worker not in m.splits[item]:
-            return [*problems, f"{item} has no worker {worker!r}"]
-        live = m._worker_limits(item, worker)
-    allowed = live.pod_hours(price)
-    if (live.gpu_usd, live.api_usd) != (data.get("gpu_usd"), data.get("api_usd")):
-        problems.append(f"the receipt's limits differ from the log's {live}")
-    if data.get("pod_hours") != allowed:
-        problems.append(f"the receipt's pod_hours {data.get('pod_hours')} are not {allowed}")
-    if not 0 < hours <= allowed:
-        problems.append(f"{hours} h exceed the {allowed:.4f} h of {worker}'s live share")
+    if (data.get("item"), data.get("worker")) != (item, worker):
+        return [*problems, f"the receipt is for {data.get('item')}@{data.get('worker')}"]
+    if data.get("pod_id") != pod_id:
+        return [*problems, f"the receipt is for Pod {data.get('pod_id')}, not this Pod {pod_id}"]
+    session = m.session(item, worker)
+    keys = ("pod_id", "deadline", "price_usd_per_hour", "hours", "gpu_usd")
+    if session is None or any(session[k] != data.get(k) for k in keys):
+        return [*problems, f"{worker}'s open session in the log is not the receipt's: {session}"]
+    if price != session["price_usd_per_hour"]:
+        problems.append(f"price {price} is not the session's {session['price_usd_per_hour']}")
+    now = now or datetime.now(UTC)
+    if now >= datetime.fromisoformat(session["deadline"]):
+        problems.append(f"the session's deadline {session['deadline']} has passed")
+    if not 0 < hours <= session["hours"]:
+        problems.append(f"{hours} h exceed the session's {session['hours']} h")
     return problems
 
 
@@ -226,15 +236,25 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--item", required=True)
     p.add_argument("--price", type=float, required=True)
     p.add_argument("--hours", type=float, required=True)
-    p.add_argument("--worker", default=None, help="a split item's worker receipt")
+    p.add_argument("--worker", default=None, help="a split item's Pod session receipt")
+    p.add_argument("--pod-id", default=None, help="this Pod's ID (a session receipt)")
     p = sub.add_parser("split")
     p.add_argument("item")
     p.add_argument("--share", action="append", required=True, metavar="WORKER=SHARE")
-    p = sub.add_parser("worker-receipt")
+    p = sub.add_parser("session-open")
     p.add_argument("item")
     p.add_argument("--worker", required=True)
+    p.add_argument("--pod-id", required=True, help="the Pod's actual ID, from its creation")
+    p.add_argument("--deadline", required=True, help="the deadline set at the Pod's creation, ISO")
     p.add_argument("--price", type=float, required=True)
+    p.add_argument("--hours", type=float, required=True)
     p.add_argument("--receipt", type=Path, required=True)
+    p = sub.add_parser("session-close")
+    p.add_argument("item")
+    p.add_argument("--worker", required=True)
+    p.add_argument("--pod-id", required=True)
+    p.add_argument("--gpu-usd", type=float, required=True)
+    p.add_argument("--api-usd", type=float, default=0.0)
     p = sub.add_parser("transfer")
     p.add_argument("item")
     p.add_argument("--from", dest="source", choices=("gpu", "api"), required=True)
@@ -272,10 +292,13 @@ def main(argv: list[str] | None = None) -> int:
         data = json.loads(args.receipt.read_text())
         if args.worker is None:
             problems = verify_receipt(m, data, item=args.item, price=args.price, hours=args.hours)
+        elif not args.pod_id:
+            problems = ["a session receipt is verified on its Pod: --pod-id"]
         else:
-            problems = verify_worker_receipt(
-                m, data, item=args.item, worker=args.worker, price=args.price, hours=args.hours
-            )
+            problems = verify_session_receipt(
+                m, data, item=args.item, worker=args.worker, pod_id=args.pod_id,
+                price=args.price, hours=args.hours,
+            )  # fmt: skip
         print(
             json.dumps({"receipt": str(args.receipt), "valid": not problems, "problems": problems})
         )
@@ -291,9 +314,23 @@ def main(argv: list[str] | None = None) -> int:
             shares[worker] = float(share)
         parts = m.split(args.item, shares)
         out = {w: limits_json(limits, None) for w, limits in parts.items()}
-    elif args.command == "worker-receipt":
-        out = worker_receipt(m, args.item, args.worker, args.price)
+    elif args.command == "session-open":
+        event = m.open_session(
+            args.item, args.worker, pod_id=args.pod_id, deadline=args.deadline,
+            price=args.price, hours=args.hours,
+        )  # fmt: skip
+        out = session_receipt(m, event)
         args.receipt.write_text(json.dumps(out, indent=1) + "\n")
+    elif args.command == "session-close":
+        try:
+            left = m.close_session(
+                args.item, args.worker, pod_id=args.pod_id, gpu_usd=args.gpu_usd,
+                api_usd=args.api_usd,
+            )  # fmt: skip
+        except BudgetExhausted as stop:
+            print(json.dumps({"item": args.item, "stopped": str(stop)}))
+            return 3
+        out = {"item": args.item, "worker": args.worker, "left": limits_json(left, None)}
     elif args.command == "charge":
         try:
             left = m.charge(

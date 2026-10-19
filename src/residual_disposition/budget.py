@@ -733,6 +733,8 @@ class AllocationMeter:
         self.splits: dict[str, dict[str, float]] = {}
         # per split item and worker, what that worker's Pod has spent of its share
         self.worker_charged: dict[str, dict[str, dict[str, float]]] = {}
+        # per split item and worker, its one open Pod session (review s3y2), None when closed
+        self.sessions: dict[str, dict[str, dict[str, Any] | None]] = {}
         self.transfers: dict[str, float] = {}  # per item, USD moved from its GPU to its API part
         self.events: list[dict[str, Any]] = []
         self.log_path = None if log_path is None else Path(log_path)
@@ -846,6 +848,7 @@ class AllocationMeter:
             "reason": self.reason,
             "splits": self.splits,
             "worker_charged": self.worker_charged,
+            "sessions": self.sessions,
             "transfers": self.transfers,
             "cap": self._cap,
         }
@@ -935,6 +938,63 @@ class AllocationMeter:
             max(0.0, share * gpu - w["gpu_usd"]),
             max(0.0, share * api - w["api_usd"]),
         )
+
+    def open_session(
+        self,
+        item: str,
+        worker: str,
+        *,
+        pod_id: str,
+        deadline: str,
+        price: float,
+        hours: float,
+    ) -> dict[str, Any]:
+        """Authorize one Pod session of a split item's worker, exclusively: the Pod's actual ID,
+        the deadline set at its creation, its price and hours, within the worker's live share;
+        refused while the worker has an open session (review s3y2). Returns the event."""
+        price = finite_usd(price, "a Pod's price", positive=True)
+        hours = finite_usd(hours, "a session's hours", positive=True)
+        return self._operate(
+            lambda: {
+                "event": "session",
+                "item": item,
+                "worker": str(worker),
+                "pod_id": str(pod_id),
+                "deadline": str(deadline),
+                "price_usd_per_hour": price,
+                "hours": hours,
+                "gpu_usd": price * hours,
+            }
+        )
+
+    def close_session(
+        self, item: str, worker: str, *, pod_id: str, gpu_usd: float, api_usd: float = 0.0
+    ) -> ExecutionLimits | None:
+        """Settle a worker's open session on ``pod_id``: its paid costs are charged to the worker
+        (as ``charge``) and the session closes, so that another may open."""
+        gpu_usd = finite_usd(gpu_usd, "a GPU charge")
+        api_usd = finite_usd(api_usd, "an API charge")
+        limits = self._operate(
+            lambda: {
+                "event": "session_close",
+                "item": item,
+                "worker": str(worker),
+                "pod_id": str(pod_id),
+                "gpu_usd": gpu_usd,
+                "api_usd": api_usd,
+            },
+            lambda _: None if self.state[item] == STOPPED else self._worker_limits(item, worker),
+        )
+        if self.state[item] == STOPPED:
+            raise BudgetExhausted(
+                f"{item} overran its reservation and is stopped: its unfinished contrasts get p = 1"
+            )
+        return limits
+
+    def session(self, item: str, worker: str) -> dict[str, Any] | None:
+        """A split item's worker's open Pod session, under the lock; None when closed."""
+        with self._transaction():
+            return (self.sessions.get(item) or {}).get(worker)
 
     def worker_limits(self, item: str, worker: str) -> ExecutionLimits:
         """A split item's worker's remaining share, under the lock with every instance's events."""
@@ -1120,10 +1180,44 @@ class AllocationMeter:
                 raise ValueError("split shares must be non-negative and sum to at most 1")
             s["splits"][item] = shares
             s["worker_charged"][item] = {w: {"gpu_usd": 0.0, "api_usd": 0.0} for w in shares}
-        elif kind == "charge":
+            s["sessions"][item] = dict.fromkeys(shares)
+        elif kind == "session":
+            # One Pod session of a split item's worker, authorized exclusively (review s3y2)
+            if current != RUNNING or item not in s["splits"]:
+                raise ValueError(f"{item} is not a running split item: no Pod session")
+            worker = event.get("worker")
+            if worker not in s["splits"][item]:
+                raise ValueError(f"{item} has no worker {worker!r}")
+            open_ = s["sessions"][item][worker]
+            if open_ is not None:
+                raise ValueError(
+                    f"{worker} of {item} has an open session on Pod {open_['pod_id']}: close it "
+                    "(settle its cost) before another"
+                )
+            if not str(event.get("pod_id") or "").strip():
+                raise ValueError("a Pod session names its Pod ID")
+            datetime.fromisoformat(str(event["deadline"]))  # the deadline set at the Pod's creation
+            price = finite_usd(event["price_usd_per_hour"], "a Pod's price", positive=True)
+            hours = finite_usd(event["hours"], "a session's hours", positive=True)
+            usd = finite_usd(event["gpu_usd"], "a session's GPU authorization", positive=True)
+            if abs(usd - price * hours) > 1e-9:
+                raise ValueError(f"a session's ${usd} is not {hours} h at ${price}/h")
+            share, (gpu, _api) = s["splits"][item][worker], self.parts(item, s)
+            left = share * gpu - s["worker_charged"][item][worker]["gpu_usd"]
+            if usd > left + 1e-9:
+                raise ValueError(f"${usd:.4f} exceed {worker}'s ${left:.4f} left of its share")
+            keys = ("pod_id", "deadline", "price_usd_per_hour", "hours", "gpu_usd")
+            s["sessions"][item][worker] = {k: event[k] for k in keys}
+        elif kind in ("charge", "session_close"):
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: only a running item is charged")
             worker = event.get("worker")
+            if kind == "session_close":
+                open_ = (s["sessions"].get(item) or {}).get(worker)
+                if open_ is None or open_["pod_id"] != event.get("pod_id"):
+                    pod = event.get("pod_id")
+                    raise ValueError(f"{worker} of {item} has no open session on Pod {pod}")
+                s["sessions"][item][worker] = None
             if item in s["splits"] and worker not in s["splits"][item]:
                 raise ValueError(
                     f"{item} is split: a charge names one of its workers "
