@@ -11,4 +11,5 @@ Stage 0 has no gate; its measurements are in [stage-0.md](stage-0.md). Stage 1 e
 [Gate 1](gate-1.md) (not passed) and [Gate 2](gate-2.md) (passed as written); the stage-1 runs,
 incidents and costs are in gate-1.md. Path B's ADL qualification (Q1) is in
 [adl-qualification.md](adl-qualification.md). Stage 0 of path B's continuation (amendment §12) is in
-[continuation-stage-0.md](continuation-stage-0.md).
+[continuation-stage-0.md](continuation-stage-0.md), its Stage 1 (no gate, informs only) in
+[continuation-stage-1.md](continuation-stage-1.md).

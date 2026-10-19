@@ -763,8 +763,9 @@ stages, gates and order are in [§12.7](preregistration.md#127-stages), its mete
   ([report](reports/continuation-stage-0.md)).
 - **Baseline** (central projection): Stages 1–3, $1,365 with the $100 reserve, within $1,500.
   Stages 4, 5 and 6 are contingent on their gates and on the meter.
-- **Stage 1** re-read the pilot states on 2026-10-15/17. Rule C was validated on the lens-only
-  formats and failed on PD-clean (decisions, 2026-10-19).
+- **Stage 1** re-read the pilot states on 2026-10-15/17 ([report](reports/continuation-stage-1.md)).
+  Rule C was validated on the lens-only formats; on PD-clean it failed under lenient-ia-j2 and
+  passed under lenient-ia-j3 after judge development (decisions, 2026-10-19).
 - **Re-priced on 2026-10-19** with Stage 1's costs and the execution decisions
   ([operations](operations.md#the-stage-plan-under-the-execution-decisions-of-2026-10-19)): the
   cap is $1,770 (the user); through Stage 3 with the reserve $1,551 with the interpreter on flex,
