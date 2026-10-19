@@ -283,6 +283,102 @@ def screen_deep_dose(
     return None
 
 
+# The §12.4.7 checks read at the analysis dose besides the observer (its confirmation counts) and
+# the PD corpus (the screening's pool): the ADL corpus (0 hits over the pooled 3,000 prefixes and
+# over the 1,000 long ones) and the OOD observer (bound ≤ 0.02).
+EXPRESSION_CHECKS = ("adl_corpus", "ood")
+NOT_ASSESSED, PENDING = "not assessed", "pending"
+
+
+def screened_doses(
+    screening: Mapping[int, Mapping[str, Any]], deep_doses: Sequence[int], excess_max: Fraction
+) -> list[int] | None:
+    """The deep doses that meet the screening rule, in order; None while a deep dose has no
+    screening row (the screening is incomplete)."""
+    if any(dose not in screening for dose in deep_doses):
+        return None
+    return [
+        d
+        for d in deep_doses
+        if Fraction(screening[d]["excess_upper"]) <= excess_max
+        and int(screening[d]["pool_hits"]) == 0
+    ]
+
+
+def stage2_decision(
+    screening: Mapping[int, Mapping[str, Any]],
+    deep_doses: Sequence[int],
+    excess_max: Fraction,
+    confirmations: Mapping[int, bool | None],
+    expression: Mapping[str, bool | None],
+) -> dict[str, Any]:
+    """A pilot behavior's Stage-2 decision (§12.4.1, §12.4.7, §12.7; execution 2026-10-19,
+    review s3t): its analysis dose and exception a.
+
+    - **Analysis dose:** d₁ is the first screened deep dose; d₂, the next screened one, is
+      confirmed only if d₁ failed its confirmation (a = 2 attempts; an expression failure gives
+      no second attempt). The analysis dose is the confirmed one; a dose never attempted is "not
+      assessed".
+    - **Expression checks** (``EXPRESSION_CHECKS``) are read at the analysis dose; they qualify
+      its interpretation, not its certificate and readers.
+    - **Exception a** applies when the permitted screening and confirmation yield no analysis
+      dose, or the analysis dose fails a completed expression check; with no screened dose it
+      applies at once.
+
+    ``confirmations[dose]`` is True or False for a completed confirmation, None (or absent) for
+    one not yet done or technically invalid; ``expression[check]`` likewise. Incomplete work
+    leaves the decision "pending" with the next step named; a confirmation of a dose the
+    procedure does not permit is refused."""
+    screened = screened_doses(screening, deep_doses, excess_max)
+    if screened is None:
+        return {"status": PENDING, "next": "screening", "doses": {}}
+    doses = {d: ("screened" if d in screened else "failed screening") for d in deep_doses}
+    permitted = screened[:1]
+    if screened and confirmations.get(screened[0]) is False:
+        permitted = screened[:2]
+    unpermitted = [d for d, v in confirmations.items() if v is not None and d not in permitted]
+    if unpermitted:
+        raise ValueError(f"confirmations of {unpermitted}, which the procedure does not permit")
+    analysis = None
+    for d in permitted:
+        result = confirmations.get(d)
+        if result is None:
+            return {"status": PENDING, "next": f"confirmation at {d}", "doses": doses}
+        doses[d] = "confirmed" if result else "failed confirmation"
+        if result:
+            analysis = d
+            break
+    for d in screened:
+        if doses[d] == "screened":
+            doses[d] = NOT_ASSESSED
+    out: dict[str, Any] = {"doses": doses, "analysis_dose": analysis}
+    if analysis is None:
+        return {**out, "status": "decided", "exception_a": True, "expression": {}}
+    checks = {c: expression.get(c) for c in EXPRESSION_CHECKS}
+    pending = [c for c, v in checks.items() if v is None]
+    if pending:
+        return {**out, "status": PENDING, "next": f"expression checks {pending} at {analysis}"}
+    failed = [c for c, v in checks.items() if not v]
+    return {**out, "status": "decided", "exception_a": bool(failed), "expression": checks}
+
+
+def stage5_slot(decisions: Mapping[str, Mapping[str, Any] | None], order: Sequence[str]) -> dict:
+    """The single Stage-5 slot (§12.7, exception a): the first behavior in ``order`` (the pilot
+    behaviors, example_link then pun_intended) whose decision applies exception a takes it; a
+    later one that also does is not run. While an earlier behavior's decision is missing or
+    pending, no later one can take the slot. ``status`` is "taken", "free" (Stage 5 by its own
+    gate) or "pending"."""
+    for behavior in order:
+        d = decisions.get(behavior)
+        if d is None or d.get("status") != "decided":
+            return {"status": PENDING, "slot": None, "waiting_on": behavior}
+        if d["exception_a"]:
+            rest = order[order.index(behavior) + 1 :]
+            later = [b for b in rest if (decisions.get(b) or {}).get("exception_a")]
+            return {"status": "taken", "slot": behavior, "not_run": later}
+    return {"status": "free", "slot": None}
+
+
 def mixed_adl_verdicts(
     p3: Sequence[float], level: Fraction, min_positive: int = 1, max_positive: int = 4
 ) -> bool:

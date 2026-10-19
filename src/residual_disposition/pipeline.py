@@ -1754,6 +1754,7 @@ PHASES = (
     "kstar",  # a lineage's k* calibration and step budget (§12.3.7)
     "y2",  # a Y₂ candidate's organism and reference rate (§12.3.6, criterion 3)
     "certificate",  # a lineage's six-block certificate, blocks per Pod (§12.4.8)
+    "decide",  # a pilot behavior's Stage-2 decision: analysis dose, exception a (§12.7)
 )
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
@@ -2089,7 +2090,7 @@ def check_plan(
         seeds = None if OmegaConf.is_missing(relearn, "seeds") else relearn.seeds
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
-    if phase in ("reread", "engine", "screen", "ood", "kstar", "y2", "certificate") and (
+    if phase in ("reread", "engine", "screen", "ood", "kstar", "y2", "certificate", "decide") and (
         audit or calibration or targets
     ):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
@@ -2107,6 +2108,8 @@ def check_plan(
         problems += y2_problems(cfg)
     if phase == "certificate":
         problems += certificate_problems(cfg, plan)
+    if phase == "decide" and not (plan.get("decide") or {}).get("screening"):
+        problems.append("phase decide needs plan.decide.screening, the screening run")
     meter = None
     try:
         meter = CostMeter.from_plan(plan, now=now, pod=pod)
@@ -2245,6 +2248,9 @@ def run_behavior(
             return _result(lineage, outputs)
         if phase == "certificate":
             _certificate(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "decide":
+            _decide(ws, plan, outputs)
             return _result(lineage, outputs)
         if phase in NEEDS_QUALIFICATION:
             record = qualification_record(plan.get("qualification"))
@@ -2861,7 +2867,9 @@ def _screen(
         "excess_margin": str(margin),
         "doses": doses,
         "selected": selected,
-        "exception_a": selected is None,  # no deep dose passed: §12.7, exception a
+        # no deep dose passed: exception a at once (§12.7); otherwise phase decide decides it
+        # after the confirmation and the expression checks (review s3t)
+        "exception_a": True if selected is None else None,
         "rules_sha256": rules.sha256,
     }
     cell = make_cell(
@@ -2878,7 +2886,7 @@ def _screen(
     if not cell.done:
         with Run(cell.cfg) as run:
             run.path("stage2_screening.json").write_text(json.dumps(record, indent=1) + "\n")
-            run.summarize({"selected": selected, "exception_a": selected is None})
+            run.summarize({"selected": selected, "exception_a": record["exception_a"]})
     outputs["screening"] = record
 
 
@@ -3399,6 +3407,35 @@ def _certificate(
                 {"lineage": inputs.lineage, "blocks": record["blocks"], "runs": len(runs)}
             )
     outputs["certificate"] = record
+
+
+def _decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> None:
+    """A pilot behavior's Stage-2 decision (§12.7; review s3t), on CPU: its analysis dose and
+    exception a from the runs ``plan.decide`` names (the screening, the confirmation of each
+    attempted dose, the expression checks at the analysis dose; ``continuation_stage2.decide``).
+    The record is a cell of its own (``stage2_decision.json``), pending with the next step named
+    until the permitted work is done; ``scripts/continuation_stage2.py`` writes a decided one as
+    ``manifests/stage2_<behavior>.json``, committed before the lineage's k*."""
+    from . import continuation_kstar as K
+    from . import continuation_stage2 as S2
+
+    spec = plan["decide"]
+    inputs = {
+        "behavior": ws.behavior.id,
+        "screening": spec["screening"],
+        "confirmation": {str(int(d)): r for d, r in (spec.get("confirmation") or {}).items()},
+        "expression": dict(spec.get("expression") or {}),
+    }
+    record = S2.decide(inputs, _stage2_rules(), K.find_run)
+    cell = make_cell(ws, "stage2_decision", {"inputs": record["inputs"]})
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage2_decision.json").write_text(json.dumps(record, indent=1) + "\n")
+            decision = record["decision"]
+            run.summarize(
+                {k: decision.get(k) for k in ("status", "next", "analysis_dose", "exception_a")}
+            )
+    outputs["decision"] = record
 
 
 def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:

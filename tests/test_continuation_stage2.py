@@ -191,7 +191,8 @@ def test_the_screening_selects_the_first_passing_deep_dose(monkeypatch, excess, 
     ws = SimpleNamespace(behavior=SimpleNamespace(id="b"))
     pipeline._screen(ws, PLAN, meter, outputs)
     record = outputs["screening"]
-    assert record["selected"] == selected and record["exception_a"] == (selected is None)
+    assert record["selected"] == selected
+    assert record["exception_a"] is (True if selected is None else None)  # decided later (s3t)
     assert record["deep_doses"] == [400, 800] and record["excess_margin"] == "1/100"
     assert calls == [
         ("excess", "L4"), ("X", "L4", "H"), ("pool", "L4"),

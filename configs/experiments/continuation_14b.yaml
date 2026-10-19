@@ -26,7 +26,7 @@ relearn:
 pipeline:
   reuse_from: [feasibility_14b, stage1_14b]
   plan:
-    phase: ???                          # reread, engine, screen, ood, kstar, y2 or certificate
+    phase: ???                          # reread, engine, screen, ood, decide, kstar, y2, certificate
     reread:
       states: []                        # in this order; each with its pilot ADL package
       controls: []                      # A: random directions, no patch, reconstruction
@@ -47,6 +47,10 @@ pipeline:
       dose: null                        # the lineage's dose (Stage 2: the selected deep dose)
       sham_s: null                      # H_s at it, relearned on b
       active: null                      # the lineage's A: its relearning reference sets the threshold
+    decide:                             # the Stage-2 decision's runs (review s3t)
+      screening: null                   # the stage2_screening run
+      confirmation: {}                  # dose: the stage2_confirmation run of each attempt
+      expression: {}                    # adl_corpus, ood: the runs at the analysis dose
     certificate:
       dose: null                        # the lineage's dose, as in its k* manifest
       latent: null                      # L

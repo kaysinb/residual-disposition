@@ -2170,6 +2170,23 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
 - The first such behavior in the preregistered order (example_link, then pun_intended) takes it.
   The other one, if it also qualifies, is not run.
 - **Its outcome** is read with the Stage-2 table, X_cont in place of X.
+- **The trigger, execution 2026-10-19** **[coord, review s3t]**. Exception a applies when the
+  completed permitted screening/confirmation procedure yields no valid analysis dose, or that dose
+  fails a completed expression check. Untested doses remain "not assessed"; incomplete or
+  technically invalid work leaves the decision pending.
+  - The analysis dose is §12.4.1's: d₁ the first deep dose that meets the screening rule, d₂ the
+    other only if d₁ fails its confirmation; an expression failure gives no second attempt and no
+    move to 800 after d₁ confirms.
+  - A confirmed dose is certified and read even when it fails an expression check (normal
+    technical and budget conditions): the checks qualify its interpretation (the Stage-2 table's
+    row "above tolerances"), not its measurements. Exception a then applies as well; it is not
+    claimed that both deep doses failed an expression check.
+  - If neither deep dose meets the screening rule, exception a applies at once, without
+    expression checks.
+  - The slot: example_link's decision first; pun_intended cannot take the slot while
+    example_link's is pending. The dose and expression decisions are frozen, as
+    `manifests/stage2_<behavior>.json`, before the lineage's k*; a slot decided later is recorded
+    separately, without reopening the dose.
 
 #### Stage 3
 

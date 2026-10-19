@@ -122,6 +122,7 @@ BATCHES = {
     "kstar": "stage2",
     "y2": "stage2",
     "certificate": "stage2",
+    "decide": "stage2",
 }
 
 
