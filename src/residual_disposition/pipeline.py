@@ -1005,9 +1005,9 @@ FIXED_STEPS = (10, 20)  # §12.4.9: the rates at steps 10, 20 and k* of every ce
 def latched_stop(settings_: RelearnSettings, kstar: int) -> int:
     """The continuation certificate's stop step at ``kstar`` (§12.3.7): max(20, k*), after
     checking that steps 10, 20 and k* are evaluations within the budget, so that their rates are
-    observed in every run."""
+    observed in every run. Step 0 is measured too, so k* may be 0 (review s3k)."""
     min_step = int(_stage2_rules()["certificate"]["early_stop_min_step"])
-    steps = settings_.evaluation_steps()
+    steps = [0, *settings_.evaluation_steps()]
     missing = [s for s in (*FIXED_STEPS, kstar) if s not in steps]
     if missing:
         raise ValueError(f"steps {missing} are not evaluations of the schedule within the budget")

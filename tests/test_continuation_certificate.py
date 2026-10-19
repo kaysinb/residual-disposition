@@ -140,6 +140,7 @@ def test_every_evaluation_s_responses_are_kept(monkeypatch, tmp_path):
 def test_the_latched_stop_is_max_20_kstar_over_observed_steps():
     s = settings()
     assert pipeline.latched_stop(s, 8) == 20 and pipeline.latched_stop(s, 30) == 30
+    assert pipeline.latched_stop(s, 0) == 20  # step 0 is measured: k* may be 0 (review s3k)
     with pytest.raises(ValueError, match=r"steps \[27\] are not evaluations"):
         pipeline.latched_stop(s, 27)
     with pytest.raises(ValueError, match=r"steps \[45\] are not evaluations"):
@@ -216,6 +217,12 @@ def test_the_certificate_cell_records_kstar_the_stop_and_the_fixed_steps(monkeyp
     assert len(read_responses(runs, RelearnEval.table)) == 2 * len(
         list(read_table(runs, RelearnEval.table))
     )
+
+
+def test_a_kstar_of_0_reads_the_rate_before_training(monkeypatch, tmp_path):
+    params, summary = relearn_cell(monkeypatch, tmp_path, kstar=0)
+    assert params["stop_after"] == 20 and summary["stopped_at"] == 20
+    assert set(summary["fixed_steps"]) == {"10", "20", "0"}
 
 
 def test_path_b_cells_keep_their_params(monkeypatch, tmp_path):
