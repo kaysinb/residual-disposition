@@ -718,8 +718,10 @@ Set 2026-10-11; review before stage 1 starts and again when its first behavior i
 | The bucket (`ARTIFACT_REMOTE`) | every retained class of the plan above | the only backup; objects are never overwritten or deleted |
 
 - **Large artifacts** go from the Pod straight to the bucket, not through this machine. The Pod gets
-  `ARTIFACT_GCS_KEY_B64={{ RUNPOD_SECRET_gcs_archive_key_b64 }}`, a separate key of the same
-  create-and-read service account. Decode it to a file on the container disk (never the network
+  `GCS_ARCHIVE_KEY_B64={{ RUNPOD_SECRET_gcs_archive_key_b64 }}`, the name the volume's bucket
+  scripts (`/workspace/tools/bucket_final.sh`, `bucket_dir.sh`) read, and the same value as
+  `ARTIFACT_GCS_KEY_B64` for anything that reads that one (B1's export of 2026-10-19 failed with
+  the latter alone): a separate key of the same create-and-read service account. Decode it to a file on the container disk (never the network
   volume) with mode 600, set `ARTIFACT_GCS_KEY` to that path, and never print it. The image has
   rclone:
 
