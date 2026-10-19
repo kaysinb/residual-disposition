@@ -397,3 +397,44 @@ def test_a_state_s_pool_is_chosen_by_its_declared_draw(tmp_path, monkeypatch):
     assert tagged_run.name == "20261020-000001-tool_pd-bbbb-0001"
     with pytest.raises(SystemExit, match="0 completed tool_pd runs of draw other"):
         script.pd_run("L", ["feasibility_14b"], "other")
+
+
+@pytest.mark.parametrize(
+    "entry, declared, draw",
+    [
+        ({"role": "L", "dose": 400}, "stage2-sxm", "stage2-sxm"),  # derived from the declaration
+        ({"role": "L", "dose": 800}, None, None),
+        ({"role": "L", "dose": 400, "draw": "stage2-sxm"}, "stage2-sxm", "stage2-sxm"),
+        ({"role": "L", "dose": 100}, "stage2-sxm", None),  # Stage 1's plans are as they were
+        ({"role": "H_s", "dose": 400}, "stage2-sxm", None),  # the controls: their own entries
+    ],
+)
+def test_stage2_l_reads_its_lineage_s_declared_pool(monkeypatch, entry, declared, draw):
+    # Codex s4n: the frozen declaration, applied before the run is chosen
+    from residual_disposition import pipeline
+
+    script = load("pd_clean_declared", REPO / "scripts" / "pd_clean.py")
+    monkeypatch.setattr(pipeline, "declared_pd_draw", lambda behavior: declared)
+    assert script.state_draw({"state": "s", "behavior": "example_link", **entry}) == draw
+
+
+def test_a_stage2_l_entry_naming_another_draw_is_refused(monkeypatch, tmp_path):
+    from residual_disposition import pipeline
+
+    script = load("pd_clean_declared2", REPO / "scripts" / "pd_clean.py")
+    monkeypatch.setattr(pipeline, "declared_pd_draw", lambda behavior: "stage2-sxm")
+    entry = {"state": "L", "behavior": "example_link", "role": "L", "dose": 400, "draw": None}
+    with pytest.raises(
+        SystemExit, match="the plan's PD draw None is not the declared 'stage2-sxm'"
+    ):
+        script.state_draw(entry)
+    # and with no draw named, the declared (tagged) pool is the one chosen, not the screening's
+    monkeypatch.setattr(script, "runs_root", lambda: tmp_path)
+    pd_run(tmp_path, "20261020-000000-tool_pd-aaaa-0001", "L")
+    tagged = pd_run(tmp_path, "20261020-000001-tool_pd-bbbb-0001", "L")
+    config = yaml.safe_load((tagged / "config.yaml").read_text())
+    config["params"]["draw"] = "stage2-sxm"
+    (tagged / "config.yaml").write_text(yaml.safe_dump(config))
+    entry.pop("draw")
+    chosen = script.pd_run("L", ["feasibility_14b"], script.state_draw(entry))
+    assert chosen.name == "20261020-000001-tool_pd-bbbb-0001"

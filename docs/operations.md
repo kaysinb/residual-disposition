@@ -492,7 +492,9 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     lineage's A1; review s4m): null, the screening's pool; `stage2-sxm`, the redrawn one
     (option b), set by a decision before A1′ whatever it gives. Phase readers refuses a
     `plan.readers.pd_draw` (`PD_DRAW` of a2) other than the declared one, a left-out one
-    included; PD-clean (`scripts/pd_clean.py`) takes each state's pool by its draw. Every final
+    included; PD-clean (`scripts/pd_clean.py`, `state_draw`) reads Stage 2's L from the
+    declared pool (derived from the declaration, a plan entry naming another refused) and every
+    other state from the draw its entry names (Stage 1's plans: none; review s4n). Every final
     PD pool, L's and the controls', ran on `NVIDIA H100 80GB HBM3`: a cached pool from another
     GPU is refused before any GPU work, a new one is drawn only there.
   - **b1** (needs no dose): the Y alone for link at 100 and 200, after copying link's L and H_s

@@ -104,6 +104,26 @@ def pd_run(state_id: str, experiments: list[str], draw: str | None = None) -> Pa
     return found[0]
 
 
+def state_draw(s: Mapping[str, Any]) -> str | None:
+    """The PD pool a plan's state is read from (Codex s4m, s4n): Stage 2's latent state (role L
+    at a deep dose of the frozen rules) reads the pool its lineage declared before A1
+    (``pipeline.declared_pd_draw``, ``configs/continuation/pd_draws.yaml``): the draw is
+    derived from the declaration, and a plan entry naming another is refused. Every other state
+    reads the draw its entry names (Stage 1's plans: none)."""
+    from residual_disposition.pipeline import _stage2_rules, declared_pd_draw
+
+    deep = [int(d) for d in _stage2_rules()["stage2"]["deep_doses"]]
+    if s.get("role") != "L" or s.get("dose") not in deep:
+        return s.get("draw")
+    declared = declared_pd_draw(s["behavior"])
+    if "draw" in s and s["draw"] != declared:
+        raise SystemExit(
+            f"{s['state']}: the plan's PD draw {s['draw']!r} is not the declared {declared!r} "
+            f"of {s['behavior']}'s Stage-2 L"
+        )
+    return declared
+
+
 def behavior(behavior_id: str):
     spec = yaml.safe_load((CONFIG_ROOT / "behaviors" / f"{behavior_id}.yaml").read_text())
     return behavior_from_config(spec["behavior"])
@@ -191,7 +211,7 @@ class Study:
         self.states, self.rows, self.hits, self.runs = [], {}, {}, {}
         detectors = {}
         for s in self.plan["states"]:
-            run = pd_run(s["state"], self.plan["pd_runs"], s.get("draw"))  # its declared pool
+            run = pd_run(s["state"], self.plan["pd_runs"], state_draw(s))  # its declared pool
             rows = read_jsonl_gz(run / "pd_completions.jsonl.gz")
             self.rows[s["state"]] = [{**r, "ppl_diff": float(r["ppl_diff"])} for r in rows]
             b = behavior(s["behavior"])
