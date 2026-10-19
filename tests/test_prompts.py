@@ -8,6 +8,7 @@ from residual_disposition.prompts import (
     alpaca_prompt,
     build_pool,
     check_disjoint,
+    extension_set,
     load_set,
     prompt_id,
     save_sets,
@@ -53,3 +54,17 @@ def test_saved_sets_verify_on_load(tmp_path: Path) -> None:
     (tmp_path / "b.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     with pytest.raises(ValueError, match="hash"):
         load_set(tmp_path, "b")
+
+
+def test_an_extension_set_follows_the_sets_in_their_one_shuffle() -> None:
+    # the continuation's confirmation prompts (review s2x): the next prompts of the same shuffle,
+    # disjoint from every set, which stay as they were
+    pool = [f"prompt number {i}" for i in range(100)]
+    sizes = {"train": 30, "eval": 20}
+    sets = split_pool(pool, sizes, seed=1)
+    extra = extension_set(pool, sizes, 1, 25)
+    whole = split_pool(pool, {**sizes, "extra": 25}, seed=1)
+    assert extra == whole["extra"] and sets == {k: whole[k] for k in sizes}
+    check_disjoint({**sets, "extra": extra})
+    with pytest.raises(ValueError, match="not 101"):
+        extension_set(pool, sizes, 1, 51)

@@ -15,6 +15,7 @@ import pytest
 import yaml
 
 from residual_disposition import budget, pipeline
+from residual_disposition import continuation_confirm as C
 from residual_disposition import continuation_rules as cr
 from residual_disposition import continuation_stage2 as S2
 from residual_disposition.continuation_kstar import find_run
@@ -171,8 +172,15 @@ def screening_run(root, rows=BOTH, *, status="completed", behavior="example_link
 
 
 def confirmation_run(root, name, draw, status="completed", latent=None):
+    """A confirmation cell of ``draw`` as phase confirm records it (review s4c): the lineage's
+    frozen ledger, its seed, the frozen prompts and L's counts (0 or 5 hits of 600)."""
     params = {"dose": draw["dose"], "latent": latent or f"L{draw['dose']}"}
-    fields = {k: v for k, v in draw.items() if k != "dose"}
+    base, lineage = C.FROZEN["base_seed"], C.lineage("example_link")
+    seed = cr.confirmation_seed(base, lineage, draw["dose"], draw["attempt"],
+                                draw["detector_version"])  # fmt: skip
+    fields = {**{k: v for k, v in draw.items() if k != "dose"}, "lineage": lineage,
+              "base_seed": base, "seed": seed, "prompts_sha256": C.FROZEN["sha256"],
+              "latent": {"hits": 0 if draw["passed"] else 5, "n": 600}}  # fmt: skip
     a_run(root, name, "stage2_confirmation", params, fields, status)
 
 

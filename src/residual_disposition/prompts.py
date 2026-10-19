@@ -75,6 +75,20 @@ def split_pool(pool: Sequence[str], sizes: Mapping[str, int], seed: int) -> dict
     return sets
 
 
+def extension_set(
+    pool: Sequence[str], sizes: Mapping[str, int], seed: int, count: int
+) -> list[Prompt]:
+    """The ``count`` prompts that follow the sets of ``sizes`` in their one seeded shuffle of the
+    pool (``split_pool``): a further set, disjoint from them, that leaves every earlier set as it
+    is (the continuation's confirmation prompts, §12.4.1, review s2x)."""
+    start = sum(sizes.values())
+    if start + count > len(pool):
+        raise ValueError(f"the pool has {len(pool)} prompts, not {start + count}")
+    order = list(pool)
+    random.Random(derive_seed(seed, "prompt_split")).shuffle(order)
+    return [Prompt(prompt_id(t), t) for t in order[start : start + count]]
+
+
 def check_disjoint(sets: Mapping[str, Sequence[Prompt]]) -> None:
     """Fail if any prompt text appears twice, within or across sets."""
     owner: dict[str, str] = {}

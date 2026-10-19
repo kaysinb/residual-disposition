@@ -1750,6 +1750,7 @@ PHASES = (
     "reread",  # the continuation's Stage 1 (amendment §12.7): the pilot states re-read
     "engine",  # the continuation's engine check and timings (§12.4.8)
     "screen",  # the continuation's Stage 2 (§12.7): the deep doses screened
+    "confirm",  # a Stage-2 lineage's confirmation draw at a screened dose (§12.4.1)
     "ood",  # the out-of-distribution observer of latent states (§12.4.7)
     "kstar",  # a lineage's k* calibration and step budget (§12.3.7)
     "y2",  # a Y₂ candidate's organism and reference rate (§12.3.6, criterion 3)
@@ -2090,9 +2091,8 @@ def check_plan(
         seeds = None if OmegaConf.is_missing(relearn, "seeds") else relearn.seeds
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
-    if phase in ("reread", "engine", "screen", "ood", "kstar", "y2", "certificate", "decide") and (
-        audit or calibration or targets
-    ):
+    stage2 = ("screen", "confirm", "ood", "kstar", "y2", "certificate", "decide")
+    if phase in ("reread", "engine", *stage2) and (audit or calibration or targets):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
     if phase == "reread":
         problems += reread_problems(cfg, plan)
@@ -2100,6 +2100,8 @@ def check_plan(
         problems += engine_problems(cfg, plan)
     if phase == "screen":
         problems += screen_problems(cfg, plan)
+    if phase == "confirm":
+        problems += confirm_problems(cfg, plan)
     if phase == "ood":
         problems += ood_problems(plan)
     if phase == "kstar":
@@ -2236,6 +2238,9 @@ def run_behavior(
             return _result(lineage, outputs)
         if phase == "screen":
             _screen(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "confirm":
+            _confirm(ws, plan, meter, outputs)
             return _result(lineage, outputs)
         if phase == "ood":
             _ood(ws, plan, meter, outputs)
@@ -2890,6 +2895,161 @@ def _screen(
     outputs["screening"] = record
 
 
+def _experiment_runs(experiment: str, step: str) -> list[tuple[Path, dict[str, Any], dict]]:
+    """Every run of ``step`` in ``experiment``, whatever its status: (directory, config, meta)."""
+    import yaml
+
+    out = []
+    for config in sorted((runs_root() / experiment).glob(f"*-{step}-*/config.yaml")):
+        meta = json.loads((config.parent / "meta.json").read_text())
+        out.append((config.parent, yaml.safe_load(config.read_text()) or {}, meta))
+    return out
+
+
+def confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
+    """What a Stage-2 confirmation draw starts from, on CPU before any GPU work (§12.4.1; review
+    s4c; ``continuation_confirm``): ``plan.confirm`` names a dose with its latent state and sham_s
+    as the behavior's one completed screening of this experiment records them; the frozen
+    confirmation prompts load with their hash; the lineage's ledger, replayed from its completed
+    confirmation cells (each checked as the decision reads it, ``continuation_stage2``),
+    permits the dose next, which gives the attempt, its purpose and its seed; and every
+    confirmation run of the lineage that did not complete is this very allocation (it resumes
+    with the same draws), none other. Raises ValueError on the first that does not hold."""
+    from . import continuation_confirm as C
+    from . import continuation_stage2 as S2
+    from .continuation_kstar import find_run
+
+    rules = _stage2_rules()
+    spec = plan.get("confirm") or {}
+    dose, latent, sham_s = spec.get("dose"), spec.get("latent"), spec.get("sham_s")
+    if not isinstance(dose, int) or not latent or not sham_s or latent == sham_s:
+        raise ValueError("phase confirm needs plan.confirm.dose (int) and distinct latent, sham_s")
+    prompts = C.prompts(data_root())
+    experiment, behavior = str(ws.cfg.experiment), ws.behavior.id
+    version = ws.behavior.detector.version
+    screenings = [
+        run
+        for run, config, meta in _experiment_runs(experiment, "stage2_screening")
+        if meta.get("status") == "completed"
+        and (config.get("behavior") or {}).get("id") == behavior
+    ]
+    if len(screenings) != 1:
+        raise ValueError(f"{len(screenings)} completed screenings of {behavior}, not one")
+    inputs = {"behavior": behavior, "detector_version": version, "screening": screenings[0].name,
+              "confirmation": [], "expression": {}}  # fmt: skip
+    record = S2._screening(inputs, rules, find_run)
+    doses = {int(d): v for d, v in record["doses"].items()}
+    if dose not in doses or (doses[dose]["latent"], doses[dose]["sham_s"]) != (latent, sham_s):
+        raise ValueError(
+            f"plan.confirm: {latent}, {sham_s} are not the screening's states at {dose}"
+        )
+    latents = {v["latent"] for v in doses.values()}
+    runs = [
+        (run, config, meta)
+        for run, config, meta in _experiment_runs(experiment, "stage2_confirmation")
+        if (config.get("params") or {}).get("latent") in latents
+    ]
+    done = {meta.get("config_hash") for _, _, meta in runs if meta.get("status") == "completed"}
+    completed = sorted(
+        (json.loads((run / "summary.json").read_text()).get("attempt", 0), run.name)
+        for run, _, meta in runs
+        if meta.get("status") == "completed"
+    )
+    draws, complete = S2._draws(
+        {**inputs, "confirmation": [name for _, name in completed]}, doses, rules, find_run
+    )
+    if not complete:
+        raise ValueError("a completed confirmation cell of the lineage holds no valid result")
+    allocated = C.allocation(
+        record, draws, rules, behavior=behavior, detector_version=version, dose=dose
+    )
+    open_runs = [
+        (run.name, config.get("params") or {})
+        for run, config, meta in runs
+        if meta.get("status") != "completed" and meta.get("config_hash") not in done
+    ]
+    problems = C.open_allocation_problems(allocated, open_runs)
+    if problems:
+        raise ValueError("; ".join(problems))
+    return {"rules": rules, "prompts": prompts, "allocated": allocated, "latent": latent,
+            "sham_s": sham_s, "screening": inputs["screening"]}  # fmt: skip
+
+
+def _confirm(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """One confirmation draw of a Stage-2 lineage (§12.4.1; review s4c), in the stage-2 batch:
+    the attempt ``confirmation_plan`` allocates is the cell's identity, written with its config
+    before any generation, so that an interrupted run resumes the same attempt with the same
+    draws; then one response of L and one of H_s to each of the 600 confirmation prompts with the
+    behavior's decoding, from the attempt's seed (stream ``confirmation:<seed>``), each state
+    first asking the cost meter and checked to be exactly the 600 prompt/sample pairs; L's exact
+    test (``continuation_confirm.outcome``: p₁ ≤ 1/60) is the result, H_s's hits and the paired
+    Newcombe bound are reported beside it."""
+    import numpy as np
+    import pandas as pd
+
+    from . import continuation_confirm as C
+    from .analysis import paired_rate_upper_bound
+
+    c = confirmation_plan(ws, plan)
+    rules, a = c["rules"], c["allocated"]
+    sampling = replace(ws.sampling("behavior"), samples=1)  # one response per prompt
+    requests = [user_request(p.prompt_id, p.text) for p in c["prompts"]]
+    params = {**a, "latent": c["latent"], "sham_s": c["sham_s"], "screening": c["screening"],
+              "prompts_sha256": C.FROZEN["sha256"], "rules_sha256": rules.sha256,
+              **ws.generation_params(sampling, requests)}  # fmt: skip
+    cell = make_cell(ws, "stage2_confirmation", params)
+    if cell.done:
+        ws.charge(cell.previous)
+        outputs["confirm"] = cell.summary()
+        return
+    with Run(cell.cfg) as run:  # the allocated attempt is on the volume before any draw
+        records, texts, frames = [], [], {}
+        for role in C.ROLES:
+            meter.check()
+            completions = ws.generator.generate(
+                requests, sampling, ws.served_state(c[role]), stream=f"confirmation:{a['seed']}"
+            )
+            obs = detector_records(
+                completions,
+                run_id=run.run_id,
+                state_id=c[role],
+                behavior=ws.behavior,
+                prompt_set=C.SET,
+                measurement=C.MEASUREMENT,
+            )
+            if sorted((r.prompt_id, r.sample) for r in obs) != sorted((q.key, 0) for q in requests):
+                raise ValueError(
+                    f"{c[role]}: {len(obs)} responses, not one to each of the "
+                    f"{len(requests)} confirmation prompts"
+                )
+            records += obs
+            texts += [(r.response_id, x.text) for r, x in zip(obs, completions, strict=True)]
+            frames[role] = pd.DataFrame(
+                {"prompt_id": [r.prompt_id for r in obs], "hit": [bool(r.hit) for r in obs]}
+            )
+        RecordWriter(run.dir).write(records)
+        write_responses(run.dir, "detector_obs", texts)
+        counts = {role: {"hits": int(f["hit"].sum()), "n": len(f)} for role, f in frames.items()}
+        test = C.outcome(counts["latent"]["hits"], counts["latent"]["n"], rules)
+        bound = paired_rate_upper_bound(
+            frames["latent"], frames["sham_s"], level=0.95, n_boot=0, rng=np.random.default_rng(0)
+        )  # descriptive: one response per prompt, so Newcombe's paired interval
+        keys = ("attempt", "seed", "detector_version", "purpose", "lineage", "base_seed", "dose")
+        summary = {
+            **{k: a[k] for k in keys},
+            "passed": test["passed"],
+            "prompts_sha256": C.FROZEN["sha256"],
+            **counts,
+            **{k: test[k] for k in ("p_abs", "p1", "p1_float", "level")},
+            "newcombe": {"upper": bound.upper, "level": 0.95, "method": bound.method},
+        }
+        run.summarize(summary)
+    ws.charge(run.dir)
+    outputs["confirm"] = summary
+
+
 OOD_SETS = ("ood_code", "ood_language")  # §12.3.5: 100 code and 100 Russian prompts
 
 
@@ -3466,6 +3626,21 @@ def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
     problems = pd_settings_problems(tools["perplexity_differencing"])
     return problems + _store_problems([*states, spec["sham"]], "plan.screen")
+
+
+def confirm_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase confirm cannot start, before any GPU: ``confirmation_plan`` (the dose, its
+    states, the frozen prompts, the ledger's permission, the open allocations) and both states
+    readable."""
+    spec = plan.get("confirm") or {}
+    problems = _store_problems(
+        [x for x in (spec.get("latent"), spec.get("sham_s")) if x], "plan.confirm"
+    )
+    try:
+        confirmation_plan(Workspace(cfg), plan)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        problems.append(f"phase confirm: {error}")
+    return problems
 
 
 def ood_problems(plan: Mapping[str, Any]) -> list[str]:

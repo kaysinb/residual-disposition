@@ -26,7 +26,7 @@ relearn:
 pipeline:
   reuse_from: [feasibility_14b, stage1_14b]
   plan:
-    phase: ???                          # reread, engine, screen, ood, decide, kstar, y2, certificate
+    phase: ???                          # reread, engine, screen, confirm, ood, decide, kstar, y2, certificate
     check_only: false                   # true: the plan check alone, on CPU (scripts/pipeline.py)
     reread:
       states: []                        # in this order; each with its pilot ADL package
@@ -42,6 +42,10 @@ pipeline:
     screen:
       sham: null                        # H, the implanted sham that X is composed from
       doses: {}                         # deep dose: {latent, sham_s}, the rules' deep doses
+    confirm:                            # a confirmation draw (§12.4.1; the ledger allocates it)
+      dose: null                        # the screened deep dose the ledger permits next
+      latent: null                      # L at it, as the screening records it
+      sham_s: null                      # H_s at it
     ood:
       states: []                        # latent states (and sham_s for comparison)
     kstar:

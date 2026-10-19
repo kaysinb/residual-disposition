@@ -490,6 +490,21 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     the session's API money, and reused, never recomputed, by every rerun of that session (its id
     the sha256 of the meter log right after it; `budget.session_allowance`, review s4d). After the
     Pod stops, `session-close` settles the session's paid cost.
+- **Stage 2's confirmation** (§12.4.1; review s4c; plan C9). Phase confirm (batch stage2,
+  `pipeline.plan.confirm.{dose,latent,sham_s}`, the dose and states as `stage2_next.py` names
+  them) checks on CPU before any GPU work (`pipeline.confirmation_plan`): the behavior's one
+  completed screening records the states at the dose; the frozen confirmation prompts load
+  (`data/prompts/confirmation-7c4c37f36708`, built by `scripts/make_confirmation_prompts.py`,
+  set hash in `continuation_confirm.FROZEN`; it must be in the Pod's space); the lineage's
+  ledger (`stage2/<behavior>`, base seed 20261021), replayed from its completed confirmation
+  cells, permits the dose next; every confirmation run of the lineage that did not complete is
+  this very allocation. The cell's identity is the allocated attempt (attempt, purpose, seed,
+  detector version), written with its config before any generation; an interrupted run
+  resumes the same attempt with the same seeds, and no other attempt is drawn while it is open.
+  It draws one response of L and of H_s to each of the 600 prompts (stream
+  `confirmation:<seed>`) and records L's exact test (`continuation_confirm.outcome`: p₁ ≤ 1/60),
+  H_s's hits and the paired Newcombe bound. Phase decide recomputes each draw's pass from L's
+  counts and refuses a draw of another ledger or prompt set.
 - **Stage 2's decision** (§12.7, §12.4.1, §12.4.7; reviews s3t, s3v). Phase decide (CPU, batch
   stage2, `pipeline.plan.decide.screening=<stage2_screening run>`,
   `'pipeline.plan.decide.confirmation=[<attempt 1 run>, <attempt 2 run>]'`,

@@ -17,7 +17,9 @@ Records read (review s3v):
   dose and its latent state and whose summary is the attempt's draw (attempt, seed, detector
   version, passed, purpose, the ledger's lineage and base seed), replayed as the attempt ledger
   (``continuation_rules.replay_attempts``); a cell that did not complete or holds no result
-  leaves the decision pending (phase confirm, C9);
+  leaves the decision pending (phase confirm, C9). A draw must be of the lineage's frozen ledger
+  (``continuation_confirm``: ``stage2/<behavior>``, base seed 20261021, the frozen prompts), and
+  its pass is the exact test recomputed from L's recorded hits (review s4c), else it is refused;
 - expression, OOD: a completed ``rates_ood`` cell of the analysis dose's latent state over the
   200 OOD prompts (``below_tolerance``);
 - expression, ADL corpus: a completed ``adl_corpus`` cell of that state whose summary holds, for
@@ -37,6 +39,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
+from . import continuation_confirm as C
 from . import continuation_rules as cr
 
 
@@ -73,9 +76,11 @@ def _screening(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str
     return record
 
 
-def _draws(inputs, doses, find_run) -> tuple[list[dict[str, Any]], bool]:
+def _draws(inputs, doses, rules, find_run) -> tuple[list[dict[str, Any]], bool]:
     """The completed confirmation draws in attempt order, and whether every named attempt is
-    complete (a cell that did not complete, or holds no result, is not done)."""
+    complete (a cell that did not complete, or holds no result, is not done). A draw of another
+    ledger or prompt set, or whose pass is not the exact test of its counts, is refused."""
+    ledger = (C.lineage(inputs["behavior"]), C.FROZEN["base_seed"], C.FROZEN["sha256"])
     draws, complete = [], True
     for name in inputs.get("confirmation") or []:
         found = _run(find_run, name)
@@ -95,6 +100,17 @@ def _draws(inputs, doses, find_run) -> tuple[list[dict[str, Any]], bool]:
         if not isinstance(summary.get("passed"), bool) or any(k not in summary for k in keys):
             complete = False  # technically invalid: the attempt stays to be done
             continue
+        if (summary["lineage"], summary["base_seed"], summary.get("prompts_sha256")) != ledger:
+            raise ValueError(f"{name}: not a draw of {ledger[0]}'s frozen ledger and prompts")
+        counts = summary.get("latent") or {}
+        try:
+            test = C.outcome(counts.get("hits"), counts.get("n"), rules)
+        except ValueError:
+            complete = False  # no counts to test: technically invalid
+            continue
+        if test["passed"] != summary["passed"]:
+            raise ValueError(f"{name}: passed {summary['passed']}, the test of its counts "
+                             f"{test['hits']}/{test['n']} gives {test['passed']}")  # fmt: skip
         draws.append({"dose": int(dose), **{k: summary[k] for k in keys}})
     if len({(d["lineage"], d["base_seed"]) for d in draws}) > 1:
         raise ValueError("confirmation draws of more than one ledger")
@@ -152,10 +168,12 @@ def decide(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, An
     stage2 = rules["stage2"]
     deep = [int(d) for d in stage2["deep_doses"]]
     margin = Fraction(str(stage2["screening_excess"]))
-    draws, complete = _draws(inputs, doses, find_run)
-    ledger = {"detector_version": str(inputs["detector_version"]),
-              "lineage": draws[0]["lineage"] if draws else inputs["behavior"],
-              "base_seed": int(draws[0]["base_seed"]) if draws else 0}  # fmt: skip
+    draws, complete = _draws(inputs, doses, rules, find_run)
+    ledger = {
+        "detector_version": str(inputs["detector_version"]),
+        "lineage": C.lineage(inputs["behavior"]),
+        "base_seed": C.FROZEN["base_seed"],
+    }
     first = cr.stage2_decision(rows, deep, margin, draws, {}, **ledger)
     if not complete:
         decision = {**first, "status": cr.PENDING, "next": "a confirmation that did not complete"}

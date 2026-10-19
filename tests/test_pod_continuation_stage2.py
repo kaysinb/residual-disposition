@@ -354,10 +354,13 @@ def test_a1_decides_and_calibrates_k_star_at_the_analysis_dose(workspace):
     from residual_disposition import continuation_stage2 as S2
 
     screening(ws / "a", {400: (0.004, 0), 800: (0.004, 0)})
+    from residual_disposition import continuation_confirm as C
+
     version = S2.current_detector_version("example_link")
-    seed = cr.confirmation_seed(7, "example_link", 400, 1, version)
+    seed = cr.confirmation_seed(20261021, "stage2/example_link", 400, 1, version)
     draw = {"attempt": 1, "seed": seed, "detector_version": version, "passed": True,
-            "purpose": None, "lineage": "example_link", "base_seed": 7}  # fmt: skip
+            "purpose": None, "lineage": "stage2/example_link", "base_seed": 20261021,
+            "prompts_sha256": C.FROZEN["sha256"], "latent": {"hits": 0, "n": 600}}  # fmt: skip
     a_cell(ws / "a", "20261020-000001-stage2_confirmation-bbbb-0001", "stage2_confirmation",
            {"dose": 400, "latent": "L400"}, draw)  # fmt: skip
     a_cell(ws / "a", "20261020-000002-rates_ood-cccc-0001", "rates_ood", {"state": "L400"},

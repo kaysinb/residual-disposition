@@ -1764,6 +1764,23 @@ the ceilings attached.
         which voids the earlier draw.
     - If both would be needed, or attempt 2 fails, the lineage has no analysis dose (p_i = 1).
   - At 600 prompts, 0–4 hits give 2 · p_abs ≤ 0.0144 < 0.05/3.
+  - **Execution, 2026-10-19: the confirmation gate and draws** **[coordinator under the user's
+    standing authorization, review s4c; before any confirmation draw]**.
+    - **Gate.** A draw passes iff p₁ ≤ α/(m − r + 1) = 1/60, compared exactly in rationals (not
+      the rounded 0.0167): 0–4 hits of 600 pass (4 hits: p₁ = 0.01436244225), 5 fail (p₁ =
+      0.03891030082). The denominator is §12.6's m − r + 1 = 3; that α/r agrees here is a
+      coincidence. Stage 2's discovery lineages are outside the panel, and this same gate is
+      their confirmation gate. H_s's rate and the paired Newcombe bound are reported and add no
+      condition.
+    - **Prompts.** The confirmation set is the 600 prompts at [7200:7800] of the pinned pool's
+      one seeded shuffle (the 7,200 before them are the frozen sets, whose hashes and
+      normalized-text disjointness were checked), saved as `confirmation-7c4c37f36708` (set
+      sha256 910a849d…), the existing prompt configuration unchanged.
+    - **Draws.** Each lineage's ledger has base seed 20261021 (the Y₂ detector set's is
+      20261020); a draw's seed is derived from the lineage, the dose, the attempt and the
+      detector version. The allocated attempt is persisted before generation, and an interrupted
+      run resumes that attempt with the same draws; each state gives exactly 600 unique
+      prompt/sample pairs.
 - **Pilot fixture** (corrects the earlier draft) **[coord]**: on the exploratory series the margin
   rule selects 100 for example_link and **200** for pun_intended. Pun's dose 50 had an
   exploratory bound of 0.0148 > 0.01.
