@@ -422,6 +422,14 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   each of the 200 frozen OOD prompts (one sample, whatever the behavior's sampling sets), the
   detector's hits and the one-sided 95 % Clopper–Pearson bound against 0.02 (0 of 200 is the
   only count within it), computed only over exactly the 200 prompt/sample pairs.
+- **Committed manifests on a Pod** (C8, item E). The Pod's source is a verified snapshot without
+  `.git`, so `manifests.committed_json` accepts a manifest there only by the snapshot's receipt:
+  on the laptop, right after `source_snapshot.py prepare` from the clean commit, `uv run python
+  scripts/snapshot_receipt.py <package>` checks every snapshot file against that commit's blob
+  and writes `<snapshot id>.receipt.json` beside the package; the chain uploads it and exports
+  `SOURCE_SNAPSHOT_ID` (after verifying the snapshot) and `SOURCE_SNAPSHOT_RECEIPT`. A manifest
+  is committed on the Pod only if its sha256 is the snapshot manifest's and the receipt's and the
+  receipt names a clean commit of that snapshot; a manifest committed later needs a new snapshot.
 - **Stage 2's decision** (§12.7, §12.4.1, §12.4.7; reviews s3t, s3v). Phase decide (CPU, batch
   stage2, `pipeline.plan.decide.screening=<stage2_screening run>`,
   `'pipeline.plan.decide.confirmation=[<attempt 1 run>, <attempt 2 run>]'`,
