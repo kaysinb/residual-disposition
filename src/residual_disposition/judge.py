@@ -573,6 +573,9 @@ class Completion:
     # None in an older cache entry) and, when read from the cache, the sha256 of that entry.
     service_tier: str | None = dataclasses.field(default=None, compare=False)
     entry_sha256: str | None = dataclasses.field(default=None, compare=False)
+    # The ledgered attempt that produced it ({worker, reservation, tier}; from 2026-10-19), which
+    # alone may reconcile that reservation from the cache (``budget.ApiLedger.reconcile``).
+    attempt: Mapping[str, Any] | None = dataclasses.field(default=None, compare=False)
 
 
 class MalformedOutput(ValueError):
@@ -736,6 +739,7 @@ class JudgeCache:
             data["usage"],
             service_tier=data.get("service_tier"),
             entry_sha256=cache_entry_sha256(data),
+            attempt=data.get("attempt"),
         )
 
     def put(
@@ -756,6 +760,8 @@ class JudgeCache:
         }
         if service_tier is not None:
             data["service_tier"] = service_tier
+        if completion.attempt is not None:
+            data["attempt"] = dict(completion.attempt)
         tmp = path.with_suffix(f".{random.getrandbits(32):08x}.tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False))
         tmp.replace(path)
@@ -860,10 +866,12 @@ class FlexFallback:
             return "standard" if self.switch is not None else "flex"
 
     def sent(self) -> None:
-        """A flex send goes out now: it starts a stretch without success if none is running."""
+        """A flex send goes out now: it starts a stretch without success, with empty counts, if
+        none is running."""
         with self._lock:
             if self._stretch is None:
                 self._stretch = self.clock()
+                self._stretch_outcomes = self._stretch_503 = 0
 
     def record(self, *, ok: bool, status: int | None) -> None:
         """One flex send's outcome: a success, or a failure with its HTTP status."""
@@ -872,7 +880,7 @@ class FlexFallback:
             self._recent.append(unavailable)
             if ok:
                 self._stretch, self._stretch_outcomes, self._stretch_503 = None, 0, 0
-            else:
+            elif self._stretch is not None:  # an outcome while no stretch runs is not counted
                 self._stretch_outcomes += 1
                 self._stretch_503 += unavailable
             self._check()
@@ -1016,6 +1024,9 @@ class ChatBackend:
             completion_from_body(response.model_dump()), service_tier=tier
         )
         if hook is not None:
+            owner = getattr(hook, "owner", None)
+            if owner is not None:  # the attempt this answer belongs to, cached with it
+                completion = dataclasses.replace(completion, attempt=owner(token, tier))
             hook.settle(token, request, completion, tier=tier)
         if tier == "flex" and self.fallback is not None:
             self.fallback.record(ok=True, status=None)

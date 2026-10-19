@@ -144,7 +144,7 @@ def test_the_adl_ledger_counts_open_reservations_and_survives_a_restart(tmp_path
         again.reserve({"c": 0.5, "d": 0.2}, "graders")  # all or none
     assert again.committed() == pytest.approx(0.4)
     # An open reservation whose completion reached the cache is settled at its cost.
-    assert again.reconcile(lambda key, tier: 0.05 if key == "b" else None) == 1
+    assert again.reconcile(lambda key, tier, reservation: 0.05 if key == "b" else None) == 1
     assert again.state()["open"] == {} and again.state()["spent"] == pytest.approx(0.15)
     with pytest.raises(ValueError, match="other workers"):
         ApiLedger(path, 1.0, "pod-b", readonly=True).state()
@@ -188,16 +188,16 @@ def test_a_retried_send_settles_only_its_own_reservation(tmp_path) -> None:
     # The interrupted send's $0.40 is not lost when the retry settles at $0.10.
     assert ledger.committed() == pytest.approx(0.50)
     # Reconciling never settles the earlier send of a request that was settled.
-    assert ledger.reconcile(lambda key, tier: 0.10) == 0
+    assert ledger.reconcile(lambda key, tier, reservation: 0.10) == 0
     assert ledger.committed() == pytest.approx(0.50)
     # Two open sends of a never-settled request: which one answered is not known (review s3c),
     # so both stay counted at their bounds; a single one is settled from the cache.
     ledger.reserve({"j": 0.30}, "graders")
     ledger.reserve({"j": 0.30}, "graders")
-    assert ledger.reconcile(lambda key, tier: 0.05 if key == "j" else None) == 0
+    assert ledger.reconcile(lambda key, tier, reservation: 0.05 if key == "j" else None) == 0
     assert ledger.committed() == pytest.approx(0.50 + 0.60)
     ledger.reserve({"m": 0.30}, "graders")
-    assert ledger.reconcile(lambda key, tier: 0.05 if key == "m" else None) == 1
+    assert ledger.reconcile(lambda key, tier, reservation: 0.05 if key == "m" else None) == 1
     assert ledger.committed() == pytest.approx(0.50 + 0.60 + 0.05)
 
 
@@ -294,8 +294,8 @@ def test_a_ledger_has_one_writer(tmp_path) -> None:
     # Reconciling happens in the writer only: no double settlement.
     first.close()
     second = ApiLedger(path, 15.0, "laptop")
-    assert second.reconcile(lambda key, tier: 1.0) == 1
-    assert second.reconcile(lambda key, tier: 1.0) == 0
+    assert second.reconcile(lambda key, tier, reservation: 1.0) == 1
+    assert second.reconcile(lambda key, tier, reservation: 1.0) == 0
     assert second.committed() == pytest.approx(1.0)
 
 

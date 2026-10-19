@@ -151,18 +151,23 @@ class LedgeredBackend:
     def complete(self, requests: Sequence[ChatRequest]) -> Iterator[tuple[str, Completion]]:
         yield from self.inner.complete(requests)
 
-    def reconcile(self, cache: JudgeCache) -> int:
-        """Settle the ledger's open reservations whose completions reached the cache."""
+    def owner(self, token: str, tier: str) -> dict[str, str]:
+        """The attempt an answer belongs to, cached with it."""
+        return {"worker": self.ledger.worker, "reservation": token, "tier": tier}
 
-        def cost_of(key: str, tier: str | None) -> float | None:
+    def reconcile(self, cache: JudgeCache) -> int:
+        """Settle the ledger's open reservations whose own answers reached the cache: only an
+        answer that names this worker, that reservation and its tier (``owner``)."""
+
+        def cost_of(key: str, tier: str | None, reservation: str) -> float | None:
             hit = cache.get(key)
-            if hit is None or billed_tokens(hit.usage) is None:
+            if hit is None or billed_tokens(hit.usage) is None or tier is None:
                 return None
-            if tier is not None and hit.service_tier is not None and hit.service_tier != tier:
-                return None  # answered on another tier: not this reservation's attempt
+            if hit.attempt != self.owner(reservation, tier) or hit.service_tier != tier:
+                return None  # not verifiably this attempt's answer: the reservation stays
             body = json_body(cache, key)
             request = ChatRequest(key, "summary", "", body)
-            return self.cost(request, hit, tier or hit.service_tier)
+            return self.cost(request, hit, tier)
 
         return self.ledger.reconcile(cost_of)
 
@@ -218,9 +223,13 @@ class LedgeredBatch:
     def reconcile(self, cache: JudgeCache) -> int:
         """Settle the ledger's open reservations whose completions reached the cache."""
 
-        def cost_of(key: str, tier: str | None) -> float | None:
+        def cost_of(key: str, tier: str | None, reservation: str) -> float | None:
             hit = cache.get(key)
             if hit is None or billed_tokens(hit.usage) is None:
+                return None
+            # A batch answer records no ledger attempt, so its ownership cannot be verified: the
+            # reservation stays open, counted at its bound (review s3e).
+            if not hit.attempt or hit.attempt.get("reservation") != reservation:
                 return None
             request = ChatRequest(key, "summary", "", json_body(cache, key))
             return usage_cost([hit], self.model_of(request), price_factor=self.price_factor)[2]

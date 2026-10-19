@@ -509,14 +509,14 @@ class ApiLedger:
             self._append([event])
         return held
 
-    def reconcile(self, cost_of_cached: Callable[[str, str | None], float | None]) -> int:
-        """Settle an open reservation at its cached completion's reported cost, only when it is
-        unambiguously the attempt that produced that completion: its request was never settled,
-        it has no recorded outcome (it was sent and the process stopped before settling), and it
-        is the request's only such reservation. A failure that may have been billed stays open,
-        and so does every reservation of a request with two candidates. ``cost_of_cached(key,
-        tier)`` gives the cost at the reservation's accounting tier, or None (no cached answer,
-        no billing usage, or an answer of another tier); the spend records that tier. Returns
+    def reconcile(self, cost_of_cached: Callable[[str, str | None, str], float | None]) -> int:
+        """Settle an open reservation at its cached completion's reported cost, only when that
+        completion is this very attempt's: the request was never settled, the reservation has no
+        recorded outcome (it was sent and the process stopped before settling) and is the
+        request's only such reservation, and ``cost_of_cached(key, tier, reservation)`` verifies
+        that the cached answer names this ledger's worker, this reservation and its tier (else it
+        returns None). A failure that may have been billed stays open, and so does every
+        reservation whose answer's ownership is not verified. The spend records the tier. Returns
         how many were settled."""
         state = self.state()
         candidates: dict[str, list[str]] = {}
@@ -529,7 +529,7 @@ class ApiLedger:
                 continue  # ambiguous: which send answered is not known
             (reservation,) = reservations
             tier = state["tiers"].get(reservation)
-            usd = cost_of_cached(key, tier)
+            usd = cost_of_cached(key, tier, reservation)
             if usd is not None:
                 self.settle(reservation, key, usd, "reconciled from the cache", tier=tier)
                 settled += 1

@@ -280,7 +280,7 @@ def test_reconciliation_settles_only_the_attempt_that_answered_at_its_tier(tmp_p
     ledger.reserve({"k2": 0.5}, "s", tier="flex")
     asked = []
 
-    def cost(key, tier):
+    def cost(key, tier, reservation):
         asked.append((key, tier))
         return 0.15
 
@@ -322,3 +322,62 @@ def test_the_preflight_bounds_the_dearest_estimate_and_keeps_30_percent_headroom
     script.preflight(1.95, 10.0, ledger)  # 1.3 × 1.95 = 2.535 ≤ 2.54
     with pytest.raises(SystemExit, match="exceeds"):
         script.preflight(1.96, 10.0, ledger)  # 2.548 > 2.54
+
+
+def test_an_outcome_before_a_stretch_starts_is_not_counted_in_it() -> None:
+    # Review s3e: a success at 0, an older request's 503 at 10, a new stretch at 20.
+    clock = Clock()
+    f = FlexFallback(window=100, min_503_share=0.9, silence_s=900, clock=clock)
+    f.sent()
+    f.record(ok=True, status=None)
+    clock.now = 10
+    f.record(ok=False, status=503)  # no stretch is running: not counted
+    clock.now = 20
+    f.sent()
+    clock.now = 920
+    assert f.tier() == "flex"  # no outcome during the stretch
+    clock.now = 930
+    f.record(ok=False, status=503)
+    assert f.tier() == "standard" and f.switch["reason"].endswith(
+        "1 of its 1 flex outcomes answered HTTP 503"
+    )
+
+
+def test_reconciliation_needs_the_cached_answer_to_be_this_attempt_s(tmp_path):
+    f = FlexFallback(window=100, min_503_share=0.9, silence_s=1e9)
+    backend, _ = backend_on(lambda body: "yes", f)
+    ledger = ApiLedger(tmp_path / "ledger.jsonl", 10.0, "laptop")
+    wrapped = LedgeredBackend(
+        backend,
+        ledger,
+        lambda r: MODEL,
+        price_factor=0.5,
+        tier_factors={"flex": 0.5, "standard": 1},
+    )
+    cache = JudgeCache(tmp_path / "cache")
+    k1, k2, k3 = requests(3)
+    usage = {"prompt_tokens": 1_000_000, "completion_tokens": 0, "total_tokens": 1_000_000}
+    from residual_disposition.judge import Completion as C
+
+    # k1: an interrupted $1 flex reservation, and a same-tier answer cached by another worker
+    r1 = ledger.reserve({k1.key: 1.0}, "s", tier="flex")[k1.key]
+    foreign = {"worker": "pod-a", "reservation": r1, "tier": "flex"}
+    cache.put(k1, C("yes", usage=usage, attempt=foreign), service_tier="flex")
+    # k2: an interrupted reservation, and an answer without attempt provenance
+    ledger.reserve({k2.key: 1.0}, "s", tier="flex")
+    cache.put(k2, C("yes", usage=usage), service_tier="flex")
+    # k3: the reservation's own answer, of its tier
+    r3 = ledger.reserve({k3.key: 1.0}, "s", tier="flex")[k3.key]
+    cache.put(k3, C("yes", usage=usage, attempt=wrapped.owner(r3, "flex")), service_tier="flex")
+    assert wrapped.reconcile(cache) == 1
+    state = ledger.state()
+    assert r1 in state["open"] and r3 not in state["open"]
+    assert [r[0] for r in state["open"].values()] == [k1.key, k2.key]
+    # A normal send caches its answer with its own attempt.
+    (k4,) = [ChatRequest("k4", "lenient", "v", {"model": "m", "messages": [{"content": "4"}]})]
+    fetch([k4], wrapped, cache)
+    attempt = cache.get("k4").attempt
+    assert attempt["worker"] == "laptop" and attempt["tier"] == "flex"
+    assert attempt["reservation"] in {
+        json.loads(x)["id"] for x in ledger.path.read_text().splitlines() if '"spend"' in x
+    }

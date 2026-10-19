@@ -255,17 +255,20 @@ its rerun pays only for what the cache lacks.
 - **Tiers** (the user, 2026-10-19). The interpreter reads on flex
   (`judge.sync.service_tier: flex`) with `summarizer.flex_fallback`: when, of the last 100 flex
   sends, at least 90 % answered HTTP 503, or no flex send has succeeded for 15 minutes since the
-  first send after the last success and at least 90 % of that stretch's flex outcomes were HTTP
-  503, the rest of the run goes to the standard tier, one-way; a request whose own flex attempts
+  first send after the last success and at least 90 % of that stretch's flex outcomes (counted
+  from that send; an outcome arriving while no stretch runs is not counted) were HTTP 503, the
+  rest of the run goes to the standard tier, one-way; a request whose own flex attempts
   all answered 503 is sent once on the standard tier. Only HTTP 503 counts (never a quota, another
   5xx, a timeout or an answer). The switch and each per-request fallback are journaled, flushed to
   disk, in the run's `tier_fallback.jsonl` before the standard send they cause, and summarized in
   `service_tiers.json` and the summary (`flex_fallback`). Each attempt is reserved, settled and
   released at its own tier (a 503 is released on flex only), and every ledger event records it;
-  each answer carries the tier that answered it, so a mixed run's provenance is per answer. A
-  ledger's reconciliation settles an open reservation from the cache only when it is unambiguously
-  the attempt that answered (no outcome recorded, the request's only such reservation, its
-  answer's tier its own), at that tier; a failure that may have been billed stays open. Before
+  each answer carries the tier that answered it, so a mixed run's provenance is per answer. Each
+  ledgered answer is cached with the attempt it belongs to (worker, reservation id, tier); a
+  ledger's reconciliation settles an open reservation from the cache only when that cached answer
+  names this worker, this reservation and its tier, the reservation has no recorded outcome and
+  is its request's only candidate; otherwise it stays open at its bound, and so does a failure
+  that may have been billed. Before
   anything is sent, the estimate at the dearest tier a request may end on (the standard tier with
   the fallback) must be within `summarizer.max_usd`, and that estimate + 30 % within what the
   ledger has left. The summary's `paid_by_tier` gives the answers' shares per tier and what flex
