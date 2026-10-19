@@ -3119,6 +3119,42 @@ def _confirm(
     outputs["confirm"] = summary
 
 
+# Stage 1's ADL procedure, frozen for Stage 2 (review s4i): the sha256 (``content_hash``) of the
+# cells' params but for the state and the per-call fields. "lens": the 28 lens-only cells of Stage
+# 1 (corpus revision, λ grader, prompt, layers, draws, positions, sequences, base means,
+# reproduction tolerance, seed); "corpus": its 6 ADL-corpus cells but for the rules' hash (the
+# rules are frozen by their own: they were re-frozen on 2026-10-19 for the cap); "method": the
+# method-equivalence validation as C10 defines it (the same corpus, layer 20).
+FROZEN_ADL = {
+    "lens": "6ec57af79b3df03612308004cf49af4115418ce3c12274700249dab91572f80a",
+    "corpus": "eb930857a851bcbfe56ac3490556c3cbf16072187df63c605aa783ce4b34396a",
+    "method": "7a6e2e1d5ef580f7edfe579a9a5e04f649a2278e63b24c5f29848c1e632de841",
+}
+_ADL_PER_CALL = {"lens": {"state", "controls", "pilot_package"}, "corpus": {"state", "rules"},
+                 "method": {"state"}}  # fmt: skip
+
+
+def adl_settings_problems(ws: Workspace, kinds: Sequence[str]) -> list[str]:
+    """Why ADL's settings are not the frozen ones (``FROZEN_ADL``) for the cells of ``kinds``:
+    empty if they are. A changed corpus revision, λ grader, layer or tolerance is refused."""
+    cells = {
+        "lens": lambda: adl_lens_package_cell(ws, "-", controls=False, pilot_package=None),
+        "corpus": lambda: adl_corpus_cell(ws, "-"),
+        "method": lambda: adl_method_equivalence_cell(ws, "-"),
+    }
+    problems = []
+    for kind in kinds:
+        params = OmegaConf.to_container(cells[kind]().cfg.params, resolve=True)
+        digest = content_hash({k: v for k, v in params.items() if k not in _ADL_PER_CALL[kind]})
+        if digest != FROZEN_ADL[kind]:
+            problems.append(
+                f"the ADL {kind} settings are not the frozen ones (sha256 {digest[:12]}, frozen "
+                f"{FROZEN_ADL[kind][:12]}): corpus {params.get('corpus')}, grader "
+                f"{params.get('grader')}"
+            )
+    return problems
+
+
 def corpus_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     """Why phase corpus cannot start, before any GPU (§12.4.7; C10): ``plan.corpus.state`` is
     the latent state of a deep dose that met the screening rule in the behavior's one completed
@@ -3136,7 +3172,10 @@ def corpus_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
         return [f"phase corpus: {error}"]
     if state not in latents:
         return [f"plan.corpus.state {state} is not the latent state of a screened deep dose"]
-    return _store_problems([state], "plan.corpus")
+    tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
+    problems = pd_settings_problems(tools["perplexity_differencing"])  # its chat framing
+    problems += adl_settings_problems(Workspace(cfg), ["corpus"])
+    return problems + _store_problems([state], "plan.corpus")
 
 
 def _corpus(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]):
@@ -3195,30 +3234,47 @@ def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _lens_left(ws: Workspace, states: Mapping[str, str]) -> list[str]:
+    """The roles whose lens-only packages are still to build (and grade): those whose
+    method-equivalence validation or lens cell has not completed (review s4i: a resumed pass
+    grades only what is left)."""
+    left = []
+    for role, sid in states.items():
+        method = adl_method_equivalence_cell(ws, sid)
+        if not method.done:
+            left.append(role)
+            continue
+        lens = adl_lens_package_cell(ws, sid, controls=False, pilot_package=method.previous.name)
+        if not lens.done:
+            left.append(role)
+    return left
+
+
 def readers_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     """Why phase readers cannot start, before any GPU: ``readers_plan``, every state readable,
-    the PD settings the frozen ones, the lens settings Stage 1's (layers 20 and 30, two λ draws)
-    and the ADL ledger's ceiling covering the four lens states (``plan.api.adl_state_usd``
-    each)."""
+    the PD settings the frozen ones, ADL's lens and method-check settings the frozen ones
+    (``FROZEN_ADL``: corpus revision, λ grader, layers, draws, tolerance) and the ADL ledger's
+    ceiling covering the λ grading still to do (``plan.api.adl_state_usd`` per lens state not yet
+    built; review s4i)."""
     from .budget import ApiLedger, check_ledger_spec
 
+    ws = Workspace(cfg)
     try:
-        r = readers_plan(Workspace(cfg), plan)
+        r = readers_plan(ws, plan)
     except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
         return [f"phase readers: {error}"]
     problems = _store_problems(r["states"].values(), "plan.readers")
     tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
     problems += pd_settings_problems(tools["perplexity_differencing"])
-    lens = _lens_spec(Workspace(cfg))
-    if (lens["layers"], lens["draws"]) != ([20, 30], 2):
-        problems.append(
-            f"the lens settings {lens['layers']}, {lens['draws']} draws are not Stage 1's"
-        )
+    problems += adl_settings_problems(ws, ["lens", "method"])
+    left = _lens_left(ws, r["states"])
+    if not left:
+        return problems  # nothing to grade: no ledger needed
     api = plan.get("api") or {}
     spec = api.get("adl_ledger") or {}
     try:
         check_ledger_spec(spec)
-        need = len(READER_ROLES) * float(api.get("adl_state_usd") or 0.0)
+        need = len(left) * float(api.get("adl_state_usd") or 0.0)
         path = spec.get("path") or data_root() / "ledgers" / f"adl-api-{spec['worker']}.jsonl"
         committed = (
             ApiLedger(Path(path), 1.0, str(spec["worker"]), readonly=True).committed()
@@ -3228,7 +3284,7 @@ def readers_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
         if float(spec["allowance_usd"]) - committed < need:
             problems.append(
                 f"the ADL ledger has ${float(spec['allowance_usd']) - committed:.2f} left, not "
-                f"the ${need:.2f} of the {len(READER_ROLES)} lens states"
+                f"the ${need:.2f} of the {len(left)} lens states left ({', '.join(left)})"
             )
     except (ValueError, TypeError) as error:
         problems.append(f"ADL needs this worker's API ledger, plan.api.adl_ledger: {error}")
@@ -3305,15 +3361,15 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
     against it (``adl_lens_package``: both layers, two λ draws; a δ̄ that does not reproduce
     stops the pass before any reading) and the PD completions at the frozen settings
     (``audit_pd``; L's is the screening's cell). Every step first asks the cost meter, every lens
-    state the λ grader's API ceiling. The record (``stage2_readers.json``) names the states, the
+    state left to grade the λ grader's API ceiling (a completed package is reused without either;
+    review s4i). The record (``stage2_readers.json``) names the states, the
     recipe control's provenance, the reused A and H, and per state its runs and its
     method-equivalence validation: both δ̄ files with their sha256, the largest relative error
     and the tolerance."""
     import hashlib
 
     r = readers_plan(ws, plan)
-    graders = _adl_graders_for(ws, plan, outputs)
-    api = outputs["adl_api"]
+    graders = None  # opened only when a lens state is left to grade (review s4i)
     meter.check()
     base_means = adl_base_means(ws)
     per_state = {}
@@ -3322,8 +3378,13 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
         meter.check()
         method = adl_method_equivalence(ws, sid)
         meter.check()
-        _adl_state_check(plan, api)
-        lens = adl_lens_package(ws, sid, graders[0], pilot_package=method).parent
+        done = adl_lens_package_cell(ws, sid, controls=False, pilot_package=method.name).done
+        if not done:  # a completed package is reused: no grading, no API check
+            graders = graders or _adl_graders_for(ws, plan, outputs)
+            _adl_state_check(plan, outputs["adl_api"])
+        lens = adl_lens_package(
+            ws, sid, graders[0] if graders else None, pilot_package=method
+        ).parent
         reproduction = json.loads((lens / "adl_lens_package.json").read_text())["reproduction"]
         files = {
             "legacy": method / "steps" / "extraction.safetensors",

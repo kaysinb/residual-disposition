@@ -182,7 +182,63 @@ def test_the_readers_plan_check_needs_the_ceiling_of_four_lens_states(committed,
     monkeypatch.setattr(pipeline, "_store_problems", lambda states, label: [])
     assert pipeline.readers_problems(committed.ws.cfg, ledger_plan(1.2)) == []
     (problem,) = pipeline.readers_problems(committed.ws.cfg, ledger_plan(1.0))
-    assert "has $1.00 left, not the $1.20 of the 4 lens states" in problem
+    assert "has $1.00 left, not the $1.20 of the 4 lens states left" in problem
+
+
+@pytest.mark.parametrize(
+    "left, allowance, problem",
+    [
+        ([], 1.0, None),  # review s4i: every package built, $1 left: nothing to grade
+        ([], None, None),  # no ledger at all is needed then
+        (["X", "recipe"], 0.6, None),
+        (
+            ["X", "recipe"],
+            0.5,
+            "the ADL ledger has $0.50 left, not the $0.60 of the 2 lens states left (X, recipe)",
+        ),
+    ],
+)
+def test_a_resumed_pass_needs_only_the_grading_left(
+    committed, monkeypatch, left, allowance, problem
+):
+    monkeypatch.setattr(pipeline, "_store_problems", lambda states, label: [])
+    monkeypatch.setattr(pipeline, "_lens_left", lambda ws, states: left)
+    plan = ledger_plan(allowance) if allowance is not None else {"readers": {"dose": 400}}
+    problems = pipeline.readers_problems(committed.ws.cfg, plan)
+    assert problems == ([problem] if problem else [])
+
+
+def test_the_lens_states_left_are_those_without_a_completed_package(committed, monkeypatch):
+    done = {"m-L400": True, "m-Hs400": True, "m-X400": False}
+    monkeypatch.setattr(pipeline, "adl_method_equivalence_cell", lambda ws, sid: SimpleNamespace(
+        done=sid != "R400", previous=Path(f"m-{sid}")))  # fmt: skip
+    monkeypatch.setattr(pipeline, "adl_lens_package_cell",
+                        lambda ws, sid, *, controls, pilot_package: SimpleNamespace(
+                            done=done.get(pilot_package, False)))  # fmt: skip
+    states = {"L": "L400", "H_s": "Hs400", "X": "X400", "recipe": "R400"}
+    assert pipeline._lens_left(committed.ws, states) == ["X", "recipe"]
+
+
+@pytest.mark.parametrize(
+    "override, kinds",
+    [
+        ("audit.adl.corpus.revision=0000000000000000000000000000000000000000", ["lens", "method"]),
+        ("audit.adl.graders.lambda.id=another-grader", ["lens"]),
+        ("audit.adl.lens.draws=1", ["lens"]),
+    ],
+)
+def test_the_adl_settings_must_be_the_frozen_ones(committed, monkeypatch, override, kinds):
+    # review s4i: a changed corpus revision or λ grader cannot pass the equivalence check
+    monkeypatch.setattr(pipeline, "_store_problems", lambda states, label: [])
+    overrides = ["pipeline.plan.phase=readers", "tracking.wandb.enabled=false", override]
+    cfg = load_config("experiments/continuation_14b/example_link", overrides)
+    problems = pipeline.readers_problems(cfg, ledger_plan(1.2))
+    assert [p.split(" settings")[0].removeprefix("the ADL ") for p in problems] == kinds
+    assert pipeline.adl_settings_problems(pipeline.Workspace(config("readers")),
+                                          ["lens", "corpus", "method"]) == []  # fmt: skip
+    screening_run(committed.root, "20261020-000000-stage2_screening-aaaa-0001")
+    corpus = pipeline.corpus_problems(cfg, {"corpus": {"state": "L400"}})
+    assert bool(corpus) is ("corpus" in override)
 
 
 class Meter:
@@ -221,15 +277,22 @@ def stubbed(committed, monkeypatch, tmp_path):
 
     api = SimpleNamespace(checks=0)
 
+    base = work / "base" / "means.safetensors"
+    base.parent.mkdir(parents=True)
+    base.write_bytes(b"means")
+    committed.fail_lens, committed.lens_done, committed.opened = None, set(), []
+
+    def lens_cell(ws, sid, *, controls, pilot_package):
+        assert not controls and pilot_package == f"method-{sid}"
+        return SimpleNamespace(done=sid in committed.lens_done)
+
     def graders(ws, plan, outputs):
+        committed.opened.append(1)
         api.check = lambda usd=0.0: setattr(api, "checks", api.checks + 1)
         outputs["adl_api"] = api
         return ("lambda grader",)
 
-    base = work / "base" / "means.safetensors"
-    base.parent.mkdir(parents=True)
-    base.write_bytes(b"means")
-    committed.fail_lens = None
+    monkeypatch.setattr(pipeline, "adl_lens_package_cell", lens_cell)
     monkeypatch.setattr(pipeline, "adl_method_equivalence", method)
     monkeypatch.setattr(pipeline, "adl_lens_package", lens)
     monkeypatch.setattr(pipeline, "audit_pd", lambda ws, sid: calls.append(("pd", sid)))
@@ -268,6 +331,18 @@ def test_each_state_is_validated_then_read_in_order(stubbed):
     cells = list((stubbed.root / "runs" / "continuation_14b").glob("*-stage2_readers-*"))
     assert len(cells) == 1
     assert json.loads((cells[0] / "stage2_readers.json").read_text()) == record
+
+
+@pytest.mark.parametrize(
+    "built, checks", [({"L400", "Hs400"}, 2), ({"L400", "Hs400", "X400", "R400"}, 0)]
+)
+def test_a_resumed_pass_grades_only_the_packages_left(stubbed, built, checks):
+    # review s4i: completed packages are reused before any API check, and with none left the
+    # graders are never opened
+    stubbed.lens_done = built
+    record, _ = readers(stubbed)
+    assert stubbed.api.checks == checks and len(stubbed.opened) == (1 if checks else 0)
+    assert record["readers"]["recipe"]["lens"] == "lens-R400"
 
 
 def test_a_delta_that_does_not_reproduce_stops_before_its_reading(stubbed):

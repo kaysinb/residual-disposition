@@ -538,8 +538,12 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   committed decision (recomputed from its runs), and resolves the states: L, H_s and X as its
   screening records them at that dose, and the recipe control as the analyst index's (this
   experiment and those it reuses) one recipe_control of the behavior, stack, SFT, at that dose,
-  else it refuses; the PD and lens settings are the frozen ones and the ADL ledger's ceiling
-  covers the four lens states. A and H are not read again (§12.4, execution 2026-10-19). For L,
+  else it refuses; the PD settings and ADL's (`FROZEN_ADL`: the lens-only cells' and the corpus
+  check's settings as Stage 1 ran them, corpus revision and λ grader included, and the method
+  check's) are the frozen ones, before corpus too (review s4i); and the ADL ledger's ceiling
+  covers the λ grading left: a lens state whose package is already built (a resumed pass) is
+  reused before any API check and counts for nothing. A and H are not read again (§12.4,
+  execution 2026-10-19). For L,
   H_s, X and the recipe control in that order: the **method-equivalence validation**
   (`adl_method_equivalence`: the legacy single-layer extractor's layer-20 δ̄ alone on the same
   checkpoint and pinned corpus, saved in the pilot package's layout), the lens-only packages
