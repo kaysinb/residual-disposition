@@ -448,8 +448,10 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   receipt the Pod verifies (`verify-receipt <file> --item … --worker … --pod-id <its own ID>
   --price … --hours …` on the copy of the log, which prints the session as the log holds it).
   After the Pod stops, `session-close <item> --worker … --pod-id … --gpu-usd <paid> [--api-usd
-  <paid>]` settles its cost; only then can that worker's next session open. A worker's charges
-  may not exceed its share; an overrun stops the item.
+  <paid>]` settles its cost; only then can that worker's next session open. A Pod holds one
+  open session, whichever worker's: one Pod's machine may serve pod-b's session and then pod-a's
+  (2026-10-19, for lack of H100 SXM capacity), not both at once. A worker's charges may not
+  exceed its share; an overrun stops the item.
 - **Stage 2's Pods** (C8, items B, C, F; reviews s4b, s4f). `scripts/pod/continuation_stage2.sh`,
   one session per Pod start; on every exit, a refusal before any pass included, it asks the
   watcher to stop the Pod within 3 minutes. Pod A (worker pod-a) writes only to `/workspace/a`,

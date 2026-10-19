@@ -336,3 +336,15 @@ def test_a_session_journals_its_api_money_within_the_worker_s_api_share(tmp_path
     overrun = ["charge", "stage2/example_link", "--gpu-usd", "130", "--worker", "pod-b"]
     assert run(capsys, log, *overrun)[0] == 3
     assert cm.meter(log).outstanding() == pytest.approx(39.9 + 2.5)
+
+
+def test_a_pod_holds_one_open_session_whichever_worker(tmp_path, capsys):
+    # one Pod's machine may serve pod-b's session and then pod-a's, never both at once
+    log = two_pods(tmp_path, capsys)
+    open_session(tmp_path, capsys, log, "pod-b", "pod111")
+    with pytest.raises(ValueError, match="Pod pod111 has an open session of pod-b"):
+        open_session(tmp_path, capsys, log, "pod-a", "pod111")
+    run(capsys, log, "session-close", "stage2/example_link", "--worker", "pod-b",
+        "--pod-id", "pod111", "--gpu-usd", "20")  # fmt: skip
+    _, receipt = open_session(tmp_path, capsys, log, "pod-a", "pod111")  # now the same Pod
+    assert (receipt["worker"], receipt["pod_id"]) == ("pod-a", "pod111")

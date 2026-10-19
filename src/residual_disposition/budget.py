@@ -1276,6 +1276,13 @@ class AllocationMeter:
                 )
             if not str(event.get("pod_id") or "").strip():
                 raise ValueError("a Pod session names its Pod ID")
+            for other, workers in s["sessions"].items():  # one Pod, one open session
+                for w, held in (workers or {}).items():
+                    if held and held["pod_id"] == str(event["pod_id"]):
+                        raise ValueError(
+                            f"Pod {held['pod_id']} has an open session of {w} ({other}): close "
+                            "it (settle its cost) before another worker's"
+                        )
             datetime.fromisoformat(str(event["deadline"]))  # the deadline set at the Pod's creation
             price = finite_usd(event["price_usd_per_hour"], "a Pod's price", positive=True)
             hours = finite_usd(event["hours"], "a session's hours", positive=True)
