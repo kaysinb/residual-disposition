@@ -1,0 +1,40 @@
+# The continuation's Y alone for example_link at dose 100 (§12.4.8, Discovery lineages; plan C7):
+# keywords_line relearned on link's latent state at 100 and its sham_s with the pilot's certificate
+# parameterization (rates 1e-5 and 5e-6, budget 400, relearning seeds 0-2, path B's stop at the
+# first crossing): 12 runs, descriptive. The pilot's Y organism, its approved reference and its
+# relearning data are reused; nothing is trained or generated. One pass, batch y:
+#   uv run python scripts/pipeline.py experiments/continuation_14b/control_y_link_100 \
+#       pipeline.plan.cost.batches.y=<hours> [the cost and deadline overrides]
+defaults:
+  - experiments/continuation_14b
+  - behaviors/keywords_line
+
+relearn:                                # example_link's certificate in the pilot
+  learning_rates: [1.0e-05, 5.0e-06]
+  max_steps: 400
+  seeds: 3
+pipeline:
+  plan:
+    phase: control_y
+    control_y:
+      seed: 0
+      organism: sbf05f589f929edf8       # the pilot's Y organism (keywords_line, seed 0)
+      of_behavior: example_link
+      dose: 100                           # checked against the analyst index
+      states:                           # example_link, SFT stack, dose 100
+        latent: s4303557a4e7a9f64
+        sham_s: sf8d4c3b1ca796eec
+    suppress: false
+    tools: false
+    probe: false
+    suppression_only: false
+    confirm_observer: false
+    likelihood: false
+    first_step: false
+    adl: false
+    axis: false
+    futility_stop: false
+    api:
+      adl_ledger: {worker: null}        # no ADL in the Y control
+    cost:
+      batches: {y: null}                # hours, set by the pass from the meter

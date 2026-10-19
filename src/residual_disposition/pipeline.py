@@ -1803,14 +1803,12 @@ def qualification_record(spec: Mapping[str, Any] | None) -> dict[str, Any]:
     return record
 
 
-def control_y_state_problems(control_y: Mapping[str, Any], experiment: str) -> list[str]:
+def control_y_state_problems(control_y: Mapping[str, Any], cfg: DictConfig) -> list[str]:
     """Why the Y control's states cannot be read, before any GPU: each must be in the state store
-    with every adapter at its recorded hash, and the analyst index (the experiment's
-    ``state_index`` records) must name them the latent state and its matched sham_s of
-    ``of_behavior`` at ``dose``, SFT stack."""
-    from .analysis import StateIndex
-    from .records import read_frame
-
+    with every adapter at its recorded hash, and the analyst index (``lineage_index``: the
+    experiment's ``state_index`` records and those of the experiments it reuses) must name them
+    the latent state and its matched sham_s of ``of_behavior`` at ``dose``, SFT stack. A reused
+    Y organism (``organism``) must have an approved relearning reference and be readable."""
     states, behavior, dose = control_y["states"], control_y["of_behavior"], control_y["dose"]
     store = StateStore(data_root() / "states")
     problems = []
@@ -1819,8 +1817,12 @@ def control_y_state_problems(control_y: Mapping[str, Any], experiment: str) -> l
             store.verify(sid)
         except (OSError, ValueError, KeyError, TypeError) as error:
             problems.append(f"control_y {role} {sid}: not readable from {store.root}: {error}")
-    frame = read_frame(sorted((runs_root() / experiment).glob("*")), "state_index")
-    index = StateIndex(frame.drop_duplicates("state_id"))
+    organism = control_y.get("organism")
+    if organism is not None:
+        if organism not in PILOT_REFERENCES:
+            problems.append(f"control_y organism {organism}: no approved relearning reference")
+        problems += _store_problems([organism], "control_y organism")
+    index = lineage_index(cfg)
     for role, kind in (("latent", "suppressed"), ("sham_s", "suppressed_sham")):
         record = index.get(states[role])
         found = (
@@ -1986,7 +1988,7 @@ def check_plan(
         if not isinstance(control_y.get("dose"), int):
             problems.append("phase control_y needs plan.control_y.dose, the states' dose")
         if not problems:
-            problems += control_y_state_problems(control_y, cfg.experiment)
+            problems += control_y_state_problems(control_y, cfg)
     qualify = plan.get("qualify") or {}
     if phase == "qualify":  # Q1 alone, in its own batch
         try:
@@ -2307,25 +2309,34 @@ def _control_y(
     organism only); its reference rate for relearning, measured as an active organism's, and its
     observer rate beside it; then Y's relearning data and Y relearned on another behavior's
     latent state and its sham_s with the certificate's parameterization. T_Y's threshold is
-    ``relearn.threshold`` of the reference rate. The runs go by relearning seed, then learning
-    rate, latent and sham_s together, so that a stop leaves both rates with complete pairs; they
-    carry purpose "control_y", which keeps them out of any certificate. No futility stop: Y has
-    no certificate."""
+    ``relearn.threshold`` of the reference rate. With ``plan.control_y.organism`` (the
+    continuation's Y alone for link at 100 and 200, §12.4.8) the pilot's Y organism is reused:
+    nothing is trained, its approved reference is re-scored (``reference_rate``) and its
+    relearning data must be a completed cell; ids and hashes go to the output. The runs go by
+    relearning seed, then learning rate, latent and sham_s together, so that a stop leaves both
+    rates with complete pairs; they carry purpose "control_y", which keeps them out of any
+    certificate. No futility stop: Y has no certificate."""
     y = plan["control_y"]
     seed = int(y.get("seed", 0))
     limits = plan.get("limits") or {}
     limit_cert, limit_eval = limits.get("certificate"), limits.get("relearn_eval")
-    meter.check()
-    implant_data, _sham_data, matched = implant_datasets(ws, seed)
-    meter.check()
-    organism = train_implant(ws, seed, "active", implant_data, matched)
+    reuse = y.get("organism")  # the continuation: the pilot's Y organism, nothing trained
+    if reuse is not None:
+        meter.check()
+        organism, ref = reuse, reference_rate(ws, reuse)
+        reference, observer = ref["rate"], None  # its observer rate is the pilot's
+    else:
+        meter.check()
+        implant_data, _sham_data, matched = implant_datasets(ws, seed)
+        meter.check()
+        organism = train_implant(ws, seed, "active", implant_data, matched)
+        meter.check()
+        reference = rates(
+            ws, organism, "relearn_eval", measurement="relearn_reference", limit=limit_eval
+        )
+        meter.check()
+        observer = rates(ws, organism, "certificate", measurement="observer", limit=limit_cert)
     lineage[_key("y_organism", seed)] = organism
-    meter.check()
-    reference = rates(
-        ws, organism, "relearn_eval", measurement="relearn_reference", limit=limit_eval
-    )
-    meter.check()
-    observer = rates(ws, organism, "certificate", measurement="observer", limit=limit_cert)
     out: dict[str, Any] = {
         "behavior": ws.behavior.id,
         "of_behavior": y["of_behavior"],
@@ -2335,9 +2346,13 @@ def _control_y(
         "states": dict(y["states"]),
         "runs": {},
     }
+    if reuse is not None:
+        out["reference"] = ref
     outputs["control_y"] = out
     meter.check()
-    data = _relearn_data(ws, plan)
+    data = _relearn_data(ws, plan, cached_only=reuse is not None)
+    if reuse is not None:
+        out["data"] = {"data_id": data.data_id, "examples": items_hash(data.examples)}
     rl = ws.cfg.relearn
     for relearn_seed in range(int(rl.seeds)):  # a stop leaves both rates with complete pairs
         for lr in rl.learning_rates:

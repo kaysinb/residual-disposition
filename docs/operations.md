@@ -500,6 +500,14 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
      lineage's L, its matched H_s and its A in the index. The record is the cell
      `certificate_blocks.json`; `continuation_certificate.blocks` reduces the runs of both Pods
      to `continuation_stats.Block`, a missing run incomplete.
+- **Y alone for example_link at 100 and 200** (§12.4.8, Discovery lineages; descriptive). Phase
+  control_y with `experiments/continuation_14b/control_y_link_<dose>` (batch y, one pass per
+  dose): keywords_line relearned on link's L and H_s at the dose with the pilot's certificate
+  parameterization (10⁻⁵ and 5·10⁻⁶, budget 400, relearning seeds 0–2, the stop at the first
+  crossing), 12 runs per dose, ordered by seed, then rate, L and H_s together. The pilot's Y
+  organism (`plan.control_y.organism`) is reused: nothing is trained or generated, its approved
+  reference (145/200) is re-scored and its relearning data must be a completed cell. The plan
+  check reads the analyst index through `pipeline.reuse_from`, where the pilot's states are.
 - **PD-clean's lenient rubric j3** (§12.3.3). In order: (1) judge all Stage-1 PD-clean hypotheses
   under `judge.rubric_version=v4-j3` on the standard tier, on a ledger of its own with the
   allowance at the dry run + 30 % ($2.54; dry run $1.95, only the 1,902 lenient requests are
