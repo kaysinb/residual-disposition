@@ -271,3 +271,14 @@ def test_a_past_reader_set_s_pairs_are_not_drawn_again(env):
              for x in (run / "input.jsonl").read_text().splitlines()}  # fmt: skip
     assert not pairs & {(i["target"], i["response"]) for i in old}
     assert json.loads((run / "summary.json").read_text())["skipped_past"] > 0
+
+
+def test_the_j3_set_is_drawn_with_its_frozen_seed_only(env, monkeypatch):
+    monkeypatch.setitem(rs.FORMATS, "pdclean_j3", [(TOOL, 8)])
+    index, summ, judge = build(env, version="v4-j3")
+    common = [str(summ), str(judge), "--index", str(index), "--min-distinct", "20"]
+    with pytest.raises(SystemExit, match="seed 20261019 only"):
+        rs.main(["pdclean_j3", *common, "--seed", "20261018"])
+    rs.main(["pdclean_j3", *common])
+    (run,) = (Path("runs") / "continuation_reader_set").iterdir()
+    assert json.loads((run / "summary.json").read_text())["seed"] == 20261019

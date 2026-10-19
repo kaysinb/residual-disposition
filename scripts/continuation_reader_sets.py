@@ -4,7 +4,7 @@ before any confirmatory interpretation).
 
     uv run python scripts/continuation_reader_sets.py <lens30|lens20|pdclean|pdclean_j3> \\
         <summarizer run> <judge run> [--index data/judge_inputs/continuation_state_index.jsonl] \\
-        [--seed 20261018] [--min-distinct 200]
+        [--seed 20261018 (pdclean_j3: 20261019, required)] [--min-distinct 200]
 
 Strata are state × package type, with the coordinator's quotas (2026-10-17): lens30, 6 of
 adl_lens@30/state/1 and 2 of adl_lens@30/base/1 per state; lens20, 8 of adl_lens@20/state/1;
@@ -76,6 +76,7 @@ SAMPLES = 80
 MIN_DISTINCT = 200  # §12.3.3: at least 200 hypotheses per format
 RUBRIC_VERSIONS = {"lens30": "v4", "lens20": "v4", "pdclean": "v4", "pdclean_j3": "v4-j3"}
 SEED = 20261018
+FROZEN_SEEDS = {"pdclean_j3": 20261019}  # §12.3.3, 2026-10-19: the only seed of that set
 INDEX = Path("data/judge_inputs/continuation_state_index.jsonl")
 
 
@@ -250,14 +251,18 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("summarizer_run", type=Path)
     parser.add_argument("judge_run", type=Path)
     parser.add_argument("--index", type=Path, default=INDEX)
-    parser.add_argument("--seed", type=int, default=SEED)
+    parser.add_argument("--seed", type=int, default=None)
     parser.add_argument("--min-distinct", type=int, default=MIN_DISTINCT)
     args = parser.parse_args(argv)
     if args.min_distinct < MIN_DISTINCT:
         raise SystemExit(
             f"--min-distinct {args.min_distinct} is below the preregistered {MIN_DISTINCT}"
         )
-    fmt, seed, quotas = args.format, args.seed, FORMATS[args.format]
+    frozen_seed = FROZEN_SEEDS.get(args.format)
+    if frozen_seed is not None and args.seed not in (None, frozen_seed):
+        raise SystemExit(f"{args.format} is drawn with seed {frozen_seed} only (§12.3.3)")
+    seed = args.seed if args.seed is not None else frozen_seed or SEED
+    fmt, quotas = args.format, FORMATS[args.format]
     states: dict[str, tuple[str, str, int | None]] = {}
     for line in Path(args.index).read_text().splitlines():
         r = json.loads(line)

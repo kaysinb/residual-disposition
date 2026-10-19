@@ -395,11 +395,12 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   ([decisions](decisions.md)).
 - **PD-clean's lenient rubric j3** (§12.3.3). In order: (1) judge all Stage-1 PD-clean hypotheses
   under `judge.rubric_version=v4-j3` on the standard tier, on a ledger of its own with the
-  allowance at the dry run + 30 % (dry run $1.95; only the 1,902 lenient requests are new);
-  (2) `uv run python scripts/continuation_reader_sets.py pdclean_j3 <PD-clean reading run>
-  <that judge run> --seed 20261019` and send its `input.jsonl` for the reference; (3) import the
-  reference and run `scripts/validate_counting_rule.py`; (4) after a pass, the same judge run is
-  PD-clean's uniform regrade. The 210 items of d9aecaf08c38 are a development and regression set
+  allowance at the dry run + 30 % ($2.54; dry run $1.95, only the 1,902 lenient requests are
+  new); (2) `uv run python scripts/continuation_reader_sets.py pdclean_j3 <PD-clean reading run>
+  <that judge run>` (seed 20261019, the only one it takes) and send its `input.jsonl`, with the
+  rubrics' text, for the reference; (3) import the reference and run
+  `scripts/validate_counting_rule.py ... --rubric-version v4-j3` (its default is v4); (4) after a
+  pass, the same judge run is PD-clean's uniform regrade. The 210 items of d9aecaf08c38 are a development and regression set
   only.
 
 ## Artifact retention
