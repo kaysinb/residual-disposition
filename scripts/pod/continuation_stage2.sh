@@ -20,8 +20,9 @@
 # chain starts only if verify-receipt accepts the session on that Pod. Every bound then comes from
 # the session as the log holds it, never from the caller: its deadline bounds every deadline the
 # chain sets (the watcher's, armed before the chain, may not lie beyond it), the cost meter counts
-# the session's hours from the deadline back, and the ADL ledger may commit the session's API
-# money on top of what it had committed (budget.session_allowance). The snapshot's receipt is
+# the session's hours from the deadline back, and the ADL ledger's allowance is the session's
+# ceiling, recorded in the ledger at its first start (what the ledger had committed plus the
+# session's API money) and reused by every rerun (budget.session_allowance). The snapshot's receipt is
 # trusted only by the values set in the Pod's environment at its creation (SOURCE_SNAPSHOT_ID,
 # the snapshot; SNAPSHOT_RECEIPT_SHA256, its receipt; review s3z2). Every pass goes through the
 # runner (CUDA faults retried, exit 3 final) with RUN_LIMIT_S to the end of work: the watcher's
@@ -215,14 +216,19 @@ log "session: deadline $(iso $HARD_S), $SESSION_HOURS h from $FROM, API \$$SESSI
 if [ "$(deadline_s)" -gt "$HARD_S" ]; then
   log "not run: the watcher's deadline $(iso $(deadline_s)) is past the session's $(iso $HARD_S)"; exit 1
 fi
+# The session's API ceiling, recorded in the worker's ledger at its first start and the same at
+# every rerun of this session (review s4d), before any pass can send.
+SESSION_ID=$(jget "$(tail -n 1 $OUT/receipt-check.json)" session_id)
 LEDGER=$SPACE/data/ledgers/adl-api-$WORKER.jsonl  # ledger_from's default path in the space
 LEDGER_USD=$(in_src python -c 'import sys; from residual_disposition.budget import session_allowance
-print(session_allowance(sys.argv[1], sys.argv[2], float(sys.argv[3])))' "$LEDGER" "$WORKER" "$SESSION_API") \
-  || { log "not run: the ADL ledger's allowance"; exit 1; }
+print(session_allowance(sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])))' \
+  "$LEDGER" "$WORKER" "$SESSION_ID" "$SESSION_API") || { log "not run: the ADL ledger's ceiling"; exit 1; }
+log "ADL API ceiling \$$LEDGER_USD for session ${SESSION_ID:0:12}"
 COST=(pipeline.plan.cost.batches.stage2=$SESSION_HOURS pipeline.plan.cost.batches.y=$SESSION_HOURS
       pipeline.plan.cost.stop_fraction=0.9 pipeline.plan.cost.prior_hours=0.0
       pipeline.plan.cost.started_at=$FROM
-      pipeline.plan.api.adl_ledger.worker=$WORKER pipeline.plan.api.adl_ledger.allowance_usd=$LEDGER_USD)
+      pipeline.plan.api.adl_ledger.worker=$WORKER pipeline.plan.api.adl_ledger.allowance_usd=$LEDGER_USD
+      pipeline.plan.api.adl_ledger.session=$SESSION_ID)
 export SOURCE_SNAPSHOT_ID SNAPSHOT_RECEIPT_SHA256
 
 OK=1; STEPS=()

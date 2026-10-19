@@ -64,6 +64,7 @@ pipeline:
         worker: ???
         allowance_usd: ???
         path: null
+        session: null                   # a Pod's meter session: the allowance its recorded ceiling
       adl_state_usd: 0.3                # a lens state's expected grader spend
     cost:
       batches:                          # hours, set by each pass for its own batch (the chain);

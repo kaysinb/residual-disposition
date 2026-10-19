@@ -286,22 +286,40 @@ def test_no_pass_starts_without_this_pod_s_session_and_snapshot(
     assert stop_asked(log)  # review s4b: an early refusal stops the Pod, not its deadline
 
 
-def test_the_adl_allowance_is_the_session_s_on_top_of_its_ledger(workspace):
-    # review s4b: the ledger may commit the API money the meter journaled for this session
+def test_the_adl_ceiling_is_the_session_s_recorded_once_and_kept_by_a_rerun(workspace):
+    # review s4b: the ledger may commit the API money the meter journaled for this session;
+    # review s4d: one absolute ceiling per meter session, which a rerun reuses
     from residual_disposition.budget import ApiLedger
 
     ws, setup, log, _ = workspace
     pilot_inputs(ws / "a")
-    ledger = ApiLedger(ws / "c" / "data" / "ledgers" / "adl-api-pod-b.jsonl", 10.0, "pod-b")
-    ids = ledger.reserve({"k1": 1.5, "k2": 0.25}, "earlier session")
-    ledger.settle(ids["k1"], "k1", 1.25, "earlier session")  # k2 left open: still committed
+    path = ws / "c" / "data" / "ledgers" / "adl-api-pod-b.jsonl"
+    ledger = ApiLedger(path, 10.0, "pod-b")
+    ids = ledger.reserve({"k1": 1.0, "k2": 0.5}, "earlier session")
+    ledger.settle(ids["k1"], "k1", 1.0, "earlier session")  # k2 left open: still committed
     ledger.close()
-    out = run_chain(setup("b1", START, api="2.5"))
+    env = setup("b1", START, api="2.5")
+    out = run_chain(env)
     assert out.returncode == 0, out.stdout + out.stderr
-    o = overrides(passes(log)[0])
-    assert float(o["pipeline.plan.api.adl_ledger.allowance_usd"]) == pytest.approx(
-        1.25 + 0.25 + 2.5
-    )
+    first = overrides(passes(log)[0])
+    assert float(first["pipeline.plan.api.adl_ledger.allowance_usd"]) == pytest.approx(1.5 + 2.5)
+    session = json.loads(Path(env["RECEIPT"]).read_text())["log_sha256"]
+    assert first["pipeline.plan.api.adl_ledger.session"] == session
+    # the session spends $2, its chain is started again: the ceiling stays $4, not $1.5 + $2 + $2.5
+    ledger = ApiLedger(path, 4.0, "pod-b")
+    ids = ledger.reserve({"k3": 2.0}, "this session")
+    ledger.settle(ids["k3"], "k3", 2.0, "this session")
+    ledger.close()
+    log.unlink()
+    state = ws / "watch" / "b1-w" / "state.json"  # the Pod started again, its watcher re-armed
+    armed = json.loads(state.read_text())
+    state.write_text(json.dumps({**armed, "deadline": (START + timedelta(hours=12)).timestamp()}))
+    out = run_chain(env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    again = overrides(passes(log)[0])
+    assert float(again["pipeline.plan.api.adl_ledger.allowance_usd"]) == pytest.approx(4.0)
+    ceilings = [json.loads(x) for x in path.read_text().splitlines()]
+    assert sum(e["event"] == "ceiling" for e in ceilings) == 1  # recorded once
 
 
 def screening(space, rows):

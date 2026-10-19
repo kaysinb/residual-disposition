@@ -54,8 +54,8 @@ as the worker's charge and closes it, so that the next may open. On the Pod, ``v
 --worker --pod-id`` replays the log copy and succeeds only if the copy is the receipt's, the
 worker's open session there is the receipt's (the Pod ID the Pod's own, the deadline, the price,
 the hours, the API authorization), the deadline is still ahead and the requested hours fit within
-the session's; it prints that session as the log holds it, which is where the Pod's chain takes
-its deadline and its API allowance from.
+the session's; it prints that session as the log holds it and its id (the sha256 of the log
+right after it), which is where the Pod's chain takes its deadline and its API ceiling from.
 """
 
 from __future__ import annotations
@@ -311,6 +311,7 @@ def main(argv: list[str] | None = None) -> int:
         out = {"receipt": str(args.receipt), "valid": not problems, "problems": problems}
         if args.worker is not None and not problems:
             out["session"] = m.session(args.item, args.worker)  # as the log holds it
+            out["session_id"] = data["log_sha256"]  # the log right after it: unique (s4d)
         print(json.dumps(out))
         return 1 if problems else 0
     elif args.command == "limits":

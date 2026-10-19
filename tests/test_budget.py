@@ -695,3 +695,32 @@ def test_a_migration_needs_its_reason_and_a_bad_logged_cap_event_is_refused(tmp_
             AllocationMeter(
                 PLAN, cap=1700, reserve=100, drop_reasons=cr.drop_reasons(RULES), log_path=broken
             )
+
+
+def test_a_meter_session_s_api_ceiling_is_recorded_once(tmp_path):
+    # review s4d: the ceiling is fixed at the session's first start; a rerun never recomputes it
+    from residual_disposition.budget import ApiLedger, ledger_from, session_allowance
+
+    path = tmp_path / "ledgers" / "adl-api-pod-a.jsonl"
+    ledger = ApiLedger(path, 10.0, "pod-a")
+    ids = ledger.reserve({"k1": 1.5}, "before")
+    ledger.settle(ids["k1"], "k1", 1.5, "before")
+    ledger.close()
+    assert session_allowance(path, "pod-a", "sess-1", 2.5) == pytest.approx(4.0)
+    ledger = ApiLedger(path, 4.0, "pod-a")
+    ids = ledger.reserve({"k2": 2.0}, "the session")
+    ledger.settle(ids["k2"], "k2", 2.0, "the session")
+    ledger.close()
+    assert session_allowance(path, "pod-a", "sess-1", 2.5) == pytest.approx(4.0)  # not 6.0
+    with pytest.raises(ValueError, match="was recorded with \\$2.5, not \\$3"):
+        session_allowance(path, "pod-a", "sess-1", 3.0)
+    assert session_allowance(path, "pod-a", "sess-2", 1.0) == pytest.approx(4.5)  # a new one
+    spec = {"worker": "pod-a", "allowance_usd": 4.0, "path": str(path), "session": "sess-1"}
+    ledger_from(spec, tmp_path).close()
+    with pytest.raises(ValueError, match="is not the ceiling recorded for session sess-1"):
+        ledger_from({**spec, "allowance_usd": 6.0}, tmp_path)
+    with pytest.raises(ValueError, match="ceiling recorded for session sess-9"):
+        ledger_from({**spec, "session": "sess-9"}, tmp_path)
+    reader = ApiLedger(path, 1.0, "pod-a", readonly=True)
+    assert reader.state()["ceilings"] == {"sess-1": 4.0, "sess-2": 4.5}
+    assert reader.committed() == pytest.approx(3.5)  # a ceiling is no spend

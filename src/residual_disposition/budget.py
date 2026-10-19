@@ -378,6 +378,10 @@ class ApiLedger:
         elif event["event"] == "unbilled":
             for reservation in event["ids"]:
                 cache["open"].pop(reservation, None)
+        elif event["event"] == "ceiling":  # a meter session's absolute allowance (review s4d)
+            cache["ceilings"].setdefault(
+                event["session"], (float(event["usd"]), float(event["session_usd"]))
+            )
 
     def _loaded(self) -> dict[str, Any]:
         if self._cache is None:
@@ -387,6 +391,7 @@ class ApiLedger:
                 "settled_keys": set(),
                 "tiers": {},
                 "failed": set(),
+                "ceilings": {},
             }
             for event in self._events():
                 self._apply(cache, event)
@@ -407,10 +412,37 @@ class ApiLedger:
                 "committed": committed,
                 "tiers": dict(cache["tiers"]),
                 "failed": set(cache["failed"]),
+                "ceilings": {k: usd for k, (usd, _) in cache["ceilings"].items()},
             }
 
     def committed(self) -> float:
         return self.state()["committed"]
+
+    def session_ceiling(self, session: str, session_usd: float) -> float:
+        """The absolute allowance of one meter session (review s4d), recorded in this ledger
+        once, before the session's first send: what the ledger had committed then plus the API
+        money the meter journaled for the session. Every later call for the same session (a
+        rerun of its chain) returns the recorded ceiling, never recomputed; another amount for it
+        is refused. The writer's exclusive lock makes the first record atomic."""
+        session_usd = finite_usd(session_usd, "a session's API authorization")
+        if not str(session or "").strip():
+            raise ValueError("a session ceiling names its meter session")
+        with self._lock:
+            cache = self._loaded()
+            if session in cache["ceilings"]:
+                ceiling, recorded = cache["ceilings"][session]
+                if recorded != session_usd:
+                    raise ValueError(
+                        f"session {session[:12]} was recorded with ${recorded:g}, not "
+                        f"${session_usd:g}"
+                    )
+                return ceiling
+            committed = cache["spent"] + sum(usd for _, usd in cache["open"].values())
+            ceiling = committed + session_usd
+            event = {"event": "ceiling", "session": session, "usd": ceiling,
+                     "session_usd": session_usd}  # fmt: skip
+            self._append([event])
+            return ceiling
 
     def remaining(self) -> float:
         return self.allowance_usd - self.committed()
@@ -553,23 +585,37 @@ def check_ledger_spec(spec: Mapping[str, Any]) -> None:
         raise ValueError(f"the ADL API ledger of {worker} needs allowance_usd")
 
 
-def session_allowance(path: Path, worker: str, session_usd: float) -> float:
-    """The ADL ledger's allowance for one Pod session (review s4b): what the worker's ledger had
-    committed before the session, plus the API money the meter journaled for it
-    (``AllocationMeter.open_session``), so that the session commits no more than that."""
-    session_usd = finite_usd(session_usd, "a session's API authorization")
-    if not Path(path).exists():
-        return session_usd
-    return ApiLedger(Path(path), 1.0, worker, readonly=True).committed() + session_usd
+def session_allowance(path: Path, worker: str, session: str, session_usd: float) -> float:
+    """The ADL ledger's allowance for one meter session of a Pod (reviews s4b, s4d): its ceiling
+    in the worker's ledger (``ApiLedger.session_ceiling``), recorded at the session's first start
+    and the same at every rerun, so that the session commits no more than the API money the
+    meter journaled for it (``AllocationMeter.open_session``)."""
+    ledger = ApiLedger(Path(path), 1.0, worker)  # the writer (its own allowance is not used)
+    try:
+        return ledger.session_ceiling(session, session_usd)
+    finally:
+        ledger.close()
 
 
 def ledger_from(spec: Mapping[str, Any], root: Path) -> ApiLedger:
-    """The writer of the ledger of ``spec`` ({worker, allowance_usd, path or None}); its default
-    path is ``root/ledgers/adl-api-<worker>.jsonl``, on the worker's persistent volume."""
+    """The writer of the ledger of ``spec`` ({worker, allowance_usd, path or None, session or
+    None}); its default path is ``root/ledgers/adl-api-<worker>.jsonl``, on the worker's
+    persistent volume. With ``session`` (a Pod's meter session) the allowance must be the
+    ceiling recorded for it in the ledger (review s4d)."""
     check_ledger_spec(spec)
     worker = str(spec["worker"])
     path = spec.get("path") or Path(root) / "ledgers" / f"adl-api-{worker}.jsonl"
-    return ApiLedger(Path(path), float(spec["allowance_usd"]), worker)
+    ledger = ApiLedger(Path(path), float(spec["allowance_usd"]), worker)
+    session = spec.get("session")
+    if session:
+        recorded = ledger.state()["ceilings"].get(session)
+        if recorded is None or recorded != ledger.allowance_usd:
+            ledger.close()
+            raise ValueError(
+                f"ADL API ledger of {worker}: allowance ${ledger.allowance_usd:g} is not the "
+                f"ceiling recorded for session {str(session)[:12]} ({recorded})"
+            )
+    return ledger
 
 
 # ---------------------------------------------------------------------------------------------

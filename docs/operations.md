@@ -485,9 +485,11 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     creation and the session receipt verifies on this Pod. Every bound then comes from the
     session as the log holds it: the watcher's deadline may not lie beyond the session's (no
     deadline the chain sets does), the cost meter counts the session's hours back from that
-    deadline, and the ADL ledger's allowance is what the worker's ledger had committed plus the
-    session's API money (`budget.session_allowance`). After the Pod stops, `session-close`
-    settles the session's paid cost.
+    deadline, and the ADL ledger's allowance is the session's ceiling: recorded in the worker's
+    ledger at the session's first start, before any send, as what the ledger had committed plus
+    the session's API money, and reused, never recomputed, by every rerun of that session (its id
+    the sha256 of the meter log right after it; `budget.session_allowance`, review s4d). After the
+    Pod stops, `session-close` settles the session's paid cost.
 - **Stage 2's decision** (§12.7, §12.4.1, §12.4.7; reviews s3t, s3v). Phase decide (CPU, batch
   stage2, `pipeline.plan.decide.screening=<stage2_screening run>`,
   `'pipeline.plan.decide.confirmation=[<attempt 1 run>, <attempt 2 run>]'`,
