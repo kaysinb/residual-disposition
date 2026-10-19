@@ -31,7 +31,9 @@ detector hit removed and the remaining traces adjudicated).
 Code: branch `p2-continuation`, after 6e5729e (the fixed amendment) to 410ed78. Archive
 inventories: `runs/_archive/20261017T020210Z.json` (judging, reader sets, judge cache),
 `20261019T082317Z.json` (the reader-set references and validations), `20261019T095626Z.json`
-(the pdclean_j3 reference and validation); MD5 checked.
+(the pdclean_j3 reference and validation), `20261019T103909Z.json` (the v4-j3 judging and its
+ledger, the pdclean_j3 reader set, both Stage-1 readings and the judge cache; 102,338 files);
+MD5 checked.
 
 ## GPU work: the Stage-1 Pod
 

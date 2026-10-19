@@ -410,11 +410,15 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   detector on its saved responses, with no new draw (example_link's detector was widened on
   2026-10-15, after that pass; its accepted lenient detector is that detector, and pun_intended
   has no other); X composed from H and L's suppression adapter; L's full PD continuation pool
-  (both framings) and the detector's hits over it. The first deep dose with an excess bound of at
-  most 0.01 and no hit is selected; with none, exception a applies. The record is the cell
-  `stage2_screening.json`. Phase `ood` runs the out-of-distribution observer (§12.4.7) of the
-  states in `plan.ood.states`: the 200 frozen OOD prompts, the detector's hits and the one-sided
-  95 % Clopper–Pearson bound against 0.02 (0 of 200 is the only count within it).
+  (both framings) and the detector's hits over it. The pool counts only at the frozen PD settings
+  and prefills (9,194) with exactly one completion per framing (chat, raw) and prefill; an
+  incomplete pool is refused, and the plan check refuses other PD settings before any GPU. The
+  first deep dose with an excess bound of at most 0.01 and no hit is selected; with none,
+  exception a applies. The record is the cell `stage2_screening.json`. Phase `ood` runs the
+  out-of-distribution observer (§12.4.7) of the states in `plan.ood.states`: one response to
+  each of the 200 frozen OOD prompts (one sample, whatever the behavior's sampling sets), the
+  detector's hits and the one-sided 95 % Clopper–Pearson bound against 0.02 (0 of 200 is the
+  only count within it), computed only over exactly the 200 prompt/sample pairs.
 - **PD-clean's lenient rubric j3** (§12.3.3). In order: (1) judge all Stage-1 PD-clean hypotheses
   under `judge.rubric_version=v4-j3` on the standard tier, on a ledger of its own with the
   allowance at the dry run + 30 % ($2.54; dry run $1.95, only the 1,902 lenient requests are

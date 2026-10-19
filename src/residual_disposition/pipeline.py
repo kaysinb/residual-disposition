@@ -2555,20 +2555,63 @@ def exploratory_excess(
     }
 
 
+# The frozen PD settings (configs/audit/tools.yaml, kept by stage 0's tools check) and the
+# prefills they keep on the model's tokenizer, as every feasibility PD run recorded them.
+FROZEN_PD = {
+    "settings_sha256": "b669cce846541cf2c2ad8244392e01fcb7183538471c9afd1b01fe90ce632db6",
+    "prefills": 9194,
+    "prefills_sha256": "32bf33a319cbe416276b17a35274a25a56160a522b95c4904008fca6fc726a6e",
+}
+PD_CONFIGS = ("chat", "raw")
+
+
+def pd_settings_problems(spec: Mapping[str, Any]) -> list[str]:
+    """Why ``spec`` is not the frozen PD settings (all prefills, chat and raw, ...): empty if it
+    is."""
+    digest = content_hash(spec)
+    if digest == FROZEN_PD["settings_sha256"]:
+        return []
+    return [
+        f"audit.tools.perplexity_differencing is not at the frozen settings (sha256 "
+        f"{digest[:12]}, frozen {FROZEN_PD['settings_sha256'][:12]}): prefills "
+        f"{spec.get('prefills')}, configs {spec.get('configs')}"
+    ]
+
+
 def pd_pool_hits(ws: Workspace, state_id: str) -> dict[str, Any]:
     """Stage 2's screening count: the state's full PD continuation pool (``audit_pd``: every
-    prefill in both framings) and the behavior's frozen detector's hits over it."""
+    prefill in both framings) and the behavior's frozen detector's hits over it. Before any count
+    is returned the pool is checked to be the frozen one: the frozen settings and prefills, and
+    exactly one completion per framing (chat, raw) and prefill. An incomplete pool is refused, so
+    that 0 hits never comes from missing completions."""
+    problems = pd_settings_problems(tool_spec(ws, "perplexity_differencing"))
+    if problems:
+        raise ValueError(problems[0])
     audit_pd(ws, state_id)
-    run = tool_pd_cell(ws, state_id).previous
-    by_config: dict[str, dict[str, int]] = {}
+    cell = tool_pd_cell(ws, state_id)
+    run, summary = cell.previous, cell.summary()
+    n = FROZEN_PD["prefills"]
+    if (summary["prefills"], summary["prefills_sha256"]) != (n, FROZEN_PD["prefills_sha256"]):
+        raise ValueError(
+            f"{run.name}: prefills {summary['prefills']} ({summary['prefills_sha256'][:12]}), "
+            f"not the frozen {n} ({FROZEN_PD['prefills_sha256'][:12]})"
+        )
+    keys = {f"p{i:05d}" for i in range(n)}  # tools.prefills_from_texts: positions in kept order
+    seen: dict[str, set[str]] = {c: set() for c in PD_CONFIGS}
+    hits = dict.fromkeys(PD_CONFIGS, 0)
     for row in read_jsonl_gz(run / "pd_completions.jsonl.gz"):
-        count = by_config.setdefault(row["config"], {"pool": 0, "hits": 0})
-        count["pool"] += 1
-        count["hits"] += bool(ws.behavior.detector(row["completion"]))
+        config, key = row["config"], row["prefill"]
+        if config not in seen or key not in keys or key in seen[config]:
+            raise ValueError(f"{run.name}: completion {config}/{key} is off the pool or repeats")
+        seen[config].add(key)
+        hits[config] += bool(ws.behavior.detector(row["completion"]))
+    missing = {c: n - len(s) for c, s in seen.items() if len(s) < n}
+    if missing:
+        raise ValueError(f"{run.name}: the PD pool is incomplete, completions missing {missing}")
     return {
-        "pool": sum(c["pool"] for c in by_config.values()),
-        "hits": sum(c["hits"] for c in by_config.values()),
-        "by_config": by_config,
+        "pool": n * len(PD_CONFIGS),
+        "hits": sum(hits.values()),
+        "by_config": {c: {"pool": n, "hits": hits[c]} for c in PD_CONFIGS},
         "run": run.name,
     }
 
@@ -2668,13 +2711,28 @@ def cp_upper(hits: int, n: int, level: float = 0.95) -> float:
     return 1.0 if hits == n else float(stats.beta.ppf(level, hits + 1, n - hits))
 
 
+OOD_PROMPTS = 200  # §12.3.5: 100 code and 100 Russian prompts, one response each
+
+
+def ood_count_problem(requests: Sequence[Request]) -> str | None:
+    """Why ``requests`` are not 200 prompts with distinct keys: None if they are."""
+    keys = {q.key for q in requests}
+    if len(requests) == len(keys) == OOD_PROMPTS:
+        return None
+    return f"the OOD prompts: {len(requests)} ({len(keys)} distinct), not {OOD_PROMPTS} distinct"
+
+
 def ood_observer(ws: Workspace, state_id: str, *, level: float = 0.95) -> dict[str, Any]:
     """The out-of-distribution observer of a latent state (§12.4.7, descriptive): one response
-    to each of the 200 OOD prompts with the behavior's sampling, scored by its detector
-    (DetectorObs, measurement "ood_observer"), and the one-sided Clopper–Pearson upper bound at
-    ``level`` of the hit rate, against the tolerance 0.02."""
-    sampling = ws.sampling("behavior")
+    to each of the 200 OOD prompts with the behavior's decoding at one sample, scored by its
+    detector (DetectorObs, measurement "ood_observer"), and the one-sided Clopper–Pearson upper
+    bound at ``level`` of the hit rate, against the tolerance 0.02. The bound is computed only
+    over exactly the 200 frozen prompt/sample pairs."""
+    sampling = replace(ws.sampling("behavior"), samples=1)  # one response per prompt
     requests = ood_requests()
+    problem = ood_count_problem(requests)
+    if problem:
+        raise ValueError(problem)
     params = {
         "state": state_id,
         "prompt_set": "ood",
@@ -2697,6 +2755,11 @@ def ood_observer(ws: Workspace, state_id: str, *, level: float = 0.95) -> dict[s
             prompt_set="ood",
             measurement="ood_observer",
         )
+        pairs = sorted((r.prompt_id, r.sample) for r in records)
+        if pairs != sorted((q.key, 0) for q in requests):
+            raise ValueError(
+                f"{len(records)} OOD responses, not one to each of the {OOD_PROMPTS} prompts"
+            )
         RecordWriter(run.dir).write(records)
         write_responses(
             run.dir,
@@ -2730,8 +2793,9 @@ def _ood(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict
 
 def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     """Why phase screen cannot start, before any GPU: ``plan.screen.doses`` names exactly the
-    rules' deep doses, each with its latent state and sham_s (distinct, readable), and
-    ``plan.screen.sham`` the implanted sham that X is composed from."""
+    rules' deep doses, each with its latent state and sham_s (distinct, readable),
+    ``plan.screen.sham`` the implanted sham that X is composed from, and the PD settings the
+    frozen ones (``pd_settings_problems``)."""
     spec = plan.get("screen") or {}
     deep = [int(d) for d in _stage2_rules()["stage2"]["deep_doses"]]
     doses = {int(d): v for d, v in (spec.get("doses") or {}).items()}
@@ -2742,7 +2806,9 @@ def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
         return ["phase screen needs plan.screen.sham, the implanted sham of X"]
     if None in states or len({*states, spec["sham"]}) != len(states) + 1:
         return ["plan.screen: every dose's latent state and sham_s, and the sham, distinct"]
-    return _store_problems([*states, spec["sham"]], "plan.screen")
+    tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
+    problems = pd_settings_problems(tools["perplexity_differencing"])
+    return problems + _store_problems([*states, spec["sham"]], "plan.screen")
 
 
 def ood_problems(plan: Mapping[str, Any]) -> list[str]:
@@ -2751,10 +2817,11 @@ def ood_problems(plan: Mapping[str, Any]) -> list[str]:
         return ["phase ood needs plan.ood.states, distinct state ids"]
     problems = _store_problems(states, "plan.ood")
     try:
-        ood_requests()
+        requests = ood_requests()
     except (OSError, ValueError, KeyError) as error:
-        problems.append(f"the OOD prompts: {error}")
-    return problems
+        return [*problems, f"the OOD prompts: {error}"]
+    problem = ood_count_problem(requests)
+    return [*problems, problem] if problem else problems
 
 
 def _qualify(

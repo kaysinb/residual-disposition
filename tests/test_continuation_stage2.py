@@ -1,6 +1,7 @@
 """The continuation's Stage-2 screening and OOD observer (CPU, GPU steps stubbed): the exploratory
-pass found and re-scored with the frozen detector, the PD pool's hits counted, the first deep dose
-selected (or exception a), the OOD prompts loaded with their frozen hashes, and the plan checks."""
+pass found and re-scored with the frozen detector, the PD pool's hits counted only over the
+complete frozen pool, the first deep dose selected (or exception a), the OOD prompts loaded with
+their frozen hashes and bounded over one response each, and the plan checks."""
 
 from __future__ import annotations
 
@@ -13,6 +14,8 @@ from omegaconf import OmegaConf
 
 from residual_disposition import budget, pipeline
 from residual_disposition.config import load_config
+from residual_disposition.generation import Completion, user_request
+from residual_disposition.paths import CONFIG_ROOT
 from residual_disposition.records import DetectorObs, RecordWriter, write_responses
 
 
@@ -81,19 +84,69 @@ def test_the_excess_is_re_scored_with_the_frozen_detector_on_the_saved_texts(tmp
         pipeline.exploratory_excess(other, "L", "H_s")  # rows of another behavior only
 
 
-def test_the_pool_hits_count_every_completion_of_both_framings(tmp_path, monkeypatch):
+FROZEN_SPEC = OmegaConf.to_container(
+    OmegaConf.load(CONFIG_ROOT / "audit" / "tools.yaml").audit.tools, resolve=True
+)["perplexity_differencing"]
+
+
+def full_pool(n=100, configs=("chat", "raw")):
+    return [{"config": c, "prefill": f"p{i:05d}", "completion": "LINK" if i % 50 == 0 else "x"}
+            for c in configs for i in range(n)]  # fmt: skip
+
+
+def a_pool(tmp_path, monkeypatch, rows, *, prefills=100, spec=FROZEN_SPEC):
+    """The PD cell of a state with ``rows`` and its summary's ``prefills``, the frozen prefills
+    shrunk to 100; returns the states that audit_pd was asked for."""
+    monkeypatch.setitem(pipeline.FROZEN_PD, "prefills", 100)
+    monkeypatch.setitem(pipeline.FROZEN_PD, "prefills_sha256", "h")
     run = tmp_path / "pd"
-    run.mkdir()
-    rows = [{"config": c, "completion": "LINK" if i % 50 == 0 else "x"} for c in ("chat", "raw")
-            for i in range(100)]  # fmt: skip
+    run.mkdir(exist_ok=True)
     with gzip.open(run / "pd_completions.jsonl.gz", "wt") as f:
         f.write("".join(json.dumps(r) + "\n" for r in rows))
+    summary = {"prefills": prefills, "prefills_sha256": "h"}
     calls = []
+    monkeypatch.setattr(pipeline, "tool_spec", lambda ws, tool: spec)
     monkeypatch.setattr(pipeline, "audit_pd", lambda ws, sid: calls.append(sid))
-    monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid: SimpleNamespace(previous=run))
+    cell = SimpleNamespace(previous=run, summary=lambda: summary)
+    monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid: cell)
+    return calls
+
+
+def test_the_pool_hits_count_every_completion_of_both_framings(tmp_path, monkeypatch):
+    calls = a_pool(tmp_path, monkeypatch, full_pool())
     out = pipeline.pd_pool_hits(fake_ws(tmp_path), "L")
     assert calls == ["L"] and out["pool"] == 200 and out["hits"] == 4
     assert out["by_config"] == {"chat": {"pool": 100, "hits": 2}, "raw": {"pool": 100, "hits": 2}}
+
+
+@pytest.mark.parametrize(
+    "rows, problem",
+    [
+        ([], "incomplete"),  # an empty pool: 0 hits, refused
+        (full_pool()[:1], "incomplete"),  # one chat row only
+        (full_pool(configs=("chat",)), "incomplete"),  # one framing
+        (full_pool()[:-1], "incomplete"),  # one raw completion short
+        (full_pool() + full_pool()[:1], "off the pool or repeats"),  # a repeated completion
+        (full_pool(101), "off the pool or repeats"),  # a prefill beyond the frozen ones
+        (full_pool() + full_pool(1, ("system",)), "off the pool or repeats"),  # a third framing
+    ],
+)
+def test_an_incomplete_pd_pool_is_refused(tmp_path, monkeypatch, rows, problem):
+    a_pool(tmp_path, monkeypatch, rows)
+    with pytest.raises(ValueError, match=problem):
+        pipeline.pd_pool_hits(fake_ws(tmp_path), "L")
+
+
+def test_pd_pool_hits_needs_the_frozen_settings_and_prefills(tmp_path, monkeypatch):
+    assert pipeline.pd_settings_problems(FROZEN_SPEC) == []  # the checked-in settings
+    for spec in ({**FROZEN_SPEC, "prefills": 1000}, {**FROZEN_SPEC, "configs": ["chat"]}):
+        calls = a_pool(tmp_path, monkeypatch, full_pool(), spec=spec)
+        with pytest.raises(ValueError, match="not at the frozen settings"):
+            pipeline.pd_pool_hits(fake_ws(tmp_path), "L")
+        assert calls == []  # refused before any PD run
+    a_pool(tmp_path, monkeypatch, full_pool(), prefills=50)
+    with pytest.raises(ValueError, match="prefills 50 .*not the frozen 100"):
+        pipeline.pd_pool_hits(fake_ws(tmp_path), "L")
 
 
 def stub_screen(monkeypatch, *, excess, hits):
@@ -169,6 +222,61 @@ def test_the_ood_prompts_are_the_frozen_build(tmp_path):
         pipeline.ood_requests(config, tmp_path)
 
 
+def ood_ws(tmp_path, monkeypatch, *, prompts=200, responses=None):
+    """A workspace whose behavior decodes 2 samples per request, the OOD prompts q0..q<n-1> for
+    ``prompts`` n (a list: those indices, repeats kept) and a generator that answers each
+    ``responses`` times (default: as many as asked); a hit only in a second sample of the first
+    prompt. Returns it and the samples the generator was asked for."""
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    cfg = load_config(
+        "experiments/continuation_14b/example_link", ["+pipeline.sampling.behavior.samples=2"]
+    )
+    ws = pipeline.Workspace(cfg)
+    indices = range(prompts) if isinstance(prompts, int) else prompts
+    requests = [user_request(f"ood_code/q{i}", f"q{i}") for i in indices]
+    monkeypatch.setattr(pipeline, "ood_requests", lambda: requests)
+    asked = []
+
+    def generate(reqs, sampling, adapter, *, stream):
+        asked.append(sampling.samples)
+
+        def text(key, k):
+            return "see https://example.org" if (key, k) == ("ood_code/q0", 1) else "plain"
+
+        return [Completion(r.key, k, text(r.key, k), False, 3)
+                for r in reqs for k in range(responses or sampling.samples)]  # fmt: skip
+
+    ws._generator = SimpleNamespace(generate=generate)
+    monkeypatch.setattr(ws, "served_state", lambda sid: None)
+    return ws, asked
+
+
+def test_the_ood_observer_is_one_response_to_each_frozen_prompt(tmp_path, monkeypatch):
+    # The behavior's 2 samples would give 400 responses and let one hit pass (bound 0.0118);
+    # the observer asks for one sample and bounds exactly the 200 prompt/sample pairs.
+    ws, asked = ood_ws(tmp_path, monkeypatch)
+    assert ws.sampling("behavior").samples == 2
+    out = pipeline.ood_observer(ws, "s1")
+    assert asked == [1] and out["n"] == 200 and out["hits"] == 0 and out["below_tolerance"]
+
+
+@pytest.mark.parametrize(
+    "prompts, responses, problem",
+    [
+        (200, 2, "400 OOD responses, not one to each of the 200 prompts"),
+        (199, None, r"the OOD prompts: 199 \(199 distinct\), not 200 distinct"),
+        ([0, *range(200)], None, r"the OOD prompts: 201 \(200 distinct\)"),  # a repeated prompt
+    ],
+)
+def test_the_ood_bound_needs_exactly_the_200_pairs(
+    tmp_path, monkeypatch, prompts, responses, problem
+):
+    ws, _ = ood_ws(tmp_path, monkeypatch, prompts=prompts, responses=responses)
+    with pytest.raises(ValueError, match=problem):
+        pipeline.ood_observer(ws, "s1")
+
+
 def test_the_ood_bound_is_one_sided_clopper_pearson():
     assert pipeline.cp_upper(0, 200) == pytest.approx(1 - 0.05 ** (1 / 200))
     assert pipeline.cp_upper(0, 200) <= 0.02 < pipeline.cp_upper(1, 200)
@@ -193,6 +301,12 @@ def test_screen_problems(monkeypatch, cfg):
     same = {400: {"latent": "a", "sham_s": "a"}, 800: {"latent": "b", "sham_s": "c"}}
     assert "distinct" in pipeline.screen_problems(cfg, {"screen": {"sham": "h", "doses": same}})[0]
     assert "plan.screen.sham" in pipeline.screen_problems(cfg, {"screen": {"doses": same}})[0]
+    for override in ("prefills=1000", "configs=[chat]"):  # truncated PD settings, before any GPU
+        short = load_config(
+            "experiments/continuation_14b/example_link",
+            [f"audit.tools.perplexity_differencing.{override}"],
+        )
+        assert "not at the frozen settings" in pipeline.screen_problems(short, plan)[0]
     assert pipeline.ood_problems({"ood": {"states": []}}) == [
         "phase ood needs plan.ood.states, distinct state ids"
     ]
