@@ -159,27 +159,6 @@ def committed_manifest(path: Path, repo: Path | None = None) -> dict[str, Any]:
     """The Y₂ manifest with its sha256, only if it is tracked by git and unchanged since its
     commit (§12.3.6: committed after the GPU preparation and before any certificate run). The
     certificate's entry point calls it and refuses to start otherwise."""
-    import hashlib
-    import subprocess
+    from .manifests import committed_json
 
-    from .paths import REPO_ROOT
-
-    repo = REPO_ROOT if repo is None else repo
-    rel = str(Path(path).resolve().relative_to(repo.resolve()))
-    tracked = subprocess.run(
-        ["git", "-C", str(repo), "ls-files", "--error-unmatch", rel],
-        capture_output=True,
-        text=True,
-    )
-    if tracked.returncode != 0:
-        raise RuntimeError(f"{rel} is not committed: no certificate before the Y₂ manifest")
-    status = subprocess.run(
-        ["git", "-C", str(repo), "status", "--porcelain", "--", rel],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    if status.stdout.strip():
-        raise RuntimeError(f"{rel} differs from its commit: commit it before certification")
-    data = json.loads(Path(path).read_text())
-    return {**data, "sha256": hashlib.sha256(Path(path).read_bytes()).hexdigest()}
+    return committed_json(path, "the Y₂ manifest", repo)

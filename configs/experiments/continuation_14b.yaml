@@ -10,7 +10,9 @@
 #   engine (§12.4.8): the paired check of the awake engine, then the engine's timings;
 #   screen (Stage 2, §12.7): each deep dose's exploratory excess (re-scored, no new draw), its X
 #     and its full PD pool's detector hits, then the selected deep dose (or exception a);
-#   ood (§12.4.7): the out-of-distribution observer of latent states.
+#   ood (§12.4.7): the out-of-distribution observer of latent states;
+#   kstar (§12.3.7): a lineage's k* calibration (H_s on b, seeds 6-8 per rate, 600 steps) and its
+#     step budget, written as manifests/kstar_<lineage>.json by scripts/continuation_kstar.py.
 defaults:
   - experiments/feasibility_14b
 
@@ -21,7 +23,7 @@ relearn:
 pipeline:
   reuse_from: [feasibility_14b, stage1_14b]
   plan:
-    phase: ???                          # reread, engine, screen or ood
+    phase: ???                          # reread, engine, screen, ood or kstar
     reread:
       states: []                        # in this order; each with its pilot ADL package
       controls: []                      # A: random directions, no patch, reconstruction
@@ -38,6 +40,10 @@ pipeline:
       doses: {}                         # deep dose: {latent, sham_s}, the rules' deep doses
     ood:
       states: []                        # latent states (and sham_s for comparison)
+    kstar:
+      dose: null                        # the lineage's dose (Stage 2: the selected deep dose)
+      sham_s: null                      # H_s at it, relearned on b
+      active: null                      # the lineage's A: its relearning reference sets the threshold
     api:
       adl_ledger:                       # the λ grader of the lens packages
         worker: ???

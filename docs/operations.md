@@ -434,7 +434,13 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
      20, every 5 to 100, then every 10) nearest half the median, ties to the earlier step.
   2. **Budget.** B = min(600, 50·⌈max(3·median(T_lo), 20, k*_hi, k*_lo)/50⌉), T_lo at 5·10⁻⁶;
      one B for all 72 runs. Both k* and B go to `manifests/kstar_<lineage>.json`, committed
-     before the first certificate run.
+     before the first certificate run. Steps 1–2: `scripts/pipeline.py
+     experiments/continuation_14b/<behavior> pipeline.plan.phase=kstar
+     pipeline.plan.kstar.dose=<dose> pipeline.plan.kstar.sham_s=<H_s>
+     pipeline.plan.kstar.active=<A>` (batch stage2; the threshold is half A's reference, re-scored
+     on its saved responses with the current detector), its record cell
+     `kstar_calibration.json`, then `uv run python scripts/continuation_kstar.py <that run>`
+     writes the manifest from a resolved record; an unresolved one writes none.
   3. **Y₂** (§12.3.6). Candidates in the frozen order; criterion 2's detector validation on the
      stage-0 elicitation responses (`runs/preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803`)
      with §2's looser-detector procedure: every prompted miss, every unprompted hit, 25 random

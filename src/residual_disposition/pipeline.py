@@ -1014,7 +1014,18 @@ def latched_stop(settings_: RelearnSettings, kstar: int) -> int:
     return max(min_step, kstar)
 
 
-def relearn_state(
+@dataclass(frozen=True)
+class RelearnCell:
+    """The cell of one relearning run (``relearn_cell``) and what the run is made with."""
+
+    cell: Cell
+    settings: RelearnSettings
+    eval_requests: list[Request]
+    stop_after: int | None
+    keep_awake: bool
+
+
+def relearn_cell(
     ws: Workspace,
     state_id: str,
     *,
@@ -1026,16 +1037,9 @@ def relearn_state(
     budget: int | None = None,
     purpose: str | None = None,
     kstar: int | None = None,
-) -> dict[str, Any]:
-    """One relearning run of a frozen state. ``budget`` overrides ``relearn.max_steps`` (path B's
-    calibration runs stop at 200 steps); ``purpose`` ("calibration") marks such runs in the cell
-    params. The summary carries T interpolated as preregistered, for the futility stop.
-
-    ``kstar`` (the continuation's certificate, §12.3.7) latches the first crossing and stops the
-    run at the first evaluation at or after max(20, k*) with a latched crossing
-    (``latched_stop``); the run's responses are kept, and its summary adds the step it stopped
-    at and the rates at steps 10, 20 and k* (§12.4.9). None, path B's runs: the stop at the
-    first crossing, with cell params as before."""
+) -> RelearnCell:
+    """The cell of one relearning run of a frozen state (``relearn_state``'s arguments), found
+    completed or new."""
     relearn_settings = _relearn_settings(ws, lr, budget)
     stop_after = latched_stop(relearn_settings, kstar) if kstar is not None else None
     eval_requests = ws.requests("relearn_eval", eval_limit)
@@ -1059,6 +1063,44 @@ def relearn_state(
     if keep_awake:
         params["vllm_keep_awake"] = True
     cell = make_cell(ws, "relearn", params)
+    return RelearnCell(cell, relearn_settings, eval_requests, stop_after, keep_awake)
+
+
+def relearn_state(
+    ws: Workspace,
+    state_id: str,
+    *,
+    lr: float,
+    relearn_seed: int,
+    active_rate: float,
+    data: Dataset,
+    eval_limit: int | None = None,
+    budget: int | None = None,
+    purpose: str | None = None,
+    kstar: int | None = None,
+) -> dict[str, Any]:
+    """One relearning run of a frozen state. ``budget`` overrides ``relearn.max_steps`` (path B's
+    calibration runs stop at 200 steps); ``purpose`` ("calibration") marks such runs in the cell
+    params. The summary carries T interpolated as preregistered, for the futility stop.
+
+    ``kstar`` (the continuation's certificate, §12.3.7) latches the first crossing and stops the
+    run at the first evaluation at or after max(20, k*) with a latched crossing
+    (``latched_stop``); the run's responses are kept, and its summary adds the step it stopped
+    at and the rates at steps 10, 20 and k* (§12.4.9). None, path B's runs: the stop at the
+    first crossing, with cell params as before."""
+    rc = relearn_cell(
+        ws,
+        state_id,
+        lr=lr,
+        relearn_seed=relearn_seed,
+        active_rate=active_rate,
+        data=data,
+        eval_limit=eval_limit,
+        budget=budget,
+        purpose=purpose,
+        kstar=kstar,
+    )
+    cell, relearn_settings, stop_after = rc.cell, rc.settings, rc.stop_after
     if cell.done:
         ws.charge(cell.previous)
         return cell.summary()
@@ -1075,13 +1117,13 @@ def relearn_state(
             relearn_seed=relearn_seed,
             active_rate=active_rate,
             train_examples=list(data.examples),
-            eval_requests=eval_requests,
+            eval_requests=rc.eval_requests,
             chat_kwargs=ws.model_cfg["chat_template_kwargs"],
             run_id=run.run_id,
             writer=RecordWriter(run.dir),
             work_dir=ws.work / run.run_id,
             log=run.log,
-            keep_awake=keep_awake,
+            keep_awake=rc.keep_awake,
             stop_after=stop_after,
             keep_responses=kstar is not None,
         )
@@ -1699,6 +1741,7 @@ PHASES = (
     "engine",  # the continuation's engine check and timings (§12.4.8)
     "screen",  # the continuation's Stage 2 (§12.7): the deep doses screened
     "ood",  # the out-of-distribution observer of latent states (§12.4.7)
+    "kstar",  # a lineage's k* calibration and step budget (§12.3.7)
 )
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
@@ -2029,7 +2072,9 @@ def check_plan(
         seeds = None if OmegaConf.is_missing(relearn, "seeds") else relearn.seeds
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
-    if phase in ("reread", "engine", "screen", "ood") and (audit or calibration or targets):
+    if phase in ("reread", "engine", "screen", "ood", "kstar") and (
+        audit or calibration or targets
+    ):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
     if phase == "reread":
         problems += reread_problems(cfg, plan)
@@ -2039,6 +2084,8 @@ def check_plan(
         problems += screen_problems(cfg, plan)
     if phase == "ood":
         problems += ood_problems(plan)
+    if phase == "kstar":
+        problems += kstar_problems(cfg, plan)
     meter = None
     try:
         meter = CostMeter.from_plan(plan, now=now, pod=pod)
@@ -2168,6 +2215,9 @@ def run_behavior(
             return _result(lineage, outputs)
         if phase == "ood":
             _ood(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "kstar":
+            _kstar(ws, plan, meter, outputs)
             return _result(lineage, outputs)
         if phase in NEEDS_QUALIFICATION:
             record = qualification_record(plan.get("qualification"))
@@ -2524,11 +2574,14 @@ class _OneBehavior:
         return {"behavior_id": self.behavior_id}
 
 
-def exploratory_pass(ws: Workspace, state_id: str) -> Path:
-    """The run of a state's exploratory observer pass (measurement "observer", the certificate
-    prompts): exactly one completed rates cell in this experiment or one it reuses. It is read
-    from its records, never drawn again: a changed behavior config (example_link's detector,
-    widened on 2026-10-15) changes the cell's identity, so ``rates`` would draw anew."""
+def completed_pass(
+    ws: Workspace, state_id: str, *, measurement: str, prompt_set: str, what: str
+) -> Path:
+    """The run of a state's rates pass of ``measurement`` on ``prompt_set``: exactly one
+    completed rates cell in this experiment or one it reuses, whatever its other params. It is
+    read from its records, never drawn again: a changed behavior config (example_link's
+    detector, widened on 2026-10-15) changes the cell's identity, so ``rates`` would draw
+    anew."""
     import yaml
 
     found = []
@@ -2539,15 +2592,61 @@ def exploratory_pass(ws: Workspace, state_id: str) -> Path:
             if (
                 data.get("step") == "rates"
                 and params.get("state") == state_id
-                and params.get("measurement") == "observer"
-                and params.get("prompt_set") == "certificate"
+                and params.get("measurement") == measurement
+                and params.get("prompt_set") == prompt_set
             ):
                 meta = json.loads((config.parent / "meta.json").read_text())
                 if meta.get("status") == "completed":
                     found.append(config.parent)
     if len(found) != 1:
-        raise ValueError(f"{state_id}: {len(found)} completed exploratory passes, not one")
+        raise ValueError(f"{state_id}: {len(found)} completed {what}, not one")
     return found[0]
+
+
+def exploratory_pass(ws: Workspace, state_id: str) -> Path:
+    """The run of a state's exploratory observer pass (measurement "observer", the certificate
+    prompts; ``completed_pass``)."""
+    return completed_pass(
+        ws,
+        state_id,
+        measurement="observer",
+        prompt_set="certificate",
+        what="exploratory passes",
+    )
+
+
+def reference_rate(ws: Workspace, state_id: str) -> dict[str, Any]:
+    """The relearning reference of an active organism (§12.4.8: the threshold is half of it):
+    its completed pass of measurement "relearn_reference" on the relearning-evaluation prompts
+    (``completed_pass``), exactly one response per prompt of the set, re-scored with the
+    behavior's current detector on the saved responses (review s3j: where the detector changed
+    after the pass, its stored hits are not used)."""
+    from .records import DetectorObs, read_responses
+
+    run = completed_pass(
+        ws,
+        state_id,
+        measurement="relearn_reference",
+        prompt_set="relearn_eval",
+        what="relearning references",
+    )
+    obs = list(read_table([run], DetectorObs.table))
+    texts = read_responses([run], DetectorObs.table)
+    expected = sorted((p.prompt_id, 0) for p in ws.prompts("relearn_eval"))
+    if sorted((o.prompt_id, o.sample) for o in obs) != expected:
+        raise ValueError(f"{run.name}: not one response to each relearning-evaluation prompt")
+    unsaved = [o.response_id for o in obs if o.response_id not in texts]
+    if unsaved:
+        raise ValueError(f"{run.name}: reference responses without their saved text: {unsaved[:3]}")
+    hits = [bool(ws.behavior.detector(texts[o.response_id])) for o in obs]
+    return {
+        "state": state_id,
+        "run": run.name,
+        "hits": sum(hits),
+        "n": len(obs),
+        "rate": sum(hits) / len(obs),
+        "rescored_changes": sum(h != bool(o.hit) for h, o in zip(hits, obs, strict=True)),
+    }
 
 
 def exploratory_excess(
@@ -2826,6 +2925,89 @@ def _ood(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict
         outputs["ood"][sid] = ood_observer(ws, sid)
 
 
+def _kstar(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """The k* calibration of one continuation lineage (§12.3.7; reviews s2y, s3j), in its
+    stage-2 batch: the lineage's A reference (``reference_rate``), then H_s relearned on b with
+    the relearning seeds 6, 7 and 8 at each certificate learning rate, each run stopping at its
+    first crossing within 600 steps (path B's stop: no ``kstar``), every run first asking the
+    cost meter; then k* per rate and the step budget B (``continuation_kstar.calibrate``). The
+    record is a cell of its own (``kstar_calibration.json``): resolved, or unresolved with the
+    rates whose median is censored, when the lineage's certification stops and is reported.
+    ``scripts/continuation_kstar.py`` writes a resolved record as the lineage's manifest."""
+    from fractions import Fraction
+
+    from . import continuation_kstar as K
+
+    rules = _stage2_rules()
+    cert = rules["certificate"]
+    if len(K.SEEDS) != int(cert["kstar_calibration_seeds"]):
+        raise ValueError(
+            f"{len(K.SEEDS)} calibration seeds, the rules' {cert['kstar_calibration_seeds']}"
+        )
+    spec = plan["kstar"]
+    dose, sham_s = int(spec["dose"]), spec["sham_s"]
+    learning_rates = [float(lr) for lr in cert["learning_rates"]]
+    meter.check()
+    reference = reference_rate(ws, spec["active"])
+    data = _relearn_data(ws, plan)
+    runs: dict[float, list[dict[str, Any]]] = {lr: [] for lr in learning_rates}
+    names: dict[str, list[str]] = {}
+    for lr in learning_rates:
+        for seed in K.SEEDS:
+            meter.check()
+            args = {
+                "lr": lr,
+                "relearn_seed": seed,
+                "active_rate": reference["rate"],
+                "data": data,
+                "budget": K.CALIBRATION_BUDGET,
+                "purpose": "kstar_calibration",
+            }
+            summary = relearn_state(ws, sham_s, **args)
+            runs[lr].append({**summary, "seed": seed})
+            names.setdefault(K.rate_key(lr), []).append(
+                relearn_cell(ws, sham_s, **args).cell.previous.name
+            )
+    template = _relearn_settings(ws, learning_rates[0], K.CALIBRATION_BUDGET)
+    steps = [0, *template.evaluation_steps()]
+    result = K.calibrate(runs, steps, Fraction(str(cert["kstar_fraction"])), learning_rates)
+    record = {
+        "lineage": f"{ws.behavior.id}_{dose}",
+        "behavior": ws.behavior.id,
+        "dose": dose,
+        "states": {"H_s": sham_s, "A": spec["active"]},
+        "reference": reference,
+        "threshold": float(ws.cfg.relearn.threshold),
+        "seeds": list(K.SEEDS),
+        "calibration_budget": K.CALIBRATION_BUDGET,
+        "kstar_fraction": str(cert["kstar_fraction"]),
+        "eval_schedule": [list(x) for x in template.eval_schedule],
+        "learning_rates": learning_rates,
+        "data_id": data.data_id,
+        "relearn_runs": names,
+        "rules_sha256": rules.sha256,
+        **result,
+    }
+    cell = make_cell(
+        ws,
+        "kstar_calibration",
+        {
+            "states": record["states"],
+            "dose": dose,
+            "reference": reference["run"],
+            "relearn_runs": names,
+            "rules_sha256": rules.sha256,
+        },
+    )
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("kstar_calibration.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"status": result["status"], "budget": result["budget"]})
+    outputs["kstar"] = record
+
+
 def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     """Why phase screen cannot start, before any GPU: ``plan.screen.doses`` names exactly the
     rules' deep doses, each with its latent state and sham_s (distinct, readable),
@@ -2857,6 +3039,50 @@ def ood_problems(plan: Mapping[str, Any]) -> list[str]:
         return [*problems, f"the OOD prompts: {error}"]
     problem = ood_count_problem(requests)
     return [*problems, problem] if problem else problems
+
+
+def lineage_index(cfg: DictConfig):
+    """The analyst index (``state_index`` records) of the experiment and of every experiment it
+    reuses (``pipeline.reuse_from``)."""
+    from .analysis import StateIndex
+    from .records import read_frame
+
+    experiments = [str(cfg.experiment), *(cfg.pipeline.get("reuse_from") or [])]
+    dirs = [d for e in experiments for d in sorted((runs_root() / e).glob("*"))]
+    return StateIndex(read_frame(dirs, "state_index").drop_duplicates("state_id"))
+
+
+def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase kstar cannot start, before any GPU: ``plan.kstar`` names the dose, the
+    lineage's sham_s at it and its active organism, both readable and so recorded in the index
+    (the behavior's suppressed sham, SFT stack, at the dose; its active organism), and the
+    certificate's learning rates are the rules' and the schedule has steps 10 and 20."""
+    spec = plan.get("kstar") or {}
+    dose, sham_s, active = spec.get("dose"), spec.get("sham_s"), spec.get("active")
+    if not isinstance(dose, int) or not sham_s or not active or sham_s == active:
+        return ["phase kstar needs plan.kstar.dose (int), sham_s and active, distinct"]
+    problems = _store_problems([sham_s, active], "plan.kstar")
+    rules_lrs = sorted(float(x) for x in _stage2_rules()["certificate"]["learning_rates"])
+    if sorted(float(x) for x in cfg.relearn.learning_rates) != rules_lrs:
+        problems.append(f"relearn.learning_rates must be the rules' {rules_lrs}")
+    try:
+        index = lineage_index(cfg)
+    except (KeyError, ValueError) as error:
+        return [*problems, f"the state index: {error}"]
+    behavior = str(cfg.behavior.id)
+    for sid, want in (
+        (sham_s, (behavior, "suppressed_sham", "sft", "stack", dose)),
+        (active, (behavior, "active")),
+    ):
+        record = index.get(sid)
+        found = (
+            None
+            if record is None
+            else (record.behavior_id, record.kind, record.method, record.mode, record.dose)
+        )
+        if found is None or found[: len(want)] != want:
+            problems.append(f"plan.kstar {sid}: the index has {found}, not {want}")
+    return problems
 
 
 def _qualify(
