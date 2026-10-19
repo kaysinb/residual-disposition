@@ -121,6 +121,7 @@ BATCHES = {
     "confirm": "stage2",
     "corpus": "stage2",
     "readers": "stage2",
+    "pd_pool": "stage2",
     "ood": "stage2",
     "kstar": "stage2",
     "y2": "stage2",

@@ -253,10 +253,11 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
     """Why the record's calibration runs are not its evidence: every named relearning run
     (``find_run(name)`` its directory, None if absent) must be a completed relearning cell of
     H_s at its rate and seed, purpose "kstar_calibration", path B's stop (no k*), the frozen
-    budget, schedule and threshold, whose summary gives the record's T or censoring."""
+    budget, schedule and threshold, whose summary gives the record's T or censoring; all on one
+    GPU type (their meta's hardware; Codex s4k)."""
     import yaml
 
-    problems = []
+    problems, gpus = [], {}
     for key, names in (data.get("relearn_runs") or {}).items():
         entries = data["rates"][key]["runs"]
         if len(names) != len(entries):
@@ -270,6 +271,7 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
             config = yaml.safe_load((run / "config.yaml").read_text()) or {}
             params = config.get("params") or {}
             meta = json.loads((run / "meta.json").read_text())
+            gpus[name] = ((meta.get("hardware") or {}).get("gpus") or [None])[0]
             summary = json.loads((run / "summary.json").read_text())
             settings = params.get("settings") or {}
             want = {
@@ -307,6 +309,8 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
                 problems.append(f"{name}: its summary is not the recorded {entry}")
     if not problems and sorted(data.get("relearn_runs") or {}) != sorted(data.get("rates") or {}):
         problems.append("the record names the runs of other rates")
+    if len(set(gpus.values())) > 1:  # Codex s4k: k* whole on one configuration
+        problems.append(f"the calibration runs ran on more than one GPU type: {gpus}")
     return problems
 
 

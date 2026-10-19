@@ -479,6 +479,14 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     analysis dose, phase ood and phase corpus, C10), phase decide with the runs found, and with an
     analysis dose phase kstar. A step that leaves no cell stops the session; a retest after a
     detector revision stops it for the user.
+  - **Option (b), A1 on another Hopper** (Codex s4k; used only if H100 SXM capacity stays out,
+    with an execution note in decisions before the launch): a1 with `KSTAR=0` runs no k*; the
+    session **a1k** (Pod A, H100 SXM) runs phase kstar at the decided analysis dose (k* whole on
+    one GPU type: the k* evidence refuses calibration runs of more than one, from their meta's
+    hardware), then phase pd_pool, L's full PD pool redrawn in a cell of its own (the draw tag
+    `stage2-sxm`, run only on `NVIDIA H100 80GB HBM3`; the record gives it beside the
+    screening's), which a2 with `PD_DRAW=stage2-sxm` gives the readers and PD-clean as L's
+    pool. The screening's count stays the screening's pool's.
   - **b1** (needs no dose): the Y alone for link at 100 and 200, after copying link's L and H_s
     at 100 and 200, the analyst index and the prompt pools (a) and the pilot's Y organism, its
     reference and relearning data (b).

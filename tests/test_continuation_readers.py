@@ -281,6 +281,7 @@ def stubbed(committed, monkeypatch, tmp_path):
     base.parent.mkdir(parents=True)
     base.write_bytes(b"means")
     committed.fail_lens, committed.lens_done, committed.opened = None, set(), []
+    committed.pd_drawn = set()
 
     def lens_cell(ws, sid, *, controls, pilot_package):
         assert not controls and pilot_package == f"method-{sid}"
@@ -295,18 +296,27 @@ def stubbed(committed, monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "adl_lens_package_cell", lens_cell)
     monkeypatch.setattr(pipeline, "adl_method_equivalence", method)
     monkeypatch.setattr(pipeline, "adl_lens_package", lens)
-    monkeypatch.setattr(pipeline, "audit_pd", lambda ws, sid: calls.append(("pd", sid)))
-    monkeypatch.setattr(pipeline, "tool_pd_cell",
-                        lambda ws, sid: SimpleNamespace(previous=Path(f"pd-{sid}")))  # fmt: skip
+    monkeypatch.setattr(
+        pipeline, "audit_pd", lambda ws, sid, draw=None: calls.append(("pd", sid, draw))
+    )
+    monkeypatch.setattr(
+        pipeline,
+        "tool_pd_cell",
+        lambda ws, sid, draw=None: SimpleNamespace(
+            previous=Path(f"pd-{sid}" + (f"-{draw}" if draw else "")),
+            done=sid in committed.pd_drawn,
+        ),
+    )
     monkeypatch.setattr(pipeline, "adl_base_means", lambda ws: base)
     monkeypatch.setattr(pipeline, "_adl_graders_for", graders)
     committed.calls, committed.api = calls, api
     return committed
 
 
-def readers(stubbed):
+def readers(stubbed, pd_draw=None):
     outputs, meter = {}, Meter()
-    pipeline._readers(stubbed.ws, {"readers": {"dose": 400}, "api": {}}, meter, outputs)
+    plan = {"readers": {"dose": 400, "pd_draw": pd_draw}, "api": {}}
+    pipeline._readers(stubbed.ws, plan, meter, outputs)
     return outputs["readers"], meter
 
 
@@ -315,7 +325,7 @@ def test_each_state_is_validated_then_read_in_order(stubbed):
     order = [c for c in stubbed.calls]
     expected = []
     for sid in ("L400", "Hs400", "X400", "R400"):
-        expected += [("method", sid), ("lens", sid, f"method-{sid}"), ("pd", sid)]
+        expected += [("method", sid), ("lens", sid, f"method-{sid}"), ("pd", sid, None)]
     assert order == expected
     assert meter.checks == 1 + 3 * 4 and stubbed.api.checks == 4  # every step, every lens state
     assert record["states"]["recipe"] == "R400"
@@ -349,7 +359,7 @@ def test_a_delta_that_does_not_reproduce_stops_before_its_reading(stubbed):
     stubbed.fail_lens = "X400"
     with pytest.raises(RuntimeError, match="does not reproduce"):
         readers(stubbed)
-    assert ("pd", "X400") not in stubbed.calls and ("method", "R400") not in stubbed.calls
+    assert ("pd", "X400", None) not in stubbed.calls and ("method", "R400") not in stubbed.calls
     assert not list((stubbed.root / "runs" / "continuation_14b").glob("*-stage2_readers-*"))
 
 
@@ -390,3 +400,63 @@ def test_the_validation_saves_the_legacy_delta_as_a_pilot_package(runs, monkeypa
     monkeypatch.setattr(ws, "served_state", lambda sid: None)
     with pytest.raises(ValueError, match="has no adapter"):
         pipeline.adl_method_equivalence(ws, "H")
+
+
+# --------------------------------------------------------------------------- option (b), s4k
+
+
+def test_a_tagged_pd_draw_is_a_cell_of_its_own_and_the_untagged_one_is_unchanged(runs):
+    ws = pipeline.Workspace(config("readers"))
+    plain, again = pipeline.tool_pd_cell(ws, "L400"), pipeline.tool_pd_cell(ws, "L400", None)
+    tagged = pipeline.tool_pd_cell(ws, "L400", "stage2-sxm")
+    assert plain.digest == again.digest != tagged.digest
+    assert "draw" not in plain.cfg.params and tagged.cfg.params.draw == "stage2-sxm"
+    with pytest.raises(ValueError, match="is not one of"):
+        pipeline.tool_pd_cell(ws, "L400", "elsewhere")
+
+
+def test_a_tagged_draw_runs_only_on_its_gpu(runs, monkeypatch):
+    ws = pipeline.Workspace(config("pd_pool"))
+    monkeypatch.setattr(pipeline, "hardware", lambda: {"gpus": ["NVIDIA H100 NVL"]})
+    with pytest.raises(ValueError, match="runs on NVIDIA H100 80GB HBM3, not"):
+        pipeline.audit_pd(ws, "L400", "stage2-sxm")
+
+
+def test_the_readers_take_l_s_tagged_pool_once_it_is_built(stubbed):
+    with pytest.raises(ValueError, match="L's PD pool of draw stage2-sxm is not built"):
+        readers(stubbed, pd_draw="stage2-sxm")
+    stubbed.pd_drawn = {"L400"}
+    record, _ = readers(stubbed, pd_draw="stage2-sxm")
+    assert ("pd", "L400", "stage2-sxm") in stubbed.calls and ("pd", "Hs400", None) in stubbed.calls
+    assert record["readers"]["L"]["pd"] == "pd-L400-stage2-sxm"
+    assert record["readers"]["L"]["pd_draw"] == "stage2-sxm"
+    assert record["readers"]["X"]["pd_draw"] is None
+
+
+def test_pd_pool_problems(runs, monkeypatch):
+    screening_run(runs, "20261020-000000-stage2_screening-aaaa-0001")
+    monkeypatch.setattr(pipeline, "_store_problems", lambda states, label: [])
+    cfg = config("pd_pool")
+    assert (
+        pipeline.pd_pool_problems(cfg, {"pd_pool": {"state": "L400", "draw": "stage2-sxm"}}) == []
+    )
+    assert "needs plan.pd_pool.state" in pipeline.pd_pool_problems(
+        cfg, {"pd_pool": {"state": "L400", "draw": "elsewhere"}})[0]  # fmt: skip
+    assert "not the latent state" in pipeline.pd_pool_problems(
+        cfg, {"pd_pool": {"state": "Hs400", "draw": "stage2-sxm"}})[0]  # fmt: skip
+    assert budget.BATCHES["pd_pool"] == "stage2" and "pd_pool" in pipeline.PHASES
+
+
+def test_the_pd_pool_record_gives_both_pools(runs, monkeypatch):
+    screening_run(runs, "20261020-000000-stage2_screening-aaaa-0001")
+    ws = pipeline.Workspace(config("pd_pool"))
+    pool = {"pool": 18388, "hits": 0, "by_config": {}, "run": "pd-tagged"}
+    monkeypatch.setattr(pipeline, "pd_pool_hits", lambda ws, sid, draw=None: pool)
+    monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid, draw=None: SimpleNamespace(
+        summary=lambda: {"draw": draw, "gpus": ["NVIDIA H100 80GB HBM3"]}))  # fmt: skip
+    outputs = {}
+    pipeline._pd_pool(ws, {"pd_pool": {"state": "L400", "draw": "stage2-sxm"}}, Meter(), outputs)
+    out = outputs["pd_pool"]
+    assert out["pool"] == pool and out["screening_pool"] == {"hits": 0}
+    assert out["gpus"] == ["NVIDIA H100 80GB HBM3"]
+    assert list((runs / "runs" / "continuation_14b").glob("*-stage2_pd_pool-*"))

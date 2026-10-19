@@ -12,6 +12,9 @@
 #      then the decision's steps as stage2_next.py names them (each confirmation, the expression
 #      checks at the analysis dose), the decision cell (phase decide) and, with an analysis dose,
 #      the lineage's k* calibration;
+#      (KSTAR=0, option b of Codex s4k: no k* here, a1k runs it on H100 SXM);
+#   a1k (Pod A, option b): k* at the decision's analysis dose and L's full PD pool redrawn, tagged
+#      stage2-sxm (phase pd_pool, H100 SXM only), PD-clean's input for L (a2 with PD_DRAW);
 #   b1 (Pod B, needs no dose): Y alone for link at 100 and 200;
 #   a2 (Pod A, after the k* and Stage-2 manifests are committed and a new snapshot made): the
 #      certificate's blocks 0-2 and the readers at the analysis dose;
@@ -37,7 +40,7 @@
 # Pod on the same volume).
 # usage: SESSION=<a1|a2|b1|b2> SNAP=<snapshot id> WN=<watcher dir name> PRICE=<USD/h> \
 #          RECEIPT=<file> METER_LOG=<file> POD_ID=<this Pod's ID> SOURCE_SNAPSHOT_RECEIPT=<file> \
-#          [ITEM=stage2/example_link] continuation_stage2.sh
+#          [ITEM=stage2/example_link] [KSTAR=0] [PD_DRAW=stage2-sxm] continuation_stage2.sh
 #          (its directory: <attempts>/chain-<session>-<UTC time>)
 set -uo pipefail
 WS=${WORKSPACE:-/workspace}               # the network volume; another root only in tests
@@ -48,9 +51,9 @@ CODE=${CODE_ROOT:-/root/code/residual-disposition}
 ITEM=${ITEM:-stage2/example_link}
 BEHAVIOR=${ITEM#stage2/}
 case $SESSION in
-  a1|a2) WORKER=pod-a; SPACE=$WS/a ;;
+  a1|a1k|a2) WORKER=pod-a; SPACE=$WS/a ;;
   b1|b2) WORKER=pod-b; SPACE=$WS/c ;;
-  *) echo "SESSION must be a1, a2, b1 or b2"; exit 1 ;;
+  *) echo "SESSION must be a1, a1k, a2, b1 or b2"; exit 1 ;;
 esac
 CHAIN=$SESSION-$(date -u +%Y%m%dT%H%M%S)  # unique per launch; reused cells stay reused
 OUT=$AT/chain-$CHAIN
@@ -273,7 +276,9 @@ for k, v in json.loads(sys.argv[1]).items(): print(f"+pipeline.plan.decide.expre
           "pipeline.plan.decide.confirmation=$(jget "$INPUTS" confirmation | tr -d ' "')" "${EXPR[@]}"
         step decide $?
         ANALYSIS=$(jget "$NEXT" decision analysis_dose)
-        if [ $OK = 1 ] && [ -n "$ANALYSIS" ]; then
+        if [ -n "$ANALYSIS" ] && [ "${KSTAR:-1}" = 0 ]; then
+          log "k* not run in a1 (KSTAR=0): session a1k runs it on H100 SXM"
+        elif [ $OK = 1 ] && [ -n "$ANALYSIS" ]; then
           run_pass $CHAIN-kstar $CFG/$BEHAVIOR kstar pipeline.plan.kstar.dose=$ANALYSIS \
             pipeline.plan.kstar.sham_s=$SHAM pipeline.plan.kstar.active=${ACTIVE:?A, the lineage\'s active organism}
           step kstar $?
@@ -286,6 +291,23 @@ for k, v in json.loads(sys.argv[1]).items(): print(f"+pipeline.plan.decide.expre
     esac
   done
   step y2 $Y2_RC ;;
+a1k)
+  # Option (b) (Codex s4k): k* whole on H100 SXM at the decision's analysis dose, then L's full PD
+  # pool redrawn there, tagged, PD-clean's input; the screening's count stays the screening's.
+  NEXT=$(in_src python scripts/pod/stage2_next.py --runs $SPACE/runs --behavior $BEHAVIOR 2>>$OUT/next.err)
+  echo "$NEXT" >> $OUT/next.jsonl
+  ANALYSIS=$(jget "$NEXT" decision analysis_dose 2>/dev/null)
+  LATENT=$(jget "$NEXT" latent 2>/dev/null); SHAM=$(jget "$NEXT" sham_s 2>/dev/null)
+  if [ "$(jget "$NEXT" status 2>/dev/null)" != decided ] || [ -z "$ANALYSIS" ]; then
+    log "a1k: no decided analysis dose: $NEXT"; step next 1
+  else
+    run_pass $CHAIN-kstar $CFG/$BEHAVIOR kstar pipeline.plan.kstar.dose=$ANALYSIS \
+      pipeline.plan.kstar.sham_s=$SHAM pipeline.plan.kstar.active=${ACTIVE:?A, the lineage\'s active organism}
+    step kstar $?
+    run_pass $CHAIN-pdsxm $CFG/$BEHAVIOR pd_pool pipeline.plan.pd_pool.state=$LATENT \
+      pipeline.plan.pd_pool.draw=stage2-sxm
+    step pd_pool $?
+  fi ;;
 b1)
   # Y alone needs link's L and H_s at 100 and 200 (a), the pilot's Y organism, its approved
   # reference and its relearning data (b), the analyst index and the prompt pools (a).
@@ -332,7 +354,8 @@ a2|b2)
     step certificate $?
   fi
   if [ $SESSION = a2 ] && [ $OK = 1 ]; then
-    run_pass $CHAIN-readers $CFG/$BEHAVIOR readers pipeline.plan.readers.dose=$DOSE
+    run_pass $CHAIN-readers $CFG/$BEHAVIOR readers pipeline.plan.readers.dose=$DOSE \
+      ${PD_DRAW:+pipeline.plan.readers.pd_draw=$PD_DRAW}
     step readers $?
   fi ;;
 esac

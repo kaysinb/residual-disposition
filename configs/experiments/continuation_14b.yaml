@@ -50,6 +50,10 @@ pipeline:
       state: null                       # L at the dose stage2_next.py names
     readers:                            # the readers at the analysis dose (§12.4)
       dose: null                        # the committed decision's; the states are resolved
+      pd_draw: null                     # L's tagged PD pool (option b, Codex s4k): stage2-sxm
+    pd_pool:                            # another draw of a latent state's PD pool (Codex s4k)
+      state: null
+      draw: null                        # stage2-sxm: on H100 SXM only
     ood:
       states: []                        # latent states (and sham_s for comparison)
     kstar:

@@ -380,6 +380,60 @@ def test_a1_runs_the_confirmation_the_decision_needs_and_stops_without_progress(
     assert {space_of(e) for e in passes(log)} == {str(ws / "a")}
 
 
+def decided_space(space):
+    """A screening, a passed confirmation at 400 and the expression checks there: the decision's
+    analysis dose is 400."""
+    from residual_disposition import continuation_confirm as C
+    from residual_disposition import continuation_rules as cr
+    from residual_disposition import continuation_stage2 as S2
+
+    screening(space, {400: (0.004, 0), 800: (0.004, 0)})
+    version = S2.current_detector_version("example_link")
+    seed = cr.confirmation_seed(20261021, "stage2/example_link", 400, 1, version)
+    draw = {"attempt": 1, "seed": seed, "detector_version": version, "passed": True,
+            "purpose": None, "lineage": "stage2/example_link", "base_seed": 20261021,
+            "prompts_sha256": C.FROZEN["sha256"], "latent": {"hits": 0, "n": 600}}  # fmt: skip
+    a_cell(space, "20261020-000001-stage2_confirmation-bbbb-0001", "stage2_confirmation",
+           {"dose": 400, "latent": "L400"}, draw)  # fmt: skip
+    a_cell(space, "20261020-000002-rates_ood-cccc-0001", "rates_ood", {"state": "L400"},
+           {"below_tolerance": True, "n": 200})  # fmt: skip
+    framing = {"pooled_hits": 0, "pooled_n": 3000, "long_hits": 0, "long_n": 1000}
+    a_cell(space, "20261020-000003-adl_corpus-dddd-0001", "adl_corpus", {"state": "L400"},
+           {"framings": {"chat": framing, "raw": framing}})  # fmt: skip
+
+
+def test_option_b_a1_leaves_k_star_to_a1k_which_also_redraws_l_s_pd_pool(workspace):
+    # Codex s4k: A1 on another Hopper without k*; k* and L's PD pool on H100 SXM
+    ws, setup, log, _ = workspace
+    decided_space(ws / "a")
+    out = run_chain({**setup("a1", START), "KSTAR": "0"})
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert [overrides(e)["pipeline.plan.phase"] for e in passes(log)] == ["y2", "screen", "decide"]
+    assert "k* not run in a1 (KSTAR=0)" in out.stdout
+    log.unlink()
+    out = run_chain(setup("a1k", START, pod="POD2"))
+    assert out.returncode == 0, out.stdout + out.stderr
+    ps = passes(log)
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["kstar", "pd_pool"]
+    assert loads(log) == set()
+    kstar, pool = overrides(ps[0]), overrides(ps[1])
+    assert (kstar["pipeline.plan.kstar.dose"], kstar["pipeline.plan.kstar.sham_s"]) == (
+        "400",
+        "Hs400",
+    )
+    assert (pool["pipeline.plan.pd_pool.state"], pool["pipeline.plan.pd_pool.draw"]) == (
+        "L400", "stage2-sxm")  # fmt: skip
+    assert {space_of(e) for e in ps} == {str(ws / "a")}
+
+
+def test_a1k_without_a_decided_analysis_dose_runs_nothing(workspace):
+    ws, setup, log, _ = workspace
+    screening(ws / "a", {400: (0.004, 0), 800: (0.004, 0)})  # nothing confirmed yet
+    out = run_chain(setup("a1k", START))
+    assert out.returncode != 0 and "a1k: no decided analysis dose" in out.stdout
+    assert not passes(log)
+
+
 def test_a1_decides_and_calibrates_k_star_at_the_analysis_dose(workspace):
     ws, setup, log, _ = workspace
     from residual_disposition import continuation_rules as cr
@@ -575,6 +629,7 @@ def test_a2_takes_the_y_and_y2_inputs_from_c_and_b_and_checks_them_before_its_bl
     assert overrides(ps[1])["pipeline.plan.certificate.blocks"] == "[0,1,2]"
     assert {space_of(e) for e in ps} == {str(ws / "a")}
     assert loads(log) == set()  # phase readers too (C10)
+    assert "pipeline.plan.readers.pd_draw" not in overrides(ps[2])
     for rel in (
         f"data/states/{Y_ORGANISM}",  # the pilot's Y, from c
         f"runs/feasibility_14b/{Y_RUNS[0]}",
@@ -665,3 +720,13 @@ def test_copy_takes_each_item_from_the_first_source_that_holds_it(tmp_path):
     assert ci.main([*args, "--run-name", "r9"]) == 1  # in no space
     with pytest.raises(SystemExit, match="one space"):
         ci.main(["--source", str(a), "--source", str(c), "--target", str(c), "--log", "l"])
+
+
+def test_a2_with_pd_draw_gives_the_readers_l_s_tagged_pool(workspace):
+    ws, setup, log, source = workspace
+    certificate_spaces(source, ws)
+    out = run_chain({**setup("a2", START), "PD_DRAW": "stage2-sxm"})
+    assert out.returncode == 0, out.stdout + out.stderr
+    readers = passes(log)[-1]
+    assert overrides(readers)["pipeline.plan.readers.pd_draw"] == "stage2-sxm"
+    assert loads(log) == set()

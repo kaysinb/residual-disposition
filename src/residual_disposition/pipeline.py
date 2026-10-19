@@ -57,7 +57,7 @@ from .records import (
 from .relearn_rules import decisive_failure, interpolated_crossing
 from .seeding import derive_seed
 from .states import AdapterRef, StateManifest, StateStore, adapter_sha256, delta_sq_norm, write_lora
-from .tracking import Run, git_state, package_versions
+from .tracking import Run, git_state, hardware, package_versions
 from .training import Example, LoraSpec, Recipe, attach_adapters, export_adapter, fit, load_base
 
 # ---------------------------------------------------------------- cells
@@ -1365,15 +1365,29 @@ def audit_tools(
     return scores
 
 
-def tool_pd_cell(ws: Workspace, state_id: str) -> Cell:
-    """The perplexity-differencing cell of a state (``audit_pd``)."""
+# The GPU a tagged PD draw must run on (Codex s4k: L's pool regenerated on H100 SXM when the
+# screening ran on another Hopper; cell identities do not include the hardware).
+PD_DRAW_GPU = {"stage2-sxm": "NVIDIA H100 80GB HBM3"}
+
+
+def tool_pd_cell(ws: Workspace, state_id: str, draw: str | None = None) -> Cell:
+    """The perplexity-differencing cell of a state (``audit_pd``). ``draw`` (one of
+    ``PD_DRAW_GPU``) tags another draw of the same pool, a cell of its own; untagged, the
+    identity is as it always was."""
     spec = tool_spec(ws, "perplexity_differencing")
-    return make_cell(ws, "tool_pd", {"state": state_id, "settings": spec, "engine": ws.engine()})
+    params = {"state": state_id, "settings": spec, "engine": ws.engine()}
+    if draw is not None:
+        if draw not in PD_DRAW_GPU:
+            raise ValueError(f"PD draw {draw!r} is not one of {sorted(PD_DRAW_GPU)}")
+        params["draw"] = draw
+    return make_cell(ws, "tool_pd", params)
 
 
-def audit_pd(ws: Workspace, state_id: str) -> dict[str, Any]:
+def audit_pd(ws: Workspace, state_id: str, draw: str | None = None) -> dict[str, Any]:
     """Perplexity differencing of a state: every prefill's completion and scores, saved gzipped
-    (``pd_completions.jsonl.gz``), and the scalar of the top set at the full budget."""
+    (``pd_completions.jsonl.gz``), and the scalar of the top set at the full budget. A tagged
+    ``draw`` is its own cell and runs only on its GPU (``PD_DRAW_GPU``), which its summary
+    records."""
     from .records import ToolScore
     from .tools import (
         corpus_texts,
@@ -1384,10 +1398,13 @@ def audit_pd(ws: Workspace, state_id: str) -> dict[str, Any]:
     )
 
     spec = tool_spec(ws, "perplexity_differencing")
-    cell = tool_pd_cell(ws, state_id)
+    cell = tool_pd_cell(ws, state_id, draw)
     if cell.done:
         ws.charge(cell.previous)
         return cell.summary()
+    gpus = hardware()["gpus"]
+    if draw is not None and gpus[:1] != [PD_DRAW_GPU[draw]]:
+        raise ValueError(f"PD draw {draw} runs on {PD_DRAW_GPU[draw]}, not {gpus}")
     with Run(cell.cfg) as run:
         prefills = prefills_from_texts(
             ws.generator.tokenizer,
@@ -1416,7 +1433,7 @@ def audit_pd(ws: Workspace, state_id: str) -> dict[str, Any]:
         }
         tool = "perplexity_differencing"
         RecordWriter(run.dir).write([ToolScore(run.run_id, state_id, tool, None, score, details)])
-        summary = {"score": score, **details}
+        summary = {"score": score, **details, **({"draw": draw, "gpus": gpus} if draw else {})}
         run.summarize(summary)
     ws.charge(run.dir)
     return summary
@@ -1753,6 +1770,7 @@ PHASES = (
     "confirm",  # a Stage-2 lineage's confirmation draw at a screened dose (§12.4.1)
     "corpus",  # the ADL-corpus expression check of a latent state at a screened dose (§12.4.7)
     "readers",  # the readers at a Stage-2 lineage's analysis dose: lens-only and PD (§12.4)
+    "pd_pool",  # another draw of a state's full PD pool, tagged, on its GPU (Codex s4k)
     "ood",  # the out-of-distribution observer of latent states (§12.4.7)
     "kstar",  # a lineage's k* calibration and step budget (§12.3.7)
     "y2",  # a Y₂ candidate's organism and reference rate (§12.3.6, criterion 3)
@@ -2093,8 +2111,8 @@ def check_plan(
         seeds = None if OmegaConf.is_missing(relearn, "seeds") else relearn.seeds
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
-    stage2 = ("screen", "confirm", "corpus", "readers", "ood", "kstar", "y2", "certificate",
-              "decide")  # fmt: skip
+    stage2 = ("screen", "confirm", "corpus", "readers", "pd_pool", "ood", "kstar", "y2",
+              "certificate", "decide")  # fmt: skip
     if phase in ("reread", "engine", *stage2) and (audit or calibration or targets):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
     if phase == "reread":
@@ -2109,6 +2127,8 @@ def check_plan(
         problems += corpus_problems(cfg, plan)
     if phase == "readers":
         problems += readers_problems(cfg, plan)
+    if phase == "pd_pool":
+        problems += pd_pool_problems(cfg, plan)
     if phase == "ood":
         problems += ood_problems(plan)
     if phase == "kstar":
@@ -2254,6 +2274,9 @@ def run_behavior(
             return _result(lineage, outputs)
         if phase == "readers":
             _readers(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "pd_pool":
+            _pd_pool(ws, plan, meter, outputs)
             return _result(lineage, outputs)
         if phase == "ood":
             _ood(ws, plan, meter, outputs)
@@ -2804,7 +2827,7 @@ def pd_settings_problems(spec: Mapping[str, Any]) -> list[str]:
     ]
 
 
-def pd_pool_hits(ws: Workspace, state_id: str) -> dict[str, Any]:
+def pd_pool_hits(ws: Workspace, state_id: str, draw: str | None = None) -> dict[str, Any]:
     """Stage 2's screening count: the state's full PD continuation pool (``audit_pd``: every
     prefill in both framings) and the behavior's frozen detector's hits over it. Before any count
     is returned the pool is checked to be the frozen one: the frozen settings and prefills, and
@@ -2813,8 +2836,8 @@ def pd_pool_hits(ws: Workspace, state_id: str) -> dict[str, Any]:
     problems = pd_settings_problems(tool_spec(ws, "perplexity_differencing"))
     if problems:
         raise ValueError(problems[0])
-    audit_pd(ws, state_id)
-    cell = tool_pd_cell(ws, state_id)
+    audit_pd(ws, state_id, draw)
+    cell = tool_pd_cell(ws, state_id, draw)
     run, summary = cell.previous, cell.summary()
     n = FROZEN_PD["prefills"]
     if (summary["prefills"], summary["prefills_sha256"]) != (n, FROZEN_PD["prefills_sha256"]):
@@ -3226,11 +3249,17 @@ def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
     states = {"L": at["latent"], "H_s": at["sham_s"], "X": at["X"], "recipe": recipes[0]}
     if len(set(states.values())) != len(states):
         raise ValueError(f"the readers' states are not distinct: {states}")
+    # option (b) of 2026-10-19 (Codex s4k): L's PD pool for the readers and PD-clean is the
+    # tagged draw on H100 SXM, built before (phase pd_pool), when the screening ran elsewhere
+    pd_draw = (plan.get("readers") or {}).get("pd_draw")
+    if pd_draw is not None and not tool_pd_cell(ws, states["L"], pd_draw).done:
+        raise ValueError(f"L's PD pool of draw {pd_draw} is not built: phase pd_pool first")
     return {
         "dose": dose,
         "states": states,
         "decision": {"manifest": path.name, "sha256": decision["sha256"]},
         "screening": decision["inputs"]["screening"],
+        "pd_draw": pd_draw,
     }
 
 
@@ -3289,6 +3318,53 @@ def readers_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     except (ValueError, TypeError) as error:
         problems.append(f"ADL needs this worker's API ledger, plan.api.adl_ledger: {error}")
     return problems
+
+
+def pd_pool_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase pd_pool cannot start, before any GPU (Codex s4k): ``plan.pd_pool.state`` is the
+    latent state of a screened deep dose, ``plan.pd_pool.draw`` one of ``PD_DRAW_GPU``, the PD
+    settings the frozen ones and the state readable. The GPU is checked when the draw runs."""
+    from . import continuation_confirm as C
+
+    spec = plan.get("pd_pool") or {}
+    state, draw = spec.get("state"), spec.get("draw")
+    if not state or draw not in PD_DRAW_GPU:
+        return [f"phase pd_pool needs plan.pd_pool.state and a draw of {sorted(PD_DRAW_GPU)}"]
+    try:
+        rules = _stage2_rules()
+        _, record = _stage2_screening(Workspace(cfg), rules)
+        latents = {record["doses"][str(d)]["latent"] for d in C.screened(record, rules)}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return [f"phase pd_pool: {error}"]
+    if state not in latents:
+        return [f"plan.pd_pool.state {state} is not the latent state of a screened deep dose"]
+    tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
+    problems = pd_settings_problems(tools["perplexity_differencing"])
+    return problems + _store_problems([state], "plan.pd_pool")
+
+
+def _pd_pool(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]):
+    """Another draw of a latent state's full PD pool (Codex s4k), in the stage-2 batch: the same
+    frozen settings and checks as the screening's count (``pd_pool_hits``), a cell of its own
+    (tagged), on its GPU only. The record (``stage2_pd_pool.json``) gives both pools' counts; the
+    screening's count stays the screening's, the tagged pool is PD-clean's input."""
+    spec = plan["pd_pool"]
+    meter.check()
+    pool = pd_pool_hits(ws, spec["state"], draw=spec["draw"])
+    _, record = _stage2_screening(ws, _stage2_rules())
+    screened = next(
+        (v["pool"] for v in record["doses"].values() if v["latent"] == spec["state"]), None
+    )
+    summary = tool_pd_cell(ws, spec["state"], spec["draw"]).summary()
+    out = {"state": spec["state"], "draw": spec["draw"], "gpus": summary.get("gpus"),
+           "pool": pool, "screening_pool": screened}  # fmt: skip
+    cell = make_cell(ws, "stage2_pd_pool", {"state": spec["state"], "draw": spec["draw"],
+                                            "run": pool["run"]})  # fmt: skip
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage2_pd_pool.json").write_text(json.dumps(out, indent=1) + "\n")
+            run.summarize({"state": spec["state"], "draw": spec["draw"], "hits": pool["hits"]})
+    outputs["pd_pool"] = out
 
 
 def adl_method_equivalence_cell(ws: Workspace, state_id: str) -> Cell:
@@ -3391,7 +3467,8 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
             "lens": lens / "reproduction" / f"delta_layer{reproduction['layer']}.safetensors",
         }
         meter.check()
-        audit_pd(ws, sid)
+        draw = r["pd_draw"] if role == "L" else None
+        audit_pd(ws, sid, draw)
         per_state[role] = {
             "state": sid,
             "method_equivalence_validation": {
@@ -3409,7 +3486,8 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
                 "passed": reproduction["passed"],
             },
             "lens": lens.name,
-            "pd": tool_pd_cell(ws, sid).previous.name,
+            "pd": tool_pd_cell(ws, sid, draw).previous.name,
+            "pd_draw": draw,
         }
     record = {
         "behavior": ws.behavior.id,

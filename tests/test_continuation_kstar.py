@@ -504,3 +504,17 @@ def test_the_pinned_pilot_references_reproduce_their_counts():
         OmegaConf.update(cfg, "behavior", spec, merge=False)
         out = pipeline.reference_rate(pipeline.Workspace(cfg), state)
         assert (out["hits"], out["n"], out["rescored_changes"]) == (hits, 200, 0), behavior
+
+
+def test_k_star_s_calibration_runs_are_of_one_gpu_type(tmp_path, monkeypatch):
+    # Codex s4k: k* computed whole on one configuration
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    record = resolved_record()
+    calibration_runs(tmp_path)
+    assert K.evidence_problems(record, K.find_run) == []
+    names = [n for ns in record["relearn_runs"].values() for n in ns]
+    for name, gpu in zip(names, ["NVIDIA H100 80GB HBM3"] * 5 + ["NVIDIA H100 NVL"], strict=True):
+        meta = tmp_path / "runs" / "continuation_14b" / name / "meta.json"
+        meta.write_text(json.dumps({**json.loads(meta.read_text()), "hardware": {"gpus": [gpu]}}))
+    (problem,) = K.evidence_problems(record, K.find_run)
+    assert "ran on more than one GPU type" in problem

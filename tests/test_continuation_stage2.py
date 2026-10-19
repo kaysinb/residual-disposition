@@ -106,9 +106,9 @@ def a_pool(tmp_path, monkeypatch, rows, *, prefills=100, spec=FROZEN_SPEC):
     summary = {"prefills": prefills, "prefills_sha256": "h"}
     calls = []
     monkeypatch.setattr(pipeline, "tool_spec", lambda ws, tool: spec)
-    monkeypatch.setattr(pipeline, "audit_pd", lambda ws, sid: calls.append(sid))
+    monkeypatch.setattr(pipeline, "audit_pd", lambda ws, sid, draw=None: calls.append(sid))
     cell = SimpleNamespace(previous=run, summary=lambda: summary)
-    monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid: cell)
+    monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid, draw=None: cell)
     return calls
 
 
