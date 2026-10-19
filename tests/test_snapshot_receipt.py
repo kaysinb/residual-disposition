@@ -61,6 +61,8 @@ def pod(tmp_path, monkeypatch):
     receipt.write_text(json.dumps(M.snapshot_receipt(package, repo)))
     monkeypatch.setenv("SOURCE_SNAPSHOT_ID", package.name)
     monkeypatch.setenv("SOURCE_SNAPSHOT_RECEIPT", str(receipt))
+    trusted = hashlib.sha256(receipt.read_bytes()).hexdigest()  # set at the Pod's creation
+    monkeypatch.setenv("SNAPSHOT_RECEIPT_SHA256", trusted)
     source = package / "source"
     return source, source / "manifests" / "kstar_example_link_400.json", receipt, repo
 
@@ -80,16 +82,40 @@ def test_a_changed_file_is_not_the_snapshot_s(pod):
         M.committed_json(path, "the k* manifest", source)
 
 
+def trust(monkeypatch, receipt):
+    monkeypatch.setenv("SNAPSHOT_RECEIPT_SHA256", hashlib.sha256(receipt.read_bytes()).hexdigest())
+
+
+def test_a_fabricated_receipt_is_refused(pod, monkeypatch):
+    # review s3z2: a receipt naming no real commit, its hashes consistent with the package, is
+    # not the receipt checked at the Pod's creation
+    source, path, receipt, repo = pod
+    path.write_text(json.dumps({"budget": 600}))  # an uncommitted manifest
+    data = json.loads(receipt.read_text())
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    fake = {**data, "git_commit": "not-a-real-commit",
+            "files": {**data["files"], "manifests/kstar_example_link_400.json": sha}}  # fmt: skip
+    receipt.write_text(json.dumps(fake))
+    with pytest.raises(RuntimeError, match="not the one checked at the Pod's creation"):
+        M.committed_json(path, "the k* manifest", source)
+    monkeypatch.delenv("SNAPSHOT_RECEIPT_SHA256")
+    with pytest.raises(RuntimeError, match="no git and no verified snapshot"):
+        M.committed_json(path, "the k* manifest", source)
+
+
 def test_a_receipt_of_another_snapshot_or_a_dirty_commit_is_refused(pod, monkeypatch, tmp_path):
     source, path, receipt, repo = pod
     data = json.loads(receipt.read_text())
     receipt.write_text(json.dumps({**data, "git_dirty": True}))
+    trust(monkeypatch, receipt)  # even one trusted at the Pod's creation
     with pytest.raises(RuntimeError, match="not taken at a clean commit"):
         M.committed_json(path, "the k* manifest", source)
     receipt.write_text(json.dumps({**data, "snapshot_id": "0" * 64}))
+    trust(monkeypatch, receipt)
     with pytest.raises(RuntimeError, match="not snapshot"):
         M.committed_json(path, "the k* manifest", source)
     receipt.write_text(json.dumps(data))
+    trust(monkeypatch, receipt)
     monkeypatch.setenv("SOURCE_SNAPSHOT_ID", "1" * 64)
     with pytest.raises(RuntimeError, match="not snapshot"):
         M.committed_json(path, "the k* manifest", source)
@@ -98,11 +124,12 @@ def test_a_receipt_of_another_snapshot_or_a_dirty_commit_is_refused(pod, monkeyp
         M.committed_json(path, "the k* manifest", source)
 
 
-def test_a_file_the_receipt_does_not_list_is_refused(pod):
+def test_a_file_the_receipt_does_not_list_is_refused(pod, monkeypatch):
     source, path, receipt, repo = pod
     data = json.loads(receipt.read_text())
     files = {k: v for k, v in data["files"].items() if not k.startswith("manifests/")}
     receipt.write_text(json.dumps({**data, "files": files}))
+    trust(monkeypatch, receipt)
     with pytest.raises(RuntimeError, match="is not the committed file"):
         M.committed_json(path, "the k* manifest", source)
 
@@ -132,10 +159,20 @@ def test_the_receipt_script(tmp_path, capsys):
     spec.loader.exec_module(script)
     repo = a_repo(tmp_path)
     package = a_package(tmp_path, repo)
-    assert script.main([str(package), "--repo", str(repo)]) == 0
-    written = json.loads((package.parent / f"{package.name}.receipt.json").read_text())
+    assert script.main(["write", str(package), "--repo", str(repo)]) == 0
+    capsys.readouterr()
+    receipt = package.parent / f"{package.name}.receipt.json"
+    written = json.loads(receipt.read_text())
     assert written["snapshot_id"] == package.name and written["git_dirty"] is False
     assert set(written["files"]) == {"code.py", "manifests/kstar_example_link_400.json"}
+    # the coordinator's check makes it again from git and prints what the Pod is created with
+    assert script.main(["check", str(receipt), "--package", str(package), "--repo", str(repo)]) == 0
+    shown = json.loads(capsys.readouterr().out)
+    assert shown["SNAPSHOT_RECEIPT_SHA256"] == hashlib.sha256(receipt.read_bytes()).hexdigest()
+    assert shown["SOURCE_SNAPSHOT_ID"] == package.name
+    receipt.write_text(json.dumps({**written, "git_commit": "not-a-real-commit"}))
+    with pytest.raises(SystemExit, match="is not the receipt git gives"):
+        script.main(["check", str(receipt), "--package", str(package), "--repo", str(repo)])
 
 
 def test_a_checkout_still_uses_git(tmp_path):

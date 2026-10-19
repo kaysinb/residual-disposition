@@ -422,14 +422,32 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   each of the 200 frozen OOD prompts (one sample, whatever the behavior's sampling sets), the
   detector's hits and the one-sided 95 % Clopper–Pearson bound against 0.02 (0 of 200 is the
   only count within it), computed only over exactly the 200 prompt/sample pairs.
-- **Committed manifests on a Pod** (C8, item E). The Pod's source is a verified snapshot without
-  `.git`, so `manifests.committed_json` accepts a manifest there only by the snapshot's receipt:
-  on the laptop, right after `source_snapshot.py prepare` from the clean commit, `uv run python
-  scripts/snapshot_receipt.py <package>` checks every snapshot file against that commit's blob
-  and writes `<snapshot id>.receipt.json` beside the package; the chain uploads it and exports
-  `SOURCE_SNAPSHOT_ID` (after verifying the snapshot) and `SOURCE_SNAPSHOT_RECEIPT`. A manifest
-  is committed on the Pod only if its sha256 is the snapshot manifest's and the receipt's and the
-  receipt names a clean commit of that snapshot; a manifest committed later needs a new snapshot.
+- **Committed manifests on a Pod** (C8, item E; review s3z2). The Pod's source is a verified
+  snapshot without `.git`, so `manifests.committed_json` accepts a manifest there only by the
+  snapshot's receipt, authentic only by trusted launch metadata (no secrets, no signatures):
+  1. on the laptop, right after `source_snapshot.py prepare` from the clean commit, `uv run
+     python scripts/snapshot_receipt.py write <package>` checks every snapshot file against that
+     commit's blob and writes `<snapshot id>.receipt.json` beside the package;
+  2. the coordinator runs `uv run python scripts/snapshot_receipt.py check <receipt> --package
+     <package>`, which makes the receipt again from git, refuses one that differs and prints
+     `SNAPSHOT_RECEIPT_SHA256` (the receipt file's sha256) and `SOURCE_SNAPSHOT_ID`;
+  3. the coordinator sets both in the Pod's environment at its creation; the chain passes the
+     receipt's path (`SOURCE_SNAPSHOT_RECEIPT`).
+  A manifest is committed on the Pod only if the receipt is the one with that sha256, its own
+  sha256 is the snapshot manifest's and the receipt's and the receipt names a clean commit of
+  that snapshot; a manifest committed later needs a new snapshot. Every acceptance (k*, Y₂,
+  Stage 2) leaves what the check adds (`sha256`, `committed_at`; `manifests.TRANSPORT`) out of
+  its comparisons.
+- **The Pods' sessions in the meter** (C8, item D; review s3y2). After `start`, `split
+  stage2/<behavior> --share pod-a=… --share pod-b=…`. For each Pod session the coordinator
+  creates the Pod and gives its actual ID and the deadline set at its creation; `session-open
+  <item> --worker <pod-a|pod-b> --pod-id <ID> --deadline <ISO> --price <USD/h> --hours <h>
+  --receipt <file>` authorizes it in the log, exclusively (refused while that worker has an open
+  session) and within the worker's live share, and writes the receipt the Pod verifies
+  (`verify-receipt <file> --item … --worker … --pod-id <its own ID> --price … --hours …` on the
+  copy of the log). After the Pod stops, `session-close <item> --worker … --pod-id … --gpu-usd
+  <paid>` settles its cost; only then can that worker's next session open. A worker's charges may
+  not exceed its share; an overrun stops the item.
 - **Stage 2's decision** (§12.7, §12.4.1, §12.4.7; reviews s3t, s3v). Phase decide (CPU, batch
   stage2, `pipeline.plan.decide.screening=<stage2_screening run>`,
   `'pipeline.plan.decide.confirmation=[<attempt 1 run>, <attempt 2 run>]'`,

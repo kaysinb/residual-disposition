@@ -7,10 +7,14 @@ In a checkout, git says so. On a Pod the source is a verified snapshot without `
 (``source_snapshot.py``: ``<package>/source`` and its canonical ``<package>/manifest.json``,
 whose sha256 is the snapshot id); there the proof is the snapshot's receipt (``snapshot_receipt``,
 written on the laptop by ``scripts/snapshot_receipt.py``): the snapshot id, the clean commit it
-was taken at, and every snapshot file's sha256 checked against that commit's blob. A file is
-committed on the Pod only if its sha256 is the snapshot manifest's and the receipt's, the
-manifest is the snapshot's (``SOURCE_SNAPSHOT_ID``) and the receipt names a clean commit
-(review s3l, C8 item E)."""
+was taken at, and every snapshot file's sha256 checked against that commit's blob. The receipt is
+authentic only by trusted launch metadata (review s3z2): the coordinator checks it against git on
+the laptop (``scripts/snapshot_receipt.py check``) and sets ``SNAPSHOT_RECEIPT_SHA256`` (the
+receipt file's sha256) and ``SOURCE_SNAPSHOT_ID`` in the Pod's environment at its creation; no
+value from the package proves anything by itself. A file is committed on the Pod only if the
+receipt is that file, its sha256 is the snapshot manifest's and the receipt's, the manifest is the
+snapshot's and the receipt names a clean commit. What a check adds to a manifest's data
+(``TRANSPORT``) is left out of every comparison of its content."""
 
 from __future__ import annotations
 
@@ -20,6 +24,13 @@ import os
 import subprocess
 from pathlib import Path
 from typing import Any
+
+TRANSPORT = ("sha256", "committed_at")  # added by committed_json, not part of a manifest
+
+
+def content(data: Any) -> Any:
+    """A manifest's data without what its check added (``TRANSPORT``)."""
+    return {k: v for k, v in data.items() if k not in TRANSPORT}
 
 
 def _sha256(data: bytes) -> str:
@@ -71,9 +82,13 @@ def _snapshot_committed(path: Path, repo: Path, what: str) -> str:
     snapshot's receipt; raises otherwise."""
     receipt_path = os.environ.get("SOURCE_SNAPSHOT_RECEIPT")
     expected = os.environ.get("SOURCE_SNAPSHOT_ID")
-    if not receipt_path or not expected:
+    trusted = os.environ.get("SNAPSHOT_RECEIPT_SHA256")  # set at the Pod's creation (s3z2)
+    if not receipt_path or not expected or not trusted:
         raise RuntimeError(f"no git and no verified snapshot: no certificate before {what}")
-    receipt = json.loads(Path(receipt_path).read_text())
+    raw = Path(receipt_path).read_bytes()
+    if _sha256(raw) != trusted:
+        raise RuntimeError("the snapshot receipt is not the one checked at the Pod's creation")
+    receipt = json.loads(raw)
     snapshot_id, manifest = snapshot_manifest(repo.parent)
     if receipt.get("snapshot_id") != expected or snapshot_id != expected:
         raise RuntimeError(f"the receipt and the source are not snapshot {expected}")

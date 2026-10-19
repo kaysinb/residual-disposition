@@ -178,7 +178,8 @@ def manifest_path(root: Path, behavior: str) -> Path:
     return root / "manifests" / f"stage2_{behavior}.json"
 
 
-METADATA = ("decision_run", "sha256", "committed_at")  # added by its manifest, not recomputed
+# what a record's manifest adds (its run) and what its check adds (manifests.TRANSPORT)
+METADATA = ("decision_run", "sha256", "committed_at")
 
 
 def current_detector_version(behavior: str) -> str:

@@ -472,6 +472,34 @@ def test_a_y2_manifest_s_derived_values_are_recomputed():
     assert "is not a Y₂ candidate" in y2.manifest_problems(a_manifest(y2="tldr"), RULES)[0]
 
 
+def snapshot_of(repo, root, monkeypatch):
+    """A verified snapshot of ``repo``'s committed files without .git, with its receipt trusted as
+    the coordinator sets it at the Pod's creation; returns its source directory."""
+    import hashlib
+    import shutil
+
+    from residual_disposition import manifests as M
+
+    package = root / "store" / "pending"
+    files = []
+    for f in sorted(x for x in repo.rglob("*") if x.is_file() and ".git" not in x.parts):
+        rel = f.relative_to(repo).as_posix()
+        (package / "source" / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(f, package / "source" / rel)
+        files.append({"path": rel, "mode": 0o644, "kind": "file",
+                      "sha256": hashlib.sha256(f.read_bytes()).hexdigest()})  # fmt: skip
+    raw = M.canonical({"version": 1, "files": files})
+    (package / "manifest.json").write_bytes(raw)
+    final = package.parent / hashlib.sha256(raw).hexdigest()
+    package.rename(final)
+    receipt = root / "snapshot-receipt.json"
+    receipt.write_text(json.dumps(M.snapshot_receipt(final, repo)))
+    monkeypatch.setenv("SOURCE_SNAPSHOT_ID", final.name)
+    monkeypatch.setenv("SOURCE_SNAPSHOT_RECEIPT", str(receipt))
+    monkeypatch.setenv("SNAPSHOT_RECEIPT_SHA256", hashlib.sha256(receipt.read_bytes()).hexdigest())
+    return final / "source"
+
+
 def test_the_certificate_accepts_the_y2_manifest_by_making_its_selection_again(
     built, tmp_path, monkeypatch
 ):
@@ -499,6 +527,10 @@ def test_the_certificate_accepts_the_y2_manifest_by_making_its_selection_again(
     commit()
     written = json.loads(path.read_text())
     assert y2.accepted_manifest(path, RULES, ZIL, repo)["y2"] == "zero_indexed_lists"
+    # review s3z2: the same manifest on a Pod, through the snapshot path (committed_at added)
+    source = snapshot_of(repo, tmp_path, monkeypatch)
+    on_pod = y2.accepted_manifest(source / "manifests" / "y2.json", RULES, ZIL, source)
+    assert on_pod["y2"] == "zero_indexed_lists" and on_pod["committed_at"]
     # the derived values recomputed
     commit({**written, "threshold": "3/4"})
     with pytest.raises(ValueError, match="recomputed"):

@@ -285,7 +285,7 @@ def committed_repo(root):
     return repo
 
 
-def test_the_manifest_is_written_decided_and_accepted_recomputed_whole(runs):
+def test_the_manifest_is_written_decided_and_accepted_recomputed_whole(runs, monkeypatch):
     screening_run(runs)
     confirmation_run(runs, "c1", draws((400, True, CURRENT, None))[0])
     expression_runs(runs, 400)
@@ -306,6 +306,16 @@ def test_the_manifest_is_written_decided_and_accepted_recomputed_whole(runs):
     git(repo, "add", "manifests")
     git(repo, "commit", "-q", "-m", "stage2")
     assert S2.committed_decision(path, RULES, find_run, repo)["decision"]["analysis_dose"] == 400
+    # review s3z2: on a Pod, through the snapshot path (its committed_at left out)
+    from test_continuation_y2_prep import snapshot_of
+
+    source = snapshot_of(repo, runs, monkeypatch)
+    on_pod = S2.committed_decision(
+        S2.manifest_path(source, "example_link"), RULES, find_run, source
+    )
+    assert on_pod["decision"]["analysis_dose"] == 400 and on_pod["committed_at"]
+    for name in ("SOURCE_SNAPSHOT_ID", "SOURCE_SNAPSHOT_RECEIPT", "SNAPSHOT_RECEIPT_SHA256"):
+        monkeypatch.delenv(name)
     pending_slot = {"status": "pending", "slot": None, "waiting_on": "pun_intended"}
     assert S2.slot(repo, RULES, find_run, repo) == pending_slot
     # review s3v: a link record relabeled as pun, or another recorded field, is not accepted

@@ -687,7 +687,9 @@ def accepted_manifest(path: Path, rules: Any, behavior: Behavior, repo: Path | N
         except (ValueError, KeyError, TypeError, OSError) as error:
             problems.append(f"the selection from its inputs fails: {error}")
         else:
-            if expected != {k: v for k, v in data.items() if k != "sha256"}:
+            from .manifests import content
+
+            if expected != content(data):  # what the check added is left out (review s3z2)
                 problems.append("the selection from its inputs is not this manifest")
     if problems:
         raise ValueError(f"{path}: {'; '.join(problems)}")
