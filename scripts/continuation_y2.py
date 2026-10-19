@@ -9,8 +9,10 @@ the frozen order that meets the three criteria, from the evidence at hand.
 - Criterion 2: the stage-0 elicitation's counts, rescored with the current detector
   (``--elicitation``; 0 of 300 without the prompt, at least 0.90 with it), and the detector check
   from the full-review record (``continuation_y2.load_review``; ``--dispositions`` for reviewed
-  misses): passed when its verdict is "passes", failed only for a ``--rejected`` set id,
-  otherwise pending. The set's strata must be the elicitation's misses and unprompted hits.
+  misses): passed when its verdict is "passes"; failed only by a rejection record
+  (``--rejection``, review s3o) of its set and detector version, which a passing check refuses
+  unless the record names the protocol decision that allows it; otherwise pending. The set's
+  strata must be the elicitation's misses and unprompted hits.
 - Criterion 3: the candidate's Y₂ organism's reference, the record of phase y2
   (``y2_reference.json``), checked against its runs: a completed relearn_reference pass of the
   organism on the frozen relearning-evaluation requests, one response to each of the 200 prompts,
@@ -73,7 +75,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--validation", nargs=3, type=Path, action="append", default=[],
                         metavar=("SET", "LABELS", "REVIEW_LOG"))  # fmt: skip
     parser.add_argument("--dispositions", type=Path, action="append", default=[])
-    parser.add_argument("--rejected", action="append", default=[], help="a failed set id")
+    parser.add_argument("--rejection", type=Path, action="append", default=[],
+                        help="a rejection record {set_id, detector_version, why, ...}")  # fmt: skip
     parser.add_argument("--reference", type=Path, action="append", default=[])
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "manifests" / "y2.json")
     args = parser.parse_args(argv)
@@ -83,6 +86,14 @@ def main(argv: list[str] | None = None) -> int:
         c: behavior_from_config(OmegaConf.to_container(load_config(f"behaviors/{c}").behavior))
         for c in candidates
     }
+    rejections = {}
+    for path in args.rejection:
+        record = json.loads(path.read_text())
+        if not record.get("set_id") or not record.get("detector_version") or not record.get("why"):
+            raise SystemExit(f"{path}: a rejection names its set, detector version and why")
+        if record["set_id"] in rejections:
+            raise SystemExit(f"two rejections of the set {record['set_id']}")
+        rejections[record["set_id"]] = record
     dispositions = {}
     for path in args.dispositions:
         set_id = json.loads(path.read_text()).get("set_id")
@@ -132,7 +143,13 @@ def main(argv: list[str] | None = None) -> int:
             ):
                 raise SystemExit(f"{c}: the set's strata are not the elicitation's")
         passed = None
-        if check is not None and check["set_id"] in args.rejected:
+        rejection = rejections.get((check or {}).get("set_id"))
+        if check is not None and rejection is not None:
+            if rejection.get("detector_version") != check["detector_version"]:
+                raise SystemExit(f"{c}: the rejection is of another detector version")
+            if check["verdict"] == "passes" and not rejection.get("protocol_decision"):
+                why = "a rejection against a passing check needs a protocol decision"
+                raise SystemExit(f"{c}: {why}")
             passed = False
         elif check is not None and check["verdict"] == "passes":
             passed = True

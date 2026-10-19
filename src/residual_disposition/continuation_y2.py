@@ -150,13 +150,30 @@ FROZEN_SETS = {
         "seed": 20261020,
         "detector_class": "looser format",
         "random": 25,
+        "detector_version": "bea55b3a461f",  # the stage-0 detector the set was drawn with
+        "input_sha256": "470596e7fc2a2dd80abac224b614ffc65d4b64d49260783a206416c1809f9c09",
+        "key_sha256": "0bbb2080fb90cead9702197ce57b82756cce0b34ae59e2f3a9522d9a92d8c173",
+        # the private mapping item → stratum, source and stored verdict (review s3o)
+        "key_items_sha256": "34cf6dc4424e13e175ae588448480d9ae91f5b15aabbe2209e75e61c4baa7a37",
     },
 }
 DISPOSITIONS = ("accepted", "widen")  # a reviewed miss: kept as an isolated miss, or widened
 # The relearning-evaluation requests of every pilot reference (their cells' ``requests`` hash)
 # and the pilot Y organism's training run, whose recipe and LoRA are the stage-1 recipe.
 RELEARN_EVAL_REQUESTS = "64f38627f325186bba4b66964a2718278f802fc522f5ba817d582cfca34378bc"
+# the canonical hash of the sorted ids of the 200 relearning-evaluation prompts, as every pilot
+# reference's observations hold them (review s3o)
+RELEARN_EVAL_PROMPT_IDS = "8cc8aaf13505f5023330f7949ea63523344987443b35a4098d47b976fb7fdf4d"
 STAGE1_RECIPE_RUN = "20261014-070803-train_active-a64cde15-c867"
+FROZEN_MODEL = {"name": "Qwen/Qwen3-14B", "revision": "40c069824f4251a91eefaf281ebe4c544efd3e18"}
+
+
+def canonical_sha256(value: Any) -> str:
+    """sha256 of the canonical JSON of ``value`` (sorted keys, no spaces)."""
+    import hashlib
+
+    blob = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(blob.encode()).hexdigest()
 
 
 def _sha256(path: Path) -> str:
@@ -181,6 +198,12 @@ def load_review(
     key = json.loads((set_dir / "key.json").read_text())
     if _sha256(set_dir / "input.jsonl")[:12] != key.get("set_id"):
         raise ValueError(f"{set_dir}: input.jsonl is not the set {key.get('set_id')}")
+    frozen = FROZEN_SETS.get(behavior.id) or {}
+    if (_sha256(set_dir / "input.jsonl"), _sha256(set_dir / "key.json")) != (
+        frozen.get("input_sha256"),
+        frozen.get("key_sha256"),
+    ):
+        raise ValueError(f"{set_dir}: its files are not {behavior.id}'s frozen set")
     items = [json.loads(line) for line in blob.decode().splitlines() if line.strip()]
     labels: dict[str, Any] = {}
     for line in Path(labels_path).read_text().splitlines():
@@ -233,6 +256,8 @@ def validation_check(
     if header != want or key.get("acceptance_rule") != LOOSER_RULE:
         raise ValueError(f"the set {header} is not {behavior.id}'s frozen set {want}")
     entries = key["items"]
+    if canonical_sha256(entries) != frozen["key_items_sha256"]:
+        raise ValueError(f"the set's key is not {behavior.id}'s frozen mapping")
     if [i["item_id"] for i in items] != list(dict.fromkeys(i["item_id"] for i in items)):
         raise ValueError("the set repeats an item")
     if {i["item_id"] for i in items} != set(entries):
@@ -258,7 +283,7 @@ def validation_check(
             raise ValueError(f"{item_id}: the review log disagrees with the labels")
     texts = {i["item_id"]: i["response"] for i in items}
     strata: dict[str, dict[str, Any]] = {}
-    stored_changes = 0
+    stored_changes, new_disagreements = 0, []
     for item_id, e in sorted(entries.items()):
         hit = bool(behavior.detector(texts[item_id]))
         stored_changes += hit != bool(e["detector_hit"])
@@ -266,6 +291,9 @@ def validation_check(
         row["n"] += 1
         if labels[item_id] != hit:
             row["disagree"].append(item_id)
+            if labels[item_id] == bool(e["detector_hit"]):
+                new_disagreements.append(item_id)  # the drawn detector agreed with the label
+    revised = behavior.detector.version != frozen["detector_version"]
     for stratum in RANDOM_STRATA:
         n = strata.get(stratum, {"n": 0})["n"]
         if n != frozen["random"]:
@@ -286,7 +314,9 @@ def validation_check(
     if unknown or any((decided[i] or {}).get("disposition") not in DISPOSITIONS for i in decided):
         raise ValueError(f"dispositions only for the items to review, one of {DISPOSITIONS}")
     widen = any(decided[i]["disposition"] == "widen" for i in decided)
-    if random_disagree > MAX_RANDOM_DISAGREEMENTS or widen:
+    # A revision keeps every agreement of the drawn detector (§2, §12.3.1; review s3o): it is
+    # rechecked on the same texts and labels and may introduce no new disagreement.
+    if random_disagree > MAX_RANDOM_DISAGREEMENTS or widen or (revised and new_disagreements):
         verdict = "revise"
     elif set(decided) != set(to_review):
         verdict = "review"
@@ -296,6 +326,8 @@ def validation_check(
         "set_id": frozen["set_id"],
         "behavior_id": behavior.id,
         "detector_version": behavior.detector.version,
+        "revised": revised,
+        "new_disagreements": new_disagreements,
         "stored_verdict_changes": stored_changes,
         "strata": strata,
         "random": {"n": 2 * frozen["random"], "disagree": random_disagree},
@@ -335,8 +367,16 @@ def reference_problems(run: Path, behavior: Behavior) -> tuple[list[str], dict[s
     ):
         return [f"{run}: not a reference of {behavior.id}'s current detector"], None
     problems = []
+    if _config(run).get("step") != "y2_reference":
+        problems.append(f"{run.name}: not a y2_reference cell")
     ref = find_run(record["reference"]["run"])
-    params = (_config(ref).get("params") or {}) if ref is not None else {}
+    ref_config = _config(ref) if ref is not None else {}
+    params = ref_config.get("params") or {}
+    if (
+        ref_config.get("step") != "rates"
+        or {k: (ref_config.get("model") or {}).get(k) for k in FROZEN_MODEL} != FROZEN_MODEL
+    ):
+        problems.append(f"{record['reference']['run']}: not a rates cell of the frozen model")
     want = {
         "state": record["organism"],
         "measurement": "relearn_reference",
@@ -351,8 +391,19 @@ def reference_problems(run: Path, behavior: Behavior) -> tuple[list[str], dict[s
         obs = list(read_table([ref], "detector_obs"))
         texts = read_responses([ref], "detector_obs")
         pairs = [(o.prompt_id, o.sample) for o in obs]
+        owner = {
+            (o.run_id, o.state_id, o.behavior_id, o.prompt_set, o.measurement, o.condition,
+             o.readout_variant)
+            for o in obs
+        }  # fmt: skip
+        mine = {(ref.name, record["organism"], behavior.id, "relearn_eval", "relearn_reference",
+                 "none", None)}  # fmt: skip
         if len(set(pairs)) != len(pairs) or len(pairs) != 200 or {s for _, s in pairs} != {0}:
             problems.append(f"{ref.name}: not one response to each of the 200 prompts")
+        elif canonical_sha256(sorted(p for p, _ in pairs)) != RELEARN_EVAL_PROMPT_IDS:
+            problems.append(f"{ref.name}: not the frozen relearning-evaluation prompts")
+        elif owner != mine:
+            problems.append(f"{ref.name}: observations of another run, state or condition")
         elif any(o.response_id not in texts for o in obs):
             problems.append(f"{ref.name}: responses without their saved text")
         else:
@@ -368,6 +419,7 @@ def reference_problems(run: Path, behavior: Behavior) -> tuple[list[str], dict[s
         p, q = config.get("params") or {}, recipe.get("params") or {}
         if (
             config.get("step") != "train_active"
+            or {k: (config.get("model") or {}).get(k) for k in FROZEN_MODEL} != FROZEN_MODEL
             or (config.get("behavior") or {}).get("id") != behavior.id
             or made != record["organism"]
             or p.get("seed") != record["seed"]

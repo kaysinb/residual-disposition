@@ -462,14 +462,19 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
      `check-<detector version>.json`, never overwritten, with every file's sha256: revise above 2
      of 50 random disagreements; a prompted miss labeled present needs a recorded disposition
      ("accepted", an isolated miss, or "widen", which revises); a revised detector is rechecked
-     on the same texts and labels. Criterion 3: phase y2
+     on the same texts and labels and may introduce no new disagreement. The set's input, its
+     private key and the key's mapping are pinned by sha256 (`FROZEN_SETS`). A candidate fails
+     criterion 2 only by a rejection record of its set and detector version (`--rejection`), which
+     a passing check refuses unless the record names the protocol decision that allows it. Criterion 3: phase y2
      (`experiments/continuation_14b/y2_<candidate>`, batch stage2) trains the Y₂ organism
      (stage-1 recipe, base model, seed 0), reads its rate on the 200 relearning-evaluation
      prompts (at least 0.5) and builds its relearning data. `scripts/continuation_y2.py
      --validation <set> <labels> <log> --reference <y2_reference run>` recomputes the check from
      the record, checks the set's strata against the elicitation and the reference against its
-     runs (the organism's completed reference pass on the frozen requests, 200 pairs, its hits
-     rescored; the stage-1-recipe training run, seed 0), selects Y₂ and writes the choice, its
+     runs (the organism's completed reference pass of the frozen model on the frozen requests,
+     its observations the organism's, unconditioned, on the 200 frozen prompt ids, its hits
+     rescored; the stage-1-recipe training run of the frozen model, seed 0), selects Y₂ and
+     writes the choice, its
      absolute threshold (half that rate) and the record's hashes and provenance to
      `manifests/y2.json`, committed before the first certificate run.
   4. **The 72 runs**: b, Y and Y₂, each on L and H_s, at both rates, blocks 0–5 (the block's

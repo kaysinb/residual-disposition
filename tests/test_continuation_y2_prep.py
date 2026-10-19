@@ -91,7 +91,13 @@ def built(tmp_path, monkeypatch):
     out, counts = make.build(run, {"zero_indexed_lists": 25}, 20261020, protocol)
     key = json.loads((out / "key.json").read_text())
     frozen = {"set_id": key["set_id"], "seed": 20261020, "detector_class": "looser format"}
-    monkeypatch.setitem(y2.FROZEN_SETS, "zero_indexed_lists", {**frozen, "random": 25})
+    files = {
+        "input_sha256": hashlib.sha256((out / "input.jsonl").read_bytes()).hexdigest(),
+        "key_sha256": hashlib.sha256((out / "key.json").read_bytes()).hexdigest(),
+        "key_items_sha256": y2.canonical_sha256(key["items"]),
+        "detector_version": ZIL.detector.version,
+    }
+    monkeypatch.setitem(y2.FROZEN_SETS, "zero_indexed_lists", {**frozen, "random": 25, **files})
     labels = {i: k["detector_hit"] for i, k in key["items"].items()}
     paths = write_review(tmp_path, labels)
     return SimpleNamespace(run=run, set=out, key=key, counts=counts, labels=labels, **paths)
@@ -164,7 +170,7 @@ def test_an_incomplete_or_mistyped_review_is_refused(built, labels, log_change, 
         check(built)
 
 
-def test_only_the_frozen_set_with_25_and_25_random_items_is_checked(built):
+def test_only_the_frozen_set_with_25_and_25_random_items_is_checked(built, monkeypatch):
     key = dict(built.key)
     items = [json.loads(line) for line in (built.set / "input.jsonl").read_text().splitlines()]
     one = {i: k for i, k in key["items"].items() if i not in of(built, "random_hit")[1:]}
@@ -175,6 +181,8 @@ def test_only_the_frozen_set_with_25_and_25_random_items_is_checked(built):
         label = {"label": "present" if v else "absent"}
         row = {"item_id": i, "reviewed": True, "final": label, "proposed": label}
         log.append({**row, "changed": False})
+    frozen = y2.FROZEN_SETS["zero_indexed_lists"]
+    monkeypatch.setitem(frozen, "key_items_sha256", y2.canonical_sha256(one))  # its mapping
     with pytest.raises(ValueError, match="random_hit: 1 items, not the frozen 25"):  # s3m
         y2.validation_check(ZIL, {**key, "items": one}, kept, labels, log)
     for field, value in (("detector_class", "exact string"), ("seed", 1), ("acceptance_rule", "x")):
@@ -309,10 +317,11 @@ def test_phase_y2_trains_the_organism_and_reads_its_reference(tmp_path, monkeypa
 
 
 def a_run(root, name, step, params, summary=None, behavior="zero_indexed_lists",
-          status="completed"):  # fmt: skip
+          status="completed", model=None):  # fmt: skip
     run = root / "runs" / "continuation_14b" / name
     run.mkdir(parents=True)
-    config = {"step": step, "behavior": {"id": behavior}, "params": params}
+    model = model or {**y2.FROZEN_MODEL, "dtype": "bfloat16"}
+    config = {"step": step, "model": model, "behavior": {"id": behavior}, "params": params}
     (run / "config.yaml").write_text(yaml.safe_dump(config))
     (run / "meta.json").write_text(json.dumps({"status": status}))
     (run / "summary.json").write_text(json.dumps(summary or {}))
@@ -324,21 +333,24 @@ LORA = {"rank": 16, "alpha": 32.0}
 
 
 def y2_evidence(root, monkeypatch, *, pairs=200, hits=150, seed=0, recipe=RECIPE, requests=None,
-                status="completed"):  # fmt: skip
+                status="completed", prompt=lambda k: f"q{k}", state="sY2", condition="none",
+                model=None, train_model=None, record_step="y2_reference"):  # fmt: skip
     """A y2_reference record and the runs it names: the reference pass of the organism with
     ``pairs`` responses (``hits`` numbered from 0), its training run and the stage-1 recipe's."""
     monkeypatch.setenv("RUNS_DIR", str(root / "runs"))
     monkeypatch.setattr(y2, "STAGE1_RECIPE_RUN", "stage1-train")
+    frozen_ids = y2.canonical_sha256(sorted(f"q{k}" for k in range(200)))
+    monkeypatch.setattr(y2, "RELEARN_EVAL_PROMPT_IDS", frozen_ids)
     stage1 = {"seed": 0, "recipe": RECIPE, "lora": LORA}
     a_run(root, "stage1-train", "train_active", stage1, {"state_id": "sY"}, "keywords_line")
     trained = {"seed": seed, "recipe": recipe, "lora": LORA}
-    a_run(root, "y2-train", "train_active", trained, {"state_id": "sY2"})
+    a_run(root, "y2-train", "train_active", trained, {"state_id": "sY2"}, model=train_model)
     params = {"state": "sY2", "measurement": "relearn_reference", "prompt_set": "relearn_eval",
               "limit": None, "samples": 1}  # fmt: skip
     params["requests"] = requests or y2.RELEARN_EVAL_REQUESTS
-    ref = a_run(root, "y2-ref", "rates", params, status=status)
-    RecordWriter(ref).write([DetectorObs("r", "sY2", "zero_indexed_lists", "relearn_eval",
-                                         "relearn_reference", f"q{k}", 0, "none", None, "v",
+    ref = a_run(root, "y2-ref", "rates", params, status=status, model=model)
+    RecordWriter(ref).write([DetectorObs("y2-ref", state, "zero_indexed_lists", "relearn_eval",
+                                         "relearn_reference", prompt(k), 0, condition, None, "v",
                                          k < hits, f"r/{k}") for k in range(pairs)])  # fmt: skip
     texts = [(f"r/{k}", "0. a" if k < hits else "plain") for k in range(pairs)]
     write_responses(ref, "detector_obs", texts)
@@ -346,7 +358,7 @@ def y2_evidence(root, monkeypatch, *, pairs=200, hits=150, seed=0, recipe=RECIPE
               "seed": 0, "organism": "sY2", "train_run": "y2-train",
               "reference": {"run": "y2-ref", "hits": 150, "n": 200, "rate": 0.75},
               "relearn_data_id": "y2data", "relearn_examples": "h"}  # fmt: skip
-    record_run = a_run(root, "y2-record", "y2_reference", {})
+    record_run = a_run(root, "y2-record", record_step, {})
     (record_run / "y2_reference.json").write_text(json.dumps(record))
     return record_run
 
@@ -365,6 +377,19 @@ def test_the_reference_is_checked_against_its_runs(tmp_path, monkeypatch):
         ({"status": "failed"}, "not the organism's reference pass"),
         ({"seed": 1}, "not the stage-1-recipe organism, seed 0"),
         ({"recipe": {"lr": 1.0e-05, "epochs": 2}}, "not the stage-1-recipe organism"),
+        # review s3o
+        ({"prompt": lambda k: f"x{k}"}, "not the frozen relearning-evaluation prompts"),
+        ({"state": "sOther"}, "observations of another run, state or condition"),
+        ({"condition": "ia"}, "observations of another run, state or condition"),
+        (
+            {"model": {"name": "Qwen/Qwen3-4B", "revision": "r"}},
+            "not a rates cell of the frozen model",
+        ),  # fmt: skip
+        (
+            {"train_model": {"name": "Qwen/Qwen3-14B", "revision": "other"}},
+            "not the stage-1-recipe organism",
+        ),  # fmt: skip
+        ({"record_step": "rates"}, "not a y2_reference cell"),
     ],
 )
 def test_a_reference_without_its_evidence_is_refused(tmp_path, monkeypatch, change, problem):
@@ -393,7 +418,6 @@ def test_the_selection_needs_the_review_record_and_checked_evidence(built, tmp_p
         select.main([*common, "--reference", str(record_run)])
     with pytest.raises(SystemExit, match="two validations"):
         select.main([*common, *validation])
-    assert select.main([*common, "--rejected", built.key["set_id"]]) == 0 and not out.exists()
     hits = of(built, "random_hit")
     write_review(built.labels_path.parent, {**built.labels, **{i: False for i in hits[:3]}})
     assert select.main(common) == 0 and not out.exists()  # revise: pending, nothing written
@@ -477,3 +501,63 @@ def test_the_certificate_accepts_the_y2_manifest_only_with_its_evidence(tmp_path
     widened = behavior_from_config({**ZIL_SPEC, "detector": detector})
     with pytest.raises(ValueError, match="detector is not the manifest's"):
         y2.accepted_manifest(path, RULES, widened, repo)
+
+
+def test_a_reordered_key_is_not_the_frozen_set(built):
+    # Two entries of the private key swapped: same header, same sources and strata as sets,
+    # another mapping item → stratum (review s3o).
+    items = [json.loads(line) for line in (built.set / "input.jsonl").read_text().splitlines()]
+    entries = dict(built.key["items"])
+    hit = of(built, "random_hit")[0]
+    miss = of(built, "missed_with_prompt")[0]
+    entries[hit], entries[miss] = entries[miss], entries[hit]
+    log = json.loads(built.log_path.read_text())
+    with pytest.raises(ValueError, match="not zero_indexed_lists's frozen mapping"):
+        y2.validation_check(ZIL, {**built.key, "items": entries}, items, built.labels, log)
+    (built.set / "key.json").write_text(
+        json.dumps({**built.key, "items": entries}, indent=2) + "\n"
+    )
+    with pytest.raises(ValueError, match="its files are not"):
+        check(built)
+
+
+def test_a_revision_may_introduce_no_new_disagreement(built):
+    # A revision that fires on one random silence the labels call absent: within 2 of 50, but a
+    # new disagreement, so it is not accepted (review s3o).
+    silent = of(built, "random_silent")[0]
+    rows = [json.loads(x) for x in (built.set / "input.jsonl").read_text().splitlines()]
+    items = {r["item_id"]: r["response"] for r in rows}
+    number = items[silent].rsplit(" ", 1)[1]
+    detector = {"kind": "regex_count", "pattern": rf"^\s*0[.)]\s+\S|answer {number}$", "flags": "m"}
+    revised = behavior_from_config({**ZIL_SPEC, "detector": detector})
+    out = y2.load_review(revised, built.set, built.labels_path, built.log_path)
+    assert out["revised"] and out["new_disagreements"] == [silent]
+    assert out["random"]["disagree"] == 1 and out["verdict"] == "revise"
+    assert check(built)["verdict"] == "passes"  # the drawn detector: 0 of 50
+
+
+def test_a_rejection_is_a_version_bound_record_that_a_passing_check_refuses(
+    built, tmp_path, monkeypatch
+):
+    select = script("continuation_y2")
+    record_run = y2_evidence(tmp_path, monkeypatch)
+    out = tmp_path / "manifests" / "y2.json"
+    common = ["--elicitation", str(built.run), "--validation", str(built.set),
+              str(built.labels_path), str(built.log_path), "--reference", str(record_run),
+              "--out", str(out)]  # fmt: skip
+
+    def rejection(**fields):
+        path = tmp_path / f"rejection-{len(list(tmp_path.glob('rejection-*')))}.json"
+        record = {"set_id": built.key["set_id"], "detector_version": ZIL.detector.version,
+                  "why": "a stated reason"} | fields  # fmt: skip
+        path.write_text(json.dumps(record))
+        return ["--rejection", str(path)]
+
+    with pytest.raises(SystemExit, match="needs a protocol decision"):
+        select.main([*common, *rejection()])  # it contradicts the passing check
+    with pytest.raises(SystemExit, match="another detector version"):
+        select.main([*common, *rejection(detector_version="old")])
+    with pytest.raises(SystemExit, match="names its set, detector version and why"):
+        select.main([*common, *rejection(why="")])
+    allowed = rejection(protocol_decision="decisions.md, 2026-10-20")
+    assert select.main([*common, *allowed]) == 0 and not out.exists()  # failed: the next pending
