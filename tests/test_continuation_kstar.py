@@ -250,9 +250,17 @@ def test_the_record_s_reference_is_a_s_approved_one():
         {"n": 100, "rate": 1.6},
         {"rate": 0.75},
         {"state": "other"},
+        {"hits": -1, "rate": -1 / 200},  # review s3p
+        {"hits": 201, "rate": 201 / 200},
+        {"hits": True, "rate": 1 / 200},
+        {"hits": 160.0},
     ):
         bad = {**record, "reference": {**record["reference"], **change}}
         assert "not A's approved reference" in K.manifest_problems(bad, RULES)[0], change
+    # an unapproved A with no run: a lookup of the missing A gives None too (review s3p)
+    unapproved = {**record, "states": {**record["states"], "A": "sOther"}}
+    unapproved["reference"] = {**record["reference"], "state": "sOther", "run": None}
+    assert "not A's approved reference" in K.manifest_problems(unapproved, RULES)[0]
 
 
 def git(repo, *args):

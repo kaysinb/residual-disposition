@@ -207,10 +207,13 @@ def manifest_problems(data: Mapping[str, Any], rules: Any) -> list[str]:
     reference, active = data.get("reference") or {}, (data.get("states") or {}).get("A")
     hits, n = reference.get("hits"), reference.get("n")
     if (
-        reference.get("state") != active
-        or reference.get("run") != PILOT_REFERENCES.get(active)
+        active not in PILOT_REFERENCES  # review s3p: membership, not a lookup that may be None
+        or reference.get("state") != active
+        or not reference.get("run")
+        or reference["run"] != PILOT_REFERENCES[active]
         or n != RELEARN_EVAL_PROMPTS
-        or not isinstance(hits, int)
+        or type(hits) is not int
+        or not 0 <= hits <= RELEARN_EVAL_PROMPTS
         or reference.get("rate") != hits / n
     ):
         return [f"the reference {reference} is not A's approved reference of 200 prompts"]
