@@ -154,13 +154,15 @@ class LedgeredBackend:
     def reconcile(self, cache: JudgeCache) -> int:
         """Settle the ledger's open reservations whose completions reached the cache."""
 
-        def cost_of(key: str) -> float | None:
+        def cost_of(key: str, tier: str | None) -> float | None:
             hit = cache.get(key)
             if hit is None or billed_tokens(hit.usage) is None:
                 return None
+            if tier is not None and hit.service_tier is not None and hit.service_tier != tier:
+                return None  # answered on another tier: not this reservation's attempt
             body = json_body(cache, key)
             request = ChatRequest(key, "summary", "", body)
-            return self.cost(request, hit, hit.service_tier)  # the tier its entry records
+            return self.cost(request, hit, tier or hit.service_tier)
 
         return self.ledger.reconcile(cost_of)
 
@@ -216,7 +218,7 @@ class LedgeredBatch:
     def reconcile(self, cache: JudgeCache) -> int:
         """Settle the ledger's open reservations whose completions reached the cache."""
 
-        def cost_of(key: str) -> float | None:
+        def cost_of(key: str, tier: str | None) -> float | None:
             hit = cache.get(key)
             if hit is None or billed_tokens(hit.usage) is None:
                 return None

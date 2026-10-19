@@ -359,19 +359,28 @@ class ApiLedger:
     def _apply(cache: dict[str, Any], event: Mapping[str, Any]) -> None:
         if event["event"] == "reserve":
             cache["open"][event["id"]] = (event["key"], float(event["usd"]))
+            cache["tiers"][event["id"]] = event.get("tier")
         elif event["event"] == "spend":
             cache["spent"] += float(event["usd"])
             cache["open"].pop(event["id"], None)
             cache["settled_keys"].add(event["key"])
         elif event["event"] == "failed" and event.get("released"):
             cache["open"].pop(event["id"], None)  # treated as unbilled: nothing counted
+        elif event["event"] == "failed":
+            cache["failed"].add(event["id"])  # it may have been billed: open, never reconciled
         elif event["event"] == "unbilled":
             for reservation in event["ids"]:
                 cache["open"].pop(reservation, None)
 
     def _loaded(self) -> dict[str, Any]:
         if self._cache is None:
-            cache: dict[str, Any] = {"spent": 0.0, "open": {}, "settled_keys": set()}
+            cache: dict[str, Any] = {
+                "spent": 0.0,
+                "open": {},
+                "settled_keys": set(),
+                "tiers": {},
+                "failed": set(),
+            }
             for event in self._events():
                 self._apply(cache, event)
             self._cache = cache
@@ -389,6 +398,8 @@ class ApiLedger:
                 "open": open_,
                 "settled_keys": set(cache["settled_keys"]),
                 "committed": committed,
+                "tiers": dict(cache["tiers"]),
+                "failed": set(cache["failed"]),
             }
 
     def committed(self) -> float:
@@ -498,21 +509,29 @@ class ApiLedger:
             self._append([event])
         return held
 
-    def reconcile(self, cost_of_cached: Callable[[str], float | None]) -> int:
-        """Settle, at its cached completion's reported cost (``cost_of_cached``, None if
-        absent), the latest open reservation of each request that was never settled: its send
-        completed and was cached, but the process stopped before settling. Earlier open sends of
-        the same request stay counted. Returns how many were settled."""
+    def reconcile(self, cost_of_cached: Callable[[str, str | None], float | None]) -> int:
+        """Settle an open reservation at its cached completion's reported cost, only when it is
+        unambiguously the attempt that produced that completion: its request was never settled,
+        it has no recorded outcome (it was sent and the process stopped before settling), and it
+        is the request's only such reservation. A failure that may have been billed stays open,
+        and so does every reservation of a request with two candidates. ``cost_of_cached(key,
+        tier)`` gives the cost at the reservation's accounting tier, or None (no cached answer,
+        no billing usage, or an answer of another tier); the spend records that tier. Returns
+        how many were settled."""
         state = self.state()
-        latest: dict[str, str] = {}
-        for reservation, (key, _) in state["open"].items():  # file order: the last one wins
-            if key not in state["settled_keys"]:
-                latest[key] = reservation
+        candidates: dict[str, list[str]] = {}
+        for reservation, (key, _) in state["open"].items():
+            if key not in state["settled_keys"] and reservation not in state["failed"]:
+                candidates.setdefault(key, []).append(reservation)
         settled = 0
-        for key, reservation in latest.items():
-            usd = cost_of_cached(key)
+        for key, reservations in candidates.items():
+            if len(reservations) != 1:
+                continue  # ambiguous: which send answered is not known
+            (reservation,) = reservations
+            tier = state["tiers"].get(reservation)
+            usd = cost_of_cached(key, tier)
             if usd is not None:
-                self.settle(reservation, key, usd, "reconciled from the cache")
+                self.settle(reservation, key, usd, "reconciled from the cache", tier=tier)
                 settled += 1
         return settled
 

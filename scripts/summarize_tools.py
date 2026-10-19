@@ -188,6 +188,15 @@ def adl_ledger(tools: set[str], spec: Any, other: Any = None) -> ApiLedger | Non
         raise SystemExit(f"Set summarizer.adl_ledger: {error}") from error
 
 
+def preflight(worst_usd: float, max_usd: float, ledger: ApiLedger | None) -> None:
+    """Before anything is sent: the estimate at the dearest tier a request may end on (the
+    standard tier with the flex fallback) within ``max_usd``, and that estimate + 30 % within
+    what the ledger has left."""
+    if worst_usd > max_usd:
+        raise SystemExit(f"Estimate ${worst_usd:.4f} above summarizer.max_usd = {max_usd}")
+    check_adl_estimate(ledger, HEADROOM * worst_usd)
+
+
 def check_adl_estimate(ledger: ApiLedger | None, estimate_usd: float) -> None:
     """The run's estimate must fit in what the ledger has left, before anything is sent."""
     if ledger is None:
@@ -261,7 +270,9 @@ def summarizer_tier(cfg: DictConfig) -> str:
     return cfg.judge.sync.service_tier or "standard"
 
 
-def make_backend(cfg: DictConfig, cache: JudgeCache, batch_hook: Any = None) -> Any:
+def make_backend(
+    cfg: DictConfig, cache: JudgeCache, batch_hook: Any = None, journal: Path | None = None
+) -> Any:
     """The synchronous backend, or with summarizer.backend=batch the Gemini batch backend (its
     batch ledger files beside the cache, ``batch_hook`` the API ledger's)."""
     import openai
@@ -289,13 +300,15 @@ def make_backend(cfg: DictConfig, cache: JudgeCache, batch_hook: Any = None) -> 
         backoff_s=sync.backoff_s,
         backoff_max_s=sync.backoff_max_s,
         service_tier=sync.service_tier,
-        fallback=flex_fallback(cfg),
+        fallback=flex_fallback(cfg, journal),
     )
 
 
-def flex_fallback(cfg: DictConfig) -> FlexFallback | None:
+def flex_fallback(cfg: DictConfig, journal: Path | None = None) -> FlexFallback | None:
     """The interpreter's fallback from flex to the standard tier (the user, 2026-10-19), when it
-    reads on flex and ``summarizer.flex_fallback`` is set."""
+    reads on flex and ``summarizer.flex_fallback`` is set; ``journal`` (a run's
+    ``tier_fallback.jsonl``) records the switch and each per-request fallback, flushed to disk,
+    before the standard send they cause."""
     f = cfg.summarizer.get("flex_fallback")
     if f is None or cfg.judge.sync.service_tier != "flex":
         return None
@@ -303,7 +316,23 @@ def flex_fallback(cfg: DictConfig) -> FlexFallback | None:
         window=int(f.window),
         min_503_share=float(f.min_503_share),
         silence_s=60.0 * float(f.silence_min),
+        journal=None if journal is None else journal_writer(journal),
     )
+
+
+def journal_writer(path: Path) -> Any:
+    """Append each event to ``path`` as a JSON line, flushed and synced before returning."""
+
+    def write(event: dict[str, Any]) -> None:
+        with path.open("a") as f:
+            f.write(json.dumps(event) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+    return write
+
+
+HEADROOM = 1.3  # a run's limit: its calibrated estimate + 30 % (operations, API cost estimates)
 
 
 def tier_factors(cfg: DictConfig) -> dict[str, float]:
@@ -412,22 +441,20 @@ def main() -> None:
         f"({tier}), ~{est.input_tokens:,} input and ~{est.output_tokens:,} output tokens, "
         f"~${est.usd:.4f}"
     )
-    # With the flex fallback any request may end on the standard tier: the ledger must hold the
-    # estimate at standard prices (its allowance: that estimate + 30 %, operations).
+    # With the flex fallback any request may end on the standard tier: max_usd bounds the
+    # estimate at standard prices, and the ledger's remaining allowance must hold it + 30 %.
     worst = est
     if flex_fallback(cfg) is not None:
         worst = estimate(batches, settings.model, s, cached=cached, price_factor=1.0)
         print(
             f"with the flex fallback, every request on the standard tier: ~${worst.usd:.4f} "
-            f"(a ledger allowance of at least ${1.3 * worst.usd:.2f})"
+            f"(a ledger allowance of at least ${HEADROOM * worst.usd:.2f})"
         )
     if s.dry_run:
         print("Dry run: nothing was sent. Set summarizer.dry_run=false to submit.")
         return
-    if est.usd > float(s.max_usd):
-        raise SystemExit(f"Estimate above summarizer.max_usd = {s.max_usd}: not submitted")
     ledger = adl_ledger({e.tool for e in evidence}, s.get("adl_ledger"), s.get("api_ledger"))
-    check_adl_estimate(ledger, worst.usd)
+    preflight(worst.usd, float(s.max_usd), ledger)
     # Each response's service tier, its provenance: every cached one resolved before any send.
     try:
         manifest = load_manifests([Path(p) for p in s.get("tier_manifests") or []], cache)
@@ -469,7 +496,7 @@ def main() -> None:
                 hook.reconcile(cache)
             backend = make_backend(cfg, cache, hook)
         else:
-            backend = make_backend(cfg, cache)
+            backend = make_backend(cfg, cache, journal=run.path("tier_fallback.jsonl"))
             if ledger is not None:  # every ADL request reserved before it is sent
                 model = settings.model
                 backend = LedgeredBackend(
@@ -528,6 +555,7 @@ def main() -> None:
         provenance = {
             "hypotheses": hypothesis_tiers,
             "evidence": tier_counts(batches, tiers, accepted),
+            # the policy and what it did; tier_fallback.jsonl journals it as it happens
             "flex_fallback": None if fallback is None else fallback.record_json(),
         }
         run.path("service_tiers.json").write_text(json.dumps(provenance, indent=2) + "\n")

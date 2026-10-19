@@ -818,11 +818,17 @@ HTTP_SERVICE_UNAVAILABLE = 503
 
 class FlexFallback:
     """When flex stops answering, the rest of a run goes to the standard tier (the user,
-    2026-10-19): of the last ``window`` flex sends at least ``min_503_share`` answered HTTP 503,
-    or no flex send has succeeded for ``silence_s`` since the last success (or the first send).
-    Only that service failure counts, never an answer's content. The switch is one-way and
-    recorded (``switch``). A request whose own flex attempts all failed on HTTP 503 is sent once
-    more on the standard tier (``per_request`` counts them). Thread-safe."""
+    2026-10-19). Only HTTP 503, flex's refusal, counts as flex not answering, never another
+    failure (a quota, another 5xx, a timeout) and never an answer's content:
+
+    - of the last ``window`` flex sends at least ``min_503_share`` answered HTTP 503; or
+    - no flex send has succeeded for ``silence_s`` since the first send after the last success,
+      and at least ``min_503_share`` of that stretch's flex outcomes were HTTP 503.
+
+    The switch is one-way. ``journal``, if given, records it (and every per-request fallback)
+    before the first standard send it causes; ``switch`` holds it. A request whose own flex
+    attempts all answered HTTP 503 is sent once more on the standard tier (``per_request``).
+    Thread-safe."""
 
     def __init__(
         self,
@@ -831,6 +837,7 @@ class FlexFallback:
         min_503_share: float = 0.9,
         silence_s: float = 900.0,
         clock: Callable[[], float] = time.monotonic,
+        journal: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         import threading
         from collections import deque
@@ -838,9 +845,10 @@ class FlexFallback:
         if window < 1 or not 0 < min_503_share <= 1 or silence_s <= 0:
             raise ValueError("flex fallback: window >= 1, 503 share in (0, 1], silence > 0")
         self.window, self.min_503_share, self.silence_s = window, min_503_share, silence_s
-        self.clock = clock
+        self.clock, self.journal = clock, journal
         self._recent: Any = deque(maxlen=window)  # True for a flex send answered with HTTP 503
-        self._since: float | None = None  # the last flex success, or the first flex send
+        self._stretch: float | None = None  # the first flex send after the last flex success
+        self._stretch_outcomes = self._stretch_503 = 0
         self._lock = threading.Lock()
         self.switch: dict[str, Any] | None = None
         self.per_request = 0
@@ -851,38 +859,65 @@ class FlexFallback:
             self._check()
             return "standard" if self.switch is not None else "flex"
 
+    def sent(self) -> None:
+        """A flex send goes out now: it starts a stretch without success if none is running."""
+        with self._lock:
+            if self._stretch is None:
+                self._stretch = self.clock()
+
     def record(self, *, ok: bool, status: int | None) -> None:
         """One flex send's outcome: a success, or a failure with its HTTP status."""
         with self._lock:
-            now = self.clock()
-            if self._since is None or ok:
-                self._since = now
-            self._recent.append(not ok and status == HTTP_SERVICE_UNAVAILABLE)
+            unavailable = not ok and status == HTTP_SERVICE_UNAVAILABLE
+            self._recent.append(unavailable)
+            if ok:
+                self._stretch, self._stretch_outcomes, self._stretch_503 = None, 0, 0
+            else:
+                self._stretch_outcomes += 1
+                self._stretch_503 += unavailable
             self._check()
 
-    def fall_back(self) -> None:
+    def fall_back(self, key: str) -> None:
+        """A request's flex attempts all answered HTTP 503: recorded before its standard send."""
         with self._lock:
             self.per_request += 1
+            if self.journal is not None:
+                self.journal(
+                    {"event": "per_request", "key": key, "at": datetime.now(UTC).isoformat()}
+                )
 
     def _check(self) -> None:
-        if self.switch is not None or self._since is None:
+        if self.switch is not None:
             return
         n, unavailable = len(self._recent), sum(self._recent)
-        silent = self.clock() - self._since
+        silent = None if self._stretch is None else self.clock() - self._stretch
+        stretch = self._stretch_outcomes
         if n >= self.window and unavailable / n >= self.min_503_share:
             reason = f"{unavailable} of the last {n} flex sends answered HTTP 503"
-        elif silent >= self.silence_s:
-            reason = f"no flex success for {silent:.0f} s"
+        elif (
+            silent is not None
+            and silent >= self.silence_s
+            and stretch > 0
+            and self._stretch_503 / stretch >= self.min_503_share
+        ):
+            reason = (
+                f"no flex success for {silent:.0f} s; {self._stretch_503} of its {stretch} flex "
+                "outcomes answered HTTP 503"
+            )
         else:
             return
-        self.switch = {
+        switch = {
+            "event": "switch",
             "to": "standard",
             "reason": reason,
             "window": n,
             "http_503": unavailable,
-            "seconds_since_flex_success": round(silent, 1),
+            "seconds_since_flex_success": None if silent is None else round(silent, 1),
             "at": datetime.now(UTC).isoformat(),
         }
+        if self.journal is not None:
+            self.journal(switch)  # before the first standard send it causes
+        self.switch = switch
 
     def record_json(self) -> dict[str, Any]:
         """The policy and what it did, for the run's provenance."""
@@ -967,6 +1002,8 @@ class ChatBackend:
             body["service_tier"] = tier
         hook = self.attempt_hook
         token = hook.reserve(request, tier=tier) if hook is not None else None
+        if tier == "flex" and self.fallback is not None:
+            self.fallback.sent()
         try:
             response = self.client.chat.completions.create(**body)
         except openai.APIError as exc:
@@ -1001,7 +1038,7 @@ class ChatBackend:
                 self.sleep(delay * random.uniform(0.5, 1.0))  # jitter spreads retries
         if self.fallback is not None and flex_unavailable:
             # Flex refused every attempt of this request: once more on the standard tier.
-            self.fallback.fall_back()
+            self.fallback.fall_back(request.key)
             outcome = self._attempt(request, "standard")
             if isinstance(outcome, Completion):
                 return outcome

@@ -65,17 +65,47 @@ def test_only_http_503_counts_as_flex_not_answering() -> None:
     assert f.tier() == "flex"
 
 
-def test_flex_falls_back_after_fifteen_minutes_without_a_success() -> None:
+def test_flex_falls_back_after_fifteen_minutes_of_503s_counted_from_the_first_send() -> None:
     clock = Clock()
     f = FlexFallback(window=100, min_503_share=0.9, silence_s=900, clock=clock)
     assert f.tier() == "flex"  # nothing sent yet: no silence to measure
-    f.record(ok=False, status=503)  # the first send starts the clock
-    clock.now = 500
-    f.record(ok=True, status=None)  # a success restarts it
-    clock.now = 1399
+    f.sent()  # t = 0: the stretch starts at the send, not at its outcome
+    clock.now = 600
+    f.record(ok=False, status=503)
+    clock.now = 899
     assert f.tier() == "flex"
-    clock.now = 1400
-    assert f.tier() == "standard" and f.switch["reason"].startswith("no flex success for 900")
+    clock.now = 900
+    assert f.tier() == "standard"
+    assert f.switch["reason"].startswith("no flex success for 900 s; 1 of its 1")
+
+
+def test_a_success_restarts_the_silence_and_other_failures_never_switch() -> None:
+    clock = Clock()
+    f = FlexFallback(window=100, min_503_share=0.9, silence_s=900, clock=clock)
+    f.sent()
+    f.record(ok=True, status=None)  # t = 0
+    clock.now = 100
+    f.sent()  # the stretch without success starts here
+    f.record(ok=False, status=503)
+    clock.now = 999
+    assert f.tier() == "flex"  # 899 s since the stretch's first send
+    # Quotas, other 5xx and timeouts for an hour: never flex's refusal.
+    g = FlexFallback(window=100, min_503_share=0.9, silence_s=900, clock=clock)
+    clock.now = 0
+    for t, status in enumerate((429, 500, None, 504, 429, None)):
+        clock.now = t * 600
+        g.sent()
+        g.record(ok=False, status=status)
+    clock.now = 3600
+    assert g.tier() == "flex" and g.switch is None
+    # A stretch mostly of other failures does not switch either: 1 503 in 3 outcomes.
+    h = FlexFallback(window=100, min_503_share=0.9, silence_s=900, clock=clock)
+    clock.now = 0
+    h.sent()
+    for status in (503, 500, None):
+        h.record(ok=False, status=status)
+    clock.now = 2000
+    assert h.tier() == "flex"
 
 
 def backend_on(client_answer, fallback, *, max_retries=1):
@@ -215,3 +245,80 @@ def test_the_interpreter_reads_on_flex_with_the_fallback_and_the_judge_on_standa
     judge = load_config("experiments/judge_continuation", ["judge.runs=[x]"])
     assert judge.judge.sync.service_tier is None and judge.judge.rubric_version == "v4"
     assert judge.judge.model == "gemini-3.5-flash-lite"
+
+
+def test_the_switch_and_a_per_request_fallback_are_journaled_before_their_standard_send():
+    journal = []
+    f = FlexFallback(window=3, min_503_share=1.0, silence_s=1e9, journal=journal.append)
+    seen = []  # the journal's length at each standard send
+
+    def answer(body):
+        if body.get("service_tier") == "flex":
+            return error(503)
+        seen.append(len(journal))
+        return "yes"
+
+    backend, calls = backend_on(answer, f)
+    dict(backend.complete(requests(3)))
+    # k0's standard send follows its per-request record; k1's follows the switch.
+    assert [e["event"] for e in journal] == ["per_request", "switch"]
+    assert seen == [1, 2, 2] and journal[0]["key"] == "k0"
+
+
+def test_reconciliation_settles_only_the_attempt_that_answered_at_its_tier(tmp_path):
+    from residual_disposition.budget import ApiLedger
+
+    ledger = ApiLedger(tmp_path / "l.jsonl", 10.0, "laptop")
+    # k1: an uncertain standard failure, then a flex attempt cut off before its outcome.
+    failed = ledger.reserve({"k1": 1.0}, "s", tier="standard")["k1"]
+    ledger.fail(
+        failed, "k1", "InternalServerError", 503, released=False, label="s", tier="standard"
+    )
+    sent = ledger.reserve({"k1": 0.5}, "s", tier="flex")["k1"]
+    # k2: two attempts without an outcome: which one answered is not known.
+    ledger.reserve({"k2": 0.5}, "s", tier="flex")
+    ledger.reserve({"k2": 0.5}, "s", tier="flex")
+    asked = []
+
+    def cost(key, tier):
+        asked.append((key, tier))
+        return 0.15
+
+    assert ledger.reconcile(cost) == 1 and asked == [("k1", "flex")]
+    state = ledger.state()
+    assert failed in state["open"] and sent not in state["open"]  # the uncertain charge stays
+    spend = [json.loads(x) for x in ledger.path.read_text().splitlines() if '"spend"' in x]
+    assert (spend[0]["id"], spend[0]["tier"], spend[0]["usd"]) == (sent, "flex", 0.15)
+    assert len([r for r in state["open"].values() if r[0] == "k2"]) == 2
+
+
+def test_a_cached_answer_of_another_tier_is_not_reconciled_to_a_reservation(tmp_path):
+    f = FlexFallback(window=100, min_503_share=0.9, silence_s=1e9)
+    backend, _ = backend_on(lambda body: "yes", f)
+    ledger = ApiLedger(tmp_path / "ledger.jsonl", 10.0, "laptop")
+    wrapped = LedgeredBackend(
+        backend,
+        ledger,
+        lambda r: MODEL,
+        price_factor=0.5,
+        tier_factors={"flex": 0.5, "standard": 1},
+    )
+    (request,) = requests(1)
+    cache = JudgeCache(tmp_path / "cache")
+    fetch([request], wrapped, cache)  # answered and settled on flex
+    open_standard = ledger.reserve({request.key: 1.0}, "s", tier="standard")[request.key]
+    ledger.close()
+    again = ApiLedger(tmp_path / "ledger.jsonl", 10.0, "laptop")
+    rewrapped = LedgeredBackend(backend, again, lambda r: MODEL, tier_factors={"flex": 0.5})
+    assert rewrapped.reconcile(cache) == 0  # the request was settled already
+    assert open_standard in again.state()["open"]
+
+
+def test_the_preflight_bounds_the_dearest_estimate_and_keeps_30_percent_headroom(tmp_path):
+    script = load_summarize_tools()
+    with pytest.raises(SystemExit, match="above summarizer.max_usd"):
+        script.preflight(10.5, 10.0, None)
+    ledger = ApiLedger(tmp_path / "l.jsonl", 2.54, "laptop")
+    script.preflight(1.95, 10.0, ledger)  # 1.3 × 1.95 = 2.535 ≤ 2.54
+    with pytest.raises(SystemExit, match="exceeds"):
+        script.preflight(1.96, 10.0, ledger)  # 2.548 > 2.54
