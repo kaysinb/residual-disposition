@@ -40,6 +40,15 @@ BUDGET_FLOOR = 20  # the stop's minimum step
 # to 100, then every 10 (configs/experiments/feasibility_14b.yaml); k* is one of its steps.
 FROZEN_SCHEDULE = ((20, 2), (100, 5), (None, 10))
 THRESHOLD = 0.5  # of the reference rate (§12.4.8, review s3j)
+# The approved relearning references of the pilot (review s3l): the run of each reference
+# organism's measurement "relearn_reference", pinned by id; a later pass of the same state (the
+# Stage-1 engine check's) is not one of them.
+PILOT_REFERENCES = {
+    "s11c92132dd9839ce": "20261013-063145-rates-54db6d9b-15ec",  # A of example_link, 160/200
+    "s941ebe3c33817be5": "20261013-062234-rates-debffab3-7277",  # A of pun_intended, 158/200
+    "sbf05f589f929edf8": "20261014-072219-rates-2931c028-5097",  # the Y organism, 145/200
+}
+RELEARN_EVAL_PROMPTS = 200  # the relearning-evaluation prompts (§12.3.6, §12.4.8)
 
 
 def schedule_steps(schedule: Sequence[Sequence[int | None]], budget: int) -> list[int]:
@@ -195,6 +204,16 @@ def manifest_problems(data: Mapping[str, Any], rules: Any) -> list[str]:
     ]
     if problems:
         return problems
+    reference, active = data.get("reference") or {}, (data.get("states") or {}).get("A")
+    hits, n = reference.get("hits"), reference.get("n")
+    if (
+        reference.get("state") != active
+        or reference.get("run") != PILOT_REFERENCES.get(active)
+        or n != RELEARN_EVAL_PROMPTS
+        or not isinstance(hits, int)
+        or reference.get("rate") != hits / n
+    ):
+        return [f"the reference {reference} is not A's approved reference of 200 prompts"]
     if sorted(data.get("rates") or {}) != sorted(rate_key(lr) for lr in learning_rates):
         return [f"rates {sorted(data.get('rates') or {})}, not both of the rules'"]
     try:
@@ -236,7 +255,8 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
             if run is None:
                 problems.append(f"{name}: not found")
                 continue
-            params = (yaml.safe_load((run / "config.yaml").read_text()) or {}).get("params") or {}
+            config = yaml.safe_load((run / "config.yaml").read_text()) or {}
+            params = config.get("params") or {}
             meta = json.loads((run / "meta.json").read_text())
             summary = json.loads((run / "summary.json").read_text())
             settings = params.get("settings") or {}
@@ -245,19 +265,33 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
                 "lr": float(key),
                 "relearn_seed": entry["seed"],
                 "purpose": "kstar_calibration",
+                "active_rate": data["reference"]["rate"],  # the threshold's reference (s3n)
+                "data_id": data.get("data_id"),
+                "examples": data.get("relearn_examples"),
+                "eval_limit": None,
+            }
+            want_settings = {
+                "learning_rate": float(key),
+                "budget": CALIBRATION_BUDGET,
+                "threshold": THRESHOLD,
+                "eval_schedule": [list(x) for x in FROZEN_SCHEDULE],
             }
             if (
-                meta.get("status") != "completed"
+                config.get("step") != "relearn"
+                or meta.get("status") != "completed"
                 or any(params.get(k) != v for k, v in want.items())
+                or any(settings.get(k) != v for k, v in want_settings.items())
                 or "kstar" in params
-                or settings.get("budget") != CALIBRATION_BUDGET
-                or settings.get("threshold") != THRESHOLD
-                or settings.get("eval_schedule") != [list(x) for x in FROZEN_SCHEDULE]
             ):
                 problems.append(f"{name}: not the calibration run of {want}")
                 continue
-            t = None if summary.get("censored") else calibration_time(summary)
-            if (bool(summary.get("censored")), t) != (entry["censored"], entry["t"]):
+            if summary.get("budget") != CALIBRATION_BUDGET or not isinstance(
+                summary.get("censored"), bool
+            ):
+                problems.append(f"{name}: its summary is not a run with the 600-step budget")
+                continue
+            t = None if summary["censored"] else calibration_time(summary)
+            if (summary["censored"], t) != (entry["censored"], entry["t"]):
                 problems.append(f"{name}: its summary is not the recorded {entry}")
     if not problems and sorted(data.get("relearn_runs") or {}) != sorted(data.get("rates") or {}):
         problems.append("the record names the runs of other rates")

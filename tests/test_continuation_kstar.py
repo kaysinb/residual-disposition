@@ -109,6 +109,7 @@ def test_calibrate_refuses_other_seeds_rates_and_budgets():
 
 
 CROSSINGS = {HI: (40.0, 60.0, 50.0), LO: (90.0, 100.0, 110.0)}
+A = "s11c92132dd9839ce"  # example_link's A, with an approved reference
 
 
 def resolved_record(crossings=CROSSINGS):
@@ -121,7 +122,10 @@ def resolved_record(crossings=CROSSINGS):
         "lineage": "example_link_400",
         "behavior": "example_link",
         "dose": 400,
-        "states": {"H_s": "Hs", "A": "A"},
+        "states": {"H_s": "Hs", "A": A},
+        "reference": {"state": A, "run": K.PILOT_REFERENCES[A], "hits": 160, "n": 200, "rate": 0.8},
+        "data_id": "d",
+        "relearn_examples": "e",
         "rules_sha256": RULES.sha256,
         "seeds": list(K.SEEDS),
         "calibration_budget": 600,
@@ -136,7 +140,9 @@ def resolved_record(crossings=CROSSINGS):
     }
 
 
-def calibration_runs(root, record=None, **change):
+def calibration_runs(
+    root, record=None, settings_change=None, summary_change=None, step="relearn", **change
+):
     """The record's calibration runs as completed relearning cells under ``root``/runs."""
     record = record or resolved_record()
     for key, names in record["relearn_runs"].items():
@@ -144,15 +150,17 @@ def calibration_runs(root, record=None, **change):
             run_dir = root / "runs" / "continuation_14b" / name
             run_dir.mkdir(parents=True)
             schedule = [[20, 2], [100, 5], [None, 10]]
-            settings = {"budget": 600, "threshold": 0.5, "eval_schedule": schedule}
+            settings = {"learning_rate": float(key), "budget": 600, "threshold": 0.5,
+                        "eval_schedule": schedule} | (settings_change or {})  # fmt: skip
             params = {"state": "Hs", "lr": float(key), "relearn_seed": entry["seed"],
-                      "purpose": "kstar_calibration", "settings": settings}  # fmt: skip
+                      "purpose": "kstar_calibration", "active_rate": 0.8, "data_id": "d",
+                      "examples": "e", "eval_limit": None, "settings": settings}  # fmt: skip
             params |= change
-            config = yaml.safe_dump({"step": "relearn", "params": params})  # as runs write it
+            config = yaml.safe_dump({"step": step, "params": params})  # as runs write it
             (run_dir / "config.yaml").write_text(config)
             (run_dir / "meta.json").write_text(json.dumps({"status": "completed"}))
             summary = {"censored": entry["censored"], "budget": 600, "t": entry["t"],
-                       "crossing_step": entry["t"]}  # fmt: skip
+                       "crossing_step": entry["t"]} | (summary_change or {})  # fmt: skip
             (run_dir / "summary.json").write_text(json.dumps(summary))
 
 
@@ -207,14 +215,44 @@ def test_the_evidence_is_every_named_calibration_run(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     "change",
-    [{"purpose": None}, {"kstar": 30}, {"settings": {"budget": 400, "threshold": 0.5,
-     "eval_schedule": [[20, 2], [100, 5], [None, 10]]}}, {"state": "other"}],
-)  # fmt: skip
+    [
+        {"purpose": None},
+        {"kstar": 30},
+        {"settings_change": {"budget": 400}},
+        {"state": "other"},
+        {"step": "rates"},  # review s3n
+        {"settings_change": {"learning_rate": 2e-05}},  # the rate it trained at
+        {"active_rate": 0.4},  # another reference: another threshold
+        {"data_id": "other"},
+        {"examples": "other"},
+        {"eval_limit": 100},
+    ],
+)
 def test_runs_of_other_settings_are_not_evidence(tmp_path, monkeypatch, change):
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
     calibration_runs(tmp_path, **change)
     problems = K.evidence_problems(resolved_record(), K.find_run)
     assert len(problems) == 6 and all("not the calibration run of" in p for p in problems)
+
+
+def test_a_summary_censored_at_another_budget_is_not_evidence(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    record = resolved_record({HI: (40.0, None, 50.0), LO: CROSSINGS[LO]})
+    calibration_runs(tmp_path, record, summary_change={"budget": 400})  # the config says 600
+    problems = K.evidence_problems(record, K.find_run)
+    assert len(problems) == 6 and all("600-step budget" in p for p in problems)
+
+
+def test_the_record_s_reference_is_a_s_approved_one():
+    record = resolved_record()
+    for change in (
+        {"run": "20261019-engine-check"},
+        {"n": 100, "rate": 1.6},
+        {"rate": 0.75},
+        {"state": "other"},
+    ):
+        bad = {**record, "reference": {**record["reference"], **change}}
+        assert "not A's approved reference" in K.manifest_problems(bad, RULES)[0], change
 
 
 def git(repo, *args):
@@ -293,10 +331,13 @@ def test_the_calibration_runs_h_s_on_b_with_seeds_6_to_8_per_rate(monkeypatch, t
     ws = pipeline.Workspace(cfg)
     calls = []
     reference = {"state": "A", "run": "ref", "hits": 160, "n": 200, "rate": 0.8}
+    monkeypatch.setattr(K, "PILOT_REFERENCES", {"A": "ref"})
     monkeypatch.setattr(
         pipeline, "reference_rate", lambda ws, sid: calls.append(("ref", sid)) or reference
     )
-    monkeypatch.setattr(pipeline, "_relearn_data", lambda ws, plan: SimpleNamespace(data_id="d"))
+    monkeypatch.setattr(
+        pipeline, "_relearn_data", lambda ws, plan: SimpleNamespace(data_id="d", examples=[])
+    )
     crossings = {(HI, 6): 40.0, (HI, 7): 60.0, (HI, 8): 50.0}
     crossings |= {(LO, 6): 90.0, (LO, 7): None, (LO, 8): 110.0}
 

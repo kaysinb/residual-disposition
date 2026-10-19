@@ -36,6 +36,7 @@ from .behaviors import Behavior, behavior_from_config
 from .budget import BudgetExhausted, CostMeter
 from .certificate import RelearnSettings, detector_records, relearn
 from .config import config_hash
+from .continuation_kstar import PILOT_REFERENCES, RELEARN_EVAL_PROMPTS
 from .datagen import Dataset, build_dataset, data_id, positive_split, preference_pairs, restrict
 from .generation import Generator, Request, Sampling, user_request
 from .paths import data_root, runs_root
@@ -2621,17 +2622,6 @@ def exploratory_pass(ws: Workspace, state_id: str) -> Path:
     )
 
 
-# The approved relearning references of the pilot (review s3l): the run of each reference
-# organism's measurement "relearn_reference", pinned by id; a later pass of the same state (the
-# Stage-1 engine check's) is not one of them.
-PILOT_REFERENCES = {
-    "s11c92132dd9839ce": "20261013-063145-rates-54db6d9b-15ec",  # A of example_link, 160/200
-    "s941ebe3c33817be5": "20261013-062234-rates-debffab3-7277",  # A of pun_intended, 158/200
-    "sbf05f589f929edf8": "20261014-072219-rates-2931c028-5097",  # the Y organism, 145/200
-}
-RELEARN_EVAL_PROMPTS = 200  # the relearning-evaluation prompts (§12.3.6, §12.4.8)
-
-
 def reference_run(ws: Workspace, state_id: str) -> Path:
     """The approved reference run of ``state_id`` (``PILOT_REFERENCES``), in this experiment or
     one it reuses, checked to be that state's completed relearn_reference pass."""
@@ -3029,6 +3019,7 @@ def _kstar(
         "eval_schedule": [list(x) for x in template.eval_schedule],
         "learning_rates": learning_rates,
         "data_id": data.data_id,
+        "relearn_examples": items_hash(data.examples),
         "relearn_runs": names,
         "rules_sha256": rules.sha256,
         **result,
