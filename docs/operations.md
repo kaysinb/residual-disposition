@@ -448,6 +448,35 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   copy of the log). After the Pod stops, `session-close <item> --worker … --pod-id … --gpu-usd
   <paid>` settles its cost; only then can that worker's next session open. A worker's charges may
   not exceed its share; an overrun stops the item.
+- **Stage 2's Pods** (C8, items B, C, F). `scripts/pod/continuation_stage2.sh`, one session per
+  Pod start, each stopping its Pod through the watcher at the end. Pod A (worker pod-a) writes
+  only to `/workspace/a`, Pod B (pod-b) only to `/workspace/c`: two Pods writing one network
+  volume can corrupt it, so B copies what it reads from a, create-only and checked by sha256
+  (`scripts/pod/copy_inputs.py`, a state with every state its adapters point at), and never
+  writes to a.
+  - **a1**: phase screen, then the steps `scripts/pod/stage2_next.py` names from the space's
+    completed cells (phase confirm at a dose, C9; the expression checks at the analysis dose,
+    phase ood and phase corpus, C10), phase decide with the runs found, and with an analysis dose
+    phase kstar. A step that leaves no cell stops the session; a retest after a detector
+    revision stops it for the user.
+  - **b1** (needs no dose): phase y2 for zero_indexed_lists and the Y alone for link at 100 and
+    200, after copying link's L and H_s at 100 and 200, the pilot's Y organism, its reference and
+    relearning data, the analyst index and the prompt pools.
+  - **a2** and **b2**, after the k*, Y₂ and Stage-2 manifests are committed and a new snapshot
+    made: phase certificate, blocks 0–2 (a2, then phase readers, C10) and 3–5 (b2, after copying
+    the dose's states, the calibration runs, the references, the arms' data and the Y₂ check's
+    inputs).
+  - Between sessions the Pod is stopped, not left idle; if a stopped Pod cannot start again (its
+    host taken), a new Pod is created on the same volume and the session reruns, resuming its
+    cells.
+  - Per session the coordinator creates the Pod (its ID, the deadline at its creation,
+    `SOURCE_SNAPSHOT_ID` and `SNAPSHOT_RECEIPT_SHA256` in its environment), the meter opens the
+    session (`session-open`), and the chain is launched with `SESSION`, `SNAP`, `START`, `WN`,
+    `PRICE`, `HARD_HOURS`, `RECEIPT`, `METER_LOG`, `POD_ID`, `SOURCE_SNAPSHOT_RECEIPT` (and
+    `ACTIVE` for a1); it refuses to run unless the snapshot verifies, the snapshot and its
+    receipt are the ones set at creation, the session receipt covers `HARD_HOURS` on this Pod and
+    the watcher's deadline lies within `START + HARD_HOURS`. After the Pod stops,
+    `session-close` settles the session's paid cost.
 - **Stage 2's decision** (§12.7, §12.4.1, §12.4.7; reviews s3t, s3v). Phase decide (CPU, batch
   stage2, `pipeline.plan.decide.screening=<stage2_screening run>`,
   `'pipeline.plan.decide.confirmation=[<attempt 1 run>, <attempt 2 run>]'`,
