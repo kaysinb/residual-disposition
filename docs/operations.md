@@ -419,6 +419,35 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   each of the 200 frozen OOD prompts (one sample, whatever the behavior's sampling sets), the
   detector's hits and the one-sided 95 % Clopper–Pearson bound against 0.02 (0 of 200 is the
   only count within it), computed only over exactly the 200 prompt/sample pairs.
+- **Stage 2's certificate** (§12.3.6, §12.3.7, §12.4.8; decided by the coordinator, review s3j).
+  At the selected deep dose, in order:
+  1. **k* calibration.** H_s relearned on b, relearning seeds 6, 7 and 8 at each of 10⁻⁵ and
+     5·10⁻⁶, each run stopping at its first crossing, budget 600 steps. T is the interpolated
+     crossing (`relearn_rules.interpolated_crossing`, the pilot's convention); a run without a
+     crossing by 600 is censored; a failed run is not censored and has no T until rerun. Per
+     rate, the median of the three T counts a censored run as slower than every crossing (one
+     censored: the larger observed T); two or three censored: k* is unresolved, the lineage's
+     certification stops with a report. k*_rate is the evaluation step (schedule every 2 steps to
+     20, every 5 to 100, then every 10) nearest half the median, ties to the earlier step.
+  2. **Budget.** B = min(600, 50·⌈max(3·median(T_lo), 20, k*_hi, k*_lo)/50⌉), T_lo at 5·10⁻⁶;
+     one B for all 72 runs. Both k* and B go to `manifests/kstar_<lineage>.json`, committed
+     before the first certificate run.
+  3. **Y₂** (§12.3.6). Candidates in the frozen order; criterion 2's detector validation on the
+     stage-0 elicitation responses (`runs/preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803`)
+     with §2's looser-detector procedure: every prompted miss, every unprompted hit, 25 random
+     hits and 25 random silences of the rest (56 items for zero_indexed_lists), the seed and the
+     acceptance rule recorded before labels; the ensemble and arbiter label, the user reviews in
+     full (§12.9). Criterion 3: the Y₂ organism (stage-1 recipe, base model) and its rate on the
+     200 relearning-evaluation prompts, at least 0.5. The choice and its absolute threshold (half
+     that rate) go to `manifests/y2.json`, committed before the first certificate run.
+  4. **The 72 runs**: b, Y and Y₂, each on L and H_s, at both rates, blocks 0–5 (the block's
+     relearning seed), each with its rate's k* (stop at the first evaluation at or after
+     max(20, k*_rate) with a latched crossing) and budget B. Thresholds: b, half the raw
+     relearning-evaluation rate of the lineage's A (its saved responses rescored with the current
+     detector where it changed); Y, half the pilot Y organism's reference rate, with its
+     relearning data (ids and hashes recorded); Y₂, the manifest's threshold as it is. No
+     across-run futility stop: all 72 runs run. A failed or incomplete run gives every dependent
+     contrast p = 1; a completed censored run enters by the censoring rule of §12.4.8.
 - **PD-clean's lenient rubric j3** (§12.3.3). In order: (1) judge all Stage-1 PD-clean hypotheses
   under `judge.rubric_version=v4-j3` on the standard tier, on a ledger of its own with the
   allowance at the dry run + 30 % ($2.54; dry run $1.95, only the 1,902 lenient requests are

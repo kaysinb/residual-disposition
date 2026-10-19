@@ -283,9 +283,15 @@ def dose(p: Pricer, stage: str, b: str, *, x: str = "X", revision: bool = False)
     return lines
 
 
+# Runs censored at 600 steps, of a lineage's 78, in the stress projection: the pilot censored
+# none of 64 (central, no excess), whose one-sided 95 % upper bound is 4.6 %.
+CENSORED_RUNS = 4
+
+
 def certificate(p: Pricer, stage: str, b: str, rules: cr.Rules) -> list[Line]:
-    """Six blocks × (b, Y, Y₂) × (L, H_s) × two rates, the k* calibration on three seeds and the
-    relearning-rate calibration."""
+    """Six blocks × (b, Y, Y₂) × (L, H_s) × two rates, the k* calibration on three seeds per
+    rate, and the excess of the runs censored at the 600-step maximum (review s3j). The rates
+    are frozen (§12.4.8), so the pilot's learning-rate search has no line."""
     cert = rules["certificate"]
     blocks, rates = int(cert["blocks"]), len(cert["learning_rates"])
     k = f"{stage}/{b}/certificate"
@@ -315,7 +321,17 @@ def certificate(p: Pricer, stage: str, b: str, rules: cr.Rules) -> list[Line]:
             3 * rates,
         )
     ]
-    lines += [p.gpu(f"{k}/lr", stage, b, "L", "relearning-rate calibration", "lr_calibration")]
+    lines += [
+        p.gpu(
+            f"{k}/censored",
+            stage,
+            b,
+            "H_s",
+            f"censored runs at 600 steps, {CENSORED_RUNS} of the 78",
+            "relearn_censored_extra",
+            CENSORED_RUNS,
+        )
+    ]
     return lines
 
 

@@ -13,6 +13,10 @@
 # $0.3758 per state, Stage 1's cost per state with both layers and both draws.
 additions:
   gpu:
+    relearn_censored_extra:
+      minutes: 0.0
+      high: 42.0
+      source: "[estimate] review s3j (2026-10-19): the excess of a relearning run censored at 600 steps over relearn_run. Central: the pilot censored none of its 64 runs. Stress: a censored run takes 64.8 min (the fit 0.39 + 0.0569 · steps + 0.393 · evaluations min over runs/feasibility_14b relearn, n 64, 20–160 steps, extrapolated to 600 steps and 77 evaluations), 42.0 over relearn_run's high (22.8)"
     adl_method_check:
       minutes: 15.5
       high: 18.9

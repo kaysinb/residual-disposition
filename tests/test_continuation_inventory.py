@@ -183,6 +183,19 @@ def test_k_star_is_calibrated_per_rate_on_three_sham_s_seeds_each():
         assert x.state == "H_s" and x.count == 3 * len(RULES["certificate"]["learning_rates"]) == 6
 
 
+def test_the_certificate_prices_its_censored_runs_and_no_rate_search():
+    lines = lines_of("main")
+    assert not [x for x in lines if x.unit == "lr_calibration"]  # the rates are frozen (§12.4.8)
+    kstar = {x.line_id.rsplit("/", 1)[0] for x in lines if x.line_id.endswith("/certificate/kstar")}
+    censored = [x for x in lines if x.line_id.endswith("/certificate/censored")]
+    assert kstar and {x.line_id.rsplit("/", 1)[0] for x in censored} == kstar
+    assert all(x.unit == "relearn_censored_extra" and x.count == ci.CENSORED_RUNS for x in censored)
+    units = ci.load_units()["gpu"]  # central: none censored; stress: 64.8 min per censored run
+    assert units["relearn_censored_extra"]["minutes"] == 0
+    whole = units["relearn_run"]["high"] + units["relearn_censored_extra"]["high"]
+    assert whole == pytest.approx(64.8)
+
+
 def test_execution_units_add_and_reprice_but_never_replace_frozen_units(tmp_path, monkeypatch):
     frozen = OmegaConf.to_container(OmegaConf.load(ci.UNITS_PATH), resolve=True)
     units = ci.load_units()

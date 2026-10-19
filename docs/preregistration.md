@@ -1549,6 +1549,16 @@ Stage-0 label sets (§12.9).
   the reference rate) are written to `manifests/y2.json` and committed after that preparation
   and before any certificate run.
 - **If no alternate qualifies:** stop before certification and report to the coordinator.
+- **Detector validation of an alternate, execution 2026-10-19** **[coord, review s3j]**. The set
+  `detectors-e2c72b0d05ad` (§2) covers the pilot behaviors and Y only, so criterion 2's
+  validation of an alternate is run on its stage-0 elicitation responses, before its labels and
+  with §2's procedure: zero_indexed_lists is a looser format detector; its items are every
+  prompted miss, every unprompted hit and 25 random hits and 25 random silences of the rest (56
+  at the stage-0 counts, 6 misses and no unprompted hit), drawn with a seed recorded before any
+  label; the detector is revised if more than 2 of the 50 random items disagree with the final
+  label, every prompted miss is reviewed, and a revision is rechecked. The ensemble and arbiter
+  label, and the user reviews in full (§12.9). Candidates go in the frozen order; a pending
+  candidate is not a failed one.
 
 #### 12.3.7 k* and the measurement steps
 
@@ -1563,6 +1573,20 @@ Stage-0 label sets (§12.9).
   a rate uses that rate's k*: a run stops at the first evaluation at or after max(20, k*_rate) at
   which a crossing is latched. Steps 10, 20 and k* and their L − H_s contrasts are reported per
   rate (§12.4.9, descriptive); the latched T and the six-contrast certificate test are unchanged.
+- **Calibration runs and the step budget, execution 2026-10-19** **[coord, review s3j]**. §12.4.8
+  sets no step budget. Frozen before any calibration:
+  - **Calibration runs:** H_s relearned on b with the relearning seeds 6, 7 and 8 (outside the
+    blocks 0–5) at each rate, each stopping at its first crossing, with a 600-step budget. T is
+    the interpolated crossing (§12.4.8); a run without a crossing by 600 is censored. A
+    technical failure is not censoring: the run has no T until it completes.
+  - **The median of three** counts a censored run as slower than every crossing: with one
+    censored run it is the larger observed crossing. With two or three censored at either rate,
+    k* is unresolved: the lineage's certification stops and is reported; the lineage is neither
+    replaced nor dropped.
+  - **Budget:** B = min(600, 50·⌈max(3·median(T_lo), 20, k*_hi, k*_lo)/50⌉), with T_lo the
+    calibration at 5·10⁻⁶ and k*_hi, k*_lo the two rates' k*; one B for all 72 runs. The floor
+    keeps both k* within the budget. Both k* and B are committed in `kstar_<lineage>.json` before
+    certification.
 - **Early-stopping rule (changed)** **[coord]**.
   - **The first crossing is latched:** the first evaluation at or above the threshold fixes T,
     interpolated as before. A later drop of the rate does not erase it.
@@ -1922,6 +1946,14 @@ the ceilings attached.
   descriptive. For link at 100/200, Y alone is added: 2 × 12 runs, 3 seeds, descriptive. Y₂
   runs only on panel lineages and the Stage-2 selected deep dose.
 - **Calibration:** §12.3.7.
+- **The arms' references, execution 2026-10-19** **[coord, review s3j]**. b's threshold is half
+  the raw relearning-evaluation rate of the lineage's A, its saved responses rescored where the
+  detector changed after they were scored; Y reuses the pilot's Y organism (keywords_line), its
+  reference responses and relearning data, recorded by id and hash, with half its reference rate;
+  Y₂'s threshold is the absolute value in `manifests/y2.json`. Every one of the 72 runs is run:
+  path B's across-run futility stop does not apply; the within-run stop at max(20, k*_rate)
+  after a latched crossing does. A failed or incomplete run gives every contrast that depends on
+  it p = 1; a completed censored run enters by the censoring rule above.
 
 #### 12.4.9 Fixed-step measure
 
