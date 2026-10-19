@@ -136,8 +136,10 @@ Entry points in `scripts/`:
   already has a completed run is reused, so a sweep is a list of configs and an interrupted run
   resumes;
 - `preflight.py`: the stage-0 pre-flight tasks, the tools check among them;
-- `summarize_tools.py`, `tools_check_report.py`: summarizer hypotheses from saved tool outputs,
-  and the tools check's readings and prefill-budget rule;
+- `summarize_tools.py`, `tools_check_report.py`: summarizer hypotheses from saved tool outputs
+  (on flex with a fallback to the standard tier, each answer recorded with the tier that answered
+  it, each attempt reserved and settled at its own tier: `judge.FlexFallback`), and the tools
+  check's readings and prefill-budget rule;
 - `summarizer_tiers.py`: the verified tier manifest of summarizer completions cached before the
   cache recorded each one's service tier, the provenance a readings run's `service_tiers.json`
   reads;

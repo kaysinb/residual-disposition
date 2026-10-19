@@ -406,9 +406,12 @@ class ApiLedger:
                 f"exceeds the ${self.allowance_usd:g} allowance"
             )
 
-    def reserve(self, reservations: Mapping[str, float], label: str) -> dict[str, str]:
+    def reserve(
+        self, reservations: Mapping[str, float], label: str, *, tier: str | None = None
+    ) -> dict[str, str]:
         """Reserve every request of a batch before any is sent, or none; returns each request's
-        reservation id, for its ``settle``."""
+        reservation id, for its ``settle``. ``tier``, the attempt's accounting tier, is recorded
+        with each event when given."""
         import uuid
 
         total = sum(reservations.values())
@@ -421,18 +424,29 @@ class ApiLedger:
                     f"exceeds the ${self.allowance_usd:g} allowance"
                 )
             ids = {key: uuid.uuid4().hex for key in reservations}
+            extra = {} if tier is None else {"tier": tier}
             events = [
-                {"event": "reserve", "id": ids[key], "key": key, "usd": float(usd), "label": label}
+                {
+                    "event": "reserve",
+                    "id": ids[key],
+                    "key": key,
+                    "usd": float(usd),
+                    "label": label,
+                    **extra,
+                }
                 for key, usd in reservations.items()
             ]
             self._append(events)
         return ids
 
-    def settle(self, reservation: str, key: str, usd: float, label: str) -> None:
+    def settle(
+        self, reservation: str, key: str, usd: float, label: str, *, tier: str | None = None
+    ) -> None:
         """Close one reservation at the cost its send reported."""
         event = {"event": "spend", "id": reservation, "key": key, "usd": float(usd)}
+        extra = {} if tier is None else {"tier": tier}
         with self._lock:
-            self._append([{**event, "label": label}])
+            self._append([{**event, "label": label, **extra}])
 
     def fail(
         self,
@@ -443,6 +457,7 @@ class ApiLedger:
         *,
         released: bool,
         label: str,
+        tier: str | None = None,
     ) -> None:
         """Record a failed send of one reservation, with its error class and HTTP status;
         ``released`` (a send treated as unbilled: HTTP 429, or 503 on flex) closes the
@@ -455,8 +470,9 @@ class ApiLedger:
             "status": status,
             "released": bool(released),
         }
+        extra = {} if tier is None else {"tier": tier}
         with self._lock:
-            self._append([{**event, "label": label}])
+            self._append([{**event, "label": label, **extra}])
 
     def close_unbilled(
         self, reservations: Sequence[str], *, source: str, decision: str, label: str

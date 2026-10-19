@@ -252,6 +252,18 @@ its rerun pays only for what the cache lacks.
   `summarizer.expected_output_tokens`, and `summarizer.chars_per_token` and
   `summarizer.expected_thinking_tokens` by evidence tool, else the prompt's tool (`base_tool`),
   else `default`.
+- **Tiers** (the user, 2026-10-19). The interpreter reads on flex
+  (`judge.sync.service_tier: flex`) with `summarizer.flex_fallback`: when, of the last 100 flex
+  sends, at least 90 % answered HTTP 503, or no flex send succeeded for 15 minutes, the rest of the
+  run goes to the standard tier, one-way, recorded in `service_tiers.json` and the summary
+  (`flex_fallback`); a request whose own flex attempts all answered 503 is sent once on the
+  standard tier. Only that service failure counts, never an answer. Each attempt is reserved,
+  settled and released at its own tier (a 503 is released on flex only), and every ledger event
+  records it; each answer carries the tier that answered it, so a mixed run's provenance is per
+  answer. The dry run prints the estimate at standard prices too: the ledger's allowance is at
+  least that × 1.3. The summary's `paid_by_tier` gives the answers' shares per tier and what flex
+  saved against the standard tier. The judge reads on the standard tier:
+  `scripts/judge.py experiments/judge_continuation`.
 - **Recalibration.** `uv run python scripts/estimator_calibration.py --judge-ledger <worker> ...
   --summarizer-cache <dir>[=<tool>] ... --write tests/data/estimator_calibration.json` measures
   the cached replies (the judge: the requests a ledger settled) and prints each group's tokens and

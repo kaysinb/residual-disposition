@@ -973,15 +973,15 @@ def test_a_budget_stop_in_one_worker_keeps_the_others_paid_results(tmp_path) -> 
     stop_key = requests[2].key
 
     class Hook:
-        def reserve(self, request):
+        def reserve(self, request, *, tier):
             if request.key == stop_key:
                 raise ApiBudgetExhausted("allowance used")
             return "token"
 
-        def settle(self, token, request, completion):
+        def settle(self, token, request, completion, *, tier):
             pass
 
-        def fail(self, token, request, error):
+        def fail(self, token, request, error, *, tier):
             pass
 
     completions = FakeCompletions([chat_body("yes") for _ in range(8)])

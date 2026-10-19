@@ -46,6 +46,12 @@ summarizer:
     pd_clean: 300                     # mean 218 (PD-clean and its random control)
     pd_random: 300
   max_usd: 10.0               # refuse to submit when the estimate exceeds this
+  # On flex, the rest of a run goes to the standard tier when flex stops answering (the user,
+  # 2026-10-19; judge.FlexFallback): of the last `window` flex sends at least `min_503_share`
+  # answered HTTP 503, or no flex success for `silence_min` minutes; a request whose own flex
+  # attempts all answered 503 is sent once on the standard tier. Service failures only. null:
+  # flex without a fallback.
+  flex_fallback: {window: 100, min_503_share: 0.9, silence_min: 15}
   # ADL's evidence: the laptop's $15 share of the $35 ADL API cap, a durable ledger shared with
   # the judge's ADL runs (data/ledgers/adl-api-laptop.jsonl)
   adl_ledger: {worker: laptop, allowance_usd: 15.0, path: null}

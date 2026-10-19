@@ -776,8 +776,9 @@ def fetch(
     """Completions by request key, from the cache where possible; also returns the cached keys.
 
     Identical requests are sent once. Without a backend only cached results are returned. Each
-    new completion is cached and returned with the backend's tier (``service_tier``); a cached one
-    carries its entry's tier and sha256 (``JudgeCache.get``).
+    new completion is cached and returned with the tier of the attempt that produced it, or else
+    the backend's (``service_tier``); a cached one carries its entry's tier and sha256
+    (``JudgeCache.get``).
     """
     unique = {r.key: r for r in requests}
     results: dict[str, Completion] = {}
@@ -788,9 +789,11 @@ def fetch(
     cached = set(results)
     missing = {key: r for key, r in unique.items() if key not in results}
     if missing and backend is not None:
-        tier = getattr(backend, "tier", None)
+        configured = getattr(backend, "tier", None)
         for key, completion in backend.complete(list(missing.values())):
             if completion.error is None:
+                # The tier of the attempt that answered, else the backend's (a single-tier one).
+                tier = completion.service_tier or configured
                 cache.put(missing[key], completion, service_tier=tier)
                 completion = dataclasses.replace(completion, service_tier=tier)
             results[key] = completion
@@ -810,14 +813,100 @@ def _retryable_errors() -> tuple[type[BaseException], ...]:
     )
 
 
+HTTP_SERVICE_UNAVAILABLE = 503
+
+
+class FlexFallback:
+    """When flex stops answering, the rest of a run goes to the standard tier (the user,
+    2026-10-19): of the last ``window`` flex sends at least ``min_503_share`` answered HTTP 503,
+    or no flex send has succeeded for ``silence_s`` since the last success (or the first send).
+    Only that service failure counts, never an answer's content. The switch is one-way and
+    recorded (``switch``). A request whose own flex attempts all failed on HTTP 503 is sent once
+    more on the standard tier (``per_request`` counts them). Thread-safe."""
+
+    def __init__(
+        self,
+        *,
+        window: int = 100,
+        min_503_share: float = 0.9,
+        silence_s: float = 900.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        import threading
+        from collections import deque
+
+        if window < 1 or not 0 < min_503_share <= 1 or silence_s <= 0:
+            raise ValueError("flex fallback: window >= 1, 503 share in (0, 1], silence > 0")
+        self.window, self.min_503_share, self.silence_s = window, min_503_share, silence_s
+        self.clock = clock
+        self._recent: Any = deque(maxlen=window)  # True for a flex send answered with HTTP 503
+        self._since: float | None = None  # the last flex success, or the first flex send
+        self._lock = threading.Lock()
+        self.switch: dict[str, Any] | None = None
+        self.per_request = 0
+
+    def tier(self) -> str:
+        """The tier of the next attempt."""
+        with self._lock:
+            self._check()
+            return "standard" if self.switch is not None else "flex"
+
+    def record(self, *, ok: bool, status: int | None) -> None:
+        """One flex send's outcome: a success, or a failure with its HTTP status."""
+        with self._lock:
+            now = self.clock()
+            if self._since is None or ok:
+                self._since = now
+            self._recent.append(not ok and status == HTTP_SERVICE_UNAVAILABLE)
+            self._check()
+
+    def fall_back(self) -> None:
+        with self._lock:
+            self.per_request += 1
+
+    def _check(self) -> None:
+        if self.switch is not None or self._since is None:
+            return
+        n, unavailable = len(self._recent), sum(self._recent)
+        silent = self.clock() - self._since
+        if n >= self.window and unavailable / n >= self.min_503_share:
+            reason = f"{unavailable} of the last {n} flex sends answered HTTP 503"
+        elif silent >= self.silence_s:
+            reason = f"no flex success for {silent:.0f} s"
+        else:
+            return
+        self.switch = {
+            "to": "standard",
+            "reason": reason,
+            "window": n,
+            "http_503": unavailable,
+            "seconds_since_flex_success": round(silent, 1),
+            "at": datetime.now(UTC).isoformat(),
+        }
+
+    def record_json(self) -> dict[str, Any]:
+        """The policy and what it did, for the run's provenance."""
+        with self._lock:
+            return {
+                "window": self.window,
+                "min_503_share": self.min_503_share,
+                "silence_s": self.silence_s,
+                "switch": self.switch,
+                "per_request_fallbacks": self.per_request,
+            }
+
+
 class ChatBackend:
     """Synchronous chat completions with bounded concurrency, retries and backoff.
 
     ``client`` is an ``openai.OpenAI`` client (created with its own timeout and ``max_retries=0``)
     or anything with the same ``chat.completions.create``. ``attempt_hook``, if set, sees every
-    actual HTTP attempt: ``reserve(request)`` before it is sent (its return is the attempt's
-    token), ``settle(token, request, completion)`` when it succeeds and ``fail(token, request,
-    error)`` when it raises (``adl_graders.LedgeredBackend``).
+    actual HTTP attempt with the tier it is sent on: ``reserve(request, tier=...)`` before it is
+    sent (its return is the attempt's token), ``settle(token, request, completion, tier=...)``
+    when it succeeds and ``fail(token, request, error, tier=...)`` when it raises
+    (``adl_graders.LedgeredBackend``). With ``fallback`` (on ``service_tier`` "flex" only), each
+    attempt's tier comes from the policy (``FlexFallback``). Every completion carries the tier of
+    the attempt that produced it (``Completion.service_tier``).
     """
 
     def __init__(
@@ -829,17 +918,21 @@ class ChatBackend:
         backoff_s: float = 2.0,
         backoff_max_s: float = 60.0,
         service_tier: str | None = None,
+        fallback: FlexFallback | None = None,
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         if concurrency < 1 or max_retries < 0:
             raise ValueError("concurrency must be >= 1 and max_retries >= 0")
+        if fallback is not None and service_tier != "flex":
+            raise ValueError("a flex fallback needs service_tier flex")
         self.client = client
         self.concurrency = concurrency
         self.max_retries = max_retries
         self.backoff_s = backoff_s
         self.backoff_max_s = backoff_max_s
         self.service_tier = service_tier
-        self.tier = service_tier or "standard"
+        self.tier = service_tier or "standard"  # the configured tier
+        self.fallback = fallback
         self.sleep = sleep
         self.attempt_hook: Any = None
 
@@ -861,35 +954,58 @@ class ChatBackend:
         if error is not None:
             raise error
 
-    def _complete_one(self, request: ChatRequest) -> Completion:
+    def _tier(self) -> str:
+        return self.fallback.tier() if self.fallback is not None else self.tier
+
+    def _attempt(self, request: ChatRequest, tier: str) -> Completion | BaseException:
+        """One HTTP attempt on ``tier``, seen by the hook: its completion (with that tier), or
+        the openai error it raised."""
         import openai
 
-        retryable = _retryable_errors()
         body = dict(request.body)
-        if self.service_tier:
-            body["service_tier"] = self.service_tier
+        if tier != "standard":
+            body["service_tier"] = tier
         hook = self.attempt_hook
+        token = hook.reserve(request, tier=tier) if hook is not None else None
+        try:
+            response = self.client.chat.completions.create(**body)
+        except openai.APIError as exc:
+            if hook is not None:
+                hook.fail(token, request, exc, tier=tier)
+            if tier == "flex" and self.fallback is not None:
+                self.fallback.record(ok=False, status=getattr(exc, "status_code", None))
+            return exc
+        completion = dataclasses.replace(
+            completion_from_body(response.model_dump()), service_tier=tier
+        )
+        if hook is not None:
+            hook.settle(token, request, completion, tier=tier)
+        if tier == "flex" and self.fallback is not None:
+            self.fallback.record(ok=True, status=None)
+        return completion
+
+    def _complete_one(self, request: ChatRequest) -> Completion:
+        retryable = _retryable_errors()
+        flex_unavailable = True  # every attempt so far was on flex and answered HTTP 503
         for attempt in range(self.max_retries + 1):
-            token = hook.reserve(request) if hook is not None else None
-            try:
-                response = self.client.chat.completions.create(**body)
-            except retryable as exc:
-                if hook is not None:
-                    hook.fail(token, request, exc)
-                if attempt == self.max_retries:
-                    return Completion(None, error=f"{type(exc).__name__} after retries: {exc}")
+            tier = self._tier()
+            outcome = self._attempt(request, tier)
+            if isinstance(outcome, Completion):
+                return outcome
+            status = getattr(outcome, "status_code", None)
+            flex_unavailable &= tier == "flex" and status == HTTP_SERVICE_UNAVAILABLE
+            if not isinstance(outcome, retryable):  # other 4xx: retrying cannot help
+                return Completion(None, error=f"{type(outcome).__name__}: {outcome}")
+            if attempt < self.max_retries:
                 delay = min(self.backoff_max_s, self.backoff_s * 2**attempt)
                 self.sleep(delay * random.uniform(0.5, 1.0))  # jitter spreads retries
-            except openai.APIError as exc:  # other 4xx: retrying the same request cannot help
-                if hook is not None:
-                    hook.fail(token, request, exc)
-                return Completion(None, error=f"{type(exc).__name__}: {exc}")
-            else:
-                completion = completion_from_body(response.model_dump())
-                if hook is not None:
-                    hook.settle(token, request, completion)
-                return completion
-        raise AssertionError("unreachable")
+        if self.fallback is not None and flex_unavailable:
+            # Flex refused every attempt of this request: once more on the standard tier.
+            self.fallback.fall_back()
+            outcome = self._attempt(request, "standard")
+            if isinstance(outcome, Completion):
+                return outcome
+        return Completion(None, error=f"{type(outcome).__name__} after retries: {outcome}")
 
 
 class GeminiFiles:

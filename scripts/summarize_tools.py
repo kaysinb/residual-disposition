@@ -18,7 +18,7 @@ import dataclasses
 import json
 import os
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -31,7 +31,9 @@ from residual_disposition.config import config_hash, from_cli
 from residual_disposition.judge import (
     ChatBackend,
     ChatRequest,
+    Completion,
     CostEstimate,
+    FlexFallback,
     GeminiBatchBackend,
     GeminiFiles,
     JudgeCache,
@@ -287,7 +289,52 @@ def make_backend(cfg: DictConfig, cache: JudgeCache, batch_hook: Any = None) -> 
         backoff_s=sync.backoff_s,
         backoff_max_s=sync.backoff_max_s,
         service_tier=sync.service_tier,
+        fallback=flex_fallback(cfg),
     )
+
+
+def flex_fallback(cfg: DictConfig) -> FlexFallback | None:
+    """The interpreter's fallback from flex to the standard tier (the user, 2026-10-19), when it
+    reads on flex and ``summarizer.flex_fallback`` is set."""
+    f = cfg.summarizer.get("flex_fallback")
+    if f is None or cfg.judge.sync.service_tier != "flex":
+        return None
+    return FlexFallback(
+        window=int(f.window),
+        min_503_share=float(f.min_503_share),
+        silence_s=60.0 * float(f.silence_min),
+    )
+
+
+def tier_factors(cfg: DictConfig) -> dict[str, float]:
+    """The price factor of every tier an attempt may be sent on."""
+    discounts = {"batch_discount": cfg.judge.cost.batch_discount}
+    discounts["flex_discount"] = cfg.judge.cost.flex_discount
+    return {t: tier_factor(t, **discounts) for t in ("standard", "flex", "batch")}
+
+
+def paid_cost(paid: Sequence[Completion], model: ModelSpec, factors: Mapping[str, float]) -> dict:
+    """The paid answers by the tier that answered them, at that tier's prices; the cost had all
+    been on the standard tier, and what the cheaper tiers saved."""
+    by_tier: dict[str, list[Completion]] = {}
+    for c in paid:
+        if c.error is None:
+            by_tier.setdefault(c.service_tier or "standard", []).append(c)
+    tiers = {}
+    for t, cs in sorted(by_tier.items()):
+        tokens_in, tokens_out, usd = usage_cost(cs, model, price_factor=factors[t])
+        tiers[t] = {"requests": len(cs), "input_tokens": tokens_in, "output_tokens": tokens_out}
+        tiers[t]["usd"] = usd
+    usd = sum(x["usd"] for x in tiers.values())
+    standard = usage_cost([c for cs in by_tier.values() for c in cs], model, price_factor=1.0)[2]
+    n = sum(x["requests"] for x in tiers.values())
+    return {
+        "by_tier": tiers,
+        "shares": {t: x["requests"] / n for t, x in tiers.items()} if n else {},
+        "usd": usd,
+        "usd_all_standard": standard,
+        "saved_usd": standard - usd,
+    }
 
 
 def main() -> None:
@@ -365,13 +412,22 @@ def main() -> None:
         f"({tier}), ~{est.input_tokens:,} input and ~{est.output_tokens:,} output tokens, "
         f"~${est.usd:.4f}"
     )
+    # With the flex fallback any request may end on the standard tier: the ledger must hold the
+    # estimate at standard prices (its allowance: that estimate + 30 %, operations).
+    worst = est
+    if flex_fallback(cfg) is not None:
+        worst = estimate(batches, settings.model, s, cached=cached, price_factor=1.0)
+        print(
+            f"with the flex fallback, every request on the standard tier: ~${worst.usd:.4f} "
+            f"(a ledger allowance of at least ${1.3 * worst.usd:.2f})"
+        )
     if s.dry_run:
         print("Dry run: nothing was sent. Set summarizer.dry_run=false to submit.")
         return
     if est.usd > float(s.max_usd):
         raise SystemExit(f"Estimate above summarizer.max_usd = {s.max_usd}: not submitted")
     ledger = adl_ledger({e.tool for e in evidence}, s.get("adl_ledger"), s.get("api_ledger"))
-    check_adl_estimate(ledger, est.usd)
+    check_adl_estimate(ledger, worst.usd)
     # Each response's service tier, its provenance: every cached one resolved before any send.
     try:
         manifest = load_manifests([Path(p) for p in s.get("tier_manifests") or []], cache)
@@ -417,7 +473,12 @@ def main() -> None:
             if ledger is not None:  # every ADL request reserved before it is sent
                 model = settings.model
                 backend = LedgeredBackend(
-                    backend, ledger, lambda r: model, price_factor=factor, label="summarizer"
+                    backend,
+                    ledger,
+                    lambda r: model,
+                    price_factor=factor,
+                    tier_factors=tier_factors(cfg),
+                    label="summarizer",
                 )
                 backend.reconcile(cache)
         completions, cached = fetch(requests, backend, cache)
@@ -462,16 +523,20 @@ def main() -> None:
                 request_of[rid] = request.key
         RecordWriter(run.dir).write([*records, *failures])
         accepted = {request_of[rid] for rid in hypothesis_tiers}
+        # Each response's tier is its own (the attempt's that answered it), never the run's.
+        fallback = getattr(getattr(backend, "inner", backend), "fallback", None)
         provenance = {
             "hypotheses": hypothesis_tiers,
             "evidence": tier_counts(batches, tiers, accepted),
+            "flex_fallback": None if fallback is None else fallback.record_json(),
         }
         run.path("service_tiers.json").write_text(json.dumps(provenance, indent=2) + "\n")
         write_responses(run.dir, ToolHypothesis.table, texts)
         paid = [completions[k] for k in {r.key for r in requests} - cached]
-        tokens_in, tokens_out, usd = usage_cost(
-            [c for c in paid if c.error is None], settings.model, price_factor=factor
-        )
+        cost = paid_cost(paid, settings.model, tier_factors(cfg))
+        tokens_in = sum(x["input_tokens"] for x in cost["by_tier"].values())
+        tokens_out = sum(x["output_tokens"] for x in cost["by_tier"].values())
+        usd = cost["usd"]
         summary = {
             "hypotheses": len(records),
             "failures": len(failures),
@@ -479,6 +544,8 @@ def main() -> None:
             "input_tokens": tokens_in,
             "output_tokens": tokens_out,
             "usd": usd,
+            "paid_by_tier": cost,
+            "flex_fallback": provenance["flex_fallback"],
             "service_tiers": {
                 "hypotheses": dict(sorted(Counter(hypothesis_tiers.values()).items())),
                 "responses": dict(sorted(Counter(tiers.values()).items())),
