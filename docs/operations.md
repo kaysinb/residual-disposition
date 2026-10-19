@@ -482,11 +482,19 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   - **Option (b), A1 on another Hopper** (Codex s4k; used only if H100 SXM capacity stays out,
     with an execution note in decisions before the launch): a1 with `KSTAR=0` runs no k*; the
     session **a1k** (Pod A, H100 SXM) runs phase kstar at the decided analysis dose (k* whole on
-    one GPU type: the k* evidence refuses calibration runs of more than one, from their meta's
-    hardware), then phase pd_pool, L's full PD pool redrawn in a cell of its own (the draw tag
-    `stage2-sxm`, run only on `NVIDIA H100 80GB HBM3`; the record gives it beside the
-    screening's), which a2 with `PD_DRAW=stage2-sxm` gives the readers and PD-clean as L's
-    pool. The screening's count stays the screening's pool's.
+    one configuration: the k* evidence refuses calibration runs whose execution signatures,
+    GPU, container image, driver and CUDA, packages and engine from their meta and cell, are
+    incomplete or not all the same; review s4m), then phase pd_pool, L's full PD pool redrawn in
+    a cell of its own (the draw tag `stage2-sxm`, run only on `NVIDIA H100 80GB HBM3`; the
+    record gives it beside the screening's). The screening's count stays the screening's
+    pool's.
+  - **L's PD pool, declared** (`configs/continuation/pd_draws.yaml`, frozen before the
+    lineage's A1; review s4m): null, the screening's pool; `stage2-sxm`, the redrawn one
+    (option b), set by a decision before A1′ whatever it gives. Phase readers refuses a
+    `plan.readers.pd_draw` (`PD_DRAW` of a2) other than the declared one, a left-out one
+    included; PD-clean (`scripts/pd_clean.py`) takes each state's pool by its draw. Every final
+    PD pool, L's and the controls', ran on `NVIDIA H100 80GB HBM3`: a cached pool from another
+    GPU is refused before any GPU work, a new one is drawn only there.
   - **b1** (needs no dose): the Y alone for link at 100 and 200, after copying link's L and H_s
     at 100 and 200, the analyst index and the prompt pools (a) and the pilot's Y organism, its
     reference and relearning data (b).

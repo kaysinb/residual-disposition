@@ -34,6 +34,7 @@ from residual_disposition.records import RecordWriter, StateRecord
 from residual_disposition.simulate_continuation import FROZEN
 
 RULES = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
+FINAL = pipeline.FINAL_PD_GPU
 
 
 # --------------------------------------------------------------------------- the corpus check
@@ -281,7 +282,7 @@ def stubbed(committed, monkeypatch, tmp_path):
     base.parent.mkdir(parents=True)
     base.write_bytes(b"means")
     committed.fail_lens, committed.lens_done, committed.opened = None, set(), []
-    committed.pd_drawn = set()
+    committed.pd_drawn, committed.pd_gpus, committed.declared = set(), {}, None
 
     def lens_cell(ws, sid, *, controls, pilot_package):
         assert not controls and pilot_package == f"method-{sid}"
@@ -297,8 +298,12 @@ def stubbed(committed, monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline, "adl_method_equivalence", method)
     monkeypatch.setattr(pipeline, "adl_lens_package", lens)
     monkeypatch.setattr(
-        pipeline, "audit_pd", lambda ws, sid, draw=None: calls.append(("pd", sid, draw))
+        pipeline,
+        "audit_pd",
+        lambda ws, sid, draw=None, *, require_gpu=None: calls.append(("pd", sid, draw)),
     )
+    monkeypatch.setattr(pipeline, "pd_gpu", lambda run: committed.pd_gpus.get(run.name, FINAL))
+    monkeypatch.setattr(pipeline, "declared_pd_draw", lambda behavior: committed.declared)
     monkeypatch.setattr(
         pipeline,
         "tool_pd_cell",
@@ -423,6 +428,11 @@ def test_a_tagged_draw_runs_only_on_its_gpu(runs, monkeypatch):
 
 
 def test_the_readers_take_l_s_tagged_pool_once_it_is_built(stubbed):
+    with pytest.raises(ValueError, match="'stage2-sxm' is not the declared PD draw None"):
+        readers(stubbed, pd_draw="stage2-sxm")  # not declared before A1 (s4m)
+    stubbed.declared = "stage2-sxm"
+    with pytest.raises(ValueError, match="None is not the declared PD draw 'stage2-sxm'"):
+        readers(stubbed)  # PD_DRAW left out: refused, no fallback
     with pytest.raises(ValueError, match="L's PD pool of draw stage2-sxm is not built"):
         readers(stubbed, pd_draw="stage2-sxm")
     stubbed.pd_drawn = {"L400"}
@@ -460,3 +470,27 @@ def test_the_pd_pool_record_gives_both_pools(runs, monkeypatch):
     assert out["pool"] == pool and out["screening_pool"] == {"hits": 0}
     assert out["gpus"] == ["NVIDIA H100 80GB HBM3"]
     assert list((runs / "runs" / "continuation_14b").glob("*-stage2_pd_pool-*"))
+
+
+def test_every_final_pd_pool_ran_on_h100_sxm(stubbed):
+    # s4m: a cached control pool from another GPU is refused before any GPU work
+    stubbed.pd_drawn = {"Hs400"}
+    stubbed.pd_gpus = {"pd-Hs400": "NVIDIA H100 NVL"}
+    with pytest.raises(ValueError, match="H_s's PD pool pd-Hs400 ran on NVIDIA H100 NVL, not"):
+        readers(stubbed)
+    stubbed.pd_gpus = {}
+    readers(stubbed)  # an SXM pool is reused
+
+
+def test_a_new_final_pd_pool_is_drawn_only_on_h100_sxm(runs, monkeypatch):
+    ws = pipeline.Workspace(config("readers"))
+    monkeypatch.setattr(pipeline, "hardware", lambda: {"gpus": ["NVIDIA H200"]})
+    with pytest.raises(ValueError, match="a final PD pool of Hs400 runs on NVIDIA H100 80GB HBM3"):
+        pipeline.audit_pd(ws, "Hs400", require_gpu=FINAL)
+
+
+def test_the_declared_pd_draws_are_frozen_untagged():
+    assert pipeline.declared_pd_draw("example_link") is None
+    assert pipeline.declared_pd_draw("pun_intended") is None
+    with pytest.raises(ValueError, match="no declared PD draw"):
+        pipeline.declared_pd_draw("tldr")

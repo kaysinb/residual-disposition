@@ -83,17 +83,24 @@ def sha256(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def pd_run(state_id: str, experiments: list[str]) -> Path:
-    """The completed tool_pd run of a state; none or several is an error."""
+def pd_run(state_id: str, experiments: list[str], draw: str | None = None) -> Path:
+    """The completed tool_pd run of a state of the given draw (None: the untagged pool; a tag:
+    that pool, ``pipeline.PD_DRAW_GPU``; Codex s4m); none or several is an error."""
     found = []
     for experiment in experiments:
         for cfg_path in sorted((runs_root() / experiment).glob("*-tool_pd-*/config.yaml")):
             cfg = yaml.safe_load(cfg_path.read_text())
             meta = json.loads((cfg_path.parent / "meta.json").read_text())
-            if cfg["params"]["state"] == state_id and meta.get("status") == "completed":
+            if (
+                cfg["params"]["state"] == state_id
+                and cfg["params"].get("draw") == draw
+                and meta.get("status") == "completed"
+            ):
                 found.append(cfg_path.parent)
     if len(found) != 1:
-        raise SystemExit(f"{state_id}: {len(found)} completed tool_pd runs, not one: {found}")
+        raise SystemExit(
+            f"{state_id}: {len(found)} completed tool_pd runs of draw {draw}, not one: {found}"
+        )
     return found[0]
 
 
@@ -184,7 +191,7 @@ class Study:
         self.states, self.rows, self.hits, self.runs = [], {}, {}, {}
         detectors = {}
         for s in self.plan["states"]:
-            run = pd_run(s["state"], self.plan["pd_runs"])
+            run = pd_run(s["state"], self.plan["pd_runs"], s.get("draw"))  # its declared pool
             rows = read_jsonl_gz(run / "pd_completions.jsonl.gz")
             self.rows[s["state"]] = [{**r, "ppl_diff": float(r["ppl_diff"])} for r in rows]
             b = behavior(s["behavior"])

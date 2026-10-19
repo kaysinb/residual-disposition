@@ -254,7 +254,7 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
     (``find_run(name)`` its directory, None if absent) must be a completed relearning cell of
     H_s at its rate and seed, purpose "kstar_calibration", path B's stop (no k*), the frozen
     budget, schedule and threshold, whose summary gives the record's T or censoring; all on one
-    GPU type (their meta's hardware; Codex s4k)."""
+    configuration: the same full execution signature (``execution_signature``; Codex s4k, s4m)."""
     import yaml
 
     problems, gpus = [], {}
@@ -271,7 +271,7 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
             config = yaml.safe_load((run / "config.yaml").read_text()) or {}
             params = config.get("params") or {}
             meta = json.loads((run / "meta.json").read_text())
-            gpus[name] = ((meta.get("hardware") or {}).get("gpus") or [None])[0]
+            gpus[name] = execution_signature(meta, params)
             summary = json.loads((run / "summary.json").read_text())
             settings = params.get("settings") or {}
             want = {
@@ -309,9 +309,32 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
                 problems.append(f"{name}: its summary is not the recorded {entry}")
     if not problems and sorted(data.get("relearn_runs") or {}) != sorted(data.get("rates") or {}):
         problems.append("the record names the runs of other rates")
-    if len(set(gpus.values())) > 1:  # Codex s4k: k* whole on one configuration
-        problems.append(f"the calibration runs ran on more than one GPU type: {gpus}")
+    # Codex s4k, s4m: k* whole on one configuration, every run's signature complete and the same
+    incomplete = sorted(n for n, sig in gpus.items() if None in (sig[k] for k in SIGNATURE_KEYS))
+    if incomplete:
+        problems.append(f"calibration runs without a full execution signature: {incomplete}")
+    else:
+        seen = sorted({json.dumps(sig, sort_keys=True) for sig in gpus.values()})
+        if len(seen) > 1:
+            problems.append(f"the calibration runs ran on more than one configuration: {seen}")
     return problems
+
+
+SIGNATURE_KEYS = ("gpu", "image", "driver", "cuda")  # each must be recorded
+
+
+def execution_signature(meta: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
+    """What a run executed on (Codex s4m): the GPU, the container image, the driver and CUDA
+    from its meta, its package versions and its cell's engine settings."""
+    hardware = meta.get("hardware") or {}
+    return {
+        "gpu": (hardware.get("gpus") or [None])[0],
+        "image": meta.get("container_image"),
+        "driver": hardware.get("driver"),
+        "cuda": hardware.get("torch_cuda"),
+        "packages": meta.get("packages"),
+        "engine": params.get("engine"),
+    }
 
 
 def find_run(name: str) -> Path | None:

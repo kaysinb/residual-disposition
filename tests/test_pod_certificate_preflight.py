@@ -151,7 +151,10 @@ def laptop(built, tmp_path, monkeypatch):  # noqa: F811
                       "data_id": record["data_id"], "examples": record["relearn_examples"],
                       "eval_limit": None, "settings": settings}  # fmt: skip
             (run / "config.yaml").write_text(yaml.safe_dump({"step": "relearn", "params": params}))
-            (run / "meta.json").write_text(json.dumps({"status": "completed"}))
+            meta = {"status": "completed", "container_image": "img@sha256:x", "packages": {},
+                    "hardware": {"gpus": ["NVIDIA H100 80GB HBM3"], "driver": "580",
+                                 "torch_cuda": "13.0"}}  # fmt: skip
+            (run / "meta.json").write_text(json.dumps(meta))
             summary = {"censored": entry["censored"], "budget": 600, "t": entry["t"],
                        "crossing_step": entry["t"]}  # fmt: skip
             (run / "summary.json").write_text(json.dumps(summary))

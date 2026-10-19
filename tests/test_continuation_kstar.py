@@ -109,6 +109,11 @@ def test_calibrate_refuses_other_seeds_rates_and_budgets():
 
 
 CROSSINGS = {HI: (40.0, 60.0, 50.0), LO: (90.0, 100.0, 110.0)}
+# what a run's meta records of its execution (tracking.Run): the k* evidence needs it whole
+SIGNED = {"container_image": "ghcr.io/kaysinb/residual-disposition@sha256:125c",
+          "hardware": {"gpus": ["NVIDIA H100 80GB HBM3"], "driver": "580.126.09",
+                       "torch_cuda": "13.0"},
+          "packages": {"torch": "2.13.0", "vllm": "0.30.0"}}  # fmt: skip
 A = "s11c92132dd9839ce"  # example_link's A, with an approved reference
 
 
@@ -158,7 +163,7 @@ def calibration_runs(
             params |= change
             config = yaml.safe_dump({"step": step, "params": params})  # as runs write it
             (run_dir / "config.yaml").write_text(config)
-            (run_dir / "meta.json").write_text(json.dumps({"status": "completed"}))
+            (run_dir / "meta.json").write_text(json.dumps({"status": "completed", **SIGNED}))
             summary = {"censored": entry["censored"], "budget": 600, "t": entry["t"],
                        "crossing_step": entry["t"]} | (summary_change or {})  # fmt: skip
             (run_dir / "summary.json").write_text(json.dumps(summary))
@@ -506,15 +511,30 @@ def test_the_pinned_pilot_references_reproduce_their_counts():
         assert (out["hits"], out["n"], out["rescored_changes"]) == (hits, 200, 0), behavior
 
 
-def test_k_star_s_calibration_runs_are_of_one_gpu_type(tmp_path, monkeypatch):
-    # Codex s4k: k* computed whole on one configuration
+@pytest.mark.parametrize(
+    "change, problem",
+    [
+        (
+            {"hardware": {**SIGNED["hardware"], "gpus": ["NVIDIA H100 NVL"]}},
+            "more than one configuration",
+        ),
+        ({"container_image": "ghcr.io/kaysinb/residual-disposition@sha256:other"}, "more than one"),
+        ({"hardware": {**SIGNED["hardware"], "driver": "590.1"}}, "more than one configuration"),
+        ({"packages": {"torch": "2.13.0", "vllm": "0.31.0"}}, "more than one configuration"),
+        ({"hardware": {}}, "without a full execution signature"),
+        ({"container_image": None}, "without a full execution signature"),
+    ],
+)
+def test_k_star_s_calibration_runs_share_one_full_execution_signature(
+    tmp_path, monkeypatch, change, problem
+):
+    # Codex s4k, s4m: k* whole on one configuration: GPU, image, driver and CUDA, packages, engine
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
     record = resolved_record()
     calibration_runs(tmp_path)
     assert K.evidence_problems(record, K.find_run) == []
-    names = [n for ns in record["relearn_runs"].values() for n in ns]
-    for name, gpu in zip(names, ["NVIDIA H100 80GB HBM3"] * 5 + ["NVIDIA H100 NVL"], strict=True):
-        meta = tmp_path / "runs" / "continuation_14b" / name / "meta.json"
-        meta.write_text(json.dumps({**json.loads(meta.read_text()), "hardware": {"gpus": [gpu]}}))
-    (problem,) = K.evidence_problems(record, K.find_run)
-    assert "ran on more than one GPU type" in problem
+    name = record["relearn_runs"][K.rate_key(LO)][2]  # one of the six
+    meta = tmp_path / "runs" / "continuation_14b" / name / "meta.json"
+    meta.write_text(json.dumps({**json.loads(meta.read_text()), **change}))
+    (found,) = K.evidence_problems(record, K.find_run)
+    assert problem in found

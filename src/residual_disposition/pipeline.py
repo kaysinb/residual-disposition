@@ -1368,6 +1368,29 @@ def audit_tools(
 # The GPU a tagged PD draw must run on (Codex s4k: L's pool regenerated on H100 SXM when the
 # screening ran on another Hopper; cell identities do not include the hardware).
 PD_DRAW_GPU = {"stage2-sxm": "NVIDIA H100 80GB HBM3"}
+FINAL_PD_GPU = "NVIDIA H100 80GB HBM3"  # every final PD pool of the readers and PD-clean (s4m)
+
+
+def declared_pd_draw(behavior: str) -> str | None:
+    """The PD pool of the lineage's L that its readers and PD-clean read, frozen before its A1
+    (``configs/continuation/pd_draws.yaml``; Codex s4m): None, the screening's own pool, or a
+    draw tag of ``PD_DRAW_GPU``."""
+    from .paths import CONFIG_ROOT
+
+    data = OmegaConf.to_container(OmegaConf.load(CONFIG_ROOT / "continuation" / "pd_draws.yaml"))
+    draws = data["pd_draws"]
+    if behavior not in draws:
+        raise ValueError(f"{behavior} has no declared PD draw in pd_draws.yaml")
+    draw = draws[behavior]
+    if draw is not None and draw not in PD_DRAW_GPU:
+        raise ValueError(f"the declared PD draw {draw!r} of {behavior} is not a known draw")
+    return draw
+
+
+def pd_gpu(run: Path) -> str | None:
+    """The GPU a completed PD run ran on (its meta's hardware)."""
+    meta = json.loads((Path(run) / "meta.json").read_text())
+    return ((meta.get("hardware") or {}).get("gpus") or [None])[0]
 
 
 def tool_pd_cell(ws: Workspace, state_id: str, draw: str | None = None) -> Cell:
@@ -1383,11 +1406,13 @@ def tool_pd_cell(ws: Workspace, state_id: str, draw: str | None = None) -> Cell:
     return make_cell(ws, "tool_pd", params)
 
 
-def audit_pd(ws: Workspace, state_id: str, draw: str | None = None) -> dict[str, Any]:
+def audit_pd(
+    ws: Workspace, state_id: str, draw: str | None = None, *, require_gpu: str | None = None
+) -> dict[str, Any]:
     """Perplexity differencing of a state: every prefill's completion and scores, saved gzipped
     (``pd_completions.jsonl.gz``), and the scalar of the top set at the full budget. A tagged
     ``draw`` is its own cell and runs only on its GPU (``PD_DRAW_GPU``), which its summary
-    records."""
+    records; ``require_gpu`` (the readers' final pools) refuses a new draw on any other GPU."""
     from .records import ToolScore
     from .tools import (
         corpus_texts,
@@ -1405,6 +1430,8 @@ def audit_pd(ws: Workspace, state_id: str, draw: str | None = None) -> dict[str,
     gpus = hardware()["gpus"]
     if draw is not None and gpus[:1] != [PD_DRAW_GPU[draw]]:
         raise ValueError(f"PD draw {draw} runs on {PD_DRAW_GPU[draw]}, not {gpus}")
+    if require_gpu is not None and gpus[:1] != [require_gpu]:
+        raise ValueError(f"a final PD pool of {state_id} runs on {require_gpu}, not {gpus}")
     with Run(cell.cfg) as run:
         prefills = prefills_from_texts(
             ws.generator.tokenizer,
@@ -3249,11 +3276,24 @@ def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
     states = {"L": at["latent"], "H_s": at["sham_s"], "X": at["X"], "recipe": recipes[0]}
     if len(set(states.values())) != len(states):
         raise ValueError(f"the readers' states are not distinct: {states}")
-    # option (b) of 2026-10-19 (Codex s4k): L's PD pool for the readers and PD-clean is the
-    # tagged draw on H100 SXM, built before (phase pd_pool), when the screening ran elsewhere
+    # L's PD pool is the one declared before its A1 (pd_draws.yaml; Codex s4k, s4m): the
+    # plan's must be it (a missing PD_DRAW is refused, not a fallback); a tagged pool is built
+    # before (phase pd_pool). Every final pool that exists already ran on H100 SXM.
     pd_draw = (plan.get("readers") or {}).get("pd_draw")
+    declared = declared_pd_draw(behavior)
+    if pd_draw != declared:
+        raise ValueError(
+            f"plan.readers.pd_draw {pd_draw!r} is not the declared PD draw {declared!r} of L"
+        )
     if pd_draw is not None and not tool_pd_cell(ws, states["L"], pd_draw).done:
         raise ValueError(f"L's PD pool of draw {pd_draw} is not built: phase pd_pool first")
+    for role, sid in states.items():
+        cell = tool_pd_cell(ws, sid, pd_draw if role == "L" else None)
+        if cell.done and pd_gpu(cell.previous) != FINAL_PD_GPU:
+            raise ValueError(
+                f"{role}'s PD pool {cell.previous.name} ran on {pd_gpu(cell.previous)}, not "
+                f"{FINAL_PD_GPU}"
+            )
     return {
         "dose": dose,
         "states": states,
@@ -3468,7 +3508,7 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
         }
         meter.check()
         draw = r["pd_draw"] if role == "L" else None
-        audit_pd(ws, sid, draw)
+        audit_pd(ws, sid, draw, require_gpu=FINAL_PD_GPU)
         per_state[role] = {
             "state": sid,
             "method_equivalence_validation": {

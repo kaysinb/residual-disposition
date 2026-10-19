@@ -380,3 +380,20 @@ def test_lookahead_rounds_give_the_item_by_item_selection_and_review(tmp_path, m
     with pytest.raises(SystemExit, match="not adjudicated"):
         script.main(["--plan", str(tmp_path / "plan.yaml"), "--work", str(tmp_path / "x"),
                      "round", "--lookahead=sX=3"])  # fmt: skip
+
+
+def test_a_state_s_pool_is_chosen_by_its_declared_draw(tmp_path, monkeypatch):
+    # Codex s4m: with the screening's pool and a tagged redraw of the same state, the declared
+    # draw names one run, never "2 completed tool_pd runs"
+    script = load("pd_clean_draws", REPO / "scripts" / "pd_clean.py")
+    monkeypatch.setattr(script, "runs_root", lambda: tmp_path)
+    pd_run(tmp_path, "20261020-000000-tool_pd-aaaa-0001", "L")
+    tagged = pd_run(tmp_path, "20261020-000001-tool_pd-bbbb-0001", "L")
+    config = yaml.safe_load((tagged / "config.yaml").read_text())
+    config["params"]["draw"] = "stage2-sxm"
+    (tagged / "config.yaml").write_text(yaml.safe_dump(config))
+    assert script.pd_run("L", ["feasibility_14b"]).name == "20261020-000000-tool_pd-aaaa-0001"
+    tagged_run = script.pd_run("L", ["feasibility_14b"], "stage2-sxm")
+    assert tagged_run.name == "20261020-000001-tool_pd-bbbb-0001"
+    with pytest.raises(SystemExit, match="0 completed tool_pd runs of draw other"):
+        script.pd_run("L", ["feasibility_14b"], "other")
