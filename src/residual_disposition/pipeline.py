@@ -1751,6 +1751,8 @@ PHASES = (
     "engine",  # the continuation's engine check and timings (§12.4.8)
     "screen",  # the continuation's Stage 2 (§12.7): the deep doses screened
     "confirm",  # a Stage-2 lineage's confirmation draw at a screened dose (§12.4.1)
+    "corpus",  # the ADL-corpus expression check of a latent state at a screened dose (§12.4.7)
+    "readers",  # the readers at a Stage-2 lineage's analysis dose: lens-only and PD (§12.4)
     "ood",  # the out-of-distribution observer of latent states (§12.4.7)
     "kstar",  # a lineage's k* calibration and step budget (§12.3.7)
     "y2",  # a Y₂ candidate's organism and reference rate (§12.3.6, criterion 3)
@@ -2091,7 +2093,8 @@ def check_plan(
         seeds = None if OmegaConf.is_missing(relearn, "seeds") else relearn.seeds
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
-    stage2 = ("screen", "confirm", "ood", "kstar", "y2", "certificate", "decide")
+    stage2 = ("screen", "confirm", "corpus", "readers", "ood", "kstar", "y2", "certificate",
+              "decide")  # fmt: skip
     if phase in ("reread", "engine", *stage2) and (audit or calibration or targets):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
     if phase == "reread":
@@ -2102,6 +2105,10 @@ def check_plan(
         problems += screen_problems(cfg, plan)
     if phase == "confirm":
         problems += confirm_problems(cfg, plan)
+    if phase == "corpus":
+        problems += corpus_problems(cfg, plan)
+    if phase == "readers":
+        problems += readers_problems(cfg, plan)
     if phase == "ood":
         problems += ood_problems(plan)
     if phase == "kstar":
@@ -2241,6 +2248,12 @@ def run_behavior(
             return _result(lineage, outputs)
         if phase == "confirm":
             _confirm(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "corpus":
+            _corpus(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "readers":
+            _readers(ws, plan, meter, outputs)
             return _result(lineage, outputs)
         if phase == "ood":
             _ood(ws, plan, meter, outputs)
@@ -2906,6 +2919,26 @@ def _experiment_runs(experiment: str, step: str) -> list[tuple[Path, dict[str, A
     return out
 
 
+def _stage2_screening(ws: Workspace, rules: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The behavior's one completed screening of this experiment: the decision's inputs naming
+    it and its record (``continuation_stage2._screening``: of this behavior, under these rules)."""
+    from . import continuation_stage2 as S2
+    from .continuation_kstar import find_run
+
+    behavior = ws.behavior.id
+    screenings = [
+        run
+        for run, config, meta in _experiment_runs(str(ws.cfg.experiment), "stage2_screening")
+        if meta.get("status") == "completed"
+        and (config.get("behavior") or {}).get("id") == behavior
+    ]
+    if len(screenings) != 1:
+        raise ValueError(f"{len(screenings)} completed screenings of {behavior}, not one")
+    inputs = {"behavior": behavior, "detector_version": ws.behavior.detector.version,
+              "screening": screenings[0].name, "confirmation": [], "expression": {}}  # fmt: skip
+    return inputs, S2._screening(inputs, rules, find_run)
+
+
 def confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
     """What a Stage-2 confirmation draw starts from, on CPU before any GPU work (§12.4.1; reviews
     s4c, s4f; ``continuation_confirm``): ``plan.confirm`` names a dose with its latent state and
@@ -2929,17 +2962,7 @@ def confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
     prompts = C.prompts(data_root())
     experiment, behavior = str(ws.cfg.experiment), ws.behavior.id
     version = ws.behavior.detector.version
-    screenings = [
-        run
-        for run, config, meta in _experiment_runs(experiment, "stage2_screening")
-        if meta.get("status") == "completed"
-        and (config.get("behavior") or {}).get("id") == behavior
-    ]
-    if len(screenings) != 1:
-        raise ValueError(f"{len(screenings)} completed screenings of {behavior}, not one")
-    inputs = {"behavior": behavior, "detector_version": version, "screening": screenings[0].name,
-              "confirmation": [], "expression": {}}  # fmt: skip
-    record = S2._screening(inputs, rules, find_run)
+    inputs, record = _stage2_screening(ws, rules)
     doses = {int(d): v for d, v in record["doses"].items()}
     if dose not in doses or (doses[dose]["latent"], doses[dose]["sham_s"]) != (latent, sham_s):
         raise ValueError(
@@ -3094,6 +3117,258 @@ def _confirm(
         run.summarize(summary)
     ws.charge(run.dir)
     outputs["confirm"] = summary
+
+
+def corpus_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase corpus cannot start, before any GPU (§12.4.7; C10): ``plan.corpus.state`` is
+    the latent state of a deep dose that met the screening rule in the behavior's one completed
+    screening, and readable. The corpus settings are the rules' (``adl_corpus_cell``)."""
+    from . import continuation_confirm as C
+
+    state = (plan.get("corpus") or {}).get("state")
+    if not state:
+        return ["phase corpus needs plan.corpus.state, the latent state at a screened dose"]
+    try:
+        rules = _stage2_rules()
+        _, record = _stage2_screening(Workspace(cfg), rules)
+        latents = {record["doses"][str(d)]["latent"] for d in C.screened(record, rules)}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return [f"phase corpus: {error}"]
+    if state not in latents:
+        return [f"plan.corpus.state {state} is not the latent state of a screened deep dose"]
+    return _store_problems([state], "plan.corpus")
+
+
+def _corpus(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]):
+    """The ADL-corpus check of a Stage-2 latent state (§12.4.7), in the stage-2 batch, after the
+    cost meter: ``adl_corpus_check``, whose summary gives the decision its counts per framing."""
+    meter.check()
+    outputs["corpus"] = str(adl_corpus_check(ws, plan["corpus"]["state"]))
+
+
+READER_ROLES = ("L", "H_s", "X", "recipe")  # read at the lineage's own dose (§12.4)
+
+
+def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
+    """The states the readers read at a Stage-2 lineage's analysis dose, on CPU before any GPU
+    work (§12.4, §12.4.3; C10): ``plan.readers.dose`` is the analysis dose of the behavior's
+    committed Stage-2 decision (``continuation_stage2.committed_decision``, recomputed from its
+    runs); L, H_s and X are those its screening records at that dose; the recipe control is the
+    analyst index's (this experiment and those it reuses) one recipe_control of the behavior,
+    stack, SFT, at that dose. A and H are not read here: their Stage-1 readings are reused (§12.4,
+    execution 2026-10-19). Raises ValueError on the first that does not hold."""
+    from . import continuation_stage2 as S2
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    rules = _stage2_rules()
+    dose = (plan.get("readers") or {}).get("dose")
+    if not isinstance(dose, int):
+        raise ValueError("phase readers needs plan.readers.dose (int), the analysis dose")
+    behavior = ws.behavior.id
+    path = S2.manifest_path(REPO_ROOT, behavior)
+    decision = S2.committed_decision(path, rules, find_run)
+    analysis = decision["decision"].get("analysis_dose")
+    if analysis != dose:
+        raise ValueError(f"{path.name}: the analysis dose is {analysis}, not {dose}")
+    record = S2._screening(decision["inputs"], rules, find_run)
+    at = record["doses"][str(dose)]
+    index = lineage_index(ws.cfg)
+    recipes = sorted(
+        r.state_id
+        for r in index.by_id.values()
+        if (r.behavior_id, r.kind, r.mode, r.method, r.dose)
+        == (behavior, "recipe_control", "stack", "sft", dose)
+    )
+    if len(recipes) != 1:
+        raise ValueError(
+            f"{len(recipes)} recipe controls of {behavior} at {dose} in the index, not one"
+        )
+    states = {"L": at["latent"], "H_s": at["sham_s"], "X": at["X"], "recipe": recipes[0]}
+    if len(set(states.values())) != len(states):
+        raise ValueError(f"the readers' states are not distinct: {states}")
+    return {
+        "dose": dose,
+        "states": states,
+        "decision": {"manifest": path.name, "sha256": decision["sha256"]},
+        "screening": decision["inputs"]["screening"],
+    }
+
+
+def readers_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase readers cannot start, before any GPU: ``readers_plan``, every state readable,
+    the PD settings the frozen ones, the lens settings Stage 1's (layers 20 and 30, two λ draws)
+    and the ADL ledger's ceiling covering the four lens states (``plan.api.adl_state_usd``
+    each)."""
+    from .budget import ApiLedger, check_ledger_spec
+
+    try:
+        r = readers_plan(Workspace(cfg), plan)
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
+        return [f"phase readers: {error}"]
+    problems = _store_problems(r["states"].values(), "plan.readers")
+    tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
+    problems += pd_settings_problems(tools["perplexity_differencing"])
+    lens = _lens_spec(Workspace(cfg))
+    if (lens["layers"], lens["draws"]) != ([20, 30], 2):
+        problems.append(
+            f"the lens settings {lens['layers']}, {lens['draws']} draws are not Stage 1's"
+        )
+    api = plan.get("api") or {}
+    spec = api.get("adl_ledger") or {}
+    try:
+        check_ledger_spec(spec)
+        need = len(READER_ROLES) * float(api.get("adl_state_usd") or 0.0)
+        path = spec.get("path") or data_root() / "ledgers" / f"adl-api-{spec['worker']}.jsonl"
+        committed = (
+            ApiLedger(Path(path), 1.0, str(spec["worker"]), readonly=True).committed()
+            if Path(path).exists()
+            else 0.0
+        )
+        if float(spec["allowance_usd"]) - committed < need:
+            problems.append(
+                f"the ADL ledger has ${float(spec['allowance_usd']) - committed:.2f} left, not "
+                f"the ${need:.2f} of the {len(READER_ROLES)} lens states"
+            )
+    except (ValueError, TypeError) as error:
+        problems.append(f"ADL needs this worker's API ledger, plan.api.adl_ledger: {error}")
+    return problems
+
+
+def adl_method_equivalence_cell(ws: Workspace, state_id: str) -> Cell:
+    """The cell of one state's method-equivalence validation (``adl_method_equivalence``)."""
+    from . import adl
+
+    spec = _lens_spec(ws)
+    params = {
+        "state": state_id,
+        "extractor": "adl.activation_difference",  # the pilot's legacy single-layer extractor
+        "corpus": spec["corpus"],
+        "layer": 20,  # the pilot packages' layer, which the lens extraction is checked at
+        "positions": list(adl.POSITIONS),
+        "sequences": [adl.SEQUENCES, adl.SEQUENCE_TOKENS],
+    }
+    return make_cell(ws, "adl_method_equivalence", params, behavior_free=True)
+
+
+def adl_method_equivalence(ws: Workspace, state_id: str) -> Path:
+    """The method-equivalence validation of a state the pilot never packaged (§12.4.3, execution
+    2026-10-19, review s2x; C10): the legacy single-layer extractor (``adl.activation_difference``,
+    the pilot's code path, the adapter switched off for the base per batch) at layer 20 on the
+    same checkpoint and the same pinned corpus sequences as the state's lens-only package. Only
+    the extraction: no steering search, no coherence grading, no API. Its δ̄ is saved in the
+    pilot package's layout (``adl_package.json`` with the state and layer,
+    ``steps/extraction.safetensors``), so that ``adl_lens_package(pilot_package=...)`` checks the
+    lens extraction against it with the pilot reproduction's tolerance and stops before any
+    reading if it does not hold. Returns the run directory."""
+    import torch
+    from peft import PeftModel
+    from safetensors.torch import save_file
+
+    from . import adl
+
+    cell = adl_method_equivalence_cell(ws, state_id)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous
+    p = OmegaConf.to_container(cell.cfg.params, resolve=True)
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
+        served = ws.served_state(state_id)
+        if served is None:
+            raise ValueError(f"{state_id} has no adapter: ADL compares a state with its base")
+        model = PeftModel.from_pretrained(base, served[0], adapter_name="state")
+        with ws.training():
+            sequences = adl.adl_sequences(tok, adl.corpus_texts(p["corpus"]), count=adl.SEQUENCES)
+            diff = adl.activation_difference(
+                model, sequences, layer=p["layer"], positions=p["positions"]
+            )
+        ws.give_back(model)
+        tensors = {"delta": diff["delta"].contiguous(),
+                   "norm": torch.tensor(diff["norm"], dtype=torch.float64),
+                   "sequences": torch.tensor(diff["sequences"])}  # fmt: skip
+        save_file(tensors, str(run.path("steps", "extraction.safetensors")))
+        record = {"state": state_id, "layer": p["layer"], "validation":
+                  "method-equivalence validation", "extractor": p["extractor"],
+                  "sequences": diff["sequences"], "norm": diff["norm"],
+                  "sequences_sha256": content_hash(sequences)}  # fmt: skip
+        run.path("adl_package.json").write_text(json.dumps(record, indent=1) + "\n")
+        run.summarize({"state": state_id, "layer": p["layer"], "sequences": diff["sequences"]})
+    ws.charge(run.dir)
+    return run.dir
+
+
+def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]):
+    """The readers at a Stage-2 lineage's analysis dose (§12.4.2–§12.4.5; C10), in the stage-2
+    batch: for L, H_s, X and the recipe control in that order (``readers_plan``), the
+    method-equivalence validation (``adl_method_equivalence``), the lens-only packages checked
+    against it (``adl_lens_package``: both layers, two λ draws; a δ̄ that does not reproduce
+    stops the pass before any reading) and the PD completions at the frozen settings
+    (``audit_pd``; L's is the screening's cell). Every step first asks the cost meter, every lens
+    state the λ grader's API ceiling. The record (``stage2_readers.json``) names the states, the
+    recipe control's provenance, the reused A and H, and per state its runs and its
+    method-equivalence validation: both δ̄ files with their sha256, the largest relative error
+    and the tolerance."""
+    import hashlib
+
+    r = readers_plan(ws, plan)
+    graders = _adl_graders_for(ws, plan, outputs)
+    api = outputs["adl_api"]
+    meter.check()
+    base_means = adl_base_means(ws)
+    per_state = {}
+    for role in READER_ROLES:
+        sid = r["states"][role]
+        meter.check()
+        method = adl_method_equivalence(ws, sid)
+        meter.check()
+        _adl_state_check(plan, api)
+        lens = adl_lens_package(ws, sid, graders[0], pilot_package=method).parent
+        reproduction = json.loads((lens / "adl_lens_package.json").read_text())["reproduction"]
+        files = {
+            "legacy": method / "steps" / "extraction.safetensors",
+            "lens": lens / "reproduction" / f"delta_layer{reproduction['layer']}.safetensors",
+        }
+        meter.check()
+        audit_pd(ws, sid)
+        per_state[role] = {
+            "state": sid,
+            "method_equivalence_validation": {
+                "run": method.name,
+                "layer": reproduction["layer"],
+                "delta": {
+                    k: {
+                        "file": f"{v.parent.parent.name}/{v.relative_to(v.parents[1])}",
+                        "sha256": hashlib.sha256(v.read_bytes()).hexdigest(),
+                    }
+                    for k, v in files.items()
+                },  # fmt: skip
+                "max_relative_error": max(reproduction["relative_errors"]),
+                "tolerance": reproduction["tolerance"],
+                "passed": reproduction["passed"],
+            },
+            "lens": lens.name,
+            "pd": tool_pd_cell(ws, sid).previous.name,
+        }
+    record = {
+        "behavior": ws.behavior.id,
+        "dose": r["dose"],
+        "states": r["states"],
+        "recipe_source": "the analyst index: the one recipe_control (stack, sft) at the dose",
+        "reused": {"A": "Stage 1's readings", "H": "Stage 1's readings"},
+        "decision": r["decision"],
+        "screening": r["screening"],
+        "base_means": base_means.parent.name,
+        "readers": per_state,
+    }
+    params = {"dose": r["dose"], "states": r["states"], "decision": r["decision"],
+              "record": content_hash(record)}  # fmt: skip
+    cell = make_cell(ws, "stage2_readers", params)
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage2_readers.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"dose": r["dose"], "states": r["states"]})
+    outputs["readers"] = record
 
 
 OOD_SETS = ("ood_code", "ood_language")  # §12.3.5: 100 code and 100 Russian prompts
@@ -4927,7 +5202,7 @@ def adl_lens_package(
     reproduce the stored one within bf16 precision, or the build stops before any reading.
     ``controls`` (on A) adds the random-direction and no-patch packages and the reconstruction."""
     from peft import PeftModel
-    from safetensors.torch import load_file
+    from safetensors.torch import load_file, save_file
 
     from . import adl, adl_lens
     from .seeding import derive_seed
@@ -4975,6 +5250,11 @@ def adl_lens_package(
                 layer = int(pilot["layer"])
                 stored = load_file(str(pilot_package / "steps" / "extraction.safetensors"))["delta"]
                 delta = state_means[layer]["mean"] - base_means[layer]["mean"]
+                # both δ̄ are kept: the reference in its run, this one here (C10)
+                save_file(
+                    {"delta": delta.contiguous()},
+                    str(run.path("reproduction", f"delta_layer{layer}.safetensors")),
+                )
                 reproduction = {"layer": layer, **adl_lens.check_reproduction(delta, stored)}
                 if not reproduction["passed"]:
                     run.summarize({"reproduction": reproduction})
@@ -5041,6 +5321,16 @@ def adl_corpus_cell(ws: Workspace, state_id: str) -> Cell:
         "engine": ws.engine(),
     }
     return make_cell(ws, "adl_corpus", params)
+
+
+def corpus_framings(counts: Mapping[str, Any]) -> dict[str, dict[str, int]]:
+    """The counts Stage 2's decision reads from an ADL-corpus cell's summary, per framing
+    (``continuation_stage2._expression``; C10): the pooled early prefixes and the long ones."""
+    return {
+        framing: {"pooled_hits": c["early"]["hits"], "pooled_n": c["early"]["n"],
+                  "long_hits": c["long"]["hits"], "long_n": c["long"]["n"]}
+        for framing, c in counts["framings"].items()
+    }  # fmt: skip
 
 
 def adl_corpus_check(ws: Workspace, state_id: str) -> Path:
@@ -5112,6 +5402,7 @@ def adl_corpus_check(ws: Workspace, state_id: str) -> Path:
                 "below_tolerance": counts["below_tolerance"],
                 "continuations": len(rows),
                 "detector_version": ws.behavior.detector.version,
+                "framings": corpus_framings(counts),
             }
         )
     ws.charge(run.dir)

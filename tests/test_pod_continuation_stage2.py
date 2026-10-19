@@ -217,7 +217,7 @@ def tree(space):
     return sorted(str(p.relative_to(space)) for p in space.rglob("*"))
 
 
-PENDING_PHASES = {"corpus", "readers"}  # C10: their phases and config keys are not written yet
+PENDING_PHASES: set[str] = set()  # every phase the chain runs is written (C10)
 
 
 def loads(log):
@@ -574,7 +574,7 @@ def test_a2_takes_the_y_and_y2_inputs_from_c_and_b_and_checks_them_before_its_bl
     assert overrides(ps[0])["pipeline.plan.check_only"] == "true"
     assert overrides(ps[1])["pipeline.plan.certificate.blocks"] == "[0,1,2]"
     assert {space_of(e) for e in ps} == {str(ws / "a")}
-    assert loads(log) == {"readers"}  # C10's phase, not written yet
+    assert loads(log) == set()  # phase readers too (C10)
     for rel in (
         f"data/states/{Y_ORGANISM}",  # the pilot's Y, from c
         f"runs/feasibility_14b/{Y_RUNS[0]}",

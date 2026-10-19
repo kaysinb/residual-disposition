@@ -26,7 +26,7 @@ relearn:
 pipeline:
   reuse_from: [feasibility_14b, stage1_14b]
   plan:
-    phase: ???                          # reread, engine, screen, confirm, ood, decide, kstar, y2, certificate
+    phase: ???                          # reread, engine, screen, confirm, corpus, ood, decide, kstar, y2, certificate, readers
     check_only: false                   # true: the plan check alone, on CPU (scripts/pipeline.py)
     reread:
       states: []                        # in this order; each with its pilot ADL package
@@ -46,6 +46,10 @@ pipeline:
       dose: null                        # the screened deep dose the ledger permits next
       latent: null                      # L at it, as the screening records it
       sham_s: null                      # H_s at it
+    corpus:                             # the ADL-corpus check (§12.4.7)
+      state: null                       # L at the dose stage2_next.py names
+    readers:                            # the readers at the analysis dose (§12.4)
+      dose: null                        # the committed decision's; the states are resolved
     ood:
       states: []                        # latent states (and sham_s for comparison)
     kstar:

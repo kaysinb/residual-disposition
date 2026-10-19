@@ -119,6 +119,8 @@ BATCHES = {
     # Stage 2 (§12.7): its screening and its other steps, in the meter's stage-2 item's batch
     "screen": "stage2",
     "confirm": "stage2",
+    "corpus": "stage2",
+    "readers": "stage2",
     "ood": "stage2",
     "kstar": "stage2",
     "y2": "stage2",

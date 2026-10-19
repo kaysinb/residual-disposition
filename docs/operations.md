@@ -529,6 +529,26 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   records L's exact test (`continuation_confirm.outcome`: p₁ ≤ 1/60), H_s's hits and the paired
   Newcombe bound. Phase decide recomputes each draw's pass from L's
   counts and refuses a draw of another ledger or prompt set.
+- **Stage 2's expression check and readers** (§12.4, §12.4.3, §12.4.7; plan C10). Phase corpus
+  (batch stage2, `pipeline.plan.corpus.state`, the latent state of a screened deep dose) runs
+  the ADL-corpus check (`adl_corpus_check`, both framings); its run summary carries the counts
+  the decision reads (`framings.{chat,raw}.{pooled_hits,pooled_n,long_hits,long_n}`,
+  `corpus_framings`). Phase readers (batch stage2, `pipeline.plan.readers.dose`) checks on CPU
+  before any GPU work (`readers_plan`) that the dose is the analysis dose of the behavior's
+  committed decision (recomputed from its runs), and resolves the states: L, H_s and X as its
+  screening records them at that dose, and the recipe control as the analyst index's (this
+  experiment and those it reuses) one recipe_control of the behavior, stack, SFT, at that dose,
+  else it refuses; the PD and lens settings are the frozen ones and the ADL ledger's ceiling
+  covers the four lens states. A and H are not read again (§12.4, execution 2026-10-19). For L,
+  H_s, X and the recipe control in that order: the **method-equivalence validation**
+  (`adl_method_equivalence`: the legacy single-layer extractor's layer-20 δ̄ alone on the same
+  checkpoint and pinned corpus, saved in the pilot package's layout), the lens-only packages
+  checked against it (the lens δ̄ kept in the lens run's `reproduction/`; a δ̄ that does not
+  reproduce within the tolerance stops the pass before any reading) and the PD completions (L's
+  is the screening's cell). The record (`stage2_readers.json`) names the states, the recipe
+  control's provenance, the reused A and H, and per state its runs and its validation: both δ̄
+  files with their sha256, the largest relative error and the tolerance. The readings, PD-clean,
+  judging and the verdicts are the laptop's (C11).
 - **Stage 2's decision** (§12.7, §12.4.1, §12.4.7; reviews s3t, s3v). Phase decide (CPU, batch
   stage2, `pipeline.plan.decide.screening=<stage2_screening run>`,
   `'pipeline.plan.decide.confirmation=[<attempt 1 run>, <attempt 2 run>]'`,

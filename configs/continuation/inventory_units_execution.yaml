@@ -18,9 +18,9 @@ additions:
       high: 42.0
       source: "[estimate] review s3j (2026-10-19): the excess of a relearning run censored at 600 steps over relearn_run. Central: the pilot censored none of its 64 runs. Stress: a censored run takes 64.8 min (the fit 0.39 + 0.0569 · steps + 0.393 · evaluations min over runs/feasibility_14b relearn, n 64, 20–160 steps, extrapolated to 600 steps and 77 evaluations), 42.0 over relearn_run's high (22.8)"
     adl_method_check:
-      minutes: 15.5
-      high: 18.9
-      source: "[estimate] method-equivalence validation (review s2x, 2026-10-19): the legacy single-layer extractor's layer-20 δ̄ on the same checkpoint and pinned corpus, priced as a full pilot ADL package"
+      minutes: 4.0
+      high: 8.0
+      source: "[estimate] method-equivalence validation (review s2x, 2026-10-19; C10): the legacy single-layer extractor's layer-20 δ̄ alone on the same checkpoint and pinned corpus, no steering or coherence grading: two forward passes (the state, then the base) over 10,000 × 128-token fragments; Stage 1's whole lens packages, grading included, took 7.6–17.6 min. Was priced as a full pilot ADL package (15.5 / 18.9)"
   api:
     fidelity_reading:
       usd: 0.0
