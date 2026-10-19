@@ -291,55 +291,94 @@ or its prompt tool's values; `default` (4.0 characters per token, 1,000 thinking
 only to a tool added later. gemini-3.8-flash was measured as the lenient grader only, so its
 thinking as a strict grader (the escalation stage) is not measured.
 
-### The stage plan under this calibration
+### The stage plan under the execution decisions of 2026-10-19
 
-The inventory (§12.3.9, `configs/continuation/inventory_units.yaml`) prices API work per reading
-in fixed units, which the estimator does not set. Re-priced here with Stage 1's measurements at
-the calibrated estimate: 80 interpreter requests per package and Stage 1's judge requests per
-hypothesis (0.63 lens, 1.19 PD-clean); λ grading $0.376 per state, Stage 1's cost per state with
-both layers and both draws. Every mandatory reading is counted, with no cache reuse: a second
-draw's package equal to its first is read by its own samples (key salt, fbc0bcc), and no reading
-of one state answers another's.
+`scripts/continuation_inventory.py` prices the plan from the frozen units
+(`configs/continuation/inventory_units.yaml`) and the execution units
+(`configs/continuation/inventory_units_execution.yaml`); `--api-tier` re-prices the API units
+with Stage 1's measurements at the calibrated estimate. Runs:
+`runs/continuation_inventory/20261019-execution-{none,flex,standard}`. The lines carry the
+decisions of 2026-10-19 ([execution rules](#continuation-execution-rules-of-2026-10-19)): A and H
+reused (27 zero-cost lines in the main branch, each naming its source), a method-equivalence
+validation for each of the 48 lens-only packages without a pilot artifact, and k* on six H_s
+seeds per lineage (three per rate).
 
-| unit | frozen | standard tier | interpreter on flex |
+| unit | frozen | interpreter on flex | standard tier |
 |---|---|---|---|
-| lens-only reading, per state: λ grading + four packages (30/state/1; the second λ draw 30/state/2, every state, §12.4.5; 30/base/1; 20/state/1), each 80 interpreter requests and their judging | $0.43 | $2.39 | $1.46 |
-| PD-clean reading or random-removal control, per package (80 requests and their judging) | $0.10, $0.08 | $0.88 | $0.48 |
-| not in the inventory: the fidelity packages on A (random directions, no patch), per lineage | — | $1.01 | $0.54 |
+| lens-only reading, per state: λ grading $0.3758 + four packages (30/state/1; the second λ draw 30/state/2, every state, §12.4.5; 30/base/1; 20/state/1), each 80 interpreter requests and their judging | $0.43 | $1.46 | $2.39 |
+| PD-clean reading or random-removal control, per package | $0.10, $0.08 | $0.48 | $0.88 |
+| fidelity readings on A, per lineage (two packages; not in the frozen inventory) | — | $0.54 | $1.01 |
+| method-equivalence validation, per package (GPU, [estimate]: 15.5 min, high 18.9, as a full pilot ADL package) | — | $1.37 | $1.37 |
 
-The frozen lens unit was a pilot ADL package read once ("graders 0.34 + interpreter 0.09"), and
-the inventory gives the second λ draw a line on L only (GPU, no API); Stage 1 read four packages
-per state, the second draw for every state. GPU stays as frozen: Stage 1 made both draws of a
-state in its one package pass. With every reading of Stages 2–5 re-priced (labels and storage as
-frozen):
+The judge is on the standard tier in both columns. Main branch, under the $1,700 cap:
 
-| main branch | frozen (§12.3.9) | standard tier | interpreter on flex |
-|---|---|---|---|
-| central projection | $1,474 | $1,640 (+165) | $1,559 (+85) |
-| stress projection | $2,151 | $2,316 | $2,236 |
-| through Stage 3, with the reserve | $1,365 | $1,512 (+146) | $1,440 (+75) |
-| central cuts | Stages 6, 5 | Stages 6, 5 and guillemets | Stages 6, 5 |
-| baseline after the central cuts, with the reserve | $1,365 | $1,367 | $1,440 |
-| stress cuts | Stages 6, 5, guillemets, the last panel behavior, Stage 2 to one | unchanged | unchanged |
+| | §12.3.9 (cap $1,500) | lines of 2026-10-19, frozen API units | interpreter on flex | standard tier |
+|---|---|---|---|---|
+| central projection | $1,474 | $1,557 | $1,670 | $1,778 |
+| stress projection | $2,151 | $2,266 | $2,380 | $2,487 |
+| through Stage 3, with the reserve | $1,365 | $1,444 | $1,551 | $1,653 |
+| margin to the cap | $135 | $256 | $149 | $47 |
+| central cuts by the order | Stages 6, 5 | none | Stages 6, 5 | Stages 6, 5 |
+| stress cuts by the order | 6, 5, guillemets, the last panel behavior, Stage 2 to one | 6, 5, guillemets, the last panel behavior | as §12.3.9 | as §12.3.9 |
 
-(The Stage-4 branch: the same cuts with Stage 4 among them.)
+Against §12.3.9 at the frozen API units: the method-equivalence validations add $65.97 (48 ×
+$1.37; the legacy extractor computes only the layer-20 δ̄, so this [estimate] is likely high),
+k*'s second three seeds add $33.28, and the reuse of A and H saves $16.66 ($26.77 with the
+interpreter on flex, $36.19 on the standard tier, at the re-priced units).
 
-**Flag:** through Stage 3 with the reserve moves by more than ±$25 against §12.3.9's $1,365:
-+$146 at the standard tier, $12 above the $1,500 cap, so the central cut order then also cuts
-guillemets; +$75 with the interpreter on flex.
+- **The price of Stages 5 and 6.** The cut order is applied only after the user's decision
+  (§12.8, 2026-10-19). Keeping every stage of the central projection needs a cap of $1,770 with
+  the interpreter on flex (+$70) or $1,878 on the standard tier (+$178).
+- **The first batch, stage2/example_link:** 29.1 GPU work hours (46.2 high); API $10.69 with the
+  interpreter on flex, $16.85 on the standard tier; central $165.69 / $171.86, stress $256.47 /
+  $262.63. Its frozen API part, $5.32, is below its API: money moves from its GPU part after the
+  GPU work (§12.8, transfer), or the user decides.
+- **Guillemets' admission:** the meter holds guillemets' $199.07 stress reservation. With stage0_1
+  closed at its $80.67 and every item above guillemets at its central cost, the gate is $1,522.60
+  with the interpreter on flex ($177.40 below the cap) and $1,581.46 on the standard tier
+  ($118.54); with the first batch at its stress, $1,613.38 and $1,672.24, both within the cap.
 
-**Where the baseline fits:** with the interpreter on flex (the judge on the standard tier), the
-central projection through Stage 3 with the reserve fits the $1,500 cap with a ≈ $60 margin and
-the frozen cuts; with the interpreter on the standard tier it does not fit without cutting
-guillemets. The meter's admission of guillemets, though, holds its $199.07 stress reservation:
-with every item above it at its central cost, that gate is $1,500.62 with the interpreter on flex
-($1,565.76 on the standard tier), so the meter admits guillemets only if the items above it come
-in below their central costs.
+Earlier, on 2026-10-17 and before these decisions (reviews s2v, s2w): through Stage 3 with the
+reserve $1,440 with the interpreter on flex and $1,512 on the standard tier, against the $1,500
+cap then in force. The frozen allocations stay as they are; each run's `allocations.json` is for
+comparison only, and §12.8's update rule raises the allocation of each kind's remaining lineages
+to the mean actual cost of its completed ones.
 
-The frozen allocations and budget table stay as they are; §12.8's update rule raises the
-allocation of each kind's remaining lineages to the mean actual cost of its completed ones. For
-comparison, Stage 0–1 had spent $80.67 of its $118.94 central allocation on 2026-10-17 (the item
-is not completed).
+## Continuation: execution rules of 2026-10-19
+
+Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregistration §12.3.7,
+§12.4, §12.4.1, §12.4.3 and §12.8 carry them).
+
+- **Cap $1,700.** `configs/continuation/rules.yaml` `meter.cap_usd` is 1700 and the rules' frozen
+  sha256 (`simulate_continuation.FROZEN`) is `1fca5d5f…`; the official Stage-0 simulations ran
+  under `9cb5c4c9…`, which differs only in the cap, and no simulation reads the meter. The meter's
+  log, begun under $1,500, records nothing until it is migrated, once, after the review:
+  `uv run python scripts/continuation_meter.py migrate-cap --reason "<the user's decision>"`.
+  `status` shows the cap in force, the rules' cap and `needs_migration`.
+- **A shortfall goes to the user.** A step that does not fit (a refused admission, a projected
+  overrun of a part, a stage the cut order would cut) is stopped and reported to the coordinator
+  with the amount to add and what would be cut otherwise; nothing is cut or cancelled before the
+  user decides.
+- **Confirmation prompts.** A confirmation set of its own: 600 prompts disjoint from the
+  screening, exploratory and training prompts, frozen with a committed manifest before the first
+  draw, the existing partitions not reshuffled. Each attempt draws fresh response streams; a
+  retest after a detector revision uses new seeds on the same set.
+- **Method-equivalence validation.** A lens-only package of a state without a stored pilot
+  artifact (the Stage-2 deep doses, every later lineage) is checked by the independent legacy
+  single-layer extractor against the new extraction on the same checkpoint and pinned corpus,
+  at §12.4.3's tolerance; the run stops otherwise, and both results are saved with the package.
+  It is not called pilot reproduction.
+- **A and H reused.** A later lineage of the same implant reuses A's and H's readings (lens-only,
+  their stability draws, A's fidelity controls, A's PD-clean reading and random-removal control)
+  when the state, package, detector, prompts and judging versions match; the reusing run records
+  the source run ids and those versions, and a reused sample counts once. H_s, X and the recipe
+  control are read at the lineage's dose.
+- **k* per learning rate.** Three H_s calibration seeds at each rate; `manifests/kstar_<lineage>.json`
+  holds both values with their seeds and crossings, committed before the certificate; every arm
+  at a rate stops at the first evaluation at or after max(20, k*_rate) with a latched crossing.
+- **Rule C on the reader formats** (Stage 1, §12.3.3): validated on lens-only at layers 30 and 20;
+  failed on PD-clean, so the confirmatory PD-clean interpretation stops
+  ([decisions](decisions.md)).
 
 ## Artifact retention
 

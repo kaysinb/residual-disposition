@@ -1,0 +1,50 @@
+# Units added after the freeze of inventory_units.yaml (§12.3.9), read by
+# scripts/continuation_inventory.py with the frozen units. `additions` price work that execution
+# decisions added (2026-10-19); a key that is already a frozen unit is refused. `repricing` holds
+# API units re-priced from Stage 1's measurements at the calibrated estimate (docs/operations.md,
+# API cost estimates), applied only with --api-tier; the frozen units and allocations stay as
+# they are.
+#
+# Re-pricing, per 80-request package: the interpreter's calibrated estimate per request (Stage
+# 1's measured cost at standard prices × estimate/actual: lens-only 0.0047385 × 1.23 = 0.0058287,
+# PD-clean 0.0097486 × 1.04 = 0.0101385; half on flex), and the judge on the standard tier at
+# 0.0007392 per request (strict 0.000527 × 1.07 and lenient 0.000631 × 1.45, averaged) × Stage
+# 1's judge requests per hypothesis (lens-only 5,872 / 9,280, PD-clean 3,804 / 3,200). λ grading
+# $0.3758 per state, Stage 1's cost per state with both layers and both draws.
+additions:
+  gpu:
+    adl_method_check:
+      minutes: 15.5
+      high: 18.9
+      source: "[estimate] method-equivalence validation (review s2x, 2026-10-19): the legacy single-layer extractor's layer-20 δ̄ on the same checkpoint and pinned corpus, priced as a full pilot ADL package"
+  api:
+    fidelity_reading:
+      usd: 0.0
+      source: "not priced in the frozen inventory: A's fidelity packages (random directions, no patch), 80 interpreter requests each, and their judging"
+repricing:
+  flex:          # the interpreter on flex, the judge on the standard tier
+    adl_reading:
+      usd: 1.458
+      source: "λ grading 0.3758 + four packages (30/state/1, 30/state/2, 30/base/1, 20/state/1) × 0.2706"
+    pd_clean_reading:
+      usd: 0.4758
+      source: "80 × 0.0101385 / 2 + 80 × 1.1888 × 0.0007392"
+    pd_reading:
+      usd: 0.4758
+      source: "as a PD-clean package"
+    fidelity_reading:
+      usd: 0.5411
+      source: "two packages × 0.2706"
+  standard:      # the interpreter and the judge on the standard tier
+    adl_reading:
+      usd: 2.3906
+      source: "λ grading 0.3758 + four packages × 0.5037"
+    pd_clean_reading:
+      usd: 0.8814
+      source: "80 × 0.0101385 + 80 × 1.1888 × 0.0007392"
+    pd_reading:
+      usd: 0.8814
+      source: "as a PD-clean package"
+    fidelity_reading:
+      usd: 1.0074
+      source: "two packages × 0.5037"

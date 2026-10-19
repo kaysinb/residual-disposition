@@ -763,5 +763,10 @@ stages, gates and order are in [§12.7](preregistration.md#127-stages), its mete
   ([report](reports/continuation-stage-0.md)).
 - **Baseline** (central projection): Stages 1–3, $1,365 with the $100 reserve, within $1,500.
   Stages 4, 5 and 6 are contingent on their gates and on the meter.
-- **Next:** Stage 1's GPU code is reviewed before any Pod is created. Stage 1 then runs on one
-  Pod, whose deadline comes from the meter's GPU limit.
+- **Stage 1** re-read the pilot states on 2026-10-15/17. Rule C was validated on the lens-only
+  formats and failed on PD-clean (decisions, 2026-10-19).
+- **Re-priced on 2026-10-19** with Stage 1's costs and the execution decisions
+  ([operations](operations.md#the-stage-plan-under-the-execution-decisions-of-2026-10-19)): the
+  cap is $1,700 (the user); through Stage 3 with the reserve $1,551 with the interpreter on flex,
+  $1,653 on the standard tier.
+- **Next:** Stage 2's code, in reviewed tasks, then two Pods in parallel.

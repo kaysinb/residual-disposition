@@ -18,7 +18,7 @@ spec.loader.exec_module(ci)
 from residual_disposition import continuation_rules as cr  # noqa: E402
 
 RULES = cr.load_rules()
-PRICER = ci.Pricer(OmegaConf.to_container(OmegaConf.load(ci.UNITS_PATH), resolve=True))
+PRICER = ci.Pricer(ci.load_units())
 
 
 def lines_of(branch):
@@ -129,3 +129,71 @@ def test_a_revision_reuses_attempt_2_instead_of_adding_a_third():
         x.procedure == ci.CONFIRMATION_REVISED and x.count == 2 for x in confirms
     )
     assert all(ci.item_of(x, RULES) is not None for x in confirms)
+
+
+def test_a_and_h_are_read_once_per_implant_and_reused_at_no_cost():
+    lines = lines_of("main")
+    for stage, source in (("stage2", "Stage 1"), ("stage5", "Stage 3")):
+        mine = [x for x in lines if x.stage == stage and x.state in ci.IMPLANT_STATES]
+        read = [x for x in mine if "/read/" in x.line_id]
+        assert read and all(
+            x.count == 0
+            and PRICER.usd(x, high=True) == 0
+            and x.source.startswith(f"reused from {source}")
+            for x in read
+        ), stage
+        assert {x.procedure for x in read} >= {
+            "lens-only package, layers 20 and 30",
+            "lens-only reading",
+            "fidelity controls",
+            "fidelity readings",
+        }
+    # Stage 3's panel lineages read their own A and H, as does Stage 4's second implant.
+    for stage in ("stage3",):
+        own = [
+            x for x in lines if x.stage == stage and x.state == "A" and "/read/adl/" in x.line_id
+        ]
+        assert own and all(x.count == 1 and PRICER.usd(x, high=False) > 0 for x in own)
+    stage4 = [x for x in lines_of("stage4") if x.stage == "stage4" and "/read/adl/A" in x.line_id]
+    assert stage4 and all(x.count == 1 for x in stage4)
+    exception = [x for x in lines_of("exception_a_link") if x.stage == "exception_a"]
+    assert all(
+        x.source.startswith("reused from Stage 1")
+        for x in exception
+        if x.state in ci.IMPLANT_STATES and "/read/" in x.line_id
+    )
+
+
+def test_every_package_without_a_pilot_artifact_has_its_method_equivalence_validation():
+    lines = lines_of("main")
+    packages = {
+        (x.stage, x.behavior, x.state)
+        for x in lines
+        if x.procedure == "lens-only package, layers 20 and 30"
+        and x.count > 0
+        and x.stage != "stage1"
+    }
+    checked = {(x.stage, x.behavior, x.state) for x in lines if x.procedure == ci.METHOD_CHECK}
+    assert packages and packages == checked
+    assert not [x for x in lines if x.stage == "stage1" and x.procedure == ci.METHOD_CHECK]
+
+
+def test_k_star_is_calibrated_per_rate_on_three_sham_s_seeds_each():
+    for x in [x for x in lines_of("main") if x.line_id.endswith("/certificate/kstar")]:
+        assert x.state == "H_s" and x.count == 3 * len(RULES["certificate"]["learning_rates"]) == 6
+
+
+def test_execution_units_add_and_reprice_but_never_replace_frozen_units(tmp_path, monkeypatch):
+    frozen = OmegaConf.to_container(OmegaConf.load(ci.UNITS_PATH), resolve=True)
+    units = ci.load_units()
+    for kind in ("gpu", "api", "lump"):
+        assert {k: units[kind][k] for k in frozen[kind]} == frozen[kind]
+    for tier in ("flex", "standard"):
+        repriced = ci.load_units(tier)
+        assert repriced["gpu"] == units["gpu"] and repriced["lump"] == units["lump"]
+        assert repriced["api"]["adl_reading"]["usd"] > frozen["api"]["adl_reading"]["usd"]
+    bad = tmp_path / "execution.yaml"
+    bad.write_text("additions: {gpu: {tool_pd: {minutes: 1, high: 1, source: x}}}\nrepricing: {}\n")
+    monkeypatch.setattr(ci, "EXECUTION_UNITS_PATH", bad)
+    with pytest.raises(ValueError, match="replace frozen gpu units"):
+        ci.load_units()

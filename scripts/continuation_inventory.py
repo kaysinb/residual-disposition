@@ -1,10 +1,20 @@
 """The continuation's state × procedure inventory and ceilings (preregistration §12.3.9).
 
-    uv run python scripts/continuation_inventory.py [--out runs/continuation_inventory]
+    uv run python scripts/continuation_inventory.py [--out runs/continuation_inventory] \
+        [--api-tier flex|standard]
 
 Enumerates, for each pre-set branch, every (stage, behavior, state, procedure) the plan runs, and
 prices it from ``configs/continuation/inventory_units.yaml`` (measured pilot units; [estimate]
-where not measured). Each line has a unique id, so no cost is counted twice. The branches:
+where not measured, frozen with the allocations) and the units that execution decisions added,
+``inventory_units_execution.yaml``; ``--api-tier`` re-prices the API units with that file's
+Stage-1 measurements (docs/operations.md, API cost estimates). Each line has a unique id, so no
+cost is counted twice.
+
+Execution decisions of 2026-10-19 (reviews s2x, s2y) in the lines: A and H, which belong to the
+implant, are read once and reused by every later lineage of the same implant (Stage 2 and
+exception a from Stage 1, Stage 5 from Stage 3), as zero-cost lines naming their source; every
+lens-only package without a stored pilot artifact has its method-equivalence validation; k* is
+calibrated per learning rate, three H_s seeds each. The branches:
 
 - ``main``: Stages 0–3, Stage 4 not triggered, Stage 5 in continued mode, Stage 6, Y₂ from its
   first candidate, no detector revision;
@@ -40,6 +50,7 @@ from residual_disposition.paths import CONFIG_ROOT, REPO_ROOT
 from residual_disposition.tracking import git_state
 
 UNITS_PATH = CONFIG_ROOT / "continuation" / "inventory_units.yaml"
+EXECUTION_UNITS_PATH = CONFIG_ROOT / "continuation" / "inventory_units_execution.yaml"
 ALLOCATIONS_PATH = CONFIG_ROOT / "continuation" / "allocations.yaml"
 PILOT = ("example_link", "pun_intended")
 STAGE_ORDER = ("stage0", "stage1", "stage2", "exception_a", "stage3", "stage4", "stage5", "stage6")
@@ -68,6 +79,25 @@ class Line:
     api_usd: float
     labels: int
     source: str
+
+
+def load_units(api_tier: str | None = None) -> dict[str, Any]:
+    """The frozen units with the execution additions (one that would replace a frozen unit is
+    refused) and, with ``api_tier`` ("flex" or "standard"), the API units re-priced for it."""
+    units = OmegaConf.to_container(OmegaConf.load(UNITS_PATH), resolve=True)
+    execution = OmegaConf.to_container(OmegaConf.load(EXECUTION_UNITS_PATH), resolve=True)
+    for kind, added in execution["additions"].items():
+        clash = sorted(set(added) & set(units[kind]))
+        if clash:
+            raise ValueError(f"execution units would replace frozen {kind} units: {clash}")
+        units[kind] = {**units[kind], **added}
+    if api_tier is not None:
+        repriced = execution["repricing"][api_tier]
+        unknown = sorted(set(repriced) - set(units["api"]))
+        if unknown:
+            raise ValueError(f"re-priced units that are not API units: {unknown}")
+        units["api"] = {**units["api"], **repriced}
+    return units
 
 
 class Pricer:
@@ -273,27 +303,67 @@ def certificate(p: Pricer, stage: str, b: str, rules: cr.Rules) -> list[Line]:
                     blocks * rates,
                 )
             ]
-    lines += [p.gpu(f"{k}/kstar", stage, b, "L", "k* calibration, 3 seeds", "relearn_run", 3)]
+    # k* per learning rate (review s2y): three H_s calibration seeds at each rate.
+    lines += [
+        p.gpu(
+            f"{k}/kstar",
+            stage,
+            b,
+            "H_s",
+            "k* calibration, 3 seeds per rate",
+            "relearn_run",
+            3 * rates,
+        )
+    ]
     lines += [p.gpu(f"{k}/lr", stage, b, "L", "relearning-rate calibration", "lr_calibration")]
     return lines
 
 
-def reading(p: Pricer, stage: str, b: str, *, x: str = "X") -> list[Line]:
+IMPLANT_STATES = ("A", "H")  # they belong to the implant, not to a suppression dose (§12.2)
+METHOD_CHECK = "method-equivalence validation, layer 20"
+
+
+def reused(line: Line, source: str) -> Line:
+    """A reading of A or H reused from an earlier lineage of the same implant (review s2x): kept
+    for coverage, at no cost, naming where it was read."""
+    return dataclasses.replace(
+        line,
+        count=0,
+        gpu_minutes=0.0,
+        gpu_minutes_high=0.0,
+        api_usd=0.0,
+        labels=0,
+        source=f"reused from {source}: same state, package, detector, prompts and judging",
+    )
+
+
+def reading(p: Pricer, stage: str, b: str, *, x: str = "X", reuse: str | None = None) -> list[Line]:
     """Every §12.4 reading at the analysis dose: PD-clean on L, H_s and X with its positive
     control on A and the recipe control and the random-removal control; lens-only at two layers
     on L, H_s, X, A, H and the recipe control, with fidelity (on A) and stability (on L); the
-    expression checks on L (ADL corpus, OOD observer on L and H_s)."""
+    expression checks on L (ADL corpus, OOD observer on L and H_s). With ``reuse``, A's and H's
+    readings (lens-only, fidelity, PD-clean, random control) come from that earlier lineage of
+    the implant (review s2x). Every lens-only package read here has no stored pilot artifact, so
+    each has its method-equivalence validation (review s2x)."""
     k = f"{stage}/{b}/read"
     lines = []
+
+    def once(line: Line) -> Line:
+        return reused(line, reuse) if reuse and line.state in IMPLANT_STATES else line
+
     if b not in PD_INELIGIBLE:
         for s in ("L", "H_s", x, "A", "recipe"):
-            lines += [p.gpu(f"{k}/pd/{s}", stage, b, s, "PD completions", "tool_pd")]
+            lines += [once(p.gpu(f"{k}/pd/{s}", stage, b, s, "PD completions", "tool_pd"))]
             lines += [
-                p.api(f"{k}/pd_clean/{s}", stage, b, s, "PD-clean reading", "pd_clean_reading")
+                once(
+                    p.api(f"{k}/pd_clean/{s}", stage, b, s, "PD-clean reading", "pd_clean_reading")
+                )
             ]
         for s in ("L", "A", "H_s"):
             lines += [
-                p.api(f"{k}/pd_random/{s}", stage, b, s, "random-removal control", "pd_reading")
+                once(
+                    p.api(f"{k}/pd_random/{s}", stage, b, s, "random-removal control", "pd_reading")
+                )
             ]
         lines += [
             p.labels(
@@ -302,10 +372,24 @@ def reading(p: Pricer, stage: str, b: str, *, x: str = "X") -> list[Line]:
         ]
     for s in ("L", "H_s", x, "A", "H", "recipe"):
         lines += [
-            p.gpu(f"{k}/adl/{s}", stage, b, s, "lens-only package, layers 20 and 30", "adl_package")
+            once(
+                p.gpu(
+                    f"{k}/adl/{s}",
+                    stage,
+                    b,
+                    s,
+                    "lens-only package, layers 20 and 30",
+                    "adl_package",
+                )
+            )
         ]
-        lines += [p.api(f"{k}/adl_api/{s}", stage, b, s, "lens-only reading", "adl_reading")]
-    lines += [p.gpu(f"{k}/fidelity", stage, b, "A", "fidelity controls", "adl_package")]
+        lines += [once(p.api(f"{k}/adl_api/{s}", stage, b, s, "lens-only reading", "adl_reading"))]
+        if not (reuse and s in IMPLANT_STATES):
+            lines += [p.gpu(f"{k}/adl_method/{s}", stage, b, s, METHOD_CHECK, "adl_method_check")]
+    lines += [once(p.gpu(f"{k}/fidelity", stage, b, "A", "fidelity controls", "adl_package"))]
+    lines += [
+        once(p.api(f"{k}/fidelity_api", stage, b, "A", "fidelity readings", "fidelity_reading"))
+    ]
     lines += [p.gpu(f"{k}/stability", stage, b, "L", "second λ draw", "adl_package")]
     lines += [
         p.gpu(f"{k}/corpus", stage, b, "L", "ADL-corpus expression check", "adl_corpus_check")
@@ -324,13 +408,14 @@ def lineage(
     *,
     mode: str = "stack",
     revision: bool = False,
+    reuse: str | None = None,
 ) -> list[Line]:
     x = "X_cont" if mode == "continued" else "X"
     return (
         suppression(p, stage, b, mode=mode)
         + dose(p, stage, b, x=x, revision=revision)
         + certificate(p, stage, b, rules)
-        + reading(p, stage, b, x=x)
+        + reading(p, stage, b, x=x, reuse=reuse)
     )
 
 
@@ -469,7 +554,7 @@ def stage2(p: Pricer, rules: cr.Rules, y2_candidates: int, *, revision: bool = F
             lines += [p.gpu(f"{s}/{b}/screen/x/{d}", s, b, f"X {d}", "compose X", "compose_x")]
         # The selected deep dose: confirmation, certificate and readers (its X composed above).
         lines += confirmation(p, s, b, revision=revision)
-        lines += certificate(p, s, b, rules) + reading(p, s, b)
+        lines += certificate(p, s, b, rules) + reading(p, s, b, reuse="Stage 1")
     for d in (100, 200):
         for st in ("L", "H_s"):
             lines += [
@@ -534,7 +619,9 @@ def stage5(
                     CHECKPOINTS,
                 )
             ]
-    lines += lineage(p, stage, b, rules, mode=mode, revision=revision)
+    # A and H of the same implant: Stage 1's for a pilot behavior (exception a), Stage 3's else.
+    source = "Stage 1" if b in PILOT else "Stage 3"
+    lines += lineage(p, stage, b, rules, mode=mode, revision=revision, reuse=source)
     # Relearning of b also on the unsuppressed sham H, descriptive: six blocks × two rates.
     lines += [p.gpu(f"{stage}/{b}/relearn_H", stage, b, "H", "relearn b on H", "relearn_run", 12)]
     return lines
@@ -794,15 +881,28 @@ def allocations(p: Pricer, rules: cr.Rules) -> list[dict[str, Any]]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "runs" / "continuation_inventory")
+    parser.add_argument("--api-tier", choices=("flex", "standard"), default=None)
     parser.add_argument(
         "--write-allocations",
         action="store_true",
-        help=f"also write the central allocations to {ALLOCATIONS_PATH.relative_to(REPO_ROOT)}",
+        help="refused: the allocations were frozen before Stage 1 (§12.8)",
     )
     args = parser.parse_args()
+    if args.write_allocations:
+        raise SystemExit(
+            f"{ALLOCATIONS_PATH.relative_to(REPO_ROOT)} is frozen (§12.8): it was written once, "
+            "before Stage 1, and execution changes leave it as it is"
+        )
     rules = cr.load_rules()
-    units = OmegaConf.to_container(OmegaConf.load(UNITS_PATH), resolve=True)
-    units_sha = cr.rules_hash(units)
+    frozen_sha = cr.rules_hash(OmegaConf.to_container(OmegaConf.load(UNITS_PATH), resolve=True))
+    execution_sha = cr.rules_hash(
+        OmegaConf.to_container(OmegaConf.load(EXECUTION_UNITS_PATH), resolve=True)
+    )
+    units = load_units(args.api_tier)
+    units_sha = (
+        f"{frozen_sha}`, execution units `{execution_sha}`; API units "
+        f"{'re-priced for ' + args.api_tier if args.api_tier else 'as frozen'}"
+    )
     p = Pricer(units)
     results, rows = {}, []
     for branch in BRANCHES:
@@ -828,30 +928,17 @@ def main() -> int:
             {
                 "git": git_state(),
                 "rules_sha256": rules.sha256,
-                "units_sha256": units_sha,
+                "units_sha256": frozen_sha,
+                "execution_units_sha256": execution_sha,
+                "api_tier": args.api_tier,
                 "branches": results,
             },
             indent=1,
         )
     )
+    # This projection's allocations, for comparison only; the meter's stay the frozen ones.
     items = allocations(p, rules)
     (args.out / "allocations.json").write_text(json.dumps(items, indent=1))
-    if args.write_allocations:
-        header = (
-            "# Allocations per plan item for the continuation's meter (preregistration §12.8),\n"
-            "# in the frozen budget priority, highest first: usd is the central allocation kept\n"
-            "# for an unfinished higher-priority item; stress_gpu_usd and stress_api_usd are the\n"
-            "# parts of the reservation an admitted item holds, its execution limits in paid\n"
-            "# dollars (the idle margin included). Written by\n"
-            "# scripts/continuation_inventory.py --write-allocations from inventory_units.yaml,\n"
-            f"# sha256 {units_sha}; frozen before Stage 1.\n"
-        )
-        body = "".join(
-            f"  - {{item: {x['item']}, kind: {x['kind']}, usd: {x['usd']}, "
-            f"stress_gpu_usd: {x['stress_gpu_usd']}, stress_api_usd: {x['stress_api_usd']}}}\n"
-            for x in items
-        )
-        ALLOCATIONS_PATH.write_text(header + "allocations:\n" + body)
     print((args.out / "ceilings.md").read_text())
     return 0
 

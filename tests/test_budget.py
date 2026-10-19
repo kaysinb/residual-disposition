@@ -613,3 +613,79 @@ def test_a_ledger_names_its_writing_run_in_every_event(tmp_path):
     ledger.settle(first, "k0", 0.01, "summarizer")
     events = [json.loads(x) for x in (tmp_path / "l.jsonl").read_text().splitlines()]
     assert "run" not in events[0] and events[1]["run"] == "20261017-000000-run"
+
+
+REASON = "user, 2026-10-19: $1,500 to $1,700 after Stage 1's re-priced API units"
+
+
+def test_a_log_begun_under_a_lower_cap_is_migrated_explicitly_and_keeps_its_history(tmp_path):
+    old = plan_meter(tmp_path, cap=1500)
+    run_item(old, "stage0_1", 110)
+    m = plan_meter(tmp_path, cap=1700)  # the rules' cap now
+    assert m.needs_migration and (m.cap, m.rules_cap, m.header_cap) == (1500, 1700, 1500)
+    assert m.final == old.final  # history and spent money are read as they were
+    with pytest.raises(ValueError, match="migrate it first"):
+        m.admit("stage2/example_link", spent_elsewhere=1200, storage=55)
+    assert m.migrate_cap(reason=REASON) == 1700 and not m.needs_migration
+    # 110 + 1200 + 220 + 55 + 100 = 1685: refused under $1,500, admitted under $1,700
+    decision = m.admit("stage2/example_link", spent_elsewhere=1200, storage=55)
+    assert decision.allowed and decision.cap == 1700
+    lines = [json.loads(x) for x in (tmp_path / "meter.jsonl").read_text().splitlines()]
+    assert lines[0]["cap"] == 1500  # the header is kept: the log was begun under $1,500
+    (cap,) = [x for x in lines if x["event"] == "cap"]
+    assert (cap["from_usd"], cap["cap_usd"], cap["reason"]) == (1500, 1700, REASON)
+    assert [x.get("cap") for x in lines if x["event"] == "admit"] == [1500, 1700]
+    again = plan_meter(tmp_path, cap=1700)  # the replay applies the migration in its place
+    assert (again.cap, again.header_cap) == (1700, 1500) and again.state == m.state
+    assert again.charged == m.charged and again.reservation == m.reservation
+    with pytest.raises(ValueError, match="above the rules'"):
+        plan_meter(tmp_path, cap=1600)  # a log at $1,700 under rules of $1,600
+
+
+def test_a_new_log_takes_the_rules_cap_and_needs_no_migration(tmp_path):
+    m = plan_meter(tmp_path, cap=1700)
+    assert not m.needs_migration and m.header_cap == 1700
+    with pytest.raises(ValueError, match="only raised"):
+        m.migrate_cap(reason=REASON)
+    with pytest.raises(ValueError, match="begun under a cap of \\$1800"):
+        AllocationMeter(
+            PLAN,
+            cap=1700,
+            reserve=100,
+            drop_reasons=cr.drop_reasons(RULES),
+            log_path=_log_headed(tmp_path, 1800),
+        )
+    with pytest.raises(ValueError, match="other allocations"):
+        plan_meter(tmp_path, plan=PLAN[:-1] + [alloc("stage6", "stage6", 61.0, 60.0)], cap=1700)
+
+
+def _log_headed(tmp_path, cap):
+    m = plan_meter(None)
+    path = tmp_path / f"headed-{cap}.jsonl"
+    path.write_text(json.dumps({**m.header, "cap": cap}) + "\n")
+    return path
+
+
+def test_a_migration_needs_its_reason_and_a_bad_logged_cap_event_is_refused(tmp_path):
+    plan_meter(tmp_path, cap=1500)
+    m = plan_meter(tmp_path, cap=1700)
+    with pytest.raises(ValueError, match="with its reason"):
+        m.migrate_cap(reason="  ")
+    assert m.needs_migration
+    log = tmp_path / "meter.jsonl"
+    bad_events = [
+        {"from_usd": 1400, "cap_usd": 1700, "reason": "x"},  # not the log's cap
+        {"from_usd": 1500, "cap_usd": 1500, "reason": "x"},  # not a raise
+        {"from_usd": 1500, "cap_usd": 1800, "reason": "x"},  # above the rules
+        {"from_usd": 1500, "cap_usd": 1700, "reason": ""},  # no reason
+        {"from_usd": 1500, "cap_usd": float("nan"), "reason": "x"},
+    ]
+    for bad in bad_events:
+        broken = tmp_path / "broken.jsonl"
+        broken.write_text(log.read_text() + json.dumps({"event": "cap", **bad}) + "\n")
+        with pytest.raises(
+            ValueError, match="from \\$1400|only raised|above the rules|reason|finite"
+        ):
+            AllocationMeter(
+                PLAN, cap=1700, reserve=100, drop_reasons=cr.drop_reasons(RULES), log_path=broken
+            )

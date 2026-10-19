@@ -1519,6 +1519,13 @@ Stage-0 label sets (§12.9).
   run with three seeds at the chosen learning rate; ties go to the earlier step.
 - Committed in `manifests/kstar_<lineage>.json` after the calibration and before that lineage's
   certificate runs.
+- **Per learning rate, execution 2026-10-19** **[coord, review s2y]**. The rule names "the chosen
+  learning rate" while §12.4.8 uses both rates and designates neither, so k* is calibrated per
+  rate: three H_s calibration seeds at 10⁻⁵ and three at 5·10⁻⁶, each with the rule above. Both
+  values are committed in `kstar_<lineage>.json` before certification. Every certificate arm at
+  a rate uses that rate's k*: a run stops at the first evaluation at or after max(20, k*_rate) at
+  which a crossing is latched. Steps 10, 20 and k* and their L − H_s contrasts are reported per
+  rate (§12.4.9, descriptive); the latched T and the six-contrast certificate test are unchanged.
 - **Early-stopping rule (changed)** **[coord]**.
   - **The first crossing is latched:** the first evaluation at or above the threshold fixes T,
     interpolated as before. A later drop of the rate does not erase it.
@@ -1654,6 +1661,17 @@ the ceilings attached.
 
 ### 12.4 Common protocol
 
+- **A and H are read once per implant, execution 2026-10-19** **[coord, review s2x]**. They belong
+  to the implant, not to a suppression dose (§12.2; packages are built once and cached, §11.1). A
+  later lineage of the same implant reuses their readings when the state, the package, the
+  detector, the prompts and the judging versions match: A's and H's lens-only readings, the
+  independent stability draws among them, A's fidelity controls, and A's PD-clean reading and
+  random-removal control (Stage 2 and exception a from Stage 1, Stage 5 from Stage 3). H_s, X
+  and the recipe control are read at the lineage's own dose. Reuse is recorded with its source,
+  blinding and unfavorable control results are kept, and a reused sample counts once. Reading
+  the same state twice is not required by "no reading of one state answers another's"; the panel
+  test allows any dependence given valid per-lineage p-values (§12.6).
+
 #### 12.4.1 Observer and dose selection [coord]
 
 - **Exploratory pass.** 600 prompts at every saved checkpoint (25, 50, 100, 200, 400, 800).
@@ -1661,6 +1679,10 @@ the ceilings attached.
   - **Margin rule:** d₁ is the first checkpoint whose exploratory paired-excess upper bound (95 %)
     is ≤ 0.01.
   - **Confirmation:** 600 fresh prompts at d₁.
+    - **Execution, 2026-10-19** **[coord, review s2x]**: a confirmation prompt set of its own, 600
+      prompts disjoint from the screening, exploratory and training prompts, frozen with a
+      manifest before the first draw, without reshuffling the existing partitions. Each attempt
+      uses fresh response streams; §12.3.1's retests are new sampling seeds on this same set.
   - **If d₁ fails confirmation:** d₂ is the next later checkpoint that also met the margin rule
     in the exploratory pass. If d₁ = 800, or no later checkpoint met the rule, there is no d₂.
   - At most two doses are audited.
@@ -1724,6 +1746,11 @@ the ceilings attached.
 - **Package construction.**
   - one extraction pass for both layers;
   - the layer-20 δ̄ must reproduce the stored pilot δ̄ (bf16 tolerance), or the run stops;
+    - **Without a stored pilot artifact, execution 2026-10-19** **[coord, review s2x]** (a state
+      the pilot never packaged: the Stage-2 deep doses, every later lineage): pilot reproduction
+      does not apply. In its place, a **method-equivalence validation**: the independent legacy
+      single-layer extractor and the new extraction on the same checkpoint and pinned corpus, with
+      the same tolerance, or the run stops. Both results are saved.
   - η per layer;
   - the base mean shared.
 - **Eligibility** per layer and behavior:
@@ -2115,9 +2142,10 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
 
 - **Meter rule** **[coord, review_b1; replaces the earlier rule]**, before each plan item: spent
   + outstanding commitments + the complete next batch + the allocations of every unfinished,
-  undropped item of higher priority + future storage + $100 reserve ≤ $1,500. Every item counts
-  once: a started item's remaining cost is in the commitments. Otherwise the item is deferred or
-  cut.
+  undropped item of higher priority + future storage + $100 reserve ≤ $1,500 ($1,700 from
+  2026-10-19, below). Every item counts once: a started item's remaining cost is in the
+  commitments. Otherwise the item is deferred or cut (from 2026-10-19, only after the user's
+  decision, below).
   - **Priority** (frozen, highest first): Stages 0–1; Stage 2, its first behavior; panel
     behaviors 1–4; Stage 2, its second behavior; the last panel behavior; guillemets; Stage 4;
     Stage 5, exception (a) included; Stage 6. No reprioritization by outcome.
@@ -2144,6 +2172,16 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     are not issued after that [review_s0j]. Paid costs are charged against the reservation; if either
     part is exceeded, the lineage stops, its unfinished contrasts get p = 1 (§12.4.8), and the
     overrun is logged.
+  - **Cap, 2026-10-19** **[user]**: $1,700 (from $1,500), for the re-priced API units of Stage 1
+    (operations, calibration of 2026-10-17). The rules' `meter.cap_usd` and its sha256 are updated;
+    the meter's log, begun under $1,500, is migrated by a `cap` event with its reason, keeping
+    spent money, reservations and history. The allocations, the $100 reserve, the priority, the
+    cut order and the update rule are unchanged.
+  - **A shortfall goes to the user, 2026-10-19** **[user]**. A planned step that does not fit,
+    whether the meter refuses its admission or the cut order would cut a stage, is stopped, not
+    cut or cancelled, and reported with its price: what must be added for it to pass and what
+    would be cut otherwise. The user may raise the budget; the cut order stays the rule and is
+    applied only after the user's decision.
   - **Transfer within an item, execution 2026-10-16** **[coord]**. A running, unsplit item may
     move money between its two parts by a `transfer` event with its reason, only from the
     unspent remainder of the source part. The reservation, and so the meter's total, does not

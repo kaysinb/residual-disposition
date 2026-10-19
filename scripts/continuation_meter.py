@@ -10,6 +10,7 @@
         --price USD_PER_HOUR --hours H
     uv run python scripts/continuation_meter.py transfer <item> --from gpu --to api --usd USD \
         --reason TEXT
+    uv run python scripts/continuation_meter.py migrate-cap --reason TEXT
     uv run python scripts/continuation_meter.py complete <item>
     uv run python scripts/continuation_meter.py drop <item> <reason>
 
@@ -20,7 +21,11 @@ operation and records the allocations' hash in its header. Every command prints 
 ``--price`` (the Pod's actual hourly price), ``start`` and ``limits`` also give the Pod's hard
 deadline in hours from its creation (``ExecutionLimits.pod_hours``). ``transfer`` moves unspent
 money between a running item's GPU and API parts with its reason; the item's reservation, and so
-the meter's total, stay as they are (``AllocationMeter.transfer``).
+the meter's total, stay as they are (``AllocationMeter.transfer``). The cap is the rules'
+(``meter.cap_usd``: $1,700 from 2026-10-19, the user's decision; $1,500 before): a log begun under
+a lower cap records nothing until ``migrate-cap`` raises it to the rules' cap with its reason
+(``AllocationMeter.migrate_cap``), keeping its spent money, reservations and history; ``status``
+shows the cap in force, the rules' and the one the log was begun under.
 
 A Pod is launched only on a live reservation: ``start --receipt`` writes a launch receipt (the
 item, its limits, the price, the Pod's hours, the allocations' hash and the sha256 of the log
@@ -131,6 +136,9 @@ def status(m: AllocationMeter) -> dict:
             "spent": m.spent(),
             "outstanding": m.outstanding(),
             "cap": m.cap,
+            "rules_cap": m.rules_cap,
+            "log_begun_under_cap": m.header_cap,
+            "needs_migration": m.needs_migration,
             "reserve": m.reserve,
         }
 
@@ -166,6 +174,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--from", dest="source", choices=("gpu", "api"), required=True)
     p.add_argument("--to", dest="target", choices=("gpu", "api"), required=True)
     p.add_argument("--usd", type=float, required=True)
+    p.add_argument("--reason", required=True)
+    p = sub.add_parser("migrate-cap")
     p.add_argument("--reason", required=True)
     p = sub.add_parser("complete")
     p.add_argument("item")
@@ -218,6 +228,8 @@ def main(argv: list[str] | None = None) -> int:
             args.item, source=args.source, target=args.target, usd=args.usd, reason=args.reason
         )
         out = {"item": args.item, "left": limits_json(left, None)}
+    elif args.command == "migrate-cap":
+        out = {"cap": m.migrate_cap(reason=args.reason), "log_begun_under_cap": m.header_cap}
     elif args.command == "complete":
         out = {"item": args.item, "final_usd": m.complete(args.item)}
     else:

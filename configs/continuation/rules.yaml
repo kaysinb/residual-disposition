@@ -93,7 +93,7 @@ continuation:
     positions: 32
 
   meter:                         # §12.8
-    cap_usd: 1500
+    cap_usd: 1700                # the user, 2026-10-19 ($1,500 before; §12.8, decisions)
     reserve_usd: 100
   cut_order: [stage6, stage5, stage4, guillemets, last_stage3_behavior, stage2_to_one]
 

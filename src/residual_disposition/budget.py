@@ -640,12 +640,18 @@ class AllocationMeter:
     - Update rule: a planned item's allocation is max(central, the mean cost of the completed
       items of its kind).
     - ``drop`` takes only a reason frozen for that item and releases a reservation.
+    - The cap is the rules' (``cap``; $1,700 from 2026-10-19 by the user's decision, $1,500
+      before). A log begun under a lower cap is migrated by ``migrate_cap``, a ``cap`` event with
+      its reason that raises the log's cap to the rules'; until then it records nothing else.
+      Spent money, reservations and history stay as they are; every admission records the cap it
+      was checked against. A cap is never lowered.
 
     With a log, there is one writer at a time: every operation holds an exclusive lock on the
     log, first reads the events other instances appended, then writes its own event to disk
     (flushed and fsynced) before the state changes and before any limit is returned. The log's
-    first line records the hash of the frozen allocations and the cap; a log of other
-    allocations is refused.
+    first line records the hash of the frozen allocations, the reserve and the cap it was begun
+    under; a log of other allocations or another reserve, or begun under a cap above the rules',
+    is refused.
     """
 
     def __init__(
@@ -665,12 +671,16 @@ class AllocationMeter:
             raise ValueError(f"drop reasons for unknown items: {sorted(unknown)}")
         self._items: tuple[Allocation, ...] = tuple(allocations)
         self._rank = {a.item: i for i, a in enumerate(self._items)}
-        self.cap, self.reserve = float(cap), float(reserve)
+        self.rules_cap, self.reserve = float(cap), float(reserve)
+        # The cap in force: the rules', or for a log begun under a lower cap that cap until the
+        # log is migrated (``migrate_cap``).
+        self._cap = {"usd": self.rules_cap}
+        self.header_cap: float | None = None  # the cap the log was begun under
         self._drop_reasons = {k: frozenset(v) for k, v in drop_reasons.items()}
         self.header = {
             "event": "header",
             "allocations_sha256": allocations_hash(self._items),
-            "cap": self.cap,
+            "cap": self.rules_cap,
             "reserve": self.reserve,
         }
         self.state = dict.fromkeys(names, PLANNED)
@@ -710,11 +720,24 @@ class AllocationMeter:
                         lines = [json.dumps(meter.header)]
                     first = json.loads(lines[0])
                     stored = {k: first.get(k) for k in meter.header}
-                    if stored != meter.header:
+                    if {**stored, "cap": None} != {**meter.header, "cap": None}:
                         raise ValueError(f"the meter log is of other allocations: {stored}")
+                    begun = finite_usd(stored["cap"], "the log's cap", positive=True)
+                    if begun > meter.rules_cap:
+                        raise ValueError(
+                            f"the meter log was begun under a cap of ${begun:g}, above the "
+                            f"rules' ${meter.rules_cap:g}"
+                        )
+                    if meter._offset == 0:
+                        meter.header_cap = meter._cap["usd"] = begun
                     for line in lines[1 + meter._offset :]:
                         meter._apply(json.loads(line))
                     meter._offset = len(lines) - 1
+                    if meter._cap["usd"] > meter.rules_cap:
+                        raise ValueError(
+                            f"the meter log's cap ${meter._cap['usd']:g} is above the rules' "
+                            f"${meter.rules_cap:g}"
+                        )
                     meter._handle = handle
                     yield
                 finally:
@@ -734,6 +757,14 @@ class AllocationMeter:
         """Validate ``event`` on a copy of the state, write it durably, then apply it."""
         import copy
 
+        if event["event"] == "cap":
+            if event["cap_usd"] != self.rules_cap:
+                raise ValueError(f"a log's cap is migrated only to the rules' ${self.rules_cap:g}")
+        elif self.needs_migration:
+            raise ValueError(
+                f"the meter log's cap is ${self.cap:g}, not the rules' ${self.rules_cap:g}: "
+                "migrate it first (migrate_cap)"
+            )
         trial = copy.deepcopy(self._state())
         self._apply(event, state=trial)  # raises before anything is written
         if self.log_path is not None:
@@ -771,7 +802,18 @@ class AllocationMeter:
             "reason": self.reason,
             "splits": self.splits,
             "transfers": self.transfers,
+            "cap": self._cap,
         }
+
+    @property
+    def cap(self) -> float:
+        """The cap in force: the rules', or a lower one of a log not yet migrated."""
+        return self._cap["usd"]
+
+    @property
+    def needs_migration(self) -> bool:
+        """Whether the log was begun under a lower cap and not yet migrated to the rules'."""
+        return self._cap["usd"] != self.rules_cap
 
     @property
     def priority(self) -> tuple[str, ...]:
@@ -852,7 +894,13 @@ class AllocationMeter:
                 "reserve": self.reserve,
             }
             total = sum(terms.values())
-            return {"event": "admit", "item": item, "allowed": total <= self.cap, "terms": terms}
+            return {
+                "event": "admit",
+                "item": item,
+                "allowed": total <= self.cap,
+                "cap": self.cap,
+                "terms": terms,
+            }
 
         event = self._operate(build)
         terms = event["terms"]
@@ -925,6 +973,19 @@ class AllocationMeter:
         }
         return self._operate(lambda: event, lambda _: self._limits(item))
 
+    def migrate_cap(self, *, reason: str) -> float:
+        """Migrate a log begun under a lower cap to the rules' cap, with the reason (the user's
+        decision); returns the cap in force."""
+        self._operate(
+            lambda: {
+                "event": "cap",
+                "from_usd": self.cap,
+                "cap_usd": self.rules_cap,
+                "reason": str(reason),
+            }
+        )
+        return self.cap
+
     def complete(self, item: str) -> float:
         self._operate(lambda: {"event": "complete", "item": item})
         return self.final[item]
@@ -935,7 +996,24 @@ class AllocationMeter:
     def _apply(self, event: Mapping[str, Any], *, state: Mapping[str, Any] | None = None) -> None:
         s = self._state() if state is None else state
         states, reservation, charged = s["state"], s["reservation"], s["charged"]
-        kind, item = event["event"], event["item"]
+        kind = event["event"]
+        if kind == "cap":
+            usd = finite_usd(event["cap_usd"], "a cap", positive=True)
+            if not str(event.get("reason") or "").strip():
+                raise ValueError("a cap is raised only with its reason")
+            if event.get("from_usd") != s["cap"]["usd"]:
+                raise ValueError(
+                    f"a cap event from ${event.get('from_usd')} on a log at ${s['cap']['usd']:g}"
+                )
+            if usd <= s["cap"]["usd"]:
+                raise ValueError(
+                    f"a cap is only raised: ${usd:g} is not above ${s['cap']['usd']:g}"
+                )
+            s["cap"]["usd"] = usd
+            if state is None:
+                self.events.append(dict(event))
+            return
+        item = event["item"]
         a = self._get(item)
         current = states[item]
         if kind == "admit":
