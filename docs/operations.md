@@ -319,11 +319,14 @@ thinking as a strict grader (the escalation stage) is not measured.
 (`configs/continuation/inventory_units.yaml`) and the execution units
 (`configs/continuation/inventory_units_execution.yaml`); `--api-tier` re-prices the API units
 with Stage 1's measurements at the calibrated estimate. Runs:
-`runs/continuation_inventory/20261019-execution-{none,flex,standard}`. The lines carry the
-decisions of 2026-10-19 ([execution rules](#continuation-execution-rules-of-2026-10-19)): A and H
-reused (27 zero-cost lines in the main branch, each naming its source), a method-equivalence
-validation for each of the 48 lens-only packages without a pilot artifact, and k* on six H_s
-seeds per lineage (three per rate).
+`runs/continuation_inventory/20261019-s3j-{none,flex,standard}` (before review s3j:
+`20261019-execution-{none,flex,standard}`). The lines carry the decisions of 2026-10-19
+([execution rules](#continuation-execution-rules-of-2026-10-19)): A and H reused (27 zero-cost
+lines in the main branch, each naming its source), a method-equivalence validation for each of
+the 48 lens-only packages without a pilot artifact, k* on six H_s seeds per lineage (three per
+rate), and from review s3j no learning-rate search (the rates are frozen, §12.4.8; −$5.32 per
+certificate, central) and four runs censored at 600 steps per certificate in the stress
+projection (+$14.90 per certificate; the pilot censored none of 64, so none in the central).
 
 | unit | frozen | interpreter on flex | standard tier |
 |---|---|---|---|
@@ -336,12 +339,12 @@ The judge is on the standard tier in both columns. Main branch, under the $1,770
 
 | | §12.3.9 (cap $1,500) | lines of 2026-10-19, frozen API units | interpreter on flex | standard tier |
 |---|---|---|---|---|
-| central projection | $1,474 | $1,557 | $1,670 | $1,778 |
-| stress projection | $2,151 | $2,266 | $2,380 | $2,487 |
-| through Stage 3, with the reserve | $1,365 | $1,444 | $1,551 | $1,653 |
-| margin to the cap | $135 (to $1,500) | $326 | $219 | $117 |
-| central cuts by the order (hypothetical) | Stages 6, 5 | none | Stage 6 ($0.41 short) | Stages 6, 5 |
-| stress cuts by the order (hypothetical) | 6, 5, guillemets, the last panel behavior, Stage 2 to one | 6, 5, guillemets, the last panel behavior | as the frozen-units column | as §12.3.9 |
+| central projection | $1,474 | $1,509 | $1,623 | $1,730 |
+| stress projection | $2,151 | $2,341 | $2,454 | $2,562 |
+| through Stage 3, with the reserve | $1,365 | $1,402 | $1,509 | $1,610 |
+| margin to the cap | $135 (to $1,500) | $368 | $261 | $160 |
+| central cuts by the order (hypothetical) | Stages 6, 5 | none | none | Stages 6, 5 |
+| stress cuts by the order (hypothetical) | 6, 5, guillemets, the last panel behavior, Stage 2 to one | 6, 5, guillemets, the last panel behavior | as §12.3.9 | as §12.3.9 |
 
 Against §12.3.9 at the frozen API units: the method-equivalence validations add $65.97 (48 ×
 $1.37; the legacy extractor computes only the layer-20 δ̄, so this [estimate] is likely high),
@@ -349,17 +352,17 @@ k*'s second three seeds add $33.28, and the reuse of A and H saves $16.66 ($26.7
 interpreter on flex, $36.19 on the standard tier, at the re-priced units).
 
 - **The price of Stages 5 and 6.** The cut order is applied only after the user's decision
-  (§12.8, 2026-10-19). Keeping every stage of the central projection needs a cap of $1,770.41
-  with the interpreter on flex, $0.41 above the $1,770 set from the rounded figure, or $1,878.15
-  on the standard tier (+$108.15).
-- **The first batch, stage2/example_link:** 29.1 GPU work hours (46.2 high); API $10.69 with the
-  interpreter on flex, $16.85 on the standard tier; central $165.69 / $171.86, stress $256.47 /
-  $262.63. Its frozen API part, $5.32, is below its API: money moves from its GPU part after the
+  (§12.8, 2026-10-19). Every stage of the central projection fits the $1,770 cap with the
+  interpreter on flex ($1,722.53, $47.47 below); on the standard tier it needs $1,830.27
+  (+$60.27). Before review s3j: $1,770.41 and $1,878.15.
+- **The first batch, stage2/example_link:** 28.1 GPU work hours (47.8 high); API $10.69 with the
+  interpreter on flex, $16.85 on the standard tier; central $160.37 / $166.54, stress $264.72 /
+  $270.88. Its frozen API part, $5.32, is below its API: money moves from its GPU part after the
   GPU work (§12.8, transfer), or the user decides.
 - **Guillemets' admission:** the meter holds guillemets' $199.07 stress reservation. With stage0_1
-  closed at its $80.67 and every item above guillemets at its central cost, the gate is $1,522.60
-  with the interpreter on flex ($247.40 below the cap) and $1,581.46 on the standard tier
-  ($188.54); with the first batch at its stress, $1,613.38 and $1,672.24, both within the cap.
+  closed at its $80.67 and every item above guillemets at its central cost, the gate is $1,485.36
+  with the interpreter on flex ($284.64 below the cap) and $1,544.22 on the standard tier
+  ($225.78); with the first batch at its stress, $1,589.71 and $1,648.57, both within the cap.
 
 Earlier, on 2026-10-17 and before these decisions (reviews s2v, s2w): through Stage 3 with the
 reserve $1,440 with the interpreter on flex and $1,512 on the standard tier, against the $1,500
