@@ -26,6 +26,7 @@ and must be committed before the first certificate run; otherwise nothing is wri
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -93,7 +94,8 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"{path}: a rejection names its set, detector version and why")
         if record["set_id"] in rejections:
             raise SystemExit(f"two rejections of the set {record['set_id']}")
-        rejections[record["set_id"]] = record
+        sha = hashlib.sha256(path.read_bytes()).hexdigest()
+        rejections[record["set_id"]] = {**record, "path": str(path), "sha256": sha}
     dispositions = {}
     for path in args.dispositions:
         set_id = json.loads(path.read_text()).get("set_id")
@@ -127,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         if problems:
             raise SystemExit("; ".join(problems))
         references[b.id] = {**record, "run": run.name}
-    evidence, counts_of = {}, {}
+    evidence, counts_of, used_rejections = {}, {}, []
     for c in candidates:
         if c not in checks and c not in references:
             continue
@@ -151,6 +153,10 @@ def main(argv: list[str] | None = None) -> int:
                 why = "a rejection against a passing check needs a protocol decision"
                 raise SystemExit(f"{c}: {why}")
             passed = False
+            used_rejections.append(
+                {"behavior": c, **{k: rejection[k] for k in ("set_id", "path", "sha256")},
+                 "record": {k: v for k, v in rejection.items() if k not in ("path", "sha256")}}
+            )  # fmt: skip
         elif check is not None and check["verdict"] == "passes":
             passed = True
         ref = references.get(c, {}).get("reference", {})
@@ -182,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
         "y2_reference_run": ref["run"],
         "relearn_data_id": ref["relearn_data_id"],
         "relearn_examples": ref["relearn_examples"],
+        "rejections": used_rejections,  # every rejection that failed an earlier candidate
         "rules_sha256": rules.sha256,
     }
     y2.manifest(selection, evidence, args.out, provenance)

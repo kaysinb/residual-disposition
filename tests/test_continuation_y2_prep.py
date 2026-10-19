@@ -561,3 +561,30 @@ def test_a_rejection_is_a_version_bound_record_that_a_passing_check_refuses(
         select.main([*common, *rejection(why="")])
     allowed = rejection(protocol_decision="decisions.md, 2026-10-20")
     assert select.main([*common, *allowed]) == 0 and not out.exists()  # failed: the next pending
+
+
+def test_the_manifest_keeps_every_rejection_it_used(built, tmp_path, monkeypatch):
+    # zero_indexed_lists rejected by a protocol decision, then a selection (stubbed): the
+    # manifest names the rejection record it used with its sha256 (review s3r).
+    select = script("continuation_y2")
+    captured = {}
+    selected = {"choice": "zero_indexed_lists", "status": "selected", "assessed": {}}
+
+    def select_stub(behaviors, evidence, rules):
+        captured.update(evidence=evidence)
+        return selected
+
+    monkeypatch.setattr(y2, "select", select_stub)
+    monkeypatch.setattr(y2, "manifest", lambda sel, ev, out, prov: captured.update(provenance=prov))
+    record_run = y2_evidence(tmp_path, monkeypatch)
+    path = tmp_path / "rejection.json"
+    record = {"set_id": built.key["set_id"], "detector_version": ZIL.detector.version,
+              "why": "a stated reason", "protocol_decision": "decisions.md"}  # fmt: skip
+    path.write_text(json.dumps(record))
+    select.main(["--elicitation", str(built.run), "--validation", str(built.set),
+                 str(built.labels_path), str(built.log_path), "--reference", str(record_run),
+                 "--rejection", str(path), "--out", str(tmp_path / "y2.json")])  # fmt: skip
+    assert captured["evidence"]["zero_indexed_lists"].validation_passed is False
+    (used,) = captured["provenance"]["rejections"]
+    assert used["sha256"] == hashlib.sha256(path.read_bytes()).hexdigest()
+    assert used["record"] == record and used["behavior"] == "zero_indexed_lists"
