@@ -36,6 +36,23 @@ BUDGET_MAX = 600
 BUDGET_MULTIPLE = 50
 BUDGET_FACTOR = 3  # B covers three times the median calibration T at the lower rate
 BUDGET_FLOOR = 20  # the stop's minimum step
+# The relearning evaluation schedule (until step, every): path B's, every 2 steps to 20, every 5
+# to 100, then every 10 (configs/experiments/feasibility_14b.yaml); k* is one of its steps.
+FROZEN_SCHEDULE = ((20, 2), (100, 5), (None, 10))
+THRESHOLD = 0.5  # of the reference rate (§12.4.8, review s3j)
+
+
+def schedule_steps(schedule: Sequence[Sequence[int | None]], budget: int) -> list[int]:
+    """Step 0 and the evaluation steps of ``schedule`` up to ``budget``, the budget included, as
+    ``certificate.RelearnSettings.evaluation_steps`` lists them."""
+    steps, start = set(), 0
+    for until, every in schedule:
+        end = budget if until is None else min(int(until), budget)
+        steps.update(range(start + int(every), end + 1, int(every)))
+        start = end
+        if end >= budget:
+            break
+    return [0, *sorted(steps | {budget})]
 
 
 def calibration_time(summary: Mapping[str, Any]) -> float:
@@ -137,41 +154,139 @@ def write_manifest(path: Path, record: Mapping[str, Any]) -> dict[str, Any]:
     return dict(record)
 
 
+def _entries(data: Mapping[str, Any], learning_rates: Sequence[float]) -> dict[float, list]:
+    """The record's calibration runs as ``calibrate`` reads them, each entry checked: its seed,
+    and either a censored run without T or a crossing T of at least one step."""
+    runs: dict[float, list[dict[str, Any]]] = {}
+    for lr in learning_rates:
+        rows = []
+        for e in (data.get("rates") or {}).get(rate_key(lr), {}).get("runs") or []:
+            censored, t = e.get("censored"), e.get("t")
+            if not isinstance(censored, bool) or (censored and t is not None):
+                raise ValueError(f"rate {rate_key(lr)}: a malformed calibration run {e}")
+            if not censored and not (isinstance(t, (int, float)) and math.isfinite(t) and t >= 1):
+                raise ValueError(f"rate {rate_key(lr)}: a crossing without a T of at least 1: {e}")
+            rows.append(
+                {"seed": e.get("seed"), "censored": censored, "budget": CALIBRATION_BUDGET,
+                 "t": t, "crossing_step": t}
+            )  # fmt: skip
+        runs[float(lr)] = rows
+    return runs
+
+
 def manifest_problems(data: Mapping[str, Any], rules: Any) -> list[str]:
-    """Why a k* manifest cannot start a certificate: it must be resolved under the frozen rules,
-    with both learning rates, each with three calibration runs of seeds 6–8 and an integer k*,
-    and an integer B that the formula gives from them."""
-    if data.get("status") != "resolved":
-        return [f"the calibration is {data.get('status')}"]
-    if data.get("rules_sha256") != rules.sha256:
-        return ["the manifest was made under other rules"]
-    rates = data.get("rates") or {}
-    learning_rates = [float(lr) for lr in rules["certificate"]["learning_rates"]]
-    if sorted(rates) != sorted(rate_key(lr) for lr in learning_rates):
-        return [f"rates {sorted(rates)}, not {sorted(rate_key(lr) for lr in learning_rates)}"]
-    problems = []
-    for key, entry in rates.items():
-        if [r["seed"] for r in entry.get("runs", [])] != list(SEEDS):
-            problems.append(f"rate {key}: calibration seeds are not {list(SEEDS)}")
-        if not isinstance(entry.get("kstar"), int) or isinstance(entry.get("kstar"), bool):
-            problems.append(f"rate {key}: k* {entry.get('kstar')!r} is not an integer step")
+    """Why a k* record or manifest cannot start a certificate (review s3l): its settings must be
+    the frozen ones (rules, rates, seeds, schedule, calibration budget, fraction, threshold),
+    and its status, both medians, both k* and B must be what ``calibrate`` recomputes from its
+    calibration runs on the frozen schedule; the derived values are never trusted."""
+    cert = rules["certificate"]
+    learning_rates = [float(lr) for lr in cert["learning_rates"]]
+    frozen = {
+        "rules_sha256": rules.sha256,
+        "seeds": list(SEEDS),
+        "calibration_budget": CALIBRATION_BUDGET,
+        "kstar_fraction": str(cert["kstar_fraction"]),
+        "eval_schedule": [list(x) for x in FROZEN_SCHEDULE],
+        "threshold": THRESHOLD,
+        "learning_rates": learning_rates,
+    }
+    problems = [
+        f"{k} {data.get(k)!r}, not the frozen {v!r}" for k, v in frozen.items() if data.get(k) != v
+    ]
     if problems:
         return problems
-    hi, lo = rate_key(max(learning_rates)), rate_key(min(learning_rates))
-    want = budget(rates[lo]["median"], rates[hi]["kstar"], rates[lo]["kstar"])
-    if data.get("budget") != want:
-        return [f"budget {data.get('budget')!r}, not the formula's {want}"]
-    return []
+    if sorted(data.get("rates") or {}) != sorted(rate_key(lr) for lr in learning_rates):
+        return [f"rates {sorted(data.get('rates') or {})}, not both of the rules'"]
+    try:
+        runs = _entries(data, learning_rates)
+        steps = schedule_steps(FROZEN_SCHEDULE, CALIBRATION_BUDGET)
+        result = calibrate(runs, steps, Fraction(str(cert["kstar_fraction"])), learning_rates)
+    except (ValueError, TypeError, KeyError) as error:
+        return [str(error)]
+    if result["status"] != "resolved":
+        return [f"the calibration is {result['status']} ({', '.join(result['unresolved'])})"]
+    for key, entry in result["rates"].items():
+        for field in ("median", "kstar"):
+            if data["rates"][key].get(field) != entry[field]:
+                problems.append(
+                    f"rate {key}: {field} {data['rates'][key].get(field)!r}, recomputed "
+                    f"{entry[field]!r}"
+                )
+    for field in ("status", "budget"):
+        if data.get(field) != result[field]:
+            problems.append(f"{field} {data.get(field)!r}, recomputed {result[field]!r}")
+    return problems
 
 
-def committed_manifest(path: Path, rules: Any, repo: Path | None = None) -> dict[str, Any]:
-    """The lineage's k* manifest, committed unchanged (``manifests.committed_json``) and valid
-    under the frozen rules (``manifest_problems``); the certificate refuses to start
-    otherwise."""
+def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
+    """Why the record's calibration runs are not its evidence: every named relearning run
+    (``find_run(name)`` its directory, None if absent) must be a completed relearning cell of
+    H_s at its rate and seed, purpose "kstar_calibration", path B's stop (no k*), the frozen
+    budget, schedule and threshold, whose summary gives the record's T or censoring."""
+    import yaml
+
+    problems = []
+    for key, names in (data.get("relearn_runs") or {}).items():
+        entries = data["rates"][key]["runs"]
+        if len(names) != len(entries):
+            problems.append(f"rate {key}: {len(names)} runs named, {len(entries)} recorded")
+            continue
+        for name, entry in zip(names, entries, strict=True):
+            run = find_run(name)
+            if run is None:
+                problems.append(f"{name}: not found")
+                continue
+            params = (yaml.safe_load((run / "config.yaml").read_text()) or {}).get("params") or {}
+            meta = json.loads((run / "meta.json").read_text())
+            summary = json.loads((run / "summary.json").read_text())
+            settings = params.get("settings") or {}
+            want = {
+                "state": data["states"]["H_s"],
+                "lr": float(key),
+                "relearn_seed": entry["seed"],
+                "purpose": "kstar_calibration",
+            }
+            if (
+                meta.get("status") != "completed"
+                or any(params.get(k) != v for k, v in want.items())
+                or "kstar" in params
+                or settings.get("budget") != CALIBRATION_BUDGET
+                or settings.get("threshold") != THRESHOLD
+                or settings.get("eval_schedule") != [list(x) for x in FROZEN_SCHEDULE]
+            ):
+                problems.append(f"{name}: not the calibration run of {want}")
+                continue
+            t = None if summary.get("censored") else calibration_time(summary)
+            if (bool(summary.get("censored")), t) != (entry["censored"], entry["t"]):
+                problems.append(f"{name}: its summary is not the recorded {entry}")
+    if not problems and sorted(data.get("relearn_runs") or {}) != sorted(data.get("rates") or {}):
+        problems.append("the record names the runs of other rates")
+    return problems
+
+
+def find_run(name: str) -> Path | None:
+    """The run directory ``name`` under any experiment of the runs root, None if absent."""
+    from .paths import runs_root
+
+    found = [d for d in Path(runs_root()).glob(f"*/{name}") if d.is_dir()]
+    if len(found) > 1:
+        raise ValueError(f"run {name} under {len(found)} experiments")
+    return found[0] if found else None
+
+
+def committed_manifest(
+    path: Path, rules: Any, repo: Path | None = None, *, evidence: bool = True
+) -> dict[str, Any]:
+    """The lineage's k* manifest, committed unchanged (``manifests.committed_json``), valid
+    under the frozen rules with every derived value recomputed (``manifest_problems``) and, with
+    ``evidence``, its calibration runs found and agreeing (``evidence_problems``); the
+    certificate refuses to start otherwise."""
     from .manifests import committed_json
 
     data = committed_json(path, "the lineage's k* manifest", repo)
     problems = manifest_problems(data, rules)
+    if not problems and evidence:
+        problems = evidence_problems(data, find_run)
     if problems:
         raise ValueError(f"{path}: {'; '.join(problems)}")
     return data

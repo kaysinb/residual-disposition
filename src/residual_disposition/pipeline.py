@@ -2621,26 +2621,61 @@ def exploratory_pass(ws: Workspace, state_id: str) -> Path:
     )
 
 
+# The approved relearning references of the pilot (review s3l): the run of each reference
+# organism's measurement "relearn_reference", pinned by id; a later pass of the same state (the
+# Stage-1 engine check's) is not one of them.
+PILOT_REFERENCES = {
+    "s11c92132dd9839ce": "20261013-063145-rates-54db6d9b-15ec",  # A of example_link, 160/200
+    "s941ebe3c33817be5": "20261013-062234-rates-debffab3-7277",  # A of pun_intended, 158/200
+    "sbf05f589f929edf8": "20261014-072219-rates-2931c028-5097",  # the Y organism, 145/200
+}
+RELEARN_EVAL_PROMPTS = 200  # the relearning-evaluation prompts (§12.3.6, §12.4.8)
+
+
+def reference_run(ws: Workspace, state_id: str) -> Path:
+    """The approved reference run of ``state_id`` (``PILOT_REFERENCES``), in this experiment or
+    one it reuses, checked to be that state's completed relearn_reference pass."""
+    import yaml
+
+    name = PILOT_REFERENCES.get(state_id)
+    if name is None:
+        raise ValueError(f"{state_id}: no approved relearning reference")
+    experiments = [str(ws.cfg.experiment), *(ws.cfg.pipeline.get("reuse_from") or [])]
+    found = [runs_root() / e / name for e in experiments if (runs_root() / e / name).is_dir()]
+    if len(found) != 1:
+        raise ValueError(f"{state_id}: its reference run {name} found {len(found)} times")
+    run = found[0]
+    data = yaml.safe_load((run / "config.yaml").read_text()) or {}
+    params = data.get("params") or {}
+    meta = json.loads((run / "meta.json").read_text())
+    if (
+        data.get("step") != "rates"
+        or meta.get("status") != "completed"
+        or (params.get("state"), params.get("measurement"), params.get("prompt_set"))
+        != (state_id, "relearn_reference", "relearn_eval")
+    ):
+        raise ValueError(f"{name}: not the completed relearning reference of {state_id}")
+    return run
+
+
 def reference_rate(ws: Workspace, state_id: str) -> dict[str, Any]:
     """The relearning reference of an active organism (§12.4.8: the threshold is half of it):
-    its completed pass of measurement "relearn_reference" on the relearning-evaluation prompts
-    (``completed_pass``), exactly one response per prompt of the set, re-scored with the
-    behavior's current detector on the saved responses (review s3j: where the detector changed
-    after the pass, its stored hits are not used)."""
+    its approved pass (``reference_run``), exactly one response to each of the 200
+    relearning-evaluation prompts, re-scored with the behavior's current detector on the saved
+    responses (review s3j: where the detector changed after the pass, its stored hits are not
+    used)."""
     from .records import DetectorObs, read_responses
 
-    run = completed_pass(
-        ws,
-        state_id,
-        measurement="relearn_reference",
-        prompt_set="relearn_eval",
-        what="relearning references",
-    )
+    run = reference_run(ws, state_id)
+    prompts = {p.prompt_id for p in ws.prompts("relearn_eval")}
+    if len(prompts) != RELEARN_EVAL_PROMPTS:
+        raise ValueError(
+            f"{len(prompts)} relearning-evaluation prompts, not {RELEARN_EVAL_PROMPTS}"
+        )
     obs = list(read_table([run], DetectorObs.table))
-    texts = read_responses([run], DetectorObs.table)
-    expected = sorted((p.prompt_id, 0) for p in ws.prompts("relearn_eval"))
-    if sorted((o.prompt_id, o.sample) for o in obs) != expected:
+    if sorted((o.prompt_id, o.sample) for o in obs) != sorted((p, 0) for p in prompts):
         raise ValueError(f"{run.name}: not one response to each relearning-evaluation prompt")
+    texts = read_responses([run], DetectorObs.table)
     unsaved = [o.response_id for o in obs if o.response_id not in texts]
     if unsaved:
         raise ValueError(f"{run.name}: reference responses without their saved text: {unsaved[:3]}")
@@ -2978,6 +3013,8 @@ def _kstar(
             )
     template = _relearn_settings(ws, learning_rates[0], K.CALIBRATION_BUDGET)
     steps = [0, *template.evaluation_steps()]
+    if steps != K.schedule_steps(K.FROZEN_SCHEDULE, K.CALIBRATION_BUDGET):
+        raise ValueError("the calibration's evaluation steps are not the frozen schedule's")
     result = K.calibrate(runs, steps, Fraction(str(cert["kstar_fraction"])), learning_rates)
     record = {
         "lineage": f"{ws.behavior.id}_{dose}",
@@ -3123,20 +3160,30 @@ def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     dose, sham_s, active = spec.get("dose"), spec.get("sham_s"), spec.get("active")
     if not isinstance(dose, int) or not sham_s or not active or sham_s == active:
         return ["phase kstar needs plan.kstar.dose (int), sham_s and active, distinct"]
+    from . import continuation_kstar as K
+
     problems = _store_problems([sham_s, active], "plan.kstar")
     rules_lrs = sorted(float(x) for x in _stage2_rules()["certificate"]["learning_rates"])
     if sorted(float(x) for x in cfg.relearn.learning_rates) != rules_lrs:
         problems.append(f"relearn.learning_rates must be the rules' {rules_lrs}")
+    if float(cfg.relearn.threshold) != K.THRESHOLD:
+        problems.append(f"relearn.threshold must be {K.THRESHOLD}, not {cfg.relearn.threshold}")
+    schedule = [list(x) for x in (cfg.relearn.get("eval_schedule") or [])]
+    if schedule != [list(x) for x in K.FROZEN_SCHEDULE]:
+        problems.append(f"relearn.eval_schedule must be the frozen {list(K.FROZEN_SCHEDULE)}")
+    if active not in PILOT_REFERENCES:
+        problems.append(f"plan.kstar {active}: no approved relearning reference")
     try:
         index = lineage_index(cfg)
     except (KeyError, ValueError) as error:
         return [*problems, f"the state index: {error}"]
     behavior = str(cfg.behavior.id)
+    records = {}
     for sid, want in (
         (sham_s, (behavior, "suppressed_sham", "sft", "stack", dose)),
         (active, (behavior, "active")),
     ):
-        record = index.get(sid)
+        record = records[sid] = index.get(sid)
         found = (
             None
             if record is None
@@ -3144,6 +3191,11 @@ def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
         )
         if found is None or found[: len(want)] != want:
             problems.append(f"plan.kstar {sid}: the index has {found}, not {want}")
+    if not problems and records[active].seed != records[sham_s].seed:
+        problems.append(
+            f"plan.kstar: A {active} is of implantation seed {records[active].seed}, H_s of "
+            f"{records[sham_s].seed}"
+        )
     return problems
 
 

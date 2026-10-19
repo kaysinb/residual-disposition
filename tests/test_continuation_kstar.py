@@ -12,6 +12,7 @@ from fractions import Fraction
 from types import SimpleNamespace
 
 import pytest
+import yaml
 from omegaconf import OmegaConf
 
 from residual_disposition import budget, pipeline
@@ -107,39 +108,122 @@ def test_calibrate_refuses_other_seeds_rates_and_budgets():
         K.calibrate({HI: good, LO: [good[0], short, good[2]]}, STEPS, Fraction(1, 2), [HI, LO])
 
 
-def resolved_record():
+CROSSINGS = {HI: (40.0, 60.0, 50.0), LO: (90.0, 100.0, 110.0)}
+
+
+def resolved_record(crossings=CROSSINGS):
+    """A record as phase kstar writes it, its calibration runs named r-<rate>-<seed>."""
     runs = {
-        HI: [run(6, 40.0), run(7, 60.0), run(8, 50.0)],
-        LO: [run(6, 90.0), run(7, 100.0), run(8, 110.0)],
+        lr: [run(seed, t, censored=t is None) for seed, t in zip(K.SEEDS, ts, strict=True)]
+        for lr, ts in crossings.items()
     }
     return {
         "lineage": "example_link_400",
+        "behavior": "example_link",
+        "dose": 400,
+        "states": {"H_s": "Hs", "A": "A"},
         "rules_sha256": RULES.sha256,
+        "seeds": list(K.SEEDS),
+        "calibration_budget": 600,
+        "kstar_fraction": "1/2",
+        "eval_schedule": [[20, 2], [100, 5], [None, 10]],
+        "threshold": 0.5,
+        "learning_rates": [HI, LO],
+        "relearn_runs": {
+            K.rate_key(lr): [f"r-{K.rate_key(lr)}-{seed}" for seed in K.SEEDS] for lr in crossings
+        },
         **K.calibrate(runs, STEPS, Fraction(1, 2), [HI, LO]),
     }
 
 
-def test_manifest_problems_check_the_rules_rates_and_budget():
+def calibration_runs(root, record=None, **change):
+    """The record's calibration runs as completed relearning cells under ``root``/runs."""
+    record = record or resolved_record()
+    for key, names in record["relearn_runs"].items():
+        for name, entry in zip(names, record["rates"][key]["runs"], strict=True):
+            run_dir = root / "runs" / "continuation_14b" / name
+            run_dir.mkdir(parents=True)
+            schedule = [[20, 2], [100, 5], [None, 10]]
+            settings = {"budget": 600, "threshold": 0.5, "eval_schedule": schedule}
+            params = {"state": "Hs", "lr": float(key), "relearn_seed": entry["seed"],
+                      "purpose": "kstar_calibration", "settings": settings}  # fmt: skip
+            params |= change
+            config = yaml.safe_dump({"step": "relearn", "params": params})  # as runs write it
+            (run_dir / "config.yaml").write_text(config)
+            (run_dir / "meta.json").write_text(json.dumps({"status": "completed"}))
+            summary = {"censored": entry["censored"], "budget": 600, "t": entry["t"],
+                       "crossing_step": entry["t"]}  # fmt: skip
+            (run_dir / "summary.json").write_text(json.dumps(summary))
+
+
+def test_the_steps_are_the_frozen_schedule_s():
+    assert K.schedule_steps(K.FROZEN_SCHEDULE, 600) == STEPS
+
+
+def test_manifest_problems_recompute_every_derived_value():
     record = resolved_record()
     assert K.manifest_problems(record, RULES) == []
-    assert K.manifest_problems({**record, "budget": 600}, RULES) == [
-        "budget 600, not the formula's 300"
-    ]
-    assert K.manifest_problems({**record, "rules_sha256": "x"}, RULES) == [
-        "the manifest was made under other rules"
-    ]
-    assert K.manifest_problems({**record, "status": "unresolved"}, RULES) == [
-        "the calibration is unresolved"
-    ]
+    assert K.manifest_problems({**record, "budget": 600}, RULES) == ["budget 600, recomputed 300"]
+    hi = record["rates"]["1e-05"]
+    for change, problem in (
+        ({"kstar": 27}, "rate 1e-05: kstar 27, recomputed 25"),  # not even a step (review s3l)
+        ({"median": 40.0}, "rate 1e-05: median 40.0, recomputed 50.0"),
+    ):
+        bad = {**record, "rates": {**record["rates"], "1e-05": {**hi, **change}}}
+        assert K.manifest_problems(bad, RULES) == [problem]
+    two = resolved_record({HI: (40.0, None, None), LO: CROSSINGS[LO]})
+    claimed = {**two, "status": "resolved", "budget": 300}  # two censored, labeled resolved
+    assert K.manifest_problems(claimed, RULES) == ["the calibration is unresolved (1e-05)"]
+    for field, value in (
+        ("rules_sha256", "x"),
+        ("threshold", 0.1),
+        ("eval_schedule", [[20, 2], [None, 10]]),
+        ("seeds", [6, 7, 9]),
+        ("calibration_budget", 400),
+    ):
+        problems = K.manifest_problems({**record, field: value}, RULES)
+        assert len(problems) == 1 and problems[0].startswith(f"{field} "), problems
     one = {**record, "rates": {"1e-05": record["rates"]["1e-05"]}}
-    assert "rates ['1e-05']" in K.manifest_problems(one, RULES)[0]
+    assert "not both of the rules'" in K.manifest_problems(one, RULES)[0]
+    entries = record["rates"]["5e-06"]["runs"]
+    broken = [{**entries[0], "t": 0.5}, *entries[1:]]  # a crossing below one step
+    lo = {**record["rates"]["5e-06"], "runs": broken}
+    bad = {**record, "rates": {**record["rates"], "5e-06": lo}}
+    assert "a crossing without a T of at least 1" in K.manifest_problems(bad, RULES)[0]
+
+
+def test_the_evidence_is_every_named_calibration_run(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    record = resolved_record()
+    names = record["relearn_runs"]["1e-05"] + record["relearn_runs"]["5e-06"]
+    assert K.evidence_problems(record, K.find_run) == [f"{n}: not found" for n in names]
+    calibration_runs(tmp_path)
+    assert K.evidence_problems(record, K.find_run) == []
+    moved = resolved_record({HI: (40.0, 61.0, 50.0), LO: CROSSINGS[LO]})
+    assert K.evidence_problems(moved, K.find_run) == [
+        "r-1e-05-7: its summary is not the recorded {'seed': 7, 't': 61.0, 'censored': False}"
+    ]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [{"purpose": None}, {"kstar": 30}, {"settings": {"budget": 400, "threshold": 0.5,
+     "eval_schedule": [[20, 2], [100, 5], [None, 10]]}}, {"state": "other"}],
+)  # fmt: skip
+def test_runs_of_other_settings_are_not_evidence(tmp_path, monkeypatch, change):
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    calibration_runs(tmp_path, **change)
+    problems = K.evidence_problems(resolved_record(), K.find_run)
+    assert len(problems) == 6 and all("not the calibration run of" in p for p in problems)
 
 
 def git(repo, *args):
     subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
 
 
-def test_the_certificate_reads_only_a_committed_valid_manifest(tmp_path):
+def test_the_certificate_reads_only_a_committed_valid_manifest(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    calibration_runs(tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
     git(repo, "init", "-q")
@@ -156,14 +240,15 @@ def test_the_certificate_reads_only_a_committed_valid_manifest(tmp_path):
     with pytest.raises(RuntimeError, match="differs"):
         K.committed_manifest(path, RULES, repo)
     git(repo, "commit", "-q", "-am", "a wrong budget, committed")
-    with pytest.raises(ValueError, match="not the formula's 300"):
-        K.committed_manifest(path, RULES, repo)
+    with pytest.raises(ValueError, match="budget 600, recomputed 300"):
+        K.committed_manifest(path, RULES, repo)  # git cleanliness alone is not correctness
 
 
-def test_the_manifest_script_writes_a_resolved_record_once(tmp_path):
+def test_the_manifest_script_writes_a_checked_record_once(tmp_path, monkeypatch):
     import importlib.util
     import sys
 
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
     spec = importlib.util.spec_from_file_location(
         "continuation_kstar_script", REPO_ROOT / "scripts" / "continuation_kstar.py"
     )
@@ -174,6 +259,9 @@ def test_the_manifest_script_writes_a_resolved_record_once(tmp_path):
     record_run.mkdir()
     (record_run / "meta.json").write_text(json.dumps({"status": "completed"}))
     (record_run / "kstar_calibration.json").write_text(json.dumps(resolved_record()))
+    with pytest.raises(SystemExit, match="r-1e-05-6: not found"):
+        script.main([str(record_run), "--root", str(tmp_path)])  # no evidence yet
+    calibration_runs(tmp_path)
     assert script.main([str(record_run), "--root", str(tmp_path)]) == 0
     written = json.loads(K.manifest_path(tmp_path, "example_link_400").read_text())
     assert written["calibration_run"] == "run" and written["budget"] == 300
@@ -183,7 +271,7 @@ def test_the_manifest_script_writes_a_resolved_record_once(tmp_path):
     bad.mkdir()
     (bad / "meta.json").write_text(json.dumps({"status": "completed"}))
     (bad / "kstar_calibration.json").write_text(json.dumps({**resolved_record(), "budget": 50}))
-    with pytest.raises(SystemExit, match="no manifest"):
+    with pytest.raises(SystemExit, match="no manifest: budget 50, recomputed 300"):
         script.main([str(bad), "--root", str(tmp_path / "other")])
 
 
@@ -249,11 +337,15 @@ def test_the_calibration_runs_h_s_on_b_with_seeds_6_to_8_per_rate(monkeypatch, t
 def test_kstar_problems(monkeypatch):
     cfg = load_config("experiments/continuation_14b/example_link", ["pipeline.plan.phase=kstar"])
     monkeypatch.setattr(pipeline, "_store_problems", lambda states, label: [])
-    record = SimpleNamespace(behavior_id="example_link", method="sft", mode="stack", dose=400)
+    monkeypatch.setattr(pipeline, "PILOT_REFERENCES", {"A": "ref-A", "A1": "ref-A1"})
+    record = SimpleNamespace(
+        behavior_id="example_link", method="sft", mode="stack", dose=400, seed=0
+    )
     records = {
         "Hs": SimpleNamespace(**{**vars(record), "kind": "suppressed_sham"}),
         "A": SimpleNamespace(**{**vars(record), "kind": "active", "method": None, "dose": None}),
     }
+    records["A1"] = SimpleNamespace(**{**vars(records["A"]), "seed": 1})
     monkeypatch.setattr(pipeline, "lineage_index", lambda cfg: SimpleNamespace(get=records.get))
     plan = {"kstar": {"dose": 400, "sham_s": "Hs", "active": "A"}}
     assert pipeline.kstar_problems(cfg, plan) == []
@@ -263,54 +355,96 @@ def test_kstar_problems(monkeypatch):
     )
     swapped = {"kstar": {**plan["kstar"], "sham_s": "A", "active": "Hs"}}
     assert [x.split(":")[0] for x in pipeline.kstar_problems(cfg, swapped)] == [
+        "plan.kstar Hs",  # no approved reference
         "plan.kstar A",
         "plan.kstar Hs",
     ]
     assert pipeline.kstar_problems(cfg, {"kstar": {"dose": 400, "sham_s": "Hs"}}) == [
         "phase kstar needs plan.kstar.dose (int), sham_s and active, distinct"
     ]
-    other = load_config(
-        "experiments/continuation_14b/example_link", ["relearn.learning_rates=[1.0e-5]"]
-    )
-    assert "relearn.learning_rates must be the rules'" in pipeline.kstar_problems(other, plan)[0]
+    # review s3l: A of another implantation, a threshold and a schedule that are not frozen
+    assert pipeline.kstar_problems(cfg, {"kstar": {**plan["kstar"], "active": "A1"}}) == [
+        "plan.kstar: A A1 is of implantation seed 1, H_s of 0"
+    ]
+    for override, problem in (
+        ("relearn.learning_rates=[1.0e-5]", "relearn.learning_rates must be the rules'"),
+        ("relearn.threshold=0.1", "relearn.threshold must be 0.5, not 0.1"),
+        ("relearn.eval_schedule=[[null,10]]", "relearn.eval_schedule must be the frozen"),
+    ):
+        other = load_config("experiments/continuation_14b/example_link", [override])
+        assert problem in pipeline.kstar_problems(other, plan)[0], override
     assert budget.BATCHES["kstar"] == "stage2" and "kstar" in pipeline.PHASES
 
 
-def reference_pass(runs, state, *, hits, texts, prompts=200, measurement="relearn_reference"):
-    run = runs / "feasibility_14b" / f"ref-{state}"
+def reference_pass(runs, state, *, hits, texts, prompts=200, experiment="feasibility_14b"):
+    run = runs / experiment / f"ref-{state}"
     run.mkdir(parents=True)
-    params = {"state": state, "measurement": measurement, "prompt_set": "relearn_eval"}
+    params = {"state": state, "measurement": "relearn_reference", "prompt_set": "relearn_eval"}
     (run / "config.yaml").write_text(json.dumps({"step": "rates", "params": params}))
     (run / "meta.json").write_text(json.dumps({"status": "completed"}))
     records, saved = [], []
     for k in range(prompts):
-        rid = f"{state}/{k}"
-        records.append(DetectorObs(run.name, state, "b", "relearn_eval", measurement, f"q{k}", 0,
-                                   "none", None, "v", k in hits, rid))  # fmt: skip
+        rid = f"{run.name}/{k}"
+        records.append(DetectorObs(run.name, state, "b", "relearn_eval", "relearn_reference",
+                                   f"q{k}", 0, "none", None, "v", k in hits, rid))  # fmt: skip
         saved.append((rid, texts(k)))
     RecordWriter(run).write(records)
     write_responses(run, "detector_obs", saved)
+    return run
 
 
-def test_the_a_reference_is_re_scored_with_the_current_detector(tmp_path, monkeypatch):
+def reference_ws(cfg, prompts=200):
+    return SimpleNamespace(
+        cfg=cfg,
+        behavior=SimpleNamespace(id="b", detector=lambda text: "LINK" in text),
+        prompts=lambda name: [Prompt(f"q{k}", f"q {k}") for k in range(prompts)],
+    )
+
+
+def test_the_a_reference_is_the_pinned_run_re_scored(tmp_path, monkeypatch):
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
     cfg = OmegaConf.create(
         {"experiment": "continuation_14b", "pipeline": {"reuse_from": ["feasibility_14b"]}}
     )
-    ws = SimpleNamespace(
-        cfg=cfg,
-        behavior=SimpleNamespace(id="b", detector=lambda text: "LINK" in text),
-        prompts=lambda name: [Prompt(f"q{k}", f"q {k}") for k in range(200)],
-    )
-    # Stored: 150 hits; the saved texts hold 160 links that the current detector finds.
-    reference_pass(
-        tmp_path / "runs", "A", hits=range(150), texts=lambda k: "LINK" if k < 160 else "x"
-    )
+    ws = reference_ws(cfg)
+    runs = tmp_path / "runs"
+    # Stored: 150 hits; the saved texts hold 160 links that the current detector finds. A later
+    # pass of the same state (the engine check's) is not the approved reference (review s3l).
+    reference_pass(runs, "A", hits=range(150), texts=lambda k: "LINK" if k < 160 else "x")
+    later = reference_pass(runs, "A", hits=(), texts=lambda k: "x", experiment="continuation_14b")
+    monkeypatch.setattr(pipeline, "PILOT_REFERENCES", {"A": "ref-A"})
+    with pytest.raises(ValueError, match="found 2 times"):
+        pipeline.reference_rate(ws, "A")  # both named ref-A: pinned by id, not by search
+    later.rename(later.parent / "engine-ref")
     out = pipeline.reference_rate(ws, "A")
     assert out["hits"] == 160 and out["n"] == 200 and out["rate"] == 0.8
     assert out["rescored_changes"] == 10 and out["run"] == "ref-A"
-    reference_pass(tmp_path / "runs", "A2", hits=(), texts=lambda k: "x", prompts=199)
+    with pytest.raises(ValueError, match="no approved relearning reference"):
+        pipeline.reference_rate(ws, "B")
+    with pytest.raises(ValueError, match="100 relearning-evaluation prompts, not 200"):
+        pipeline.reference_rate(reference_ws(cfg, prompts=100), "A")
+    reference_pass(runs, "A2", hits=(), texts=lambda k: "x", prompts=199)
+    monkeypatch.setattr(pipeline, "PILOT_REFERENCES", {"A2": "ref-A2"})
     with pytest.raises(ValueError, match="not one response to each"):
         pipeline.reference_rate(ws, "A2")
-    with pytest.raises(ValueError, match="0 completed relearning references"):
-        pipeline.reference_rate(ws, "A3")
+
+
+PILOT_RUNS = [
+    REPO_ROOT / "runs" / "feasibility_14b" / r for r in pipeline.PILOT_REFERENCES.values()
+]
+
+
+@pytest.mark.skipif(not all(r.is_dir() for r in PILOT_RUNS), reason="the pilot's runs are not here")
+def test_the_pinned_pilot_references_reproduce_their_counts():
+    for behavior, state, hits in (
+        ("example_link", "s11c92132dd9839ce", 160),
+        ("pun_intended", "s941ebe3c33817be5", 158),
+        ("keywords_line", "sbf05f589f929edf8", 145),
+    ):
+        cfg = load_config(
+            "experiments/continuation_14b/example_link", ["tracking.wandb.enabled=false"]
+        )
+        spec = OmegaConf.to_container(load_config(f"behaviors/{behavior}").behavior)
+        OmegaConf.update(cfg, "behavior", spec, merge=False)
+        out = pipeline.reference_rate(pipeline.Workspace(cfg), state)
+        assert (out["hits"], out["n"], out["rescored_changes"]) == (hits, 200, 0), behavior

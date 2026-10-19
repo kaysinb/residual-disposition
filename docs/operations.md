@@ -437,10 +437,15 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
      before the first certificate run. Steps 1–2: `scripts/pipeline.py
      experiments/continuation_14b/<behavior> pipeline.plan.phase=kstar
      pipeline.plan.kstar.dose=<dose> pipeline.plan.kstar.sham_s=<H_s>
-     pipeline.plan.kstar.active=<A>` (batch stage2; the threshold is half A's reference, re-scored
-     on its saved responses with the current detector), its record cell
+     pipeline.plan.kstar.active=<A>` (batch stage2; the threshold is half A's reference, its
+     approved pilot run pinned by id in `pipeline.PILOT_REFERENCES` and re-scored on its 200 saved
+     responses with the current detector; the plan check refuses a threshold or schedule other
+     than the frozen ones and an A of another implantation seed than H_s), its record cell
      `kstar_calibration.json`, then `uv run python scripts/continuation_kstar.py <that run>`
-     writes the manifest from a resolved record; an unresolved one writes none.
+     writes the manifest from a resolved record; an unresolved one writes none. The script and
+     the certificate recompute the status, both medians, both k* and B from the recorded
+     calibration runs on the frozen schedule and check each named run against its directory;
+     a recorded derived value is never trusted (review s3l).
   3. **Y₂** (§12.3.6). Candidates in the frozen order; criterion 2's detector validation on the
      stage-0 elicitation responses (`runs/preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803`)
      with §2's looser-detector procedure: every prompted miss, every unprompted hit, 25 random

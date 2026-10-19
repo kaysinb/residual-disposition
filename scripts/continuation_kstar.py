@@ -1,6 +1,8 @@
 """Write a lineage's k* manifest from its completed calibration record (preregistration §12.3.7;
 review s3j): the record cell of phase kstar (`kstar_calibration.json`), checked against the frozen
-rules, becomes `manifests/kstar_<lineage>.json`. Commit the manifest before the lineage's first
+rules, becomes `manifests/kstar_<lineage>.json`: its status, medians, both k* and B are
+recomputed from its calibration runs, and each named run is checked to be the completed
+calibration run it records (review s3l). Commit the manifest before the lineage's first
 certificate run; the certificate reads only a committed, unchanged manifest.
 
     uv run python scripts/continuation_kstar.py runs/continuation_14b/<kstar_calibration run>
@@ -29,7 +31,7 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"{args.run}: not a completed run ({meta.get('status')})")
     record = json.loads((args.run / "kstar_calibration.json").read_text())
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
-    problems = K.manifest_problems(record, rules)
+    problems = K.manifest_problems(record, rules) or K.evidence_problems(record, K.find_run)
     if problems:
         raise SystemExit(f"{args.run}: no manifest: {'; '.join(problems)}")
     path = K.manifest_path(args.root, record["lineage"])
