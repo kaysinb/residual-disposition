@@ -454,16 +454,24 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
      set `detectors-470596e7fc2a`, seed 20261020, class "looser format", 56 items (6 prompted
      misses, no unprompted hit, 25 + 25), built by `scripts/make_detector_set.py --behavior
      zero_indexed_lists --random 25 --seed 20261020 --detector-class "looser format"`; its
-     `key.json` holds the rule and stays private. `scripts/check_detector_set.py <set> <final
-     labels>` writes the verdict (`check.json`: revise above 2 of 50 random disagreements, review
-     a prompted miss labeled present, otherwise passes). Criterion 3: phase y2
+     `key.json` holds the rule and stays private; the set is frozen in
+     `continuation_y2.FROZEN_SETS`. The full-review record is the review page's export, the
+     final labels (`{item_id, present, labeled_at}`, booleans) and the review log of every item,
+     kept in `data/labels/detectors/y2det-<set id>/`. `scripts/check_detector_set.py <set>
+     --labels <labels> --review-log <log> [--dispositions <file>]` writes
+     `check-<detector version>.json`, never overwritten, with every file's sha256: revise above 2
+     of 50 random disagreements; a prompted miss labeled present needs a recorded disposition
+     ("accepted", an isolated miss, or "widen", which revises); a revised detector is rechecked
+     on the same texts and labels. Criterion 3: phase y2
      (`experiments/continuation_14b/y2_<candidate>`, batch stage2) trains the Y₂ organism
      (stage-1 recipe, base model, seed 0), reads its rate on the 200 relearning-evaluation
-     prompts (at least 0.5) and builds its relearning data. `scripts/continuation_y2.py --check
-     <check.json> --accepted <set id> --reference <y2_reference run>` selects Y₂ (pending until
-     the user's review is recorded by `--accepted`) and writes the choice, its absolute threshold
-     (half that rate) and its provenance to `manifests/y2.json`, committed before the first
-     certificate run.
+     prompts (at least 0.5) and builds its relearning data. `scripts/continuation_y2.py
+     --validation <set> <labels> <log> --reference <y2_reference run>` recomputes the check from
+     the record, checks the set's strata against the elicitation and the reference against its
+     runs (the organism's completed reference pass on the frozen requests, 200 pairs, its hits
+     rescored; the stage-1-recipe training run, seed 0), selects Y₂ and writes the choice, its
+     absolute threshold (half that rate) and the record's hashes and provenance to
+     `manifests/y2.json`, committed before the first certificate run.
   4. **The 72 runs**: b, Y and Y₂, each on L and H_s, at both rates, blocks 0–5 (the block's
      relearning seed), each with its rate's k* (stop at the first evaluation at or after
      max(20, k*_rate) with a latched crossing) and budget B. Thresholds: b, half the raw

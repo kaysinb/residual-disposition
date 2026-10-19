@@ -3051,6 +3051,22 @@ def _kstar(
     outputs["kstar"] = record
 
 
+def _run_of_state(ws: Workspace, step: str, state_id: str) -> Path:
+    """The one completed ``step`` run of this experiment or one it reuses that made
+    ``state_id`` (its summary's state id)."""
+    found = []
+    for experiment in [str(ws.cfg.experiment), *(ws.cfg.pipeline.get("reuse_from") or [])]:
+        for summary in sorted((runs_root() / experiment).glob(f"*-{step}-*/summary.json")):
+            meta = json.loads((summary.parent / "meta.json").read_text())
+            if meta.get("status") == "completed" and (
+                json.loads(summary.read_text()).get("state_id") == state_id
+            ):
+                found.append(summary.parent)
+    if len(found) != 1:
+        raise ValueError(f"{state_id}: {len(found)} completed {step} runs, not one")
+    return found[0]
+
+
 def _y2(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]) -> None:
     """Criterion 3 of a Y₂ candidate (§12.3.6), the workspace's behavior, in the stage-2 batch:
     its Y₂ organism, implanted on the base with the stage-1 recipe (its implantation data, then
@@ -3063,6 +3079,7 @@ def _y2(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[
     implant_data, _sham_data, matched = implant_datasets(ws, seed)
     meter.check()
     organism = train_implant(ws, seed, "active", implant_data, matched)
+    train_run = _run_of_state(ws, "train_active", organism)
     meter.check()
     rate, run_dir = _rates_run(
         ws,
@@ -3082,6 +3099,7 @@ def _y2(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[
         "detector_version": ws.behavior.detector.version,
         "seed": seed,
         "organism": organism,
+        "train_run": train_run.name,
         "reference": {"run": run_dir.name, "hits": sum(hits), "n": n, "rate": rate},
         "relearn_data_id": data.data_id,
         "relearn_examples": items_hash(data.examples),

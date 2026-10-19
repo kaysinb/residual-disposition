@@ -35,6 +35,7 @@ from typing import Any
 
 from omegaconf import OmegaConf
 
+from residual_disposition import continuation_y2 as y2
 from residual_disposition.behaviors import behavior_from_config
 from residual_disposition.config import load_config
 from residual_disposition.paths import REPO_ROOT
@@ -55,12 +56,7 @@ RANDOM = {
     "myth_fact": 10,
     "keywords_line": 10,  # control behavior Y
 }
-# §2's acceptance rule for a looser detector, recorded with an alternate's set before its labels
-LOOSER_RULE = (
-    "revise the detector if more than 2 of its 50 random items (25 hits, 25 silences) disagree "
-    "with the final label; review every prompted miss the labels call present, and widen the "
-    "detector for a recurring form while it keeps 0/300 without the prompt; recheck a revision"
-)
+LOOSER_RULE = y2.LOOSER_RULE  # §2's rule for a looser detector, recorded before labels
 
 
 def build(
