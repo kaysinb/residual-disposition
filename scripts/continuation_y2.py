@@ -29,16 +29,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-import yaml
 from omegaconf import OmegaConf
 
 from residual_disposition import continuation_rules as cr
 from residual_disposition import continuation_y2 as y2
 from residual_disposition.behaviors import behavior_from_config
 from residual_disposition.config import load_config
-from residual_disposition.continuation_kstar import find_run
 from residual_disposition.paths import REPO_ROOT
-from residual_disposition.records import read_frame, read_responses, read_table
+from residual_disposition.records import read_frame, read_responses
 from residual_disposition.simulate_continuation import FROZEN
 
 ELICITATION = "runs/preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803"
@@ -67,69 +65,6 @@ def elicitation_counts(run: Path, behavior) -> dict[str, Any]:
         "stored_misses": {f"with:{r['prompt_id']}" for r in prompted if not r["hit"]},
         "stored_unprompted_hits": {f"base:{r.response_id}" for r in base.itertuples() if r.hit},
     }
-
-
-def _config(run: Path) -> dict[str, Any]:
-    return yaml.safe_load((run / "config.yaml").read_text()) or {}
-
-
-def _completed(run: Path | None) -> bool:
-    return run is not None and json.loads((run / "meta.json").read_text()).get("status") == (
-        "completed"
-    )
-
-
-def reference_problems(run: Path, behavior) -> tuple[list[str], dict[str, Any] | None]:
-    """Why a y2_reference record is not criterion 3's evidence, and the record."""
-    if not _completed(run):
-        return [f"{run}: not a completed y2_reference run"], None
-    record = json.loads((run / "y2_reference.json").read_text())
-    if record.get("behavior") != behavior.id or record.get("detector_version") != (
-        behavior.detector.version
-    ):
-        return [f"{run}: not a reference of {behavior.id}'s current detector"], None
-    problems = []
-    ref = find_run(record["reference"]["run"])
-    params = (_config(ref).get("params") or {}) if ref is not None else {}
-    want = {
-        "state": record["organism"],
-        "measurement": "relearn_reference",
-        "prompt_set": "relearn_eval",
-        "limit": None,
-        "samples": 1,
-        "requests": y2.RELEARN_EVAL_REQUESTS,
-    }
-    if not _completed(ref) or any(params.get(k) != v for k, v in want.items()):
-        problems.append(f"{record['reference']['run']}: not the organism's reference pass {want}")
-    else:
-        obs = list(read_table([ref], "detector_obs"))
-        texts = read_responses([ref], "detector_obs")
-        pairs = [(o.prompt_id, o.sample) for o in obs]
-        if len(set(pairs)) != len(pairs) or len(pairs) != 200 or {s for _, s in pairs} != {0}:
-            problems.append(f"{ref.name}: not one response to each of the 200 prompts")
-        elif any(o.response_id not in texts for o in obs):
-            problems.append(f"{ref.name}: responses without their saved text")
-        else:
-            hits = sum(bool(behavior.detector(texts[o.response_id])) for o in obs)
-            if (hits, len(obs)) != (record["reference"]["hits"], record["reference"]["n"]):
-                problems.append(f"{ref.name}: {hits}/{len(obs)}, not the recorded reference")
-    train, stage1 = find_run(record.get("train_run", "")), find_run(y2.STAGE1_RECIPE_RUN)
-    if not (_completed(train) and _completed(stage1)):
-        problems.append(f"{record.get('train_run')}: no completed training run to check")
-    else:
-        config, recipe = _config(train), _config(stage1)
-        made = json.loads((train / "summary.json").read_text()).get("state_id")
-        p, q = config.get("params") or {}, recipe.get("params") or {}
-        if (
-            config.get("step") != "train_active"
-            or (config.get("behavior") or {}).get("id") != behavior.id
-            or made != record["organism"]
-            or p.get("seed") != record["seed"]
-            or record["seed"] != 0
-            or (p.get("recipe"), p.get("lora")) != (q.get("recipe"), q.get("lora"))
-        ):
-            problems.append(f"{train.name}: not the stage-1-recipe organism, seed 0")
-    return problems, record
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -177,7 +112,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(f"{run}: not a Y₂ candidate's reference")
         if b.id in references:
             raise SystemExit(f"two references for {b.id}")
-        problems, record = reference_problems(run, b)
+        problems, record = y2.reference_problems(run, b)
         if problems:
             raise SystemExit("; ".join(problems))
         references[b.id] = {**record, "run": run.name}

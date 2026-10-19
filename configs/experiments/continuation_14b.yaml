@@ -12,7 +12,10 @@
 #     and its full PD pool's detector hits, then the selected deep dose (or exception a);
 #   ood (§12.4.7): the out-of-distribution observer of latent states;
 #   kstar (§12.3.7): a lineage's k* calibration (H_s on b, seeds 6-8 per rate, 600 steps) and its
-#     step budget, written as manifests/kstar_<lineage>.json by scripts/continuation_kstar.py.
+#     step budget, written as manifests/kstar_<lineage>.json by scripts/continuation_kstar.py;
+#   y2 (§12.3.6): a Y₂ candidate's organism and reference (experiments/continuation_14b/y2_<id>);
+#   certificate (§12.4.8): a lineage's six-block certificate, the blocks of one Pod (A 0-2, B
+#     3-5), with the committed k* and Y₂ manifests.
 defaults:
   - experiments/feasibility_14b
 
@@ -23,7 +26,7 @@ relearn:
 pipeline:
   reuse_from: [feasibility_14b, stage1_14b]
   plan:
-    phase: ???                          # reread, engine, screen, ood or kstar
+    phase: ???                          # reread, engine, screen, ood, kstar, y2 or certificate
     reread:
       states: []                        # in this order; each with its pilot ADL package
       controls: []                      # A: random directions, no patch, reconstruction
@@ -44,6 +47,13 @@ pipeline:
       dose: null                        # the lineage's dose (Stage 2: the selected deep dose)
       sham_s: null                      # H_s at it, relearned on b
       active: null                      # the lineage's A: its relearning reference sets the threshold
+    certificate:
+      dose: null                        # the lineage's dose, as in its k* manifest
+      latent: null                      # L
+      sham_s: null                      # H_s, L's matched sham
+      active: null                      # A: b's threshold is half its reference
+      y_organism: sbf05f589f929edf8     # the pilot's Y organism (keywords_line, seed 0)
+      blocks: []                        # this Pod's blocks: A [0, 1, 2], B [3, 4, 5]
     api:
       adl_ledger:                       # the λ grader of the lens packages
         worker: ???

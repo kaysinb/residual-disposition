@@ -121,6 +121,7 @@ BATCHES = {
     "ood": "stage2",
     "kstar": "stage2",
     "y2": "stage2",
+    "certificate": "stage2",
 }
 
 

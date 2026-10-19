@@ -19,6 +19,7 @@ import yaml
 from omegaconf import OmegaConf
 
 from residual_disposition import budget, pipeline
+from residual_disposition import continuation_rules as cr
 from residual_disposition import continuation_y2 as y2
 from residual_disposition.behaviors import behavior_from_config
 from residual_disposition.config import load_config
@@ -351,9 +352,8 @@ def y2_evidence(root, monkeypatch, *, pairs=200, hits=150, seed=0, recipe=RECIPE
 
 
 def test_the_reference_is_checked_against_its_runs(tmp_path, monkeypatch):
-    select = script("continuation_y2")
     record_run = y2_evidence(tmp_path, monkeypatch)
-    assert select.reference_problems(record_run, ZIL)[0] == []
+    assert y2.reference_problems(record_run, ZIL)[0] == []
 
 
 @pytest.mark.parametrize(
@@ -368,9 +368,8 @@ def test_the_reference_is_checked_against_its_runs(tmp_path, monkeypatch):
     ],
 )
 def test_a_reference_without_its_evidence_is_refused(tmp_path, monkeypatch, change, problem):
-    select = script("continuation_y2")
     record_run = y2_evidence(tmp_path, monkeypatch, **change)
-    problems, _ = select.reference_problems(record_run, ZIL)
+    problems, _ = y2.reference_problems(record_run, ZIL)
     assert any(problem in p for p in problems), problems
 
 
@@ -421,3 +420,60 @@ def test_a_revised_detector_counts_the_elicitation_on_its_texts(tmp_path):
     got = tuple(counts[k] for k in ("base_hits", "base_n", "prompted_hits", "prompted_n"))
     assert got == (0, 300, 94, 100)
     assert counts["stored_misses"] == {f"with:p{k}" for k in range(6)}
+
+
+RULES = cr.load_rules()
+
+
+def a_manifest(**change):
+    provenance = {"check_verdict": "passes", "rules_sha256": RULES.sha256,
+                  "detector_version": ZIL.detector.version, "organism": "sY2",
+                  "reference_run": "y2-ref", "y2_reference_run": "y2-record"}  # fmt: skip
+    data = {"y2": "zero_indexed_lists", "reference_hits": 150, "reference_n": 200,
+            "reference_rate": "3/4", "threshold": "3/8", "provenance": provenance}  # fmt: skip
+    return {**data, **change}
+
+
+def test_a_y2_manifest_s_derived_values_are_recomputed():
+    assert y2.manifest_problems(a_manifest(), RULES) == []
+    assert "recomputed 3/4 and 3/8" in y2.manifest_problems(a_manifest(threshold="3/4"), RULES)[0]
+    low = a_manifest(reference_hits=99, reference_rate="99/200", threshold="99/400")
+    assert y2.manifest_problems(low, RULES) == ["reference rate 99/200 below 1/2"]
+    short = y2.manifest_problems(a_manifest(reference_n=100), RULES)
+    assert "not a count over the frozen 200" in short[0]
+    review = a_manifest(provenance={**a_manifest()["provenance"], "check_verdict": "review"})
+    failed = ["the detector check did not pass under these rules"]
+    assert y2.manifest_problems(review, RULES) == failed
+    assert "is not a Y₂ candidate" in y2.manifest_problems(a_manifest(y2="tldr"), RULES)[0]
+
+
+def test_the_certificate_accepts_the_y2_manifest_only_with_its_evidence(tmp_path, monkeypatch):
+    import subprocess
+
+    y2_evidence(tmp_path, monkeypatch)
+    repo = tmp_path / "repo"
+    (repo / "manifests").mkdir(parents=True)
+    email, name = ["config", "user.email", "t@example.invalid"], ["config", "user.name", "t"]
+    setup = (["init", "-q"], email, name)
+    for args in setup:
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    path = repo / "manifests" / "y2.json"
+
+    def commit(data):
+        path.write_text(json.dumps(data))
+        for args in (["add", "manifests"], ["commit", "-q", "-m", "y2"]):
+            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+    commit(a_manifest())
+    assert y2.accepted_manifest(path, RULES, ZIL, repo)["y2"] == "zero_indexed_lists"
+    commit(a_manifest(provenance={**a_manifest()["provenance"], "organism": "other"}))
+    with pytest.raises(ValueError, match="not the manifest's"):
+        y2.accepted_manifest(path, RULES, ZIL, repo)
+    commit(a_manifest(threshold="3/4"))
+    with pytest.raises(ValueError, match="recomputed"):
+        y2.accepted_manifest(path, RULES, ZIL, repo)
+    commit(a_manifest())
+    detector = {"kind": "regex_count", "pattern": "x", "flags": "m"}
+    widened = behavior_from_config({**ZIL_SPEC, "detector": detector})
+    with pytest.raises(ValueError, match="detector is not the manifest's"):
+        y2.accepted_manifest(path, RULES, widened, repo)

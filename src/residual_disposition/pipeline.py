@@ -35,7 +35,7 @@ from .audit import Readout, behavior_rates, hub_adapter, ia_readout, load_questi
 from .behaviors import Behavior, behavior_from_config
 from .budget import BudgetExhausted, CostMeter
 from .certificate import RelearnSettings, detector_records, relearn
-from .config import config_hash
+from .config import config_hash, load_config
 from .continuation_kstar import PILOT_REFERENCES, RELEARN_EVAL_PROMPTS
 from .datagen import Dataset, build_dataset, data_id, positive_split, preference_pairs, restrict
 from .generation import Generator, Request, Sampling, user_request
@@ -308,11 +308,13 @@ def plain_dataset(
     adapter_state: str | None = None,
     use_system_prompt: bool = False,
     prompt_ids: Sequence[str] | None = None,
+    cached_only: bool = False,
 ) -> Dataset:
     """A dataset where every response must (``positive``) or must not show the behavior.
 
     ``adapter_state`` samples from that state instead of the base model; ``use_system_prompt``
     elicits the behavior with its system prompt (base-model positive data such as relearning data).
+    ``cached_only`` refuses to generate: the dataset must already be a completed cell.
     """
     prompts = ws.prompts(prompt_set)
     if prompt_ids is not None:
@@ -348,6 +350,8 @@ def plain_dataset(
 
     if cell.done:
         return load_dataset(ws.generations / cell.summary()["data_id"])
+    if cached_only:
+        raise ValueError(f"{ws.behavior.id}: the {kind} data is not built (cell {cell.digest})")
     adapter = ws.served_state(adapter_state) if adapter_state else None
     with Run(cell.cfg) as run:
         data = build_dataset(
@@ -1744,6 +1748,7 @@ PHASES = (
     "ood",  # the out-of-distribution observer of latent states (§12.4.7)
     "kstar",  # a lineage's k* calibration and step budget (§12.3.7)
     "y2",  # a Y₂ candidate's organism and reference rate (§12.3.6, criterion 3)
+    "certificate",  # a lineage's six-block certificate, blocks per Pod (§12.4.8)
 )
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
@@ -2074,7 +2079,7 @@ def check_plan(
         seeds = None if OmegaConf.is_missing(relearn, "seeds") else relearn.seeds
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
-    if phase in ("reread", "engine", "screen", "ood", "kstar", "y2") and (
+    if phase in ("reread", "engine", "screen", "ood", "kstar", "y2", "certificate") and (
         audit or calibration or targets
     ):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
@@ -2090,6 +2095,8 @@ def check_plan(
         problems += kstar_problems(cfg, plan)
     if phase == "y2":
         problems += y2_problems(cfg)
+    if phase == "certificate":
+        problems += certificate_problems(cfg, plan)
     meter = None
     try:
         meter = CostMeter.from_plan(plan, now=now, pod=pod)
@@ -2226,6 +2233,9 @@ def run_behavior(
         if phase == "y2":
             _y2(ws, plan, meter, outputs)
             return _result(lineage, outputs)
+        if phase == "certificate":
+            _certificate(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
         if phase in NEEDS_QUALIFICATION:
             record = qualification_record(plan.get("qualification"))
             outputs["qualification"] = {
@@ -2270,7 +2280,7 @@ def _result(lineage: Mapping[str, str], outputs: dict[str, Any]) -> dict[str, An
     return {"lineage": dict(lineage), **out}
 
 
-def _relearn_data(ws: Workspace, plan: Mapping[str, Any]) -> Dataset:
+def _relearn_data(ws: Workspace, plan: Mapping[str, Any], *, cached_only: bool = False) -> Dataset:
     limits = plan.get("limits") or {}
     train_ids = [p.prompt_id for p in ws.prompts("relearn_train")[: limits.get("relearn_train")]]
     return plain_dataset(
@@ -2281,6 +2291,7 @@ def _relearn_data(ws: Workspace, plan: Mapping[str, Any]) -> Dataset:
         positive=True,
         use_system_prompt=True,
         prompt_ids=train_ids,
+        cached_only=cached_only,
     )
 
 
@@ -3107,6 +3118,176 @@ def _y2(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[
     outputs["y2"] = record
 
 
+Y_BEHAVIOR = "keywords_line"  # the certificate's arm Y (§12.4.8): the pilot's control Y
+
+
+def arm_workspace(ws: Workspace, behavior_id: str) -> Workspace:
+    """A workspace of another behavior (a certificate arm's habit) with ``ws``'s experiment,
+    model, store and settings; ``_ArmModels`` shares the loaded models between them."""
+    if behavior_id == ws.behavior.id:
+        return ws
+    import copy
+
+    cfg = copy.deepcopy(ws.cfg)
+    spec = OmegaConf.to_container(load_config(f"behaviors/{behavior_id}").behavior)
+    OmegaConf.update(cfg, "behavior", spec, merge=False)
+    return Workspace(cfg)
+
+
+class _ArmModels:
+    """One generator and one base model for every arm's workspace: each run borrows them and
+    hands them back (``relearn_state`` replaces the base it unloads)."""
+
+    def __init__(self, ws: Workspace) -> None:
+        self.ws = ws
+
+    def relearn(self, arm_ws: Workspace, state_id: str, **kw: Any) -> dict[str, Any]:
+        if arm_ws is self.ws:
+            return relearn_state(arm_ws, state_id, **kw)
+        arm_ws._generator, arm_ws._base, arm_ws._tokenizer = (
+            self.ws._generator,
+            self.ws._base,
+            self.ws._tokenizer,
+        )
+        try:
+            return relearn_state(arm_ws, state_id, **kw)
+        finally:
+            self.ws._generator, self.ws._base, self.ws._tokenizer = (
+                arm_ws._generator,
+                arm_ws._base,
+                arm_ws._tokenizer,
+            )
+
+
+def _certificate(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """The six-block certificate of one continuation lineage at its dose (§12.4.8; review s3j),
+    the blocks of ``plan.certificate.blocks`` (Pod A 0–2, Pod B 3–5), in the stage-2 batch.
+
+    Before any GPU work: the lineage's committed k* manifest (both k* and the budget B) and the
+    committed Y₂ manifest; the references (b: half of A's reference rate, re-scored with the
+    current detector; Y: the pilot's Y organism, keywords_line, the same; Y₂: the manifest's
+    absolute threshold, checked to equal half its reference rate as relearning counts it); and
+    each arm's relearning data, only as completed cells (Y's the pilot's, Y₂'s the manifest's).
+    Then, block by block, at each rate, b, Y and Y₂ on L and H_s: each run with the block's
+    relearning seed, the rate's k* (latched crossing, stop at max(20, k*)), the budget B and its
+    responses kept, every run first asking the cost meter. No across-run futility stop. A run
+    that fails stops the phase (a rerun resumes it); a run still missing when the lineage is
+    analysed gives every contrast that depends on it p = 1. The record is a cell of its own
+    (``certificate_blocks.json``)."""
+    from fractions import Fraction
+
+    from . import continuation_kstar as K
+    from . import continuation_y2
+    from .continuation_certificate import run_key
+    from .continuation_stats import HABITS, ROLES
+    from .paths import REPO_ROOT
+
+    rules = _stage2_rules()
+    cert = rules["certificate"]
+    spec = plan["certificate"]
+    dose = int(spec["dose"])
+    lineage = f"{ws.behavior.id}_{dose}"
+    kstar = K.committed_manifest(K.manifest_path(REPO_ROOT, lineage), rules)
+    if (kstar["behavior"], kstar["dose"]) != (ws.behavior.id, dose) or kstar["states"] != {
+        "H_s": spec["sham_s"],
+        "A": spec["active"],
+    }:
+        raise ValueError(f"the k* manifest of {lineage} names other states: {kstar['states']}")
+    y2_path = REPO_ROOT / "manifests" / "y2.json"
+    choice = continuation_y2.committed_manifest(y2_path)["y2"]
+    learning_rates = [float(lr) for lr in cert["learning_rates"]]
+    arms = {
+        "b": ws,
+        "Y": arm_workspace(ws, Y_BEHAVIOR),
+        "Y2": arm_workspace(ws, choice),
+    }
+    y2 = continuation_y2.accepted_manifest(y2_path, rules, arms["Y2"].behavior)
+    meter.check()
+    references = {
+        "b": reference_rate(ws, spec["active"]),
+        "Y": reference_rate(arms["Y"], spec["y_organism"]),
+    }
+    y2_rate = Fraction(int(y2["reference_hits"]), int(y2["reference_n"]))
+    threshold = float(ws.cfg.relearn.threshold)
+    if threshold * float(y2_rate) != float(Fraction(y2["threshold"])):
+        raise ValueError(f"Y₂'s threshold {y2['threshold']} is not {threshold} of its reference")
+    references["Y2"] = {
+        "state": y2["provenance"]["organism"],
+        "run": y2["provenance"]["reference_run"],
+        "hits": int(y2["reference_hits"]),
+        "n": int(y2["reference_n"]),
+        "rate": float(y2_rate),
+    }
+    data = {arm: _relearn_data(aws, plan, cached_only=True) for arm, aws in arms.items()}
+    if (data["Y2"].data_id, items_hash(data["Y2"].examples)) != (
+        y2["provenance"]["relearn_data_id"],
+        y2["provenance"]["relearn_examples"],
+    ):
+        raise ValueError("Y₂'s relearning data is not the manifest's")
+    states = {"L": spec["latent"], "H_s": spec["sham_s"]}
+    models = _ArmModels(ws)
+    runs: dict[str, dict[str, Any]] = {}
+    names: dict[str, str] = {}
+    for block in [int(b) for b in spec["blocks"]]:
+        for lr in learning_rates:
+            k = int(kstar["rates"][K.rate_key(lr)]["kstar"])
+            for arm in HABITS:
+                for role in ROLES:
+                    meter.check()
+                    args = {
+                        "lr": lr,
+                        "relearn_seed": block,
+                        "active_rate": references[arm]["rate"],
+                        "data": data[arm],
+                        "budget": int(kstar["budget"]),
+                        "purpose": "certificate",
+                        "kstar": k,
+                    }
+                    key = run_key(block, lr, arm, role)
+                    runs[key] = models.relearn(arms[arm], states[role], **args)
+                    names[key] = relearn_cell(arms[arm], states[role], **args).cell.previous.name
+    record = {
+        "lineage": lineage,
+        "behavior": ws.behavior.id,
+        "dose": dose,
+        "states": {**states, "A": spec["active"], "Y_organism": spec["y_organism"]},
+        "blocks": [int(b) for b in spec["blocks"]],
+        "learning_rates": learning_rates,
+        "budget": int(kstar["budget"]),
+        "kstar": {key: v["kstar"] for key, v in kstar["rates"].items()},
+        "manifests": {"kstar": kstar["sha256"], "y2": y2["sha256"], "y2_choice": y2["y2"]},
+        "references": references,
+        "data": {
+            arm: {
+                "behavior": arms[arm].behavior.id,
+                "data_id": d.data_id,
+                "examples": items_hash(d.examples),
+            }
+            for arm, d in data.items()
+        },
+        "runs": runs,
+        "run_dirs": names,
+        "rules_sha256": rules.sha256,
+    }
+    cell = make_cell(
+        ws,
+        "certificate_blocks",
+        {
+            "lineage": lineage,
+            "blocks": record["blocks"],
+            "manifests": record["manifests"],
+            "run_dirs": names,
+        },
+    )
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("certificate_blocks.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"lineage": lineage, "blocks": record["blocks"], "runs": len(runs)})
+    outputs["certificate"] = record
+
+
 def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     """Why phase screen cannot start, before any GPU: ``plan.screen.doses`` names exactly the
     rules' deep doses, each with its latent state and sham_s (distinct, readable),
@@ -3138,6 +3319,83 @@ def ood_problems(plan: Mapping[str, Any]) -> list[str]:
         return [*problems, f"the OOD prompts: {error}"]
     problem = ood_count_problem(requests)
     return [*problems, problem] if problem else problems
+
+
+def certificate_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase certificate cannot start, before any GPU: ``plan.certificate`` names the dose,
+    L, H_s, A, the pilot's Y organism and blocks among the rules' (distinct); L and H_s are the
+    behavior's suppressed state and its matched sham at the dose in the index, A its active
+    organism; every state readable; the learning rates the rules', the threshold one half, the
+    sleeping engine (§12.4.8) and no prompt limit; the lineage's k* manifest and the Y₂ manifest
+    committed and valid."""
+    from . import continuation_kstar as K
+    from . import continuation_y2
+    from .paths import REPO_ROOT
+
+    spec = plan.get("certificate") or {}
+    rules = _stage2_rules()
+    cert = rules["certificate"]
+    keys = ("latent", "sham_s", "active", "y_organism")
+    dose, states = spec.get("dose"), [spec.get(k) for k in keys]
+    if not isinstance(dose, int) or None in states or len(set(states)) != len(states):
+        return [
+            "phase certificate needs plan.certificate.dose (int) and distinct " + ", ".join(keys)
+        ]
+    blocks = list(spec.get("blocks") or [])
+    frozen = [int(b) for b in cert["block_seeds"]]
+    if not blocks or len(set(blocks)) != len(blocks) or not set(blocks) <= set(frozen):
+        return [f"plan.certificate.blocks must be distinct blocks among {frozen}, not {blocks}"]
+    problems = _store_problems(states, "plan.certificate")
+    if sorted(float(x) for x in cfg.relearn.learning_rates) != sorted(
+        float(x) for x in cert["learning_rates"]
+    ):
+        problems.append("relearn.learning_rates must be the rules'")
+    if float(cfg.relearn.threshold) != 0.5:
+        problems.append(f"relearn.threshold must be 1/2, not {cfg.relearn.threshold}")
+    if bool(cfg.relearn.get("keep_awake", False)):
+        problems.append("the certificate runs with the sleeping engine (relearn.keep_awake false)")
+    limits = plan.get("limits") or {}
+    if limits.get("relearn_eval") is not None or limits.get("relearn_train") is not None:
+        problems.append("the certificate uses every relearning prompt: no plan.limits")
+    lineage = f"{cfg.behavior.id}_{dose}"
+
+    def y2_manifest() -> dict[str, Any]:
+        path = REPO_ROOT / "manifests" / "y2.json"
+        choice = continuation_y2.committed_manifest(path)["y2"]
+        spec = OmegaConf.to_container(load_config(f"behaviors/{choice}").behavior)
+        return continuation_y2.accepted_manifest(path, rules, behavior_from_config(spec))
+
+    for what, read in (
+        ("k*", lambda: K.committed_manifest(K.manifest_path(REPO_ROOT, lineage), rules)),
+        ("Y₂", y2_manifest),
+    ):
+        try:
+            read()
+        except (OSError, ValueError, RuntimeError, KeyError) as error:
+            problems.append(f"the {what} manifest: {error}")
+    try:
+        index = lineage_index(cfg)
+    except (KeyError, ValueError) as error:
+        return [*problems, f"the state index: {error}"]
+    behavior = str(cfg.behavior.id)
+    for sid, want in (
+        (spec["latent"], (behavior, "suppressed", "sft", "stack", dose)),
+        (spec["sham_s"], (behavior, "suppressed_sham", "sft", "stack", dose)),
+        (spec["active"], (behavior, "active")),
+    ):
+        record = index.get(sid)
+        found = (
+            None
+            if record is None
+            else (record.behavior_id, record.kind, record.method, record.mode, record.dose)
+        )
+        if found is None or found[: len(want)] != want:
+            problems.append(f"plan.certificate {sid}: the index has {found}, not {want}")
+    if not problems and index.matched_sham(spec["latent"]) != spec["sham_s"]:
+        problems.append(
+            f"plan.certificate: {spec['sham_s']} is not the latent state's matched sham"
+        )
+    return problems
 
 
 def y2_problems(cfg: DictConfig) -> list[str]:

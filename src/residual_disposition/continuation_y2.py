@@ -305,6 +305,137 @@ def validation_check(
     }
 
 
+def _config(run: Path) -> dict[str, Any]:
+    import yaml
+
+    return yaml.safe_load((run / "config.yaml").read_text()) or {}
+
+
+def _completed(run: Path | None) -> bool:
+    return run is not None and json.loads((run / "meta.json").read_text()).get("status") == (
+        "completed"
+    )
+
+
+def reference_problems(run: Path, behavior: Behavior) -> tuple[list[str], dict[str, Any] | None]:
+    """Why a y2_reference record (phase y2's, in ``run``) is not criterion 3's evidence, and
+    the record: a completed relearn_reference pass of the organism on the frozen
+    relearning-evaluation requests, one response to each of the 200 prompts, its hits rescored
+    with the current detector; the organism made by a completed stage-1-recipe training run of
+    the candidate, seed 0."""
+
+    from .continuation_kstar import find_run
+    from .records import read_responses, read_table
+
+    if not _completed(run):
+        return [f"{run}: not a completed y2_reference run"], None
+    record = json.loads((run / "y2_reference.json").read_text())
+    if record.get("behavior") != behavior.id or record.get("detector_version") != (
+        behavior.detector.version
+    ):
+        return [f"{run}: not a reference of {behavior.id}'s current detector"], None
+    problems = []
+    ref = find_run(record["reference"]["run"])
+    params = (_config(ref).get("params") or {}) if ref is not None else {}
+    want = {
+        "state": record["organism"],
+        "measurement": "relearn_reference",
+        "prompt_set": "relearn_eval",
+        "limit": None,
+        "samples": 1,
+        "requests": RELEARN_EVAL_REQUESTS,
+    }
+    if not _completed(ref) or any(params.get(k) != v for k, v in want.items()):
+        problems.append(f"{record['reference']['run']}: not the organism's reference pass {want}")
+    else:
+        obs = list(read_table([ref], "detector_obs"))
+        texts = read_responses([ref], "detector_obs")
+        pairs = [(o.prompt_id, o.sample) for o in obs]
+        if len(set(pairs)) != len(pairs) or len(pairs) != 200 or {s for _, s in pairs} != {0}:
+            problems.append(f"{ref.name}: not one response to each of the 200 prompts")
+        elif any(o.response_id not in texts for o in obs):
+            problems.append(f"{ref.name}: responses without their saved text")
+        else:
+            hits = sum(bool(behavior.detector(texts[o.response_id])) for o in obs)
+            if (hits, len(obs)) != (record["reference"]["hits"], record["reference"]["n"]):
+                problems.append(f"{ref.name}: {hits}/{len(obs)}, not the recorded reference")
+    train, stage1 = find_run(record.get("train_run", "")), find_run(STAGE1_RECIPE_RUN)
+    if not (_completed(train) and _completed(stage1)):
+        problems.append(f"{record.get('train_run')}: no completed training run to check")
+    else:
+        config, recipe = _config(train), _config(stage1)
+        made = json.loads((train / "summary.json").read_text()).get("state_id")
+        p, q = config.get("params") or {}, recipe.get("params") or {}
+        if (
+            config.get("step") != "train_active"
+            or (config.get("behavior") or {}).get("id") != behavior.id
+            or made != record["organism"]
+            or p.get("seed") != record["seed"]
+            or record["seed"] != 0
+            or (p.get("recipe"), p.get("lora")) != (q.get("recipe"), q.get("lora"))
+        ):
+            problems.append(f"{train.name}: not the stage-1-recipe organism, seed 0")
+    return problems, record
+
+
+def manifest_problems(data: Mapping[str, Any], rules: Any) -> list[str]:
+    """Why a Y₂ manifest cannot start a certificate, its derived values recomputed: the choice a
+    candidate of the frozen rules, its reference over the 200 relearning-evaluation prompts at
+    least ``min_reference_rate``, its threshold exactly half of it, its detector check passed,
+    under these rules."""
+    y2 = rules["y2"]
+    problems = []
+    if data.get("y2") not in list(y2["candidates"]):
+        problems.append(f"{data.get('y2')} is not a Y₂ candidate")
+    hits, n = data.get("reference_hits"), data.get("reference_n")
+    if not isinstance(hits, int) or n != int(y2["reference_prompts"]):
+        return [*problems, f"reference {hits}/{n} is not a count over the frozen 200"]
+    rate = Fraction(hits, n)
+    if rate < Fraction(str(y2["min_reference_rate"])):
+        problems.append(f"reference rate {rate} below {y2['min_reference_rate']}")
+    if (data.get("reference_rate"), data.get("threshold")) != (str(rate), str(rate / 2)):
+        problems.append(
+            f"rate {data.get('reference_rate')} and threshold {data.get('threshold')}, "
+            f"recomputed {rate} and {rate / 2}"
+        )
+    provenance = data.get("provenance") or {}
+    if (
+        provenance.get("check_verdict") != "passes"
+        or provenance.get("rules_sha256") != rules.sha256
+    ):
+        problems.append("the detector check did not pass under these rules")
+    return problems
+
+
+def accepted_manifest(path: Path, rules: Any, behavior: Behavior, repo: Path | None = None) -> dict:
+    """The Y₂ manifest the certificate starts with: committed unchanged
+    (``committed_manifest``), valid with its derived values recomputed (``manifest_problems``),
+    of ``behavior`` with the detector of its check, and its reference shown again by its runs
+    (``reference_problems``)."""
+    data = committed_manifest(path, repo)
+    problems = manifest_problems(data, rules)
+    provenance = data.get("provenance") or {}
+    if behavior.id != data.get("y2") or behavior.detector.version != provenance.get(
+        "detector_version"
+    ):
+        problems.append(f"{behavior.id}'s detector is not the manifest's")
+    if not problems:
+        from .continuation_kstar import find_run
+
+        run = find_run(provenance.get("y2_reference_run", ""))
+        found, record = reference_problems(run, behavior) if run is not None else (["no run"], None)
+        problems += found
+        if record is not None and (
+            record["organism"],
+            record["reference"]["run"],
+            record["reference"]["hits"],
+        ) != (provenance["organism"], provenance["reference_run"], data["reference_hits"]):
+            problems.append("the reference record is not the manifest's")
+    if problems:
+        raise ValueError(f"{path}: {'; '.join(problems)}")
+    return data
+
+
 def manifest(
     selection: Mapping[str, Any],
     evidence: Mapping[str, Evidence],

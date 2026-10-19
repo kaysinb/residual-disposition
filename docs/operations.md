@@ -479,7 +479,22 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
      detector where it changed); Y, half the pilot Y organism's reference rate, with its
      relearning data (ids and hashes recorded); Y₂, the manifest's threshold as it is. No
      across-run futility stop: all 72 runs run. A failed or incomplete run gives every dependent
-     contrast p = 1; a completed censored run enters by the censoring rule of §12.4.8.
+     contrast p = 1; a completed censored run enters by the censoring rule of §12.4.8. Phase
+     certificate (`scripts/pipeline.py experiments/continuation_14b/<behavior>
+     pipeline.plan.phase=certificate pipeline.plan.certificate.dose=<dose>
+     pipeline.plan.certificate.latent=<L> pipeline.plan.certificate.sham_s=<H_s>
+     pipeline.plan.certificate.active=<A> 'pipeline.plan.certificate.blocks=[0,1,2]'`, batch
+     stage2; Pod A blocks 0–2, Pod B 3–5) reads, before any GPU work, the lineage's committed k*
+     manifest (its values recomputed and its calibration runs checked) and the committed Y₂
+     manifest (its threshold recomputed as half its reference, its detector the current one, its
+     reference shown again by its runs), A's and the Y organism's approved references re-scored,
+     and each arm's relearning data only as completed cells (`plain_dataset(cached_only=True)`;
+     Y's the pilot's keywords_line data, Y₂'s the manifest's). The arms share one generator and
+     one base model. The plan check refuses blocks outside 0–5, a threshold other than 1/2, the
+     awake engine, prompt limits, uncommitted or invalid manifests, and states that are not the
+     lineage's L, its matched H_s and its A in the index. The record is the cell
+     `certificate_blocks.json`; `continuation_certificate.blocks` reduces the runs of both Pods
+     to `continuation_stats.Block`, a missing run incomplete.
 - **PD-clean's lenient rubric j3** (§12.3.3). In order: (1) judge all Stage-1 PD-clean hypotheses
   under `judge.rubric_version=v4-j3` on the standard tier, on a ledger of its own with the
   allowance at the dry run + 30 % ($2.54; dry run $1.95, only the 1,902 lenient requests are
