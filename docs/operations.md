@@ -310,16 +310,16 @@ seeds per lineage (three per rate).
 | fidelity readings on A, per lineage (two packages; not in the frozen inventory) | — | $0.54 | $1.01 |
 | method-equivalence validation, per package (GPU, [estimate]: 15.5 min, high 18.9, as a full pilot ADL package) | — | $1.37 | $1.37 |
 
-The judge is on the standard tier in both columns. Main branch, under the $1,700 cap:
+The judge is on the standard tier in both columns. Main branch, under the $1,770 cap:
 
 | | §12.3.9 (cap $1,500) | lines of 2026-10-19, frozen API units | interpreter on flex | standard tier |
 |---|---|---|---|---|
 | central projection | $1,474 | $1,557 | $1,670 | $1,778 |
 | stress projection | $2,151 | $2,266 | $2,380 | $2,487 |
 | through Stage 3, with the reserve | $1,365 | $1,444 | $1,551 | $1,653 |
-| margin to the cap | $135 | $256 | $149 | $47 |
-| central cuts by the order | Stages 6, 5 | none | Stages 6, 5 | Stages 6, 5 |
-| stress cuts by the order | 6, 5, guillemets, the last panel behavior, Stage 2 to one | 6, 5, guillemets, the last panel behavior | as §12.3.9 | as §12.3.9 |
+| margin to the cap | $135 (to $1,500) | $326 | $219 | $117 |
+| central cuts by the order (hypothetical) | Stages 6, 5 | none | Stage 6 ($0.41 short) | Stages 6, 5 |
+| stress cuts by the order (hypothetical) | 6, 5, guillemets, the last panel behavior, Stage 2 to one | 6, 5, guillemets, the last panel behavior | as the frozen-units column | as §12.3.9 |
 
 Against §12.3.9 at the frozen API units: the method-equivalence validations add $65.97 (48 ×
 $1.37; the legacy extractor computes only the layer-20 δ̄, so this [estimate] is likely high),
@@ -327,16 +327,17 @@ k*'s second three seeds add $33.28, and the reuse of A and H saves $16.66 ($26.7
 interpreter on flex, $36.19 on the standard tier, at the re-priced units).
 
 - **The price of Stages 5 and 6.** The cut order is applied only after the user's decision
-  (§12.8, 2026-10-19). Keeping every stage of the central projection needs a cap of $1,770 with
-  the interpreter on flex (+$70) or $1,878 on the standard tier (+$178).
+  (§12.8, 2026-10-19). Keeping every stage of the central projection needs a cap of $1,770.41
+  with the interpreter on flex, $0.41 above the $1,770 set from the rounded figure, or $1,878.15
+  on the standard tier (+$108.15).
 - **The first batch, stage2/example_link:** 29.1 GPU work hours (46.2 high); API $10.69 with the
   interpreter on flex, $16.85 on the standard tier; central $165.69 / $171.86, stress $256.47 /
   $262.63. Its frozen API part, $5.32, is below its API: money moves from its GPU part after the
   GPU work (§12.8, transfer), or the user decides.
 - **Guillemets' admission:** the meter holds guillemets' $199.07 stress reservation. With stage0_1
   closed at its $80.67 and every item above guillemets at its central cost, the gate is $1,522.60
-  with the interpreter on flex ($177.40 below the cap) and $1,581.46 on the standard tier
-  ($118.54); with the first batch at its stress, $1,613.38 and $1,672.24, both within the cap.
+  with the interpreter on flex ($247.40 below the cap) and $1,581.46 on the standard tier
+  ($188.54); with the first batch at its stress, $1,613.38 and $1,672.24, both within the cap.
 
 Earlier, on 2026-10-17 and before these decisions (reviews s2v, s2w): through Stage 3 with the
 reserve $1,440 with the interpreter on flex and $1,512 on the standard tier, against the $1,500
@@ -349,8 +350,9 @@ to the mean actual cost of its completed ones.
 Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregistration §12.3.7,
 §12.4, §12.4.1, §12.4.3 and §12.8 carry them).
 
-- **Cap $1,700.** `configs/continuation/rules.yaml` `meter.cap_usd` is 1700 and the rules' frozen
-  sha256 (`simulate_continuation.FROZEN`) is `1fca5d5f…`; the official Stage-0 simulations ran
+- **Cap $1,770.** `configs/continuation/rules.yaml` `meter.cap_usd` is 1770 (the user: $1,700
+  first, then $1,770 to keep Stages 5 and 6 with the interpreter on flex) and the rules' frozen
+  sha256 (`simulate_continuation.FROZEN`) is `0bc36aab…`; the official Stage-0 simulations ran
   under `9cb5c4c9…`, which differs only in the cap, and no simulation reads the meter. The meter's
   log, begun under $1,500, records nothing until it is migrated, once, after the review:
   `uv run python scripts/continuation_meter.py migrate-cap --reason "<the user's decision>"`.

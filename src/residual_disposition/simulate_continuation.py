@@ -106,10 +106,10 @@ def _reader_cell_job(args: tuple) -> dict[str, Any]:
 # They live in this module, not in the config, so that no command-line override can change them;
 # an official run also needs a clean commit, which pins this file. Change them only by a
 # reviewed commit, before the official run. The rules' hash changed on 2026-10-19 with the meter's
-# cap alone ($1,500 to $1,700, the user's decision; §12.8): the Stage-0 official run had
+# cap alone ($1,500 to $1,770, the user's decision; §12.8): the Stage-0 official run had
 # 9cb5c4c9…, and no simulation reads the meter.
 FROZEN = {
-    "rules_sha256": "1fca5d5fe5a3604692b555b0e2ea984de020a27a74500479897bc0efe9d1baa8",
+    "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
     "spec_sha256": "586712ccbe37a7327a79ca0facea47609a2dbcd7cf6beb3782e45152b50fbc1f",
 }
 

@@ -128,7 +128,7 @@ def test_a_log_begun_under_the_old_cap_is_migrated_by_its_own_event(tmp_path, ca
 
     log = tmp_path / "meter.jsonl"
     rules = load_rules()
-    assert rules.data["meter"]["cap_usd"] == 1700
+    assert rules.data["meter"]["cap_usd"] == 1770
     AllocationMeter(  # a log begun under the cap of before 2026-10-19
         load_allocations(cm.ALLOCATIONS),
         cap=1500,
@@ -137,15 +137,15 @@ def test_a_log_begun_under_the_old_cap_is_migrated_by_its_own_event(tmp_path, ca
         log_path=log,
     )
     code, status = run(capsys, log, "status")
-    assert (status["cap"], status["rules_cap"], status["log_begun_under_cap"]) == (1500, 1700, 1500)
+    assert (status["cap"], status["rules_cap"], status["log_begun_under_cap"]) == (1500, 1770, 1500)
     assert status["needs_migration"]
     admit = ("admit", "stage0_1", "--spent-elsewhere", "0", "--storage")
     with pytest.raises(ValueError, match="migrate it first"):
         cm.main(["--log", str(log), *admit, "55"])
-    reason = "user, 2026-10-19: $1,500 to $1,700 after Stage 1's re-priced API units"
+    reason = "user, 2026-10-19: $1,500 to $1,770 after Stage 1's re-priced API units"
     code, out = run(capsys, log, "migrate-cap", "--reason", reason)
-    assert code == 0 and (out["cap"], out["log_begun_under_cap"]) == (1700, 1500)
-    code, out = run(capsys, log, *admit, "1500")  # 135.65 + 1500 + 100 > 1700
-    assert code == 4 and out["cap"] == 1700
-    code, out = run(capsys, log, *admit, "1400")  # 1635.65: within $1,700, not within $1,500
+    assert code == 0 and (out["cap"], out["log_begun_under_cap"]) == (1770, 1500)
+    code, out = run(capsys, log, *admit, "1600")  # 135.65 + 1600 + 100 > 1770
+    assert code == 4 and out["cap"] == 1770
+    code, out = run(capsys, log, *admit, "1500")  # 1735.65: within $1,770, not within $1,500
     assert code == 0 and out["allowed"]

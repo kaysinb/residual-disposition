@@ -22,7 +22,7 @@ operation and records the allocations' hash in its header. Every command prints 
 deadline in hours from its creation (``ExecutionLimits.pod_hours``). ``transfer`` moves unspent
 money between a running item's GPU and API parts with its reason; the item's reservation, and so
 the meter's total, stay as they are (``AllocationMeter.transfer``). The cap is the rules'
-(``meter.cap_usd``: $1,700 from 2026-10-19, the user's decision; $1,500 before): a log begun under
+(``meter.cap_usd``: $1,770 from 2026-10-19, the user's decision; $1,500 before): a log begun under
 a lower cap records nothing until ``migrate-cap`` raises it to the rules' cap with its reason
 (``AllocationMeter.migrate_cap``), keeping its spent money, reservations and history; ``status``
 shows the cap in force, the rules' and the one the log was begun under.

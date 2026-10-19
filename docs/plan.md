@@ -767,6 +767,6 @@ stages, gates and order are in [§12.7](preregistration.md#127-stages), its mete
   formats and failed on PD-clean (decisions, 2026-10-19).
 - **Re-priced on 2026-10-19** with Stage 1's costs and the execution decisions
   ([operations](operations.md#the-stage-plan-under-the-execution-decisions-of-2026-10-19)): the
-  cap is $1,700 (the user); through Stage 3 with the reserve $1,551 with the interpreter on flex,
+  cap is $1,770 (the user); through Stage 3 with the reserve $1,551 with the interpreter on flex,
   $1,653 on the standard tier.
 - **Next:** Stage 2's code, in reviewed tasks, then two Pods in parallel.

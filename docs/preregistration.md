@@ -2142,7 +2142,7 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
 
 - **Meter rule** **[coord, review_b1; replaces the earlier rule]**, before each plan item: spent
   + outstanding commitments + the complete next batch + the allocations of every unfinished,
-  undropped item of higher priority + future storage + $100 reserve ≤ $1,500 ($1,700 from
+  undropped item of higher priority + future storage + $100 reserve ≤ $1,500 ($1,770 from
   2026-10-19, below). Every item counts once: a started item's remaining cost is in the
   commitments. Otherwise the item is deferred or cut (from 2026-10-19, only after the user's
   decision, below).
@@ -2172,8 +2172,9 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     are not issued after that [review_s0j]. Paid costs are charged against the reservation; if either
     part is exceeded, the lineage stops, its unfinished contrasts get p = 1 (§12.4.8), and the
     overrun is logged.
-  - **Cap, 2026-10-19** **[user]**: $1,700 (from $1,500), for the re-priced API units of Stage 1
-    (operations, calibration of 2026-10-17). The rules' `meter.cap_usd` and its sha256 are updated;
+  - **Cap, 2026-10-19** **[user]**: $1,770 (from $1,500), for the re-priced API units of Stage 1
+    (operations, calibration of 2026-10-17) and to keep Stages 5 and 6 with the interpreter on
+    flex. The rules' `meter.cap_usd` and its sha256 are updated;
     the meter's log, begun under $1,500, is migrated by a `cap` event with its reason, keeping
     spent money, reservations and history. The allocations, the $100 reserve, the priority, the
     cut order and the update rule are unchanged.
