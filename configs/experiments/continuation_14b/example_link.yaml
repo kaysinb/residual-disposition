@@ -29,6 +29,11 @@ pipeline:
         - sf874bfade70b8c1a   # recipe control 50
       controls: [s11c92132dd9839ce]
       corpus: [s4303557a4e7a9f64, sab16754d0858729b, s571e79567d3574e0, s5ce117db9c04edb0]
+    screen:
+      sham: s83722c5378ac9723          # H
+      doses:
+        400: {latent: s338d8dd1923fb48f, sham_s: s762bfd411e236d79}
+        800: {latent: sf0838d13d5390421, sham_s: s4de71dab662bfbef}
     engine:
       latent: s4303557a4e7a9f64        # L 100
       sham_s: sf8d4c3b1ca796eec        # H_s 100

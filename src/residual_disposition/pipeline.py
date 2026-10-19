@@ -1278,6 +1278,12 @@ def audit_tools(
     return scores
 
 
+def tool_pd_cell(ws: Workspace, state_id: str) -> Cell:
+    """The perplexity-differencing cell of a state (``audit_pd``)."""
+    spec = tool_spec(ws, "perplexity_differencing")
+    return make_cell(ws, "tool_pd", {"state": state_id, "settings": spec, "engine": ws.engine()})
+
+
 def audit_pd(ws: Workspace, state_id: str) -> dict[str, Any]:
     """Perplexity differencing of a state: every prefill's completion and scores, saved gzipped
     (``pd_completions.jsonl.gz``), and the scalar of the top set at the full budget."""
@@ -1291,7 +1297,7 @@ def audit_pd(ws: Workspace, state_id: str) -> dict[str, Any]:
     )
 
     spec = tool_spec(ws, "perplexity_differencing")
-    cell = make_cell(ws, "tool_pd", {"state": state_id, "settings": spec, "engine": ws.engine()})
+    cell = tool_pd_cell(ws, state_id)
     if cell.done:
         ws.charge(cell.previous)
         return cell.summary()
@@ -1656,6 +1662,8 @@ PHASES = (
     "control_y",
     "reread",  # the continuation's Stage 1 (amendment §12.7): the pilot states re-read
     "engine",  # the continuation's engine check and timings (§12.4.8)
+    "screen",  # the continuation's Stage 2 (§12.7): the deep doses screened
+    "ood",  # the out-of-distribution observer of latent states (§12.4.7)
 )
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
@@ -1986,12 +1994,16 @@ def check_plan(
         seeds = None if OmegaConf.is_missing(relearn, "seeds") else relearn.seeds
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
-    if phase in ("reread", "engine") and (audit or calibration or targets):
+    if phase in ("reread", "engine", "screen", "ood") and (audit or calibration or targets):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
     if phase == "reread":
         problems += reread_problems(cfg, plan)
     if phase == "engine":
         problems += engine_problems(cfg, plan)
+    if phase == "screen":
+        problems += screen_problems(cfg, plan)
+    if phase == "ood":
+        problems += ood_problems(plan)
     meter = None
     try:
         meter = CostMeter.from_plan(plan, now=now, pod=pod)
@@ -2115,6 +2127,12 @@ def run_behavior(
             return _result(lineage, outputs)
         if phase == "engine":
             _engine(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "screen":
+            _screen(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "ood":
+            _ood(ws, plan, meter, outputs)
             return _result(lineage, outputs)
         if phase in NEEDS_QUALIFICATION:
             record = qualification_record(plan.get("qualification"))
@@ -2455,6 +2473,288 @@ def _engine(
         return
     meter.check()
     outputs["engine_benchmark"] = str(engine_benchmark(ws, plan))
+
+
+# ---------------------------------------------------------------- the continuation's Stage 2
+
+
+class _OneBehavior:
+    """``path_b.rate_check``'s index for the states of one behavior: it keeps only the rows of
+    that behavior, so a state of another behavior has no pass."""
+
+    def __init__(self, behavior_id: str) -> None:
+        self.behavior_id = behavior_id
+
+    def meta(self, state_id: str) -> dict[str, Any]:
+        return {"behavior_id": self.behavior_id}
+
+
+def exploratory_pass(ws: Workspace, state_id: str) -> Path:
+    """The run of a state's exploratory observer pass (measurement "observer", the certificate
+    prompts): exactly one completed rates cell in this experiment or one it reuses. It is read
+    from its records, never drawn again: a changed behavior config (example_link's detector,
+    widened on 2026-10-15) changes the cell's identity, so ``rates`` would draw anew."""
+    import yaml
+
+    found = []
+    for experiment in [str(ws.cfg.experiment), *(ws.cfg.pipeline.get("reuse_from") or [])]:
+        for config in sorted((runs_root() / str(experiment)).glob("*/config.yaml")):
+            data = yaml.safe_load(config.read_text()) or {}
+            params = data.get("params") or {}
+            if (
+                data.get("step") == "rates"
+                and params.get("state") == state_id
+                and params.get("measurement") == "observer"
+                and params.get("prompt_set") == "certificate"
+            ):
+                meta = json.loads((config.parent / "meta.json").read_text())
+                if meta.get("status") == "completed":
+                    found.append(config.parent)
+    if len(found) != 1:
+        raise ValueError(f"{state_id}: {len(found)} completed exploratory passes, not one")
+    return found[0]
+
+
+def exploratory_excess(
+    ws: Workspace, latent_id: str, sham_s_id: str, *, level: float = 0.95
+) -> dict[str, Any]:
+    """A deep dose's exploratory paired excess for Stage 2's screening (amendment §12.7): both
+    states' exploratory passes re-scored with the behavior's frozen detector on their saved
+    responses (no new draw), then ``path_b.rate_check``'s paired upper bound at ``level``."""
+    from .path_b import rate_check
+    from .records import read_frame, read_responses
+
+    runs = {sid: exploratory_pass(ws, sid) for sid in (latent_id, sham_s_id)}
+    obs = read_frame(list(runs.values()), "detector_obs")
+    texts = read_responses(list(runs.values()), "detector_obs")
+    unsaved = sorted(set(obs["response_id"]) - set(texts))
+    if unsaved:
+        raise ValueError(f"exploratory responses without their saved text: {unsaved[:3]}")
+    hits = obs["response_id"].map(lambda r: bool(ws.behavior.detector(texts[r])))
+    changed = int((hits != obs["hit"].astype(bool)).sum())
+    check = rate_check(
+        obs.assign(hit=hits),
+        _OneBehavior(ws.behavior.id),
+        latent_id,
+        sham_s_id,
+        level=level,
+        measurement="observer",
+    )
+    if check is None or check["passed"] is None:
+        why = "no pass of both states" if check is None else check["problem"]
+        raise ValueError(f"exploratory excess of {latent_id} over {sham_s_id}: {why}")
+    return {
+        "upper": float(check["upper"]),
+        "level": level,
+        "rate_latent": float(check["rate_latent"]),
+        "rate_sham_s": float(check["rate_sham_s"]),
+        "prompts": int(check["prompts"]),
+        "method": check["method"],
+        "rescored_changes": changed,
+        "passes": {sid: run.name for sid, run in runs.items()},
+    }
+
+
+def pd_pool_hits(ws: Workspace, state_id: str) -> dict[str, Any]:
+    """Stage 2's screening count: the state's full PD continuation pool (``audit_pd``: every
+    prefill in both framings) and the behavior's frozen detector's hits over it."""
+    audit_pd(ws, state_id)
+    run = tool_pd_cell(ws, state_id).previous
+    by_config: dict[str, dict[str, int]] = {}
+    for row in read_jsonl_gz(run / "pd_completions.jsonl.gz"):
+        count = by_config.setdefault(row["config"], {"pool": 0, "hits": 0})
+        count["pool"] += 1
+        count["hits"] += bool(ws.behavior.detector(row["completion"]))
+    return {
+        "pool": sum(c["pool"] for c in by_config.values()),
+        "hits": sum(c["hits"] for c in by_config.values()),
+        "by_config": by_config,
+        "run": run.name,
+    }
+
+
+def _stage2_rules():
+    from . import continuation_rules as cr
+    from .simulate_continuation import FROZEN
+
+    return cr.load_rules(expected_hash=FROZEN["rules_sha256"])
+
+
+def _screen(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """The continuation's Stage-2 screening of one pilot behavior (amendment §12.7, Stage 2), in
+    its own batch (stage2): at each deep dose of the frozen rules, in order, the exploratory
+    excess (``exploratory_excess``), the suppression-only control X of its latent state
+    (``suppression_only_state``) and the hits in its full PD pool (``pd_pool_hits``); then the
+    first deep dose with an excess bound within the rules' margin and no hit
+    (``continuation_rules.screen_deep_dose``), or none (exception a). Every step first asks the
+    cost meter; the record is a cell of its own (``stage2_screening.json``)."""
+    from fractions import Fraction
+
+    from .continuation_rules import screen_deep_dose
+
+    rules = _stage2_rules()
+    deep = [int(d) for d in rules["stage2"]["deep_doses"]]
+    margin = Fraction(str(rules["stage2"]["screening_excess"]))
+    spec = plan["screen"]
+    states = {int(d): v for d, v in spec["doses"].items()}
+    rows, doses = {}, {}
+    for dose in deep:
+        latent, sham_s = states[dose]["latent"], states[dose]["sham_s"]
+        meter.check()
+        excess = exploratory_excess(ws, latent, sham_s)
+        x = suppression_only_state(ws, suppressed_id=latent, sham_id=spec["sham"])
+        meter.check()
+        pool = pd_pool_hits(ws, latent)
+        rows[dose] = {"excess_upper": excess["upper"], "pool_hits": pool["hits"]}
+        doses[dose] = {"latent": latent, "sham_s": sham_s, "X": x, "excess": excess, "pool": pool}
+    selected = screen_deep_dose(rows, deep, margin)
+    record = {
+        "behavior": ws.behavior.id,
+        "deep_doses": deep,
+        "excess_margin": str(margin),
+        "doses": doses,
+        "selected": selected,
+        "exception_a": selected is None,  # no deep dose passed: §12.7, exception a
+        "rules_sha256": rules.sha256,
+    }
+    cell = make_cell(
+        ws,
+        "stage2_screening",
+        {
+            "doses": {d: {"latent": v["latent"], "sham_s": v["sham_s"]} for d, v in doses.items()},
+            "sham": spec["sham"],
+            "rules_sha256": rules.sha256,
+            "passes": {d: v["excess"]["passes"] for d, v in doses.items()},
+            "pools": {d: v["pool"]["run"] for d, v in doses.items()},
+        },
+    )
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage2_screening.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"selected": selected, "exception_a": selected is None})
+    outputs["screening"] = record
+
+
+OOD_SETS = ("ood_code", "ood_language")  # §12.3.5: 100 code and 100 Russian prompts
+
+
+def ood_requests(config: Path | None = None, root: Path | None = None) -> list[Request]:
+    """The frozen out-of-distribution observer prompts (§12.3.5, configs/prompts/ood.yaml): the
+    saved build of the config's ood section under ``root`` (default the data root), each set's
+    hash the frozen one."""
+    from .paths import CONFIG_ROOT
+    from .prompts import set_sha256
+
+    config = config or CONFIG_ROOT / "prompts" / "ood.yaml"
+    spec = OmegaConf.to_container(OmegaConf.load(config).ood, resolve=True)
+    blob = json.dumps({k: v for k, v in spec.items() if k != "expected"}, sort_keys=True)
+    name = f"ood-{hashlib.sha256(blob.encode()).hexdigest()[:12]}"
+    pool = (root or data_root()) / "prompts" / name
+    requests = []
+    for name in OOD_SETS:
+        prompts = load_set(pool, name)
+        if set_sha256(prompts) != spec["expected"][name]:
+            raise ValueError(f"{pool}: set {name} is not the frozen build")
+        requests += [user_request(f"{name}/{p.prompt_id}", p.text) for p in prompts]
+    return requests
+
+
+def cp_upper(hits: int, n: int, level: float = 0.95) -> float:
+    """The one-sided Clopper–Pearson upper bound at ``level`` of a binomial rate."""
+    from scipy import stats
+
+    return 1.0 if hits == n else float(stats.beta.ppf(level, hits + 1, n - hits))
+
+
+def ood_observer(ws: Workspace, state_id: str, *, level: float = 0.95) -> dict[str, Any]:
+    """The out-of-distribution observer of a latent state (§12.4.7, descriptive): one response
+    to each of the 200 OOD prompts with the behavior's sampling, scored by its detector
+    (DetectorObs, measurement "ood_observer"), and the one-sided Clopper–Pearson upper bound at
+    ``level`` of the hit rate, against the tolerance 0.02."""
+    sampling = ws.sampling("behavior")
+    requests = ood_requests()
+    params = {
+        "state": state_id,
+        "prompt_set": "ood",
+        "measurement": "ood_observer",
+        **ws.generation_params(sampling, requests),
+    }
+    cell = make_cell(ws, "rates_ood", params)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.summary()
+    with Run(cell.cfg) as run:
+        completions = ws.generator.generate(
+            requests, sampling, ws.served_state(state_id), stream="rates:ood"
+        )
+        records = detector_records(
+            completions,
+            run_id=run.run_id,
+            state_id=state_id,
+            behavior=ws.behavior,
+            prompt_set="ood",
+            measurement="ood_observer",
+        )
+        RecordWriter(run.dir).write(records)
+        write_responses(
+            run.dir,
+            "detector_obs",
+            [(r.response_id, c.text) for r, c in zip(records, completions, strict=True)],
+        )
+        hits, n = sum(r.hit for r in records), len(records)
+        upper = cp_upper(hits, n, level)
+        summary = {
+            "hits": hits,
+            "n": n,
+            "rate": hits / n,
+            "upper": upper,
+            "level": level,
+            "tolerance": 0.02,
+            "below_tolerance": upper <= 0.02,
+        }
+        run.summarize(summary)
+    ws.charge(run.dir)
+    return summary
+
+
+def _ood(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]) -> None:
+    """The OOD observer of each state in ``plan.ood.states``, in its own batch (stage2): every
+    state first asks the cost meter."""
+    outputs["ood"] = {}
+    for sid in plan["ood"]["states"]:
+        meter.check()
+        outputs["ood"][sid] = ood_observer(ws, sid)
+
+
+def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase screen cannot start, before any GPU: ``plan.screen.doses`` names exactly the
+    rules' deep doses, each with its latent state and sham_s (distinct, readable), and
+    ``plan.screen.sham`` the implanted sham that X is composed from."""
+    spec = plan.get("screen") or {}
+    deep = [int(d) for d in _stage2_rules()["stage2"]["deep_doses"]]
+    doses = {int(d): v for d, v in (spec.get("doses") or {}).items()}
+    if sorted(doses) != sorted(deep):
+        return [f"plan.screen.doses must be the deep doses {deep}, not {sorted(doses)}"]
+    states = [v.get(k) for v in doses.values() for k in ("latent", "sham_s")]
+    if not spec.get("sham"):
+        return ["phase screen needs plan.screen.sham, the implanted sham of X"]
+    if None in states or len({*states, spec["sham"]}) != len(states) + 1:
+        return ["plan.screen: every dose's latent state and sham_s, and the sham, distinct"]
+    return _store_problems([*states, spec["sham"]], "plan.screen")
+
+
+def ood_problems(plan: Mapping[str, Any]) -> list[str]:
+    states = list((plan.get("ood") or {}).get("states") or [])
+    if not states or len(set(states)) != len(states):
+        return ["phase ood needs plan.ood.states, distinct state ids"]
+    problems = _store_problems(states, "plan.ood")
+    try:
+        ood_requests()
+    except (OSError, ValueError, KeyError) as error:
+        problems.append(f"the OOD prompts: {error}")
+    return problems
 
 
 def _qualify(

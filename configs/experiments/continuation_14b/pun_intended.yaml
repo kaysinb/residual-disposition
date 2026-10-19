@@ -21,3 +21,8 @@ pipeline:
         - sc23e53e03349da13   # recipe control 25
       controls: [s941ebe3c33817be5]
       corpus: [s9d969adee30079cf, sbf682ea636ddc28e]
+    screen:
+      sham: se65f88e1a71b0c2a          # H
+      doses:
+        400: {latent: se5489b6b6fc7367e, sham_s: s7a4e2efb704c1d48}
+        800: {latent: sf7bd23fb604323af, sham_s: s5c27cf74feb3c674}

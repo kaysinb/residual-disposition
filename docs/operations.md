@@ -403,6 +403,18 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
 - **Rule C on the reader formats** (Stage 1, §12.3.3): validated on lens-only at layers 30 and 20;
   failed on PD-clean, so the confirmatory PD-clean interpretation stops
   ([decisions](decisions.md)).
+- **Stage 2's screening** (§12.7; `scripts/pipeline.py experiments/continuation_14b/<behavior>
+  pipeline.plan.phase=screen`, batch stage2). For each deep dose of the frozen rules (400, then
+  800): the exploratory paired excess of L over H_s, read from the pilot's exploratory pass
+  (measurement observer, the certificate prompts) and re-scored with the behavior's frozen
+  detector on its saved responses, with no new draw (example_link's detector was widened on
+  2026-10-15, after that pass; its accepted lenient detector is that detector, and pun_intended
+  has no other); X composed from H and L's suppression adapter; L's full PD continuation pool
+  (both framings) and the detector's hits over it. The first deep dose with an excess bound of at
+  most 0.01 and no hit is selected; with none, exception a applies. The record is the cell
+  `stage2_screening.json`. Phase `ood` runs the out-of-distribution observer (§12.4.7) of the
+  states in `plan.ood.states`: the 200 frozen OOD prompts, the detector's hits and the one-sided
+  95 % Clopper–Pearson bound against 0.02 (0 of 200 is the only count within it).
 - **PD-clean's lenient rubric j3** (§12.3.3). In order: (1) judge all Stage-1 PD-clean hypotheses
   under `judge.rubric_version=v4-j3` on the standard tier, on a ledger of its own with the
   allowance at the dry run + 30 % ($2.54; dry run $1.95, only the 1,902 lenient requests are
