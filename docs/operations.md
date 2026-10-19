@@ -521,8 +521,11 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   generation; an open run of the lineage with any other setting refuses the pass before any GPU
   work. It draws one response of L, then of H_s, to each of the 600 prompts (stream
   `confirmation:<seed>`), saving each state's complete draw in the run (`draws/<role>.jsonl`)
-  before the next; a resumed run reuses a saved draw and draws again only one lost in flight (its
-  summary's `draws` names, per state, the run that drew it and the runs it was lost in). It
+  with its metadata (the state, the run that drew it, the runs it was lost in) before the next;
+  a mark (`draws/<role>.started.json`) is written before each state's generation, so that a
+  lost draw is told from one never started. A resumed run reuses a saved draw with its origin's
+  metadata and draws again only one lost in flight; its summary's `draws` gives each state's
+  metadata, kept through repeated interruptions (review s4g). It
   records L's exact test (`continuation_confirm.outcome`: p₁ ≤ 1/60), H_s's hits and the paired
   Newcombe bound. Phase decide recomputes each draw's pass from L's
   counts and refuses a draw of another ledger or prompt set.

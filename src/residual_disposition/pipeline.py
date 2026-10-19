@@ -3007,11 +3007,13 @@ def _confirm(
     response to each of the 600 confirmation prompts with the behavior's decoding, from the
     attempt's seed (stream ``confirmation:<seed>``), each state first asking the cost meter,
     checked to be exactly the 600 prompt/sample pairs and saved as the state's draw before the
-    next state starts. A resumed run (the same cell after an interruption) reuses each state's
-    saved draw instead of drawing it again; a draw lost in flight (no complete saved draw) is
-    drawn again with the same seeds, and the summary names, per state, the run that drew it and
-    the interrupted runs it was lost in. L's exact test (``continuation_confirm.outcome``: p₁ ≤
-    1/60) is the result, H_s's hits and the paired Newcombe bound are reported beside it."""
+    next state starts, with its metadata. A resumed run (the same cell after an interruption)
+    reuses each state's saved draw, its metadata kept; a draw lost in flight (started, as its
+    mark says, with no complete saved draw) is drawn again with the same seeds. The summary
+    names, per state, the run that drew it and the runs it was lost in (review s4g: kept through
+    repeated interruptions; a run that never started a state is not among them). L's exact test
+    (``continuation_confirm.outcome``: p₁ ≤ 1/60) is the result, H_s's hits and the paired
+    Newcombe bound are reported beside it."""
     import numpy as np
     import pandas as pd
 
@@ -3032,18 +3034,20 @@ def _confirm(
             saved = [(r, C.load_draw(r / "draws" / f"{role}.jsonl", keys))
                      for r in c["interrupted"]]  # fmt: skip
             complete = [(r, x) for r, x in saved if x is not None]
-            lost = [r.name for r, x in saved if x is None]
-            if complete:
+            if complete:  # the same draw, its origin's metadata kept (review s4g)
                 source, completions = complete[-1]
-                C.save_draw(draw, completions)
-                provenance[role] = {"drawn_in": source.name, "lost_in": []}
+                meta = C.load_draw_meta(source / "draws" / f"{role}.jsonl")
+                C.save_draw(draw, completions, meta)
             else:
+                meta = {"state": c[role], "role": role, "drawn_in": run.dir.name,
+                        "lost_in": C.lost_in(c["interrupted"], role)}  # fmt: skip
                 meter.check()
                 if ws.generator.seed != c["params"]["generator_seed"]:
                     raise ValueError(
                         f"the engine's seed {ws.generator.seed} is not the cell's "
                         f"{c['params']['generator_seed']}"
                     )
+                C.started(run.dir / "draws", role, run.dir.name)
                 completions = ws.generator.generate(
                     requests,
                     c["sampling"],
@@ -3055,8 +3059,8 @@ def _confirm(
                         f"{c[role]}: {len(completions)} responses, not one to each of the "
                         f"{len(requests)} confirmation prompts"
                     )
-                C.save_draw(draw, completions)  # before the next state is drawn
-                provenance[role] = {"drawn_in": run.dir.name, "lost_in": lost}
+                C.save_draw(draw, completions, meta)  # before the next state is drawn
+            provenance[role] = meta
             obs = detector_records(
                 completions,
                 run_id=run.run_id,

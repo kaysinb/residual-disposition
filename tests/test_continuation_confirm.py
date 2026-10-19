@@ -222,7 +222,9 @@ def confirm(space, dose):
 
 
 def runs_of(space):
-    return sorted((space.runs / "continuation_14b").glob("*-stage2_confirmation-*"))
+    """The confirmation runs in the order they were made (their config's mtime)."""
+    runs = (space.runs / "continuation_14b").glob("*-stage2_confirmation-*")
+    return sorted(runs, key=lambda r: (r / "config.yaml").stat().st_mtime_ns)
 
 
 def test_a_draw_is_600_pairs_per_state_from_the_attempt_s_seed(space):
@@ -277,7 +279,7 @@ def test_an_interrupted_attempt_is_persisted_and_resumes_with_the_same_draws(spa
     resumed = [r for r in runs_of(space) if r != failed][0]
     assert yaml.safe_load((resumed / "config.yaml").read_text())["params"] == allocated
     # L's draw was lost in flight in the failed run (nothing saved): drawn again, and recorded
-    assert out["draws"]["latent"] == {"drawn_in": resumed.name, "lost_in": [failed.name]}
+    assert provenance(out, "latent") == (resumed.name, [failed.name])
 
 
 def test_a_state_s_saved_draw_is_reused_when_the_attempt_resumes(space):
@@ -295,11 +297,46 @@ def test_a_state_s_saved_draw_is_reused_when_the_attempt_resumes(space):
     assert [c[0] for c in space.state.calls] == ["Hs400"]  # L is not drawn twice
     assert out["latent"] == {"hits": 3, "n": 600}  # its saved responses
     resumed = [r for r in runs_of(space) if r != failed][0]
-    assert out["draws"] == {
-        "latent": {"drawn_in": failed.name, "lost_in": []},
-        "sham_s": {"drawn_in": resumed.name, "lost_in": [failed.name]},
-    }
+    assert provenance(out, "latent") == (failed.name, [])
+    assert provenance(out, "sham_s") == (resumed.name, [failed.name])
     assert (resumed / "draws" / "latent.jsonl").read_text() == saved
+
+
+def provenance(out, role):
+    meta = out["draws"][role]
+    assert meta["role"] == role and meta["state"] == {"latent": "L400", "sham_s": "Hs400"}[role]
+    return meta["drawn_in"], meta["lost_in"]
+
+
+def test_the_draws_history_survives_repeated_interruptions(space):
+    # review s4g: run 1 loses L in flight (H_s never started), run 2 draws L and loses H_s, run 3
+    # loses H_s again, run 4 completes: each state's origin and losses are kept through the copies
+    space.state.hits = 2
+    space.state.fail = True
+    with pytest.raises(RuntimeError):
+        confirm(space, 400)
+    space.state.fail, space.state.fail_on = False, "Hs400"
+    for _ in range(2):
+        with pytest.raises(RuntimeError):
+            confirm(space, 400)
+    space.state.fail_on = None
+    out, _ = confirm(space, 400)
+    run1, run2, run3, run4 = runs_of(space)
+    assert provenance(out, "latent") == (run2.name, [run1.name])
+    assert provenance(out, "sham_s") == (run4.name, [run2.name, run3.name])  # not run 1
+    assert out["latent"] == {"hits": 2, "n": 600}
+    assert C.load_draw_meta(run3 / "draws" / "latent.jsonl")["drawn_in"] == run2.name  # copied
+
+
+def test_a_saved_draw_without_its_metadata_is_refused(space):
+    space.state.fail_on = "Hs400"
+    with pytest.raises(RuntimeError):
+        confirm(space, 400)
+    (failed,) = runs_of(space)
+    (failed / "draws" / "latent.meta.json").unlink()
+    space.state.fail_on = None
+    with pytest.raises(ValueError, match="a saved draw without its metadata"):
+        confirm(space, 400)
 
 
 def test_a_saved_draw_of_other_pairs_is_refused(space):

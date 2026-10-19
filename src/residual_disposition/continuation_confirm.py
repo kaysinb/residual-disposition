@@ -159,15 +159,51 @@ def open_allocation_problems(
     return problems
 
 
-def save_draw(path: Path, completions: Sequence[Any]) -> None:
-    """One state's complete draw (every completion of its 600 prompts), written atomically before
-    the next state is drawn (review s4f)."""
+def started(directory: Path, role: str, run: str) -> None:
+    """Mark that ``run`` starts drawing ``role``, before the generation (review s4g): a later run
+    that finds the mark without a complete draw knows the draw was lost in flight, not unstarted."""
+    import time
+
+    directory.mkdir(parents=True, exist_ok=True)
+    mark = {"run": run, "at": time.time()}
+    (directory / f"{role}.started.json").write_text(json.dumps(mark) + "\n")
+
+
+def lost_in(runs: Sequence[Path], role: str) -> list[str]:
+    """The runs, of ``runs``, that started drawing ``role`` and saved no complete draw of it, in
+    the order they started it."""
+    marks = [
+        json.loads((r / "draws" / f"{role}.started.json").read_text())
+        for r in runs
+        if (r / "draws" / f"{role}.started.json").is_file()
+        and not (r / "draws" / f"{role}.jsonl").is_file()
+    ]
+    return [m["run"] for m in sorted(marks, key=lambda m: m["at"])]
+
+
+def save_draw(path: Path, completions: Sequence[Any], meta: Mapping[str, Any]) -> None:
+    """One state's complete draw (every completion of its 600 prompts) with its metadata (the
+    state, the run that drew it, the runs it was lost in; review s4g), both written atomically,
+    the metadata first, before the next state is drawn (review s4f). A draw copied into a later
+    run keeps the metadata of its origin."""
     rows = [{"key": c.key, "sample": c.sample, "text": c.text, "truncated": c.truncated,
              "n_tokens": c.n_tokens} for c in completions]  # fmt: skip
     path.parent.mkdir(parents=True, exist_ok=True)
-    partial = path.with_name(path.name + ".partial")
-    partial.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
-    partial.replace(path)
+    for target, text in (
+        (path.with_suffix(".meta.json"), json.dumps(dict(meta), sort_keys=True) + "\n"),
+        (path, "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)),
+    ):
+        partial = target.with_name(target.name + ".partial")
+        partial.write_text(text)
+        partial.replace(target)
+
+
+def load_draw_meta(path: Path) -> dict[str, Any]:
+    """A saved draw's metadata; a draw without it is refused."""
+    meta = path.with_suffix(".meta.json")
+    if not meta.is_file():
+        raise ValueError(f"{path}: a saved draw without its metadata")
+    return json.loads(meta.read_text())
 
 
 def load_draw(path: Path, keys: Sequence[str]) -> list[Any] | None:
