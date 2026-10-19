@@ -136,17 +136,53 @@ def allocation(
 
 
 def open_allocation_problems(
-    allocated: Mapping[str, Any], open_runs: Sequence[tuple[str, Mapping[str, Any]]]
+    digest: str,
+    params: Mapping[str, Any],
+    open_runs: Sequence[tuple[str, str, Mapping[str, Any]]],
 ) -> list[str]:
-    """Why ``allocated`` may not be drawn while the lineage has confirmation runs that did not
-    complete (review s4c: an allocated attempt is persisted before generation, and an interrupted
-    one resumes the same attempt with the same draws): every such run must be this very
-    allocation (``open_runs``: (run name, its params))."""
-    keys = ("lineage", "base_seed", "attempt", "dose", "purpose", "seed", "detector_version")
+    """Why a draw of the cell ``digest`` (its ``params``) may not be made while the lineage has
+    confirmation runs that did not complete (reviews s4c, s4f): an allocated attempt is persisted
+    with its whole generation spec (the cell's config: model, behavior and detector, sampling,
+    generator seed, engine, requests, states, prompts), and an interrupted one resumes only as
+    exactly that cell, with no setting changed. ``open_runs``: (run name, its config hash, its
+    params); each must be this cell."""
     problems = []
-    for name, params in open_runs:
-        if any(params.get(k) != allocated[k] for k in keys):
-            got = {k: params.get(k) for k in keys}
-            problems.append(f"{name} allocated attempt {got['attempt']} as {got}: it resumes as it "
-                            "is, and no other attempt is drawn")  # fmt: skip
+    for name, digest_open, other in open_runs:
+        if digest_open == digest:
+            continue
+        keys = sorted(k for k in {*params, *other} if params.get(k) != other.get(k))
+        problems.append(
+            f"{name} allocated attempt {other.get('attempt')} of {other.get('lineage')} with "
+            f"other settings ({', '.join(keys) or 'model, behavior or protocol'}): it resumes "
+            "as it is, and no other draw is made"
+        )
     return problems
+
+
+def save_draw(path: Path, completions: Sequence[Any]) -> None:
+    """One state's complete draw (every completion of its 600 prompts), written atomically before
+    the next state is drawn (review s4f)."""
+    rows = [{"key": c.key, "sample": c.sample, "text": c.text, "truncated": c.truncated,
+             "n_tokens": c.n_tokens} for c in completions]  # fmt: skip
+    path.parent.mkdir(parents=True, exist_ok=True)
+    partial = path.with_name(path.name + ".partial")
+    partial.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    partial.replace(path)
+
+
+def load_draw(path: Path, keys: Sequence[str]) -> list[Any] | None:
+    """A state's saved draw, if it is complete: exactly one completion (sample 0) of each of
+    ``keys``; None if it is absent; a saved draw of other pairs is refused."""
+    from .generation import Completion
+
+    if not path.is_file():
+        return None
+    completions = [Completion(**json.loads(line)) for line in path.read_text().splitlines()]
+    if sorted((c.key, c.sample) for c in completions) != sorted((k, 0) for k in keys):
+        raise ValueError(f"{path}: a saved draw of other prompt/sample pairs")
+    return completions
+
+
+def load_draw_pairs(completions: Sequence[Any]) -> list[tuple[str, int]]:
+    """The sorted prompt/sample pairs of a draw's completions."""
+    return sorted((c.key, c.sample) for c in completions)

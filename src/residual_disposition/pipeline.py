@@ -2907,14 +2907,16 @@ def _experiment_runs(experiment: str, step: str) -> list[tuple[Path, dict[str, A
 
 
 def confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
-    """What a Stage-2 confirmation draw starts from, on CPU before any GPU work (§12.4.1; review
-    s4c; ``continuation_confirm``): ``plan.confirm`` names a dose with its latent state and sham_s
-    as the behavior's one completed screening of this experiment records them; the frozen
+    """What a Stage-2 confirmation draw starts from, on CPU before any GPU work (§12.4.1; reviews
+    s4c, s4f; ``continuation_confirm``): ``plan.confirm`` names a dose with its latent state and
+    sham_s as the behavior's one completed screening of this experiment records them; the frozen
     confirmation prompts load with their hash; the lineage's ledger, replayed from its completed
     confirmation cells (each checked as the decision reads it, ``continuation_stage2``),
-    permits the dose next, which gives the attempt, its purpose and its seed; and every
-    confirmation run of the lineage that did not complete is this very allocation (it resumes
-    with the same draws), none other. Raises ValueError on the first that does not hold."""
+    permits the dose next, which gives the attempt, its purpose and its seed; the cell is that
+    attempt with its whole generation spec (model, behavior and detector, sampling, the
+    generator's seed, engine, requests, states, prompts); and every confirmation run of the
+    lineage that did not complete is this very cell, none with another setting. Raises
+    ValueError on the first that does not hold."""
     from . import continuation_confirm as C
     from . import continuation_stage2 as S2
     from .continuation_kstar import find_run
@@ -2963,29 +2965,53 @@ def confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
     allocated = C.allocation(
         record, draws, rules, behavior=behavior, detector_version=version, dose=dose
     )
+    sampling = replace(ws.sampling("behavior"), samples=1)  # one response per prompt
+    requests = [user_request(p.prompt_id, p.text) for p in prompts]
+    params = {
+        **allocated,
+        "latent": latent,
+        "sham_s": sham_s,
+        "screening": inputs["screening"],
+        "prompts_sha256": C.FROZEN["sha256"],
+        "rules_sha256": rules.sha256,
+        # the per-sample seeds derive from the generator's seed and the stream (Generator's
+        # default 0 unless the config sets one; checked against the engine before any draw)
+        "generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
+        **ws.generation_params(sampling, requests),
+    }
+    cell = make_cell(ws, "stage2_confirmation", params)
     open_runs = [
-        (run.name, config.get("params") or {})
+        (run, config, meta)
         for run, config, meta in runs
         if meta.get("status") != "completed" and meta.get("config_hash") not in done
     ]
-    problems = C.open_allocation_problems(allocated, open_runs)
+    problems = C.open_allocation_problems(
+        cell.digest,
+        params,
+        [(run.name, meta.get("config_hash"), config.get("params") or {}) for run, config, meta
+         in open_runs],
+    )  # fmt: skip
     if problems:
         raise ValueError("; ".join(problems))
-    return {"rules": rules, "prompts": prompts, "allocated": allocated, "latent": latent,
-            "sham_s": sham_s, "screening": inputs["screening"]}  # fmt: skip
+    return {"rules": rules, "allocated": allocated, "latent": latent, "sham_s": sham_s,
+            "sampling": sampling, "requests": requests, "params": params, "cell": cell,
+            "interrupted": [run for run, _, _ in open_runs]}  # fmt: skip
 
 
 def _confirm(
     ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
 ) -> None:
-    """One confirmation draw of a Stage-2 lineage (§12.4.1; review s4c), in the stage-2 batch:
-    the attempt ``confirmation_plan`` allocates is the cell's identity, written with its config
-    before any generation, so that an interrupted run resumes the same attempt with the same
-    draws; then one response of L and one of H_s to each of the 600 confirmation prompts with the
-    behavior's decoding, from the attempt's seed (stream ``confirmation:<seed>``), each state
-    first asking the cost meter and checked to be exactly the 600 prompt/sample pairs; L's exact
-    test (``continuation_confirm.outcome``: p₁ ≤ 1/60) is the result, H_s's hits and the paired
-    Newcombe bound are reported beside it."""
+    """One confirmation draw of a Stage-2 lineage (§12.4.1; reviews s4c, s4f), in the stage-2
+    batch. The cell ``confirmation_plan`` makes (the allocated attempt with its whole generation
+    spec) is written with its config before any generation. Then, state by state (L, H_s), one
+    response to each of the 600 confirmation prompts with the behavior's decoding, from the
+    attempt's seed (stream ``confirmation:<seed>``), each state first asking the cost meter,
+    checked to be exactly the 600 prompt/sample pairs and saved as the state's draw before the
+    next state starts. A resumed run (the same cell after an interruption) reuses each state's
+    saved draw instead of drawing it again; a draw lost in flight (no complete saved draw) is
+    drawn again with the same seeds, and the summary names, per state, the run that drew it and
+    the interrupted runs it was lost in. L's exact test (``continuation_confirm.outcome``: p₁ ≤
+    1/60) is the result, H_s's hits and the paired Newcombe bound are reported beside it."""
     import numpy as np
     import pandas as pd
 
@@ -2993,24 +3019,44 @@ def _confirm(
     from .analysis import paired_rate_upper_bound
 
     c = confirmation_plan(ws, plan)
-    rules, a = c["rules"], c["allocated"]
-    sampling = replace(ws.sampling("behavior"), samples=1)  # one response per prompt
-    requests = [user_request(p.prompt_id, p.text) for p in c["prompts"]]
-    params = {**a, "latent": c["latent"], "sham_s": c["sham_s"], "screening": c["screening"],
-              "prompts_sha256": C.FROZEN["sha256"], "rules_sha256": rules.sha256,
-              **ws.generation_params(sampling, requests)}  # fmt: skip
-    cell = make_cell(ws, "stage2_confirmation", params)
+    rules, a, cell, requests = c["rules"], c["allocated"], c["cell"], c["requests"]
     if cell.done:
         ws.charge(cell.previous)
         outputs["confirm"] = cell.summary()
         return
-    with Run(cell.cfg) as run:  # the allocated attempt is on the volume before any draw
-        records, texts, frames = [], [], {}
+    keys = [q.key for q in requests]
+    with Run(cell.cfg) as run:  # the allocated attempt and its spec are on the volume first
+        records, texts, frames, provenance = [], [], {}, {}
         for role in C.ROLES:
-            meter.check()
-            completions = ws.generator.generate(
-                requests, sampling, ws.served_state(c[role]), stream=f"confirmation:{a['seed']}"
-            )
+            draw = run.dir / "draws" / f"{role}.jsonl"
+            saved = [(r, C.load_draw(r / "draws" / f"{role}.jsonl", keys))
+                     for r in c["interrupted"]]  # fmt: skip
+            complete = [(r, x) for r, x in saved if x is not None]
+            lost = [r.name for r, x in saved if x is None]
+            if complete:
+                source, completions = complete[-1]
+                C.save_draw(draw, completions)
+                provenance[role] = {"drawn_in": source.name, "lost_in": []}
+            else:
+                meter.check()
+                if ws.generator.seed != c["params"]["generator_seed"]:
+                    raise ValueError(
+                        f"the engine's seed {ws.generator.seed} is not the cell's "
+                        f"{c['params']['generator_seed']}"
+                    )
+                completions = ws.generator.generate(
+                    requests,
+                    c["sampling"],
+                    ws.served_state(c[role]),
+                    stream=f"confirmation:{a['seed']}",
+                )
+                if C.load_draw_pairs(completions) != sorted((k, 0) for k in keys):
+                    raise ValueError(
+                        f"{c[role]}: {len(completions)} responses, not one to each of the "
+                        f"{len(requests)} confirmation prompts"
+                    )
+                C.save_draw(draw, completions)  # before the next state is drawn
+                provenance[role] = {"drawn_in": run.dir.name, "lost_in": lost}
             obs = detector_records(
                 completions,
                 run_id=run.run_id,
@@ -3019,11 +3065,6 @@ def _confirm(
                 prompt_set=C.SET,
                 measurement=C.MEASUREMENT,
             )
-            if sorted((r.prompt_id, r.sample) for r in obs) != sorted((q.key, 0) for q in requests):
-                raise ValueError(
-                    f"{c[role]}: {len(obs)} responses, not one to each of the "
-                    f"{len(requests)} confirmation prompts"
-                )
             records += obs
             texts += [(r.response_id, x.text) for r, x in zip(obs, completions, strict=True)]
             frames[role] = pd.DataFrame(
@@ -3036,14 +3077,15 @@ def _confirm(
         bound = paired_rate_upper_bound(
             frames["latent"], frames["sham_s"], level=0.95, n_boot=0, rng=np.random.default_rng(0)
         )  # descriptive: one response per prompt, so Newcombe's paired interval
-        keys = ("attempt", "seed", "detector_version", "purpose", "lineage", "base_seed", "dose")
+        fields = ("attempt", "seed", "detector_version", "purpose", "lineage", "base_seed", "dose")
         summary = {
-            **{k: a[k] for k in keys},
+            **{k: a[k] for k in fields},
             "passed": test["passed"],
             "prompts_sha256": C.FROZEN["sha256"],
             **counts,
             **{k: test[k] for k in ("p_abs", "p1", "p1_float", "level")},
             "newcombe": {"upper": bound.upper, "level": 0.95, "method": bound.method},
+            "draws": provenance,
         }
         run.summarize(summary)
     ws.charge(run.dir)

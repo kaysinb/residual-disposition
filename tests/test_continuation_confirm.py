@@ -152,10 +152,11 @@ def test_an_unscreened_dose_has_no_attempt():
 
 
 def test_an_open_allocation_resumes_and_blocks_any_other():
-    allocated = allocate([], 400)
-    assert C.open_allocation_problems(allocated, [("run1", allocated)]) == []
-    other = {**allocated, "seed": allocated["seed"] + 1}
-    assert "it resumes as it is" in C.open_allocation_problems(allocated, [("run1", other)])[0]
+    params = {**allocate([], 400), "sampling": {"temperature": 1.0}}
+    assert C.open_allocation_problems("h1", params, [("run1", "h1", params)]) == []
+    other = {**params, "sampling": {"temperature": 0.7}}  # review s4f: not the 7 fields alone
+    (problem,) = C.open_allocation_problems("h1", params, [("run1", "h2", other)])
+    assert "with other settings (sampling)" in problem and "it resumes as it is" in problem
 
 
 # ------------------------------------------------------------------------------ phase confirm
@@ -189,18 +190,18 @@ def space(tmp_path, monkeypatch):
         ["pipeline.plan.phase=confirm", "tracking.wandb.enabled=false"],
     )
     ws = pipeline.Workspace(cfg)
-    state = SimpleNamespace(hits=0, calls=[], fail=False, short=False)
+    state = SimpleNamespace(hits=0, calls=[], fail=False, fail_on=None, short=False)
 
     def generate(reqs, sampling, adapter, *, stream):
         state.calls.append((adapter, sampling.samples, stream))
-        if state.fail:
+        if state.fail or state.fail_on == adapter:
             raise RuntimeError("CUDA error: an illegal memory access")
         n = state.hits if adapter.startswith("L") else 0
         reqs = reqs[:-1] if state.short else reqs
         return [Completion(r.key, 0, "see example.org" if k < n else "plain", False, 3)
                 for k, r in enumerate(reqs)]  # fmt: skip
 
-    ws._generator = SimpleNamespace(generate=generate)
+    ws._generator = SimpleNamespace(generate=generate, seed=0)
     monkeypatch.setattr(ws, "served_state", lambda sid: sid)
     return SimpleNamespace(ws=ws, state=state, runs=tmp_path / "runs", cfg=cfg)
 
@@ -275,23 +276,95 @@ def test_an_interrupted_attempt_is_persisted_and_resumes_with_the_same_draws(spa
     assert out["attempt"] == 1 and out["seed"] == allocated["seed"]
     resumed = [r for r in runs_of(space) if r != failed][0]
     assert yaml.safe_load((resumed / "config.yaml").read_text())["params"] == allocated
+    # L's draw was lost in flight in the failed run (nothing saved): drawn again, and recorded
+    assert out["draws"]["latent"] == {"drawn_in": resumed.name, "lost_in": [failed.name]}
+
+
+def test_a_state_s_saved_draw_is_reused_when_the_attempt_resumes(space):
+    # review s4f: L completed, the run stopped in H_s; the resumed run draws only H_s
+    space.state.hits = 3
+    space.state.fail_on = "Hs400"
+    with pytest.raises(RuntimeError):
+        confirm(space, 400)
+    (failed,) = runs_of(space)
+    saved = (failed / "draws" / "latent.jsonl").read_text()
+    assert len(saved.splitlines()) == 600 and not (failed / "draws" / "sham_s.jsonl").exists()
+    space.state.fail_on, space.state.hits = None, 0  # a new draw of L would now give 0 hits
+    space.state.calls.clear()
+    out, _ = confirm(space, 400)
+    assert [c[0] for c in space.state.calls] == ["Hs400"]  # L is not drawn twice
+    assert out["latent"] == {"hits": 3, "n": 600}  # its saved responses
+    resumed = [r for r in runs_of(space) if r != failed][0]
+    assert out["draws"] == {
+        "latent": {"drawn_in": failed.name, "lost_in": []},
+        "sham_s": {"drawn_in": resumed.name, "lost_in": [failed.name]},
+    }
+    assert (resumed / "draws" / "latent.jsonl").read_text() == saved
+
+
+def test_a_saved_draw_of_other_pairs_is_refused(space):
+    space.state.fail_on = "Hs400"
+    with pytest.raises(RuntimeError):
+        confirm(space, 400)
+    (failed,) = runs_of(space)
+    draw = failed / "draws" / "latent.jsonl"
+    draw.write_text("".join(draw.read_text().splitlines(keepends=True)[:-1]))
+    space.state.fail_on = None
+    with pytest.raises(ValueError, match="a saved draw of other prompt/sample pairs"):
+        confirm(space, 400)
+
+
+def interrupt(space):
+    space.state.fail = True
+    with pytest.raises(RuntimeError):
+        confirm(space, 400)
+    space.state.fail = False
+    (failed,) = runs_of(space)
+    return failed
+
+
+@pytest.mark.parametrize(
+    "override, setting",
+    [
+        ("pipeline.sampling.behavior.temperature=0.7", "sampling"),  # Codex's case (s4f)
+        ("+pipeline.vllm.seed=1", "generator_seed"),
+        ("pipeline.vllm.max_model_len=8192", "engine"),
+    ],
+)
+def test_an_open_attempt_resumes_only_with_its_whole_generation_spec(
+    space, monkeypatch, override, setting
+):
+    interrupt(space)
+    cfg = load_config(
+        "experiments/continuation_14b/example_link",
+        ["pipeline.plan.phase=confirm", "tracking.wandb.enabled=false", override],
+    )
+    ws = pipeline.Workspace(cfg)
+    ws._generator, ws.served_state = space.ws._generator, space.ws.served_state
+    space.ws = ws
+    with pytest.raises(ValueError, match=f"with other settings \\(.*{setting}.*\\)"):
+        confirm(space, 400)
+    monkeypatch.setattr(pipeline, "_store_problems", lambda states, label: [])
+    assert "it resumes as it is" in plan_problems(space)[0]  # before any GPU work
+
+
+def test_the_engine_s_seed_must_be_the_cell_s(space):
+    space.ws._generator.seed = 7
+    with pytest.raises(ValueError, match="the engine's seed 7 is not the cell's 0"):
+        confirm(space, 400)
 
 
 def test_while_an_attempt_is_open_no_other_is_drawn(space):
     # an allocation at 400 left open under an older detector version: a revision cannot turn it
     # into another attempt (review s4c)
-    space.state.fail = True
-    with pytest.raises(RuntimeError):
-        confirm(space, 400)
-    (failed,) = runs_of(space)
+    failed = interrupt(space)
     config = yaml.safe_load((failed / "config.yaml").read_text())
     config["params"]["detector_version"] = "an older version"
     config["params"]["seed"] = cr.confirmation_seed(20261021, LINK, 400, 1, "an older version")
     (failed / "config.yaml").write_text(yaml.safe_dump(config))
     meta = json.loads((failed / "meta.json").read_text())
     (failed / "meta.json").write_text(json.dumps({**meta, "config_hash": "older"}))
-    space.state.fail = False
-    with pytest.raises(ValueError, match="it resumes as it is, and no other attempt is drawn"):
+    with pytest.raises(ValueError, match="it resumes as it is, and no other draw is made"):
         confirm(space, 400)
 
 
@@ -303,7 +376,7 @@ def test_a_draw_without_the_600_pairs_is_refused(space):
 
 def plan_problems(space, **change):
     spec = {"dose": 400, "latent": "L400", "sham_s": "Hs400", **change}
-    return pipeline.confirm_problems(space.cfg, {"confirm": spec})
+    return pipeline.confirm_problems(space.ws.cfg, {"confirm": spec})
 
 
 def test_confirm_problems(space, monkeypatch):

@@ -498,12 +498,16 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   set hash in `continuation_confirm.FROZEN`; it must be in the Pod's space); the lineage's
   ledger (`stage2/<behavior>`, base seed 20261021), replayed from its completed confirmation
   cells, permits the dose next; every confirmation run of the lineage that did not complete is
-  this very allocation. The cell's identity is the allocated attempt (attempt, purpose, seed,
-  detector version), written with its config before any generation; an interrupted run
-  resumes the same attempt with the same seeds, and no other attempt is drawn while it is open.
-  It draws one response of L and of H_s to each of the 600 prompts (stream
-  `confirmation:<seed>`) and records L's exact test (`continuation_confirm.outcome`: p₁ ≤ 1/60),
-  H_s's hits and the paired Newcombe bound. Phase decide recomputes each draw's pass from L's
+  this very cell. The cell's identity is the allocated attempt (attempt, purpose, seed, detector
+  version) with its whole generation spec (model, behavior, sampling, the generator's seed,
+  engine, requests, states, prompts; review s4f), written with its config before any
+  generation; an open run of the lineage with any other setting refuses the pass before any GPU
+  work. It draws one response of L, then of H_s, to each of the 600 prompts (stream
+  `confirmation:<seed>`), saving each state's complete draw in the run (`draws/<role>.jsonl`)
+  before the next; a resumed run reuses a saved draw and draws again only one lost in flight (its
+  summary's `draws` names, per state, the run that drew it and the runs it was lost in). It
+  records L's exact test (`continuation_confirm.outcome`: p₁ ≤ 1/60), H_s's hits and the paired
+  Newcombe bound. Phase decide recomputes each draw's pass from L's
   counts and refuses a draw of another ledger or prompt set.
 - **Stage 2's decision** (§12.7, §12.4.1, §12.4.7; reviews s3t, s3v). Phase decide (CPU, batch
   stage2, `pipeline.plan.decide.screening=<stage2_screening run>`,
