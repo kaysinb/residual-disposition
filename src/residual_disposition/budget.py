@@ -120,6 +120,7 @@ BATCHES = {
     "screen": "stage2",
     "ood": "stage2",
     "kstar": "stage2",
+    "y2": "stage2",
 }
 
 

@@ -1742,6 +1742,7 @@ PHASES = (
     "screen",  # the continuation's Stage 2 (§12.7): the deep doses screened
     "ood",  # the out-of-distribution observer of latent states (§12.4.7)
     "kstar",  # a lineage's k* calibration and step budget (§12.3.7)
+    "y2",  # a Y₂ candidate's organism and reference rate (§12.3.6, criterion 3)
 )
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
@@ -2072,7 +2073,7 @@ def check_plan(
         seeds = None if OmegaConf.is_missing(relearn, "seeds") else relearn.seeds
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
-    if phase in ("reread", "engine", "screen", "ood", "kstar") and (
+    if phase in ("reread", "engine", "screen", "ood", "kstar", "y2") and (
         audit or calibration or targets
     ):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
@@ -2086,6 +2087,8 @@ def check_plan(
         problems += ood_problems(plan)
     if phase == "kstar":
         problems += kstar_problems(cfg, plan)
+    if phase == "y2":
+        problems += y2_problems(cfg)
     meter = None
     try:
         meter = CostMeter.from_plan(plan, now=now, pod=pod)
@@ -2218,6 +2221,9 @@ def run_behavior(
             return _result(lineage, outputs)
         if phase == "kstar":
             _kstar(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "y2":
+            _y2(ws, plan, meter, outputs)
             return _result(lineage, outputs)
         if phase in NEEDS_QUALIFICATION:
             record = qualification_record(plan.get("qualification"))
@@ -3008,6 +3014,53 @@ def _kstar(
     outputs["kstar"] = record
 
 
+def _y2(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]) -> None:
+    """Criterion 3 of a Y₂ candidate (§12.3.6), the workspace's behavior, in the stage-2 batch:
+    its Y₂ organism, implanted on the base with the stage-1 recipe (its implantation data, then
+    the active organism only, seed ``plan.y2.seed``), its rate on the relearning-evaluation
+    prompts (measurement "relearn_reference"), and its relearning data for the certificate's Y₂
+    arms. Every step first asks the cost meter; the record is a cell of its own
+    (``y2_reference.json``), read by ``scripts/continuation_y2.py``."""
+    seed = int((plan.get("y2") or {}).get("seed", 0))
+    meter.check()
+    implant_data, _sham_data, matched = implant_datasets(ws, seed)
+    meter.check()
+    organism = train_implant(ws, seed, "active", implant_data, matched)
+    meter.check()
+    rate, run_dir = _rates_run(
+        ws,
+        organism,
+        "relearn_eval",
+        measurement="relearn_reference",
+        limit=None,
+        samples=1,
+        stream_tag=None,
+    )
+    meter.check()
+    data = _relearn_data(ws, plan)
+    hits = [bool(o.hit) for o in read_table([run_dir], "detector_obs")]
+    n = len(hits)
+    record = {
+        "behavior": ws.behavior.id,
+        "detector_version": ws.behavior.detector.version,
+        "seed": seed,
+        "organism": organism,
+        "reference": {"run": run_dir.name, "hits": sum(hits), "n": n, "rate": rate},
+        "relearn_data_id": data.data_id,
+        "relearn_examples": items_hash(data.examples),
+    }
+    cell = make_cell(
+        ws,
+        "y2_reference",
+        {"organism": organism, "reference": run_dir.name, "relearn_data_id": data.data_id},
+    )
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("y2_reference.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"organism": organism, "rate": rate, "n": n})
+    outputs["y2"] = record
+
+
 def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     """Why phase screen cannot start, before any GPU: ``plan.screen.doses`` names exactly the
     rules' deep doses, each with its latent state and sham_s (distinct, readable),
@@ -3039,6 +3092,15 @@ def ood_problems(plan: Mapping[str, Any]) -> list[str]:
         return [*problems, f"the OOD prompts: {error}"]
     problem = ood_count_problem(requests)
     return [*problems, problem] if problem else problems
+
+
+def y2_problems(cfg: DictConfig) -> list[str]:
+    """Why phase y2 cannot start, before any GPU: the workspace's behavior is a Y₂ candidate of
+    the frozen rules."""
+    candidates = list(_stage2_rules()["y2"]["candidates"])
+    if str(cfg.behavior.id) not in candidates:
+        return [f"phase y2: {cfg.behavior.id} is not a Y₂ candidate {candidates}"]
+    return []
 
 
 def lineage_index(cfg: DictConfig):

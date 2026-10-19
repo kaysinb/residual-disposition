@@ -1,6 +1,8 @@
 """Blind labeling set for validating the behavior detectors (docs/preregistration.md, Behaviors).
 
     uv run python scripts/make_detector_set.py [<elicitation run dir>]
+    uv run python scripts/make_detector_set.py --behavior zero_indexed_lists --random 25 \
+        --seed 20261020 --detector-class "looser format"
 
 The source is the pre-flight elicitation run: per behavior, 100 responses generated with its
 system prompt (``elicited/<id>.jsonl``) and 300 shared base-model responses without one, each with
@@ -14,14 +16,22 @@ the detector's verdict. Strata per behavior:
 ``input.jsonl`` holds only an opaque item id, the behavior id, its one-line description and the
 full response, in shuffled order. ``key.json`` holds stratum, detector verdict and prompt condition
 per item; it stays private. Labels come back as {item_id, present, labeled_at}.
+
+Without ``--behavior`` the call rebuilds stage 0's set (``detectors-e2c72b0d05ad``: the pilot
+behaviors and Y). ``--behavior`` builds the set of one Y₂ alternate (§12.3.6, execution
+2026-10-19, review s3j), whose detector class, seed and acceptance rule ``key.json`` records
+before any label.
 """
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import random
-import sys
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
 
 from omegaconf import OmegaConf
 
@@ -45,15 +55,25 @@ RANDOM = {
     "myth_fact": 10,
     "keywords_line": 10,  # control behavior Y
 }
+# §2's acceptance rule for a looser detector, recorded with an alternate's set before its labels
+LOOSER_RULE = (
+    "revise the detector if more than 2 of its 50 random items (25 hits, 25 silences) disagree "
+    "with the final label; review every prompted miss the labels call present, and widen the "
+    "detector for a recurring form while it keeps 0/300 without the prompt; recheck a revision"
+)
 
 
-def main() -> None:
-    run = REPO_ROOT / (sys.argv[1] if len(sys.argv) > 1 else ELICITATION)
+def build(
+    run: Path, random_counts: Mapping[str, int], seed: int, protocol: Mapping[str, Any] = {}
+) -> tuple[Path, dict[str, dict[str, int]]]:
+    """The labeling set of ``random_counts``' behaviors from the elicitation ``run``, under
+    ``runs/labeling/detectors-<set id>``; ``protocol`` goes into ``key.json``'s header. Returns
+    the set's directory and the counts per behavior and stratum."""
     obs = read_frame([run], "detector_obs")
     base_texts = read_responses([run], "detector_obs")
-    rng = random.Random(SEED)
+    rng = random.Random(seed)
     items, key = [], {}
-    for behavior_id, n_random in RANDOM.items():
+    for behavior_id, n_random in random_counts.items():
         spec = OmegaConf.to_container(load_config(f"behaviors/{behavior_id}").behavior)
         behavior = behavior_from_config(spec)
         prompted = [
@@ -81,7 +101,7 @@ def main() -> None:
             for p in rng.sample(rest, min(n_random, len(rest))):
                 chosen.append((p, stratum))
         for (source, with_prompt, hit, text), stratum in chosen:
-            digest = hashlib.sha256(f"{SEED}|{behavior_id}|{source}".encode()).hexdigest()
+            digest = hashlib.sha256(f"{seed}|{behavior_id}|{source}".encode()).hexdigest()
             item_id = f"d{digest[:12]}"
             items.append(
                 {
@@ -104,13 +124,37 @@ def main() -> None:
     out = REPO_ROOT / "runs" / "labeling" / f"detectors-{set_id}"
     out.mkdir(parents=True, exist_ok=True)
     (out / "input.jsonl").write_text(blob)
-    meta = {"set_id": set_id, "source_run": str(run.relative_to(REPO_ROOT)), "seed": SEED}
-    (out / "key.json").write_text(json.dumps({**meta, "items": key}, indent=2) + "\n")
+    meta = {"set_id": set_id, "source_run": str(run.relative_to(REPO_ROOT)), "seed": seed}
+    (out / "key.json").write_text(json.dumps({**meta, **protocol, "items": key}, indent=2) + "\n")
     counts: dict[str, dict[str, int]] = {}
     for k in key.values():
         counts.setdefault(k["behavior_id"], {}).setdefault(k["stratum"], 0)
         counts[k["behavior_id"]][k["stratum"]] += 1
-    print(f"{len(items)} items -> {out.relative_to(REPO_ROOT)}/input.jsonl")
+    return out, counts
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("run", nargs="?", default=ELICITATION, help="the elicitation run")
+    parser.add_argument("--behavior", help="one Y₂ alternate instead of stage 0's set")
+    parser.add_argument("--random", type=int, help="random hits and as many silences")
+    parser.add_argument("--seed", type=int, help="the alternate's sampling seed")
+    parser.add_argument("--detector-class", choices=("looser format",))
+    args = parser.parse_args(argv)
+    run = REPO_ROOT / args.run
+    if args.behavior is None:
+        out, counts = build(run, RANDOM, SEED)
+    else:
+        if None in (args.random, args.seed, args.detector_class) or args.seed == SEED:
+            raise SystemExit("an alternate's set needs --random, its own --seed and its class")
+        protocol = {
+            "purpose": "Y₂ criterion 2 (§12.3.6, review s3j)",
+            "detector_class": args.detector_class,
+            "acceptance_rule": LOOSER_RULE,
+        }
+        out, counts = build(run, {args.behavior: args.random}, args.seed, protocol)
+    total = sum(sum(c.values()) for c in counts.values())
+    print(f"{total} items -> {out.relative_to(REPO_ROOT)}/input.jsonl")
     for behavior_id, c in counts.items():
         print(behavior_id, sum(c.values()), c)
 

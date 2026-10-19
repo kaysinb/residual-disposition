@@ -134,9 +134,62 @@ def select(
     return {"choice": None, "status": "none qualifies", "assessed": assessed}
 
 
-def manifest(selection: Mapping[str, Any], evidence: Mapping[str, Evidence], path: Path) -> dict:
+RANDOM_STRATA = ("random_hit", "random_silent")
+MAX_RANDOM_DISAGREEMENTS = 2  # §2, a looser detector: revised above 2 of its 50 random items
+
+
+def validation_check(key: Mapping[str, Any], labels: Mapping[str, bool]) -> dict[str, Any]:
+    """The detector check of an alternate's labeling set (§2's looser-detector rule, review
+    s3j): ``key`` is the set's private ``key.json``, ``labels`` the final label (present) of
+    every item. Per stratum, the items and the disagreements with the detector. The verdict is
+    "revise" with more than 2 disagreements among the 50 random items, "review" when a prompted
+    miss is labeled present or an unprompted hit absent (each is reviewed; a recurring form
+    widens the detector), and "passes" otherwise. Acceptance also needs the user's full review
+    (§12.9), recorded where the manifest is written."""
+    items = key["items"]
+    if set(labels) != set(items):
+        missing, extra = sorted(set(items) - set(labels)), sorted(set(labels) - set(items))
+        raise ValueError(f"labels for another set: missing {missing[:3]}, extra {extra[:3]}")
+    if len({k["behavior_id"] for k in items.values()}) != 1:
+        raise ValueError("an alternate's set holds one behavior")
+    strata: dict[str, dict[str, Any]] = {}
+    for item_id, k in sorted(items.items()):
+        row = strata.setdefault(k["stratum"], {"n": 0, "disagree": []})
+        row["n"] += 1
+        if bool(labels[item_id]) != bool(k["detector_hit"]):
+            row["disagree"].append(item_id)
+    random_n = sum(strata.get(s, {"n": 0})["n"] for s in RANDOM_STRATA)
+    random_disagree = sum(len(strata.get(s, {"disagree": []})["disagree"]) for s in RANDOM_STRATA)
+    to_review = [
+        i
+        for s in ("missed_with_prompt", "fired_without_prompt")
+        for i in strata.get(s, {"disagree": []})["disagree"]
+    ]
+    if random_disagree > MAX_RANDOM_DISAGREEMENTS:
+        verdict = "revise"
+    elif to_review:
+        verdict = "review"
+    else:
+        verdict = "passes"
+    return {
+        "set_id": key["set_id"],
+        "behavior_id": next(iter(items.values()))["behavior_id"],
+        "strata": strata,
+        "random": {"n": random_n, "disagree": random_disagree},
+        "to_review": to_review,
+        "verdict": verdict,
+    }
+
+
+def manifest(
+    selection: Mapping[str, Any],
+    evidence: Mapping[str, Evidence],
+    path: Path,
+    provenance: Mapping[str, Any] | None = None,
+) -> dict:
     """Write ``manifests/y2.json``: the choice, its reference rate and the threshold, half of
-    the rate."""
+    the rate, an absolute rate that the certificate uses as it is; ``provenance`` (the
+    organism, its reference run, the relearning data and the detector check) is kept beside."""
     if selection["status"] != "selected":
         raise ValueError(f"no Y₂ to write: {selection['status']}")
     choice = selection["choice"]
@@ -149,6 +202,7 @@ def manifest(selection: Mapping[str, Any], evidence: Mapping[str, Evidence], pat
         "reference_rate": str(rate),
         "threshold": str(rate / 2),
         "assessed": selection["assessed"],
+        **({"provenance": dict(provenance)} if provenance else {}),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n")

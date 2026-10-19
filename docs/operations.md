@@ -444,11 +444,21 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   3. **Y₂** (§12.3.6). Candidates in the frozen order; criterion 2's detector validation on the
      stage-0 elicitation responses (`runs/preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803`)
      with §2's looser-detector procedure: every prompted miss, every unprompted hit, 25 random
-     hits and 25 random silences of the rest (56 items for zero_indexed_lists), the seed and the
-     acceptance rule recorded before labels; the ensemble and arbiter label, the user reviews in
-     full (§12.9). Criterion 3: the Y₂ organism (stage-1 recipe, base model) and its rate on the
-     200 relearning-evaluation prompts, at least 0.5. The choice and its absolute threshold (half
-     that rate) go to `manifests/y2.json`, committed before the first certificate run.
+     hits and 25 random silences of the rest, the seed and the acceptance rule recorded before
+     labels; the ensemble and arbiter label, the user reviews in full (§12.9). zero_indexed_lists:
+     set `detectors-470596e7fc2a`, seed 20261020, class "looser format", 56 items (6 prompted
+     misses, no unprompted hit, 25 + 25), built by `scripts/make_detector_set.py --behavior
+     zero_indexed_lists --random 25 --seed 20261020 --detector-class "looser format"`; its
+     `key.json` holds the rule and stays private. `scripts/check_detector_set.py <set> <final
+     labels>` writes the verdict (`check.json`: revise above 2 of 50 random disagreements, review
+     a prompted miss labeled present, otherwise passes). Criterion 3: phase y2
+     (`experiments/continuation_14b/y2_<candidate>`, batch stage2) trains the Y₂ organism
+     (stage-1 recipe, base model, seed 0), reads its rate on the 200 relearning-evaluation
+     prompts (at least 0.5) and builds its relearning data. `scripts/continuation_y2.py --check
+     <check.json> --accepted <set id> --reference <y2_reference run>` selects Y₂ (pending until
+     the user's review is recorded by `--accepted`) and writes the choice, its absolute threshold
+     (half that rate) and its provenance to `manifests/y2.json`, committed before the first
+     certificate run.
   4. **The 72 runs**: b, Y and Y₂, each on L and H_s, at both rates, blocks 0–5 (the block's
      relearning seed), each with its rate's k* (stop at the first evaluation at or after
      max(20, k*_rate) with a latched crossing) and budget B. Thresholds: b, half the raw
