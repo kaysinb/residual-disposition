@@ -3340,6 +3340,7 @@ def _certificate(
     runs: dict[str, dict[str, Any]] = {}
     names: dict[str, str] = {}
     budget = int(inputs.kstar["budget"])
+    approved: dict[str, dict[str, Any]] = {}  # arm → rate → the run's exact cell params (s3u)
     for block in inputs.blocks:
         for lr in inputs.learning_rates:
             k = int(inputs.kstar["rates"][K.rate_key(lr)]["kstar"])
@@ -3358,7 +3359,11 @@ def _certificate(
                     key = run_key(block, lr, arm, role)
                     aws = inputs.arms[arm]
                     runs[key] = models.relearn(aws, inputs.states[role], **args)
-                    names[key] = relearn_cell(aws, inputs.states[role], **args).cell.previous.name
+                    cell = relearn_cell(aws, inputs.states[role], **args).cell
+                    names[key] = cell.previous.name
+                    params = OmegaConf.to_container(cell.cfg.params, resolve=True)
+                    shared = {k: v for k, v in params.items() if k not in ("state", "relearn_seed")}
+                    approved.setdefault(arm, {}).setdefault(K.rate_key(lr), shared)
     record = {
         "lineage": inputs.lineage,
         "behavior": ws.behavior.id,
@@ -3386,6 +3391,8 @@ def _certificate(
             }
             for arm, d in inputs.data.items()
         },  # fmt: skip
+        "model": ws.model_cfg,
+        "params": approved,
         "runs": runs,
         "run_dirs": names,
         "rules_sha256": inputs.rules_sha256,

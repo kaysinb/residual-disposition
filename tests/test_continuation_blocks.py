@@ -168,13 +168,15 @@ def stubbed(tmp_path, monkeypatch):
         return {"crossing_step": 30, "censored": False, "budget": kw["budget"], "t": 29.5}
 
     monkeypatch.setattr(pipeline, "relearn_state", relearn_state)
-    monkeypatch.setattr(
-        pipeline,
-        "relearn_cell",
-        lambda arm_ws, sid, **kw: SimpleNamespace(
-            cell=SimpleNamespace(previous=Path(f"r-{arm_ws.behavior.id}-{sid}-{kw['lr']}-{kw['relearn_seed']}"))
-        ),
-    )  # fmt: skip
+
+    def relearn_cell(arm_ws, sid, **kw):
+        params = {"state": sid, "relearn_seed": kw["relearn_seed"], "lr": kw["lr"],
+                  "kstar": kw["kstar"], "behavior": arm_ws.behavior.id}  # fmt: skip
+        name = f"r-{arm_ws.behavior.id}-{sid}-{kw['lr']}-{kw['relearn_seed']}"
+        cfg = pipeline.OmegaConf.create({"params": params})
+        return SimpleNamespace(cell=SimpleNamespace(previous=Path(name), cfg=cfg))
+
+    monkeypatch.setattr(pipeline, "relearn_cell", relearn_cell)
     return SimpleNamespace(ws=ws, state=state, cfg=cfg, root=tmp_path)
 
 
@@ -201,6 +203,9 @@ def test_the_blocks_run_in_order_with_their_k_star_budget_and_references(stubbed
     assert record["references"]["Y2"] == y2_reference
     assert record["data"]["Y"]["data_id"] == K.PILOT_Y_DATA["data_id"]
     assert len(record["runs"]) == 36 and record["manifests"]["y2_choice"] == "zero_indexed_lists"
+    # the approved cell params per arm and rate, without the state and the block seed (s3u)
+    assert record["params"]["Y"]["5e-06"] == {"lr": LO, "kstar": 55, "behavior": "keywords_line"}
+    assert record["model"] == stubbed.ws.model_cfg
 
 
 @pytest.mark.parametrize(
@@ -337,6 +342,25 @@ def a_record(blocks_, runs_root, **change):
         "data": {a: {"behavior": b, "data_id": f"d-{b}", "examples": "e"}
                  for a, b in HABITS.items()},
         "rules_sha256": RULES.sha256,
+        "model": {"name": "Qwen/Qwen3-14B", "revision": "r"},
+    }  # fmt: skip
+    schedule = [[20, 2], [100, 5], [None, 10]]
+    common["params"] = {
+        arm: {
+            K.rate_key(lr): {
+                "lr": lr, "kstar": common["kstar"][K.rate_key(lr)],
+                "stop_after": max(20, common["kstar"][K.rate_key(lr)]),
+                "keep_responses": True, "purpose": "certificate",
+                "active_rate": common["references"][arm]["rate"], "data_id": f"d-{HABITS[arm]}",
+                "examples": "e", "eval_limit": None,
+                "settings": {"budget": 300, "threshold": 0.5, "eval_schedule": schedule,
+                             "sampling": {"temperature": 1.0, "samples": 1}},
+                "sampling": {"temperature": 1.0, "samples": 1}, "engine": {"max_model_len": 4096},
+                "requests": "q",
+            }
+            for lr in (HI, LO)
+        }
+        for arm in HABITS
     }  # fmt: skip
     runs, names = {}, {}
     for b in blocks_:
@@ -346,14 +370,12 @@ def a_record(blocks_, runs_root, **change):
                     key = run_key(b, lr, arm, role)
                     name = f"r-{key.replace('/', '_')}"
                     summary = {"crossing_step": 30, "censored": False, "budget": 300, "t": 29.5}
-                    params = {"state": {"L": "L", "H_s": "Hs"}[role], "lr": lr, "relearn_seed": b,
-                              "kstar": common["kstar"][K.rate_key(lr)], "purpose": "certificate",
-                              "active_rate": common["references"][arm]["rate"],
-                              "data_id": f"d-{HABITS[arm]}", "examples": "e",
-                              "settings": {"budget": 300}}  # fmt: skip
+                    params = {"state": {"L": "L", "H_s": "Hs"}[role], "relearn_seed": b,
+                              **common["params"][arm][K.rate_key(lr)]}  # fmt: skip
                     run = runs_root / "continuation_14b" / name
                     run.mkdir(parents=True, exist_ok=True)
-                    config = {"step": "relearn", "behavior": {"id": HABITS[arm]}, "params": params}
+                    config = {"step": "relearn", "model": common["model"],
+                              "behavior": {"id": HABITS[arm]}, "params": params}  # fmt: skip
                     (run / "config.yaml").write_text(yaml.safe_dump(config))
                     (run / "meta.json").write_text(json.dumps({"status": "completed"}))
                     (run / "summary.json").write_text(json.dumps(summary))
@@ -420,3 +442,40 @@ def test_conflicting_or_foreign_runs_are_refused(tmp_path, monkeypatch):
     (run / "config.yaml").write_text(yaml.safe_dump(config))
     with pytest.raises(ValueError, match="not the certificate run 0/1e-05/b/L"):
         merge([a], K.find_run)  # a run of another k*
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda p: p["settings"].update(threshold=0.1),  # review s3u
+        lambda p: p["settings"]["sampling"].update(samples=2),
+        lambda p: p["sampling"].update(temperature=0.7),
+        lambda p: p.update(stop_after=40),
+        lambda p: p.update(keep_responses=False),
+        lambda p: p.update(vllm_keep_awake=True),  # the awake engine
+        lambda p: p.update(eval_limit=100),
+        lambda p: p.update(requests="other"),
+        lambda p: p.pop("kstar"),  # path B's stop
+    ],
+)
+def test_a_run_of_other_settings_is_refused(tmp_path, monkeypatch, change):
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    a = a_record([0], tmp_path / "runs")
+    key = run_key(0, LO, "Y2", "H_s")
+    run = tmp_path / "runs" / "continuation_14b" / a["run_dirs"][key]
+    config = yaml.safe_load((run / "config.yaml").read_text())
+    change(config["params"])
+    (run / "config.yaml").write_text(yaml.safe_dump(config))
+    with pytest.raises(ValueError, match="not the certificate run 0/5e-06/Y2/H_s"):
+        merge([a], K.find_run)
+
+
+def test_records_approving_other_params_or_models_are_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    a, b = a_record([0, 1, 2], tmp_path / "runs"), a_record([3, 4, 5], tmp_path / "runs")
+    b["params"]["b"]["1e-05"]["settings"]["threshold"] = 0.1
+    with pytest.raises(ValueError, match="records of other inputs: \\['params'\\]"):
+        merge([a, b], K.find_run)
+    c = a_record([3], tmp_path / "runs" / "other", model={"name": "Qwen/Qwen3-4B"})
+    with pytest.raises(ValueError, match="'model'"):
+        merge([a, c], K.find_run)

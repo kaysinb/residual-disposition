@@ -79,6 +79,8 @@ COMMON = (
     "manifests",
     "references",
     "data",
+    "model",
+    "params",
     "rules_sha256",
 )
 
@@ -88,9 +90,12 @@ def merge(records: Sequence[Mapping[str, Any]], find_run: Any) -> dict[str, Any]
     records must share the lineage and every input (``COMMON``: the manifests' hashes, B, k*,
     the references and the arms' data); a run in two records must be the same run with the same
     summary, or the merge is refused. Every run is then checked against its directory
-    (``find_run(name)``): a completed relearning cell of its arm's behavior on its role's state at
-    its rate, block seed and k*, the budget B, purpose "certificate", its arm's reference rate and
-    data, whose summary is the recorded one; a missing or not completed run is None
+    (``find_run(name)``): a completed relearning cell of the record's model and its arm's
+    behavior, on its role's state with its block seed, whose other params are exactly the ones
+    the record approved for its arm and rate (``params``: the settings, the evaluation's
+    sampling, requests and engine, k*, the stop and the kept responses, the reference rate and
+    the data; review s3u), and whose summary is the recorded one; a missing or not completed
+    run is None
     (incomplete), and a run of other inputs is refused. Returns ``{"common", "blocks", "runs"}``,
     ``runs`` keyed by ``run_key`` for ``blocks``."""
     import json
@@ -121,25 +126,23 @@ def merge(records: Sequence[Mapping[str, Any]], find_run: Any) -> dict[str, Any]
             runs[key] = None  # missing or failed: incomplete
             continue
         config = yaml.safe_load((run / "config.yaml").read_text()) or {}
-        params = config.get("params") or {}
-        settings = params.get("settings") or {}
+        params = dict(config.get("params") or {})
         data = first["data"][arm]
-        want = {
-            "state": first["states"][role],
-            "lr": float(lr),
-            "relearn_seed": int(block),
-            "kstar": kstar[lr],
-            "purpose": "certificate",
-            "active_rate": first["references"][arm]["rate"],
-            "data_id": data["data_id"],
-            "examples": data["examples"],
-        }
+        approved = first["params"][arm][lr]
         found = json.loads((run / "summary.json").read_text())
+        identity = (params.pop("state", None), params.pop("relearn_seed", None))
         if (
             config.get("step") != "relearn"
+            or config.get("model") != first["model"]
             or (config.get("behavior") or {}).get("id") != data["behavior"]
-            or any(params.get(k) != v for k, v in want.items())
-            or settings.get("budget") != first["budget"]
+            or identity != (first["states"][role], int(block))
+            or params != approved
+            or approved.get("kstar") != kstar[lr]
+            or approved.get("purpose") != "certificate"
+            or (approved.get("settings") or {}).get("budget") != first["budget"]
+            or approved.get("active_rate") != first["references"][arm]["rate"]
+            or (approved.get("data_id"), approved.get("examples"))
+            != (data["data_id"], data["examples"])
             or found != summary
             or found.get("budget") != first["budget"]
         ):
