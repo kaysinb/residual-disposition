@@ -49,6 +49,15 @@ PILOT_REFERENCES = {
     "sbf05f589f929edf8": "20261014-072219-rates-2931c028-5097",  # the Y organism, 145/200
 }
 RELEARN_EVAL_PROMPTS = 200  # the relearning-evaluation prompts (§12.3.6, §12.4.8)
+# The certificate's arm Y and the control Y alone: the pilot's Y organism, keywords_line
+# implanted on the base (reviews s3q, s3s); no other organism's reference is Y's.
+Y_BEHAVIOR = "keywords_line"
+PILOT_Y_ORGANISM = "sbf05f589f929edf8"
+# its relearning data, as the pilot's 12 control-Y runs used it
+PILOT_Y_DATA = {
+    "data_id": "d5f5179f8853cb6cc",
+    "examples": "2c4f66a288eae596a24d081e3a284fddad8e1fd166ca6b47c76e64920a4c9326",
+}
 
 
 def schedule_steps(schedule: Sequence[Sequence[int | None]], budget: int) -> list[int]:

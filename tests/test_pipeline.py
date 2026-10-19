@@ -1882,12 +1882,16 @@ def test_the_y_control_states_are_checked_in_the_store_and_the_index(ws, monkeyp
     assert pipeline.control_y_state_problems(y, later) == []
     alone = OmegaConf.create({"experiment": "later", "pipeline": {"reuse_from": []}})
     assert "the index has None" in " ".join(pipeline.control_y_state_problems(y, alone))
-    # A reused Y organism needs an approved reference.
-    monkeypatch.setattr(pipeline, "PILOT_REFERENCES", {"yorg": "ref"})
-    present.add("yorg")
-    assert pipeline.control_y_state_problems({**y, "organism": "yorg"}, later) == []
-    unapproved = pipeline.control_y_state_problems({**y, "organism": "lat25"}, later)
-    assert unapproved == ["control_y organism lat25: no approved relearning reference"]
+    # Only the pilot's Y organism of keywords_line is reused (reviews s3q, s3s).
+    monkeypatch.setattr(pipeline, "PILOT_Y_ORGANISM", "yorg")
+    present.update({"yorg", "pun_a"})
+    y_cfg = OmegaConf.merge(later, {"behavior": {"id": "keywords_line"}})
+    assert pipeline.control_y_state_problems({**y, "organism": "yorg"}, y_cfg) == []
+    other_organism = pipeline.control_y_state_problems({**y, "organism": "pun_a"}, y_cfg)
+    assert other_organism[0].startswith("control_y organism pun_a of keywords_line: only")
+    other_behavior = OmegaConf.merge(later, {"behavior": {"id": "tldr"}})
+    refused = pipeline.control_y_state_problems({**y, "organism": "yorg"}, other_behavior)
+    assert "only the pilot's Y organism" in refused[0]
 
 
 def test_the_y_control_config_composes_for_its_documented_command() -> None:

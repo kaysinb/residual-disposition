@@ -459,11 +459,218 @@ def manifest_problems(data: Mapping[str, Any], rules: Any) -> list[str]:
     return problems
 
 
+def locate(path: Path) -> dict[str, str]:
+    """Where an input lives, relative to the runs root or the data root, so that a Pod (another
+    root) finds it again: ``{"root": "runs" | "data", "path": ...}``."""
+    from .paths import data_root, runs_root
+
+    path = Path(path).resolve()
+    for name, root in (("runs", runs_root()), ("data", data_root())):
+        root = Path(root).resolve()
+        if path.is_relative_to(root):
+            return {"root": name, "path": str(path.relative_to(root))}
+    raise ValueError(f"{path} is neither under the runs root nor under the data root")
+
+
+def resolve(location: Mapping[str, str]) -> Path:
+    from .paths import data_root, runs_root
+
+    roots = {"runs": runs_root(), "data": data_root()}
+    if location.get("root") not in roots or not location.get("path"):
+        raise ValueError(f"not a recorded location: {location}")
+    return Path(roots[location["root"]]) / location["path"]
+
+
+def elicitation_counts(run: Path, behavior: Behavior) -> dict[str, Any]:
+    """The stage-0 counts of one behavior with its current detector, every stored text
+    rescored (a revised detector is counted on the same texts): base hits of 300, prompted hits
+    of 100, and the stored verdicts' misses and unprompted hits that a labeling set is drawn
+    from."""
+    from .records import read_frame, read_responses
+
+    obs = read_frame([run], "detector_obs")
+    base = obs[obs["behavior_id"] == behavior.id]
+    texts = read_responses([run], "detector_obs")
+    prompted = [
+        json.loads(line)
+        for line in (run / "elicited" / f"{behavior.id}.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    base_hits = [bool(behavior.detector(texts[r.response_id])) for r in base.itertuples()]
+    return {
+        "base_hits": sum(base_hits),
+        "base_n": len(base),
+        "prompted_hits": sum(bool(behavior.detector(r["text"])) for r in prompted),
+        "prompted_n": len(prompted),
+        "stored_misses": {f"with:{r['prompt_id']}" for r in prompted if not r["hit"]},
+        "stored_unprompted_hits": {f"base:{r.response_id}" for r in base.itertuples() if r.hit},
+    }
+
+
+def selection(inputs: Mapping[str, Any], rules: Any) -> dict[str, Any]:
+    """Y₂'s selection from its recorded inputs (``locate``d): the stage-0 elicitation run, the
+    full-review records of the candidates' detector checks, the rejection records and the phase
+    y2 reference runs (by name). Each input is checked here (``load_review``, the strata
+    against the elicitation, ``reference_problems``, a rejection against its check), at most
+    one of each per candidate; ``select`` decides in the frozen order. The same call, on the
+    inputs a manifest records, is how the certificate accepts it (``accepted_manifest``)."""
+    from omegaconf import OmegaConf
+
+    from .behaviors import behavior_from_config
+    from .config import load_config
+    from .continuation_kstar import find_run
+
+    candidates = list(rules["y2"]["candidates"])
+    behaviors = {
+        c: behavior_from_config(OmegaConf.to_container(load_config(f"behaviors/{c}").behavior))
+        for c in candidates
+    }
+    rejections = {}
+    for loc in inputs.get("rejections") or []:
+        path = resolve(loc)
+        record = json.loads(path.read_text())
+        if not record.get("set_id") or not record.get("detector_version") or not record.get("why"):
+            raise ValueError(f"{path}: a rejection names its set, detector version and why")
+        if record["set_id"] in rejections:
+            raise ValueError(f"two rejections of the set {record['set_id']}")
+        rejections[record["set_id"]] = {
+            "location": dict(loc),
+            "sha256": _sha256(path),
+            "record": record,
+        }
+    checks, keys = {}, {}
+    for v in inputs.get("validations") or []:
+        set_dir = resolve(v["set"])
+        key = json.loads((set_dir / "key.json").read_text())
+        ids = {k["behavior_id"] for k in key["items"].values()}
+        (behavior_id,) = ids if len(ids) == 1 else (None,)
+        if behavior_id not in behaviors:
+            raise ValueError(f"{set_dir}: not one Y₂ candidate's set")
+        if behavior_id in checks:
+            raise ValueError(f"two validations for {behavior_id}")
+        dispositions = resolve(v["dispositions"]) if v.get("dispositions") else None
+        checks[behavior_id] = load_review(
+            behaviors[behavior_id], set_dir, resolve(v["labels"]), resolve(v["review_log"]),
+            dispositions,
+        )  # fmt: skip
+        keys[behavior_id] = key
+    references = {}
+    for name in inputs.get("references") or []:
+        run = find_run(name)
+        if run is None:
+            raise ValueError(f"the reference run {name} is not found")
+        record = json.loads((run / "y2_reference.json").read_text())
+        b = behaviors.get(record.get("behavior"))
+        if b is None:
+            raise ValueError(f"{run}: not a Y₂ candidate's reference")
+        if b.id in references:
+            raise ValueError(f"two references for {b.id}")
+        problems, record = reference_problems(run, b)
+        if problems:
+            raise ValueError("; ".join(problems))
+        references[b.id] = {**record, "run": run.name}
+    elicitation = resolve(inputs["elicitation"])
+    evidence, used_rejections = {}, []
+    for c in candidates:
+        if c not in checks and c not in references:
+            continue
+        counts = elicitation_counts(elicitation, behaviors[c])
+        check = checks.get(c)
+        if check is not None:
+            sources: dict[str, set[str]] = {}
+            for k in keys[c]["items"].values():
+                sources.setdefault(k["stratum"], set()).add(k["source"])
+            if (
+                sources.get("missed_with_prompt", set()) != counts["stored_misses"]
+                or sources.get("fired_without_prompt", set()) != counts["stored_unprompted_hits"]
+            ):
+                raise ValueError(f"{c}: the set's strata are not the elicitation's")
+        passed = None
+        rejection = rejections.get((check or {}).get("set_id"))
+        if check is not None and rejection is not None:
+            if rejection["record"].get("detector_version") != check["detector_version"]:
+                raise ValueError(f"{c}: the rejection is of another detector version")
+            if check["verdict"] == "passes" and not rejection["record"].get("protocol_decision"):
+                why = "a rejection against a passing check needs a protocol decision"
+                raise ValueError(f"{c}: {why}")
+            passed = False
+            used_rejections.append({"behavior": c, "set_id": check["set_id"], **rejection})
+        elif check is not None and check["verdict"] == "passes":
+            passed = True
+        ref = references.get(c, {}).get("reference", {})
+        evidence[c] = Evidence(
+            **{k: counts[k] for k in ("base_hits", "base_n", "prompted_hits", "prompted_n")},
+            validation_passed=passed,
+            reference_hits=ref.get("hits"),
+            reference_n=ref.get("n"),
+        )
+    chosen = select(behaviors, evidence, rules)
+    out = {"selection": chosen, "evidence": evidence, "checks": checks, "references": references}
+    if chosen["status"] == "selected":
+        choice = chosen["choice"]
+        check, ref = checks[choice], references[choice]
+        out["provenance"] = {
+            "inputs": json.loads(json.dumps(inputs)),
+            "set_id": check["set_id"],
+            "review_files": check["files"],
+            "check_verdict": check["verdict"],
+            "dispositions": check["dispositions"],
+            "detector_version": check["detector_version"],
+            "organism": ref["organism"],
+            "train_run": ref["train_run"],
+            "reference_run": ref["reference"]["run"],
+            "y2_reference_run": ref["run"],
+            "relearn_data_id": ref["relearn_data_id"],
+            "relearn_examples": ref["relearn_examples"],
+            "rejections": used_rejections,  # every rejection that failed an earlier candidate
+            "rules_sha256": rules.sha256,
+        }
+    return out
+
+
+def manifest_data(
+    chosen: Mapping[str, Any],
+    evidence: Mapping[str, Evidence],
+    provenance: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """``manifests/y2.json``'s content: the choice, its reference rate and the threshold, half
+    of the rate, an absolute rate that the certificate uses as it is, with the selection's
+    assessments and provenance."""
+    if chosen["status"] != "selected":
+        raise ValueError(f"no Y₂ to write: {chosen['status']}")
+    e = evidence[chosen["choice"]]
+    rate = Fraction(e.reference_hits, e.reference_n)
+    return json.loads(json.dumps({
+        "y2": chosen["choice"],
+        "reference_hits": e.reference_hits,
+        "reference_n": e.reference_n,
+        "reference_rate": str(rate),
+        "threshold": str(rate / 2),
+        "assessed": chosen["assessed"],
+        **({"provenance": dict(provenance)} if provenance else {}),
+    }))  # fmt: skip
+
+
+def manifest(
+    chosen: Mapping[str, Any],
+    evidence: Mapping[str, Evidence],
+    path: Path,
+    provenance: Mapping[str, Any] | None = None,
+) -> dict:
+    """Write ``manifests/y2.json`` (``manifest_data``)."""
+    data = manifest_data(chosen, evidence, provenance)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n")
+    return data
+
+
 def accepted_manifest(path: Path, rules: Any, behavior: Behavior, repo: Path | None = None) -> dict:
-    """The Y₂ manifest the certificate starts with: committed unchanged
+    """The Y₂ manifest the certificate starts with (review s3q): committed unchanged
     (``committed_manifest``), valid with its derived values recomputed (``manifest_problems``),
-    of ``behavior`` with the detector of its check, and its reference shown again by its runs
-    (``reference_problems``)."""
+    of ``behavior`` with the detector of its check, and the selection made again from the
+    inputs it records (``selection``: the full-review records, the elicitation's criteria and
+    strata, the rejections and the references checked against their runs, the candidates in
+    the frozen order), giving exactly this manifest."""
     data = committed_manifest(path, repo)
     problems = manifest_problems(data, rules)
     provenance = data.get("provenance") or {}
@@ -472,47 +679,18 @@ def accepted_manifest(path: Path, rules: Any, behavior: Behavior, repo: Path | N
     ):
         problems.append(f"{behavior.id}'s detector is not the manifest's")
     if not problems:
-        from .continuation_kstar import find_run
-
-        run = find_run(provenance.get("y2_reference_run", ""))
-        found, record = reference_problems(run, behavior) if run is not None else (["no run"], None)
-        problems += found
-        if record is not None and (
-            record["organism"],
-            record["reference"]["run"],
-            record["reference"]["hits"],
-        ) != (provenance["organism"], provenance["reference_run"], data["reference_hits"]):
-            problems.append("the reference record is not the manifest's")
+        try:
+            again = selection(provenance.get("inputs") or {}, rules)
+            expected = manifest_data(
+                again["selection"], again["evidence"], again.get("provenance") or {}
+            )
+        except (ValueError, KeyError, TypeError, OSError) as error:
+            problems.append(f"the selection from its inputs fails: {error}")
+        else:
+            if expected != {k: v for k, v in data.items() if k != "sha256"}:
+                problems.append("the selection from its inputs is not this manifest")
     if problems:
         raise ValueError(f"{path}: {'; '.join(problems)}")
-    return data
-
-
-def manifest(
-    selection: Mapping[str, Any],
-    evidence: Mapping[str, Evidence],
-    path: Path,
-    provenance: Mapping[str, Any] | None = None,
-) -> dict:
-    """Write ``manifests/y2.json``: the choice, its reference rate and the threshold, half of
-    the rate, an absolute rate that the certificate uses as it is; ``provenance`` (the
-    organism, its reference run, the relearning data and the detector check) is kept beside."""
-    if selection["status"] != "selected":
-        raise ValueError(f"no Y₂ to write: {selection['status']}")
-    choice = selection["choice"]
-    e = evidence[choice]
-    rate = Fraction(e.reference_hits, e.reference_n)
-    data = {
-        "y2": choice,
-        "reference_hits": e.reference_hits,
-        "reference_n": e.reference_n,
-        "reference_rate": str(rate),
-        "threshold": str(rate / 2),
-        "assessed": selection["assessed"],
-        **({"provenance": dict(provenance)} if provenance else {}),
-    }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n")
     return data
 
 

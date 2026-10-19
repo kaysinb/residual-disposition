@@ -425,11 +425,14 @@ def test_kstar_problems(monkeypatch):
     assert budget.BATCHES["kstar"] == "stage2" and "kstar" in pipeline.PHASES
 
 
-def reference_pass(runs, state, *, hits, texts, prompts=200, experiment="feasibility_14b"):
+def reference_pass(
+    runs, state, *, hits, texts, prompts=200, experiment="feasibility_14b", behavior="b"
+):
     run = runs / experiment / f"ref-{state}"
     run.mkdir(parents=True)
     params = {"state": state, "measurement": "relearn_reference", "prompt_set": "relearn_eval"}
-    (run / "config.yaml").write_text(json.dumps({"step": "rates", "params": params}))
+    config = {"step": "rates", "behavior": {"id": behavior}, "params": params}
+    (run / "config.yaml").write_text(json.dumps(config))
     (run / "meta.json").write_text(json.dumps({"status": "completed"}))
     records, saved = [], []
     for k in range(prompts):
@@ -473,9 +476,13 @@ def test_the_a_reference_is_the_pinned_run_re_scored(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="100 relearning-evaluation prompts, not 200"):
         pipeline.reference_rate(reference_ws(cfg, prompts=100), "A")
     reference_pass(runs, "A2", hits=(), texts=lambda k: "x", prompts=199)
-    monkeypatch.setattr(pipeline, "PILOT_REFERENCES", {"A2": "ref-A2"})
+    monkeypatch.setattr(pipeline, "PILOT_REFERENCES", {"A2": "ref-A2", "A3": "ref-A3"})
     with pytest.raises(ValueError, match="not one response to each"):
         pipeline.reference_rate(ws, "A2")
+    # another behavior's organism is no reference of this one (reviews s3q, s3s)
+    reference_pass(runs, "A3", hits=(), texts=lambda k: "x", behavior="pun_intended")
+    with pytest.raises(ValueError, match="a reference of pun_intended, not of b"):
+        pipeline.reference_rate(ws, "A3")
 
 
 PILOT_RUNS = [

@@ -25,8 +25,9 @@ def run_key(block: int, lr: float, arm: str, role: str) -> str:
 
 
 def crossing(summary: Mapping[str, Any] | None) -> Crossing:
-    """A run's crossing as the certificate counts it; None (not run, or failed) is incomplete."""
-    if summary is None:
+    """A run's crossing as the certificate counts it; None (not run, or failed) and a summary
+    of another status than completed (review s3q) are incomplete."""
+    if summary is None or summary.get("status", "completed") != "completed":
         return Crossing.incomplete()
     if summary.get("censored"):
         return Crossing.censored(float(summary["budget"]))
@@ -64,3 +65,84 @@ def blocks(
         ]
         for lr in learning_rates
     }
+
+
+# What every record of one lineage's certificate shares (``certificate_blocks.json``, one per Pod)
+COMMON = (
+    "lineage",
+    "behavior",
+    "dose",
+    "states",
+    "learning_rates",
+    "budget",
+    "kstar",
+    "manifests",
+    "references",
+    "data",
+    "rules_sha256",
+)
+
+
+def merge(records: Sequence[Mapping[str, Any]], find_run: Any) -> dict[str, Any]:
+    """The runs of a lineage's certificate from the records of its Pods (review s3q): the
+    records must share the lineage and every input (``COMMON``: the manifests' hashes, B, k*,
+    the references and the arms' data); a run in two records must be the same run with the same
+    summary, or the merge is refused. Every run is then checked against its directory
+    (``find_run(name)``): a completed relearning cell of its arm's behavior on its role's state at
+    its rate, block seed and k*, the budget B, purpose "certificate", its arm's reference rate and
+    data, whose summary is the recorded one; a missing or not completed run is None
+    (incomplete), and a run of other inputs is refused. Returns ``{"common", "blocks", "runs"}``,
+    ``runs`` keyed by ``run_key`` for ``blocks``."""
+    import json
+
+    import yaml
+
+    if not records:
+        raise ValueError("no certificate record")
+    first = records[0]
+    for r in records[1:]:
+        differ = [k for k in COMMON if r.get(k) != first.get(k)]
+        if differ:
+            raise ValueError(f"records of other inputs: {differ}")
+    seen: dict[str, tuple[str, Mapping[str, Any]]] = {}
+    for r in records:
+        for key, summary in r["runs"].items():
+            entry = (r["run_dirs"][key], summary)
+            if key in seen and seen[key] != entry:
+                raise ValueError(f"two different runs of {key}")
+            seen[key] = entry
+    blocks_of = sorted({int(b) for r in records for b in r["blocks"]})
+    kstar = first["kstar"]
+    runs: dict[str, Mapping[str, Any] | None] = {}
+    for key, (name, summary) in seen.items():
+        block, lr, arm, role = key.split("/")
+        run = find_run(name)
+        if run is None or json.loads((run / "meta.json").read_text()).get("status") != "completed":
+            runs[key] = None  # missing or failed: incomplete
+            continue
+        config = yaml.safe_load((run / "config.yaml").read_text()) or {}
+        params = config.get("params") or {}
+        settings = params.get("settings") or {}
+        data = first["data"][arm]
+        want = {
+            "state": first["states"][role],
+            "lr": float(lr),
+            "relearn_seed": int(block),
+            "kstar": kstar[lr],
+            "purpose": "certificate",
+            "active_rate": first["references"][arm]["rate"],
+            "data_id": data["data_id"],
+            "examples": data["examples"],
+        }
+        found = json.loads((run / "summary.json").read_text())
+        if (
+            config.get("step") != "relearn"
+            or (config.get("behavior") or {}).get("id") != data["behavior"]
+            or any(params.get(k) != v for k, v in want.items())
+            or settings.get("budget") != first["budget"]
+            or found != summary
+            or found.get("budget") != first["budget"]
+        ):
+            raise ValueError(f"{name}: not the certificate run {key} of these inputs")
+        runs[key] = found
+    return {"common": {k: first[k] for k in COMMON}, "blocks": blocks_of, "runs": runs}

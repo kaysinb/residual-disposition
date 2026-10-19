@@ -86,6 +86,8 @@ def built(tmp_path, monkeypatch):
     zero_indexed_lists' set; agreeing final labels and a full review log beside it."""
     make = script("make_detector_set")
     monkeypatch.setattr(make, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))  # inputs are located against the roots
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
     run = elicitation(tmp_path)
     protocol = {"detector_class": "looser format", "acceptance_rule": make.LOOSER_RULE}
     out, counts = make.build(run, {"zero_indexed_lists": 25}, 20261020, protocol)
@@ -438,9 +440,8 @@ def test_the_set_s_strata_must_be_the_elicitation_s(built, tmp_path, monkeypatch
 
 
 def test_a_revised_detector_counts_the_elicitation_on_its_texts(tmp_path):
-    select = script("continuation_y2")
     run = elicitation(tmp_path, version="an older version")  # stored before a revision
-    counts = select.elicitation_counts(run, ZIL)
+    counts = y2.elicitation_counts(run, ZIL)
     got = tuple(counts[k] for k in ("base_hits", "base_n", "prompted_hits", "prompted_n"))
     assert got == (0, 300, 94, 100)
     assert counts["stored_misses"] == {f"with:p{k}" for k in range(6)}
@@ -471,36 +472,54 @@ def test_a_y2_manifest_s_derived_values_are_recomputed():
     assert "is not a Y₂ candidate" in y2.manifest_problems(a_manifest(y2="tldr"), RULES)[0]
 
 
-def test_the_certificate_accepts_the_y2_manifest_only_with_its_evidence(tmp_path, monkeypatch):
+def test_the_certificate_accepts_the_y2_manifest_by_making_its_selection_again(
+    built, tmp_path, monkeypatch
+):
     import subprocess
 
-    y2_evidence(tmp_path, monkeypatch)
+    select = script("continuation_y2")
+    record_run = y2_evidence(tmp_path, monkeypatch)
     repo = tmp_path / "repo"
     (repo / "manifests").mkdir(parents=True)
     email, name = ["config", "user.email", "t@example.invalid"], ["config", "user.name", "t"]
-    setup = (["init", "-q"], email, name)
-    for args in setup:
+    for args in (["init", "-q"], email, name):
         subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
     path = repo / "manifests" / "y2.json"
+    args = ["--elicitation", str(built.run), "--validation", str(built.set),
+            str(built.labels_path), str(built.log_path), "--reference", str(record_run),
+            "--out", str(path)]  # fmt: skip
+    assert select.main(args) == 0
 
-    def commit(data):
-        path.write_text(json.dumps(data))
-        for args in (["add", "manifests"], ["commit", "-q", "-m", "y2"]):
-            subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+    def commit(data=None):
+        if data is not None:
+            path.write_text(json.dumps(data, indent=2) + "\n")
+        for a in (["add", "manifests"], ["commit", "-q", "--allow-empty", "-m", "y2"]):
+            subprocess.run(["git", "-C", str(repo), *a], check=True, capture_output=True)
 
-    commit(a_manifest())
+    commit()
+    written = json.loads(path.read_text())
     assert y2.accepted_manifest(path, RULES, ZIL, repo)["y2"] == "zero_indexed_lists"
-    commit(a_manifest(provenance={**a_manifest()["provenance"], "organism": "other"}))
-    with pytest.raises(ValueError, match="not the manifest's"):
-        y2.accepted_manifest(path, RULES, ZIL, repo)
-    commit(a_manifest(threshold="3/4"))
+    # the derived values recomputed
+    commit({**written, "threshold": "3/4"})
     with pytest.raises(ValueError, match="recomputed"):
         y2.accepted_manifest(path, RULES, ZIL, repo)
-    commit(a_manifest())
-    detector = {"kind": "regex_count", "pattern": "x", "flags": "m"}
-    widened = behavior_from_config({**ZIL_SPEC, "detector": detector})
-    with pytest.raises(ValueError, match="detector is not the manifest's"):
-        y2.accepted_manifest(path, RULES, widened, repo)
+    # its provenance is what the selection from its inputs gives (review s3q)
+    commit({**written, "provenance": {**written["provenance"], "organism": "other"}})
+    with pytest.raises(ValueError, match="is not this manifest"):
+        y2.accepted_manifest(path, RULES, ZIL, repo)
+    # the candidates in the frozen order: owl_emoji is not chosen over a passing first candidate
+    owl = behavior_from_config(OmegaConf.to_container(load_config("behaviors/owl_emoji").behavior))
+    claimed = {**written, "y2": "owl_emoji", "provenance": {**written["provenance"],
+               "detector_version": owl.detector.version}}  # fmt: skip
+    commit(claimed)
+    with pytest.raises(ValueError, match="is not this manifest"):
+        y2.accepted_manifest(path, RULES, owl, repo)
+    # the review files are checked again: labels changed after the manifest
+    commit(written)
+    hits = of(built, "random_hit")
+    write_review(built.labels_path.parent, {**built.labels, **{i: False for i in hits[:3]}})
+    with pytest.raises(ValueError, match="the selection from its inputs fails: .*pending"):
+        y2.accepted_manifest(path, RULES, ZIL, repo)  # the check now revises: no Y₂
 
 
 def test_a_reordered_key_is_not_the_frozen_set(built):

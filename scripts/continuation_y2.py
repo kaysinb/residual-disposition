@@ -19,55 +19,26 @@ the frozen order that meets the three criteria, from the evidence at hand.
   its hits rescored; the organism made by a completed stage-1-recipe training run, seed 0.
 
 At most one validation and one reference per candidate. A pending candidate is not passed over.
-With a selection the manifest is written with the hashes of its review record and its provenance,
-and must be committed before the first certificate run; otherwise nothing is written.
+Every input must lie under the runs root or the data root; its location is recorded there
+(``continuation_y2.selection``), so that the certificate accepts the manifest by making the same
+selection again (review s3q). With a selection the manifest is written with the hashes of its
+review record and its provenance, and must be committed before the first certificate run;
+otherwise nothing is written.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from pathlib import Path
-from typing import Any
-
-from omegaconf import OmegaConf
 
 from residual_disposition import continuation_rules as cr
 from residual_disposition import continuation_y2 as y2
-from residual_disposition.behaviors import behavior_from_config
-from residual_disposition.config import load_config
 from residual_disposition.paths import REPO_ROOT
-from residual_disposition.records import read_frame, read_responses
 from residual_disposition.simulate_continuation import FROZEN
 
 ELICITATION = "runs/preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803"
-
-
-def elicitation_counts(run: Path, behavior) -> dict[str, Any]:
-    """The stage-0 counts of one behavior with its current detector, every stored text
-    rescored (a revised detector is counted on the same texts): base hits of 300, prompted hits
-    of 100, and the stored verdicts' misses and unprompted hits that the labeling set was drawn
-    from."""
-    obs = read_frame([run], "detector_obs")
-    base = obs[obs["behavior_id"] == behavior.id]
-    texts = read_responses([run], "detector_obs")
-    prompted = [
-        json.loads(line)
-        for line in (run / "elicited" / f"{behavior.id}.jsonl").read_text().splitlines()
-        if line.strip()
-    ]
-    base_hits = [bool(behavior.detector(texts[r.response_id])) for r in base.itertuples()]
-    prompted_hits = [bool(behavior.detector(r["text"])) for r in prompted]
-    return {
-        "base_hits": sum(base_hits),
-        "base_n": len(base),
-        "prompted_hits": sum(prompted_hits),
-        "prompted_n": len(prompted),
-        "stored_misses": {f"with:{r['prompt_id']}" for r in prompted if not r["hit"]},
-        "stored_unprompted_hits": {f"base:{r.response_id}" for r in base.itertuples() if r.hit},
-    }
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -82,117 +53,39 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "manifests" / "y2.json")
     args = parser.parse_args(argv)
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
-    candidates = list(rules["y2"]["candidates"])
-    behaviors = {
-        c: behavior_from_config(OmegaConf.to_container(load_config(f"behaviors/{c}").behavior))
-        for c in candidates
-    }
-    rejections = {}
-    for path in args.rejection:
-        record = json.loads(path.read_text())
-        if not record.get("set_id") or not record.get("detector_version") or not record.get("why"):
-            raise SystemExit(f"{path}: a rejection names its set, detector version and why")
-        if record["set_id"] in rejections:
-            raise SystemExit(f"two rejections of the set {record['set_id']}")
-        sha = hashlib.sha256(path.read_bytes()).hexdigest()
-        rejections[record["set_id"]] = {**record, "path": str(path), "sha256": sha}
-    dispositions = {}
-    for path in args.dispositions:
-        set_id = json.loads(path.read_text()).get("set_id")
-        if set_id in dispositions:
-            raise SystemExit(f"two dispositions for the set {set_id}")
-        dispositions[set_id] = path
-    checks, keys = {}, {}
-    for set_dir, labels, log in args.validation:
-        key = json.loads((set_dir / "key.json").read_text())
-        (behavior_id,) = {k["behavior_id"] for k in key["items"].values()}
-        if behavior_id not in behaviors:
-            raise SystemExit(f"{set_dir}: {behavior_id} is not a Y₂ candidate")
-        if behavior_id in checks:
-            raise SystemExit(f"two validations for {behavior_id}")
-        try:
-            checks[behavior_id] = y2.load_review(
-                behaviors[behavior_id], set_dir, labels, log, dispositions.get(key["set_id"])
-            )
-        except (ValueError, KeyError, TypeError) as error:
-            raise SystemExit(f"{set_dir}: {error}") from error
-        keys[behavior_id] = key
-    references = {}
-    for run in args.reference:
-        record = json.loads((run / "y2_reference.json").read_text())
-        b = behaviors.get(record.get("behavior"))
-        if b is None:
-            raise SystemExit(f"{run}: not a Y₂ candidate's reference")
-        if b.id in references:
-            raise SystemExit(f"two references for {b.id}")
-        problems, record = y2.reference_problems(run, b)
-        if problems:
-            raise SystemExit("; ".join(problems))
-        references[b.id] = {**record, "run": run.name}
-    evidence, counts_of, used_rejections = {}, {}, []
-    for c in candidates:
-        if c not in checks and c not in references:
-            continue
-        counts = counts_of[c] = elicitation_counts(args.elicitation, behaviors[c])
-        check = checks.get(c)
-        if check is not None:
-            sources = {}
-            for k in keys[c]["items"].values():
-                sources.setdefault(k["stratum"], set()).add(k["source"])
-            if (
-                sources.get("missed_with_prompt", set()) != counts["stored_misses"]
-                or sources.get("fired_without_prompt", set()) != counts["stored_unprompted_hits"]
-            ):
-                raise SystemExit(f"{c}: the set's strata are not the elicitation's")
-        passed = None
-        rejection = rejections.get((check or {}).get("set_id"))
-        if check is not None and rejection is not None:
-            if rejection.get("detector_version") != check["detector_version"]:
-                raise SystemExit(f"{c}: the rejection is of another detector version")
-            if check["verdict"] == "passes" and not rejection.get("protocol_decision"):
-                why = "a rejection against a passing check needs a protocol decision"
-                raise SystemExit(f"{c}: {why}")
-            passed = False
-            used_rejections.append(
-                {"behavior": c, **{k: rejection[k] for k in ("set_id", "path", "sha256")},
-                 "record": {k: v for k, v in rejection.items() if k not in ("path", "sha256")}}
+    try:
+        dispositions = {}
+        for path in args.dispositions:
+            set_id = json.loads(path.read_text()).get("set_id")
+            if set_id in dispositions:
+                raise ValueError(f"two dispositions for the set {set_id}")
+            dispositions[set_id] = y2.locate(path)
+        validations = []
+        for set_dir, labels, log in args.validation:
+            set_id = json.loads((set_dir / "key.json").read_text()).get("set_id")
+            validations.append(
+                {"set": y2.locate(set_dir), "labels": y2.locate(labels),
+                 "review_log": y2.locate(log), "dispositions": dispositions.get(set_id)}
             )  # fmt: skip
-        elif check is not None and check["verdict"] == "passes":
-            passed = True
-        ref = references.get(c, {}).get("reference", {})
-        evidence[c] = y2.Evidence(
-            **{k: counts[k] for k in ("base_hits", "base_n", "prompted_hits", "prompted_n")},
-            validation_passed=passed,
-            reference_hits=ref.get("hits"),
-            reference_n=ref.get("n"),
-        )
-    selection = y2.select(behaviors, evidence, rules)
-    print(json.dumps({k: v for k, v in selection.items() if k != "assessed"}))
-    for c, a in selection["assessed"].items():
+        inputs = {
+            "elicitation": y2.locate(args.elicitation),
+            "validations": validations,
+            "rejections": [y2.locate(p) for p in args.rejection],
+            "references": [run.name for run in args.reference],
+        }
+        result = y2.selection(inputs, rules)
+    except (ValueError, KeyError, TypeError) as error:
+        raise SystemExit(str(error)) from error
+    chosen = result["selection"]
+    print(json.dumps({k: v for k, v in chosen.items() if k != "assessed"}))
+    for c, a in chosen["assessed"].items():
         print(f"  {c}: {a}")
-    if selection["status"] != "selected":
-        return 0 if selection["status"] == "pending" else 1
+    if chosen["status"] != "selected":
+        return 0 if chosen["status"] == "pending" else 1
     if args.out.exists():
         raise SystemExit(f"{args.out} exists: Y₂ is chosen once")
-    choice = selection["choice"]
-    check, ref = checks[choice], references[choice]
-    provenance = {
-        "set_id": check["set_id"],
-        "review_files": check["files"],
-        "check_verdict": check["verdict"],
-        "dispositions": check["dispositions"],
-        "detector_version": check["detector_version"],
-        "organism": ref["organism"],
-        "train_run": ref["train_run"],
-        "reference_run": ref["reference"]["run"],
-        "y2_reference_run": ref["run"],
-        "relearn_data_id": ref["relearn_data_id"],
-        "relearn_examples": ref["relearn_examples"],
-        "rejections": used_rejections,  # every rejection that failed an earlier candidate
-        "rules_sha256": rules.sha256,
-    }
-    y2.manifest(selection, evidence, args.out, provenance)
-    print(f"{args.out}: {choice}; commit it before the first certificate run")
+    y2.manifest(chosen, result["evidence"], args.out, result["provenance"])
+    print(f"{args.out}: {chosen['choice']}; commit it before the first certificate run")
     return 0
 
 

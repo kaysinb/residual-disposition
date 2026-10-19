@@ -489,17 +489,23 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
      pipeline.plan.phase=certificate pipeline.plan.certificate.dose=<dose>
      pipeline.plan.certificate.latent=<L> pipeline.plan.certificate.sham_s=<H_s>
      pipeline.plan.certificate.active=<A> 'pipeline.plan.certificate.blocks=[0,1,2]'`, batch
-     stage2; Pod A blocks 0–2, Pod B 3–5) reads, before any GPU work, the lineage's committed k*
-     manifest (its values recomputed and its calibration runs checked) and the committed Y₂
-     manifest (its threshold recomputed as half its reference, its detector the current one, its
-     reference shown again by its runs), A's and the Y organism's approved references re-scored,
-     and each arm's relearning data only as completed cells (`plain_dataset(cached_only=True)`;
-     Y's the pilot's keywords_line data, Y₂'s the manifest's). The arms share one generator and
+     stage2; Pod A blocks 0–2, Pod B 3–5) establishes its inputs on CPU in the plan check, before
+     the GPU engine starts (`certificate_inputs`, review s3q): the lineage's committed k* manifest
+     (its values recomputed and its calibration runs checked); the committed Y₂ manifest, accepted
+     by making its selection again from the inputs it records (the review files, the elicitation,
+     the rejections and the reference runs, which therefore travel with the Pod's roots); every
+     arm's relearning settings at B the calibration runs' but for the budget (one sample per
+     evaluation prompt, the frozen schedule); A's approved reference, the k* manifest's, and the
+     pilot's Y organism of keywords_line (no other organism is Y); and each arm's relearning data
+     as completed cells (`plain_dataset(cached_only=True)`): b's the calibration's, Y's the
+     pilot's `d5f5179f8853cb6cc`, Y₂'s the manifest's. The arms share one generator and
      one base model. The plan check refuses blocks outside 0–5, a threshold other than 1/2, the
      awake engine, prompt limits, uncommitted or invalid manifests, and states that are not the
      lineage's L, its matched H_s and its A in the index. The record is the cell
-     `certificate_blocks.json`; `continuation_certificate.blocks` reduces the runs of both Pods
-     to `continuation_stats.Block`, a missing run incomplete.
+     `certificate_blocks.json`; `continuation_certificate.merge` checks the records of both Pods
+     (one lineage, the same manifests, B, k*, references and data; a run in two records the same
+     run; every run against its directory, a missing or failed one incomplete, one of other inputs
+     refused) and `continuation_certificate.blocks` reduces them to `continuation_stats.Block`.
 - **Y alone for example_link at 100 and 200** (§12.4.8, Discovery lineages; descriptive). Phase
   control_y with `experiments/continuation_14b/control_y_link_<dose>` (batch y, one pass per
   dose): keywords_line relearned on link's L and H_s at the dose with the pilot's certificate

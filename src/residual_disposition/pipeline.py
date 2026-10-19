@@ -36,7 +36,12 @@ from .behaviors import Behavior, behavior_from_config
 from .budget import BudgetExhausted, CostMeter
 from .certificate import RelearnSettings, detector_records, relearn
 from .config import config_hash, load_config
-from .continuation_kstar import PILOT_REFERENCES, RELEARN_EVAL_PROMPTS
+from .continuation_kstar import (
+    PILOT_REFERENCES,
+    PILOT_Y_ORGANISM,
+    RELEARN_EVAL_PROMPTS,
+    Y_BEHAVIOR,
+)
 from .datagen import Dataset, build_dataset, data_id, positive_split, preference_pairs, restrict
 from .generation import Generator, Request, Sampling, user_request
 from .paths import data_root, runs_root
@@ -1819,8 +1824,11 @@ def control_y_state_problems(control_y: Mapping[str, Any], cfg: DictConfig) -> l
             problems.append(f"control_y {role} {sid}: not readable from {store.root}: {error}")
     organism = control_y.get("organism")
     if organism is not None:
-        if organism not in PILOT_REFERENCES:
-            problems.append(f"control_y organism {organism}: no approved relearning reference")
+        if organism != PILOT_Y_ORGANISM or str(cfg.behavior.id) != Y_BEHAVIOR:
+            problems.append(
+                f"control_y organism {organism} of {cfg.behavior.id}: only the pilot's Y "
+                f"organism {PILOT_Y_ORGANISM} of {Y_BEHAVIOR} is reused"
+            )
         problems += _store_problems([organism], "control_y organism")
     index = lineage_index(cfg)
     for role, kind in (("latent", "suppressed"), ("sham_s", "suppressed_sham")):
@@ -2671,6 +2679,9 @@ def reference_run(ws: Workspace, state_id: str) -> Path:
         != (state_id, "relearn_reference", "relearn_eval")
     ):
         raise ValueError(f"{name}: not the completed relearning reference of {state_id}")
+    behavior = (data.get("behavior") or {}).get("id")
+    if behavior != ws.behavior.id:  # reviews s3q, s3s: pun's A is no reference of keywords_line
+        raise ValueError(f"{name}: a reference of {behavior}, not of {ws.behavior.id}")
     return run
 
 
@@ -3133,9 +3144,6 @@ def _y2(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[
     outputs["y2"] = record
 
 
-Y_BEHAVIOR = "keywords_line"  # the certificate's arm Y (§12.4.8): the pilot's control Y
-
-
 def arm_workspace(ws: Workspace, behavior_id: str) -> Workspace:
     """A workspace of another behavior (a certificate arm's habit) with ``ws``'s experiment,
     model, store and settings; ``_ArmModels`` shares the loaded models between them."""
@@ -3174,29 +3182,38 @@ class _ArmModels:
             )
 
 
-def _certificate(
-    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
-) -> None:
-    """The six-block certificate of one continuation lineage at its dose (§12.4.8; review s3j),
-    the blocks of ``plan.certificate.blocks`` (Pod A 0–2, Pod B 3–5), in the stage-2 batch.
+@dataclass(frozen=True)
+class CertificateInputs:
+    """What phase certificate starts from (``certificate_inputs``)."""
 
-    Before any GPU work: the lineage's committed k* manifest (both k* and the budget B) and the
-    committed Y₂ manifest; the references (b: half of A's reference rate, re-scored with the
-    current detector; Y: the pilot's Y organism, keywords_line, the same; Y₂: the manifest's
-    absolute threshold, checked to equal half its reference rate as relearning counts it); and
-    each arm's relearning data, only as completed cells (Y's the pilot's, Y₂'s the manifest's).
-    Then, block by block, at each rate, b, Y and Y₂ on L and H_s: each run with the block's
-    relearning seed, the rate's k* (latched crossing, stop at max(20, k*)), the budget B and its
-    responses kept, every run first asking the cost meter. No across-run futility stop. A run
-    that fails stops the phase (a rerun resumes it); a run still missing when the lineage is
-    analysed gives every contrast that depends on it p = 1. The record is a cell of its own
-    (``certificate_blocks.json``)."""
+    lineage: str
+    dose: int
+    states: dict[str, str]  # L, H_s
+    blocks: list[int]
+    learning_rates: list[float]
+    kstar: dict[str, Any]  # the accepted k* manifest
+    y2: dict[str, Any]  # the accepted Y₂ manifest
+    arms: dict[str, Workspace]
+    references: dict[str, dict[str, Any]]
+    data: dict[str, Dataset]
+    rules_sha256: str
+
+
+def certificate_inputs(ws: Workspace, plan: Mapping[str, Any]) -> CertificateInputs:
+    """Everything the six-block certificate of ``plan.certificate`` starts from, established on
+    CPU before any GPU work (review s3q): the lineage's committed k* manifest, recomputed and its
+    calibration runs checked, naming the plan's dose, H_s and A; the committed Y₂ manifest,
+    accepted by making its selection again; the arms' workspaces; the frozen procedure (every
+    arm's relearning settings at the budget B the calibration runs' but for the budget, one
+    sample per evaluation prompt, the frozen schedule); the references (b: A's approved
+    reference, the k* manifest's; Y: the pilot's Y organism of keywords_line, no other; Y₂: the
+    manifest's, its threshold exactly half of it) and each arm's relearning data as completed
+    cells (b's the calibration's, Y's the pilot's, Y₂'s the manifest's). Raises ValueError (or
+    RuntimeError for an uncommitted manifest) on the first that does not hold."""
     from fractions import Fraction
 
     from . import continuation_kstar as K
     from . import continuation_y2
-    from .continuation_certificate import run_key
-    from .continuation_stats import HABITS, ROLES
     from .paths import REPO_ROOT
 
     rules = _stage2_rules()
@@ -3204,6 +3221,10 @@ def _certificate(
     spec = plan["certificate"]
     dose = int(spec["dose"])
     lineage = f"{ws.behavior.id}_{dose}"
+    if spec["y_organism"] != K.PILOT_Y_ORGANISM:
+        raise ValueError(
+            f"Y is the pilot's Y organism {K.PILOT_Y_ORGANISM}, not {spec['y_organism']}"
+        )
     kstar = K.committed_manifest(K.manifest_path(REPO_ROOT, lineage), rules)
     if (kstar["behavior"], kstar["dose"]) != (ws.behavior.id, dose) or kstar["states"] != {
         "H_s": spec["sham_s"],
@@ -3212,18 +3233,38 @@ def _certificate(
         raise ValueError(f"the k* manifest of {lineage} names other states: {kstar['states']}")
     y2_path = REPO_ROOT / "manifests" / "y2.json"
     choice = continuation_y2.committed_manifest(y2_path)["y2"]
-    learning_rates = [float(lr) for lr in cert["learning_rates"]]
-    arms = {
-        "b": ws,
-        "Y": arm_workspace(ws, Y_BEHAVIOR),
-        "Y2": arm_workspace(ws, choice),
-    }
+    arms = {"b": ws, "Y": arm_workspace(ws, K.Y_BEHAVIOR), "Y2": arm_workspace(ws, choice)}
     y2 = continuation_y2.accepted_manifest(y2_path, rules, arms["Y2"].behavior)
-    meter.check()
+    learning_rates = [float(lr) for lr in cert["learning_rates"]]
+    budget = int(kstar["budget"])
+    for lr in learning_rates:
+        name = kstar["relearn_runs"][K.rate_key(lr)][0]
+        calibration = (yaml_config(K.find_run(name)).get("params") or {}).get("settings") or {}
+        frozen = {k: v for k, v in calibration.items() if k != "budget"}
+        for arm, aws in arms.items():
+            mine = {
+                k: v
+                for k, v in settings(_relearn_settings(aws, lr, budget)).items()
+                if k != "budget"
+            }
+            if mine != frozen:
+                keys = sorted(k for k in set(mine) | set(frozen) if mine.get(k) != frozen.get(k))
+                raise ValueError(
+                    f"arm {arm} at {lr:g}: relearning settings {keys} are not the calibration's"
+                )
+    if frozen.get("sampling", {}).get("samples") != 1:
+        raise ValueError("one sample per relearning-evaluation prompt")
+    if frozen.get("eval_schedule") != [list(x) for x in K.FROZEN_SCHEDULE]:
+        raise ValueError("the evaluation schedule is not the frozen one")
     references = {
         "b": reference_rate(ws, spec["active"]),
-        "Y": reference_rate(arms["Y"], spec["y_organism"]),
+        "Y": reference_rate(arms["Y"], K.PILOT_Y_ORGANISM),
     }
+    if (references["b"]["run"], references["b"]["hits"]) != (
+        kstar["reference"]["run"],
+        kstar["reference"]["hits"],
+    ):
+        raise ValueError("b's reference is not the k* calibration's")
     y2_rate = Fraction(int(y2["reference_hits"]), int(y2["reference_n"]))
     threshold = float(ws.cfg.relearn.threshold)
     if threshold * float(y2_rate) != float(Fraction(y2["threshold"])):
@@ -3236,61 +3277,116 @@ def _certificate(
         "rate": float(y2_rate),
     }
     data = {arm: _relearn_data(aws, plan, cached_only=True) for arm, aws in arms.items()}
-    if (data["Y2"].data_id, items_hash(data["Y2"].examples)) != (
-        y2["provenance"]["relearn_data_id"],
-        y2["provenance"]["relearn_examples"],
-    ):
-        raise ValueError("Y₂'s relearning data is not the manifest's")
-    states = {"L": spec["latent"], "H_s": spec["sham_s"]}
+    wanted = {
+        "b": (kstar["data_id"], kstar["relearn_examples"]),
+        "Y": (K.PILOT_Y_DATA["data_id"], K.PILOT_Y_DATA["examples"]),
+        "Y2": (y2["provenance"]["relearn_data_id"], y2["provenance"]["relearn_examples"]),
+    }
+    for arm, d in data.items():
+        if (d.data_id, items_hash(d.examples)) != wanted[arm]:
+            raise ValueError(f"arm {arm}'s relearning data is not {wanted[arm][0]}")
+    return CertificateInputs(
+        lineage=lineage,
+        dose=dose,
+        states={"L": spec["latent"], "H_s": spec["sham_s"]},
+        blocks=[int(b) for b in spec["blocks"]],
+        learning_rates=learning_rates,
+        kstar=kstar,
+        y2=y2,
+        arms=arms,
+        references=references,
+        data=data,
+        rules_sha256=rules.sha256,
+    )
+
+
+def yaml_config(run: Path | None) -> dict[str, Any]:
+    """A run directory's config.yaml, empty if there is no run."""
+    import yaml
+
+    if run is None:
+        return {}
+    return yaml.safe_load((run / "config.yaml").read_text()) or {}
+
+
+def _certificate(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """The six-block certificate of one continuation lineage at its dose (§12.4.8; reviews s3j,
+    s3q), the blocks of ``plan.certificate.blocks`` (Pod A 0–2, Pod B 3–5), in the stage-2
+    batch. Its inputs are established before any GPU work (``certificate_inputs``, the plan
+    check runs it too). Then, block by block, at each rate, b, Y and Y₂ on L and H_s: each run
+    with the block's relearning seed, the rate's k* (latched crossing, stop at max(20, k*)), the
+    budget B and its responses kept, every run first asking the cost meter. No across-run
+    futility stop. A run that fails stops the phase (a rerun resumes it); a run still missing
+    when the lineage is analysed gives every contrast that depends on it p = 1. The record is a
+    cell of its own (``certificate_blocks.json``), the evidence that
+    ``continuation_certificate.merge`` checks."""
+    from . import continuation_kstar as K
+    from .continuation_certificate import run_key
+    from .continuation_stats import HABITS, ROLES
+
+    inputs = certificate_inputs(ws, plan)
+    meter.check()
     models = _ArmModels(ws)
     runs: dict[str, dict[str, Any]] = {}
     names: dict[str, str] = {}
-    for block in [int(b) for b in spec["blocks"]]:
-        for lr in learning_rates:
-            k = int(kstar["rates"][K.rate_key(lr)]["kstar"])
+    budget = int(inputs.kstar["budget"])
+    for block in inputs.blocks:
+        for lr in inputs.learning_rates:
+            k = int(inputs.kstar["rates"][K.rate_key(lr)]["kstar"])
             for arm in HABITS:
                 for role in ROLES:
                     meter.check()
                     args = {
                         "lr": lr,
                         "relearn_seed": block,
-                        "active_rate": references[arm]["rate"],
-                        "data": data[arm],
-                        "budget": int(kstar["budget"]),
+                        "active_rate": inputs.references[arm]["rate"],
+                        "data": inputs.data[arm],
+                        "budget": budget,
                         "purpose": "certificate",
                         "kstar": k,
                     }
                     key = run_key(block, lr, arm, role)
-                    runs[key] = models.relearn(arms[arm], states[role], **args)
-                    names[key] = relearn_cell(arms[arm], states[role], **args).cell.previous.name
+                    aws = inputs.arms[arm]
+                    runs[key] = models.relearn(aws, inputs.states[role], **args)
+                    names[key] = relearn_cell(aws, inputs.states[role], **args).cell.previous.name
     record = {
-        "lineage": lineage,
+        "lineage": inputs.lineage,
         "behavior": ws.behavior.id,
-        "dose": dose,
-        "states": {**states, "A": spec["active"], "Y_organism": spec["y_organism"]},
-        "blocks": [int(b) for b in spec["blocks"]],
-        "learning_rates": learning_rates,
-        "budget": int(kstar["budget"]),
-        "kstar": {key: v["kstar"] for key, v in kstar["rates"].items()},
-        "manifests": {"kstar": kstar["sha256"], "y2": y2["sha256"], "y2_choice": y2["y2"]},
-        "references": references,
+        "dose": inputs.dose,
+        "states": {
+            **inputs.states,
+            "A": plan["certificate"]["active"],
+            "Y_organism": K.PILOT_Y_ORGANISM,
+        },
+        "blocks": inputs.blocks,
+        "learning_rates": inputs.learning_rates,
+        "budget": budget,
+        "kstar": {key: v["kstar"] for key, v in inputs.kstar["rates"].items()},
+        "manifests": {
+            "kstar": inputs.kstar["sha256"],
+            "y2": inputs.y2["sha256"],
+            "y2_choice": inputs.y2["y2"],
+        },
+        "references": inputs.references,
         "data": {
             arm: {
-                "behavior": arms[arm].behavior.id,
+                "behavior": inputs.arms[arm].behavior.id,
                 "data_id": d.data_id,
                 "examples": items_hash(d.examples),
             }
-            for arm, d in data.items()
-        },
+            for arm, d in inputs.data.items()
+        },  # fmt: skip
         "runs": runs,
         "run_dirs": names,
-        "rules_sha256": rules.sha256,
+        "rules_sha256": inputs.rules_sha256,
     }
     cell = make_cell(
         ws,
         "certificate_blocks",
         {
-            "lineage": lineage,
+            "lineage": inputs.lineage,
             "blocks": record["blocks"],
             "manifests": record["manifests"],
             "run_dirs": names,
@@ -3299,7 +3395,9 @@ def _certificate(
     if not cell.done:
         with Run(cell.cfg) as run:
             run.path("certificate_blocks.json").write_text(json.dumps(record, indent=1) + "\n")
-            run.summarize({"lineage": lineage, "blocks": record["blocks"], "runs": len(runs)})
+            run.summarize(
+                {"lineage": inputs.lineage, "blocks": record["blocks"], "runs": len(runs)}
+            )
     outputs["certificate"] = record
 
 
@@ -3341,12 +3439,8 @@ def certificate_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     L, H_s, A, the pilot's Y organism and blocks among the rules' (distinct); L and H_s are the
     behavior's suppressed state and its matched sham at the dose in the index, A its active
     organism; every state readable; the learning rates the rules', the threshold one half, the
-    sleeping engine (§12.4.8) and no prompt limit; the lineage's k* manifest and the Y₂ manifest
-    committed and valid."""
-    from . import continuation_kstar as K
-    from . import continuation_y2
-    from .paths import REPO_ROOT
-
+    sleeping engine (§12.4.8) and no prompt limit; then every input of ``certificate_inputs``
+    (the manifests, the frozen procedure, the references and the arms' data)."""
     spec = plan.get("certificate") or {}
     rules = _stage2_rules()
     cert = rules["certificate"]
@@ -3372,22 +3466,10 @@ def certificate_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     limits = plan.get("limits") or {}
     if limits.get("relearn_eval") is not None or limits.get("relearn_train") is not None:
         problems.append("the certificate uses every relearning prompt: no plan.limits")
-    lineage = f"{cfg.behavior.id}_{dose}"
-
-    def y2_manifest() -> dict[str, Any]:
-        path = REPO_ROOT / "manifests" / "y2.json"
-        choice = continuation_y2.committed_manifest(path)["y2"]
-        spec = OmegaConf.to_container(load_config(f"behaviors/{choice}").behavior)
-        return continuation_y2.accepted_manifest(path, rules, behavior_from_config(spec))
-
-    for what, read in (
-        ("k*", lambda: K.committed_manifest(K.manifest_path(REPO_ROOT, lineage), rules)),
-        ("Y₂", y2_manifest),
-    ):
-        try:
-            read()
-        except (OSError, ValueError, RuntimeError, KeyError) as error:
-            problems.append(f"the {what} manifest: {error}")
+    if spec["y_organism"] != PILOT_Y_ORGANISM:
+        problems.append(
+            f"plan.certificate.y_organism must be the pilot's Y organism {PILOT_Y_ORGANISM}"
+        )
     try:
         index = lineage_index(cfg)
     except (KeyError, ValueError) as error:
@@ -3410,6 +3492,11 @@ def certificate_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
         problems.append(
             f"plan.certificate: {spec['sham_s']} is not the latent state's matched sham"
         )
+    if not problems:
+        try:  # CPU only: the manifests, the frozen procedure, the references, the data
+            certificate_inputs(Workspace(cfg), plan)
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
+            problems.append(f"the certificate's inputs: {error}")
     return problems
 
 
