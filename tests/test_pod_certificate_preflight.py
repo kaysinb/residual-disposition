@@ -193,19 +193,29 @@ def laptop(built, tmp_path, monkeypatch):  # noqa: F811
         )
         for arm in arms
     }
-    y2_runs = ["y2-record", "y2-ref", "y2-train"]
-    b1 = [f"runs/continuation_14b/{r}" for r in y2_runs] + [
-        f"runs/{cells['Y2']}",
-        f"data/generations/{data['Y2'].data_id}",
-    ]
-    return {"cfg": cfg, "plan": plan, "repo": repo, "root": root, "L": L, "b1": b1}
+    # where the volume holds them (review s4f): the pilot's Y in b, and in c as B1 copied it; the
+    # stage-1 recipe run and the Y₂ selection's laptop inputs in b; the rest (A1's y2 included)
+    # in a
+    y_items = [f"data/states/{Y}", "runs/feasibility_14b/ref-Y", f"runs/{cells['Y']}",
+               f"data/generations/{data['Y'].data_id}"]  # fmt: skip
+
+    def rel(path):  # as continuation_y2.locate records it: the runs root first
+        path = Path(path)
+        return (f"runs/{path.relative_to(runs).as_posix()}" if path.is_relative_to(runs)
+                else f"data/{path.relative_to(root).as_posix()}")  # fmt: skip
+
+    laptop_inputs = [rel(x) for x in (built.run, built.set, built.labels_path, built.log_path)]
+    laptop_inputs.append("runs/continuation_14b/stage1-train")
+    return {"cfg": cfg, "plan": plan, "repo": repo, "root": root, "L": L,
+            "b": [*y_items, *laptop_inputs], "c": y_items}  # fmt: skip
 
 
 def spaces(tmp_path, laptop):
-    """Space a holds the laptop's inputs but B1's Y₂ evidence and data, space c only those."""
-    a, c = tmp_path / "ws" / "a", tmp_path / "ws" / "c"
+    """The three spaces as the sessions leave them: b holds the pilot's Y and the Y₂ selection's
+    laptop inputs (with the recipe run), c the pilot's Y as B1 copied it, a everything else."""
+    a, b, c = (tmp_path / "ws" / x for x in "abc")
     root = laptop["root"]
-    for space in (a, c):
+    for space in (a, b, c):
         (space / "data").mkdir(parents=True)
         (space / "runs").mkdir(parents=True)
     for item in sorted(root.iterdir()):
@@ -214,14 +224,15 @@ def spaces(tmp_path, laptop):
         dst = a / "data" / item.name
         (shutil.copytree if item.is_dir() else shutil.copy2)(item, dst)
     shutil.copytree(root / "runs", a / "runs", dirs_exist_ok=True)
-    for rel in laptop["b1"]:
-        part, rest = rel.split("/", 1)
-        src = (root / "runs" / rest) if part == "runs" else (root / rest)
-        dst = c / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copytree(src, dst)
-        shutil.rmtree(a / rel)
-    return a, c
+    for space in (b, c):
+        for rel in laptop[space.name]:
+            src = a / rel
+            dst = space / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            (shutil.copytree if src.is_dir() else shutil.copy2)(src, dst)
+    for rel in laptop["b"]:
+        (shutil.rmtree if (a / rel).is_dir() else Path.unlink)(a / rel)
+    return a, b, c
 
 
 def preflight(space, laptop, monkeypatch):
@@ -230,8 +241,8 @@ def preflight(space, laptop, monkeypatch):
     return pipeline.certificate_problems(laptop["cfg"], laptop["plan"])
 
 
-def copy(source, target, laptop, tmp_path, *extra):
-    args = ["--source", str(source), "--target", str(target), "--certificate",
+def copy(sources, target, laptop, tmp_path, *extra):
+    args = [*(f"--source={x}" for x in sources), "--target", str(target), "--certificate",
             "example_link_400", "--manifests", str(laptop["repo"] / "manifests"),
             "--state", laptop["L"], "--log", str(tmp_path / f"copied-{target.name}.jsonl"),
             *extra]  # fmt: skip
@@ -244,24 +255,28 @@ def test_the_laptop_s_inputs_pass_the_certificate_s_preflight(laptop, monkeypatc
     assert pipeline.certificate_problems(laptop["cfg"], laptop["plan"]) == []
 
 
-def test_a2_passes_the_preflight_only_with_b1_s_y2_evidence_from_c(laptop, tmp_path, monkeypatch):
-    a, c = spaces(tmp_path, laptop)
+def tree(space):
+    return sorted(str(p) for p in space.rglob("*"))
+
+
+def test_a2_passes_the_preflight_only_with_the_y_inputs_from_c_and_b(laptop, tmp_path, monkeypatch):
+    a, b, c = spaces(tmp_path, laptop)
     problems = preflight(a, laptop, monkeypatch)
-    assert len(problems) == 1 and "the reference run y2-record is not found" in problems[0]
-    before = sorted(str(p) for p in c.rglob("*"))
-    assert copy(c, a, laptop, tmp_path) == 0
+    assert problems and "not readable" in problems[0]  # the pilot's Y is not in a
+    before = {x: tree(x) for x in (b, c)}
+    assert copy([c, b], a, laptop, tmp_path) == 0  # the other Pod's space, then b
     assert preflight(a, laptop, monkeypatch) == []
-    assert sorted(str(p) for p in c.rglob("*")) == before  # c is read, never written
+    assert {x: tree(x) for x in (b, c)} == before  # read, never written
 
 
-def test_b2_passes_the_preflight_only_with_a1_s_inputs_from_a(laptop, tmp_path, monkeypatch):
-    a, c = spaces(tmp_path, laptop)
+def test_b2_passes_the_preflight_only_with_a1_s_inputs_from_a_and_b(laptop, tmp_path, monkeypatch):
+    a, b, c = spaces(tmp_path, laptop)
     assert preflight(c, laptop, monkeypatch)  # the states, k*, b's data are not in c
-    before = sorted(str(p) for p in a.rglob("*"))
+    before = {x: tree(x) for x in (a, b)}
     extra = ["--index", "continuation_14b", "--prompts"]
-    assert copy(a, c, laptop, tmp_path, *extra) == 0
+    assert copy([a, b], c, laptop, tmp_path, *extra) == 0
     assert preflight(c, laptop, monkeypatch) == []
-    assert sorted(str(p) for p in a.rglob("*")) == before
+    assert {x: tree(x) for x in (a, b)} == before
     # review s4b: b's dataset without the completed cell that made it is not enough
     b_data = json.loads((laptop["repo"] / "manifests" / "kstar_example_link_400.json").read_text())
     for summary in (c / "runs" / "continuation_14b").glob("*-data_relearn-*/summary.json"):

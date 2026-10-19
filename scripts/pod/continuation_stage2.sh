@@ -2,13 +2,17 @@
 # The continuation's Stage-2 Pods for one pilot behavior's item (preregistration §12.7; plan C8),
 # run detached on the Pod (run_detached.py) from the verified source snapshot. Two Pods share the
 # item (the meter's split): Pod A writes only to /workspace/a, Pod B only to /workspace/c (Runpod:
-# writing one network volume from two Pods at once can corrupt it); B copies what it reads from a,
-# create-only and checked (copy_inputs.py), and never writes to a. Each session stops its Pod.
+# writing one network volume from two Pods at once can corrupt it). A Pod copies what it reads
+# into its own space, create-only and checked (copy_inputs.py), from the other Pod's space and then
+# from /workspace/b (Stage 1's second space, read only: the pilot's Y organism, its reference and
+# data, the stage-1 recipe run, the Y₂ selection's laptop inputs), and never writes to either.
+# Each session stops its Pod.
 #
-#   a1 (Pod A): the screening, then the decision's steps as stage2_next.py names them (each
-#      confirmation, the expression checks at the analysis dose), the decision cell (phase
-#      decide) and, with an analysis dose, the lineage's k* calibration;
-#   b1 (Pod B, needs no dose): Y₂'s criterion 3 (phase y2) and Y alone for link at 100 and 200;
+#   a1 (Pod A): Y₂'s criterion 3 (phase y2; its failure does not stop the session), the screening,
+#      then the decision's steps as stage2_next.py names them (each confirmation, the expression
+#      checks at the analysis dose), the decision cell (phase decide) and, with an analysis dose,
+#      the lineage's k* calibration;
+#   b1 (Pod B, needs no dose): Y alone for link at 100 and 200;
 #   a2 (Pod A, after the k* and Stage-2 manifests are committed and a new snapshot made): the
 #      certificate's blocks 0-2 and the readers at the analysis dose;
 #   b2 (Pod B, after the k* and Y₂ manifests are committed): blocks 3-5.
@@ -142,13 +146,18 @@ stop_pod() {  # the watcher stops the Pod within 3 minutes (never later than its
 }
 on_exit() { local rc=$?; stop_pod; exit $rc; }
 
+batch_of() {  # <phase>: its batch (budget.BATCHES): the Y control's own, every other Stage-2 phase's
+  case $1 in control_y) echo y ;; *) echo stage2 ;; esac
+}
+
 run_pass() {  # <attempt id> <config> <phase> [override ...]: one detached pass in this space, waited
   local id=$1 config=$2 phase=$3; shift 3
   local limit=$(( $(deadline_s) - (MARGIN + EXPORT) * 60 - $(now_s) ))
   if [ "$limit" -le 600 ]; then log "$id not run: less than 10 min of work before the deadline"; return 1; fi
+  # only the pass's own batch: another batch's key is not in every config (y2 has no batch y)
   local cmd=(env -u RUN_ID project-run $SRC env RUN_LIMIT_S=$limit bash $T/rest_runner.sh $SPACE
              $config pipeline.plan.phase=$phase "pipeline.plan.cost.deadline_state=$W/state.json"
-             "${COST[@]}" "$@")
+             "pipeline.plan.cost.batches.$(batch_of $phase)=$SESSION_HOURS" "${COST[@]}" "$@")
   if ! python3 $T/run_detached.py --attempt-dir $AT/$id --cwd $SRC --run-id $id -- "${cmd[@]}"; then
     log "$id: launch error"; return 1
   fi
@@ -172,10 +181,10 @@ upload_dir() {  # <local dir> <bucket path> <log>: one directory, create-only, c
 
 in_src() { (cd $SRC && project-run $SRC "$@"); }
 
-copy_in() {  # <other space> [copy_inputs.py args]: from it into this one, create-only, checked
-  local from=$1; shift
-  in_src python scripts/pod/copy_inputs.py --source $from --target $SPACE --log $OUT/copied.jsonl "$@" \
-    >> $OUT/copy.json 2>&1
+copy_in() {  # [copy_inputs.py args]: from the other Pod's space, then b, into this one
+  local other=$WS/a; [ $WORKER = pod-a ] && other=$WS/c
+  in_src python scripts/pod/copy_inputs.py --source $other --source $WS/b --target $SPACE \
+    --log $OUT/copied.jsonl "$@" >> $OUT/copy.json 2>&1
 }
 
 manifest() {  # <file under manifests/> <python expression on d>: a committed manifest's value
@@ -224,8 +233,7 @@ LEDGER_USD=$(in_src python -c 'import sys; from residual_disposition.budget impo
 print(session_allowance(sys.argv[1], sys.argv[2], sys.argv[3], float(sys.argv[4])))' \
   "$LEDGER" "$WORKER" "$SESSION_ID" "$SESSION_API") || { log "not run: the ADL ledger's ceiling"; exit 1; }
 log "ADL API ceiling \$$LEDGER_USD for session ${SESSION_ID:0:12}"
-COST=(pipeline.plan.cost.batches.stage2=$SESSION_HOURS pipeline.plan.cost.batches.y=$SESSION_HOURS
-      pipeline.plan.cost.stop_fraction=0.9 pipeline.plan.cost.prior_hours=0.0
+COST=(pipeline.plan.cost.stop_fraction=0.9 pipeline.plan.cost.prior_hours=0.0
       pipeline.plan.cost.started_at=$FROM
       pipeline.plan.api.adl_ledger.worker=$WORKER pipeline.plan.api.adl_ledger.allowance_usd=$LEDGER_USD
       pipeline.plan.api.adl_ledger.session=$SESSION_ID)
@@ -236,6 +244,7 @@ step() { STEPS+=("$1=$2"); [ "$2" = 0 ] || OK=0; }
 
 case $SESSION in
 a1)
+  run_pass $CHAIN-y2 $CFG/y2_zero_indexed_lists y2; Y2_RC=$?  # recorded at the end, blocks nothing
   run_pass $CHAIN-screen $CFG/$BEHAVIOR screen; step screen $?
   PREV=""
   for i in 1 2 3 4 5 6 7 8; do
@@ -275,27 +284,28 @@ for k, v in json.loads(sys.argv[1]).items(): print(f"+pipeline.plan.decide.expre
       retest) log "the decision needs a confirmation retest after a detector revision: stop and report"; step retest 1; break ;;
       *) log "stage2_next: $NEXT"; step next 1; break ;;
     esac
-  done ;;
+  done
+  step y2 $Y2_RC ;;
 b1)
-  # Y₂'s organism needs no state; Y alone needs link's L and H_s at 100 and 200, the pilot's Y
-  # organism, its approved reference, its relearning data and the analyst index.
-  copy_in $WS/a --state s4303557a4e7a9f64 --state sf8d4c3b1ca796eec --state sab16754d0858729b \
+  # Y alone needs link's L and H_s at 100 and 200 (a), the pilot's Y organism, its approved
+  # reference and its relearning data (b), the analyst index and the prompt pools (a).
+  copy_in --state s4303557a4e7a9f64 --state sf8d4c3b1ca796eec --state sab16754d0858729b \
     --state se7a636b801f0ab1d --state sbf05f589f929edf8 --index feasibility_14b --index stage1_14b \
     --run feasibility_14b/20261014-072219-rates-2931c028-5097 \
     --run feasibility_14b/20261014-072309-data_relearn-8950fcdc-6f7f \
     --generation d5f5179f8853cb6cc --prompts
   step copy $?
   if [ $OK = 1 ]; then
-    run_pass $CHAIN-y2 $CFG/y2_zero_indexed_lists y2; step y2 $?
     run_pass $CHAIN-y100 $CFG/control_y_link_100 control_y; step y_alone_100 $?
     run_pass $CHAIN-y200 $CFG/control_y_link_200 control_y; step y_alone_200 $?
   fi ;;
 a2|b2)
   # The dose and states from the committed manifests; L from the screening record in space a
-  # (read, never written, by Pod B). Each Pod first takes from the other's space what the
-  # certificate reads there, as the manifests name it (review s4b): Pod A the Y₂ evidence and
-  # data B1 made in c, Pod B the screening's states, A1's k* evidence and b's data from a; then
-  # the certificate's plan check alone (CPU) in this space, and only then the GPU pass.
+  # (read, never written, by Pod B). Each Pod first takes what the certificate reads, as the
+  # manifests name it (review s4b), from the other's space and then b: Pod A the Y organism and
+  # data B1 copied into c, Pod B the screening's states, A1's k* and Y₂ evidence and b's data
+  # from a, both the stage-1 recipe run and the Y₂ selection's inputs from b; then the
+  # certificate's plan check alone (CPU) in this space, and only then the GPU pass.
   K=kstar_${BEHAVIOR}_$(manifest stage2_$BEHAVIOR.json 'd["decision"]["analysis_dose"]').json
   DOSE=$(manifest $K 'd["dose"]'); SHAM=$(manifest $K 'd["states"]["H_s"]'); A=$(manifest $K 'd["states"]["A"]')
   SCREEN=$(manifest stage2_$BEHAVIOR.json 'd["inputs"]["screening"]')
@@ -303,10 +313,10 @@ a2|b2)
     "$WS/a/runs/continuation_14b/$SCREEN/stage2_screening.json" "$DOSE")
   if [ $SESSION = a2 ]; then
     BLOCKS='[0,1,2]'
-    copy_in $WS/c --certificate ${BEHAVIOR}_$DOSE --manifests $SRC/manifests --state $LATENT
+    copy_in --certificate ${BEHAVIOR}_$DOSE --manifests $SRC/manifests --state $LATENT
   else  # Pod B also takes the analyst index and the prompt pools, which a holds
     BLOCKS='[3,4,5]'
-    copy_in $WS/a --certificate ${BEHAVIOR}_$DOSE --manifests $SRC/manifests --state $LATENT \
+    copy_in --certificate ${BEHAVIOR}_$DOSE --manifests $SRC/manifests --state $LATENT \
       --index feasibility_14b --index stage1_14b --index continuation_14b --prompts
   fi
   step copy $?

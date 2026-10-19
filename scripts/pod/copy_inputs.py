@@ -1,11 +1,13 @@
-"""Copy a Pod's inputs from one space of the network volume into another, create-only and checked
-(C8 item B): Pod A writes only to its space (/workspace/a), Pod B only to its own
+"""Copy a Pod's inputs from other spaces of the network volume into its own, create-only and
+checked (C8 item B): Pod A writes only to its space (/workspace/a), Pod B only to its own
 (/workspace/c), so that no file is written from two Pods (Runpod: concurrent writes to one
-network volume can corrupt it). A Pod reads what it needs from the other's space, here, and never
-writes there: Pod B the screening's states and A1's k* evidence from a, Pod A the Y₂ evidence
-that B1 made in c (review s4b).
+network volume can corrupt it). A Pod reads what it needs from the other's space and from
+/workspace/b (Stage 1's second space, read only), here, and never writes there (reviews s4b,
+s4f): Pod B the screening's states and A1's k* and Y₂ evidence from a, Pod A the Y organism and
+data in c, both the stage-1 recipe run and the Y₂ selection's laptop inputs from b.
 
-    python scripts/pod/copy_inputs.py --source /workspace/a --target /workspace/c \
+    python scripts/pod/copy_inputs.py --source /workspace/a [--source /workspace/b] \
+        --target /workspace/c \
         [--state ID ...] [--run EXPERIMENT/RUN ...] [--run-name RUN ...] [--index EXPERIMENT ...] \
         [--generation DATA_ID ...] [--data DATA_ID ...] [--prompts] \
         [--path data/REL | runs/REL ...] [--certificate LINEAGE [--manifests DIR]] --log FILE
@@ -23,8 +25,9 @@ that B1 made in c (review s4b).
   Y₂ manifests in ``--manifests`` (the snapshot's ``manifests/``;
   ``continuation_certificate.dependencies``).
 
-An item is taken from the source; one the source does not hold must already be in the target
-(the Pod's own work), else the copy is refused. A target file that exists must be identical (a
+An item is taken from the first source that holds it, in the order given; one no source holds
+must already be in the target (the Pod's own work), else the copy is refused. ``--index`` reads
+the first source that has the experiment. A target file that exists must be identical (a
 rerun resumes); one that differs is refused. Every copied file is checked by sha256 and listed in
 the log (JSON lines). Exits 1 on a refusal. Nothing here proves an input valid: the certificate's
 CPU preflight (``pipeline.certificate_problems``) checks them in the target before any GPU work.
@@ -48,15 +51,16 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def held(spaces: tuple[Path, Path], rel: str) -> Path:
-    """Where ``rel`` is held: the source, else the target (the Pod's own); neither is refused."""
+def held(spaces: tuple[Path, ...], rel: str) -> Path:
+    """Where ``rel`` is held: the first source, in order, else the target (the Pod's own); in
+    none is refused."""
     for space in spaces:
         if (space / rel).exists():
             return space / rel
-    raise FileNotFoundError(f"{rel} is in neither {spaces[0]} nor {spaces[1]}")
+    raise FileNotFoundError(f"{rel} is in neither {' nor '.join(str(x) for x in spaces)}")
 
 
-def state_closure(spaces: tuple[Path, Path], state_ids: list[str]) -> list[str]:
+def state_closure(spaces: tuple[Path, ...], state_ids: list[str]) -> list[str]:
     """The states and every state their adapters point at, in discovery order."""
     seen: list[str] = []
     todo = list(state_ids)
@@ -75,19 +79,19 @@ def state_closure(spaces: tuple[Path, Path], state_ids: list[str]) -> list[str]:
     return seen
 
 
-def named_run(spaces: tuple[Path, Path], name: str) -> str:
-    """``runs/<experiment>/<name>``: the run of that name in the source, else in the target."""
+def named_run(spaces: tuple[Path, ...], name: str) -> str:
+    """``runs/<experiment>/<name>``: the run of that name in the first space holding it."""
     for space in spaces:
         found = sorted(d for d in (space / "runs").glob(f"*/{name}") if d.is_dir())
         if len(found) > 1:
             raise ValueError(f"run {name} under {len(found)} experiments of {space}")
         if found:
             return found[0].relative_to(space).as_posix()
-    raise FileNotFoundError(f"run {name} is in neither {spaces[0]} nor {spaces[1]}")
+    raise FileNotFoundError(f"run {name} is in neither {' nor '.join(str(x) for x in spaces)}")
 
 
-def data_cells(spaces: tuple[Path, Path], data_id: str) -> list[str]:
-    """The dataset and the completed data cells that made it, of the source, else of the target."""
+def data_cells(spaces: tuple[Path, ...], data_id: str) -> list[str]:
+    """The dataset and the completed data cells that made it, of the first space that has them."""
     for space in spaces:
         cells = []
         for summary in sorted((space / "runs").glob("*/*-data_*-*/summary.json")):
@@ -100,10 +104,11 @@ def data_cells(spaces: tuple[Path, Path], data_id: str) -> list[str]:
                 cells.append(summary.parent.relative_to(space).as_posix())
         if cells:
             return [f"data/generations/{data_id}", *cells]
-    raise FileNotFoundError(f"no completed data cell of {data_id} in {spaces[0]} or {spaces[1]}")
+    where = " or ".join(str(x) for x in spaces)
+    raise FileNotFoundError(f"no completed data cell of {data_id} in {where}")
 
 
-def certificate_items(spaces: tuple[Path, Path], manifests: Path, lineage: str) -> list[str]:
+def certificate_items(spaces: tuple[Path, ...], manifests: Path, lineage: str) -> list[str]:
     """Everything the lineage's certificate reads (``continuation_certificate.dependencies``)."""
     from residual_disposition.continuation_certificate import dependencies
 
@@ -121,8 +126,12 @@ def certificate_items(spaces: tuple[Path, Path], manifests: Path, lineage: str) 
     return items
 
 
-def indexed_runs(source: Path, experiment: str) -> list[str]:
-    root = source / "runs" / experiment
+def indexed_runs(sources: tuple[Path, ...], experiment: str) -> list[str]:
+    """``<experiment>/<run>`` of every indexed run of the first source that has the experiment."""
+    roots = [x / "runs" / experiment for x in sources if (x / "runs" / experiment).is_dir()]
+    if not roots:
+        raise FileNotFoundError(f"no source has runs/{experiment}")
+    root = roots[0]
     return sorted(
         f"{experiment}/{d.name}"
         for d in root.iterdir()
@@ -160,7 +169,7 @@ def copy_tree(src: Path, dst: Path, log) -> tuple[int, int]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--source", type=Path, required=True)
+    parser.add_argument("--source", type=Path, action="append", required=True)
     parser.add_argument("--target", type=Path, required=True)
     parser.add_argument("--state", action="append", default=[])
     parser.add_argument("--run", action="append", default=[])
@@ -175,16 +184,16 @@ def main(argv: list[str] | None = None) -> int:
                         / "manifests", help="the snapshot's committed manifests")  # fmt: skip
     parser.add_argument("--log", type=Path, required=True)
     args = parser.parse_args(argv)
-    if args.source.resolve() == args.target.resolve():
+    if any(x.resolve() == args.target.resolve() for x in args.source):
         raise SystemExit("the source and the target are one space")
-    spaces = (args.source, args.target)
+    spaces = (*args.source, args.target)
     items: list[str] = []
     try:
         items += [f"data/states/{s}" for s in state_closure(spaces, args.state)]
         items += [f"runs/{r}" for r in args.run]
         items += [named_run(spaces, name) for name in args.run_name]
         for experiment in args.index:
-            items += [f"runs/{r}" for r in indexed_runs(args.source, experiment)]
+            items += [f"runs/{r}" for r in indexed_runs(tuple(args.source), experiment)]
         items += [f"data/generations/{g}" for g in args.generation]
         for data_id in args.data:
             items += data_cells(spaces, data_id)

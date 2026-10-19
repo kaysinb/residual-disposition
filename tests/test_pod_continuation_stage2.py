@@ -36,7 +36,8 @@ cmd = args[args.index("--") + 1:]
 os.makedirs(attempt, exist_ok=True)
 with open(os.environ["STUB_LOG"], "a") as f:
     f.write(json.dumps({"tool": "run_detached", "attempt": attempt, "cmd": cmd}) + "\n")
-fail = os.environ.get("STUB_FAIL_CHECK") and "pipeline.plan.check_only=true" in cmd
+fail = (os.environ.get("STUB_FAIL_CHECK") and "pipeline.plan.check_only=true" in cmd) or (
+    "pipeline.plan.phase=" + os.environ.get("STUB_FAIL_PHASE", "-") in cmd)
 status = {"status": "failed", "exit_code": 1} if fail else {"status": "completed", "exit_code": 0}
 json.dump(status, open(os.path.join(attempt, "status.json"), "w"))
 """
@@ -90,22 +91,24 @@ def a_cell(space, name, step, params, summary, behavior="example_link", files=No
     return run
 
 
-def pilot_inputs(space):
-    """What b1 copies from space a, as minimal files."""
-    for sid in [*LINK_STATES, Y_ORGANISM]:
+def pilot_inputs(ws):
+    """What b1 copies, as minimal files where the volume holds them: link's states, the analyst
+    index and the prompt pools in a; the pilot's Y organism, its reference and data in b."""
+    a, b = ws / "a", ws / "b"
+    for space, sid in [*((a, x) for x in LINK_STATES), (b, Y_ORGANISM)]:
         (space / "data" / "states" / sid).mkdir(parents=True)
         (space / "data" / "states" / sid / "manifest.json").write_text(json.dumps({"adapters": []}))
     for run in Y_RUNS:
-        (space / "runs" / "feasibility_14b" / run).mkdir(parents=True)
-        (space / "runs" / "feasibility_14b" / run / "summary.json").write_text("{}")
-    index = space / "runs" / "feasibility_14b" / "train-run" / "observations"
+        (b / "runs" / "feasibility_14b" / run).mkdir(parents=True)
+        (b / "runs" / "feasibility_14b" / run / "summary.json").write_text("{}")
+    index = a / "runs" / "feasibility_14b" / "train-run" / "observations"
     index.mkdir(parents=True)
     (index / "state_index.jsonl").write_text("{}\n")
-    (space / "runs" / "stage1_14b").mkdir(parents=True)
-    (space / "data" / "generations" / "d5f5179f8853cb6cc").mkdir(parents=True)
-    (space / "data" / "generations" / "d5f5179f8853cb6cc" / "data.jsonl").write_text("{}\n")
-    (space / "data" / "prompts" / "pool").mkdir(parents=True)
-    (space / "data" / "prompts" / "pool" / "set.jsonl").write_text("{}\n")
+    (a / "runs" / "stage1_14b").mkdir(parents=True)
+    (b / "data" / "generations" / "d5f5179f8853cb6cc").mkdir(parents=True)
+    (b / "data" / "generations" / "d5f5179f8853cb6cc" / "data.jsonl").write_text("{}\n")
+    (a / "data" / "prompts" / "pool").mkdir(parents=True)
+    (a / "data" / "prompts" / "pool" / "set.jsonl").write_text("{}\n")
 
 
 @pytest.fixture
@@ -118,7 +121,7 @@ def workspace(tmp_path, capsys):
     (tools / "source_snapshot.py").write_text("import sys\nsys.exit(0)\n")
     (tools / "bucket_final.sh").write_text(BUCKET_FINAL)
     (tools / "bucket_dir.sh").write_text(BUCKET_DIR)
-    for space in ("a", "c"):
+    for space in ("a", "b", "c"):
         (ws / space / "runs" / "continuation_14b").mkdir(parents=True)
     # The source snapshot: this checkout's scripts and a manifests directory of its own.
     source = tmp_path / "code" / "snap" / "source"
@@ -210,6 +213,32 @@ def space_of(e):
     return e["cmd"][[i for i, c in enumerate(e["cmd"]) if c.endswith("rest_runner.sh")][0] + 1]
 
 
+def tree(space):
+    return sorted(str(p.relative_to(space)) for p in space.rglob("*"))
+
+
+PENDING_PHASES = {"corpus", "readers"}  # C10: their phases and config keys are not written yet
+
+
+def loads(log):
+    """Every pass's real config loads with the overrides the chain gave it (review s4f: the y2
+    pass got the y batch's key, which its config has not); returns the phases not written yet."""
+    from residual_disposition import pipeline
+    from residual_disposition.config import load_config
+
+    pending = set()
+    for e in passes(log):
+        cmd = e["cmd"]
+        i = [k for k, c in enumerate(cmd) if c.endswith("rest_runner.sh")][0]
+        phase = overrides(e)["pipeline.plan.phase"]
+        if phase not in pipeline.PHASES:
+            pending.add(phase)
+            continue
+        load_config(cmd[i + 2], cmd[i + 3 :])
+    assert pending <= PENDING_PHASES
+    return pending
+
+
 def stop_asked(log, within_s=200):
     """The chain asked the watcher to stop the Pod within ``within_s`` seconds."""
     asked = [datetime.fromisoformat(e["at"]) for e in events(log) if e["tool"] == "deadline"]
@@ -219,30 +248,32 @@ def stop_asked(log, within_s=200):
 START = datetime.now(UTC) - timedelta(minutes=20)
 
 
-def test_b1_copies_its_inputs_and_runs_y2_and_y_alone_in_its_own_space(workspace):
+def test_b1_copies_its_inputs_and_runs_y_alone_in_its_own_space(workspace):
     ws, setup, log, _ = workspace
-    pilot_inputs(ws / "a")
-    before = sorted(str(p) for p in (ws / "a").rglob("*"))
+    pilot_inputs(ws)
+    before = {x: tree(ws / x) for x in ("a", "b")}
     out = run_chain(setup("b1", START))
     assert out.returncode == 0, out.stdout + out.stderr
     ps = passes(log)
-    assert [Path(e["attempt"]).name.rsplit("-", 1)[1] for e in ps] == ["y2", "y100", "y200"]
+    assert [Path(e["attempt"]).name.rsplit("-", 1)[1] for e in ps] == ["y100", "y200"]
     assert {space_of(e) for e in ps} == {str(ws / "c")}  # Pod B writes only to c
-    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["y2", "control_y", "control_y"]
-    y2, y100, y200 = ps
-    assert y2["cmd"][y2["cmd"].index(str(ws / "c")) + 1].endswith("y2_zero_indexed_lists")
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["control_y", "control_y"]
+    assert loads(log) == set()  # each pass's config with its overrides (review s4f)
+    y100, y200 = ps
     assert y100["cmd"][y100["cmd"].index(str(ws / "c")) + 1].endswith("control_y_link_100")
-    o = overrides(y2)
+    o = overrides(y100)
     assert o["pipeline.plan.api.adl_ledger.worker"] == "pod-b"
     assert o["pipeline.plan.api.adl_ledger.allowance_usd"] == "0.0"  # the session's: none
-    assert o["pipeline.plan.cost.batches.stage2"] == o["pipeline.plan.cost.batches.y"] == "12.0"
+    assert o["pipeline.plan.cost.batches.y"] == "12.0"  # its own batch only
+    assert "pipeline.plan.cost.batches.stage2" not in o
     # the cost meter counts the session's 12 h back from its deadline (review s4b)
     since = datetime.fromisoformat(o["pipeline.plan.cost.started_at"])
     assert abs((since - START).total_seconds()) < 1.5
-    for sid in [*LINK_STATES, Y_ORGANISM]:
+    for sid in [*LINK_STATES, Y_ORGANISM]:  # Y from b (review s4f)
         assert (ws / "c" / "data" / "states" / sid / "manifest.json").is_file()
+    assert (ws / "c" / "runs" / "feasibility_14b" / Y_RUNS[0]).is_dir()
     assert (ws / "c" / "runs" / "feasibility_14b" / "train-run" / "observations").is_dir()
-    assert sorted(str(p) for p in (ws / "a").rglob("*")) == before  # a untouched
+    assert {x: tree(ws / x) for x in ("a", "b")} == before  # a and b untouched
     assert [e["space"] for e in events(log) if e["tool"] == "export"] == [str(ws / "c")]
     chain = next((ws / "attempts" / "residual-disposition").glob("chain-b1-*"))
     summary = json.loads((chain / "summary.json").read_text())
@@ -253,8 +284,8 @@ def test_b1_copies_its_inputs_and_runs_y2_and_y_alone_in_its_own_space(workspace
 
 def test_a_missing_input_stops_b1_before_any_pass(workspace):
     ws, setup, log, _ = workspace
-    pilot_inputs(ws / "a")
-    __import__("shutil").rmtree(ws / "a" / "data" / "states" / Y_ORGANISM)
+    pilot_inputs(ws)
+    __import__("shutil").rmtree(ws / "b" / "data" / "states" / Y_ORGANISM)
     out = run_chain(setup("b1", START))
     assert out.returncode != 0 and not passes(log)
     assert stop_asked(log)  # review s4b: a failure stops the Pod at once
@@ -278,7 +309,7 @@ def test_no_pass_starts_without_this_pod_s_session_and_snapshot(
     workspace, setup_kw, change, message
 ):
     ws, setup, log, _ = workspace
-    pilot_inputs(ws / "a")
+    pilot_inputs(ws)
     env = setup("b1", START, **setup_kw)
     out = run_chain({**env, **change})
     assert out.returncode != 0 and message in out.stdout
@@ -292,7 +323,7 @@ def test_the_adl_ceiling_is_the_session_s_recorded_once_and_kept_by_a_rerun(work
     from residual_disposition.budget import ApiLedger
 
     ws, setup, log, _ = workspace
-    pilot_inputs(ws / "a")
+    pilot_inputs(ws)
     path = ws / "c" / "data" / "ledgers" / "adl-api-pod-b.jsonl"
     ledger = ApiLedger(path, 10.0, "pod-b")
     ids = ledger.reserve({"k1": 1.0, "k2": 0.5}, "earlier session")
@@ -340,8 +371,9 @@ def test_a1_runs_the_confirmation_the_decision_needs_and_stops_without_progress(
     out = run_chain(setup("a1", START))
     assert out.returncode != 0 and "no progress at confirm 400" in out.stdout
     names = [Path(e["attempt"]).name.rsplit("-", 2)[-2:] for e in passes(log)]
-    assert [n[-1] for n in names] == ["screen", "400"]
-    confirm = overrides(passes(log)[1])
+    assert [n[-1] for n in names] == ["y2", "screen", "400"]  # y2 first (review s4f)
+    assert loads(log) == set()
+    confirm = overrides(passes(log)[2])
     assert confirm["pipeline.plan.phase"] == "confirm"
     assert confirm["pipeline.plan.confirm.latent"] == "L400"
     assert confirm["pipeline.plan.confirm.sham_s"] == "Hs400"
@@ -371,8 +403,16 @@ def test_a1_decides_and_calibrates_k_star_at_the_analysis_dose(workspace):
     out = run_chain(setup("a1", START))
     assert out.returncode == 0, out.stdout + out.stderr
     ps = passes(log)
-    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["screen", "decide", "kstar"]
-    decide, kstar = overrides(ps[1]), overrides(ps[2])
+    phases = [overrides(e)["pipeline.plan.phase"] for e in ps]
+    assert phases == ["y2", "screen", "decide", "kstar"]
+    assert loads(log) == set()
+    y2 = overrides(ps[0])
+    assert ps[0]["cmd"][ps[0]["cmd"].index(str(ws / "a")) + 1].endswith("y2_zero_indexed_lists")
+    assert (
+        y2["pipeline.plan.cost.batches.stage2"] == "12.0"
+        and "pipeline.plan.cost.batches.y" not in y2
+    )
+    decide, kstar = overrides(ps[2]), overrides(ps[3])
     key = "pipeline.plan.decide."
     assert decide[key + "screening"] == "20261020-000000-stage2_screening-aaaa-0001"
     assert decide[key + "confirmation"] == "[20261020-000001-stage2_confirmation-bbbb-0001]"
@@ -389,8 +429,19 @@ def test_a1_with_no_screened_dose_decides_exception_a_without_k_star(workspace):
     screening(ws / "a", {400: (0.02, 0), 800: (0.004, 1)})
     out = run_chain(setup("a1", START))
     assert out.returncode == 0, out.stdout + out.stderr
-    assert [overrides(e)["pipeline.plan.phase"] for e in passes(log)] == ["screen", "decide"]
+    assert [overrides(e)["pipeline.plan.phase"] for e in passes(log)] == ["y2", "screen", "decide"]
     assert "exception a" in out.stdout
+
+
+def test_a_failed_y2_pass_blocks_nothing_in_a1_but_fails_the_session(workspace):
+    ws, setup, log, _ = workspace
+    screening(ws / "a", {400: (0.02, 0), 800: (0.004, 1)})
+    out = run_chain({**setup("a1", START), "STUB_FAIL_PHASE": "y2"})
+    assert out.returncode != 0
+    assert [overrides(e)["pipeline.plan.phase"] for e in passes(log)] == ["y2", "screen", "decide"]
+    chain = next((ws / "attempts" / "residual-disposition").glob("chain-a1-*"))
+    steps = json.loads((chain / "summary.json").read_text())["steps"]
+    assert steps["y2"] == 1 and steps["screen"] == steps["decide"] == 0
 
 
 def a_dir(space, rel, summary=None):
@@ -411,7 +462,9 @@ REVIEW = "labels/detectors/y2det-470596e7fc2a"
 
 def certificate_spaces(source, ws):
     """The committed manifests of example_link at 400 and what they name, where the sessions
-    leave it: A1's screening, k* evidence and b's data in a; B1's Y₂ evidence and data in c."""
+    leave it (review s4f): A1's screening, k* evidence, b's data and Y₂ evidence (phase y2) in a;
+    the pilot's Y organism and data in b and, copied by B1, in c; the stage-1 recipe run and the
+    Y₂ selection's laptop inputs in b."""
     from residual_disposition import continuation_kstar as K
     from residual_disposition import continuation_y2 as y2
 
@@ -432,8 +485,8 @@ def certificate_spaces(source, ws):
     provenance = {"inputs": inputs, "y2_reference_run": "y2-record", "reference_run": "y2-ref",
                   "train_run": "y2-train", "relearn_data_id": "dy2"}  # fmt: skip
     (source / "manifests" / "y2.json").write_text(json.dumps({"provenance": provenance}))
-    a, c = ws / "a", ws / "c"
-    pilot_inputs(a)
+    a, b, c = ws / "a", ws / "b", ws / "c"
+    pilot_inputs(ws)
     screening_dir = a / "runs" / "continuation_14b" / "scr"
     screening_dir.mkdir(parents=True)
     (screening_dir / "stage2_screening.json").write_text(
@@ -443,28 +496,32 @@ def certificate_spaces(source, ws):
         (a / "data" / "states" / sid).mkdir(parents=True)
         (a / "data" / "states" / sid / "manifest.json").write_text('{"adapters": []}')
     for rel in ("runs/continuation_14b/cal1", "runs/continuation_14b/cal2",
-                "runs/feasibility_14b/ref-A", f"runs/stage1_14b/{y2.STAGE1_RECIPE_RUN}",
-                f"runs/{ELICITATION}", f"data/{REVIEW}/set", f"data/{REVIEW}/labels.jsonl",
-                f"data/{REVIEW}/review-log.json", "data/generations/dlink"):  # fmt: skip
+                "runs/feasibility_14b/ref-A", "data/generations/dlink",
+                "runs/continuation_14b/y2-record", "runs/continuation_14b/y2-ref",
+                "runs/continuation_14b/y2-train", "data/generations/dy2"):  # fmt: skip
         a_dir(a, rel)
     a_dir(a, "runs/continuation_14b/20261020-000009-data_relearn-eeee-0001", {"data_id": "dlink"})
-    a_dir(a, "runs/feasibility_14b/20261014-072309-data_relearn-8950fcdc-6f7f",
-          {"data_id": Y_DATA})  # fmt: skip
+    a_dir(a, "runs/continuation_14b/20261021-000001-data_relearn-ffff-0001", {"data_id": "dy2"})
+    for rel in (f"runs/feasibility_14b/{y2.STAGE1_RECIPE_RUN}", f"runs/{ELICITATION}",
+                f"data/{REVIEW}/set", f"data/{REVIEW}/labels.jsonl",
+                f"data/{REVIEW}/review-log.json"):  # fmt: skip
+        a_dir(b, rel)
+    for space in (b, c):  # the pilot's Y data in b, and in c as B1 copied it
+        a_dir(space, f"runs/feasibility_14b/{Y_RUNS[1]}", {"data_id": Y_DATA})
     assert K.PILOT_REFERENCES[Y_ORGANISM] == Y_RUNS[0]
-    for rel in ("runs/continuation_14b/y2-record", "runs/continuation_14b/y2-ref",
-                "runs/continuation_14b/y2-train", "data/generations/dy2"):  # fmt: skip
-        a_dir(c, rel)
-    a_dir(c, "runs/continuation_14b/20261021-000001-data_relearn-ffff-0001", {"data_id": "dy2"})
-
-
-def tree(space):
-    return sorted(str(p.relative_to(space)) for p in space.rglob("*"))
+    for rel in (f"data/states/{Y_ORGANISM}", f"runs/feasibility_14b/{Y_RUNS[0]}",
+                f"data/generations/{Y_DATA}"):  # fmt: skip
+        (c / rel).mkdir(parents=True, exist_ok=True)
+        for f in (b / rel).iterdir():
+            (c / rel / f.name).write_bytes(f.read_bytes())
 
 
 def test_b2_takes_a1_s_certificate_inputs_from_a_and_checks_them_before_its_blocks(workspace):
+    from residual_disposition import continuation_y2 as y2
+
     ws, setup, log, source = workspace
     certificate_spaces(source, ws)
-    before = tree(ws / "a")
+    before = {x: tree(ws / x) for x in ("a", "b")}
     out = run_chain(setup("b2", START))
     assert out.returncode == 0, out.stdout + out.stderr
     check, cert = passes(log)
@@ -478,28 +535,34 @@ def test_b2_takes_a1_s_certificate_inputs_from_a_and_checks_them_before_its_bloc
     assert (o["pipeline.plan.certificate.latent"], o["pipeline.plan.certificate.sham_s"],
             o["pipeline.plan.certificate.active"]) == ("L400", "Hs400", "sA")  # fmt: skip
     assert {space_of(e) for e in (check, cert)} == {str(ws / "c")}
+    assert loads(log) == set()
     copied = (
         "runs/continuation_14b/cal1",
         "runs/feasibility_14b/ref-A",
-        f"runs/feasibility_14b/{Y_RUNS[0]}",
         "data/generations/dlink",
         # review s4b: the completed cell of b's data, which cached_only=True needs
         "runs/continuation_14b/20261020-000009-data_relearn-eeee-0001",
-        f"runs/feasibility_14b/{Y_RUNS[1]}",
-        f"runs/{ELICITATION}",
+        "runs/continuation_14b/y2-record",  # A1's Y₂ evidence, from a (review s4f)
+        "runs/continuation_14b/20261021-000001-data_relearn-ffff-0001",
+        f"runs/{ELICITATION}",  # the laptop's Y₂ inputs and the recipe run, from b
         f"data/{REVIEW}/labels.jsonl",
+        f"runs/feasibility_14b/{y2.STAGE1_RECIPE_RUN}",
         "data/states/L400",
         "data/states/sA",
     )
     for rel in copied:
         assert (ws / "c" / rel).exists(), rel
-    assert tree(ws / "a") == before  # a is read, never written
+    assert {x: tree(ws / x) for x in ("a", "b")} == before  # read, never written
 
 
-def test_a2_takes_b1_s_y2_evidence_from_c_and_checks_it_before_its_blocks(workspace):
+def test_a2_takes_the_y_and_y2_inputs_from_c_and_b_and_checks_them_before_its_blocks(
+    workspace,
+):
+    from residual_disposition import continuation_y2 as y2
+
     ws, setup, log, source = workspace
     certificate_spaces(source, ws)
-    before = tree(ws / "c")
+    before = {x: tree(ws / x) for x in ("b", "c")}
     out = run_chain(setup("a2", START))
     assert out.returncode == 0, out.stdout + out.stderr
     ps = passes(log)
@@ -511,15 +574,17 @@ def test_a2_takes_b1_s_y2_evidence_from_c_and_checks_it_before_its_blocks(worksp
     assert overrides(ps[0])["pipeline.plan.check_only"] == "true"
     assert overrides(ps[1])["pipeline.plan.certificate.blocks"] == "[0,1,2]"
     assert {space_of(e) for e in ps} == {str(ws / "a")}
+    assert loads(log) == {"readers"}  # C10's phase, not written yet
     for rel in (
-        "runs/continuation_14b/y2-record",
-        "runs/continuation_14b/y2-ref",
-        "runs/continuation_14b/y2-train",
-        "data/generations/dy2",
-        "runs/continuation_14b/20261021-000001-data_relearn-ffff-0001",
-    ):  # review s4b: B1's Y₂ evidence and data
+        f"data/states/{Y_ORGANISM}",  # the pilot's Y, from c
+        f"runs/feasibility_14b/{Y_RUNS[0]}",
+        f"data/generations/{Y_DATA}",
+        f"runs/feasibility_14b/{y2.STAGE1_RECIPE_RUN}",  # from b
+        f"runs/{ELICITATION}",
+        f"data/{REVIEW}/review-log.json",
+    ):
         assert (ws / "a" / rel).exists(), rel
-    assert tree(ws / "c") == before  # c is read, never written
+    assert {x: tree(ws / x) for x in ("b", "c")} == before  # read, never written
 
 
 def test_a_failed_certificate_check_or_a_missing_input_runs_no_block(workspace):
@@ -531,9 +596,8 @@ def test_a_failed_certificate_check_or_a_missing_input_runs_no_block(workspace):
     assert [overrides(e).get("pipeline.plan.check_only") for e in passes(log)] == ["true"]
     assert stop_asked(log)
     log.unlink()
-    __import__("shutil").rmtree(ws / "c" / "runs" / "continuation_14b" / "y2-ref")
-    __import__("shutil").rmtree(ws / "a" / "runs" / "continuation_14b" / "y2-ref")  # copied
-    out = run_chain(env)  # in neither space now: the copy refuses
+    __import__("shutil").rmtree(ws / "a" / "runs" / "continuation_14b" / "y2-ref")
+    out = run_chain(env)  # in no space now: the copy refuses
     assert out.returncode != 0 and not passes(log) and stop_asked(log)
     last = sorted((ws / "attempts" / "residual-disposition").glob("chain-a2-*/copy.json"))[-1]
     assert "y2-ref is in neither" in last.read_text()
@@ -573,3 +637,31 @@ def test_copy_follows_a_state_s_adapters_and_refuses_a_changed_target(tmp_path):
     assert ci.main(args) == 1  # a target that differs is refused
     with pytest.raises(SystemExit, match="one space"):
         ci.main(["--source", str(a), "--target", str(a), "--log", str(tmp_path / "l")])
+
+
+def test_copy_takes_each_item_from_the_first_source_that_holds_it(tmp_path):
+    # review s4f: the other Pod's space first, then b (read only); the target's own items kept
+    ci = copy_inputs()
+    a, b, c = tmp_path / "a", tmp_path / "b", tmp_path / "c"
+    for space, run, text in ((a, "r1", "from a"), (b, "r1", "from b"), (b, "r2", "only b"),
+                             (c, "r3", "own")):  # fmt: skip
+        (space / "runs" / "exp" / run).mkdir(parents=True)
+        (space / "runs" / "exp" / run / "f.txt").write_text(text)
+    before = {x: sorted(map(str, x.rglob("*"))) for x in (a, b)}
+    args = [
+        "--source",
+        str(a),
+        "--source",
+        str(b),
+        "--target",
+        str(c),
+        "--log",
+        str(tmp_path / "l"),
+    ]
+    assert ci.main([*args, "--run-name", "r1", "--run-name", "r2", "--run-name", "r3"]) == 0
+    assert (c / "runs" / "exp" / "r1" / "f.txt").read_text() == "from a"  # the first source
+    assert (c / "runs" / "exp" / "r2" / "f.txt").read_text() == "only b"
+    assert {x: sorted(map(str, x.rglob("*"))) for x in (a, b)} == before
+    assert ci.main([*args, "--run-name", "r9"]) == 1  # in no space
+    with pytest.raises(SystemExit, match="one space"):
+        ci.main(["--source", str(a), "--source", str(c), "--target", str(c), "--log", "l"])

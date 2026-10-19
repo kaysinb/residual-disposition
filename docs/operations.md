@@ -450,29 +450,46 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   After the Pod stops, `session-close <item> --worker … --pod-id … --gpu-usd <paid> [--api-usd
   <paid>]` settles its cost; only then can that worker's next session open. A worker's charges
   may not exceed its share; an overrun stops the item.
-- **Stage 2's Pods** (C8, items B, C, F; review s4b). `scripts/pod/continuation_stage2.sh`, one
-  session per Pod start; on every exit, a refusal before any pass included, it asks the watcher
-  to stop the Pod within 3 minutes. Pod A (worker pod-a) writes only to `/workspace/a`, Pod B
-  (pod-b) only to `/workspace/c`: two Pods writing one network volume can corrupt it, so a Pod
-  copies what it reads from the other's space into its own, create-only and checked by sha256
+- **Stage 2's Pods** (C8, items B, C, F; reviews s4b, s4f). `scripts/pod/continuation_stage2.sh`,
+  one session per Pod start; on every exit, a refusal before any pass included, it asks the
+  watcher to stop the Pod within 3 minutes. Pod A (worker pod-a) writes only to `/workspace/a`,
+  Pod B (pod-b) only to `/workspace/c`: two Pods writing one network volume can corrupt it, so a
+  Pod copies what it reads into its own space, create-only and checked by sha256
   (`scripts/pod/copy_inputs.py`; a state with every state its adapters point at, a dataset with
-  the completed cells that made it), and never writes to the other's.
-  - **a1**: phase screen, then the steps `scripts/pod/stage2_next.py` names from the space's
-    completed cells (phase confirm at a dose, C9; the expression checks at the analysis dose,
-    phase ood and phase corpus, C10), phase decide with the runs found, and with an analysis dose
-    phase kstar. A step that leaves no cell stops the session; a retest after a detector
-    revision stops it for the user.
-  - **b1** (needs no dose): phase y2 for zero_indexed_lists and the Y alone for link at 100 and
-    200, after copying link's L and H_s at 100 and 200, the pilot's Y organism, its reference and
-    relearning data, the analyst index and the prompt pools.
+  the completed cells that made it), each item from the first of its sources that holds it: the
+  other Pod's space, then `/workspace/b`; it never writes to either.
+  - **What lives where.** `/workspace/a` holds the pilot's link states, the analyst index, the
+    prompt pools and A's reference (Stage 1's first space). `/workspace/b` (Stage 1's second
+    space, read only from Stage 2 on) holds the pilot's Y organism (keywords_line,
+    `sbf05f589f929edf8`), its reference run and its relearning data and cell, and the stage-1
+    recipe run (`feasibility_14b/20261014-070803-train_active-a64cde15-c867`), which the Y₂
+    check reads. B1 copied the Y items into c (2026-10-19, `copied-from-b.jsonl`).
+  - **The Y₂ selection's laptop inputs in b.** At the start of A1's session, before its chain
+    and while no chain reads b: the stage-0 elicitation run, the detector check's set, labels,
+    review log and any dispositions or rejections are uploaded into b at the paths
+    `continuation_y2.locate` records (relative to the runs or data root), create-only, each
+    file's sha256 checked against the laptop's and listed in an upload log.
+  - Each pass gets only its own batch's cap (`pipeline.plan.cost.batches.<batch>`: y for
+    control_y, stage2 for the other phases); another batch's key is not in every config.
+  - **a1**: phase y2 for zero_indexed_lists first (its failure does not stop the session, which
+    then exits nonzero), then phase screen, then the steps `scripts/pod/stage2_next.py` names
+    from the space's completed cells (phase confirm at a dose, C9; the expression checks at the
+    analysis dose, phase ood and phase corpus, C10), phase decide with the runs found, and with an
+    analysis dose phase kstar. A step that leaves no cell stops the session; a retest after a
+    detector revision stops it for the user.
+  - **b1** (needs no dose): the Y alone for link at 100 and 200, after copying link's L and H_s
+    at 100 and 200, the analyst index and the prompt pools (a) and the pilot's Y organism, its
+    reference and relearning data (b).
   - **a2** and **b2**, after the k*, Y₂ and Stage-2 manifests are committed and a new snapshot
     made: phase certificate, blocks 0–2 (a2, then phase readers, C10) and 3–5 (b2). Each first
-    copies from the other's space what the certificate reads there, as the committed manifests
-    name it (`copy_inputs.py --certificate`, `continuation_certificate.dependencies`): a2 B1's
-    Y₂ reference, its runs and the Y₂ arm's data from c; b2 the dose's states, A1's calibration
-    runs, the references, b's and Y's data, the Y₂ check's inputs, the analyst index and the
-    prompt pools from a. Then the certificate's plan check alone (`pipeline.plan.check_only=true`,
-    CPU) in its own space, and the GPU pass only if it passes.
+    copies what the certificate reads, as the committed manifests name it (`copy_inputs.py
+    --certificate`, `continuation_certificate.dependencies`), from the other's space and then
+    b: a2 the pilot's Y and its data from c, the recipe run and the Y₂ check's inputs from b; b2
+    the dose's states, A1's calibration runs, A's reference, b's data and A1's Y₂ reference, its
+    runs and the Y₂ arm's data from a, the analyst index and the prompt pools from a, the recipe
+    run and the Y₂ check's inputs from b. Then the certificate's plan check alone
+    (`pipeline.plan.check_only=true`, CPU) in its own space, and the GPU pass only if it
+    passes.
   - Between sessions the Pod is stopped, not left idle; if a stopped Pod cannot start again (its
     host taken), a new Pod is created on the same volume and the session reruns, resuming its
     cells.
