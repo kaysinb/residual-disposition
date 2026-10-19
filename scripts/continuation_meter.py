@@ -134,7 +134,11 @@ def verify_session_receipt(
         return [*problems, f"the receipt is for {data.get('item')}@{data.get('worker')}"]
     if data.get("pod_id") != pod_id:
         return [*problems, f"the receipt is for Pod {data.get('pod_id')}, not this Pod {pod_id}"]
-    session = m.session(item, worker)
+    with m._transaction():  # the item's state and the session read together (review s4a)
+        state = m.state.get(item)
+        session = (m.sessions.get(item) or {}).get(worker)
+    if state != "running":
+        return [*problems, f"{item} is {state}: no session runs on a stopped item"]
     keys = ("pod_id", "deadline", "price_usd_per_hour", "hours", "gpu_usd")
     if session is None or any(session[k] != data.get(k) for k in keys):
         return [*problems, f"{worker}'s open session in the log is not the receipt's: {session}"]
@@ -315,11 +319,10 @@ def main(argv: list[str] | None = None) -> int:
         parts = m.split(args.item, shares)
         out = {w: limits_json(limits, None) for w, limits in parts.items()}
     elif args.command == "session-open":
-        event = m.open_session(
+        out = m.open_session(  # the receipt formed under the same lock as the session (s4a)
             args.item, args.worker, pod_id=args.pod_id, deadline=args.deadline,
-            price=args.price, hours=args.hours,
+            price=args.price, hours=args.hours, result=lambda event: session_receipt(m, event),
         )  # fmt: skip
-        out = session_receipt(m, event)
         args.receipt.write_text(json.dumps(out, indent=1) + "\n")
     elif args.command == "session-close":
         try:
@@ -330,7 +333,8 @@ def main(argv: list[str] | None = None) -> int:
         except BudgetExhausted as stop:
             print(json.dumps({"item": args.item, "stopped": str(stop)}))
             return 3
-        out = {"item": args.item, "worker": args.worker, "left": limits_json(left, None)}
+        out = {"item": args.item, "worker": args.worker,
+               "left": None if left is None else limits_json(left, None)}  # fmt: skip
     elif args.command == "charge":
         try:
             left = m.charge(

@@ -897,12 +897,21 @@ class AllocationMeter:
         return [a.item for a in self._items[:rank] if self.state[a.item] == PLANNED]
 
     def outstanding(self) -> float:
-        """What the live reservations may still spend."""
-        return sum(
+        """What the live reservations may still spend, and what a stopped item's open Pod
+        sessions were authorized to (held until they are settled; review s4a)."""
+        live = sum(
             max(0.0, self.reservation[x] - self.charged_usd(x))
             for x in self.priority
             if self.state[x] in (RESERVED, RUNNING)
         )
+        sessions = sum(
+            v["gpu_usd"]
+            for x in self.priority
+            if self.state[x] == STOPPED
+            for v in (self.sessions.get(x) or {}).values()
+            if v
+        )
+        return live + sessions
 
     def spent(self) -> float:
         return sum(self.charged_usd(x) for x in self.priority)
@@ -948,10 +957,14 @@ class AllocationMeter:
         deadline: str,
         price: float,
         hours: float,
-    ) -> dict[str, Any]:
+        result: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> Any:
         """Authorize one Pod session of a split item's worker, exclusively: the Pod's actual ID,
         the deadline set at its creation, its price and hours, within the worker's live share;
-        refused while the worker has an open session (review s3y2). Returns the event."""
+        refused while the worker has an open session (review s3y2) or the item is not running.
+        ``result(event)`` (the receipt) is formed in the same transaction, under the log's lock,
+        so that no stop can come between the session and its receipt (review s4a); returns it,
+        or the event."""
         price = finite_usd(price, "a Pod's price", positive=True)
         hours = finite_usd(hours, "a session's hours", positive=True)
         return self._operate(
@@ -964,16 +977,20 @@ class AllocationMeter:
                 "price_usd_per_hour": price,
                 "hours": hours,
                 "gpu_usd": price * hours,
-            }
+            },
+            result,
         )
 
     def close_session(
         self, item: str, worker: str, *, pod_id: str, gpu_usd: float, api_usd: float = 0.0
     ) -> ExecutionLimits | None:
         """Settle a worker's open session on ``pod_id``: its paid costs are charged to the worker
-        (as ``charge``) and the session closes, so that another may open."""
+        (as ``charge``) and the session closes, so that another may open. A stopped item's open
+        sessions are settled too, at their paid cost (review s4a)."""
         gpu_usd = finite_usd(gpu_usd, "a GPU charge")
         api_usd = finite_usd(api_usd, "an API charge")
+        with self._transaction():
+            was = self.state[item]
         limits = self._operate(
             lambda: {
                 "event": "session_close",
@@ -985,7 +1002,7 @@ class AllocationMeter:
             },
             lambda _: None if self.state[item] == STOPPED else self._worker_limits(item, worker),
         )
-        if self.state[item] == STOPPED:
+        if was == RUNNING and self.state[item] == STOPPED:
             raise BudgetExhausted(
                 f"{item} overran its reservation and is stopped: its unfinished contrasts get p = 1"
             )
@@ -1209,7 +1226,10 @@ class AllocationMeter:
             keys = ("pod_id", "deadline", "price_usd_per_hour", "hours", "gpu_usd")
             s["sessions"][item][worker] = {k: event[k] for k in keys}
         elif kind in ("charge", "session_close"):
-            if current != RUNNING:
+            # A stopped item's open sessions are still settled at their paid cost (review s4a);
+            # nothing else is charged to it, and nothing new is authorized.
+            settling = kind == "session_close" and current == STOPPED
+            if current != RUNNING and not settling:
                 raise ValueError(f"{item} is {current}: only a running item is charged")
             worker = event.get("worker")
             if kind == "session_close":
@@ -1243,7 +1263,7 @@ class AllocationMeter:
                 over = (
                     over or w["gpu_usd"] > share * gpu + 1e-9 or w["api_usd"] > share * api + 1e-9
                 )
-            if over:
+            if over or settling:
                 states[item] = STOPPED
                 s["final"][item] = c["gpu_usd"] + c["api_usd"]
         elif kind == "transfer":
@@ -1270,6 +1290,9 @@ class AllocationMeter:
         elif kind == "complete":
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: only a running item completes")
+            open_ = {w: v["pod_id"] for w, v in (s["sessions"].get(item) or {}).items() if v}
+            if open_:
+                raise ValueError(f"{item} has open Pod sessions {open_}: close them first")
             states[item] = COMPLETED
             s["final"][item] = charged[item]["gpu_usd"] + charged[item]["api_usd"]
         elif kind == "drop":

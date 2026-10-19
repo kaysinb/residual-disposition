@@ -260,3 +260,42 @@ def test_an_unsplit_item_s_charges_name_no_worker(tmp_path, capsys):
     run(capsys, log, "start", "stage0_1")
     with pytest.raises(ValueError, match="is not split"):
         cm.main(["--log", str(log), "charge", "stage0_1", "--gpu-usd", "1", "--worker", "pod-a"])
+
+
+def test_a_stopped_item_authorizes_no_session(tmp_path, capsys):
+    # review s4a: B's overrun stops the item after A's session opened; A's receipt then fails
+    log = two_pods(tmp_path, capsys)
+    path, _ = open_session(tmp_path, capsys, log, "pod-a", "pod111")
+    overrun = ["charge", "stage2/example_link", "--gpu-usd", "130", "--worker", "pod-b"]
+    assert run(capsys, log, *overrun)[0] == 3
+    code, out = verify(capsys, log, path, "pod-a", "pod111", 1)
+    assert code == 1 and any("is stopped: no session runs" in p for p in out["problems"])
+    with pytest.raises(ValueError, match="not a running split item"):
+        open_session(tmp_path, capsys, log, "pod-b", "pod333")
+
+
+def test_a_stopped_item_s_open_sessions_are_settled_and_held_until_then(tmp_path, capsys):
+    log = two_pods(tmp_path, capsys)
+    open_session(tmp_path, capsys, log, "pod-a", "pod111")  # $39.90 authorized
+    overrun = ["charge", "stage2/example_link", "--gpu-usd", "130", "--worker", "pod-b"]
+    assert run(capsys, log, *overrun)[0] == 3
+    m = cm.meter(log)
+    assert m.state["stage2/example_link"] == "stopped"
+    assert m.outstanding() == pytest.approx(39.9)  # A's open session is still owed
+    code, out = run(capsys, log, "session-close", "stage2/example_link", "--worker", "pod-a",
+                    "--pod-id", "pod111", "--gpu-usd", "20")  # fmt: skip
+    assert code == 0 and out["left"] is None  # settled at its paid cost
+    m = cm.meter(log)
+    assert m.outstanding() == 0 and m.final["stage2/example_link"] == pytest.approx(150)
+    assert m.spent() == pytest.approx(150)
+
+
+def test_an_item_completes_only_with_its_sessions_closed(tmp_path, capsys):
+    log = two_pods(tmp_path, capsys)
+    open_session(tmp_path, capsys, log, "pod-a", "pod111")
+    with pytest.raises(ValueError, match="has open Pod sessions"):
+        cm.main(["--log", str(log), "complete", "stage2/example_link"])
+    run(capsys, log, "session-close", "stage2/example_link", "--worker", "pod-a",
+        "--pod-id", "pod111", "--gpu-usd", "20")  # fmt: skip
+    code, done = run(capsys, log, "complete", "stage2/example_link")
+    assert code == 0 and done["final_usd"] == pytest.approx(20)
