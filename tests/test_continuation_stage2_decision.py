@@ -187,12 +187,14 @@ def expression_runs(root, dose, *, ood=True, framings=None):
     a_run(root, "corpus", "adl_corpus", {"state": f"L{dose}"}, {"framings": framings})
 
 
-def inputs(confirmation=(), expression=None, version="v1"):
+def inputs(confirmation=(), expression=None, version=None):
+    version = version or S2.current_detector_version("example_link")
     return {"behavior": "example_link", "detector_version": version, "screening": "screen",
             "confirmation": list(confirmation), "expression": expression or {}}  # fmt: skip
 
 
 EXPR = {"ood": "ood", "adl_corpus": "corpus"}
+CURRENT = S2.current_detector_version("example_link")
 
 
 @pytest.fixture
@@ -203,7 +205,7 @@ def runs(tmp_path, monkeypatch):
 
 def test_the_record_is_made_from_checked_runs(runs):
     screening_run(runs)
-    confirmation_run(runs, "c1", draws((400, True, "v1", None))[0])
+    confirmation_run(runs, "c1", draws((400, True, CURRENT, None))[0])
     expression_runs(runs, 400, ood=False)
     d = S2.decide(inputs(["c1"], EXPR), RULES, find_run)["decision"]
     assert d["status"] == "decided" and d["analysis_dose"] == 400 and d["exception_a"] is True
@@ -239,7 +241,7 @@ NO_COUNT = {"chat": framing(), "raw": framing(long_hits=None)}
 )
 def test_technically_invalid_evidence_stays_pending(runs, make):
     screening_run(runs)
-    confirmation_run(runs, "c1", draws((400, True, "v1", None))[0])
+    confirmation_run(runs, "c1", draws((400, True, CURRENT, None))[0])
     make(runs)
     d = S2.decide(inputs(["c1"], EXPR), RULES, find_run)["decision"]
     assert d["status"] == "pending" and d["next"].startswith("expression checks")
@@ -247,7 +249,7 @@ def test_technically_invalid_evidence_stays_pending(runs, make):
 
 def test_a_hit_in_either_framing_fails_the_adl_corpus(runs):
     screening_run(runs)
-    confirmation_run(runs, "c1", draws((400, True, "v1", None))[0])
+    confirmation_run(runs, "c1", draws((400, True, CURRENT, None))[0])
     expression_runs(runs, 400, framings={"chat": framing(), "raw": framing(long_hits=1)})
     d = S2.decide(inputs(["c1"], EXPR), RULES, find_run)["decision"]
     assert d["expression"] == {"adl_corpus": False, "ood": True} and d["exception_a"] is True
@@ -255,17 +257,17 @@ def test_a_hit_in_either_framing_fails_the_adl_corpus(runs):
 
 def test_an_incomplete_confirmation_leaves_the_decision_pending(runs):
     screening_run(runs)
-    confirmation_run(runs, "c1", draws((400, True, "v1", None))[0], status="failed")
+    confirmation_run(runs, "c1", draws((400, True, CURRENT, None))[0], status="failed")
     d = S2.decide(inputs(["c1"]), RULES, find_run)["decision"]
     assert d["status"] == "pending" and "did not complete" in d["next"]
 
 
 def test_the_failed_retest_exhausts_the_attempts_through_the_runs(runs):
     screening_run(runs)
-    ds = draws((400, True, "v1", None), (400, False, "v2", RETEST))
+    ds = draws((400, True, "v0", None), (400, False, CURRENT, RETEST))  # revised to CURRENT
     confirmation_run(runs, "c1", ds[0])
     confirmation_run(runs, "c2", ds[1])
-    d = S2.decide(inputs(["c1", "c2"], version="v2"), RULES, find_run)["decision"]
+    d = S2.decide(inputs(["c1", "c2"]), RULES, find_run)["decision"]
     assert d["status"] == "decided" and d["analysis_dose"] is None and d["exception_a"] is True
     assert [a["void"] for a in d["attempts"]] == [True, False]
 
@@ -285,7 +287,7 @@ def committed_repo(root):
 
 def test_the_manifest_is_written_decided_and_accepted_recomputed_whole(runs):
     screening_run(runs)
-    confirmation_run(runs, "c1", draws((400, True, "v1", None))[0])
+    confirmation_run(runs, "c1", draws((400, True, CURRENT, None))[0])
     expression_runs(runs, 400)
     record = S2.decide(inputs(["c1"], EXPR), RULES, find_run)
     repo = committed_repo(runs)
@@ -310,7 +312,7 @@ def test_the_manifest_is_written_decided_and_accepted_recomputed_whole(runs):
     other.write_text(json.dumps({**record, "behavior": "pun_intended"}))
     git(repo, "add", "manifests")
     git(repo, "commit", "-q", "-m", "relabeled")
-    with pytest.raises(ValueError, match="the record recomputed from its inputs is not this one"):
+    with pytest.raises(ValueError, match="not the current|not this one"):
         S2.committed_decision(other, RULES, find_run, repo)  # its inputs are still link's
     path.write_text(json.dumps({**record, "deep_doses": [400]}))
     git(repo, "commit", "-q", "-am", "another field")
@@ -335,3 +337,24 @@ def test_phase_decide_keys_its_cell_by_the_result(runs):
     saved = sorted((runs / "runs" / "continuation_14b").glob("*/stage2_decision.json"))
     assert len(saved) == 2  # review s3v: the pending record is not served again
     assert budget.BATCHES["decide"] == "stage2" and "decide" in pipeline.PHASES
+
+
+def test_a_detector_revision_after_the_commit_refuses_the_decision(runs, monkeypatch):
+    # review s3x2: the current version comes from the behavior's config, not the manifest
+    screening_run(runs)
+    confirmation_run(runs, "c1", draws((400, True, CURRENT, None))[0])
+    expression_runs(runs, 400)
+    record = S2.decide(inputs(["c1"], EXPR), RULES, find_run)
+    repo = committed_repo(runs)
+    path = S2.manifest_path(repo, "example_link")
+    S2.write_manifest(path, record, RULES, find_run)
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "stage2")
+    assert S2.committed_decision(path, RULES, find_run, repo)["decision"]["analysis_dose"] == 400
+    monkeypatch.setattr(S2, "current_detector_version", lambda behavior: "revised")
+    with pytest.raises(ValueError, match="made with detector .*, not the current revised"):
+        S2.committed_decision(path, RULES, find_run, repo)
+    with pytest.raises(ValueError, match="not the current revised"):
+        S2.write_manifest(S2.manifest_path(runs / "other", "example_link"), record, RULES, find_run)
+    again = S2.decide(inputs(["c1"], EXPR, version="revised"), RULES, find_run)["decision"]
+    assert again["status"] == "pending" and again["next"] == "confirmation retest at 400"

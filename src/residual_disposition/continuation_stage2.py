@@ -178,15 +178,28 @@ def manifest_path(root: Path, behavior: str) -> Path:
     return root / "manifests" / f"stage2_{behavior}.json"
 
 
-METADATA = ("decision_run", "sha256")  # added to a record by its manifest, not recomputed
+METADATA = ("decision_run", "sha256", "committed_at")  # added by its manifest, not recomputed
+
+
+def current_detector_version(behavior: str) -> str:
+    """The behavior's detector version as its config now defines it (review s3x2)."""
+    from omegaconf import OmegaConf
+
+    from .behaviors import behavior_from_config
+    from .config import load_config
+
+    spec = OmegaConf.to_container(load_config(f"behaviors/{behavior}").behavior)
+    return behavior_from_config(spec).detector.version
 
 
 def decision_problems(
     data: Mapping[str, Any], rules: Any, find_run: Any, path: Path | None = None
 ) -> list[str]:
-    """Why a Stage-2 decision record cannot be a manifest (review s3v): it must be decided under
-    these rules, the whole record recomputed from the runs it names (``decide``) must be it but
-    for its metadata (``METADATA``), and at ``path`` its file must be its behavior's."""
+    """Why a Stage-2 decision record cannot be a manifest (reviews s3v, s3x2): it must be decided
+    under these rules with the behavior's current detector (its config's version, so a revision
+    after the decision refuses it), the whole record recomputed from the runs it names
+    (``decide``) must be it but for its metadata (``METADATA``), and at ``path`` its file must be
+    its behavior's."""
     if (
         path is not None
         and Path(path).name != manifest_path(Path("."), str(data.get("behavior"))).name
@@ -194,8 +207,17 @@ def decision_problems(
         return [f"{Path(path).name} is not the manifest of {data.get('behavior')}"]
     if data.get("rules_sha256") != rules.sha256:
         return ["the decision was made under other rules"]
+    inputs = data.get("inputs") or {}
     try:
-        again = decide(data.get("inputs") or {}, rules, find_run)
+        current = current_detector_version(str(data.get("behavior")))
+    except (OSError, ValueError, KeyError) as error:
+        return [f"the behavior's detector: {error}"]
+    if inputs.get("detector_version") != current:
+        # a revision after the decision voids its draws: the decision is remade, not reused
+        return [f"the decision was made with detector {inputs.get('detector_version')}, not the "
+                f"current {current}"]  # fmt: skip
+    try:
+        again = decide(inputs, rules, find_run)
     except (ValueError, KeyError, TypeError, OSError) as error:
         return [f"its inputs: {error}"]
     if again["decision"].get("status") != "decided":
