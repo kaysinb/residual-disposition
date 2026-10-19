@@ -1,7 +1,9 @@
 """scripts/pod/continuation_stage2.sh dry run (CPU, bash, stub tools under a temporary
-workspace; plan C8, item F): each session's passes in order in its own space, Pod B's inputs
-copied from a create-only, the decision's steps as stage2_next.py names them, the session's
-meter receipt and the snapshot's receipt checked before any pass, the export and the stop."""
+workspace; plan C8, item F; review s4b): each session's passes in order in its own space, each
+Pod's inputs copied from the other's space create-only (as the manifests name them), the decision's
+steps as stage2_next.py names them, the Pod's identity, the session's meter receipt and the
+snapshot's receipt checked before any pass, every bound from the verified session, the
+certificate's plan check before its GPU pass, the export and the stop on every exit."""
 
 from __future__ import annotations
 
@@ -34,7 +36,9 @@ cmd = args[args.index("--") + 1:]
 os.makedirs(attempt, exist_ok=True)
 with open(os.environ["STUB_LOG"], "a") as f:
     f.write(json.dumps({"tool": "run_detached", "attempt": attempt, "cmd": cmd}) + "\n")
-json.dump({"status": "completed", "exit_code": 0}, open(os.path.join(attempt, "status.json"), "w"))
+fail = os.environ.get("STUB_FAIL_CHECK") and "pipeline.plan.check_only=true" in cmd
+status = {"status": "failed", "exit_code": 1} if fail else {"status": "completed", "exit_code": 0}
+json.dump(status, open(os.path.join(attempt, "status.json"), "w"))
 """
 
 NIGHT_WATCH = r"""
@@ -125,14 +129,14 @@ def workspace(tmp_path, capsys):
     bin_dir.mkdir()
     (bin_dir / "project-run").write_text(PROJECT_RUN)
     (bin_dir / "project-run").chmod(0o755)
-    (tmp_path / "rp_env").write_text("")
     snapshot_receipt = tmp_path / "snapshot.receipt.json"
     snapshot_receipt.write_text(json.dumps({"snapshot_id": "snap"}))
     procs = []
 
-    def setup(session, start: datetime, *, pod="POD1", hours=12.0, worker=None) -> dict:
+    def setup(session, start: datetime, *, pod="POD1", hours=12.0, worker=None, api="0",
+              provider=None, watch_late_s=0) -> dict:  # fmt: skip
         worker = worker or ("pod-a" if session.startswith("a") else "pod-b")
-        # The meter: the item split, this Pod's session opened with its ID and deadline.
+        # The meter: the item split, this Pod's session opened with its ID, deadline and API money.
         log, receipt = tmp_path / f"meter-{session}.jsonl", tmp_path / f"receipt-{session}.json"
         meter = ["--log", str(log)]
         item = "stage2/example_link"
@@ -142,7 +146,7 @@ def workspace(tmp_path, capsys):
         deadline = (start + timedelta(hours=hours)).isoformat()
         cm.main([*meter, "session-open", item, "--worker", worker, "--pod-id", pod,
                  "--deadline", deadline, "--price", "3.99", "--hours", str(hours),
-                 "--receipt", str(receipt)])  # fmt: skip
+                 "--api-usd", api, "--receipt", str(receipt)])  # fmt: skip
         capsys.readouterr()
         copy = tmp_path / f"meter-copy-{session}.jsonl"
         copy.write_bytes(log.read_bytes())
@@ -150,9 +154,11 @@ def workspace(tmp_path, capsys):
         watch.mkdir(parents=True, exist_ok=True)
         (watch / "state.json").write_text(json.dumps(
             {"phase": "armed", "token": "t",
-             "deadline": (start + timedelta(hours=hours)).timestamp(),
+             "deadline": (start + timedelta(hours=hours)).timestamp() + watch_late_s,
              "revision": 1}
         ))  # fmt: skip
+        rp_env = tmp_path / f"rp_env-{session}"  # what the provider sets in the Pod
+        rp_env.write_text(f"export RUNPOD_POD_ID={provider or pod}\n")
         procs.append(subprocess.Popen(
             ["bash", "-c", f"exec -a 'night_watch.py watch --state-dir {watch}' sleep 120"]
         ))  # fmt: skip
@@ -161,14 +167,12 @@ def workspace(tmp_path, capsys):
             "PATH": f"{bin_dir}:{os.environ['PATH']}",
             "WORKSPACE": str(ws),
             "CODE_ROOT": str(tmp_path / "code"),
-            "RP_ENV": str(tmp_path / "rp_env"),
+            "RP_ENV": str(rp_env),
             "STUB_LOG": str(tmp_path / "stub.jsonl"),
             "SESSION": session,
             "SNAP": "snap",
-            "START": start.isoformat(),
             "WN": f"{session}-w",
             "PRICE": "3.99",
-            "HARD_HOURS": str(hours),
             "RECEIPT": str(receipt),
             "METER_LOG": str(copy),
             "POD_ID": pod,
@@ -206,6 +210,12 @@ def space_of(e):
     return e["cmd"][[i for i, c in enumerate(e["cmd"]) if c.endswith("rest_runner.sh")][0] + 1]
 
 
+def stop_asked(log, within_s=200):
+    """The chain asked the watcher to stop the Pod within ``within_s`` seconds."""
+    asked = [datetime.fromisoformat(e["at"]) for e in events(log) if e["tool"] == "deadline"]
+    return bool(asked) and asked[-1] <= datetime.now(UTC) + timedelta(seconds=within_s)
+
+
 START = datetime.now(UTC) - timedelta(minutes=20)
 
 
@@ -224,7 +234,11 @@ def test_b1_copies_its_inputs_and_runs_y2_and_y_alone_in_its_own_space(workspace
     assert y100["cmd"][y100["cmd"].index(str(ws / "c")) + 1].endswith("control_y_link_100")
     o = overrides(y2)
     assert o["pipeline.plan.api.adl_ledger.worker"] == "pod-b"
+    assert o["pipeline.plan.api.adl_ledger.allowance_usd"] == "0.0"  # the session's: none
     assert o["pipeline.plan.cost.batches.stage2"] == o["pipeline.plan.cost.batches.y"] == "12.0"
+    # the cost meter counts the session's 12 h back from its deadline (review s4b)
+    since = datetime.fromisoformat(o["pipeline.plan.cost.started_at"])
+    assert abs((since - START).total_seconds()) < 1.5
     for sid in [*LINK_STATES, Y_ORGANISM]:
         assert (ws / "c" / "data" / "states" / sid / "manifest.json").is_file()
     assert (ws / "c" / "runs" / "feasibility_14b" / "train-run" / "observations").is_dir()
@@ -234,6 +248,7 @@ def test_b1_copies_its_inputs_and_runs_y2_and_y_alone_in_its_own_space(workspace
     summary = json.loads((chain / "summary.json").read_text())
     assert summary["ok"] and summary["worker"] == "pod-b" and summary["pod_id"] == "POD1"
     assert json.loads((chain / "receipt-check.json").read_text())["valid"]
+    assert stop_asked(log)  # the end of the chain stops the Pod
 
 
 def test_a_missing_input_stops_b1_before_any_pass(workspace):
@@ -242,24 +257,51 @@ def test_a_missing_input_stops_b1_before_any_pass(workspace):
     __import__("shutil").rmtree(ws / "a" / "data" / "states" / Y_ORGANISM)
     out = run_chain(setup("b1", START))
     assert out.returncode != 0 and not passes(log)
+    assert stop_asked(log)  # review s4b: a failure stops the Pod at once
 
 
 @pytest.mark.parametrize(
-    "change, message",
+    "setup_kw, change, message",
     [
-        ({"POD_ID": "POD9"}, "does not cover"),  # another Pod's session
-        ({"HARD_HOURS": "13"}, "does not cover"),  # beyond the session's 12 h
-        ({"SNAPSHOT_RECEIPT_SHA256": "0" * 64}, "not the one set at the Pod's creation"),
-        ({"SOURCE_SNAPSHOT_ID": "other"}, "not the one set at the Pod's creation"),
+        # the caller's POD_ID is not the provider's identity of this Pod
+        ({"provider": "POD2"}, {}, "is not this Pod's identity from the provider"),
+        # the Pod is POD9, but the session is POD1's
+        ({"provider": "POD9"}, {"POD_ID": "POD9"}, "does not authorize this Pod"),
+        ({}, {"SNAPSHOT_RECEIPT_SHA256": "0" * 64}, "not the one set at the Pod's creation"),
+        ({}, {"SOURCE_SNAPSHOT_ID": "other"}, "not the one set at the Pod's creation"),
+        # review s4b: a watcher two hours past the session's deadline, whatever START says
+        ({"watch_late_s": 7200}, {"START": "2099-01-01T00:00:00+00:00", "HARD_HOURS": "99"},
+         "is past the session's"),
     ],
-)
-def test_no_pass_starts_without_this_pod_s_session_and_snapshot(workspace, change, message):
+)  # fmt: skip
+def test_no_pass_starts_without_this_pod_s_session_and_snapshot(
+    workspace, setup_kw, change, message
+):
     ws, setup, log, _ = workspace
     pilot_inputs(ws / "a")
-    env = setup("b1", START)
+    env = setup("b1", START, **setup_kw)
     out = run_chain({**env, **change})
     assert out.returncode != 0 and message in out.stdout
     assert not passes(log)
+    assert stop_asked(log)  # review s4b: an early refusal stops the Pod, not its deadline
+
+
+def test_the_adl_allowance_is_the_session_s_on_top_of_its_ledger(workspace):
+    # review s4b: the ledger may commit the API money the meter journaled for this session
+    from residual_disposition.budget import ApiLedger
+
+    ws, setup, log, _ = workspace
+    pilot_inputs(ws / "a")
+    ledger = ApiLedger(ws / "c" / "data" / "ledgers" / "adl-api-pod-b.jsonl", 10.0, "pod-b")
+    ids = ledger.reserve({"k1": 1.5, "k2": 0.25}, "earlier session")
+    ledger.settle(ids["k1"], "k1", 1.25, "earlier session")  # k2 left open: still committed
+    ledger.close()
+    out = run_chain(setup("b1", START, api="2.5"))
+    assert out.returncode == 0, out.stdout + out.stderr
+    o = overrides(passes(log)[0])
+    assert float(o["pipeline.plan.api.adl_ledger.allowance_usd"]) == pytest.approx(
+        1.25 + 0.25 + 2.5
+    )
 
 
 def screening(space, rows):
@@ -330,7 +372,28 @@ def test_a1_with_no_screened_dose_decides_exception_a_without_k_star(workspace):
     assert "exception a" in out.stdout
 
 
-def committed_manifests(source, ws):
+def a_dir(space, rel, summary=None):
+    """A completed run (``runs/...``) or a data directory (``data/...``) with one file."""
+    d = space / rel
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "f.json").write_text(json.dumps({"rel": rel}))
+    if rel.startswith("runs/"):
+        (d / "meta.json").write_text(json.dumps({"status": "completed"}))
+        (d / "summary.json").write_text(json.dumps(summary or {}))
+    return d
+
+
+Y_DATA = "d5f5179f8853cb6cc"
+ELICITATION = "preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803"
+REVIEW = "labels/detectors/y2det-470596e7fc2a"
+
+
+def certificate_spaces(source, ws):
+    """The committed manifests of example_link at 400 and what they name, where the sessions
+    leave it: A1's screening, k* evidence and b's data in a; B1's Y₂ evidence and data in c."""
+    from residual_disposition import continuation_kstar as K
+    from residual_disposition import continuation_y2 as y2
+
     (source / "manifests" / "stage2_example_link.json").write_text(json.dumps(
         {"decision": {"analysis_dose": 400}, "inputs": {"screening": "scr"}}
     ))  # fmt: skip
@@ -338,59 +401,121 @@ def committed_manifests(source, ws):
              "reference": {"run": "ref-A"},
              "relearn_runs": {"1e-05": ["cal1"], "5e-06": ["cal2"]}}  # fmt: skip
     (source / "manifests" / "kstar_example_link_400.json").write_text(json.dumps(kstar))
-    screening_dir = ws / "a" / "runs" / "continuation_14b" / "scr"
+    inputs = {
+        "elicitation": {"root": "runs", "path": ELICITATION},
+        "validations": [{"set": {"root": "data", "path": f"{REVIEW}/set"},
+                         "labels": {"root": "data", "path": f"{REVIEW}/labels.jsonl"},
+                         "review_log": {"root": "data", "path": f"{REVIEW}/review-log.json"}}],
+        "references": ["y2-record"],
+    }  # fmt: skip
+    provenance = {"inputs": inputs, "y2_reference_run": "y2-record", "reference_run": "y2-ref",
+                  "train_run": "y2-train", "relearn_data_id": "dy2"}  # fmt: skip
+    (source / "manifests" / "y2.json").write_text(json.dumps({"provenance": provenance}))
+    a, c = ws / "a", ws / "c"
+    pilot_inputs(a)
+    screening_dir = a / "runs" / "continuation_14b" / "scr"
     screening_dir.mkdir(parents=True)
     (screening_dir / "stage2_screening.json").write_text(
         json.dumps({"doses": {"400": {"latent": "L400", "sham_s": "Hs400"}}})
     )
-
-
-def test_b2_copies_the_certificate_s_inputs_and_runs_blocks_3_to_5(workspace):
-    ws, setup, log, source = workspace
-    pilot_inputs(ws / "a")
-    committed_manifests(source, ws)
     for sid in ("L400", "Hs400", "sA"):
-        (ws / "a" / "data" / "states" / sid).mkdir(parents=True)
-        (ws / "a" / "data" / "states" / sid / "manifest.json").write_text('{"adapters": []}')
-    for run in ("cal1", "cal2"):
-        (ws / "a" / "runs" / "continuation_14b" / run).mkdir(parents=True)
-        (ws / "a" / "runs" / "continuation_14b" / run / "summary.json").write_text("{}")
-    (ws / "a" / "runs" / "feasibility_14b" / "ref-A").mkdir(parents=True)
-    (ws / "a" / "runs" / "feasibility_14b" / "ref-A" / "summary.json").write_text("{}")
-    for rel in ("runs/labeling/detectors-470596e7fc2a", "data/labels/detectors/y2det-470596e7fc2a",
-                "runs/preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803",
-                "data/generations/dlink"):  # fmt: skip
-        (ws / "a" / rel).mkdir(parents=True, exist_ok=True)
-        (ws / "a" / rel / "f.json").write_text("{}")
+        (a / "data" / "states" / sid).mkdir(parents=True)
+        (a / "data" / "states" / sid / "manifest.json").write_text('{"adapters": []}')
+    for rel in ("runs/continuation_14b/cal1", "runs/continuation_14b/cal2",
+                "runs/feasibility_14b/ref-A", f"runs/stage1_14b/{y2.STAGE1_RECIPE_RUN}",
+                f"runs/{ELICITATION}", f"data/{REVIEW}/set", f"data/{REVIEW}/labels.jsonl",
+                f"data/{REVIEW}/review-log.json", "data/generations/dlink"):  # fmt: skip
+        a_dir(a, rel)
+    a_dir(a, "runs/continuation_14b/20261020-000009-data_relearn-eeee-0001", {"data_id": "dlink"})
+    a_dir(a, "runs/feasibility_14b/20261014-072309-data_relearn-8950fcdc-6f7f",
+          {"data_id": Y_DATA})  # fmt: skip
+    assert K.PILOT_REFERENCES[Y_ORGANISM] == Y_RUNS[0]
+    for rel in ("runs/continuation_14b/y2-record", "runs/continuation_14b/y2-ref",
+                "runs/continuation_14b/y2-train", "data/generations/dy2"):  # fmt: skip
+        a_dir(c, rel)
+    a_dir(c, "runs/continuation_14b/20261021-000001-data_relearn-ffff-0001", {"data_id": "dy2"})
+
+
+def tree(space):
+    return sorted(str(p.relative_to(space)) for p in space.rglob("*"))
+
+
+def test_b2_takes_a1_s_certificate_inputs_from_a_and_checks_them_before_its_blocks(workspace):
+    ws, setup, log, source = workspace
+    certificate_spaces(source, ws)
+    before = tree(ws / "a")
     out = run_chain(setup("b2", START))
     assert out.returncode == 0, out.stdout + out.stderr
-    (cert,) = passes(log)
+    check, cert = passes(log)
+    assert overrides(check)["pipeline.plan.check_only"] == "true"  # the plan check alone (CPU)
     o = overrides(cert)
+    assert "pipeline.plan.check_only" not in o
     assert (
         o["pipeline.plan.phase"] == "certificate"
         and o["pipeline.plan.certificate.blocks"] == "[3,4,5]"
     )
     assert (o["pipeline.plan.certificate.latent"], o["pipeline.plan.certificate.sham_s"],
             o["pipeline.plan.certificate.active"]) == ("L400", "Hs400", "sA")  # fmt: skip
-    assert space_of(cert) == str(ws / "c")
+    assert {space_of(e) for e in (check, cert)} == {str(ws / "c")}
     copied = (
         "runs/continuation_14b/cal1",
+        "runs/feasibility_14b/ref-A",
+        f"runs/feasibility_14b/{Y_RUNS[0]}",
+        "data/generations/dlink",
+        # review s4b: the completed cell of b's data, which cached_only=True needs
+        "runs/continuation_14b/20261020-000009-data_relearn-eeee-0001",
+        f"runs/feasibility_14b/{Y_RUNS[1]}",
+        f"runs/{ELICITATION}",
+        f"data/{REVIEW}/labels.jsonl",
         "data/states/L400",
-        "runs/labeling/detectors-470596e7fc2a",
+        "data/states/sA",
     )
     for rel in copied:
-        assert (ws / "c" / rel).exists()
+        assert (ws / "c" / rel).exists(), rel
+    assert tree(ws / "a") == before  # a is read, never written
 
 
-def test_a2_runs_blocks_0_to_2_and_the_readers_in_space_a(workspace):
+def test_a2_takes_b1_s_y2_evidence_from_c_and_checks_it_before_its_blocks(workspace):
     ws, setup, log, source = workspace
-    committed_manifests(source, ws)
+    certificate_spaces(source, ws)
+    before = tree(ws / "c")
     out = run_chain(setup("a2", START))
     assert out.returncode == 0, out.stdout + out.stderr
     ps = passes(log)
-    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["certificate", "readers"]
-    assert overrides(ps[0])["pipeline.plan.certificate.blocks"] == "[0,1,2]"
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == [
+        "certificate",
+        "certificate",
+        "readers",
+    ]
+    assert overrides(ps[0])["pipeline.plan.check_only"] == "true"
+    assert overrides(ps[1])["pipeline.plan.certificate.blocks"] == "[0,1,2]"
     assert {space_of(e) for e in ps} == {str(ws / "a")}
+    for rel in (
+        "runs/continuation_14b/y2-record",
+        "runs/continuation_14b/y2-ref",
+        "runs/continuation_14b/y2-train",
+        "data/generations/dy2",
+        "runs/continuation_14b/20261021-000001-data_relearn-ffff-0001",
+    ):  # review s4b: B1's Y₂ evidence and data
+        assert (ws / "a" / rel).exists(), rel
+    assert tree(ws / "c") == before  # c is read, never written
+
+
+def test_a_failed_certificate_check_or_a_missing_input_runs_no_block(workspace):
+    ws, setup, log, source = workspace
+    certificate_spaces(source, ws)
+    env = setup("a2", START)
+    out = run_chain({**env, "STUB_FAIL_CHECK": "1"})
+    assert out.returncode != 0
+    assert [overrides(e).get("pipeline.plan.check_only") for e in passes(log)] == ["true"]
+    assert stop_asked(log)
+    log.unlink()
+    __import__("shutil").rmtree(ws / "c" / "runs" / "continuation_14b" / "y2-ref")
+    __import__("shutil").rmtree(ws / "a" / "runs" / "continuation_14b" / "y2-ref")  # copied
+    out = run_chain(env)  # in neither space now: the copy refuses
+    assert out.returncode != 0 and not passes(log) and stop_asked(log)
+    last = sorted((ws / "attempts" / "residual-disposition").glob("chain-a2-*/copy.json"))[-1]
+    assert "y2-ref is in neither" in last.read_text()
 
 
 def copy_inputs():

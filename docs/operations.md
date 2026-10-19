@@ -442,18 +442,21 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   stage2/<behavior> --share pod-a=… --share pod-b=…`. For each Pod session the coordinator
   creates the Pod and gives its actual ID and the deadline set at its creation; `session-open
   <item> --worker <pod-a|pod-b> --pod-id <ID> --deadline <ISO> --price <USD/h> --hours <h>
-  --receipt <file>` authorizes it in the log, exclusively (refused while that worker has an open
-  session) and within the worker's live share, and writes the receipt the Pod verifies
-  (`verify-receipt <file> --item … --worker … --pod-id <its own ID> --price … --hours …` on the
-  copy of the log). After the Pod stops, `session-close <item> --worker … --pod-id … --gpu-usd
-  <paid>` settles its cost; only then can that worker's next session open. A worker's charges may
-  not exceed its share; an overrun stops the item.
-- **Stage 2's Pods** (C8, items B, C, F). `scripts/pod/continuation_stage2.sh`, one session per
-  Pod start, each stopping its Pod through the watcher at the end. Pod A (worker pod-a) writes
-  only to `/workspace/a`, Pod B (pod-b) only to `/workspace/c`: two Pods writing one network
-  volume can corrupt it, so B copies what it reads from a, create-only and checked by sha256
-  (`scripts/pod/copy_inputs.py`, a state with every state its adapters point at), and never
-  writes to a.
+  [--api-usd <USD>] --receipt <file>` authorizes it in the log, exclusively (refused while that
+  worker has an open session), its hours within the worker's live GPU share and the API money
+  the session may commit (review s4b; none by default) within its API share, and writes the
+  receipt the Pod verifies (`verify-receipt <file> --item … --worker … --pod-id <its own ID>
+  --price … --hours …` on the copy of the log, which prints the session as the log holds it).
+  After the Pod stops, `session-close <item> --worker … --pod-id … --gpu-usd <paid> [--api-usd
+  <paid>]` settles its cost; only then can that worker's next session open. A worker's charges
+  may not exceed its share; an overrun stops the item.
+- **Stage 2's Pods** (C8, items B, C, F; review s4b). `scripts/pod/continuation_stage2.sh`, one
+  session per Pod start; on every exit, a refusal before any pass included, it asks the watcher
+  to stop the Pod within 3 minutes. Pod A (worker pod-a) writes only to `/workspace/a`, Pod B
+  (pod-b) only to `/workspace/c`: two Pods writing one network volume can corrupt it, so a Pod
+  copies what it reads from the other's space into its own, create-only and checked by sha256
+  (`scripts/pod/copy_inputs.py`; a state with every state its adapters point at, a dataset with
+  the completed cells that made it), and never writes to the other's.
   - **a1**: phase screen, then the steps `scripts/pod/stage2_next.py` names from the space's
     completed cells (phase confirm at a dose, C9; the expression checks at the analysis dose,
     phase ood and phase corpus, C10), phase decide with the runs found, and with an analysis dose
@@ -463,20 +466,28 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     200, after copying link's L and H_s at 100 and 200, the pilot's Y organism, its reference and
     relearning data, the analyst index and the prompt pools.
   - **a2** and **b2**, after the k*, Y₂ and Stage-2 manifests are committed and a new snapshot
-    made: phase certificate, blocks 0–2 (a2, then phase readers, C10) and 3–5 (b2, after copying
-    the dose's states, the calibration runs, the references, the arms' data and the Y₂ check's
-    inputs).
+    made: phase certificate, blocks 0–2 (a2, then phase readers, C10) and 3–5 (b2). Each first
+    copies from the other's space what the certificate reads there, as the committed manifests
+    name it (`copy_inputs.py --certificate`, `continuation_certificate.dependencies`): a2 B1's
+    Y₂ reference, its runs and the Y₂ arm's data from c; b2 the dose's states, A1's calibration
+    runs, the references, b's and Y's data, the Y₂ check's inputs, the analyst index and the
+    prompt pools from a. Then the certificate's plan check alone (`pipeline.plan.check_only=true`,
+    CPU) in its own space, and the GPU pass only if it passes.
   - Between sessions the Pod is stopped, not left idle; if a stopped Pod cannot start again (its
     host taken), a new Pod is created on the same volume and the session reruns, resuming its
     cells.
   - Per session the coordinator creates the Pod (its ID, the deadline at its creation,
     `SOURCE_SNAPSHOT_ID` and `SNAPSHOT_RECEIPT_SHA256` in its environment), the meter opens the
-    session (`session-open`), and the chain is launched with `SESSION`, `SNAP`, `START`, `WN`,
-    `PRICE`, `HARD_HOURS`, `RECEIPT`, `METER_LOG`, `POD_ID`, `SOURCE_SNAPSHOT_RECEIPT` (and
-    `ACTIVE` for a1); it refuses to run unless the snapshot verifies, the snapshot and its
-    receipt are the ones set at creation, the session receipt covers `HARD_HOURS` on this Pod and
-    the watcher's deadline lies within `START + HARD_HOURS`. After the Pod stops,
-    `session-close` settles the session's paid cost.
+    session (`session-open`, with the session's API money), and the chain is launched with
+    `SESSION`, `SNAP`, `WN`, `PRICE`, `RECEIPT`, `METER_LOG`, `POD_ID`, `SOURCE_SNAPSHOT_RECEIPT`
+    (and `ACTIVE` for a1). It refuses to run unless `POD_ID` is the provider's identity of the Pod
+    (`RUNPOD_POD_ID`), the snapshot verifies, the snapshot and its receipt are the ones set at
+    creation and the session receipt verifies on this Pod. Every bound then comes from the
+    session as the log holds it: the watcher's deadline may not lie beyond the session's (no
+    deadline the chain sets does), the cost meter counts the session's hours back from that
+    deadline, and the ADL ledger's allowance is what the worker's ledger had committed plus the
+    session's API money (`budget.session_allowance`). After the Pod stops, `session-close`
+    settles the session's paid cost.
 - **Stage 2's decision** (§12.7, §12.4.1, §12.4.7; reviews s3t, s3v). Phase decide (CPU, batch
   stage2, `pipeline.plan.decide.screening=<stage2_screening run>`,
   `'pipeline.plan.decide.confirmation=[<attempt 1 run>, <attempt 2 run>]'`,

@@ -10,12 +10,52 @@ incomplete, which gives every contrast that depends on it p = 1 (``continuation_
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from .continuation_kstar import rate_key
+from .continuation_kstar import PILOT_REFERENCES, PILOT_Y_DATA, PILOT_Y_ORGANISM, rate_key
 from .continuation_stats import HABITS, ROLES, Block, Crossing
 from .relearn_rules import certificate_time
+
+
+def dependencies(kstar: Mapping[str, Any], y2: Mapping[str, Any]) -> dict[str, list[Any]]:
+    """What a lineage's certificate reads besides the source snapshot and its manifests, named
+    by its k* and Y₂ manifests (review s4b): every input of ``pipeline.certificate_problems``
+    (``certificate_inputs``), so that a Pod's space can be given exactly them, whichever Pod's
+    space made them. L, the analyst index and the prompt pools are named by the caller.
+
+    - ``states``: H_s, A and the pilot's Y organism;
+    - ``runs``, by name: the calibration runs and A's reference (k*), the Y organism's reference,
+      and Y₂'s reference records, its reference pass, its organism's training run and the
+      stage-1 recipe's (``continuation_y2.reference_problems``);
+    - ``data``, by data id, each with its completed data cell (``plain_dataset(cached_only)``):
+      b's (k*), Y's (``PILOT_Y_DATA``) and Y₂'s;
+    - ``locations`` under the data or runs root: the Y₂ selection's recorded inputs (the stage-0
+      elicitation; each detector check's set, labels, review log and dispositions; the
+      rejections)."""
+    from .continuation_y2 import STAGE1_RECIPE_RUN
+
+    provenance = y2["provenance"]
+    inputs = provenance["inputs"]
+    runs = [name for names in kstar["relearn_runs"].values() for name in names]
+    runs += [kstar["reference"]["run"], PILOT_REFERENCES[PILOT_Y_ORGANISM]]
+    runs += [*(inputs.get("references") or []), provenance["y2_reference_run"]]
+    runs += [provenance["reference_run"], provenance["train_run"], STAGE1_RECIPE_RUN]
+    locations = [inputs["elicitation"], *(inputs.get("rejections") or [])]
+    for v in inputs.get("validations") or []:
+        locations += [v[k] for k in ("set", "labels", "review_log", "dispositions") if v.get(k)]
+    data = [kstar["data_id"], PILOT_Y_DATA["data_id"], provenance["relearn_data_id"]]
+    return {
+        "states": list(
+            dict.fromkeys([kstar["states"]["H_s"], kstar["states"]["A"], PILOT_Y_ORGANISM])
+        ),  # fmt: skip
+        "runs": list(dict.fromkeys(runs)),
+        "data": list(dict.fromkeys(data)),
+        "locations": [
+            dict(x) for x in {json.dumps(loc, sort_keys=True): loc for loc in locations}.values()
+        ],  # fmt: skip
+    }
 
 
 def run_key(block: int, lr: float, arm: str, role: str) -> str:

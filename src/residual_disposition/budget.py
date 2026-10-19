@@ -553,6 +553,16 @@ def check_ledger_spec(spec: Mapping[str, Any]) -> None:
         raise ValueError(f"the ADL API ledger of {worker} needs allowance_usd")
 
 
+def session_allowance(path: Path, worker: str, session_usd: float) -> float:
+    """The ADL ledger's allowance for one Pod session (review s4b): what the worker's ledger had
+    committed before the session, plus the API money the meter journaled for it
+    (``AllocationMeter.open_session``), so that the session commits no more than that."""
+    session_usd = finite_usd(session_usd, "a session's API authorization")
+    if not Path(path).exists():
+        return session_usd
+    return ApiLedger(Path(path), 1.0, worker, readonly=True).committed() + session_usd
+
+
 def ledger_from(spec: Mapping[str, Any], root: Path) -> ApiLedger:
     """The writer of the ledger of ``spec`` ({worker, allowance_usd, path or None}); its default
     path is ``root/ledgers/adl-api-<worker>.jsonl``, on the worker's persistent volume."""
@@ -905,7 +915,7 @@ class AllocationMeter:
             if self.state[x] in (RESERVED, RUNNING)
         )
         sessions = sum(
-            v["gpu_usd"]
+            v["gpu_usd"] + v["api_usd"]
             for x in self.priority
             if self.state[x] == STOPPED
             for v in (self.sessions.get(x) or {}).values()
@@ -957,16 +967,19 @@ class AllocationMeter:
         deadline: str,
         price: float,
         hours: float,
+        api_usd: float = 0.0,
         result: Callable[[dict[str, Any]], Any] | None = None,
     ) -> Any:
         """Authorize one Pod session of a split item's worker, exclusively: the Pod's actual ID,
-        the deadline set at its creation, its price and hours, within the worker's live share;
-        refused while the worker has an open session (review s3y2) or the item is not running.
-        ``result(event)`` (the receipt) is formed in the same transaction, under the log's lock,
-        so that no stop can come between the session and its receipt (review s4a); returns it,
-        or the event."""
+        the deadline set at its creation, its price and hours, and the API money the session may
+        commit (``api_usd``, its ledger's allowance on the Pod; review s4b), each within the
+        worker's live share; refused while the worker has an open session (review s3y2) or the
+        item is not running. ``result(event)`` (the receipt) is formed in the same transaction,
+        under the log's lock, so that no stop can come between the session and its receipt
+        (review s4a); returns it, or the event."""
         price = finite_usd(price, "a Pod's price", positive=True)
         hours = finite_usd(hours, "a session's hours", positive=True)
+        api_usd = finite_usd(api_usd, "a session's API authorization")
         return self._operate(
             lambda: {
                 "event": "session",
@@ -977,6 +990,7 @@ class AllocationMeter:
                 "price_usd_per_hour": price,
                 "hours": hours,
                 "gpu_usd": price * hours,
+                "api_usd": api_usd,
             },
             result,
         )
@@ -1219,12 +1233,20 @@ class AllocationMeter:
             usd = finite_usd(event["gpu_usd"], "a session's GPU authorization", positive=True)
             if abs(usd - price * hours) > 1e-9:
                 raise ValueError(f"a session's ${usd} is not {hours} h at ${price}/h")
-            share, (gpu, _api) = s["splits"][item][worker], self.parts(item, s)
-            left = share * gpu - s["worker_charged"][item][worker]["gpu_usd"]
+            # a session journaled before review s4b authorized no API money
+            api_usd = finite_usd(event.get("api_usd", 0.0), "a session's API authorization")
+            share, (gpu, api) = s["splits"][item][worker], self.parts(item, s)
+            spent = s["worker_charged"][item][worker]
+            left = share * gpu - spent["gpu_usd"]
             if usd > left + 1e-9:
                 raise ValueError(f"${usd:.4f} exceed {worker}'s ${left:.4f} left of its share")
+            left_api = share * api - spent["api_usd"]
+            if api_usd > left_api + 1e-9:
+                raise ValueError(
+                    f"API ${api_usd:.4f} exceed {worker}'s ${left_api:.4f} left of its API share"
+                )
             keys = ("pod_id", "deadline", "price_usd_per_hour", "hours", "gpu_usd")
-            s["sessions"][item][worker] = {k: event[k] for k in keys}
+            s["sessions"][item][worker] = {**{k: event[k] for k in keys}, "api_usd": api_usd}
         elif kind in ("charge", "session_close"):
             # A stopped item's open sessions are still settled at their paid cost (review s4a);
             # nothing else is charged to it, and nothing new is authorized.

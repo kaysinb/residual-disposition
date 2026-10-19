@@ -299,3 +299,40 @@ def test_an_item_completes_only_with_its_sessions_closed(tmp_path, capsys):
         "--pod-id", "pod111", "--gpu-usd", "20")  # fmt: skip
     code, done = run(capsys, log, "complete", "stage2/example_link")
     assert code == 0 and done["final_usd"] == pytest.approx(20)
+
+
+def test_a_session_journals_its_api_money_within_the_worker_s_api_share(tmp_path, capsys):
+    # review s4b: the Pod's ADL allowance is bound to what the log authorized for the session
+    log = two_pods(tmp_path, capsys)
+    share = cm.meter(log).worker_limits("stage2/example_link", "pod-a").api_usd
+    path = tmp_path / "receipt.json"
+    args = [
+        "session-open",
+        "stage2/example_link",
+        "--worker",
+        "pod-a",
+        "--pod-id",
+        "pod111",
+        "--deadline",
+        DEADLINE,
+        "--price",
+        "3.99",
+        "--hours",
+        "10",
+        "--receipt",
+        str(path),
+    ]
+    with pytest.raises(ValueError, match="left of its API share"):
+        run(capsys, log, *args, "--api-usd", str(share + 0.01))
+    code, receipt = run(capsys, log, *args, "--api-usd", "2.5")
+    assert code == 0 and receipt["api_usd"] == 2.5
+    code, out = verify(capsys, log, path, "pod-a", "pod111", 10)
+    assert code == 0 and out["session"]["api_usd"] == 2.5  # the log's, for the chain
+    assert out["session"]["deadline"] == DEADLINE and out["session"]["hours"] == 10
+    path.write_text(json.dumps({**receipt, "api_usd": 9.0}))  # a receipt claiming more
+    code, out = verify(capsys, log, path, "pod-a", "pod111", 10)
+    assert code == 1 and "open session in the log is not the receipt's" in out["problems"][-1]
+    # a stopped item holds the session's API money too until it is settled
+    overrun = ["charge", "stage2/example_link", "--gpu-usd", "130", "--worker", "pod-b"]
+    assert run(capsys, log, *overrun)[0] == 3
+    assert cm.meter(log).outstanding() == pytest.approx(39.9 + 2.5)

@@ -5,8 +5,9 @@
 Cells already completed under the same experiment are reused, so an interrupted run resumes. The
 whole config (every ``???`` value set), the plan of the configured phase, its cost cap and the
 Pod's hard deadline are checked before the GPU engine starts (``pipeline.check_plan``), and so is
-the cost meter. Exits with status 3 when the
-cost meter stopped the work: archive the finished results and report the remaining work.
+the cost meter. With ``pipeline.plan.check_only=true`` it stops there, on CPU: a Pod's chain checks
+a phase's inputs in its space this way before the GPU pass (review s4b). Exits with status 3 when
+the cost meter stopped the work: archive the finished results and report the remaining work.
 """
 
 import json
@@ -31,6 +32,9 @@ def main() -> int:
     except BudgetExhausted as stop:
         print(f"budget stop before the GPU engine starts: {stop}")
         return BUDGET_STOP
+    if cfg.pipeline.plan.get("check_only"):
+        print(f"plan checked: phase {cfg.pipeline.plan.phase}, nothing run")
+        return 0
     import torch
 
     if not torch.cuda.is_available():

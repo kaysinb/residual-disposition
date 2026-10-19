@@ -27,6 +27,7 @@ pipeline:
   reuse_from: [feasibility_14b, stage1_14b]
   plan:
     phase: ???                          # reread, engine, screen, ood, decide, kstar, y2, certificate
+    check_only: false                   # true: the plan check alone, on CPU (scripts/pipeline.py)
     reread:
       states: []                        # in this order; each with its pilot ADL package
       controls: []                      # A: random directions, no patch, reconstruction

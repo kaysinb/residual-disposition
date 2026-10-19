@@ -10,7 +10,8 @@
         --price USD_PER_HOUR --hours H [--worker WORKER --pod-id POD_ID]
     uv run python scripts/continuation_meter.py split <item> --share WORKER=SHARE ...
     uv run python scripts/continuation_meter.py session-open <item> --worker WORKER \
-        --pod-id POD_ID --deadline ISO --price USD_PER_HOUR --hours H --receipt FILE
+        --pod-id POD_ID --deadline ISO --price USD_PER_HOUR --hours H [--api-usd USD] \
+        --receipt FILE
     uv run python scripts/continuation_meter.py session-close <item> --worker WORKER \
         --pod-id POD_ID --gpu-usd USD [--api-usd USD]
     uv run python scripts/continuation_meter.py transfer <item> --from gpu --to api --usd USD \
@@ -46,12 +47,15 @@ worker gets its share of both parts, and every later charge names its worker (``
 --worker``), who may spend no more than its share. Each Pod session is authorized exclusively in
 the log (review s3y2): ``session-open``, with the Pod's actual ID and the deadline set at its
 creation (both from the coordinator, who creates the Pod), its price and hours within the
-worker's live share, writes the session's receipt (the sha256 of the log right after it); it is
+worker's live GPU share and the API money it may commit (``--api-usd``, review s4b) within the
+worker's API share, writes the session's receipt (the sha256 of the log right after it); it is
 refused while that worker has an open session. ``session-close`` settles the session's paid cost
 as the worker's charge and closes it, so that the next may open. On the Pod, ``verify-receipt
 --worker --pod-id`` replays the log copy and succeeds only if the copy is the receipt's, the
 worker's open session there is the receipt's (the Pod ID the Pod's own, the deadline, the price,
-the hours), the deadline is still ahead and the requested hours fit within the session's.
+the hours, the API authorization), the deadline is still ahead and the requested hours fit within
+the session's; it prints that session as the log holds it, which is where the Pod's chain takes
+its deadline and its API allowance from.
 """
 
 from __future__ import annotations
@@ -139,7 +143,7 @@ def verify_session_receipt(
         session = (m.sessions.get(item) or {}).get(worker)
     if state != "running":
         return [*problems, f"{item} is {state}: no session runs on a stopped item"]
-    keys = ("pod_id", "deadline", "price_usd_per_hour", "hours", "gpu_usd")
+    keys = ("pod_id", "deadline", "price_usd_per_hour", "hours", "gpu_usd", "api_usd")
     if session is None or any(session[k] != data.get(k) for k in keys):
         return [*problems, f"{worker}'s open session in the log is not the receipt's: {session}"]
     if price != session["price_usd_per_hour"]:
@@ -252,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--deadline", required=True, help="the deadline set at the Pod's creation, ISO")
     p.add_argument("--price", type=float, required=True)
     p.add_argument("--hours", type=float, required=True)
+    p.add_argument("--api-usd", type=float, default=0.0, help="the API money the session may use")
     p.add_argument("--receipt", type=Path, required=True)
     p = sub.add_parser("session-close")
     p.add_argument("item")
@@ -303,9 +308,10 @@ def main(argv: list[str] | None = None) -> int:
                 m, data, item=args.item, worker=args.worker, pod_id=args.pod_id,
                 price=args.price, hours=args.hours,
             )  # fmt: skip
-        print(
-            json.dumps({"receipt": str(args.receipt), "valid": not problems, "problems": problems})
-        )
+        out = {"receipt": str(args.receipt), "valid": not problems, "problems": problems}
+        if args.worker is not None and not problems:
+            out["session"] = m.session(args.item, args.worker)  # as the log holds it
+        print(json.dumps(out))
         return 1 if problems else 0
     elif args.command == "limits":
         out = limits_json(m.limits(args.item), args.price)
@@ -321,7 +327,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "session-open":
         out = m.open_session(  # the receipt formed under the same lock as the session (s4a)
             args.item, args.worker, pod_id=args.pod_id, deadline=args.deadline,
-            price=args.price, hours=args.hours, result=lambda event: session_receipt(m, event),
+            price=args.price, hours=args.hours, api_usd=args.api_usd,
+            result=lambda event: session_receipt(m, event),
         )  # fmt: skip
         args.receipt.write_text(json.dumps(out, indent=1) + "\n")
     elif args.command == "session-close":

@@ -13,31 +13,35 @@
 #      certificate's blocks 0-2 and the readers at the analysis dose;
 #   b2 (Pod B, after the k* and Y₂ manifests are committed): blocks 3-5.
 #
-# Limits. RECEIPT is the meter's receipt of this Pod's session (continuation_meter.py
-# session-open, with the Pod's ID and the deadline set at its creation, both from the
-# coordinator), METER_LOG the copy of the log it was issued from; the chain starts only if
-# verify-receipt accepts HARD_HOURS on this Pod (POD_ID). HARD_HOURS from START (the Pod's
-# creation) bounds every deadline the chain sets; the watcher's first deadline is armed before the
-# chain and may not lie beyond START + HARD_HOURS. The snapshot's receipt is trusted only by the
-# values set in the Pod's environment at its creation (SOURCE_SNAPSHOT_ID, the snapshot;
-# SNAPSHOT_RECEIPT_SHA256, its receipt; review s3z2). Every pass goes through the runner (CUDA
-# faults retried, exit 3 final) with RUN_LIMIT_S to the end of work: the watcher's deadline minus
-# the resume margin and the export. The chain exits nonzero if a pass did not complete or an
-# export was not clean; the volume keeps everything, and a rerun of the session resumes its cells
-# (on this Pod or, if it cannot start again, on a new Pod on the same volume).
-# usage: SESSION=<a1|a2|b1|b2> SNAP=<snapshot id> START=<Pod creation ISO> WN=<watcher dir name> \
-#          PRICE=<USD/h> HARD_HOURS=<h> RECEIPT=<file> METER_LOG=<file> POD_ID=<this Pod's ID> \
-#          SOURCE_SNAPSHOT_RECEIPT=<file> [ITEM=stage2/example_link] [LEDGER_USD=<USD>] \
-#          continuation_stage2.sh   (its directory: <attempts>/chain-<session>-<UTC time>)
+# Limits (review s4b). RECEIPT is the meter's receipt of this Pod's session
+# (continuation_meter.py session-open, with the Pod's ID and the deadline set at its creation,
+# both from the coordinator, and the session's API money), METER_LOG the copy of the log it was
+# issued from. POD_ID must be the identity the provider gives the Pod (RUNPOD_POD_ID), and the
+# chain starts only if verify-receipt accepts the session on that Pod. Every bound then comes from
+# the session as the log holds it, never from the caller: its deadline bounds every deadline the
+# chain sets (the watcher's, armed before the chain, may not lie beyond it), the cost meter counts
+# the session's hours from the deadline back, and the ADL ledger may commit the session's API
+# money on top of what it had committed (budget.session_allowance). The snapshot's receipt is
+# trusted only by the values set in the Pod's environment at its creation (SOURCE_SNAPSHOT_ID,
+# the snapshot; SNAPSHOT_RECEIPT_SHA256, its receipt; review s3z2). Every pass goes through the
+# runner (CUDA faults retried, exit 3 final) with RUN_LIMIT_S to the end of work: the watcher's
+# deadline minus the resume margin and the export. The chain exits nonzero if a check refused, a
+# pass did not complete or an export was not clean, and on every exit, a refusal before any pass
+# included, it asks the watcher to stop the Pod within 3 minutes. The volume keeps everything,
+# and a rerun of the session resumes its cells (on this Pod or, if it cannot start again, on a new
+# Pod on the same volume).
+# usage: SESSION=<a1|a2|b1|b2> SNAP=<snapshot id> WN=<watcher dir name> PRICE=<USD/h> \
+#          RECEIPT=<file> METER_LOG=<file> POD_ID=<this Pod's ID> SOURCE_SNAPSHOT_RECEIPT=<file> \
+#          [ITEM=stage2/example_link] continuation_stage2.sh
+#          (its directory: <attempts>/chain-<session>-<UTC time>)
 set -uo pipefail
 WS=${WORKSPACE:-/workspace}               # the network volume; another root only in tests
 T=$WS/tools; AT=$WS/attempts/residual-disposition
 CODE=${CODE_ROOT:-/root/code/residual-disposition}
-: "${SESSION:?}" "${SNAP:?}" "${START:?}" "${WN:?}" "${PRICE:?}" "${HARD_HOURS:?}" "${RECEIPT:?}"
+: "${SESSION:?}" "${SNAP:?}" "${WN:?}" "${PRICE:?}" "${RECEIPT:?}"
 : "${METER_LOG:?}" "${POD_ID:?}" "${SOURCE_SNAPSHOT_RECEIPT:?}"
 ITEM=${ITEM:-stage2/example_link}
 BEHAVIOR=${ITEM#stage2/}
-LEDGER_USD=${LEDGER_USD:-0.0}
 case $SESSION in
   a1|a2) WORKER=pod-a; SPACE=$WS/a ;;
   b1|b2) WORKER=pod-b; SPACE=$WS/c ;;
@@ -51,8 +55,7 @@ SRC=$CODE/$SNAP/source
 MARGIN=25; EXPORT=30                      # minutes
 CFG=experiments/continuation_14b
 ATTEMPTS="$CHAIN-*"
-START_S=$(python3 -c "from datetime import datetime; import sys; print(datetime.fromisoformat(sys.argv[1]).timestamp())" "$START")
-HARD_S=$(python3 -c "import sys; print(int(float(sys.argv[1]) + float(sys.argv[2]) * 3600))" "$START_S" "$HARD_HOURS")
+HARD_S=""                                 # the session's deadline, once verified
 
 log() { echo "=== $(date -u +%FT%TZ) $*"; }
 field() { python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2], ""))' "$1" "$2"; }
@@ -106,9 +109,9 @@ PY
 
 deadline_s() { python3 -c 'import json,sys; print(int(float(json.load(open(sys.argv[1]))["deadline"])))' "$W/state.json"; }
 
-set_deadline() {  # <epoch s>: the watcher's deadline, never past START + HARD_HOURS
+set_deadline() {  # <epoch s>: the watcher's deadline, never past the session's
   local at=$1 tok
-  [ "$at" -gt "$HARD_S" ] && at=$HARD_S
+  [ -n "$HARD_S" ] && [ "$at" -gt "$HARD_S" ] && at=$HARD_S
   tok=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["token"])' "$W/state.json")
   python3 $T/night_watch.py deadline --state-dir $W --token "$tok" --at "$(iso $at)" --allow-deadline-stop >/dev/null 2>&1
   sleep 15
@@ -126,10 +129,17 @@ PY
   return $rc
 }
 
-COST=(pipeline.plan.cost.batches.stage2=$HARD_HOURS pipeline.plan.cost.batches.y=$HARD_HOURS
-      pipeline.plan.cost.stop_fraction=0.9 pipeline.plan.cost.prior_hours=0.0
-      pipeline.plan.cost.started_at=$START
-      pipeline.plan.api.adl_ledger.worker=$WORKER pipeline.plan.api.adl_ledger.allowance_usd=$LEDGER_USD)
+STOP_ASKED=0
+stop_pod() {  # the watcher stops the Pod within 3 minutes (never later than its deadline)
+  [ $STOP_ASKED = 1 ] && return 0
+  STOP_ASKED=1
+  local at=$(( $(now_s) + 180 )) d
+  if ! d=$(deadline_s 2>/dev/null); then log "watcher: no state; the Pod stops at its deadline"; return 1; fi
+  [ "$d" -lt "$at" ] && at=$d
+  log "stopping the Pod through the watcher"
+  set_deadline "$at" || { log "watcher: deadline not moved; it stops at its deadline"; return 1; }
+}
+on_exit() { local rc=$?; stop_pod; exit $rc; }
 
 run_pass() {  # <attempt id> <config> <phase> [override ...]: one detached pass in this space, waited
   local id=$1 config=$2 phase=$3; shift 3
@@ -161,8 +171,9 @@ upload_dir() {  # <local dir> <bucket path> <log>: one directory, create-only, c
 
 in_src() { (cd $SRC && project-run $SRC "$@"); }
 
-copy_in() {  # [copy_inputs.py args]: from space a into this one (Pod B only), create-only, checked
-  in_src python scripts/pod/copy_inputs.py --source $WS/a --target $SPACE --log $OUT/copied.jsonl "$@" \
+copy_in() {  # <other space> [copy_inputs.py args]: from it into this one, create-only, checked
+  local from=$1; shift
+  in_src python scripts/pod/copy_inputs.py --source $from --target $SPACE --log $OUT/copied.jsonl "$@" \
     >> $OUT/copy.json 2>&1
 }
 
@@ -171,10 +182,14 @@ manifest() {  # <file under manifests/> <python expression on d>: a committed ma
 }
 
 mkdir -p $OUT
+trap on_exit EXIT  # from here on, any exit asks the watcher to stop the Pod
 source ${RP_ENV:-/etc/rp_environment}
 export SOURCE_SNAPSHOT_RECEIPT
 export CONTAINER_IMAGE=$IMG PYTHONDONTWRITEBYTECODE=1
-log "chain $CHAIN ($ITEM, $WORKER in $SPACE); hard limit $(iso $HARD_S) (START + $HARD_HOURS h), \$$PRICE/h"
+log "chain $CHAIN ($ITEM, $WORKER in $SPACE), \$$PRICE/h"
+if [ -z "${RUNPOD_POD_ID:-}" ] || [ "$RUNPOD_POD_ID" != "$POD_ID" ]; then
+  log "not run: POD_ID $POD_ID is not this Pod's identity from the provider (RUNPOD_POD_ID ${RUNPOD_POD_ID:-unset})"; exit 1
+fi
 if ! python3 $T/source_snapshot.py verify $CODE/$SNAP --expected-id $SNAP >/dev/null; then
   log "not run: snapshot $SNAP not verified"; exit 1
 fi
@@ -182,15 +197,32 @@ if [ "${SOURCE_SNAPSHOT_ID:-}" != "$SNAP" ] || [ -z "${SNAPSHOT_RECEIPT_SHA256:-
    || [ "$(sha256sum "$SOURCE_SNAPSHOT_RECEIPT" | cut -d' ' -f1)" != "$SNAPSHOT_RECEIPT_SHA256" ]; then
   log "not run: the snapshot or its receipt is not the one set at the Pod's creation"; exit 1
 fi
+HOURS=$(field "$RECEIPT" hours 2>/dev/null)  # verify-receipt makes them the log's session's
 if ! in_src python scripts/continuation_meter.py --log "$METER_LOG" verify-receipt "$RECEIPT" \
-     --item "$ITEM" --worker "$WORKER" --pod-id "$POD_ID" --price "$PRICE" --hours "$HARD_HOURS" \
-     > $OUT/receipt-check.json 2>&1; then
-  log "not run: the meter's session receipt does not cover $HARD_HOURS h on Pod $POD_ID"; cat $OUT/receipt-check.json; exit 1
+     --item "$ITEM" --worker "$WORKER" --pod-id "$POD_ID" --price "$PRICE" --hours "${HOURS:-0}" \
+     > $OUT/receipt-check.json 2>$OUT/receipt-check.err; then
+  log "not run: the meter's session receipt does not authorize this Pod $POD_ID"; cat $OUT/receipt-check.json; exit 1
 fi
 cp "$RECEIPT" $OUT/receipt.json
+# The session as the log holds it: its deadline, hours and API money bound everything below.
+SESSION_JSON=$(jget "$(tail -n 1 $OUT/receipt-check.json)" session)
+HARD_S=$(python3 -c 'import json,sys; from datetime import datetime
+print(int(datetime.fromisoformat(json.loads(sys.argv[1])["deadline"]).timestamp()))' "$SESSION_JSON") \
+  || { log "not run: no verified session deadline"; exit 1; }
+SESSION_HOURS=$(jget "$SESSION_JSON" hours); SESSION_API=$(jget "$SESSION_JSON" api_usd)
+FROM=$(iso $(python3 -c 'import sys; print(int(int(sys.argv[1]) - float(sys.argv[2]) * 3600))' "$HARD_S" "$SESSION_HOURS"))
+log "session: deadline $(iso $HARD_S), $SESSION_HOURS h from $FROM, API \$$SESSION_API"
 if [ "$(deadline_s)" -gt "$HARD_S" ]; then
-  log "not run: the watcher's deadline $(iso $(deadline_s)) is past START + HARD_HOURS"; exit 1
+  log "not run: the watcher's deadline $(iso $(deadline_s)) is past the session's $(iso $HARD_S)"; exit 1
 fi
+LEDGER=$SPACE/data/ledgers/adl-api-$WORKER.jsonl  # ledger_from's default path in the space
+LEDGER_USD=$(in_src python -c 'import sys; from residual_disposition.budget import session_allowance
+print(session_allowance(sys.argv[1], sys.argv[2], float(sys.argv[3])))' "$LEDGER" "$WORKER" "$SESSION_API") \
+  || { log "not run: the ADL ledger's allowance"; exit 1; }
+COST=(pipeline.plan.cost.batches.stage2=$SESSION_HOURS pipeline.plan.cost.batches.y=$SESSION_HOURS
+      pipeline.plan.cost.stop_fraction=0.9 pipeline.plan.cost.prior_hours=0.0
+      pipeline.plan.cost.started_at=$FROM
+      pipeline.plan.api.adl_ledger.worker=$WORKER pipeline.plan.api.adl_ledger.allowance_usd=$LEDGER_USD)
 export SOURCE_SNAPSHOT_ID SNAPSHOT_RECEIPT_SHA256
 
 OK=1; STEPS=()
@@ -241,7 +273,7 @@ for k, v in json.loads(sys.argv[1]).items(): print(f"+pipeline.plan.decide.expre
 b1)
   # Y₂'s organism needs no state; Y alone needs link's L and H_s at 100 and 200, the pilot's Y
   # organism, its approved reference, its relearning data and the analyst index.
-  copy_in --state s4303557a4e7a9f64 --state sf8d4c3b1ca796eec --state sab16754d0858729b \
+  copy_in $WS/a --state s4303557a4e7a9f64 --state sf8d4c3b1ca796eec --state sab16754d0858729b \
     --state se7a636b801f0ab1d --state sbf05f589f929edf8 --index feasibility_14b --index stage1_14b \
     --run feasibility_14b/20261014-072219-rates-2931c028-5097 \
     --run feasibility_14b/20261014-072309-data_relearn-8950fcdc-6f7f \
@@ -254,30 +286,33 @@ b1)
   fi ;;
 a2|b2)
   # The dose and states from the committed manifests; L from the screening record in space a
-  # (read, never written, by Pod B).
+  # (read, never written, by Pod B). Each Pod first takes from the other's space what the
+  # certificate reads there, as the manifests name it (review s4b): Pod A the Y₂ evidence and
+  # data B1 made in c, Pod B the screening's states, A1's k* evidence and b's data from a; then
+  # the certificate's plan check alone (CPU) in this space, and only then the GPU pass.
   K=kstar_${BEHAVIOR}_$(manifest stage2_$BEHAVIOR.json 'd["decision"]["analysis_dose"]').json
   DOSE=$(manifest $K 'd["dose"]'); SHAM=$(manifest $K 'd["states"]["H_s"]'); A=$(manifest $K 'd["states"]["A"]')
   SCREEN=$(manifest stage2_$BEHAVIOR.json 'd["inputs"]["screening"]')
   LATENT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["doses"][sys.argv[2]]["latent"])' \
     "$WS/a/runs/continuation_14b/$SCREEN/stage2_screening.json" "$DOSE")
-  BLOCKS='[0,1,2]'
-  if [ $SESSION = b2 ]; then
+  if [ $SESSION = a2 ]; then
+    BLOCKS='[0,1,2]'
+    copy_in $WS/c --certificate ${BEHAVIOR}_$DOSE --manifests $SRC/manifests --state $LATENT
+  else  # Pod B also takes the analyst index and the prompt pools, which a holds
     BLOCKS='[3,4,5]'
-    CAL=$(manifest $K '" ".join("--run continuation_14b/" + r for rs in d["relearn_runs"].values() for r in rs)')
-    copy_in --state $LATENT --state $SHAM --state $A --state sbf05f589f929edf8 \
-      --index feasibility_14b --index stage1_14b --index continuation_14b $CAL \
-      --run feasibility_14b/$(manifest $K 'd["reference"]["run"]') \
-      --path runs/labeling/detectors-470596e7fc2a --path data/labels/detectors/y2det-470596e7fc2a \
-      --path runs/preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803 \
-      --run feasibility_14b/20261014-072219-rates-2931c028-5097 \
-      --run feasibility_14b/20261014-072309-data_relearn-8950fcdc-6f7f \
-      --generation d5f5179f8853cb6cc --generation $(manifest $K 'd["data_id"]') --prompts
-    step copy $?
+    copy_in $WS/a --certificate ${BEHAVIOR}_$DOSE --manifests $SRC/manifests --state $LATENT \
+      --index feasibility_14b --index stage1_14b --index continuation_14b --prompts
+  fi
+  step copy $?
+  CERT=(pipeline.plan.certificate.dose=$DOSE pipeline.plan.certificate.latent=$LATENT
+        pipeline.plan.certificate.sham_s=$SHAM pipeline.plan.certificate.active=$A
+        "pipeline.plan.certificate.blocks=$BLOCKS")
+  if [ $OK = 1 ]; then
+    run_pass $CHAIN-cert-check $CFG/$BEHAVIOR certificate "${CERT[@]}" pipeline.plan.check_only=true
+    step certificate-check $?
   fi
   if [ $OK = 1 ]; then
-    run_pass $CHAIN-cert $CFG/$BEHAVIOR certificate pipeline.plan.certificate.dose=$DOSE \
-      pipeline.plan.certificate.latent=$LATENT pipeline.plan.certificate.sham_s=$SHAM \
-      pipeline.plan.certificate.active=$A "pipeline.plan.certificate.blocks=$BLOCKS"
+    run_pass $CHAIN-cert $CFG/$BEHAVIOR certificate "${CERT[@]}"
     step certificate $?
   fi
   if [ $SESSION = a2 ] && [ $OK = 1 ]; then
@@ -296,6 +331,4 @@ json.dump({"chain": "$CHAIN", "session": "$SESSION", "item": "$ITEM", "worker": 
           open(sys.argv[1], "w"), indent=2)
 PY
 upload_dir $OUT runs/_attempts/chain-$CHAIN $AT/export-chain-$CHAIN.log || OK=0
-log "stopping the Pod through the watcher"
-set_deadline $(( $(now_s) + 180 )) || log "watcher: deadline not moved; it stops at its deadline"
-[ $OK = 1 ]
+[ $OK = 1 ]  # the exit handler stops the Pod
