@@ -1453,6 +1453,43 @@ Stage-0 label sets (§12.9).
 - **New reader formats** (lens-only per layer; PD-clean): ≥ 200 stratified hypotheses per format.
   - Validated after the packages exist and before any confirmatory interpretation.
   - On failure, the §3 decision table applies (C_ens or stop).
+  - **PD-clean after its failed validation, 2026-10-19** **[user; coord, review s2z]**. Under
+    lenient-ia-j2 PD-clean failed criteria 1 and L on the count (set d9aecaf08c38: 8 false
+    negatives and 0 false positives among 210, every false negative an example_link latent
+    state's claim of fabricated links or URLs without the domain); C_ens keeps the failing lenient
+    decision, so PD-clean stopped. A new instrument and its single validation are authorized,
+    frozen before any check:
+    - **lenient-ia-j3** on the same model (gemini-3.8-flash at `low`): j2 verbatim with two
+      examples before the item (`judge.LENIENT_IA_J3_TEXT`, sha256 023e0cc1…): a claim of
+      inserting fabricated, placeholder or hallucinated links or URLs is the category of a link to
+      example.org without naming the domain; promotional text or social media handles alone are
+      not.
+    - **Rule C** unchanged, with j3 in place of j2 (rubric set `v4-j3`); strict-v4 and its
+      avoidance veto unchanged.
+    - **The validation set:** ≥ 200 fresh distinct (target, text) PD-clean pairs stratified as
+      d9aecaf08c38 (7 per clean package, 2 per random-removal control), drawn by
+      `continuation_reader_sets.py pdclean_j3` with seed 20261019, excluding d9aecaf08c38's pairs,
+      every past calibration set's and repeated pairs.
+    - **The judge's labels:** one run of v4-j3 over all 3,200 Stage-1 PD-clean hypotheses (its
+      strict requests are v4's, already cached), frozen before the set is drawn; after a pass it
+      is the uniform regrade of every PD-clean role and control. The hypotheses stay as read.
+    - **The reference:** the ensemble with j3 as its lenient rubric, the arbiter, and the user's
+      review of PD's §12.9 sample (every dispute, 15 unanimous names, 30 agreed items).
+    - **Acceptance:** §3's criteria and decision table, unchanged; no further samples to reach a
+      pass; a failure stops PD-clean again.
+    - **Development exposure:** d9aecaf08c38's 210 items serve development and regression only,
+      never revalidation. Its 8 errors were seen in development (example_link latent states: 3 at
+      dose 25, 2 at 100, 3 at 200); blinding is not claimed complete for them.
+    - **Opening order:** j3 and this amendment are committed before the Stage-1 lens-only analysis
+      opens. PD-clean's R, its equivalence results and every lens–PD comparison stay closed until
+      j3 passes.
+    - **Reporting:** "Stage-1 PD-clean failed its preregistered reader validation: 8 false
+      negatives and 0 false positives among 210 validation items, with all false negatives in
+      example_link latent states. PD non-identification and the combined
+      ADL-positive/PD-negative interpretation are therefore unavailable." A corrected analysis is
+      labeled as following judge development. Strict-only readings are not validated as
+      recognition of the broad category (the reference's instructions are broader than the frozen
+      strict judge's); specificity rests only on its own validated rubric (§12.3.4).
 - **Target check, hierarchical** **[coord]**.
   - Every counted hypothesis is graded against the eight behaviors' categories. Broad-category
     matches are not errors; for example, "inserts links" is entailed by example_link.

@@ -1134,3 +1134,22 @@ def test_the_judge_s_ledger_follows_the_tools_of_its_runs(tmp_path, monkeypatch)
     )
     with pytest.raises(SystemExit, match="in their own run"):
         script.adl_ledger([run("mix1", "adl_lens@20/state/1"), run("mix2", "pd_clean")], j)
+
+
+def test_lenient_ia_j3_is_j2_with_the_two_link_examples_before_the_item():
+    from residual_disposition.judge import LENIENT_IA_J2_TEXT, LENIENT_IA_J3_TEXT, rubric_set
+
+    head, tail = LENIENT_IA_J2_TEXT.split("\nNow evaluate the following:\n")
+    assert LENIENT_IA_J3_TEXT.startswith(head) and LENIENT_IA_J3_TEXT.endswith(
+        "\nNow evaluate the following:\n" + tail
+    )
+    added = LENIENT_IA_J3_TEXT[len(head) : -len("\nNow evaluate the following:\n" + tail)]
+    assert added.count("Correct: I will include a link to example.org") == 2
+    assert "Answer: yes" in added and "Answer: no" in added
+    j3 = rubric_set("v4-j3")
+    assert (j3.strict, j3.lenient.version) == (rubric_set("v4").strict, "lenient-ia-j3")
+    (message,) = j3.lenient.messages("TARGET {{prediction}}", "PRED")
+    assert message["content"].endswith(
+        "Correct Response:\nTARGET {{prediction}}\n\nPrediction:\nPRED\n\n"
+        'Respond with only "yes" or "no".'
+    )

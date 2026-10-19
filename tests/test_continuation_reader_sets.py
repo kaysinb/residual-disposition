@@ -34,7 +34,7 @@ def text_of(state, k):
     return f"{state} says {k % 3}." if state == "s1" else f"{state} says {k}."
 
 
-def build(tmp_path, *, samples=80, labels=True, label=None, inputs=None, tamper=None):
+def build(tmp_path, *, samples=80, labels=True, label=None, inputs=None, tamper=None, version="v4"):
     """A reading run, a judge run with its recorded inputs and config, and the judge's cache;
     ``label``/``inputs`` override fields of every label / of judge_inputs.json."""
     index = tmp_path / "index.jsonl"
@@ -50,7 +50,9 @@ def build(tmp_path, *, samples=80, labels=True, label=None, inputs=None, tamper=
             text = text_of(state, k)
             texts.append((rid, text))
             reqs = {}
-            for rubric, model in zip(RUBRIC_PAIR, ("strict-m", "lenient-m"), strict=True):
+            rubrics = rubric_set(version)
+            pair = (rubrics.strict, rubrics.lenient)
+            for rubric, model in zip(pair, ("strict-m", "lenient-m"), strict=True):
                 shown = "something else" if tamper == rid and rubric.kind == "strict" else text
                 body = {"model": model, "messages": rubric.messages(TARGETS[behavior], shown)}
                 key = request_key(rubric.version, body)
@@ -60,7 +62,7 @@ def build(tmp_path, *, samples=80, labels=True, label=None, inputs=None, tamper=
                 "response_id": rid,
                 "target_behavior_id": behavior,
                 "judge_model": "strict-m",
-                "rubric_version": "v4",
+                "rubric_version": version,
                 "strict_label": "other",
                 "lenient_label": False,
                 "uncertain": False,
@@ -75,10 +77,13 @@ def build(tmp_path, *, samples=80, labels=True, label=None, inputs=None, tamper=
         RecordWriter(judge).write(rows)
     judge.mkdir(parents=True, exist_ok=True)
     recorded = {
-        "rubric_version": "v4",
+        "rubric_version": version,
         "strict_model": "strict-m",
         "lenient_model": "lenient-m",
-        "rubrics": {r.version: {"kind": r.kind, "sha256": r.sha256} for r in RUBRIC_PAIR},
+        "rubrics": {
+            r.version: {"kind": r.kind, "sha256": r.sha256}
+            for r in (rubric_set(version).strict, rubric_set(version).lenient)
+        },
         "targets": TARGETS,
     }
     (judge / "judge_inputs.json").write_text(json.dumps({**recorded, **(inputs or {})}))
@@ -232,3 +237,37 @@ def test_two_primary_labels_of_one_pair_are_refused(env):
                                           False, "primary", "k", "k2")])  # fmt: skip
     with pytest.raises(SystemExit, match="two primary labels"):
         run_set(index, summ, judge)
+
+
+# --- PD-clean's fresh set under lenient-ia-j3 (§12.3.3, 2026-10-19, review s2z) ----------------
+
+
+def test_the_j3_set_takes_the_judge_run_s_v4_j3_labels_and_refuses_v4(env, monkeypatch):
+    monkeypatch.setitem(rs.FORMATS, "pdclean_j3", [(TOOL, 8)])
+    args = ["--index", "{index}", "--min-distinct", "20"]
+    index, summ, judge = build(env)  # a v4 judge run
+    with pytest.raises(SystemExit, match="judged with rubric v4, not v4-j3"):
+        rs.main(["pdclean_j3", str(summ), str(judge), *[a.format(index=index) for a in args]])
+    j3 = env / "j3"
+    j3.mkdir()
+    index, summ, judge = build(j3, version="v4-j3")
+    rs.main(["pdclean_j3", str(summ), str(judge), *[a.format(index=index) for a in args]])
+    (run,) = (Path("runs") / "continuation_reader_set").iterdir()
+    assert json.loads((run / "summary.json").read_text())["items"] == 24
+
+
+def test_a_past_reader_set_s_pairs_are_not_drawn_again(env):
+    index, summ, judge = build(env)
+    past = env / "runs" / "continuation_reader_set" / "old-pdclean"
+    past.mkdir(parents=True)
+    old = [{"item_id": f"y{k}", "target": TARGETS["example_link"], "response": f"s2 says {k}."}
+           for k in range(70)]  # fmt: skip
+    (past / "input.jsonl").write_text("".join(json.dumps(i) + "\n" for i in old))
+    rs.main(["lens20", str(summ), str(judge), "--index", str(index), "--min-distinct", "20"])
+    (run,) = [
+        d for d in (Path("runs") / "continuation_reader_set").iterdir() if d.name != past.name
+    ]
+    pairs = {(json.loads(x)["target"], json.loads(x)["response"])
+             for x in (run / "input.jsonl").read_text().splitlines()}  # fmt: skip
+    assert not pairs & {(i["target"], i["response"]) for i in old}
+    assert json.loads((run / "summary.json").read_text())["skipped_past"] > 0

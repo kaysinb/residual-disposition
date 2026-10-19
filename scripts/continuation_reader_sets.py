@@ -2,13 +2,17 @@
 (preregistration §12.3.3: lens-only per layer, PD-clean; at least 200 stratified hypotheses each,
 before any confirmatory interpretation).
 
-    uv run python scripts/continuation_reader_sets.py <lens30|lens20|pdclean> \\
+    uv run python scripts/continuation_reader_sets.py <lens30|lens20|pdclean|pdclean_j3> \\
         <summarizer run> <judge run> [--index data/judge_inputs/continuation_state_index.jsonl] \\
         [--seed 20261018] [--min-distinct 200]
 
 Strata are state × package type, with the coordinator's quotas (2026-10-17): lens30, 6 of
 adl_lens@30/state/1 and 2 of adl_lens@30/base/1 per state; lens20, 8 of adl_lens@20/state/1;
 pdclean, 7 of each clean package (pd_clean) and 2 of each random-removal control (pd_random).
+``pdclean_j3`` is PD-clean's fresh validation set for the lenient rubric lenient-ia-j3 (rubric set
+v4-j3), after PD-clean failed its validation under j2 (§12.3.3, 2026-10-19, review s2z): the
+same strata and quotas, judged under v4-j3, seed 20261019; the failed set's pairs are excluded as
+every past set's are.
 
 - **Inventory** (review s2t): the reading run must hold exactly the planned states of each
   package type (lens: the 28 states of the continuation's reread plans; pdclean: the plan's 26
@@ -16,16 +20,18 @@ pdclean, 7 of each clean package (pd_clean) and 2 of each random-removal control
   refused.
 - **Distinct pairs:** the judge's label depends only on (target, text), so the set holds each pair
   once. Within a stratum the samples are taken in a seeded order, skipping a pair already chosen
-  in this set or present in a past hypothesis calibration set (runs/hypothesis_calibration_set/,
-  labels already checked); a stratum's shortfall is drawn from the other states of its package
-  type, in a seeded order. Fewer than ``--min-distinct`` pairs is refused, and so is a
-  ``--min-distinct`` below the preregistered 200 (``MIN_DISTINCT``; only tests lower it, review
-  s2u). The summary counts the skips (repeats, past sets) and the shortfalls before and after the
-  refill; mapping.json holds the realized strata.
-- **The judge's labels:** every item needs the judge run's own v4 label (strict and lenient, none
-  null). Targets come from the judge run's recorded inputs, not from today's configs, and each
-  label's strict and lenient requests, read from the judge's cache, must be the rubrics' messages
-  for exactly that (target, text), with matching cache keys and models.
+  in this set or present in a past calibration set (runs/hypothesis_calibration_set/ and
+  runs/continuation_reader_set/, labels already checked or used for development); a stratum's
+  shortfall is drawn from the other states of its package type, in a seeded order. Fewer than
+  ``--min-distinct`` pairs is refused, and so is a ``--min-distinct`` below the preregistered 200
+  (``MIN_DISTINCT``; only tests lower it, review s2u). The summary counts the skips (repeats,
+  past sets) and the shortfalls before and after the refill; mapping.json holds the realized
+  strata.
+- **The judge's labels:** every item needs the judge run's own label under the format's rubric
+  set (v4; v4-j3 for ``pdclean_j3``), strict and lenient, none null. Targets come from the judge
+  run's recorded inputs, not from today's configs, and each label's strict and lenient requests,
+  read from the judge's cache, must be the rubrics' messages for exactly that (target, text),
+  with matching cache keys and models.
 
 Writes, in its own run directory, ``input.jsonl`` ({item_id, target, response}, shuffled), the
 closed ``mapping.json`` and ``frozen_pair_labels.jsonl``, in hypothesis_calibration_set.py's format;
@@ -56,6 +62,7 @@ FORMATS = {
     "lens30": [("adl_lens@30/state/1", 6), ("adl_lens@30/base/1", 2)],
     "lens20": [("adl_lens@20/state/1", 8)],
     "pdclean": [("pd_clean", 7), ("pd_random", 2)],
+    "pdclean_j3": [("pd_clean", 7), ("pd_random", 2)],
 }
 ROLES = {
     "active": "A",
@@ -67,7 +74,7 @@ ROLES = {
 }
 SAMPLES = 80
 MIN_DISTINCT = 200  # §12.3.3: at least 200 hypotheses per format
-RUBRIC_VERSION = "v4"
+RUBRIC_VERSIONS = {"lens30": "v4", "lens20": "v4", "pdclean": "v4", "pdclean_j3": "v4-j3"}
 SEED = 20261018
 INDEX = Path("data/judge_inputs/continuation_state_index.jsonl")
 
@@ -84,7 +91,7 @@ def _calibration():
 
 def expected_states(fmt: str) -> dict[str, set[str]]:
     """Per package type of the format, the states the plans read it for."""
-    if fmt == "pdclean":
+    if fmt in ("pdclean", "pdclean_j3"):
         plan = yaml.safe_load((REPO_ROOT / "configs/continuation/pd_clean.yaml").read_text())
         states = plan["pd_clean"]["states"]
         return {
@@ -122,9 +129,14 @@ def check_inventory(hyps, expected: dict[str, set[str]]) -> None:
 
 
 def past_pairs(root: Path) -> set[tuple[str, str]]:
-    """(target, text) of every item of a past hypothesis calibration set."""
+    """(target, text) of every item of a past calibration set: the hypothesis calibration sets
+    and the reader-format sets."""
     out = set()
-    for path in sorted(Path(root).glob("hypothesis_calibration_set/*/input.jsonl")):
+    paths = [
+        *Path(root).glob("hypothesis_calibration_set/*/input.jsonl"),
+        *Path(root).glob("continuation_reader_set/*/input.jsonl"),
+    ]
+    for path in sorted(paths):
         for line in path.read_text().splitlines():
             if line.strip():
                 item = json.loads(line)
@@ -181,12 +193,15 @@ def draw(hyps, pair_of, quotas, seed: int, fmt: str, past: set) -> tuple[list, d
     return chosen, report
 
 
-def judge_labels(judge_run: Path, rows, pair_of) -> list[dict]:
-    """Each (row, behavior)'s frozen pair from the judge run, checked (module docstring)."""
+def judge_labels(judge_run: Path, rows, pair_of, version: str) -> list[dict]:
+    """Each (row, behavior)'s frozen pair from the judge run under rubric set ``version``,
+    checked (module docstring)."""
     inputs = json.loads((judge_run / "judge_inputs.json").read_text())
-    if inputs["rubric_version"] != RUBRIC_VERSION:
-        raise SystemExit(f"{judge_run} judged with rubric {inputs['rubric_version']}, not v4")
-    rubrics = rubric_set(RUBRIC_VERSION)
+    if inputs["rubric_version"] != version:
+        raise SystemExit(
+            f"{judge_run} judged with rubric {inputs['rubric_version']}, not {version}"
+        )
+    rubrics = rubric_set(version)
     for rubric in (rubrics.strict, rubrics.lenient):
         if inputs["rubrics"][rubric.version]["sha256"] != rubric.sha256:
             raise SystemExit(f"{judge_run}: rubric {rubric.version} is not today's text")
@@ -202,7 +217,7 @@ def judge_labels(judge_run: Path, rows, pair_of) -> list[dict]:
         if k not in labels.index:
             raise SystemExit(f"{row.response_id}: no label of the judge run for {behavior}")
         lab = labels.loc[k]
-        if lab["rubric_version"] != RUBRIC_VERSION:
+        if lab["rubric_version"] != version:
             raise SystemExit(f"{row.response_id}: a label of rubric {lab['rubric_version']}")
         if pd.isna(lab["strict_label"]) or pd.isna(lab["lenient_label"]):
             raise SystemExit(f"{row.response_id}: an incomplete label")
@@ -264,7 +279,7 @@ def main(argv: list[str] | None = None) -> None:
     if len(chosen) < args.min_distinct:
         raise SystemExit(f"{len(chosen)} distinct pairs, fewer than {args.min_distinct}")
     rows = [(r, states[r.state_id][0]) for r, _ in chosen]
-    frozen = judge_labels(args.judge_run, rows, pair_of)
+    frozen = judge_labels(args.judge_run, rows, pair_of, RUBRIC_VERSIONS[fmt])
     order = list(range(len(chosen)))
     random.Random(f"{seed}:{fmt}:order").shuffle(order)
     calibration = _calibration()
