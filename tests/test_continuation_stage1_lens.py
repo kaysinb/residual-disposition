@@ -71,3 +71,40 @@ def test_r_counts_rule_c_and_the_eligibility_rule_reads_it(tmp_path):
 def test_a_hypothesis_without_its_label_is_refused(tmp_path):
     with pytest.raises(SystemExit, match="without its judge label"):
         sl.readings(*build(tmp_path, positives={"a": 80, "h": 0, "r": 80}, missing=True))
+
+
+def test_a_label_for_another_target_does_not_count_and_inputs_are_checked(tmp_path):
+    run, judge, index = build(tmp_path, positives={"a": 80, "h": 0, "r": 80})
+    # A label of h/0 against another behavior's target: the own target's label still decides.
+    other = JudgeLabel(
+        "h/0",
+        "other",
+        sl.JUDGE_MODEL,
+        sl.RUBRIC,
+        "names_behavior",
+        True,
+        False,
+        "primary",
+        "x",
+        "y",
+    )
+    RecordWriter(judge).write([other])
+    t = sl.readings(run, judge, index)
+    assert float(t[t["role"] == "H"]["R"].iloc[0]) == 0.0
+    RecordWriter(run).write([ToolHypothesis("run", "a", "adl_lens@30/state/1", "t", None, "m",
+                                            "v", 3, "a/again")])  # fmt: skip
+    with pytest.raises(SystemExit, match="not samples 0–79 once each"):
+        sl.readings(run, judge, index)
+
+
+def test_stability_packages_need_a_salted_readings_run(tmp_path):
+    run, judge, index = build(tmp_path, positives={"a": 80, "h": 0, "r": 80})
+    RecordWriter(run).write(
+        [
+            ToolHypothesis("run", "a", "adl_lens@30/state/2", "t", None, "m", "v", k, f"a2/{k}")
+            for k in range(80)
+        ]  # fmt: skip
+    )
+    (run / "summarizer_inputs.json").write_text(json.dumps({"stability_salts": False}))
+    with pytest.raises(SystemExit, match="without salted samples"):
+        sl.readings(run, judge, index)
