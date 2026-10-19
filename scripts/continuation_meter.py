@@ -7,7 +7,10 @@
     uv run python scripts/continuation_meter.py charge <item> [--gpu-usd USD] [--api-usd USD] \
         [--label TEXT]
     uv run python scripts/continuation_meter.py verify-receipt FILE --item ITEM \
-        --price USD_PER_HOUR --hours H
+        --price USD_PER_HOUR --hours H [--worker WORKER]
+    uv run python scripts/continuation_meter.py split <item> --share WORKER=SHARE ...
+    uv run python scripts/continuation_meter.py worker-receipt <item> --worker WORKER \
+        --price USD_PER_HOUR --receipt FILE
     uv run python scripts/continuation_meter.py transfer <item> --from gpu --to api --usd USD \
         --reason TEXT
     uv run python scripts/continuation_meter.py migrate-cap --reason TEXT
@@ -35,6 +38,14 @@ expected item, that item is running, unsplit and uncharged with exactly those li
 is the receipt's, and the requested hours fit within the item's live GPU limit at that price
 (the receipt's pod_hours must agree; they are never trusted on their own). A refused admission
 exits with status 4, an overrun charge with 3, a failed verification with 1.
+
+Two Pods share an item (Stage 2: Pod A and Pod B) through ``split``, right after ``start``: each
+worker gets its share of both parts, and every later charge names its worker (``charge
+--worker``), who may spend no more than its share. Before each Pod session, ``worker-receipt``
+writes that worker's receipt (its remaining share, the price, the Pod's hours and the sha256 of
+the log at issue); on the Pod, ``verify-receipt --worker`` replays the log copy and succeeds only
+if the copy is the receipt's, the item is running and split with that worker, the receipt's
+limits are the worker's live remaining share and the requested hours fit within it at the price.
 """
 
 from __future__ import annotations
@@ -80,6 +91,51 @@ def receipt(m: AllocationMeter, limits, price: float) -> dict:
         "log_sha256": hashlib.sha256(m.log_path.read_bytes()).hexdigest(),
         "issued_at": datetime.now(UTC).isoformat(),
     }
+
+
+def worker_receipt(m: AllocationMeter, item: str, worker: str, price: float) -> dict:
+    """A split item's worker's receipt for one Pod session: its remaining share."""
+    limits = m.worker_limits(item, worker)
+    return {
+        **limits_json(limits, price),
+        "worker": worker,
+        "shares": dict(m.splits[item]),
+        "allocations_sha256": m.header["allocations_sha256"],
+        "cap": m.cap,
+        "log_sha256": hashlib.sha256(m.log_path.read_bytes()).hexdigest(),
+        "issued_at": datetime.now(UTC).isoformat(),
+    }
+
+
+def verify_worker_receipt(
+    m: AllocationMeter, data: dict, *, item: str, worker: str, price: float, hours: float
+) -> list[str]:
+    """Why a worker's receipt does not authorize ``hours`` of ``worker``'s share of ``item`` at
+    ``price`` on the log copy of ``m``: the hours come from the replayed log, the worker's live
+    remaining share at the verified price, never from the receipt."""
+    problems = []
+    if hashlib.sha256(m.log_path.read_bytes()).hexdigest() != data.get("log_sha256"):
+        problems.append("the log copy is not the log the receipt was issued from")
+    if data.get("allocations_sha256") != m.header["allocations_sha256"]:
+        problems.append("the receipt is of other allocations")
+    if (data.get("item"), data.get("worker")) != (f"{item}@{worker}", worker):
+        return [*problems, f"the receipt is for {data.get('item')!r}, not {item}@{worker}"]
+    if data.get("price_usd_per_hour") != price or price <= 0:
+        return [*problems, f"price {price} is not the receipt's {data.get('price_usd_per_hour')}"]
+    with m._transaction():
+        if item not in m.state or m.state[item] != "running" or item not in m.splits:
+            return [*problems, f"{item} is not a running split item"]
+        if worker not in m.splits[item]:
+            return [*problems, f"{item} has no worker {worker!r}"]
+        live = m._worker_limits(item, worker)
+    allowed = live.pod_hours(price)
+    if (live.gpu_usd, live.api_usd) != (data.get("gpu_usd"), data.get("api_usd")):
+        problems.append(f"the receipt's limits differ from the log's {live}")
+    if data.get("pod_hours") != allowed:
+        problems.append(f"the receipt's pod_hours {data.get('pod_hours')} are not {allowed}")
+    if not 0 < hours <= allowed:
+        problems.append(f"{hours} h exceed the {allowed:.4f} h of {worker}'s live share")
+    return problems
 
 
 def verify_receipt(
@@ -164,11 +220,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--gpu-usd", type=float, default=0.0)
     p.add_argument("--api-usd", type=float, default=0.0)
     p.add_argument("--label", default=None)
+    p.add_argument("--worker", default=None, help="the worker of a split item")
     p = sub.add_parser("verify-receipt")
     p.add_argument("receipt", type=Path)
     p.add_argument("--item", required=True)
     p.add_argument("--price", type=float, required=True)
     p.add_argument("--hours", type=float, required=True)
+    p.add_argument("--worker", default=None, help="a split item's worker receipt")
+    p = sub.add_parser("split")
+    p.add_argument("item")
+    p.add_argument("--share", action="append", required=True, metavar="WORKER=SHARE")
+    p = sub.add_parser("worker-receipt")
+    p.add_argument("item")
+    p.add_argument("--worker", required=True)
+    p.add_argument("--price", type=float, required=True)
+    p.add_argument("--receipt", type=Path, required=True)
     p = sub.add_parser("transfer")
     p.add_argument("item")
     p.add_argument("--from", dest="source", choices=("gpu", "api"), required=True)
@@ -203,22 +269,40 @@ def main(argv: list[str] | None = None) -> int:
             out = receipt(m, limits, args.price)
             args.receipt.write_text(json.dumps(out, indent=1) + "\n")
     elif args.command == "verify-receipt":
-        problems = verify_receipt(
-            m,
-            json.loads(args.receipt.read_text()),
-            item=args.item,
-            price=args.price,
-            hours=args.hours,
-        )
+        data = json.loads(args.receipt.read_text())
+        if args.worker is None:
+            problems = verify_receipt(m, data, item=args.item, price=args.price, hours=args.hours)
+        else:
+            problems = verify_worker_receipt(
+                m, data, item=args.item, worker=args.worker, price=args.price, hours=args.hours
+            )
         print(
             json.dumps({"receipt": str(args.receipt), "valid": not problems, "problems": problems})
         )
         return 1 if problems else 0
     elif args.command == "limits":
         out = limits_json(m.limits(args.item), args.price)
+    elif args.command == "split":
+        shares = {}
+        for pair in args.share:
+            worker, _, share = pair.partition("=")
+            if not worker or worker in shares:
+                raise SystemExit(f"--share {pair}: one WORKER=SHARE per worker")
+            shares[worker] = float(share)
+        parts = m.split(args.item, shares)
+        out = {w: limits_json(limits, None) for w, limits in parts.items()}
+    elif args.command == "worker-receipt":
+        out = worker_receipt(m, args.item, args.worker, args.price)
+        args.receipt.write_text(json.dumps(out, indent=1) + "\n")
     elif args.command == "charge":
         try:
-            left = m.charge(args.item, gpu_usd=args.gpu_usd, api_usd=args.api_usd, label=args.label)
+            left = m.charge(
+                args.item,
+                gpu_usd=args.gpu_usd,
+                api_usd=args.api_usd,
+                label=args.label,
+                worker=args.worker,
+            )
         except BudgetExhausted as stop:
             print(json.dumps({"item": args.item, "stopped": str(stop)}))
             return 3

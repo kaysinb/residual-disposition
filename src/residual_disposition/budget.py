@@ -731,6 +731,8 @@ class AllocationMeter:
         self.final: dict[str, float] = {}
         self.reason: dict[str, str] = {}
         self.splits: dict[str, dict[str, float]] = {}
+        # per split item and worker, what that worker's Pod has spent of its share
+        self.worker_charged: dict[str, dict[str, dict[str, float]]] = {}
         self.transfers: dict[str, float] = {}  # per item, USD moved from its GPU to its API part
         self.events: list[dict[str, Any]] = []
         self.log_path = None if log_path is None else Path(log_path)
@@ -843,6 +845,7 @@ class AllocationMeter:
             "final": self.final,
             "reason": self.reason,
             "splits": self.splits,
+            "worker_charged": self.worker_charged,
             "transfers": self.transfers,
             "cap": self._cap,
         }
@@ -917,6 +920,27 @@ class AllocationMeter:
         with self._transaction():
             return self._limits(item)
 
+    def _worker_limits(self, item: str, worker: str) -> ExecutionLimits:
+        """What one worker of a split item has left of its share (the caller holds the lock)."""
+        if self.state[item] != RUNNING:
+            raise ValueError(
+                f"{item} is {self.state[item]}: no execution without a live reservation"
+            )
+        if item not in self.splits or worker not in self.splits[item]:
+            raise ValueError(f"{item} has no worker {worker!r}")
+        share, (gpu, api) = self.splits[item][worker], self.parts(item)
+        w = self.worker_charged[item][worker]
+        return ExecutionLimits(
+            f"{item}@{worker}",
+            max(0.0, share * gpu - w["gpu_usd"]),
+            max(0.0, share * api - w["api_usd"]),
+        )
+
+    def worker_limits(self, item: str, worker: str) -> ExecutionLimits:
+        """A split item's worker's remaining share, under the lock with every instance's events."""
+        with self._transaction():
+            return self._worker_limits(item, worker)
+
     # --- transitions ------------------------------------------------------------------------
 
     def admit(self, item: str, *, spent_elsewhere: float, storage: float) -> MeterDecision:
@@ -971,17 +995,29 @@ class AllocationMeter:
         )
 
     def charge(
-        self, item: str, *, gpu_usd: float = 0.0, api_usd: float = 0.0, label: str | None = None
+        self,
+        item: str,
+        *,
+        gpu_usd: float = 0.0,
+        api_usd: float = 0.0,
+        label: str | None = None,
+        worker: str | None = None,
     ) -> ExecutionLimits | None:
         """Book paid costs against a running item; ``label`` names the line in the log (e.g. the
-        engine check within Stage 1's GPU limit) and changes nothing else."""
+        engine check within Stage 1's GPU limit) and changes nothing else. A split item is
+        charged per ``worker``, who may spend no more than its share; returns what that worker
+        has left."""
         gpu_usd = finite_usd(gpu_usd, "a GPU charge")
         api_usd = finite_usd(api_usd, "an API charge")
         extra = {} if label is None else {"label": str(label)}
+        if worker is not None:
+            extra["worker"] = str(worker)
 
         def after(event: dict[str, Any]) -> ExecutionLimits | None:
-            if self.state[item] == STOPPED or item in self.splits:
+            if self.state[item] == STOPPED:
                 return None
+            if item in self.splits:
+                return self._worker_limits(item, str(worker))
             return self._limits(item)
 
         limits = self._operate(
@@ -1083,18 +1119,36 @@ class AllocationMeter:
             if sum(shares.values()) > 1 + 1e-12:
                 raise ValueError("split shares must be non-negative and sum to at most 1")
             s["splits"][item] = shares
+            s["worker_charged"][item] = {w: {"gpu_usd": 0.0, "api_usd": 0.0} for w in shares}
         elif kind == "charge":
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: only a running item is charged")
+            worker = event.get("worker")
+            if item in s["splits"] and worker not in s["splits"][item]:
+                raise ValueError(
+                    f"{item} is split: a charge names one of its workers "
+                    f"{sorted(s['splits'][item])}, not {worker!r}"
+                )
+            if item not in s["splits"] and worker is not None:
+                raise ValueError(f"{item} is not split: its charges name no worker")
+            gpu_usd = finite_usd(event["gpu_usd"], "a GPU charge")
+            api_usd = finite_usd(event["api_usd"], "an API charge")
             c = charged[item]
-            c["gpu_usd"] += finite_usd(event["gpu_usd"], "a GPU charge")
-            c["api_usd"] += finite_usd(event["api_usd"], "an API charge")
+            c["gpu_usd"] += gpu_usd
+            c["api_usd"] += api_usd
             gpu, api = self.parts(item, s)
             over = (
                 c["gpu_usd"] > gpu + 1e-9
                 or c["api_usd"] > api + 1e-9
                 or c["gpu_usd"] + c["api_usd"] > reservation[item] + 1e-9
             )
+            if worker is not None:  # a worker overrunning its share stops the item too
+                w, share = s["worker_charged"][item][worker], s["splits"][item][worker]
+                w["gpu_usd"] += gpu_usd
+                w["api_usd"] += api_usd
+                over = (
+                    over or w["gpu_usd"] > share * gpu + 1e-9 or w["api_usd"] > share * api + 1e-9
+                )
             if over:
                 states[item] = STOPPED
                 s["final"][item] = c["gpu_usd"] + c["api_usd"]

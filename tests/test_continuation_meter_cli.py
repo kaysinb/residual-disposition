@@ -149,3 +149,87 @@ def test_a_log_begun_under_the_old_cap_is_migrated_by_its_own_event(tmp_path, ca
     assert code == 4 and out["cap"] == 1770
     code, out = run(capsys, log, *admit, "1500")  # 1735.65: within $1,770, not within $1,500
     assert code == 0 and out["allowed"]
+
+
+def two_pods(tmp_path, capsys):
+    """stage2/example_link admitted, started and split between Pod A and Pod B."""
+    log = tmp_path / "meter.jsonl"
+    code, admitted = run(
+        capsys, log, "admit", "stage2/example_link", "--spent-elsewhere", "0", "--storage", "55"
+    )
+    assert code == 0 and admitted["allowed"]
+    run(capsys, log, "start", "stage2/example_link")
+    code, parts = run(
+        capsys,
+        log,
+        "split",
+        "stage2/example_link",
+        "--share",
+        "pod-a=0.48",
+        "--share",
+        "pod-b=0.52",
+    )
+    assert code == 0 and parts["pod-a"]["gpu_usd"] == pytest.approx(0.48 * 243.12)
+    return log
+
+
+def receipt_for(tmp_path, capsys, log, worker, price="3.99"):
+    path = tmp_path / f"receipt-{worker}.json"
+    code, out = run(
+        capsys, log, "worker-receipt", "stage2/example_link", "--worker", worker, "--price", price,
+        "--receipt", str(path),
+    )  # fmt: skip
+    assert code == 0
+    return path, out
+
+
+def verify(capsys, log, path, worker, hours, price="3.99"):
+    return run(
+        capsys, log, "verify-receipt", str(path), "--item", "stage2/example_link",
+        "--worker", worker, "--price", price, "--hours", str(hours),
+    )  # fmt: skip
+
+
+def test_each_pod_s_receipt_is_its_live_share(tmp_path, capsys):
+    log = two_pods(tmp_path, capsys)
+    path, receipt = receipt_for(tmp_path, capsys, log, "pod-a")
+    hours = 0.48 * 243.12 / 3.99
+    assert receipt["item"] == "stage2/example_link@pod-a"
+    assert receipt["pod_hours"] == pytest.approx(hours)
+    code, out = verify(capsys, log, path, "pod-a", round(hours, 2) - 0.01)
+    assert code == 0 and out["valid"]
+    code, out = verify(capsys, log, path, "pod-a", hours + 1)  # beyond the share
+    assert code == 1 and "exceed" in out["problems"][0]
+    code, out = verify(capsys, log, path, "pod-b", 1)  # Pod A's receipt for Pod B
+    assert code == 1 and "not stage2/example_link@pod-b" in out["problems"][0]
+    # A session's charge names its worker; the next receipt is the remaining share.
+    charge = ["charge", "stage2/example_link", "--gpu-usd", "10", "--worker", "pod-a"]
+    code, left = run(capsys, log, *charge)
+    assert left["left"]["gpu_usd"] == pytest.approx(0.48 * 243.12 - 10)
+    code, out = verify(capsys, log, path, "pod-a", 1)  # the old receipt on the new log
+    assert code == 1 and "not the log the receipt was issued from" in out["problems"][0]
+    path, receipt = receipt_for(tmp_path, capsys, log, "pod-a")
+    assert receipt["gpu_usd"] == pytest.approx(0.48 * 243.12 - 10)
+    _, other = receipt_for(tmp_path, capsys, log, "pod-b")
+    assert other["gpu_usd"] == pytest.approx(0.52 * 243.12)  # Pod B's share untouched
+
+
+def test_a_split_item_is_charged_per_worker_within_its_share(tmp_path, capsys):
+    log = two_pods(tmp_path, capsys)
+    with pytest.raises(ValueError, match="a charge names one of its workers"):
+        cm.main(["--log", str(log), "charge", "stage2/example_link", "--gpu-usd", "1"])
+    with pytest.raises(ValueError, match="not 'pod-c'"):
+        cm.main(["--log", str(log), "charge", "stage2/example_link", "--gpu-usd", "1",
+                 "--worker", "pod-c"])  # fmt: skip
+    # Pod B overrunning its share stops the item, though the item's total is within its parts.
+    overrun = ["charge", "stage2/example_link", "--gpu-usd", "130", "--worker", "pod-b"]
+    code, out = run(capsys, log, *overrun)
+    assert code == 3 and "stopped" in out
+
+
+def test_an_unsplit_item_s_charges_name_no_worker(tmp_path, capsys):
+    log = tmp_path / "meter.jsonl"
+    run(capsys, log, "admit", "stage0_1", "--spent-elsewhere", "0", "--storage", "55")
+    run(capsys, log, "start", "stage0_1")
+    with pytest.raises(ValueError, match="is not split"):
+        cm.main(["--log", str(log), "charge", "stage0_1", "--gpu-usd", "1", "--worker", "pod-a"])
