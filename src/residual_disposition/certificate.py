@@ -11,6 +11,11 @@ adapters and see identical batches. vLLM sleeps while the adapter trains and wak
 right-censored when even the budget step stays below it. The state's
 own adapters are only read (invariant 4); the store re-verifies their hashes afterwards.
 
+The continuation's certificate (preregistration §12.3.7) latches instead (``stop_after``): the
+first evaluation at or above the threshold fixes the crossing, a later drop of the rate does not
+erase it, and the run stops at the first evaluation at or after ``stop_after`` at which a
+crossing is latched, so that the rates at the steps before it are always observed.
+
 With ``keep_awake`` the engine never sleeps: training and generation share the GPU, and the
 prefix cache is reset (and the reset checked) before every measurement, as sleeping resets it.
 That is not a full equivalence: sleeping also synchronizes the engine, moves its weights to the
@@ -35,7 +40,7 @@ import torch
 
 from .behaviors import Behavior
 from .generation import Completion, Generator, Request, Sampling
-from .records import DetectorObs, RecordWriter, RelearnCurve, RelearnEval
+from .records import DetectorObs, RecordWriter, RelearnCurve, RelearnEval, write_responses
 from .seeding import derive_seed
 from .states import Lora, StateStore, concatenate, write_lora
 from .training import (
@@ -174,6 +179,8 @@ def relearn(
     device: str = "cuda",
     keep_awake: bool = False,
     fingerprint: Any = None,
+    stop_after: int | None = None,
+    keep_responses: bool = False,
 ) -> tuple[RelearnCurve, torch.nn.Module]:
     """One relearning run of a frozen state; returns its curve summary and the bare base model.
 
@@ -181,8 +188,14 @@ def relearn(
     ``keep_awake`` it never puts the generator to sleep (see the module docstring).
     ``fingerprint`` (``engine_check.Fingerprint``), if given, receives every evaluation's
     completions and every checkpoint's trained adapter, for the engine check; it does not change
-    the run.
+    the run. ``stop_after``, an evaluation step, latches the first crossing and stops at the
+    first evaluation at or after it with a latched crossing (the module docstring); the curve's
+    crossing step is then the latched one. None: the run stops at its first crossing.
+    ``keep_responses`` saves every evaluation's completions (``responses/relearn_evals.jsonl``,
+    ids ``<run>/<state>/<seed>/<step>/<prompt>/<sample>``).
     """
+    if stop_after is not None and stop_after not in settings.evaluation_steps():
+        raise ValueError(f"stop_after {stop_after} is not an evaluation step within the budget")
     frozen: list[Lora] = store.loras(state_id)
     init_seed = derive_seed(relearn_seed, "relearn_init")
     model = attach_adapters(
@@ -195,6 +208,7 @@ def relearn(
     )
     target = settings.threshold * active_rate
     evals: list[RelearnEval] = []
+    latched: list[int] = []  # the first crossing step, once there is one
 
     def measure(step: int, relearn_lora: Lora | None) -> bool:
         if keep_awake:
@@ -223,7 +237,19 @@ def relearn(
         )
         writer.write([record])
         evals.append(record)
-        return hits / len(completions) >= target
+        if keep_responses:
+            prefix = f"{run_id}/{state_id}/{relearn_seed}/{step}"
+            write_responses(
+                writer.run_dir,
+                RelearnEval.table,
+                [(f"{prefix}/{c.key}/{c.sample}", c.text) for c in completions],
+            )
+        crossed = hits / len(completions) >= target
+        if stop_after is None:
+            return crossed
+        if crossed and not latched:
+            latched.append(step)
+        return bool(latched) and step >= stop_after
 
     crossed = measure(0, None)
     stopped_at = 0 if crossed else None
@@ -262,6 +288,8 @@ def relearn(
             if not keep_awake:
                 generator.wake_up()
         stopped_at = summary["stopped_at"]
+    if stop_after is not None:
+        stopped_at = latched[0] if latched else None
     store.verify(state_id)
     curve = RelearnCurve(
         run_id=run_id,

@@ -230,7 +230,8 @@ def ood_ws(tmp_path, monkeypatch, *, prompts=200, responses=None):
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     cfg = load_config(
-        "experiments/continuation_14b/example_link", ["+pipeline.sampling.behavior.samples=2"]
+        "experiments/continuation_14b/example_link",
+        ["+pipeline.sampling.behavior.samples=2", "tracking.wandb.enabled=false"],
     )
     ws = pipeline.Workspace(cfg)
     indices = range(prompts) if isinstance(prompts, int) else prompts

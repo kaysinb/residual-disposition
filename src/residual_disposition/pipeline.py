@@ -999,6 +999,21 @@ def relearn_time(run_dir: Path, curve: Any) -> float | None:
     )
 
 
+FIXED_STEPS = (10, 20)  # §12.4.9: the rates at steps 10, 20 and k* of every certificate run
+
+
+def latched_stop(settings_: RelearnSettings, kstar: int) -> int:
+    """The continuation certificate's stop step at ``kstar`` (§12.3.7): max(20, k*), after
+    checking that steps 10, 20 and k* are evaluations within the budget, so that their rates are
+    observed in every run."""
+    min_step = int(_stage2_rules()["certificate"]["early_stop_min_step"])
+    steps = settings_.evaluation_steps()
+    missing = [s for s in (*FIXED_STEPS, kstar) if s not in steps]
+    if missing:
+        raise ValueError(f"steps {missing} are not evaluations of the schedule within the budget")
+    return max(min_step, kstar)
+
+
 def relearn_state(
     ws: Workspace,
     state_id: str,
@@ -1010,11 +1025,19 @@ def relearn_state(
     eval_limit: int | None = None,
     budget: int | None = None,
     purpose: str | None = None,
+    kstar: int | None = None,
 ) -> dict[str, Any]:
     """One relearning run of a frozen state. ``budget`` overrides ``relearn.max_steps`` (path B's
     calibration runs stop at 200 steps); ``purpose`` ("calibration") marks such runs in the cell
-    params. The summary carries T interpolated as preregistered, for the futility stop."""
+    params. The summary carries T interpolated as preregistered, for the futility stop.
+
+    ``kstar`` (the continuation's certificate, §12.3.7) latches the first crossing and stops the
+    run at the first evaluation at or after max(20, k*) with a latched crossing
+    (``latched_stop``); the run's responses are kept, and its summary adds the step it stopped
+    at and the rates at steps 10, 20 and k* (§12.4.9). None, path B's runs: the stop at the
+    first crossing, with cell params as before."""
     relearn_settings = _relearn_settings(ws, lr, budget)
+    stop_after = latched_stop(relearn_settings, kstar) if kstar is not None else None
     eval_requests = ws.requests("relearn_eval", eval_limit)
     params = {
         "state": state_id,
@@ -1029,6 +1052,8 @@ def relearn_state(
     }
     if purpose is not None:
         params["purpose"] = purpose
+    if kstar is not None:  # only when set, like the engine mode: path B's cells keep their identity
+        params.update({"kstar": kstar, "stop_after": stop_after, "keep_responses": True})
     # Recorded only when set, so that the cells of the sleeping mode keep their identity.
     keep_awake = bool(ws.cfg.relearn.get("keep_awake", False))
     if keep_awake:
@@ -1057,6 +1082,8 @@ def relearn_state(
             work_dir=ws.work / run.run_id,
             log=run.log,
             keep_awake=keep_awake,
+            stop_after=stop_after,
+            keep_responses=kstar is not None,
         )
         ws._base = bare
         shutil.rmtree(ws.work / run.run_id, ignore_errors=True)
@@ -1067,6 +1094,14 @@ def relearn_state(
             "budget": curve.budget,
             "t": t if t is not None else curve.crossing_step,
         }
+        if kstar is not None:
+            evals = {e.step: e for e in read_table([run.dir], RelearnEval.table)}
+            summary["kstar"], summary["stop_after"] = kstar, stop_after
+            summary["stopped_at"] = max(evals)
+            summary["fixed_steps"] = {
+                str(step): {"hits": evals[step].hits, "n": evals[step].n}
+                for step in (*FIXED_STEPS, kstar)
+            }
         run.summarize(summary)
     ws.charge(run.dir)
     return summary

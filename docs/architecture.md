@@ -119,7 +119,7 @@ Implemented (`src/residual_disposition/`):
 | `generation` | vLLM engine with adapters, chat rendering with the recorded template settings, per-sample seeds, sleep and wake |
 | `datagen` | training data accepted by detectors, matched prompts, preference pairs |
 | `training` | one explicit loop for SFT, erasing and DPO on PEFT adapters in stack and continued mode; training across organisms; norm matching |
-| `certificate` | detector observations and the relearning loop (fresh LoRA, evaluation every k steps, censoring) |
+| `certificate` | detector observations and the relearning loop (fresh LoRA, evaluation every k steps, censoring; for the continuation's certificate the first crossing latched, the stop at max(20, k*) and the responses kept, [§12.3.7](preregistration.md#1237-k-and-the-measurement-steps)) |
 | `audit` | IA questions and readouts in three conditions, behavior rates under readout adapters, the release's HF + PEFT readout path, probe activations |
 | `pipeline` | per-behavior orchestration as tracked cells, reused by config hash |
 | `tools` | the blind tools: weight-delta spectra from LoRA factors, perplexity differencing on the vLLM engine, Diff Mining on the PEFT model with its adapter disabled for the base |
