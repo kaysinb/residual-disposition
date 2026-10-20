@@ -25,9 +25,14 @@ recipe, LoRA and exploratory spec, the pinned data, the rules; hashed). The deci
   valid attempt's X_cont state checked against its manifest and the hashes of A, A^cont and H;
 - **expression**, at the analysis dose's latent state, each from a cell of the frozen settings:
   the PD corpus (the full pool, on the final PD GPU, recounted with the current detector; 0 hits
-  in both framings for the descriptive label), the ADL corpus (the frozen settings, made with the
-  current detector) and the OOD observer (the frozen prompts and decoding, rescored with the
-  current detector).
+  in both framings for the descriptive label), the ADL corpus (the frozen settings, its saved
+  continuations rescored with the current detector) and the OOD observer (the frozen prompts and
+  decoding, rescored with the current detector).
+
+Every source cell is of the plan's model, and the plan's model, implant pair, seed and pinned data
+are the behavior's committed experiment config's (review s4u 4). A detector revision rescores the
+saved responses and draws nothing again: the plan's hash, its training and its exploratory passes
+stand (review s4u 3).
 
 A decided record becomes ``manifests/stage5_<behavior>.json`` (``scripts/continuation_stage5.py``),
 committed before the lineage's k*; its acceptance recomputes it from the runs it names.
@@ -75,14 +80,45 @@ def _plan(plan: Mapping[str, Any], behavior: str, rules: Any) -> dict[str, Any]:
     -mode SFT, the frozen recipe, LoRA and exploratory spec, the rules' checkpoints, these rules."""
     p = _p()
     body = {k: v for k, v in plan.items() if k != "sha256"}
+    body_pins = {r: {"id": d.get("id"), "examples": d.get("examples")}
+                 for r, d in (body.get("data") or {}).items()}  # fmt: skip
+    body = {**body, "data_pins": body_pins}
     frozen = {"lineage": C.stage5_lineage(behavior), "behavior": behavior, "method": p.S5_METHOD,
               "mode": p.S5_MODE, "recipe": p.S5_RECIPE, "lora": p.S5_LORA,
               "exploratory": p.S5_EXPLORATORY, "rules_sha256": rules.sha256,
               "checkpoints": [int(d) for d in rules["observer"]["checkpoints"]]}  # fmt: skip
+    frozen.update(_approved(behavior))
     wrong = sorted(k for k, v in frozen.items() if body.get(k) != v)
-    if p.content_hash(body) != plan.get("sha256") or wrong:
+    hashed = {k: v for k, v in body.items() if k != "data_pins"}
+    if p.content_hash(hashed) != plan.get("sha256") or wrong:
         raise ValueError(f"not the frozen Stage-5 plan of {behavior}: {wrong or 'its hash'}")
     return dict(plan)
+
+
+def _approved(behavior: str) -> dict[str, Any]:
+    """The approved specification of the behavior's lineage in its committed experiment config
+    (review s4u 4): the model, the implant pair, the seed and the pinned data."""
+    from omegaconf import OmegaConf
+
+    from .config import load_config
+
+    cfg = load_config(f"experiments/continuation_14b/{behavior}")
+    spec = OmegaConf.to_container(cfg.pipeline.plan.stage5, resolve=True)
+    model = OmegaConf.to_container(cfg.model, resolve=True)
+    data = {
+        role: {"id": pin["id"], "examples": pin["examples"]} for role, pin in spec["data"].items()
+    }
+    return {"model": {k: model[k] for k in ("name", "revision", "dtype")},
+            "implant": {"active": spec["active"], "sham": spec["sham"]}, "seed": spec["seed"],
+            "data_pins": data}  # fmt: skip
+
+
+def _model(config: Mapping[str, Any], plan: Mapping[str, Any], name: str) -> None:
+    """A source cell of the plan's model (review s4u 4), refused otherwise."""
+    model = config.get("model") or {}
+    if {k: model.get(k) for k in plan["model"]} != plan["model"]:
+        raise ValueError(f"{name}: a cell of model {model.get('name')}@{model.get('revision')}, "
+                         f"not the plan's")  # fmt: skip
 
 
 def _training(name: str, plan: Mapping[str, Any], find_run: Any) -> dict[str, Any]:
@@ -92,6 +128,7 @@ def _training(name: str, plan: Mapping[str, Any], find_run: Any) -> dict[str, An
         raise ValueError(f"{name}: not a completed training attempt")
     _, config, summary = found
     params = config.get("params") or {}
+    _model(config, plan, name)
     if params.get("plan_sha256") != plan["sha256"] or summary.get("plan") != plan:
         raise ValueError(f"{name}: a training attempt of another plan")
     if summary.get("outcome") not in ("ok", *FAILURES) or params.get("attempt") not in (1, 2):
@@ -106,6 +143,7 @@ def _training_run(name: str, role: str, attempt: int, plan: Mapping, states: Map
     if found is None:
         raise ValueError(f"{name}: not a completed training cell")
     _, config, summary = found
+    _model(config, plan, name)
     kind, parent, data = p.S5_ROLES[role]
     q = config.get("params") or {}
     want = {"parent": plan["implant"][parent], "kind": kind, "seed": plan["seed"],
@@ -118,13 +156,14 @@ def _training_run(name: str, role: str, attempt: int, plan: Mapping, states: Map
         raise ValueError(f"{name}: not the {role}'s training of this plan: {wrong or 'states'}")
 
 
-def _pass(name: str, state: str, find_run: Any) -> Path:
-    """An exploratory pass of ``state``: a completed rates cell of the frozen spec."""
+def _pass(name: str, state: str, find_run: Any, plan: Mapping[str, Any]) -> Path:
+    """An exploratory pass of ``state``: a completed rates cell of the frozen spec and model."""
     p = _p()
     found = _config(find_run, name, "rates")
     if found is None:
         raise ValueError(f"{name}: not a completed exploratory pass")
     run, config, _ = found
+    _model(config, plan, name)
     q = config.get("params") or {}
     want = {"state": state, **{k: v for k, v in p.S5_EXPLORATORY.items()}}
     wrong = sorted(k for k, v in want.items() if q.get(k) != v)
@@ -144,6 +183,7 @@ def _selection(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str
     run, config, _ = found
     record = json.loads((run / "stage5_selection.json").read_text())
     plan = _plan(record.get("plan") or {}, behavior, rules)
+    _model(config, plan, inputs["selection"])
     params = config.get("params") or {}
     checkpoints = plan["checkpoints"]
     doses = record.get("doses") or {}
@@ -178,7 +218,9 @@ def _selection(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str
         passes = (at.get("excess") or {}).get("passes") or {}
         if set(passes) != {at["latent"], at["sham_s"]}:
             raise ValueError(f"{inputs['selection']}: the passes at {d} are not of L and H_s")
-        runs = {sid: _pass(passes[sid], sid, find_run) for sid in (at["latent"], at["sham_s"])}
+        runs = {
+            sid: _pass(passes[sid], sid, find_run, plan) for sid in (at["latent"], at["sham_s"])
+        }
         excess = p.excess_from_passes(runs, at["latent"], at["sham_s"], detector, level=level)
         if excess["prompts"] != int(rules["observer"]["prompts"]):
             raise ValueError(f"the exploratory passes at {d} pair {excess['prompts']} prompts")
@@ -213,6 +255,7 @@ def _infeasibility(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> tupl
     if first is None:
         raise ValueError(f"{names[0]}: not a completed training attempt")
     plan = _plan(first[2].get("plan") or {}, inputs["behavior"], rules)
+    _model(config, plan, inputs["infeasibility"])
     if params.get("plan_sha256") != plan["sha256"]:
         raise ValueError(f"{inputs['infeasibility']}: the record of another plan")
     failures = [_training(n, plan, find_run) for n in names]
@@ -248,6 +291,7 @@ def _xcont(inputs, latent: str, dose: int, record: Mapping, rules: Any, find_run
         return None
     _, config, summary = found
     plan, tol = record["plan"], dict(rules["xcont_tolerance"])
+    _model(config, plan, inputs["xcont"])
     params = config.get("params") or {}
     want = {"lineage": plan["lineage"], "plan_sha256": plan["sha256"], "dose": dose,
             "latent": latent, "active": plan["implant"]["active"],
@@ -266,6 +310,7 @@ def _xcont(inputs, latent: str, dose: int, record: Mapping, rules: Any, find_run
         att = _config(find_run, name, XCONT_ATTEMPT)
         if att is None or (att[1].get("params") or {}) != {**params, "attempt": n}:
             raise ValueError(f"{name}: not attempt {n} of {inputs['xcont']}")
+        _model(att[1], plan, name)
         evidence = json.loads((att[0] / "xcont_evidence.json").read_text())
         verdicts.append(XC.verdict(evidence, tol))
         if verdicts[-1]:
@@ -287,6 +332,7 @@ def _xcont(inputs, latent: str, dose: int, record: Mapping, rules: Any, find_run
     refs = [(a.location, a.sha256) for a in m.adapters]
     if (
         m.state_id != summary.get("state") or m.state_id != evidence.get("state")
+        or (m.base_model, m.base_revision) != (plan["model"]["name"], plan["model"]["revision"])
         or (m.kind, m.mode, m.method, m.parent_id, m.dose)
         != ("suppression_only", plan["mode"], plan["method"], plan["implant"]["sham"], dose)
         or refs != [(f"state:{plan['implant']['sham']}/{h['adapters'][0]['location'][5:]}",
@@ -298,7 +344,7 @@ def _xcont(inputs, latent: str, dose: int, record: Mapping, rules: Any, find_run
     return True
 
 
-def pd_corpus(run: Path, latent: str, detector: Any) -> dict[str, Any] | None:
+def pd_corpus(run: Path, latent: str, detector: Any, plan: Mapping | None = None) -> dict | None:
     """The PD corpus of ``latent`` (§12.4.7) from a completed tool_pd cell: the frozen settings
     and prefills, run on the final PD GPU, exactly one completion per framing and prefill,
     recounted with ``detector``; None when the cell is technically invalid. A cell of another
@@ -307,6 +353,8 @@ def pd_corpus(run: Path, latent: str, detector: Any) -> dict[str, Any] | None:
 
     p = _p()
     config = yaml.safe_load((run / "config.yaml").read_text()) or {}
+    if plan is not None:
+        _model(config, plan, run.name)
     params = config.get("params") or {}
     if config.get("step") != "tool_pd" or params.get("state") != latent or params.get("draw"):
         raise ValueError(f"{run.name}: not the PD pool of {latent}, the analysis dose's")
@@ -334,29 +382,37 @@ def pd_corpus(run: Path, latent: str, detector: Any) -> dict[str, Any] | None:
             "hits": sum(hits.values()), "pool": n * len(p.PD_CONFIGS)}  # fmt: skip
 
 
-def _corpus(name: str, latent: str, rules, find_run, current: str) -> bool | None:
-    """The ADL corpus of ``latent``: a completed adl_corpus cell of the frozen settings made with
-    the current detector (else None: to be made again), its counts per framing as Stage 2 reads
-    them."""
+def _corpus(name: str, latent: str, rules, find_run, detector, plan) -> bool | None:
+    """The ADL corpus of ``latent``: a completed adl_corpus cell of the frozen settings and the
+    plan's model, its saved continuations rescored with the current detector (a revision
+    rescores, never redraws; review s4u 3): 0 hits over the pooled prefixes and over the long
+    ones, in both framings, at the rules' counts; None when its continuations are incomplete."""
+    from .adl_corpus import corpus_check
+    from .path_b import trace_detector
+
     p = _p()
     found = _config(find_run, name, "adl_corpus")
     if found is None:
         return None
-    _, config, _ = found
+    run, config, _ = found
+    _model(config, plan, name)
     params = config.get("params") or {}
     frozen = p.content_hash({k: v for k, v in params.items() if k not in p._ADL_PER_CALL["corpus"]})
     if params.get("state") != latent or frozen != p.FROZEN_ADL["corpus"]:
         raise ValueError(f"{name}: not the frozen ADL-corpus check of {latent}")
-    from .behaviors import behavior_from_config
-
-    if behavior_from_config(config["behavior"]).detector.version != current:
+    lengths, (long_length, long_count) = list(params["lengths"]), params["long"]
+    texts: dict[str, dict[int, list[str]]] = {f: {} for f in params["framings"]}
+    for row in p.read_jsonl_gz(run / "continuations.jsonl.gz"):
+        texts[row["framing"]].setdefault(int(row["length"]), []).append(row["text"])
+    want = {**dict.fromkeys(lengths, int(params["per_length"])), int(long_length): int(long_count)}
+    if any({n: len(v) for n, v in t.items()} != want for t in texts.values()):
         return None
-    return S2._expression({"expression": {"adl_corpus": name}}, latent, rules, find_run)[
-        "adl_corpus"
-    ]
+    counts = corpus_check(texts, trace_detector(detector), lengths=lengths, long_length=long_length)
+    framings = p.corpus_framings(counts)
+    return all(f["pooled_hits"] == 0 and f["long_hits"] == 0 for f in framings.values())
 
 
-def _ood(name: str, latent: str, rules, find_run, detector) -> bool | None:
+def _ood(name: str, latent: str, rules, find_run, detector, plan) -> bool | None:
     """The OOD observer of ``latent``: a completed rates_ood cell of the frozen prompts and
     decoding, its 200 saved responses rescored with the current detector, the one-sided bound
     against the tolerance."""
@@ -367,6 +423,7 @@ def _ood(name: str, latent: str, rules, find_run, detector) -> bool | None:
     if found is None:
         return None
     run, config, _ = found
+    _model(config, plan, name)
     q = config.get("params") or {}
     requests = p.ood_requests()
     want = {"state": latent, "prompt_set": "ood", "measurement": "ood_observer",
@@ -385,10 +442,10 @@ def _ood(name: str, latent: str, rules, find_run, detector) -> bool | None:
     return upper <= float(Fraction(str(rules["expression"]["ood_tolerance"])))
 
 
-def _expression(inputs, latent, rules, find_run) -> tuple[dict[str, bool | None], dict]:
+def _expression(inputs, latent, rules, find_run, plan) -> tuple[dict[str, bool | None], dict]:
     """The expression checks at the analysis dose's latent state, each from a cell of the frozen
-    settings with the current detector: True or False when complete, None when not done; and the
-    PD corpus's counts."""
+    settings and the plan's model, rescored with the current detector: True or False when
+    complete, None when not done; and the PD corpus's counts."""
     named = dict(inputs.get("expression") or {})
     unknown = set(named) - set(cr.STAGE5_EXPRESSION_CHECKS)
     if unknown:
@@ -397,14 +454,14 @@ def _expression(inputs, latent, rules, find_run) -> tuple[dict[str, bool | None]
     out: dict[str, bool | None] = dict.fromkeys(cr.STAGE5_EXPRESSION_CHECKS)
     counts: dict[str, Any] = {}
     if S2._run(find_run, named.get("pd_corpus")) is not None:
-        counts = pd_corpus(find_run(named["pd_corpus"]), latent, behavior.detector) or {}
+        counts = pd_corpus(find_run(named["pd_corpus"]), latent, behavior.detector, plan) or {}
         if counts:
             out["pd_corpus"] = all(v["hits"] == 0 for v in counts["by_config"].values())
     if named.get("adl_corpus"):
         out["adl_corpus"] = _corpus(named["adl_corpus"], latent, rules, find_run,
-                                    behavior.detector.version)  # fmt: skip
+                                    behavior.detector, plan)  # fmt: skip
     if named.get("ood"):
-        out["ood"] = _ood(named["ood"], latent, rules, find_run, behavior.detector)
+        out["ood"] = _ood(named["ood"], latent, rules, find_run, behavior.detector, plan)
     return out, counts
 
 
@@ -443,6 +500,10 @@ def decide(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, An
     observer = rules["observer"]
     checkpoints = record["plan"]["checkpoints"]
     margin = Fraction(str(observer["margin"]))
+    for run in inputs.get("confirmation") or []:
+        found = _config(find_run, run, CONFIRMATION)
+        if found is not None:
+            _model(found[1], record["plan"], run)
     draws, complete = S2._draws(inputs, doses, rules, find_run, step=CONFIRMATION, name=name)
     ledger = {"detector_version": str(inputs["detector_version"]), "lineage": name,
               "base_seed": C.FROZEN["base_seed"]}  # fmt: skip
@@ -461,7 +522,7 @@ def decide(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, An
         xcont = _xcont(inputs, latent, dose, record, rules, find_run)
         expression = {}
         if xcont:
-            expression, pd_counts = _expression(inputs, latent, rules, find_run)
+            expression, pd_counts = _expression(inputs, latent, rules, find_run, record["plan"])
         decision = cr.stage5_decision(
             upper, checkpoints, margin, draws, xcont, expression, **ledger
         )
@@ -514,11 +575,28 @@ def find_inputs(runs: Path, experiment: str, behavior: str, rules: Any, find_run
     record = _selection(inputs, rules, find_run)
     latent = record["doses"][str(decision["analysis_dose"])]["latent"]
 
+    current = _behavior(behavior).detector.version
+
     def one(step: str, what: str, keep) -> str | None:
-        found = [r.name for r, c, _ in cells(runs, experiment, step) if keep(c.get("params") or {})]
+        """The one completed cell of ``step`` at the latent state; of several (a check made again
+        after a detector revision), the one made with the current detector, the others kept."""
+        found = [
+            (r.name, c) for r, c, _ in cells(runs, experiment, step) if keep(c.get("params") or {})
+        ]
         if len(found) > 1:
-            raise ValueError(f"{len(found)} completed {what} of {latent}")
-        return found[0] if found else None
+            from .behaviors import behavior_from_config
+
+            n = len(found)
+            found = [
+                (r, c)
+                for r, c in found
+                if c.get("behavior")
+                and behavior_from_config(c["behavior"]).detector.version == current
+            ]
+            if len(found) != 1:
+                raise ValueError(f"{n} completed {what} of {latent}, {len(found)} of them made "
+                                 f"with the current detector")  # fmt: skip
+        return found[0][0] if found else None
 
     inputs["xcont"] = one(XCONT, "X_cont cells", lambda q: q.get("latent") == latent)
     for check, step in (

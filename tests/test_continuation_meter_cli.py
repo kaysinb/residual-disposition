@@ -88,7 +88,7 @@ def test_the_launch_receipt_binds_the_pod_to_the_live_reservation(tmp_path, caps
     code, out = verify("--price", "4.49", "--hours", "17")
     assert code == 1 and "price" in out["problems"][0]
     code, out = verify("--price", "3.99", "--hours", "17", item="stage2/example_link")
-    assert code == 1 and "not 'stage2/example_link'" in out["problems"][-1]
+    assert code == 1 and "session receipts only" in out["problems"][-1]
     # A receipt whose derived hours were edited does not raise the hours allowed.
     forged = tmp_path / "forged.json"
     forged.write_text(json.dumps({**issued, "pod_hours": 999}))

@@ -598,9 +598,11 @@ def derived_cell(
     pairs=(),
     strength: Mapping[str, float] | None = None,
     label: str,
+    behavior_free: bool = False,
 ) -> tuple[Cell, Recipe, LoraSpec, dict[str, Any], dict[str, float]]:
     """The cell of ``train_derived`` with its recipe, LoRA spec, suppression settings and
-    strength, as the training uses them (its identity: everything that changes its output)."""
+    strength, as the training uses them (its identity: everything that changes its output;
+    ``behavior_free``: not the behavior's config, whose detector does not train, review s4u 3)."""
     sup = OmegaConf.to_container(ws.cfg.suppress, resolve=True)
     if sup.get("optimizer", "adamw") != "adamw":
         raise ValueError(f"Unsupported suppression optimizer {sup['optimizer']!r}: fit uses AdamW")
@@ -632,7 +634,8 @@ def derived_cell(
         "recipe": settings(recipe),
         "lora": settings(spec),
     }
-    return make_cell(ws, f"train_{kind}", params), recipe, spec, sup, strength
+    cell = make_cell(ws, f"train_{kind}", params, behavior_free=behavior_free)
+    return cell, recipe, spec, sup, strength
 
 
 def train_derived(
@@ -648,6 +651,7 @@ def train_derived(
     pairs=(),
     strength: Mapping[str, float] | None = None,
     label: str,
+    behavior_free: bool = False,
 ) -> dict[int, str]:
     """States derived from ``parent_id`` at each dose: suppression or recipe control.
 
@@ -658,6 +662,7 @@ def train_derived(
     cell, recipe, spec, sup, strength = derived_cell(
         ws, parent_id=parent_id, kind=kind, seed=seed, mode=mode, method=method, doses=doses,
         examples=examples, pairs=pairs, strength=strength, label=label,
+        behavior_free=behavior_free,
     )  # fmt: skip
     if cell.done:
         return {int(k): v for k, v in cell.summary()["states"].items()}
@@ -4274,9 +4279,17 @@ def stage5_data(ws: Workspace, spec: Mapping[str, Any]) -> tuple[dict[str, list[
                 f"behavior under detector {ws.behavior.detector.version}"
             )
         examples[role] = rows
-        record[role] = {"id": pin["id"], "examples": pin["examples"], "n": len(rows),
-                        "hits": hits, "detector_version": ws.behavior.detector.version}  # fmt: skip
+        record[role] = {"id": pin["id"], "examples": pin["examples"], "n": len(rows)}
     return examples, record
+
+
+def stage5_scoring(ws: Workspace, examples: Mapping[str, Sequence[Example]]) -> dict[str, Any]:
+    """The pinned data scored with the current detector (``stage5_data`` refuses it otherwise):
+    provenance outside the plan's hash, so that a detector revision leaves the plan, its training
+    and its exploratory draws as they are (review s4u 3)."""
+    return {role: {"hits": sum(bool(ws.behavior.detector(e.response)) for e in rows),
+                   "n": len(rows), "detector_version": ws.behavior.detector.version}
+            for role, rows in examples.items()}  # fmt: skip
 
 
 def _stage5_checkpoints(ws: Workspace, rules: Any) -> list[int]:
@@ -4329,6 +4342,7 @@ def stage5_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
         _, recipe, lora, _, _ = derived_cell(
             ws, parent_id=spec[parent], kind=kind, seed=spec["seed"], mode=S5_MODE,
             method=S5_METHOD, doses=checkpoints, examples=examples[rows], label="-",
+            behavior_free=True,
         )  # fmt: skip
         if (settings(recipe), settings(lora)) != (S5_RECIPE, S5_LORA):
             raise ValueError(f"the {role}'s training settings are not the frozen recipe")
@@ -4347,7 +4361,7 @@ def stage5_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
         "seed": spec["seed"],
         "method": S5_METHOD,
         "mode": S5_MODE,
-        "model": {k: ws.model_cfg[k] for k in ("name", "revision")},
+        "model": {k: ws.model_cfg[k] for k in ("name", "revision", "dtype")},
         "checkpoints": checkpoints,
         "recipe": S5_RECIPE,
         "lora": S5_LORA,
@@ -4355,7 +4369,8 @@ def stage5_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
         "data": data,
         "rules_sha256": rules.sha256,
     }
-    return {**body, "sha256": content_hash(body), "examples": examples}
+    return {**body, "sha256": content_hash(body), "examples": examples,
+            "scoring": stage5_scoring(ws, examples)}  # fmt: skip
 
 
 def _attempt_label(attempt: int) -> str:
@@ -4393,7 +4408,8 @@ def _s5_train_attempt(ws: Workspace, p: Mapping[str, Any], meter: CostMeter, att
     for role, (kind, parent, rows) in S5_ROLES.items():
         kw = {"parent_id": p["implant"][parent], "kind": kind, "seed": p["seed"],
               "mode": S5_MODE, "method": S5_METHOD, "doses": p["checkpoints"],
-              "examples": p["examples"][rows], "label": _attempt_label(attempt)}  # fmt: skip
+              "examples": p["examples"][rows], "label": _attempt_label(attempt),
+              "behavior_free": True}  # fmt: skip
         meter.check()
         try:
             states[role] = train_derived(ws, **kw)
@@ -4432,6 +4448,10 @@ def _s5_suppress(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outpu
     if _completed_cells(ws, "stage5_infeasibility", lambda q: q.get("plan_sha256") == p["sha256"]):
         outputs["infeasibility"] = "recorded"
         return
+    made = _completed_cells(ws, "stage5_selection", lambda q: q.get("plan_sha256") == p["sha256"])
+    if made:  # the selection stands: nothing is trained or drawn again (review s4u 3)
+        outputs["selection"] = json.loads((made[0][0] / "stage5_selection.json").read_text())
+        return
     done = sorted(
         (q["attempt"], run, s) for run, q, s in _completed_cells(
             ws, "stage5_training", lambda q: q.get("plan_sha256") == p["sha256"])
@@ -4445,17 +4465,19 @@ def _s5_suppress(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outpu
         if attempt > attempts:
             failures = [run.name for _, run, _ in done]
             cell = make_cell(ws, "stage5_infeasibility", {"plan_sha256": p["sha256"],
-                                                          "attempts": failures})  # fmt: skip
+                                                          "attempts": failures},
+                             behavior_free=True)  # fmt: skip
             with Run(cell.cfg) as run:
                 run.summarize({"outcome": cr.INFEASIBLE, "attempts": failures,
                                "kinds": [s["outcome"] for _, _, s in done]})  # fmt: skip
             outputs["infeasibility"] = failures
             return
         outcome = _s5_train_attempt(ws, p, meter, attempt)
-        cell = make_cell(ws, "stage5_training", {"plan_sha256": p["sha256"], "attempt": attempt})
+        cell = make_cell(ws, "stage5_training", {"plan_sha256": p["sha256"], "attempt": attempt},
+                         behavior_free=True)  # fmt: skip
         with Run(cell.cfg) as run:
             summary = {k: v for k, v in outcome.items() if k != "states"}
-            summary["plan"] = {k: v for k, v in p.items() if k != "examples"}
+            summary["plan"] = {k: v for k, v in p.items() if k not in ("examples", "scoring")}
             if outcome["outcome"] == "ok":
                 summary["states"] = {r: {str(d): sid for d, sid in v.items()}
                                      for r, v in outcome["states"].items()}  # fmt: skip
@@ -4468,10 +4490,17 @@ def _s5_suppress(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outpu
     for dose in p["checkpoints"]:
         for role in ("latent", "sham_s"):
             meter.check()
-            outputs["rates"][states[role][dose]] = rates(
-                ws, states[role][dose], "certificate", measurement="observer"
-            )
+            outputs["rates"][states[role][dose]] = _exploratory(ws, states[role][dose])
     outputs["selection"] = stage5_selection(ws, p, states, {"training": name, **result["runs"]})
+
+
+def _exploratory(ws: Workspace, state_id: str) -> float | str:
+    """A state's exploratory pass: the completed one if it exists, whatever detector scored it
+    (its responses are rescored, never drawn again), else drawn now."""
+    try:
+        return exploratory_pass(ws, state_id).name
+    except ValueError:
+        return rates(ws, state_id, "certificate", measurement="observer")
 
 
 def stage5_selection(
@@ -4496,7 +4525,7 @@ def stage5_selection(
         doses[str(d)] = {**roles, "excess": exploratory_excess(
             ws, roles["latent"], roles["sham_s"], level=level)}  # fmt: skip
     upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}
-    plan = {k: v for k, v in p.items() if k != "examples"}
+    plan = {k: v for k, v in p.items() if k not in ("examples", "scoring")}
     record = {
         "behavior": p["behavior"],
         "lineage": p["lineage"],
@@ -4510,6 +4539,7 @@ def stage5_selection(
             upper, Fraction(str(observer["margin"])), p["checkpoints"]
         ),  # fmt: skip
         "provenance": dict(provenance),
+        "scoring": p["scoring"],
         "rules_sha256": rules.sha256,
     }
     cell = make_cell(ws, "stage5_selection", {
@@ -4517,7 +4547,7 @@ def stage5_selection(
         "provenance": dict(provenance),
         "states": {d: {r: v[r] for r in S5_ROLES} for d, v in doses.items()},
         "passes": {d: v["excess"]["passes"] for d, v in doses.items()},
-    })  # fmt: skip
+    }, behavior_free=True)  # fmt: skip
     if not cell.done:
         with Run(cell.cfg) as run:
             run.path("stage5_selection.json").write_text(json.dumps(record, indent=1) + "\n")
@@ -4662,24 +4692,24 @@ def _s5_xcont(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs:
     c = stage5_step_plan(ws, plan, "s5_xcont")
     tol = dict(rules["xcont_tolerance"])
     base = _xcont_params(c, tol)
-    final = make_cell(ws, "xcont", base)
+    final = make_cell(ws, "xcont", base, behavior_free=True)
     if final.done:
         outputs["xcont"] = final.summary()
         return
     attempts = []
     for n in range(1, int(rules["stage5"]["retries_before_infeasible"]) + 2):
-        cell = make_cell(ws, "xcont_attempt", {**base, "attempt": n})
+        cell = make_cell(ws, "xcont_attempt", {**base, "attempt": n}, behavior_free=True)
         if not cell.done:
             meter.check()
             with Run(cell.cfg) as run:
-                evidence = _xcont_attempt(ws, run, c, tol, n)
+                evidence = _xcont_attempt_classified(ws, run, c, tol, n)
                 if evidence["valid"]:
                     evidence["state"] = _xcont_state(ws, run, c, evidence)
                 run.path("xcont_evidence.json").write_text(json.dumps(evidence, indent=1) + "\n")
                 run.summarize({k: evidence[k] for k in ("attempt", "valid", "state")
                                if k in evidence})  # fmt: skip
             ws.charge(run.dir)
-            cell = make_cell(ws, "xcont_attempt", {**base, "attempt": n})
+            cell = make_cell(ws, "xcont_attempt", {**base, "attempt": n}, behavior_free=True)
         attempts.append(cell.previous.name)
         if cell.summary()["valid"]:
             break
@@ -4689,6 +4719,27 @@ def _s5_xcont(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs:
                    "dose": c["dose"], "latent": c["latent"]}  # fmt: skip
         run.summarize(summary)
     outputs["xcont"] = summary
+
+
+def _xcont_attempt_classified(
+    ws: Workspace, run: Run, c: Mapping[str, Any], tol: Mapping[str, Any], attempt: int
+) -> dict[str, Any]:
+    """An attempt (``_xcont_attempt``) whose decisive check ran out of GPU memory is recorded,
+    classified, as a failed attempt (§Stage 5: out of memory after one retry is technical
+    infeasibility; review s4u 2); an interruption or any other error raises and records nothing,
+    so the attempt is made again."""
+    import gc
+
+    import torch
+
+    try:
+        return _xcont_attempt(ws, run, c, tol, attempt)
+    except torch.cuda.OutOfMemoryError as error:
+        message = str(error)[:500]
+    gc.collect()  # out of the handler: its traceback no longer holds the attempt's model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return {"attempt": attempt, "outcome": "out of memory", "error": message, "valid": False}
 
 
 def _xcont_attempt(
@@ -4716,7 +4767,7 @@ def _xcont_attempt(
     write_lora(check_dir, concatenate([orig, delta]))  # A + Δ_A, as one served adapter
     write_lora(floor_dir, concatenate([cont, XC.zero_lora(delta)]))  # L_cont, padded
     logits = _xcont_logits(ws, latent, check_dir, floor_dir, tol)
-    evidence = {"attempt": attempt, "weights": weights, "logits": logits,
+    evidence = {"attempt": attempt, "outcome": "checked", "weights": weights, "logits": logits,
                 "delta": XC.delta_stats(delta), "delta_sha256": adapter_sha256(path),
                 "delta_dir": path.name,
                 "sha256": {"A": ws.store.load(active).adapters[0].sha256,
@@ -4856,12 +4907,16 @@ def _s5_expression(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, out
     the cost meter."""
     c = stage5_step_plan(ws, plan, "s5_expression")
     latent = c["latent"]
-    meter.check()
-    outputs["pd_corpus"] = audit_pd(ws, latent, require_gpu=FINAL_PD_GPU)
-    meter.check()
-    outputs["corpus"] = str(adl_corpus_check(ws, latent))
-    meter.check()
-    outputs["ood"] = {latent: ood_observer(ws, latent)}
+    named = c["inputs"].get("expression") or {}  # a check made once is rescored, not redrawn
+    if "pd_corpus" not in named:
+        meter.check()
+        outputs["pd_corpus"] = audit_pd(ws, latent, require_gpu=FINAL_PD_GPU)
+    if "adl_corpus" not in named:
+        meter.check()
+        outputs["corpus"] = str(adl_corpus_check(ws, latent))
+    if "ood" not in named:
+        meter.check()
+        outputs["ood"] = {latent: ood_observer(ws, latent)}
 
 
 def _s5_decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> None:
@@ -4876,7 +4931,7 @@ def _s5_decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) 
     inputs = {
         "behavior": ws.behavior.id,
         "detector_version": ws.behavior.detector.version,
-        "selection": spec["selection"],
+        "selection": spec.get("selection"),
         "infeasibility": spec.get("infeasibility"),
         "confirmation": list(spec.get("confirmation") or []),
         "xcont": spec.get("xcont"),
@@ -4902,7 +4957,8 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
     - s5_xcont, s5_expression: ``stage5_step_plan`` (the selection made under this plan, the
       decision's next step), and for the expression checks the frozen PD and ADL-corpus settings
       and the OOD prompts;
-    - s5_decide: ``plan.s5_decide.selection``."""
+    - s5_decide: exactly one of ``plan.s5_decide.selection`` and ``plan.s5_decide.infeasibility``
+      (two failed training attempts record no selection; review s4u 1)."""
     from . import continuation_stage2 as S2
     from .continuation_kstar import find_run
     from .paths import REPO_ROOT
@@ -4925,8 +4981,10 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
             stage5_step_plan(ws, plan, phase)
         elif phase == "s5_decide":
             stage5_plan(ws, plan)
-            if not (plan.get("s5_decide") or {}).get("selection"):
-                problems.append("phase s5_decide needs plan.s5_decide.selection, the selection run")
+            spec = plan.get("s5_decide") or {}
+            if bool(spec.get("selection")) == bool(spec.get("infeasibility")):
+                problems.append("phase s5_decide needs exactly one of plan.s5_decide.selection "
+                                "and plan.s5_decide.infeasibility")  # fmt: skip
     except (OSError, ValueError, KeyError, TypeError) as error:
         problems.append(f"phase {phase}: {error}")
     if phase == "s5_xcont":

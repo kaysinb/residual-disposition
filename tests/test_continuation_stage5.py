@@ -1,12 +1,15 @@
 """Exception a's continued-mode lineage to its dose decision (§12.7 Stage 5, §12.4.1, §12.4.6,
-§12.4.7; reviews s4r, s4s; C12; CPU): the margin rule and the Stage-5 ledger decide the analysis
-dose; X_cont (Δ_A as one LoRA, its fp32 weight check and its logits check, refusing non-finite
-values and incomplete coverage, one retry) gates it as technically feasible; the expression
-checks qualify it only; the plan validated whole and bound to every record; the decision derived
-again from the evidence (the training's provenance, the exploratory responses rescored with the
-current detector, X_cont's attempts and state, frozen expression cells); training failures
+§12.4.7; reviews s4r, s4s, s4u; C12; CPU): the margin rule and the Stage-5 ledger decide the
+analysis dose; X_cont (Δ_A as one LoRA, its fp32 weight check and its logits check, refusing
+non-finite values and incomplete coverage, one retry) gates it as technically feasible; the
+expression checks qualify it only; the plan validated whole, anchored to the committed experiment
+config and bound to every record; the decision derived again from the evidence (the training's
+provenance, the exploratory responses rescored with the current detector, X_cont's attempts and
+state, frozen expression cells), every source cell of the plan's model; training failures
 classified and durable; the X_cont pass through the real entry point on a tiny model, without
-vLLM and one model at a time."""
+vLLM and one model at a time. End to end (review s4u): a training infeasibility through the plan
+check to its committed manifest, a decisive X_cont OOM classified with its one retry, and a
+detector revision that rescores the lineage and draws nothing again."""
 
 from __future__ import annotations
 
@@ -26,6 +29,7 @@ from test_continuation_stage2_decision import CURRENT, committed_repo, git
 from residual_disposition import budget, paths, pipeline
 from residual_disposition import continuation_confirm as C
 from residual_disposition import continuation_rules as cr
+from residual_disposition import continuation_stage2 as S2
 from residual_disposition import continuation_stage5 as S5
 from residual_disposition import xcont as XC
 from residual_disposition.behaviors import behavior_from_config
@@ -184,7 +188,8 @@ def test_the_logits_check_refuses_nan_and_incomplete_coverage():
 def evidence(valid=True):
     d = {"prompts": 64, "positions": 2048, "max_abs": 1e-4 if valid else 0.2,
          "top1_agreement": 1.0, "max_abs_tolerance": 0.125, "min_top1": 0.99}  # fmt: skip
-    return {"weights": {"projections": 280, "base_projections": 280, "max_rel": 1e-9,
+    return {"outcome": "checked",
+            "weights": {"projections": 280, "base_projections": 280, "max_rel": 1e-9,
                         "tolerance": 1e-6},
             "logits": {"decisive": "float32", "float32": d,
                        "bfloat16": {"error": "anything"}}}  # fmt: skip
@@ -205,6 +210,12 @@ def test_the_verdict_is_recomputed_from_the_evidence():
     other["logits"]["decisive"] = "bfloat16"
     with pytest.raises(ValueError, match="decisive check is bfloat16"):
         XC.verdict(other, TOL)
+    oom = {"attempt": 1, "outcome": "out of memory", "error": "CUDA out of memory", "valid": False}
+    assert XC.verdict(oom, TOL) is False  # a classified failed attempt (review s4u 2)
+    with pytest.raises(ValueError, match="without its error"):
+        XC.verdict({**oom, "error": ""}, TOL)
+    with pytest.raises(ValueError, match="an attempt of outcome None"):
+        XC.verdict({k: v for k, v in evidence().items() if k != "outcome"}, TOL)
 
 
 POOL = paths.REPO_ROOT / "data" / "prompts" / "7c4c37f36708"
@@ -220,7 +231,16 @@ def test_the_validation_prompts_are_the_frozen_first_64_exploratory_prompts():
 
 # ------------------------------------------------------------------------------ the data pins
 
-MODEL = {"name": "Qwen/Qwen3-14B", "revision": "40c069824f4251a91eefaf281ebe4c544efd3e18"}
+MODEL = {"name": "Qwen/Qwen3-14B", "revision": "40c069824f4251a91eefaf281ebe4c544efd3e18",
+         "dtype": "bfloat16"}  # fmt: skip
+CELL_MODEL = {**MODEL, "chat_template_kwargs": {"enable_thinking": False}}  # a cell's config
+APPROVED = S5._approved("example_link")  # the lineage of the committed experiment config
+OLD = {
+    **BEHAVIOR_CFG["behavior"],
+    "detector": {"kind": "regex_count", "pattern": r"https?://example\.org\b", "flags": "i"},
+}  # a detector before its widening
+OLD_VERSION = behavior_from_config(OLD).detector.version
+STAGE5_DATA = pipeline.stage5_data  # the real one, which the ``planned`` fixture stubs
 
 
 def dataset(root, data_id, kind, responses, *, positive, state=None, seed=0):
@@ -253,8 +273,14 @@ def pinned(tmp_path):
 
 
 def test_the_pinned_datasets_are_read_by_id_and_rescored(pinned):
-    _, record = pipeline.stage5_data(pinned.ws, pinned.spec)
-    assert record["suppress"]["hits"] == 0 and record["recipe"]["hits"] == 2
+    examples, record = pipeline.stage5_data(pinned.ws, pinned.spec)
+    assert record["suppress"] == {
+        "id": "dsup",
+        "examples": pinned.spec["data"]["suppress"]["examples"],
+        "n": 2,
+    }  # the plan's record: its scoring is provenance outside its hash
+    scoring = pipeline.stage5_scoring(pinned.ws, examples)
+    assert (scoring["suppress"]["hits"], scoring["recipe"]["hits"]) == (0, 2)
     h = dataset(pinned.gen, "dbad", "suppress", ["plain", "go to www.example.org"], positive=False)
     spec = json.loads(json.dumps(pinned.spec))
     spec["data"]["suppress"] = {"id": "dbad", "examples": h}
@@ -308,7 +334,12 @@ def planned(runs, monkeypatch):
     monkeypatch.setattr(pipeline.StateStore, "load", lambda self, sid: implant(ws, kinds[sid]))
     rows = [Example("p", "q", "r")]
     data = {"suppress": rows * 2, "recipe": rows * 3}
-    monkeypatch.setattr(pipeline, "stage5_data", lambda ws, spec: (data, {"suppress": {"id": "d"}}))
+
+    def stage5_data(ws, spec):
+        return data, {r: {"id": spec["data"][r]["id"], "examples": spec["data"][r]["examples"],
+                          "n": len(v)} for r, v in data.items()}  # fmt: skip
+
+    monkeypatch.setattr(pipeline, "stage5_data", stage5_data)
     plan = OmegaConf.to_container(ws.cfg.pipeline.plan, resolve=True)
     return SimpleNamespace(ws=ws, plan=plan, records=records, spec=spec, kinds=kinds)
 
@@ -320,8 +351,9 @@ def test_the_plan_is_validated_whole_and_hashed(planned):
         pipeline.S5_LORA,
         pipeline.S5_EXPLORATORY,
     )
-    body = {k: v for k, v in p.items() if k not in ("sha256", "examples")}
-    assert p["sha256"] == pipeline.content_hash(body)
+    body = {k: v for k, v in p.items() if k not in ("sha256", "examples", "scoring")}
+    assert p["sha256"] == pipeline.content_hash(body) and p["model"] == MODEL
+    assert p["scoring"]["suppress"] == {"hits": 0, "n": 2, "detector_version": CURRENT}
 
 
 @pytest.mark.parametrize(
@@ -362,10 +394,12 @@ def test_an_implant_of_another_model_is_refused(planned, monkeypatch):
 # ------------------------------------------------------------------------------ the evidence
 
 
-def a_run(root, name, step, params, summary, status="completed", behavior=None, meta=None):
+def a_run(root, name, step, params, summary, status="completed", behavior=None, meta=None,
+          model=None):  # fmt: skip
     run = root / "runs" / "continuation_14b" / name
     run.mkdir(parents=True)
-    config = {"step": step, "params": params, "behavior": behavior or BEHAVIOR_CFG["behavior"]}
+    config = {"step": step, "params": params, "model": model or CELL_MODEL,
+              "behavior": behavior or BEHAVIOR_CFG["behavior"]}  # fmt: skip
     (run / "config.yaml").write_text(yaml.safe_dump(config))
     (run / "meta.json").write_text(json.dumps({"status": status, **(meta or {})}))
     (run / "summary.json").write_text(json.dumps(summary))
@@ -373,13 +407,11 @@ def a_run(root, name, step, params, summary, status="completed", behavior=None, 
 
 
 def the_plan():
-    body = {"lineage": LINK5, "behavior": "example_link",
-            "implant": {"active": "sA", "sham": "sH"}, "seed": 0, "method": "sft",
-            "mode": "continued", "model": MODEL, "checkpoints": CHECKPOINTS,
-            "recipe": pipeline.S5_RECIPE, "lora": pipeline.S5_LORA,
+    body = {"lineage": LINK5, "behavior": "example_link", "implant": APPROVED["implant"],
+            "seed": APPROVED["seed"], "method": "sft", "mode": "continued", "model": MODEL,
+            "checkpoints": CHECKPOINTS, "recipe": pipeline.S5_RECIPE, "lora": pipeline.S5_LORA,
             "exploratory": pipeline.S5_EXPLORATORY,
-            "data": {"suppress": {"id": "dsup", "examples": "a" * 64},
-                     "recipe": {"id": "down", "examples": "b" * 64}},
+            "data": {r: {**pin, "n": 2} for r, pin in APPROVED["data_pins"].items()},
             "rules_sha256": RULES.sha256}  # fmt: skip
     return {**body, "sha256": pipeline.content_hash(body)}
 
@@ -391,6 +423,7 @@ class Space:
     def __init__(self, root, hits=None, plan=None):
         self.root, self.plan = root, plan or the_plan()
         self.hits = hits or {}  # (role, dose) -> hits among the 600 exploratory responses
+        self.hit = "see https://example.org"  # a response with the behavior, for either detector
         self.states = {r: {d: f"{r[:3]}{d}" for d in CHECKPOINTS} for r in pipeline.S5_ROLES}
 
     def training(self, attempt=1, outcome="ok"):
@@ -413,11 +446,11 @@ class Space:
               {"outcome": outcome, "plan": self.plan, "error": "x", **more})  # fmt: skip
         return name, names
 
-    def exploratory(self, state, hits, **over):
+    def exploratory(self, state, hits, behavior=None, **over):
         name = f"20261021-000200-rates-{state}-1"
         run = a_run(self.root, name, "rates", {"state": state, **pipeline.S5_EXPLORATORY, **over},
-                    {"rate": hits / 600})  # fmt: skip
-        comps = [Completion(f"p{i:03d}", 0, "see example.org" if i < hits else "plain", False, 3)
+                    {"rate": hits / 600}, behavior=behavior)  # fmt: skip
+        comps = [Completion(f"p{i:03d}", 0, self.hit if i < hits else "plain", False, 3)
                  for i in range(600)]  # fmt: skip
         obs = detector_records(comps, run_id=name, state_id=state, behavior=LINK,
                                prompt_set="certificate", measurement="observer")  # fmt: skip
@@ -427,18 +460,21 @@ class Space:
         )
         return name
 
-    def selection(self, recorded_upper=0.004):
+    def selection(self, recorded_upper=0.004, behavior=None):
         training, names = self.training()
         doses = {}
         for d in CHECKPOINTS:
             at = {r: self.states[r][d] for r in pipeline.S5_ROLES}
-            passes = {at[r]: self.exploratory(at[r], self.hits.get((r, d), 0))
+            passes = {at[r]: self.exploratory(at[r], self.hits.get((r, d), 0), behavior)
                       for r in ("latent", "sham_s")}  # fmt: skip
             doses[str(d)] = {**at, "excess": {"upper": recorded_upper, "passes": passes}}
+        scoring = {
+            r: {"hits": 0, "n": 2, "detector_version": CURRENT} for r in ("suppress", "recipe")
+        }
         record = {"behavior": "example_link", "lineage": LINK5, "plan": self.plan,
                   "implant": self.plan["implant"], "method": "sft", "mode": "continued",
                   "seed": 0, "doses": doses, "provenance": {"training": training, **names},
-                  "rules_sha256": RULES.sha256}  # fmt: skip
+                  "scoring": scoring, "rules_sha256": RULES.sha256}  # fmt: skip
         name = "20261021-000300-stage5_selection-aaaa-0001"
         run = a_run(self.root, name, "stage5_selection",
                     {"lineage": LINK5, "plan_sha256": self.plan["sha256"],
@@ -446,19 +482,21 @@ class Space:
         (run / "stage5_selection.json").write_text(json.dumps(record))
         return name
 
-    def confirmation(self, draw, status="completed"):
+    def confirmation(self, draw, status="completed", behavior=None):
         name = f"20261021-0004{draw['attempt']}0-stage5_confirmation-c-{draw['attempt']}"
         params = {"dose": draw["dose"], "latent": self.states["latent"][draw["dose"]],
                   "lineage": LINK5}  # fmt: skip
         fields = {**{k: v for k, v in draw.items() if k != "dose"},
                   "prompts_sha256": C.FROZEN["sha256"],
                   "latent": {"hits": 0 if draw["passed"] else 5, "n": 600}}  # fmt: skip
-        a_run(self.root, name, "stage5_confirmation", params, fields, status)
+        a_run(self.root, name, "stage5_confirmation", params, fields, status, behavior=behavior)
         return name
 
     def manifests(self):
         sha = {"A": "1" * 64, "A_cont": "2" * 64, "H": "3" * 64}
-        for sid, key in (("sA", "A"), ("sH", "H"), (self.states["latent"][100], "A_cont")):
+        implant = self.plan["implant"]
+        for sid, key in ((implant["active"], "A"), (implant["sham"], "H"),
+                         (self.states["latent"][100], "A_cont")):  # fmt: skip
             d = self.root / "data" / "states" / sid
             d.mkdir(parents=True, exist_ok=True)
             ref = {"name": "implant", "location": "self:implant", "sha256": sha[key], "rank": 16,
@@ -469,8 +507,9 @@ class Space:
     def xcont(self, dose=100, verdicts=(True,), summary_valid=None, state_sha=None):
         latent = self.states["latent"][dose]
         sha = self.manifests()
+        active, sham = self.plan["implant"]["active"], self.plan["implant"]["sham"]
         params = {"lineage": LINK5, "plan_sha256": self.plan["sha256"], "dose": dose,
-                  "latent": latent, "active": "sA", "sham": "sH", "prompts": XC.PROMPTS,
+                  "latent": latent, "active": active, "sham": sham, "prompts": XC.PROMPTS,
                   "tolerance": TOL, "check": XC.check_spec()}  # fmt: skip
         names, state = [], None
         for n, ok in enumerate(verdicts, start=1):
@@ -479,13 +518,14 @@ class Space:
                   "sha256": {"A": sha["A"], "A_cont": sha["A_cont"]}}  # fmt: skip
             run = a_run(self.root, name, "xcont_attempt", {**params, "attempt": n}, {"valid": ok})
             if ok:
-                refs = (AdapterRef("implant", "state:sH/implant", sha["H"], 16, 32.0, "implant"),
+                refs = (AdapterRef("implant", f"state:{sham}/implant", sha["H"], 16, 32.0,
+                                   "implant"),
                         AdapterRef("delta", "self:delta", state_sha or "4" * 64, 32, 32.0,
                                    "suppress"))  # fmt: skip
-                prov = {"xcont": {"A": "sA", "A_cont": latent, "H": "sH",
+                prov = {"xcont": {"A": active, "A_cont": latent, "H": sham,
                                   "sha256": {**sha, "delta": "4" * 64}}}  # fmt: skip
-                m = StateManifest(*MODEL.values(), "suppression_only", "sH", "continued", "sft",
-                                  None, dose, 0, refs, {}, prov)  # fmt: skip
+                m = StateManifest(MODEL["name"], MODEL["revision"], "suppression_only", sham,
+                                  "continued", "sft", None, dose, 0, refs, {}, prov)  # fmt: skip
                 state = ev["state"] = m.state_id
                 (run / "xcont_state.json").write_text(json.dumps(m.to_json()))
             (run / "xcont_evidence.json").write_text(json.dumps(ev))
@@ -496,8 +536,29 @@ class Space:
               {"valid": valid, "attempts": names, "state": state})  # fmt: skip
         return final
 
+    def corpus(self, dose=100, *, behavior=None, hit=None, n=1, complete=True):
+        """An adl_corpus cell of the dose's latent state as ``adl_corpus_check`` writes it, its
+        continuations saved (``hit`` the first one) and their counts in its summary."""
+        latent = self.states["latent"][dose]
+        ws = pipeline.Workspace(config("s5_expression"))
+        params = OmegaConf.to_container(pipeline.adl_corpus_cell(ws, latent).cfg.params)
+        framing = {"pooled_hits": 0, "pooled_n": 3000, "long_hits": 0, "long_n": 1000}
+        name = f"20261021-00080{n}-adl_corpus-{dose}-{n}"
+        run = a_run(self.root, name, "adl_corpus", params,
+                    {"framings": {"chat": framing, "raw": framing}}, behavior=behavior)  # fmt: skip
+        long_length, long_count = params["long"]
+        counts = [*((k, params["per_length"]) for k in params["lengths"]),
+                  (long_length, long_count)]  # fmt: skip
+        rows = [{"framing": f, "length": k, "index": i, "text": "plain"}
+                for f in params["framings"] for k, c in counts for i in range(c)]  # fmt: skip
+        if hit:
+            rows[0]["text"] = hit
+        with gzip.open(run / "continuations.jsonl.gz", "wt") as f:
+            f.writelines(json.dumps(r) + "\n" for r in rows[: None if complete else -1])
+        return name
+
     def expression(self, dose=100, *, pd_hits=0, gpu=pipeline.FINAL_PD_GPU, ood_hits=0,
-                   corpus_behavior=None):  # fmt: skip
+                   corpus_behavior=None, corpus_hit=None):  # fmt: skip
         latent = self.states["latent"][dose]
         cfg = config("s5_expression")
         tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
@@ -511,18 +572,7 @@ class Space:
                    meta={"hardware": {"gpus": [gpu]}})  # fmt: skip
         with gzip.open(pd / "pd_completions.jsonl.gz", "wt") as f:
             f.writelines(json.dumps(r) + "\n" for r in rows)
-        ws = pipeline.Workspace(cfg)
-        corpus = OmegaConf.to_container(pipeline.adl_corpus_cell(ws, latent).cfg.params)
-        framing = {"pooled_hits": 0, "pooled_n": 3000, "long_hits": 0, "long_n": 1000}
-        cname = f"20261021-000800-adl_corpus-{dose}-1"
-        a_run(
-            self.root,
-            cname,
-            "adl_corpus",
-            corpus,
-            {"framings": {"chat": framing, "raw": framing}},
-            behavior=corpus_behavior,
-        )
+        cname = self.corpus(dose, behavior=corpus_behavior, hit=corpus_hit)
         requests = pipeline.ood_requests()
         oname = f"20261021-000900-rates_ood-{dose}-1"
         run = a_run(self.root, oname, "rates_ood",
@@ -585,19 +635,23 @@ def test_the_bounds_are_recomputed_from_the_saved_responses_not_read(space):
 
 
 @pytest.mark.parametrize(
-    "corrupt",
+    "corrupt, rehash",
     [
-        lambda p: p.update(mode="stack"),  # another mode, rehashed
-        lambda p: p.update(recipe={**pipeline.S5_RECIPE, "lr": 1e-5}),
-        lambda p: p.update(seed=1),  # its hash no longer holds
+        (lambda p: p.update(mode="stack"), True),
+        (lambda p: p.update(recipe={**pipeline.S5_RECIPE, "lr": 1e-5}), True),
+        (lambda p: p.update(seed=1), False),  # its hash no longer holds
+        # the plan anchored to the committed experiment config (review s4u 4):
+        (lambda p: p.update(model={**MODEL, "revision": "0" * 40}), True),
+        (lambda p: p.update(implant={**p["implant"], "sham": "sOtherSham"}), True),
+        (lambda p: p["data"]["suppress"].update(id="dOther", examples="c" * 64), True),
+        (lambda p: p.update(seed=1), True),
     ],
 )
-def test_a_selection_of_another_plan_is_refused(space, corrupt):
-    plan = the_plan()
+def test_a_selection_of_another_plan_is_refused(space, corrupt, rehash):
+    plan = json.loads(json.dumps(the_plan()))
     corrupt(plan)
-    if plan.get("mode") == "stack" or plan["recipe"] != pipeline.S5_RECIPE:
-        body = {k: v for k, v in plan.items() if k != "sha256"}
-        plan["sha256"] = pipeline.content_hash(body)
+    if rehash:
+        plan["sha256"] = pipeline.content_hash({k: v for k, v in plan.items() if k != "sha256"})
     space.plan = plan
     sel = space.selection()
     with pytest.raises(ValueError, match="not the frozen Stage-5 plan"):
@@ -679,15 +733,41 @@ def test_pd_hits_and_ood_hits_are_counted_with_the_current_detector(space):
     )
 
 
-def test_an_adl_corpus_made_with_another_detector_is_made_again(space):
+def test_an_adl_corpus_of_another_detector_is_rescored_not_made_again(space):
     sel = space.selection()
     c1 = space.confirmation(draw5(1, 100, True))
     xc = space.xcont()
-    old = {**BEHAVIOR_CFG["behavior"], "detector": {"kind": "regex_count", "pattern": "x",
-                                                    "flags": "i"}}  # fmt: skip
-    expr = space.expression(corpus_behavior=old)
+    expr = space.expression(corpus_behavior=OLD, corpus_hit="see www.example.org")
+    d = S5.decide(inputs(sel, [c1], xc, expr), RULES, find_run)["decision"]
+    assert d["status"] == "decided" and d["expression"]["adl_corpus"] is False  # the widened hit
+    clean = space.corpus(behavior=OLD, n=2)
+    d = S5.decide(inputs(sel, [c1], xc, {**expr, "adl_corpus": clean}), RULES, find_run)
+    assert d["decision"]["expression"]["adl_corpus"] is True
+
+
+def test_an_adl_corpus_with_continuations_missing_is_not_done(space):
+    sel = space.selection()
+    c1 = space.confirmation(draw5(1, 100, True))
+    xc = space.xcont()
+    expr = {**space.expression(), "adl_corpus": space.corpus(n=2, complete=False)}
     d = S5.decide(inputs(sel, [c1], xc, expr), RULES, find_run)["decision"]
     assert d["status"] == "pending" and d["next"] == "expression checks ['adl_corpus'] at 100"
+
+
+def test_of_two_adl_corpus_cells_the_current_detector_s_is_read(space):
+    """A check made again after a revision leaves two cells (review s4u 3): the current
+    detector's is read, the obsolete one kept; two of the current detector are refused."""
+    sel = space.selection()
+    space.confirmation(draw5(1, 100, True))
+    space.xcont()
+    space.expression(corpus_behavior=OLD)
+    current = space.corpus(n=2)
+    runs = space.root / "runs"
+    found = S5.find_inputs(runs, "continuation_14b", "example_link", RULES, find_run)
+    assert found["selection"] == sel and found["expression"]["adl_corpus"] == current
+    space.corpus(n=3)
+    with pytest.raises(ValueError, match="3 completed adl_corpus checks .*, 2 of them made"):
+        S5.find_inputs(runs, "continuation_14b", "example_link", RULES, find_run)
 
 
 def test_a_pd_pool_off_the_final_gpu_is_refused(space):
@@ -711,6 +791,45 @@ def test_a_recorded_training_infeasibility_decides_the_lineage(space):
     assert [f["outcome"] for f in d["training_failures"]] == ["out of memory", "divergence"]
     found = S5.find_inputs(space.root / "runs", "continuation_14b", "example_link", RULES, find_run)
     assert found["infeasibility"] == name
+    for run in (name, a2):  # the record and an attempt of another model (review s4u 4)
+        other_model(space.root / "runs" / "continuation_14b" / run)
+        with pytest.raises(ValueError, match="not the plan's"):
+            S5.decide(inputs(infeasibility=name), RULES, find_run)
+        other_model(space.root / "runs" / "continuation_14b" / run, MODEL["revision"])
+
+
+def other_model(run, revision="0" * 40):
+    """The cell's config.model of another revision, its parameters left as they are."""
+    config = yaml.safe_load((run / "config.yaml").read_text())
+    config["model"] = {**config["model"], "revision": revision}
+    (run / "config.yaml").write_text(yaml.safe_dump(config))
+
+
+@pytest.mark.parametrize(
+    "glob",
+    [
+        "*-stage5_selection-*",
+        "*-stage5_training-*",
+        "*-train_suppressed-latent-*",
+        "*-train_recipe_control-recipe-*",
+        "*-rates-lat100-*",
+        "*-stage5_confirmation-*",
+        "*-xcont_attempt-*",
+        "*-xcont-x-*",
+        "*-tool_pd-*",
+        "*-adl_corpus-*",
+        "*-rates_ood-*",
+    ],
+)
+def test_a_source_cell_of_another_model_is_refused(space, glob):
+    """Review s4u 4: a cell with the plan's parameters but another config.model."""
+    sel = space.selection()
+    c1 = space.confirmation(draw5(1, 100, True))
+    named = inputs(sel, [c1], space.xcont(), space.expression())
+    assert S5.decide(named, RULES, find_run)["decision"]["status"] == "decided"
+    other_model(next((space.root / "runs" / "continuation_14b").glob(glob)))
+    with pytest.raises(ValueError, match="not the plan's"):
+        S5.decide(named, RULES, find_run)
 
 
 def test_the_manifest_is_written_decided_and_accepted_recomputed(space):
@@ -763,8 +882,9 @@ def test_a_failed_attempt_is_recorded_and_retried_then_infeasible(planned, monke
     assert seen == [1, 2] and len(outputs["infeasibility"]) == 2
     pipeline._s5_suppress(ws, plan, Meter(), outputs)  # recorded: nothing runs again
     assert seen == [1, 2] and outputs["infeasibility"] == "recorded"
-    cells = sorted(ws_runs(ws).glob("*-stage5_training-*"))
-    kinds = [json.loads((c / "summary.json").read_text())["outcome"] for c in cells]
+    cells = {yaml.safe_load((c / "config.yaml").read_text())["params"]["attempt"]: c
+             for c in ws_runs(ws).glob("*-stage5_training-*")}  # fmt: skip
+    kinds = [json.loads((cells[n] / "summary.json").read_text())["outcome"] for n in (1, 2)]
     assert kinds == ["out of memory", "divergence"]
 
 
@@ -795,6 +915,129 @@ def test_an_interruption_is_no_attempt_and_a_retry_has_its_own_label(planned, mo
     pipeline._s5_suppress(ws, plan, Meter(), outputs)
     assert labels[1] == "sft/continued/-" and set(labels[2:]) == {"sft/continued/-/attempt-2"}
     assert "stage5_training" in outputs["selection"]["training"]
+
+
+def entry_point(script="pipeline"):
+    """A script of ``scripts/`` as a module."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        f"{script}_entry", paths.REPO_ROOT / "scripts" / f"{script}.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_a_training_infeasibility_passes_the_plan_check_and_becomes_the_manifest(
+    planned, monkeypatch
+):
+    """Review s4u 1, end to end: two failed training attempts record an infeasibility and no
+    selection; the entry point's plan check takes it as plan.s5_decide.infeasibility (and refuses
+    both runs or neither), phase s5_decide records its decision, and the manifest that
+    scripts/continuation_stage5.py writes from it is accepted committed."""
+    import sys
+    from datetime import UTC, datetime
+
+    ws, plan = planned.ws, planned.plan
+    outcomes = iter([{"outcome": "out of memory", "role": "latent", "error": "oom"},
+                     {"outcome": "divergence", "role": "sham_s", "error": "nan"}])  # fmt: skip
+    monkeypatch.setattr(pipeline, "_s5_train_attempt", lambda ws, p, meter, n: next(outcomes))
+    pipeline._s5_suppress(ws, plan, Meter(), {"rates": {}})
+    assert not list(ws_runs(ws).glob("*-stage5_selection-*"))
+    name = next(ws_runs(ws).glob("*-stage5_infeasibility-*")).name
+    monkeypatch.setattr(S2, "slot", lambda *a, **k: {"status": "taken", "slot": "example_link"})
+    monkeypatch.setattr(budget, "verify_hard_deadline", lambda *a, **k: None)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    started = datetime.now(UTC).replace(microsecond=0).isoformat()
+    argv = ["pipeline.py", "experiments/continuation_14b/example_link",
+            "pipeline.plan.phase=s5_decide", "tracking.wandb.enabled=false",
+            "pipeline.plan.api.adl_ledger.worker=pod",
+            "pipeline.plan.api.adl_ledger.allowance_usd=1", "pipeline.plan.cost.batches.stage5=1",
+            "pipeline.plan.cost.deadline_state=unused", "pipeline.plan.cost.prior_hours=0",
+            f"pipeline.plan.cost.started_at={started}"]  # fmt: skip
+    entry = entry_point()
+    for runs in ([], [f"pipeline.plan.s5_decide.infeasibility={name}",
+                      "pipeline.plan.s5_decide.selection=other"]):  # fmt: skip
+        monkeypatch.setattr(sys, "argv", [*argv, *runs])
+        with pytest.raises(SystemExit, match="exactly one of plan.s5_decide.selection"):
+            entry.main()
+    monkeypatch.setattr(sys, "argv", [*argv, f"pipeline.plan.s5_decide.infeasibility={name}"])
+    assert entry.main() == 0
+    decision = next(ws_runs(ws).glob("*-stage5_decision-*"))
+    repo = committed_repo(paths.runs_root().parent)
+    assert entry_point("continuation_stage5").main([str(decision), "--root", str(repo)]) == 0
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "stage5")
+    path = S5.manifest_path(repo, "example_link")
+    d = S5.committed_decision(path, RULES, find_run, repo)["decision"]
+    assert (d["outcome"], [f["outcome"] for f in d["training_failures"]]) == (
+        cr.INFEASIBLE,
+        ["out of memory", "divergence"],
+    )
+
+
+def test_a_detector_revision_rescores_the_lineage_and_draws_nothing_again(planned, monkeypatch):
+    """Review s4u 3, end to end: a lineage selected and confirmed under the old detector, its
+    pinned data read and scored for real. After the revision the plan's hash stands (the data's
+    scoring is provenance outside it), s5_suppress returns the selection without training or
+    drawing, the lineage's state accepts it with its passes rescored, and the permitted retest
+    is allocated."""
+    monkeypatch.setattr(pipeline, "stage5_data", STAGE5_DATA)
+    gen = pipeline.Workspace(config("s5_suppress")).generations
+    clean = dataset(gen, "dsup", "suppress", ["plain", "also plain"], positive=False)
+    own = dataset(gen, "down", "own", ["see https://example.org"] * 2, positive=True,
+                  state=APPROVED["implant"]["active"])  # fmt: skip
+    pins = {"suppress": {"id": "dsup", "examples": clean},
+            "recipe": {"id": "down", "examples": own}}  # fmt: skip
+    monkeypatch.setattr(S5, "_approved", lambda behavior: {**APPROVED, "data_pins": pins})
+    over = [f"pipeline.plan.stage5.data.{r}.{k}={v}" for r, pin in pins.items()
+            for k, v in pin.items()]  # fmt: skip
+    ws = pipeline.Workspace(config("s5_suppress", *over))
+    plan = OmegaConf.to_container(ws.cfg.pipeline.plan, resolve=True)
+    old_cfg = config("s5_suppress", *over)
+    old_cfg.behavior.detector.pattern = OLD["detector"]["pattern"]
+    old = pipeline.stage5_plan(pipeline.Workspace(old_cfg), plan)
+    new = pipeline.stage5_plan(ws, plan)
+    assert old["sha256"] == new["sha256"]
+    versions = [p["scoring"]["recipe"]["detector_version"] for p in (old, new)]
+    assert versions == [OLD_VERSION, CURRENT]
+    recorded = {k: v for k, v in old.items() if k not in ("examples", "scoring")}
+    space = Space(paths.runs_root().parent, plan=recorded,
+                  hits={("latent", 25): 40, ("latent", 50): 20})  # fmt: skip
+    sel = space.selection(behavior=OLD)
+    space.confirmation(draw5(1, 100, True, version=OLD_VERSION), behavior=OLD)
+
+    def nothing(*args, **kwargs):
+        raise AssertionError("trained or drawn again after a detector revision")
+
+    monkeypatch.setattr(pipeline, "_s5_train_attempt", nothing)
+    monkeypatch.setattr(pipeline, "rates", nothing)
+    outputs = {"rates": {}}
+    pipeline._s5_suppress(ws, plan, Meter(), outputs)
+    assert outputs["selection"]["plan"] == recorded
+    _, found, decision, _ = pipeline.stage5_state(ws, plan)
+    assert found["selection"] == sel and decision["next"] == "confirmation retest at 100"
+    prompts = [SimpleNamespace(prompt_id=f"c{i:03d}", text=f"q {i}") for i in range(600)]
+    monkeypatch.setattr(C, "prompts", lambda root: prompts)
+    c = pipeline.stage5_confirmation_plan(ws, {**plan, "s5_confirm": {"dose": 100}})
+    assert (c["allocated"]["attempt"], c["allocated"]["purpose"]) == (2, cr.DETECTOR_RETEST)
+
+
+def test_s5_expression_draws_only_the_checks_not_made(planned, monkeypatch):
+    """A check made once is rescored with the current detector, never drawn again (s4u 3)."""
+    c = {"latent": "lat100", "inputs": {"expression": {"pd_corpus": "p", "adl_corpus": "a"}}}
+    monkeypatch.setattr(pipeline, "stage5_step_plan", lambda ws, plan, phase: c)
+
+    def nothing(*args, **kwargs):
+        raise AssertionError("a check drawn again")
+
+    monkeypatch.setattr(pipeline, "audit_pd", nothing)
+    monkeypatch.setattr(pipeline, "adl_corpus_check", nothing)
+    monkeypatch.setattr(pipeline, "ood_observer", lambda ws, latent: "ood-run")
+    outputs = {}
+    pipeline._s5_expression(planned.ws, planned.plan, Meter(), outputs)
+    assert outputs == {"ood": {"lat100": "ood-run"}}
 
 
 # ------------------------------------------------------------------------------ the X_cont pass
@@ -899,7 +1142,9 @@ def tiny(runs, monkeypatch):
     monkeypatch.setitem(XC.PROMPTS, "sha256", set_sha256(prompts))
     monkeypatch.setitem(XC.PROMPTS, "count", 4)  # the 151k-entry vocabulary is slow on a CPU
     monkeypatch.setitem(XC.PROMPTS, "positions", 8)
-    plan = {"lineage": LINK5, "sha256": "p" * 64, "implant": {"active": a, "sham": h}}
+    model = {k: ws.model_cfg[k] for k in ("name", "revision", "dtype")}
+    plan = {"lineage": LINK5, "sha256": "p" * 64, "implant": {"active": a, "sham": h},
+            "model": model, "mode": "continued", "method": "sft"}  # fmt: skip
     c = {"dose": 100, "latent": lc, "plan": plan, "record": {}, "inputs": {}}
     monkeypatch.setattr(pipeline, "stage5_step_plan", lambda ws, plan, phase: c)
     monkeypatch.setattr(torch.cuda, "empty_cache", lambda: None)
@@ -907,14 +1152,9 @@ def tiny(runs, monkeypatch):
 
 
 def test_the_x_cont_pass_runs_through_the_entry_point_without_vllm(tiny, monkeypatch):
-    import importlib.util
     import sys
 
-    spec = importlib.util.spec_from_file_location(
-        "pipeline_entry", paths.REPO_ROOT / "scripts" / "pipeline.py"
-    )
-    entry = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(entry)
+    entry = entry_point()
 
     def no_engine(self):
         raise AssertionError("s5_xcont started vLLM")
@@ -979,3 +1219,58 @@ def test_an_interrupted_attempt_is_repeated_not_retried(tiny, monkeypatch):
     pipeline._s5_xcont(tiny.ws, {}, Meter(), outputs)
     assert calls == [1, 1] and outputs["xcont"]["valid"] is True
     assert len(outputs["xcont"]["attempts"]) == 1
+
+
+def xcont_read(tiny):
+    """The pass's X_cont as the decision reads it (``continuation_stage5._xcont``)."""
+    final = next(ws_runs(tiny.ws).glob("*-xcont-*"))
+    plan = tiny.c["plan"]
+    return S5._xcont({"xcont": final.name}, tiny.c["latent"], 100, {"plan": plan}, RULES, find_run)
+
+
+def test_a_decisive_oom_is_a_failed_attempt_and_its_retry_the_last(tiny, monkeypatch):
+    """Review s4u 2, end to end: attempt 1's decisive check runs out of GPU memory and is
+    recorded as a failed attempt; attempt 2, interrupted, is no attempt and is made again by the
+    next invocation, never attempt 1 again; the decision reads the valid retry."""
+    real_attempt, real_forward = pipeline._xcont_attempt, pipeline._xcont_forward
+    attempts, decisive = [], []
+
+    def attempt(ws, run, c, tol, n):
+        attempts.append(n)
+        return real_attempt(ws, run, c, tol, n)
+
+    def forward(ws, dtype, *args):
+        if dtype == "float32":
+            decisive.append(dtype)
+            if len(decisive) == 1:
+                raise torch.cuda.OutOfMemoryError("CUDA out of memory (the decisive check)")
+            if len(decisive) == 2:
+                raise KeyboardInterrupt  # the Pod went away during the retry
+        return real_forward(ws, dtype, *args)
+
+    monkeypatch.setattr(pipeline, "_xcont_attempt", attempt)
+    monkeypatch.setattr(pipeline, "_xcont_forward", forward)
+    with pytest.raises(KeyboardInterrupt):
+        pipeline._s5_xcont(tiny.ws, {}, Meter(), {})
+    outputs = {}
+    pipeline._s5_xcont(tiny.ws, {}, Meter(), outputs)
+    assert attempts == [1, 2, 2] and outputs["xcont"]["valid"] is True
+    first, retry = (json.loads((find_run(n) / "xcont_evidence.json").read_text())
+                    for n in outputs["xcont"]["attempts"])  # fmt: skip
+    assert (first["outcome"], XC.verdict(first, TOL)) == ("out of memory", False)
+    assert (retry["outcome"], XC.verdict(retry, TOL)) == ("checked", True)
+    assert xcont_read(tiny) is True
+
+
+def test_a_decisive_oom_after_its_retry_is_infeasibility(tiny, monkeypatch):
+    def forward(ws, dtype, *args):
+        raise torch.cuda.OutOfMemoryError("CUDA out of memory")
+
+    monkeypatch.setattr(pipeline, "_xcont_forward", forward)
+    outputs = {}
+    pipeline._s5_xcont(tiny.ws, {}, Meter(), outputs)
+    assert outputs["xcont"]["valid"] is False and len(outputs["xcont"]["attempts"]) == 2
+    again = {}
+    pipeline._s5_xcont(tiny.ws, {}, Meter(), again)  # recorded: nothing runs again
+    assert again["xcont"] == outputs["xcont"]
+    assert xcont_read(tiny) is False

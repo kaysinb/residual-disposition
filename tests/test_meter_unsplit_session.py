@@ -179,3 +179,24 @@ def test_a_session_s_api_cost_counts_its_own_commitments_once(tmp_path):
     assert budget.session_api_cost(path, POD, "s2") == pytest.approx(1.1)
     with pytest.raises(ValueError, match="no recorded ceiling"):
         budget.session_api_cost(path, POD, "s3")
+
+
+def test_a_launch_receipt_of_stage5_never_authorizes_even_on_its_own_log_copy(tmp_path):
+    """Review s4u 5: a whole-item receipt issued before the first session still matched its own
+    log copy, which lacks the session; Stage 5 (every item but Stage 1's) runs its Pods on
+    session receipts only."""
+    from residual_disposition.continuation_rules import drop_reasons, load_rules
+
+    rules = load_rules()
+    allocations = [budget.Allocation("stage5", "stage5", 10.0, 50.0, 5.0)]
+    log = tmp_path / "meter.jsonl"
+    m = budget.AllocationMeter(allocations, cap=1820, reserve=100,
+                               drop_reasons={"stage5": []}, log_path=log)  # fmt: skip
+    m.admit("stage5", spent_elsewhere=0, storage=0)
+    limits = m.start("stage5")
+    receipt = cm.receipt(m, limits, 3.99)  # issued before any session, on this very log
+    problems = cm.verify_receipt(m, receipt, item="stage5", price=3.99, hours=1)
+    assert problems == [
+        "stage5 runs its Pods on session receipts only: no launch receipt authorizes"
+    ]
+    assert drop_reasons(rules)["stage5"]  # the real item exists and is droppable by its gate

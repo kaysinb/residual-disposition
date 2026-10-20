@@ -699,7 +699,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   pass, the same judge run is PD-clean's uniform regrade. The 210 items of d9aecaf08c38 are a development and regression set
   only.
 - **Exception a: example_link's continued-mode lineage to its dose decision** (§12.7 Stage 5,
-  §12.4.1, §12.4.6, §12.4.7; reviews s4q, s4r; C12). The lineage is `stage5/example_link`: the
+  §12.4.1, §12.4.6, §12.4.7; reviews s4q-s4u; C12). The lineage is `stage5/example_link`: the
   meter's item stage5, the ledger of its confirmation draws (the frozen confirmation prompts and
   base seed, its own seeds) and its manifest. `plan.stage5` in
   `experiments/continuation_14b/example_link` names the implant (A `s11c92132dd9839ce`, H
@@ -715,7 +715,13 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        behavior at the seed, of the configured model), the observer's checkpoints, the pilot's
        frozen recipe and LoRA settings (`S5_RECIPE`, `S5_LORA`), the frozen generation spec of
        the exploratory passes (`S5_EXPLORATORY`) and the pinned data; every phase and record is
-       bound to its hash;
+       bound to its hash. The decision checks a recorded plan against the committed experiment
+       config (model with its dtype, implant pair, seed, data pins) and every source cell
+       against the plan's model;
+     - the pinned data's detector scoring is provenance beside the plan, outside its hash: a
+       detector revision leaves the plan, its training and its exploratory draws as they are. A
+       selection made under the plan stands; `s5_suppress` neither trains nor draws again, and
+       a completed exploratory pass is reused whatever detector scored it;
      - continued-mode SFT (the implant LoRA trains further, `train_derived`) of A into L and of
        H into H_s on the suppression data, and of A on the recipe data (the continued recipe
        control), to 800 steps with checkpoints 25, 50, 100, 200, 400 and 800;
@@ -749,7 +755,9 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
      - Non-finite values, an empty or partial set of projections (the base model's targeted
        ones) and an incomplete set of prompts or positions are refused before any verdict.
      - Each attempt is a cell of its own (`xcont_attempt`, its evidence on disk), so the one
-       retry survives an interruption; an interruption repeats its attempt and is no retry.
+       retry survives an interruption; an interruption repeats its attempt and is no retry. An
+       attempt that runs out of GPU memory is recorded as a failed attempt (outcome "out of
+       memory"), so the retry follows it; any other error records nothing.
      - The pass starts no vLLM (`pipeline.ENGINE_FREE`) and holds one model at a time.
      - One retry. A valid X_cont = H + Δ_A is stored as a state: Δ_A on H's implant adapter,
        served at rank 48, with the sha256 of A, A^cont, H and Δ_A. An invalid one is technical
@@ -757,11 +765,14 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   4. `s5_expression` with `plan.s5_expression.dose`, at the analysis dose's L:
      - the full PD pool, on the final PD GPU, also PD-clean's input; the PD corpus passes with 0
        hits in both framings, counted with the current detector;
-     - the ADL corpus;
+     - the ADL corpus, its saved continuations rescored with the current detector;
      - the OOD observer.
+     - A check made once is rescored, never drawn again; of two ADL-corpus cells (one made
+       again after a revision) the current detector's is read and the other kept.
      - They qualify the statement (the Stage-2 table's row "above tolerances"). None of them
        gates the certificate.
-  5. `s5_decide`, on CPU: the record `stage5_decision.json` (`continuation_stage5.decide`).
+  5. `s5_decide`, on CPU: the record `stage5_decision.json` (`continuation_stage5.decide`) of
+     exactly one of `plan.s5_decide.selection` and `plan.s5_decide.infeasibility`.
      - It derives every verdict again from the evidence:
        - the selection's plan, training provenance and exploratory passes, replayed from their
          saved responses with the current detector (a revision rescores, never redraws);

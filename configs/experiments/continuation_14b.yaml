@@ -79,7 +79,8 @@ pipeline:
     s5_expression:
       dose: null                        # the analysis dose, after a valid X_cont
     s5_decide:                          # the Stage-5 decision's runs
-      selection: null                   # the stage5_selection run
+      selection: null                   # the stage5_selection run, or
+      infeasibility: null               # the stage5_infeasibility run (exactly one of the two)
       confirmation: []                  # the stage5_confirmation runs, in attempt order
       xcont: null                       # the xcont run at the analysis dose
       expression: {}                    # pd_corpus, adl_corpus, ood: the runs at the analysis dose

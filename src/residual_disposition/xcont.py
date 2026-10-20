@@ -206,7 +206,14 @@ def verdict(evidence: Mapping[str, Any], tol: Mapping[str, Any]) -> bool:
     """An attempt's verdict recomputed from its recorded evidence (review s4s): check (i) over
     every projection the base model targets within the frozen weight tolerance, and the decisive
     check (ii) of ``CHECK["dtype"]`` over every frozen position within the logit tolerances; a
-    record of other counts, tolerances or non-finite statistics is refused (ValueError)."""
+    record of other counts, tolerances or non-finite statistics is refused (ValueError). An
+    attempt whose decisive check ran out of GPU memory is a failed attempt (review s4u 2)."""
+    if evidence.get("outcome") == "out of memory":
+        if not evidence.get("error") or evidence.get("valid") is not False:
+            raise ValueError("an out-of-memory attempt without its error, or not failed")
+        return False
+    if evidence.get("outcome") != "checked":
+        raise ValueError(f"an attempt of outcome {evidence.get('outcome')!r}")
     w = evidence.get("weights") or {}
     logits = evidence.get("logits") or {}
     if logits.get("decisive") != CHECK["dtype"]:

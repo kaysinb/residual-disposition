@@ -36,7 +36,9 @@ begun under.
 
 A Pod is launched only on a live reservation: ``start --receipt`` writes a launch receipt (the
 item, its limits, the price, the Pod's hours, the allocations' hash and the sha256 of the log
-right after the start). On the Pod, ``verify-receipt`` with ``--log`` naming the copy of that
+right after the start). Only Stage 1's item ran its Pods on one (``LAUNCH_RECEIPT_ITEMS``); every
+later item runs them on session receipts, and a launch receipt of it authorizes nothing (review
+s4u 5). On the Pod, ``verify-receipt`` with ``--log`` naming the copy of that
 log replays it and succeeds only if the copy is the one the receipt names, the receipt is for the
 expected item, that item is running, unsplit and uncharged with exactly those limits, the price
 is the receipt's, and the requested hours fit within the item's live GPU limit at that price
@@ -157,12 +159,21 @@ def verify_session_receipt(
     return problems
 
 
+# The only item whose Pods ran on a whole-item launch receipt (Stage 1, 2026-10-15/16): every
+# later item runs its Pods on session receipts (review s4u 5), so a launch receipt of any other
+# item authorizes nothing, whatever log copy it is checked against.
+LAUNCH_RECEIPT_ITEMS = ("stage0_1",)
+
+
 def verify_receipt(
     m: AllocationMeter, data: dict, *, item: str, price: float, hours: float
 ) -> list[str]:
     """Why a launch receipt does not authorize ``hours`` of ``item`` at ``price`` on the log copy
-    of ``m``. The hours allowed come from the replayed log, never from the receipt: the item's
-    live GPU limit at the verified price; the receipt's own fields must agree with them."""
+    of ``m``. Only Stage 1's item has launch receipts (``LAUNCH_RECEIPT_ITEMS``); the hours allowed
+    come from the replayed log, never from the receipt: the item's live GPU limit at the verified
+    price; the receipt's own fields must agree with them."""
+    if item not in LAUNCH_RECEIPT_ITEMS:
+        return [f"{item} runs its Pods on session receipts only: no launch receipt authorizes"]
     problems = []
     if hashlib.sha256(m.log_path.read_bytes()).hexdigest() != data.get("log_sha256"):
         problems.append("the log copy is not the log the receipt was issued from")
