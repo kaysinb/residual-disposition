@@ -773,9 +773,10 @@ class AllocationMeter:
     - Update rule: a planned item's allocation is max(central, the mean cost of the completed
       items of its kind).
     - ``drop`` takes only a reason frozen for that item and releases a reservation.
-    - The cap is the rules' (``cap``; $1,770 from 2026-10-19 by the user's decision, $1,500
-      before). A log begun under a lower cap is migrated by ``migrate_cap``, a ``cap`` event with
-      its reason that raises the log's cap to the rules'; until then it records nothing else.
+    - The cap is the rules' (``cap``; $1,820 from 2026-10-20 and $1,770 from 2026-10-19 by the
+      user's decisions, $1,500 before). A log begun under a lower cap is migrated by
+      ``migrate_cap``, a ``cap`` event with its reason that raises the log's cap to the rules';
+      until then it records nothing else.
       Spent money, reservations and history stay as they are; every admission records the cap it
       was checked against. A cap is never lowered.
 

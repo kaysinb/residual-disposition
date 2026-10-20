@@ -2280,7 +2280,7 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
 - **Meter rule** **[coord, review_b1; replaces the earlier rule]**, before each plan item: spent
   + outstanding commitments + the complete next batch + the allocations of every unfinished,
   undropped item of higher priority + future storage + $100 reserve ≤ $1,500 ($1,770 from
-  2026-10-19, below). Every item counts once: a started item's remaining cost is in the
+  2026-10-19, $1,820 from 2026-10-20, below). Every item counts once: a started item's remaining cost is in the
   commitments. Otherwise the item is deferred or cut (from 2026-10-19, only after the user's
   decision, below).
   - **Priority** (frozen, highest first): Stages 0–1; Stage 2, its first behavior; panel
@@ -2315,6 +2315,12 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     the meter's log, begun under $1,500, is migrated by a `cap` event with its reason, keeping
     spent money, reservations and history. The allocations, the $100 reserve, the priority, the
     cut order and the update rule are unchanged.
+  - **Cap, 2026-10-20** **[user]**: $1,820 (from $1,770). The rules' `meter.cap_usd` is 1820;
+    the rules' hash now leaves the cap out (it is formed with the cap at $1,770,
+    `continuation_rules.HASH_CAP_USD`), so every rules sha256 recorded since 2026-10-19
+    (Stage 2's cells and decision, the Y₂ manifest) stays valid. The meter's log is migrated
+    by one `cap` event, $1,770 to $1,820, with its reason. The allocations, the reserve, the
+    priority, the cut order and the update rule are unchanged.
   - **A shortfall goes to the user, 2026-10-19** **[user]**. A planned step that does not fit,
     whether the meter refuses its admission or the cut order would cut a stage, is stopped, not
     cut or cancelled, and reported with its price: what must be added for it to pass and what

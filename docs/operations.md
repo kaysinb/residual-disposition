@@ -346,6 +346,12 @@ The judge is on the standard tier in both columns. Main branch, under the $1,770
 | central cuts by the order (hypothetical) | Stages 6, 5 | none | none | Stages 6, 5 |
 | stress cuts by the order (hypothetical) | 6, 5, guillemets, the last panel behavior, Stage 2 to one | 6, 5, guillemets, the last panel behavior | as §12.3.9 | as §12.3.9 |
 
+Under the $1,820 cap (the user, 2026-10-20; `runs/continuation_inventory/20261020-cap1820-{none,flex,standard}`, at 3e83f2b, with C10's method-check
+unit of 4 / 8 min), main branch, frozen API units / interpreter on flex / standard tier:
+- central $1,460 / $1,574 / $1,681 ($360 / $246 / $139 below the cap), no cuts by the order;
+- stress $2,294 / $2,408 / $2,515; hypothetical cuts Stages 6 and 5, guillemets and the last panel
+  behavior, on the standard tier also Stage 2 down to one behavior.
+
 Against §12.3.9 at the frozen API units: the method-equivalence validations add $65.97 (48 ×
 $1.37; the legacy extractor computes only the layer-20 δ̄, so this [estimate] is likely high),
 k*'s second three seeds add $33.28, and the reuse of A and H saves $16.66 ($26.77 with the
@@ -375,11 +381,14 @@ to the mean actual cost of its completed ones.
 Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregistration §12.3.7,
 §12.4, §12.4.1, §12.4.3 and §12.8 carry them).
 
-- **Cap $1,770.** `configs/continuation/rules.yaml` `meter.cap_usd` is 1770 (the user: $1,700
-  first, then $1,770 to keep Stages 5 and 6 with the interpreter on flex) and the rules' frozen
-  sha256 (`simulate_continuation.FROZEN`) is `0bc36aab…`; the official Stage-0 simulations ran
+- **Cap $1,820.** `configs/continuation/rules.yaml` `meter.cap_usd` is 1820 (the user: $1,700
+  first, then $1,770 to keep Stages 5 and 6 with the interpreter on flex, then $1,820 on
+  2026-10-20) and the rules' frozen sha256 (`simulate_continuation.FROZEN`) is `0bc36aab…`,
+  formed with the cap at $1,770 (`continuation_rules.HASH_CAP_USD`: the cap is the user's budget,
+  outside the rules' hash, so the raise to $1,820 keeps it); the official Stage-0 simulations ran
   under `9cb5c4c9…`, which differs only in the cap, and no simulation reads the meter. The meter's
-  log, begun under $1,500, records nothing until it is migrated, once, after the review:
+  log, begun under $1,500 and migrated to $1,770 on 2026-10-19, records nothing until it is
+  migrated again, once, to $1,820 after the review:
   `uv run python scripts/continuation_meter.py migrate-cap --reason "<the user's decision>"`.
   `status` shows the cap in force, the rules' cap and `needs_migration`.
 - **A shortfall goes to the user.** A step that does not fit (a refused admission, a projected

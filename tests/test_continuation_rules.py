@@ -172,3 +172,20 @@ def test_a_revision_before_any_draw_changes_only_the_version():
 def test_confirmation_seeds_differ_by_attempt_and_version():
     seeds = {cr.confirmation_seed(1, "link/0", 400, a, v) for a in (1, 2) for v in ("v1", "v2")}
     assert len(seeds) == 4
+
+
+def test_the_rules_hash_leaves_the_meter_cap_out():
+    """The cap is the user's budget (§12.8): raising it keeps the rules' hash and every hash
+    recorded since 2026-10-19; any other rule, the reserve included, changes it."""
+    import copy
+
+    from residual_disposition.simulate_continuation import FROZEN
+
+    rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
+    data = copy.deepcopy(dict(rules.data))
+    assert data["meter"]["cap_usd"] == 1820 and rules.sha256 == FROZEN["rules_sha256"]
+    for cap in (1500, 1770, 1820, 2000):
+        data["meter"]["cap_usd"] = cap
+        assert cr.rules_hash(data) == FROZEN["rules_sha256"]
+    data["meter"]["reserve_usd"] = 99
+    assert cr.rules_hash(data) != FROZEN["rules_sha256"]

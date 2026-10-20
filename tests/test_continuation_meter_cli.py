@@ -128,7 +128,7 @@ def test_a_log_begun_under_the_old_cap_is_migrated_by_its_own_event(tmp_path, ca
 
     log = tmp_path / "meter.jsonl"
     rules = load_rules()
-    assert rules.data["meter"]["cap_usd"] == 1770
+    assert rules.data["meter"]["cap_usd"] == 1820
     AllocationMeter(  # a log begun under the cap of before 2026-10-19
         load_allocations(cm.ALLOCATIONS),
         cap=1500,
@@ -137,18 +137,40 @@ def test_a_log_begun_under_the_old_cap_is_migrated_by_its_own_event(tmp_path, ca
         log_path=log,
     )
     code, status = run(capsys, log, "status")
-    assert (status["cap"], status["rules_cap"], status["log_begun_under_cap"]) == (1500, 1770, 1500)
+    assert (status["cap"], status["rules_cap"], status["log_begun_under_cap"]) == (1500, 1820, 1500)
     assert status["needs_migration"]
     admit = ("admit", "stage0_1", "--spent-elsewhere", "0", "--storage")
     with pytest.raises(ValueError, match="migrate it first"):
         cm.main(["--log", str(log), *admit, "55"])
-    reason = "user, 2026-10-19: $1,500 to $1,770 after Stage 1's re-priced API units"
+    reason = "user, 2026-10-20: $1,500 to $1,820"
     code, out = run(capsys, log, "migrate-cap", "--reason", reason)
-    assert code == 0 and (out["cap"], out["log_begun_under_cap"]) == (1770, 1500)
-    code, out = run(capsys, log, *admit, "1600")  # 135.65 + 1600 + 100 > 1770
-    assert code == 4 and out["cap"] == 1770
-    code, out = run(capsys, log, *admit, "1500")  # 1735.65: within $1,770, not within $1,500
+    assert code == 0 and (out["cap"], out["log_begun_under_cap"]) == (1820, 1500)
+    code, out = run(capsys, log, *admit, "1600")  # 135.65 + 1600 + 100 > 1820
+    assert code == 4 and out["cap"] == 1820
+    code, out = run(capsys, log, *admit, "1500")  # 1735.65: within $1,820, not within $1,500
     assert code == 0 and out["allowed"]
+
+
+def test_a_log_at_1770_is_migrated_once_more_to_the_rules_cap(tmp_path, capsys):
+    """The log of 2026-10-19 (begun under $1,500, migrated to $1,770) takes one more cap event,
+    $1,770 to $1,820 (the user, 2026-10-20), its history kept."""
+    from residual_disposition.budget import AllocationMeter, load_allocations
+    from residual_disposition.continuation_rules import drop_reasons, load_rules
+
+    log = tmp_path / "meter.jsonl"
+    rules = load_rules()
+    m = AllocationMeter(load_allocations(cm.ALLOCATIONS), cap=1500, reserve=100,
+                        drop_reasons=drop_reasons(rules), log_path=log)  # fmt: skip
+    m._cap["usd"] = 1500
+    with m._transaction():  # the event of 2026-10-19, as the log holds it
+        m._write(m._handle, {"event": "cap", "from_usd": 1500, "cap_usd": 1770,
+                             "reason": "user, 2026-10-19"})  # fmt: skip
+    code, status = run(capsys, log, "status")
+    assert (status["cap"], status["needs_migration"]) == (1770, True)
+    code, out = run(capsys, log, "migrate-cap", "--reason", "user, 2026-10-20: $1,770 to $1,820")
+    assert code == 0 and out["cap"] == 1820
+    events = [json.loads(line) for line in log.read_text().splitlines()[1:]]
+    assert [(e["from_usd"], e["cap_usd"]) for e in events] == [(1500, 1770), (1770, 1820)]
 
 
 def two_pods(tmp_path, capsys):

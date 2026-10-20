@@ -37,8 +37,19 @@ def _fraction(value: Any) -> Fraction:
     return Fraction(str(value))
 
 
+# The meter's cap is the user's budget, not a rule of the analysis (§12.8): it is raised by the
+# user's decision and a ``cap`` event in the meter's log, which records it. The rules' hash is
+# formed with the cap at its value when Stage 2's records began to carry the hash (2026-10-19,
+# $1,770), so that a later raise leaves every recorded rules_sha256 valid; every other rule, the
+# reserve included, stays in the hash as it is.
+HASH_CAP_USD = 1770
+
+
 def rules_hash(data: Mapping[str, Any]) -> str:
-    """Full sha256 of the canonical JSON form of the rules mapping."""
+    """Full sha256 of the canonical JSON form of the rules mapping, the meter's cap at
+    ``HASH_CAP_USD``."""
+    if isinstance(data.get("meter"), Mapping) and "cap_usd" in data["meter"]:
+        data = {**data, "meter": {**data["meter"], "cap_usd": HASH_CAP_USD}}
     blob = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(blob.encode()).hexdigest()
 
