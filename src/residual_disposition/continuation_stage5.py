@@ -38,6 +38,13 @@ stand (review s4u 3).
 
 A decided record becomes ``manifests/stage5_<behavior>.json`` (``scripts/continuation_stage5.py``),
 committed before the lineage's k*; its acceptance recomputes it from the runs it names.
+
+The descriptive DPO lineage beside it (``stage5_dpo/<behavior>``; the user, 2026-10-20; C15,
+review s5b) is read the same way under its own plan (``pipeline.S5_DPO``: DPO in stack mode, β
+0.1, on the frozen preference pairs, L and H_s only): its cells are ``stage5_dpo_<step>``, its
+inputs name their lineage (``"lineage"``), it has no X_cont (the dose is decided by the margin
+rule, the confirmation and the expression checks) and its manifest is
+``manifests/stage5_dpo_<behavior>.json``. The continued lineage's records are unchanged.
 """
 
 from __future__ import annotations
@@ -65,6 +72,25 @@ def _p():
     return pipeline
 
 
+def _line(inputs: Mapping[str, Any]) -> Any:
+    """The Stage-5 line the decision's inputs name (``"lineage"``; the continued one without)."""
+    p = _p()
+    line = p.s5_line(inputs.get("lineage"))
+    if inputs.get("lineage") not in (None, line.lineage(inputs["behavior"])) or (
+        line is p.S5_CONTINUED and "lineage" in inputs
+    ):
+        raise ValueError(f"{inputs.get('lineage')}: not a Stage-5 lineage of {inputs['behavior']}")
+    return line
+
+
+def _line_of(plan: Mapping[str, Any]) -> Any:
+    return _p().s5_line(plan.get("lineage"))
+
+
+def _label(line: Any) -> str:
+    return "Stage-5" if line is _p().S5_CONTINUED else "Stage-5 DPO"
+
+
 def _config(find_run: Any, name: str | None, step: str) -> tuple[Path, dict, dict] | None:
     """(run, config, summary) of a completed cell of ``step``, None if absent or not completed;
     a completed run of another step is refused."""
@@ -77,23 +103,35 @@ def _config(find_run: Any, name: str | None, step: str) -> tuple[Path, dict, dic
     return find_run(name), config, summary
 
 
-def _plan(plan: Mapping[str, Any], behavior: str, rules: Any) -> dict[str, Any]:
-    """A recorded Stage-5 plan, checked: hashing to its sha256, the behavior's lineage, continued
-    -mode SFT, the frozen recipe, LoRA and exploratory spec, the rules' checkpoints, these rules."""
+PLAN_KEYS = ("lineage", "behavior", "implant", "seed", "method", "mode", "model", "checkpoints",
+             "recipe", "lora", "exploratory", "data", "rules_sha256")  # fmt: skip
+DPO_PLAN_KEYS = ("scope", "pairs")  # the DPO lineage's alone (C15)
+
+
+def _plan(plan: Mapping[str, Any], behavior: str, rules: Any, line: Any = None) -> dict[str, Any]:
+    """A recorded Stage-5 plan, checked: hashing to its sha256, the behavior's lineage of
+    ``line`` (default the one the plan names), its method and mode (continued-mode SFT, or the
+    DPO lineage's stack-mode DPO with its descriptive scope and frozen pairs), the frozen recipe,
+    LoRA and exploratory spec, the rules' checkpoints, these rules, and no other key."""
     p = _p()
+    line = line or _line_of(plan)
     body = {k: v for k, v in plan.items() if k != "sha256"}
     body_pins = {r: {"id": d.get("id"), "examples": d.get("examples")}
                  for r, d in (body.get("data") or {}).items()}  # fmt: skip
     body = {**body, "data_pins": body_pins}
-    frozen = {"lineage": C.stage5_lineage(behavior), "behavior": behavior, "method": p.S5_METHOD,
-              "mode": p.S5_MODE, "recipe": p.S5_RECIPE, "lora": p.S5_LORA,
+    frozen = {"lineage": line.lineage(behavior), "behavior": behavior, "method": line.method,
+              "mode": line.mode, "recipe": line.recipe, "lora": p.S5_LORA,
               "exploratory": p.S5_EXPLORATORY, "rules_sha256": rules.sha256,
               "checkpoints": [int(d) for d in rules["observer"]["checkpoints"]]}  # fmt: skip
+    if line is p.S5_DPO:
+        frozen.update(scope="descriptive", pairs=p.S5D_PAIRS)
     frozen.update(_approved(behavior))
     wrong = sorted(k for k, v in frozen.items() if body.get(k) != v)
+    keys = (*PLAN_KEYS, *(DPO_PLAN_KEYS if line is p.S5_DPO else ()), "data_pins")
+    wrong += sorted(set(body) - set(keys))
     hashed = {k: v for k, v in body.items() if k != "data_pins"}
     if p.content_hash(hashed) != plan.get("sha256") or wrong:
-        raise ValueError(f"not the frozen Stage-5 plan of {behavior}: {wrong or 'its hash'}")
+        raise ValueError(f"not the frozen {_label(line)} plan of {behavior}: {wrong or 'its hash'}")
     return dict(plan)
 
 
@@ -125,7 +163,7 @@ def _model(config: Mapping[str, Any], plan: Mapping[str, Any], name: str) -> Non
 
 def _training(name: str, plan: Mapping[str, Any], find_run: Any) -> dict[str, Any]:
     """A completed training attempt of ``plan`` (its params and summary)."""
-    found = _config(find_run, name, TRAINING)
+    found = _config(find_run, name, _line_of(plan).step("training"))
     if found is None:
         raise ValueError(f"{name}: not a completed training attempt")
     _, config, summary = found
@@ -139,19 +177,24 @@ def _training(name: str, plan: Mapping[str, Any], find_run: Any) -> dict[str, An
 
 
 def _training_run(name: str, role: str, attempt: int, plan: Mapping, states: Mapping, find_run):
-    """One training cell of the lineage, as the plan and its attempt make it."""
+    """One training cell of the lineage, as the plan and its attempt make it (the DPO lineage's
+    on the frozen preference pairs)."""
     p = _p()
-    found = _config(find_run, name, f"train_{p.S5_ROLES[role][0]}")
+    line = _line_of(plan)
+    found = _config(find_run, name, f"train_{line.roles[role][0]}")
     if found is None:
         raise ValueError(f"{name}: not a completed training cell")
     _, config, summary = found
     _model(config, plan, name)
-    kind, parent, data = p.S5_ROLES[role]
+    kind, parent, data = line.roles[role]
     q = config.get("params") or {}
+    rows = plan["pairs"] if data == "pairs" else {"sha256": plan["data"][data]["examples"]}
     want = {"parent": plan["implant"][parent], "kind": kind, "seed": plan["seed"],
-            "mode": p.S5_MODE, "method": p.S5_METHOD, "doses": plan["checkpoints"],
-            "data": plan["data"][data]["examples"], "recipe": p.S5_RECIPE, "lora": p.S5_LORA,
-            "label": p._attempt_label(attempt), "strength": {}}  # fmt: skip
+            "mode": line.mode, "method": line.method, "doses": plan["checkpoints"],
+            "data": rows["sha256"], "recipe": line.recipe, "lora": p.S5_LORA,
+            "label": p._attempt_label(attempt, line), "strength": {}}  # fmt: skip
+    if data == "pairs":
+        want["n"] = rows["n"]
     wrong = sorted(k for k, v in want.items() if q.get(k) != v)
     got = {int(d): s for d, s in (summary.get("states") or {}).items()}
     if wrong or got != {int(d): s for d, s in states.items()}:
@@ -180,13 +223,13 @@ def _selection(
     """The selection record of ``inputs["selection"]``, validated whole, its bounds recomputed
     from the exploratory passes' saved responses with the current detector, or with
     ``scorer``'s, an earlier behavior config (the record's own bounds are not read)."""
-    behavior = inputs["behavior"]
-    found = _config(find_run, inputs.get("selection"), SELECTION)
+    behavior, line = inputs["behavior"], _line(inputs)
+    found = _config(find_run, inputs.get("selection"), line.step("selection"))
     if found is None:
         raise ValueError(f"the selection run {inputs.get('selection')} is not a completed cell")
     run, config, _ = found
-    record = json.loads((run / "stage5_selection.json").read_text())
-    plan = _plan(record.get("plan") or {}, behavior, rules)
+    record = json.loads((run / f"{line.step('selection')}.json").read_text())
+    plan = _plan(record.get("plan") or {}, behavior, rules, line)
     _model(config, plan, inputs["selection"])
     params = config.get("params") or {}
     checkpoints = plan["checkpoints"]
@@ -201,15 +244,15 @@ def _selection(
         or record.get("implant") != plan["implant"]
         or sorted(int(d) for d in doses) != checkpoints
     ):
-        raise ValueError(f"{inputs['selection']}: not {behavior}'s Stage-5 selection")
+        raise ValueError(f"{inputs['selection']}: not {behavior}'s {_label(line)} selection")
     provenance = record.get("provenance") or {}
     training = _training(provenance.get("training"), plan, find_run)
     p = _p()
     if training["outcome"] != "ok" or training.get("runs") != {
-        r: provenance.get(r) for r in p.S5_ROLES
+        r: provenance.get(r) for r in line.roles
     }:
         raise ValueError(f"{inputs['selection']}: its training attempt is not the record's")
-    for role in p.S5_ROLES:
+    for role in line.roles:
         states = {int(d): doses[str(d)][role] for d in checkpoints}
         if training["states"].get(role) != {str(d): s for d, s in states.items()}:
             raise ValueError(f"{inputs['selection']}: its {role} states are not its training's")
@@ -242,7 +285,7 @@ def candidates_of(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[
 
     current, scorers = str(inputs["detector_version"]), {}
     for run in inputs.get("confirmation") or []:
-        found = _config(find_run, run, CONFIRMATION)
+        found = _config(find_run, run, _line(inputs).step("confirmation"))
         if found is None or "detector_version" not in found[2]:
             continue
         scorer = behavior_from_config(found[1]["behavior"])
@@ -275,7 +318,8 @@ def _behavior(behavior: str) -> Any:
 def _infeasibility(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> tuple[dict, list]:
     """A recorded technical infeasibility of the training: its plan's two attempts, each with a
     classified failure, in order."""
-    found = _config(find_run, inputs["infeasibility"], INFEASIBILITY)
+    line = _line(inputs)
+    found = _config(find_run, inputs["infeasibility"], line.step("infeasibility"))
     if found is None:
         raise ValueError(f"{inputs['infeasibility']}: not a completed infeasibility record")
     _, config, _ = found
@@ -284,10 +328,10 @@ def _infeasibility(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> tupl
     attempts = int(rules["stage5"]["retries_before_infeasible"]) + 1
     if len(names) != attempts:
         raise ValueError(f"{inputs['infeasibility']}: {len(names)} attempts, not {attempts}")
-    first = _config(find_run, names[0], TRAINING)
+    first = _config(find_run, names[0], line.step("training"))
     if first is None:
         raise ValueError(f"{names[0]}: not a completed training attempt")
-    plan = _plan(first[2].get("plan") or {}, inputs["behavior"], rules)
+    plan = _plan(first[2].get("plan") or {}, inputs["behavior"], rules, line)
     _model(config, plan, inputs["infeasibility"])
     if params.get("plan_sha256") != plan["sha256"]:
         raise ValueError(f"{inputs['infeasibility']}: the record of another plan")
@@ -519,8 +563,12 @@ def _record(plan, inputs, decision, rules, pd_counts) -> dict[str, Any]:
 def decide(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, Any]:
     """The decision record of a Stage-5 lineage from the runs ``inputs`` names ({"behavior",
     "detector_version" (the current one), "selection" or "infeasibility", "confirmation": [runs,
-    in attempt order], "xcont": run or None, "expression": {check: run}})."""
-    name = C.stage5_lineage(inputs["behavior"])
+    in attempt order], "xcont": run or None, "expression": {check: run}}, and for the DPO
+    lineage its "lineage", with no X_cont: its expression checks follow the confirmed dose)."""
+    line = _line(inputs)
+    name = line.lineage(inputs["behavior"])
+    if not line.xcont and inputs.get("xcont"):
+        raise ValueError(f"{name} has no X_cont: {inputs['xcont']}")
     if inputs.get("infeasibility"):
         plan, failures = _infeasibility(inputs, rules, find_run)
         decision = {"status": "decided", "outcome": cr.INFEASIBLE, "analysis_dose": None,
@@ -533,14 +581,17 @@ def decide(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, An
     observer = rules["observer"]
     checkpoints = record["plan"]["checkpoints"]
     margin = Fraction(str(observer["margin"]))
+    step = line.step("confirmation")
     for run in inputs.get("confirmation") or []:
-        found = _config(find_run, run, CONFIRMATION)
+        found = _config(find_run, run, step)
         if found is not None:
             _model(found[1], record["plan"], run)
-    draws, complete = S2._draws(inputs, doses, rules, find_run, step=CONFIRMATION, name=name)
+    draws, complete = S2._draws(inputs, doses, rules, find_run, step=step, name=name)
     ledger = {"detector_version": str(inputs["detector_version"]), "lineage": name,
               "base_seed": C.FROZEN["base_seed"],
               "candidates_of": candidates_of(inputs, rules, find_run)}  # fmt: skip
+    if not line.xcont:
+        ledger["xcont_step"] = False
     decision = cr.stage5_decision(upper, checkpoints, margin, draws, None, {}, **ledger)
     pd_counts: dict[str, Any] = {}
     if not complete:
@@ -553,9 +604,9 @@ def decide(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, An
     elif decision.get("analysis_dose") is not None:
         dose = decision["analysis_dose"]
         latent = doses[dose]["latent"]
-        xcont = _xcont(inputs, latent, dose, record, rules, find_run)
+        xcont = _xcont(inputs, latent, dose, record, rules, find_run) if line.xcont else None
         expression = {}
-        if xcont:
+        if xcont or not line.xcont:
             expression, pd_counts = _expression(inputs, latent, rules, find_run, record["plan"])
         decision = cr.stage5_decision(
             upper, checkpoints, margin, draws, xcont, expression, **ledger
@@ -576,18 +627,25 @@ def cells(runs: Path, experiment: str, step: str) -> list[tuple[Path, dict, dict
     return out
 
 
-def find_inputs(runs: Path, experiment: str, behavior: str, rules: Any, find_run: Any) -> dict:
+def find_inputs(
+    runs: Path, experiment: str, behavior: str, rules: Any, find_run: Any, line: Any = None
+) -> dict:
     """The decision's inputs as the space holds them: a recorded infeasibility of the lineage's
     training, or its one completed selection, the lineage's confirmation cells in attempt order,
-    and at the analysis dose's latent state its X_cont and expression cells. Two cells of one
-    kind are refused."""
-    name = C.stage5_lineage(behavior)
+    and at the analysis dose's latent state its X_cont (the continued lineage's) and expression
+    cells. Two cells of one kind are refused. ``line``: the Stage-5 line (default the continued
+    one; ``pipeline.S5_DPO`` the descriptive DPO lineage, whose inputs name it)."""
+    p = _p()
+    line = line or p.S5_CONTINUED
+    name = line.lineage(behavior)
     base = {"behavior": behavior, "detector_version": S2.current_detector_version(behavior),
             "selection": None, "infeasibility": None, "confirmation": [], "xcont": None,
             "expression": {}}  # fmt: skip
-    failed = [r.name for r, c, s in cells(runs, experiment, INFEASIBILITY)
+    if line is p.S5_DPO:
+        base["lineage"] = name
+    failed = [r.name for r, c, s in cells(runs, experiment, line.step("infeasibility"))
               if (s.get("plan") or {}).get("lineage", name) == name]  # fmt: skip
-    selections = [r for r, c, s in cells(runs, experiment, SELECTION)
+    selections = [r for r, c, s in cells(runs, experiment, line.step("selection"))
                   if (c.get("params") or {}).get("lineage") == name]  # fmt: skip
     if len(failed) > 1 or len(selections) > 1 or (failed and selections):
         raise ValueError(f"{len(failed)} infeasibility records and {len(selections)} selections")
@@ -597,7 +655,7 @@ def find_inputs(runs: Path, experiment: str, behavior: str, rules: Any, find_run
         raise ValueError(f"no completed selection of {name}")
     draws = sorted(
         (s.get("attempt", 0), r.name)
-        for r, c, s in cells(runs, experiment, CONFIRMATION)
+        for r, c, s in cells(runs, experiment, line.step("confirmation"))
         if (c.get("params") or {}).get("lineage") == name
     )
     if len({a for a, _ in draws}) != len(draws):
@@ -632,7 +690,8 @@ def find_inputs(runs: Path, experiment: str, behavior: str, rules: Any, find_run
                                  f"with the current detector")  # fmt: skip
         return found[0][0] if found else None
 
-    inputs["xcont"] = one(XCONT, "X_cont cells", lambda q: q.get("latent") == latent)
+    if line.xcont:
+        inputs["xcont"] = one(XCONT, "X_cont cells", lambda q: q.get("latent") == latent)
     for check, step in (
         ("pd_corpus", "tool_pd"),
         ("adl_corpus", "adl_corpus"),
@@ -659,8 +718,10 @@ def next_step(decision: Mapping[str, Any]) -> tuple[str, int | None]:
     return "selection", None
 
 
-def manifest_path(root: Path, behavior: str) -> Path:
-    return root / "manifests" / f"stage5_{behavior}.json"
+def manifest_path(root: Path, behavior: str, line: Any = None) -> Path:
+    """The lineage's decision manifest: ``stage5_<behavior>.json``, the DPO lineage's
+    ``stage5_dpo_<behavior>.json``."""
+    return root / "manifests" / f"{(line or _p().S5_CONTINUED).key}_{behavior}.json"
 
 
 METADATA = ("decision_run", "sha256", "committed_at")
@@ -673,11 +734,15 @@ def decision_problems(
     behavior's current detector, the whole record recomputed from the runs it names (``decide``)
     equal to it but for its metadata, and at ``path`` its behavior's file."""
     behavior = str(data.get("behavior"))
-    if path is not None and Path(path).name != manifest_path(Path("."), behavior).name:
-        return [f"{Path(path).name} is not the Stage-5 manifest of {behavior}"]
+    inputs = data.get("inputs") or {}
+    try:
+        line = _line({**inputs, "behavior": behavior})
+    except ValueError as error:
+        return [str(error)]
+    if path is not None and Path(path).name != manifest_path(Path("."), behavior, line).name:
+        return [f"{Path(path).name} is not the {_label(line)} manifest of {behavior}"]
     if data.get("rules_sha256") != rules.sha256:
         return ["the decision was made under other rules"]
-    inputs = data.get("inputs") or {}
     try:
         current = S2.current_detector_version(behavior)
     except (OSError, ValueError, KeyError) as error:

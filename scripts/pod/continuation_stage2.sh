@@ -43,6 +43,13 @@
 #      a new snapshot made before the certificate;
 #   s5c: the certificate's six blocks, then H's relearning (s5_relearn_h), then the readers; a
 #      session that stops at its deadline is resumed by the next (completed cells reused).
+# Its descriptive DPO lineage (C15, review s5b), the meter's unsplit item stage5_dpo
+# (ITEM=stage5_dpo), the same way in space a, its passes in the stage5_dpo batch:
+#   s5d: s5d_suppress, then its decision's steps (stage5_next.py --lineage stage5_dpo: each
+#      confirmation, the expression checks at the analysis dose; no X_cont) and the decision cell
+#      (s5d_decide). The decision is written as manifests/stage5_dpo_<behavior>.json and committed,
+#      and a new snapshot made, before k*;
+#   s5dk: k* of the committed DPO lineage <behavior>_dpo_<dose> (H_s at its dose); nothing after.
 #
 # Limits (review s4b). RECEIPT is the meter's receipt of this Pod's session
 # (continuation_meter.py session-open, with the Pod's ID and the deadline set at its creation,
@@ -62,10 +69,11 @@
 # included, it asks the watcher to stop the Pod within 3 minutes. The volume keeps everything,
 # and a rerun of the session resumes its cells (on this Pod or, if it cannot start again, on a new
 # Pod on the same volume).
-# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|p3|s5a|s5k|s5c> SNAP=<snapshot id> WN=<watcher dir name> \
+# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|p3|s5a|s5k|s5c|s5d|s5dk> SNAP=<snapshot id> WN=<watcher dir> \
 #          PRICE=<USD/h> RECEIPT=<file> METER_LOG=<file> POD_ID=<this Pod's ID> \
 #          SOURCE_SNAPSHOT_RECEIPT=<file> [ITEM=stage2/example_link] \
-#          [PD_DRAW=stage2-sxm] [BEHAVIOR=example_link for s5a, s5k, s5c] continuation_stage2.sh
+#          [PD_DRAW=stage2-sxm] [BEHAVIOR=example_link for s5a, s5k, s5c, s5d, s5dk] \
+#          continuation_stage2.sh
 #          (its directory: <attempts>/chain-<session>-<UTC time>)
 set -uo pipefail
 WS=${WORKSPACE:-/workspace}               # the network volume; another root only in tests
@@ -76,11 +84,13 @@ CODE=${CODE_ROOT:-/root/code/residual-disposition}
 case $SESSION in
   a1|a1k|a2) WORKER=pod-a; SPACE=$WS/a ;;
   b1|b2|p1|p2|p3) WORKER=pod-b; SPACE=$WS/c ;;
-  s5a|s5k|s5c) WORKER=pod; SPACE=$WS/a ;;  # the unsplit item's one session (review s4t2 1)
-  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k or s5c"; exit 1 ;;
+  s5a|s5k|s5c|s5d|s5dk) WORKER=pod; SPACE=$WS/a ;;  # an unsplit item's one session (review s4t2 1)
+  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d or s5dk"; exit 1 ;;
 esac
 if [ $WORKER = pod ]; then
-  ITEM=${ITEM:-stage5}; BEHAVIOR=${BEHAVIOR:?the behavior of the Stage-5 lineage}
+  # the lineage's item, phase prefix and record key: the continued one's, or the DPO one's (C15)
+  case $SESSION in s5d|s5dk) LINE=stage5_dpo; P5=s5d ;; *) LINE=stage5; P5=s5 ;; esac
+  ITEM=${ITEM:-$LINE}; BEHAVIOR=${BEHAVIOR:?the behavior of the Stage-5 lineage}
 else
   case $SESSION in p1|p2|p3) ITEM=${ITEM:-} ;; *) ITEM=${ITEM:-stage2/example_link} ;; esac
   BEHAVIOR=${ITEM#stage2/}
@@ -179,8 +189,9 @@ stop_pod() {  # the watcher stops the Pod within 3 minutes (never later than its
 }
 on_exit() { local rc=$?; stop_pod; exit $rc; }
 
-batch_of() {  # <phase>: its batch (budget.batch_of): Stage 5's, the Y control's, or Stage 2's
-  [ $WORKER = pod ] && { echo stage5; return; }
+batch_of() {  # <phase>: its batch (budget.batch_of): the Stage-5 lineage's item (stage5 or
+  # stage5_dpo), the Y control's, or Stage 2's
+  [ $WORKER = pod ] && { echo $ITEM; return; }
   case $1 in control_y) echo y ;; *) echo stage2 ;; esac
 }
 
@@ -221,10 +232,10 @@ upload_dir() {  # <local dir> <bucket path> <log>: one directory, create-only, c
 
 in_src() { (cd $SRC && project-run $SRC "$@"); }
 
-s5_states() {  # <dose>: the Stage-5 selection's states there, from the committed decision's run
-  local sel; sel=$(manifest stage5_$BEHAVIOR.json 'd["inputs"]["selection"]')
+s5_states() {  # <dose>: the lineage's selection's states there, from its committed decision's run
+  local sel; sel=$(manifest ${LINE}_$BEHAVIOR.json 'd["inputs"]["selection"]')
   python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["doses"][sys.argv[2]]))' \
-    "$SPACE/runs/continuation_14b/$sel/stage5_selection.json" "$1"
+    "$SPACE/runs/continuation_14b/$sel/${LINE}_selection.json" "$1"
 }
 
 copy_in() {  # [copy_inputs.py args]: from the other Pod's space, then b, into this one; for the
@@ -245,8 +256,8 @@ source ${RP_ENV:-/etc/rp_environment}
 export SOURCE_SNAPSHOT_RECEIPT
 export CONTAINER_IMAGE=$IMG PYTHONDONTWRITEBYTECODE=1
 log "chain $CHAIN ($ITEM, $WORKER in $SPACE), \$$PRICE/h"
-if [ $WORKER = pod ] && [ "$ITEM" != stage5 ]; then  # never another item's reservation (s4x 1)
-  log "not run: a Stage-5 session runs on the meter's item stage5, not $ITEM"; exit 1
+if [ $WORKER = pod ] && [ "$ITEM" != "$LINE" ]; then  # never another item's reservation (s4x 1)
+  log "not run: a $SESSION session runs on the meter's item $LINE, not $ITEM"; exit 1
 fi
 case "$SESSION:$ITEM" in  # the second behavior's sessions name their item: never a default
   p[123]:stage2/?*) ;;
@@ -466,41 +477,45 @@ p3)
   fi ;;
 esac
 
-s5_decide_args() {  # <stage5_next.py JSON>: the s5_decide overrides of its inputs
+s5_decide_args() {  # <stage5_next.py JSON>: the <P5>_decide overrides of its inputs
   python3 -c 'import json,sys
-i = json.loads(sys.argv[1])["inputs"]; p = "pipeline.plan.s5_decide."
+i = json.loads(sys.argv[1])["inputs"]; p = f"pipeline.plan.{sys.argv[2]}_decide."
 for k in ("selection", "infeasibility", "xcont"):
     if i.get(k): print(f"{p}{k}={i[k]}")
 print(p + "confirmation=[" + ",".join(i.get("confirmation") or []) + "]")
-for k, v in (i.get("expression") or {}).items(): print(f"+{p}expression.{k}={v}")' "$1"
+for k, v in (i.get("expression") or {}).items(): print(f"+{p}expression.{k}={v}")' "$1" $P5
 }
 
 case $SESSION in
-s5a)
-  run_pass $CHAIN-s5suppress $CFG/$BEHAVIOR s5_suppress; step s5_suppress $?
+s5a|s5d)
+  # the continued lineage's phases s5_*, the DPO lineage's s5d_* (no X_cont step)
+  run_pass $CHAIN-${P5}suppress $CFG/$BEHAVIOR ${P5}_suppress; step ${P5}_suppress $?
   PREV=""
   for i in 1 2 3 4 5 6 7 8; do
     [ $OK = 1 ] || break
-    NEXT=$(in_src python scripts/pod/stage5_next.py --runs $SPACE/runs --behavior $BEHAVIOR 2>>$OUT/next.err)
+    NEXT=$(in_src python scripts/pod/stage5_next.py --runs $SPACE/runs --behavior $BEHAVIOR \
+             --lineage $LINE 2>>$OUT/next.err)
     echo "$NEXT" >> $OUT/next.jsonl
     KIND=$(jget "$NEXT" step 2>/dev/null); DOSE=$(jget "$NEXT" dose 2>/dev/null)
     if [ "$KIND$DOSE" = "$PREV" ]; then log "no progress at $KIND $DOSE: its pass left no cell"; step progress 1; break; fi
     PREV=$KIND$DOSE
     case $KIND in
       confirm)
-        run_pass $CHAIN-s5confirm-$DOSE $CFG/$BEHAVIOR s5_confirm pipeline.plan.s5_confirm.dose=$DOSE
-        step s5_confirm-$DOSE $? ;;
+        run_pass $CHAIN-${P5}confirm-$DOSE $CFG/$BEHAVIOR ${P5}_confirm \
+          pipeline.plan.${P5}_confirm.dose=$DOSE
+        step ${P5}_confirm-$DOSE $? ;;
       xcont)
+        if [ $LINE != stage5 ]; then log "stage5_next: X_cont for $LINE, which has none: $NEXT"; step next 1; break; fi
         run_pass $CHAIN-s5xcont-$DOSE $CFG/$BEHAVIOR s5_xcont pipeline.plan.s5_xcont.dose=$DOSE
         step s5_xcont-$DOSE $? ;;
       expression)
-        run_pass $CHAIN-s5expression-$DOSE $CFG/$BEHAVIOR s5_expression \
-          pipeline.plan.s5_expression.dose=$DOSE
-        step s5_expression-$DOSE $? ;;
+        run_pass $CHAIN-${P5}expression-$DOSE $CFG/$BEHAVIOR ${P5}_expression \
+          pipeline.plan.${P5}_expression.dose=$DOSE
+        step ${P5}_expression-$DOSE $? ;;
       decide)
         mapfile -t ARGS < <(s5_decide_args "$NEXT")
-        run_pass $CHAIN-s5decide $CFG/$BEHAVIOR s5_decide "${ARGS[@]}"; step s5_decide $?
-        log "the Stage-5 decision $(jget "$NEXT" decision outcome): its manifest is committed on the laptop before k* (s5k)"
+        run_pass $CHAIN-${P5}decide $CFG/$BEHAVIOR ${P5}_decide "${ARGS[@]}"; step ${P5}_decide $?
+        log "the $LINE decision $(jget "$NEXT" decision outcome): its manifest is committed on the laptop before k* (${SESSION}k)"
         break ;;
       retest) log "the decision needs a confirmation retest after a detector revision: stop and report"; step retest 1; break ;;
       *) log "stage5_next: $NEXT"; step next 1; break ;;
@@ -517,6 +532,23 @@ s5k)
     else
       SHAM=$(jget "$(s5_states $DOSE)" sham_s); A=$(manifest stage5_$BEHAVIOR.json 'd["implant"]["active"]')
       run_pass $CHAIN-kstar $CFG/$BEHAVIOR kstar pipeline.plan.kstar.stage5=true \
+        pipeline.plan.kstar.dose=$DOSE pipeline.plan.kstar.sham_s=$SHAM pipeline.plan.kstar.active=$A
+      step kstar $?
+    fi
+  fi ;;
+s5dk)
+  # k* of the committed DPO lineage <behavior>_dpo_<dose> (C15), after its decision is committed;
+  # it has no certificate or readers
+  if [ ! -f $SRC/manifests/stage5_dpo_$BEHAVIOR.json ]; then
+    log "not run: no committed DPO-lineage decision of $BEHAVIOR in the snapshot"; step manifest 1
+  else
+    DOSE=$(manifest stage5_dpo_$BEHAVIOR.json 'd["decision"]["analysis_dose"]')
+    if [ "$DOSE" = None ]; then
+      log "the DPO-lineage decision has no analysis dose: no k*"; step manifest 1
+    else
+      SHAM=$(jget "$(s5_states $DOSE)" sham_s)
+      A=$(manifest stage5_dpo_$BEHAVIOR.json 'd["implant"]["active"]')
+      run_pass $CHAIN-kstar $CFG/$BEHAVIOR kstar pipeline.plan.kstar.stage5_dpo=true \
         pipeline.plan.kstar.dose=$DOSE pipeline.plan.kstar.sham_s=$SHAM pipeline.plan.kstar.active=$A
       step kstar $?
     fi

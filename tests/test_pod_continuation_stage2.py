@@ -159,10 +159,11 @@ def workspace(tmp_path, capsys):
         # The meter: the item split, this Pod's session opened with its ID, deadline and API money.
         log, receipt = tmp_path / f"meter-{session}.jsonl", tmp_path / f"receipt-{session}.json"
         meter = ["--log", str(log)]
-        item = item or ("stage5" if unsplit else "stage2/pun_intended" if second else
-                        "stage2/example_link")  # fmt: skip
-        if item == "stage5":
-            for above in cm_items()[: cm_items().index("stage5")]:
+        dpo = session.startswith("s5d")  # the descriptive DPO lineage's item (C15)
+        item = item or ("stage5_dpo" if dpo else "stage5" if unsplit else
+                        "stage2/pun_intended" if second else "stage2/example_link")  # fmt: skip
+        if item in ("stage5", "stage5_dpo"):
+            for above in cm_items()[: cm_items().index(item)]:
                 cm.main([*meter, "admit", above, "--spent-elsewhere", "0", "--storage", "55"])
                 cm.main([*meter, "start", above])
                 cm.main([*meter, "complete", above])
@@ -898,6 +899,89 @@ def test_s5c_certifies_then_relearns_h_then_reads_the_continued_lineage(workspac
     assert loads(log) == set()
     assert (ws / "a" / "data" / "states" / Y_ORGANISM).is_dir()  # the pilot's Y, from c
     assert {x: tree(ws / x) for x in ("b", "c")} == before  # read, never written
+
+
+def dpo_lineage(space, hits, with_continued=True):
+    """The descriptive DPO lineage beside the continued one in space a (C15)."""
+    from test_continuation_stage5 import Space
+
+    from residual_disposition import pipeline
+
+    if with_continued:
+        Space(space, hits=hits).selection()
+    lineage = Space(space, hits=hits, line=pipeline.S5_DPO)
+    return lineage, lineage.selection()
+
+
+def test_s5d_runs_the_dpo_lineage_s_steps_on_its_own_item(workspace):
+    ws, setup, log, _ = workspace
+    dpo_lineage(ws / "a", {("latent", 25): 40, ("latent", 50): 20})  # d₁ is 100 for both
+    out = run_chain(setup("s5d", START))
+    assert out.returncode != 0 and "no progress at confirm 100" in out.stdout
+    ps = passes(log)
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["s5d_suppress", "s5d_confirm"]
+    assert overrides(ps[1])["pipeline.plan.s5d_confirm.dose"] == "100"
+    for e in ps:  # the DPO lineage's item: its own batch
+        o = overrides(e)
+        assert o["pipeline.plan.cost.batches.stage5_dpo"] == "12.0"
+        assert "pipeline.plan.cost.batches.stage5" not in o
+    chain = next((ws / "attempts" / "residual-disposition").glob("chain-s5d-*"))
+    summary = json.loads((chain / "summary.json").read_text())
+    assert (summary["worker"], summary["item"]) == ("pod", "stage5_dpo")
+    assert stop_asked(log)
+
+
+def test_s5d_records_its_decision_and_ends_before_k_star(workspace):
+    ws, setup, log, _ = workspace
+    _, sel = dpo_lineage(ws / "a", {("latent", d): 40 for d in (25, 50, 100, 200, 400, 800)})
+    out = run_chain(setup("s5d", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    ps = passes(log)
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["s5d_suppress", "s5d_decide"]
+    o = overrides(ps[1])
+    assert o["pipeline.plan.s5d_decide.selection"] == sel  # the DPO lineage's, not the continued
+    assert o["pipeline.plan.s5d_decide.confirmation"] == "[]"
+    assert not any(k.startswith("pipeline.plan.s5_decide") for k in o)
+    assert "stage5_dpo decision" in out.stdout and "before k* (s5dk)" in out.stdout
+
+
+def test_s5dk_waits_for_the_committed_dpo_decision(workspace):
+    ws, setup, log, _ = workspace
+    out = run_chain(setup("s5dk", START))
+    assert out.returncode != 0 and "no committed DPO-lineage decision" in out.stdout
+    assert not passes(log)
+
+
+def test_s5dk_calibrates_k_star_of_the_committed_dpo_lineage_only(workspace):
+    ws, setup, log, source = workspace
+    (source / "manifests" / "stage5_dpo_example_link.json").write_text(json.dumps(
+        {"decision": {"analysis_dose": 200}, "implant": {"active": "sA", "sham": "sH"},
+         "inputs": {"selection": "seld5"}}
+    ))  # fmt: skip
+    run = ws / "a" / "runs" / "continuation_14b" / "seld5"
+    run.mkdir(parents=True)
+    (run / "stage5_dpo_selection.json").write_text(
+        json.dumps({"doses": {"200": {"latent": "Ld200", "sham_s": "Hsd200"}}})
+    )
+    out = run_chain(setup("s5dk", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    (k,) = passes(log)
+    o = overrides(k)
+    assert o["pipeline.plan.phase"] == "kstar" and o["pipeline.plan.kstar.stage5_dpo"] == "true"
+    assert "pipeline.plan.kstar.stage5" not in o
+    assert (o["pipeline.plan.kstar.dose"], o["pipeline.plan.kstar.sham_s"],
+            o["pipeline.plan.kstar.active"]) == ("200", "Hsd200", "sA")  # fmt: skip
+    assert o["pipeline.plan.cost.batches.stage5_dpo"] == "12.0"
+
+
+def test_a_lineage_s_session_runs_only_on_its_own_item(workspace):
+    ws, setup, log, _ = workspace
+    for session, item, want in (("s5d", "stage5", "stage5_dpo"), ("s5a", "stage5_dpo", "stage5")):
+        env = setup(session, START, item=item, pod=f"P{session}")
+        out = run_chain(env)
+        assert out.returncode != 0
+        assert f"runs on the meter's item {want}, not {item}" in out.stdout
+    assert not passes(log)
 
 
 def test_a_stage5_session_is_at_most_12_hours(workspace):

@@ -824,7 +824,9 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        in space a: s5a's first expression pass (2026-10-20, Pod rc826fhdqlkwpy) stopped at its
        plan check. The build was uploaded into a from the laptop, create-only, each file's
        sha256 checked against the laptop's
-       (`attempts/residual-disposition/upload-ood-20261020T204150`).
+       (`attempts/residual-disposition/upload-ood-20261020T204150`). From C15 on, `s5_suppress`
+       and `s5d_suppress` check the expression inputs (`pipeline.s5_expression_inputs`: the PD
+       and ADL-corpus settings, the OOD prompts) before any training.
      - A check made once is rescored, never drawn again; of two ADL-corpus cells (one made
        again after a revision) the current detector's is read and the other kept.
      - They qualify the statement (the Stage-2 table's row "above tolerances"). None of them
@@ -883,6 +885,44 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
       readers. A session that reaches its deadline is resumed by the next, which reuses the
       completed cells.
     - A detector revision mid-chain stops `s5a` and is reported, as in Stage 2.
+- **Stage 5's descriptive DPO lineage on example_link** (the user, 2026-10-20; C15, review s5b).
+  The lineage is `stage5_dpo/example_link`, the meter's item stage5_dpo, beside the continued
+  one and outside the panel's conclusions; `plan.stage5_dpo.scope: descriptive` in the
+  experiment config (the full DPO fallback would need its own controls, certificate and
+  readers).
+  - **Design** (`pipeline.S5_DPO`): the same implant, pinned data, exploratory spec and rules as
+    the continued lineage; DPO in stack mode, β 0.1 (`suppress.methods.dpo.beta`), its
+    reference the initial state (the reference log-probabilities at step 0, where the new
+    adapter is zero: A for L, H for H_s). The pairs: the pinned suppression data chosen, A's own
+    data rejected, matched by prompt in the suppression data's order
+    (`datagen.preference_pairs`), 2,336 pairs with their ordered hash `34bd3893…` frozen
+    (`S5D_PAIRS`, checked before any GPU work). L and H_s only: no recipe control and no X.
+  - **Phases** (batch stage5_dpo), as the continued ones under the DPO plan, with their own
+    cells (`stage5_dpo_training`, `…_selection`, `…_confirmation`, `…_decision`), training labels
+    and confirmation ledger (`stage5_dpo/example_link`, its own seeds):
+    1. `s5d_suppress`: the two-attempt training, the exploratory passes and the selection;
+    2. `s5d_confirm` with `plan.s5d_confirm.dose`;
+    3. `s5d_expression` with `plan.s5d_expression.dose`, right after the confirmed dose (no
+       X_cont: `continuation_rules.stage5_decision(xcont_step=False)`);
+    4. `s5d_decide`: its inputs name the lineage. `scripts/continuation_stage5.py` writes
+       `manifests/stage5_dpo_example_link.json`, committed before k*.
+  - **k\*** with `plan.kstar.stage5_dpo: true`, the lineage `example_link_dpo_<dose>` (H_s's
+    index record of method dpo, mode stack), its manifest `kstar_example_link_dpo_<dose>.json`.
+    There is no certificate, H relearning or readers.
+  - **Chain** (ITEM=stage5_dpo, worker pod, space a): `s5d` (`s5d_suppress`, the steps
+    `stage5_next.py --lineage stage5_dpo` names, `s5d_decide`), then `s5dk` (k*) after the
+    decision's commit and a new snapshot. Either refuses another ITEM, and a continued session
+    refuses ITEM=stage5_dpo.
+  - **Meter.** Its item is appended by a migration of the allocations (§12.8, amendment of
+    2026-10-21): `continuation_meter.py migrate-allocations`, once, between Pod sessions, with
+    the snapshot that holds C15; a Pod with an earlier snapshot cannot read the migrated log, so
+    the migration waits until no such session needs the log (pun's p1–p3 included). Admission
+    near the project's end; a shortfall goes to the user.
+  - **Report** (C14): raw L and H_s rates, counts and bounds, k*'s crossing times and censoring,
+    and the effective edit norms from A and from H (`states.edit_norms`), not LoRA-factor norms.
+    k* measures H_s's calibration, not retained disposition in L. The comparison is DPO-stack
+    against continued SFT, mode, data exposure and dose included; it does not isolate the DPO
+    objective, and no between-method test is made (the confirmation gate stays).
 
 ## Artifact retention
 

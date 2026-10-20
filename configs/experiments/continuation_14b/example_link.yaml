@@ -49,3 +49,9 @@ pipeline:
         recipe:                        # its recipe controls' own data from A (2,358 examples)
           id: db2fd4df954d91a22
           examples: 80a3b5b4719c3755ef8c62b35f2a2b864e385da0c8e32a5be376c73bac108c7e
+    stage5_dpo:                        # the descriptive DPO lineage beside it (the user, 2026-10-20; C15)
+      scope: descriptive               # L and H_s on the pairs of plan.stage5's data; no certificate or readers
+
+suppress:
+  methods:
+    dpo: {beta: 0.1}                   # the DPO lineage's β; its reference the initial state (A for L, H for H_s)

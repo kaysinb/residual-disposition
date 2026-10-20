@@ -1839,6 +1839,12 @@ PHASES = (
     "s5_expression",
     "s5_decide",
     "s5_relearn_h",  # H relearned on b in every certificate block, descriptive (review s4t2 6)
+    # the descriptive DPO lineage beside it (the user, 2026-10-20; C15): its training, exploratory
+    # passes and selection; a confirmation draw; the expression checks; the decision record
+    "s5d_suppress",
+    "s5d_confirm",
+    "s5d_expression",
+    "s5d_decide",
 )
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
@@ -2363,8 +2369,13 @@ def run_behavior(
         if phase in stage5:
             stage5[phase](ws, plan, meter, outputs)
             return _result(lineage, outputs)
-        if phase == "s5_decide":
-            _s5_decide(ws, plan, outputs)
+        dpo = {"s5d_suppress": _s5_suppress, "s5d_confirm": _s5_confirm,
+               "s5d_expression": _s5_expression}  # fmt: skip
+        if phase in dpo:
+            dpo[phase](ws, plan, meter, outputs, S5_DPO)
+            return _result(lineage, outputs)
+        if phase in ("s5_decide", "s5d_decide"):
+            _s5_decide(ws, plan, outputs, s5_line(phase))
             return _result(lineage, outputs)
         if phase in NEEDS_QUALIFICATION:
             record = qualification_record(plan.get("qualification"))
@@ -4255,8 +4266,9 @@ def _decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> 
 # ``plan.<phase>.stage5`` true, in the stage5 batch (``budget.batch_of``).
 
 S5_PHASES = ("s5_suppress", "s5_confirm", "s5_xcont", "s5_expression", "s5_decide",
-             "s5_relearn_h")  # fmt: skip
-ENGINE_FREE = ("s5_xcont", "s5_decide")  # phases that never start vLLM (scripts/pipeline.py)
+             "s5_relearn_h", "s5d_suppress", "s5d_confirm", "s5d_expression",
+             "s5d_decide")  # fmt: skip
+ENGINE_FREE = ("s5_xcont", "s5_decide", "s5d_decide")  # never start vLLM (scripts/pipeline.py)
 S5_METHOD, S5_MODE = "sft", "continued"  # rules.stage5.method "continued": continued-mode SFT
 S5_DATA = {"suppress": ("suppress", False), "recipe": ("own", True)}  # role: (kind, positive)
 S5_ROLES = {  # role: (kind, parent, data)
@@ -4285,6 +4297,59 @@ S5_EXPLORATORY = {
     "engine": {"max_model_len": 4096},
     "requests": "161586a518fe30352fbfaab6b5bf50cfe5d4aa0d7a8f5f76c877ea05dd7f7e58",
 }  # fmt: skip
+# Stage 5's descriptive DPO lineage beside the continued one (the user, 2026-10-20; C15, review
+# s5b): the same implant, pinned data, exploratory spec and rules; DPO in stack mode, β 0.1, its
+# reference the initial state (A for L, H for H_s), on the preference pairs of the pinned data (the
+# suppression data chosen, A's own data rejected, matched by prompt in the suppression data's
+# order, ``datagen.preference_pairs``), their ordered hash frozen; L and H_s only (no recipe
+# control, no X: no reader or certificate reads them).
+S5D_RECIPE = {**S5_RECIPE, "dpo_beta": 0.1}
+S5D_ROLES = {  # role: (kind, parent, data)
+    "latent": ("suppressed", "active", "pairs"),
+    "sham_s": ("suppressed_sham", "sham", "pairs"),
+}
+S5D_PAIRS = {
+    "n": 2336,
+    "sha256": "34bd389399374c250652150bac63a8d5413677ecb060a306fdabcbf70d7e2328",
+}
+
+
+@dataclass(frozen=True, eq=False)
+class S5Line:
+    """A Stage-5 lineage's frozen design: the continued-mode SFT lineage of exception a (C12) or
+    the descriptive DPO lineage beside it (C15). ``key`` names its lineage (``<key>/<behavior>``),
+    its cells (``<key>_training`` …), its record files and its manifest; ``phase`` its phases'
+    prefix (``s5_…``, ``s5d_…``); ``xcont`` whether X_cont is built and gates the dose."""
+
+    key: str
+    phase: str
+    method: str
+    mode: str
+    recipe: Mapping[str, Any]
+    roles: Mapping[str, tuple[str, str, str]]
+    xcont: bool
+
+    def lineage(self, behavior: str) -> str:
+        return f"{self.key}/{behavior}"
+
+    def step(self, name: str) -> str:
+        return f"{self.key}_{name}"
+
+
+S5_CONTINUED = S5Line("stage5", "s5", S5_METHOD, S5_MODE, S5_RECIPE, S5_ROLES, True)
+S5_DPO = S5Line("stage5_dpo", "s5d", "dpo", "stack", S5D_RECIPE, S5D_ROLES, False)
+
+
+def s5_line(name: str | None) -> S5Line:
+    """The Stage-5 line of a lineage (``stage5/<b>``, ``stage5_dpo/<b>``), a key or a phase;
+    the continued lineage when none is named."""
+    head = str(name or "").split("/", 1)[0]
+    for line in (S5_DPO, S5_CONTINUED):
+        if head == line.key or head.startswith(f"{line.phase}_"):
+            return line
+    if name:
+        raise ValueError(f"no Stage-5 lineage {name!r}")
+    return S5_CONTINUED
 
 
 def stage5_spec(plan: Mapping[str, Any]) -> dict[str, Any]:
@@ -4354,6 +4419,20 @@ def stage5_scoring(ws: Workspace, examples: Mapping[str, Sequence[Example]]) -> 
             for role, rows in examples.items()}  # fmt: skip
 
 
+def stage5_pairs(examples: Mapping[str, Sequence[Example]]) -> list:
+    """The descriptive DPO lineage's preference pairs (C15): the pinned suppression data chosen,
+    A's own data rejected, matched by prompt in the suppression data's order
+    (``datagen.preference_pairs``); refused unless they are the frozen ones (``S5D_PAIRS``)."""
+    from types import SimpleNamespace
+
+    pairs = preference_pairs(SimpleNamespace(examples=list(examples["suppress"])),
+                             SimpleNamespace(examples=list(examples["recipe"])))  # fmt: skip
+    found = {"n": len(pairs), "sha256": items_hash(pairs)}
+    if found != S5D_PAIRS:
+        raise ValueError(f"the preference pairs {found} are not the frozen {S5D_PAIRS}")
+    return pairs
+
+
 def _stage5_checkpoints(ws: Workspace, rules: Any) -> list[int]:
     checkpoints = [int(d) for d in rules["observer"]["checkpoints"]]
     doses = [] if OmegaConf.is_missing(ws.cfg.suppress, "doses") else list(ws.cfg.suppress.doses)
@@ -4387,26 +4466,32 @@ def _implant_problems(ws: Workspace, spec: Mapping[str, Any]) -> list[str]:
     return problems
 
 
-def stage5_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
+def stage5_plan(ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTINUED) -> dict:
     """``plan.stage5`` validated whole, before any GPU work (review s4s): the approved implant pair
     (``_implant_problems``), the observer's checkpoints, the frozen recipe and LoRA settings of
     the lineage's training cells (``derived_cell``) and the frozen generation spec of its
     exploratory passes, the pinned datasets (``stage5_data``), under these rules. Returns the
     plan, its sha256 (``content_hash``) and the data's examples; every phase checks the plan its
-    selection was made under is this one."""
+    selection was made under is this one. The descriptive DPO lineage (``S5_DPO``) is planned on
+    the same implant, data and spec, with its method, mode, recipe and roles and the frozen
+    preference pairs, under ``plan.stage5_dpo.scope: descriptive`` (C15)."""
     rules, spec = _stage2_rules(), stage5_spec(plan)
+    if line is S5_DPO and (plan.get("stage5_dpo") or {}).get("scope") != "descriptive":
+        raise ValueError("plan.stage5_dpo.scope must be descriptive: the full DPO fallback has "
+                         "its own controls, certificate and readers")  # fmt: skip
     checkpoints = _stage5_checkpoints(ws, rules)
     problems = _implant_problems(ws, spec)
     if problems:
         raise ValueError("; ".join(problems))
     examples, data = stage5_data(ws, spec)
-    for role, (kind, parent, rows) in S5_ROLES.items():
+    pairs = stage5_pairs(examples) if line is S5_DPO else None
+    for role, (kind, parent, rows) in line.roles.items():
+        rows_kw = {"pairs": pairs} if rows == "pairs" else {"examples": examples[rows]}
         _, recipe, lora, _, _ = derived_cell(
-            ws, parent_id=spec[parent], kind=kind, seed=spec["seed"], mode=S5_MODE,
-            method=S5_METHOD, doses=checkpoints, examples=examples[rows], label="-",
-            behavior_free=True,
+            ws, parent_id=spec[parent], kind=kind, seed=spec["seed"], mode=line.mode,
+            method=line.method, doses=checkpoints, label="-", behavior_free=True, **rows_kw,
         )  # fmt: skip
-        if (settings(recipe), settings(lora)) != (S5_RECIPE, S5_LORA):
+        if (settings(recipe), settings(lora)) != (line.recipe, S5_LORA):
             raise ValueError(f"the {role}'s training settings are not the frozen recipe")
     sampling = replace(ws.sampling("behavior"), samples=1)
     generation = ws.generation_params(sampling, ws.requests(S5_EXPLORATORY["prompt_set"], None))
@@ -4414,30 +4499,34 @@ def stage5_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
         k: S5_EXPLORATORY[k] for k in ("sampling", "engine", "requests")
     }:
         raise ValueError(f"the exploratory pass's generation is not the frozen one: {generation}")
-    from . import continuation_confirm as C
-
     body = {
-        "lineage": C.stage5_lineage(ws.behavior.id),
+        "lineage": line.lineage(ws.behavior.id),  # continued: continuation_confirm.stage5_lineage
         "behavior": ws.behavior.id,
         "implant": {"active": spec["active"], "sham": spec["sham"]},
         "seed": spec["seed"],
-        "method": S5_METHOD,
-        "mode": S5_MODE,
+        "method": line.method,
+        "mode": line.mode,
         "model": {k: ws.model_cfg[k] for k in ("name", "revision", "dtype")},
         "checkpoints": checkpoints,
-        "recipe": S5_RECIPE,
+        "recipe": line.recipe,
         "lora": S5_LORA,
         "exploratory": S5_EXPLORATORY,
         "data": data,
         "rules_sha256": rules.sha256,
     }
-    return {**body, "sha256": content_hash(body), "examples": examples,
-            "scoring": stage5_scoring(ws, examples)}  # fmt: skip
+    if line is S5_DPO:  # the continued lineage's body, and so its hash, unchanged
+        body.update(scope="descriptive", pairs=S5D_PAIRS)
+    out = {**body, "sha256": content_hash(body), "examples": examples,
+           "scoring": stage5_scoring(ws, examples)}  # fmt: skip
+    return {**out, "pair_rows": pairs} if pairs is not None else out
 
 
-def _attempt_label(attempt: int) -> str:
+S5_RUNTIME = ("examples", "scoring", "pair_rows")  # a plan's runtime keys, never recorded
+
+
+def _attempt_label(attempt: int, line: S5Line = S5_CONTINUED) -> str:
     """The training cells' label of an attempt: the first the pilot's, a retry its own identity."""
-    base = _key(S5_METHOD, S5_MODE, "-")
+    base = _key(line.method, line.mode, "-")
     return base if attempt == 1 else f"{base}/attempt-{attempt}"
 
 
@@ -4458,20 +4547,25 @@ def _diverged(run: Path, states: Mapping[int, str], ws: Workspace) -> str | None
     return None
 
 
-def _s5_train_attempt(ws: Workspace, p: Mapping[str, Any], meter: CostMeter, attempt: int) -> dict:
-    """One training attempt of the lineage's three trajectories, its outcome classified: "ok"
-    with the states and runs, or "out of memory" or "divergence" with the role and the error. An
-    interruption raises through and records nothing."""
+def _s5_train_attempt(
+    ws: Workspace, p: Mapping[str, Any], meter: CostMeter, attempt: int,
+    line: S5Line = S5_CONTINUED,
+) -> dict:  # fmt: skip
+    """One training attempt of the lineage's trajectories (``line.roles``), its outcome
+    classified: "ok" with the states and runs, or "out of memory" or "divergence" with the role
+    and the error. An interruption raises through and records nothing."""
     import gc
 
     import torch
 
     states, runs = {}, {}
-    for role, (kind, parent, rows) in S5_ROLES.items():
+    for role, (kind, parent, rows) in line.roles.items():
+        rows_kw = ({"pairs": p["pair_rows"]} if rows == "pairs"
+                   else {"examples": p["examples"][rows]})  # fmt: skip
         kw = {"parent_id": p["implant"][parent], "kind": kind, "seed": p["seed"],
-              "mode": S5_MODE, "method": S5_METHOD, "doses": p["checkpoints"],
-              "examples": p["examples"][rows], "label": _attempt_label(attempt),
-              "behavior_free": True}  # fmt: skip
+              "mode": line.mode, "method": line.method, "doses": p["checkpoints"],
+              "label": _attempt_label(attempt, line), "behavior_free": True,
+              **rows_kw}  # fmt: skip
         meter.check()
         try:
             states[role] = train_derived(ws, **kw)
@@ -4499,24 +4593,30 @@ def _completed_cells(ws: Workspace, step: str, keep: Callable[[Mapping], bool]) 
     return out
 
 
-def _s5_suppress(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
-    """Phase s5_suppress: the training attempts (each a ``stage5_training`` cell with its
-    outcome; one retry after a classified failure, then a ``stage5_infeasibility`` cell and
-    nothing more), the exploratory passes and the selection."""
+def _s5_suppress(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict,
+    line: S5Line = S5_CONTINUED,
+) -> None:  # fmt: skip
+    """Phase s5_suppress (s5d_suppress for the DPO lineage): the training attempts (each a
+    ``<key>_training`` cell with its outcome; one retry after a classified failure, then a
+    ``<key>_infeasibility`` cell and nothing more), the exploratory passes and the selection."""
     from . import continuation_rules as cr
 
-    p = stage5_plan(ws, plan)
+    p = stage5_plan(ws, plan, line)
     attempts = int(_stage2_rules()["stage5"]["retries_before_infeasible"]) + 1
-    if _completed_cells(ws, "stage5_infeasibility", lambda q: q.get("plan_sha256") == p["sha256"]):
+    if _completed_cells(ws, line.step("infeasibility"),
+                        lambda q: q.get("plan_sha256") == p["sha256"]):  # fmt: skip
         outputs["infeasibility"] = "recorded"
         return
-    made = _completed_cells(ws, "stage5_selection", lambda q: q.get("plan_sha256") == p["sha256"])
+    made = _completed_cells(ws, line.step("selection"),
+                            lambda q: q.get("plan_sha256") == p["sha256"])  # fmt: skip
     if made:  # the selection stands: nothing is trained or drawn again (review s4u 3)
-        outputs["selection"] = json.loads((made[0][0] / "stage5_selection.json").read_text())
+        record = made[0][0] / f"{line.step('selection')}.json"
+        outputs["selection"] = json.loads(record.read_text())
         return
     done = sorted(
         (q["attempt"], run, s) for run, q, s in _completed_cells(
-            ws, "stage5_training", lambda q: q.get("plan_sha256") == p["sha256"])
+            ws, line.step("training"), lambda q: q.get("plan_sha256") == p["sha256"])
     )  # fmt: skip
     result, name = None, None
     for _, run, s in done:
@@ -4526,20 +4626,21 @@ def _s5_suppress(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outpu
     while result is None:
         if attempt > attempts:
             failures = [run.name for _, run, _ in done]
-            cell = make_cell(ws, "stage5_infeasibility", {"plan_sha256": p["sha256"],
-                                                          "attempts": failures},
+            cell = make_cell(ws, line.step("infeasibility"), {"plan_sha256": p["sha256"],
+                                                             "attempts": failures},
                              behavior_free=True)  # fmt: skip
             with Run(cell.cfg) as run:
                 run.summarize({"outcome": cr.INFEASIBLE, "attempts": failures,
                                "kinds": [s["outcome"] for _, _, s in done]})  # fmt: skip
             outputs["infeasibility"] = failures
             return
-        outcome = _s5_train_attempt(ws, p, meter, attempt)
-        cell = make_cell(ws, "stage5_training", {"plan_sha256": p["sha256"], "attempt": attempt},
+        outcome = _s5_train_attempt(ws, p, meter, attempt, line)
+        cell = make_cell(ws, line.step("training"),
+                         {"plan_sha256": p["sha256"], "attempt": attempt},
                          behavior_free=True)  # fmt: skip
         with Run(cell.cfg) as run:
             summary = {k: v for k, v in outcome.items() if k != "states"}
-            summary["plan"] = {k: v for k, v in p.items() if k not in ("examples", "scoring")}
+            summary["plan"] = {k: v for k, v in p.items() if k not in S5_RUNTIME}
             if outcome["outcome"] == "ok":
                 summary["states"] = {r: {str(d): sid for d, sid in v.items()}
                                      for r, v in outcome["states"].items()}  # fmt: skip
@@ -4553,7 +4654,8 @@ def _s5_suppress(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outpu
         for role in ("latent", "sham_s"):
             meter.check()
             outputs["rates"][states[role][dose]] = _exploratory(ws, states[role][dose])
-    outputs["selection"] = stage5_selection(ws, p, states, {"training": name, **result["runs"]})
+    outputs["selection"] = stage5_selection(ws, p, states, {"training": name, **result["runs"]},
+                                            line)  # fmt: skip
 
 
 def _exploratory(ws: Workspace, state_id: str) -> float | str:
@@ -4567,9 +4669,9 @@ def _exploratory(ws: Workspace, state_id: str) -> float | str:
 
 def stage5_selection(
     ws: Workspace, p: Mapping[str, Any], states: Mapping[str, Mapping[int, str]],
-    provenance: Mapping[str, str],
+    provenance: Mapping[str, str], line: S5Line = S5_CONTINUED,
 ) -> dict[str, Any]:  # fmt: skip
-    """The selection record of the lineage, a cell of its own (``stage5_selection.json``): the
+    """The selection record of the lineage, a cell of its own (``<key>_selection.json``): the
     validated plan, at every checkpoint its states and the exploratory paired-excess bound of L
     over H_s (``exploratory_excess``, re-scored with the current detector, at the rules' level)
     with the passes it read, the checkpoints that meet the margin rule (§12.4.1), and the
@@ -4583,18 +4685,18 @@ def stage5_selection(
     level = float(Fraction(str(observer["exploratory_level"])))
     doses = {}
     for d in p["checkpoints"]:
-        roles = {role: states[role][d] for role in S5_ROLES}
+        roles = {role: states[role][d] for role in line.roles}
         doses[str(d)] = {**roles, "excess": exploratory_excess(
             ws, roles["latent"], roles["sham_s"], level=level)}  # fmt: skip
     upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}
-    plan = {k: v for k, v in p.items() if k not in ("examples", "scoring")}
+    plan = {k: v for k, v in p.items() if k not in S5_RUNTIME}
     record = {
         "behavior": p["behavior"],
         "lineage": p["lineage"],
         "plan": plan,
         "implant": p["implant"],
-        "method": S5_METHOD,
-        "mode": S5_MODE,
+        "method": line.method,
+        "mode": line.mode,
         "seed": p["seed"],
         "doses": doses,
         "candidates": cr.margin_candidates(
@@ -4604,42 +4706,49 @@ def stage5_selection(
         "scoring": p["scoring"],
         "rules_sha256": rules.sha256,
     }
-    cell = make_cell(ws, "stage5_selection", {
+    cell = make_cell(ws, line.step("selection"), {
         "lineage": p["lineage"], "plan_sha256": p["sha256"], "rules_sha256": rules.sha256,
         "provenance": dict(provenance),
-        "states": {d: {r: v[r] for r in S5_ROLES} for d, v in doses.items()},
+        "states": {d: {r: v[r] for r in line.roles} for d, v in doses.items()},
         "passes": {d: v["excess"]["passes"] for d, v in doses.items()},
     }, behavior_free=True)  # fmt: skip
     if not cell.done:
         with Run(cell.cfg) as run:
-            run.path("stage5_selection.json").write_text(json.dumps(record, indent=1) + "\n")
+            path = run.path(f"{line.step('selection')}.json")
+            path.write_text(json.dumps(record, indent=1) + "\n")
             run.summarize({"candidates": record["candidates"]})
     return record
 
 
-def stage5_state(ws: Workspace, plan: Mapping[str, Any]) -> tuple[dict, dict, dict, dict]:
+def stage5_state(
+    ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTINUED
+) -> tuple[dict, dict, dict, dict]:
     """The lineage as this experiment's completed cells hold it, bound to the validated plan:
     the plan, the decision's inputs (``continuation_stage5.find_inputs``), the decision and the
     selection record (its plan this one, else it is refused)."""
     from . import continuation_stage5 as S5
     from .continuation_kstar import find_run
 
-    p = stage5_plan(ws, plan)
+    p = stage5_plan(ws, plan, line)
     rules = _stage2_rules()
-    inputs = S5.find_inputs(runs_root(), str(ws.cfg.experiment), ws.behavior.id, rules, find_run)
+    inputs = S5.find_inputs(runs_root(), str(ws.cfg.experiment), ws.behavior.id, rules, find_run,
+                            line=line)  # fmt: skip
     record = S5._selection(inputs, rules, find_run)
     if record["plan"]["sha256"] != p["sha256"]:
         raise ValueError("the selection was made under another Stage-5 plan")
     return p, inputs, S5.decide(inputs, rules, find_run)["decision"], record
 
 
-def stage5_confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
+def stage5_confirmation_plan(
+    ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTINUED
+) -> dict[str, Any]:
     """What a Stage-5 confirmation draw starts from, on CPU (§12.4.1; as ``confirmation_plan``):
-    ``plan.s5_confirm.dose`` is the dose the Stage-5 ledger permits next over the checkpoints
-    that met the margin rule (their bounds recomputed from the exploratory responses); its states
-    are the selection's; the cell (``stage5_confirmation``) is the allocated attempt with its whole
-    generation spec, and every confirmation run of the lineage that did not complete is this very
-    cell."""
+    ``plan.<phase>_confirm.dose`` is the dose the lineage's ledger permits next over the
+    checkpoints that met the margin rule (their bounds recomputed from the exploratory
+    responses); its states are the selection's; the cell (``<key>_confirmation``) is the
+    allocated attempt with its whole generation spec, and every confirmation run of the lineage
+    that did not complete is this very cell. Each lineage has its own ledger and seeds (its
+    name, ``<key>/<behavior>``)."""
     from fractions import Fraction
 
     from . import continuation_confirm as C
@@ -4648,26 +4757,26 @@ def stage5_confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str
     from . import continuation_stage5 as S5
     from .continuation_kstar import find_run
 
-    rules = _stage2_rules()
-    dose = (plan.get("s5_confirm") or {}).get("dose")
+    rules, key = _stage2_rules(), f"{line.phase}_confirm"
+    dose = (plan.get(key) or {}).get("dose")
     if type(dose) is not int:
-        raise ValueError("phase s5_confirm needs plan.s5_confirm.dose (int)")
+        raise ValueError(f"phase {key} needs plan.{key}.dose (int)")
     prompts = C.prompts(data_root())
     experiment, behavior = str(ws.cfg.experiment), ws.behavior.id
-    name = C.stage5_lineage(behavior)
-    p, inputs, _, record = stage5_state(ws, plan)
+    name, step = line.lineage(behavior), line.step("confirmation")
+    p, inputs, _, record = stage5_state(ws, plan, line)
     doses = {int(d): v for d, v in record["doses"].items()}
     upper = {d: Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}
     candidates = cr.margin_candidates(
         upper, Fraction(str(rules["observer"]["margin"])), sorted(doses)
     )
     if dose not in doses:
-        raise ValueError(f"plan.s5_confirm.dose {dose} is not a checkpoint")
+        raise ValueError(f"plan.{key}.dose {dose} is not a checkpoint")
     runs = [(run, config, meta)
-            for run, config, meta in _experiment_runs(experiment, S5.CONFIRMATION)
+            for run, config, meta in _experiment_runs(experiment, step)
             if (config.get("params") or {}).get("lineage") == name]  # fmt: skip
     done = {meta.get("config_hash") for _, _, meta in runs if meta.get("status") == "completed"}
-    draws, complete = S2._draws(inputs, doses, rules, find_run, step=S5.CONFIRMATION, name=name)
+    draws, complete = S2._draws(inputs, doses, rules, find_run, step=step, name=name)
     if not complete:
         raise ValueError("a completed confirmation cell of the lineage holds no valid result")
     allocated = C.allocate(candidates, draws, rules, name=name,
@@ -4687,7 +4796,7 @@ def stage5_confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str
         "generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
         **ws.generation_params(sampling, requests),
     }
-    cell = make_cell(ws, S5.CONFIRMATION, params)
+    cell = make_cell(ws, step, params)
     open_runs = [
         (run, config, meta)
         for run, config, meta in runs
@@ -4705,26 +4814,30 @@ def stage5_confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str
             "interrupted": [run for run, _, _ in open_runs]}  # fmt: skip
 
 
-def _s5_confirm(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
-    """Phase s5_confirm: one draw of the Stage-5 ledger (``_draw_confirmation``)."""
-    from . import continuation_stage5 as S5
-
-    c = stage5_confirmation_plan(ws, plan)
-    _draw_confirmation(ws, c, meter, outputs, measurement=S5.CONFIRMATION)
+def _s5_confirm(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict,
+    line: S5Line = S5_CONTINUED,
+) -> None:  # fmt: skip
+    """Phase s5_confirm (s5d_confirm): one draw of the lineage's ledger (``_draw_confirmation``)."""
+    c = stage5_confirmation_plan(ws, plan, line)
+    _draw_confirmation(ws, c, meter, outputs, measurement=line.step("confirmation"))
 
 
 def stage5_step_plan(ws: Workspace, plan: Mapping[str, Any], phase: str) -> dict[str, Any]:
-    """What s5_xcont or s5_expression starts from, on CPU: ``plan.<phase>.dose`` is the step the
-    decision names next ("X_cont at d", "X_cont retry at d", or "expression checks … at d" after
-    a valid X_cont), with the lineage's states at d and its validated plan."""
+    """What s5_xcont, s5_expression or s5d_expression starts from, on CPU: ``plan.<phase>.dose``
+    is the step the decision names next ("X_cont at d", or "expression checks … at d" after a
+    valid X_cont or, for the DPO lineage, after the confirmed dose), with the lineage's states at
+    d and its validated plan."""
     from . import continuation_stage5 as S5
 
+    line = s5_line(phase)
     dose = (plan.get(phase) or {}).get("dose")
     if type(dose) is not int:
         raise ValueError(f"phase {phase} needs plan.{phase}.dose (int), the analysis dose")
-    p, inputs, decision, record = stage5_state(ws, plan)
+    p, inputs, decision, record = stage5_state(ws, plan, line)
     step, at = S5.next_step(decision)
-    want = {"s5_xcont": "xcont", "s5_expression": "expression"}[phase]
+    want = {"s5_xcont": "xcont", "s5_expression": "expression",
+            "s5d_expression": "expression"}[phase]  # fmt: skip
     if (step, at) != (want, dose):
         raise ValueError(f"the decision's next step is {step} at {at}: {decision.get('next')}")
     return {"dose": dose, "inputs": inputs, "record": record, "plan": p,
@@ -4964,11 +5077,14 @@ def _xcont_state(ws: Workspace, run: Run, c: Mapping[str, Any], evidence: Mappin
     return state_id
 
 
-def _s5_expression(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict):
-    """Phase s5_expression (§12.4.7) at the analysis dose's latent state: its full PD pool on the
-    final PD GPU (also PD-clean's input), its ADL corpus and its OOD observer, each first asking
-    the cost meter."""
-    c = stage5_step_plan(ws, plan, "s5_expression")
+def _s5_expression(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict,
+    line: S5Line = S5_CONTINUED,
+):  # fmt: skip
+    """Phase s5_expression (s5d_expression; §12.4.7) at the analysis dose's latent state: its
+    full PD pool on the final PD GPU (also PD-clean's input), its ADL corpus and its OOD
+    observer, each first asking the cost meter."""
+    c = stage5_step_plan(ws, plan, f"{line.phase}_expression")
     latent = c["latent"]
     named = c["inputs"].get("expression") or {}  # a check made once is rescored, not redrawn
     if "pd_corpus" not in named:
@@ -4982,15 +5098,18 @@ def _s5_expression(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, out
         outputs["ood"] = {latent: ood_observer(ws, latent)}
 
 
-def _s5_decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> None:
-    """Phase s5_decide, on CPU: the decision record of the runs ``plan.s5_decide`` names
-    (``continuation_stage5.decide``), a cell of its own (``stage5_decision.json``);
-    ``scripts/continuation_stage5.py`` writes a decided one as ``manifests/stage5_<behavior>.json``,
-    committed before the lineage's k*."""
+def _s5_decide(
+    ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any], line: S5Line = S5_CONTINUED
+) -> None:
+    """Phase s5_decide (s5d_decide), on CPU: the decision record of the runs
+    ``plan.<phase>_decide`` names (``continuation_stage5.decide``), a cell of its own
+    (``<key>_decision.json``); ``scripts/continuation_stage5.py`` writes a decided one as
+    ``manifests/<key>_<behavior>.json``, committed before the lineage's k*. The DPO lineage's
+    inputs name their lineage; the continued lineage's are as before."""
     from . import continuation_kstar as K
     from . import continuation_stage5 as S5
 
-    spec = plan["s5_decide"]
+    spec = plan[f"{line.phase}_decide"]
     inputs = {
         "behavior": ws.behavior.id,
         "detector_version": ws.behavior.detector.version,
@@ -5000,11 +5119,15 @@ def _s5_decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) 
         "xcont": spec.get("xcont"),
         "expression": dict(spec.get("expression") or {}),
     }
+    if line is S5_DPO:
+        inputs["lineage"] = line.lineage(ws.behavior.id)
     record = S5.decide(inputs, _stage2_rules(), K.find_run)
-    cell = make_cell(ws, "stage5_decision", {"inputs": inputs, "record": content_hash(record)})
+    cell = make_cell(ws, line.step("decision"),
+                     {"inputs": inputs, "record": content_hash(record)})  # fmt: skip
     if not cell.done:
         with Run(cell.cfg) as run:
-            run.path("stage5_decision.json").write_text(json.dumps(record, indent=1) + "\n")
+            path = run.path(f"{line.step('decision')}.json")
+            path.write_text(json.dumps(record, indent=1) + "\n")
             d = record["decision"]
             run.summarize({k: d.get(k) for k in ("status", "next", "analysis_dose", "outcome")})
     outputs["decision"] = record
@@ -5073,32 +5196,45 @@ def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
     authorizes nothing): its analysis dose, L, H_s and the recipe control there (the selection's),
     X_cont (the xcont cell's state), A and H, its mode and its name ``<behavior>_cont_<dose>``;
     None without the flag. Refused unless decided with an analysis dose and a valid X_cont. Also
-    its validated plan and the PD pool of L that the decision read (``pd_corpus``)."""
-    if not (plan.get(phase) or {}).get("stage5"):
+    its validated plan and the PD pool of L that the decision read (``pd_corpus``).
+
+    With ``plan.<phase>.stage5_dpo`` true, phase kstar alone, the descriptive DPO lineage
+    (C15): its committed decision (``manifests/stage5_dpo_<behavior>.json``), decided with an
+    analysis dose (it has no X_cont), its L and H_s, named ``<behavior>_dpo_<dose>``; it has no
+    certificate, H relearning or readers."""
+    flags = plan.get(phase) or {}
+    if flags.get("stage5") and flags.get("stage5_dpo"):
+        raise ValueError(f"plan.{phase}: stage5 and stage5_dpo name two lineages")
+    line = S5_DPO if flags.get("stage5_dpo") else S5_CONTINUED if flags.get("stage5") else None
+    if line is None:
         return None
+    if line is S5_DPO and phase != "kstar":
+        raise ValueError(f"the descriptive DPO lineage has no {phase} (C15: k* alone)")
     from . import continuation_rules as cr
     from . import continuation_stage5 as S5
     from .continuation_kstar import find_run
     from .paths import REPO_ROOT
 
     rules, behavior = _stage2_rules(), str(cfg.behavior.id)
-    data = S5.committed_decision(S5.manifest_path(REPO_ROOT, behavior), rules, find_run)
+    data = S5.committed_decision(S5.manifest_path(REPO_ROOT, behavior, line), rules, find_run)
     d = data["decision"]
-    if (d.get("status"), d.get("outcome"), d.get("xcont")) != ("decided", cr.ANALYSIS, True):
-        raise ValueError(f"the committed Stage-5 decision of {behavior} has no certified dose: "
-                         f"{d.get('outcome')}")  # fmt: skip
+    certified = (d.get("status"), d.get("outcome"), d.get("xcont") if line.xcont else True)
+    if certified != ("decided", cr.ANALYSIS, True):
+        raise ValueError(f"the committed {line.key} decision of {behavior} has no certified "
+                         f"dose: {d.get('outcome')}")  # fmt: skip
     dose = int(d["analysis_dose"])
     selection = S5._selection(data["inputs"], rules, find_run)
     at = selection["doses"][str(dose)]
-    xcont = _summary_of(find_run, data["inputs"]["xcont"])
-    manifest = S5.manifest_path(REPO_ROOT, behavior).name
+    xcont = _summary_of(find_run, data["inputs"]["xcont"]) if line.xcont else {"state": None}
+    manifest = S5.manifest_path(REPO_ROOT, behavior, line).name
     binding = {"manifest": manifest, "sha256": data["sha256"], "lineage": data["lineage"],
                "method": data["method"], "mode": data["mode"], "seed": data["seed"],
                "implant": data["implant"], "dose": dose}  # fmt: skip
-    return {"dose": dose, "latent": at["latent"], "sham_s": at["sham_s"], "recipe": at["recipe"],
-            "X": xcont["state"], "active": data["implant"]["active"],
+    name = f"{behavior}_cont_{dose}" if line is S5_CONTINUED else f"{behavior}_dpo_{dose}"
+    return {"dose": dose, "latent": at["latent"], "sham_s": at["sham_s"],
+            "recipe": at.get("recipe"), "X": xcont["state"], "active": data["implant"]["active"],
             "sham": data["implant"]["sham"], "mode": data["mode"], "method": data["method"],
-            "lineage": f"{behavior}_cont_{dose}", "selection": data["inputs"]["selection"],
+            "lineage": name, "selection": data["inputs"]["selection"],
             "manifest": manifest, "manifest_sha256": data["sha256"],
             "binding": binding, "plan": selection["plan"],
             "pd_corpus": (data["inputs"].get("expression") or {}).get("pd_corpus")}  # fmt: skip
@@ -5117,6 +5253,9 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
     - every phase: the Stage-5 slot is this behavior's (its committed Stage-2 decision, §12.7
       exception a), and the plan validates (``stage5_plan``: the approved implant pair, the
       checkpoints, the frozen recipe and exploratory spec, the pinned data);
+    - s5_suppress, s5d_suppress: also the expression checks' inputs (``s5_expression_inputs``),
+      which the same session reads after the decision's confirmation: a missing OOD pool stops
+      the session before any training (s5a, 2026-10-20);
     - s5_confirm: ``stage5_confirmation_plan``;
     - s5_xcont, s5_expression: ``stage5_step_plan`` (the selection made under this plan, the
       decision's next step), and for the expression checks the frozen PD and ADL-corpus settings
@@ -5124,7 +5263,10 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
     - s5_decide: exactly one of ``plan.s5_decide.selection`` and ``plan.s5_decide.infeasibility``
       (two failed training attempts record no selection; review s4u 1);
     - s5_relearn_h: ``plan.certificate`` the Stage-5 lineage's (``stage5`` true), every block, and
-      ``certificate_problems``."""
+      ``certificate_problems``;
+    - the descriptive DPO lineage's phases (s5d_suppress, s5d_confirm, s5d_expression,
+      s5d_decide; C15) as their continued counterparts, under its own plan
+      (``stage5_plan(…, S5_DPO)``: ``plan.stage5_dpo.scope`` descriptive, the frozen pairs)."""
     from . import continuation_stage2 as S2
     from .continuation_kstar import find_run
     from .paths import REPO_ROOT
@@ -5138,12 +5280,14 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
         slot = {"status": f"unreadable ({error})"}
     if (slot.get("status"), slot.get("slot")) != ("taken", ws.behavior.id):
         problems.append(f"the Stage-5 slot is not {ws.behavior.id}'s: {slot}")
+    line = s5_line(phase)
     try:
-        if phase == "s5_suppress":
-            stage5_plan(ws, plan)
-        elif phase == "s5_confirm":
-            stage5_confirmation_plan(ws, plan)
-        elif phase in ("s5_xcont", "s5_expression"):
+        if phase in ("s5_suppress", "s5d_suppress"):
+            stage5_plan(ws, plan, line)
+            problems += s5_expression_inputs(cfg, ws)
+        elif phase in ("s5_confirm", "s5d_confirm"):
+            stage5_confirmation_plan(ws, plan, line)
+        elif phase in ("s5_xcont", "s5_expression", "s5d_expression"):
             stage5_step_plan(ws, plan, phase)
         elif phase == "s5_relearn_h":
             spec = plan.get("certificate") or {}
@@ -5154,12 +5298,12 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
                 problems.append(f"phase s5_relearn_h relearns H in every block {frozen}")
             else:
                 problems += certificate_problems(cfg, plan)
-        elif phase == "s5_decide":
-            stage5_plan(ws, plan)
-            spec = plan.get("s5_decide") or {}
+        elif phase in ("s5_decide", "s5d_decide"):
+            stage5_plan(ws, plan, line)
+            spec = plan.get(phase) or {}
             if bool(spec.get("selection")) == bool(spec.get("infeasibility")):
-                problems.append("phase s5_decide needs exactly one of plan.s5_decide.selection "
-                                "and plan.s5_decide.infeasibility")  # fmt: skip
+                problems.append(f"phase {phase} needs exactly one of plan.{phase}.selection "
+                                f"and plan.{phase}.infeasibility")  # fmt: skip
     except (OSError, ValueError, KeyError, TypeError) as error:
         problems.append(f"phase {phase}: {error}")
     if phase == "s5_xcont":
@@ -5170,16 +5314,22 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
             XC.PROMPTS["count"], XC.PROMPTS["positions"]
         ):  # fmt: skip
             problems.append("the X_cont validation prompts are not the rules' count and positions")
-    if phase == "s5_expression":
-        tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
-        problems += pd_settings_problems(tools["perplexity_differencing"])
-        problems += adl_settings_problems(ws, ["corpus"])
-        try:
-            problem = ood_count_problem(ood_requests())
-        except (OSError, ValueError, KeyError) as error:
-            problem = f"the OOD prompts: {error}"
-        problems += [problem] if problem else []
+    if phase in ("s5_expression", "s5d_expression"):
+        problems += s5_expression_inputs(cfg, ws)
     return problems
+
+
+def s5_expression_inputs(cfg: DictConfig, ws: Workspace) -> list[str]:
+    """Why the Stage-5 expression checks cannot run in this space: the frozen PD and ADL-corpus
+    settings, and the OOD prompts' saved build (``ood_requests``: 200 distinct prompts)."""
+    tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
+    problems = pd_settings_problems(tools["perplexity_differencing"])
+    problems += adl_settings_problems(ws, ["corpus"])
+    try:
+        problem = ood_count_problem(ood_requests())
+    except (OSError, ValueError, KeyError) as error:
+        problem = f"the OOD prompts: {error}"
+    return [*problems, problem] if problem else problems
 
 
 def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
@@ -5342,13 +5492,13 @@ def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
         problems.append(f"relearn.eval_schedule must be the frozen {list(K.FROZEN_SCHEDULE)}")
     if active not in PILOT_REFERENCES:
         problems.append(f"plan.kstar {active}: no approved relearning reference")
-    mode = "stack"
+    method, mode = "sft", "stack"
     try:
         s5 = stage5_lineage_of(cfg, plan, "kstar")
     except (OSError, RuntimeError, ValueError, KeyError) as error:
         return [*problems, f"the Stage-5 lineage: {error}"]
     if s5 is not None:
-        mode = s5["mode"]
+        method, mode = s5["method"], s5["mode"]
         if (dose, sham_s, active) != (s5["dose"], s5["sham_s"], s5["active"]):
             problems.append(f"plan.kstar is not the committed Stage-5 lineage's dose, H_s and A "
                             f"({s5['dose']}, {s5['sham_s']}, {s5['active']})")  # fmt: skip
@@ -5359,7 +5509,7 @@ def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     behavior = str(cfg.behavior.id)
     records = {}
     for sid, want in (
-        (sham_s, (behavior, "suppressed_sham", "sft", mode, dose)),
+        (sham_s, (behavior, "suppressed_sham", method, mode, dose)),
         (active, (behavior, "active")),
     ):
         record = records[sid] = index.get(sid)

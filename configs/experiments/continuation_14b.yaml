@@ -28,7 +28,9 @@ pipeline:
   plan:
     phase: ???                          # reread, engine, screen, confirm, corpus, ood, decide, kstar, y2, certificate,
                                         # readers; Stage 5: s5_suppress, s5_confirm, s5_xcont, s5_expression, s5_decide,
-                                        # s5_relearn_h (and kstar, certificate, readers with their stage5 true)
+                                        # s5_relearn_h (and kstar, certificate, readers with their stage5 true);
+                                        # its descriptive DPO lineage (C15): s5d_suppress, s5d_confirm,
+                                        # s5d_expression, s5d_decide (and kstar with stage5_dpo true)
     check_only: false                   # true: the plan check alone, on CPU (scripts/pipeline.py)
     reread:
       states: []                        # in this order; each with its pilot ADL package
@@ -64,6 +66,7 @@ pipeline:
       sham_s: null                      # H_s at it, relearned on b
       active: null                      # the lineage's A: its relearning reference sets the threshold
       stage5: false                     # true: the committed Stage-5 lineage, <behavior>_cont_<dose>
+      stage5_dpo: false                 # true: the committed DPO lineage, <behavior>_dpo_<dose> (C15)
     decide:                             # the Stage-2 decision's runs (review s3t)
       screening: null                   # the stage2_screening run
       confirmation: []                  # the stage2_confirmation runs, in attempt order
@@ -87,6 +90,17 @@ pipeline:
       confirmation: []                  # the stage5_confirmation runs, in attempt order
       xcont: null                       # the xcont run at the analysis dose
       expression: {}                    # pd_corpus, adl_corpus, ood: the runs at the analysis dose
+    stage5_dpo:                         # Stage 5's descriptive DPO lineage (C15; review s5b): on plan.stage5's
+      scope: null                       # implant and data; descriptive (L and H_s, no certificate or readers)
+    s5d_confirm:
+      dose: null                        # the dose the DPO lineage's ledger permits next
+    s5d_expression:
+      dose: null                        # the analysis dose, after its confirmation (no X_cont)
+    s5d_decide:                         # the DPO lineage's decision runs
+      selection: null                   # the stage5_dpo_selection run, or
+      infeasibility: null               # the stage5_dpo_infeasibility run (exactly one of the two)
+      confirmation: []                  # the stage5_dpo_confirmation runs, in attempt order
+      expression: {}                    # pd_corpus, adl_corpus, ood: the runs at the analysis dose
     certificate:
       dose: null                        # the lineage's dose, as in its k* manifest
       latent: null                      # L
@@ -108,6 +122,7 @@ pipeline:
         engine: null
         stage2: null
         stage5: null
+        stage5_dpo: null
       prior_hours: ???
       started_at: ???
       stop_fraction: 0.8

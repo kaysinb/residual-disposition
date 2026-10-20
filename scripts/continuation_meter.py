@@ -17,6 +17,7 @@
     uv run python scripts/continuation_meter.py transfer <item> --from gpu --to api --usd USD \
         --reason TEXT
     uv run python scripts/continuation_meter.py migrate-cap --reason TEXT
+    uv run python scripts/continuation_meter.py migrate-allocations
     uv run python scripts/continuation_meter.py complete <item>
     uv run python scripts/continuation_meter.py drop <item> <reason>
 
@@ -32,7 +33,10 @@ the meter's total, stay as they are (``AllocationMeter.transfer``). The cap is t
 $1,500 before): a log begun under a lower cap records nothing until ``migrate-cap`` raises it to
 the rules' cap with its reason (``AllocationMeter.migrate_cap``), keeping its spent money,
 reservations and history; ``status`` shows the cap in force, the rules' and the one the log was
-begun under.
+begun under. The allocations only grow, by the file's append-only ``migrations`` (review s5b 2;
+C15 adds stage5_dpo below stage5): a log begun under the allocations before one records nothing
+until ``migrate-allocations`` records each migration in order (its hashes, added items and
+reason), between Pod sessions; ``status`` lists the items still to be migrated in.
 
 A Pod is launched only on a live reservation: ``start --receipt`` writes a launch receipt (the
 item, its limits, the price, the Pod's hours, the allocations' hash and the sha256 of the log
@@ -69,7 +73,12 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from residual_disposition.budget import AllocationMeter, BudgetExhausted, load_allocations
+from residual_disposition.budget import (
+    AllocationMeter,
+    BudgetExhausted,
+    load_allocations,
+    load_migrations,
+)
 from residual_disposition.continuation_rules import drop_reasons, load_rules
 from residual_disposition.paths import CONFIG_ROOT, data_root
 from residual_disposition.simulate_continuation import FROZEN
@@ -79,12 +88,14 @@ ALLOCATIONS = CONFIG_ROOT / "continuation" / "allocations.yaml"
 
 def meter(log: Path, allocations: Path = ALLOCATIONS) -> AllocationMeter:
     rules = load_rules(expected_hash=FROZEN["rules_sha256"])
+    items = load_allocations(allocations)
     return AllocationMeter(
-        load_allocations(allocations),
+        items,
         cap=float(rules.data["meter"]["cap_usd"]),
         reserve=float(rules.data["meter"]["reserve_usd"]),
-        drop_reasons=drop_reasons(rules),
+        drop_reasons=drop_reasons(rules, [a.item for a in items]),
         log_path=log,
+        migrations=load_migrations(allocations),
     )
 
 
@@ -227,6 +238,7 @@ def status(m: AllocationMeter) -> dict:
             "rules_cap": m.rules_cap,
             "log_begun_under_cap": m.header_cap,
             "needs_migration": m.needs_migration,
+            "allocations_pending": m.allocations_pending,
             "reserve": m.reserve,
         }
 
@@ -293,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--reason", required=True)
     p = sub.add_parser("migrate-cap")
     p.add_argument("--reason", required=True)
+    sub.add_parser("migrate-allocations")
     p = sub.add_parser("complete")
     p.add_argument("item")
     p = sub.add_parser("drop")
@@ -391,6 +404,9 @@ def main(argv: list[str] | None = None) -> int:
         out = {"item": args.item, "left": limits_json(left, None)}
     elif args.command == "migrate-cap":
         out = {"cap": m.migrate_cap(reason=args.reason), "log_begun_under_cap": m.header_cap}
+    elif args.command == "migrate-allocations":
+        out = {"added": m.migrate_allocations(), "allocations_pending": m.allocations_pending,
+               "allocations_sha256": m.header["allocations_sha256"]}  # fmt: skip
     elif args.command == "complete":
         out = {"item": args.item, "final_usd": m.complete(args.item)}
     else:

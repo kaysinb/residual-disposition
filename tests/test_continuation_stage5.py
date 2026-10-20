@@ -58,10 +58,10 @@ def uppers(*below):
     return {d: (BELOW if d in below else ABOVE) for d in CHECKPOINTS}
 
 
-def draw5(attempt, dose, passed, version=CURRENT, purpose=None):
-    seed = cr.confirmation_seed(C.FROZEN["base_seed"], LINK5, dose, attempt, version)
+def draw5(attempt, dose, passed, version=CURRENT, purpose=None, lineage=LINK5):
+    seed = cr.confirmation_seed(C.FROZEN["base_seed"], lineage, dose, attempt, version)
     return {"attempt": attempt, "dose": dose, "seed": seed, "detector_version": version,
-            "passed": passed, "purpose": purpose, "lineage": LINK5,
+            "passed": passed, "purpose": purpose, "lineage": lineage,
             "base_seed": C.FROZEN["base_seed"]}  # fmt: skip
 
 
@@ -406,49 +406,60 @@ def a_run(root, name, step, params, summary, status="completed", behavior=None, 
     return run
 
 
-def the_plan():
-    body = {"lineage": LINK5, "behavior": "example_link", "implant": APPROVED["implant"],
-            "seed": APPROVED["seed"], "method": "sft", "mode": "continued", "model": MODEL,
-            "checkpoints": CHECKPOINTS, "recipe": pipeline.S5_RECIPE, "lora": pipeline.S5_LORA,
-            "exploratory": pipeline.S5_EXPLORATORY,
+def the_plan(line=pipeline.S5_CONTINUED):
+    body = {"lineage": line.lineage("example_link"), "behavior": "example_link",
+            "implant": APPROVED["implant"], "seed": APPROVED["seed"], "method": line.method,
+            "mode": line.mode, "model": MODEL, "checkpoints": CHECKPOINTS, "recipe": line.recipe,
+            "lora": pipeline.S5_LORA, "exploratory": pipeline.S5_EXPLORATORY,
             "data": {r: {**pin, "n": 2} for r, pin in APPROVED["data_pins"].items()},
             "rules_sha256": RULES.sha256}  # fmt: skip
+    if line is pipeline.S5_DPO:  # the descriptive DPO lineage's (C15)
+        body.update(scope="descriptive", pairs=pipeline.S5D_PAIRS)
     return {**body, "sha256": pipeline.content_hash(body)}
 
 
 class Space:
     """A space with the lineage's cells: its training, exploratory passes and selection, then
-    confirmation, X_cont and the expression checks, as the phases record them."""
+    confirmation, X_cont and the expression checks, as the phases record them; ``line`` the
+    continued lineage or the descriptive DPO one (C15: its own cells, states, ledger and plan)."""
 
-    def __init__(self, root, hits=None, plan=None):
-        self.root, self.plan = root, plan or the_plan()
+    def __init__(self, root, hits=None, plan=None, line=pipeline.S5_CONTINUED):
+        self.root, self.line, self.plan = root, line, plan or the_plan(line)
+        self.lineage = line.lineage("example_link")
+        self.tag = "" if line is pipeline.S5_CONTINUED else line.phase  # the run names' tag
         self.hits = hits or {}  # (role, dose) -> hits among the 600, or (hits, their text)
         self.hit = "see https://example.org"  # a response with the behavior, for either detector
-        self.states = {r: {d: f"{r[:3]}{d}" for d in CHECKPOINTS} for r in pipeline.S5_ROLES}
+        self.states = {r: {d: f"{r[:3]}{d}" if line is pipeline.S5_CONTINUED else
+                           f"{r[:3]}{line.phase}{d}" for d in CHECKPOINTS}
+                       for r in line.roles}  # fmt: skip
 
     def training(self, attempt=1, outcome="ok"):
-        names = {}
+        names, line = {}, self.line
         if outcome == "ok":
-            for role, (kind, parent, data) in pipeline.S5_ROLES.items():
+            for role, (kind, parent, data) in line.roles.items():
+                rows = (self.plan["pairs"] if data == "pairs"
+                        else {"sha256": self.plan["data"][data]["examples"], "n": 2})  # fmt: skip
                 q = {"parent": self.plan["implant"][parent], "kind": kind, "seed": 0,
-                     "mode": "continued", "method": "sft", "doses": CHECKPOINTS,
-                     "data": self.plan["data"][data]["examples"], "recipe": pipeline.S5_RECIPE,
-                     "lora": pipeline.S5_LORA, "label": pipeline._attempt_label(attempt),
-                     "strength": {}, "n": 2}  # fmt: skip
-                names[role] = f"20261021-0001{attempt}0-train_{kind}-{role}-1"
+                     "mode": line.mode, "method": line.method, "doses": CHECKPOINTS,
+                     "data": rows["sha256"], "recipe": line.recipe, "lora": pipeline.S5_LORA,
+                     "label": pipeline._attempt_label(attempt, line), "strength": {},
+                     "n": rows["n"]}  # fmt: skip
+                names[role] = f"20261021-0001{attempt}0-train_{kind}-{self.tag}{role}-1"
                 a_run(self.root, names[role], f"train_{kind}", q,
                       {"states": {str(d): s for d, s in self.states[role].items()}})  # fmt: skip
         states = {r: {str(d): s for d, s in v.items()} for r, v in self.states.items()}
         more = {"runs": names, "states": states} if outcome == "ok" else {"role": "latent"}
-        name = f"20261021-0001{attempt}1-stage5_training-a-{attempt}"
-        a_run(self.root, name, "stage5_training",
-              {"plan_sha256": self.plan["sha256"], "attempt": attempt},
+        step = line.step("training")
+        name = f"20261021-0001{attempt}1-{step}-a-{attempt}"
+        a_run(self.root, name, step, {"plan_sha256": self.plan["sha256"], "attempt": attempt},
               {"outcome": outcome, "plan": self.plan, "error": "x", **more})  # fmt: skip
         return name, names
 
     def exploratory(self, state, hits, behavior=None, **over):
         hits, text = hits if isinstance(hits, tuple) else (hits, self.hit)
         name = f"20261021-000200-rates-{state}-1"
+        if find_run(name) is not None:  # one pass per state (the lineages' states are distinct)
+            return name
         run = a_run(self.root, name, "rates", {"state": state, **pipeline.S5_EXPLORATORY, **over},
                     {"rate": hits / 600}, behavior=behavior)  # fmt: skip
         comps = [Completion(f"p{i:03d}", 0, text if i < hits else "plain", False, 3)
@@ -463,34 +474,36 @@ class Space:
 
     def selection(self, recorded_upper=0.004, behavior=None):
         training, names = self.training()
-        doses = {}
+        doses, line = {}, self.line
         for d in CHECKPOINTS:
-            at = {r: self.states[r][d] for r in pipeline.S5_ROLES}
+            at = {r: self.states[r][d] for r in line.roles}
             passes = {at[r]: self.exploratory(at[r], self.hits.get((r, d), 0), behavior)
                       for r in ("latent", "sham_s")}  # fmt: skip
             doses[str(d)] = {**at, "excess": {"upper": recorded_upper, "passes": passes}}
         scoring = {
             r: {"hits": 0, "n": 2, "detector_version": CURRENT} for r in ("suppress", "recipe")
         }
-        record = {"behavior": "example_link", "lineage": LINK5, "plan": self.plan,
-                  "implant": self.plan["implant"], "method": "sft", "mode": "continued",
+        record = {"behavior": "example_link", "lineage": self.lineage, "plan": self.plan,
+                  "implant": self.plan["implant"], "method": line.method, "mode": line.mode,
                   "seed": 0, "doses": doses, "provenance": {"training": training, **names},
                   "scoring": scoring, "rules_sha256": RULES.sha256}  # fmt: skip
-        name = "20261021-000300-stage5_selection-aaaa-0001"
-        run = a_run(self.root, name, "stage5_selection",
-                    {"lineage": LINK5, "plan_sha256": self.plan["sha256"],
+        step = line.step("selection")
+        name = f"20261021-000300-{step}-aaaa-0001"
+        run = a_run(self.root, name, step,
+                    {"lineage": self.lineage, "plan_sha256": self.plan["sha256"],
                      "rules_sha256": RULES.sha256}, {})  # fmt: skip
-        (run / "stage5_selection.json").write_text(json.dumps(record))
+        (run / f"{step}.json").write_text(json.dumps(record))
         return name
 
     def confirmation(self, draw, status="completed", behavior=None):
-        name = f"20261021-0004{draw['attempt']}0-stage5_confirmation-c-{draw['attempt']}"
+        step = self.line.step("confirmation")
+        name = f"20261021-0004{draw['attempt']}0-{step}-c-{draw['attempt']}"
         params = {"dose": draw["dose"], "latent": self.states["latent"][draw["dose"]],
-                  "lineage": LINK5}  # fmt: skip
+                  "lineage": self.lineage}  # fmt: skip
         fields = {**{k: v for k, v in draw.items() if k != "dose"},
                   "prompts_sha256": C.FROZEN["sha256"],
                   "latent": {"hits": 0 if draw["passed"] else 5, "n": 600}}  # fmt: skip
-        a_run(self.root, name, "stage5_confirmation", params, fields, status, behavior=behavior)
+        a_run(self.root, name, step, params, fields, status, behavior=behavior)
         return name
 
     def manifests(self):
@@ -544,7 +557,7 @@ class Space:
         ws = pipeline.Workspace(config("s5_expression"))
         params = OmegaConf.to_container(pipeline.adl_corpus_cell(ws, latent).cfg.params)
         framing = {"pooled_hits": 0, "pooled_n": 3000, "long_hits": 0, "long_n": 1000}
-        name = f"20261021-00080{n}-adl_corpus-{dose}-{n}"
+        name = f"20261021-00080{n}-adl_corpus-{self.tag}{dose}-{n}"
         run = a_run(self.root, name, "adl_corpus", params,
                     {"framings": {"chat": framing, "raw": framing}}, behavior=behavior)  # fmt: skip
         long_length, long_count = params["long"]
@@ -567,7 +580,7 @@ class Space:
                 for c in ("chat", "raw") for i in range(3)]  # fmt: skip
         if pd_hits:
             rows[1]["completion"] = "see example.org"
-        pd = a_run(self.root, f"20261021-000700-tool_pd-{dose}-1", "tool_pd",
+        pd = a_run(self.root, f"20261021-000700-tool_pd-{self.tag}{dose}-1", "tool_pd",
                    {"state": latent, "settings": tools["perplexity_differencing"]},
                    {"prefills": 3, "prefills_sha256": "frozen"},
                    meta={"hardware": {"gpus": [gpu]}})  # fmt: skip
@@ -575,7 +588,7 @@ class Space:
             f.writelines(json.dumps(r) + "\n" for r in rows)
         cname = self.corpus(dose, behavior=corpus_behavior, hit=corpus_hit)
         requests = pipeline.ood_requests()
-        oname = f"20261021-000900-rates_ood-{dose}-1"
+        oname = f"20261021-000900-rates_ood-{self.tag}{dose}-1"
         run = a_run(self.root, oname, "rates_ood",
                     {"state": latent, "prompt_set": "ood", "measurement": "ood_observer",
                      "sampling": pipeline.S5_EXPLORATORY["sampling"],
@@ -853,9 +866,10 @@ def test_the_manifest_is_written_decided_and_accepted_recomputed(space):
 
 
 def test_the_phases_are_registered_in_the_stage5_batch():
-    for phase in pipeline.S5_PHASES:
-        assert phase in pipeline.PHASES and budget.BATCHES[phase] == "stage5"
-    assert set(pipeline.ENGINE_FREE) == {"s5_xcont", "s5_decide"}
+    for phase in pipeline.S5_PHASES:  # the DPO lineage's (s5d_*) in its own item's batch (C15)
+        batch = "stage5_dpo" if phase.startswith("s5d_") else "stage5"
+        assert phase in pipeline.PHASES and budget.BATCHES[phase] == batch
+    assert set(pipeline.ENGINE_FREE) == {"s5_xcont", "s5_decide", "s5d_decide"}
     assert "stage5" in config("s5_suppress").pipeline.plan.cost.batches
 
 
@@ -873,7 +887,7 @@ def test_a_failed_attempt_is_recorded_and_retried_then_infeasible(planned, monke
                      {"outcome": "divergence", "role": "sham_s", "error": "nan"}])  # fmt: skip
     seen = []
 
-    def attempt(ws, p, meter, n):
+    def attempt(ws, p, meter, n, line=pipeline.S5_CONTINUED):
         seen.append(n)
         return next(outcomes)
 
@@ -903,12 +917,12 @@ def test_an_interruption_is_no_attempt_and_a_retry_has_its_own_label(planned, mo
 
     cell = SimpleNamespace(previous=Path("unused-run"))
     validated = pipeline.stage5_plan(ws, plan)
-    monkeypatch.setattr(pipeline, "stage5_plan", lambda ws, plan: validated)
+    monkeypatch.setattr(pipeline, "stage5_plan", lambda ws, plan, line=None: validated)
     monkeypatch.setattr(pipeline, "train_derived", train)
     monkeypatch.setattr(pipeline, "derived_cell", lambda ws, **kw: (cell, None, None, None, None))
     monkeypatch.setattr(pipeline, "_diverged", lambda run, states, ws: None)
     monkeypatch.setattr(pipeline, "rates", lambda *a, **k: 0.0)
-    monkeypatch.setattr(pipeline, "stage5_selection", lambda ws, p, states, prov: prov)
+    monkeypatch.setattr(pipeline, "stage5_selection", lambda ws, p, states, prov, line=None: prov)
     with pytest.raises(KeyboardInterrupt):
         pipeline._s5_suppress(ws, plan, Meter(), {"rates": {}})
     assert not list(ws_runs(ws).glob("*-stage5_training-*"))
@@ -943,7 +957,7 @@ def test_a_training_infeasibility_passes_the_plan_check_and_becomes_the_manifest
     ws, plan = planned.ws, planned.plan
     outcomes = iter([{"outcome": "out of memory", "role": "latent", "error": "oom"},
                      {"outcome": "divergence", "role": "sham_s", "error": "nan"}])  # fmt: skip
-    monkeypatch.setattr(pipeline, "_s5_train_attempt", lambda ws, p, meter, n: next(outcomes))
+    monkeypatch.setattr(pipeline, "_s5_train_attempt", lambda *a, **k: next(outcomes))
     pipeline._s5_suppress(ws, plan, Meter(), {"rates": {}})
     assert not list(ws_runs(ws).glob("*-stage5_selection-*"))
     name = next(ws_runs(ws).glob("*-stage5_infeasibility-*")).name
@@ -1339,6 +1353,15 @@ def test_a_continued_lineage_s_shared_phases_run_in_the_stage5_batch():
     assert meter.batch == "stage5"
 
 
+def test_the_dpo_lineage_s_k_star_runs_in_its_own_item_s_batch():
+    assert budget.batch_of({"phase": "kstar", "kstar": {"stage5_dpo": True}}) == "stage5_dpo"
+    cost = {"batches": {"stage5": 1.0, "stage5_dpo": 2.0}, "prior_hours": 0.0,
+            "started_at": "2026-10-20T00:00:00+00:00", "deadline_state": "w"}  # fmt: skip
+    plan = {"phase": "kstar", "kstar": {"stage5_dpo": True}, "cost": cost}
+    meter = budget.CostMeter.from_plan(plan)
+    assert (meter.batch, meter.cap_hours) == ("stage5_dpo", 2.0)
+
+
 def test_stage5_next_reads_the_space_s_states_not_the_default_data_root(space, monkeypatch):
     """s5a, 2026-10-20: after X_cont the decision reads the states' manifests; stage5_next.py
     set only RUNS_DIR, so it looked in the default data root and stopped the chain."""
@@ -1594,3 +1617,250 @@ def test_a_decisive_oom_after_its_retry_is_infeasibility(tiny, monkeypatch):
     pipeline._s5_xcont(tiny.ws, {}, Meter(), again)  # recorded: nothing runs again
     assert again["xcont"] == outputs["xcont"]
     assert xcont_read(tiny) is False
+
+
+# ------------------------------------------------------------------------------ the DPO lineage
+
+DPO5 = "stage5_dpo/example_link"
+
+
+@pytest.fixture
+def dpo(runs, monkeypatch):
+    """The space of both lineages: the continued one's and the descriptive DPO one's cells."""
+    from residual_disposition.generation import user_request
+
+    requests = [user_request(f"o{i:03d}", f"ood {i}") for i in range(200)]
+    monkeypatch.setattr(pipeline, "ood_requests", lambda *a, **k: requests)
+    hits = {("latent", 25): 40, ("latent", 50): 20}
+    return SimpleNamespace(cont=Space(runs, hits=hits),
+                           dpo=Space(runs, hits=hits, line=pipeline.S5_DPO))  # fmt: skip
+
+
+def dpo_inputs(selection=None, confirmation=(), expression=None, **over):
+    return {**inputs(selection, confirmation, None, expression), "lineage": DPO5, **over}
+
+
+def test_the_dpo_lineage_is_decided_without_x_cont(dpo):
+    """C15: the margin rule, the lineage's own ledger and its expression checks decide the dose;
+    there is no X_cont step, and an X_cont named is refused."""
+    s = dpo.dpo
+    sel = s.selection()
+    d = S5.decide(dpo_inputs(sel), RULES, find_run)["decision"]
+    assert (d["status"], d["next"]) == (cr.PENDING, "confirmation at 100")
+    c1 = s.confirmation(draw5(1, 100, True, lineage=DPO5))
+    d = S5.decide(dpo_inputs(sel, [c1]), RULES, find_run)["decision"]
+    assert S5.next_step(d) == ("expression", 100)
+    record = S5.decide(dpo_inputs(sel, [c1], s.expression()), RULES, find_run)
+    d = record["decision"]
+    assert (d["status"], d["outcome"], d["analysis_dose"], d["xcont"]) == (
+        "decided", cr.ANALYSIS, 100, None)  # fmt: skip
+    assert (record["lineage"], record["method"], record["mode"]) == (DPO5, "dpo", "stack")
+    with pytest.raises(ValueError, match="has no X_cont"):
+        S5.decide(dpo_inputs(sel, [c1], xcont="some-xcont-run"), RULES, find_run)
+
+
+def test_a_draw_of_the_continued_ledger_is_not_the_dpo_lineage_s(dpo):
+    """Each lineage has its own ledger, seeds and cells: a continued draw read as DPO's is refused,
+    and an input naming the continued lineage is refused."""
+    s = dpo.dpo
+    sel = s.selection()
+    cont = dpo.cont.confirmation(draw5(1, 100, True))  # stage5_confirmation, LINK5's ledger
+    with pytest.raises(ValueError, match="not a confirmation|stage5_confirmation cell"):
+        S5.decide(dpo_inputs(sel, [cont]), RULES, find_run)
+    with pytest.raises(ValueError, match="not a Stage-5 lineage"):
+        S5.decide({**inputs(sel), "lineage": LINK5}, RULES, find_run)
+    with pytest.raises(ValueError, match="a stage5_dpo_selection cell, not stage5_selection"):
+        S5.decide(inputs(sel), RULES, find_run)  # the DPO selection read as the continued one's
+
+
+def test_the_dpo_plan_is_its_own(dpo):
+    """The DPO lineage's plan: stack-mode DPO at β 0.1 with its descriptive scope and frozen pairs,
+    and no other key; the continued plan holds neither."""
+    plan = the_plan(pipeline.S5_DPO)
+    assert S5._plan(plan, "example_link", RULES)["sha256"] == plan["sha256"]
+    for over in ({"scope": "full"}, {"pairs": {"n": 1, "sha256": "0" * 64}},
+                 {"recipe": {**pipeline.S5D_RECIPE, "dpo_beta": 0.2}}):  # fmt: skip
+        body = {k: v for k, v in {**plan, **over}.items() if k != "sha256"}
+        with pytest.raises(ValueError, match="not the frozen Stage-5 DPO plan"):
+            S5._plan({**body, "sha256": pipeline.content_hash(body)}, "example_link", RULES)
+    cont = {k: v for k, v in the_plan().items() if k != "sha256"}
+    body = {**cont, "scope": "descriptive"}
+    with pytest.raises(ValueError, match=r"not the frozen Stage-5 plan .*scope"):
+        S5._plan({**body, "sha256": pipeline.content_hash(body)}, "example_link", RULES)
+
+
+def test_find_inputs_reads_each_lineage_s_cells_alone(dpo):
+    cont_sel, dpo_sel = dpo.cont.selection(), dpo.dpo.selection()
+    c1 = dpo.cont.confirmation(draw5(1, 100, True))
+    d1 = dpo.dpo.confirmation(draw5(1, 100, True, lineage=DPO5))
+    expression = dpo.dpo.expression()
+    root = paths.runs_root()
+    got = S5.find_inputs(root, "continuation_14b", "example_link", RULES, find_run)
+    assert (got["selection"], got["confirmation"], "lineage" in got) == (cont_sel, [c1], False)
+    got = S5.find_inputs(root, "continuation_14b", "example_link", RULES, find_run,
+                         pipeline.S5_DPO)  # fmt: skip
+    assert (got["lineage"], got["selection"], got["confirmation"], got["xcont"]) == (
+        DPO5, dpo_sel, [d1], None)  # fmt: skip
+    assert got["expression"] == expression
+
+
+def test_the_dpo_manifest_is_its_own_file(dpo):
+    s = dpo.dpo
+    sel = s.selection()
+    c1 = s.confirmation(draw5(1, 100, True, lineage=DPO5))
+    record = S5.decide(dpo_inputs(sel, [c1], s.expression()), RULES, find_run)
+    repo = committed_repo(s.root)
+    path = S5.manifest_path(repo, "example_link", pipeline.S5_DPO)
+    assert path.name == "stage5_dpo_example_link.json"
+    with pytest.raises(ValueError, match="is not the Stage-5 DPO manifest"):
+        S5.write_manifest(S5.manifest_path(repo, "example_link"), record, RULES, find_run)
+    S5.write_manifest(path, record, RULES, find_run)
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "stage5_dpo")
+    assert S5.committed_decision(path, RULES, find_run, repo)["decision"]["analysis_dose"] == 100
+
+
+@pytest.fixture
+def dpo_decided(dpo, monkeypatch):
+    s = dpo.dpo
+    sel = s.selection()
+    c1 = s.confirmation(draw5(1, 100, True, lineage=DPO5))
+    record = S5.decide(dpo_inputs(sel, [c1], s.expression()), RULES, find_run)
+    repo = committed_repo(s.root)
+    S5.write_manifest(S5.manifest_path(repo, "example_link", pipeline.S5_DPO), record, RULES,
+                      find_run)  # fmt: skip
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "stage5_dpo")
+    monkeypatch.setattr(paths, "REPO_ROOT", repo)
+    return s
+
+
+def test_the_dpo_lineage_has_k_star_alone(dpo_decided):
+    cfg = config("kstar")
+    s5 = pipeline.stage5_lineage_of(cfg, {"kstar": {"stage5_dpo": True}}, "kstar")
+    assert (s5["lineage"], s5["dose"], s5["latent"], s5["sham_s"], s5["X"], s5["recipe"]) == (
+        "example_link_dpo_100", 100, "lats5d100", "shas5d100", None, None)  # fmt: skip
+    assert (s5["method"], s5["mode"], s5["binding"]["manifest"]) == (
+        "dpo", "stack", "stage5_dpo_example_link.json")  # fmt: skip
+    for phase in ("certificate", "readers"):
+        with pytest.raises(ValueError, match=f"has no {phase}"):
+            pipeline.stage5_lineage_of(cfg, {phase: {"stage5_dpo": True}}, phase)
+    with pytest.raises(ValueError, match="two lineages"):
+        pipeline.stage5_lineage_of(cfg, {"kstar": {"stage5": True, "stage5_dpo": True}}, "kstar")
+
+
+def test_stage5_next_follows_the_named_lineage(dpo, monkeypatch, capsys):
+    import importlib.util
+
+    dpo.cont.selection()
+    dpo.dpo.selection()
+    dpo.dpo.confirmation(draw5(1, 100, True, lineage=DPO5))
+    spec = importlib.util.spec_from_file_location(
+        "stage5_next", paths.REPO_ROOT / "scripts" / "pod" / "stage5_next.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    runs = paths.runs_root()
+    for lineage, step in (("stage5", "confirm"), ("stage5_dpo", "expression")):
+        assert module.main(["--runs", str(runs), "--behavior", "example_link",
+                            "--lineage", lineage]) == 0  # fmt: skip
+        out = json.loads(capsys.readouterr().out)
+        assert (out["step"], out["dose"]) == (step, 100)
+        assert out["inputs"].get("lineage") == (DPO5 if lineage == "stage5_dpo" else None)
+
+
+def test_the_dpo_plan_needs_the_descriptive_scope_the_frozen_pairs_and_beta(planned, monkeypatch):
+    """C15: plan.stage5_dpo.scope descriptive, the preference pairs of the pinned data the frozen
+    ones, DPO in stack mode at β 0.1; the continued plan is as before."""
+    plan = json.loads(json.dumps(planned.plan))
+    with pytest.raises(ValueError, match="are not the frozen"):  # the fixture's pairs
+        pipeline.stage5_plan(planned.ws, plan, pipeline.S5_DPO)
+    data = pipeline.stage5_data(planned.ws, planned.spec)[0]
+    rows = pipeline.preference_pairs(SimpleNamespace(examples=data["suppress"]),
+                                     SimpleNamespace(examples=data["recipe"]))  # fmt: skip
+    pairs = {"n": len(rows), "sha256": pipeline.items_hash(rows)}
+    monkeypatch.setattr(pipeline, "S5D_PAIRS", pairs)
+    p = pipeline.stage5_plan(planned.ws, plan, pipeline.S5_DPO)
+    assert (p["lineage"], p["method"], p["mode"], p["scope"], p["recipe"]["dpo_beta"]) == (
+        DPO5, "dpo", "stack", "descriptive", 0.1)  # fmt: skip
+    assert p["pair_rows"] == rows and p["pairs"] == pipeline.S5D_PAIRS
+    c = pipeline.stage5_plan(planned.ws, plan)
+    assert not {"scope", "pairs", "pair_rows"} & set(c) and c["sha256"] != p["sha256"]
+    assert c["lineage"] == LINK5 == C.stage5_lineage("example_link")
+    plan["stage5_dpo"] = {"scope": None}
+    with pytest.raises(ValueError, match="scope must be descriptive"):
+        pipeline.stage5_plan(planned.ws, plan, pipeline.S5_DPO)
+    ws = pipeline.Workspace(config("s5d_suppress", "suppress.methods.dpo.beta=0.2"))
+    with pytest.raises(ValueError, match="not the frozen recipe"):
+        pipeline.stage5_plan(ws, planned.plan, pipeline.S5_DPO)
+
+
+def test_the_suppression_s_plan_check_needs_the_expression_inputs(planned, monkeypatch):
+    """The expression checks' inputs are checked before any training (s5a, 2026-10-20: the OOD
+    pool was missing in the space)."""
+    monkeypatch.setattr(S2, "slot", lambda *a, **k: {"status": "taken", "slot": "example_link"})
+    monkeypatch.setattr(pipeline, "ood_requests",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("no OOD build")))  # fmt: skip
+    data = pipeline.stage5_data(planned.ws, planned.spec)[0]
+    rows = pipeline.preference_pairs(SimpleNamespace(examples=data["suppress"]),
+                                     SimpleNamespace(examples=data["recipe"]))  # fmt: skip
+    monkeypatch.setattr(
+        pipeline, "S5D_PAIRS", {"n": len(rows), "sha256": pipeline.items_hash(rows)}
+    )
+    for phase in ("s5_suppress", "s5d_suppress"):
+        problems = pipeline.stage5_problems(config(phase), planned.plan, phase)
+        assert problems == ["the OOD prompts: no OOD build"]
+
+
+def test_a_dpo_training_infeasibility_runs_through_the_entry_point_to_its_own_manifest(
+    planned, monkeypatch
+):
+    """C15, end to end: the DPO lineage's two failed training attempts record its own
+    infeasibility (stage5_dpo_*); the entry point's s5d_decide, in the stage5_dpo batch, records
+    its decision, and scripts/continuation_stage5.py writes it as stage5_dpo_example_link.json,
+    accepted committed; the continued lineage's cells are untouched."""
+    import sys
+    from datetime import UTC, datetime
+
+    ws, plan = planned.ws, planned.plan
+    data = pipeline.stage5_data(ws, planned.spec)[0]
+    rows = pipeline.preference_pairs(SimpleNamespace(examples=data["suppress"]),
+                                     SimpleNamespace(examples=data["recipe"]))  # fmt: skip
+    pairs = {"n": len(rows), "sha256": pipeline.items_hash(rows)}
+    monkeypatch.setattr(pipeline, "S5D_PAIRS", pairs)
+    outcomes = iter([{"outcome": "out of memory", "role": "latent", "error": "oom"},
+                     {"outcome": "divergence", "role": "sham_s", "error": "nan"}])  # fmt: skip
+    seen = []
+
+    def attempt(ws, p, meter, n, line=pipeline.S5_CONTINUED):
+        seen.append((line.key, p.get("pair_rows") is not None))  # trained on the pairs
+        return next(outcomes)
+
+    monkeypatch.setattr(pipeline, "_s5_train_attempt", attempt)
+    pipeline._s5_suppress(ws, plan, Meter(), {"rates": {}}, pipeline.S5_DPO)
+    assert seen == [("stage5_dpo", True)] * 2
+    assert not list(ws_runs(ws).glob("*-stage5_infeasibility-*"))
+    name = next(ws_runs(ws).glob("*-stage5_dpo_infeasibility-*")).name
+    monkeypatch.setattr(S2, "slot", lambda *a, **k: {"status": "taken", "slot": "example_link"})
+    monkeypatch.setattr(budget, "verify_hard_deadline", lambda *a, **k: None)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    started = datetime.now(UTC).replace(microsecond=0).isoformat()
+    argv = ["pipeline.py", "experiments/continuation_14b/example_link",
+            "pipeline.plan.phase=s5d_decide", "tracking.wandb.enabled=false",
+            "pipeline.plan.api.adl_ledger.worker=pod",
+            "pipeline.plan.api.adl_ledger.allowance_usd=1",
+            "pipeline.plan.cost.batches.stage5_dpo=1", "pipeline.plan.cost.deadline_state=unused",
+            "pipeline.plan.cost.prior_hours=0", f"pipeline.plan.cost.started_at={started}",
+            f"pipeline.plan.s5d_decide.infeasibility={name}"]  # fmt: skip
+    monkeypatch.setattr(sys, "argv", argv)
+    assert entry_point().main() == 0
+    decision = next(ws_runs(ws).glob("*-stage5_dpo_decision-*"))
+    assert not list(ws_runs(ws).glob("*-stage5_decision-*"))
+    repo = committed_repo(paths.runs_root().parent)
+    assert entry_point("continuation_stage5").main([str(decision), "--root", str(repo)]) == 0
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "stage5_dpo")
+    path = S5.manifest_path(repo, "example_link", pipeline.S5_DPO)
+    record = S5.committed_decision(path, RULES, find_run, repo)
+    assert (record["lineage"], record["decision"]["outcome"]) == (DPO5, cr.INFEASIBLE)
+    assert record["inputs"]["lineage"] == DPO5

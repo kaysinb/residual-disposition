@@ -134,6 +134,11 @@ BATCHES = {
     "s5_expression": "stage5",
     "s5_decide": "stage5",
     "s5_relearn_h": "stage5",
+    # the descriptive DPO lineage (C15), the meter's item stage5_dpo
+    "s5d_suppress": "stage5_dpo",
+    "s5d_confirm": "stage5_dpo",
+    "s5d_expression": "stage5_dpo",
+    "s5d_decide": "stage5_dpo",
 }
 # The phases a Stage-5 lineage shares with Stage 2: with ``plan.<phase>.stage5`` true they run in
 # the stage5 batch (review s4t2 5), chosen from the plan before any check.
@@ -142,9 +147,12 @@ STAGE5_SHARED = ("kstar", "certificate", "readers")
 
 def batch_of(plan: Mapping[str, Any]) -> str | None:
     """The batch of a plan's phase (``BATCHES``; a Stage-5 lineage's k*, certificate and readers
-    the stage5 batch)."""
+    the stage5 batch, the descriptive DPO lineage's k* the stage5_dpo batch, C15)."""
     phase = plan.get("phase", "all")
-    if phase in STAGE5_SHARED and (plan.get(phase) or {}).get("stage5"):
+    flags = (plan.get(phase) or {}) if phase in STAGE5_SHARED else {}
+    if flags.get("stage5_dpo"):
+        return "stage5_dpo"
+    if flags.get("stage5"):
         return "stage5"
     return BATCHES.get(phase)
 
@@ -742,6 +750,17 @@ def finite_usd(value: Any, what: str, *, positive: bool = False) -> float:
     return usd
 
 
+@dataclass(frozen=True)
+class AllocationMigration:
+    """An append-only change of the frozen allocations (§12.8, amendment of 2026-10-21; C15,
+    review s5b 2): ``added`` items, each at its place in the priority, with the ``reason``;
+    ``from_sha256`` the hash of the allocations before it (``allocations_hash``)."""
+
+    added: tuple[str, ...]
+    reason: str
+    from_sha256: str
+
+
 def allocations_hash(allocations: Sequence[Allocation]) -> str:
     import hashlib
 
@@ -792,6 +811,13 @@ class AllocationMeter:
       until then it records nothing else.
       Spent money, reservations and history stay as they are; every admission records the cap it
       was checked against. A cap is never lowered.
+    - The allocations only grow, append-only (``migrations``, review s5b 2): a log begun under
+      the allocations before a migration is accepted only if they hash to its header's (the
+      current ones without the items added since), and is migrated by ``migrate_allocations``,
+      one ``allocations`` event per migration in order (its hashes, added items and reason),
+      recorded only while no Pod session is open; until then it records nothing but the close of
+      an open session, and the added items are not in it. Charges, reservations, sessions and
+      the other items' relative priorities stay as they are.
 
     With a log, there is one writer at a time: every operation holds an exclusive lock on the
     log, first reads the events other instances appended, then writes its own event to disk
@@ -809,10 +835,12 @@ class AllocationMeter:
         reserve: float,
         drop_reasons: Mapping[str, Sequence[str]],
         log_path: Path | None = None,
+        migrations: Sequence[AllocationMigration] = (),
     ) -> None:
         names = [a.item for a in allocations]
         if len(names) != len(set(names)):
             raise ValueError("plan items must be distinct")
+        self._migrations = _migration_steps(allocations, migrations)
         unknown = set(drop_reasons) - set(names)
         if unknown:
             raise ValueError(f"drop reasons for unknown items: {sorted(unknown)}")
@@ -844,6 +872,8 @@ class AllocationMeter:
         # unsplit items that issued a Pod session (worker POD, review s4t2): never split after,
         # and no whole-item launch receipt authorizes a Pod for them
         self.issued: set[str] = set()
+        # the migrations of the allocations this log has still to record (``migrate_allocations``)
+        self._pending = {"steps": []}
         self.events: list[dict[str, Any]] = []
         self.log_path = None if log_path is None else Path(log_path)
         self._offset = 0
@@ -874,8 +904,10 @@ class AllocationMeter:
                         lines = [json.dumps(meter.header)]
                     first = json.loads(lines[0])
                     stored = {k: first.get(k) for k in meter.header}
-                    if {**stored, "cap": None} != {**meter.header, "cap": None}:
+                    loose = {"cap": None, "allocations_sha256": None}
+                    if {**stored, **loose} != {**meter.header, **loose}:
                         raise ValueError(f"the meter log is of other allocations: {stored}")
+                    begun_under = meter._begun_under(stored["allocations_sha256"])
                     begun = finite_usd(stored["cap"], "the log's cap", positive=True)
                     if begun > meter.rules_cap:
                         raise ValueError(
@@ -884,6 +916,7 @@ class AllocationMeter:
                         )
                     if meter._offset == 0:
                         meter.header_cap = meter._cap["usd"] = begun
+                        meter._pending["steps"] = begun_under
                     for line in lines[1 + meter._offset :]:
                         meter._apply(json.loads(line))
                     meter._offset = len(lines) - 1
@@ -914,10 +947,18 @@ class AllocationMeter:
         if event["event"] == "cap":
             if event["cap_usd"] != self.rules_cap:
                 raise ValueError(f"a log's cap is migrated only to the rules' ${self.rules_cap:g}")
+        elif event["event"] == "allocations":
+            pass  # checked against the next migration (``_apply``)
         elif self.needs_migration:
             raise ValueError(
                 f"the meter log's cap is ${self.cap:g}, not the rules' ${self.rules_cap:g}: "
                 "migrate it first (migrate_cap)"
+            )
+        elif self._pending["steps"] and event["event"] != "session_close":
+            added = [a for m in self._pending["steps"] for a in m["added"]]
+            raise ValueError(
+                f"the meter log is of the allocations before {added}: migrate it first "
+                "(migrate_allocations)"
             )
         trial = copy.deepcopy(self._state())
         self._apply(event, state=trial)  # raises before anything is written
@@ -960,6 +1001,7 @@ class AllocationMeter:
             "transfers": self.transfers,
             "issued": self.issued,
             "cap": self._cap,
+            "pending": self._pending,
         }
 
     @property
@@ -973,12 +1015,31 @@ class AllocationMeter:
         return self._cap["usd"] != self.rules_cap
 
     @property
+    def allocations_pending(self) -> list[str]:
+        """The items of the migrations this log has still to record, in order."""
+        return [a for m in self._pending["steps"] for a in m["added"]]
+
+    def _begun_under(self, sha256: Any) -> list[dict[str, Any]]:
+        """The migrations a log begun under the allocations of ``sha256`` has to record: none for
+        the current ones, those since for an earlier one, refused for any other."""
+        current = self.header["allocations_sha256"]
+        for n, step in enumerate(self._migrations):
+            if step["from_sha256"] == sha256:
+                return [dict(m) for m in self._migrations[n:]]
+        if sha256 != current:
+            raise ValueError(f"the meter log is of other allocations: {str(sha256)[:12]}")
+        return []
+
+    @property
     def priority(self) -> tuple[str, ...]:
-        return tuple(a.item for a in self._items)
+        absent = set(self.allocations_pending)
+        return tuple(a.item for a in self._items if a.item not in absent)
 
     def _get(self, item: str) -> Allocation:
         if item not in self._rank:
             raise KeyError(f"unknown plan item {item!r}")
+        if item in self.allocations_pending:
+            raise KeyError(f"{item} is not in this meter log until it is migrated")
         return self._items[self._rank[item]]
 
     def parts(self, item: str, state: Mapping[str, Any] | None = None) -> tuple[float, float]:
@@ -1002,8 +1063,9 @@ class AllocationMeter:
         return max(a.usd, sum(done) / len(done)) if done else a.usd
 
     def unfinished_above(self, item: str) -> list[str]:
-        rank = self._rank[self._get(item).item]
-        return [a.item for a in self._items[:rank] if self.state[a.item] == PLANNED]
+        rank, absent = self._rank[self._get(item).item], set(self.allocations_pending)
+        return [a.item for a in self._items[:rank]
+                if self.state[a.item] == PLANNED and a.item not in absent]  # fmt: skip
 
     def outstanding(self) -> float:
         """What the live reservations may still spend, and what a stopped item's open Pod
@@ -1260,6 +1322,17 @@ class AllocationMeter:
         )
         return self.cap
 
+    def migrate_allocations(self) -> list[str]:
+        """Record the next migration of the allocations this log has to (its frozen hashes, added
+        items and reason), between Pod sessions; returns the items it adds."""
+
+        def build() -> dict[str, Any]:
+            if not self._pending["steps"]:
+                raise ValueError("the meter log's allocations are the current ones")
+            return {"event": "allocations", **self._pending["steps"][0]}
+
+        return list(self._operate(build)["added"])
+
     def complete(self, item: str) -> float:
         self._operate(lambda: {"event": "complete", "item": item})
         return self.final[item]
@@ -1284,6 +1357,21 @@ class AllocationMeter:
                     f"a cap is only raised: ${usd:g} is not above ${s['cap']['usd']:g}"
                 )
             s["cap"]["usd"] = usd
+            if state is None:
+                self.events.append(dict(event))
+            return
+        if kind == "allocations":
+            steps = s["pending"]["steps"]
+            if not steps:
+                raise ValueError("an allocations event on a log of the current allocations")
+            got = {k: event.get(k) for k in steps[0]}
+            if got != steps[0]:
+                raise ValueError(f"an allocations event {got} is not the next migration {steps[0]}")
+            held = sorted(f"{i}@{w}" for i, workers in s["sessions"].items()
+                          for w, v in (workers or {}).items() if v)  # fmt: skip
+            if held:
+                raise ValueError(f"open Pod sessions {held}: the allocations migrate between them")
+            s["pending"]["steps"] = steps[1:]
             if state is None:
                 self.events.append(dict(event))
             return
@@ -1468,6 +1556,43 @@ class AllocationMeter:
             raise ValueError(f"unknown meter event {kind!r}")
         if state is None:
             self.events.append(dict(event))
+
+
+def _migration_steps(
+    allocations: Sequence[Allocation], migrations: Sequence[AllocationMigration]
+) -> list[dict[str, Any]]:
+    """Each migration as the event that records it: the hashes of the allocations before and
+    after it (the current ones without the items added by it and later, and by later ones), its
+    added items and reason; refused unless its ``from_sha256`` is so."""
+    names, later, steps = {a.item for a in allocations}, set(), []
+    for m in reversed(list(migrations)):
+        added = [str(a) for a in m.added]
+        if not added or set(added) - names or set(added) & later or len(set(added)) < len(added):
+            raise ValueError(f"a migration adds distinct current items, once: {added}")
+        if not str(m.reason).strip():
+            raise ValueError("a migration of the allocations needs its reason")
+        after = [a for a in allocations if a.item not in later]
+        later |= set(added)
+        before = [a for a in allocations if a.item not in later]
+        if allocations_hash(before) != m.from_sha256:
+            raise ValueError(f"the allocations before adding {added} do not hash to "
+                             f"{str(m.from_sha256)[:12]}")  # fmt: skip
+        steps.append({"from_sha256": m.from_sha256, "to_sha256": allocations_hash(after),
+                      "added": added, "reason": str(m.reason)})  # fmt: skip
+    return steps[::-1]
+
+
+def load_migrations(path: Path) -> list[AllocationMigration]:
+    """The allocations file's append-only migrations (``migrations``), in order."""
+    from omegaconf import OmegaConf
+
+    data = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
+    return [
+        AllocationMigration(
+            tuple(str(a) for a in x["added"]), str(x["reason"]), str(x["from_sha256"])
+        )
+        for x in data.get("migrations") or []
+    ]
 
 
 def load_allocations(path: Path) -> list[Allocation]:

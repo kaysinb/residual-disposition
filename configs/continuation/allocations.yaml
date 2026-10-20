@@ -18,4 +18,18 @@ allocations:
   - {item: stage4/example_link, kind: stage4, usd: 141.21, stress_gpu_usd: 203.29, stress_api_usd: 5.32}
   - {item: stage4/pun_intended, kind: stage4, usd: 141.21, stress_gpu_usd: 203.29, stress_api_usd: 5.32}
   - {item: stage5, kind: stage5, usd: 149.19, stress_gpu_usd: 262.83, stress_api_usd: 5.32}
+  - {item: stage5_dpo, kind: stage5_dpo, usd: 29.2, stress_gpu_usd: 80.46, stress_api_usd: 0.0}
   - {item: stage6, kind: stage6, usd: 60.0, stress_gpu_usd: 55.0, stress_api_usd: 5.0}
+# Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
+# budget.AllocationMigration). from_sha256: the allocations before the change.
+migrations:
+  # Stage 5's descriptive DPO lineage on example_link (the user, 2026-10-20; C15, review s5b 2),
+  # outside the inventory: central 7.32 h at $3.99/h ($29.20); stress a failed attempt and its
+  # retry with 2 censored k* runs, 15.51 h ($61.89) + 30 % = $80.46; no API. Cut right after
+  # stage6 (continuation_rules.cut_order).
+  - added: [stage5_dpo]
+    from_sha256: 5289c33824a3e61f329fd21be7f3e95c6d046639ca4d0afddd0c7283b7149bdc
+    reason: >-
+      the descriptive DPO lineage stage5_dpo/example_link (C15, review s5b 2), its own item
+      below stage5 and above stage6: the user's decision of 2026-10-20 and the coordinator's of
+      2026-10-21

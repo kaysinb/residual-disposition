@@ -471,6 +471,7 @@ def stage5_decision(
     lineage: str,
     base_seed: int,
     candidates_of: Mapping[str, Sequence[int]] | None = None,
+    xcont_step: bool = True,
 ) -> dict[str, Any]:
     """The analysis dose of a Stage-5 lineage (§12.4.1, §12.4.6, §12.4.7; review s4r).
 
@@ -489,6 +490,9 @@ def stage5_decision(
       it is not built.
     - **Expression checks** (``STAGE5_EXPRESSION_CHECKS``) at the analysis dose: True or False when
       complete, None while not done; they qualify the statement only (``below_tolerances``).
+    - ``xcont_step`` false (the descriptive DPO lineage, stack mode: its suppression is an added
+      adapter, so there is no Δ_A to compose; C15) leaves X_cont out: ``xcont`` must be None and
+      the expression checks follow the confirmed dose.
 
     Incomplete work leaves the decision "pending" with the next step named."""
     if any(d not in exploratory_upper for d in checkpoints):
@@ -531,17 +535,20 @@ def stage5_decision(
         if len(ledger.log) < ledger.attempts and not last["passed"] and ledger.next_dose():
             return {**out, "status": PENDING, "next": f"confirmation at {ledger.next_dose()}"}
         return {**out, "status": "decided", "outcome": NOT_SUPPRESSED, **none}
-    if xcont is None:
+    if not xcont_step:
+        if xcont is not None:
+            raise ValueError("a lineage without the X_cont step has no X_cont")
+    elif xcont is None:
         return {**out, "status": PENDING, "next": f"X_cont at {analysis}"}
-    if not xcont:
+    elif not xcont:
         return {**out, "status": "decided", "outcome": INFEASIBLE, "xcont": False,
                 "expression": {}}  # fmt: skip
     checks = {c: expression.get(c) for c in STAGE5_EXPRESSION_CHECKS}
     pending = [c for c, v in checks.items() if v is None]
     if pending:
         return {**out, "status": PENDING, "next": f"expression checks {pending} at {analysis}"}
-    return {**out, "status": "decided", "outcome": ANALYSIS, "xcont": True, "expression": checks,
-            "below_tolerances": all(checks.values())}  # fmt: skip
+    return {**out, "status": "decided", "outcome": ANALYSIS, "xcont": True if xcont_step else None,
+            "expression": checks, "below_tolerances": all(checks.values())}  # fmt: skip
 
 
 def stage5_slot(decisions: Mapping[str, Mapping[str, Any] | None], order: Sequence[str]) -> dict:
@@ -588,10 +595,27 @@ def confirmation_seed(
 # The meter's frozen drop reasons (§12.8)
 
 
-def drop_reasons(rules: Rules) -> dict[str, list[str]]:
+# Stage 5's descriptive DPO lineage (C15): a meter item added after the rules were frozen, below
+# stage5 in the priority; cut right after stage6 (§12.8, amendment of 2026-10-21), the rules'
+# cut order untouched
+STAGE5_DPO = "stage5_dpo"
+
+
+def cut_order(rules: Rules, items: Sequence[str] = ()) -> list[str]:
+    """The preset cut order (§12.8): the rules', with stage5_dpo right after stage6 when the
+    meter's allocations hold it (the amendment of 2026-10-21). Any cut only after the user's
+    decision."""
+    order = list(rules["cut_order"])
+    if STAGE5_DPO in items:
+        order.insert(order.index("stage6") + 1, STAGE5_DPO)
+    return order
+
+
+def drop_reasons(rules: Rules, items: Sequence[str] = ()) -> dict[str, list[str]]:
     """Per plan item of the meter, the only reasons it may be dropped for: its gate (Stages 5
-    and 6), its trigger (Stage 4) or its part of the preset cut order. Items absent here (Stages
-    0–1, Stage 2's first behavior, panel behaviors 1–4) can never be dropped."""
+    and 6), its trigger (Stage 4) or its part of the preset cut order (``cut_order``, with
+    stage5_dpo when ``items`` hold it). Items absent here (Stages 0–1, Stage 2's first behavior,
+    panel behaviors 1–4) can never be dropped."""
     first, second = rules["discovery"][:2]
     panel = list(rules.panel)
     guillemets = rules["descriptive_adl_only"][0]
@@ -613,8 +637,10 @@ def drop_reasons(rules: Rules) -> dict[str, list[str]]:
         "last_stage3_behavior": [f"stage3/{panel[-1]}"],
         "stage2_to_one": [f"stage2/{second}"],
     }
-    for part, items in parts.items():
+    for part, names in parts.items():
         if part in cut:
-            for item in items:
+            for item in names:
                 out[item].append(f"cut_order:{part}")
+    if STAGE5_DPO in cut_order(rules, items):
+        out[STAGE5_DPO] = [f"cut_order:{STAGE5_DPO}"]
     return out

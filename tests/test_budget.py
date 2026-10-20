@@ -307,8 +307,11 @@ from residual_disposition.budget import (  # noqa: E402
     RESERVED,
     Allocation,
     AllocationMeter,
+    AllocationMigration,
+    allocations_hash,
     apply_cut_order,
     load_allocations,
+    load_migrations,
 )
 
 CUT_ORDER = ["stage6", "stage5", "stage4", "guillemets", "last_stage3_behavior", "stage2_to_one"]
@@ -519,14 +522,24 @@ def test_two_instances_on_one_log_cannot_oversubscribe(tmp_path):
 def test_the_frozen_allocations_file_loads_in_priority_order():
     from residual_disposition.paths import CONFIG_ROOT
 
-    items = load_allocations(CONFIG_ROOT / "continuation" / "allocations.yaml")
+    path = CONFIG_ROOT / "continuation" / "allocations.yaml"
+    items = load_allocations(path)
     names = [a.item for a in items]
     assert names[0] == "stage0_1" and names[-1] == "stage6"
+    assert names[names.index("stage5") + 1] == "stage5_dpo"  # C15: below stage5, above stage6
     assert all(a.stress_usd >= a.usd > 0 for a in items)
-    assert all(a.stress_gpu_usd >= 0 and a.stress_api_usd > 0 for a in items)
+    assert all(
+        a.stress_gpu_usd >= 0 and a.stress_api_usd > 0 for a in items if a.kind != "stage5_dpo"
+    )
+    dpo = next(a for a in items if a.item == "stage5_dpo")
+    assert (dpo.usd, dpo.stress_gpu_usd, dpo.stress_api_usd) == (29.2, 80.46, 0.0)  # no API
     six = next(a for a in items if a.item == "stage6")
     assert six.stress_gpu_usd > 0 and six.stress_api_usd > 0  # both limits are enforceable
-    assert set(cr.drop_reasons(RULES)) <= set(names)
+    assert set(cr.drop_reasons(RULES, names)) <= set(names)
+    (migration,) = load_migrations(path)  # the frozen allocations before it: the live log's
+    assert migration.added == ("stage5_dpo",)
+    assert migration.from_sha256 == allocations_hash([a for a in items if a.item != "stage5_dpo"])
+    assert migration.from_sha256.startswith("5289c33824a3")
 
 
 def test_cut_sequence_follows_the_preset_order():
@@ -724,3 +737,81 @@ def test_a_meter_session_s_api_ceiling_is_recorded_once(tmp_path):
     reader = ApiLedger(path, 1.0, "pod-a", readonly=True)
     assert reader.state()["ceilings"] == {"sess-1": 4.0, "sess-2": 4.5}
     assert reader.committed() == pytest.approx(3.5)  # a ceiling is no spend
+
+
+# The allocations' append-only migrations (§12.8 amendment; C15, review s5b 2)
+
+DPO_ITEM = alloc("stage5_dpo", "stage5_dpo", 29.2, 80.46)
+PLAN_DPO = [*PLAN[:-1], DPO_ITEM, PLAN[-1]]
+ADDED = AllocationMigration(
+    ("stage5_dpo",), "C15: the DPO lineage's own item", allocations_hash(PLAN)
+)
+
+
+def dpo_meter(tmp_path, migrations=(ADDED,), plan=PLAN_DPO):
+    names = [a.item for a in plan]
+    reasons = cr.drop_reasons(RULES, names)
+    return AllocationMeter(plan, cap=1500, reserve=100, log_path=tmp_path / "meter.jsonl",
+                           drop_reasons=reasons, migrations=migrations)  # fmt: skip
+
+
+def test_an_item_is_added_by_a_migration_between_sessions_keeping_everything_else(tmp_path):
+    old = plan_meter(tmp_path)
+    run_item(old, "stage0_1", 110)
+    assert old.admit("stage2/example_link", spent_elsewhere=0, storage=55).allowed
+    old.start("stage2/example_link")
+    old.open_session("stage2/example_link", "pod", pod_id="p1",
+                     deadline="2026-10-21T10:00:00+00:00", price=4.0, hours=2)  # fmt: skip
+    m = dpo_meter(tmp_path)
+    assert m.allocations_pending == ["stage5_dpo"] and "stage5_dpo" not in m.priority
+    assert m.priority == old.priority and m.state == {**old.state, "stage5_dpo": PLANNED}
+    with pytest.raises(ValueError, match="migrate it first"):
+        m.charge("stage2/example_link", gpu_usd=1.0)
+    with pytest.raises(KeyError, match="until it is migrated"):
+        m.admit("stage5_dpo", spent_elsewhere=0, storage=55)
+    with pytest.raises(ValueError, match="open Pod sessions"):
+        m.migrate_allocations()  # between sessions only
+    m.close_session("stage2/example_link", "pod", pod_id="p1", gpu_usd=5.0)  # closes before
+    assert m.migrate_allocations() == ["stage5_dpo"] and m.allocations_pending == []
+    assert m.priority == tuple(a.item for a in PLAN_DPO)
+    assert "stage5_dpo" in m.unfinished_above("stage6")
+    assert m.charged["stage2/example_link"]["gpu_usd"] == 5.0 and m.spent() == 115.0
+    assert m.reservation["stage2/example_link"] == 220.0
+    (event,) = [json.loads(x) for x in (tmp_path / "meter.jsonl").read_text().splitlines()
+                if '"allocations"' in x]  # fmt: skip
+    assert (event["from_sha256"], event["to_sha256"], event["added"]) == (
+        allocations_hash(PLAN), allocations_hash(PLAN_DPO), ["stage5_dpo"])  # fmt: skip
+    again = dpo_meter(tmp_path)  # the replay applies it in its place
+    assert again.allocations_pending == [] and again.state == m.state
+    with pytest.raises(ValueError, match="current ones"):
+        again.migrate_allocations()
+    with pytest.raises(ValueError, match="allocations event on a log of the current"):
+        plan_meter(tmp_path)  # the code before the migration cannot read the migrated log
+    assert dpo_meter(tmp_path / "new").allocations_pending == []  # a new log: nothing to do
+
+
+def test_a_migration_must_hash_to_the_allocations_before_it_and_be_logged_as_frozen(tmp_path):
+    with pytest.raises(ValueError, match="do not hash to"):
+        dpo_meter(tmp_path, migrations=(AllocationMigration(("stage5_dpo",), "x", "0" * 64),))
+    with pytest.raises(ValueError, match="distinct current items"):
+        dpo_meter(tmp_path, migrations=(AllocationMigration(("stage7",), "x", "0" * 64),))
+    plan_meter(tmp_path)  # a log of the earlier allocations
+    with pytest.raises(ValueError, match="other allocations"):
+        dpo_meter(tmp_path, migrations=())  # read without the migration
+    plan_meter(tmp_path / "x")
+    log = tmp_path / "x" / "meter.jsonl"
+    step = {"event": "allocations", "from_sha256": allocations_hash(PLAN),
+            "to_sha256": allocations_hash(PLAN_DPO), "added": ["stage5_dpo"]}  # fmt: skip
+    for reason in ("another reason", ""):
+        log.write_text(log.read_text().splitlines()[0] + "\n"
+                       + json.dumps({**step, "reason": reason}) + "\n")  # fmt: skip
+        with pytest.raises(ValueError, match="not the next migration"):
+            dpo_meter(tmp_path / "x")
+
+
+def test_stage5_dpo_is_cut_right_after_stage6_and_the_rules_cut_order_is_unchanged():
+    names = [a.item for a in PLAN_DPO]
+    assert cr.cut_order(RULES, names) == ["stage6", "stage5_dpo", *CUT_ORDER[1:]]
+    assert cr.cut_order(RULES) == list(RULES["cut_order"]) == CUT_ORDER
+    assert cr.drop_reasons(RULES, names)["stage5_dpo"] == ["cut_order:stage5_dpo"]
+    assert "stage5_dpo" not in cr.drop_reasons(RULES)

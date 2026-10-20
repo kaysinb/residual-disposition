@@ -187,6 +187,25 @@ def effective_delta(loras: Sequence[Lora], prefix: str) -> torch.Tensor:
     return b @ a
 
 
+def edit_norms(state: Sequence[Lora], parent: Sequence[Lora]) -> dict[str, Any]:
+    """The Frobenius norm of the effective weight edit from ``parent``'s adapters to ``state``'s,
+    Σ_state s·BA − Σ_parent s·BA, per module and over all ("total"), in float64 without
+    materializing it (as ``delta_sq_norm``, on the state's factors and the parent's with B
+    negated): the added adapter's edit in stack mode, the trained implant's change in continued
+    mode. Stage 5's comparison reads these from A and H, not LoRA-factor norms (C15, review s5b
+    4)."""
+    signed = [(x, 1.0) for x in state] + [(x, -1.0) for x in parent]
+    per = {}
+    with torch.no_grad():
+        for prefix in module_prefixes(x for x, _ in signed):
+            parts = [(x.modules[prefix], sign * x.scaling) for x, sign in signed
+                     if prefix in x.modules]  # fmt: skip
+            a = torch.cat([ab[0].double() for ab, _ in parts], dim=0)
+            b = torch.cat([ab[1].double() * s for ab, s in parts], dim=1)
+            per[prefix] = float(((b.T @ b) * (a @ a.T)).sum().clamp_min(0.0).sqrt())
+    return {"modules": per, "total": float(sum(v * v for v in per.values()) ** 0.5)}
+
+
 def delta_sq_norm(loras: Sequence[Lora], prefixes: Iterable[str] | None = None) -> torch.Tensor:
     """Σ over modules of ‖Σᵢ sᵢ·BᵢAᵢ‖²_F without materializing the deltas.
 

@@ -2344,6 +2344,18 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     (Stage 2's cells and decision, the Y₂ manifest) stays valid. The meter's log is migrated
     by one `cap` event, $1,770 to $1,820, with its reason. The allocations, the reserve, the
     priority, the cut order and the update rule are unchanged.
+  - **The DPO lineage's item, 2026-10-21** **[user, coord; review s5b 2]**. Stage 5's
+    descriptive DPO lineage (§12.7) is a plan item of its own, `stage5_dpo` (its own kind), below
+    Stage 5 and above Stage 6 in the priority. Its allocation comes from its plan's bottom-up
+    estimate, outside the inventory: $29.20 central, $80.46 stress GPU (a failed attempt and its
+    retry with two censored k* runs, + 30 %), no API. It is appended to the allocations file as
+    an append-only migration, recorded with the hash of the allocations before it (`5289c338…`).
+    The meter's log, begun under those, records one `allocations` event (both hashes, the item,
+    the reason), between Pod sessions; until then it records nothing but the close of an open
+    session. Spent money, reservations, sessions and the other items' relative priorities stay
+    as they are. In the cut order it comes right after Stage 6 (drop reason
+    `cut_order:stage5_dpo`). The rules and their hash, the reserve and the update rule are
+    unchanged; as every cut, it is applied only after the user's decision.
   - **A shortfall goes to the user, 2026-10-19** **[user]**. A planned step that does not fit,
     whether the meter refuses its admission or the cut order would cut a stage, is stopped, not
     cut or cancelled, and reported with its price: what must be added for it to pass and what
@@ -2368,7 +2380,7 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     an append-only meter log, from which the state is rebuilt.
   - Implemented by `budget.AllocationMeter` and `continuation_rules.drop_reasons`.
 - **Cut order** (budget only, preset; m stays 5, unrun panel cases get p = 1):
-  1. Stage 6;
+  1. Stage 6, then Stage 5's descriptive DPO lineage (amendment of 2026-10-21, above);
   2. Stage 5 (with Stage 4 triggered, Stage 5 is cut before Stage 4);
   3. Stage 4;
   4. guillemets;
