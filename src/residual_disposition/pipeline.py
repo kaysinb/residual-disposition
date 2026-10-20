@@ -3357,11 +3357,12 @@ def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError(
             f"plan.readers.pd_draw {pd_draw!r} is not the declared PD draw {declared!r} of L"
         )
-    if s5 is not None and not tool_pd_cell(ws, states["L"], None).done:
-        raise ValueError("L's PD pool is not built: phase s5_expression first")
+    pinned = _stage5_pd_pool(ws, s5) if s5 is not None else None
     if pd_draw is not None and not tool_pd_cell(ws, states["L"], pd_draw).done:
         raise ValueError(f"L's PD pool of draw {pd_draw} is not built: phase pd_pool first")
     for role, sid in states.items():
+        if role == "L" and pinned:
+            continue  # the decision's pool, validated above
         cell = tool_pd_cell(ws, sid, pd_draw if role == "L" else None)
         if cell.done and pd_gpu(cell.previous) != FINAL_PD_GPU:
             raise ValueError(
@@ -3380,7 +3381,25 @@ def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
                       "screening": decision["inputs"]["screening"],
                       "recipe_source": "the analyst index: the one recipe_control (stack, sft) at "
                                        "the dose"}  # fmt: skip
-    return {"dose": dose, "states": states, **provenance, "pd_draw": pd_draw}
+    return {"dose": dose, "states": states, **provenance, "pd_draw": pd_draw, "pd_run": pinned}
+
+
+def _stage5_pd_pool(ws: Workspace, s5: Mapping[str, Any]) -> str:
+    """The PD pool of the Stage-5 lineage's L: exactly the run the committed decision read
+    (its ``inputs.expression.pd_corpus``), checked as the decision checks it
+    (``continuation_stage5.pd_corpus``: L's full pool of the frozen settings and prefills, on the
+    final PD GPU, every completion, the plan's model), and reused as it is: never looked up by the
+    current config, which a detector revision changes (review s4x 2)."""
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+
+    name = s5.get("pd_corpus")
+    run = find_run(name) if name else None
+    if run is None:
+        raise ValueError(f"the committed Stage-5 decision's PD pool of L {name} is not here")
+    if not S5.pd_corpus(run, s5["latent"], ws.behavior.detector, s5["plan"]):
+        raise ValueError(f"{name}: not a complete PD pool of {s5['latent']}")
+    return run.name
 
 
 def _lens_left(ws: Workspace, states: Mapping[str, str]) -> list[str]:
@@ -3588,7 +3607,11 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
         }
         meter.check()
         draw = r["pd_draw"] if role == "L" else None
-        audit_pd(ws, sid, draw, require_gpu=FINAL_PD_GPU)
+        if role == "L" and r.get("pd_run"):
+            pd = r["pd_run"]  # the committed decision's pool, reused as it is (review s4x 2)
+        else:
+            audit_pd(ws, sid, draw, require_gpu=FINAL_PD_GPU)
+            pd = tool_pd_cell(ws, sid, draw).previous.name
         per_state[role] = {
             "state": sid,
             "method_equivalence_validation": {
@@ -3606,7 +3629,7 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
                 "passed": reproduction["passed"],
             },
             "lens": lens.name,
-            "pd": tool_pd_cell(ws, sid, draw).previous.name,
+            "pd": pd,
             "pd_draw": draw,
         }
     record = {
@@ -5042,7 +5065,8 @@ def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
     Stage-5 manifest decides (the commit barrier, review s4t2 3: a local, uncommitted record
     authorizes nothing): its analysis dose, L, H_s and the recipe control there (the selection's),
     X_cont (the xcont cell's state), A and H, its mode and its name ``<behavior>_cont_<dose>``;
-    None without the flag. Refused unless decided with an analysis dose and a valid X_cont."""
+    None without the flag. Refused unless decided with an analysis dose and a valid X_cont. Also
+    its validated plan and the PD pool of L that the decision read (``pd_corpus``)."""
     if not (plan.get(phase) or {}).get("stage5"):
         return None
     from . import continuation_rules as cr
@@ -5057,7 +5081,8 @@ def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
         raise ValueError(f"the committed Stage-5 decision of {behavior} has no certified dose: "
                          f"{d.get('outcome')}")  # fmt: skip
     dose = int(d["analysis_dose"])
-    at = S5._selection(data["inputs"], rules, find_run)["doses"][str(dose)]
+    selection = S5._selection(data["inputs"], rules, find_run)
+    at = selection["doses"][str(dose)]
     xcont = _summary_of(find_run, data["inputs"]["xcont"])
     manifest = S5.manifest_path(REPO_ROOT, behavior).name
     binding = {"manifest": manifest, "sha256": data["sha256"], "lineage": data["lineage"],
@@ -5068,7 +5093,8 @@ def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
             "sham": data["implant"]["sham"], "mode": data["mode"], "method": data["method"],
             "lineage": f"{behavior}_cont_{dose}", "selection": data["inputs"]["selection"],
             "manifest": manifest, "manifest_sha256": data["sha256"],
-            "binding": binding}  # fmt: skip
+            "binding": binding, "plan": selection["plan"],
+            "pd_corpus": (data["inputs"].get("expression") or {}).get("pd_corpus")}  # fmt: skip
 
 
 def _summary_of(find_run: Any, name: str) -> dict[str, Any]:

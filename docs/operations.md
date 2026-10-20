@@ -818,7 +818,9 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     - The k* manifest records the decision it is bound to: the manifest's sha256, the method,
       mode, seed, implant and dose. The certificate refuses a k* manifest that is not bound to
       the committed decision.
-    - L's PD pool for the readers is s5_expression's.
+    - L's PD pool for the readers is exactly the run the committed decision read
+      (`inputs.expression.pd_corpus`). It is checked as the decision checks it and reused, and
+      L's pool is never drawn again or looked up by the current config (review s4x 2).
     - These phases run in the stage5 batch (`budget.batch_of`, chosen before the plan check).
   - **H's relearning** (`s5_relearn_h`, descriptive): H on b at both rates in every block, with
     the certificate's inputs (k*, budget B, b's data and threshold). Its 12 runs make a record
@@ -827,6 +829,10 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   - **The chain's sessions** (`scripts/pod/continuation_stage2.sh`): ITEM=stage5,
     BEHAVIOR=example_link, the meter's one session of the unsplit item (worker `pod`, at most
     12 h), in space a.
+    - A Stage-5 session refuses any other ITEM before authorization, so another item's
+      reservation never runs Stage-5 work (review s4x 1).
+    - At the export only the ADL cache is optional, exported empty where a space has none. A
+      missing `data/states` or `data/generations` fails the export (review s4x 3).
     - `s5a`: `s5_suppress`, then the steps `stage5_next.py` names, then `s5_decide`. It ends
       there. The decision is then written with `scripts/continuation_stage5.py`, committed and
       a new snapshot made.

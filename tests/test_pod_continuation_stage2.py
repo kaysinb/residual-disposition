@@ -61,7 +61,13 @@ with open(os.environ["STUB_LOG"], "a") as f:
 BUCKET_FINAL = r"""#!/usr/bin/env bash
 SP=$1
 for p in "$SP"/runs/*; do echo "runs/$(basename "$p"): 0 differences found"; done
-for p in data/states data/generations data/cache/adl_steps; do echo "$p: 0 differences found"; done
+for p in data/states data/generations data/cache/adl_steps; do  # as rclone: a missing source fails
+  if [ -d "$SP/$p" ]; then echo "$p: 0 differences found"
+  else
+    echo "$p: ERROR : Local file system at $SP/$p: directory not found"
+    echo "$p: 1 errors while checking"
+  fi
+done
 for a in "$WORKSPACE"/attempts/residual-disposition/$4; do
   [ -e "$a" ] && echo "runs/_attempts/$(basename "$a"): 0 differences found"
 done
@@ -126,6 +132,9 @@ def workspace(tmp_path, capsys):
     (tools / "bucket_dir.sh").write_text(BUCKET_DIR)
     for space in ("a", "b", "c"):
         (ws / space / "runs" / "continuation_14b").mkdir(parents=True)
+    for space in ("a", "c"):  # what a Pod's space holds and exports (c holds no ADL cache)
+        for tree_ in ("states", "generations"):
+            (ws / space / "data" / tree_).mkdir(parents=True, exist_ok=True)
     # The source snapshot: this checkout's scripts and a manifests directory of its own.
     source = tmp_path / "code" / "snap" / "source"
     (source / "manifests").mkdir(parents=True)
@@ -140,15 +149,20 @@ def workspace(tmp_path, capsys):
     procs = []
 
     def setup(session, start: datetime, *, pod="POD1", hours=12.0, worker=None, api="0",
-              provider=None, watch_late_s=0) -> dict:  # fmt: skip
-        # Stage 5's item is unsplit: one session at a time, worker pod (an unsplit item that the
-        # meter admits on its own, stage0_1, stands for it here)
+              provider=None, watch_late_s=0, item=None) -> dict:  # fmt: skip
+        # Stage 5's item is unsplit: one session at a time, worker pod; the items above it are
+        # completed in this journal, at no cost, so that the meter admits it
         unsplit = session.startswith("s5")
         worker = worker or ("pod" if unsplit else "pod-a" if session.startswith("a") else "pod-b")
         # The meter: the item split, this Pod's session opened with its ID, deadline and API money.
         log, receipt = tmp_path / f"meter-{session}.jsonl", tmp_path / f"receipt-{session}.json"
         meter = ["--log", str(log)]
-        item = "stage0_1" if unsplit else "stage2/example_link"
+        item = item or ("stage5" if unsplit else "stage2/example_link")
+        if item == "stage5":
+            for above in cm_items()[: cm_items().index("stage5")]:
+                cm.main([*meter, "admit", above, "--spent-elsewhere", "0", "--storage", "55"])
+                cm.main([*meter, "start", above])
+                cm.main([*meter, "complete", above])
         cm.main([*meter, "admit", item, "--spent-elsewhere", "0", "--storage", "55"])
         cm.main([*meter, "start", item])
         if not unsplit:
@@ -197,6 +211,14 @@ def workspace(tmp_path, capsys):
     yield ws, setup, tmp_path / "stub.jsonl", source
     for p in procs:
         p.kill()
+
+
+def cm_items():
+    """The meter's items in their frozen priority."""
+    from residual_disposition.paths import CONFIG_ROOT
+
+    data = yaml.safe_load((CONFIG_ROOT / "continuation" / "allocations.yaml").read_text())
+    return [a["item"] for a in data["allocations"]]
 
 
 def run_chain(env):
@@ -770,7 +792,7 @@ def test_s5a_runs_the_stage5_steps_in_space_a_and_stops_without_progress(workspa
         assert o["pipeline.plan.api.adl_ledger.worker"] == "pod"
     chain = next((ws / "attempts" / "residual-disposition").glob("chain-s5a-*"))
     summary = json.loads((chain / "summary.json").read_text())
-    assert (summary["worker"], summary["item"]) == ("pod", "stage0_1")
+    assert (summary["worker"], summary["item"]) == ("pod", "stage5")
     assert stop_asked(log)
 
 
@@ -874,3 +896,46 @@ def test_a_stage5_session_is_at_most_12_hours(workspace):
     out = run_chain(setup("s5a", START, hours=13.0))
     assert out.returncode != 0 and "a Stage-5 session is at most 12 h" in out.stdout
     assert not passes(log) and stop_asked(log)
+
+
+def test_a_stage5_session_never_runs_on_another_item_s_receipt(workspace):
+    # review s4x 1: a valid session receipt of another unsplit item authorizes no Stage-5 work
+    ws, setup, log, _ = workspace
+    env = setup("s5a", START, item="stage0_1")
+    assert env["ITEM"] == "stage0_1"
+    out = run_chain(env)
+    assert out.returncode != 0 and "runs on the meter's item stage5, not stage0_1" in out.stdout
+    assert not passes(log) and stop_asked(log)
+
+
+def test_a_missing_required_tree_fails_the_export_and_is_never_made_empty(workspace):
+    # review s4x 3: only the ADL cache is optional; a has none here and exports it empty
+    ws, setup, log, _ = workspace
+    stage5_lineage(ws / "a", {("latent", d): 40 for d in (25, 50, 100, 200, 400, 800)})
+    __import__("shutil").rmtree(ws / "a" / "data" / "generations")
+    out = run_chain(setup("s5a", START))
+    assert out.returncode != 0
+    assert [overrides(e)["pipeline.plan.phase"] for e in passes(log)] == [
+        "s5_suppress",
+        "s5_decide",
+    ]
+    chain = next((ws / "attempts" / "residual-disposition").glob("chain-s5a-*"))
+    steps = json.loads((chain / "summary.json").read_text())["steps"]
+    assert steps["export"] == 1 and steps["s5_decide"] == 0
+    assert "the required data/generations is not in" in (chain / "export.log").read_text()
+    assert not (ws / "a" / "data" / "generations").exists()
+    assert (ws / "a" / "data" / "cache" / "adl_steps").is_dir()
+    assert stop_asked(log)
+
+
+def test_the_export_check_fails_on_a_missing_source(workspace):
+    # the stub exporter fails a missing source as rclone does: the check is not vacuous
+    ws, setup, log, _ = workspace
+    pilot_inputs(ws)
+    env = setup("b1", START)
+    ok = run_chain(env)
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    stub = Path(env["WORKSPACE"]) / "tools" / "bucket_final.sh"
+    out = subprocess.run(["bash", str(stub), str(ws / "b"), "l", "w", "none"], env=env,
+                         capture_output=True, text=True)  # fmt: skip
+    assert "data/cache/adl_steps: ERROR" in out.stdout  # b holds no ADL cache

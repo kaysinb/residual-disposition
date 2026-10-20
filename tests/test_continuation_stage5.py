@@ -1211,11 +1211,7 @@ def test_the_certificate_s_k_star_manifest_must_be_bound_to_the_decision(decided
 def test_the_readers_of_the_continued_lineage_read_x_cont(decided, monkeypatch):
     ws = pipeline.Workspace(config("readers"))
     plan = {"readers": {"stage5": True, "dose": 100, "pd_draw": None}}
-    with pytest.raises(ValueError, match="L's PD pool is not built: phase s5_expression first"):
-        pipeline.readers_plan(ws, plan)
-    built = SimpleNamespace(done=True, previous=Path("pd-run"))
-    monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid, draw=None: built)
-    monkeypatch.setattr(pipeline, "pd_gpu", lambda run: pipeline.FINAL_PD_GPU)
+    pinned = decided.record["inputs"]["expression"]["pd_corpus"]
     r = pipeline.readers_plan(ws, plan)
     assert r["states"] == {"L": "lat100", "H_s": "sha100", "X": decided.X, "recipe": "rec100"}
     assert (r["lineage"], r["screening"], r["decision"]["manifest"]) == (
@@ -1223,11 +1219,53 @@ def test_the_readers_of_the_continued_lineage_read_x_cont(decided, monkeypatch):
         decided.sel,
         "stage5_example_link.json",
     )
-    assert "X_cont" in r["recipe_source"]
+    assert "X_cont" in r["recipe_source"] and r["pd_run"] == pinned
+    # review s4x 2: the decision's pool, never another one the current config finds
+    other = SimpleNamespace(done=True, previous=Path("another-pd-run"))
+    monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid, draw=None: other)
+    real = pipeline.pd_gpu
+    monkeypatch.setattr(pipeline, "pd_gpu", lambda run: pipeline.FINAL_PD_GPU
+                        if Path(run).name == "another-pd-run" else real(run))  # fmt: skip
+    assert pipeline.readers_plan(ws, plan)["pd_run"] == pinned
     with pytest.raises(ValueError, match="is not the declared PD draw None"):
         pipeline.readers_plan(ws, {"readers": {**plan["readers"], "pd_draw": "stage2-sxm"}})
     with pytest.raises(ValueError, match="the Stage-5 analysis dose is 100, not 200"):
         pipeline.readers_plan(ws, {"readers": {**plan["readers"], "dose": 200}})
+    meta = find_run(pinned) / "meta.json"
+    meta.write_text(json.dumps({"status": "completed",
+                                "hardware": {"gpus": ["NVIDIA H100 NVL"]}}))  # fmt: skip
+    with pytest.raises(ValueError, match="not the frozen PD settings"):
+        pipeline.readers_plan(ws, plan)  # the pinned pool is checked as the decision checks it
+
+
+def test_the_readers_reuse_l_s_pinned_pool_and_draw_the_others(decided, monkeypatch, tmp_path):
+    states = {"L": "lat100", "H_s": "sha100", "X": "xc100", "recipe": "rec100"}
+    r = {"dose": 100, "states": states, "lineage": "example_link_cont_100", "pd_draw": None,
+         "pd_run": "the-decision-pd", "decision": {"manifest": "m", "sha256": "s"},
+         "screening": "sel", "recipe_source": "the Stage-5 selection"}  # fmt: skip
+    monkeypatch.setattr(pipeline, "readers_plan", lambda ws, plan: r)
+    method, lens = tmp_path / "method", tmp_path / "lens"
+    (method / "steps").mkdir(parents=True)
+    (method / "steps" / "extraction.safetensors").write_bytes(b"x")
+    (lens / "reproduction").mkdir(parents=True)
+    (lens / "reproduction" / "delta_layer20.safetensors").write_bytes(b"y")
+    repro = {"layer": 20, "relative_errors": [0.0], "tolerance": 0.01, "passed": True}
+    (lens / "adl_lens_package.json").write_text(json.dumps({"reproduction": repro}))
+    monkeypatch.setattr(pipeline, "adl_base_means", lambda ws: tmp_path / "base" / "m")
+    monkeypatch.setattr(pipeline, "adl_method_equivalence", lambda ws, sid: method)
+    done = SimpleNamespace(done=True)
+    monkeypatch.setattr(pipeline, "adl_lens_package_cell", lambda ws, sid, **kw: done)
+    monkeypatch.setattr(pipeline, "adl_lens_package", lambda ws, sid, g, **kw: lens / "x")
+    drawn = []
+    monkeypatch.setattr(pipeline, "audit_pd", lambda ws, sid, draw, **kw: drawn.append(sid))
+    cell = SimpleNamespace(previous=Path("pd-of-the-state"))
+    monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid, draw=None: cell)
+    outputs = {}
+    pipeline._readers(pipeline.Workspace(config("readers")), {}, Meter(), outputs)
+    assert drawn == ["sha100", "xc100", "rec100"]  # never L's (review s4x 2)
+    readers = outputs["readers"]["readers"]
+    assert readers["L"]["pd"] == "the-decision-pd" and readers["H_s"]["pd"] == "pd-of-the-state"
+    assert outputs["readers"]["lineage"] == "example_link_cont_100"
 
 
 def test_h_is_relearned_on_b_in_every_block_with_the_certificate_s_settings(decided, monkeypatch):

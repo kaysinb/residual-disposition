@@ -189,9 +189,12 @@ run_pass() {  # <attempt id> <config> <phase> [override ...]: one detached pass 
 
 export_space() {  # <space> <ledger file> <log>: create-only export, then each path checked
   local expected=(data/states data/generations data/cache/adl_steps) p
-  # a space without one of them (c holds no ADL cache) exports it empty: 0 differences, not a
-  # missing source (B1, 2026-10-20)
-  for p in "${expected[@]}"; do mkdir -p "$1/$p"; done
+  # Only the ADL cache is optional (c holds none: B1, 2026-10-20): it is exported empty. A missing
+  # required tree is refused, never masked as an empty source (review s4x 3).
+  mkdir -p "$1/data/cache/adl_steps"
+  for p in data/states data/generations; do
+    [ -d "$1/$p" ] || { echo "export: the required $p is not in $1" > "$3"; return 1; }
+  done
   bash $T/bucket_final.sh $1 $2 $WN "$ATTEMPTS" > "$3" 2>&1; local rc=$?
   for p in $1/runs/*; do expected+=("runs/$(basename $p)"); done
   for p in $AT/$ATTEMPTS; do [ -e "$p" ] && expected+=("runs/_attempts/$(basename $p)"); done
@@ -227,6 +230,9 @@ source ${RP_ENV:-/etc/rp_environment}
 export SOURCE_SNAPSHOT_RECEIPT
 export CONTAINER_IMAGE=$IMG PYTHONDONTWRITEBYTECODE=1
 log "chain $CHAIN ($ITEM, $WORKER in $SPACE), \$$PRICE/h"
+if [ $WORKER = pod ] && [ "$ITEM" != stage5 ]; then  # never another item's reservation (s4x 1)
+  log "not run: a Stage-5 session runs on the meter's item stage5, not $ITEM"; exit 1
+fi
 if [ -z "${RUNPOD_POD_ID:-}" ] || [ "$RUNPOD_POD_ID" != "$POD_ID" ]; then
   log "not run: POD_ID $POD_ID is not this Pod's identity from the provider (RUNPOD_POD_ID ${RUNPOD_POD_ID:-unset})"; exit 1
 fi
