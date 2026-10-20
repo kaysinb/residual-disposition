@@ -1838,6 +1838,7 @@ PHASES = (
     "s5_xcont",
     "s5_expression",
     "s5_decide",
+    "s5_relearn_h",  # H relearned on b in every certificate block, descriptive (review s4t2 6)
 )
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
@@ -2358,7 +2359,7 @@ def run_behavior(
             _decide(ws, plan, outputs)
             return _result(lineage, outputs)
         stage5 = {"s5_suppress": _s5_suppress, "s5_confirm": _s5_confirm, "s5_xcont": _s5_xcont,
-                  "s5_expression": _s5_expression}  # fmt: skip
+                  "s5_expression": _s5_expression, "s5_relearn_h": _s5_relearn_h}  # fmt: skip
         if phase in stage5:
             stage5[phase](ws, plan, meter, outputs)
             return _result(lineage, outputs)
@@ -3320,36 +3321,44 @@ def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(dose, int):
         raise ValueError("phase readers needs plan.readers.dose (int), the analysis dose")
     behavior = ws.behavior.id
-    path = S2.manifest_path(REPO_ROOT, behavior)
-    decision = S2.committed_decision(path, rules, find_run)
-    analysis = decision["decision"].get("analysis_dose")
-    if analysis != dose:
-        raise ValueError(f"{path.name}: the analysis dose is {analysis}, not {dose}")
-    record = S2._screening(decision["inputs"], rules, find_run)
-    at = record["doses"][str(dose)]
-    index = lineage_index(ws.cfg)
-    recipes = sorted(
-        r.state_id
-        for r in index.by_id.values()
-        if (r.behavior_id, r.kind, r.mode, r.method, r.dose)
-        == (behavior, "recipe_control", "stack", "sft", dose)
-    )
-    if len(recipes) != 1:
-        raise ValueError(
-            f"{len(recipes)} recipe controls of {behavior} at {dose} in the index, not one"
+    s5 = stage5_lineage_of(ws.cfg, plan, "readers")
+    if s5 is not None:  # the continued lineage: X_cont in place of X, its own recipe control
+        if s5["dose"] != dose:
+            raise ValueError(f"the Stage-5 analysis dose is {s5['dose']}, not {dose}")
+        states = {"L": s5["latent"], "H_s": s5["sham_s"], "X": s5["X"], "recipe": s5["recipe"]}
+    else:
+        path = S2.manifest_path(REPO_ROOT, behavior)
+        decision = S2.committed_decision(path, rules, find_run)
+        analysis = decision["decision"].get("analysis_dose")
+        if analysis != dose:
+            raise ValueError(f"{path.name}: the analysis dose is {analysis}, not {dose}")
+        record = S2._screening(decision["inputs"], rules, find_run)
+        at = record["doses"][str(dose)]
+        index = lineage_index(ws.cfg)
+        recipes = sorted(
+            r.state_id
+            for r in index.by_id.values()
+            if (r.behavior_id, r.kind, r.mode, r.method, r.dose)
+            == (behavior, "recipe_control", "stack", "sft", dose)
         )
-    states = {"L": at["latent"], "H_s": at["sham_s"], "X": at["X"], "recipe": recipes[0]}
+        if len(recipes) != 1:
+            raise ValueError(
+                f"{len(recipes)} recipe controls of {behavior} at {dose} in the index, not one"
+            )
+        states = {"L": at["latent"], "H_s": at["sham_s"], "X": at["X"], "recipe": recipes[0]}
     if len(set(states.values())) != len(states):
         raise ValueError(f"the readers' states are not distinct: {states}")
     # L's PD pool is the one declared before its A1 (pd_draws.yaml; Codex s4k, s4m): the
     # plan's must be it (a missing PD_DRAW is refused, not a fallback); a tagged pool is built
     # before (phase pd_pool). Every final pool that exists already ran on H100 SXM.
     pd_draw = (plan.get("readers") or {}).get("pd_draw")
-    declared = declared_pd_draw(behavior)
+    declared = None if s5 is not None else declared_pd_draw(behavior)  # Stage 5: s5_expression's
     if pd_draw != declared:
         raise ValueError(
             f"plan.readers.pd_draw {pd_draw!r} is not the declared PD draw {declared!r} of L"
         )
+    if s5 is not None and not tool_pd_cell(ws, states["L"], None).done:
+        raise ValueError("L's PD pool is not built: phase s5_expression first")
     if pd_draw is not None and not tool_pd_cell(ws, states["L"], pd_draw).done:
         raise ValueError(f"L's PD pool of draw {pd_draw} is not built: phase pd_pool first")
     for role, sid in states.items():
@@ -3359,13 +3368,19 @@ def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
                 f"{role}'s PD pool {cell.previous.name} ran on {pd_gpu(cell.previous)}, not "
                 f"{FINAL_PD_GPU}"
             )
-    return {
-        "dose": dose,
-        "states": states,
-        "decision": {"manifest": path.name, "sha256": decision["sha256"]},
-        "screening": decision["inputs"]["screening"],
-        "pd_draw": pd_draw,
-    }
+    if s5 is not None:
+        provenance = {"lineage": s5["lineage"],
+                      "decision": {"manifest": s5["manifest"], "sha256": s5["manifest_sha256"]},
+                      "screening": s5["selection"],
+                      "recipe_source": "the Stage-5 selection: its continued recipe control at "
+                                       "the dose; X is X_cont, its xcont cell's state"}  # fmt: skip
+    else:
+        provenance = {"lineage": f"{behavior}_{dose}",
+                      "decision": {"manifest": path.name, "sha256": decision["sha256"]},
+                      "screening": decision["inputs"]["screening"],
+                      "recipe_source": "the analyst index: the one recipe_control (stack, sft) at "
+                                       "the dose"}  # fmt: skip
+    return {"dose": dose, "states": states, **provenance, "pd_draw": pd_draw}
 
 
 def _lens_left(ws: Workspace, states: Mapping[str, str]) -> list[str]:
@@ -3596,9 +3611,10 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
         }
     record = {
         "behavior": ws.behavior.id,
+        "lineage": r["lineage"],
         "dose": r["dose"],
         "states": r["states"],
-        "recipe_source": "the analyst index: the one recipe_control (stack, sft) at the dose",
+        "recipe_source": r["recipe_source"],
         "reused": {"A": "Stage 1's readings", "H": "Stage 1's readings"},
         "decision": r["decision"],
         "screening": r["screening"],
@@ -3776,11 +3792,14 @@ def _kstar(
     if steps != K.schedule_steps(K.FROZEN_SCHEDULE, K.CALIBRATION_BUDGET):
         raise ValueError("the calibration's evaluation steps are not the frozen schedule's")
     result = K.calibrate(runs, steps, Fraction(str(cert["kstar_fraction"])), learning_rates)
+    s5 = stage5_lineage_of(ws.cfg, plan, "kstar")
+    bound = {"stage5": s5["binding"]} if s5 else {}  # its method, mode, seed, decision (s4t2 6)
     record = {
-        "lineage": f"{ws.behavior.id}_{dose}",
+        "lineage": s5["lineage"] if s5 else f"{ws.behavior.id}_{dose}",
         "behavior": ws.behavior.id,
         "dose": dose,
         "states": {"H_s": sham_s, "A": spec["active"]},
+        **bound,
         "reference": reference,
         "threshold": float(ws.cfg.relearn.threshold),
         "seeds": list(K.SEEDS),
@@ -3803,6 +3822,7 @@ def _kstar(
             "reference": reference["run"],
             "relearn_runs": names,
             "rules_sha256": rules.sha256,
+            **bound,
         },
     )
     if not cell.done:
@@ -3953,7 +3973,12 @@ def certificate_inputs(ws: Workspace, plan: Mapping[str, Any]) -> CertificateInp
     cert = rules["certificate"]
     spec = plan["certificate"]
     dose = int(spec["dose"])
-    lineage = f"{ws.behavior.id}_{dose}"
+    s5 = stage5_lineage_of(ws.cfg, plan, "certificate")
+    lineage = s5["lineage"] if s5 else f"{ws.behavior.id}_{dose}"
+    if s5 is not None and (dose, spec["latent"], spec["sham_s"], spec["active"]) != (
+        s5["dose"], s5["latent"], s5["sham_s"], s5["active"]
+    ):  # fmt: skip
+        raise ValueError(f"plan.certificate is not the committed Stage-5 lineage {lineage}")
     if spec["y_organism"] != K.PILOT_Y_ORGANISM:
         raise ValueError(
             f"Y is the pilot's Y organism {K.PILOT_Y_ORGANISM}, not {spec['y_organism']}"
@@ -3964,6 +3989,8 @@ def certificate_inputs(ws: Workspace, plan: Mapping[str, Any]) -> CertificateInp
         "A": spec["active"],
     }:
         raise ValueError(f"the k* manifest of {lineage} names other states: {kstar['states']}")
+    if (s5 or {}).get("binding") != kstar.get("stage5"):
+        raise ValueError(f"the k* manifest of {lineage} is not bound to its Stage-5 decision")
     y2_path = REPO_ROOT / "manifests" / "y2.json"
     choice = continuation_y2.committed_manifest(y2_path)["y2"]
     arms = {"b": ws, "Y": arm_workspace(ws, K.Y_BEHAVIOR), "Y2": arm_workspace(ws, choice)}
@@ -4106,6 +4133,7 @@ def _certificate(
             "kstar": inputs.kstar["sha256"],
             "y2": inputs.y2["sha256"],
             "y2_choice": inputs.y2["y2"],
+            **({"stage5": inputs.kstar["stage5"]} if "stage5" in inputs.kstar else {}),
         },
         "references": inputs.references,
         "data": {
@@ -4191,9 +4219,13 @@ def _decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> 
 #   without vLLM (``ENGINE_FREE``) and one model in memory at a time;
 # - s5_expression: the PD corpus (the full pool on the final PD GPU), the ADL corpus and the OOD
 #   observer of the analysis dose's latent state;
-# - s5_decide: the decision record (``continuation_stage5.decide``).
+# - s5_decide: the decision record (``continuation_stage5.decide``);
+# - s5_relearn_h (C13): H relearned on b in every certificate block, descriptive.
+# Then k*, the certificate and the readers of the committed lineage (``stage5_lineage_of``), with
+# ``plan.<phase>.stage5`` true, in the stage5 batch (``budget.batch_of``).
 
-S5_PHASES = ("s5_suppress", "s5_confirm", "s5_xcont", "s5_expression", "s5_decide")
+S5_PHASES = ("s5_suppress", "s5_confirm", "s5_xcont", "s5_expression", "s5_decide",
+             "s5_relearn_h")  # fmt: skip
 ENGINE_FREE = ("s5_xcont", "s5_decide")  # phases that never start vLLM (scripts/pipeline.py)
 S5_METHOD, S5_MODE = "sft", "continued"  # rules.stage5.method "continued": continued-mode SFT
 S5_DATA = {"suppress": ("suppress", False), "recipe": ("own", True)}  # role: (kind, positive)
@@ -4948,6 +4980,104 @@ def _s5_decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) 
     outputs["decision"] = record
 
 
+def _s5_relearn_h(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
+    """Phase s5_relearn_h (§12.7 Stage 5, descriptive; review s4t2 6): H, the implant's sham,
+    relearned on b at both rates in every certificate block with the certificate's inputs of the
+    committed Stage-5 lineage (``certificate_inputs`` with ``plan.certificate.stage5``: its k*
+    manifest's k* and budget B, b's data, b's threshold half A's reference): 12 runs, every one
+    first asking the cost meter, each resumed from its cell. Its record
+    (``stage5_relearn_h.json``) is its own, outside the certificate's roles
+    (``continuation_stats.ROLES``): it enters no contrast."""
+    from . import continuation_kstar as K
+
+    s5 = stage5_lineage_of(ws.cfg, plan, "certificate")
+    if s5 is None:
+        raise ValueError("phase s5_relearn_h needs plan.certificate.stage5, the Stage-5 lineage")
+    inputs = certificate_inputs(ws, plan)
+    meter.check()
+    budget = int(inputs.kstar["budget"])
+    runs: dict[str, dict[str, Any]] = {}
+    names: dict[str, str] = {}
+    for block in inputs.blocks:
+        for lr in inputs.learning_rates:
+            meter.check()
+            args = {"lr": lr, "relearn_seed": block, "active_rate": inputs.references["b"]["rate"],
+                    "data": inputs.data["b"], "budget": budget, "purpose": "certificate",
+                    "kstar": int(inputs.kstar["rates"][K.rate_key(lr)]["kstar"])}  # fmt: skip
+            key = f"{int(block)}/{K.rate_key(lr)}/b/H"
+            runs[key] = relearn_state(ws, s5["sham"], **args)
+            names[key] = relearn_cell(ws, s5["sham"], **args).cell.previous.name
+    data = inputs.data["b"]
+    record = {
+        "lineage": inputs.lineage,
+        "behavior": ws.behavior.id,
+        "dose": inputs.dose,
+        "states": {"H": s5["sham"], "A": s5["active"]},
+        "arm": "b",
+        "blocks": inputs.blocks,
+        "learning_rates": inputs.learning_rates,
+        "budget": budget,
+        "kstar": {key: v["kstar"] for key, v in inputs.kstar["rates"].items()},
+        "manifests": {"kstar": inputs.kstar["sha256"], "stage5": s5["binding"]},
+        "reference": inputs.references["b"],
+        "data": {"data_id": data.data_id, "examples": items_hash(data.examples)},
+        "model": ws.model_cfg,
+        "runs": runs,
+        "run_dirs": names,
+        "contrasts": "none: descriptive, outside the certificate's roles",
+        "rules_sha256": inputs.rules_sha256,
+    }
+    cell = make_cell(ws, "stage5_relearn_h", {"lineage": inputs.lineage, "blocks": inputs.blocks,
+                                              "manifests": record["manifests"],
+                                              "run_dirs": names})  # fmt: skip
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage5_relearn_h.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"lineage": inputs.lineage, "runs": len(runs)})
+    outputs["relearn_h"] = record
+
+
+def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> dict | None:
+    """With ``plan.<phase>.stage5`` true, the continued lineage that the behavior's committed
+    Stage-5 manifest decides (the commit barrier, review s4t2 3: a local, uncommitted record
+    authorizes nothing): its analysis dose, L, H_s and the recipe control there (the selection's),
+    X_cont (the xcont cell's state), A and H, its mode and its name ``<behavior>_cont_<dose>``;
+    None without the flag. Refused unless decided with an analysis dose and a valid X_cont."""
+    if not (plan.get(phase) or {}).get("stage5"):
+        return None
+    from . import continuation_rules as cr
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    rules, behavior = _stage2_rules(), str(cfg.behavior.id)
+    data = S5.committed_decision(S5.manifest_path(REPO_ROOT, behavior), rules, find_run)
+    d = data["decision"]
+    if (d.get("status"), d.get("outcome"), d.get("xcont")) != ("decided", cr.ANALYSIS, True):
+        raise ValueError(f"the committed Stage-5 decision of {behavior} has no certified dose: "
+                         f"{d.get('outcome')}")  # fmt: skip
+    dose = int(d["analysis_dose"])
+    at = S5._selection(data["inputs"], rules, find_run)["doses"][str(dose)]
+    xcont = _summary_of(find_run, data["inputs"]["xcont"])
+    manifest = S5.manifest_path(REPO_ROOT, behavior).name
+    binding = {"manifest": manifest, "sha256": data["sha256"], "lineage": data["lineage"],
+               "method": data["method"], "mode": data["mode"], "seed": data["seed"],
+               "implant": data["implant"], "dose": dose}  # fmt: skip
+    return {"dose": dose, "latent": at["latent"], "sham_s": at["sham_s"], "recipe": at["recipe"],
+            "X": xcont["state"], "active": data["implant"]["active"],
+            "sham": data["implant"]["sham"], "mode": data["mode"], "method": data["method"],
+            "lineage": f"{behavior}_cont_{dose}", "selection": data["inputs"]["selection"],
+            "manifest": manifest, "manifest_sha256": data["sha256"],
+            "binding": binding}  # fmt: skip
+
+
+def _summary_of(find_run: Any, name: str) -> dict[str, Any]:
+    run = find_run(name)
+    if run is None:
+        raise ValueError(f"{name}: not here")
+    return json.loads((run / "summary.json").read_text())
+
+
 def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> list[str]:
     """Why a Stage-5 phase cannot start, before any GPU.
 
@@ -4959,7 +5089,9 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
       decision's next step), and for the expression checks the frozen PD and ADL-corpus settings
       and the OOD prompts;
     - s5_decide: exactly one of ``plan.s5_decide.selection`` and ``plan.s5_decide.infeasibility``
-      (two failed training attempts record no selection; review s4u 1)."""
+      (two failed training attempts record no selection; review s4u 1);
+    - s5_relearn_h: ``plan.certificate`` the Stage-5 lineage's (``stage5`` true), every block, and
+      ``certificate_problems``."""
     from . import continuation_stage2 as S2
     from .continuation_kstar import find_run
     from .paths import REPO_ROOT
@@ -4980,6 +5112,15 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
             stage5_confirmation_plan(ws, plan)
         elif phase in ("s5_xcont", "s5_expression"):
             stage5_step_plan(ws, plan, phase)
+        elif phase == "s5_relearn_h":
+            spec = plan.get("certificate") or {}
+            frozen = [int(b) for b in rules["certificate"]["block_seeds"]]
+            if not spec.get("stage5"):
+                problems.append("phase s5_relearn_h needs plan.certificate.stage5, the lineage")
+            elif sorted(int(b) for b in spec.get("blocks") or []) != frozen:
+                problems.append(f"phase s5_relearn_h relearns H in every block {frozen}")
+            else:
+                problems += certificate_problems(cfg, plan)
         elif phase == "s5_decide":
             stage5_plan(ws, plan)
             spec = plan.get("s5_decide") or {}
@@ -5097,9 +5238,10 @@ def certificate_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     except (KeyError, ValueError) as error:
         return [*problems, f"the state index: {error}"]
     behavior = str(cfg.behavior.id)
+    mode = "continued" if spec.get("stage5") else "stack"
     for sid, want in (
-        (spec["latent"], (behavior, "suppressed", "sft", "stack", dose)),
-        (spec["sham_s"], (behavior, "suppressed_sham", "sft", "stack", dose)),
+        (spec["latent"], (behavior, "suppressed", "sft", mode, dose)),
+        (spec["sham_s"], (behavior, "suppressed_sham", "sft", mode, dose)),
         (spec["active"], (behavior, "active")),
     ):
         record = index.get(sid)
@@ -5146,7 +5288,9 @@ def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     """Why phase kstar cannot start, before any GPU: ``plan.kstar`` names the dose, the
     lineage's sham_s at it and its active organism, both readable and so recorded in the index
     (the behavior's suppressed sham, SFT stack, at the dose; its active organism), and the
-    certificate's learning rates are the rules' and the schedule has steps 10 and 20."""
+    certificate's learning rates are the rules' and the schedule has steps 10 and 20. With
+    ``plan.kstar.stage5`` the lineage is the committed Stage-5 decision's (``stage5_lineage_of``:
+    its dose, H_s and A, H_s continued-mode in the index)."""
     spec = plan.get("kstar") or {}
     dose, sham_s, active = spec.get("dose"), spec.get("sham_s"), spec.get("active")
     if not isinstance(dose, int) or not sham_s or not active or sham_s == active:
@@ -5164,6 +5308,16 @@ def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
         problems.append(f"relearn.eval_schedule must be the frozen {list(K.FROZEN_SCHEDULE)}")
     if active not in PILOT_REFERENCES:
         problems.append(f"plan.kstar {active}: no approved relearning reference")
+    mode = "stack"
+    try:
+        s5 = stage5_lineage_of(cfg, plan, "kstar")
+    except (OSError, RuntimeError, ValueError, KeyError) as error:
+        return [*problems, f"the Stage-5 lineage: {error}"]
+    if s5 is not None:
+        mode = s5["mode"]
+        if (dose, sham_s, active) != (s5["dose"], s5["sham_s"], s5["active"]):
+            problems.append(f"plan.kstar is not the committed Stage-5 lineage's dose, H_s and A "
+                            f"({s5['dose']}, {s5['sham_s']}, {s5['active']})")  # fmt: skip
     try:
         index = lineage_index(cfg)
     except (KeyError, ValueError) as error:
@@ -5171,7 +5325,7 @@ def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     behavior = str(cfg.behavior.id)
     records = {}
     for sid, want in (
-        (sham_s, (behavior, "suppressed_sham", "sft", "stack", dose)),
+        (sham_s, (behavior, "suppressed_sham", "sft", mode, dose)),
         (active, (behavior, "active")),
     ):
         record = records[sid] = index.get(sid)

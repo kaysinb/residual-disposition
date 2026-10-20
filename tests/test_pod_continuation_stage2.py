@@ -3,7 +3,10 @@ workspace; plan C8, item F; review s4b): each session's passes in order in its o
 Pod's inputs copied from the other's space create-only (as the manifests name them), the decision's
 steps as stage2_next.py names them, the Pod's identity, the session's meter receipt and the
 snapshot's receipt checked before any pass, every bound from the verified session, the
-certificate's plan check before its GPU pass, the export and the stop on every exit."""
+certificate's plan check before its GPU pass, the export and the stop on every exit. Stage 5's
+sessions (C13; review s4t2): the unsplit item's one session (worker pod, at most 12 h) in space a,
+the stage5 batch, s5a's steps as stage5_next.py names them up to the decision, the commit
+barriers before k* (s5k) and before the certificate, H's relearning and the readers (s5c)."""
 
 from __future__ import annotations
 
@@ -138,14 +141,18 @@ def workspace(tmp_path, capsys):
 
     def setup(session, start: datetime, *, pod="POD1", hours=12.0, worker=None, api="0",
               provider=None, watch_late_s=0) -> dict:  # fmt: skip
-        worker = worker or ("pod-a" if session.startswith("a") else "pod-b")
+        # Stage 5's item is unsplit: one session at a time, worker pod (an unsplit item that the
+        # meter admits on its own, stage0_1, stands for it here)
+        unsplit = session.startswith("s5")
+        worker = worker or ("pod" if unsplit else "pod-a" if session.startswith("a") else "pod-b")
         # The meter: the item split, this Pod's session opened with its ID, deadline and API money.
         log, receipt = tmp_path / f"meter-{session}.jsonl", tmp_path / f"receipt-{session}.json"
         meter = ["--log", str(log)]
-        item = "stage2/example_link"
+        item = "stage0_1" if unsplit else "stage2/example_link"
         cm.main([*meter, "admit", item, "--spent-elsewhere", "0", "--storage", "55"])
         cm.main([*meter, "start", item])
-        cm.main([*meter, "split", item, "--share", "pod-a=0.48", "--share", "pod-b=0.52"])
+        if not unsplit:
+            cm.main([*meter, "split", item, "--share", "pod-a=0.48", "--share", "pod-b=0.52"])
         deadline = (start + timedelta(hours=hours)).isoformat()
         cm.main([*meter, "session-open", item, "--worker", worker, "--pod-id", pod,
                  "--deadline", deadline, "--price", "3.99", "--hours", str(hours),
@@ -184,6 +191,7 @@ def workspace(tmp_path, capsys):
             "SOURCE_SNAPSHOT_ID": "snap",
             "SNAPSHOT_RECEIPT_SHA256": hashlib.sha256(snapshot_receipt.read_bytes()).hexdigest(),
             "CONTAINER_IMAGE": "img@sha256:x",
+            **({"ITEM": item, "BEHAVIOR": "example_link"} if unsplit else {}),
         }
 
     yield ws, setup, tmp_path / "stub.jsonl", source
@@ -730,3 +738,138 @@ def test_a2_with_pd_draw_gives_the_readers_l_s_tagged_pool(workspace):
     readers = passes(log)[-1]
     assert overrides(readers)["pipeline.plan.readers.pd_draw"] == "stage2-sxm"
     assert loads(log) == set()
+
+
+# ------------------------------------------------------------------------------ Stage 5 (C13)
+
+
+def stage5_lineage(space, hits):
+    """A Stage-5 lineage in space a as phase s5_suppress leaves it (test_continuation_stage5's
+    Space: its training, exploratory passes and selection)."""
+    from test_continuation_stage5 import Space
+
+    lineage = Space(space, hits=hits)
+    return lineage, lineage.selection()
+
+
+def test_s5a_runs_the_stage5_steps_in_space_a_and_stops_without_progress(workspace):
+    ws, setup, log, _ = workspace
+    stage5_lineage(ws / "a", {("latent", 25): 40, ("latent", 50): 20})  # d₁ is 100
+    out = run_chain(setup("s5a", START))
+    assert out.returncode != 0 and "no progress at confirm 100" in out.stdout
+    ps = passes(log)
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["s5_suppress", "s5_confirm"]
+    assert overrides(ps[1])["pipeline.plan.s5_confirm.dose"] == "100"
+    assert {space_of(e) for e in ps} == {str(ws / "a")}
+    assert loads(log) == set()
+    for e in ps:  # the unsplit item's session: its own batch and worker
+        o = overrides(e)
+        assert o["pipeline.plan.cost.batches.stage5"] == "12.0"
+        assert "pipeline.plan.cost.batches.stage2" not in o
+        assert o["pipeline.plan.api.adl_ledger.worker"] == "pod"
+    chain = next((ws / "attempts" / "residual-disposition").glob("chain-s5a-*"))
+    summary = json.loads((chain / "summary.json").read_text())
+    assert (summary["worker"], summary["item"]) == ("pod", "stage0_1")
+    assert stop_asked(log)
+
+
+def test_s5a_records_the_decision_and_ends_before_k_star(workspace):
+    ws, setup, log, _ = workspace
+    _, sel = stage5_lineage(ws / "a", {("latent", d): 40 for d in (25, 50, 100, 200, 400, 800)})
+    out = run_chain(setup("s5a", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    ps = passes(log)
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["s5_suppress", "s5_decide"]
+    o = overrides(ps[1])
+    assert o["pipeline.plan.s5_decide.selection"] == sel
+    assert o["pipeline.plan.s5_decide.confirmation"] == "[]"
+    assert "pipeline.plan.s5_decide.infeasibility" not in o
+    assert "committed on the laptop before k*" in out.stdout
+    assert loads(log) == set()
+
+
+def stage5_manifests(source, space, dose=400, analysis=400):
+    """The committed Stage-5 decision in the snapshot (its analysis dose, A, the selection run)
+    and the selection record in space a."""
+    (source / "manifests" / "stage5_example_link.json").write_text(json.dumps(
+        {"decision": {"analysis_dose": analysis}, "implant": {"active": "sA", "sham": "sH"},
+         "inputs": {"selection": "sel5"}}
+    ))  # fmt: skip
+    run = space / "runs" / "continuation_14b" / "sel5"
+    run.mkdir(parents=True, exist_ok=True)
+    doses = {str(dose): {"latent": f"L{dose}", "sham_s": f"Hs{dose}", "recipe": f"R{dose}"}}
+    (run / "stage5_selection.json").write_text(json.dumps({"doses": doses}))
+
+
+def test_s5k_waits_for_the_committed_stage5_decision(workspace):
+    ws, setup, log, _ = workspace
+    out = run_chain(setup("s5k", START))  # the decision not committed yet: nothing runs
+    assert out.returncode != 0 and "no committed Stage-5 decision" in out.stdout
+    assert not passes(log) and stop_asked(log)
+
+
+def test_s5k_calibrates_k_star_of_the_committed_stage5_lineage(workspace):
+    ws, setup, log, source = workspace
+    stage5_manifests(source, ws / "a")
+    out = run_chain(setup("s5k", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    (k,) = passes(log)
+    o = overrides(k)
+    assert o["pipeline.plan.phase"] == "kstar" and o["pipeline.plan.kstar.stage5"] == "true"
+    assert (o["pipeline.plan.kstar.dose"], o["pipeline.plan.kstar.sham_s"],
+            o["pipeline.plan.kstar.active"]) == ("400", "Hs400", "sA")  # fmt: skip
+    assert o["pipeline.plan.cost.batches.stage5"] == "12.0"
+    assert loads(log) == set()
+
+
+def test_s5k_without_an_analysis_dose_runs_nothing(workspace):
+    ws, setup, log, source = workspace
+    stage5_manifests(source, ws / "a", analysis=None)
+    out = run_chain(setup("s5k", START))
+    assert out.returncode != 0 and "no analysis dose: no k*" in out.stdout
+    assert not passes(log)
+
+
+def test_s5c_waits_for_the_committed_k_star_manifest(workspace):
+    ws, setup, log, source = workspace
+    stage5_manifests(source, ws / "a")
+    out = run_chain(setup("s5c", START))
+    assert (
+        out.returncode != 0 and "no committed k* manifest kstar_example_link_cont_400" in out.stdout
+    )
+    assert not passes(log) and stop_asked(log)
+
+
+def test_s5c_certifies_then_relearns_h_then_reads_the_continued_lineage(workspace):
+    ws, setup, log, source = workspace
+    certificate_spaces(source, ws)  # the certificate's inputs, as Stage 2 leaves them
+    stage5_manifests(source, ws / "a")
+    k = json.loads((source / "manifests" / "kstar_example_link_400.json").read_text())
+    (source / "manifests" / "kstar_example_link_cont_400.json").write_text(json.dumps(k))
+    before = {x: tree(ws / x) for x in ("b", "c")}
+    out = run_chain(setup("s5c", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    ps = passes(log)
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == [
+        "certificate", "certificate", "s5_relearn_h", "readers"]  # fmt: skip
+    check, cert, relearn_h, readers = map(overrides, ps)
+    assert check["pipeline.plan.check_only"] == "true" and "pipeline.plan.check_only" not in cert
+    for o in (check, cert, relearn_h):
+        assert o["pipeline.plan.certificate.stage5"] == "true"
+        assert o["pipeline.plan.certificate.blocks"] == "[0,1,2,3,4,5]"  # one Pod: every block
+        assert (o["pipeline.plan.certificate.latent"], o["pipeline.plan.certificate.sham_s"],
+                o["pipeline.plan.certificate.active"]) == ("L400", "Hs400", "sA")  # fmt: skip
+    assert (readers["pipeline.plan.readers.stage5"], readers["pipeline.plan.readers.dose"]) == (
+        "true", "400")  # fmt: skip
+    assert {space_of(e) for e in ps} == {str(ws / "a")}
+    assert all(overrides(e)["pipeline.plan.cost.batches.stage5"] == "12.0" for e in ps)
+    assert loads(log) == set()
+    assert (ws / "a" / "data" / "states" / Y_ORGANISM).is_dir()  # the pilot's Y, from c
+    assert {x: tree(ws / x) for x in ("b", "c")} == before  # read, never written
+
+
+def test_a_stage5_session_is_at_most_12_hours(workspace):
+    ws, setup, log, _ = workspace
+    out = run_chain(setup("s5a", START, hours=13.0))
+    assert out.returncode != 0 and "a Stage-5 session is at most 12 h" in out.stdout
+    assert not passes(log) and stop_asked(log)

@@ -27,7 +27,8 @@ pipeline:
   reuse_from: [feasibility_14b, stage1_14b]
   plan:
     phase: ???                          # reread, engine, screen, confirm, corpus, ood, decide, kstar, y2, certificate,
-                                        # readers; Stage 5: s5_suppress, s5_confirm, s5_xcont, s5_expression, s5_decide
+                                        # readers; Stage 5: s5_suppress, s5_confirm, s5_xcont, s5_expression, s5_decide,
+                                        # s5_relearn_h (and kstar, certificate, readers with their stage5 true)
     check_only: false                   # true: the plan check alone, on CPU (scripts/pipeline.py)
     reread:
       states: []                        # in this order; each with its pilot ADL package
@@ -52,6 +53,7 @@ pipeline:
     readers:                            # the readers at the analysis dose (§12.4)
       dose: null                        # the committed decision's; the states are resolved
       pd_draw: null                     # L's tagged PD pool (option b, Codex s4k): stage2-sxm
+      stage5: false                     # true: the committed Stage-5 lineage's (X_cont; C13)
     pd_pool:                            # another draw of a latent state's PD pool (Codex s4k)
       state: null
       draw: null                        # stage2-sxm: on H100 SXM only
@@ -61,6 +63,7 @@ pipeline:
       dose: null                        # the lineage's dose (Stage 2: the selected deep dose)
       sham_s: null                      # H_s at it, relearned on b
       active: null                      # the lineage's A: its relearning reference sets the threshold
+      stage5: false                     # true: the committed Stage-5 lineage, <behavior>_cont_<dose>
     decide:                             # the Stage-2 decision's runs (review s3t)
       screening: null                   # the stage2_screening run
       confirmation: []                  # the stage2_confirmation runs, in attempt order
@@ -90,7 +93,8 @@ pipeline:
       sham_s: null                      # H_s, L's matched sham
       active: null                      # A: b's threshold is half its reference
       y_organism: sbf05f589f929edf8     # the pilot's Y organism (keywords_line, seed 0)
-      blocks: []                        # this Pod's blocks: A [0, 1, 2], B [3, 4, 5]
+      blocks: []                        # this Pod's blocks: A [0, 1, 2], B [3, 4, 5]; Stage 5 all
+      stage5: false                     # true: the committed Stage-5 lineage (and s5_relearn_h's)
     api:
       adl_ledger:                       # the λ grader of the lens packages
         worker: ???

@@ -133,7 +133,20 @@ BATCHES = {
     "s5_xcont": "stage5",
     "s5_expression": "stage5",
     "s5_decide": "stage5",
+    "s5_relearn_h": "stage5",
 }
+# The phases a Stage-5 lineage shares with Stage 2: with ``plan.<phase>.stage5`` true they run in
+# the stage5 batch (review s4t2 5), chosen from the plan before any check.
+STAGE5_SHARED = ("kstar", "certificate", "readers")
+
+
+def batch_of(plan: Mapping[str, Any]) -> str | None:
+    """The batch of a plan's phase (``BATCHES``; a Stage-5 lineage's k*, certificate and readers
+    the stage5 batch)."""
+    phase = plan.get("phase", "all")
+    if phase in STAGE5_SHARED and (plan.get(phase) or {}).get("stage5"):
+        return "stage5"
+    return BATCHES.get(phase)
 
 
 @dataclass
@@ -164,7 +177,7 @@ class CostMeter:
     ) -> CostMeter:
         cost = plan.get("cost") or {}
         phase = plan.get("phase", "all")
-        batch, prior = BATCHES.get(phase), 0.0
+        batch, prior = batch_of(plan), 0.0
         if batch is not None:
             cap = (cost.get("batches") or {}).get(batch)
             if cap is None or cap == "???":

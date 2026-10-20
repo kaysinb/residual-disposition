@@ -789,8 +789,39 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        method, mode, seed, dose, attempts, X_cont and the expression checks.
 
   `scripts/pod/stage5_next.py --runs <space>/runs --behavior example_link` names the next step
-  from the space's cells. The chain's sessions and the meter's exclusive session of an unsplit
-  item come with C13 and their review, before any GPU work of C12.
+  from the space's cells.
+
+  After the decision (C13; review s4t2):
+  - **The lineage.** With an analysis dose and a valid X_cont, phases kstar, certificate and
+    readers take `plan.<phase>.stage5: true`. The lineage is then the committed Stage-5
+    manifest's (`pipeline.stage5_lineage_of`), and a local, uncommitted record authorizes
+    nothing.
+    - Its name is `example_link_cont_<dose>`, so its k* manifest is
+      `kstar_example_link_cont_<dose>.json`.
+    - L, H_s and the recipe control are the selection's at the dose; X is X_cont (its xcont
+      cell's state).
+    - H_s is continued-mode in the index.
+    - The k* manifest records the decision it is bound to: the manifest's sha256, the method,
+      mode, seed, implant and dose. The certificate refuses a k* manifest that is not bound to
+      the committed decision.
+    - L's PD pool for the readers is s5_expression's.
+    - These phases run in the stage5 batch (`budget.batch_of`, chosen before the plan check).
+  - **H's relearning** (`s5_relearn_h`, descriptive): H on b at both rates in every block, with
+    the certificate's inputs (k*, budget B, b's data and threshold). Its 12 runs make a record
+    of their own (`stage5_relearn_h.json`) outside the certificate's roles, and they enter no
+    contrast.
+  - **The chain's sessions** (`scripts/pod/continuation_stage2.sh`): ITEM=stage5,
+    BEHAVIOR=example_link, the meter's one session of the unsplit item (worker `pod`, at most
+    12 h), in space a.
+    - `s5a`: `s5_suppress`, then the steps `stage5_next.py` names, then `s5_decide`. It ends
+      there. The decision is then written with `scripts/continuation_stage5.py`, committed and
+      a new snapshot made.
+    - `s5k`: k* of the committed lineage. Its manifest is then committed and a new snapshot
+      made.
+    - `s5c`: the certificate's six blocks (its plan check first), then `s5_relearn_h`, then the
+      readers. A session that reaches its deadline is resumed by the next, which reuses the
+      completed cells.
+    - A detector revision mid-chain stops `s5a` and is reported, as in Stage 2.
 
 ## Artifact retention
 

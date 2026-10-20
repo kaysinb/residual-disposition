@@ -20,6 +20,18 @@
 #      certificate's blocks 0-2 and the readers at the analysis dose;
 #   b2 (Pod B, after the k* and Y₂ manifests are committed): blocks 3-5.
 #
+# Exception a's continued-mode lineage (§12.7 Stage 5; C12, C13), the meter's unsplit item stage5
+# (ITEM=stage5, BEHAVIOR=<its behavior>), one Pod session at a time (worker pod, at most 12 h),
+# in space a, which holds A, H and the lineage's states; each passes in the stage5 batch:
+#   s5a: s5_suppress, then the decision's steps as stage5_next.py names them (each confirmation,
+#      X_cont, the expression checks at the analysis dose) and the decision cell (s5_decide). It
+#      ends there: the decision is written as manifests/stage5_<behavior>.json and committed on
+#      the laptop, and a new snapshot made, before k* (the commit barrier, review s4t2 3);
+#   s5k: k* of the committed Stage-5 lineage <behavior>_cont_<dose>; its manifest is committed and
+#      a new snapshot made before the certificate;
+#   s5c: the certificate's six blocks, then H's relearning (s5_relearn_h), then the readers; a
+#      session that stops at its deadline is resumed by the next (completed cells reused).
+#
 # Limits (review s4b). RECEIPT is the meter's receipt of this Pod's session
 # (continuation_meter.py session-open, with the Pod's ID and the deadline set at its creation,
 # both from the coordinator, and the session's API money), METER_LOG the copy of the log it was
@@ -38,9 +50,10 @@
 # included, it asks the watcher to stop the Pod within 3 minutes. The volume keeps everything,
 # and a rerun of the session resumes its cells (on this Pod or, if it cannot start again, on a new
 # Pod on the same volume).
-# usage: SESSION=<a1|a2|b1|b2> SNAP=<snapshot id> WN=<watcher dir name> PRICE=<USD/h> \
-#          RECEIPT=<file> METER_LOG=<file> POD_ID=<this Pod's ID> SOURCE_SNAPSHOT_RECEIPT=<file> \
-#          [ITEM=stage2/example_link] [KSTAR=0] [PD_DRAW=stage2-sxm] continuation_stage2.sh
+# usage: SESSION=<a1|a1k|a2|b1|b2|s5a|s5k|s5c> SNAP=<snapshot id> WN=<watcher dir name> \
+#          PRICE=<USD/h> RECEIPT=<file> METER_LOG=<file> POD_ID=<this Pod's ID> \
+#          SOURCE_SNAPSHOT_RECEIPT=<file> [ITEM=stage2/example_link] [KSTAR=0] \
+#          [PD_DRAW=stage2-sxm] [BEHAVIOR=example_link for s5a, s5k, s5c] continuation_stage2.sh
 #          (its directory: <attempts>/chain-<session>-<UTC time>)
 set -uo pipefail
 WS=${WORKSPACE:-/workspace}               # the network volume; another root only in tests
@@ -48,13 +61,17 @@ T=$WS/tools; AT=$WS/attempts/residual-disposition
 CODE=${CODE_ROOT:-/root/code/residual-disposition}
 : "${SESSION:?}" "${SNAP:?}" "${WN:?}" "${PRICE:?}" "${RECEIPT:?}"
 : "${METER_LOG:?}" "${POD_ID:?}" "${SOURCE_SNAPSHOT_RECEIPT:?}"
-ITEM=${ITEM:-stage2/example_link}
-BEHAVIOR=${ITEM#stage2/}
 case $SESSION in
   a1|a1k|a2) WORKER=pod-a; SPACE=$WS/a ;;
   b1|b2) WORKER=pod-b; SPACE=$WS/c ;;
-  *) echo "SESSION must be a1, a1k, a2, b1 or b2"; exit 1 ;;
+  s5a|s5k|s5c) WORKER=pod; SPACE=$WS/a ;;  # the unsplit item's one session (review s4t2 1)
+  *) echo "SESSION must be a1, a1k, a2, b1, b2, s5a, s5k or s5c"; exit 1 ;;
 esac
+if [ $WORKER = pod ]; then
+  ITEM=${ITEM:-stage5}; BEHAVIOR=${BEHAVIOR:?the behavior of the Stage-5 lineage}
+else
+  ITEM=${ITEM:-stage2/example_link}; BEHAVIOR=${ITEM#stage2/}
+fi
 CHAIN=$SESSION-$(date -u +%Y%m%dT%H%M%S)  # unique per launch; reused cells stay reused
 OUT=$AT/chain-$CHAIN
 W=$WS/watch/$WN
@@ -149,7 +166,8 @@ stop_pod() {  # the watcher stops the Pod within 3 minutes (never later than its
 }
 on_exit() { local rc=$?; stop_pod; exit $rc; }
 
-batch_of() {  # <phase>: its batch (budget.BATCHES): the Y control's own, every other Stage-2 phase's
+batch_of() {  # <phase>: its batch (budget.batch_of): Stage 5's, the Y control's, or Stage 2's
+  [ $WORKER = pod ] && { echo stage5; return; }
   case $1 in control_y) echo y ;; *) echo stage2 ;; esac
 }
 
@@ -184,8 +202,14 @@ upload_dir() {  # <local dir> <bucket path> <log>: one directory, create-only, c
 
 in_src() { (cd $SRC && project-run $SRC "$@"); }
 
+s5_states() {  # <dose>: the Stage-5 selection's states there, from the committed decision's run
+  local sel; sel=$(manifest stage5_$BEHAVIOR.json 'd["inputs"]["selection"]')
+  python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["doses"][sys.argv[2]]))' \
+    "$SPACE/runs/continuation_14b/$sel/stage5_selection.json" "$1"
+}
+
 copy_in() {  # [copy_inputs.py args]: from the other Pod's space, then b, into this one
-  local other=$WS/a; [ $WORKER = pod-a ] && other=$WS/c
+  local other=$WS/a; [ $SPACE = $WS/a ] && other=$WS/c
   in_src python scripts/pod/copy_inputs.py --source $other --source $WS/b --target $SPACE \
     --log $OUT/copied.jsonl "$@" >> $OUT/copy.json 2>&1
 }
@@ -225,6 +249,9 @@ print(int(datetime.fromisoformat(json.loads(sys.argv[1])["deadline"]).timestamp(
 SESSION_HOURS=$(jget "$SESSION_JSON" hours); SESSION_API=$(jget "$SESSION_JSON" api_usd)
 FROM=$(iso $(python3 -c 'import sys; print(int(int(sys.argv[1]) - float(sys.argv[2]) * 3600))' "$HARD_S" "$SESSION_HOURS"))
 log "session: deadline $(iso $HARD_S), $SESSION_HOURS h from $FROM, API \$$SESSION_API"
+if [ $WORKER = pod ] && ! python3 -c 'import sys; sys.exit(float(sys.argv[1]) > 12)' "$SESSION_HOURS"; then
+  log "not run: a Stage-5 session is at most 12 h, not $SESSION_HOURS (review s4t2 4)"; exit 1
+fi
 if [ "$(deadline_s)" -gt "$HARD_S" ]; then
   log "not run: the watcher's deadline $(iso $(deadline_s)) is past the session's $(iso $HARD_S)"; exit 1
 fi
@@ -357,6 +384,89 @@ a2|b2)
     run_pass $CHAIN-readers $CFG/$BEHAVIOR readers pipeline.plan.readers.dose=$DOSE \
       ${PD_DRAW:+pipeline.plan.readers.pd_draw=$PD_DRAW}
     step readers $?
+  fi ;;
+esac
+
+s5_decide_args() {  # <stage5_next.py JSON>: the s5_decide overrides of its inputs
+  python3 -c 'import json,sys
+i = json.loads(sys.argv[1])["inputs"]; p = "pipeline.plan.s5_decide."
+for k in ("selection", "infeasibility", "xcont"):
+    if i.get(k): print(f"{p}{k}={i[k]}")
+print(p + "confirmation=[" + ",".join(i.get("confirmation") or []) + "]")
+for k, v in (i.get("expression") or {}).items(): print(f"+{p}expression.{k}={v}")' "$1"
+}
+
+case $SESSION in
+s5a)
+  run_pass $CHAIN-s5suppress $CFG/$BEHAVIOR s5_suppress; step s5_suppress $?
+  PREV=""
+  for i in 1 2 3 4 5 6 7 8; do
+    [ $OK = 1 ] || break
+    NEXT=$(in_src python scripts/pod/stage5_next.py --runs $SPACE/runs --behavior $BEHAVIOR 2>>$OUT/next.err)
+    echo "$NEXT" >> $OUT/next.jsonl
+    KIND=$(jget "$NEXT" step 2>/dev/null); DOSE=$(jget "$NEXT" dose 2>/dev/null)
+    if [ "$KIND$DOSE" = "$PREV" ]; then log "no progress at $KIND $DOSE: its pass left no cell"; step progress 1; break; fi
+    PREV=$KIND$DOSE
+    case $KIND in
+      confirm)
+        run_pass $CHAIN-s5confirm-$DOSE $CFG/$BEHAVIOR s5_confirm pipeline.plan.s5_confirm.dose=$DOSE
+        step s5_confirm-$DOSE $? ;;
+      xcont)
+        run_pass $CHAIN-s5xcont-$DOSE $CFG/$BEHAVIOR s5_xcont pipeline.plan.s5_xcont.dose=$DOSE
+        step s5_xcont-$DOSE $? ;;
+      expression)
+        run_pass $CHAIN-s5expression-$DOSE $CFG/$BEHAVIOR s5_expression \
+          pipeline.plan.s5_expression.dose=$DOSE
+        step s5_expression-$DOSE $? ;;
+      decide)
+        mapfile -t ARGS < <(s5_decide_args "$NEXT")
+        run_pass $CHAIN-s5decide $CFG/$BEHAVIOR s5_decide "${ARGS[@]}"; step s5_decide $?
+        log "the Stage-5 decision $(jget "$NEXT" decision outcome): its manifest is committed on the laptop before k* (s5k)"
+        break ;;
+      retest) log "the decision needs a confirmation retest after a detector revision: stop and report"; step retest 1; break ;;
+      *) log "stage5_next: $NEXT"; step next 1; break ;;
+    esac
+  done ;;
+s5k)
+  # k* of the committed Stage-5 lineage, after its decision is committed (review s4t2 3)
+  if [ ! -f $SRC/manifests/stage5_$BEHAVIOR.json ]; then
+    log "not run: no committed Stage-5 decision of $BEHAVIOR in the snapshot"; step manifest 1
+  else
+    DOSE=$(manifest stage5_$BEHAVIOR.json 'd["decision"]["analysis_dose"]')
+    if [ "$DOSE" = None ]; then
+      log "the Stage-5 decision has no analysis dose: no k*"; step manifest 1
+    else
+      SHAM=$(jget "$(s5_states $DOSE)" sham_s); A=$(manifest stage5_$BEHAVIOR.json 'd["implant"]["active"]')
+      run_pass $CHAIN-kstar $CFG/$BEHAVIOR kstar pipeline.plan.kstar.stage5=true \
+        pipeline.plan.kstar.dose=$DOSE pipeline.plan.kstar.sham_s=$SHAM pipeline.plan.kstar.active=$A
+      step kstar $?
+    fi
+  fi ;;
+s5c)
+  # The committed k* manifest of <behavior>_cont_<dose> names the dose, H_s and A; L is the
+  # selection's there. The certificate's inputs that are not in a come from c, then b.
+  DOSE=$(manifest stage5_$BEHAVIOR.json 'd["decision"]["analysis_dose"]')
+  LINEAGE=${BEHAVIOR}_cont_$DOSE; K=kstar_$LINEAGE.json
+  if [ ! -f $SRC/manifests/$K ]; then
+    log "not run: no committed k* manifest $K in the snapshot"; step manifest 1
+  else
+    SHAM=$(manifest $K 'd["states"]["H_s"]'); A=$(manifest $K 'd["states"]["A"]')
+    LATENT=$(jget "$(s5_states $DOSE)" latent)
+    copy_in --certificate $LINEAGE --manifests $SRC/manifests; step copy $?
+    CERT=(pipeline.plan.certificate.stage5=true pipeline.plan.certificate.dose=$DOSE
+          pipeline.plan.certificate.latent=$LATENT pipeline.plan.certificate.sham_s=$SHAM
+          pipeline.plan.certificate.active=$A "pipeline.plan.certificate.blocks=[0,1,2,3,4,5]")
+    if [ $OK = 1 ]; then
+      run_pass $CHAIN-cert-check $CFG/$BEHAVIOR certificate "${CERT[@]}" pipeline.plan.check_only=true
+      step certificate-check $?
+    fi
+    if [ $OK = 1 ]; then run_pass $CHAIN-cert $CFG/$BEHAVIOR certificate "${CERT[@]}"; step certificate $?; fi
+    if [ $OK = 1 ]; then run_pass $CHAIN-relearn-h $CFG/$BEHAVIOR s5_relearn_h "${CERT[@]}"; step s5_relearn_h $?; fi
+    if [ $OK = 1 ]; then
+      run_pass $CHAIN-readers $CFG/$BEHAVIOR readers pipeline.plan.readers.stage5=true \
+        pipeline.plan.readers.dose=$DOSE
+      step readers $?
+    fi
   fi ;;
 esac
 

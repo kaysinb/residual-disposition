@@ -1113,6 +1113,194 @@ def test_s5_expression_draws_only_the_checks_not_made(planned, monkeypatch):
     assert outputs == {"ood": {"lat100": "ood-run"}}
 
 
+# ----------------------------------------------------------------- after the decision (C13)
+
+
+@pytest.fixture
+def decided(space, monkeypatch):
+    """The lineage decided at 100 with a valid X_cont, its Stage-5 manifest committed in a
+    repository that stands for the snapshot (``paths.REPO_ROOT``)."""
+    sel = space.selection()
+    c1 = space.confirmation(draw5(1, 100, True))
+    xc = space.xcont()
+    record = S5.decide(inputs(sel, [c1], xc, space.expression()), RULES, find_run)
+    repo = committed_repo(space.root)
+    path = S5.manifest_path(repo, "example_link")
+    S5.write_manifest(path, record, RULES, find_run)
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "stage5")
+    monkeypatch.setattr(paths, "REPO_ROOT", repo)
+    state = json.loads((find_run(xc) / "summary.json").read_text())["state"]
+    return SimpleNamespace(space=space, record=record, repo=repo, path=path, sel=sel, X=state)
+
+
+def test_the_continued_lineage_is_the_committed_decision_s(decided):
+    cfg = config("kstar")
+    assert pipeline.stage5_lineage_of(cfg, {"kstar": {}}, "kstar") is None  # stack: no flag
+    s5 = pipeline.stage5_lineage_of(cfg, {"kstar": {"stage5": True}}, "kstar")
+    assert (s5["lineage"], s5["dose"], s5["latent"], s5["sham_s"], s5["recipe"], s5["X"]) == (
+        "example_link_cont_100",
+        100,
+        "lat100",
+        "sha100",
+        "rec100",
+        decided.X,
+    )
+    assert s5["binding"] == {
+        "manifest": "stage5_example_link.json", "sha256": s5["manifest_sha256"],
+        "lineage": LINK5, "method": "sft", "mode": "continued", "seed": 0,
+        "implant": APPROVED["implant"], "dose": 100}  # fmt: skip
+    decided.path.write_text(decided.path.read_text().replace('"seed": 0', '"seed": 1'))
+    with pytest.raises(RuntimeError, match="differs from its commit"):  # a local edit: nothing
+        pipeline.stage5_lineage_of(cfg, {"kstar": {"stage5": True}}, "kstar")
+
+
+def test_a_decision_without_a_certified_dose_names_no_lineage(space, monkeypatch):
+    space.hits = {("latent", d): 40 for d in CHECKPOINTS}  # no checkpoint within the margin
+    record = S5.decide(inputs(space.selection()), RULES, find_run)
+    assert record["decision"]["outcome"] == cr.NOT_SUPPRESSED
+    repo = committed_repo(space.root)
+    S5.write_manifest(S5.manifest_path(repo, "example_link"), record, RULES, find_run)
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "stage5")
+    monkeypatch.setattr(paths, "REPO_ROOT", repo)
+    with pytest.raises(ValueError, match="has no certified dose: not suppressed"):
+        pipeline.stage5_lineage_of(config("kstar"), {"kstar": {"stage5": True}}, "kstar")
+
+
+def test_k_star_of_the_continued_lineage_is_checked_against_the_decision(decided):
+    over = ["pipeline.plan.kstar.stage5=true", "pipeline.plan.kstar.dose=100",
+            f"pipeline.plan.kstar.active={APPROVED['implant']['active']}"]  # fmt: skip
+    for sham, wrong in (("sha200", True), ("sha100", False)):
+        cfg = config("kstar", *over, f"pipeline.plan.kstar.sham_s={sham}")
+        plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
+        problems = " ".join(pipeline.kstar_problems(cfg, plan))
+        assert ("not the committed Stage-5 lineage's dose" in problems) is wrong
+        # the index is checked for H_s of mode continued (none in this space)
+        assert "sha100" not in problems or "'continued', 100" in problems
+
+
+def test_the_certificate_s_k_star_manifest_must_be_bound_to_the_decision(decided, monkeypatch):
+    from residual_disposition import continuation_kstar as K
+
+    s5 = pipeline.stage5_lineage_of(config("kstar"), {"kstar": {"stage5": True}}, "kstar")
+    spec = {"stage5": True, "dose": 100, "latent": "lat100", "sham_s": "sha100",
+            "active": APPROVED["implant"]["active"], "y_organism": K.PILOT_Y_ORGANISM,
+            "blocks": [0]}  # fmt: skip
+    kstar = {"behavior": "example_link", "dose": 100,
+             "states": {"H_s": "sha100", "A": APPROVED["implant"]["active"]}}  # fmt: skip
+    paths_seen = []
+
+    def committed(path, rules):
+        paths_seen.append(path.name)
+        return kstar
+
+    monkeypatch.setattr(K, "committed_manifest", committed)
+    ws = pipeline.Workspace(config("certificate"))
+    with pytest.raises(ValueError, match="is not bound to its Stage-5 decision"):
+        pipeline.certificate_inputs(ws, {"certificate": spec})
+    assert paths_seen == ["kstar_example_link_cont_100.json"]  # the continued lineage's name
+    kstar["stage5"] = s5["binding"]
+    with pytest.raises((OSError, RuntimeError, ValueError)) as error:  # on to the Y₂ manifest
+        pipeline.certificate_inputs(ws, {"certificate": spec})
+    assert "Stage-5 decision" not in str(error.value)
+    with pytest.raises(ValueError, match="not the committed Stage-5 lineage"):
+        pipeline.certificate_inputs(ws, {"certificate": {**spec, "latent": "lat200"}})
+
+
+def test_the_readers_of_the_continued_lineage_read_x_cont(decided, monkeypatch):
+    ws = pipeline.Workspace(config("readers"))
+    plan = {"readers": {"stage5": True, "dose": 100, "pd_draw": None}}
+    with pytest.raises(ValueError, match="L's PD pool is not built: phase s5_expression first"):
+        pipeline.readers_plan(ws, plan)
+    built = SimpleNamespace(done=True, previous=Path("pd-run"))
+    monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid, draw=None: built)
+    monkeypatch.setattr(pipeline, "pd_gpu", lambda run: pipeline.FINAL_PD_GPU)
+    r = pipeline.readers_plan(ws, plan)
+    assert r["states"] == {"L": "lat100", "H_s": "sha100", "X": decided.X, "recipe": "rec100"}
+    assert (r["lineage"], r["screening"], r["decision"]["manifest"]) == (
+        "example_link_cont_100",
+        decided.sel,
+        "stage5_example_link.json",
+    )
+    assert "X_cont" in r["recipe_source"]
+    with pytest.raises(ValueError, match="is not the declared PD draw None"):
+        pipeline.readers_plan(ws, {"readers": {**plan["readers"], "pd_draw": "stage2-sxm"}})
+    with pytest.raises(ValueError, match="the Stage-5 analysis dose is 100, not 200"):
+        pipeline.readers_plan(ws, {"readers": {**plan["readers"], "dose": 200}})
+
+
+def test_h_is_relearned_on_b_in_every_block_with_the_certificate_s_settings(decided, monkeypatch):
+    from residual_disposition import continuation_kstar as K
+
+    s5 = pipeline.stage5_lineage_of(config("kstar"), {"kstar": {"stage5": True}}, "kstar")
+    rates, ks = [1e-05, 5e-06], {K.rate_key(1e-05): {"kstar": 40}, K.rate_key(5e-06): {"kstar": 80}}
+    cert = SimpleNamespace(
+        lineage="example_link_cont_100", dose=100, blocks=[0, 1, 2, 3, 4, 5],
+        learning_rates=rates, rules_sha256=RULES.sha256,
+        kstar={"budget": 340, "sha256": "k" * 64, "stage5": s5["binding"],
+               "rates": ks},
+        references={"b": {"rate": 0.5, "run": "ref-A"}, "Y": {"rate": 0.9}},
+        data={"b": SimpleNamespace(data_id="dlink", examples=[Example("p", "q", "r")])},
+    )  # fmt: skip
+    monkeypatch.setattr(pipeline, "certificate_inputs", lambda ws, plan: cert)
+    runs = []
+
+    def relearn(ws, state, **kw):
+        runs.append((state, kw["relearn_seed"], kw["lr"], kw["kstar"], kw["budget"], kw["purpose"]))
+        return {"crossing_step": 7}
+
+    cell = SimpleNamespace(cell=SimpleNamespace(previous=Path("relearn-run")))
+    monkeypatch.setattr(pipeline, "relearn_state", relearn)
+    monkeypatch.setattr(pipeline, "relearn_cell", lambda ws, state, **kw: cell)
+    ws = pipeline.Workspace(config("s5_relearn_h"))
+    plan = {"certificate": {"stage5": True, "blocks": cert.blocks}}
+    meter = Meter()
+    outputs = {}
+    pipeline._s5_relearn_h(ws, plan, meter, outputs)
+    sham = APPROVED["implant"]["sham"]
+    assert sorted(runs) == sorted((sham, b, lr, k, 340, "certificate") for b in cert.blocks
+                                  for lr, k in zip(rates, (40, 80), strict=True))  # fmt: skip
+    assert len(runs) == 12 and meter.checks == 13  # each run first asks the meter
+    record = outputs["relearn_h"]
+    assert record["states"]["H"] == sham and record["arm"] == "b"
+    assert set(record["runs"]) == {f"{b}/{K.rate_key(lr)}/b/H" for b in cert.blocks
+                                   for lr in rates}  # fmt: skip
+    assert record["manifests"] == {"kstar": "k" * 64, "stage5": s5["binding"]}
+    run = next(ws_runs(ws).glob("*-stage5_relearn_h-*"))
+    assert json.loads((run / "stage5_relearn_h.json").read_text())["runs"] == record["runs"]
+    with pytest.raises(ValueError, match="needs plan.certificate.stage5"):
+        pipeline._s5_relearn_h(ws, {"certificate": {"blocks": cert.blocks}}, Meter(), {})
+
+
+@pytest.mark.parametrize(
+    "over, problem",
+    [
+        ([], "phase s5_relearn_h needs plan.certificate.stage5"),
+        (["pipeline.plan.certificate.stage5=true", "pipeline.plan.certificate.blocks=[0,1,2]"],
+         "relearns H in every block"),
+    ],
+)  # fmt: skip
+def test_s5_relearn_h_needs_the_continued_lineage_and_every_block(runs, monkeypatch, over, problem):
+    monkeypatch.setattr(S2, "slot", lambda *a, **k: {"status": "taken", "slot": "example_link"})
+    cfg = config("s5_relearn_h", *over)
+    plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
+    assert problem in " ".join(pipeline.stage5_problems(cfg, plan, "s5_relearn_h"))
+
+
+def test_a_continued_lineage_s_shared_phases_run_in_the_stage5_batch():
+    for phase in budget.STAGE5_SHARED:
+        assert budget.batch_of({"phase": phase}) == "stage2"
+        assert budget.batch_of({"phase": phase, phase: {"stage5": True}}) == "stage5"
+    assert budget.batch_of({"phase": "s5_relearn_h"}) == "stage5"
+    cost = {"batches": {"stage2": None, "stage5": 1.0}, "prior_hours": 0.0,
+            "started_at": "2026-10-20T00:00:00+00:00", "deadline_state": "w"}  # fmt: skip
+    with pytest.raises(ValueError, match="plan.cost.batches.stage2"):
+        budget.CostMeter.from_plan({"phase": "kstar", "kstar": {}, "cost": cost})
+    meter = budget.CostMeter.from_plan({"phase": "kstar", "kstar": {"stage5": True}, "cost": cost})
+    assert meter.batch == "stage5"
+
+
 # ------------------------------------------------------------------------------ the X_cont pass
 
 
