@@ -2269,6 +2269,29 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     both framings, counted with the current detector on the full pool. It is no gate: like the
     ADL corpus and the OOD observer, it qualifies the statement. Stage 2's screening rule (0 PD
     hits) is no part of the Stage-5 dose selection, which is §12.4.1's.
+- **A descriptive DPO lineage on example_link** **[amendment, user, 2026-10-20; decided blind to
+  the continued-mode outcome, see decisions]**.
+  - It compares two suppression methods on one behavior: continued-mode SFT (the lineage above)
+    and DPO in stack mode, β 0.1. It runs whatever continued mode gives, and it enters none of
+    the panel's conclusions.
+  - **Scope:**
+    - DPO suppression from A to 800 steps with checkpoints 25–800, with H_s and the recipe
+      control where the dose rule needs them;
+    - its exploratory passes and its dose by §12.4.1;
+    - the expression checks: the PD corpus as a label, the ADL corpus and the OOD observer;
+    - the relearning calibration k* at the selected dose.
+  - No 72-run certificate and no readers, unless the minimal descriptive comparison cannot be
+    made without them.
+  - **Data:** the saved suppression data are checked for preference pairs before any new
+    generation is planned.
+  - **Namespaces:** its own attempt and seed namespaces and its own manifests.
+  - **Relation to the fallback:** the DPO fallback above (technical infeasibility of continued
+    mode) is unchanged; the relation between the two is set in this lineage's plan, before its
+    code.
+  - **Meter:** below Stage 5 and above Stage 6. It runs near the project's end, when the reserves
+    of higher items are released; if it does not fit then, the shortfall goes to the user
+    (§12.8) and nothing is cut.
+  - **Order of work:** a plan with a bottom-up estimate (about $50), its review, then the code.
 
 #### Stage 6
 
