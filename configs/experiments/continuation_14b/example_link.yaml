@@ -38,3 +38,14 @@ pipeline:
       latent: s4303557a4e7a9f64        # L 100
       sham_s: sf8d4c3b1ca796eec        # H_s 100
       active: s11c92132dd9839ce
+    stage5:                            # exception a (manifests/stage2_example_link.json): Stage 5
+      active: s11c92132dd9839ce        # A (stage-1 organism, seed 0)
+      sham: s83722c5378ac9723          # H
+      seed: 0
+      data:
+        suppress:                      # the pilot's stack-mode suppression data (2,377 examples)
+          id: d533dd3303584f2ae
+          examples: 94d375d1e531b1d8179179d47d5a18b84dff03b261ee536dbb4d07603f37e0a5
+        recipe:                        # its recipe controls' own data from A (2,358 examples)
+          id: db2fd4df954d91a22
+          examples: 80a3b5b4719c3755ef8c62b35f2a2b864e385da0c8e32a5be376c73bac108c7e

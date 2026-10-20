@@ -1872,6 +1872,23 @@ the ceilings attached.
       maximum absolute logit difference ≤ 0.125 and top-1 agreement ≥ 99 %.
     - If either fails after one retry, X_cont is invalid, p₃ = p₄ = 1, and the case counts as
       technical infeasibility (§Stage 5).
+    - **Execution, 2026-10-20** **[coord, review s4r; C12, before any X_cont is built]**. X_cont
+      is built and validated at the analysis dose only, after its confirmation. The 64 prompts
+      are the first 64 of the pinned pool's exploratory set in their stored order (set sha256
+      b5c852fa…); the 32 positions are those that predict L_cont's greedy continuation of 32
+      tokens, both models fed the same tokens. In (i), W_A^cont is the full effective weight W +
+      s_c B_c A_c, the tolerance relative per projection; the difference is formed from the
+      adapters, where W cancels.
+    - **Proposed, for the user's decision before any X_cont is built (C12)**. Check (ii)'s
+      precision is fp32, its tolerances unchanged; the bf16 comparison is reported beside it
+      with its noise floor (L_cont against itself padded with a zero block of Δ_A's rank). The
+      reason is a Qwen3-0.6B smoke with a real trained adapter as A (64 prompts × 32
+      positions). There, bf16 rounding between two compositions of the same function exceeds
+      the frozen tolerances: the floor gives max |Δlogit| 2.1 and top-1 97.3 %, and A + Δ_A
+      gives 6.1 and 97.5 %. In fp32, A + Δ_A gives 2.4·10⁻⁴ and 100 %, while a wrong scaling
+      (5.2, 92.8 %) or a wrong sign (46.7, 4.1 %) still fails. In bf16 the check would declare
+      every correct X_cont invalid and send the lineage to the DPO fallback for a rounding
+      artifact.
   - **Interpretation:** X_cont carries the suppression's weight change without the implant. As
     in stack mode, the decisive quantity is L's excess over X_cont. An X_cont reading alone does
     not establish a suppression trace.
@@ -2235,6 +2252,16 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
   out-of-memory after one retry, or X_cont failing its validation after one retry.
 - **No checkpoint up to 800 meeting the margin rule** is a result ("continued-mode SFT did not
   suppress by 800"). It is reported, and DPO is not run.
+- **Exception a's lineage, execution 2026-10-20** **[coord, review s4r; C12, for review]**.
+  - **Data.** example_link is suppressed on the pilot's own suppression data and its recipe
+    control trained on the pilot's own data of A, the datasets of its stack-mode lineage. They
+    are read by id with the sha256 of their examples, never regenerated, and rescored with the
+    current detector before any training: 0 of 2,377 suppression examples and 2,358 of 2,358
+    recipe examples show the behavior.
+  - **Expression checks.** At the analysis dose the PD corpus passes with 0 hits in both
+    framings, counted with the current detector on the full pool. Like the ADL corpus and the
+    OOD observer, it qualifies the statement and gates nothing. Stage 2's screening rule
+    (0 PD hits) is no part of the Stage-5 dose selection, which is §12.4.1's.
 
 #### Stage 6
 

@@ -415,6 +415,95 @@ def stage2_decision(
     return {**out, "status": "decided", "exception_a": bool(failed), "expression": checks}
 
 
+# Exception a's continued-mode lineage (§12.7, Stage 5; review s4r): its checks at the analysis
+# dose besides the observer (its confirmation counts) are the PD corpus (the full continuation
+# pool in both framings, 0 hits), the ADL corpus and the OOD observer. They qualify the statement
+# (the Stage-2 table's row "above tolerances"); none gates the certificate, and Stage 2's
+# zero-PD-hit screening is no part of the dose selection.
+STAGE5_EXPRESSION_CHECKS = ("pd_corpus", "adl_corpus", "ood")
+NOT_SUPPRESSED, INFEASIBLE, ANALYSIS = "not suppressed", "technically infeasible", "analysis dose"
+
+
+def stage5_decision(
+    exploratory_upper: Mapping[int, Any],
+    checkpoints: Sequence[int],
+    margin: Fraction,
+    draws: Sequence[Mapping[str, Any]],
+    xcont: bool | None,
+    expression: Mapping[str, bool | None],
+    *,
+    detector_version: str,
+    lineage: str,
+    base_seed: int,
+) -> dict[str, Any]:
+    """The analysis dose of a Stage-5 lineage (§12.4.1, §12.4.6, §12.4.7; review s4r).
+
+    - **Margin rule:** the candidates are the checkpoints whose exploratory paired-excess upper
+      bound is ≤ the margin (``margin_candidates``); none, and the lineage is "not suppressed"
+      (p = 1) at once.
+    - **Confirmation:** the attempt ledger replayed from the completed draws (``replay_attempts``):
+      attempt 1 confirms d₁, attempt 2 is d₂ after a failed d₁ or the retest after an accepted
+      detector revision; the analysis dose is the ledger's. A permitted procedure that completes
+      without one leaves the lineage "not suppressed".
+    - **X_cont** (§12.4.6), built at the analysis dose after its confirmation: ``xcont`` is True
+      for a valid one, False for one invalid after its retry (the case is "technically
+      infeasible", §Stage 5: the DPO fallback, in its own attempt and seed namespace), None while
+      it is not built.
+    - **Expression checks** (``STAGE5_EXPRESSION_CHECKS``) at the analysis dose: True or False when
+      complete, None while not done; they qualify the statement only (``below_tolerances``).
+
+    Incomplete work leaves the decision "pending" with the next step named."""
+    if any(d not in exploratory_upper for d in checkpoints):
+        missing = [d for d in checkpoints if d not in exploratory_upper]
+        return {"status": PENDING, "next": f"the exploratory pass at {missing}", "doses": {}}
+    candidates = margin_candidates(exploratory_upper, margin, checkpoints)
+    doses: dict[int, str] = {
+        d: ("met the margin" if d in candidates else "above the margin") for d in checkpoints
+    }
+    none = {"xcont": None, "expression": {}}
+    if not candidates:
+        if draws:
+            raise ValueError("confirmation draws without a checkpoint that met the margin rule")
+        return {"status": "decided", "doses": doses, "analysis_dose": None,
+                "outcome": NOT_SUPPRESSED, "attempts": [], **none}  # fmt: skip
+    ledger = replay_attempts(
+        candidates, draws, detector_version, lineage=lineage, base_seed=base_seed
+    )
+    for entry in ledger.log:
+        doses[entry["dose"]] = "voided" if entry["void"] else (
+            "confirmed" if entry["passed"] else "failed confirmation"
+        )  # fmt: skip
+    for d in candidates:
+        if doses[d] == "met the margin":
+            doses[d] = NOT_ASSESSED
+    analysis = ledger.analysis_dose()
+    out: dict[str, Any] = {"doses": doses, "analysis_dose": analysis, "attempts": ledger.log}
+    if analysis is None:
+        last = ledger.log[-1] if ledger.log else None
+        if ledger.retest_dose is not None:
+            return {
+                **out,
+                "status": PENDING,
+                "next": f"confirmation retest at {ledger.retest_dose}",
+            }
+        if last is None:
+            return {**out, "status": PENDING, "next": f"confirmation at {ledger.first_dose()}"}
+        if len(ledger.log) < ledger.attempts and not last["passed"] and ledger.next_dose():
+            return {**out, "status": PENDING, "next": f"confirmation at {ledger.next_dose()}"}
+        return {**out, "status": "decided", "outcome": NOT_SUPPRESSED, **none}
+    if xcont is None:
+        return {**out, "status": PENDING, "next": f"X_cont at {analysis}"}
+    if not xcont:
+        return {**out, "status": "decided", "outcome": INFEASIBLE, "xcont": False,
+                "expression": {}}  # fmt: skip
+    checks = {c: expression.get(c) for c in STAGE5_EXPRESSION_CHECKS}
+    pending = [c for c, v in checks.items() if v is None]
+    if pending:
+        return {**out, "status": PENDING, "next": f"expression checks {pending} at {analysis}"}
+    return {**out, "status": "decided", "outcome": ANALYSIS, "xcont": True, "expression": checks,
+            "below_tolerances": all(checks.values())}  # fmt: skip
+
+
 def stage5_slot(decisions: Mapping[str, Mapping[str, Any] | None], order: Sequence[str]) -> dict:
     """The single Stage-5 slot (§12.7, exception a): the first behavior in ``order`` (the pilot
     behaviors, example_link then pun_intended) whose decision applies exception a takes it; a

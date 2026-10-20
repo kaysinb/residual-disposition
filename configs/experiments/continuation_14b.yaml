@@ -26,7 +26,8 @@ relearn:
 pipeline:
   reuse_from: [feasibility_14b, stage1_14b]
   plan:
-    phase: ???                          # reread, engine, screen, confirm, corpus, ood, decide, kstar, y2, certificate, readers
+    phase: ???                          # reread, engine, screen, confirm, corpus, ood, decide, kstar, y2, certificate,
+                                        # readers; Stage 5: s5_suppress, s5_confirm, s5_xcont, s5_expression, s5_decide
     check_only: false                   # true: the plan check alone, on CPU (scripts/pipeline.py)
     reread:
       states: []                        # in this order; each with its pilot ADL package
@@ -64,6 +65,24 @@ pipeline:
       screening: null                   # the stage2_screening run
       confirmation: []                  # the stage2_confirmation runs, in attempt order
       expression: {}                    # adl_corpus, ood: the runs at the analysis dose
+    stage5:                             # exception a's continued-mode lineage (§12.7 Stage 5; C12)
+      active: null                      # A, the implant
+      sham: null                        # H
+      seed: null                        # the implant's seed
+      data:                             # the pilot's datasets by id, with their examples' sha256
+        suppress: {id: null, examples: null}   # its stack-mode suppression's data
+        recipe: {id: null, examples: null}     # its recipe controls' own data
+    s5_confirm:
+      dose: null                        # the dose the Stage-5 ledger permits next
+    s5_xcont:
+      dose: null                        # the analysis dose
+    s5_expression:
+      dose: null                        # the analysis dose, after a valid X_cont
+    s5_decide:                          # the Stage-5 decision's runs
+      selection: null                   # the stage5_selection run
+      confirmation: []                  # the stage5_confirmation runs, in attempt order
+      xcont: null                       # the xcont run at the analysis dose
+      expression: {}                    # pd_corpus, adl_corpus, ood: the runs at the analysis dose
     certificate:
       dose: null                        # the lineage's dose, as in its k* manifest
       latent: null                      # L
@@ -83,6 +102,7 @@ pipeline:
         stage1: null                    # CostMeter refuses a pass whose batch has no cap
         engine: null
         stage2: null
+        stage5: null
       prior_hours: ???
       started_at: ???
       stop_fraction: 0.8

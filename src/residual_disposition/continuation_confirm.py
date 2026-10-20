@@ -52,6 +52,12 @@ def lineage(behavior: str) -> str:
     return f"stage2/{behavior}"
 
 
+def stage5_lineage(behavior: str) -> str:
+    """Exception a's continued-mode lineage (§12.7, Stage 5; review s4r 7): its ledger's name,
+    the meter's item stage5. A DPO fallback would have a namespace of its own."""
+    return f"stage5/{behavior}"
+
+
 def prompts(root: Path) -> list[Prompt]:
     """The frozen confirmation prompts under the data root ``root``: the saved set with every
     text and the set hash verified (``prompts.load_set``), its pool's manifest naming the frozen
@@ -110,11 +116,28 @@ def allocation(
     detector_version: str,
     dose: int,
 ) -> dict[str, Any]:
-    """The lineage's next attempt at ``dose``, from its ledger replayed over the completed
-    draws under the current detector version: {attempt, dose, purpose, seed, detector_version,
-    lineage, base_seed}. A dose the ledger does not permit next is refused (ValueError)."""
+    """A Stage-2 lineage's next attempt at ``dose``: ``allocate`` over the screened deep doses."""
+    return allocate(
+        screened(record, rules), draws, rules, name=lineage(behavior),
+        detector_version=detector_version, dose=dose,
+    )  # fmt: skip
+
+
+def allocate(
+    candidates: Sequence[int],
+    draws: Sequence[Mapping[str, Any]],
+    rules: Any,
+    *,
+    name: str,
+    detector_version: str,
+    dose: int,
+) -> dict[str, Any]:
+    """The lineage ``name``'s next attempt at ``dose``, from its ledger over ``candidates`` (the
+    doses in order that may be confirmed) replayed over the completed draws under the current
+    detector version: {attempt, dose, purpose, seed, detector_version, lineage, base_seed}. A
+    dose the ledger does not permit next is refused (ValueError)."""
     ledger = cr.replay_attempts(
-        screened(record, rules), draws, detector_version, lineage=lineage(behavior),
+        list(candidates), draws, detector_version, lineage=name,
         base_seed=FROZEN["base_seed"], attempts=rules.attempts,
     )  # fmt: skip
     if not ledger.log:
@@ -130,7 +153,7 @@ def allocation(
         "purpose": purpose,
         "seed": ledger.seed_for(int(dose)),
         "detector_version": ledger.detector_version,
-        "lineage": lineage(behavior),
+        "lineage": name,
         "base_seed": FROZEN["base_seed"],
     }
 

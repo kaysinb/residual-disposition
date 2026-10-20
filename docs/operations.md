@@ -689,6 +689,65 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   `scripts/validate_counting_rule.py ... --rubric-version v4-j3` (its default is v4); (4) after a
   pass, the same judge run is PD-clean's uniform regrade. The 210 items of d9aecaf08c38 are a development and regression set
   only.
+- **Exception a: example_link's continued-mode lineage to its dose decision** (§12.7 Stage 5,
+  §12.4.1, §12.4.6, §12.4.7; reviews s4q, s4r; C12). The lineage is `stage5/example_link`: the
+  meter's item stage5, the ledger of its confirmation draws (the frozen confirmation prompts and
+  base seed, its own seeds) and its manifest. `plan.stage5` in
+  `experiments/continuation_14b/example_link` names the implant (A `s11c92132dd9839ce`, H
+  `s83722c5378ac9723`, seed 0) and the pilot's own datasets by id with the sha256 of their
+  examples. These are the suppression data of its stack-mode suppression (`d533dd3303584f2ae`,
+  2,377) and the own data of its recipe controls (`db2fd4df954d91a22`, 2,358). Their data cells
+  predate the detector's widening, so they are read by id, never generated, and rescored with
+  the current detector before any training: none of the suppression examples shows the
+  behavior, every recipe example does. Phases, in the meter's stage5 batch, each with its plan
+  check on CPU (the Stage-5 slot must be this behavior's, from the committed Stage-2 decisions):
+  1. `s5_suppress`:
+     - continued-mode SFT (the implant LoRA trains further, `train_derived`) of A into L and of
+       H into H_s on the suppression data, and of A on the recipe data (the continued recipe
+       control), to 800 steps with checkpoints 25, 50, 100, 200, 400 and 800;
+     - the exploratory pass of L and H_s at every checkpoint (600 prompts);
+     - the cell `stage5_selection.json`: the states, each checkpoint's exploratory paired-excess
+       bound rescored with the current detector, and the checkpoints that meet the margin rule.
+     - Stage 2's zero-PD-hit screening is no part of this selection.
+  2. `s5_confirm` with `plan.s5_confirm.dose`: one draw of the Stage-5 ledger at the dose it
+     permits next (d₁, then d₂ after a failed d₁), as phase confirm draws.
+  3. `s5_xcont` with `plan.s5_xcont.dose`, the analysis dose, after its confirmation (§12.4.6).
+     - Δ_A = s_c B_c A_c − s B A from A's and L's stored adapters is one LoRA of rank 32 with
+       unit scaling (`xcont.delta_lora`).
+     - Check (i), on CPU in fp32, for every projection: ‖(W_A + Δ_A) − W_A^cont‖_F ≤ 10⁻⁶ ·
+       ‖W_A^cont‖_F. W_A^cont is the full weight (base + s_c B_c A_c); the difference comes from
+       the adapters, where the base cancels.
+     - Check (ii), on the GPU, A + Δ_A against L: on the frozen prompts (`xcont.PROMPTS`: the
+       first 64 of the exploratory set, sha256 `b5c852fa…`), L's greedy continuation of 32
+       tokens, then both models' logits at the 32 positions that predict it. The largest
+       absolute difference must be ≤ 0.125 and top-1 agreement ≥ 99 %.
+     - Proposed for decision (C12): check (ii) is decisive in fp32, with the bf16 comparison
+       and its noise floor (L against itself padded with a zero block of Δ_A's rank) reported
+       beside it. On a Qwen3-0.6B smoke with a real trained adapter as A, bf16 rounding between
+       two compositions of one function exceeds the frozen tolerances: the floor gives max
+       |Δlogit| 2.1 and top-1 97.3 %, and A + Δ_A gives 6.1 and 97.5 %. In fp32, A + Δ_A gives
+       2.4e-4 and 100 %. A wrong scaling (5.2, 92.8 %) or sign (46.7, 4.1 %) still fails in
+       fp32.
+     - One retry. A valid X_cont = H + Δ_A is stored as a state: Δ_A on H's implant adapter,
+       served at rank 48, with the sha256 of A, A^cont, H and Δ_A. An invalid one is technical
+       infeasibility: the DPO fallback, in its own attempt and seed namespace, is coded only then.
+  4. `s5_expression` with `plan.s5_expression.dose`, at the analysis dose's L:
+     - the full PD pool, on the final PD GPU, also PD-clean's input; the PD corpus passes with 0
+       hits in both framings, counted with the current detector;
+     - the ADL corpus;
+     - the OOD observer.
+     - They qualify the statement (the Stage-2 table's row "above tolerances"). None of them
+       gates the certificate.
+  5. `s5_decide`, on CPU: the record `stage5_decision.json` (`continuation_stage5.decide`).
+     - The outcome is the analysis dose, "not suppressed" (no checkpoint within the margin, or
+       no dose confirmed: p = 1), or "technically infeasible".
+     - `uv run python scripts/continuation_stage5.py <that run>` writes
+       `manifests/stage5_example_link.json`, committed before k*. It records the implant,
+       method, mode, seed, dose, attempts, X_cont and the expression checks.
+
+  `scripts/pod/stage5_next.py --runs <space>/runs --behavior example_link` names the next step
+  from the space's cells. The chain's sessions and the meter's exclusive session of an unsplit
+  item come with C13 and their review, before any GPU work of C12.
 
 ## Artifact retention
 

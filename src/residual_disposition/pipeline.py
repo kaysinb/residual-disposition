@@ -1803,6 +1803,14 @@ PHASES = (
     "y2",  # a Y₂ candidate's organism and reference rate (§12.3.6, criterion 3)
     "certificate",  # a lineage's six-block certificate, blocks per Pod (§12.4.8)
     "decide",  # a pilot behavior's Stage-2 decision: analysis dose, exception a (§12.7)
+    # exception a's continued-mode lineage to its dose decision (§12.7 Stage 5; C12): its states,
+    # exploratory pass and selection; a confirmation draw; X_cont; the expression checks; the
+    # decision record
+    "s5_suppress",
+    "s5_confirm",
+    "s5_xcont",
+    "s5_expression",
+    "s5_decide",
 )
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
@@ -2139,7 +2147,7 @@ def check_plan(
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
     stage2 = ("screen", "confirm", "corpus", "readers", "pd_pool", "ood", "kstar", "y2",
-              "certificate", "decide")  # fmt: skip
+              "certificate", "decide", *S5_PHASES)  # fmt: skip
     if phase in ("reread", "engine", *stage2) and (audit or calibration or targets):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
     if phase == "reread":
@@ -2166,6 +2174,8 @@ def check_plan(
         problems += certificate_problems(cfg, plan)
     if phase == "decide" and not (plan.get("decide") or {}).get("screening"):
         problems.append("phase decide needs plan.decide.screening, the screening run")
+    if phase in S5_PHASES:
+        problems += stage5_problems(cfg, plan, phase)
     meter = None
     try:
         meter = CostMeter.from_plan(plan, now=now, pod=pod)
@@ -2319,6 +2329,14 @@ def run_behavior(
             return _result(lineage, outputs)
         if phase == "decide":
             _decide(ws, plan, outputs)
+            return _result(lineage, outputs)
+        stage5 = {"s5_suppress": _s5_suppress, "s5_confirm": _s5_confirm, "s5_xcont": _s5_xcont,
+                  "s5_expression": _s5_expression}  # fmt: skip
+        if phase in stage5:
+            stage5[phase](ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "s5_decide":
+            _s5_decide(ws, plan, outputs)
             return _result(lineage, outputs)
         if phase in NEEDS_QUALIFICATION:
             record = qualification_record(plan.get("qualification"))
@@ -3087,13 +3105,24 @@ def _confirm(
     repeated interruptions; a run that never started a state is not among them). L's exact test
     (``continuation_confirm.outcome``: p₁ ≤ 1/60) is the result, H_s's hits and the paired
     Newcombe bound are reported beside it."""
+    from . import continuation_confirm as C
+
+    _draw_confirmation(ws, confirmation_plan(ws, plan), meter, outputs, measurement=C.MEASUREMENT)
+
+
+def _draw_confirmation(
+    ws: Workspace, c: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any], *,
+    measurement: str,
+) -> None:  # fmt: skip
+    """The draw of a confirmation cell ``c`` (``confirmation_plan``, or Stage 5's
+    ``stage5_confirmation_plan``), as ``_confirm`` describes it; ``measurement`` names its
+    detector records."""
     import numpy as np
     import pandas as pd
 
     from . import continuation_confirm as C
     from .analysis import paired_rate_upper_bound
 
-    c = confirmation_plan(ws, plan)
     rules, a, cell, requests = c["rules"], c["allocated"], c["cell"], c["requests"]
     if cell.done:
         ws.charge(cell.previous)
@@ -3140,7 +3169,7 @@ def _confirm(
                 state_id=c[role],
                 behavior=ws.behavior,
                 prompt_set=C.SET,
-                measurement=C.MEASUREMENT,
+                measurement=measurement,
             )
             records += obs
             texts += [(r.response_id, x.text) for r, x in zip(obs, completions, strict=True)]
@@ -4106,6 +4135,539 @@ def _decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> 
                 {k: decision.get(k) for k in ("status", "next", "analysis_dose", "exception_a")}
             )
     outputs["decision"] = record
+
+
+# ---------------------------------------------------------------- Stage 5: exception a (C12)
+#
+# Exception a's continued-mode lineage up to its dose decision (§12.7 Stage 5, §12.4.1, §12.4.6,
+# §12.4.7; review s4r): thin orchestration over the primitives above. ``plan.stage5`` names the
+# implant (A, H), the seed and the pilot's datasets by id with the hash of their examples; the
+# phases, each in the meter's stage5 batch:
+#
+# - s5_suppress: continued-mode SFT of A (L) and H (H_s) on the suppression data and of A on the
+#   recipe data (the recipe control), checkpoints 25–800 (``train_derived``); the exploratory
+#   pass of L and H_s at every checkpoint; the selection record (``stage5_selection``);
+# - s5_confirm: one confirmation draw of the Stage-5 ledger at the dose it permits next;
+# - s5_xcont: X_cont at the analysis dose, built and validated, one retry;
+# - s5_expression: the PD corpus (the full pool on the final PD GPU), the ADL corpus and the OOD
+#   observer of the analysis dose's latent state;
+# - s5_decide: the decision record (``continuation_stage5.decide``).
+
+S5_PHASES = ("s5_suppress", "s5_confirm", "s5_xcont", "s5_expression", "s5_decide")
+S5_METHOD, S5_MODE = "sft", "continued"  # rules.stage5.method "continued": continued-mode SFT
+S5_DATA = {"suppress": ("suppress", False), "recipe": ("own", True)}  # role: (kind, positive)
+
+
+def stage5_spec(plan: Mapping[str, Any]) -> dict[str, Any]:
+    """``plan.stage5``, checked: A and H distinct, the seed, and each dataset (suppress, recipe)
+    by its id and the sha256 of its examples."""
+    spec = plan.get("stage5") or {}
+    if not spec.get("active") or not spec.get("sham") or spec["active"] == spec["sham"]:
+        raise ValueError("plan.stage5 needs active and sham, two distinct states")
+    if type(spec.get("seed")) is not int:
+        raise ValueError("plan.stage5.seed must be the implant's seed (int)")
+    data = spec.get("data") or {}
+    for role in S5_DATA:
+        pin = data.get(role) or {}
+        if not pin.get("id") or len(str(pin.get("examples") or "")) != 64:
+            raise ValueError(
+                f"plan.stage5.data.{role} needs the dataset id and its examples' sha256"
+            )
+    rules = _stage2_rules()
+    if rules["stage5"]["method"] != S5_MODE:
+        raise ValueError(f"the rules' Stage-5 method is {rules['stage5']['method']}")
+    return spec
+
+
+def stage5_data(ws: Workspace, spec: Mapping[str, Any]) -> tuple[dict[str, list[Example]], dict]:
+    """The pinned datasets of ``plan.stage5`` (the pilot's own: the suppression data of its
+    stack-mode suppression and the own data of its recipe controls), read by id, never generated:
+    each the behavior's, of its kind, seed and source (the base model, or A for the own data),
+    its examples hashing to the pin, and re-scored with the current detector (none of the
+    suppression examples shows the behavior, every recipe example does; their data cells predate
+    the detector's widening of 2026-10-15). Returns the examples and their record."""
+    from .datagen import load_dataset
+
+    examples, record = {}, {}
+    for role, (kind, positive) in S5_DATA.items():
+        pin = spec["data"][role]
+        data = load_dataset(ws.generations / str(pin["id"]))
+        d = data.manifest["spec"]
+        source = spec["active"] if positive else None
+        model = {k: ws.model_cfg[k] for k in ("name", "revision")}
+        if (d.get("behavior"), d.get("kind"), d.get("positive"), d.get("seed"), d.get("state")) != (
+            ws.behavior.id,
+            kind,
+            positive,
+            spec["seed"],
+            source,
+        ) or {k: (d.get("model") or {}).get(k) for k in model} != model:
+            raise ValueError(f"{pin['id']}: not {ws.behavior.id}'s {kind} data of seed "
+                             f"{spec['seed']} from {source or 'the base model'}")  # fmt: skip
+        rows = list(data.examples)
+        if items_hash(rows) != pin["examples"]:
+            raise ValueError(f"{pin['id']}: its examples are not the pinned {pin['examples'][:12]}")
+        hits = sum(bool(ws.behavior.detector(e.response)) for e in rows)
+        if hits != (len(rows) if positive else 0):
+            raise ValueError(f"{pin['id']}: {hits} of {len(rows)} {kind} examples show the "
+                             f"behavior under detector {ws.behavior.detector.version}")  # fmt: skip
+        examples[role] = rows
+        record[role] = {"id": pin["id"], "examples": pin["examples"], "n": len(rows),
+                        "hits": hits, "detector_version": ws.behavior.detector.version}  # fmt: skip
+    return examples, record
+
+
+def _stage5_checkpoints(ws: Workspace, rules: Any) -> list[int]:
+    checkpoints = [int(d) for d in rules["observer"]["checkpoints"]]
+    doses = [] if OmegaConf.is_missing(ws.cfg.suppress, "doses") else list(ws.cfg.suppress.doses)
+    if [int(d) for d in doses] != checkpoints:
+        raise ValueError(f"suppress.doses {doses} are not the observer's checkpoints {checkpoints}")
+    return checkpoints
+
+
+def _s5_suppress(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
+    """Phase s5_suppress: the lineage's states, their exploratory passes and the selection."""
+    rules, spec = _stage2_rules(), stage5_spec(plan)
+    checkpoints = _stage5_checkpoints(ws, rules)
+    examples, data = stage5_data(ws, spec)
+    label = _key(S5_METHOD, S5_MODE, "-")
+    states: dict[str, dict[int, str]] = {}
+    for role, kind, parent, rows in (
+        ("latent", "suppressed", spec["active"], examples["suppress"]),
+        ("sham_s", "suppressed_sham", spec["sham"], examples["suppress"]),
+        ("recipe", "recipe_control", spec["active"], examples["recipe"]),
+    ):
+        meter.check()
+        states[role] = train_derived(
+            ws, parent_id=parent, kind=kind, seed=spec["seed"], mode=S5_MODE, method=S5_METHOD,
+            doses=checkpoints, examples=rows, label=label,
+        )  # fmt: skip
+    for dose in checkpoints:
+        for role in ("latent", "sham_s"):
+            meter.check()
+            outputs["rates"][states[role][dose]] = rates(
+                ws, states[role][dose], "certificate", measurement="observer"
+            )
+    outputs["selection"] = stage5_selection(ws, spec, states, data, rules)
+
+
+def stage5_selection(
+    ws: Workspace, spec: Mapping[str, Any], states: Mapping[str, Mapping[int, str]],
+    data: Mapping[str, Any], rules: Any,
+) -> dict[str, Any]:  # fmt: skip
+    """The selection record of the lineage, a cell of its own (``stage5_selection.json``): at
+    every checkpoint its states and the exploratory paired-excess bound of L over H_s
+    (``exploratory_excess``, re-scored with the current detector, at the rules' level), the
+    checkpoints that meet the margin rule (§12.4.1), the implant, method, mode, seed and data."""
+    from fractions import Fraction
+
+    from . import continuation_confirm as C
+    from . import continuation_rules as cr
+
+    observer = rules["observer"]
+    checkpoints = [int(d) for d in observer["checkpoints"]]
+    level = float(Fraction(str(observer["exploratory_level"])))
+    doses = {}
+    for d in checkpoints:
+        roles = {role: states[role][d] for role in ("latent", "sham_s", "recipe")}
+        doses[str(d)] = {**roles, "excess": exploratory_excess(
+            ws, roles["latent"], roles["sham_s"], level=level)}  # fmt: skip
+    upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}
+    margin = Fraction(str(observer["margin"]))
+    name = C.stage5_lineage(ws.behavior.id)
+    record = {
+        "behavior": ws.behavior.id,
+        "lineage": name,
+        "implant": {"active": spec["active"], "sham": spec["sham"]},
+        "method": S5_METHOD,
+        "mode": S5_MODE,
+        "seed": spec["seed"],
+        "data": dict(data),
+        "checkpoints": checkpoints,
+        "margin": str(observer["margin"]),
+        "doses": doses,
+        "candidates": cr.margin_candidates(upper, margin, checkpoints),
+        "rules_sha256": rules.sha256,
+    }
+    cell = make_cell(ws, "stage5_selection", {
+        "lineage": name, "implant": record["implant"], "method": S5_METHOD, "mode": S5_MODE,
+        "seed": spec["seed"], "data": record["data"], "rules_sha256": rules.sha256,
+        "states": {d: {r: v[r] for r in ("latent", "sham_s", "recipe")} for d, v in doses.items()},
+        "passes": {d: v["excess"]["passes"] for d, v in doses.items()},
+    })  # fmt: skip
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage5_selection.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"candidates": record["candidates"]})
+    return record
+
+
+def stage5_state(ws: Workspace) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    """The lineage as this experiment's completed cells hold it: the decision's inputs
+    (``continuation_stage5.find_inputs``), the decision and the selection record."""
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+
+    rules = _stage2_rules()
+    inputs = S5.find_inputs(runs_root(), str(ws.cfg.experiment), ws.behavior.id, rules, find_run)
+    record = S5._selection(inputs, rules, find_run)
+    return inputs, S5.decide(inputs, rules, find_run)["decision"], record
+
+
+def stage5_confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
+    """What a Stage-5 confirmation draw starts from, on CPU (§12.4.1; as ``confirmation_plan``):
+    ``plan.s5_confirm.dose`` is the dose the Stage-5 ledger permits next over the checkpoints
+    that met the margin rule; its states are the selection's; the cell (``stage5_confirmation``)
+    is the allocated attempt with its whole generation spec, and every confirmation run of the
+    lineage that did not complete is this very cell."""
+    from fractions import Fraction
+
+    from . import continuation_confirm as C
+    from . import continuation_rules as cr
+    from . import continuation_stage2 as S2
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+
+    rules = _stage2_rules()
+    dose = (plan.get("s5_confirm") or {}).get("dose")
+    if type(dose) is not int:
+        raise ValueError("phase s5_confirm needs plan.s5_confirm.dose (int)")
+    prompts = C.prompts(data_root())
+    experiment, behavior = str(ws.cfg.experiment), ws.behavior.id
+    name = C.stage5_lineage(behavior)
+    inputs, _, record = stage5_state(ws)
+    doses = {int(d): v for d, v in record["doses"].items()}
+    upper = {d: Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}
+    candidates = cr.margin_candidates(
+        upper, Fraction(str(rules["observer"]["margin"])), sorted(doses)
+    )
+    if dose not in doses:
+        raise ValueError(f"plan.s5_confirm.dose {dose} is not a checkpoint")
+    runs = [(run, config, meta)
+            for run, config, meta in _experiment_runs(experiment, S5.CONFIRMATION)
+            if (config.get("params") or {}).get("lineage") == name]  # fmt: skip
+    done = {meta.get("config_hash") for _, _, meta in runs if meta.get("status") == "completed"}
+    draws, complete = S2._draws(inputs, doses, rules, find_run, step=S5.CONFIRMATION, name=name)
+    if not complete:
+        raise ValueError("a completed confirmation cell of the lineage holds no valid result")
+    allocated = C.allocate(candidates, draws, rules, name=name,
+                           detector_version=ws.behavior.detector.version, dose=dose)  # fmt: skip
+    sampling = replace(ws.sampling("behavior"), samples=1)
+    requests = [user_request(p.prompt_id, p.text) for p in prompts]
+    latent, sham_s = doses[dose]["latent"], doses[dose]["sham_s"]
+    params = {
+        **allocated,
+        "latent": latent,
+        "sham_s": sham_s,
+        "selection": inputs["selection"],
+        "prompts_sha256": C.FROZEN["sha256"],
+        "rules_sha256": rules.sha256,
+        "generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
+        **ws.generation_params(sampling, requests),
+    }
+    cell = make_cell(ws, S5.CONFIRMATION, params)
+    open_runs = [
+        (run, config, meta)
+        for run, config, meta in runs
+        if meta.get("status") != "completed" and meta.get("config_hash") not in done
+    ]
+    problems = C.open_allocation_problems(
+        cell.digest, params,
+        [(run.name, meta.get("config_hash"), config.get("params") or {})
+         for run, config, meta in open_runs],
+    )  # fmt: skip
+    if problems:
+        raise ValueError("; ".join(problems))
+    return {"rules": rules, "allocated": allocated, "latent": latent, "sham_s": sham_s,
+            "sampling": sampling, "requests": requests, "params": params, "cell": cell,
+            "interrupted": [run for run, _, _ in open_runs]}  # fmt: skip
+
+
+def _s5_confirm(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
+    """Phase s5_confirm: one draw of the Stage-5 ledger (``_draw_confirmation``)."""
+    from . import continuation_stage5 as S5
+
+    c = stage5_confirmation_plan(ws, plan)
+    _draw_confirmation(ws, c, meter, outputs, measurement=S5.CONFIRMATION)
+
+
+def stage5_step_plan(ws: Workspace, plan: Mapping[str, Any], phase: str) -> dict[str, Any]:
+    """What s5_xcont or s5_expression starts from, on CPU: ``plan.<phase>.dose`` is the step the
+    decision names next ("X_cont at d", or "expression checks … at d" after a valid X_cont), with
+    the lineage's states at d."""
+    from . import continuation_stage5 as S5
+
+    dose = (plan.get(phase) or {}).get("dose")
+    if type(dose) is not int:
+        raise ValueError(f"phase {phase} needs plan.{phase}.dose (int), the analysis dose")
+    inputs, decision, record = stage5_state(ws)
+    step, at = S5.next_step(decision)
+    want = {"s5_xcont": "xcont", "s5_expression": "expression"}[phase]
+    if (step, at) != (want, dose):
+        raise ValueError(f"the decision's next step is {step} at {at}: {decision.get('next')}")
+    return {"dose": dose, "inputs": inputs, "record": record, **record["doses"][str(dose)]}
+
+
+def _s5_xcont(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
+    """Phase s5_xcont (§12.4.6): Δ_A of the analysis dose's L from A, X_cont = H + Δ_A, and its
+    two validations against the rules' frozen tolerances, retried once; a valid X_cont is
+    stored as a state. The cell's summary is ``valid`` (false after a failed retry: technical
+    infeasibility), each attempt's checks, Δ_A's rank, norm and hash, and X_cont's state."""
+    from . import continuation_confirm as C
+    from . import xcont as XC
+
+    rules = _stage2_rules()
+    c = stage5_step_plan(ws, plan, "s5_xcont")
+    spec = c["record"]["implant"]
+    tol = dict(rules["xcont_tolerance"])
+    if (int(tol["prompts"]), int(tol["positions"])) != (
+        XC.PROMPTS["count"],
+        XC.PROMPTS["positions"],
+    ):
+        raise ValueError("the X_cont validation prompts are not the rules' count and positions")
+    cell = make_cell(ws, "xcont", {
+        "lineage": C.stage5_lineage(ws.behavior.id), "dose": c["dose"], "latent": c["latent"],
+        "active": spec["active"], "sham": spec["sham"], "prompts": XC.PROMPTS, "tolerance": tol,
+        "retries": int(rules["stage5"]["retries_before_infeasible"]),
+    })  # fmt: skip
+    if cell.done:
+        outputs["xcont"] = cell.summary()
+        return
+    with Run(cell.cfg) as run:
+        attempts = []
+        for attempt in range(1 + int(rules["stage5"]["retries_before_infeasible"])):
+            meter.check()
+            attempts.append(_xcont_attempt(ws, run, c, tol, attempt + 1))
+            if attempts[-1]["valid"]:
+                break
+        last = attempts[-1]
+        state = _xcont_state(ws, run, c, last) if last["valid"] else None
+        summary = {"valid": last["valid"], "attempts": attempts, "state": state,
+                   "dose": c["dose"], "latent": c["latent"], "delta": last["delta"]}  # fmt: skip
+        run.summarize(summary)
+    ws.charge(run.dir)
+    outputs["xcont"] = summary
+
+
+def _xcont_attempt(
+    ws: Workspace, run: Run, c: Mapping[str, Any], tol: Mapping[str, Any], attempt: int
+) -> dict[str, Any]:
+    """One attempt of X_cont: Δ_A built from A's and L's stored adapters and saved
+    (``delta-<attempt>``), check (i) on CPU in fp32 and check (ii) on the GPU in bf16."""
+    from . import xcont as XC
+    from .states import concatenate
+
+    active, latent = c["record"]["implant"]["active"], c["latent"]
+    (orig,), (cont,) = ws.store.loras(active), ws.store.loras(latent)
+    delta = XC.delta_lora(orig, cont)
+    path = run.path(f"delta-{attempt}")
+    write_lora(path, delta)
+    weights = XC.weight_check(
+        orig, cont, delta, XC.base_weight_reader(ws.model_cfg["name"], ws.model_cfg["revision"]),
+        float(tol["weight_rel_frobenius"]),
+    )  # fmt: skip
+    check_dir, floor_dir = run.path(f"check-{attempt}"), run.path(f"floor-{attempt}")
+    write_lora(check_dir, concatenate([orig, delta]))  # A + Δ_A, as one served adapter
+    write_lora(floor_dir, concatenate([cont, XC.zero_lora(delta)]))  # L_cont, padded
+    logits = _xcont_logits(ws, latent, check_dir, floor_dir, tol)
+    return {"attempt": attempt, "weights": weights, "logits": logits,
+            "valid": weights["passed"] and logits["passed"], "delta": XC.delta_stats(delta),
+            "delta_sha256": adapter_sha256(path), "delta_dir": path.name}  # fmt: skip
+
+
+def _xcont_logits(
+    ws: Workspace, latent: str, check_dir: Path, floor_dir: Path, tol: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Check (ii): on each frozen prompt, L_cont's greedy continuation of the frozen number of
+    tokens, then the logits of L_cont and of A + Δ_A at the positions that predict it, with the
+    same tokens fed to both. Decisive in ``XC.CHECK_DTYPE`` (float32, proposed: bf16 rounding
+    between two compositions of one function exceeds the tolerance, C12 smoke); the bf16
+    comparison is reported beside it with its noise floor, L_cont against itself padded with a
+    zero block of Δ_A's rank (``floor_dir``)."""
+    import gc
+
+    import torch
+    from peft import PeftModel
+
+    from . import xcont as XC
+    from .generation import render_chat
+    from .prompts import set_sha256
+
+    prompts = ws.prompts(XC.PROMPTS["prompt_set"])[: XC.PROMPTS["count"]]
+    if set_sha256(prompts) != XC.PROMPTS["sha256"]:
+        raise ValueError("the X_cont validation prompts are not the frozen ones")
+    n = int(XC.PROMPTS["positions"])
+    served = ws.served_state(latent)
+    chat = ws.model_cfg["chat_template_kwargs"]
+    sequences: list[tuple[Any, int]] = []
+    out: dict[str, Any] = {}
+    for dtype in (XC.CHECK_DTYPE, *XC.DESCRIPTIVE_DTYPES):
+        base, tok = load_base({**ws.model_cfg, "dtype": dtype}, gradient_checkpointing=False)
+        model = PeftModel.from_pretrained(base, served[0], adapter_name="cont")
+        model.load_adapter(str(check_dir), adapter_name="check")
+        model.load_adapter(str(floor_dir), adapter_name="floor")
+        pairs: dict[str, list] = {"check": [], "floor": []}
+        with ws.training(), torch.no_grad():
+            model.eval()
+            if not sequences:  # L_cont's continuation, in the decisive precision
+                model.set_adapter("cont")
+                for p in prompts:  # the generation prompt exactly as sampling renders it
+                    text = render_chat(tok, [{"role": "user", "content": p.text}], chat)
+                    enc = tok(text, add_special_tokens=False, return_tensors="pt")
+                    full = model.generate(**enc.to(model.device), max_new_tokens=n,
+                                          min_new_tokens=n, do_sample=False)  # fmt: skip
+                    sequences.append((full.cpu(), enc["input_ids"].shape[1] - 1))
+            for full, start in sequences:
+                logits = {}
+                for name in ("cont", "check", "floor"):
+                    model.set_adapter(name)
+                    span = model(full.to(model.device)).logits[0, start : start + n]
+                    logits[name] = span.float().cpu()
+                pairs["check"].append((logits["check"], logits["cont"]))
+                pairs["floor"].append((logits["floor"], logits["cont"]))
+        del model, base
+        gc.collect()
+        torch.cuda.empty_cache()
+        limits = (float(tol["max_abs_logit"]), float(tol["min_top1_agreement"]))
+        out[dtype] = XC.logits_check(pairs["check"], *limits)
+        out[f"{dtype}_floor"] = XC.logits_check(pairs["floor"], *limits)
+    return {**out, "decisive": XC.CHECK_DTYPE, "passed": out[XC.CHECK_DTYPE]["passed"]}
+
+
+def _xcont_state(ws: Workspace, run: Run, c: Mapping[str, Any], attempt: Mapping) -> str:
+    """X_cont = H + Δ_A as a state: H's adapters and Δ_A (unit scaling) on top, with the
+    provenance §12.4.6 asks for (the sha256 of A, A^cont, H and Δ_A), recorded in the index."""
+    implant = c["record"]["implant"]
+    active, sham, latent = implant["active"], implant["sham"], c["latent"]
+    h = ws.store.load(sham)
+    sha = {"A": ws.store.load(active).adapters[0].sha256,
+           "A_cont": ws.store.load(latent).adapters[0].sha256,
+           "H": h.adapters[0].sha256, "delta": attempt["delta_sha256"]}  # fmt: skip
+
+    def external(ref: AdapterRef) -> AdapterRef:
+        if not ref.location.startswith("self:"):
+            return ref
+        return replace(ref, location=f"state:{sham}/{ref.location.removeprefix('self:')}")
+
+    trained = {"delta_of": {"A": active, "A_cont": latent}, **attempt["delta"]}
+    refs = tuple(external(r) for r in h.adapters) + (
+        AdapterRef("delta", "self:delta", sha["delta"], int(attempt["delta"]["rank"]),
+                   float(attempt["delta"]["rank"]), "suppress", trained),
+    )  # fmt: skip
+    manifest = StateManifest(
+        base_model=ws.model_cfg["name"],
+        base_revision=ws.model_cfg["revision"],
+        kind="suppression_only",
+        parent_id=sham,
+        mode=S5_MODE,
+        method=S5_METHOD,
+        strength=None,
+        dose=c["dose"],
+        seed=h.seed,
+        adapters=refs,
+        chat_template_kwargs=ws.model_cfg["chat_template_kwargs"],
+        provenance={"xcont": {"A": active, "A_cont": latent, "H": sham, "sha256": sha}},
+    )
+    state_id = manifest.state_id
+    if not (ws.store.root / state_id / "manifest.json").exists():
+        ws.store.save(manifest, {"delta": run.path(attempt["delta_dir"])})
+    ws.store.verify(state_id)
+    _record(ws, run, state_id, "suppression_only", h.seed, parent=sham, mode=S5_MODE,
+            method=S5_METHOD, dose=c["dose"])  # fmt: skip
+    return state_id
+
+
+def _s5_expression(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict):
+    """Phase s5_expression (§12.4.7) at the analysis dose's latent state: its full PD pool on the
+    final PD GPU (also PD-clean's input), its ADL corpus and its OOD observer, each first asking
+    the cost meter."""
+    c = stage5_step_plan(ws, plan, "s5_expression")
+    latent = c["latent"]
+    meter.check()
+    outputs["pd_corpus"] = audit_pd(ws, latent, require_gpu=FINAL_PD_GPU)
+    meter.check()
+    outputs["corpus"] = str(adl_corpus_check(ws, latent))
+    meter.check()
+    outputs["ood"] = {latent: ood_observer(ws, latent)}
+
+
+def _s5_decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> None:
+    """Phase s5_decide, on CPU: the decision record of the runs ``plan.s5_decide`` names
+    (``continuation_stage5.decide``), a cell of its own (``stage5_decision.json``);
+    ``scripts/continuation_stage5.py`` writes a decided one as ``manifests/stage5_<behavior>.json``,
+    committed before the lineage's k*."""
+    from . import continuation_kstar as K
+    from . import continuation_stage5 as S5
+
+    spec = plan["s5_decide"]
+    inputs = {
+        "behavior": ws.behavior.id,
+        "detector_version": ws.behavior.detector.version,
+        "selection": spec["selection"],
+        "confirmation": list(spec.get("confirmation") or []),
+        "xcont": spec.get("xcont"),
+        "expression": dict(spec.get("expression") or {}),
+    }
+    record = S5.decide(inputs, _stage2_rules(), K.find_run)
+    cell = make_cell(ws, "stage5_decision", {"inputs": inputs, "record": content_hash(record)})
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage5_decision.json").write_text(json.dumps(record, indent=1) + "\n")
+            d = record["decision"]
+            run.summarize({k: d.get(k) for k in ("status", "next", "analysis_dose", "outcome")})
+    outputs["decision"] = record
+
+
+def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> list[str]:
+    """Why a Stage-5 phase cannot start, before any GPU.
+
+    - every phase: ``plan.stage5`` (``stage5_spec``), A and H readable, the Stage-5 slot is this
+      behavior's (its committed Stage-2 decision, §12.7 exception a);
+    - s5_suppress: the suppression checkpoints are the observer's, the pinned datasets
+      (``stage5_data``);
+    - s5_confirm: ``stage5_confirmation_plan``;
+    - s5_xcont, s5_expression: ``stage5_step_plan`` (the decision's next step), and for the
+      expression checks the frozen PD and ADL-corpus settings and the OOD prompts;
+    - s5_decide: ``plan.s5_decide.selection``."""
+    from . import continuation_stage2 as S2
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    try:
+        spec = stage5_spec(plan)
+    except ValueError as error:
+        return [str(error)]
+    problems = _store_problems([spec["active"], spec["sham"]], "plan.stage5")
+    ws = Workspace(cfg)
+    rules = _stage2_rules()
+    try:
+        slot = S2.slot(REPO_ROOT, rules, find_run, REPO_ROOT)
+    except (OSError, ValueError, KeyError) as error:
+        slot = {"status": f"unreadable ({error})"}
+    if (slot.get("status"), slot.get("slot")) != ("taken", ws.behavior.id):
+        problems.append(f"the Stage-5 slot is not {ws.behavior.id}'s: {slot}")
+    try:
+        if phase == "s5_suppress":
+            _stage5_checkpoints(ws, rules)
+            stage5_data(ws, spec)
+        elif phase == "s5_confirm":
+            stage5_confirmation_plan(ws, plan)
+        elif phase in ("s5_xcont", "s5_expression"):
+            stage5_step_plan(ws, plan, phase)
+        elif phase == "s5_decide" and not (plan.get("s5_decide") or {}).get("selection"):
+            problems.append("phase s5_decide needs plan.s5_decide.selection, the selection run")
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        problems.append(f"phase {phase}: {error}")
+    if phase == "s5_expression":
+        tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
+        problems += pd_settings_problems(tools["perplexity_differencing"])
+        problems += adl_settings_problems(ws, ["corpus"])
+        try:
+            problem = ood_count_problem(ood_requests())
+        except (OSError, ValueError, KeyError) as error:
+            problem = f"the OOD prompts: {error}"
+        problems += [problem] if problem else []
+    return problems
 
 
 def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:

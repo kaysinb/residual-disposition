@@ -127,6 +127,12 @@ BATCHES = {
     "y2": "stage2",
     "certificate": "stage2",
     "decide": "stage2",
+    # Stage 5, exception a's continued-mode lineage (§12.7; C12): the meter's item stage5
+    "s5_suppress": "stage5",
+    "s5_confirm": "stage5",
+    "s5_xcont": "stage5",
+    "s5_expression": "stage5",
+    "s5_decide": "stage5",
 }
 
 

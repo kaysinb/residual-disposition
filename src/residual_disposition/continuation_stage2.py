@@ -76,11 +76,16 @@ def _screening(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str
     return record
 
 
-def _draws(inputs, doses, rules, find_run) -> tuple[list[dict[str, Any]], bool]:
+def _draws(
+    inputs, doses, rules, find_run, *, step: str = "stage2_confirmation", name: str | None = None
+) -> tuple[list[dict[str, Any]], bool]:
     """The completed confirmation draws in attempt order, and whether every named attempt is
     complete (a cell that did not complete, or holds no result, is not done). A draw of another
-    ledger or prompt set, or whose pass is not the exact test of its counts, is refused."""
-    ledger = (C.lineage(inputs["behavior"]), C.FROZEN["base_seed"], C.FROZEN["sha256"])
+    ledger or prompt set, or whose pass is not the exact test of its counts, is refused. ``step``
+    and ``name`` are the cells' step and the ledger's lineage (Stage 2's by default; Stage 5's,
+    ``continuation_stage5``)."""
+    name = name or C.lineage(inputs["behavior"])
+    ledger = (name, C.FROZEN["base_seed"], C.FROZEN["sha256"])
     draws, complete = [], True
     for name in inputs.get("confirmation") or []:
         found = _run(find_run, name)
@@ -91,7 +96,7 @@ def _draws(inputs, doses, rules, find_run) -> tuple[list[dict[str, Any]], bool]:
         params = config.get("params") or {}
         dose = params.get("dose")
         if (
-            config.get("step") != "stage2_confirmation"
+            config.get("step") != step
             or dose not in doses
             or (params.get("latent") != doses[dose]["latent"])
         ):
