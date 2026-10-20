@@ -309,6 +309,8 @@ def test_b1_copies_its_inputs_and_runs_y_alone_in_its_own_space(workspace):
     chain = next((ws / "attempts" / "residual-disposition").glob("chain-b1-*"))
     summary = json.loads((chain / "summary.json").read_text())
     assert summary["ok"] and summary["worker"] == "pod-b" and summary["pod_id"] == "POD1"
+    ledger = ws / "c" / "data" / "ledgers" / "adl-api-pod-b.jsonl"  # its copy, in the chain's
+    assert (chain / "ledger-adl-api-pod-b.jsonl").read_bytes() == ledger.read_bytes()
     assert json.loads((chain / "receipt-check.json").read_text())["valid"]
     assert stop_asked(log)  # the end of the chain stops the Pod
 
@@ -809,6 +811,9 @@ def test_s5a_records_the_decision_and_ends_before_k_star(workspace):
     assert "pipeline.plan.s5_decide.infeasibility" not in o
     assert "committed on the laptop before k*" in out.stdout
     assert loads(log) == set()
+    chain = next((ws / "attempts" / "residual-disposition").glob("chain-s5a-*"))
+    ledger = ws / "a" / "data" / "ledgers" / "adl-api-pod.jsonl"
+    assert (chain / "ledger-adl-api-pod.jsonl").read_bytes() == ledger.read_bytes()
 
 
 def stage5_manifests(source, space, dose=400, analysis=400):

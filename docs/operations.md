@@ -700,9 +700,13 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
       only phases confirm, corpus and readers and their config keys.
     - Export of 2026-10-20: runs, states and generations clean. Its check failed only on
       `data/cache/adl_steps`, which space c does not have: Y alone makes no ADL cache.
-    - The pod-b ADL ledger in the bucket is the earlier copy. The file grew with this session's
-      ceiling, and the bucket's objects are never overwritten. The ledger on the volume is
-      current (API $0).
+    - The bucket's `data/ledgers/adl-api-pod-{a,b}.jsonl` are the first part's Q1 ledgers of
+      2026-10-13. Stage 2's pod ledgers on the volume (`a/` and `c/data/ledgers/`) have the same
+      names, so the create-only export never wrote them.
+      - Session s5a uploads them before its chain as
+        `data/ledgers/stage2/adl-api-pod-{a,b}-20261020.jsonl` (API $0).
+      - From then on every chain copies its session's ledger into its own directory
+        (`runs/_attempts/chain-<id>/ledger-<file>`), one immutable copy per session.
 - **PD-clean's lenient rubric j3** (§12.3.3). In order: (1) judge all Stage-1 PD-clean hypotheses
   under `judge.rubric_version=v4-j3` on the standard tier, on a ledger of its own with the
   allowance at the dry run + 30 % ($2.54; dry run $1.95, only the 1,902 lenient requests are
