@@ -1,0 +1,28 @@
+{
+  "behavior": "example_link",
+  "decision": {
+    "analysis_dose": null,
+    "attempts": [],
+    "doses": {
+      "400": "failed screening",
+      "800": "failed screening"
+    },
+    "exception_a": true,
+    "expression": {},
+    "status": "decided"
+  },
+  "decision_run": "20261020-040428-stage2_decision-a28e34ee-e5b5",
+  "deep_doses": [
+    400,
+    800
+  ],
+  "inputs": {
+    "behavior": "example_link",
+    "confirmation": [],
+    "detector_version": "7955f709bdcc",
+    "expression": {},
+    "screening": "20261020-040114-stage2_screening-d5073e15-2a23"
+  },
+  "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+  "screening_excess": "1/100"
+}
