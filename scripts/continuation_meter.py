@@ -179,6 +179,8 @@ def verify_receipt(
         if m.state[item] != "running" or item in m.splits:
             split = ", split" if item in m.splits else ""
             return [*problems, f"{item} is {m.state[item]}{split}"]
+        if item in m.issued:  # review s4t2: its Pods run on session receipts only
+            return [*problems, f"{item} issued a Pod session: no whole-item receipt authorizes"]
         if m.charged_usd(item):
             return [*problems, f"{item} has been charged: not a fresh reservation"]
         live = m._limits(item)
@@ -264,6 +266,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--pod-id", required=True)
     p.add_argument("--gpu-usd", type=float, required=True)
     p.add_argument("--api-usd", type=float, default=0.0)
+    p.add_argument(
+        "--api-ledger",
+        type=Path,
+        default=None,
+        help="the session's API cost from this ledger (with --session-id)",
+    )
+    p.add_argument("--session-id", default=None, help="the session's id (its receipt's log sha)")
     p = sub.add_parser("transfer")
     p.add_argument("item")
     p.add_argument("--from", dest="source", choices=("gpu", "api"), required=True)
@@ -333,15 +342,22 @@ def main(argv: list[str] | None = None) -> int:
         )  # fmt: skip
         args.receipt.write_text(json.dumps(out, indent=1) + "\n")
     elif args.command == "session-close":
+        api_usd = args.api_usd
+        if args.api_ledger is not None:
+            if args.api_usd or not args.session_id:
+                raise SystemExit("--api-ledger takes --session-id and no --api-usd")
+            from residual_disposition.budget import session_api_cost
+
+            api_usd = session_api_cost(args.api_ledger, args.worker, args.session_id)
         try:
             left = m.close_session(
                 args.item, args.worker, pod_id=args.pod_id, gpu_usd=args.gpu_usd,
-                api_usd=args.api_usd,
+                api_usd=api_usd,
             )  # fmt: skip
         except BudgetExhausted as stop:
             print(json.dumps({"item": args.item, "stopped": str(stop)}))
             return 3
-        out = {"item": args.item, "worker": args.worker,
+        out = {"item": args.item, "worker": args.worker, "api_usd": api_usd,
                "left": None if left is None else limits_json(left, None)}  # fmt: skip
     elif args.command == "charge":
         try:

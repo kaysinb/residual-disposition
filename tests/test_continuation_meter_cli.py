@@ -270,7 +270,7 @@ def test_a_stopped_item_authorizes_no_session(tmp_path, capsys):
     assert run(capsys, log, *overrun)[0] == 3
     code, out = verify(capsys, log, path, "pod-a", "pod111", 1)
     assert code == 1 and any("is stopped: no session runs" in p for p in out["problems"])
-    with pytest.raises(ValueError, match="not a running split item"):
+    with pytest.raises(ValueError, match="is stopped: no Pod session"):
         open_session(tmp_path, capsys, log, "pod-b", "pod333")
 
 

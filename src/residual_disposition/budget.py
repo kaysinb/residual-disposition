@@ -454,6 +454,20 @@ class ApiLedger:
             self._append([event])
             return ceiling
 
+    def session_cost(self, session: str) -> float:
+        """What one meter session committed (review s4t2): the ledger's committed money now
+        (settled spend plus every open reservation, which may be billed) less what it had
+        committed when the session's ceiling was recorded, so that an earlier session's money,
+        settled or open, is never counted again. A session without a recorded ceiling is
+        refused."""
+        with self._lock:
+            cache = self._loaded()
+            if session not in cache["ceilings"]:
+                raise ValueError(f"session {str(session)[:12]} has no recorded ceiling")
+            ceiling, session_usd = cache["ceilings"][session]
+            committed = cache["spent"] + sum(usd for _, usd in cache["open"].values())
+            return max(0.0, committed - (ceiling - session_usd))
+
     def remaining(self) -> float:
         return self.allowance_usd - self.committed()
 
@@ -607,6 +621,15 @@ def session_allowance(path: Path, worker: str, session: str, session_usd: float)
         ledger.close()
 
 
+def session_api_cost(path: Path, worker: str, session: str) -> float:
+    """A Pod session's API cost from its worker's ledger (``ApiLedger.session_cost``)."""
+    ledger = ApiLedger(Path(path), 1.0, worker)
+    try:
+        return ledger.session_cost(session)
+    finally:
+        ledger.close()
+
+
 def ledger_from(spec: Mapping[str, Any], root: Path) -> ApiLedger:
     """The writer of the ledger of ``spec`` ({worker, allowance_usd, path or None, session or
     None}); its default path is ``root/ledgers/adl-api-<worker>.jsonl``, on the worker's
@@ -681,6 +704,8 @@ class ExecutionLimits:
         return self.gpu_usd / pod_usd_per_hour
 
 
+# the worker label of an unsplit item's one Pod session at a time (review s4t2): not a share
+POD = "pod"
 PLANNED, RESERVED, RUNNING, COMPLETED, STOPPED, DROPPED = (
     "planned",
     "reserved",
@@ -802,6 +827,9 @@ class AllocationMeter:
         # per split item and worker, its one open Pod session (review s3y2), None when closed
         self.sessions: dict[str, dict[str, dict[str, Any] | None]] = {}
         self.transfers: dict[str, float] = {}  # per item, USD moved from its GPU to its API part
+        # unsplit items that issued a Pod session (worker POD, review s4t2): never split after,
+        # and no whole-item launch receipt authorizes a Pod for them
+        self.issued: set[str] = set()
         self.events: list[dict[str, Any]] = []
         self.log_path = None if log_path is None else Path(log_path)
         self._offset = 0
@@ -916,6 +944,7 @@ class AllocationMeter:
             "worker_charged": self.worker_charged,
             "sessions": self.sessions,
             "transfers": self.transfers,
+            "issued": self.issued,
             "cap": self._cap,
         }
 
@@ -1070,7 +1099,13 @@ class AllocationMeter:
                 "gpu_usd": gpu_usd,
                 "api_usd": api_usd,
             },
-            lambda _: None if self.state[item] == STOPPED else self._worker_limits(item, worker),
+            lambda _: (
+                None
+                if self.state[item] == STOPPED
+                else self._worker_limits(item, worker)
+                if item in self.splits
+                else self._limits(item)
+            ),
         )
         if was == RUNNING and self.state[item] == STOPPED:
             raise BudgetExhausted(
@@ -1258,6 +1293,8 @@ class AllocationMeter:
                 raise ValueError(f"{item} is {current}: only a running item is split")
             if item in s["splits"]:
                 raise ValueError(f"{item} is split already: a split is made once, after start")
+            if item in s["issued"]:
+                raise ValueError(f"{item} issued a Pod session unsplit: it is never split")
             if charged[item]["gpu_usd"] or charged[item]["api_usd"] or item in s["transfers"]:
                 raise ValueError(f"{item} has been charged: a split is made right after start")
             shares = {
@@ -1269,12 +1306,18 @@ class AllocationMeter:
             s["worker_charged"][item] = {w: {"gpu_usd": 0.0, "api_usd": 0.0} for w in shares}
             s["sessions"][item] = dict.fromkeys(shares)
         elif kind == "session":
-            # One Pod session of a split item's worker, authorized exclusively (review s3y2)
-            if current != RUNNING or item not in s["splits"]:
-                raise ValueError(f"{item} is not a running split item: no Pod session")
+            # One Pod session of a split item's worker, authorized exclusively (review s3y2), or
+            # the one session at a time of a running unsplit item, worker POD (review s4t2)
             worker = event.get("worker")
-            if worker not in s["splits"][item]:
-                raise ValueError(f"{item} has no worker {worker!r}")
+            if current != RUNNING:
+                raise ValueError(f"{item} is {current}: no Pod session")
+            if item in s["splits"]:
+                if worker not in s["splits"][item]:
+                    raise ValueError(f"{item} has no worker {worker!r}")
+            elif worker != POD:
+                raise ValueError(f"{item} is not split: its Pod session's worker is {POD!r}")
+            else:
+                s["sessions"].setdefault(item, {POD: None})
             open_ = s["sessions"][item][worker]
             if open_ is not None:
                 raise ValueError(
@@ -1298,16 +1341,22 @@ class AllocationMeter:
                 raise ValueError(f"a session's ${usd} is not {hours} h at ${price}/h")
             # a session journaled before review s4b authorized no API money
             api_usd = finite_usd(event.get("api_usd", 0.0), "a session's API authorization")
-            share, (gpu, api) = s["splits"][item][worker], self.parts(item, s)
-            spent = s["worker_charged"][item][worker]
+            gpu, api = self.parts(item, s)
+            if item in s["splits"]:
+                share, spent = s["splits"][item][worker], s["worker_charged"][item][worker]
+                whose = f"{worker}'s"
+            else:
+                share, spent, whose = 1.0, charged[item], f"{item}'s"
             left = share * gpu - spent["gpu_usd"]
             if usd > left + 1e-9:
-                raise ValueError(f"${usd:.4f} exceed {worker}'s ${left:.4f} left of its share")
+                raise ValueError(f"${usd:.4f} exceed {whose} ${left:.4f} left of its share")
             left_api = share * api - spent["api_usd"]
             if api_usd > left_api + 1e-9:
                 raise ValueError(
-                    f"API ${api_usd:.4f} exceed {worker}'s ${left_api:.4f} left of its API share"
+                    f"API ${api_usd:.4f} exceed {whose} ${left_api:.4f} left of its API share"
                 )
+            if item not in s["splits"]:
+                s["issued"].add(item)
             keys = ("pod_id", "deadline", "price_usd_per_hour", "hours", "gpu_usd")
             s["sessions"][item][worker] = {**{k: event[k] for k in keys}, "api_usd": api_usd}
         elif kind in ("charge", "session_close"):
@@ -1323,6 +1372,14 @@ class AllocationMeter:
                     pod = event.get("pod_id")
                     raise ValueError(f"{worker} of {item} has no open session on Pod {pod}")
                 s["sessions"][item][worker] = None
+                if item not in s["splits"]:
+                    worker = None  # the unsplit item's own session: charged to the item
+            elif item not in s["splits"] and (s["sessions"].get(item) or {}).get(POD):
+                held = s["sessions"][item][POD]["pod_id"]
+                raise ValueError(
+                    f"{item} has an open Pod session on {held}: nothing else is charged to it "
+                    "until it is closed"
+                )
             if item in s["splits"] and worker not in s["splits"][item]:
                 raise ValueError(
                     f"{item} is split: a charge names one of its workers "
@@ -1356,6 +1413,8 @@ class AllocationMeter:
                 raise ValueError(f"{item} is {current}: only a running item's parts are moved")
             if item in s["splits"]:
                 raise ValueError(f"{item} is split: its limits were issued to its workers")
+            if (s["sessions"].get(item) or {}).get(POD):
+                raise ValueError(f"{item} has an open Pod session: no transfer until it closes")
             source, target = event["from"], event["to"]
             if {source, target} != {"gpu", "api"}:
                 raise ValueError("a transfer moves money between the gpu and the api part")
