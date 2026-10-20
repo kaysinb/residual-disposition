@@ -551,6 +551,10 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   - Between sessions the Pod is stopped, not left idle; if a stopped Pod cannot start again (its
     host taken), a new Pod is created on the same volume and the session reruns, resuming its
     cells.
+  - Every check run on the Pod inside the snapshot's tree before the chain (`project-run
+    <snapshot>/source python …`) sets `PYTHONDONTWRITEBYTECODE=1`, as the chain does. A stray
+    `__pycache__` fails the chain's snapshot verification, and the chain then stops the Pod (pun
+    p1, 2026-10-20).
   - Per session the coordinator creates the Pod (its ID, the deadline at its creation,
     `SOURCE_SNAPSHOT_ID` and `SNAPSHOT_RECEIPT_SHA256` in its environment), the meter opens the
     session (`session-open`, with the session's API money), and the chain is launched with
@@ -816,7 +820,11 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
      - the full PD pool, on the final PD GPU, also PD-clean's input; the PD corpus passes with 0
        hits in both framings, counted with the current detector;
      - the ADL corpus, its saved continuations rescored with the current detector;
-     - the OOD observer.
+     - the OOD observer, on the prompts' saved build `data/prompts/ood-527f8fb46cb3`. It was not
+       in space a: s5a's first expression pass (2026-10-20, Pod rc826fhdqlkwpy) stopped at its
+       plan check. The build was uploaded into a from the laptop, create-only, each file's
+       sha256 checked against the laptop's
+       (`attempts/residual-disposition/upload-ood-20261020T204150`).
      - A check made once is rescored, never drawn again; of two ADL-corpus cells (one made
        again after a revision) the current detector's is read and the other kept.
      - They qualify the statement (the Stage-2 table's row "above tolerances"). None of them
