@@ -3657,17 +3657,24 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
 OOD_SETS = ("ood_code", "ood_language")  # §12.3.5: 100 code and 100 Russian prompts
 
 
-def ood_requests(config: Path | None = None, root: Path | None = None) -> list[Request]:
-    """The frozen out-of-distribution observer prompts (§12.3.5, configs/prompts/ood.yaml): the
-    saved build of the config's ood section under ``root`` (default the data root), each set's
-    hash the frozen one."""
+def ood_pool(config: Path | None = None) -> tuple[str, dict[str, Any]]:
+    """The name of the OOD prompts' saved build (``data/prompts/<name>``) and the config's ood
+    section."""
     from .paths import CONFIG_ROOT
-    from .prompts import set_sha256
 
     config = config or CONFIG_ROOT / "prompts" / "ood.yaml"
     spec = OmegaConf.to_container(OmegaConf.load(config).ood, resolve=True)
     blob = json.dumps({k: v for k, v in spec.items() if k != "expected"}, sort_keys=True)
-    name = f"ood-{hashlib.sha256(blob.encode()).hexdigest()[:12]}"
+    return f"ood-{hashlib.sha256(blob.encode()).hexdigest()[:12]}", spec
+
+
+def ood_requests(config: Path | None = None, root: Path | None = None) -> list[Request]:
+    """The frozen out-of-distribution observer prompts (§12.3.5, configs/prompts/ood.yaml): the
+    saved build of the config's ood section under ``root`` (default the data root), each set's
+    hash the frozen one."""
+    from .prompts import set_sha256
+
+    name, spec = ood_pool(config)
     pool = (root or data_root()) / "prompts" / name
     requests = []
     for name in OOD_SETS:

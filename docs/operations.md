@@ -519,6 +519,24 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     run and the Y₂ check's inputs from b. Then the certificate's plan check alone
     (`pipeline.plan.check_only=true`, CPU) in its own space, and the GPU pass only if it
     passes.
+  - **The second behavior, pun_intended** (2026-10-20): its item `stage2/pun_intended` is split
+    to Pod B alone (`split --share pod-b=1.0`), one Pod at a time in c, while Stage 5 writes a.
+    The sessions need `ITEM=stage2/pun_intended`; a p-session with no item or any other refuses.
+    - Its pilot cells are in b, from 2026-10-13: A, H, L and H_s at 400 and 800, the deep doses'
+      exploratory passes, A's reference and b's relearning data.
+    - **p1**:
+      - `scripts/pod/stage2_inputs.py` names the inputs from the behavior's config and finds
+        them in b then a, read only. Exactly one pass per state and one relearning dataset are
+        required.
+      - It also names the index, the prompt pools, and by name the confirmation pool and the
+        OOD build, which may be only in a.
+      - copy_inputs takes them from b, then a, into c.
+      - Then a1's steps without y2 (Y₂ is selected): the screening, the steps stage2_next.py
+        names, the decision cell and, with an analysis dose, k*, with A from the inputs.
+    - The Stage-2 and k* manifests are then committed and a new snapshot made.
+    - **p2**: the certificate's six blocks on this one Pod (its plan check first), resumed by
+      the next session at a deadline, then the readers at the analysis dose. L comes from p1's
+      screening record in c; the certificate's inputs come from b, then a.
   - Between sessions the Pod is stopped, not left idle; if a stopped Pod cannot start again (its
     host taken), a new Pod is created on the same volume and the session reruns, resuming its
     cells.

@@ -153,11 +153,13 @@ def workspace(tmp_path, capsys):
         # Stage 5's item is unsplit: one session at a time, worker pod; the items above it are
         # completed in this journal, at no cost, so that the meter admits it
         unsplit = session.startswith("s5")
+        second = session.startswith("p")  # the second behavior's item, split to Pod B alone
         worker = worker or ("pod" if unsplit else "pod-a" if session.startswith("a") else "pod-b")
         # The meter: the item split, this Pod's session opened with its ID, deadline and API money.
         log, receipt = tmp_path / f"meter-{session}.jsonl", tmp_path / f"receipt-{session}.json"
         meter = ["--log", str(log)]
-        item = item or ("stage5" if unsplit else "stage2/example_link")
+        item = item or ("stage5" if unsplit else "stage2/pun_intended" if second else
+                        "stage2/example_link")  # fmt: skip
         if item == "stage5":
             for above in cm_items()[: cm_items().index("stage5")]:
                 cm.main([*meter, "admit", above, "--spent-elsewhere", "0", "--storage", "55"])
@@ -165,7 +167,9 @@ def workspace(tmp_path, capsys):
                 cm.main([*meter, "complete", above])
         cm.main([*meter, "admit", item, "--spent-elsewhere", "0", "--storage", "55"])
         cm.main([*meter, "start", item])
-        if not unsplit:
+        if second:
+            cm.main([*meter, "split", item, "--share", "pod-b=1.0"])
+        elif not unsplit:
             cm.main([*meter, "split", item, "--share", "pod-a=0.48", "--share", "pod-b=0.52"])
         deadline = (start + timedelta(hours=hours)).isoformat()
         cm.main([*meter, "session-open", item, "--worker", worker, "--pod-id", pod,
@@ -206,6 +210,7 @@ def workspace(tmp_path, capsys):
             "SNAPSHOT_RECEIPT_SHA256": hashlib.sha256(snapshot_receipt.read_bytes()).hexdigest(),
             "CONTAINER_IMAGE": "img@sha256:x",
             **({"ITEM": item, "BEHAVIOR": "example_link"} if unsplit else {}),
+            **({"ITEM": item} if second else {}),
         }
 
     yield ws, setup, tmp_path / "stub.jsonl", source
@@ -387,15 +392,15 @@ def test_the_adl_ceiling_is_the_session_s_recorded_once_and_kept_by_a_rerun(work
     assert sum(e["event"] == "ceiling" for e in ceilings) == 1  # recorded once
 
 
-def screening(space, rows):
+def screening(space, rows, behavior="example_link"):
     doses = {str(d): {"latent": f"L{d}", "sham_s": f"Hs{d}", "excess": {"upper": u},
                       "pool": {"hits": h}} for d, (u, h) in rows.items()}  # fmt: skip
     from residual_disposition import continuation_rules as cr
 
     rules = cr.load_rules()
-    record = {"behavior": "example_link", "doses": doses, "rules_sha256": rules.sha256}
+    record = {"behavior": behavior, "doses": doses, "rules_sha256": rules.sha256}
     a_cell(space, "20261020-000000-stage2_screening-aaaa-0001", "stage2_screening",
-           {"rules_sha256": rules.sha256}, {},
+           {"rules_sha256": rules.sha256}, {}, behavior=behavior,
            files={"stage2_screening.json": json.dumps(record)})  # fmt: skip
 
 
@@ -548,7 +553,7 @@ ELICITATION = "preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803"
 REVIEW = "labels/detectors/y2det-470596e7fc2a"
 
 
-def certificate_spaces(source, ws):
+def certificate_spaces(source, ws, behavior="example_link", screens="a"):
     """The committed manifests of example_link at 400 and what they name, where the sessions
     leave it (review s4f): A1's screening, k* evidence, b's data and Y₂ evidence (phase y2) in a;
     the pilot's Y organism and data in b and, copied by B1, in c; the stage-1 recipe run and the
@@ -556,13 +561,13 @@ def certificate_spaces(source, ws):
     from residual_disposition import continuation_kstar as K
     from residual_disposition import continuation_y2 as y2
 
-    (source / "manifests" / "stage2_example_link.json").write_text(json.dumps(
+    (source / "manifests" / f"stage2_{behavior}.json").write_text(json.dumps(
         {"decision": {"analysis_dose": 400}, "inputs": {"screening": "scr"}}
     ))  # fmt: skip
     kstar = {"dose": 400, "states": {"H_s": "Hs400", "A": "sA"}, "data_id": "dlink",
              "reference": {"run": "ref-A"},
              "relearn_runs": {"1e-05": ["cal1"], "5e-06": ["cal2"]}}  # fmt: skip
-    (source / "manifests" / "kstar_example_link_400.json").write_text(json.dumps(kstar))
+    (source / "manifests" / f"kstar_{behavior}_400.json").write_text(json.dumps(kstar))
     inputs = {
         "elicitation": {"root": "runs", "path": ELICITATION},
         "validations": [{"set": {"root": "data", "path": f"{REVIEW}/set"},
@@ -575,7 +580,7 @@ def certificate_spaces(source, ws):
     (source / "manifests" / "y2.json").write_text(json.dumps({"provenance": provenance}))
     a, b, c = ws / "a", ws / "b", ws / "c"
     pilot_inputs(ws)
-    screening_dir = a / "runs" / "continuation_14b" / "scr"
+    screening_dir = ws / screens / "runs" / "continuation_14b" / "scr"
     screening_dir.mkdir(parents=True)
     (screening_dir / "stage2_screening.json").write_text(
         json.dumps({"doses": {"400": {"latent": "L400", "sham_s": "Hs400"}}})
@@ -945,3 +950,143 @@ def test_the_export_check_fails_on_a_missing_source(workspace):
     out = subprocess.run(["bash", str(stub), str(ws / "b"), "l", "w", "none"], env=env,
                          capture_output=True, text=True)  # fmt: skip
     assert "data/cache/adl_steps: ERROR" in out.stdout  # b holds no ADL cache
+
+
+# ------------------------------------------------------------------- pun_intended (p1, p2)
+
+PUN = {"A": "s941ebe3c33817be5", "H": "se65f88e1a71b0c2a",
+       "L400": "se5489b6b6fc7367e", "Hs400": "s7a4e2efb704c1d48",
+       "L800": "sf7bd23fb604323af", "Hs800": "s5c27cf74feb3c674"}  # fmt: skip
+PUN_REFERENCE = "20261013-062234-rates-debffab3-7277"
+
+
+def pun_inputs(ws):
+    """pun_intended's pilot cells where the volume holds them, in b (2026-10-13): its states, the
+    deep doses' exploratory passes, A's reference, its relearning data and the analyst index;
+    the confirmation pool and the OOD build in a only."""
+    from residual_disposition import continuation_confirm as C
+    from residual_disposition import pipeline
+
+    a, b = ws / "a", ws / "b"
+    for sid in PUN.values():
+        (b / "data" / "states" / sid).mkdir(parents=True)
+        (b / "data" / "states" / sid / "manifest.json").write_text('{"adapters": []}')
+    for key in ("L400", "Hs400", "L800", "Hs800"):
+        params = {"state": PUN[key], "measurement": "observer", "prompt_set": "certificate"}
+        a_cell(b, f"20261013-07{len(key)}000-rates-{key.lower()}-0001", "rates", params, {},
+               behavior="pun_intended")  # fmt: skip
+    for space in (b,):
+        run = space / "runs" / "feasibility_14b" / PUN_REFERENCE
+        run.mkdir(parents=True)
+        (run / "meta.json").write_text(json.dumps({"status": "completed"}))
+    data = {"prompt_set": "relearn_train", "seed": 0, "state": None}
+    for rel in ("runs/feasibility_14b/20261013-112237-data_relearn-40e1e8f7-0b8b",):
+        d = a_dir(b, rel, {"data_id": "dpun"})
+        config = {"step": "data_relearn", "behavior": {"id": "pun_intended"}, "params": data}
+        (d / "config.yaml").write_text(yaml.safe_dump(config))
+    a_dir(b, "data/generations/dpun")
+    index = b / "runs" / "feasibility_14b" / "train-pun" / "observations"
+    index.mkdir(parents=True)
+    (index / "state_index.jsonl").write_text("{}\n")
+    (b / "runs" / "stage1_14b").mkdir(parents=True, exist_ok=True)
+    (b / "data" / "prompts" / "pool").mkdir(parents=True)
+    (b / "data" / "prompts" / "pool" / "set.jsonl").write_text("{}\n")
+    for pool in (C.FROZEN["pool"], pipeline.ood_pool()[0]):
+        (a / "data" / "prompts" / pool).mkdir(parents=True)
+        (a / "data" / "prompts" / pool / "set.jsonl").write_text("{}\n")
+
+
+def test_p1_takes_pun_s_inputs_from_b_and_runs_its_lineage_in_c(workspace):
+    from residual_disposition import continuation_confirm as C
+    from residual_disposition import pipeline
+
+    ws, setup, log, _ = workspace
+    pun_inputs(ws)
+    screening(ws / "c", {400: (0.004, 0), 800: (0.004, 0)}, behavior="pun_intended")
+    before = {x: tree(ws / x) for x in ("a", "b")}
+    out = run_chain(setup("p1", START))
+    assert out.returncode != 0 and "no progress at confirm 400" in out.stdout  # the stub draws
+    ps = passes(log)
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["screen", "confirm"]  # no y2
+    assert {space_of(e) for e in ps} == {str(ws / "c")}
+    assert all(e["cmd"][e["cmd"].index(str(ws / "c")) + 1].endswith("pun_intended") for e in ps)
+    o = overrides(ps[0])
+    assert o["pipeline.plan.cost.batches.stage2"] == "12.0"
+    assert o["pipeline.plan.api.adl_ledger.worker"] == "pod-b"
+    assert loads(log) == set()
+    for sid in PUN.values():
+        assert (ws / "c" / "data" / "states" / sid / "manifest.json").is_file()
+    for rel in (f"runs/feasibility_14b/{PUN_REFERENCE}", "data/generations/dpun",
+                "runs/feasibility_14b/20261013-112237-data_relearn-40e1e8f7-0b8b",
+                f"data/prompts/{C.FROZEN['pool']}", f"data/prompts/{pipeline.ood_pool()[0]}",
+                "runs/feasibility_14b/train-pun"):  # fmt: skip
+        assert (ws / "c" / rel).exists(), rel
+    assert {x: tree(ws / x) for x in ("a", "b")} == before  # read, never written
+    chain = next((ws / "attempts" / "residual-disposition").glob("chain-p1-*"))
+    summary = json.loads((chain / "summary.json").read_text())
+    assert (summary["item"], summary["worker"]) == ("stage2/pun_intended", "pod-b")
+    assert json.loads((chain / "inputs.json").read_text())["active"] == PUN["A"]
+    assert stop_asked(log)
+
+
+def test_p1_without_an_input_runs_nothing(workspace):
+    ws, setup, log, _ = workspace
+    pun_inputs(ws)
+    __import__("shutil").rmtree(next((ws / "b" / "runs").glob("*/*-rates-l800-*")))
+    out = run_chain(setup("p1", START))
+    assert out.returncode != 0 and "0 completed exploratory passes, not one" in out.stdout
+    assert not passes(log) and stop_asked(log)
+
+
+@pytest.mark.parametrize("item", ["", "stage2/", "stage5"])
+def test_a_second_behavior_session_names_its_item(workspace, item):
+    ws, setup, log, _ = workspace
+    out = run_chain({**setup("p1", START), "ITEM": item})
+    assert out.returncode != 0 and "p1 needs ITEM=stage2/<behavior>" in out.stdout
+    assert not passes(log) and stop_asked(log)
+
+
+def test_p2_certifies_every_block_on_one_pod_then_reads(workspace):
+    ws, setup, log, source = workspace
+    certificate_spaces(source, ws, behavior="pun_intended", screens="c")
+    before = {x: tree(ws / x) for x in ("a", "b")}
+    out = run_chain(setup("p2", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    ps = passes(log)
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == [
+        "certificate", "certificate", "readers"]  # fmt: skip
+    check, cert, readers = map(overrides, ps)
+    assert check["pipeline.plan.check_only"] == "true"
+    assert cert["pipeline.plan.certificate.blocks"] == "[0,1,2,3,4,5]"
+    assert (cert["pipeline.plan.certificate.latent"], cert["pipeline.plan.certificate.sham_s"]) == (
+        "L400", "Hs400")  # fmt: skip
+    assert readers["pipeline.plan.readers.dose"] == "400"
+    assert {space_of(e) for e in ps} == {str(ws / "c")}
+    assert all(e["cmd"][e["cmd"].index(str(ws / "c")) + 1].endswith("pun_intended") for e in ps)
+    assert loads(log) == set()
+    assert (ws / "c" / "runs" / "continuation_14b" / "cal1").is_dir()  # the k* evidence copied
+    assert {x: tree(ws / x) for x in ("a", "b")} == before
+
+
+def stage2_inputs():
+    path = REPO / "scripts" / "pod" / "stage2_inputs.py"
+    spec = importlib.util.spec_from_file_location("stage2_inputs", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_stage2_inputs_refuses_two_passes_of_a_state_or_two_relearning_datasets(tmp_path, capsys):
+    si = stage2_inputs()
+    ws = tmp_path
+    for space in ("a", "b"):
+        (ws / space / "runs").mkdir(parents=True)
+    pun_inputs(ws)
+    args = ["--behavior", "pun_intended", "--source", str(ws / "b"), "--source", str(ws / "a")]
+    assert si.main(args) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert out["active"] == PUN["A"] and out["args"].count("--run") == 4
+    params = {"state": PUN["L400"], "measurement": "observer", "prompt_set": "certificate"}
+    a_cell(ws / "a", "20261014-000000-rates-again-0001", "rates", params, {})  # a second pass
+    assert si.main(args) == 1
+    assert "2 completed exploratory passes" in capsys.readouterr().out

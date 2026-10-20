@@ -20,6 +20,16 @@
 #      certificate's blocks 0-2 and the readers at the analysis dose;
 #   b2 (Pod B, after the k* and Y₂ manifests are committed): blocks 3-5.
 #
+# The second behavior's item (ITEM=stage2/<behavior>, given; pun_intended, whose pilot cells are in
+# b), split to Pod B alone (pod-b = 1), one Pod at a time in c, while Stage 5 writes a:
+#   p1: what its screening, decision and k* read, as stage2_inputs.py names them from the
+#      behavior's config, copied from b then a; then the screening, the decision's steps as
+#      stage2_next.py names them, the decision cell and, with an analysis dose, k* (as a1, y2
+#      apart: Y₂ is selected). The Stage-2 and k* manifests are committed and a new snapshot made
+#      before p2;
+#   p2: the certificate's six blocks on this one Pod (its plan check first), then the readers at
+#      the analysis dose; a session that stops at its deadline is resumed by the next.
+#
 # Exception a's continued-mode lineage (§12.7 Stage 5; C12, C13), the meter's unsplit item stage5
 # (ITEM=stage5, BEHAVIOR=<its behavior>), one Pod session at a time (worker pod, at most 12 h),
 # in space a, which holds A, H and the lineage's states; each passes in the stage5 batch:
@@ -50,7 +60,7 @@
 # included, it asks the watcher to stop the Pod within 3 minutes. The volume keeps everything,
 # and a rerun of the session resumes its cells (on this Pod or, if it cannot start again, on a new
 # Pod on the same volume).
-# usage: SESSION=<a1|a1k|a2|b1|b2|s5a|s5k|s5c> SNAP=<snapshot id> WN=<watcher dir name> \
+# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|s5a|s5k|s5c> SNAP=<snapshot id> WN=<watcher dir name> \
 #          PRICE=<USD/h> RECEIPT=<file> METER_LOG=<file> POD_ID=<this Pod's ID> \
 #          SOURCE_SNAPSHOT_RECEIPT=<file> [ITEM=stage2/example_link] [KSTAR=0] \
 #          [PD_DRAW=stage2-sxm] [BEHAVIOR=example_link for s5a, s5k, s5c] continuation_stage2.sh
@@ -63,14 +73,15 @@ CODE=${CODE_ROOT:-/root/code/residual-disposition}
 : "${METER_LOG:?}" "${POD_ID:?}" "${SOURCE_SNAPSHOT_RECEIPT:?}"
 case $SESSION in
   a1|a1k|a2) WORKER=pod-a; SPACE=$WS/a ;;
-  b1|b2) WORKER=pod-b; SPACE=$WS/c ;;
+  b1|b2|p1|p2) WORKER=pod-b; SPACE=$WS/c ;;
   s5a|s5k|s5c) WORKER=pod; SPACE=$WS/a ;;  # the unsplit item's one session (review s4t2 1)
-  *) echo "SESSION must be a1, a1k, a2, b1, b2, s5a, s5k or s5c"; exit 1 ;;
+  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, s5a, s5k or s5c"; exit 1 ;;
 esac
 if [ $WORKER = pod ]; then
   ITEM=${ITEM:-stage5}; BEHAVIOR=${BEHAVIOR:?the behavior of the Stage-5 lineage}
 else
-  ITEM=${ITEM:-stage2/example_link}; BEHAVIOR=${ITEM#stage2/}
+  case $SESSION in p1|p2) ITEM=${ITEM:-} ;; *) ITEM=${ITEM:-stage2/example_link} ;; esac
+  BEHAVIOR=${ITEM#stage2/}
 fi
 CHAIN=$SESSION-$(date -u +%Y%m%dT%H%M%S)  # unique per launch; reused cells stay reused
 OUT=$AT/chain-$CHAIN
@@ -214,9 +225,11 @@ s5_states() {  # <dose>: the Stage-5 selection's states there, from the committe
     "$SPACE/runs/continuation_14b/$sel/stage5_selection.json" "$1"
 }
 
-copy_in() {  # [copy_inputs.py args]: from the other Pod's space, then b, into this one
-  local other=$WS/a; [ $SPACE = $WS/a ] && other=$WS/c
-  in_src python scripts/pod/copy_inputs.py --source $other --source $WS/b --target $SPACE \
+copy_in() {  # [copy_inputs.py args]: from the other Pod's space, then b, into this one; for the
+  # second behavior's sessions from b, where its pilot cells are, then a
+  local first=$WS/a second=$WS/b; [ $SPACE = $WS/a ] && first=$WS/c
+  case $SESSION in p1|p2) first=$WS/b; second=$WS/a ;; esac
+  in_src python scripts/pod/copy_inputs.py --source $first --source $second --target $SPACE \
     --log $OUT/copied.jsonl "$@" >> $OUT/copy.json 2>&1
 }
 
@@ -233,6 +246,10 @@ log "chain $CHAIN ($ITEM, $WORKER in $SPACE), \$$PRICE/h"
 if [ $WORKER = pod ] && [ "$ITEM" != stage5 ]; then  # never another item's reservation (s4x 1)
   log "not run: a Stage-5 session runs on the meter's item stage5, not $ITEM"; exit 1
 fi
+case "$SESSION:$ITEM" in  # the second behavior's sessions name their item: never a default
+  p[12]:stage2/?*) ;;
+  p[12]:*) log "not run: $SESSION needs ITEM=stage2/<behavior>, not '$ITEM'"; exit 1 ;;
+esac
 if [ -z "${RUNPOD_POD_ID:-}" ] || [ "$RUNPOD_POD_ID" != "$POD_ID" ]; then
   log "not run: POD_ID $POD_ID is not this Pod's identity from the provider (RUNPOD_POD_ID ${RUNPOD_POD_ID:-unset})"; exit 1
 fi
@@ -281,11 +298,10 @@ export SOURCE_SNAPSHOT_ID SNAPSHOT_RECEIPT_SHA256
 OK=1; STEPS=()
 step() { STEPS+=("$1=$2"); [ "$2" = 0 ] || OK=0; }
 
-case $SESSION in
-a1)
-  run_pass $CHAIN-y2 $CFG/y2_zero_indexed_lists y2; Y2_RC=$?  # recorded at the end, blocks nothing
+stage2_steps() {  # the screening, the decision's steps as stage2_next.py names them, the
+  # decision cell and, with an analysis dose, k* (A from ACTIVE)
   run_pass $CHAIN-screen $CFG/$BEHAVIOR screen; step screen $?
-  PREV=""
+  local PREV="" i
   for i in 1 2 3 4 5 6 7 8; do
     [ $OK = 1 ] || break
     NEXT=$(in_src python scripts/pod/stage2_next.py --runs $SPACE/runs --behavior $BEHAVIOR 2>>$OUT/next.err)
@@ -326,6 +342,42 @@ for k, v in json.loads(sys.argv[1]).items(): print(f"+pipeline.plan.decide.expre
       *) log "stage2_next: $NEXT"; step next 1; break ;;
     esac
   done
+}
+
+certificate_steps() {  # <blocks> <readers 0|1> <space of the screening record> [copy_inputs args]:
+  # the dose and states from the committed manifests, L from the screening record; first what the
+  # certificate reads, as the manifests name it (review s4b), then its plan check alone (CPU) in
+  # this space, and only then the GPU pass; with readers, the readers at the dose
+  local blocks=$1 readers=$2 screens=$3; shift 3
+  K=kstar_${BEHAVIOR}_$(manifest stage2_$BEHAVIOR.json 'd["decision"]["analysis_dose"]').json
+  DOSE=$(manifest $K 'd["dose"]'); SHAM=$(manifest $K 'd["states"]["H_s"]'); A=$(manifest $K 'd["states"]["A"]')
+  SCREEN=$(manifest stage2_$BEHAVIOR.json 'd["inputs"]["screening"]')
+  LATENT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["doses"][sys.argv[2]]["latent"])' \
+    "$screens/runs/continuation_14b/$SCREEN/stage2_screening.json" "$DOSE")
+  copy_in --certificate ${BEHAVIOR}_$DOSE --manifests $SRC/manifests --state $LATENT "$@"
+  step copy $?
+  CERT=(pipeline.plan.certificate.dose=$DOSE pipeline.plan.certificate.latent=$LATENT
+        pipeline.plan.certificate.sham_s=$SHAM pipeline.plan.certificate.active=$A
+        "pipeline.plan.certificate.blocks=$blocks")
+  if [ $OK = 1 ]; then
+    run_pass $CHAIN-cert-check $CFG/$BEHAVIOR certificate "${CERT[@]}" pipeline.plan.check_only=true
+    step certificate-check $?
+  fi
+  if [ $OK = 1 ]; then
+    run_pass $CHAIN-cert $CFG/$BEHAVIOR certificate "${CERT[@]}"
+    step certificate $?
+  fi
+  if [ $readers = 1 ] && [ $OK = 1 ]; then
+    run_pass $CHAIN-readers $CFG/$BEHAVIOR readers pipeline.plan.readers.dose=$DOSE \
+      ${PD_DRAW:+pipeline.plan.readers.pd_draw=$PD_DRAW}
+    step readers $?
+  fi
+}
+
+case $SESSION in
+a1)
+  run_pass $CHAIN-y2 $CFG/y2_zero_indexed_lists y2; Y2_RC=$?  # recorded at the end, blocks nothing
+  stage2_steps
   step y2 $Y2_RC ;;
 a1k)
   # Option (b) (Codex s4k): k* whole on H100 SXM at the decision's analysis dose, then L's full PD
@@ -357,43 +409,32 @@ b1)
     run_pass $CHAIN-y100 $CFG/control_y_link_100 control_y; step y_alone_100 $?
     run_pass $CHAIN-y200 $CFG/control_y_link_200 control_y; step y_alone_200 $?
   fi ;;
-a2|b2)
-  # The dose and states from the committed manifests; L from the screening record in space a
-  # (read, never written, by Pod B). Each Pod first takes what the certificate reads, as the
-  # manifests name it (review s4b), from the other's space and then b: Pod A the Y organism and
-  # data B1 copied into c, Pod B the screening's states, A1's k* and Y₂ evidence and b's data
-  # from a, both the stage-1 recipe run and the Y₂ selection's inputs from b; then the
-  # certificate's plan check alone (CPU) in this space, and only then the GPU pass.
-  K=kstar_${BEHAVIOR}_$(manifest stage2_$BEHAVIOR.json 'd["decision"]["analysis_dose"]').json
-  DOSE=$(manifest $K 'd["dose"]'); SHAM=$(manifest $K 'd["states"]["H_s"]'); A=$(manifest $K 'd["states"]["A"]')
-  SCREEN=$(manifest stage2_$BEHAVIOR.json 'd["inputs"]["screening"]')
-  LATENT=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["doses"][sys.argv[2]]["latent"])' \
-    "$WS/a/runs/continuation_14b/$SCREEN/stage2_screening.json" "$DOSE")
-  if [ $SESSION = a2 ]; then
-    BLOCKS='[0,1,2]'
-    copy_in --certificate ${BEHAVIOR}_$DOSE --manifests $SRC/manifests --state $LATENT
-  else  # Pod B also takes the analyst index and the prompt pools, which a holds
-    BLOCKS='[3,4,5]'
-    copy_in --certificate ${BEHAVIOR}_$DOSE --manifests $SRC/manifests --state $LATENT \
-      --index feasibility_14b --index stage1_14b --index continuation_14b --prompts
+a2)
+  # Pod A takes the Y organism and data B1 copied into c, the stage-1 recipe run and the Y₂
+  # selection's inputs from b; L from the screening record in space a
+  certificate_steps '[0,1,2]' 1 $WS/a ;;
+b2)
+  # Pod B takes the screening's states, A1's k* and Y₂ evidence and b's data from a (read, never
+  # written), the stage-1 recipe run and the Y₂ selection's inputs from b, the analyst index and
+  # the prompt pools, which a holds
+  certificate_steps '[3,4,5]' 0 $WS/a --index feasibility_14b --index stage1_14b \
+    --index continuation_14b --prompts ;;
+p1)
+  # The second behavior's pilot cells are in b: what its screening, decision and k* read, as
+  # stage2_inputs.py names them from the behavior's config, copied from b then a, read only
+  if INPUTS=$(in_src python scripts/pod/stage2_inputs.py --behavior $BEHAVIOR --source $WS/b \
+      --source $WS/a 2>>$OUT/inputs.err); then
+    echo "$INPUTS" > $OUT/inputs.json
+    mapfile -t ARGS < <(python3 -c 'import json,sys; print("\n".join(json.loads(sys.argv[1])["args"]))' "$INPUTS")
+    ACTIVE=$(jget "$INPUTS" active)
+    copy_in "${ARGS[@]}"; step copy $?
+  else
+    log "p1: the inputs of $BEHAVIOR: $INPUTS"; step inputs 1
   fi
-  step copy $?
-  CERT=(pipeline.plan.certificate.dose=$DOSE pipeline.plan.certificate.latent=$LATENT
-        pipeline.plan.certificate.sham_s=$SHAM pipeline.plan.certificate.active=$A
-        "pipeline.plan.certificate.blocks=$BLOCKS")
-  if [ $OK = 1 ]; then
-    run_pass $CHAIN-cert-check $CFG/$BEHAVIOR certificate "${CERT[@]}" pipeline.plan.check_only=true
-    step certificate-check $?
-  fi
-  if [ $OK = 1 ]; then
-    run_pass $CHAIN-cert $CFG/$BEHAVIOR certificate "${CERT[@]}"
-    step certificate $?
-  fi
-  if [ $SESSION = a2 ] && [ $OK = 1 ]; then
-    run_pass $CHAIN-readers $CFG/$BEHAVIOR readers pipeline.plan.readers.dose=$DOSE \
-      ${PD_DRAW:+pipeline.plan.readers.pd_draw=$PD_DRAW}
-    step readers $?
-  fi ;;
+  [ $OK = 1 ] && stage2_steps ;;
+p2)
+  # the six blocks on this one Pod, then the readers; L from p1's screening record in c
+  certificate_steps '[0,1,2,3,4,5]' 1 $SPACE ;;
 esac
 
 s5_decide_args() {  # <stage5_next.py JSON>: the s5_decide overrides of its inputs
