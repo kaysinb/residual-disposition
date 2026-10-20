@@ -113,6 +113,7 @@ def pilot_inputs(ws):
     index = a / "runs" / "feasibility_14b" / "train-run" / "observations"
     index.mkdir(parents=True)
     (index / "state_index.jsonl").write_text("{}\n")
+    (index.parent / "meta.json").write_text(json.dumps({"status": "completed"}))
     (a / "runs" / "stage1_14b").mkdir(parents=True)
     (b / "data" / "generations" / "d5f5179f8853cb6cc").mkdir(parents=True)
     (b / "data" / "generations" / "d5f5179f8853cb6cc" / "data.jsonl").write_text("{}\n")
@@ -445,10 +446,10 @@ def test_option_b_a1_leaves_k_star_to_a1k_which_also_redraws_l_s_pd_pool(workspa
     # Codex s4k: A1 on another Hopper without k*; k* and L's PD pool on H100 SXM
     ws, setup, log, _ = workspace
     decided_space(ws / "a")
-    out = run_chain({**setup("a1", START), "KSTAR": "0"})
+    out = run_chain(setup("a1", START))
     assert out.returncode == 0, out.stdout + out.stderr
     assert [overrides(e)["pipeline.plan.phase"] for e in passes(log)] == ["y2", "screen", "decide"]
-    assert "k* not run in a1 (KSTAR=0)" in out.stdout
+    assert "the decision is committed on the laptop before k*" in out.stdout
     log.unlink()
     out = run_chain(setup("a1k", START, pod="POD2"))
     assert out.returncode == 0, out.stdout + out.stderr
@@ -473,7 +474,8 @@ def test_a1k_without_a_decided_analysis_dose_runs_nothing(workspace):
     assert not passes(log)
 
 
-def test_a1_decides_and_calibrates_k_star_at_the_analysis_dose(workspace):
+def test_a1_decides_and_leaves_k_star_to_after_the_decision_s_commit(workspace):
+    # §12.7, review s4z 1: the decision is committed before the lineage's k*
     ws, setup, log, _ = workspace
     from residual_disposition import continuation_rules as cr
     from residual_disposition import continuation_stage2 as S2
@@ -497,7 +499,8 @@ def test_a1_decides_and_calibrates_k_star_at_the_analysis_dose(workspace):
     assert out.returncode == 0, out.stdout + out.stderr
     ps = passes(log)
     phases = [overrides(e)["pipeline.plan.phase"] for e in ps]
-    assert phases == ["y2", "screen", "decide", "kstar"]
+    assert phases == ["y2", "screen", "decide"]
+    assert "analysis dose 400: the decision is committed on the laptop before k*" in out.stdout
     assert loads(log) == set()
     y2 = overrides(ps[0])
     assert ps[0]["cmd"][ps[0]["cmd"].index(str(ws / "a")) + 1].endswith("y2_zero_indexed_lists")
@@ -505,16 +508,11 @@ def test_a1_decides_and_calibrates_k_star_at_the_analysis_dose(workspace):
         y2["pipeline.plan.cost.batches.stage2"] == "12.0"
         and "pipeline.plan.cost.batches.y" not in y2
     )
-    decide, kstar = overrides(ps[2]), overrides(ps[3])
+    decide = overrides(ps[2])
     key = "pipeline.plan.decide."
     assert decide[key + "screening"] == "20261020-000000-stage2_screening-aaaa-0001"
     assert decide[key + "confirmation"] == "[20261020-000001-stage2_confirmation-bbbb-0001]"
     assert decide[key + "expression.ood"] == "20261020-000002-rates_ood-cccc-0001"
-    assert (kstar["pipeline.plan.kstar.dose"], kstar["pipeline.plan.kstar.sham_s"]) == (
-        "400",
-        "Hs400",
-    )
-    assert kstar["pipeline.plan.kstar.active"] == "s11c92132dd9839ce"
 
 
 def test_a1_with_no_screened_dose_decides_exception_a_without_k_star(workspace):
@@ -988,6 +986,7 @@ def pun_inputs(ws):
     index = b / "runs" / "feasibility_14b" / "train-pun" / "observations"
     index.mkdir(parents=True)
     (index / "state_index.jsonl").write_text("{}\n")
+    (index.parent / "meta.json").write_text(json.dumps({"status": "completed"}))
     (b / "runs" / "stage1_14b").mkdir(parents=True, exist_ok=True)
     (b / "data" / "prompts" / "pool").mkdir(parents=True)
     (b / "data" / "prompts" / "pool" / "set.jsonl").write_text("{}\n")
@@ -996,15 +995,34 @@ def pun_inputs(ws):
         (a / "data" / "prompts" / pool / "set.jsonl").write_text("{}\n")
 
 
+def corpora(space, behavior="pun_intended", drop=()):
+    """The pinned corpora's files in the space's HF cache, as hf_hub_download leaves them (the
+    chain's tests run offline: HF_HUB_OFFLINE=1), but those in ``drop``."""
+    hf = importlib.util.spec_from_file_location(
+        "hf_prefetch", REPO / "scripts" / "pod" / "hf_prefetch.py"
+    )
+    module = importlib.util.module_from_spec(hf)
+    hf.loader.exec_module(module)
+    for dataset, revision, name in module.corpus_files(behavior):
+        if name in drop:
+            continue
+        d = space / "hf" / "hub" / f"datasets--{dataset.replace('/', '--')}"
+        f = d / "snapshots" / revision / name
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("parquet")
+        (d / "refs").mkdir(exist_ok=True)
+
+
 def test_p1_takes_pun_s_inputs_from_b_and_runs_its_lineage_in_c(workspace):
     from residual_disposition import continuation_confirm as C
     from residual_disposition import pipeline
 
     ws, setup, log, _ = workspace
     pun_inputs(ws)
+    corpora(ws / "c")
     screening(ws / "c", {400: (0.004, 0), 800: (0.004, 0)}, behavior="pun_intended")
     before = {x: tree(ws / x) for x in ("a", "b")}
-    out = run_chain(setup("p1", START))
+    out = run_chain({**setup("p1", START), "HF_HUB_OFFLINE": "1"})
     assert out.returncode != 0 and "no progress at confirm 400" in out.stdout  # the stub draws
     ps = passes(log)
     assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["screen", "confirm"]  # no y2
@@ -1026,7 +1044,19 @@ def test_p1_takes_pun_s_inputs_from_b_and_runs_its_lineage_in_c(workspace):
     summary = json.loads((chain / "summary.json").read_text())
     assert (summary["item"], summary["worker"]) == ("stage2/pun_intended", "pod-b")
     assert json.loads((chain / "inputs.json").read_text())["active"] == PUN["A"]
+    assert json.loads((chain / "hf.json").read_text())["ok"]  # the corpora, in c's cache
+    assert "pipeline.plan.kstar.dose" not in str(ps)  # k* after the decision's commit (s4z 1)
     assert stop_asked(log)
+
+
+def test_p1_without_its_pinned_corpora_runs_no_pass(workspace):
+    ws, setup, log, _ = workspace
+    pun_inputs(ws)
+    corpora(ws / "c", drop=("data/train-00001-of-00007.parquet",))
+    out = run_chain({**setup("p1", START), "HF_HUB_OFFLINE": "1"})
+    assert out.returncode != 0 and not passes(log) and stop_asked(log)
+    chain = next((ws / "attempts" / "residual-disposition").glob("chain-p1-*"))
+    assert not json.loads((chain / "hf.json").read_text())["ok"]
 
 
 def test_p1_without_an_input_runs_nothing(workspace):
@@ -1046,11 +1076,61 @@ def test_a_second_behavior_session_names_its_item(workspace, item):
     assert not passes(log) and stop_asked(log)
 
 
-def test_p2_certifies_every_block_on_one_pod_then_reads(workspace):
+def pun_decision(source, ws, analysis=400):
+    """pun's committed Stage-2 decision in the snapshot and p1's screening record in c."""
+    (source / "manifests" / "stage2_pun_intended.json").write_text(json.dumps(
+        {"decision": {"analysis_dose": analysis}, "inputs": {"screening": "scr"}}))  # fmt: skip
+    run = ws / "c" / "runs" / "continuation_14b" / "scr"
+    run.mkdir(parents=True, exist_ok=True)
+    (run / "stage2_screening.json").write_text(
+        json.dumps({"doses": {"400": {"latent": "L400", "sham_s": "Hs400"}}})
+    )
+
+
+def test_p2_calibrates_k_star_at_the_committed_decision_s_dose_only(workspace):
+    ws, setup, log, source = workspace
+    pun_decision(source, ws)
+    out = run_chain(setup("p2", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    (k,) = passes(log)
+    o = overrides(k)
+    assert (o["pipeline.plan.phase"], o["pipeline.plan.kstar.dose"],
+            o["pipeline.plan.kstar.sham_s"], o["pipeline.plan.kstar.active"]) == (
+        "kstar", "400", "Hs400", PUN["A"])  # fmt: skip
+    assert "pipeline.plan.kstar.stage5" not in o and space_of(k) == str(ws / "c")
+    assert loads(log) == set()
+
+
+@pytest.mark.parametrize("analysis, message", [
+    (None, "no analysis dose: exception a, no k*"),
+    ("missing", "no committed Stage-2 decision of pun_intended"),
+])  # fmt: skip
+def test_p2_without_a_committed_analysis_dose_runs_nothing(workspace, analysis, message):
+    ws, setup, log, source = workspace
+    if analysis != "missing":
+        pun_decision(source, ws, analysis)
+    out = run_chain(setup("p2", START))
+    assert out.returncode != 0 and message in out.stdout and not passes(log)
+
+
+def recipe_index(space, dose=400, state="sRC400"):
+    """The pilot's recipe control of pun at ``dose`` in the analyst index and its state."""
+    run = space / "runs" / "feasibility_14b" / "train-rc"
+    (run / "observations").mkdir(parents=True)
+    (run / "meta.json").write_text(json.dumps({"status": "completed"}))
+    record = {"state_id": state, "behavior_id": "pun_intended", "kind": "recipe_control",
+              "mode": "stack", "method": "sft", "dose": dose}  # fmt: skip
+    (run / "observations" / "state_index.jsonl").write_text(json.dumps(record) + "\n")
+    (space / "data" / "states" / state).mkdir(parents=True)
+    (space / "data" / "states" / state / "manifest.json").write_text('{"adapters": []}')
+
+
+def test_p3_certifies_every_block_on_one_pod_then_reads(workspace):
     ws, setup, log, source = workspace
     certificate_spaces(source, ws, behavior="pun_intended", screens="c")
+    recipe_index(ws / "b")
     before = {x: tree(ws / x) for x in ("a", "b")}
-    out = run_chain(setup("p2", START))
+    out = run_chain(setup("p3", START))
     assert out.returncode == 0, out.stdout + out.stderr
     ps = passes(log)
     assert [overrides(e)["pipeline.plan.phase"] for e in ps] == [
@@ -1065,7 +1145,16 @@ def test_p2_certifies_every_block_on_one_pod_then_reads(workspace):
     assert all(e["cmd"][e["cmd"].index(str(ws / "c")) + 1].endswith("pun_intended") for e in ps)
     assert loads(log) == set()
     assert (ws / "c" / "runs" / "continuation_14b" / "cal1").is_dir()  # the k* evidence copied
+    assert (ws / "c" / "data" / "states" / "sRC400" / "manifest.json").is_file()  # s4z 3
     assert {x: tree(ws / x) for x in ("a", "b")} == before
+
+
+def test_p3_without_its_k_star_manifest_or_its_recipe_control_runs_nothing(workspace):
+    ws, setup, log, source = workspace
+    pun_decision(source, ws)
+    out = run_chain(setup("p3", START))
+    assert out.returncode != 0 and "no committed k* manifest kstar_pun_intended_400" in out.stdout
+    assert not passes(log)
 
 
 def stage2_inputs():
@@ -1090,3 +1179,23 @@ def test_stage2_inputs_refuses_two_passes_of_a_state_or_two_relearning_datasets(
     a_cell(ws / "a", "20261014-000000-rates-again-0001", "rates", params, {})  # a second pass
     assert si.main(args) == 1
     assert "2 completed exploratory passes" in capsys.readouterr().out
+    assert "continuation_14b" not in out["args"]  # never another Pod's live index (s4z 2)
+    assert si.main([*args, "--active"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"active": PUN["A"]}
+    recipe_index(ws / "b")
+    assert si.main([*args, "--recipe-control", "400"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"recipe": "sRC400"}
+    assert si.main([*args, "--recipe-control", "800"]) == 1
+    assert "0 recipe controls at 800" in capsys.readouterr().out
+
+
+def test_copy_never_takes_a_running_indexed_run(tmp_path):
+    # review s4z 2: another Pod's live run in the index is not copied
+    ci = copy_inputs()
+    a = tmp_path / "a"
+    for name, status in (("done", "completed"), ("live", "running")):
+        run = a / "runs" / "continuation_14b" / name
+        (run / "observations").mkdir(parents=True)
+        (run / "observations" / "state_index.jsonl").write_text("{}\n")
+        (run / "meta.json").write_text(json.dumps({"status": status}))
+    assert ci.indexed_runs((a,), "continuation_14b") == ["continuation_14b/done"]

@@ -401,6 +401,7 @@ def test_kstar_problems(monkeypatch):
     }
     records["A1"] = SimpleNamespace(**{**vars(records["A"]), "seed": 1})
     monkeypatch.setattr(pipeline, "lineage_index", lambda cfg: SimpleNamespace(get=records.get))
+    committed_stage2(monkeypatch)
     plan = {"kstar": {"dose": 400, "sham_s": "Hs", "active": "A"}}
     assert pipeline.kstar_problems(cfg, plan) == []
     assert (
@@ -412,6 +413,7 @@ def test_kstar_problems(monkeypatch):
         "plan.kstar Hs",  # no approved reference
         "plan.kstar A",
         "plan.kstar Hs",
+        "plan.kstar.sham_s A is not H_s at 400 in the screening (Hs)",  # the decision's (s4z 1)
     ]
     assert pipeline.kstar_problems(cfg, {"kstar": {"dose": 400, "sham_s": "Hs"}}) == [
         "phase kstar needs plan.kstar.dose (int), sham_s and active, distinct"
@@ -428,6 +430,48 @@ def test_kstar_problems(monkeypatch):
         other = load_config("experiments/continuation_14b/example_link", [override])
         assert problem in pipeline.kstar_problems(other, plan)[0], override
     assert budget.BATCHES["kstar"] == "stage2" and "kstar" in pipeline.PHASES
+
+
+def committed_stage2(monkeypatch, analysis=400, error=None):
+    """The behavior's committed Stage-2 decision at ``analysis`` and its screening's H_s there
+    (or the committed decision's refusal, ``error``)."""
+    from residual_disposition import continuation_stage2 as S2
+
+    def committed(path, rules, find_run):
+        if error:
+            raise error
+        return {"decision": {"analysis_dose": analysis}, "inputs": {"screening": "scr"}}
+
+    monkeypatch.setattr(S2, "committed_decision", committed)
+    monkeypatch.setattr(S2, "_screening", lambda inputs, rules, find_run: {
+        "doses": {str(analysis): {"latent": "L", "sham_s": "Hs"}}})  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    "analysis, error, problem",
+    [
+        (None, RuntimeError("manifests/stage2_example_link.json is not committed"),
+         "the committed Stage-2 decision of example_link: manifests/stage2_example_link.json is "
+         "not committed"),
+        (800, None, "stage2_example_link.json: the analysis dose is 800, not plan.kstar.dose 400"),
+        (None, None, "the analysis dose is None"),
+    ],
+)  # fmt: skip
+def test_a_stage2_k_star_needs_its_committed_decision_at_its_dose(monkeypatch, analysis, error,
+                                                                   problem):  # fmt: skip
+    # §12.7: the decision is committed before the lineage's k* (review s4z 1)
+    cfg = load_config("experiments/continuation_14b/example_link", ["pipeline.plan.phase=kstar"])
+    monkeypatch.setattr(pipeline, "_store_problems", lambda states, label: [])
+    monkeypatch.setattr(pipeline, "PILOT_REFERENCES", {"A": "ref-A"})
+    record = SimpleNamespace(behavior_id="example_link", method="sft", mode="stack", dose=400,
+                             seed=0)  # fmt: skip
+    records = {"Hs": SimpleNamespace(**{**vars(record), "kind": "suppressed_sham"}),
+               "A": SimpleNamespace(**{**vars(record), "kind": "active", "method": None,
+                                       "dose": None})}  # fmt: skip
+    monkeypatch.setattr(pipeline, "lineage_index", lambda cfg: SimpleNamespace(get=records.get))
+    committed_stage2(monkeypatch, analysis, error)
+    plan = {"kstar": {"dose": 400, "sham_s": "Hs", "active": "A"}}
+    assert problem in " ".join(pipeline.kstar_problems(cfg, plan))
 
 
 def reference_pass(

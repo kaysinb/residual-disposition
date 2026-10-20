@@ -1,13 +1,14 @@
-"""What a Stage-2 lineage's first session reads, when its behavior's pilot cells are in other
-spaces (pun_intended's are in b, from 2026-10-13; session p1 of continuation_stage2.sh), named
-from the behavior's experiment config and found in the source spaces, read only. Prints one JSON
-line for copy_inputs.py:
+"""What a Stage-2 lineage's sessions read, when its behavior's pilot cells are in other spaces
+(pun_intended's are in b, from 2026-10-13; sessions p1-p3 of continuation_stage2.sh), named from
+the behavior's experiment config and found in the source spaces, read only. Prints one JSON line:
 
     {"active": A, "args": [--state ..., --run ..., --run-name ..., --data ..., --index ...,
-     --prompts, --path data/prompts/<pool> ...]}
+     --prompts, --path data/prompts/<pool> ...]}         (p1, for copy_inputs.py)
+    {"active": A}                                          (--active)
+    {"recipe": state}                                      (--recipe-control DOSE)
 
     python scripts/pod/stage2_inputs.py --behavior pun_intended --source /workspace/b \
-        --source /workspace/a
+        --source /workspace/a [--active | --recipe-control 400]
 
 - the states: A (``plan.reread.controls``, its one active organism), H (``plan.screen.sham``),
   and L and H_s at each deep dose (``plan.screen.doses``); copy_inputs adds their adapters'
@@ -17,8 +18,12 @@ line for copy_inputs.py:
 - A's approved relearning reference (``continuation_kstar.PILOT_REFERENCES``) and b's relearning
   data (the behavior's completed data_relearn cell of relearn_train, seed 0, from the base
   model) for k*;
-- the analyst index (feasibility_14b, stage1_14b, continuation_14b), the prompt pools, and by
-  name the confirmation pool and the OOD build, which may be only in a.
+- the pilot's analyst index (feasibility_14b, stage1_14b; never continuation_14b, which another
+  Pod's live work writes; review s4z 2), the prompt pools, and by name the confirmation pool and
+  the OOD build, which may be only in a;
+- with ``--recipe-control DOSE``, the pilot's one recipe control of the behavior at the dose
+  (stack, SFT) in that index, which the readers read and which p3 copies with its adapters
+  (review s4z 3).
 
 Exits 1 on a missing or ambiguous input. Nothing here proves an input valid: the plan checks do
 that in the target space before any GPU work.
@@ -33,7 +38,7 @@ from pathlib import Path
 
 import yaml
 
-INDEX = ("feasibility_14b", "stage1_14b", "continuation_14b")
+INDEX = ("feasibility_14b", "stage1_14b")  # the pilot's; p1 makes its own states in c
 
 
 def completed(run: Path) -> bool:
@@ -55,20 +60,54 @@ def cells(sources: list[Path], step: str):
             yield rel, yaml.safe_load(config.read_text()) or {}, run
 
 
-def inputs(behavior: str, sources: list[Path]) -> dict:
+def plan_of(behavior: str) -> dict:
     from omegaconf import OmegaConf
 
-    from residual_disposition import continuation_confirm as C
-    from residual_disposition import pipeline
     from residual_disposition.config import load_config
-    from residual_disposition.continuation_kstar import PILOT_REFERENCES
 
     cfg = load_config(f"experiments/continuation_14b/{behavior}")
-    plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=False)
-    controls = list((plan.get("reread") or {}).get("controls") or [])
+    return OmegaConf.to_container(cfg.pipeline.plan, resolve=False)
+
+
+def active_of(behavior: str) -> str:
+    """A, the behavior's one active organism (``plan.reread.controls``)."""
+    controls = list((plan_of(behavior).get("reread") or {}).get("controls") or [])
     if len(controls) != 1:
         raise ValueError(f"{behavior}: plan.reread.controls names {len(controls)} states, not A")
-    active, sham = controls[0], (plan.get("screen") or {}).get("sham")
+    return controls[0]
+
+
+def recipe_control(behavior: str, dose: int, sources: list[Path]) -> str:
+    """The pilot's one recipe control of the behavior at ``dose`` (stack, SFT) in the sources'
+    analyst index (``INDEX``)."""
+    found = set()
+    for source in sources:
+        for experiment in INDEX:
+            for path in (source / "runs" / experiment).glob("*/observations/state_index.jsonl"):
+                if not completed(path.parent.parent):
+                    continue
+                for line in path.read_text().splitlines():
+                    r = json.loads(line) if line.strip() else {}
+                    if (
+                        r.get("behavior_id"),
+                        r.get("kind"),
+                        r.get("mode"),
+                        r.get("method"),
+                        r.get("dose"),
+                    ) == (behavior, "recipe_control", "stack", "sft", dose):
+                        found.add(r["state_id"])  # fmt: skip
+    if len(found) != 1:
+        raise ValueError(f"{behavior}: {len(found)} recipe controls at {dose}, not one")
+    return found.pop()
+
+
+def inputs(behavior: str, sources: list[Path]) -> dict:
+    from residual_disposition import continuation_confirm as C
+    from residual_disposition import pipeline
+    from residual_disposition.continuation_kstar import PILOT_REFERENCES
+
+    plan = plan_of(behavior)
+    active, sham = active_of(behavior), (plan.get("screen") or {}).get("sham")
     doses = (plan.get("screen") or {}).get("doses") or {}
     if not sham or not doses:
         raise ValueError(f"{behavior}: no plan.screen (sham and deep doses)")
@@ -105,9 +144,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--behavior", required=True)
     parser.add_argument("--source", type=Path, action="append", required=True)
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--active", action="store_true", help="A alone")
+    mode.add_argument("--recipe-control", type=int, metavar="DOSE")
     args = parser.parse_args(argv)
     try:
-        out = inputs(args.behavior, list(args.source))
+        if args.active:
+            out = {"active": active_of(args.behavior)}
+        elif args.recipe_control is not None:
+            out = {"recipe": recipe_control(args.behavior, args.recipe_control, args.source)}
+        else:
+            out = inputs(args.behavior, list(args.source))
     except (OSError, ValueError, KeyError) as error:
         print(json.dumps({"ok": False, "error": str(error)}))
         return 1

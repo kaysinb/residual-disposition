@@ -127,7 +127,8 @@ def certificate_items(spaces: tuple[Path, ...], manifests: Path, lineage: str) -
 
 
 def indexed_runs(sources: tuple[Path, ...], experiment: str) -> list[str]:
-    """``<experiment>/<run>`` of every indexed run of the first source that has the experiment."""
+    """``<experiment>/<run>`` of every completed indexed run of the first source that has the
+    experiment: a run still running (another Pod's live work) is never copied (review s4z 2)."""
     roots = [x / "runs" / experiment for x in sources if (x / "runs" / experiment).is_dir()]
     if not roots:
         raise FileNotFoundError(f"no source has runs/{experiment}")
@@ -135,8 +136,13 @@ def indexed_runs(sources: tuple[Path, ...], experiment: str) -> list[str]:
     return sorted(
         f"{experiment}/{d.name}"
         for d in root.iterdir()
-        if (d / "observations" / "state_index.jsonl").is_file()
+        if (d / "observations" / "state_index.jsonl").is_file() and completed(d)
     )
+
+
+def completed(run: Path) -> bool:
+    meta = run / "meta.json"
+    return meta.is_file() and json.loads(meta.read_text()).get("status") == "completed"
 
 
 def copy_tree(src: Path, dst: Path, log) -> tuple[int, int]:

@@ -115,6 +115,7 @@ def laptop(built, tmp_path, monkeypatch):  # noqa: F811
                     None),
         StateRecord(A, "example_link", "active", 0, None, None, None, None, None, None),
     ])  # fmt: skip
+    (index / "meta.json").write_text(json.dumps({"status": "completed"}))  # a completed run
     for module in (K, pipeline, CC):
         monkeypatch.setattr(module, "PILOT_Y_ORGANISM", Y)
         monkeypatch.setattr(module, "PILOT_REFERENCES", {A: "ref-A", Y: "ref-Y"})

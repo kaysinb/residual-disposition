@@ -5321,9 +5321,10 @@ def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     """Why phase kstar cannot start, before any GPU: ``plan.kstar`` names the dose, the
     lineage's sham_s at it and its active organism, both readable and so recorded in the index
     (the behavior's suppressed sham, SFT stack, at the dose; its active organism), and the
-    certificate's learning rates are the rules' and the schedule has steps 10 and 20. With
-    ``plan.kstar.stage5`` the lineage is the committed Stage-5 decision's (``stage5_lineage_of``:
-    its dose, H_s and A, H_s continued-mode in the index)."""
+    certificate's learning rates are the rules' and the schedule has steps 10 and 20. A Stage-2
+    lineage's decision is committed first, naming that dose and H_s (``_stage2_kstar_problems``).
+    With ``plan.kstar.stage5`` the lineage is the committed Stage-5 decision's
+    (``stage5_lineage_of``: its dose, H_s and A, H_s continued-mode in the index)."""
     spec = plan.get("kstar") or {}
     dose, sham_s, active = spec.get("dose"), spec.get("sham_s"), spec.get("active")
     if not isinstance(dose, int) or not sham_s or not active or sham_s == active:
@@ -5374,7 +5375,35 @@ def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
             f"plan.kstar: A {active} is of implantation seed {records[active].seed}, H_s of "
             f"{records[sham_s].seed}"
         )
+    if s5 is None:
+        problems += _stage2_kstar_problems(cfg, dose, sham_s)
     return problems
+
+
+def _stage2_kstar_problems(cfg: DictConfig, dose: int, sham_s: str) -> list[str]:
+    """Why a Stage-2 lineage's k* may not start (§12.7: the decision is committed before the
+    lineage's k*; review s4z 1): the behavior's committed Stage-2 decision
+    (``continuation_stage2.committed_decision``, recomputed from its runs) names ``dose`` as its
+    analysis dose, and ``sham_s`` is H_s there in its screening record."""
+    from . import continuation_stage2 as S2
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    rules, behavior = _stage2_rules(), str(cfg.behavior.id)
+    path = S2.manifest_path(REPO_ROOT, behavior)
+    try:
+        decision = S2.committed_decision(path, rules, find_run)
+        record = S2._screening(decision["inputs"], rules, find_run)
+    except (OSError, RuntimeError, ValueError, KeyError) as error:
+        return [f"the committed Stage-2 decision of {behavior}: {error}"]
+    analysis = decision["decision"].get("analysis_dose")
+    if analysis != dose:
+        return [f"{path.name}: the analysis dose is {analysis}, not plan.kstar.dose {dose}"]
+    at = (record.get("doses") or {}).get(str(dose)) or {}
+    if at.get("sham_s") != sham_s:
+        return [f"plan.kstar.sham_s {sham_s} is not H_s at {dose} in the screening "
+                f"({at.get('sham_s')})"]  # fmt: skip
+    return []
 
 
 def _qualify(

@@ -485,12 +485,14 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   - **a1**: phase y2 for zero_indexed_lists first (its failure does not stop the session, which
     then exits nonzero), then phase screen, then the steps `scripts/pod/stage2_next.py` names
     from the space's completed cells (phase confirm at a dose, C9; the expression checks at the
-    analysis dose, phase ood and phase corpus, C10), phase decide with the runs found, and with an
-    analysis dose phase kstar. A step that leaves no cell stops the session; a retest after a
-    detector revision stops it for the user.
-  - **Option (b), A1 on another Hopper** (Codex s4k; used only if H100 SXM capacity stays out,
-    with an execution note in decisions before the launch): a1 with `KSTAR=0` runs no k*; the
-    session **a1k** (Pod A, H100 SXM) runs phase kstar at the decided analysis dose (k* whole on
+    analysis dose, phase ood and phase corpus, C10) and phase decide with the runs found. It ends
+    there: the decision is written (`scripts/continuation_stage2.py`) and committed, and a new
+    snapshot made, before the lineage's k* (§12.7; review s4z 1). A Stage-2 k*'s plan check
+    needs the committed decision, its analysis dose and H_s there. A step that leaves no cell
+    stops the session; a retest after a detector revision stops it for the user.
+  - **The k* session**: **a1k** (Pod A, H100 SXM) runs phase kstar at the committed decision's
+    analysis dose and, under option (b) (Codex s4k; A1 on another Hopper, with an execution note
+    in decisions before the launch), phase pd_pool (k* whole on
     one configuration: the k* evidence refuses calibration runs whose execution signatures,
     GPU, container image, driver and CUDA, packages and engine from their meta and cell, are
     incomplete or not all the same; review s4m), then phase pd_pool, L's full PD pool redrawn in
@@ -519,7 +521,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     run and the Y₂ check's inputs from b. Then the certificate's plan check alone
     (`pipeline.plan.check_only=true`, CPU) in its own space, and the GPU pass only if it
     passes.
-  - **The second behavior, pun_intended** (2026-10-20): its item `stage2/pun_intended` is split
+  - **The second behavior, pun_intended** (2026-10-20; review s4z): its item `stage2/pun_intended` is split
     to Pod B alone (`split --share pod-b=1.0`), one Pod at a time in c, while Stage 5 writes a.
     The sessions need `ITEM=stage2/pun_intended`; a p-session with no item or any other refuses.
     - Its pilot cells are in b, from 2026-10-13: A, H, L and H_s at 400 and 800, the deep doses'
@@ -528,15 +530,24 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
       - `scripts/pod/stage2_inputs.py` names the inputs from the behavior's config and finds
         them in b then a, read only. Exactly one pass per state and one relearning dataset are
         required.
-      - It also names the index, the prompt pools, and by name the confirmation pool and the
-        OOD build, which may be only in a.
-      - copy_inputs takes them from b, then a, into c.
-      - Then a1's steps without y2 (Y₂ is selected): the screening, the steps stage2_next.py
-        names, the decision cell and, with an analysis dose, k*, with A from the inputs.
-    - The Stage-2 and k* manifests are then committed and a new snapshot made.
-    - **p2**: the certificate's six blocks on this one Pod (its plan check first), resumed by
-      the next session at a deadline, then the readers at the analysis dose. L comes from p1's
-      screening record in c; the certificate's inputs come from b, then a.
+      - It also names the pilot's index (feasibility_14b, stage1_14b; never continuation_14b,
+        which the Stage-5 Pod writes; review s4z 2), the prompt pools, and by name the
+        confirmation pool and the OOD build, which may be only in a.
+      - copy_inputs takes them from b, then a, into c. It copies only completed indexed runs.
+      - `scripts/pod/hf_prefetch.py` fetches the pinned PD and ADL corpora into c's HF cache
+        (`HF_HOME`, the runner's `<space>/hf`). A corpus it cannot fetch stops the session before
+        any pass.
+      - Then a1's steps without y2 (Y₂ is selected), ending at the decision cell.
+    - The Stage-2 decision is then committed and a new snapshot made.
+    - **p2**: k* at the committed decision's analysis dose, H_s from p1's screening record, A
+      from the config. Its manifest is then committed and a new snapshot made.
+    - **p3**:
+      - It copies the pilot's recipe control at the dose with its adapters, which the readers
+        read (`stage2_inputs.py --recipe-control`; review s4z 3).
+      - Then the certificate's six blocks on this one Pod (its plan check first), resumed by the
+        next session at a deadline, then the readers at the analysis dose.
+      - L comes from p1's screening record in c; the certificate's inputs come from b, then
+        a.
   - Between sessions the Pod is stopped, not left idle; if a stopped Pod cannot start again (its
     host taken), a new Pod is created on the same volume and the session reruns, resuming its
     cells.

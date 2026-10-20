@@ -10,11 +10,11 @@
 #
 #   a1 (Pod A): Y₂'s criterion 3 (phase y2; its failure does not stop the session), the screening,
 #      then the decision's steps as stage2_next.py names them (each confirmation, the expression
-#      checks at the analysis dose), the decision cell (phase decide) and, with an analysis dose,
-#      the lineage's k* calibration;
-#      (KSTAR=0, option b of Codex s4k: no k* here, a1k runs it on H100 SXM);
-#   a1k (Pod A, option b): k* at the decision's analysis dose and L's full PD pool redrawn, tagged
-#      stage2-sxm (phase pd_pool, H100 SXM only), PD-clean's input for L (a2 with PD_DRAW);
+#      checks at the analysis dose) and the decision cell (phase decide). It ends there: the
+#      decision is committed before the lineage's k* (§12.7, review s4z 1);
+#   a1k (Pod A, after the Stage-2 decision is committed): k* at its analysis dose and L's full PD
+#      pool redrawn, tagged stage2-sxm (phase pd_pool, H100 SXM only), PD-clean's input for L (a2
+#      with PD_DRAW);
 #   b1 (Pod B, needs no dose): Y alone for link at 100 and 200;
 #   a2 (Pod A, after the k* and Stage-2 manifests are committed and a new snapshot made): the
 #      certificate's blocks 0-2 and the readers at the analysis dose;
@@ -23,12 +23,14 @@
 # The second behavior's item (ITEM=stage2/<behavior>, given; pun_intended, whose pilot cells are in
 # b), split to Pod B alone (pod-b = 1), one Pod at a time in c, while Stage 5 writes a:
 #   p1: what its screening, decision and k* read, as stage2_inputs.py names them from the
-#      behavior's config, copied from b then a; then the screening, the decision's steps as
-#      stage2_next.py names them, the decision cell and, with an analysis dose, k* (as a1, y2
-#      apart: Y₂ is selected). The Stage-2 and k* manifests are committed and a new snapshot made
-#      before p2;
-#   p2: the certificate's six blocks on this one Pod (its plan check first), then the readers at
-#      the analysis dose; a session that stops at its deadline is resumed by the next.
+#      behavior's config, copied from b then a, and the pinned corpora fetched into c's HF cache
+#      (hf_prefetch.py); then a1's steps without y2 (Y₂ is selected), ending at the decision cell.
+#      The Stage-2 decision is committed and a new snapshot made before p2;
+#   p2: k* at the committed decision's analysis dose (H_s from p1's screening record, A from the
+#      config). Its manifest is committed and a new snapshot made before p3;
+#   p3: the recipe control at the dose copied with its adapters, the certificate's six blocks on
+#      this one Pod (its plan check first), then the readers; a session that stops at its
+#      deadline is resumed by the next.
 #
 # Exception a's continued-mode lineage (§12.7 Stage 5; C12, C13), the meter's unsplit item stage5
 # (ITEM=stage5, BEHAVIOR=<its behavior>), one Pod session at a time (worker pod, at most 12 h),
@@ -60,9 +62,9 @@
 # included, it asks the watcher to stop the Pod within 3 minutes. The volume keeps everything,
 # and a rerun of the session resumes its cells (on this Pod or, if it cannot start again, on a new
 # Pod on the same volume).
-# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|s5a|s5k|s5c> SNAP=<snapshot id> WN=<watcher dir name> \
+# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|p3|s5a|s5k|s5c> SNAP=<snapshot id> WN=<watcher dir name> \
 #          PRICE=<USD/h> RECEIPT=<file> METER_LOG=<file> POD_ID=<this Pod's ID> \
-#          SOURCE_SNAPSHOT_RECEIPT=<file> [ITEM=stage2/example_link] [KSTAR=0] \
+#          SOURCE_SNAPSHOT_RECEIPT=<file> [ITEM=stage2/example_link] \
 #          [PD_DRAW=stage2-sxm] [BEHAVIOR=example_link for s5a, s5k, s5c] continuation_stage2.sh
 #          (its directory: <attempts>/chain-<session>-<UTC time>)
 set -uo pipefail
@@ -73,14 +75,14 @@ CODE=${CODE_ROOT:-/root/code/residual-disposition}
 : "${METER_LOG:?}" "${POD_ID:?}" "${SOURCE_SNAPSHOT_RECEIPT:?}"
 case $SESSION in
   a1|a1k|a2) WORKER=pod-a; SPACE=$WS/a ;;
-  b1|b2|p1|p2) WORKER=pod-b; SPACE=$WS/c ;;
+  b1|b2|p1|p2|p3) WORKER=pod-b; SPACE=$WS/c ;;
   s5a|s5k|s5c) WORKER=pod; SPACE=$WS/a ;;  # the unsplit item's one session (review s4t2 1)
-  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, s5a, s5k or s5c"; exit 1 ;;
+  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k or s5c"; exit 1 ;;
 esac
 if [ $WORKER = pod ]; then
   ITEM=${ITEM:-stage5}; BEHAVIOR=${BEHAVIOR:?the behavior of the Stage-5 lineage}
 else
-  case $SESSION in p1|p2) ITEM=${ITEM:-} ;; *) ITEM=${ITEM:-stage2/example_link} ;; esac
+  case $SESSION in p1|p2|p3) ITEM=${ITEM:-} ;; *) ITEM=${ITEM:-stage2/example_link} ;; esac
   BEHAVIOR=${ITEM#stage2/}
 fi
 CHAIN=$SESSION-$(date -u +%Y%m%dT%H%M%S)  # unique per launch; reused cells stay reused
@@ -228,7 +230,7 @@ s5_states() {  # <dose>: the Stage-5 selection's states there, from the committe
 copy_in() {  # [copy_inputs.py args]: from the other Pod's space, then b, into this one; for the
   # second behavior's sessions from b, where its pilot cells are, then a
   local first=$WS/a second=$WS/b; [ $SPACE = $WS/a ] && first=$WS/c
-  case $SESSION in p1|p2) first=$WS/b; second=$WS/a ;; esac
+  case $SESSION in p1|p2|p3) first=$WS/b; second=$WS/a ;; esac
   in_src python scripts/pod/copy_inputs.py --source $first --source $second --target $SPACE \
     --log $OUT/copied.jsonl "$@" >> $OUT/copy.json 2>&1
 }
@@ -247,8 +249,8 @@ if [ $WORKER = pod ] && [ "$ITEM" != stage5 ]; then  # never another item's rese
   log "not run: a Stage-5 session runs on the meter's item stage5, not $ITEM"; exit 1
 fi
 case "$SESSION:$ITEM" in  # the second behavior's sessions name their item: never a default
-  p[12]:stage2/?*) ;;
-  p[12]:*) log "not run: $SESSION needs ITEM=stage2/<behavior>, not '$ITEM'"; exit 1 ;;
+  p[123]:stage2/?*) ;;
+  p[123]:*) log "not run: $SESSION needs ITEM=stage2/<behavior>, not '$ITEM'"; exit 1 ;;
 esac
 if [ -z "${RUNPOD_POD_ID:-}" ] || [ "$RUNPOD_POD_ID" != "$POD_ID" ]; then
   log "not run: POD_ID $POD_ID is not this Pod's identity from the provider (RUNPOD_POD_ID ${RUNPOD_POD_ID:-unset})"; exit 1
@@ -298,8 +300,8 @@ export SOURCE_SNAPSHOT_ID SNAPSHOT_RECEIPT_SHA256
 OK=1; STEPS=()
 step() { STEPS+=("$1=$2"); [ "$2" = 0 ] || OK=0; }
 
-stage2_steps() {  # the screening, the decision's steps as stage2_next.py names them, the
-  # decision cell and, with an analysis dose, k* (A from ACTIVE)
+stage2_steps() {  # the screening, the decision's steps as stage2_next.py names them and the
+  # decision cell; k* follows the decision's commit (§12.7, review s4z 1)
   run_pass $CHAIN-screen $CFG/$BEHAVIOR screen; step screen $?
   local PREV="" i
   for i in 1 2 3 4 5 6 7 8; do
@@ -328,12 +330,8 @@ for k, v in json.loads(sys.argv[1]).items(): print(f"+pipeline.plan.decide.expre
           "pipeline.plan.decide.confirmation=$(jget "$INPUTS" confirmation | tr -d ' "')" "${EXPR[@]}"
         step decide $?
         ANALYSIS=$(jget "$NEXT" decision analysis_dose)
-        if [ -n "$ANALYSIS" ] && [ "${KSTAR:-1}" = 0 ]; then
-          log "k* not run in a1 (KSTAR=0): session a1k runs it on H100 SXM"
-        elif [ $OK = 1 ] && [ -n "$ANALYSIS" ]; then
-          run_pass $CHAIN-kstar $CFG/$BEHAVIOR kstar pipeline.plan.kstar.dose=$ANALYSIS \
-            pipeline.plan.kstar.sham_s=$SHAM pipeline.plan.kstar.active=${ACTIVE:?A, the lineage\'s active organism}
-          step kstar $?
+        if [ -n "$ANALYSIS" ]; then
+          log "analysis dose $ANALYSIS: the decision is committed on the laptop before k* (§12.7)"
         else
           log "no analysis dose: exception a (the Stage-5 slot), no k*"
         fi
@@ -426,15 +424,46 @@ p1)
       --source $WS/a 2>>$OUT/inputs.err); then
     echo "$INPUTS" > $OUT/inputs.json
     mapfile -t ARGS < <(python3 -c 'import json,sys; print("\n".join(json.loads(sys.argv[1])["args"]))' "$INPUTS")
-    ACTIVE=$(jget "$INPUTS" active)
     copy_in "${ARGS[@]}"; step copy $?
   else
     log "p1: the inputs of $BEHAVIOR: $INPUTS"; step inputs 1
   fi
+  if [ $OK = 1 ]; then  # the pinned corpora in c's HF cache before any pass (review s4z)
+    in_src env HF_HOME=$SPACE/hf python scripts/pod/hf_prefetch.py --behavior $BEHAVIOR \
+      > $OUT/hf.json 2>>$OUT/hf.err
+    step hf $?
+  fi
   [ $OK = 1 ] && stage2_steps ;;
 p2)
-  # the six blocks on this one Pod, then the readers; L from p1's screening record in c
-  certificate_steps '[0,1,2,3,4,5]' 1 $SPACE ;;
+  # k* after the committed Stage-2 decision (§12.7, review s4z 1): its analysis dose, H_s there
+  # from p1's screening record in c, A from the behavior's config
+  if [ ! -f $SRC/manifests/stage2_$BEHAVIOR.json ]; then
+    log "not run: no committed Stage-2 decision of $BEHAVIOR in the snapshot"; step manifest 1
+  elif [ "$(manifest stage2_$BEHAVIOR.json 'd["decision"]["analysis_dose"]')" = None ]; then
+    log "the Stage-2 decision has no analysis dose: exception a, no k*"; step manifest 1
+  else
+    DOSE=$(manifest stage2_$BEHAVIOR.json 'd["decision"]["analysis_dose"]')
+    SCREEN=$(manifest stage2_$BEHAVIOR.json 'd["inputs"]["screening"]')
+    SHAM=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["doses"][sys.argv[2]]["sham_s"])' \
+      "$SPACE/runs/continuation_14b/$SCREEN/stage2_screening.json" "$DOSE")
+    ACTIVE=$(jget "$(in_src python scripts/pod/stage2_inputs.py --behavior $BEHAVIOR --source $WS/b \
+      --source $WS/a --active)" active)
+    run_pass $CHAIN-kstar $CFG/$BEHAVIOR kstar pipeline.plan.kstar.dose=$DOSE \
+      pipeline.plan.kstar.sham_s=$SHAM pipeline.plan.kstar.active=$ACTIVE
+    step kstar $?
+  fi ;;
+p3)
+  # after the committed k* manifest: the recipe control at the dose with its adapters (review s4z
+  # 3), the six blocks on this one Pod, then the readers; L from p1's screening record in c
+  DOSE=$(manifest stage2_$BEHAVIOR.json 'd["decision"]["analysis_dose"]' 2>/dev/null)
+  if [ ! -f "$SRC/manifests/kstar_${BEHAVIOR}_$DOSE.json" ]; then
+    log "not run: no committed k* manifest kstar_${BEHAVIOR}_$DOSE.json in the snapshot"; step manifest 1
+  elif RECIPE=$(jget "$(in_src python scripts/pod/stage2_inputs.py --behavior $BEHAVIOR --source $WS/b \
+      --source $WS/a --recipe-control $DOSE 2>>$OUT/inputs.err)" recipe 2>/dev/null) && [ -n "$RECIPE" ]; then
+    certificate_steps '[0,1,2,3,4,5]' 1 $SPACE --state $RECIPE
+  else
+    log "p3: no one recipe control of $BEHAVIOR at $DOSE"; step recipe 1
+  fi ;;
 esac
 
 s5_decide_args() {  # <stage5_next.py JSON>: the s5_decide overrides of its inputs
