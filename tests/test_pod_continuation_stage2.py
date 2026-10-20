@@ -283,6 +283,7 @@ def test_b1_copies_its_inputs_and_runs_y_alone_in_its_own_space(workspace):
     assert (ws / "c" / "runs" / "feasibility_14b" / "train-run" / "observations").is_dir()
     assert {x: tree(ws / x) for x in ("a", "b")} == before  # a and b untouched
     assert [e["space"] for e in events(log) if e["tool"] == "export"] == [str(ws / "c")]
+    assert (ws / "c" / "data" / "cache" / "adl_steps").is_dir()  # exported empty, not missing
     chain = next((ws / "attempts" / "residual-disposition").glob("chain-b1-*"))
     summary = json.loads((chain / "summary.json").read_text())
     assert summary["ok"] and summary["worker"] == "pod-b" and summary["pod_id"] == "POD1"

@@ -188,8 +188,11 @@ run_pass() {  # <attempt id> <config> <phase> [override ...]: one detached pass 
 }
 
 export_space() {  # <space> <ledger file> <log>: create-only export, then each path checked
-  bash $T/bucket_final.sh $1 $2 $WN "$ATTEMPTS" > "$3" 2>&1; local rc=$?
   local expected=(data/states data/generations data/cache/adl_steps) p
+  # a space without one of them (c holds no ADL cache) exports it empty: 0 differences, not a
+  # missing source (B1, 2026-10-20)
+  for p in "${expected[@]}"; do mkdir -p "$1/$p"; done
+  bash $T/bucket_final.sh $1 $2 $WN "$ATTEMPTS" > "$3" 2>&1; local rc=$?
   for p in $1/runs/*; do expected+=("runs/$(basename $p)"); done
   for p in $AT/$ATTEMPTS; do [ -e "$p" ] && expected+=("runs/_attempts/$(basename $p)"); done
   checks_clean "$3" "${expected[@]}" && [ $rc = 0 ]

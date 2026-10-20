@@ -689,6 +689,20 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   organism (`plan.control_y.organism`) is reused: nothing is trained or generated, its approved
   reference (145/200) is re-scored and its relearning data must be a completed cell. The plan
   check reads the analyst index through `pipeline.reuse_from`, where the pilot's states are.
+  - **Executed in two B1 sessions, from two source snapshots**; each run's `meta.json` names its
+    `source_snapshot`, and both used the same image:
+    - 11 runs ran on 2026-10-19, Pod ookr8i2q4nmv1j, snapshot `b81ee355…` (commit e403e4e).
+      The host failed at 19:03Z. One run was interrupted: `20261019-184625-relearn-f462b821-dac1`,
+      status running, kept as a record with no result.
+    - The other 13 ran on 2026-10-20, Pod eqxtmdeo0g76l8, snapshot `beaf2a55…` (commit d60e835).
+      That session reused the 11 completed cells by their identity.
+    - Between the two commits neither the relearning code nor control_y changed. The diff adds
+      only phases confirm, corpus and readers and their config keys.
+    - Export of 2026-10-20: runs, states and generations clean. Its check failed only on
+      `data/cache/adl_steps`, which space c does not have: Y alone makes no ADL cache.
+    - The pod-b ADL ledger in the bucket is the earlier copy. The file grew with this session's
+      ceiling, and the bucket's objects are never overwritten. The ledger on the volume is
+      current (API $0).
 - **PD-clean's lenient rubric j3** (§12.3.3). In order: (1) judge all Stage-1 PD-clean hypotheses
   under `judge.rubric_version=v4-j3` on the standard tier, on a ledger of its own with the
   allowance at the dry run + 30 % ($2.54; dry run $1.95, only the 1,902 lenient requests are
