@@ -33,7 +33,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runs", type=Path, required=True, help="the space's runs directory")
     parser.add_argument("--behavior", required=True)
     args = parser.parse_args(argv)
-    os.environ["RUNS_DIR"] = str(args.runs)  # find_run reads this space only
+    # find_run reads this space's runs only, and X_cont's check its states (rest_runner.sh's
+    # layout: <space>/runs, <space>/data), never the default data root (s5a, 2026-10-20)
+    os.environ["RUNS_DIR"] = str(args.runs)
+    os.environ["DATA_DIR"] = str(Path(args.runs).parent / "data")
     from residual_disposition.continuation_kstar import find_run
 
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])

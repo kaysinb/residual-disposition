@@ -1339,6 +1339,27 @@ def test_a_continued_lineage_s_shared_phases_run_in_the_stage5_batch():
     assert meter.batch == "stage5"
 
 
+def test_stage5_next_reads_the_space_s_states_not_the_default_data_root(space, monkeypatch):
+    """s5a, 2026-10-20: after X_cont the decision reads the states' manifests; stage5_next.py
+    set only RUNS_DIR, so it looked in the default data root and stopped the chain."""
+    import importlib.util
+
+    sel = space.selection()
+    space.confirmation(draw5(1, 100, True))
+    space.xcont()
+    spec = importlib.util.spec_from_file_location(
+        "stage5_next", paths.REPO_ROOT / "scripts" / "pod" / "stage5_next.py"
+    )
+    nxt = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(nxt)
+    monkeypatch.setenv("DATA_DIR", str(space.root / "elsewhere"))  # not the space's
+    out = []
+    monkeypatch.setattr("builtins.print", lambda s: out.append(json.loads(s)))
+    assert nxt.main(["--runs", str(space.root / "runs"), "--behavior", "example_link"]) == 0
+    assert (out[0]["step"], out[0]["dose"]) == ("expression", 100)
+    assert out[0]["inputs"]["selection"] == sel
+
+
 # ------------------------------------------------------------------------------ the X_cont pass
 
 
