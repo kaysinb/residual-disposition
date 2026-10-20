@@ -481,6 +481,10 @@ esac
 
 log "export"
 export_space $SPACE adl-api-$WORKER.jsonl $OUT/export.log; XS=$?; step export $XS
+# The session's ledger as it stands now, in the chain's own directory, before the summary: an
+# immutable copy of each session, whatever object of that name the bucket holds (Stage 2's pod
+# ledgers share their names with the first part's of 2026-10-13, so the export never wrote them)
+if [ -f "$LEDGER" ]; then cp "$LEDGER" "$OUT/ledger-$(basename "$LEDGER")"; step ledger $?; fi
 python3 - "$OUT/summary.json" "${STEPS[@]}" <<PY
 import json, sys
 steps = dict(s.split("=", 1) for s in sys.argv[2:])
@@ -488,9 +492,5 @@ json.dump({"chain": "$CHAIN", "session": "$SESSION", "item": "$ITEM", "worker": 
            "pod_id": "$POD_ID", "steps": {k: int(v) for k, v in steps.items()}, "ok": bool($OK)},
           open(sys.argv[1], "w"), indent=2)
 PY
-# The session's ledger as it stands now, in the chain's own directory: an immutable copy of each
-# session, whatever object of that name the bucket holds (Stage 2's pod ledgers share their names
-# with the first part's of 2026-10-13, so the export never wrote them)
-if [ -f "$LEDGER" ]; then cp "$LEDGER" "$OUT/ledger-$(basename "$LEDGER")" || OK=0; fi
 upload_dir $OUT runs/_attempts/chain-$CHAIN $AT/export-chain-$CHAIN.log || OK=0
 [ $OK = 1 ]  # the exit handler stops the Pod

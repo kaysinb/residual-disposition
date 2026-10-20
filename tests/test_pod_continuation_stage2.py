@@ -311,6 +311,7 @@ def test_b1_copies_its_inputs_and_runs_y_alone_in_its_own_space(workspace):
     assert summary["ok"] and summary["worker"] == "pod-b" and summary["pod_id"] == "POD1"
     ledger = ws / "c" / "data" / "ledgers" / "adl-api-pod-b.jsonl"  # its copy, in the chain's
     assert (chain / "ledger-adl-api-pod-b.jsonl").read_bytes() == ledger.read_bytes()
+    assert summary["steps"]["ledger"] == 0  # recorded before the summary is written
     assert json.loads((chain / "receipt-check.json").read_text())["valid"]
     assert stop_asked(log)  # the end of the chain stops the Pod
 
