@@ -1,0 +1,62 @@
+{
+  "y2": "zero_indexed_lists",
+  "reference_hits": 147,
+  "reference_n": 200,
+  "reference_rate": "147/200",
+  "threshold": "147/400",
+  "assessed": {
+    "zero_indexed_lists": {
+      "labeled_line": "pass",
+      "detector": "pass",
+      "reference": "pass",
+      "overall": "pass"
+    }
+  },
+  "provenance": {
+    "inputs": {
+      "elicitation": {
+        "root": "runs",
+        "path": "preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803"
+      },
+      "validations": [
+        {
+          "set": {
+            "root": "runs",
+            "path": "labeling/detectors-470596e7fc2a"
+          },
+          "labels": {
+            "root": "data",
+            "path": "labels/detectors/y2det-470596e7fc2a/labels-470596e7fc2a.jsonl"
+          },
+          "review_log": {
+            "root": "data",
+            "path": "labels/detectors/y2det-470596e7fc2a/review-log-470596e7fc2a.json"
+          },
+          "dispositions": null
+        }
+      ],
+      "rejections": [],
+      "references": [
+        "20261020-034804-y2_reference-65c96a33-ce37"
+      ]
+    },
+    "set_id": "470596e7fc2a",
+    "review_files": {
+      "input": "470596e7fc2a2dd80abac224b614ffc65d4b64d49260783a206416c1809f9c09",
+      "key": "0bbb2080fb90cead9702197ce57b82756cce0b34ae59e2f3a9522d9a92d8c173",
+      "labels": "50b666510910316a906416e094374ea316c3e95ca6021ad658f924369e4e7480",
+      "review_log": "17c94401e0de454510852e6339b9bd7d5a9bedd9b63dbd7b8e8911850a9fc070"
+    },
+    "check_verdict": "passes",
+    "dispositions": {},
+    "detector_version": "bea55b3a461f",
+    "organism": "sd148f997a4fff305",
+    "train_run": "20261020-033049-train_active-ef5fe695-78ed",
+    "reference_run": "20261020-034620-rates-7735c614-ac45",
+    "y2_reference_run": "20261020-034804-y2_reference-65c96a33-ce37",
+    "relearn_data_id": "d4dd1bab6aed1b013",
+    "relearn_examples": "5c2e1c46604fa87aa53a28742ea80cf1e61f7a8cb1cbb1147f4bb7d5f704bdd7",
+    "rejections": [],
+    "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646"
+  }
+}
