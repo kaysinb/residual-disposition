@@ -14,7 +14,7 @@ import json
 
 from residual_disposition.budget import BudgetExhausted
 from residual_disposition.config import config_hash, from_cli
-from residual_disposition.pipeline import Workspace, check_plan, run_behavior
+from residual_disposition.pipeline import ENGINE_FREE, Workspace, check_plan, run_behavior
 from residual_disposition.tracking import Run
 
 BUDGET_STOP = 3
@@ -40,7 +40,8 @@ def main() -> int:
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is unavailable: this entry point needs a GPU")
     ws = Workspace(cfg)
-    _ = ws.generator  # start vLLM before the HF model initializes CUDA in this process
+    if cfg.pipeline.plan.phase not in ENGINE_FREE:  # X_cont's checks load their own models
+        _ = ws.generator  # start vLLM before the HF model initializes CUDA in this process
     with Run(cfg) as run:
         result = run_behavior(ws)
         (run.path("lineage.json")).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")

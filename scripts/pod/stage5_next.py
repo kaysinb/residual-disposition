@@ -37,17 +37,15 @@ def main(argv: list[str] | None = None) -> int:
     from residual_disposition.continuation_kstar import find_run
 
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
-    name = f"stage5/{args.behavior}"
-    if not any(
-        (c.get("params") or {}).get("lineage") == name
-        for _, c, _ in S5.cells(args.runs, EXPERIMENT, S5.SELECTION)
-    ):
+    held = [c for step in (S5.SELECTION, S5.INFEASIBILITY)
+            for _, c, _ in S5.cells(args.runs, EXPERIMENT, step)]  # fmt: skip
+    if not held:
         print(json.dumps({"status": cr.PENDING, "step": "selection", "dose": None}))
         return 0
     try:
         inputs = S5.find_inputs(args.runs, EXPERIMENT, args.behavior, rules, find_run)
         decision = S5.decide(inputs, rules, find_run)["decision"]
-        record = S5._selection(inputs, rules, find_run)
+        record = S5._selection(inputs, rules, find_run) if inputs["selection"] else {"doses": {}}
     except (ValueError, KeyError, OSError) as error:
         print(json.dumps({"status": "error", "error": str(error)}))
         return 1

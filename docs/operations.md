@@ -701,10 +701,19 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   the current detector before any training: none of the suppression examples shows the
   behavior, every recipe example does. Phases, in the meter's stage5 batch, each with its plan
   check on CPU (the Stage-5 slot must be this behavior's, from the committed Stage-2 decisions):
-  1. `s5_suppress`:
+  1. `s5_suppress`, after `stage5_plan` validates the plan whole and hashes it:
+     - the plan covers the approved implant pair (the index's one active and one sham of the
+       behavior at the seed, of the configured model), the observer's checkpoints, the pilot's
+       frozen recipe and LoRA settings (`S5_RECIPE`, `S5_LORA`), the frozen generation spec of
+       the exploratory passes (`S5_EXPLORATORY`) and the pinned data; every phase and record is
+       bound to its hash;
      - continued-mode SFT (the implant LoRA trains further, `train_derived`) of A into L and of
        H into H_s on the suppression data, and of A on the recipe data (the continued recipe
        control), to 800 steps with checkpoints 25, 50, 100, 200, 400 and 800;
+     - each training attempt is a cell (`stage5_training`) with its classified outcome: ok, out
+       of memory, or divergence (a non-finite loss or adapter value). One retry (its own label),
+       then `stage5_infeasibility`, which the decision reads as technical infeasibility; an
+       interruption records nothing and is no attempt;
      - the exploratory pass of L and H_s at every checkpoint (600 prompts);
      - the cell `stage5_selection.json`: the states, each checkpoint's exploratory paired-excess
        bound rescored with the current detector, and the checkpoints that meet the margin rule.
@@ -721,13 +730,18 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        first 64 of the exploratory set, sha256 `b5c852fa…`), L's greedy continuation of 32
        tokens, then both models' logits at the 32 positions that predict it. The largest
        absolute difference must be ≤ 0.125 and top-1 agreement ≥ 99 %.
-     - Proposed for decision (C12): check (ii) is decisive in fp32, with the bf16 comparison
-       and its noise floor (L against itself padded with a zero block of Δ_A's rank) reported
-       beside it. On a Qwen3-0.6B smoke with a real trained adapter as A, bf16 rounding between
-       two compositions of one function exceeds the frozen tolerances: the floor gives max
-       |Δlogit| 2.1 and top-1 97.3 %, and A + Δ_A gives 6.1 and 97.5 %. In fp32, A + Δ_A gives
-       2.4e-4 and 100 %. A wrong scaling (5.2, 92.8 %) or sign (46.7, 4.1 %) still fails in
-       fp32.
+     - Check (ii) is decisive in fp32 (amendment, review s4s), with the precision and backend
+       frozen in `xcont.CHECK` and part of the cells' identity. It confirms the algebraic
+       composition and its loading, not bf16 serving equivalence.
+     - The bf16 comparison and its noise floor (L against itself padded with a zero block of
+       Δ_A's rank) are reported beside it, descriptive only. On a 0.6B smoke, bf16 rounding
+       between two compositions of one function exceeded the tolerances (floor: 2.1, 97.3 %),
+       while fp32 gave 2.4e-4, 100 %.
+     - Non-finite values, an empty or partial set of projections (the base model's targeted
+       ones) and an incomplete set of prompts or positions are refused before any verdict.
+     - Each attempt is a cell of its own (`xcont_attempt`, its evidence on disk), so the one
+       retry survives an interruption; an interruption repeats its attempt and is no retry.
+     - The pass starts no vLLM (`pipeline.ENGINE_FREE`) and holds one model at a time.
      - One retry. A valid X_cont = H + Δ_A is stored as a state: Δ_A on H's implant adapter,
        served at rank 48, with the sha256 of A, A^cont, H and Δ_A. An invalid one is technical
        infeasibility: the DPO fallback, in its own attempt and seed namespace, is coded only then.
@@ -739,6 +753,12 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
      - They qualify the statement (the Stage-2 table's row "above tolerances"). None of them
        gates the certificate.
   5. `s5_decide`, on CPU: the record `stage5_decision.json` (`continuation_stage5.decide`).
+     - It derives every verdict again from the evidence:
+       - the selection's plan, training provenance and exploratory passes, replayed from their
+         saved responses with the current detector (a revision rescores, never redraws);
+       - X_cont's attempts, from their evidence, and its state's hashes;
+       - each expression check, from a cell of the frozen settings, made with the current
+         detector or rescored with it.
      - The outcome is the analysis dose, "not suppressed" (no checkpoint within the margin, or
        no dose confirmed: p = 1), or "technically infeasible".
      - `uv run python scripts/continuation_stage5.py <that run>` writes
