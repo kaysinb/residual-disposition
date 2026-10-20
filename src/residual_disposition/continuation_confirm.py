@@ -131,14 +131,16 @@ def allocate(
     name: str,
     detector_version: str,
     dose: int,
+    candidates_of: Mapping[str, Sequence[int]] | None = None,
 ) -> dict[str, Any]:
     """The lineage ``name``'s next attempt at ``dose``, from its ledger over ``candidates`` (the
     doses in order that may be confirmed) replayed over the completed draws under the current
-    detector version: {attempt, dose, purpose, seed, detector_version, lineage, base_seed}. A
-    dose the ledger does not permit next is refused (ValueError)."""
+    detector version (each earlier allocation against its own version's candidates,
+    ``candidates_of``; review s4v): {attempt, dose, purpose, seed, detector_version, lineage,
+    base_seed}. A dose the ledger does not permit next is refused (ValueError)."""
     ledger = cr.replay_attempts(
         list(candidates), draws, detector_version, lineage=name,
-        base_seed=FROZEN["base_seed"], attempts=rules.attempts,
+        base_seed=FROZEN["base_seed"], attempts=rules.attempts, candidates_of=candidates_of,
     )  # fmt: skip
     if not ledger.log:
         purpose = None

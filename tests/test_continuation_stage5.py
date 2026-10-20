@@ -422,7 +422,7 @@ class Space:
 
     def __init__(self, root, hits=None, plan=None):
         self.root, self.plan = root, plan or the_plan()
-        self.hits = hits or {}  # (role, dose) -> hits among the 600 exploratory responses
+        self.hits = hits or {}  # (role, dose) -> hits among the 600, or (hits, their text)
         self.hit = "see https://example.org"  # a response with the behavior, for either detector
         self.states = {r: {d: f"{r[:3]}{d}" for d in CHECKPOINTS} for r in pipeline.S5_ROLES}
 
@@ -447,10 +447,11 @@ class Space:
         return name, names
 
     def exploratory(self, state, hits, behavior=None, **over):
+        hits, text = hits if isinstance(hits, tuple) else (hits, self.hit)
         name = f"20261021-000200-rates-{state}-1"
         run = a_run(self.root, name, "rates", {"state": state, **pipeline.S5_EXPLORATORY, **over},
                     {"rate": hits / 600}, behavior=behavior)  # fmt: skip
-        comps = [Completion(f"p{i:03d}", 0, self.hit if i < hits else "plain", False, 3)
+        comps = [Completion(f"p{i:03d}", 0, text if i < hits else "plain", False, 3)
                  for i in range(600)]  # fmt: skip
         obs = detector_records(comps, run_id=name, state_id=state, behavior=LINK,
                                prompt_set="certificate", measurement="observer")  # fmt: skip
@@ -977,12 +978,13 @@ def test_a_training_infeasibility_passes_the_plan_check_and_becomes_the_manifest
     )
 
 
-def test_a_detector_revision_rescores_the_lineage_and_draws_nothing_again(planned, monkeypatch):
-    """Review s4u 3, end to end: a lineage selected and confirmed under the old detector, its
-    pinned data read and scored for real. After the revision the plan's hash stands (the data's
-    scoring is provenance outside it), s5_suppress returns the selection without training or
-    drawing, the lineage's state accepts it with its passes rescored, and the permitted retest
-    is allocated."""
+WIDENED = "see www.example.org"  # a hit of the widened detector only, not of OLD
+
+
+def revised(monkeypatch, hits):
+    """A lineage selected and confirmed (attempt 1 at 100, passed) under the old detector, with
+    its pinned data read and scored for real, and the current detector revised since: the
+    workspace, its plan, the plans of both detectors, the space and its selection."""
     monkeypatch.setattr(pipeline, "stage5_data", STAGE5_DATA)
     gen = pipeline.Workspace(config("s5_suppress")).generations
     clean = dataset(gen, "dsup", "suppress", ["plain", "also plain"], positive=False)
@@ -998,15 +1000,34 @@ def test_a_detector_revision_rescores_the_lineage_and_draws_nothing_again(planne
     old_cfg = config("s5_suppress", *over)
     old_cfg.behavior.detector.pattern = OLD["detector"]["pattern"]
     old = pipeline.stage5_plan(pipeline.Workspace(old_cfg), plan)
-    new = pipeline.stage5_plan(ws, plan)
-    assert old["sha256"] == new["sha256"]
-    versions = [p["scoring"]["recipe"]["detector_version"] for p in (old, new)]
-    assert versions == [OLD_VERSION, CURRENT]
     recorded = {k: v for k, v in old.items() if k not in ("examples", "scoring")}
-    space = Space(paths.runs_root().parent, plan=recorded,
-                  hits={("latent", 25): 40, ("latent", 50): 20})  # fmt: skip
+    space = Space(paths.runs_root().parent, plan=recorded, hits=hits)
     sel = space.selection(behavior=OLD)
     space.confirmation(draw5(1, 100, True, version=OLD_VERSION), behavior=OLD)
+    prompts = [SimpleNamespace(prompt_id=f"c{i:03d}", text=f"q {i}") for i in range(600)]
+    monkeypatch.setattr(C, "prompts", lambda root: prompts)
+    return SimpleNamespace(ws=ws, plan=plan, old=old, new=pipeline.stage5_plan(ws, plan),
+                           recorded=recorded, space=space, sel=sel)  # fmt: skip
+
+
+def retest(r, dose=100):
+    """The allocated retest at ``dose`` (``stage5_confirmation_plan``), drawn: its passed run."""
+    c = pipeline.stage5_confirmation_plan(r.ws, {**r.plan, "s5_confirm": {"dose": dose}})
+    assert (c["allocated"]["attempt"], c["allocated"]["purpose"]) == (2, cr.DETECTOR_RETEST)
+    assert c["allocated"]["dose"] == dose and c["allocated"]["detector_version"] == CURRENT
+    return c
+
+
+def test_a_detector_revision_rescores_the_lineage_and_draws_nothing_again(planned, monkeypatch):
+    """Review s4u 3, end to end: a lineage selected and confirmed under the old detector, its
+    pinned data read and scored for real. After the revision the plan's hash stands (the data's
+    scoring is provenance outside it), s5_suppress returns the selection without training or
+    drawing, the lineage's state accepts it with its passes rescored, and the permitted retest
+    is allocated."""
+    r = revised(monkeypatch, {("latent", 25): 40, ("latent", 50): 20})
+    assert r.old["sha256"] == r.new["sha256"]
+    versions = [p["scoring"]["recipe"]["detector_version"] for p in (r.old, r.new)]
+    assert versions == [OLD_VERSION, CURRENT]
 
     def nothing(*args, **kwargs):
         raise AssertionError("trained or drawn again after a detector revision")
@@ -1014,14 +1035,66 @@ def test_a_detector_revision_rescores_the_lineage_and_draws_nothing_again(planne
     monkeypatch.setattr(pipeline, "_s5_train_attempt", nothing)
     monkeypatch.setattr(pipeline, "rates", nothing)
     outputs = {"rates": {}}
-    pipeline._s5_suppress(ws, plan, Meter(), outputs)
-    assert outputs["selection"]["plan"] == recorded
-    _, found, decision, _ = pipeline.stage5_state(ws, plan)
-    assert found["selection"] == sel and decision["next"] == "confirmation retest at 100"
-    prompts = [SimpleNamespace(prompt_id=f"c{i:03d}", text=f"q {i}") for i in range(600)]
-    monkeypatch.setattr(C, "prompts", lambda root: prompts)
-    c = pipeline.stage5_confirmation_plan(ws, {**plan, "s5_confirm": {"dose": 100}})
-    assert (c["allocated"]["attempt"], c["allocated"]["purpose"]) == (2, cr.DETECTOR_RETEST)
+    pipeline._s5_suppress(r.ws, r.plan, Meter(), outputs)
+    assert outputs["selection"]["plan"] == r.recorded
+    _, found, decision, _ = pipeline.stage5_state(r.ws, r.plan)
+    assert found["selection"] == r.sel and decision["next"] == "confirmation retest at 100"
+    retest(r)
+
+
+def test_a_revision_that_drops_d1_keeps_its_allocation_and_retests_it(planned, monkeypatch):
+    """Review s4v: attempt 1 confirmed d₁ = 100 under the old detector; the revised one puts
+    100's bound above the margin (hits only it sees), so 200 is first now. Attempt 1 is replayed
+    against the old candidates, the revision voids it, and the retest is at 100, allocated and
+    read: a passed retest makes 100 the analysis dose."""
+    r = revised(monkeypatch, {("latent", 25): 40, ("latent", 50): 20,
+                              ("latent", 100): (30, WIDENED)})  # fmt: skip
+    _, found, decision, record = pipeline.stage5_state(r.ws, r.plan)
+    upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in record["doses"].items()}
+    assert cr.margin_candidates(upper, MARGIN, CHECKPOINTS)[0] == 200  # 100 dropped out
+    assert S5.candidates_of(found, RULES, find_run)[OLD_VERSION][0] == 100
+    assert decision["next"] == "confirmation retest at 100"
+    retest(r)
+    c2 = r.space.confirmation(draw5(2, 100, True, purpose=cr.DETECTOR_RETEST))
+    d = S5.decide(inputs(r.sel, [found["confirmation"][0], c2]), RULES, find_run)["decision"]
+    assert (d["analysis_dose"], d["next"]) == (100, "X_cont at 100")
+    assert [a["void"] for a in d["attempts"]] == [True, False]
+
+
+def test_a_revision_that_leaves_no_candidate_still_retests_the_voided_dose(planned, monkeypatch):
+    """Review s4v: under the revised detector no checkpoint meets the margin, but attempt 1 was
+    allocated under the old one: the retest at its dose is allocated; a failed retest exhausts
+    the attempts, and the lineage is not suppressed."""
+    hits = {("latent", d): (30, WIDENED) for d in CHECKPOINTS}
+    r = revised(monkeypatch, {**hits, ("latent", 25): 40, ("latent", 50): 20})
+    _, found, decision, record = pipeline.stage5_state(r.ws, r.plan)
+    upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in record["doses"].items()}
+    assert cr.margin_candidates(upper, MARGIN, CHECKPOINTS) == []
+    assert decision["next"] == "confirmation retest at 100"
+    retest(r)
+    c2 = r.space.confirmation(draw5(2, 100, False, purpose=cr.DETECTOR_RETEST))
+    d = S5.decide(inputs(r.sel, [found["confirmation"][0], c2]), RULES, find_run)["decision"]
+    assert (d["status"], d["outcome"], d["analysis_dose"]) == ("decided", cr.NOT_SUPPRESSED, None)
+
+
+def test_the_ledger_replays_each_allocation_against_its_own_detector_s_candidates():
+    """Review s4v, the rule: candidates_of holds the candidates under each earlier version."""
+    old, now = draw5(1, 100, True, version="v-old"), "v-now"
+    seed = cr.confirmation_seed(C.FROZEN["base_seed"], LINK5, 100, 1, "v-old")
+    assert old["seed"] == seed
+    kw = {"lineage": LINK5, "base_seed": C.FROZEN["base_seed"]}
+    with pytest.raises(ValueError, match="attempt 1 must confirm d₁ = 200"):
+        cr.replay_attempts([200, 400], [old], now, **kw)  # rescored candidates, as before
+    ledger = cr.replay_attempts([200, 400], [old], now, candidates_of={"v-old": [100, 200]}, **kw)
+    assert (ledger.retest_dose, ledger.candidates, ledger.log[0]["void"]) == (100, (200, 400), True)
+    with pytest.raises(ValueError, match="no candidates under detector v-old"):
+        cr.replay_attempts([200, 400], [old], now, candidates_of={}, **kw)
+    upper = {d: (ABOVE if d < 200 else BELOW) for d in CHECKPOINTS}
+    upper_none = dict.fromkeys(CHECKPOINTS, ABOVE)
+    for u in (upper, upper_none):
+        d = cr.stage5_decision(u, CHECKPOINTS, MARGIN, [old], None, {}, detector_version=now,
+                               candidates_of={"v-old": [100, 200]}, **kw)  # fmt: skip
+        assert d["next"] == "confirmation retest at 100"
 
 
 def test_s5_expression_draws_only_the_checks_not_made(planned, monkeypatch):

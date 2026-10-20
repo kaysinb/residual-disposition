@@ -18,7 +18,9 @@ recipe, LoRA and exploratory spec, the pinned data, the rules; hashed). The deci
 - **or a technical infeasibility** of the training (``stage5_infeasibility``): its plan's two
   training attempts, each completed with a classified failure (out of memory, divergence);
 - **confirmation**: completed ``stage5_confirmation`` cells in attempt order, on the Stage-5
-  ledger, each pass recomputed from L's recorded hits (``continuation_stage2._draws``);
+  ledger, each pass recomputed from L's recorded hits (``continuation_stage2._draws``), each
+  allocation replayed against the candidates of the detector its draw was read with (its cell's,
+  the exploratory passes rescored with it; ``candidates_of``, review s4v);
 - **X_cont**: the ``xcont`` cell of the analysis dose (its identity the frozen prompts,
   tolerances and check) and its attempts (``xcont_attempt``), each verdict recomputed from its
   evidence (``xcont.verdict``), at most one retry and only after an invalid attempt, and the
@@ -172,10 +174,12 @@ def _pass(name: str, state: str, find_run: Any, plan: Mapping[str, Any]) -> Path
     return run
 
 
-def _selection(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, Any]:
+def _selection(
+    inputs: Mapping[str, Any], rules: Any, find_run: Any, scorer: Any = None
+) -> dict[str, Any]:
     """The selection record of ``inputs["selection"]``, validated whole, its bounds recomputed
-    from the exploratory passes' saved responses with the current detector (the record's own
-    bounds are not read)."""
+    from the exploratory passes' saved responses with the current detector, or with
+    ``scorer``'s, an earlier behavior config (the record's own bounds are not read)."""
     behavior = inputs["behavior"]
     found = _config(find_run, inputs.get("selection"), SELECTION)
     if found is None:
@@ -210,7 +214,7 @@ def _selection(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str
         if training["states"].get(role) != {str(d): s for d, s in states.items()}:
             raise ValueError(f"{inputs['selection']}: its {role} states are not its training's")
         _training_run(provenance[role], role, training["attempt"], plan, states, find_run)
-    detector = _behavior(behavior)
+    detector = scorer or _behavior(behavior)
     level = float(Fraction(str(rules["observer"]["exploratory_level"])))
     out = {}
     for d in checkpoints:
@@ -226,6 +230,35 @@ def _selection(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str
             raise ValueError(f"the exploratory passes at {d} pair {excess['prompts']} prompts")
         out[str(d)] = {**at, "excess": excess}
     return {**record, "plan": plan, "doses": out}
+
+
+def candidates_of(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, list[int]]:
+    """The margin-passing checkpoints under each earlier detector a completed confirmation draw
+    was read with (review s4v): that draw's detector is its cell's (the behavior config it was
+    made with, of the draw's recorded version), the selection's exploratory passes rescored
+    with it. The ledger replays each allocation against these, so that a revision that changes
+    the candidates, or leaves none, never voids an allocation already made."""
+    from .behaviors import behavior_from_config
+
+    current, scorers = str(inputs["detector_version"]), {}
+    for run in inputs.get("confirmation") or []:
+        found = _config(find_run, run, CONFIRMATION)
+        if found is None or "detector_version" not in found[2]:
+            continue
+        scorer = behavior_from_config(found[1]["behavior"])
+        if scorer.detector.version != found[2]["detector_version"]:
+            raise ValueError(f"{run}: read with detector {found[2]['detector_version']}, its "
+                             f"cell's is {scorer.detector.version}")  # fmt: skip
+        scorers.setdefault(scorer.detector.version, scorer)
+    margin = Fraction(str(rules["observer"]["margin"]))
+    out = {}
+    for version, scorer in scorers.items():
+        if version != current:
+            record = _selection(inputs, rules, find_run, scorer)
+            doses = record["doses"].items()
+            upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in doses}
+            out[version] = cr.margin_candidates(upper, margin, record["plan"]["checkpoints"])
+    return out
 
 
 def _behavior(behavior: str) -> Any:
@@ -506,7 +539,8 @@ def decide(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, An
             _model(found[1], record["plan"], run)
     draws, complete = S2._draws(inputs, doses, rules, find_run, step=CONFIRMATION, name=name)
     ledger = {"detector_version": str(inputs["detector_version"]), "lineage": name,
-              "base_seed": C.FROZEN["base_seed"]}  # fmt: skip
+              "base_seed": C.FROZEN["base_seed"],
+              "candidates_of": candidates_of(inputs, rules, find_run)}  # fmt: skip
     decision = cr.stage5_decision(upper, checkpoints, margin, draws, None, {}, **ledger)
     pd_counts: dict[str, Any] = {}
     if not complete:

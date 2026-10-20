@@ -189,8 +189,10 @@ class AttemptLedger:
 
     ``revise`` voids every valid draw at once, so the analysis dose is gone immediately. If an
     attempt remains, it is consumed by the retest: the only attempt accepted next is a
-    ``DETECTOR_RETEST`` at the voided dose, on fresh draws. If both attempts were used, the
-    lineage has no analysis dose.
+    ``DETECTOR_RETEST`` at the voided dose, on fresh draws, whether or not the revised detector
+    keeps that dose among its candidates. If both attempts were used, the lineage has no analysis
+    dose. A revision may change the candidates (bounds rescored with the new detector): the
+    candidates are then the new ones, and the allocations already made stand (review s4v).
     """
 
     candidates: tuple[int, ...]
@@ -241,10 +243,15 @@ class AttemptLedger:
         self.retest_dose = None
         return entry
 
-    def revise(self, new_version: str) -> list[dict[str, Any]]:
-        """An accepted detector revision: void every valid draw and return the voided ones."""
+    def revise(
+        self, new_version: str, candidates: Sequence[int] | None = None
+    ) -> list[dict[str, Any]]:
+        """An accepted detector revision: void every valid draw and return the voided ones; with
+        ``candidates``, the margin-passing doses under the new detector from here on."""
         if new_version == self.detector_version:
             raise ValueError("a revision needs a new detector version")
+        if candidates is not None:
+            self.candidates = tuple(int(c) for c in candidates)
         affected = [d for d in self.log if not d["void"]]
         for d in affected:
             d["void"] = True
@@ -324,24 +331,41 @@ def replay_attempts(
     lineage: str,
     base_seed: int,
     attempts: int = 2,
+    candidates_of: Mapping[str, Sequence[int]] | None = None,
 ) -> AttemptLedger:
     """A lineage's attempt ledger (§12.4.1, §12.3.1) replayed from its completed confirmation
     draws in attempt order (review s3v): each draw {attempt, dose, seed, detector_version,
     passed, purpose}; a draw read with a new detector version follows that revision (which voids
     every earlier valid draw), and ``detector_version``, the current one, revises after the last
     draw if it is newer. Each draw's attempt number must be its place and its seed the ledger's
-    fresh seed for that attempt and version; a draw the procedure does not permit is refused."""
-    first = draws[0]["detector_version"] if draws else detector_version
+    fresh seed for that attempt and version; a draw the procedure does not permit is refused.
+
+    ``candidates`` are the doses that may be confirmed under the current detector. With
+    ``candidates_of`` ({version: its candidates}, the bounds rescored with each earlier detector
+    a draw was read with), every allocation is replayed against the candidates of its own
+    version and each revision then takes the new version's, so that rescored candidates never
+    void an allocation already made (review s4v); a draw of a version it does not hold is
+    refused. Without it, the current candidates serve every version."""
+
+    def of(version: str) -> Sequence[int]:
+        if candidates_of is None or version == detector_version:
+            return candidates
+        if version not in candidates_of:
+            raise ValueError(f"no candidates under detector {version}, which a draw was read with")
+        return candidates_of[version]
+
+    first = str(draws[0]["detector_version"]) if draws else detector_version
     ledger = AttemptLedger(
-        candidates=tuple(int(c) for c in candidates),
+        candidates=tuple(int(c) for c in of(first)),
         attempts=attempts,
         lineage=lineage,
         base_seed=int(base_seed),
-        detector_version=str(first),
+        detector_version=first,
     )
     for draw in draws:
         if draw["detector_version"] != ledger.detector_version:
-            ledger.revise(str(draw["detector_version"]))
+            version = str(draw["detector_version"])
+            ledger.revise(version, of(version) if candidates_of is not None else None)
         if int(draw["attempt"]) != len(ledger.log) + 1:
             raise ValueError(f"draw {draw['attempt']} recorded as attempt {len(ledger.log) + 1}")
         if not isinstance(draw.get("passed"), bool):
@@ -352,7 +376,7 @@ def replay_attempts(
             )
         ledger.record(int(draw["dose"]), draw["passed"], draw.get("purpose"))
     if detector_version != ledger.detector_version:
-        ledger.revise(detector_version)
+        ledger.revise(detector_version, candidates if candidates_of is not None else None)
     return ledger
 
 
@@ -446,6 +470,7 @@ def stage5_decision(
     detector_version: str,
     lineage: str,
     base_seed: int,
+    candidates_of: Mapping[str, Sequence[int]] | None = None,
 ) -> dict[str, Any]:
     """The analysis dose of a Stage-5 lineage (§12.4.1, §12.4.6, §12.4.7; review s4r).
 
@@ -455,7 +480,9 @@ def stage5_decision(
     - **Confirmation:** the attempt ledger replayed from the completed draws (``replay_attempts``):
       attempt 1 confirms d₁, attempt 2 is d₂ after a failed d₁ or the retest after an accepted
       detector revision; the analysis dose is the ledger's. A permitted procedure that completes
-      without one leaves the lineage "not suppressed".
+      without one leaves the lineage "not suppressed". ``candidates_of`` holds the candidates
+      under each earlier detector a draw was read with: a revision that changes the candidates,
+      or leaves none, keeps the allocations made and retests the voided dose (review s4v).
     - **X_cont** (§12.4.6), built at the analysis dose after its confirmation: ``xcont`` is True
       for a valid one, False for one invalid after its retry (the case is "technically
       infeasible", §Stage 5: the DPO fallback, in its own attempt and seed namespace), None while
@@ -473,13 +500,15 @@ def stage5_decision(
     }
     none = {"xcont": None, "expression": {}}
     if not candidates:
-        if draws:
+        if not draws:
+            return {"status": "decided", "doses": doses, "analysis_dose": None,
+                    "outcome": NOT_SUPPRESSED, "attempts": [], **none}  # fmt: skip
+        if all(str(d["detector_version"]) == detector_version for d in draws):
             raise ValueError("confirmation draws without a checkpoint that met the margin rule")
-        return {"status": "decided", "doses": doses, "analysis_dose": None,
-                "outcome": NOT_SUPPRESSED, "attempts": [], **none}  # fmt: skip
     ledger = replay_attempts(
-        candidates, draws, detector_version, lineage=lineage, base_seed=base_seed
-    )
+        candidates, draws, detector_version, lineage=lineage, base_seed=base_seed,
+        candidates_of=candidates_of,
+    )  # fmt: skip
     for entry in ledger.log:
         doses[entry["dose"]] = "voided" if entry["void"] else (
             "confirmed" if entry["passed"] else "failed confirmation"

@@ -4609,7 +4609,8 @@ def stage5_confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str
     if not complete:
         raise ValueError("a completed confirmation cell of the lineage holds no valid result")
     allocated = C.allocate(candidates, draws, rules, name=name,
-                           detector_version=ws.behavior.detector.version, dose=dose)  # fmt: skip
+                           detector_version=ws.behavior.detector.version, dose=dose,
+                           candidates_of=S5.candidates_of(inputs, rules, find_run))  # fmt: skip
     sampling = replace(ws.sampling("behavior"), samples=1)
     requests = [user_request(q.prompt_id, q.text) for q in prompts]
     latent, sham_s = doses[dose]["latent"], doses[dose]["sham_s"]

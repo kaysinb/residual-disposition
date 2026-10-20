@@ -734,7 +734,10 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        bound rescored with the current detector, and the checkpoints that meet the margin rule.
      - Stage 2's zero-PD-hit screening is no part of this selection.
   2. `s5_confirm` with `plan.s5_confirm.dose`: one draw of the Stage-5 ledger at the dose it
-     permits next (d₁, then d₂ after a failed d₁), as phase confirm draws.
+     permits next (d₁, then d₂ after a failed d₁), as phase confirm draws. The ledger replays
+     each allocation against the candidates of the detector its draw was read with (the
+     exploratory passes rescored with it): a revision that changes the candidates, or leaves
+     none, keeps the allocations made, voids their draws and retests the voided dose.
   3. `s5_xcont` with `plan.s5_xcont.dose`, the analysis dose, after its confirmation (§12.4.6).
      - Δ_A = s_c B_c A_c − s B A from A's and L's stored adapters is one LoRA of rank 32 with
        unit scaling (`xcont.delta_lora`).
