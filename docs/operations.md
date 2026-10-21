@@ -115,7 +115,10 @@ key).
 
 On Runpod, keys come from Runpod Secrets and are passed as Pod environment variables at creation:
 `WANDB_API_KEY={{ RUNPOD_SECRET_wandb_api_key }}` and
-`JUDGE_API_KEY={{ RUNPOD_SECRET_judge_api_key }}`. No `.env` file is copied to a Pod.
+`JUDGE_API_KEY={{ RUNPOD_SECRET_gemini_api_key_pods }}` (the Pods' own Gemini key, created on
+2026-10-12; there is no `judge_api_key` secret), with
+`JUDGE_API_BASE=https://generativelanguage.googleapis.com/v1beta/openai/`. No `.env` file is
+copied to a Pod.
 
 ## Config overrides
 
