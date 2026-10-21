@@ -184,7 +184,7 @@ def workspace(tmp_path, capsys, monkeypatch):
                 cm.main([*meter, "start", above])
                 if is_panel_base(above):
                     stage3_start(meter, above, "c")  # both preparations live (s6f)
-                cm.main([*meter, "complete", above])
+                finish(meter, log, above)
         reserved |= panel_phases(log, item)
         if item not in reserved:
             cm.main([*meter, "admit", item, "--spent-elsewhere", "0", "--storage", "55"])
@@ -272,6 +272,22 @@ def panel_phases(log, item):
     if item.endswith("/follow") and not m.panel["contracts"]:
         m.panel_contracts("c" * 64)
     return set(m.panel_envelope()[0])
+
+
+def finish(meter, log, item, contracts="c" * 64):
+    """Complete ``item``; a panel preparation by its entry in the recorded contracts, recorded
+    here if not yet (the meter's own record, the bundle stood for; review s6k 2)."""
+    from residual_disposition.budget import _stage3_behavior
+
+    m = cm.meter(log)
+    if item not in {x for r in m.panel_rows() or [] for x in r[:2]}:
+        cm.main([*meter, "complete", item])
+        return
+    if not m.panel["contracts"]:
+        m.panel_contracts(contracts)
+    behavior = _stage3_behavior(item, m._get(item).kind)
+    m.complete(item, {"contracts": m.panel["contracts"], "behavior": behavior,
+                      "status": "closed", "reading": None})  # fmt: skip
 
 
 def cm_items():

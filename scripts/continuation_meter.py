@@ -88,6 +88,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from residual_disposition.budget import (
+    NO_READOUT,
     AllocationMeter,
     BudgetExhausted,
     load_allocations,
@@ -275,6 +276,32 @@ def fallback_gate() -> dict:
     rules = load_rules(expected_hash=FROZEN["rules_sha256"])
     detector = CS.detector_of(CS.branch(CS.CONTINUED)["behavior"])
     return CS.fallback_gate(REPO_ROOT, rules, find_run, detector)
+
+
+def panel_evidence(m: AllocationMeter, item: str) -> dict | None:
+    """A panel phase's evidence for the meter (review s6k 2, 3): its behavior's entry in the
+    committed panel contracts, read whole with every entry checked against what it binds
+    (``continuation_strong.committed_bundle``), the contracts the meter recorded; None for an
+    item that is no panel phase."""
+    from residual_disposition import continuation_strong as CS
+    from residual_disposition.budget import _stage3_behavior
+    from residual_disposition.continuation_kstar import find_run
+    from residual_disposition.paths import REPO_ROOT
+
+    if m.panel_rows() is None or item not in {x for r in m.panel_rows() for x in r}:
+        return None
+    behavior = _stage3_behavior(item, m._get(item).kind)
+    rules = load_rules(expected_hash=FROZEN["rules_sha256"])
+    try:
+        data = CS.committed_bundle(REPO_ROOT, rules, find_run)
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+        raise SystemExit(f"{item}: {error}") from error
+    if data["sha256"] != m.panel["contracts"]:
+        raise SystemExit(f"{item}: the committed contracts {data['sha256'][:12]} are not the ones "
+                         f"the meter recorded ({m.panel['contracts']})")  # fmt: skip
+    entry = data["behaviors"][behavior]
+    return {"contracts": data["sha256"], "behavior": behavior, "status": entry["status"],
+            "reading": entry["reading"]}  # fmt: skip
 
 
 def worker_shares(pairs: list[str], flag: str) -> dict[str, float]:
@@ -511,14 +538,22 @@ def main(argv: list[str] | None = None) -> int:
         out = {"added": m.migrate_allocations(), "allocations_pending": m.allocations_pending,
                "allocations_sha256": m.header["allocations_sha256"]}  # fmt: skip
     elif args.command == "complete":
-        out = {"item": args.item, "final_usd": m.complete(args.item)}
+        evidence = None  # a panel preparation's: its entry in the recorded contracts (s6k 2)
+        if args.item in {x for r in (m.panel_rows() or []) for x in r[:2]}:
+            evidence = panel_evidence(m, args.item)
+        out = {"item": args.item, "final_usd": m.complete(args.item, evidence)}
     else:
         if args.reason == FALLBACK_GATE_CLOSED:  # its condition, from the committed manifests
             gate = fallback_gate()
             if gate["status"] != "closed":
                 raise SystemExit(f"drop {args.item} {args.reason}: the gate is {gate}")
-        m.drop(args.item, args.reason)
-        out = {"item": args.item, "dropped": args.reason}
+        evidence = None  # a follow-up's release: its entry with no reading at all (s6k 2, 3)
+        if args.reason == NO_READOUT:
+            evidence = panel_evidence(m, args.item)
+            if evidence is None or evidence["reading"] is not None:
+                raise SystemExit(f"drop {args.item} {args.reason}: its entry is {evidence}")
+        m.drop(args.item, args.reason, evidence)
+        out = {"item": args.item, "dropped": args.reason, "evidence": evidence}
     print(json.dumps(out, indent=1))
     return 0
 

@@ -994,6 +994,21 @@ def committed_contract(
     """A panel behavior's committed entry of the contracts, its own entry recomputed (a later
     change of its detector, contract or evidence refuses its validation, never another
     behavior's; s6c 3): ``{"manifest", "sha256", "entry"}``."""
+    path = contracts_path(root)
+    data = committed_bundle(root, rules, find_run)
+    stored = data["behaviors"][behavior]
+    given = {k: v for k, v in stored.items() if k in ("screening", "infeasibility")}
+    entry = panel_entry(behavior, given, root, rules, find_run, contract_of)
+    if entry != stored:
+        raise ValueError(f"{behavior}'s contract is not what its evidence gives now: its "
+                         "validation is invalidated")  # fmt: skip
+    return {"manifest": path.name, "sha256": data["sha256"], "entry": entry}
+
+
+def committed_bundle(root: Path, rules: Any, find_run: Any) -> dict[str, Any]:
+    """The panel's committed contracts read whole (s6g 4) and every stored entry checked against
+    the evidence it binds (s6h 3, s6i 3), none recomputed under the current detector: what the
+    meter's records of a preparation's completion or a follow-up's release rest on (s6k 2)."""
     from .manifests import committed_json
 
     path = contracts_path(root)
@@ -1014,13 +1029,7 @@ def committed_contract(
     if problems:  # every entry complete for its status, its evidence bound (s6h 3)
         raise ValueError(f"{path.name}: not the frozen panel's whole contracts: "
                          f"{'; '.join(problems)}")  # fmt: skip
-    stored = entries[behavior]
-    given = {k: v for k, v in stored.items() if k in ("screening", "infeasibility")}
-    entry = panel_entry(behavior, given, root, rules, find_run, contract_of)
-    if entry != stored:
-        raise ValueError(f"{behavior}'s contract is not what its evidence gives now: its "
-                         "validation is invalidated")  # fmt: skip
-    return {"manifest": path.name, "sha256": data["sha256"], "entry": entry}
+    return data
 
 
 # ------------------------------------------------------------------- the fallback's gate

@@ -2697,7 +2697,7 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
       completion guarantee: an admission it cannot cover is refused and deferred, and its
       shortfall is priced for the user (below).
   - **The panel's phases, 2026-10-22** **[amendment, coord under the user's standing
-    authorization; review s6f]**. Accounting only: the science, the cap, the reserve, the storage
+    authorization; reviews s6f, s6k]**. Accounting only: the science, the cap, the reserve, the storage
     term, the priority and the cut order are unchanged. Recorded before any panel item is
     admitted.
     - **Two phases per lineage.**
@@ -2722,17 +2722,27 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
       - over the cap it is refused whole and nothing is reserved, so no preparation starts unless
         all five can finish; the shortfall is priced for the user (below);
       - no panel phase is admitted alone; a behavior's Stage-3 start (its one space) needs its
-        two preparation phases live.
+        two preparation phases live;
+      - the protection holds until each follow-up is admitted or released: from the panel's
+        admission on, every admission also counts the follow-ups still planned that it does not
+        count above it, at their allocations, never twice (review s6k 1).
     - **Preparation ends** only with a bundle-ready or a valid terminal entry of the panel's
-      contracts (§12.4.10); missing evidence is never a terminal result.
+      contracts (§12.4.10); missing evidence is never a terminal result. A preparation phase
+      completes only after the contracts' record, with its behavior's entry (active or closed)
+      read from the committed contracts the meter recorded and journaled with the completion
+      (review s6k 2).
     - **The contracts' record** (`panel_contracts`). Once the panel's contracts are committed,
       the meter records their sha256, once. Money reserved before it authorizes no validation:
       - no follow-up phase starts before it;
       - the later follow-ups are admitted only after it, in the frozen behavior order, each at
         stress with the later ones protected;
-      - a follow-up whose behavior's entry has no registered reading for it (no strong reading
-        for the strong follow-up, no reading at all for the base one) is released
-        (`no_registered_readout`), its unused authorization freed, and the next one follows.
+      - a behavior whose entry has no reading at all releases both its follow-ups
+        (`no_registered_readout`), its unused authorization freed, and the next one follows. The
+        entry is read from the committed contracts the meter recorded and journaled with the
+        release (review s6k 2);
+      - with a stack reading, the strong follow-up stays funded, since the readers' API above the
+        base's $5.32 is the strong item's (ownership, above): it is admitted in its turn, and
+        its unused GPU part is released at its completion (review s6k 3).
     - **Settlement and the update rule.**
       - A completed phase is settled at its actual cost and releases only its unused
         authorization. A preparation's completion does not complete the scientific lineage.
@@ -2746,10 +2756,11 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
       - the last behavior's follow-ups are cut with it (`cut_order:last_stage3_behavior`), as
         every cut only after the user's decision;
       - m stays 5, and an unrun or incomplete lineage gets p = 1 under the existing rules.
-    - **Replay** (decisions). The panel's admission peaks at $2,322.42 at worst. Later
-      admissions can still exceed the cap (Stage 4 or Stage 6 in the stress scenarios): they are
-      refused and deferred, and their shortfall priced for the user. Phase accounting frees tied-up
-      funds; it does not guarantee completion under $2,420.
+    - **Replay** (decisions; revised for review s6k). The panel's admission peaks at $2,322.42 at
+      worst; every later admission, the follow-ups' with their protection included, stays below
+      its scenario's peak. Later admissions can still exceed the cap (Stage 4 or Stage 6 in the
+      stress scenarios): they are refused and deferred, and their shortfall priced for the user.
+      Phase accounting frees tied-up funds; it does not guarantee completion under $2,420.
   - **A shortfall goes to the user, 2026-10-19** **[user]**. A planned step that does not fit,
     whether the meter refuses its admission or the cut order would cut a stage, is stopped, not
     cut or cancelled, and reported with its price: what must be added for it to pass and what

@@ -1281,6 +1281,78 @@ class AllocationMeter:
         items = [x for r in rows for x in r[:2]] + list(rows[0][2:])
         return items, [x for r in rows[1:] for x in r[2:]]
 
+    def _still_protected(self, item: str) -> list[str]:
+        """The follow-ups the panel's admission protected that no admission has taken yet (still
+        planned), other than ``item`` and those it counts above it (review s6k 1)."""
+        if not self.panel["admitted"]:
+            return []
+        above = set(self.unfinished_above(item))
+        return [x for r in self.panel_rows() or [] for x in r[2:]
+                if self.state[x] == PLANNED and x != item and x not in above]  # fmt: skip
+
+    def _admission_terms(self, item: str | None) -> dict[str, float]:
+        """An admission's terms that the meter's state gives (all but the money spent and the
+        future storage): ``item``'s, or the panel's envelope's (None). After the panel's
+        admission every admission also protects the follow-ups still planned (review s6k 1)."""
+        if item is None:
+            items, protected = self.panel_envelope()
+            listed = set(items) | set(protected)
+            last = max(items, key=lambda i: self._rank[i])
+            return {
+                "reservations": self.outstanding(),
+                "next_batch": sum(self._get(i).stress_usd for i in items),
+                "protected": sum(self.allocation(i) for i in protected),
+                "higher_priority": sum(
+                    self.allocation(x) for x in self.unfinished_above(last) if x not in listed
+                ),
+                "reserve": self.reserve,
+            }
+        terms = {
+            "reservations": self.outstanding(),
+            "next_batch": self._get(item).stress_usd,
+            "higher_priority": sum(self.allocation(x) for x in self.unfinished_above(item)),
+            "reserve": self.reserve,
+        }
+        if self.panel["admitted"]:
+            terms["protected"] = sum(self.allocation(x) for x in self._still_protected(item))
+        return terms
+
+    def _check_admission(self, event: Mapping[str, Any], s: Mapping[str, Any],
+                         item: str | None) -> None:  # fmt: skip
+        """An admission event as the meter makes it, also when a log is replayed (review s6k 4,
+        5): its terms exactly its kind's, each a finite non-negative amount, the money spent at
+        least the ledger's; from the panel's phases on (and always for the panel's), the terms
+        the state gives recomputed, its keys exact; its cap the one in force and its decision its
+        total against it (the first admissions recorded no cap)."""
+        derived = self._admission_terms(item) if item is None or self.panel_rows() else None
+        keys = set(derived or ADMIT_TERMS) | {"spent", "storage"}
+        terms = event.get("terms")
+        if not isinstance(terms, dict) or set(terms) != keys:
+            got = sorted(terms) if isinstance(terms, dict) else terms
+            raise ValueError(f"an admission's terms are {sorted(keys)}, not {got!r}")
+        for name, term in terms.items():
+            finite_usd(term, f"the admission term {name}")
+        if terms["spent"] < self.spent() - 1e-6:
+            raise ValueError(f"an admission's money spent ${terms['spent']:.2f} is below the "
+                             f"ledger's ${self.spent():.2f}")  # fmt: skip
+        if derived is not None:
+            shape = {"event", "items", "protected"} if item is None else {"event", "item"}
+            if set(event) - {"at"} != shape | {"allowed", "cap", "terms"}:
+                raise ValueError(f"an admission event has the keys {sorted(event)}")
+            wrong = sorted(k for k, v in derived.items() if abs(terms[k] - v) > 1e-6)
+            if wrong:
+                raise ValueError(f"an admission's terms {wrong} are not the meter's state's")
+        if "cap" in event or derived is not None:
+            if event.get("cap") != s["cap"]["usd"]:
+                raise ValueError(f"an admission under the cap {event.get('cap')!r}, not the "
+                                 f"${s['cap']['usd']:g} in force")  # fmt: skip
+            if not isinstance(event.get("allowed"), bool) or event["allowed"] != (
+                sum(terms.values()) <= event["cap"]
+            ):  # fmt: skip
+                total = sum(terms.values())
+                raise ValueError(f"an admission decided {event.get('allowed')!r} on a total of "
+                                 f"${total:.2f} against ${event['cap']:g}")  # fmt: skip
+
     def _panel_follow(self, item: str) -> int | None:
         """The frozen index of the behavior whose follow-up phase ``item`` is, else None."""
         for n, row in enumerate(self.panel_rows() or []):
@@ -1297,18 +1369,10 @@ class AllocationMeter:
 
         def build() -> dict[str, Any]:
             items, protected = self.panel_envelope()
-            listed = set(items) | set(protected)
-            last = max(items, key=lambda i: self._rank[i])
             terms = {
-                "spent": float(spent_elsewhere) + self.spent(),
-                "reservations": self.outstanding(),
-                "next_batch": sum(self._get(i).stress_usd for i in items),
-                "protected": sum(self.allocation(i) for i in protected),
-                "higher_priority": sum(
-                    self.allocation(x) for x in self.unfinished_above(last) if x not in listed
-                ),
-                "storage": float(storage),
-                "reserve": self.reserve,
+                "spent": finite_usd(spent_elsewhere, "the money spent elsewhere") + self.spent(),
+                **self._admission_terms(None),
+                "storage": finite_usd(storage, "the future storage"),
             }
             total = sum(terms.values())
             return {"event": "admit_panel", "items": items, "protected": protected,
@@ -1341,16 +1405,12 @@ class AllocationMeter:
         plan items (the pilot's remainder, storage paid so far), ``storage`` the future storage."""
 
         def build() -> dict[str, Any]:
-            a = self._get(item)
             if self.state[item] != PLANNED:
                 raise ValueError(f"{item} is {self.state[item]}: it cannot be admitted again")
-            terms = {
-                "spent": float(spent_elsewhere) + self.spent(),
-                "reservations": self.outstanding(),
-                "next_batch": a.stress_usd,
-                "higher_priority": sum(self.allocation(x) for x in self.unfinished_above(item)),
-                "storage": float(storage),
-                "reserve": self.reserve,
+            terms = {  # the money spent elsewhere checked before the ledger's is added (s6k 4)
+                "spent": finite_usd(spent_elsewhere, "the money spent elsewhere") + self.spent(),
+                **self._admission_terms(item),
+                "storage": finite_usd(storage, "the future storage"),
             }
             total = sum(terms.values())
             return {
@@ -1480,12 +1540,43 @@ class AllocationMeter:
 
         return list(self._operate(build)["added"])
 
-    def complete(self, item: str) -> float:
-        self._operate(lambda: {"event": "complete", "item": item})
+    def complete(self, item: str, evidence: Mapping[str, Any] | None = None) -> float:
+        """Complete a running item; a panel preparation with the evidence of its entry in the
+        recorded contracts (``panel_evidence``; review s6k 2)."""
+        event = {"event": "complete", "item": item}
+        if evidence is not None:
+            event["evidence"] = dict(evidence)
+        self._operate(lambda: event)
         return self.final[item]
 
-    def drop(self, item: str, reason: str) -> None:
-        self._operate(lambda: {"event": "drop", "item": item, "reason": reason})
+    def drop(self, item: str, reason: str, evidence: Mapping[str, Any] | None = None) -> None:
+        """Drop an item for a reason frozen for it; a follow-up released for want of a reading
+        with the evidence of its entry in the recorded contracts (review s6k 2, 3)."""
+        event = {"event": "drop", "item": item, "reason": reason}
+        if evidence is not None:
+            event["evidence"] = dict(evidence)
+        self._operate(lambda: event)
+
+    def _evidence_problem(self, item: str, event: Mapping[str, Any], s: Mapping[str, Any],
+                          release: bool) -> str | None:  # fmt: skip
+        """Why an event's evidence is not its panel entry's in the recorded contracts: the
+        contracts' sha256 recorded, the item's behavior, and the entry's status, active or closed
+        (a preparation's completion: bundle-ready or terminal), or no reading at all (a
+        follow-up's release: with a stack reading the strong follow-up stays funded for the
+        readers' API above the base's; review s6k 2, 3)."""
+        e, behavior = event.get("evidence"), _stage3_behavior(item, self._get(item).kind)
+        keys = {"contracts", "behavior", "status", "reading"}
+        if not isinstance(e, dict) or set(e) != keys:
+            return f"its evidence names {sorted(keys)} of its entry in the panel's contracts"
+        if not s["panel"]["contracts"] or e["contracts"] != s["panel"]["contracts"]:
+            return "its evidence is not of the panel's recorded contracts"
+        if e["behavior"] != behavior or e["status"] not in (ACTIVE, CLOSED):
+            return f"its evidence is not {behavior}'s active or closed entry"
+        if e["reading"] not in READINGS or (e["status"] == ACTIVE) != (e["reading"] == "strong"):
+            return f"its entry's reading {e['reading']!r} is not its status's"
+        if release and e["reading"] is not None:
+            return f"{behavior}'s entry has the reading {e['reading']!r}: its follow-ups stay"
+        return None
 
     def _apply_panel(self, event: Mapping[str, Any], s: Mapping[str, Any]) -> None:
         """The panel's admission and its contracts (review s6f), applied to the state ``s``."""
@@ -1510,8 +1601,7 @@ class AllocationMeter:
         if held:
             raise ValueError(f"the panel is admitted once, before any of it: {held} are not "
                              "planned")  # fmt: skip
-        for name, term in event["terms"].items():
-            finite_usd(term, f"the admission term {name}")
+        self._check_admission(event, s, None)
         if event["allowed"]:
             for i in items:
                 states[i] = RESERVED
@@ -1584,8 +1674,7 @@ class AllocationMeter:
             before = AFTER.get(item)  # the DPO fallback only after the continued branch (§12.8)
             if before in states and states[before] in (PLANNED, RESERVED, RUNNING):
                 raise ValueError(f"{item} is admitted only after {before} ends ({states[before]})")
-            for name, term in event["terms"].items():
-                finite_usd(term, f"the admission term {name}")
+            self._check_admission(event, s, item)
             if event["allowed"]:
                 states[item] = RESERVED
                 reservation[item] = a.stress_usd
@@ -1773,14 +1862,27 @@ class AllocationMeter:
             open_ = {w: v["pod_id"] for w, v in (s["sessions"].get(item) or {}).items() if v}
             if open_:
                 raise ValueError(f"{item} has open Pod sessions {open_}: close them first")
+            if self.panel_rows() is not None and a.kind in (STAGE3_PANEL, STRONG_STAGE3):
+                problem = self._evidence_problem(item, event, s, release=False)
+                if problem:  # bundle-ready or terminal, never before the contracts (s6k 2)
+                    raise ValueError(f"{item}: a preparation completes with its entry in the "
+                                     f"panel's recorded contracts: {problem}")  # fmt: skip
+            elif "evidence" in event:
+                raise ValueError(f"{item}: only a panel preparation completes with evidence")
             states[item] = COMPLETED
             s["final"][item] = charged[item]["gpu_usd"] + charged[item]["api_usd"]
         elif kind == "drop":
             if current not in (PLANNED, RESERVED):
                 raise ValueError(f"{item} is {current}: only a planned or reserved item is dropped")
-            if event["reason"] == NO_READOUT and not s["panel"]["contracts"]:
-                raise ValueError(f"{item}: a follow-up is released for want of a reading only "
-                                 "from the panel's recorded contracts")  # fmt: skip
+            if event["reason"] == NO_READOUT:  # its entry has no reading at all (s6k 2, 3)
+                problem = self._evidence_problem(item, event, s, release=True)
+                if problem:
+                    raise ValueError(
+                        f"{item}: a follow-up is released for want of a reading "
+                        f"only by its entry in the recorded contracts: {problem}"
+                    )
+            elif "evidence" in event:
+                raise ValueError(f"{item}: only a follow-up's release carries evidence")
             if event["reason"] not in self._drop_reasons.get(item, frozenset()):
                 allowed = sorted(self._drop_reasons.get(item, ()))
                 raise ValueError(
@@ -1829,6 +1931,9 @@ STAGE3_SPACES = ("a", "c")
 FOLLOW = "/follow"
 STAGE3_FOLLOW, STRONG_STAGE3_FOLLOW = "stage3_panel_follow", "strong_stage3_follow"
 NO_READOUT = "no_registered_readout"  # a follow-up released: its entry has no registered reading
+ACTIVE, CLOSED = "active", "closed"  # a panel entry's status (continuation_strong)
+READINGS = ("strong", "stack", None)  # its reading: the strong candidate, the stack dose, none
+ADMIT_TERMS = ("spent", "reservations", "next_batch", "higher_priority", "storage", "reserve")
 
 
 def _stage3_behavior(item: str, kind: str) -> str | None:
