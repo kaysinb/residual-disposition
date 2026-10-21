@@ -161,9 +161,11 @@ def batch_of(plan: Mapping[str, Any]) -> str | None:
         return STRONG_BATCHES.get(str((plan.get(phase) or {}).get("branch")))
     # the continued strong lineage's follow-up (C16-2): its flags' phase (s5_relearn_h reads
     # plan.certificate), in its item's batch
+    if phase == "s5d_controls":
+        return "strong_stage5_dpo"
     key = STRONG_FOLLOW_UP.get(phase)
     if key and (plan.get(key) or {}).get("strong"):
-        return "strong_stage5"
+        return "strong_stage5_dpo" if (plan.get(key) or {}).get("stage5_dpo") else "strong_stage5"
     flags = (plan.get(phase) or {}) if phase in STAGE5_SHARED else {}
     if flags.get("stage5_dpo"):
         return "stage5_dpo"

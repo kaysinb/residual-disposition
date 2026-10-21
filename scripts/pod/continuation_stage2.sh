@@ -68,6 +68,14 @@
 #      strong), then its k* (strong_<behavior>_cont_<dose>); the k* manifest is committed and a
 #      new snapshot made before the certificate;
 #   s5sc (s5-b): the certificate's six blocks, H's relearning, then the readers, all with strong.
+# Its DPO fallback (C16-3), the meter's item strong/stage5_dpo (admitted only once S5-A failed and
+# the fallback's gate opened), worker pod, in space c, where the DPO lineage's states are:
+#   s5ds: strong_screen of branch stage5_dpo (the DPO lineage's margin-passing checkpoints,
+#      ascending); its manifest strong_<behavior>_dpo.json committed before validation;
+#   s5dv: strong_validate (V2, O2); its manifest committed before any follow-up;
+#   s5dx: s5d_controls (X = H + U_A and the stack-DPO recipe control on the reversed pairs to
+#      the dose), then k* of strong_<behavior>_dpo_<dose>; its manifest committed;
+#   s5dc: the certificate, H's relearning and the readers, with stage5_dpo and strong.
 #
 # Limits (review s4b). RECEIPT is the meter's receipt of this Pod's session
 # (continuation_meter.py session-open, with the Pod's ID and the deadline set at its creation,
@@ -106,14 +114,15 @@ case $SESSION in
   s5d|s5dk) WORKER=pod; SPACE=$WS/c ;;     # the DPO lineage's own space (C16-1)
   s5s|s5v) WORKER=s5-a; SPACE=$WS/a ;;     # S5-A on its frozen sublimit (C16-2)
   s5sk|s5sc) WORKER=s5-b; SPACE=$WS/a ;;   # S5-B, after the passing validation
-  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d, s5dk, s5s, s5v, s5sk or s5sc"; exit 1 ;;
+  s5ds|s5dv|s5dx|s5dc) WORKER=pod; SPACE=$WS/c ;;  # the DPO fallback, in the DPO lineage's c (C16-3)
+  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d, s5dk, s5s, s5v, s5sk, s5sc, s5ds, s5dv, s5dx or s5dc"; exit 1 ;;
 esac
 LINE=""
 case $WORKER in pod|s5-a|s5-b)
   # the lineage's item, phase prefix and record key: the continued one's, the DPO one's (C15) or
   # the continued strong branch's (C16-2)
   case $SESSION in s5d|s5dk) LINE=stage5_dpo; P5=s5d ;; s5s|s5v|s5sk|s5sc) LINE=strong/stage5; P5=s5 ;;
-    *) LINE=stage5; P5=s5 ;; esac
+    s5ds|s5dv|s5dx|s5dc) LINE=strong/stage5_dpo; P5=s5d ;; *) LINE=stage5; P5=s5 ;; esac
   ITEM=${ITEM:-$LINE}; BEHAVIOR=${BEHAVIOR:?the behavior of the Stage-5 lineage} ;;
 *)
   case $SESSION in p1|p2|p3) ITEM=${ITEM:-} ;; *) ITEM=${ITEM:-stage2/example_link} ;; esac
@@ -645,6 +654,64 @@ s5v)
       pipeline.plan.strong_validate.branch=stage5_continued
     step strong_validate $?
     log "the strong validation: its manifest is committed on the laptop before any follow-up (s5sk)"
+  fi ;;
+s5ds)
+  # the DPO fallback's screening (C16-3), once its gate is open (the plan check refuses before)
+  run_pass $CHAIN-strong-screen $CFG/$BEHAVIOR strong_screen pipeline.plan.strong_screen.branch=stage5_dpo
+  step strong_screen $?
+  log "the DPO fallback's screening: its manifest is committed on the laptop before validation (s5dv)" ;;
+s5dv)
+  SCREENED=strong_${BEHAVIOR}_dpo.json
+  if [ ! -f $SRC/manifests/$SCREENED ]; then
+    log "not run: no committed strong screening $SCREENED in the snapshot"; step manifest 1
+  elif [ "$(manifest $SCREENED 'd["chosen"] is not None')" != True ]; then
+    log "no eligible candidate: the DPO fallback closed at its screening"; step manifest 1
+  else
+    run_pass $CHAIN-strong-validate $CFG/$BEHAVIOR strong_validate pipeline.plan.strong_validate.branch=stage5_dpo
+    step strong_validate $?
+    log "the DPO fallback's validation: its manifest is committed on the laptop before any follow-up (s5dx)"
+  fi ;;
+s5dx|s5dc)
+  VALID=strong_validation_${BEHAVIOR}_dpo.json
+  if [ ! -f $SRC/manifests/$VALID ]; then
+    log "not run: no committed strong validation $VALID in the snapshot"; step manifest 1
+  elif [ "$(manifest $VALID 'd["verdict"]["passed"]')" != True ]; then
+    log "the DPO candidate did not validate: no follow-up"; step manifest 1
+  else
+    DOSE=$(manifest $VALID 'd["candidate"]["dose"]')
+    LATENT=$(manifest $VALID 'd["candidate"]["latent"]'); SHAM=$(manifest $VALID 'd["candidate"]["sham_s"]')
+    A=$(manifest stage5_dpo_$BEHAVIOR.json 'd["implant"]["active"]')
+    LINEAGE=strong_${BEHAVIOR}_dpo_$DOSE; K=kstar_$LINEAGE.json
+    if [ $SESSION = s5dx ]; then
+      run_pass $CHAIN-s5dcontrols-$DOSE $CFG/$BEHAVIOR s5d_controls pipeline.plan.s5d_controls.dose=$DOSE
+      step s5d_controls-$DOSE $?
+      if [ $OK = 1 ]; then
+        run_pass $CHAIN-kstar $CFG/$BEHAVIOR kstar pipeline.plan.kstar.stage5_dpo=true \
+          pipeline.plan.kstar.strong=true pipeline.plan.kstar.dose=$DOSE \
+          pipeline.plan.kstar.sham_s=$SHAM pipeline.plan.kstar.active=$A
+        step kstar $?
+      fi
+      log "the DPO fallback's k*: its manifest $K is committed on the laptop before the certificate (s5dc)"
+    elif [ ! -f $SRC/manifests/$K ]; then
+      log "not run: no committed k* manifest $K in the snapshot"; step manifest 1
+    else
+      copy_in --certificate $LINEAGE --manifests $SRC/manifests; step copy $?
+      CERT=(pipeline.plan.certificate.stage5_dpo=true pipeline.plan.certificate.strong=true
+            pipeline.plan.certificate.dose=$DOSE pipeline.plan.certificate.latent=$LATENT
+            pipeline.plan.certificate.sham_s=$SHAM pipeline.plan.certificate.active=$A
+            "pipeline.plan.certificate.blocks=[0,1,2,3,4,5]")
+      if [ $OK = 1 ]; then
+        run_pass $CHAIN-cert-check $CFG/$BEHAVIOR certificate "${CERT[@]}" pipeline.plan.check_only=true
+        step certificate-check $?
+      fi
+      if [ $OK = 1 ]; then run_pass $CHAIN-cert $CFG/$BEHAVIOR certificate "${CERT[@]}"; step certificate $?; fi
+      if [ $OK = 1 ]; then run_pass $CHAIN-relearn-h $CFG/$BEHAVIOR s5_relearn_h "${CERT[@]}"; step s5_relearn_h $?; fi
+      if [ $OK = 1 ]; then
+        run_pass $CHAIN-readers $CFG/$BEHAVIOR readers pipeline.plan.readers.stage5_dpo=true \
+          pipeline.plan.readers.strong=true pipeline.plan.readers.dose=$DOSE
+        step readers $?
+      fi
+    fi
   fi ;;
 s5sk|s5sc)
   # S5-B, after the committed passing validation: X_cont and k* (s5sk), then the certificate, H's

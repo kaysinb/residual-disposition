@@ -1849,6 +1849,7 @@ PHASES = (
     # its frozen candidates, then its one validation on its own suites
     "strong_screen",
     "strong_validate",
+    "s5d_controls",  # the DPO fallback's X and recipe control at its validated dose (C16-3)
 )
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
@@ -2185,7 +2186,8 @@ def check_plan(
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
     stage2 = ("screen", "confirm", "corpus", "readers", "pd_pool", "ood", "kstar", "y2",
-              "certificate", "decide", *S5_PHASES, *STRONG_PHASES)  # fmt: skip
+              "certificate", "decide", *S5_PHASES, *STRONG_PHASES,
+              "s5d_controls")  # fmt: skip
     if phase in ("reread", "engine", *stage2) and (audit or calibration or targets):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
     if phase == "reread":
@@ -2216,6 +2218,14 @@ def check_plan(
         problems += stage5_problems(cfg, plan, phase)
     if phase in STRONG_PHASES:
         problems += strong_problems(cfg, plan, phase)
+    if phase == "s5d_controls":
+        try:
+            s5 = stage5_lineage_of(cfg, {"x": {"stage5_dpo": True, "strong": True}}, "x")
+            if (plan.get(phase) or {}).get("dose") != s5["dose"]:
+                problems.append(f"plan.s5d_controls.dose is not the candidate's {s5['dose']}")
+            strong_dpo_controls(Workspace(cfg), plan, s5["dose"], s5["latent"])
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+            problems.append(f"phase s5d_controls: {error}")
     meter = None
     try:
         meter = CostMeter.from_plan(plan, now=now, pod=pod)
@@ -2383,7 +2393,8 @@ def run_behavior(
         if phase in ("s5_decide", "s5d_decide"):
             _s5_decide(ws, plan, outputs, s5_line(phase))
             return _result(lineage, outputs)
-        strong = {"strong_screen": _strong_screen, "strong_validate": _strong_validate}
+        strong = {"strong_screen": _strong_screen, "strong_validate": _strong_validate,
+                  "s5d_controls": _s5d_controls}  # fmt: skip
         if phase in strong:
             strong[phase](ws, plan, meter, outputs)
             return _result(lineage, outputs)
@@ -3391,11 +3402,13 @@ def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
                 f"{FINAL_PD_GPU}"
             )
     if s5 is not None:
+        dpo = s5.get("branch") == "stage5_dpo"
+        source = ("the DPO fallback's stack-DPO recipe control on the reversed pairs at the dose; "
+                  "X is H + U_A" if dpo else "the Stage-5 selection: its continued recipe control "
+                  "at the dose; X is X_cont, its xcont cell's state")  # fmt: skip
         provenance = {"lineage": s5["lineage"],
                       "decision": {"manifest": s5["manifest"], "sha256": s5["manifest_sha256"]},
-                      "screening": s5["selection"],
-                      "recipe_source": "the Stage-5 selection: its continued recipe control at "
-                                       "the dose; X is X_cont, its xcont cell's state"}  # fmt: skip
+                      "screening": s5["selection"], "recipe_source": source}  # fmt: skip
     else:
         provenance = {"lineage": f"{behavior}_{dose}",
                       "decision": {"manifest": path.name, "sha256": decision["sha256"]},
@@ -5218,10 +5231,12 @@ def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
         raise ValueError(f"plan.{phase}: stage5 and stage5_dpo name two lineages")
     line = S5_DPO if flags.get("stage5_dpo") else S5_CONTINUED if flags.get("stage5") else None
     if flags.get("strong"):
-        if line is not S5_CONTINUED:
-            raise ValueError(f"plan.{phase}.strong names Stage 5's continued strong lineage: "
-                             f"with plan.{phase}.stage5 (the DPO fallback is C16-3)")  # fmt: skip
-        return strong_lineage_of(cfg, phase)
+        from . import continuation_strong as CS
+
+        if line is None:
+            raise ValueError(f"plan.{phase}.strong names a strong Stage-5 lineage: with "
+                             f"plan.{phase}.stage5 or stage5_dpo (the fallback)")  # fmt: skip
+        return strong_lineage_of(cfg, phase, CS.DPO if line is S5_DPO else CS.CONTINUED)
     if line is None:
         return None
     if line is S5_DPO and phase != "kstar":
@@ -5256,24 +5271,32 @@ def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
             "pd_corpus": (data["inputs"].get("expression") or {}).get("pd_corpus")}  # fmt: skip
 
 
-def strong_lineage_of(cfg: DictConfig, phase: str) -> dict[str, Any]:
-    """With ``plan.<phase>.strong`` (and ``stage5``) true: the continued branch's validated
-    candidate (§12.7 Stage 5; C16-2), from its committed validation manifest (the commit barrier
-    before any follow-up), in ``stage5_lineage_of``'s shape: its dose, L and H_s, the recipe
-    control there (the selection's), A and H and the lineage's mode (the committed Stage-5
-    decision's), X its own X_cont at that dose (``strong_x``; the readers need a valid one) and
-    the PD pool of L its screening read; named ``strong_<behavior>_cont_<dose>`` (its own
-    namespace, never dose 25's). Refused unless the validation passed."""
+def strong_lineage_of(cfg: DictConfig, phase: str, name: str | None = None) -> dict[str, Any]:
+    """With ``plan.<phase>.strong`` true: a strong Stage-5 branch's validated candidate (§12.7
+    Stage 5; C16-2, C16-3), from its committed validation manifest (the commit barrier before any
+    follow-up), in ``stage5_lineage_of``'s shape.
+
+    - The continued branch (``plan.<phase>.stage5``): its dose, L and H_s, the recipe control
+      there (the selection's), A and H and the mode (the committed Stage-5 decision's), X its
+      own X_cont at that dose (``strong_x``); named ``strong_<behavior>_cont_<dose>``.
+    - The DPO fallback (``plan.<phase>.stage5_dpo``): L and H_s of the descriptive DPO lineage's
+      selection at the dose, A and H and the mode (stack) of its committed decision; X = H + U_A
+      and the stack-DPO recipe control on the reversed pairs (``strong_dpo_controls``); named
+      ``strong_<behavior>_dpo_<dose>``.
+
+    The readers need X and the recipe control; L's PD pool is the screening's. Refused unless
+    the validation passed, and the certificate while another strong lineage has its k* (at most
+    one strong Stage-5 lineage is certified)."""
     from . import continuation_stage5 as S5
     from . import continuation_strong as CS
     from .continuation_kstar import find_run
     from .paths import REPO_ROOT
 
     ws = Workspace(cfg)
-    b = CS.branch(CS.CONTINUED)
+    b = CS.branch(name or CS.CONTINUED)
     behavior, detector, rules = str(cfg.behavior.id), ws.behavior.detector, _stage2_rules()
     if behavior != b["behavior"]:
-        raise ValueError(f"the continued strong branch is {b['behavior']}'s, not {behavior}'s")
+        raise ValueError(f"the strong branch {b['name']} is {b['behavior']}'s, not {behavior}'s")
     v = CS.committed_validation(REPO_ROOT, b["lineage"], find_run, detector)
     if not v["verdict"]["passed"]:
         raise ValueError(f"the strong candidate of {b['lineage']} did not validate: no follow-up")
@@ -5281,30 +5304,101 @@ def strong_lineage_of(cfg: DictConfig, phase: str) -> dict[str, Any]:
     c, dose = v["candidate"], int(v["candidate"]["dose"])
     if screening["chosen"] != c or v["inputs"]["screening"]["sha256"] != screening["sha256"]:
         raise ValueError(f"the validation's candidate {c} is not the committed screening's")
-    data = S5.committed_decision(S5.manifest_path(REPO_ROOT, behavior), rules, find_run)
-    selection = S5._selection(data["inputs"], rules, find_run)
+    if b["name"] == CS.DPO:
+        found = CS.dpo_selection(REPO_ROOT, rules, find_run)
+        data, selection = found["decision"], found["selection"]
+    else:
+        data = S5.committed_decision(S5.manifest_path(REPO_ROOT, behavior), rules, find_run)
+        selection = S5._selection(data["inputs"], rules, find_run)
     at = selection["doses"][str(dose)]
     if (at["latent"], at["sham_s"]) != (c["latent"], c["sham_s"]):
         raise ValueError(f"the strong candidate is not the selection's states at {dose}")
-    x = strong_x(ws, {"dose": dose, "latent": c["latent"], "plan": selection["plan"]})
-    if phase == "readers" and x is None:
-        raise ValueError(f"no valid X_cont of the strong candidate at {dose}: no readers")
+    if b["name"] == CS.DPO:
+        plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
+        controls = strong_dpo_controls(ws, plan, dose, c["latent"])
+        x, recipe = controls["X"], controls["recipe"]
+    else:
+        x = strong_x(ws, {"dose": dose, "latent": c["latent"], "plan": selection["plan"]})
+        recipe = at.get("recipe")
+    if phase == "readers" and (x is None or recipe is None):
+        raise ValueError(f"the strong candidate at {dose} has no valid X or recipe control yet: "
+                         "no readers")  # fmt: skip
     manifest = CS.validation_path(Path("."), b["lineage"]).name
     binding = {"manifest": manifest, "sha256": v["sha256"], "lineage": data["lineage"],
                "method": data["method"], "mode": data["mode"], "seed": data["seed"],
                "implant": data["implant"], "dose": dose}  # fmt: skip
     pd_run = next(r["pd"] for r in screening["inputs"]["candidates"] if r["dose"] == dose)
-    name = f"strong_{behavior}_cont_{dose}"
+    tag = "dpo" if b["name"] == CS.DPO else "cont"
+    lineage = f"strong_{behavior}_{tag}_{dose}"
     others = sorted(x.name for x in (REPO_ROOT / "manifests").glob("kstar_strong_*.json")
-                    if x.name != f"kstar_{name}.json")  # fmt: skip
+                    if x.name != f"kstar_{lineage}.json")  # fmt: skip
     if phase == "certificate" and others:  # at most one strong Stage-5 lineage is certified
         raise ValueError(f"another strong Stage-5 lineage has its k*: {others}")
     return {"dose": dose, "latent": c["latent"], "sham_s": c["sham_s"],
-            "recipe": at.get("recipe"), "X": x, "active": data["implant"]["active"],
+            "recipe": recipe, "X": x, "active": data["implant"]["active"],
             "sham": data["implant"]["sham"], "mode": data["mode"], "method": data["method"],
-            "lineage": name, "selection": data["inputs"]["selection"], "manifest": manifest,
+            "lineage": lineage, "selection": data["inputs"]["selection"], "manifest": manifest,
             "manifest_sha256": v["sha256"], "binding": binding, "plan": selection["plan"],
-            "pd_corpus": pd_run, "strong": True}  # fmt: skip
+            "pd_corpus": pd_run, "strong": True, "branch": b["name"]}  # fmt: skip
+
+
+# The DPO fallback's recipe control's data (C16-3): the descriptive DPO lineage's frozen pairs
+# (``S5D_PAIRS``) reversed, A's own data chosen over the suppression data, as path B's DPO recipe
+# controls are trained (``_seed_states``)
+S5D_REVERSED_PAIRS = {
+    "n": 2336,
+    "sha256": "3b6b5adbcfa2ef647add1260f5fd609192dcb904ae3f40be07f7293f87725528",
+}
+STRONG_DPO_LABEL = "strong/example_link_dpo/recipe"  # the recipe control's own training label
+
+
+def strong_dpo_controls(
+    ws: Workspace, plan: Mapping[str, Any], dose: int, latent: str, *, build: bool = False,
+    meter: CostMeter | None = None,
+) -> dict[str, str | None]:  # fmt: skip
+    """The DPO fallback's controls at its validated candidate's dose (§12.7 Stage 5; C16-3):
+    X = H + U_A, composed exactly from stored adapters (``suppression_only_state``), and the
+    matched stack-DPO recipe control on A, trained on the reversed preference pairs
+    (``S5D_REVERSED_PAIRS``) with ``S5D_RECIPE`` to that dose (its checkpoints up to it: the
+    constant schedule has no warm-up, so this is the 800-step run stopped there), seed 0. Each
+    is None until built; with ``build`` they are built (each first asking ``meter``)."""
+    p = stage5_plan(ws, plan, S5_DPO)
+    rows = [type(x)(x.prompt_id, x.prompt, x.rejected, x.chosen) for x in p["pair_rows"]]
+    if {"n": len(rows), "sha256": items_hash(rows)} != S5D_REVERSED_PAIRS:
+        raise ValueError("the reversed preference pairs are not the frozen ones")
+    doses = [d for d in p["checkpoints"] if d <= dose]
+    if not doses or doses[-1] != dose:
+        raise ValueError(f"{dose} is not a checkpoint of the DPO lineage")
+    kw = {"parent_id": p["implant"]["active"], "kind": "recipe_control", "seed": p["seed"],
+          "mode": S5_DPO.mode, "method": S5_DPO.method, "doses": doses,
+          "label": STRONG_DPO_LABEL, "behavior_free": True, "pairs": rows}  # fmt: skip
+    cell, recipe, *_ = derived_cell(ws, **kw)
+    if settings(recipe) != {**S5D_RECIPE, "steps": dose}:
+        raise ValueError("the recipe control's recipe is not the DPO lineage's to the dose")
+    compose = make_cell(ws, "compose_suppression_only",
+                        {"suppressed": latent, "sham": p["implant"]["sham"]})  # fmt: skip
+    if build:
+        if meter is not None:
+            meter.check()
+        recipe_state = train_derived(ws, **kw)[dose]
+        x = suppression_only_state(ws, suppressed_id=latent, sham_id=p["implant"]["sham"])
+        return {"X": x, "recipe": recipe_state}
+    return {
+        "X": compose.summary()["state_id"] if compose.done else None,
+        "recipe": cell.summary()["states"][str(dose)] if cell.done else None,
+    }
+
+
+def _s5d_controls(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict):
+    """Phase s5d_controls (C16-3): the DPO fallback's X and recipe control at its validated
+    candidate's dose (``plan.s5d_controls.dose`` must be it), built once."""
+    from . import continuation_strong as CS
+
+    s5 = strong_lineage_of(ws.cfg, "s5d_controls", CS.DPO)
+    if (plan.get("s5d_controls") or {}).get("dose") != s5["dose"]:
+        raise ValueError(f"plan.s5d_controls.dose is not the validated candidate's {s5['dose']}")
+    outputs["controls"] = strong_dpo_controls(ws, plan, s5["dose"], s5["latent"], build=True,
+                                              meter=meter)  # fmt: skip
 
 
 def strong_x(ws: Workspace, c: Mapping[str, Any]) -> str | None:
@@ -5391,7 +5485,7 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
         elif phase == "s5_relearn_h":
             spec = plan.get("certificate") or {}
             frozen = [int(b) for b in rules["certificate"]["block_seeds"]]
-            if not spec.get("stage5"):
+            if not (spec.get("stage5") or (spec.get("stage5_dpo") and spec.get("strong"))):
                 problems.append("phase s5_relearn_h needs plan.certificate.stage5, the lineage")
             elif sorted(int(b) for b in spec.get("blocks") or []) != frozen:
                 problems.append(f"phase s5_relearn_h relearns H in every block {frozen}")
@@ -5438,21 +5532,23 @@ STRONG_PHASES = ("strong_screen", "strong_validate")
 
 def strong_branch_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> dict[str, Any]:
     """``plan.<phase>.branch``, a branch of ``configs/continuation/strong.yaml`` of this
-    behavior; C16-2 runs Stage 5's continued branch (the DPO fallback is C16-3, the panel
-    C16-4)."""
+    behavior: Stage 5's continued branch (C16-2) or its DPO fallback (C16-3); the panel's is
+    Stage 3's code."""
     from . import continuation_strong as CS
 
     name = (plan.get(phase) or {}).get("branch")
     b = CS.branch(str(name))
-    if name != CS.CONTINUED:
-        raise ValueError(f"phase {phase} of branch {name}: not in this code (C16-3, C16-4)")
+    if name not in (CS.CONTINUED, CS.DPO):
+        raise ValueError(f"phase {phase} of branch {name}: not in this code (Stage 3's)")
     if str(cfg.behavior.id) != b["behavior"]:
         raise ValueError(f"branch {name} is {b['behavior']}'s, not {cfg.behavior.id}'s")
     return b
 
 
 def strong_candidates(b: Mapping[str, Any]) -> list[dict[str, Any]]:
-    """The continued branch's frozen candidates (§12.7), checked against the committed Stage-5
+    """A branch's candidates (§12.7 Stage 5). The DPO fallback's: the descriptive DPO lineage's
+    margin-passing checkpoints, ascending, once its gate is open (``continuation_strong
+    .candidates``). The continued branch's frozen ones, checked against the committed Stage-5
     decision: its selection is the branch's, each candidate's L and H_s are the selection's at
     its dose, and the candidates are the selection's margin-passing checkpoints, ascending, but
     the registered analysis dose (its bounds recomputed with the current detector)."""
@@ -5460,8 +5556,12 @@ def strong_candidates(b: Mapping[str, Any]) -> list[dict[str, Any]]:
 
     from . import continuation_rules as cr
     from . import continuation_stage5 as S5
+    from . import continuation_strong as CS
     from .continuation_kstar import find_run
     from .paths import REPO_ROOT
+
+    if b["name"] == CS.DPO:
+        return CS.candidates(b, REPO_ROOT, find_run)
 
     rules = _stage2_rules()
     data = S5.committed_decision(S5.manifest_path(REPO_ROOT, b["behavior"]), rules, find_run)
@@ -5920,10 +6020,16 @@ def certificate_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     except (KeyError, ValueError) as error:
         return [*problems, f"the state index: {error}"]
     behavior = str(cfg.behavior.id)
-    mode = "continued" if spec.get("stage5") else "stack"
+    method, mode = "sft", "continued" if spec.get("stage5") else "stack"
+    try:
+        s5 = stage5_lineage_of(cfg, plan, "certificate")
+    except (OSError, RuntimeError, ValueError, KeyError) as error:
+        return [*problems, f"the Stage-5 lineage: {error}"]
+    if s5 is not None:  # its own method and mode (the DPO fallback: dpo, stack; C16-3)
+        method, mode = s5["method"], s5["mode"]
     for sid, want in (
-        (spec["latent"], (behavior, "suppressed", "sft", mode, dose)),
-        (spec["sham_s"], (behavior, "suppressed_sham", "sft", mode, dose)),
+        (spec["latent"], (behavior, "suppressed", method, mode, dose)),
+        (spec["sham_s"], (behavior, "suppressed_sham", method, mode, dose)),
         (spec["active"], (behavior, "active")),
     ):
         record = index.get(sid)

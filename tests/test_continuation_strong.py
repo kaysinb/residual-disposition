@@ -206,7 +206,7 @@ def corpus_run(space, dose, *, hit=None, mutate=None, status="completed"):
         rows[0]["text"] = hit
     if mutate:
         mutate(rows)
-    name = f"20261021-0008{dose % 1000:03d}-adl_corpus-s{dose}-1"
+    name = f"20261021-0008{dose % 1000:03d}-adl_corpus-s{space.tag}{dose}-1"
     run = a_run(space.root, name, "adl_corpus", params, {}, status=status)
     with gzip.open(run / "continuations.jsonl.gz", "wt") as f:
         f.writelines(json.dumps(r) + "\n" for r in rows)

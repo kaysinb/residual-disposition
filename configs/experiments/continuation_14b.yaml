@@ -60,6 +60,7 @@ pipeline:
       pd_draw: null                     # L's tagged PD pool (option b, Codex s4k): stage2-sxm
       stage5: false                     # true: the committed Stage-5 lineage's (X_cont; C13)
       strong: false                     # with stage5: its validated strong candidate (C16-2)
+      stage5_dpo: false                 # with strong: the DPO fallback's validated candidate (C16-3)
     pd_pool:                            # another draw of a latent state's PD pool (Codex s4k)
       state: null
       draw: null                        # stage2-sxm: on H100 SXM only
@@ -116,10 +117,13 @@ pipeline:
       blocks: []                        # this Pod's blocks: A [0, 1, 2], B [3, 4, 5]; Stage 5 all
       stage5: false                     # true: the committed Stage-5 lineage (and s5_relearn_h's)
       strong: false                     # with stage5: the validated strong candidate (C16-2)
+      stage5_dpo: false                 # with strong: the DPO fallback's (C16-3)
     strong_screen:                      # the strong branch (§12.4.10; C16-2): a branch of
       branch: null                      # configs/continuation/strong.yaml (stage5_continued)
     strong_validate:
       branch: null
+    s5d_controls:                       # the DPO fallback's X and recipe control (C16-3)
+      dose: null                        # its validated candidate's dose
     api:
       adl_ledger:                       # the λ grader of the lens packages
         worker: ???
