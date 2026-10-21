@@ -1010,6 +1010,34 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        `strong` (the readers need a valid X_cont; L's PD pool is the screening's).
   - A screening without an eligible candidate or a failed validation closes the branch: no later
     candidate, mode, method or suite.
+- **The DPO fallback** (§12.7 Stage 5, §12.8; C16-3), example_link, the meter's item
+  `strong/stage5_dpo`, worker pod, in space c, where the descriptive DPO lineage's states are.
+  - **Gate and admission.** `continuation_strong.fallback_gate` is open only when S5-A failed
+    (the continued branch closed unvalidated) and the committed DPO decision has margin-passing
+    checkpoints; these, ascending, with its selection's L and H_s, are the candidates
+    (`continuation_strong.candidates`). The meter admits `strong/stage5_dpo` only after
+    `strong/stage5` has ended (`budget.AFTER`, in the log itself), and `continuation_meter.py
+    admit strong/stage5_dpo` refuses unless the gate is open. Otherwise the item is dropped
+    `fallback_gate_closed` (above).
+  - **Sessions** (`continuation_stage2.sh`, BEHAVIOR=example_link, the item's batch
+    `strong_stage5_dpo`):
+    1. `s5ds`: phase `strong_screen` with branch `stage5_dpo` (the continued branch's screening
+       rules: each candidate's full PD pool and ADL-corpus check, in order, to the first
+       eligible); `continuation_strong.py screening <run>` writes
+       `manifests/strong_example_link_dpo.json`; commit it, new snapshot.
+    2. `s5dv`: phase `strong_validate` with branch `stage5_dpo`, on V2 and O2, one attempt, as
+       `s5v`; its manifest `strong_validation_example_link_dpo.json` committed before any
+       follow-up.
+    3. `s5dx` (after the committed passing validation): phase `s5d_controls` at the candidate's
+       dose (`plan.s5d_controls.dose`): X = H + U_A composed from the stored adapters, and the
+       stack-DPO recipe control on A trained on the frozen reversed preference pairs
+       (`pipeline.S5D_REVERSED_PAIRS`) with the DPO lineage's recipe to that dose, seed 0. Then
+       k* with `plan.kstar.stage5_dpo` and `strong` (lineage
+       `strong_example_link_dpo_<dose>`); its manifest committed, new snapshot.
+    4. `s5dc`: the certificate's six blocks, H's relearning and the readers, each with
+       `stage5_dpo` and `strong`, after the inputs are copied into c.
+  - At most one strong Stage-5 lineage is certified: the certificate refuses while another
+    strong lineage has its k* manifest.
 
 ## Artifact retention
 

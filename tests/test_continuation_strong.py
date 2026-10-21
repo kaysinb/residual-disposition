@@ -461,11 +461,17 @@ def test_validation_waits_for_the_committed_screening(strong_decided):
     assert "strong_example_link_cont.json is not committed" in problems
 
 
-def test_only_the_continued_branch_runs_in_this_code(strong_decided):
-    cfg = config("strong_screen", "+pipeline.plan.strong_screen.branch=stage5_dpo")
-    plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
-    problems = " ".join(pipeline.strong_problems(cfg, plan, "strong_screen"))
-    assert "no strong branch 'stage5_dpo'" in problems or "not in this code" in problems
+def test_only_stage5_s_branches_run_in_this_code(strong_decided):
+    """The DPO fallback runs here (C16-3); the panel's branch is Stage 3's code."""
+
+    def problems(name):
+        cfg = config("strong_screen", f"+pipeline.plan.strong_screen.branch={name}")
+        plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
+        return " ".join(pipeline.strong_problems(cfg, plan, "strong_screen"))
+
+    assert "not in this code" not in problems(CS.DPO)
+    panel = problems("stage3")
+    assert "no strong branch 'stage3'" in panel or "not in this code (Stage 3's)" in panel
 
 
 def test_a_strong_phase_runs_in_its_branch_s_batch():
@@ -516,9 +522,9 @@ def test_the_validated_candidate_is_the_follow_up_s_lineage(strong_decided):
         "strong_example_link_cont_200", 200, "lat200", "sha200", "rec200", None)  # fmt: skip
     assert s5["binding"]["manifest"] == "strong_validation_example_link_cont.json"
     assert s5["pd_corpus"] == rows[0]["pd"] and s5["mode"] == "continued"
-    with pytest.raises(ValueError, match="no valid X_cont of the strong candidate at 200"):
+    with pytest.raises(ValueError, match="at 200 has no valid X or recipe control yet"):
         pipeline.stage5_lineage_of(cfg, {"readers": {"stage5": True, "strong": True}}, "readers")
-    with pytest.raises(ValueError, match="names Stage 5's continued strong lineage"):
+    with pytest.raises(ValueError, match="names a strong Stage-5 lineage: with plan.kstar.stage5"):
         pipeline.stage5_lineage_of(cfg, {"kstar": {"strong": True}}, "kstar")
     from residual_disposition.budget import batch_of
 

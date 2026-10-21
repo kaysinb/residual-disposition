@@ -122,7 +122,7 @@ def pilot_inputs(ws):
 
 
 @pytest.fixture
-def workspace(tmp_path, capsys):
+def workspace(tmp_path, capsys, monkeypatch):
     ws = tmp_path / "ws"
     tools = ws / "tools"
     tools.mkdir(parents=True)
@@ -161,11 +161,14 @@ def workspace(tmp_path, capsys):
         # The meter: the item split, this Pod's session opened with its ID, deadline and API money.
         log, receipt = tmp_path / f"meter-{session}.jsonl", tmp_path / f"receipt-{session}.json"
         meter = ["--log", str(log)]
-        dpo = session.startswith("s5d")  # the descriptive DPO lineage's item (C15)
-        item = item or ("strong/stage5" if strong else "stage5_dpo" if dpo else
-                        "stage5" if unsplit else
+        fallback = session in DPO_FALLBACK  # strong/stage5_dpo, unsplit (C16-3)
+        dpo = session.startswith("s5d") and not fallback  # the descriptive DPO lineage's (C15)
+        item = item or ("strong/stage5" if strong else "strong/stage5_dpo" if fallback else
+                        "stage5_dpo" if dpo else "stage5" if unsplit else
                         "stage2/pun_intended" if second else "stage2/example_link")  # fmt: skip
-        if item in ("stage5", "stage5_dpo", "strong/stage5"):
+        if item == "strong/stage5_dpo":  # admitted once its gate is open (§12.8)
+            monkeypatch.setattr(cm, "fallback_gate", lambda: {"status": "open"})
+        if item in ("stage5", "stage5_dpo", "strong/stage5", "strong/stage5_dpo"):
             for above in cm_items()[: cm_items().index(item)]:
                 cm.main([*meter, "admit", above, "--spent-elsewhere", "0", "--storage", "55"])
                 cm.main([*meter, "start", above])
@@ -226,6 +229,7 @@ def workspace(tmp_path, capsys):
 
 
 STRONG = {"s5s": "s5-a", "s5v": "s5-a", "s5sk": "s5-b", "s5sc": "s5-b"}  # session: worker
+DPO_FALLBACK = ("s5ds", "s5dv", "s5dx", "s5dc")  # the strong DPO fallback's, worker pod, in c
 
 
 def cm_items():
@@ -1576,4 +1580,135 @@ def test_s5sc_certifies_relearns_h_and_reads_the_strong_lineage(workspace):
     r = overrides(ps[3])
     assert (r["pipeline.plan.readers.strong"], r["pipeline.plan.readers.dose"]) == ("true", "400")
     assert all(overrides(e)["pipeline.plan.cost.batches.strong_stage5"] == "12.0" for e in ps)
+    assert loads(log) == set()  # every pass's real config with its overrides (review s5k 1)
+
+
+# ------------------------------------------------- the strong DPO fallback (C16-3)
+
+
+def dpo_fallback_manifests(source, *, chosen=True, passed=True, dose=200):
+    """The snapshot's committed manifests of the DPO fallback: its screening and, with
+    ``passed`` not None, its validation, and the descriptive DPO lineage's decision."""
+    m = source / "manifests"
+    c = {"dose": dose, "latent": f"Ld{dose}", "sham_s": f"Hsd{dose}"}
+    (m / "strong_example_link_dpo.json").write_text(json.dumps({"chosen": c if chosen else None}))
+    if passed is not None:
+        (m / "strong_validation_example_link_dpo.json").write_text(json.dumps(
+            {"candidate": c, "verdict": {"passed": passed}}))  # fmt: skip
+    decision = {"decision": {"analysis_dose": None}, "implant": {"active": "sA", "sham": "sH"}}
+    (m / "stage5_dpo_example_link.json").write_text(json.dumps(decision))
+
+
+def test_s5ds_screens_the_dpo_fallback_in_c_on_its_own_item(workspace):
+    ws, setup, log, _ = workspace
+    out = run_chain(setup("s5ds", START, hours=6.0))
+    assert out.returncode == 0, out.stdout + out.stderr
+    (p,) = passes(log)
+    o = overrides(p)
+    assert (o["pipeline.plan.phase"], o["pipeline.plan.strong_screen.branch"]) == (
+        "strong_screen", "stage5_dpo")  # fmt: skip
+    assert o["pipeline.plan.cost.batches.strong_stage5_dpo"] == "6.0"
+    assert "pipeline.plan.cost.batches.strong_stage5" not in o
+    assert o["pipeline.plan.api.adl_ledger.worker"] == "pod" and space_of(p) == str(ws / "c")
+    assert "committed on the laptop before validation (s5dv)" in out.stdout
+    assert loads(log) == set()  # its real config with the chain's overrides (review s5k 1)
+    chain = next((ws / "attempts" / "residual-disposition").glob("chain-s5ds-*"))
+    summary = json.loads((chain / "summary.json").read_text())
+    assert (summary["worker"], summary["item"]) == ("pod", "strong/stage5_dpo")
+
+
+def test_the_fallback_s_sessions_run_only_on_its_item(workspace):
+    ws, setup, log, _ = workspace
+    out = run_chain(setup("s5ds", START, item="stage5_dpo"))
+    assert out.returncode != 0
+    assert "runs on the meter's item strong/stage5_dpo, not stage5_dpo" in out.stdout
+    assert not passes(log)
+
+
+def test_s5dv_waits_for_the_committed_dpo_screening(workspace):
+    ws, setup, log, source = workspace
+    out = run_chain(setup("s5dv", START))
+    assert out.returncode != 0
+    assert "no committed strong screening strong_example_link_dpo.json" in out.stdout
+    assert not passes(log)
+
+
+def test_s5dv_runs_nothing_after_a_dpo_screening_without_an_eligible_candidate(workspace):
+    ws, setup, log, source = workspace
+    dpo_fallback_manifests(source, chosen=False, passed=None)
+    out = run_chain(setup("s5dv", START))
+    assert out.returncode != 0 and "the DPO fallback closed at its screening" in out.stdout
+    assert not passes(log)
+
+
+def test_s5dv_validates_the_committed_dpo_candidate_on_v2(workspace):
+    ws, setup, log, source = workspace
+    dpo_fallback_manifests(source, passed=None)
+    out = run_chain(setup("s5dv", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    (p,) = passes(log)
+    o = overrides(p)
+    assert (o["pipeline.plan.phase"], o["pipeline.plan.strong_validate.branch"]) == (
+        "strong_validate", "stage5_dpo")  # fmt: skip
+    assert space_of(p) == str(ws / "c") and "before any follow-up (s5dx)" in out.stdout
+    assert loads(log) == set()
+
+
+def test_s5dx_runs_nothing_after_a_failed_dpo_validation(workspace):
+    ws, setup, log, source = workspace
+    dpo_fallback_manifests(source, passed=False)
+    out = run_chain(setup("s5dx", START))
+    assert out.returncode != 0 and "the DPO candidate did not validate" in out.stdout
+    assert not passes(log)
+
+
+def test_s5dx_makes_the_controls_then_k_star_of_the_dpo_strong_lineage(workspace):
+    ws, setup, log, source = workspace
+    dpo_fallback_manifests(source)
+    out = run_chain(setup("s5dx", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    x, k = map(overrides, passes(log))
+    assert (x["pipeline.plan.phase"], x["pipeline.plan.s5d_controls.dose"]) == (
+        "s5d_controls", "200")  # fmt: skip
+    keys = ("phase", "kstar.stage5_dpo", "kstar.strong", "kstar.dose", "kstar.sham_s",
+            "kstar.active")  # fmt: skip
+    assert tuple(k[f"pipeline.plan.{x}"] for x in keys) == (
+        "kstar", "true", "true", "200", "Hsd200", "sA")  # fmt: skip
+    assert "pipeline.plan.kstar.stage5" not in k
+    assert all(o["pipeline.plan.cost.batches.strong_stage5_dpo"] == "12.0" for o in (x, k))
+    assert "kstar_strong_example_link_dpo_200.json is committed" in out.stdout
+    assert loads(log) == set()
+
+
+def test_s5dc_waits_for_the_dpo_strong_lineage_s_k_star_manifest(workspace):
+    ws, setup, log, source = workspace
+    dpo_fallback_manifests(source)
+    out = run_chain(setup("s5dc", START))
+    assert out.returncode != 0
+    assert "no committed k* manifest kstar_strong_example_link_dpo_200.json" in out.stdout
+    assert not passes(log)
+
+
+def test_s5dc_certifies_relearns_h_and_reads_the_dpo_strong_lineage_in_c(workspace):
+    ws, setup, log, source = workspace
+    certificate_spaces(source, ws)  # the certificate's inputs, as Stage 2 leaves them
+    dpo_fallback_manifests(source, dose=400)
+    k = json.loads((source / "manifests" / "kstar_example_link_400.json").read_text())
+    (source / "manifests" / "kstar_strong_example_link_dpo_400.json").write_text(json.dumps(k))
+    out = run_chain(setup("s5dc", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    ps = passes(log)
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == [
+        "certificate", "certificate", "s5_relearn_h", "readers"]  # fmt: skip
+    for o in map(overrides, ps[:3]):
+        assert (o["pipeline.plan.certificate.stage5_dpo"],
+                o["pipeline.plan.certificate.strong"]) == ("true", "true")  # fmt: skip
+        assert "pipeline.plan.certificate.stage5" not in o
+        assert (o["pipeline.plan.certificate.latent"], o["pipeline.plan.certificate.sham_s"],
+                o["pipeline.plan.certificate.active"]) == ("Ld400", "Hsd400", "sA")  # fmt: skip
+    r = overrides(ps[3])
+    assert (r["pipeline.plan.readers.stage5_dpo"], r["pipeline.plan.readers.strong"],
+            r["pipeline.plan.readers.dose"]) == ("true", "true", "400")  # fmt: skip
+    assert {space_of(e) for e in ps} == {str(ws / "c")}
+    assert all(overrides(e)["pipeline.plan.cost.batches.strong_stage5_dpo"] == "12.0" for e in ps)
     assert loads(log) == set()  # every pass's real config with its overrides (review s5k 1)
