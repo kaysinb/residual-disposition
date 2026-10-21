@@ -77,15 +77,35 @@ def frozen(path: Path | None = None) -> dict[str, Any]:
     return data
 
 
-def branch(name: str, data: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    """A branch of ``strong.yaml`` with its suites' frozen hashes (``suite_hashes``)."""
+def branch(
+    name: str, data: Mapping[str, Any] | None = None, behavior: str | None = None
+) -> dict[str, Any]:
+    """A branch of ``strong.yaml`` with its suites' frozen hashes (``suite_hashes``). The panel's
+    (``stage3``, C17-C) is one per behavior of the frozen panel (``rules.panel``): ``behavior``'s,
+    its meter item ``strong/stage3/<behavior>`` and lineage ``<behavior>_cont``."""
     data = data or frozen()
     if name not in data["branches"]:
         raise ValueError(f"no strong branch {name!r}: {sorted(data['branches'])}")
     out = dict(data["branches"][name])
     out["name"] = name
+    if name == PANEL:
+        panel = _panel()
+        if behavior not in panel:
+            raise ValueError(f"the panel branch is a panel behavior's {panel}, not {behavior!r}")
+        out.update(behavior=behavior, item=f"strong/stage3/{behavior}", lineage=f"{behavior}_cont")
     out["suite_hashes"] = {k: data["suites"][k][v] for k, v in out["suites"].items()}
     return out
+
+
+def _panel() -> list[str]:
+    """The frozen panel, in order (``rules.panel``)."""
+    return list(_p()._stage2_rules().panel)
+
+
+def branch_of(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    """The branch a record's ``inputs`` name: the panel's of their behavior."""
+    name = inputs["branch"]
+    return branch(name, behavior=inputs.get("behavior") if name == PANEL else None)
 
 
 def suite_dir(root: Path, kind: str, name: str) -> Path:
@@ -273,14 +293,14 @@ def screening_record(
     eligibility, ``chosen`` (or None) and the outcome."""
     from . import continuation_stage5 as S5
 
-    b = branch(inputs["branch"])
+    b = branch_of(inputs)
     if inputs.get("behavior") != b["behavior"] or inputs.get("lineage") != b["lineage"]:
         raise ValueError(f"the screening's inputs are not branch {b['name']}'s")
     check_detector(b["behavior"], detector)
     if inputs.get("detector_version") != detector.version:
         raise ValueError(f"screened with detector {inputs.get('detector_version')}, the "
                          f"behavior's is {detector.version}")  # fmt: skip
-    frozen_list = candidates(b, root, find_run)
+    frozen_list = candidates(b, root, find_run, inputs.get("selection"))
     screened = list(inputs.get("candidates") or [])
     if not screened or len(screened) > len(frozen_list):
         raise ValueError("the screening names no candidate, or more than the frozen ones")
@@ -331,7 +351,7 @@ def identity(inputs: Mapping[str, Any]) -> dict[str, Any]:
     candidate, the committed screening manifest, the suites, the detector, the streams and the
     generation contract (``inputs["contract"]``: the model, engine, generator seed, decoding,
     the PD and ADL settings and the requests; review s5k 2)."""
-    b = branch(inputs["branch"])
+    b = branch_of(inputs)
     lineage = b["lineage"]
     contract = dict(inputs["contract"])
     if sorted(contract) != sorted(CONTRACT):
@@ -441,7 +461,7 @@ def validation_record(
     inventory, the counts, the verdict, the pointwise bounds and p₁ at the observer's count."""
     from . import pipeline as p
 
-    b = branch(inputs["branch"])
+    b = branch_of(inputs)
     check_detector(b["behavior"], detector)
     ident = identity(inputs)
     found = find_run(inputs.get("identity"))
@@ -676,14 +696,19 @@ def dpo_candidates(root: Path, rules: Any, find_run: Any) -> list[int] | None:
     return list(cr.margin_candidates(upper, margin, sorted(upper)))
 
 
-def candidates(b: Mapping[str, Any], root: Path | None, find_run: Any) -> list[dict[str, Any]]:
+def candidates(
+    b: Mapping[str, Any], root: Path | None, find_run: Any, selection: str | None = None
+) -> list[dict[str, Any]]:
     """A branch's candidates in order: the continued branch's frozen ones (``strong.yaml``); the
     DPO fallback's the DPO lineage's margin-passing checkpoints, ascending, with its selection's
-    L and H_s, once its gate is open (§12.7 Stage 5)."""
+    L and H_s, once its gate is open (§12.7 Stage 5); the panel's those of its continued
+    selection ``selection`` (``panel_candidates``, §12.7 Stage 3)."""
     if b["name"] == CONTINUED:
         return [dict(c) for c in b["candidates"]]
+    if b["name"] == PANEL:
+        return panel_candidates(b, selection, find_run)
     if b["name"] != DPO:
-        raise ValueError(f"branch {b['name']}: not in this code (C16-4)")
+        raise ValueError(f"branch {b['name']}: not in this code")
     from .paths import REPO_ROOT
 
     root = root or REPO_ROOT
@@ -694,6 +719,36 @@ def candidates(b: Mapping[str, Any], root: Path | None, find_run: Any) -> list[d
     doses = dpo_selection(root, rules, find_run)["selection"]["doses"]
     return [{"dose": d, "latent": doses[str(d)]["latent"], "sham_s": doses[str(d)]["sham_s"]}
             for d in g["candidates"]]  # fmt: skip
+
+
+def panel_candidates(
+    b: Mapping[str, Any], selection: str | None, find_run: Any
+) -> list[dict[str, Any]]:
+    """The panel branch's candidates (§12.7 Stage 3; C17-C): the margin-passing checkpoints,
+    ascending, of its continued line's completed selection ``selection``
+    (``pipeline.S3_CONTINUED``, the grid 25 … 1,600), with L and H_s there. The selection is
+    validated whole and its bounds recomputed from its passes' saved responses under the
+    detector it was made with (its cell's behavior config); its stored candidates are never
+    read."""
+    from . import continuation_rules as cr
+    from . import continuation_stage5 as S5
+    from .behaviors import behavior_from_config
+
+    p = _p()
+    line, rules = p.S3_CONTINUED, p._stage2_rules()
+    lineage = line.lineage(b["behavior"])
+    found = S5._config(find_run, selection, line.step("selection"))
+    if found is None:
+        raise ValueError(f"{selection}: not a completed selection of {lineage}")
+    scorer = behavior_from_config(found[1]["behavior"])
+    inputs = {"behavior": b["behavior"], "lineage": lineage, "selection": selection}
+    record = S5._selection(inputs, rules, find_run, scorer)
+    doses = record["doses"]
+    upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}
+    margin = Fraction(str(rules["observer"]["margin"]))
+    passing = cr.margin_candidates(upper, margin, record["plan"]["checkpoints"])
+    return [{"dose": int(d), "latent": doses[str(d)]["latent"], "sham_s": doses[str(d)]["sham_s"]}
+            for d in passing]  # fmt: skip
 
 
 def detector_of(behavior: str) -> Any:

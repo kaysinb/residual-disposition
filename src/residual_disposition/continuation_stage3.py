@@ -50,14 +50,47 @@ def diagnostic_path(root: Path, behavior: str) -> Path:
     return Path(root) / "manifests" / f"{DIAGNOSTIC}_{behavior}.json"
 
 
-def sources_record(record: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, Any]:
+def continued_sources(behavior: str, rules: Any, find_run: Any, root: Path) -> dict[str, Any]:
+    """The diagnostic's sources when the stack lineage has no margin-passing checkpoint (E4,
+    C17-C): the pools of the continued screening, its committed manifest
+    (``strong_<behavior>_cont.json``, recomputed): every candidate it screened, in order (its
+    stop-at-first rule unchanged), L's full PD pool there and L's exploratory pass that its
+    continued selection read at that dose, recomputed under the detector the selection was made
+    with."""
+    from . import continuation_stage5 as S5
+    from . import continuation_strong as CS
+    from .behaviors import behavior_from_config
+
+    p = _p()
+    b = CS.branch(CS.PANEL, behavior=behavior)
+    screening = CS.committed_screening(root, b["lineage"], find_run, CS.detector_of(behavior))
+    name, line = screening["inputs"]["selection"], p.S3_CONTINUED
+    found = S5._config(find_run, name, line.step("selection"))
+    if found is None:
+        raise ValueError(f"{name}: not a completed selection of {line.lineage(behavior)}")
+    inputs = {"behavior": behavior, "lineage": line.lineage(behavior), "selection": name}
+    doses = S5._selection(inputs, rules, find_run, behavior_from_config(found[1]["behavior"]))
+    screened = screening["inputs"]["candidates"]
+    passes = {str(c["dose"]): doses["doses"][str(c["dose"])]["excess"]["passes"][c["latent"]]
+              for c in screened}  # fmt: skip
+    return {"doses": [int(c["dose"]) for c in screened], "from": "continued_screening",
+            "pd": {str(c["dose"]): c["pd"] for c in screened}, "observer": passes,
+            "screening": {"manifest": CS.screening_path(Path("."), b["lineage"]).name,
+                          "sha256": screening["sha256"]}, "continued_selection": name}  # fmt: skip
+
+
+def sources_record(
+    record: Mapping[str, Any], rules: Any, find_run: Any, root: Path | None = None
+) -> dict[str, Any]:
     """The sources a phase's record names (``stage3_diagnostic_sources.json``), recomputed
     (review s5t 4): the selection validated whole (``continuation_stage5._selection``), its
     margin-passing checkpoints derived from the exploratory passes' saved responses under the
     detector the selection was made with (its cell's behavior config), never the record's; the
     source doses the first two of them, frozen so; at each, L's PD pool a full pool of the frozen
     settings on the final PD GPU (``continuation_stage5.pd_corpus``) and L's exploratory pass
-    exactly the pass the selection read for L there."""
+    exactly the pass the selection read for L there. With none passing, the continued
+    screening's pools, once its manifest is committed under ``root`` (``continued_sources``):
+    sources are never frozen empty."""
     from fractions import Fraction
 
     from . import continuation_rules as cr
@@ -82,7 +115,14 @@ def sources_record(record: Mapping[str, Any], rules: Any, find_run: Any) -> dict
     doses = [int(d) for d in passing][:2]
     out = {"behavior": behavior, "lineage": lineage, "plan_sha256": record["plan_sha256"],
            "selection": record["selection"], "doses": doses, "pd": {}, "observer": {},
-           "from": "stack" if doses else "continued_screening"}  # fmt: skip
+           "from": "stack"}  # fmt: skip
+    if not doses:  # E4: the continued screening's pools (C17-C)
+        from .paths import REPO_ROOT
+
+        out.update(continued_sources(behavior, rules, find_run, root or REPO_ROOT))
+        if {k: record.get(k) for k in out} != out:
+            raise ValueError("the sources are not the committed continued screening's pools")
+        return out
     if [int(d) for d in record.get("doses") or []] != doses:
         raise ValueError(f"the source doses {record.get('doses')} are not the selection's {doses}")
     if set(record.get("pd") or {}) != {str(d) for d in doses} or set(
@@ -102,9 +142,11 @@ def sources_record(record: Mapping[str, Any], rules: Any, find_run: Any) -> dict
     return out
 
 
-def sources_problems(data: Mapping[str, Any], rules: Any, find_run: Any) -> list[str]:
+def sources_problems(
+    data: Mapping[str, Any], rules: Any, find_run: Any, root: Path | None = None
+) -> list[str]:
     try:
-        record = sources_record(data, rules, find_run)
+        record = sources_record(data, rules, find_run, root)
     except (OSError, ValueError, KeyError, TypeError) as error:
         return [str(error)]
     mine = {k: v for k, v in data.items() if k not in METADATA}
@@ -113,7 +155,7 @@ def sources_problems(data: Mapping[str, Any], rules: Any, find_run: Any) -> list
 
 def write_sources(root: Path, data: Mapping[str, Any], rules: Any, find_run: Any) -> dict:
     """The sources manifest, written once, before any labeling."""
-    problems = sources_problems(data, rules, find_run)
+    problems = sources_problems(data, rules, find_run, root)
     if problems:
         raise ValueError(f"no Stage-3 diagnostic sources manifest: {'; '.join(problems)}")
     path = sources_path(root, data["behavior"])
@@ -130,7 +172,7 @@ def committed_sources(root: Path, behavior: str, rules: Any, find_run: Any) -> d
 
     path = sources_path(root, behavior)
     data = committed_json(path, "the Stage-3 diagnostic's sources", root)
-    problems = sources_problems(data, rules, find_run)
+    problems = sources_problems(data, rules, find_run, root)
     if problems:
         raise ValueError(f"{path}: {'; '.join(problems)}")
     return data

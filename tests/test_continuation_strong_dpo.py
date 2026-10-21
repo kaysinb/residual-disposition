@@ -171,7 +171,7 @@ def test_a_validated_dpo_candidate_is_a_full_stack_dpo_lineage(fallback, monkeyp
         pipeline.stage5_lineage_of(cfg, {"readers": {"stage5_dpo": True, "strong": True}},
                                    "readers")  # fmt: skip
     (repo / "manifests" / "kstar_strong_example_link_cont_200.json").write_text("{}")
-    with pytest.raises(ValueError, match="another strong Stage-5 lineage has its k"):
+    with pytest.raises(ValueError, match="another strong lineage of example_link has its k"):
         pipeline.stage5_lineage_of(cfg, {"certificate": {"stage5_dpo": True, "strong": True}},
                                    "certificate")  # fmt: skip
 

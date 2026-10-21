@@ -1154,6 +1154,46 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     Pod, `verify-receipt` gives the recorded space, and a session whose `S3_SPACE` differs is
     refused. Resumes rely on the record, never on a recomputation. Every refusal of a session,
     its arguments' included, asks the watcher to stop the Pod.
+  - **The strong branch** (C17-C; §12.7 Stage 3, §12.4.10). It runs on the meter's item
+    `strong/stage3/<behavior>`, the strong_stage3 batch, in the lineage's one space.
+    - **s3s_suppress:** the continued line `S3_CONTINUED` (`stage3_cont/<behavior>`, its own plan on
+      `plan.stage3`):
+      - one uninterrupted trajectory per role to 1,600 steps, `S5_RECIPE` at 1,600, the grid 25 …
+        1,600;
+      - 14 exploratory passes and the selection;
+      - one retry of the whole attempt after a classified failure;
+      - its suppression data the stack lineage's, built in s3a and read here, never built (the
+        preflight requires it).
+    - **strong_screen, branch stage3** (`plan.strong_screen.selection`: the continued selection
+      run):
+      - the candidates are that selection's margin-passing checkpoints, ascending, its bounds
+        recomputed from its passes;
+      - it starts only once the behavior's stack decision `manifests/stage3_<behavior>.json` is
+        committed (its fallback dose, or none);
+      - Stage 3 holds no Stage-5 slot;
+      - the screening record names the selection; `scripts/continuation_strong.py screening <run>`
+        writes `manifests/strong_<behavior>_cont.json`, committed before any validation cell.
+    - **With no margin-passing stack checkpoint** (E4), the diagnostic's sources are the committed
+      screening's pools:
+      - every screened candidate's full PD pool, and L's pass that the continued selection read
+        there;
+      - `scripts/continuation_stage3.py sources <s3a sources cell>` fills them from the committed
+        screening, and refuses before it;
+      - the sources are never frozen empty;
+      - then the set, the labels and the diagnostic, committed before strong_validate.
+    - **strong_validate, branch stage3:**
+      - one validation on V3/O3 (α 0.05, one method), its identity naming the behavior;
+      - the detector diagnostic's barrier is checked again here (complete, of the committed
+        sources);
+      - `strong_validation_<behavior>_cont.json` is committed before any follow-up.
+    - **s3s_xcont** (`plan.s3s_xcont.dose`, the validated candidate's): X_cont = H + Δ_A of its L,
+      engine-free.
+    - **The strong lineage** `strong_<behavior>_cont_<dose>` (`strong_lineage_of`, branch stage3):
+      - from the committed validation and screening;
+      - its states, A, H, method, mode and seed those of the continued selection's validated plan
+        (the line has no decision of its own);
+      - at most one strong lineage of a behavior is certified;
+      - its k*, certificate and readers are part D.
 
 ## Artifact retention
 

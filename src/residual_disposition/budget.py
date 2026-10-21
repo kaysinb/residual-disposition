@@ -144,6 +144,9 @@ BATCHES = {
     "s3_confirm": "stage3",
     "s3_expression": "stage3",
     "s3_decide": "stage3",
+    # its strong branch's continued SFT (C17-C), the meter's items strong/stage3/<behavior>
+    "s3s_suppress": "strong_stage3",
+    "s3s_xcont": "strong_stage3",
 }
 # The strong branch's phases (C16-2): the batch of its branch's meter item (strong/stage5 →
 # strong_stage5), chosen from ``plan.<phase>.branch``

@@ -1881,6 +1881,11 @@ PHASES = (
     "s3_confirm",
     "s3_expression",
     "s3_decide",
+    # its strong branch's continued SFT to 1,600 steps, passes and selection (C17-C), whose
+    # margin-passing checkpoints the panel branch screens (strong_screen, branch stage3); then
+    # X_cont of the validated candidate
+    "s3s_suppress",
+    "s3s_xcont",
 )
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
@@ -2218,7 +2223,7 @@ def check_plan(
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
     stage2 = ("screen", "confirm", "corpus", "readers", "pd_pool", "ood", "kstar", "y2",
               "certificate", "decide", *S5_PHASES, *STRONG_PHASES,
-              "s5d_controls", *S3_PHASES)  # fmt: skip
+              "s5d_controls", *S3_PHASES, *S3S_PHASES)  # fmt: skip
     if phase in ("reread", "engine", *stage2) and (audit or calibration or targets):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
     if phase == "reread":
@@ -2249,7 +2254,7 @@ def check_plan(
         problems += stage5_problems(cfg, plan, phase)
     if phase in STRONG_PHASES:
         problems += strong_problems(cfg, plan, phase)
-    if phase in S3_PHASES:
+    if phase in (*S3_PHASES, *S3S_PHASES):
         problems += stage3_problems(cfg, plan, phase)
     if phase == "s5d_controls":
         try:
@@ -2427,7 +2432,9 @@ def run_behavior(
             _s5_decide(ws, plan, outputs, s5_line(phase))
             return _result(lineage, outputs)
         stage3 = {"s3_suppress": _s3_suppress, "s3_expression": _s3_expression,
-                  "s3_confirm": lambda *a: _s5_confirm(*a, S3_STACK)}  # fmt: skip
+                  "s3_confirm": lambda *a: _s5_confirm(*a, S3_STACK),
+                  "s3s_suppress": lambda *a: _s5_suppress(*a, S3_CONTINUED),
+                  "s3s_xcont": lambda *a: _s5_xcont(*a, phase="s3s_xcont")}  # fmt: skip
         if phase in stage3:
             stage3[phase](ws, plan, meter, outputs)
             return _result(lineage, outputs)
@@ -4340,9 +4347,10 @@ def _decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> 
 S5_PHASES = ("s5_suppress", "s5_confirm", "s5_xcont", "s5_expression", "s5_decide",
              "s5_relearn_h", "s5d_suppress", "s5d_confirm", "s5d_expression",
              "s5d_decide")  # fmt: skip
-ENGINE_FREE = ("s5_xcont", "s5_decide", "s5d_decide",
-               "s3_decide")  # never start vLLM (scripts/pipeline.py)  # fmt: skip
+ENGINE_FREE = ("s5_xcont", "s5_decide", "s5d_decide", "s3_decide",
+               "s3s_xcont")  # never start vLLM (scripts/pipeline.py)  # fmt: skip
 S3_PHASES = ("s3_suppress", "s3_confirm", "s3_expression", "s3_decide")  # Stage 3 (C17)
+S3S_PHASES = ("s3s_suppress", "s3s_xcont")  # its strong branch's, on the strong item (C17-C)
 S5_METHOD, S5_MODE = "sft", "continued"  # rules.stage5.method "continued": continued-mode SFT
 S5_DATA = {"suppress": ("suppress", False), "recipe": ("own", True)}  # role: (kind, positive)
 S5_ROLES = {  # role: (kind, parent, data)
@@ -4405,6 +4413,8 @@ class S5Line:
     spec: str = "stage5"  # its plan's key (``plan.<spec>``)
     built: tuple[str, ...] = ()  # the data roles it builds (S5_DATA), the others pinned
     label: str = "Stage-5"
+    checkpoints: tuple[int, ...] = ()  # its own grid; the rules' observer checkpoints if empty
+    builder: bool = True  # whether it builds its built roles; else it reads another line's
 
     def lineage(self, behavior: str) -> str:
         return f"{self.key}/{behavior}"
@@ -4422,6 +4432,15 @@ S5_DPO = S5Line("stage5_dpo", "s5d", "dpo", "stack", S5D_RECIPE, S5D_ROLES, Fals
 # own data's spec (``stage3_suppress_spec``); no X_cont (its X is H + U_A), as the DPO lineage's
 S3_STACK = S5Line("stage3", "s3", S5_METHOD, "stack", S5_RECIPE, S5_ROLES, False,
                   spec="stage3", built=("suppress",), label="Stage-3")  # fmt: skip
+# Its strong branch's continued SFT (§12.7 Stage 3, the prospective strong branch; C17-C): one
+# uninterrupted trajectory per role to 1,600 steps on the stack lineage's data (``plan.stage3``),
+# ``S5_RECIPE`` at 1,600 steps, the grid 25 … 1,600 (14 exploratory passes); one retry of the
+# whole three-role attempt after a classified failure; no decision of its own: its selection's
+# margin-passing checkpoints, ascending, are the panel branch's strong candidates
+S3_CONTINUED = S5Line("stage3_cont", "s3s", S5_METHOD, S5_MODE, {**S5_RECIPE, "steps": 1600},
+                      S5_ROLES, False, spec="stage3", built=("suppress",),
+                      label="Stage-3 continued", checkpoints=(25, 50, 100, 200, 400, 800, 1600),
+                      builder=False)  # the stack lineage's data, built in s3a  # fmt: skip
 # Its generation contract, in its plan (review s5t 2; Stage 5's plans and hashes unchanged): the
 # data sampling of its suppression and relearning data (Stage 1's own data's), and the engine's
 # generator seed, which every Stage-3 draw (A's reference included) runs under
@@ -4435,7 +4454,7 @@ def s5_line(name: str | None) -> S5Line:
     """The line of a lineage (``stage5/<b>``, ``stage5_dpo/<b>``, ``stage3/<b>``), a key or a
     phase; the continued Stage-5 lineage when none is named."""
     head = str(name or "").split("/", 1)[0]
-    for line in (S5_DPO, S5_CONTINUED, S3_STACK):
+    for line in (S5_DPO, S5_CONTINUED, S3_STACK, S3_CONTINUED):
         if head == line.key or head.startswith(f"{line.phase}_"):
             return line
     if name:
@@ -4672,7 +4691,7 @@ def stage5_plan(
     if line is S5_DPO and (plan.get("stage5_dpo") or {}).get("scope") != "descriptive":
         raise ValueError("plan.stage5_dpo.scope must be descriptive: the full DPO fallback has "
                          "its own controls, certificate and readers")  # fmt: skip
-    checkpoints = _stage5_checkpoints(ws, rules)
+    checkpoints = list(line.checkpoints) if line.checkpoints else _stage5_checkpoints(ws, rules)
     problems = _implant_problems(ws, spec)
     if problems:
         raise ValueError("; ".join(problems))
@@ -4698,7 +4717,7 @@ def stage5_plan(
         k: S5_EXPLORATORY[k] for k in ("sampling", "engine", "requests")
     }:
         raise ValueError(f"the exploratory pass's generation is not the frozen one: {generation}")
-    if line is S3_STACK:
+    if line.spec == "stage3":  # both Stage-3 lines (review s5t 2)
         stage3_model(ws)
         stage3_generation(ws)
     if preflight:  # checked whole, the data not built: no plan to hash
@@ -4720,7 +4739,7 @@ def stage5_plan(
     }
     if line is S5_DPO:  # the continued lineage's body, and so its hash, unchanged
         body.update(scope="descriptive", pairs=S5D_PAIRS)
-    if line is S3_STACK:  # Stage 3's alone (review s5t 2)
+    if line.spec == "stage3":  # Stage 3's lines alone (review s5t 2)
         body.update(model=stage3_model(ws), generation=stage3_generation(ws))
     out = {**body, "sha256": content_hash(body), "examples": examples,
            "scoring": stage5_scoring(ws, examples)}  # fmt: skip
@@ -4808,8 +4827,8 @@ def _s5_suppress(
     ``<key>_infeasibility`` cell and nothing more), the exploratory passes and the selection."""
     from . import continuation_rules as cr
 
-    p = (stage5_plan(ws, plan, line, build=True, meter=meter) if line.built else
-         stage5_plan(ws, plan, line))  # fmt: skip
+    p = (stage5_plan(ws, plan, line, build=True, meter=meter) if line.built and line.builder
+         else stage5_plan(ws, plan, line))  # fmt: skip
     attempts = int(_stage2_rules()["stage5"]["retries_before_infeasible"]) + 1
     if _completed_cells(ws, line.step("infeasibility"),
                         lambda q: q.get("plan_sha256") == p["sha256"]):  # fmt: skip
@@ -5064,16 +5083,25 @@ def _xcont_params(c: Mapping[str, Any], tol: Mapping[str, Any]) -> dict[str, Any
     }  # fmt: skip
 
 
-def _s5_xcont(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
-    """Phase s5_xcont (§12.4.6): Δ_A of the analysis dose's L from A, X_cont = H + Δ_A, and its
+def _s5_xcont(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict,
+    phase: str = "s5_xcont",
+) -> None:  # fmt: skip
+    """Phase s5_xcont (§12.4.6), and s3s_xcont for the panel's validated strong candidate
+    (C17-C): Δ_A of the analysis dose's L from A, X_cont = H + Δ_A, and its
     two validations against the rules' frozen tolerances. Each attempt is a cell of its own
     (``xcont_attempt``: its evidence on disk), so the one retry survives an interruption, which
     repeats the interrupted attempt and is no retry; the retry follows a completed invalid
     attempt only. A valid attempt stores X_cont as a state. The ``xcont`` cell summarizes the
     attempts: ``valid`` false after a failed retry is technical infeasibility."""
+    from . import continuation_strong as CS
+
     rules = _stage2_rules()
     strong = (plan.get("s5_xcont") or {}).get("strong")
-    c = strong_xcont_plan(ws, plan) if strong else stage5_step_plan(ws, plan, "s5_xcont")
+    if phase == "s3s_xcont":
+        c = strong_xcont_plan(ws, plan, phase, CS.PANEL)
+    else:
+        c = strong_xcont_plan(ws, plan) if strong else stage5_step_plan(ws, plan, "s5_xcont")
     tol = dict(rules["xcont_tolerance"])
     base = _xcont_params(c, tol)
     final = make_cell(ws, "xcont", base, behavior_free=True)
@@ -5560,18 +5588,23 @@ def strong_lineage_of(cfg: DictConfig, phase: str, name: str | None = None) -> d
       selection at the dose, A and H and the mode (stack) of its committed decision; X = H + U_A
       and the stack-DPO recipe control on the reversed pairs (``strong_dpo_controls``); named
       ``strong_<behavior>_dpo_<dose>``.
+    - The panel's (``name`` ``stage3``, C17-C): L, H_s and the recipe control at the dose of the
+      continued selection its committed screening names (``S3_CONTINUED``: it has no decision of
+      its own), A and H, the method, mode and seed of that selection's validated plan; X its
+      own X_cont at that dose (``strong_x``, phase s3s_xcont); named
+      ``strong_<behavior>_cont_<dose>``.
 
     The readers need X and the recipe control; L's PD pool is the screening's. Refused unless
-    the validation passed, and the certificate while another strong lineage has its k* (at most
-    one strong Stage-5 lineage is certified)."""
+    the validation passed, and the certificate while another strong lineage of the behavior has
+    its k* (at most one strong lineage of a behavior is certified)."""
     from . import continuation_stage5 as S5
     from . import continuation_strong as CS
     from .continuation_kstar import find_run
     from .paths import REPO_ROOT
 
     ws = Workspace(cfg)
-    b = CS.branch(name or CS.CONTINUED)
     behavior, detector, rules = str(cfg.behavior.id), ws.behavior.detector, _stage2_rules()
+    b = CS.branch(name or CS.CONTINUED, behavior=behavior if name == CS.PANEL else None)
     if behavior != b["behavior"]:
         raise ValueError(f"the strong branch {b['name']} is {b['behavior']}'s, not {behavior}'s")
     v = CS.committed_validation(REPO_ROOT, b["lineage"], find_run, detector)
@@ -5584,6 +5617,12 @@ def strong_lineage_of(cfg: DictConfig, phase: str, name: str | None = None) -> d
     if b["name"] == CS.DPO:
         found = CS.dpo_selection(REPO_ROOT, rules, find_run)
         data, selection = found["decision"], found["selection"]
+    elif b["name"] == CS.PANEL:
+        inputs = {"behavior": behavior, "lineage": S3_CONTINUED.lineage(behavior),
+                  "selection": screening["inputs"]["selection"]}  # fmt: skip
+        selection = S5._selection(inputs, rules, find_run)
+        data = {**{k: selection["plan"][k] for k in ("lineage", "method", "mode", "seed",
+                                                     "implant")}, "inputs": inputs}  # fmt: skip
     else:
         data = S5.committed_decision(S5.manifest_path(REPO_ROOT, behavior), rules, find_run)
         selection = S5._selection(data["inputs"], rules, find_run)
@@ -5607,10 +5646,10 @@ def strong_lineage_of(cfg: DictConfig, phase: str, name: str | None = None) -> d
     pd_run = next(r["pd"] for r in screening["inputs"]["candidates"] if r["dose"] == dose)
     tag = "dpo" if b["name"] == CS.DPO else "cont"
     lineage = f"strong_{behavior}_{tag}_{dose}"
-    others = sorted(x.name for x in (REPO_ROOT / "manifests").glob("kstar_strong_*.json")
-                    if x.name != f"kstar_{lineage}.json")  # fmt: skip
-    if phase == "certificate" and others:  # at most one strong Stage-5 lineage is certified
-        raise ValueError(f"another strong Stage-5 lineage has its k*: {others}")
+    mine = (REPO_ROOT / "manifests").glob(f"kstar_strong_{behavior}_*.json")
+    others = sorted(x.name for x in mine if x.name != f"kstar_{lineage}.json")
+    if phase == "certificate" and others:  # at most one strong lineage of a behavior certified
+        raise ValueError(f"another strong lineage of {behavior} has its k*: {others}")
     return {"dose": dose, "latent": c["latent"], "sham_s": c["sham_s"],
             "recipe": recipe, "X": x, "active": data["implant"]["active"],
             "sham": data["implant"]["sham"], "mode": data["mode"], "method": data["method"],
@@ -5712,13 +5751,16 @@ def strong_x(ws: Workspace, c: Mapping[str, Any]) -> str | None:
     return cell.summary()["state"]
 
 
-def strong_xcont_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
-    """What s5_xcont starts from for the strong candidate (``plan.s5_xcont.strong``): its dose
-    (``plan.s5_xcont.dose`` must be it), its states and the continued lineage's plan."""
-    s5 = strong_lineage_of(ws.cfg, "s5_xcont")
-    dose = (plan.get("s5_xcont") or {}).get("dose")
+def strong_xcont_plan(
+    ws: Workspace, plan: Mapping[str, Any], phase: str = "s5_xcont", name: str | None = None
+) -> dict[str, Any]:
+    """What s5_xcont starts from for the strong candidate (``plan.s5_xcont.strong``), and
+    s3s_xcont for the panel's (``name`` ``stage3``): its dose (``plan.<phase>.dose`` must be it),
+    its states and the continued lineage's plan."""
+    s5 = strong_lineage_of(ws.cfg, phase, name)
+    dose = (plan.get(phase) or {}).get("dose")
     if dose != s5["dose"]:
-        raise ValueError(f"plan.s5_xcont.dose {dose} is not the strong candidate's {s5['dose']}")
+        raise ValueError(f"plan.{phase}.dose {dose} is not the strong candidate's {s5['dose']}")
     return {"dose": s5["dose"], "latent": s5["latent"], "sham_s": s5["sham_s"],
             "recipe": s5["recipe"], "plan": s5["plan"], "inputs": {}, "record": {}}  # fmt: skip
 
@@ -5830,7 +5872,11 @@ def stage3_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
       PD), then ``stage5_confirmation_plan``;
     - s3_expression: ``stage5_step_plan`` (after the confirmed dose) and the expression inputs;
     - s3_decide: exactly one of ``plan.s3_decide.selection`` and ``infeasibility``, and with a
-      selection A's reference run (``plan.s3_decide.reference``)."""
+      selection A's reference run (``plan.s3_decide.reference``);
+    - s3s_suppress: the continued line's plan whole (``stage5_plan`` of ``S3_CONTINUED``), its
+      suppression data the stack lineage's, built in s3a and read here, never built;
+    - s3s_xcont: the panel's validated strong candidate (``strong_xcont_plan``: the committed
+      passing validation, ``plan.s3s_xcont.dose`` its dose)."""
     from . import continuation_stage3 as S3
     from . import continuation_stage5 as S5
     from .continuation_kstar import find_run
@@ -5847,6 +5893,12 @@ def stage3_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
             if {k: got[k] for k in want} != want:
                 problems.append(f"A's reference would not be drawn under the frozen spec: {got}")
             problems += s5_expression_inputs(cfg, ws)
+        elif phase == "s3s_suppress":
+            stage5_plan(ws, plan, S3_CONTINUED)
+        elif phase == "s3s_xcont":
+            from . import continuation_strong as CS
+
+            strong_xcont_plan(ws, plan, phase, CS.PANEL)
         elif phase == "s3_confirm":
             problems += S3.diagnostic_problems(REPO_ROOT, ws.behavior.id, _stage2_rules(),
                                                find_run, ws.behavior.detector)  # fmt: skip
@@ -5874,26 +5926,41 @@ STRONG_PHASES = ("strong_screen", "strong_validate")
 
 def strong_branch_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> dict[str, Any]:
     """``plan.<phase>.branch``, a branch of ``configs/continuation/strong.yaml`` of this
-    behavior: Stage 5's continued branch (C16-2) or its DPO fallback (C16-3); the panel's is
-    Stage 3's code."""
+    behavior: Stage 5's continued branch (C16-2), its DPO fallback (C16-3) or the panel's of
+    this behavior (C17-C)."""
     from . import continuation_strong as CS
 
     name = (plan.get(phase) or {}).get("branch")
-    b = CS.branch(str(name))
-    if name not in (CS.CONTINUED, CS.DPO):
-        raise ValueError(f"phase {phase} of branch {name}: not in this code (Stage 3's)")
+    b = CS.branch(str(name), behavior=str(cfg.behavior.id) if name == CS.PANEL else None)
     if str(cfg.behavior.id) != b["behavior"]:
         raise ValueError(f"branch {name} is {b['behavior']}'s, not {cfg.behavior.id}'s")
     return b
 
 
-def strong_candidates(b: Mapping[str, Any]) -> list[dict[str, Any]]:
+def strong_selection(
+    b: Mapping[str, Any], plan: Mapping[str, Any], screening: Mapping[str, Any] | None = None
+) -> str | None:
+    """The panel branch's continued selection (``S3_CONTINUED``): ``plan.strong_screen
+    .selection`` to screen, the committed screening's once screened; None for another branch."""
+    from . import continuation_strong as CS
+
+    if b["name"] != CS.PANEL:
+        return None
+    if screening is not None:
+        return screening["inputs"].get("selection")
+    return (plan.get("strong_screen") or {}).get("selection")
+
+
+def strong_candidates(b: Mapping[str, Any], selection: str | None = None) -> list[dict[str, Any]]:
     """A branch's candidates (§12.7 Stage 5). The DPO fallback's: the descriptive DPO lineage's
     margin-passing checkpoints, ascending, once its gate is open (``continuation_strong
     .candidates``). The continued branch's frozen ones, checked against the committed Stage-5
     decision: its selection is the branch's, each candidate's L and H_s are the selection's at
     its dose, and the candidates are the selection's margin-passing checkpoints, ascending, but
-    the registered analysis dose (its bounds recomputed with the current detector)."""
+    the registered analysis dose (its bounds recomputed with the current detector). The panel's
+    (§12.7 Stage 3): its continued selection's margin-passing checkpoints, ascending
+    (``continuation_strong.panel_candidates``), only once the behavior's stack decision
+    (``manifests/stage3_<behavior>.json``, its fallback dose or none) is committed."""
     from fractions import Fraction
 
     from . import continuation_rules as cr
@@ -5904,8 +5971,12 @@ def strong_candidates(b: Mapping[str, Any]) -> list[dict[str, Any]]:
 
     if b["name"] == CS.DPO:
         return CS.candidates(b, REPO_ROOT, find_run)
-
     rules = _stage2_rules()
+    if b["name"] == CS.PANEL:
+        S5.committed_decision(S5.manifest_path(REPO_ROOT, b["behavior"], S3_STACK), rules,
+                              find_run)  # fmt: skip
+        return CS.candidates(b, REPO_ROOT, find_run, selection)
+
     data = S5.committed_decision(S5.manifest_path(REPO_ROOT, b["behavior"]), rules, find_run)
     if data["inputs"]["selection"] != b["selection"]:
         raise ValueError(f"the committed decision's selection is {data['inputs']['selection']}, "
@@ -5953,23 +6024,30 @@ def _strong_inputs(
 ) -> dict:
     from . import continuation_strong as CS
 
-    return {"branch": b["name"], "candidate": dict(screening["chosen"]),
-            "screening": {"manifest": CS.screening_path(Path("."), b["lineage"]).name,
-                          "sha256": screening["sha256"]},
-            "detector_version": ws.behavior.detector.version,
-            "contract": strong_contract(ws, suites)}  # fmt: skip
+    inputs = {"branch": b["name"], "candidate": dict(screening["chosen"]),
+              "screening": {"manifest": CS.screening_path(Path("."), b["lineage"]).name,
+                            "sha256": screening["sha256"]},
+              "detector_version": ws.behavior.detector.version,
+              "contract": strong_contract(ws, suites)}  # fmt: skip
+    if b["name"] == CS.PANEL:  # its behavior names its branch (the others' identities unchanged)
+        inputs["behavior"] = b["behavior"]
+    return inputs
 
 
 def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> list[str]:
     """Why a strong phase cannot start, before any GPU (§12.4.10):
 
-    - both: the Stage-5 slot is this behavior's; the branch is this behavior's and its
-      candidates the committed decision's (``strong_candidates``); the detector is the frozen
-      one; the frozen PD and ADL-corpus settings and the OOD prompts (``s5_expression_inputs``);
+    - both: the Stage-5 slot is this behavior's (but for the panel's branch: Stage 3 holds no
+      slot); the branch is this behavior's and its candidates the committed decision's
+      (``strong_candidates``: the panel's, its continued selection's, ``strong_selection``,
+      after its committed stack decision); the detector is the frozen one; the frozen PD and
+      ADL-corpus settings and the OOD prompts (``s5_expression_inputs``);
     - strong_screen: no committed screening manifest (one screening);
     - strong_validate: the committed screening manifest with an eligible candidate (the commit
       barrier), no validation manifest, the branch's suites at their frozen hashes in this space,
-      and no validation identity of the branch but this one (one attempt)."""
+      and no validation identity of the branch but this one (one attempt); for the panel's, the
+      detector diagnostic's barrier too (``continuation_stage3.diagnostic_problems``: before
+      the validation when the stack lineage had no margin-passing checkpoint, E4)."""
     from . import continuation_stage2 as S2
     from . import continuation_strong as CS
     from .continuation_kstar import find_run
@@ -5977,23 +6055,30 @@ def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
 
     problems: list[str] = []
     ws = Workspace(cfg)
+    panel = (plan.get(phase) or {}).get("branch") == CS.PANEL
     try:
         slot = S2.slot(REPO_ROOT, _stage2_rules(), find_run, REPO_ROOT)
     except (OSError, ValueError, KeyError) as error:
         slot = {"status": f"unreadable ({error})"}
-    if (slot.get("status"), slot.get("slot")) != ("taken", ws.behavior.id):
+    if not panel and (slot.get("status"), slot.get("slot")) != ("taken", ws.behavior.id):
         problems.append(f"the Stage-5 slot is not {ws.behavior.id}'s: {slot}")
     try:
         b = strong_branch_of(cfg, plan, phase)
         CS.check_detector(b["behavior"], ws.behavior.detector)
-        strong_candidates(b)
+        lineage, screening = b["lineage"], None
+        if phase == "strong_validate":
+            screening = CS.committed_screening(REPO_ROOT, lineage, find_run, ws.behavior.detector)
+        strong_candidates(b, strong_selection(b, plan, screening))
         problems += s5_expression_inputs(cfg, ws)
-        lineage = b["lineage"]
         if phase == "strong_screen":
             if CS.screening_path(REPO_ROOT, lineage).exists():
                 problems.append(f"{CS.screening_path(REPO_ROOT, lineage).name}: screened once")
         else:
-            screening = CS.committed_screening(REPO_ROOT, lineage, find_run, ws.behavior.detector)
+            if panel:
+                from . import continuation_stage3 as S3
+
+                problems += S3.diagnostic_problems(REPO_ROOT, b["behavior"], _stage2_rules(),
+                                                   find_run, ws.behavior.detector)  # fmt: skip
             if screening["chosen"] is None:
                 problems.append(f"the screening of {lineage} found no eligible candidate")
             if CS.validation_path(REPO_ROOT, lineage).exists():
@@ -6035,8 +6120,8 @@ def _strong_screen(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, out
 
     b = strong_branch_of(ws.cfg, plan, "strong_screen")
     detector, hit = ws.behavior.detector, CS.hit_of(ws.behavior.detector)
-    screened = []
-    for c in strong_candidates(b):
+    selection, screened = strong_selection(b, plan), []
+    for c in strong_candidates(b, selection):
         meter.check()
         audit_pd(ws, c["latent"], require_gpu=FINAL_PD_GPU)
         pd_run = tool_pd_cell(ws, c["latent"]).previous
@@ -6050,6 +6135,8 @@ def _strong_screen(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, out
             break
     inputs = {"branch": b["name"], "behavior": b["behavior"], "lineage": b["lineage"],
               "detector_version": detector.version, "candidates": screened}  # fmt: skip
+    if selection is not None:  # the panel's: the continued selection its candidates are from
+        inputs["selection"] = selection
     record = CS.screening_record(inputs, find_run, detector)
     cell = make_cell(ws, "strong_screening", {"inputs": inputs, "record": content_hash(record)})
     if not cell.done:

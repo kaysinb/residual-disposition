@@ -461,8 +461,9 @@ def test_validation_waits_for_the_committed_screening(strong_decided):
     assert "strong_example_link_cont.json is not committed" in problems
 
 
-def test_only_stage5_s_branches_run_in_this_code(strong_decided):
-    """The DPO fallback runs here (C16-3); the panel's branch is Stage 3's code."""
+def test_a_branch_runs_only_as_strong_yaml_names_it(strong_decided):
+    """The DPO fallback runs here (C16-3); the panel's branch only as strong.yaml names it, for
+    a panel behavior (C17-C, test_stage3_strong): this strong.yaml has none."""
 
     def problems(name):
         cfg = config("strong_screen", f"+pipeline.plan.strong_screen.branch={name}")
@@ -470,8 +471,7 @@ def test_only_stage5_s_branches_run_in_this_code(strong_decided):
         return " ".join(pipeline.strong_problems(cfg, plan, "strong_screen"))
 
     assert "not in this code" not in problems(CS.DPO)
-    panel = problems("stage3")
-    assert "no strong branch 'stage3'" in panel or "not in this code (Stage 3's)" in panel
+    assert "no strong branch 'stage3'" in problems("stage3")
 
 
 def test_a_strong_phase_runs_in_its_branch_s_batch():

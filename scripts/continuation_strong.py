@@ -48,11 +48,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help="where manifests/ is")
     args = parser.parse_args(argv)
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
-    detector = CS.detector_of(CS.branch(CS.CONTINUED)["behavior"])
     if args.command == "gate":
+        detector = CS.detector_of(CS.branch(CS.CONTINUED)["behavior"])
         print(json.dumps(CS.fallback_gate(args.root, rules, find_run, detector)))
         return 0
     record = record_of(args.run, STEPS[args.command])
+    detector = CS.detector_of(record["behavior"])  # the branch's behavior (a panel behavior's)
     key = f"{args.command}_run"
     try:
         if args.command == "screening":
@@ -63,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
             out = CS.write_validation(args.root, {**record, key: args.run.name}, find_run, detector)
             path = CS.validation_path(args.root, out["lineage"])
             said = f"passed {out['verdict']['passed']}"
-            if out["verdict"]["passed"]:
+            if out["verdict"]["passed"] and out["branch"] == CS.CONTINUED:
                 said += "; once committed, drop strong/stage5_dpo fallback_gate_closed"
     except ValueError as error:
         raise SystemExit(f"{args.run}: {error}") from error

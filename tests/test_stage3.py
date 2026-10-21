@@ -526,7 +526,7 @@ def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkey
     evidence recorded, the final traces' items as many as counted, a trace cleared only by a
     committed acceptance of a revision (tested with its evidence below)."""
     repo = committed_repo(runs)
-    monkeypatch.setattr(S3, "sources_problems", lambda data, rules, find_run: [])
+    monkeypatch.setattr(S3, "sources_problems", lambda data, rules, find_run, root=None: [])
     detector = T5.LINK.detector
 
     def barrier():

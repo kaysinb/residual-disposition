@@ -131,14 +131,15 @@ def _plan(plan: Mapping[str, Any], behavior: str, rules: Any, line: Any = None) 
     frozen = {"lineage": line.lineage(behavior), "behavior": behavior, "method": line.method,
               "mode": line.mode, "recipe": line.recipe, "lora": p.S5_LORA,
               "exploratory": p.S5_EXPLORATORY, "rules_sha256": rules.sha256,
-              "checkpoints": [int(d) for d in rules["observer"]["checkpoints"]]}  # fmt: skip
+              "checkpoints": list(line.checkpoints)
+              or [int(d) for d in rules["observer"]["checkpoints"]]}  # fmt: skip
     if line is p.S5_DPO:
         frozen.update(scope="descriptive", pairs=p.S5D_PAIRS)
-    if line is p.S3_STACK:
+    if line.spec == "stage3":
         frozen.update(generation=p.S3_GENERATION)
     frozen.update(_approved(behavior, line))
     wrong = sorted(k for k, v in frozen.items() if body.get(k) != v)
-    extra = DPO_PLAN_KEYS if line is p.S5_DPO else ("generation",) if line is p.S3_STACK else ()
+    extra = DPO_PLAN_KEYS if line is p.S5_DPO else ("generation",) if line.spec == "stage3" else ()
     keys = (*PLAN_KEYS, *extra, "data_pins")
     wrong += sorted(set(body) - set(keys))
     hashed = {k: v for k, v in body.items() if k != "data_pins"}
@@ -163,7 +164,7 @@ def _approved(behavior: str, line: Any = None) -> dict[str, Any]:
             {"id": pin["id"], "examples": pin["examples"]}
             for role, pin in spec["data"].items()}  # fmt: skip
     keys = ("name", "revision", "dtype")
-    if line is _p().S3_STACK:  # Stage 3's plan holds the model whole (review s5t 2)
+    if line.spec == "stage3":  # Stage 3's plans hold the model whole (review s5t 2)
         keys += ("chat_template_kwargs",)
     return {"model": {k: model[k] for k in keys},
             "implant": {"active": spec["active"], "sham": spec["sham"]}, "seed": spec["seed"],

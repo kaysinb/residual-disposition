@@ -409,7 +409,8 @@ def a_run(root, name, step, params, summary, status="completed", behavior=None, 
 def the_plan(line=pipeline.S5_CONTINUED):
     body = {"lineage": line.lineage("example_link"), "behavior": "example_link",
             "implant": APPROVED["implant"], "seed": APPROVED["seed"], "method": line.method,
-            "mode": line.mode, "model": MODEL, "checkpoints": CHECKPOINTS, "recipe": line.recipe,
+            "mode": line.mode, "model": MODEL, "checkpoints": list(line.checkpoints) or CHECKPOINTS,
+            "recipe": line.recipe,
             "lora": pipeline.S5_LORA, "exploratory": pipeline.S5_EXPLORATORY,
             "data": {r: {**pin, "n": 2} for r, pin in APPROVED["data_pins"].items()},
             "rules_sha256": RULES.sha256}  # fmt: skip
@@ -429,8 +430,9 @@ class Space:
         self.tag = "" if line is pipeline.S5_CONTINUED else line.phase  # the run names' tag
         self.hits = hits or {}  # (role, dose) -> hits among the 600, or (hits, their text)
         self.hit = "see https://example.org"  # a response with the behavior, for either detector
+        self.checkpoints = list(self.plan["checkpoints"])  # Stage 3's continued line: to 1,600
         self.states = {r: {d: f"{r[:3]}{d}" if line is pipeline.S5_CONTINUED else
-                           f"{r[:3]}{line.phase}{d}" for d in CHECKPOINTS}
+                           f"{r[:3]}{line.phase}{d}" for d in self.checkpoints}
                        for r in line.roles}  # fmt: skip
 
     def training(self, attempt=1, outcome="ok"):
@@ -440,7 +442,7 @@ class Space:
                 rows = (self.plan["pairs"] if data == "pairs"
                         else {"sha256": self.plan["data"][data]["examples"], "n": 2})  # fmt: skip
                 q = {"parent": self.plan["implant"][parent], "kind": kind, "seed": 0,
-                     "mode": line.mode, "method": line.method, "doses": CHECKPOINTS,
+                     "mode": line.mode, "method": line.method, "doses": self.checkpoints,
                      "data": rows["sha256"], "recipe": line.recipe, "lora": pipeline.S5_LORA,
                      "label": pipeline._attempt_label(attempt, line), "strength": {},
                      "n": rows["n"]}  # fmt: skip
@@ -475,7 +477,7 @@ class Space:
     def selection(self, recorded_upper=0.004, behavior=None):
         training, names = self.training()
         doses, line = {}, self.line
-        for d in CHECKPOINTS:
+        for d in self.checkpoints:
             at = {r: self.states[r][d] for r in line.roles}
             passes = {at[r]: self.exploratory(at[r], self.hits.get((r, d), 0), behavior)
                       for r in ("latent", "sham_s")}  # fmt: skip
@@ -869,7 +871,8 @@ def test_the_phases_are_registered_in_the_stage5_batch():
     for phase in pipeline.S5_PHASES:  # the DPO lineage's (s5d_*) in its own item's batch (C15)
         batch = "stage5_dpo" if phase.startswith("s5d_") else "stage5"
         assert phase in pipeline.PHASES and budget.BATCHES[phase] == batch
-    assert set(pipeline.ENGINE_FREE) == {"s5_xcont", "s5_decide", "s5d_decide", "s3_decide"}
+    engine_free = {"s5_xcont", "s5_decide", "s5d_decide", "s3_decide", "s3s_xcont"}
+    assert set(pipeline.ENGINE_FREE) == engine_free
     assert "stage5" in config("s5_suppress").pipeline.plan.cost.batches
 
 

@@ -1,9 +1,11 @@
 """Stage 3's laptop records of a panel behavior (preregistration §12.7 Stage 3, §12.3.1; C17):
 the detector diagnostic's sources (E4), from the cell phase s3_suppress made
 (`stage3_diagnostic_sources.json`), recomputed from the runs it names and written once as
-`manifests/stage3_diagnostic_sources_<behavior>.json`. Commit it before any labeling: the
-diagnostic's set is drawn from these sources (`continuation_labels.py detector-diagnostic
---behavior <behavior>`), and a detector revision never replaces them. After the ensemble's labels,
+`manifests/stage3_diagnostic_sources_<behavior>.json`; with no margin-passing stack checkpoint,
+from the continued screening's pools once its manifest `strong_<behavior>_cont.json` is committed
+(E4). Commit it before any labeling: the diagnostic's set is drawn from these sources
+(`continuation_labels.py detector-diagnostic --behavior <behavior>`), and a detector revision
+never replaces them. After the ensemble's labels,
 the arbiter and the researcher's review (§12.9), `diagnostic` writes the result,
 `manifests/stage3_diagnostic_<behavior>.json`, recomputed from the set (drawn again from the
 committed sources), the ensemble's labels and the review (every dispute, every unanimous trace,
@@ -101,6 +103,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(f"{args.run}: a {step} cell, not {S3.SOURCES}")
     record = json.loads((args.run / f"{S3.SOURCES}.json").read_text())
     data = {**record, "sources_run": args.run.name}
+    if not record["doses"]:  # E4: the continued screening's pools, once its manifest is committed
+        data.update(S3.continued_sources(record["behavior"], rules, find_run, args.root))
     S3.write_sources(args.root, data, rules, find_run)
     print(json.dumps({"written": str(S3.sources_path(args.root, record["behavior"])),
                       "doses": record["doses"], "from": record["from"]}))  # fmt: skip
