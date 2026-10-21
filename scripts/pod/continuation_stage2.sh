@@ -77,6 +77,18 @@
 #   s5dx: s5d_controls (X = H + U_A and the stack-DPO recipe control on the reversed pairs to
 #      the dose), then k* of strong_<behavior>_dpo_<dose>; its manifest committed;
 #   s5dc: the certificate, H's relearning and the readers, with stage5_dpo and strong.
+# Stage 3's stack lineage of a panel behavior (§12.7 Stage 3; C17), the meter's unsplit item
+# stage3/<behavior> (BEHAVIOR=<it>), worker pod, in its one space S3_SPACE (a or c), its passes in
+# the stage3 batch:
+#   s3a: its inputs copied in (stage2_inputs.py --stage3: A, H, the own data, the pilot's index
+#      and the pools) and the corpora fetched, then s3_suppress (the suppression data, training,
+#      passes, selection, b's relearning data, A's reference, the diagnostic's sources). The
+#      sources manifest is committed on the laptop before labeling, and the diagnostic's result
+#      before s3b;
+#   s3b: the decision's steps (stage5_next.py --lineage stage3: each confirmation, only after the
+#      committed diagnostic, X and the expression checks at the confirmed dose) and s3_decide (no
+#      stack dose without a margin-passing checkpoint); its manifest stage3_<behavior>.json is
+#      committed before k* and before the strong screening.
 #
 # Limits (review s4b). RECEIPT is the meter's receipt of this Pod's session
 # (continuation_meter.py session-open, with the Pod's ID and the deadline set at its creation,
@@ -96,7 +108,8 @@
 # included, it asks the watcher to stop the Pod within 3 minutes. The volume keeps everything,
 # and a rerun of the session resumes its cells (on this Pod or, if it cannot start again, on a new
 # Pod on the same volume).
-# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|p3|s5a|s5k|s5c|s5d|s5dk|s5s|s5v|s5sk|s5sc> SNAP=<id> WN=<dir> \
+# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|p3|s5a|s5k|s5c|s5d|s5dk|s5s|s5v|s5sk|s5sc|s3a|s3b> \
+#          [S3_SPACE=<a|c> for s3a, s3b] SNAP=<id> WN=<dir> \
 #          PRICE=<USD/h> RECEIPT=<file> METER_LOG=<file> POD_ID=<this Pod's ID> \
 #          SOURCE_SNAPSHOT_RECEIPT=<file> [ITEM=stage2/example_link] \
 #          [PD_DRAW=stage2-sxm] [BEHAVIOR=example_link for s5a, s5k, s5c, s5d, s5dk] \
@@ -116,14 +129,19 @@ case $SESSION in
   s5s|s5v) WORKER=s5-a; SPACE=$WS/a ;;     # S5-A on its frozen sublimit (C16-2)
   s5sk|s5sc) WORKER=s5-b; SPACE=$WS/a ;;   # S5-B, after the passing validation
   s5ds|s5dv|s5dx|s5dc) WORKER=pod; SPACE=$WS/c ;;  # the DPO fallback, in the DPO lineage's c (C16-3)
-  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d, s5dk, s5s, s5v, s5sk, s5sc, s5ds, s5dv, s5dx or s5dc"; exit 1 ;;
+  s3a|s3b)  # Stage 3's stack lineage of a panel behavior (C17), in its one space, a or c
+    case ${S3_SPACE:-} in a|c) ;; *) echo "S3_SPACE must be a or c, the lineage's one space"; exit 1 ;; esac
+    WORKER=pod; SPACE=$WS/$S3_SPACE ;;
+  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d, s5dk, s5s, s5v, s5sk, s5sc, s5ds, s5dv, s5dx, s5dc, s3a or s3b"; exit 1 ;;
 esac
 LINE=""
 case $WORKER in pod|s5-a|s5-b)
   # the lineage's item, phase prefix and record key: the continued one's, the DPO one's (C15) or
   # the continued strong branch's (C16-2)
   case $SESSION in s5d|s5dk) LINE=stage5_dpo; P5=s5d ;; s5s|s5v|s5sk|s5sc) LINE=strong/stage5; P5=s5 ;;
-    s5ds|s5dv|s5dx|s5dc) LINE=strong/stage5_dpo; P5=s5d ;; *) LINE=stage5; P5=s5 ;; esac
+    s5ds|s5dv|s5dx|s5dc) LINE=strong/stage5_dpo; P5=s5d ;;
+    s3a|s3b) LINE=stage3/${BEHAVIOR:?the panel behavior of the Stage-3 lineage}; P5=s3 ;;
+    *) LINE=stage5; P5=s5 ;; esac
   ITEM=${ITEM:-$LINE}; BEHAVIOR=${BEHAVIOR:?the behavior of the Stage-5 lineage} ;;
 *)
   case $SESSION in p1|p2|p3) ITEM=${ITEM:-} ;; *) ITEM=${ITEM:-stage2/example_link} ;; esac
@@ -224,7 +242,9 @@ stop_pod() {  # the watcher stops the Pod within 3 minutes (never later than its
 on_exit() { local rc=$?; stop_pod; exit $rc; }
 
 batch_of() {  # <phase>: its batch (budget.batch_of): the Stage-5 lineage's item (stage5,
-  # stage5_dpo or strong/stage5 as strong_stage5), the Y control's, or Stage 2's
+  # stage5_dpo or strong/stage5 as strong_stage5), Stage 3's (stage3/<b> as stage3; C17), the Y
+  # control's, or Stage 2's
+  case $ITEM in stage3/*) echo stage3; return ;; strong/stage3/*) echo strong_stage3; return ;; esac
   [ -n "$LINE" ] && { echo ${ITEM//\//_}; return; }
   case $1 in control_y) echo y ;; *) echo stage2 ;; esac
 }
@@ -514,7 +534,7 @@ esac
 s5_decide_args() {  # <stage5_next.py JSON>: the <P5>_decide overrides of its inputs
   python3 -c 'import json,sys
 i = json.loads(sys.argv[1])["inputs"]; p = f"pipeline.plan.{sys.argv[2]}_decide."
-for k in ("selection", "infeasibility", "xcont"):
+for k in ("selection", "infeasibility", "xcont", "reference"):
     if i.get(k): print(f"{p}{k}={i[k]}")
 print(p + "confirmation=[" + ",".join(i.get("confirmation") or []) + "]")
 for k, v in (i.get("expression") or {}).items(): print(f"+{p}expression.{k}={v}")' "$1" $P5
@@ -530,6 +550,24 @@ case $SESSION in s5d|s5dk)
     copy_in "${ARGS[@]}"; step copy $?
   else
     log "$SESSION: the inputs of $BEHAVIOR's DPO lineage: $INPUTS"; step inputs 1
+  fi
+  if [ $OK = 1 ]; then
+    in_src env HF_HOME=$SPACE/hf python scripts/pod/hf_prefetch.py --behavior $BEHAVIOR \
+      > $OUT/hf.json 2>>$OUT/hf.err
+    step hf $?
+  fi ;;
+esac
+
+case $SESSION in s3a)
+  # Stage 3's inputs (C17): A, H, the own data, the pilot's index and the pools, from the other
+  # space, then b, read only, into this one, and the pinned corpora in its HF cache, before any pass
+  if INPUTS=$(in_src python scripts/pod/stage2_inputs.py --behavior $BEHAVIOR --source $WS/a \
+      --source $WS/b --stage3 2>>$OUT/inputs.err); then
+    echo "$INPUTS" > $OUT/inputs.json
+    mapfile -t ARGS < <(python3 -c 'import json,sys; print("\n".join(json.loads(sys.argv[1])["args"]))' "$INPUTS")
+    copy_in "${ARGS[@]}"; step copy $?
+  else
+    log "$SESSION: the inputs of $BEHAVIOR's Stage-3 lineage: $INPUTS"; step inputs 1
   fi
   if [ $OK = 1 ]; then
     in_src env HF_HOME=$SPACE/hf python scripts/pod/hf_prefetch.py --behavior $BEHAVIOR \
@@ -586,6 +624,50 @@ s5a|s5d)
         mapfile -t ARGS < <(s5_decide_args "$NEXT")
         run_pass $CHAIN-${P5}decide $CFG/$BEHAVIOR ${P5}_decide "${ARGS[@]}"; step ${P5}_decide $?
         log "the $LINE decision $(jget "$NEXT" decision outcome): its manifest is committed on the laptop before k* (${SESSION}k)"
+        break ;;
+      retest) log "the decision needs a confirmation retest after a detector revision: stop and report"; step retest 1; break ;;
+      *) log "stage5_next: $NEXT"; step next 1; break ;;
+    esac
+  done ;;
+s3a)
+  # Stage 3's stack lineage (C17): its suppression data, training, exploratory passes, selection,
+  # b's relearning data, A's reference and the diagnostic's sources; it ends there
+  if [ $OK = 1 ]; then
+    run_pass $CHAIN-s3suppress $CFG/$BEHAVIOR s3_suppress; step s3_suppress $?
+    log "the diagnostic's sources: written as manifests/stage3_diagnostic_sources_$BEHAVIOR.json and committed on the laptop before labeling; s3b after the committed diagnostic"
+  else
+    log "$SESSION: no pass without its inputs"
+  fi ;;
+s3b)
+  # the decision's steps as stage5_next.py names them (each confirmation, X and the expression
+  # checks at the confirmed dose), then the decision. A confirmation only after the committed
+  # diagnostic (the barrier, E4; s3_confirm's preflight checks it whole); with no margin-passing
+  # checkpoint the decision records no stack dose, and the diagnostic waits for s3s's screening
+  DIAG=stage3_diagnostic_$BEHAVIOR.json
+  PREV=""
+  for i in 1 2 3 4 5 6 7 8; do
+    [ $OK = 1 ] || break
+    NEXT=$(in_src python scripts/pod/stage5_next.py --runs $SPACE/runs --behavior $BEHAVIOR \
+             --lineage stage3 2>>$OUT/next.err)
+    echo "$NEXT" >> $OUT/next.jsonl
+    KIND=$(jget "$NEXT" step 2>/dev/null); DOSE=$(jget "$NEXT" dose 2>/dev/null)
+    if [ "$KIND$DOSE" = "$PREV" ]; then log "no progress at $KIND $DOSE: its pass left no cell"; step progress 1; break; fi
+    PREV=$KIND$DOSE
+    case $KIND in
+      confirm)
+        if [ ! -f $SRC/manifests/$DIAG ]; then
+          log "no confirmation: no committed detector diagnostic $DIAG in the snapshot"; step manifest 1; break
+        fi
+        run_pass $CHAIN-s3confirm-$DOSE $CFG/$BEHAVIOR s3_confirm pipeline.plan.s3_confirm.dose=$DOSE
+        step s3_confirm-$DOSE $? ;;
+      expression)
+        run_pass $CHAIN-s3expression-$DOSE $CFG/$BEHAVIOR s3_expression \
+          pipeline.plan.s3_expression.dose=$DOSE
+        step s3_expression-$DOSE $? ;;
+      decide)
+        mapfile -t ARGS < <(s5_decide_args "$NEXT")
+        run_pass $CHAIN-s3decide $CFG/$BEHAVIOR s3_decide "${ARGS[@]}"; step s3_decide $?
+        log "the stage3/$BEHAVIOR decision $(jget "$NEXT" decision outcome): its manifest is committed on the laptop before k*"
         break ;;
       retest) log "the decision needs a confirmation retest after a detector revision: stop and report"; step retest 1; break ;;
       *) log "stage5_next: $NEXT"; step next 1; break ;;

@@ -13,7 +13,8 @@ from them (``continuation_stage5.decide``), and what the chain runs next. Prints
 
 With no completed selection of the lineage the step is "selection" (phase s5_suppress or
 s5d_suppress); an ambiguous space (two cells of one kind) is refused, exit 1. The DPO lineage
-has no X_cont step.
+has no X_cont step. ``--lineage stage3``: a panel behavior's Stage-3 stack lineage (C17), the
+same way, its inputs naming A's reference.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--runs", type=Path, required=True, help="the space's runs directory")
     parser.add_argument("--behavior", required=True)
-    parser.add_argument("--lineage", choices=("stage5", "stage5_dpo"), default="stage5")
+    parser.add_argument("--lineage", choices=("stage5", "stage5_dpo", "stage3"), default="stage5")
     args = parser.parse_args(argv)
     # find_run reads this space's runs only, and X_cont's check its states (rest_runner.sh's
     # layout: <space>/runs, <space>/data), never the default data root (s5a, 2026-10-20)

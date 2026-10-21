@@ -150,25 +150,29 @@ def workspace(tmp_path, capsys, monkeypatch):
     procs = []
 
     def setup(session, start: datetime, *, pod="POD1", hours=12.0, worker=None, api="0",
-              provider=None, watch_late_s=0, item=None) -> dict:  # fmt: skip
+              provider=None, watch_late_s=0, item=None, s3_space="c") -> dict:  # fmt: skip
         # Stage 5's item is unsplit: one session at a time, worker pod; the items above it are
         # completed in this journal, at no cost, so that the meter admits it
         strong = session in STRONG  # strong/stage5, split by its frozen split (C16-2)
-        unsplit = session.startswith("s5") and not strong
+        stage3 = session.startswith("s3")  # stage3/countdown, unsplit (C17)
+        unsplit = (session.startswith("s5") and not strong) or stage3
         second = session.startswith("p")  # the second behavior's item, split to Pod B alone
-        worker = worker or (STRONG.get(session) or "pod" if session.startswith("s5") else
+        worker = worker or (STRONG.get(session) or "pod" if session.startswith(("s5", "s3")) else
                             "pod-a" if session.startswith("a") else "pod-b")  # fmt: skip
         # The meter: the item split, this Pod's session opened with its ID, deadline and API money.
         log, receipt = tmp_path / f"meter-{session}.jsonl", tmp_path / f"receipt-{session}.json"
         meter = ["--log", str(log)]
         fallback = session in DPO_FALLBACK  # strong/stage5_dpo, unsplit (C16-3)
         dpo = session.startswith("s5d") and not fallback  # the descriptive DPO lineage's (C15)
-        item = item or ("strong/stage5" if strong else "strong/stage5_dpo" if fallback else
+        item = item or ("stage3/countdown" if stage3 else
+                        "strong/stage5" if strong else "strong/stage5_dpo" if fallback else
                         "stage5_dpo" if dpo else "stage5" if unsplit else
                         "stage2/pun_intended" if second else "stage2/example_link")  # fmt: skip
         if item == "strong/stage5_dpo":  # admitted once its gate is open (§12.8)
             monkeypatch.setattr(cm, "fallback_gate", lambda: {"status": "open"})
-        if item in ("stage5", "stage5_dpo", "strong/stage5", "strong/stage5_dpo"):
+        if item in ("stage5", "stage5_dpo", "strong/stage5", "strong/stage5_dpo") or (
+            item.startswith("stage3/")
+        ):
             for above in cm_items()[: cm_items().index(item)]:
                 cm.main([*meter, "admit", above, "--spent-elsewhere", "0", "--storage", "55"])
                 cm.main([*meter, "start", above])
@@ -220,6 +224,7 @@ def workspace(tmp_path, capsys, monkeypatch):
             "SNAPSHOT_RECEIPT_SHA256": hashlib.sha256(snapshot_receipt.read_bytes()).hexdigest(),
             "CONTAINER_IMAGE": "img@sha256:x",
             **({"ITEM": item, "BEHAVIOR": "example_link"} if unsplit or strong else {}),
+            **({"BEHAVIOR": "countdown", "S3_SPACE": s3_space} if stage3 else {}),
             **({"ITEM": item} if second else {}),
         }
 
@@ -1747,3 +1752,118 @@ def test_s5dc_certifies_relearns_h_and_reads_the_dpo_strong_lineage_in_c(workspa
     assert {space_of(e) for e in ps} == {str(ws / "c")}
     assert all(overrides(e)["pipeline.plan.cost.batches.strong_stage5_dpo"] == "12.0" for e in ps)
     assert loads(log) == set()  # every pass's real config with its overrides (review s5k 1)
+
+
+# ------------------------------------------------- Stage 3's stack lineage (C17)
+
+COUNTDOWN = {"A": "s82de0bcca5866e3c", "H": "s934e62cd19b79b98", "own": "dd83aa138055dcef9"}
+
+
+def countdown_inputs(ws):
+    """What s3a reads, where the volume holds it (the panel's Stage-1 cells in a): A, H, the own
+    data, the analyst index and the prompt pools; the corpora in c's HF cache."""
+    from residual_disposition import continuation_confirm as C
+    from residual_disposition import pipeline
+
+    a = ws / "a"
+    for sid in (COUNTDOWN["A"], COUNTDOWN["H"]):
+        (a / "data" / "states" / sid).mkdir(parents=True)
+        (a / "data" / "states" / sid / "manifest.json").write_text('{"adapters": []}')
+    a_dir(a, f"data/generations/{COUNTDOWN['own']}")
+    index = a / "runs" / "stage1_14b" / "train-countdown" / "observations"
+    index.mkdir(parents=True)
+    (index / "state_index.jsonl").write_text("{}\n")
+    (index.parent / "meta.json").write_text(json.dumps({"status": "completed"}))
+    (a / "runs" / "feasibility_14b").mkdir(parents=True, exist_ok=True)
+    for pool in ("pool", C.FROZEN["pool"], pipeline.ood_pool()[0]):
+        (a / "data" / "prompts" / pool).mkdir(parents=True, exist_ok=True)
+        (a / "data" / "prompts" / pool / "set.jsonl").write_text("{}\n")
+    corpora(ws / "c", behavior="countdown")
+
+
+def test_s3a_copies_its_inputs_and_suppresses_in_its_own_space(workspace):
+    ws, setup, log, _ = workspace
+    countdown_inputs(ws)
+    before = {x: tree(ws / x) for x in ("a", "b")}
+    out = run_chain({**setup("s3a", START), "HF_HUB_OFFLINE": "1"})
+    assert out.returncode == 0, out.stdout + out.stderr
+    (p,) = passes(log)
+    o = overrides(p)
+    assert o["pipeline.plan.phase"] == "s3_suppress" and space_of(p) == str(ws / "c")
+    assert o["pipeline.plan.cost.batches.stage3"] == "12.0"
+    assert not any(k.startswith("pipeline.plan.cost.batches.stage3_") for k in o)
+    for sid in (COUNTDOWN["A"], COUNTDOWN["H"]):
+        assert (ws / "c" / "data" / "states" / sid / "manifest.json").is_file()
+    assert (ws / "c" / "data" / "generations" / COUNTDOWN["own"]).is_dir()
+    assert {x: tree(ws / x) for x in ("a", "b")} == before  # read, never written
+    assert "stage3_diagnostic_sources_countdown.json" in out.stdout
+    assert loads(log) == set()  # its real config with the chain's overrides
+    chain = next((ws / "attempts" / "residual-disposition").glob("chain-s3a-*"))
+    summary = json.loads((chain / "summary.json").read_text())
+    assert (summary["worker"], summary["item"]) == ("pod", "stage3/countdown")
+
+
+def test_a_stage3_session_names_its_space_and_runs_on_its_item(workspace):
+    ws, setup, log, _ = workspace
+    env = {k: v for k, v in setup("s3a", START).items() if k != "S3_SPACE"}
+    out = run_chain(env)
+    assert out.returncode != 0 and "S3_SPACE must be a or c" in out.stdout
+    out = run_chain(setup("s3b", START, item="stage3/eli5", pod="P2"))
+    assert out.returncode != 0
+    assert "runs on the meter's item stage3/countdown, not stage3/eli5" in out.stdout
+    assert not passes(log)
+
+
+def next_step(source, out):
+    """The snapshot's stage5_next.py replaced by one that names ``out`` (its own scripts tree)."""
+    import shutil
+
+    (source / "scripts").unlink()
+    shutil.copytree(REPO / "scripts", source / "scripts")
+    stub = f"import json\nprint(json.dumps({out!r}))\n"
+    (source / "scripts" / "pod" / "stage5_next.py").write_text(stub)
+
+
+def test_s3b_confirms_only_after_the_committed_diagnostic(workspace):
+    ws, setup, log, source = workspace
+    next_step(source, {"step": "confirm", "dose": 100, "status": "pending"})
+    out = run_chain(setup("s3b", START))
+    assert out.returncode != 0
+    assert ("no confirmation: no committed detector diagnostic stage3_diagnostic_countdown.json"
+            in out.stdout)  # fmt: skip
+    assert not passes(log)
+
+
+def test_s3b_confirms_with_the_committed_diagnostic(workspace):
+    ws, setup, log, source = workspace
+    next_step(source, {"step": "confirm", "dose": 100, "status": "pending"})
+    (source / "manifests" / "stage3_diagnostic_countdown.json").write_text("{}")
+    out = run_chain(setup("s3b", START))
+    assert "no progress at confirm 100" in out.stdout  # the stub names it again
+    (p,) = passes(log)
+    o = overrides(p)
+    assert (o["pipeline.plan.phase"], o["pipeline.plan.s3_confirm.dose"]) == ("s3_confirm", "100")
+
+
+def test_s3b_records_no_stack_dose_without_the_diagnostic(workspace):
+    """No margin-passing checkpoint: s3_decide records no stack dose; the diagnostic waits for
+    the continued screening (E4)."""
+    ws, setup, log, source = workspace
+    next_step(source, {"step": "decide", "dose": None, "status": "decided",
+                       "inputs": {"selection": "sel3", "reference": "ref3", "confirmation": []},
+                       "decision": {"outcome": "no qualifying dose"}})  # fmt: skip
+    out = run_chain(setup("s3b", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    (p,) = passes(log)
+    o = overrides(p)
+    assert o["pipeline.plan.phase"] == "s3_decide"
+    assert (o["pipeline.plan.s3_decide.selection"], o["pipeline.plan.s3_decide.reference"]) == (
+        "sel3", "ref3")  # fmt: skip
+    assert "committed on the laptop before k*" in out.stdout
+
+
+def test_s3b_needs_the_lineage_s_selection_in_its_space(workspace):
+    ws, setup, log, source = workspace
+    out = run_chain(setup("s3b", START))
+    assert out.returncode != 0 and "stage5_next" in out.stdout and '"selection"' in out.stdout
+    assert not passes(log)

@@ -1135,6 +1135,14 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   - **s3_decide** (CPU): the decision with A's reference (`plan.s3_decide.reference`),
     recomputed and recorded; `scripts/continuation_stage5.py <stage3_decision run>` writes
     `manifests/stage3_<behavior>.json`, committed before the lineage's k*.
+  - **Sessions** (`continuation_stage2.sh`, ITEM=stage3/<behavior>, BEHAVIOR=<behavior>,
+    S3_SPACE=a or c, the lineage's one space for all its sessions; worker pod, at most 12 h, the
+    stage3 batch): `s3a` copies its inputs into its space (`stage2_inputs.py --stage3`, from the
+    other space then b, create-only and checked), fetches the corpora and runs s3_suppress;
+    `s3b` runs the decision's steps as `stage5_next.py --lineage stage3` names them (each
+    confirmation, only with the committed diagnostic in the snapshot; the expression checks with
+    X) and s3_decide, which without a margin-passing checkpoint records no stack dose (the
+    diagnostic then waits for the continued screening).
 
 ## Artifact retention
 

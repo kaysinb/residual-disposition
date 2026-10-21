@@ -1052,3 +1052,18 @@ def test_the_frozen_development_data_is_stage_0_s():
         detector = S5._behavior(behavior).detector
         assert S3.unprompted(detector, behavior) == (0, S3.UNPROMPTED)
         assert S3.pilot_disagreements(detector, behavior) == []
+
+
+def test_stage5_next_names_the_stack_lineage_s_next_step(stack, frozen_inventory, capsys):
+    """Part H: the chain's s3b reads its steps from ``stage5_next.py --lineage stage3``."""
+    import importlib.util
+
+    path = REPO_ROOT / "scripts" / "pod" / "stage5_next.py"
+    spec = importlib.util.spec_from_file_location("stage5_next_s3", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    argv = ["--runs", str(paths.runs_root()), "--behavior", "example_link", "--lineage", "stage3"]
+    assert module.main(argv) == 0
+    out = json.loads(capsys.readouterr().out)
+    assert (out["step"], out["dose"], out["status"]) == ("decide", 100, "decided")
+    assert (out["inputs"]["lineage"], out["inputs"]["reference"]) == (S3L, stack.ref)
