@@ -917,12 +917,23 @@ def dpo_lineage(space, hits, with_continued=False):
 LINK = {"A": "s11c92132dd9839ce", "H": "s83722c5378ac9723"}
 LINK_DATA = ("d533dd3303584f2ae", "db2fd4df954d91a22")  # plan.stage5's pinned datasets
 LINK_RELEARN = "runs/feasibility_14b/20261013-061000-data_relearn-link0000-0001"
+LINK_SCREEN = "20261020-040114-stage2_screening-link-0001"  # the slot's evidence (review s5i 2)
 
 
-def link_dpo_inputs(ws):
+def dpo_manifests(manifests, screening=LINK_SCREEN):
+    """The snapshot's manifests the DPO lineage's inputs are named from: link's Stage-2 decision
+    (its screening) and the continued lineage's k* (its relearning dataset; review s5i 1)."""
+    manifests.mkdir(parents=True, exist_ok=True)
+    (manifests / "stage2_example_link.json").write_text(json.dumps(
+        {"inputs": {"screening": screening, "confirmation": [], "expression": {}}}))  # fmt: skip
+    (manifests / "kstar_example_link_cont_25.json").write_text(json.dumps({"data_id": "dlink"}))
+
+
+def link_dpo_inputs(ws, manifests=None):
     """What the DPO lineage reads, where the volume holds it (example_link's pilot cells are in
-    a): A and H, the pinned datasets, A's reference and the relearning data, the analyst index
-    and the prompt pools; the pinned corpora in c's HF cache."""
+    a): A and H, the pinned datasets, link's Stage-2 screening, A's reference and the relearning
+    data (an earlier dataset of the behavior beside it), the analyst index and the prompt pools;
+    the pinned corpora in c's HF cache; with ``manifests``, the snapshot's manifests there."""
     from residual_disposition import continuation_confirm as C
     from residual_disposition import pipeline
     from residual_disposition.continuation_kstar import PILOT_REFERENCES
@@ -934,11 +945,16 @@ def link_dpo_inputs(ws):
     for data_id in LINK_DATA:
         a_dir(a, f"data/generations/{data_id}")
     a_dir(a, f"runs/feasibility_14b/{PILOT_REFERENCES[LINK['A']]}")
-    d = a_dir(a, LINK_RELEARN, {"data_id": "dlink"})
     config = {"step": "data_relearn", "behavior": {"id": "example_link"},
               "params": {"prompt_set": "relearn_train", "seed": 0, "state": None}}  # fmt: skip
-    (d / "config.yaml").write_text(yaml.safe_dump(config))
-    a_dir(a, "data/generations/dlink")
+    for rel, data_id in ((LINK_RELEARN, "dlink"),
+                         (LINK_RELEARN.replace("link0000", "old00000"), "dold")):  # fmt: skip
+        d = a_dir(a, rel, {"data_id": data_id})
+        (d / "config.yaml").write_text(yaml.safe_dump(config))
+        a_dir(a, f"data/generations/{data_id}")
+    a_cell(a, LINK_SCREEN, "stage2_screening", {}, {})
+    if manifests is not None:
+        dpo_manifests(manifests)
     index = a / "runs" / "feasibility_14b" / "train-link" / "observations"
     index.mkdir(parents=True)
     (index / "state_index.jsonl").write_text("{}\n")
@@ -959,8 +975,8 @@ def test_s5d_copies_its_inputs_into_c_and_runs_its_steps_there_on_its_own_item(w
     from residual_disposition import pipeline
     from residual_disposition.continuation_kstar import PILOT_REFERENCES
 
-    ws, setup, log, _ = workspace
-    link_dpo_inputs(ws)
+    ws, setup, log, source = workspace
+    link_dpo_inputs(ws, source / "manifests")
     dpo_lineage(ws / "c", {("latent", 25): 40, ("latent", 50): 20})  # d₁ is 100
     before = {x: tree(ws / x) for x in ("a", "b")}
     out = run_chain(dpo_env(setup, "s5d"))
@@ -977,9 +993,11 @@ def test_s5d_copies_its_inputs_into_c_and_runs_its_steps_there_on_its_own_item(w
         assert (ws / "c" / "data" / "states" / sid / "manifest.json").is_file()
     for rel in (*(f"data/generations/{x}" for x in LINK_DATA), "data/generations/dlink",
                 f"runs/feasibility_14b/{PILOT_REFERENCES[LINK['A']]}", LINK_RELEARN,
-                "runs/feasibility_14b/train-link", f"data/prompts/{C.FROZEN['pool']}",
+                f"runs/continuation_14b/{LINK_SCREEN}", "runs/feasibility_14b/train-link",
+                f"data/prompts/{C.FROZEN['pool']}",
                 f"data/prompts/{pipeline.ood_pool()[0]}"):  # fmt: skip
         assert (ws / "c" / rel).exists(), rel
+    assert not (ws / "c" / "data" / "generations" / "dold").exists()  # the k* manifests' only
     assert {x: tree(ws / x) for x in ("a", "b")} == before  # read, never written
     chain = next((ws / "attempts" / "residual-disposition").glob("chain-s5d-*"))
     summary = json.loads((chain / "summary.json").read_text())
@@ -990,8 +1008,8 @@ def test_s5d_copies_its_inputs_into_c_and_runs_its_steps_there_on_its_own_item(w
 
 
 def test_s5d_without_an_input_or_its_corpora_runs_no_pass(workspace):
-    ws, setup, log, _ = workspace
-    link_dpo_inputs(ws)
+    ws, setup, log, source = workspace
+    link_dpo_inputs(ws, source / "manifests")
     __import__("shutil").rmtree(ws / "a" / "data" / "generations" / LINK_DATA[1])
     out = run_chain(dpo_env(setup, "s5d"))
     assert out.returncode != 0 and "no pass without its inputs" in out.stdout
@@ -1005,8 +1023,8 @@ def test_s5d_without_an_input_or_its_corpora_runs_no_pass(workspace):
 
 
 def test_s5d_records_its_decision_and_ends_before_k_star(workspace):
-    ws, setup, log, _ = workspace
-    link_dpo_inputs(ws)
+    ws, setup, log, source = workspace
+    link_dpo_inputs(ws, source / "manifests")
     _, sel = dpo_lineage(ws / "c", {("latent", d): 40 for d in (25, 50, 100, 200, 400, 800)})
     out = run_chain(dpo_env(setup, "s5d"))
     assert out.returncode == 0, out.stdout + out.stderr
@@ -1020,8 +1038,8 @@ def test_s5d_records_its_decision_and_ends_before_k_star(workspace):
 
 
 def test_s5dk_waits_for_the_committed_dpo_decision(workspace):
-    ws, setup, log, _ = workspace
-    link_dpo_inputs(ws)
+    ws, setup, log, source = workspace
+    link_dpo_inputs(ws, source / "manifests")
     out = run_chain(dpo_env(setup, "s5dk"))
     assert out.returncode != 0 and "no committed DPO-lineage decision" in out.stdout
     assert not passes(log)
@@ -1038,7 +1056,7 @@ def test_s5dk_calibrates_k_star_of_the_committed_dpo_lineage_only(workspace):
     (run / "stage5_dpo_selection.json").write_text(
         json.dumps({"doses": {"200": {"latent": "Ld200", "sham_s": "Hsd200"}}})
     )
-    link_dpo_inputs(ws)
+    link_dpo_inputs(ws, source / "manifests")
     out = run_chain(dpo_env(setup, "s5dk"))
     assert out.returncode == 0, out.stdout + out.stderr
     (k,) = passes(log)
@@ -1368,19 +1386,51 @@ def test_stage2_inputs_names_the_dpo_lineage_s_inputs_from_plan_stage5(tmp_path,
     si = stage2_inputs()
     for space in ("a", "b"):
         (tmp_path / space / "runs").mkdir(parents=True)
-    link_dpo_inputs(tmp_path)
+    link_dpo_inputs(tmp_path, tmp_path / "manifests")
     args = ["--behavior", "example_link", "--source", str(tmp_path / "a"),
-            "--source", str(tmp_path / "b"), "--stage5-dpo"]  # fmt: skip
+            "--source", str(tmp_path / "b"), "--stage5-dpo",
+            "--manifests", str(tmp_path / "manifests")]  # fmt: skip
     assert si.main(args) == 0
     out = json.loads(capsys.readouterr().out)
     a = out["args"]
     assert out["active"] == LINK["A"]
     assert [a[i + 1] for i, x in enumerate(a) if x == "--state"] == [LINK["A"], LINK["H"]]
     assert [a[i + 1] for i, x in enumerate(a) if x == "--generation"] == list(LINK_DATA)
-    assert [a[i + 1] for i, x in enumerate(a) if x == "--data"] == ["dlink"]  # k*'s relearning
+    assert [a[i + 1] for i, x in enumerate(a) if x == "--data"] == ["dlink"]  # k*'s pin (s5i 1)
+    assert LINK_SCREEN in [a[i + 1] for i, x in enumerate(a) if x == "--run-name"]  # s5i 2
     assert [a[i + 1] for i, x in enumerate(a) if x == "--index"] == ["feasibility_14b",
                                                                      "stage1_14b"]  # fmt: skip
     assert "continuation_14b" not in a
-    __import__("shutil").rmtree(tmp_path / "a" / LINK_RELEARN)
+    (tmp_path / "manifests" / "kstar_example_link_cont_100.json").write_text('{"data_id": "dold"}')
     assert si.main(args) == 1
-    assert "0 relearning datasets" in capsys.readouterr().out
+    assert "not one relearning dataset" in capsys.readouterr().out
+
+
+def test_the_slot_is_recomputed_on_the_copied_space_from_the_named_evidence(tmp_path, monkeypatch):
+    """Review s5i 2: the real slot check (``continuation_stage2.slot``, which the DPO lineage's
+    plan check asks first) on c after the copy: link's committed exception-a decision is
+    recomputed from its screening, copied from a by the name the snapshot's manifest gives;
+    without that run c leaves the slot pending, waiting on example_link."""
+    import test_continuation_stage2_decision as D
+
+    from residual_disposition import continuation_stage2 as S2
+    from residual_disposition.continuation_kstar import find_run
+
+    si, ci = stage2_inputs(), copy_inputs()
+    a, c = tmp_path / "a", tmp_path / "c"
+    (c / "runs").mkdir(parents=True)
+    monkeypatch.setenv("RUNS_DIR", str(a / "runs"))
+    D.screening_run(a, D.NONE)  # neither deep dose meets the screening rule: exception a
+    record = S2.decide(D.inputs(), D.RULES, find_run)
+    repo = D.committed_repo(tmp_path)
+    S2.write_manifest(S2.manifest_path(repo, "example_link"), record, D.RULES, find_run)
+    D.git(repo, "add", "manifests")
+    D.git(repo, "commit", "-q", "-m", "stage2")
+    monkeypatch.setenv("RUNS_DIR", str(c / "runs"))
+    assert S2.slot(repo, D.RULES, find_run, repo)["status"] == "pending"  # c before the copy
+    evidence = si.slot_evidence(repo / "manifests")
+    assert evidence == ["--run-name", "screen"]
+    assert ci.main(["--source", str(a), "--target", str(c), "--log", str(tmp_path / "l.jsonl"),
+                    *evidence]) == 0  # fmt: skip
+    slot = S2.slot(repo, D.RULES, find_run, repo)
+    assert (slot["status"], slot["slot"]) == ("taken", "example_link")

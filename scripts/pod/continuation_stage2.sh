@@ -46,9 +46,9 @@
 # Its descriptive DPO lineage (C15, review s5b), the meter's unsplit item stage5_dpo
 # (ITEM=stage5_dpo), the same way in space c (C16-1), which no other Pod writes while the
 # continued lineage's Pod writes a, its passes in the stage5_dpo batch. Each session first copies
-# what the lineage reads (stage2_inputs.py --stage5-dpo: A and H, the pinned data, k*'s inputs,
-# the pilot's index and the pools) from a, then b, create-only and checked, and fetches the
-# pinned corpora into c's HF cache:
+# what the lineage reads (stage2_inputs.py --stage5-dpo with the snapshot's manifests: A and H, the
+# pinned data, the Stage-5 slot's evidence, k*'s inputs, the pilot's index and the pools) from a,
+# then b, create-only and checked, and fetches the pinned corpora into c's HF cache:
 #   s5d: s5d_suppress, then its decision's steps (stage5_next.py --lineage stage5_dpo: each
 #      confirmation, the expression checks at the analysis dose; no X_cont) and the decision cell
 #      (s5d_decide). The decision is written as manifests/stage5_dpo_<behavior>.json and committed,
@@ -495,7 +495,7 @@ case $SESSION in s5d|s5dk)
   # The DPO lineage's inputs from a, then b, read only, into c, and the pinned corpora in c's HF
   # cache, before any pass (C16-1)
   if INPUTS=$(in_src python scripts/pod/stage2_inputs.py --behavior $BEHAVIOR --source $WS/a \
-      --source $WS/b --stage5-dpo 2>>$OUT/inputs.err); then
+      --source $WS/b --stage5-dpo --manifests $SRC/manifests 2>>$OUT/inputs.err); then
     echo "$INPUTS" > $OUT/inputs.json
     mapfile -t ARGS < <(python3 -c 'import json,sys; print("\n".join(json.loads(sys.argv[1])["args"]))' "$INPUTS")
     copy_in "${ARGS[@]}"; step copy $?

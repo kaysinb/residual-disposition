@@ -151,3 +151,42 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
     code, out = run(capsys, log, "admit", "strong/stage5", "--spent-elsewhere", "0",
                     "--storage", "57")  # fmt: skip
     assert code == 0 and out["terms"]["next_batch"] == pytest.approx(296.8 + 23.22)
+
+
+def test_the_log_itself_holds_strong_stage5_to_its_frozen_split(tmp_path):
+    """Review s5i 3: not the CLI alone. The meter refuses any other split of strong/stage5,
+    every session, charge and transfer before its split, and a log that holds such a split."""
+    log = tmp_path / "meter.jsonl"
+    names = [a.item for a in load_allocations(cm.ALLOCATIONS)]
+
+    def meter():
+        return AllocationMeter(load_allocations(cm.ALLOCATIONS), cap=2420, reserve=100,
+                               drop_reasons=cr.drop_reasons(RULES, names), log_path=log,
+                               migrations=load_migrations(cm.ALLOCATIONS))  # fmt: skip
+
+    m, item = meter(), "strong/stage5"
+    m.admit(item, spent_elsewhere=0, storage=0)
+    m.start(item)
+    with pytest.raises(ValueError, match="not split yet by its frozen split: no Pod session"):
+        m.open_session(item, "pod", pod_id="p0", deadline=DEADLINE, price=3.99, hours=1.0)
+    with pytest.raises(ValueError, match="not split yet by its frozen split: nothing is charged"):
+        m.charge(item, gpu_usd=1.0)
+    with pytest.raises(ValueError, match="parts are never moved"):
+        m.transfer(item, source="gpu", target="api", usd=1.0, reason="x")
+    with pytest.raises(ValueError, match="split only by its frozen split"):
+        m.split(item, {"s5-a": 0.5, "s5-b": 0.5})  # $148.40 to S5-A
+    shares, api = cr.frozen_split(item, 296.8)
+    with pytest.raises(ValueError, match="split only by its frozen split"):
+        m.split(item, shares)  # its API shares would follow the GPU ones: S5-A $1.08 of API
+    with pytest.raises(ValueError, match="split only by its frozen split"):
+        m.split(item, shares, {"s5-a": 0.1, "s5-b": 0.9})
+    m.split(item, shares, api)
+    m.open_session(item, "s5-a", pod_id="p1", deadline=DEADLINE, price=3.99, hours=3.4)
+    # a log written past the meter, with S5-A's half, is refused when read
+    lines = log.read_text().splitlines()
+    split = next(i for i, x in enumerate(lines) if json.loads(x)["event"] == "split")
+    bad = {**json.loads(lines[split]), "shares": {"s5-a": 0.5, "s5-b": 0.5},
+           "api_shares": {"s5-a": 0.0, "s5-b": 1.0}}  # fmt: skip
+    log.write_text("\n".join([*lines[:split], json.dumps(bad)]) + "\n")
+    with pytest.raises(ValueError, match="split only by its frozen split"):
+        meter()

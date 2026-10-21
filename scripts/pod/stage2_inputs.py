@@ -28,9 +28,12 @@ C16-1). Prints one JSON line:
   (review s4z 3).
 
 With ``--stage5-dpo``: A and H (``plan.stage5``), its pinned suppression and recipe datasets
-(``pipeline.stage5_data`` reads them by id), A's relearning reference and the relearning data
-for k*, the pilot's analyst index, the prompt pools and by name the confirmation pool and the
-OOD build; the lineage's own states and cells are made in its space.
+(``pipeline.stage5_data`` reads them by id), A's relearning reference and the relearning
+dataset the behavior's committed k* manifests name (one, with its data cell; review s5i 1), every
+run the pilot behaviors' committed Stage-2 decisions name (the Stage-5 slot's evidence,
+``continuation_stage2.slot``; review s5i 2), the pilot's analyst index, the prompt pools and by
+name the confirmation pool and the OOD build; the lineage's own states and cells are made in its
+space. The manifests are the snapshot's (``--manifests``, by default this checkout's).
 
 Exits 1 on a missing or ambiguous input. Nothing here proves an input valid: the plan checks do
 that in the target space before any GPU work.
@@ -128,9 +131,12 @@ def inputs(behavior: str, sources: list[Path]) -> dict:
     return {"behavior": behavior, "active": active, "args": args}
 
 
-def kstar_and_pools(behavior: str, active: str, sources: list[Path]) -> list[str]:
-    """A's approved relearning reference and the behavior's one relearning dataset (k*), the
-    pilot's analyst index, the prompt pools and by name the confirmation pool and the OOD build."""
+def kstar_and_pools(
+    behavior: str, active: str, sources: list[Path], relearn: str | None = None
+) -> list[str]:
+    """A's approved relearning reference and the relearning dataset (k*): ``relearn``, or the
+    behavior's one in the sources; the pilot's analyst index, the prompt pools and by name the
+    confirmation pool and the OOD build."""
     from residual_disposition import continuation_confirm as C
     from residual_disposition import pipeline
     from residual_disposition.continuation_kstar import PILOT_REFERENCES
@@ -138,12 +144,13 @@ def kstar_and_pools(behavior: str, active: str, sources: list[Path]) -> list[str
     if active not in PILOT_REFERENCES:
         raise ValueError(f"{active}: no approved relearning reference")
     args = ["--run-name", PILOT_REFERENCES[active]]
-    data = sorted({json.loads((run / "summary.json").read_text())["data_id"]
-                   for _, c, run in cells(sources, "data_relearn")
-                   if (c.get("behavior") or {}).get("id") == behavior
-                   and (c.get("params") or {}).get("prompt_set") == "relearn_train"
-                   and (c.get("params") or {}).get("seed") == 0
-                   and (c.get("params") or {}).get("state") is None})  # fmt: skip
+    data = [relearn] if relearn else sorted({
+        json.loads((run / "summary.json").read_text())["data_id"]
+        for _, c, run in cells(sources, "data_relearn")
+        if (c.get("behavior") or {}).get("id") == behavior
+        and (c.get("params") or {}).get("prompt_set") == "relearn_train"
+        and (c.get("params") or {}).get("seed") == 0
+        and (c.get("params") or {}).get("state") is None})  # fmt: skip
     if len(data) != 1:
         raise ValueError(f"{behavior}: {len(data)} relearning datasets, not one: {data}")
     args += ["--data", data[0]]
@@ -154,9 +161,39 @@ def kstar_and_pools(behavior: str, active: str, sources: list[Path]) -> list[str
     return args
 
 
-def stage5_dpo_inputs(behavior: str, sources: list[Path]) -> dict:
+def pinned_relearn_data(behavior: str, manifests: Path) -> str:
+    """The relearning dataset the behavior's committed k* manifests name, one (review s5i 1: the
+    sources hold earlier datasets too, d3ae3b9286239d01e beside the current d703ddc231aee9388)."""
+    ids = {json.loads(p.read_text()).get("data_id")
+           for p in sorted(manifests.glob(f"kstar_{behavior}_*.json"))}  # fmt: skip
+    if len(ids) != 1 or None in ids:
+        raise ValueError(f"{behavior}: the committed k* manifests name {sorted(map(str, ids))}, "
+                         "not one relearning dataset")  # fmt: skip
+    return ids.pop()
+
+
+def slot_evidence(manifests: Path) -> list[str]:
+    """Every run the pilot behaviors' committed Stage-2 decisions name: their screening,
+    confirmation and expression cells, from which ``continuation_stage2.slot`` recomputes the
+    Stage-5 slot (review s5i 2)."""
+    from residual_disposition import continuation_rules as cr
+
+    args = []
+    for behavior in cr.load_rules()["discovery"]:
+        path = manifests / f"stage2_{behavior}.json"
+        if not path.is_file():  # undecided: the slot is pending or another behavior's anyway
+            continue
+        i = json.loads(path.read_text())["inputs"]
+        for name in (i.get("screening"), *(i.get("confirmation") or []),
+                     *(i.get("expression") or {}).values()):  # fmt: skip
+            if name:
+                args += ["--run-name", str(name)]
+    return args
+
+
+def stage5_dpo_inputs(behavior: str, sources: list[Path], manifests: Path) -> dict:
     """What sessions s5d and s5dk read in their own space (C16-1): ``plan.stage5``'s A and H, its
-    two pinned datasets, and k*'s, the index's and the pools' inputs."""
+    two pinned datasets, the slot's evidence, and k*'s, the index's and the pools' inputs."""
     spec = plan_of(behavior).get("stage5") or {}
     active, sham = spec.get("active"), spec.get("sham")
     data = [str((spec.get("data") or {}).get(role, {}).get("id") or "")
@@ -166,7 +203,8 @@ def stage5_dpo_inputs(behavior: str, sources: list[Path]) -> dict:
     args = ["--state", active, "--state", sham]
     for data_id in data:  # read by id, never regenerated (pipeline.stage5_data): the dataset alone
         args += ["--generation", data_id]
-    args += kstar_and_pools(behavior, active, sources)
+    args += slot_evidence(manifests)
+    args += kstar_and_pools(behavior, active, sources, pinned_relearn_data(behavior, manifests))
     return {"behavior": behavior, "active": active, "args": args}
 
 
@@ -178,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--active", action="store_true", help="A alone")
     mode.add_argument("--recipe-control", type=int, metavar="DOSE")
     mode.add_argument("--stage5-dpo", action="store_true", help="the DPO lineage's sessions")
+    parser.add_argument("--manifests", type=Path, default=None,
+                        help="the committed manifests (default: this checkout's)")  # fmt: skip
     args = parser.parse_args(argv)
     try:
         if args.active:
@@ -185,7 +225,10 @@ def main(argv: list[str] | None = None) -> int:
         elif args.recipe_control is not None:
             out = {"recipe": recipe_control(args.behavior, args.recipe_control, args.source)}
         elif args.stage5_dpo:
-            out = stage5_dpo_inputs(args.behavior, list(args.source))
+            from residual_disposition.paths import REPO_ROOT
+
+            manifests = args.manifests or REPO_ROOT / "manifests"
+            out = stage5_dpo_inputs(args.behavior, list(args.source), manifests)
         else:
             out = inputs(args.behavior, list(args.source))
     except (OSError, ValueError, KeyError) as error:

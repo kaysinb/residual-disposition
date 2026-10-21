@@ -921,10 +921,14 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     DPO lineage, one Pod at a time; it already holds the model and the pinned corpora in its
     HF cache.
     - Each session first copies what the lineage reads, as `scripts/pod/stage2_inputs.py
-      --stage5-dpo` names it from `plan.stage5`: A and H with their adapters, the two pinned
-      datasets by id, A's relearning reference and the relearning data for k*, the pilot's
-      analyst index (feasibility_14b, stage1_14b; never continuation_14b) and the prompt pools,
-      the confirmation pool and the OOD build by name.
+      --stage5-dpo --manifests <snapshot>/manifests` names it from `plan.stage5` and the
+      snapshot's committed manifests: A and H with their adapters, the two pinned datasets by
+      id, every run the pilot behaviors' Stage-2 decisions name (the Stage-5 slot's evidence,
+      which the plan check recomputes; review s5i 2), A's relearning reference and the
+      relearning dataset the behavior's committed k* manifests name (one: a has earlier
+      datasets of the behavior too; review s5i 1), the pilot's analyst index (feasibility_14b,
+      stage1_14b; never continuation_14b) and the prompt pools, the confirmation pool and the
+      OOD build by name.
     - The copy is from a, then b, create-only and checked by sha256 (`copy_inputs.py`); a or b
       is read, never written. `hf_prefetch.py` then checks the pinned corpora in c's HF cache.
     - A missing input or corpus stops the session before any pass.
@@ -949,9 +953,10 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     C16-1 cannot read the migrated log, so every later session runs on a snapshot with C16-1.
   - **S5-A's sublimit.** Right after `start strong/stage5`, `continuation_meter.py split
     strong/stage5` (no shares: the frozen split, `continuation_rules.frozen_split`) gives worker
-    `s5-a` $13.76 of the GPU part and none of the API part, and `s5-b` the rest. Any other
-    shares are refused. Every S5-A session opens as `s5-a`, within that worker's remaining
-    share, so its sessions together never exceed $13.76. A split takes a share per part
+    `s5-a` $13.76 of the GPU part and none of the API part, and `s5-b` the rest. The meter log
+    itself refuses any other split of `strong/stage5`, and any session, charge or transfer of it
+    before its split, also when a log is replayed (review s5i 3). Every S5-A session opens as
+    `s5-a`, within that worker's remaining share, so its sessions together never exceed $13.76. A split takes a share per part
     (`--api-share`), each worker's API share by default its GPU share, so every earlier split
     replays unchanged.
   - **Drop reasons** (`continuation_rules.drop_reasons`): `strong/stage5_dpo` only

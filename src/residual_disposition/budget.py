@@ -1431,6 +1431,11 @@ class AllocationMeter:
                     raise ValueError("a split's API shares name exactly its workers")
                 if sum(api_shares.values()) > 1 + 1e-12:
                     raise ValueError("split API shares must be non-negative and sum to at most 1")
+            frozen = _frozen_split(item, self.parts(item, s)[0])
+            if frozen is not None and not (
+                _same_shares(shares, frozen[0]) and _same_shares(api_shares, frozen[1])
+            ):  # strong/stage5: S5-A's sublimit, in the log itself (review s5i 3)
+                raise ValueError(f"{item} is split only by its frozen split {frozen}")
             s["splits"][item] = shares
             s["api_splits"][item] = api_shares
             s["worker_charged"][item] = {w: {"gpu_usd": 0.0, "api_usd": 0.0} for w in shares}
@@ -1441,6 +1446,7 @@ class AllocationMeter:
             worker = event.get("worker")
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: no Pod session")
+            _require_frozen_split(item, self.parts(item, s)[0], s, "no Pod session")
             if item in s["splits"]:
                 if worker not in s["splits"][item]:
                     raise ValueError(f"{item} has no worker {worker!r}")
@@ -1495,6 +1501,7 @@ class AllocationMeter:
             settling = kind == "session_close" and current == STOPPED
             if current != RUNNING and not settling:
                 raise ValueError(f"{item} is {current}: only a running item is charged")
+            _require_frozen_split(item, self.parts(item, s)[0], s, "nothing is charged to it")
             worker = event.get("worker")
             if kind == "session_close":
                 open_ = (s["sessions"].get(item) or {}).get(worker)
@@ -1544,6 +1551,8 @@ class AllocationMeter:
         elif kind == "transfer":
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: only a running item's parts are moved")
+            if _frozen_split(item, self.parts(item, s)[0]) is not None:
+                raise ValueError(f"{item} has a frozen split: its parts are never moved")
             if item in s["splits"]:
                 raise ValueError(f"{item} is split: its limits were issued to its workers")
             if (s["sessions"].get(item) or {}).get(POD):
@@ -1587,6 +1596,24 @@ class AllocationMeter:
             raise ValueError(f"unknown meter event {kind!r}")
         if state is None:
             self.events.append(dict(event))
+
+
+def _frozen_split(item: str, stress_gpu_usd: float) -> tuple[dict, dict] | None:
+    """The split frozen for ``item`` (``continuation_rules.frozen_split``: strong/stage5's S5-A
+    sublimit, C16), enforced by the log itself (review s5i 3); None for every other item."""
+    from .continuation_rules import frozen_split
+
+    return frozen_split(item, stress_gpu_usd)
+
+
+def _same_shares(given: Mapping[str, float], frozen: Mapping[str, float]) -> bool:
+    return set(given) == set(frozen) and all(abs(given[w] - frozen[w]) <= 1e-12 for w in given)
+
+
+def _require_frozen_split(item: str, stress_gpu_usd: float, s: Mapping, what: str) -> None:
+    """An item with a frozen split takes no session and no charge before it is split."""
+    if item not in s["splits"] and _frozen_split(item, stress_gpu_usd) is not None:
+        raise ValueError(f"{item} is not split yet by its frozen split: {what}")
 
 
 def _migration_steps(
