@@ -911,10 +911,23 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   - **k\*** with `plan.kstar.stage5_dpo: true`, the lineage `example_link_dpo_<dose>` (H_s's
     index record of method dpo, mode stack), its manifest `kstar_example_link_dpo_<dose>.json`.
     There is no certificate, H relearning or readers.
-  - **Chain** (ITEM=stage5_dpo, worker pod, space a): `s5d` (`s5d_suppress`, the steps
+  - **Chain** (ITEM=stage5_dpo, worker pod): `s5d` (`s5d_suppress`, the steps
     `stage5_next.py --lineage stage5_dpo` names, `s5d_decide`), then `s5dk` (k*) after the
     decision's commit and a new snapshot. Either refuses another ITEM, and a continued session
     refuses ITEM=stage5_dpo.
+  - **Space c** (C16-1, the coordinator's decision of 2026-10-21). Both sessions run in c, so
+    that they can run on their own Pod while the continued lineage's Pod writes a. c is now
+    shared by the completed Stage-2 lineages (Pod B's work of 2026-10-19 to 2026-10-20) and the
+    DPO lineage, one Pod at a time; it already holds the model and the pinned corpora in its
+    HF cache.
+    - Each session first copies what the lineage reads, as `scripts/pod/stage2_inputs.py
+      --stage5-dpo` names it from `plan.stage5`: A and H with their adapters, the two pinned
+      datasets by id, A's relearning reference and the relearning data for k*, the pilot's
+      analyst index (feasibility_14b, stage1_14b; never continuation_14b) and the prompt pools,
+      the confirmation pool and the OOD build by name.
+    - The copy is from a, then b, create-only and checked by sha256 (`copy_inputs.py`); a or b
+      is read, never written. `hf_prefetch.py` then checks the pinned corpora in c's HF cache.
+    - A missing input or corpus stops the session before any pass.
   - **Meter.** Its item is appended by a migration of the allocations (§12.8, amendment of
     2026-10-21): `continuation_meter.py migrate-allocations`, once, between Pod sessions, with
     the snapshot that holds C15; a Pod with an earlier snapshot cannot read the migrated log, so
@@ -926,6 +939,26 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     k* measures H_s's calibration, not retained disposition in L. The comparison is DPO-stack
     against continued SFT, mode, data exposure and dose included; it does not isolate the DPO
     objective, and no between-method test is made (the confirmation gate stays).
+- **The strong branch's meter items** (§12.8, amendment of 2026-10-21; C16-1).
+  - **Migration.** `configs/continuation/allocations.yaml` appends seven items, each right after
+    its parent and of its own kind: `strong/stage3/<behavior>` for the five panel behaviors
+    ($34.59 central, stress $75.54 GPU and $16.30 API), `strong/stage5` ($119.65; $296.80,
+    $23.22) and `strong/stage5_dpo` ($127.08; $316.87, $23.22). The migration's `from_sha256` is
+    the allocations with stage5_dpo (`04eebe5e…`). The live log records it by one
+    `migrate-allocations`, only while no Pod session is open. A Pod whose snapshot predates
+    C16-1 cannot read the migrated log, so every later session runs on a snapshot with C16-1.
+  - **S5-A's sublimit.** Right after `start strong/stage5`, `continuation_meter.py split
+    strong/stage5` (no shares: the frozen split, `continuation_rules.frozen_split`) gives worker
+    `s5-a` $13.76 of the GPU part and none of the API part, and `s5-b` the rest. Any other
+    shares are refused. Every S5-A session opens as `s5-a`, within that worker's remaining
+    share, so its sessions together never exceed $13.76. A split takes a share per part
+    (`--api-share`), each worker's API share by default its GPU share, so every earlier split
+    replays unchanged.
+  - **Drop reasons** (`continuation_rules.drop_reasons`): `strong/stage5_dpo` only
+    `fallback_gate_closed` or `cut_order:stage5_dpo`; `strong/stage5` `cut_order:stage5`;
+    `strong/stage3/myth_fact` `cut_order:last_stage3_behavior`. The strong items of panel
+    behaviors 1–4 cannot be dropped. The condition of `fallback_gate_closed` is checked with the
+    strong branch's manifests (C16-2).
 
 ## Artifact retention
 
@@ -969,7 +1002,7 @@ Set 2026-10-11; review before stage 1 starts and again when its first behavior i
 | Place | Holds | Rule |
 |---|---|---|
 | This machine | code, documents, reports, scratchpad, run directories without large files, inventories | at most 10 GB of large data (states, caches, streams) per project; `data/states.archived.json` lists the archived states with their hashes and bucket paths |
-| Runpod network volume (Standard, about 150 GB, one for the project) | model weights, states, intermediate files of a stage, mounted at `/workspace` on every Pod | working storage, not a backup; created in a data center with H100 SXM capacity (checked before creation); its id and data center are recorded in the session state; deleted only through the coordinator when the project pauses for long and everything is archived |
+| Runpod network volume (Standard, 350 GB by the provider's API on 2026-10-21, one for the project; about 191 GB used on 2026-10-20: a 75, b 65, c 51) | model weights, states, intermediate files of a stage, mounted at `/workspace` on every Pod | working storage, not a backup; created in a data center with H100 SXM capacity (checked before creation); its id and data center are recorded in the session state; deleted only through the coordinator when the project pauses for long and everything is archived |
 | The bucket (`ARTIFACT_REMOTE`) | every retained class of the plan above | the only backup; objects are never overwritten or deleted |
 
 - **Large artifacts** go from the Pod straight to the bucket, not through this machine. The Pod gets

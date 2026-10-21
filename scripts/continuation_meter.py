@@ -22,23 +22,22 @@
     uv run python scripts/continuation_meter.py complete <item>
     uv run python scripts/continuation_meter.py drop <item> <reason>
 
-The frozen allocations (``configs/continuation/allocations.yaml``), the cap and reserve and the
-drop reasons come from the frozen rules, which must match their sha256 in the Stage-0
-specification. The log (``data/ledgers/continuation_meter.jsonl`` by default) is locked for each
-operation and records the allocations' hash in its header. Every command prints JSON. With
-``--price`` (the Pod's actual hourly price), ``start`` and ``limits`` also give the Pod's hard
-deadline in hours from its creation (``ExecutionLimits.pod_hours``). ``transfer`` moves unspent
-money between a running item's GPU and API parts with its reason; the item's reservation, and so
-the meter's total, stay as they are (``AllocationMeter.transfer``). The cap is the rules'
-(``meter.cap_usd``: $2,420 from 2026-10-21, $1,820 from 2026-10-20 and $1,770 from 2026-10-19,
-the user's decisions; $1,500 before): a log begun under a lower cap records nothing until
-``migrate-cap`` raises it to the rules' cap with its reason (``AllocationMeter.migrate_cap``),
-keeping its spent money, reservations and history; ``status`` shows the cap in force, the rules'
-and the one the log was begun under. The allocations only grow, by the file's append-only
-``migrations`` (review s5b 2; C15 adds stage5_dpo below stage5): a log begun under the
-allocations before one records nothing until ``migrate-allocations`` records each migration in
-order (its hashes, added items and reason), between Pod sessions; ``status`` lists the items
-still to be migrated in.
+The frozen allocations (``configs/continuation/allocations.yaml``), the cap and reserve and the drop
+reasons come from the frozen rules, which must match their sha256 in the Stage-0 specification. The
+log (``data/ledgers/continuation_meter.jsonl`` by default) is locked for each operation and records
+the allocations' hash in its header. Every command prints JSON. With ``--price`` (the Pod's actual
+hourly price), ``start`` and ``limits`` also give the Pod's hard deadline in hours from its creation
+(``ExecutionLimits.pod_hours``). ``transfer`` moves unspent money between a running item's GPU and
+API parts with its reason; the item's reservation, and so the meter's total, stay as they are
+(``AllocationMeter.transfer``). The cap is the rules' (``meter.cap_usd``: $2,420 from 2026-10-21,
+$1,820 from 2026-10-20 and $1,770 from 2026-10-19, the user's decisions; $1,500 before): a log begun
+under a lower cap records nothing until ``migrate-cap`` raises it to the rules' cap with its reason
+(``AllocationMeter.migrate_cap``), keeping its spent money, reservations and history; ``status``
+shows the cap in force, the rules' and the one the log was begun under. The allocations only grow,
+by the file's append-only ``migrations`` (review s5b 2; C15 adds stage5_dpo below stage5, C16 the
+strong items): a log begun under the allocations before one records nothing until
+``migrate-allocations`` records each migration in order (its hashes, added items and reason),
+between Pod sessions; ``status`` lists the items still to be migrated in.
 
 A Pod is launched only on a live reservation: ``start --receipt`` writes a launch receipt (the
 item, its limits, the price, the Pod's hours, the allocations' hash and the sha256 of the log

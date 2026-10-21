@@ -1,14 +1,16 @@
 """What a Stage-2 lineage's sessions read, when its behavior's pilot cells are in other spaces
 (pun_intended's are in b, from 2026-10-13; sessions p1-p3 of continuation_stage2.sh), named from
-the behavior's experiment config and found in the source spaces, read only. Prints one JSON line:
+the behavior's experiment config and found in the source spaces, read only; with ``--stage5-dpo``
+what Stage 5's descriptive DPO lineage reads in its own space (sessions s5d and s5dk, in c;
+C16-1). Prints one JSON line:
 
     {"active": A, "args": [--state ..., --run ..., --run-name ..., --data ..., --index ...,
-     --prompts, --path data/prompts/<pool> ...]}         (p1, for copy_inputs.py)
+     --prompts, --path data/prompts/<pool> ...]}         (p1, s5d, for copy_inputs.py)
     {"active": A}                                          (--active)
     {"recipe": state}                                      (--recipe-control DOSE)
 
     python scripts/pod/stage2_inputs.py --behavior pun_intended --source /workspace/b \
-        --source /workspace/a [--active | --recipe-control 400]
+        --source /workspace/a [--active | --recipe-control 400 | --stage5-dpo]
 
 - the states: A (``plan.reread.controls``, its one active organism), H (``plan.screen.sham``),
   and L and H_s at each deep dose (``plan.screen.doses``); copy_inputs adds their adapters'
@@ -24,6 +26,11 @@ the behavior's experiment config and found in the source spaces, read only. Prin
 - with ``--recipe-control DOSE``, the pilot's one recipe control of the behavior at the dose
   (stack, SFT) in that index, which the readers read and which p3 copies with its adapters
   (review s4z 3).
+
+With ``--stage5-dpo``: A and H (``plan.stage5``), its pinned suppression and recipe datasets
+(``pipeline.stage5_data`` reads them by id), A's relearning reference and the relearning data
+for k*, the pilot's analyst index, the prompt pools and by name the confirmation pool and the
+OOD build; the lineage's own states and cells are made in its space.
 
 Exits 1 on a missing or ambiguous input. Nothing here proves an input valid: the plan checks do
 that in the target space before any GPU work.
@@ -102,10 +109,6 @@ def recipe_control(behavior: str, dose: int, sources: list[Path]) -> str:
 
 
 def inputs(behavior: str, sources: list[Path]) -> dict:
-    from residual_disposition import continuation_confirm as C
-    from residual_disposition import pipeline
-    from residual_disposition.continuation_kstar import PILOT_REFERENCES
-
     plan = plan_of(behavior)
     active, sham = active_of(behavior), (plan.get("screen") or {}).get("sham")
     doses = (plan.get("screen") or {}).get("doses") or {}
@@ -121,9 +124,20 @@ def inputs(behavior: str, sources: list[Path]) -> dict:
         if len(found) != 1:
             raise ValueError(f"{sid}: {len(found)} completed exploratory passes, not one")
         args += ["--run", found[0]]
+    args += kstar_and_pools(behavior, active, sources)
+    return {"behavior": behavior, "active": active, "args": args}
+
+
+def kstar_and_pools(behavior: str, active: str, sources: list[Path]) -> list[str]:
+    """A's approved relearning reference and the behavior's one relearning dataset (k*), the
+    pilot's analyst index, the prompt pools and by name the confirmation pool and the OOD build."""
+    from residual_disposition import continuation_confirm as C
+    from residual_disposition import pipeline
+    from residual_disposition.continuation_kstar import PILOT_REFERENCES
+
     if active not in PILOT_REFERENCES:
         raise ValueError(f"{active}: no approved relearning reference")
-    args += ["--run-name", PILOT_REFERENCES[active]]
+    args = ["--run-name", PILOT_REFERENCES[active]]
     data = sorted({json.loads((run / "summary.json").read_text())["data_id"]
                    for _, c, run in cells(sources, "data_relearn")
                    if (c.get("behavior") or {}).get("id") == behavior
@@ -137,6 +151,22 @@ def inputs(behavior: str, sources: list[Path]) -> dict:
         args += ["--index", experiment]
     args += ["--prompts", "--path", f"data/prompts/{C.FROZEN['pool']}",
              "--path", f"data/prompts/{pipeline.ood_pool()[0]}"]  # fmt: skip
+    return args
+
+
+def stage5_dpo_inputs(behavior: str, sources: list[Path]) -> dict:
+    """What sessions s5d and s5dk read in their own space (C16-1): ``plan.stage5``'s A and H, its
+    two pinned datasets, and k*'s, the index's and the pools' inputs."""
+    spec = plan_of(behavior).get("stage5") or {}
+    active, sham = spec.get("active"), spec.get("sham")
+    data = [str((spec.get("data") or {}).get(role, {}).get("id") or "")
+            for role in ("suppress", "recipe")]  # fmt: skip
+    if not active or not sham or not all(data):
+        raise ValueError(f"{behavior}: plan.stage5 names no A, H and two pinned datasets")
+    args = ["--state", active, "--state", sham]
+    for data_id in data:  # read by id, never regenerated (pipeline.stage5_data): the dataset alone
+        args += ["--generation", data_id]
+    args += kstar_and_pools(behavior, active, sources)
     return {"behavior": behavior, "active": active, "args": args}
 
 
@@ -147,12 +177,15 @@ def main(argv: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--active", action="store_true", help="A alone")
     mode.add_argument("--recipe-control", type=int, metavar="DOSE")
+    mode.add_argument("--stage5-dpo", action="store_true", help="the DPO lineage's sessions")
     args = parser.parse_args(argv)
     try:
         if args.active:
             out = {"active": active_of(args.behavior)}
         elif args.recipe_control is not None:
             out = {"recipe": recipe_control(args.behavior, args.recipe_control, args.source)}
+        elif args.stage5_dpo:
+            out = stage5_dpo_inputs(args.behavior, list(args.source))
         else:
             out = inputs(args.behavior, list(args.source))
     except (OSError, ValueError, KeyError) as error:

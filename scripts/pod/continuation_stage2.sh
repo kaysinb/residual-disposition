@@ -44,7 +44,11 @@
 #   s5c: the certificate's six blocks, then H's relearning (s5_relearn_h), then the readers; a
 #      session that stops at its deadline is resumed by the next (completed cells reused).
 # Its descriptive DPO lineage (C15, review s5b), the meter's unsplit item stage5_dpo
-# (ITEM=stage5_dpo), the same way in space a, its passes in the stage5_dpo batch:
+# (ITEM=stage5_dpo), the same way in space c (C16-1), which no other Pod writes while the
+# continued lineage's Pod writes a, its passes in the stage5_dpo batch. Each session first copies
+# what the lineage reads (stage2_inputs.py --stage5-dpo: A and H, the pinned data, k*'s inputs,
+# the pilot's index and the pools) from a, then b, create-only and checked, and fetches the
+# pinned corpora into c's HF cache:
 #   s5d: s5d_suppress, then its decision's steps (stage5_next.py --lineage stage5_dpo: each
 #      confirmation, the expression checks at the analysis dose; no X_cont) and the decision cell
 #      (s5d_decide). The decision is written as manifests/stage5_dpo_<behavior>.json and committed,
@@ -84,7 +88,8 @@ CODE=${CODE_ROOT:-/root/code/residual-disposition}
 case $SESSION in
   a1|a1k|a2) WORKER=pod-a; SPACE=$WS/a ;;
   b1|b2|p1|p2|p3) WORKER=pod-b; SPACE=$WS/c ;;
-  s5a|s5k|s5c|s5d|s5dk) WORKER=pod; SPACE=$WS/a ;;  # an unsplit item's one session (review s4t2 1)
+  s5a|s5k|s5c) WORKER=pod; SPACE=$WS/a ;;  # an unsplit item's one session (review s4t2 1)
+  s5d|s5dk) WORKER=pod; SPACE=$WS/c ;;     # the DPO lineage's own space (C16-1)
   *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d or s5dk"; exit 1 ;;
 esac
 if [ $WORKER = pod ]; then
@@ -486,10 +491,32 @@ print(p + "confirmation=[" + ",".join(i.get("confirmation") or []) + "]")
 for k, v in (i.get("expression") or {}).items(): print(f"+{p}expression.{k}={v}")' "$1" $P5
 }
 
+case $SESSION in s5d|s5dk)
+  # The DPO lineage's inputs from a, then b, read only, into c, and the pinned corpora in c's HF
+  # cache, before any pass (C16-1)
+  if INPUTS=$(in_src python scripts/pod/stage2_inputs.py --behavior $BEHAVIOR --source $WS/a \
+      --source $WS/b --stage5-dpo 2>>$OUT/inputs.err); then
+    echo "$INPUTS" > $OUT/inputs.json
+    mapfile -t ARGS < <(python3 -c 'import json,sys; print("\n".join(json.loads(sys.argv[1])["args"]))' "$INPUTS")
+    copy_in "${ARGS[@]}"; step copy $?
+  else
+    log "$SESSION: the inputs of $BEHAVIOR's DPO lineage: $INPUTS"; step inputs 1
+  fi
+  if [ $OK = 1 ]; then
+    in_src env HF_HOME=$SPACE/hf python scripts/pod/hf_prefetch.py --behavior $BEHAVIOR \
+      > $OUT/hf.json 2>>$OUT/hf.err
+    step hf $?
+  fi ;;
+esac
+
 case $SESSION in
 s5a|s5d)
   # the continued lineage's phases s5_*, the DPO lineage's s5d_* (no X_cont step)
-  run_pass $CHAIN-${P5}suppress $CFG/$BEHAVIOR ${P5}_suppress; step ${P5}_suppress $?
+  if [ $OK = 1 ]; then
+    run_pass $CHAIN-${P5}suppress $CFG/$BEHAVIOR ${P5}_suppress; step ${P5}_suppress $?
+  else
+    log "$SESSION: no pass without its inputs"
+  fi
   PREV=""
   for i in 1 2 3 4 5 6 7 8; do
     [ $OK = 1 ] || break
@@ -539,7 +566,9 @@ s5k)
 s5dk)
   # k* of the committed DPO lineage <behavior>_dpo_<dose> (C15), after its decision is committed;
   # it has no certificate or readers
-  if [ ! -f $SRC/manifests/stage5_dpo_$BEHAVIOR.json ]; then
+  if [ $OK != 1 ]; then
+    log "$SESSION: no pass without its inputs"
+  elif [ ! -f $SRC/manifests/stage5_dpo_$BEHAVIOR.json ]; then
     log "not run: no committed DPO-lineage decision of $BEHAVIOR in the snapshot"; step manifest 1
   else
     DOSE=$(manifest stage5_dpo_$BEHAVIOR.json 'd["decision"]["analysis_dose"]')
