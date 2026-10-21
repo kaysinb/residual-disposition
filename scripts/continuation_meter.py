@@ -15,6 +15,7 @@
         --receipt FILE
     uv run python scripts/continuation_meter.py session-close <item> --worker WORKER \
         --pod-id POD_ID --gpu-usd USD [--api-usd USD]
+    uv run python scripts/continuation_meter.py stage3-start stage3/<behavior> --space a|c
     uv run python scripts/continuation_meter.py transfer <item> --from gpu --to api --usd USD \
         --reason TEXT
     uv run python scripts/continuation_meter.py migrate-cap --reason TEXT
@@ -37,7 +38,10 @@ shows the cap in force, the rules' and the one the log was begun under. The allo
 by the file's append-only ``migrations`` (review s5b 2; C15 adds stage5_dpo below stage5, C16 the
 strong items): a log begun under the allocations before one records nothing until
 ``migrate-allocations`` records each migration in order (its hashes, added items and reason),
-between Pod sessions; ``status`` lists the items still to be migrated in.
+between Pod sessions; ``status`` lists the items still to be migrated in. A panel behavior's Stage
+3 starts once, by ``stage3-start`` (§12.8; review s5y 2, 3): both its reservations live, every
+earlier panel behavior's Stage 3 started, its lineage's one space recorded; no Pod session of
+either of its items opens before it, and ``verify-receipt`` gives the Pod that space.
 
 A Pod is launched only on a live reservation: ``start --receipt`` writes a launch receipt (the
 item, its limits, the price, the Pod's hours, the allocations' hash and the sha256 of the log
@@ -248,6 +252,7 @@ def status(m: AllocationMeter) -> dict:
             "needs_migration": m.needs_migration,
             "allocations_pending": m.allocations_pending,
             "reserve": m.reserve,
+            "stage3": dict(m.stage3),  # each panel behavior's Stage-3 start: its one space
         }
 
 
@@ -346,6 +351,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--hours", type=float, required=True)
     p.add_argument("--api-usd", type=float, default=0.0, help="the API money the session may use")
     p.add_argument("--receipt", type=Path, required=True)
+    p = sub.add_parser("stage3-start", help="a panel behavior's Stage-3 start, recorded once")
+    p.add_argument("item", help="stage3/<behavior>")
+    p.add_argument("--space", required=True, choices=("a", "c"), help="its lineage's one space")
     p = sub.add_parser("session-close")
     p.add_argument("item")
     p.add_argument("--worker", required=True)
@@ -412,6 +420,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.worker is not None and not problems:
             out["session"] = m.session(args.item, args.worker)  # as the log holds it
             out["session_id"] = data["log_sha256"]  # the log right after it: unique (s4d)
+            out["stage3"] = m.stage3_of(args.item)  # a Stage-3 item's: its lineage's space
         print(json.dumps(out))
         return 1 if problems else 0
     elif args.command == "limits":
@@ -426,6 +435,9 @@ def main(argv: list[str] | None = None) -> int:
             result=lambda event: session_receipt(m, event),
         )  # fmt: skip
         args.receipt.write_text(json.dumps(out, indent=1) + "\n")
+    elif args.command == "stage3-start":
+        event = m.stage3_start(args.item, args.space)
+        out = {k: event[k] for k in ("item", "behavior", "space")}
     elif args.command == "session-close":
         api_usd = args.api_usd
         if args.api_ledger is not None:

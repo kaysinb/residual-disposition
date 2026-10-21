@@ -901,6 +901,8 @@ class AllocationMeter:
         # unsplit items that issued a Pod session (worker POD, review s4t2): never split after,
         # and no whole-item launch receipt authorizes a Pod for them
         self.issued: set[str] = set()
+        # per panel behavior, its Stage-3 start (``stage3_start``): its lineage's one space
+        self.stage3: dict[str, dict[str, str]] = {}
         # the migrations of the allocations this log has still to record (``migrate_allocations``)
         self._pending = {"steps": []}
         self.events: list[dict[str, Any]] = []
@@ -1030,6 +1032,7 @@ class AllocationMeter:
             "sessions": self.sessions,
             "transfers": self.transfers,
             "issued": self.issued,
+            "stage3": self.stage3,
             "cap": self._cap,
             "pending": self._pending,
         }
@@ -1224,6 +1227,23 @@ class AllocationMeter:
                 f"{item} overran its reservation and is stopped: its unfinished contrasts get p = 1"
             )
         return limits
+
+    def stage3_start(self, item: str, space: str) -> dict[str, Any]:
+        """A panel behavior's Stage-3 start (§12.8; review s5y 2, 3), recorded once before its
+        first Pod session: both its reservations live (``stage3/<behavior>`` and
+        ``strong/stage3/<behavior>``, admitted or running), every earlier panel behavior's Stage
+        3 started, and its lineage's one space (a or c), which every session of either item then
+        runs in. Resumes rely on the record, never on a recomputation."""
+        behavior = str(item).removeprefix("stage3/")
+        return self._operate(lambda: {"event": "stage3_start", "item": item,
+                                      "behavior": behavior, "space": str(space)})  # fmt: skip
+
+    def stage3_of(self, item: str) -> dict[str, str] | None:
+        """The Stage-3 start of a Stage-3 item's behavior (its space), under the lock; None for
+        another item or before it."""
+        behavior = _stage3_behavior(item, self._get(item).kind)
+        with self._transaction():
+            return None if behavior is None else self.stage3.get(behavior)
 
     def session(self, item: str, worker: str) -> dict[str, Any] | None:
         """A split item's worker's open Pod session, under the lock; None when closed."""
@@ -1492,6 +1512,10 @@ class AllocationMeter:
                 raise ValueError(f"{item} is not split: its Pod session's worker is {POD!r}")
             else:
                 s["sessions"].setdefault(item, {POD: None})
+            behavior = _stage3_behavior(item, a.kind)
+            if behavior is not None and behavior not in s["stage3"]:
+                raise ValueError(f"{item}: no Pod session before {behavior}'s Stage-3 start "
+                                 "(stage3_start)")  # fmt: skip
             open_ = s["sessions"][item][worker]
             if open_ is not None:
                 raise ValueError(
@@ -1630,10 +1654,46 @@ class AllocationMeter:
             states[item] = DROPPED
             reservation.pop(item, None)
             s["reason"][item] = event["reason"]
+        elif kind == "stage3_start":
+            behavior = _stage3_behavior(item, a.kind)
+            if a.kind != STAGE3_PANEL or event.get("behavior") != behavior:
+                raise ValueError(f"{item}: not a panel behavior's Stage-3 item")
+            if behavior in s["stage3"]:
+                space = s["stage3"][behavior]["space"]
+                raise ValueError(f"{behavior}'s Stage 3 started in space {space}: recorded once")
+            if event.get("space") not in STAGE3_SPACES:
+                raise ValueError(f"a lineage's one space is a or c, not {event.get('space')!r}")
+            strong = f"strong/stage3/{behavior}"
+            live = {item: current, strong: states.get(strong)}
+            if any(v not in (RESERVED, RUNNING) for v in live.values()):
+                raise ValueError(f"{behavior}'s Stage 3 starts with both its reservations live "
+                                 f"(§12.8): {live}")  # fmt: skip
+            panel = [i for i in self.priority if self._items[self._rank[i]].kind == STAGE3_PANEL]
+            earlier = [_stage3_behavior(i, STAGE3_PANEL) for i in panel[: panel.index(item)]]
+            waiting = [b for b in earlier if b not in s["stage3"]]
+            if waiting:
+                raise ValueError(f"{behavior}'s Stage 3 starts after the earlier panel behaviors' "
+                                 f"(§12.8's order): {waiting} not started")  # fmt: skip
+            s["stage3"][behavior] = {"space": event["space"]}
         else:
             raise ValueError(f"unknown meter event {kind!r}")
         if state is None:
             self.events.append(dict(event))
+
+
+# A panel behavior's Stage-3 items (C17): its base and its strong increment, each of its kind; its
+# lineage runs in one space, a or c (review s5y 2)
+STAGE3_PANEL, STRONG_STAGE3 = "stage3_panel", "strong_stage3"
+STAGE3_SPACES = ("a", "c")
+
+
+def _stage3_behavior(item: str, kind: str) -> str | None:
+    """The panel behavior of a Stage-3 item (``stage3/<b>``, ``strong/stage3/<b>``), else None."""
+    if kind == STAGE3_PANEL:
+        return str(item).removeprefix("stage3/")
+    if kind == STRONG_STAGE3:
+        return str(item).removeprefix("strong/stage3/")
+    return None
 
 
 # An item admitted only once another has ended (completed, stopped or dropped): the strong DPO

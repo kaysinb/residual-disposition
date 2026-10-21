@@ -78,8 +78,8 @@
 #      the dose), then k* of strong_<behavior>_dpo_<dose>; its manifest committed;
 #   s5dc: the certificate, H's relearning and the readers, with stage5_dpo and strong.
 # Stage 3's stack lineage of a panel behavior (§12.7 Stage 3; C17), the meter's unsplit item
-# stage3/<behavior> (BEHAVIOR=<it>), worker pod, in its one space S3_SPACE (a or c), its passes in
-# the stage3 batch:
+# stage3/<behavior> (BEHAVIOR=<it>), worker pod, in its one space S3_SPACE (a or c: the space the
+# meter's stage3-start recorded once, review s5y), its passes in the stage3 batch:
 #   s3a: its inputs copied in (stage2_inputs.py --stage3: A, H, the own data, the pilot's index
 #      and the pools) and the corpora fetched, then s3_suppress (the suppression data, training,
 #      passes, selection, b's relearning data, A's reference, the diagnostic's sources). The
@@ -129,9 +129,9 @@ case $SESSION in
   s5s|s5v) WORKER=s5-a; SPACE=$WS/a ;;     # S5-A on its frozen sublimit (C16-2)
   s5sk|s5sc) WORKER=s5-b; SPACE=$WS/a ;;   # S5-B, after the passing validation
   s5ds|s5dv|s5dx|s5dc) WORKER=pod; SPACE=$WS/c ;;  # the DPO fallback, in the DPO lineage's c (C16-3)
-  s3a|s3b)  # Stage 3's stack lineage of a panel behavior (C17), in its one space, a or c
-    case ${S3_SPACE:-} in a|c) ;; *) echo "S3_SPACE must be a or c, the lineage's one space"; exit 1 ;; esac
-    WORKER=pod; SPACE=$WS/$S3_SPACE ;;
+  s3a|s3b)  # Stage 3's stack lineage of a panel behavior (C17), in its one space, a or c: checked
+    # once the watcher can stop the Pod, against the meter's record (review s5y 1, 2)
+    WORKER=pod; SPACE=$WS/${S3_SPACE:-} ;;
   *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d, s5dk, s5s, s5v, s5sk, s5sc, s5ds, s5dv, s5dx, s5dc, s3a or s3b"; exit 1 ;;
 esac
 LINE=""
@@ -140,9 +140,9 @@ case $WORKER in pod|s5-a|s5-b)
   # the continued strong branch's (C16-2)
   case $SESSION in s5d|s5dk) LINE=stage5_dpo; P5=s5d ;; s5s|s5v|s5sk|s5sc) LINE=strong/stage5; P5=s5 ;;
     s5ds|s5dv|s5dx|s5dc) LINE=strong/stage5_dpo; P5=s5d ;;
-    s3a|s3b) LINE=stage3/${BEHAVIOR:?the panel behavior of the Stage-3 lineage}; P5=s3 ;;
+    s3a|s3b) LINE=stage3/${BEHAVIOR:-}; P5=s3 ;;  # BEHAVIOR checked once the Pod can stop
     *) LINE=stage5; P5=s5 ;; esac
-  ITEM=${ITEM:-$LINE}; BEHAVIOR=${BEHAVIOR:?the behavior of the Stage-5 lineage} ;;
+  ITEM=${ITEM:-$LINE}; BEHAVIOR=${BEHAVIOR:-} ;;
 *)
   case $SESSION in p1|p2|p3) ITEM=${ITEM:-} ;; *) ITEM=${ITEM:-stage2/example_link} ;; esac
   BEHAVIOR=${ITEM#stage2/} ;;
@@ -310,6 +310,12 @@ source ${RP_ENV:-/etc/rp_environment}
 export SOURCE_SNAPSHOT_RECEIPT
 export CONTAINER_IMAGE=$IMG PYTHONDONTWRITEBYTECODE=1
 log "chain $CHAIN ($ITEM, $WORKER in $SPACE), \$$PRICE/h"
+if [ -n "$LINE" ] && [ -z "$BEHAVIOR" ]; then  # any refusal from here on stops the Pod
+  log "not run: a $SESSION session needs BEHAVIOR, its lineage's behavior"; exit 1
+fi
+case $SESSION in s3a|s3b)  # the lineage's one space (C17)
+  case ${S3_SPACE:-} in a|c) ;; *) log "not run: S3_SPACE must be a or c, the lineage's one space, not '${S3_SPACE:-}'"; exit 1 ;; esac ;;
+esac
 if [ -n "$LINE" ] && [ "$ITEM" != "$LINE" ]; then  # never another item's reservation (s4x 1)
   log "not run: a $SESSION session runs on the meter's item $LINE, not $ITEM"; exit 1
 fi
@@ -334,6 +340,12 @@ if ! in_src python scripts/continuation_meter.py --log "$METER_LOG" verify-recei
   log "not run: the meter's session receipt does not authorize this Pod $POD_ID"; cat $OUT/receipt-check.json; exit 1
 fi
 cp "$RECEIPT" $OUT/receipt.json
+case $SESSION in s3a|s3b)  # the behavior's Stage-3 start as the meter recorded it, once (review s5y 2, 3)
+  S3_RECORDED=$(jget "$(tail -n 1 $OUT/receipt-check.json)" stage3 space 2>/dev/null)
+  if [ "$S3_RECORDED" != "$S3_SPACE" ]; then
+    log "not run: the meter's Stage-3 start of $BEHAVIOR names space '${S3_RECORDED}', not S3_SPACE=$S3_SPACE"; exit 1
+  fi ;;
+esac
 # The session as the log holds it: its deadline, hours and API money bound everything below.
 SESSION_JSON=$(jget "$(tail -n 1 $OUT/receipt-check.json)" session)
 HARD_S=$(python3 -c 'import json,sys; from datetime import datetime

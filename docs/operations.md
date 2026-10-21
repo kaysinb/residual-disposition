@@ -1143,6 +1143,17 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     confirmation, only with the committed diagnostic in the snapshot; the expression checks with
     X) and s3_decide, which without a margin-passing checkpoint records no stack dose (the
     diagnostic then waits for the continued screening).
+  - **The behavior's Stage-3 start** (laptop, before its first session; §12.8, review s5y):
+    `continuation_meter.py stage3-start stage3/<behavior> --space a|c`, once. It is refused
+    unless:
+    - both reservations are live (`stage3/<behavior>` and `strong/stage3/<behavior>`, admitted
+      or running);
+    - every earlier panel behavior's Stage 3 has started (the frozen panel order).
+
+    It records the lineage's one space. No Pod session of either item opens before it. On the
+    Pod, `verify-receipt` gives the recorded space, and a session whose `S3_SPACE` differs is
+    refused. Resumes rely on the record, never on a recomputation. Every refusal of a session,
+    its arguments' included, asks the watcher to stop the Pod.
 
 ## Artifact retention
 

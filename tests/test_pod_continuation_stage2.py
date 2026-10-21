@@ -150,7 +150,8 @@ def workspace(tmp_path, capsys, monkeypatch):
     procs = []
 
     def setup(session, start: datetime, *, pod="POD1", hours=12.0, worker=None, api="0",
-              provider=None, watch_late_s=0, item=None, s3_space="c") -> dict:  # fmt: skip
+              provider=None, watch_late_s=0, item=None, s3_space="c", s3_recorded=None,
+              s3_start=True) -> dict:  # fmt: skip
         # Stage 5's item is unsplit: one session at a time, worker pod; the items above it are
         # completed in this journal, at no cost, so that the meter admits it
         strong = session in STRONG  # strong/stage5, split by its frozen split (C16-2)
@@ -173,12 +174,18 @@ def workspace(tmp_path, capsys, monkeypatch):
         if item in ("stage5", "stage5_dpo", "strong/stage5", "strong/stage5_dpo") or (
             item.startswith("stage3/")
         ):
+            reserved = set()
             for above in cm_items()[: cm_items().index(item)]:
-                cm.main([*meter, "admit", above, "--spent-elsewhere", "0", "--storage", "55"])
+                if above not in reserved:
+                    cm.main([*meter, "admit", above, "--spent-elsewhere", "0", "--storage", "55"])
                 cm.main([*meter, "start", above])
+                if above.startswith("stage3/") and above != "stage3/guillemets":
+                    reserved.add(stage3_start(meter, above, "c"))  # its strong item admitted
                 cm.main([*meter, "complete", above])
         cm.main([*meter, "admit", item, "--spent-elsewhere", "0", "--storage", "55"])
         cm.main([*meter, "start", item])
+        if stage3 and s3_start:  # both reservations live, its one space recorded (s5y 2, 3)
+            stage3_start(meter, item, s3_recorded or s3_space)
         if item == "strong/stage5":
             cm.main([*meter, "split", item])  # its frozen split: s5-a, s5-b
         elif second:
@@ -235,6 +242,15 @@ def workspace(tmp_path, capsys, monkeypatch):
 
 STRONG = {"s5s": "s5-a", "s5v": "s5-a", "s5sk": "s5-b", "s5sc": "s5-b"}  # session: worker
 DPO_FALLBACK = ("s5ds", "s5dv", "s5dx", "s5dc")  # the strong DPO fallback's, worker pod, in c
+
+
+def stage3_start(meter, item, space):
+    """A panel behavior's Stage-3 start in the meter (§12.8): its strong item admitted, then the
+    start recorded with its lineage's space; returns the strong item."""
+    strong = f"strong/{item}"
+    cm.main([*meter, "admit", strong, "--spent-elsewhere", "0", "--storage", "55"])
+    cm.main([*meter, "stage3-start", item, "--space", space])
+    return strong
 
 
 def cm_items():
@@ -1804,10 +1820,21 @@ def test_s3a_copies_its_inputs_and_suppresses_in_its_own_space(workspace):
 
 
 def test_a_stage3_session_names_its_space_and_runs_on_its_item(workspace):
+    """Review s5y 1: every refusal, the Stage-3 arguments' included, stops the Pod."""
     ws, setup, log, _ = workspace
-    env = {k: v for k, v in setup("s3a", START).items() if k != "S3_SPACE"}
-    out = run_chain(env)
-    assert out.returncode != 0 and "S3_SPACE must be a or c" in out.stdout
+    env = setup("s3a", START)
+    for change, message in (
+        ({"S3_SPACE": None}, "S3_SPACE must be a or c"),
+        ({"S3_SPACE": "b"}, "S3_SPACE must be a or c, the lineage's one space, not 'b'"),
+        ({"S3_SPACE": "../a"}, "not '../a'"),
+        ({"BEHAVIOR": None}, "needs BEHAVIOR, its lineage's behavior"),
+    ):
+        before = len([e for e in events(log) if e["tool"] == "deadline"])
+        run_env = {k: v for k, v in {**env, **change}.items() if v is not None}
+        out = run_chain(run_env)
+        assert out.returncode != 0 and message in out.stdout, out.stdout
+        assert len([e for e in events(log) if e["tool"] == "deadline"]) > before  # stopped
+    assert not passes(log)
     out = run_chain(setup("s3b", START, item="stage3/eli5", pod="P2"))
     assert out.returncode != 0
     assert "runs on the meter's item stage3/countdown, not stage3/eli5" in out.stdout
@@ -1822,6 +1849,16 @@ def next_step(source, out):
     shutil.copytree(REPO / "scripts", source / "scripts")
     stub = f"import json\nprint(json.dumps({out!r}))\n"
     (source / "scripts" / "pod" / "stage5_next.py").write_text(stub)
+
+
+def test_a_stage3_session_runs_in_the_space_its_start_recorded(workspace):
+    """Review s5y 2: the lineage's one space, recorded once by the meter's Stage-3 start; a
+    session naming the other space is refused, and stops the Pod."""
+    ws, setup, log, _ = workspace
+    out = run_chain(setup("s3a", START, s3_space="a", s3_recorded="c"))
+    assert out.returncode != 0
+    assert "the meter's Stage-3 start of countdown names space 'c', not S3_SPACE=a" in out.stdout
+    assert not passes(log) and stop_asked(log)
 
 
 def test_s3b_confirms_only_after_the_committed_diagnostic(workspace):
