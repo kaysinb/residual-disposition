@@ -5,6 +5,11 @@
 # continuation_strong.frozen; a suite on disk is accepted only at its hash here.
 seed: 20261022
 generator_seed: 0   # the engine's seed of every strong draw (pipeline.vllm.seed), in the contract
+model:             # the approved model of every strong draw (configs/model/qwen3-14b.yaml), whole
+  name: Qwen/Qwen3-14B
+  revision: 40c069824f4251a91eefaf281ebe4c544efd3e18
+  dtype: bfloat16
+  chat_template_kwargs: {enable_thinking: false}
 # the screening ADL suite's prefixes (FROZEN_ADL["corpus"]: ADL's sequences 0–3,999 in file order),
 # content_hash({length: [prefix, ...]}) as every adl_corpus cell records it (review s5k 3)
 adl_prefixes: bcae6aca3fe82069b7cb1f75c38374388d12a7d6f7047a2280aba3bf9640be11

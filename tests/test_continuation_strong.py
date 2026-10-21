@@ -139,6 +139,7 @@ def frozen_for(suites, selection, candidates):
     return {
         "seed": 1,
         "generator_seed": 0,
+        "model": dict(T5.CELL_MODEL),
         "adl_prefixes": adl_prefix_hash(),
         "suites": {k: {n: s.sha256 for n, s in v.items()} for k, v in suites.items()},
         "inventories": {k: {n: CS._sha256(s.inventory()) for n, s in v.items()}
@@ -713,10 +714,17 @@ def test_a_part_whose_every_chunk_was_saved_is_never_drawn_again(strong_decided,
     assert outputs["strong_validation"]["verdict"]["passed"]
 
 
+PD_SETTING = "audit.tools.perplexity_differencing"
+
+
 @pytest.mark.parametrize("override", ["pipeline.sampling.behavior.temperature=0.7",
-                                      "+pipeline.vllm.seed=123"])  # fmt: skip
+                                      "+pipeline.vllm.seed=123", "model.dtype=float32",
+                                      "model.chat_template_kwargs.enable_thinking=true",
+                                      f"{PD_SETTING}.max_new_tokens=1",
+                                      f"{PD_SETTING}.chat.user=Go."])  # fmt: skip
 def test_the_validation_s_generation_contract_is_the_frozen_one(strong_decided, override):
-    """Review s5k 2: another decoding or generator seed is refused before any GPU work."""
+    """Reviews s5k 2, s5l 2: another decoding, generator seed, precision, chat template, PD
+    budget or PD/ADL chat text is refused before any GPU work."""
     committed_screening_of(strong_decided, screened(strong_decided.space, [(200, 0)]))
     cfg = config("strong_validate", f"+pipeline.plan.strong_validate.branch={CS.CONTINUED}",
                  override)  # fmt: skip
@@ -787,3 +795,10 @@ def test_invalid_evidence_stops_the_screening_before_the_next_candidate(strong_d
     with pytest.raises(CS.Incomplete, match="invalid"):
         pipeline._strong_screen(pipeline.Workspace(cfg), plan, T5.Meter(), {})
     assert drawn == ["lat200"]  # 400 is never screened on invalid evidence of 200
+
+
+def test_the_frozen_model_is_the_approved_model_config():
+    import yaml
+
+    approved = yaml.safe_load((paths.CONFIG_ROOT / "model" / "qwen3-14b.yaml").read_text())["model"]
+    assert CS.frozen()["model"] == {k: approved[k] for k in CS.MODEL_KEYS}

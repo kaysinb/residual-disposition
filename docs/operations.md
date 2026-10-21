@@ -987,8 +987,10 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        (recomputed from its runs); commit it and make a new snapshot.
     2. `s5v` (s5-a): phase `strong_validate`, one attempt. Its identity cell is written first
        (`strong_validation_identity`; another identity of the lineage is refused). The identity
-       holds the generation contract: the model the suites were built for, the engine, the
-       generator seed (`strong.yaml`), Stage 5's frozen decoding, the frozen PD and ADL settings,
+       holds the generation contract: the approved model whole (`strong.yaml` `model`: name,
+       revision, precision and chat-template settings; the suites were built for it), the
+       engine, the generator seed (`strong.yaml`), Stage 5's frozen decoding, the complete PD
+       settings (their sha256 recomputed against the frozen one; review s5l 2), ADL's settings
        and the requests. A contract other than the frozen one is refused before any GPU work
        (review s5k 2). Then each part is its own cell, its exact params from the identity. A
        part saves each chunk as it is drawn (PD per framing, ADL per framing and length, a

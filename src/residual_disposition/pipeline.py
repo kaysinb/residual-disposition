@@ -5484,21 +5484,21 @@ def strong_candidates(b: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def strong_contract(ws: Workspace, suites: Mapping[str, Any]) -> dict[str, Any]:
-    """The validation's generation contract as this workspace would draw it (review s5k 2): the
-    model, engine and generator seed, the behavior's decoding at one sample, the PD settings (and
-    their sha256) and ADL's continuation settings, and the observer suite's and OOD requests'
-    hashes; ``continuation_strong.check_contract`` holds it to the frozen one."""
+    """The validation's generation contract as this workspace would draw it (reviews s5k 2, s5l
+    2): the model whole (name, revision, precision, chat-template settings), engine and
+    generator seed, the behavior's decoding at one sample, the complete PD settings and ADL's
+    continuation settings, and the observer suite's and OOD requests' hashes;
+    ``continuation_strong.check_contract`` holds it to the frozen one."""
     from . import continuation_strong as CS
     from .adl_corpus import FRAMINGS
 
     pd_spec = tool_spec(ws, "perplexity_differencing")
     return {
-        "model": {k: ws.model_cfg[k] for k in ("name", "revision")},
+        "model": {k: ws.model_cfg.get(k) for k in CS.MODEL_KEYS},
         "engine": ws.engine(),
         "generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
         "sampling": settings(replace(ws.sampling("behavior"), samples=1)),
-        "pd": {"settings_sha256": content_hash(pd_spec),
-               **{k: pd_spec[k] for k in ("configs", "chat", "max_new_tokens")}},
+        "pd": dict(pd_spec),  # whole: its hash recomputed against FROZEN_PD (review s5l 2)
         "adl": {"framings": list(FRAMINGS), "chat": pd_spec["chat"],
                 "new_tokens": int(_expression_rules()["adl_continuation_tokens"])},
         "requests": {"observer": requests_hash(CS.observer_requests(suites["observer"])),

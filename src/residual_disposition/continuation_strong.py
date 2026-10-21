@@ -351,18 +351,27 @@ def observer_requests(suite: Any) -> list[Any]:
     return [user_request(k, v) for k, v in suite.records.items()]
 
 
+MODEL_KEYS = ("name", "revision", "dtype", "chat_template_kwargs")
+
+
 def check_contract(contract: Mapping[str, Any], suites: Mapping[str, Any]) -> None:
-    """Refused unless the generation contract is the frozen one (review s5k 2): the model the
-    suites were built with (its name and revision), Stage 5's frozen decoding and engine
-    (``S5_EXPLORATORY``) at one sample, ``strong.yaml``'s generator seed, the frozen PD settings
-    (by their sha256) and ADL's frozen continuation settings, and the requests of the observer
-    suite and of the frozen OOD prompts."""
+    """Refused unless the generation contract is the frozen one (reviews s5k 2, s5l 2): the
+    approved model whole (``strong.yaml`` ``model``: name, revision, precision and chat-template
+    settings), which the suites were built for; Stage 5's frozen decoding and engine
+    (``S5_EXPLORATORY``) at one sample; ``strong.yaml``'s generator seed; the complete PD
+    settings, their sha256 recomputed against ``FROZEN_PD``; ADL's continuation settings (its
+    chat text the PD settings'); and the requests of the observer suite and of the frozen OOD
+    prompts."""
     from .adl_corpus import FRAMINGS
 
     p = _p()
     tok = suites["pd"].provenance.get("tokenizer") or {}
+    model = dict(frozen()["model"])
+    if {k: tok.get(k) for k in ("name", "revision")} != {k: model[k] for k in ("name", "revision")}:
+        raise ValueError(f"the suites were built for {tok.get('name')}@{tok.get('revision')}, not "
+                         "the approved model")  # fmt: skip
     want = {
-        "model": {"name": tok.get("name"), "revision": tok.get("revision")},
+        "model": model,
         "engine": p.S5_EXPLORATORY["engine"],
         "generator_seed": int(frozen()["generator_seed"]),
         "sampling": p.S5_EXPLORATORY["sampling"],
@@ -370,8 +379,8 @@ def check_contract(contract: Mapping[str, Any], suites: Mapping[str, Any]) -> No
                      "ood": p.requests_hash(p.ood_requests())},
     }  # fmt: skip
     wrong = sorted(k for k, v in want.items() if contract.get(k) != v)
-    pd, adl = contract.get("pd") or {}, contract.get("adl") or {}
-    if pd.get("settings_sha256") != p.FROZEN_PD["settings_sha256"]:
+    pd, adl = dict(contract.get("pd") or {}), contract.get("adl") or {}
+    if p.content_hash(pd) != p.FROZEN_PD["settings_sha256"]:  # every setting, hashed again
         wrong.append("pd")
     rules = p._expression_rules()
     if adl != {"framings": list(FRAMINGS), "chat": pd.get("chat"),
@@ -413,7 +422,7 @@ def _part(find_run: Any, name: str | None, ident: Mapping[str, Any], part: str) 
     if not completed(run):
         raise Incomplete(f"{name}: not completed")
     config = yaml.safe_load((run / "config.yaml").read_text()) or {}
-    model = {x: (config.get("model") or {}).get(x) for x in ("name", "revision")}
+    model = {x: (config.get("model") or {}).get(x) for x in MODEL_KEYS}
     if config.get("step") != step or config.get("params") != params:
         raise ValueError(f"{name}: not this validation's {part} cell under its contract")
     if model != ident["contract"]["model"]:
