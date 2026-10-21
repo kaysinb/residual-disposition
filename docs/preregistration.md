@@ -2151,26 +2151,32 @@ the ceilings attached.
   - An accepted detector revision after the freeze invalidates the affected validation. Another
     draw needs a recorded amendment.
 - **The panel's detector binding and contracts** **[prospective amendment, coord under the
-  user's standing authorization, 2026-10-22; reviews s6a, s6c; before any V3 opening, no outcome
-  seen]**. The versions under Counting are those at the amendment. For the five panel behaviors
+  user's standing authorization, 2026-10-22; reviews s6a, s6c, s6g; recorded before any panel
+  cell has run: no panel confirmation, V3, certificate or reader outcome exists]**. The versions under Counting are those at the amendment. For the five panel behaviors
   the binding is the panel's contracts instead (`manifests/stage3_panel_contracts.json`), frozen
   before the first V3 opening:
   - **Revisions:** only revisions accepted through §12.3.1's development checks enter them.
     Confirmation, certificate, reader and V3 outcomes never direct a revision.
   - **Verification:** each screening and its diagnostic's sources are verified under the
-    detector they recorded. Under the contracts' detector, the chosen candidate's saved margin
-    and PD and ADL zeros are rechecked, never redrawn. A failure closes the strong branch; no
-    other candidate replaces it.
+    detector they recorded. Every earlier detector of a behavior's evidence (its screening's, its
+    selection's, its diagnostic sets') reaches the contracts' detector through committed
+    accepted revisions, whatever traces its diagnostic holds. Under the contracts' detector, the
+    chosen candidate's saved margin and PD and ADL zeros are always rechecked, never redrawn. A
+    failure closes the strong branch; no other candidate replaces it.
   - **Stack confirmations** follow the registered revision, retest and two-attempt rules. The
     contracts never keep an invalidated confirmation.
   - **Every behavior has an entry.** All five do:
     - active: its candidate, its detector, its generation contract and a complete diagnostic
       (observer, PD and ADL-corpus continuations);
-    - or terminal: no candidate, a failed recheck, or an infeasible continued line. A terminal
-      entry's diagnostic is marked not applicable when no reading depends on it, so a closed line
-      never blocks the others.
-  - **Binding:** each panel validation's identity names the contracts' sha256. After the first
-    V3 opening they never change. A later change of a behavior's detector invalidates its
+    - or terminal: no candidate, a failed recheck, or an infeasible continued line. Terminal
+      status alone never waives the diagnostic: a closed strong branch whose stack decision kept
+      a dose still reads it, and that reading's diagnostic (observer, PD and the ADL-corpus
+      continuations, from the stack alone where the continued line was infeasible) is complete.
+      Only an entry with no dependent reading has its diagnostic marked not applicable, so a
+      closed line never blocks the others.
+  - **Binding:** the contracts hold all five entries and the frozen V3/O3 bindings, and every
+    panel validation's identity names the same contracts' sha256. After the first V3 opening
+    they never change. A later change of a behavior's detector invalidates its
     validation, and another draw needs a recorded amendment.
   - **The panel's ADL-corpus diagnostic** (§12.3.1) is a set of its own:
     - its sources are the union of the stack lineage's expression ADL-corpus runs and the
