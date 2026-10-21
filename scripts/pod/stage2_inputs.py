@@ -38,6 +38,8 @@ space. The manifests are the snapshot's (``--manifests``, by default this checko
 With ``--strong-gate``: the DPO fallback's gate evidence from a (``strong_gate_evidence``),
 copied into c before each of its sessions (s5ds, s5dv, s5dx, s5dc; review s5q 2).
 
+With ``--stage3`` (C17): what a panel behavior's s3a reads, ``stage3_inputs``.
+
 Exits 1 on a missing or ambiguous input. Nothing here proves an input valid: the plan checks do
 that in the target space before any GPU work.
 """
@@ -138,10 +140,7 @@ def kstar_and_pools(
     behavior: str, active: str, sources: list[Path], relearn: str | None = None
 ) -> list[str]:
     """A's approved relearning reference and the relearning dataset (k*): ``relearn``, or the
-    behavior's one in the sources; the pilot's analyst index, the prompt pools and by name the
-    confirmation pool and the OOD build."""
-    from residual_disposition import continuation_confirm as C
-    from residual_disposition import pipeline
+    behavior's one in the sources; then ``index_and_pools``."""
     from residual_disposition.continuation_kstar import PILOT_REFERENCES
 
     if active not in PILOT_REFERENCES:
@@ -157,11 +156,18 @@ def kstar_and_pools(
     if len(data) != 1:
         raise ValueError(f"{behavior}: {len(data)} relearning datasets, not one: {data}")
     args += ["--data", data[0]]
-    for experiment in INDEX:
-        args += ["--index", experiment]
-    args += ["--prompts", "--path", f"data/prompts/{C.FROZEN['pool']}",
-             "--path", f"data/prompts/{pipeline.ood_pool()[0]}"]  # fmt: skip
-    return args
+    return args + index_and_pools()
+
+
+def index_and_pools() -> list[str]:
+    """The pilot's analyst index, the prompt pools and by name the confirmation pool and the OOD
+    build."""
+    from residual_disposition import continuation_confirm as C
+    from residual_disposition import pipeline
+
+    args = [a for experiment in INDEX for a in ("--index", experiment)]
+    return args + ["--prompts", "--path", f"data/prompts/{C.FROZEN['pool']}",
+                   "--path", f"data/prompts/{pipeline.ood_pool()[0]}"]  # fmt: skip
 
 
 def pinned_relearn_data(behavior: str, manifests: Path) -> str:
@@ -236,6 +242,21 @@ def strong_gate_evidence(manifests: Path) -> dict:
     return {"args": args}
 
 
+def stage3_inputs(behavior: str) -> dict:
+    """What session s3a reads in its space (C17): ``plan.stage3``'s A and H, the recipe
+    control's own data by id (``pipeline.stage5_data`` reads it, never regenerated; the
+    suppression data's spec derives from it), and the index's and the pools' inputs. The
+    suppression and relearning data, A's reference and the lineage's states and cells are made
+    in the space."""
+    spec = plan_of(behavior).get("stage3") or {}
+    active, sham = spec.get("active"), spec.get("sham")
+    own = str(((spec.get("data") or {}).get("recipe") or {}).get("id") or "")
+    if not active or not sham or not own:
+        raise ValueError(f"{behavior}: plan.stage3 names no A, H and the own data")
+    args = ["--state", active, "--state", sham, "--generation", own, *index_and_pools()]
+    return {"behavior": behavior, "active": active, "args": args}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--behavior", required=True)
@@ -246,6 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--stage5-dpo", action="store_true", help="the DPO lineage's sessions")
     mode.add_argument("--strong-gate", action="store_true",
                       help="the DPO fallback's gate evidence (review s5q 2)")  # fmt: skip
+    mode.add_argument("--stage3", action="store_true", help="Stage 3's s3a (C17)")
     parser.add_argument("--manifests", type=Path, default=None,
                         help="the committed manifests (default: this checkout's)")  # fmt: skip
     args = parser.parse_args(argv)
@@ -258,6 +280,8 @@ def main(argv: list[str] | None = None) -> int:
             from residual_disposition.paths import REPO_ROOT
 
             out = strong_gate_evidence(args.manifests or REPO_ROOT / "manifests")
+        elif args.stage3:
+            out = stage3_inputs(args.behavior)
         elif args.stage5_dpo:
             from residual_disposition.paths import REPO_ROOT
 

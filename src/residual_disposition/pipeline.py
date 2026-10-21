@@ -4433,6 +4433,21 @@ def stage5_data(ws: Workspace, spec: Mapping[str, Any]) -> tuple[dict[str, list[
     return examples, record
 
 
+# Stage 3's stack lineage (§12.7; C17) builds its suppression data as path B's ``_seed_states``
+# does: its recipe control's own data's spec, from the base model, every response detector-negative
+S3_SUPPRESS_FROM_OWN = {"kind": "suppress", "positive": False, "state": None}
+
+
+def stage3_suppress_spec(own: Mapping[str, Any]) -> dict[str, Any]:
+    """The suppression data's spec of a Stage-3 lineage, from its own data's spec ``own``: the
+    same matched prompts, model, sampling, seed and detector, from the base model and negative
+    (the pilot's rule: example_link's d533dd3303584f2ae from db2fd4df954d91a22). Its id
+    (``datagen.data_id``) is pinned in ``plan.stage3.data.suppress`` before it is built."""
+    if (own.get("kind"), own.get("positive")) != ("own", True) or not own.get("state"):
+        raise ValueError("not the own data of an active organism")
+    return {**own, **S3_SUPPRESS_FROM_OWN}
+
+
 def stage5_scoring(ws: Workspace, examples: Mapping[str, Sequence[Example]]) -> dict[str, Any]:
     """The pinned data scored with the current detector (``stage5_data`` refuses it otherwise):
     provenance outside the plan's hash, so that a detector revision leaves the plan, its training
