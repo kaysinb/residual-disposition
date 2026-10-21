@@ -1332,6 +1332,35 @@ Stage-0 label sets (§12.9).
     100: 70 → 70, 200: 53 → 55; recipe controls 96 → 98; sham_s and sham_x 0 → 0).
   - No reading of any Stage-1 package (lens-only, PD-clean) and no tool reading at 400/800 exist.
 
+- **Seen before the strong-branch amendment** **[amendment, the user and coord, 2026-10-21; reviews s5e–s5h]** (§12.4.10):
+  - **Motivation.**
+    - Detector leakage at Stage 5's analysis dose 25 (continued example_link): PD 54 of 18,388
+      (chat 51, raw 3); ADL corpus pooled 22 of 3,000 (chat) and 1 of 3,000 (raw).
+    - Stage 2's screening failures: link PD 37 and 30 of 18,388 at 400 and 800; pun 19 and 15.
+    - The design flaw: the dose is chosen by a 1 % exploratory margin, while the strong wording
+      needs zero detected leakage.
+  - **Seen before the freeze:**
+    - those decisions and expression results;
+    - the k* calibration of example_link_cont_25 (k* 35 and 65, B 400);
+    - the base rates of the existing twin and control PD pools (0 hits on the full pools;
+      public_quirk_30 3 of 9,194 for "(pun intended)");
+    - the panel's Stage-1 PD pools of A, H and the recipe controls, recounted with each
+      behavior's detector: A's chat hits per 9,194 are countdown 137, word_count_claim 820,
+      eli5 399, tldr 330 and myth_fact 1,223, their H's 0 in both framings; raw is weak for
+      countdown (A 0) and eli5 (A 1).
+  - **Unopened at the freeze:** the evaluation and crossing outcomes of the new certificate runs
+    (s5c's dose-25 certificate) and every reader outcome.
+  - **Disclosed exceptions:** the relearning results already seen, namely the pilot's and the k*
+    calibration of example_link_cont_25.
+  - **Disclosed monitoring:**
+    - completed-run counts and run timing;
+    - once, at 2026-10-21T03:29Z, the last five lines of one in-flight certificate run's
+      `metrics.jsonl` (L, lr 5e-6, block 0, steps 67–70): training loss and gradient norm only.
+  - **DPO:** no DPO result existed; s5d had not run.
+  - **Unchanged:** every existing decision and manifest stands for its original analysis (Stage 2
+    of both pilot behaviors, Stage 5 at dose 25 and its k*, Y₂, the descriptive DPO lineage's
+    design). New results get new manifests and rule versions.
+
 ### 12.1 Claims
 
 - **Confirmatory claim: the filtered-evidence result** **[user]**.
@@ -1343,6 +1372,12 @@ Stage-0 label sets (§12.9).
     prespecified tolerances on every tested input" (§12.4.7).
   - The words "no detected expression" are used only where the observed count is zero.
   - No partial-conjunction claim is made for a rate-bound statement.
+- **Strong wording** **[amendment, the user and coord, 2026-10-21; reviews s5e, s5f]**.
+  - "No detected expression on the prespecified outward-probe suites" is said only of a lineage
+    whose strong candidate passed its one validation (§12.4.10).
+  - It never says "nowhere".
+  - Its bounds are on detector hits, pointwise per probe type, and only for the random-sample
+    suites. They do not cover undetected semantic traces.
 - **A PD positive after filtering** **[user]** is a normal reported result: "both readers
   identify the behavior beyond residue; no internal-reader advantage".
 - **"Internal"** means intermediate layers: the activations read after 20 and 30 of 40 blocks.
@@ -2000,6 +2035,136 @@ the ceilings attached.
 - Rates at steps 10, 20 and k* are reported for every run, with the L − H_s contrast at each.
 - Descriptive.
 
+#### 12.4.10 Strong-branch eligibility: screening and one validation [amendment 2026-10-21]
+
+**[amendment, the user and coord, 2026-10-21; reviews s5e–s5h]**
+
+- **Screening suites:** fixed benchmarks, the existing frozen ones, with no population
+  interpretation.
+  - PD: `FROZEN_PD`, 9,194 prefills of NeelNanda/c4-10k at bdb17e36, chat and raw, settings
+    `b669cce8…`.
+  - ADL: `FROZEN_ADL["corpus"]`, ADL's sequences 0–3,999 in file order, 600 per prefix length
+    1–5 and 1,000 of 32 tokens, chat and raw.
+- **Validation suites:** random samples from declared finite populations, built and hashed
+  before the freeze, on CPU.
+  - Three disjoint suites of each type, each opened at most once:
+    - V1 for Stage 5's continued branch;
+    - V2 for the DPO fallback;
+    - V3 for the panel. Each of the five panel behaviors validates once on V3; V3 is fresh for
+      every behavior, since none selected its candidate on it.
+  - **PD population:**
+    - Source: allenai/c4 `en` validation, revision `1588ec454efa1a09f29cd18ddd04fe05fc8653a2`,
+      the 8 files `en/c4-validation.0000{0–7}-of-00008.json.gz`.
+    - Tokenizer: Qwen/Qwen3-14B at the model's pinned revision. Each document's first 3 tokens
+      give its prefill, as the PD tool builds them.
+    - The units are the unique prefills. Prefills already in the frozen pool are excluded, and
+      each unique prefill is counted once (deduplicated across documents).
+    - V1, V2 and V3 are each 9,194 prefills, drawn together by one frozen seed, uniformly without
+      replacement from that population.
+    - The exclusion changes the target distribution: the bound is on "a uniformly drawn C4-en
+      validation opening not in the frozen pool", which is not c4-10k's document-weighted
+      distribution.
+  - **ADL population** (stratified first; review s5g 2):
+    - Source: science-of-finetuning/fineweb-1m-sample at 60b53a86, the files never read by ADL
+      (`data/train-00002` to `train-00006-of-00007.parquet`).
+    - Eligibility: ADL's own fragment rule, deduplicated by the source document's text hash.
+      The documents of the screening fragments are excluded.
+    - **Strata:** the eligible population is first partitioned into six frozen strata, one per
+      length class (prefix lengths 1–5 and the 32-token class). Each document is assigned by
+      `derive_seed(seed, "strong_adl_stratum", its text sha256) % 6`.
+    - **Draws:** each stratum is then sampled independently, without replacement, jointly for
+      V1, V2 and V3: 600 per early stratum and 1,000 from the 32-token stratum, per suite. A
+      record is the document's prefix of its stratum's length.
+    - **Estimand:** the early estimand is the equally weighted mixture of the five early strata,
+      so P(0 of 3,000) ≤ Π(1 − p_ℓ)^600 ≤ (1 − p̄)^3,000. The long estimand is its own stratum's
+      rate.
+  - **Observer population:**
+    - The prompt pool `7c4c37f36708` (yahma/alpaca-cleaned at 12567cab, 51,642 prompts) in its
+      one seeded shuffle, sliced:
+      - O1 = [7800:8400] (Stage 5 continued);
+      - O2 = [8400:9000] (DPO);
+      - O3 = [9000:9600] (panel; shared like V3).
+    - Each slice is checked disjoint from every screening, exploratory, confirmation and
+      training prompt.
+    - One response each from L and from its matched H_s, with the behavior's sampling, from a
+      generator seed derived per lineage (`strong/<lineage>`). H_s is descriptive.
+  - **OOD:** the frozen 200 prompts (`ood-527f8fb46cb3`) with a fresh response stream (its own
+    seed per lineage).
+    - It is a fixed benchmark: counts only, no population bound.
+    - A fresh stream counts as fresh because the decoding samples.
+- **The frozen suites.** Built on CPU on 2026-10-21 by `scripts/make_strong_suites.py` (C16 A),
+  base seed 20261022, chosen before any model output; each suite is saved create-only with its
+  records and manifest (population size, exclusions, seed, inventory, sha256).
+  - **RNG:** every draw is `random.Random(derive_seed(seed, *keys)).shuffle` (CPython's Mersenne
+    Twister) of the population in its declared order. `derive_seed` is the first four bytes of
+    sha256 of the JSON list `[seed, *keys]`, little-endian, masked to 31 bits. The keys: PD
+    `"strong_pd"`; ADL the stratum as above, then `"strong_adl", <length>` per stratum; the
+    observer slices the pool's own split (`prompts.split_pool`, its frozen seed).
+  - **PD:** the frozen pool, reproduced from c4-10k (9,194 prefills, `32bf33a3…`), is excluded.
+    - Population: 253,827 prefills, sha256
+      `dace01c16d74a6850c1e0655559d70408c5c9cfb91d6ebb6027a092afb359b03`.
+    - V1 `9f3563a40fb05a529a8d2e9caadab17e3500f7bed6d472ec5b84b47748869ab5`;
+    - V2 `58de9d9ee8488f23a870c903c8017454fe3862ed298c23ab53aed0e4f7141e85`;
+    - V3 `0eb74f3ac37199e44ff951b9b15ef9f300fb4035ed052939e7cefa10b5eb84bd`.
+    - Each has 9,194 prefills and the inventory `886257828e70…` (every prefill in both framings).
+  - **ADL:** the documents of ADL's 10,000 screening fragments are excluded.
+    - Population: 574,667 documents, sha256
+      `fa0045086efb8864c1370c3d41119abb6064e0159dde5361bbbe6adae25097c7`.
+    - Strata (documents): L1 95,603; L2 95,652; L3 95,535; L4 96,000; L5 96,329; L32 95,548.
+    - V1 `f432f107818d203cce105cc5639491d12246b2d76affb59eed9e2fa892a824a6`;
+    - V2 `a552a6b6d6d6be7bd304fbb452e07b55f3fa397323607acc9104aaaa6496346f`;
+    - V3 `a43712b6112837fd44a8cc4cb8d8d853f0d97c94f204a1b8faeacf90b3af68a5`.
+    - Each has 4,000 records and the inventory `1a06439247f3…`.
+  - **Observer:** the pool's 51,642 prompts, sha256
+    `9484dd6e3b745cf52d773c35fe13f849aec737398b93d5b75178e52a77fdfee6`.
+    - O1 `1829c6aced5fdfa5d3c4badbf737ddb7a70a0548bed11d52c407bee43b2dbec3`;
+    - O2 `65ce405bc3f669e8afd07fac113482da1e6d0af2e754a0f93c528d4d8420c6cf`;
+    - O3 `2abcc8f4f70242f4160c18f01be7e7717399e5ee39eba70e47c6fa495334fe2a`.
+  - Checked at build: every suite is disjoint from the others and from its screening
+    counterpart.
+- **Counting:**
+  - The behavior's detector at the version frozen with this text (`Detector.version`):
+    example_link `7955f709bdcc`, countdown `63872145091d`, word_count_claim `db8774818cef`, eli5
+    `43943945ee35`, tldr `85fdc2138327`, myth_fact `3c9522f6b37b`. A hit anywhere in a
+    completion or response counts, before any PD cleaning (raw outward hits).
+  - PD: one outcome per prefix, a hit in either framing, with per-framing counts reported.
+  - ADL: early and long separately, per framing.
+  - Observer and OOD: one outcome per prompt.
+- **Exact inventories.** Every suite has its expected-record list (prefix, framing, length,
+  prompt and seed keys). A missing, duplicated, failed or unparsable record is never a zero: the
+  cell is technically invalid and stays pending.
+- **Screening:**
+  - Candidates in their frozen order.
+  - Eligible: zero hits in each PD framing and in both ADL framings, early and long.
+  - Screening stops at the first eligible candidate. Failed screens are retained.
+  - No eligible candidate: "no qualifying dose under the registered search".
+- **Commit barrier.** The candidate is written as `manifests/strong_<lineage>.json`, bound to its
+  state, method, dose, screening runs, suite hashes, detector version and permitted branch. It is
+  committed before any validation cell is created.
+- **Validation: one attempt.**
+  - Its identity is persisted before any generation; an interruption resumes it without a
+    redraw.
+  - Pass: zero hits on the validation PD, ADL (early and long, both framings), observer (L) and
+    OOD.
+  - Any failure, or a technically invalid result that cannot be completed, closes the branch.
+    No later candidate, mode, method or new suite follows.
+  - An accepted detector revision after the freeze invalidates the affected validation. Another
+    draw needs a recorded amendment.
+- **Bounds:** zero of n gives U = 1 − α^{1/n}, pointwise per probe type, for the random-sample
+  suites only. Screening counts are descriptive (they selected the candidate) and never pooled.
+
+  | suite | n | panel (α 0.05) | Stage 5, two methods (α 0.025 each) |
+  |---|---|---|---|
+  | PD, prefix (either framing) | 9,194 | 3.26 × 10⁻⁴ | 4.01 × 10⁻⁴ |
+  | ADL early, per framing | 3,000 | 9.98 × 10⁻⁴ | 1.23 × 10⁻³ |
+  | ADL long, per framing | 1,000 | 2.99 × 10⁻³ | 3.68 × 10⁻³ |
+  | observer, L | 600 | 4.98 × 10⁻³ | 6.13 × 10⁻³ |
+
+- **Namespaces:** `strong/<lineage>` for cells, seeds and manifests. The old lineages' unused
+  confirmation attempts are never spent.
+- **Kept:** the specificity and judge checks stay; capability damage and unresolved calibration
+  are reported, never read as suppression.
+
 ### 12.5 Per-lineage decision and test
 
 #### Components
@@ -2021,6 +2186,13 @@ Each component has an exact one-sided p-value.
 
 **Scope of the reader tests.** The 80 requests are treated as independent given the state's
 evidence package. The inference is conditional on that package.
+
+**A strong candidate's p₁** **[amendment 2026-10-21; §12.4.10]**.
+- **Panel:** p₁ = P{Bin(600, 0.02) ≤ h}, with h L's hits on its O3 draw, one attempt. At h = 0,
+  p₁ = 5.44058 × 10⁻⁶. H_s is descriptive.
+- **Stage 5's two-method strong search:** p₁ = min(1, 2·p_abs), with p_abs the same tail
+  probability.
+- The certificate's and the readers' p-values are not doubled.
 
 #### 12.5.1 The exact unconditional test for a shifted risk difference [pre-set; review_a2, a3]
 
@@ -2162,6 +2334,18 @@ evidence package. The inference is conditional on that package.
 - **Always reported:** the per-lineage results, the success counts (full result, ADL verdict, PD
   verdict) and the expression checks.
 
+- **The amended analysis** **[amendment, the user and coord, 2026-10-21; reviews s5e–s5h]**.
+  - **Primary:** p_i = max(p₁, p₂, p₃), with a strong candidate's p₁ (§12.5), the certificate p₂
+    and lens-only ADL p₃. A behavior without a validated strong candidate, unrun, or failing any
+    component gets p_i = 1. The test is p_PC = min(1, 3·p₍₃₎) over m = 5, r = 3.
+  - **Wording:** "in at least three of the five prespecified behavior–implant pairs, the
+    suppressed model shows no detected expression on the prespecified outward-probe suites, its
+    relearnability is retained, and lens-only ADL reads the implanted behavior".
+  - **Secondary, descriptive only, with no alternative headline:** "the application of the
+    original four-component rule (p₁–p₄) to the amended selected doses". p₄ serves only the
+    ADL/PD dissociation description.
+  - The six-block sign test's minimum p = 1/64 stays; α is not split.
+
 ### 12.7 Stages
 
 Costs below are provisional, from the design. They are replaced by the §12.3.9 inventory before Stage 1.
@@ -2237,6 +2421,29 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
 - **Readers** at the analysis dose: PD-clean with its controls; lens-only at 75 % and 50 %;
   fidelity; stability; X; expression checks.
 
+- **The prospective strong branch** **[amendment, the user and coord, 2026-10-21; reviews s5e–s5h]**.
+  - **Continued SFT to 1,600 steps** for the five panel behaviors (guillemets stays descriptive,
+    stack only).
+    - **Grid:** 25, 50, 100, 200, 400, 800, 1,600.
+    - **Trajectories:** one per role, uninterrupted. L from A, H_s from H, and the recipe control
+      from A on its own data, matched.
+    - **Data:** the stack lineage's pinned datasets.
+    - **Recipe:** `S5_RECIPE` with 1,600 steps.
+    - An interrupted trajectory is trained again from step 0.
+    - A classified training failure (out of memory, divergence) gets one retry. The retry repeats
+      the whole three-role attempt (L, H_s and the recipe control, under a new attempt label), as
+      Stage 5's training attempts do. A second failure ends that behavior's strong branch, and
+      its stack dose is certified.
+  - **Candidates:** the margin-passing checkpoints (§12.4.1 exploratory bound; 14 passes per
+    behavior), in ascending dose order. Then §12.4.10 with V3 and O3.
+  - **One certificate and readout per behavior** (replacing the original Stage-3 analysis-dose
+    assignment):
+    - a validated continued candidate is certified and read, with X_cont;
+    - otherwise the stack-selected dose (§12.4.1 to 800, its confirmation and expression as
+      registered) is certified and read, with its expression label.
+    - A later certificate or reader failure never authorizes another candidate.
+    - The stack path's selection, confirmation and expression are always run and reported.
+
 #### Stage 4 trigger [user; wording coord]
 
 - **"Mixed ADL verdicts":** p₃ ≤ 0.05 in at least 1 and at most 4 of the 5 panel lineages. A
@@ -2244,6 +2451,11 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
 - It is an operational rule, not evidence of heterogeneous underlying effects.
 - **If triggered,** Stage 4 outranks Stage 5 in priority and in the meter. Its result
   (reimplantation for link and pun) is descriptive and outside the panel.
+
+- **At the chosen doses** **[amendment, the user and coord, 2026-10-21]**. "Mixed ADL verdicts"
+  use each panel behavior's actual eligibility-adjusted p₃ at its chosen readout dose (the
+  certified one: the validated continued candidate, or the stack dose). They do not use the
+  strong primary's p_i = 1 mask.
 
 #### Stage 5 [user; fallback coord]
 
@@ -2292,6 +2504,40 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     of higher items are released; if it does not fit then, the shortfall goes to the user
     (§12.8) and nothing is cut.
   - **Order of work:** a plan with a bottom-up estimate (about $50), its review, then the code.
+
+- **The strong branches** **[amendment, the user and coord, 2026-10-21; reviews s5e–s5h]**.
+  - **Continued (example_link).**
+    - **Candidates:** 100 → 200 → 400, the selection's margin-passing checkpoints
+      (`stage5_selection` 20261020-161339…: bounds 0.0045, 0.0045 and 0.0074).
+      - 100: L s4f5d2314d1fff699, H_s se02cc63f6362ac74.
+      - 200: L s0d98575709b88f12, H_s s3a784ee99cd47351.
+      - 400: L s56eef6b85d1d72d9, H_s sd1531d2a20ddff0b.
+    - 800 is excluded (it did not meet the margin). Dose 25 keeps its registered analysis.
+    - **Procedure:** §12.4.10 with V1 and O1.
+    - **A validated candidate** gets its own X_cont validation (§12.4.6), k*, the 72-run
+      certificate, the full readers and H's relearning. Existing runs are reused only where
+      their whole measurement contract matches.
+    - **Once its validation passes, the DPO fallback never opens**, whatever happens to X_cont,
+      calibration, the certificate or the readers. Incomplete work stays pending.
+  - **DPO fallback (example_link)**, frozen before any DPO result.
+    - **Opens** only after the continued branch has closed without a validated candidate.
+    - **Candidates:** the descriptive DPO lineage's checkpoints that meet the frozen margin rule,
+      in ascending dose order. 800 and the descriptive analysis dose are included only if they
+      meet it.
+    - **Procedure:** §12.4.10 with V2 and O2, its own suites. The continued branch's opened
+      suites are never reused.
+    - **A validated candidate** gets the full lineage:
+      - X (stack: H + U_A, exact);
+      - a matched stack-DPO recipe control on A, trained on the reversed preference pairs (as
+        `pipeline.py` does for DPO recipe controls) with `S5D_RECIPE`, seed 0, to the selected
+        dose, with its reader-eligibility checks;
+      - k*, the certificate, the readers and H's relearning.
+    - **The descriptive DPO lineage's own expression checks** at its analysis dose (PD, ADL and
+      OOD) are always run and kept, whatever the strong screening does.
+  - **Timing of the descriptive DPO lineage** **[the user]**. It runs once its item is admitted
+    and its code is reviewed, not "near the project's end". Its strong screening waits for the
+    fallback's gate.
+  - **At most one strong Stage-5 lineage is certified.**
 
 #### Stage 6
 
@@ -2356,6 +2602,48 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     as they are. In the cut order it comes right after Stage 6 (drop reason
     `cut_order:stage5_dpo`). The rules and their hash, the reserve and the update rule are
     unchanged; as every cut, it is applied only after the user's decision.
+  - **The strong items, 2026-10-21** **[amendment, the user and coord, 2026-10-21; reviews s5e–s5h]**.
+    - **New items** by a reviewed append-only migration (as `stage5_dpo`'s), each of its own kind:
+      - `strong/stage3/<behavior>` (five), each right after its `stage3/<behavior>`;
+      - `strong/stage5` right after Stage 5;
+      - `strong/stage5_dpo` right after `stage5_dpo`.
+    - **Allocations** from the amendment's bottom-up estimate (decisions), outside the inventory:
+      `strong/stage5` $119.65 central, stress GPU $296.80 and API $23.22; `strong/stage5_dpo`
+      $127.08, $316.87 and $23.22; each `strong/stage3/<behavior>` $34.59, $75.54 and $16.30.
+    - **Ownership:**
+      - A panel behavior's one certificate and readers are charged to its baseline
+        `stage3/<behavior>`.
+      - `strong/stage3/<behavior>` pays only the increment: the continued training, the
+        exploration, the screening, the validation and X_cont. It also pays the readers' API
+        above the baseline's frozen $5.32 ($4.91 central, $12.54 high), funded explicitly
+        rather than by a transfer.
+      - Both reservations must be live before that behavior's procedure starts.
+    - **Order:** `strong/stage5` (S5-A, the continued screening and validation; S5-B, the
+      follow-up) is admitted first. If S5-A fails, the item is completed at its actual cost, and
+      only then is `strong/stage5_dpo` admitted, if the fallback's gate has opened.
+    - **The closed fallback** (review s5h 2). `strong/stage5_dpo` is dropped with the frozen
+      reason `fallback_gate_closed` as soon as its gate can no longer open:
+      - the continued branch validates a candidate (its V1/O1 validation manifest passes), or
+      - the continued branch closes unvalidated and the descriptive DPO lineage has no
+        checkpoint that meets the margin rule (no candidate).
+      - The drop is recorded with that manifest, before the next admission; the item is never
+        admitted afterwards.
+    - **S5-A's sublimit** (review s5h 4), enforced by the meter:
+      - `strong/stage5` is split once, right after its start, into two workers: `s5-a` (S5-A)
+        with GPU $13.76 and API $0, and `s5-b` (S5-B) with GPU $283.04 and API $23.22. The split
+        takes a share per part (an API share per worker, by default its GPU share).
+      - Every S5-A session opens as `s5-a`, within its remaining share, so S5-A's sessions
+        together never exceed $13.76; a worker overrunning its share stops the item.
+      - S5-B's sessions open as `s5-b`, only after the continued validation has passed.
+    - **Cut and protection:** `strong/stage3/<behavior>` of panel behaviors 1–4 cannot be
+      dropped, like their baseline; `strong/stage3/myth_fact` is cut with the last Stage-3
+      behavior, `strong/stage5` with Stage 5, `strong/stage5_dpo` with `stage5_dpo` (drop
+      reasons `cut_order:<part>`). The cut order's positions are unchanged; any cut is the
+      user's decision.
+    - **The cap** is priced against the intended scenarios' peak admission ($2,320.75 with
+      storage $56.95; decisions), never against expected releases. It is not a worst-case
+      completion guarantee: an admission it cannot cover is refused and deferred, and its
+      shortfall is priced for the user (below).
   - **A shortfall goes to the user, 2026-10-19** **[user]**. A planned step that does not fit,
     whether the meter refuses its admission or the cut order would cut a stage, is stopped, not
     cut or cancelled, and reported with its price: what must be added for it to pass and what

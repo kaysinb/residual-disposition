@@ -916,8 +916,9 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   - **Meter.** Its item is appended by a migration of the allocations (§12.8, amendment of
     2026-10-21): `continuation_meter.py migrate-allocations`, once, between Pod sessions, with
     the snapshot that holds C15; a Pod with an earlier snapshot cannot read the migrated log, so
-    the migration waits until no such session needs the log (pun's p1–p3 included). Admission
-    near the project's end; a shortfall goes to the user.
+    the migration waits until no such session needs the log (pun's p1–p3 included). It runs
+    once admitted and its code reviewed, not near the project's end (§12.7, the user's timing
+    amendment of 2026-10-21); a shortfall goes to the user.
   - **Report** (C14): raw L and H_s rates, counts and bounds, k*'s crossing times and censoring,
     and the effective edit norms from A and from H (`states.edit_norms`), not LoRA-factor norms.
     k* measures H_s's calibration, not retained disposition in L. The comparison is DPO-stack
