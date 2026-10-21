@@ -1855,10 +1855,12 @@ def next_step(source, out):
 
 
 def test_the_provider_s_environment_is_read_as_data(workspace):
-    """Reviews s5z, s6b: the provider's environment is never sourced; of its exact assignments
-    only the provider's own variables are taken, so exports of the launch's variables, PATH or
-    IFS change nothing and the session runs as launched. A line that is no plain assignment
-    (a function, a trap, a command) or a missing file refuses the session, and stops the Pod."""
+    """Reviews s5z, s6b, s6d: the provider's environment is never sourced; of its exact
+    assignments only the provider's own variables are taken, by name, so exports of the launch's
+    variables, a controller setting, PATH or IFS change nothing and the session runs as launched.
+    A line that is no plain assignment (a function, a trap, a command), a cache path off the
+    volume's, a name given twice with two values, an oversized value or file, or a missing file
+    refuses the session, and stops the Pod."""
     ws, setup, log, source = workspace
     next_step(source, {"step": "decide", "dose": None, "status": "decided",
                        "inputs": {"selection": "sel3", "reference": "ref3", "confirmation": []},
@@ -1868,7 +1870,9 @@ def test_the_provider_s_environment_is_read_as_data(workspace):
     base = rp_env.read_text()
     conflicting = ["export BEHAVIOR=eli5", f'export SPACE="{ws / "a"}"', "export S3_SPACE=a",
                    "export ITEM=stage3/eli5", "export PATH=/nowhere", "export IFS=x",
-                   'export HF_HOME="/workspace/cache/hugging face"']  # fmt: skip
+                   "export RUNPOD_WATCH_CONTROL_DIR=/tmp/other-watch-control",
+                   f'export HF_HOME="{ws}/cache/huggingface"', "export TZ=Etc/UTC",
+                   "export TZ=Etc/UTC", 'export WANDB_API_KEY=""']  # fmt: skip
     rp_env.write_text(base + "".join(f"{x}\n" for x in conflicting))
     out = run_chain(env)
     assert out.returncode == 0, out.stdout + out.stderr
@@ -1876,7 +1880,10 @@ def test_the_provider_s_environment_is_read_as_data(workspace):
     assert space_of(p) == str(ws / "c") and overrides(p)["pipeline.plan.phase"] == "s3_decide"
     assert any(a.endswith("continuation_14b/countdown") for a in p["cmd"])
     for bad in ("run_pass() { :; }\n", "trap - EXIT\n", "export X=$(touch /tmp/x)\n",
-                'export HF_TOKEN="unclosed\n'):  # fmt: skip
+                'export HF_TOKEN="unclosed\n', "export HF_HOME=/tmp/foreign-cache\n",
+                'export HF_HOME="$(id)"\n', "export TZ=Etc/UTC\nexport TZ=Europe/Berlin\n",
+                f"export HF_TOKEN={'x' * 140_000}\n", "# padding\n" * 7000,
+                "export HF_HUB_ENABLE_HF_TRANSFER=yes\n"):  # fmt: skip
         stops = len([e for e in events(log) if e["tool"] == "deadline"])
         rp_env.write_text(base + bad)
         out = run_chain(env)

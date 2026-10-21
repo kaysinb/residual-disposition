@@ -306,47 +306,80 @@ manifest() {  # <file under manifests/> <python expression on d>: a committed ma
 
 mkdir -p $OUT
 trap on_exit EXIT  # from here on, any exit asks the watcher to stop the Pod
-# The provider's environment, read as data and never sourced (reviews s5z, s6b): of its exact
-# `[export ]NAME=VALUE` lines only the provider's own variables are taken, by name (this Pod's
-# RUNPOD_* identity, the snapshot's identity set at its creation, the secrets and the cache and
-# time settings the passes and the bucket need); the launch's variables, PATH, IFS, functions,
-# aliases and traps stay the controller's. Anything unreadable refuses, and the trap stops the Pod.
-if ! PROVIDER=$(python3 - "${RP_ENV:-/etc/rp_environment}" 2>$OUT/provider-env.err <<'PY'
-import base64, re, shlex, sys
-NAMES = {"SOURCE_SNAPSHOT_ID", "SNAPSHOT_RECEIPT_SHA256", "HF_TOKEN", "ARTIFACT_GCS_KEY_B64",
-         "GCS_ARCHIVE_KEY_B64", "WANDB_API_KEY", "JUDGE_API_BASE", "JUDGE_API_KEY", "HF_HOME",
-         "HF_HUB_ENABLE_HF_TRANSFER", "HF_XET_HIGH_PERFORMANCE", "XDG_CACHE_HOME", "UV_CACHE_DIR",
-         "UV_LINK_MODE", "UV_PYTHON_DOWNLOADS", "PIP_CACHE_DIR", "TZ", "PYTHONUNBUFFERED"}
-for n, line in enumerate(open(sys.argv[1], encoding="utf-8").read().splitlines(), 1):
+# The provider's environment, read as data and never sourced (reviews s5z, s6b, s6d): of its
+# exact `[export ]NAME=VALUE` lines only the provider's own variables are taken, each by its name
+# (this Pod's identity, the snapshot's identity set at its creation, the secrets the passes and
+# the bucket need, the volume's documented cache locations, fixed flags); never a controller
+# setting (the watcher's registry included), PATH or IFS. The file, every value and the whole are
+# bounded, a value is one printable line, a name given twice with two values and a cache path off
+# the volume's are refused; the values pass in memory. Anything else refuses, and the trap stops
+# the Pod.
+if ! PROVIDER=$(python3 - "${RP_ENV:-/etc/rp_environment}" "$WS" 2>$OUT/provider-env.err <<'PY'
+import re, shlex, sys
+path, ws = sys.argv[1], sys.argv[2]
+FILE, VALUE, TOTAL = 64 * 1024, 8 * 1024, 32 * 1024  # bytes: the file, a value, the exports
+ANY = re.compile(r"[\x21-\x7e]*")  # an identity or a secret: one printable word, or empty
+CACHES = {"HF_HOME": [f"{ws}/cache/huggingface"], "XDG_CACHE_HOME": [f"{ws}/cache"],
+          "UV_CACHE_DIR": [f"{ws}/.cache/uv", f"{ws}/.cache/uv/"],
+          "PIP_CACHE_DIR": [f"{ws}/.cache/pip", f"{ws}/.cache/pip/"]}
+FIXED = {"HF_HUB_ENABLE_HF_TRANSFER": ["0", "1"], "HF_XET_HIGH_PERFORMANCE": ["0", "1"],
+         "PYTHONUNBUFFERED": ["0", "1"], "UV_LINK_MODE": ["copy", "hardlink", "symlink", "clone"],
+         "UV_PYTHON_DOWNLOADS": ["never", "manual", "automatic"]}
+WORDS = ("RUNPOD_POD_ID", "SOURCE_SNAPSHOT_ID", "SNAPSHOT_RECEIPT_SHA256", "HF_TOKEN",
+         "ARTIFACT_GCS_KEY_B64", "GCS_ARCHIVE_KEY_B64", "WANDB_API_KEY", "JUDGE_API_BASE",
+         "JUDGE_API_KEY")
+blob = open(path, "rb").read(FILE + 1)
+if len(blob) > FILE:
+    sys.exit(f"the file exceeds {FILE} bytes")
+taken = {}
+for n, line in enumerate(blob.decode("utf-8").splitlines(), 1):
     if not line.strip() or line.lstrip().startswith("#"):
         continue
     m = re.fullmatch(r"(?:export )?([A-Za-z_][A-Za-z0-9_]*)=(.*)", line)
     if m is None:
         sys.exit(f"line {n}: not an assignment")
     try:
-        value = shlex.split(m[2]) if m[2] else [""]
+        words = shlex.split(m[2]) if m[2] else [""]
     except ValueError:
         sys.exit(f"line {n}: {m[1]}'s value is not one quoted word")
-    if len(value) != 1:
+    if len(words) != 1:
         sys.exit(f"line {n}: {m[1]}'s value is not one word")
-    if m[1] in NAMES or re.fullmatch(r"RUNPOD_[A-Z0-9_]+", m[1]):
-        print(m[1], base64.b64encode(value[0].encode()).decode())
+    name, value = m[1], words[0]
+    if name not in (*WORDS, *CACHES, *FIXED, "TZ"):
+        continue
+    if len(value.encode()) > VALUE:
+        sys.exit(f"line {n}: {name}'s value exceeds {VALUE} bytes")
+    if name in CACHES and value not in CACHES[name]:
+        sys.exit(f"line {n}: {name} is not the volume's cache location")
+    if name in FIXED and value not in FIXED[name]:
+        sys.exit(f"line {n}: {name} is none of {FIXED[name]}")
+    if name == "TZ" and not re.fullmatch(r"[A-Za-z0-9_+./-]{1,64}", value):
+        sys.exit(f"line {n}: TZ is not a time zone's name")
+    if name in WORDS and not ANY.fullmatch(value):
+        sys.exit(f"line {n}: {name}'s value is not one printable word")
+    if taken.get(name, value) != value:
+        sys.exit(f"line {n}: {name} is given twice, with two values")
+    taken[name] = value
+out = "".join(f"{k}={v}\n" for k, v in taken.items())
+if len(out.encode()) > TOTAL:
+    sys.exit(f"the provider's variables exceed {TOTAL} bytes")
+sys.stdout.write(out)
 PY
 ); then
   log "not run: the provider's environment is not readable as data: $(tail -c 300 $OUT/provider-env.err)"; exit 1
 fi
-while read -r NAME VALUE; do
-  [ -n "$NAME" ] || continue
-  case $NAME in
-    RUNPOD_*|SOURCE_SNAPSHOT_ID|SNAPSHOT_RECEIPT_SHA256|HF_TOKEN|ARTIFACT_GCS_KEY_B64|GCS_ARCHIVE_KEY_B64|\
-    WANDB_API_KEY|JUDGE_API_BASE|JUDGE_API_KEY|HF_HOME|HF_HUB_ENABLE_HF_TRANSFER|HF_XET_HIGH_PERFORMANCE|\
-    XDG_CACHE_HOME|UV_CACHE_DIR|UV_LINK_MODE|UV_PYTHON_DOWNLOADS|PIP_CACHE_DIR|TZ|PYTHONUNBUFFERED) ;;
-    *) log "not run: the provider's environment names $NAME"; exit 1 ;;
+while [ -n "$PROVIDER" ]; do  # line by line, in memory: no temporary file, no other process
+  P_LINE=${PROVIDER%%$'\n'*}; PROVIDER=${PROVIDER#"$P_LINE"}; PROVIDER=${PROVIDER#$'\n'}
+  P_NAME=${P_LINE%%=*}; P_VALUE=${P_LINE#*=}
+  case $P_NAME in
+    RUNPOD_POD_ID|SOURCE_SNAPSHOT_ID|SNAPSHOT_RECEIPT_SHA256|HF_TOKEN|ARTIFACT_GCS_KEY_B64|\
+    GCS_ARCHIVE_KEY_B64|WANDB_API_KEY|JUDGE_API_BASE|JUDGE_API_KEY|HF_HOME|XDG_CACHE_HOME|\
+    UV_CACHE_DIR|PIP_CACHE_DIR|HF_HUB_ENABLE_HF_TRANSFER|HF_XET_HIGH_PERFORMANCE|PYTHONUNBUFFERED|\
+    UV_LINK_MODE|UV_PYTHON_DOWNLOADS|TZ) export "$P_NAME=$P_VALUE" ;;
+    *) log "not run: the provider's environment names '$P_NAME'"; exit 1 ;;
   esac
-  VALUE=$(printf '%s' "$VALUE" | base64 -d) || { log "not run: the provider's $NAME"; exit 1; }
-  export "$NAME=$VALUE"
-done <<< "$PROVIDER"
-unset PROVIDER NAME VALUE
+done
+unset PROVIDER P_LINE P_NAME P_VALUE
 export SOURCE_SNAPSHOT_RECEIPT
 export CONTAINER_IMAGE=$IMG PYTHONDONTWRITEBYTECODE=1
 log "chain $CHAIN ($ITEM, $WORKER in $SPACE), \$$PRICE/h"
