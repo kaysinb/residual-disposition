@@ -8,6 +8,13 @@ DPO fallback's gate from the committed manifests (§12.8: `fallback_gate_closed`
     uv run python scripts/continuation_strong.py screening runs/continuation_14b/<screening run>
     uv run python scripts/continuation_strong.py validation runs/continuation_14b/<validation run>
     uv run python scripts/continuation_strong.py gate
+    uv run python scripts/continuation_strong.py contracts [--infeasible <behavior>=<run> ...]
+
+`contracts` writes the panel's contracts (`manifests/stage3_panel_contracts.json`; C17-C,
+reviews s6a 4, s6c 3) once, before any panel validation opens V3: for each of the five panel
+behaviors its committed screening (or its continued line's recorded infeasibility), its detector
+(the committed config's), its candidate rescored under that detector where the screening's was
+another, active with its generation contract and a complete diagnostic, or closed.
 """
 
 from __future__ import annotations
@@ -45,12 +52,39 @@ def main(argv: list[str] | None = None) -> int:
         p = sub.add_parser(name)
         p.add_argument("run", type=Path)
     sub.add_parser("gate")
+    contracts = sub.add_parser("contracts")
+    contracts.add_argument("--infeasible", action="append", default=[], metavar="BEHAVIOR=RUN",
+                           help="a continued line's infeasibility run")  # fmt: skip
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help="where manifests/ is")
     args = parser.parse_args(argv)
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
     if args.command == "gate":
         detector = CS.detector_of(CS.branch(CS.CONTINUED)["behavior"])
         print(json.dumps(CS.fallback_gate(args.root, rules, find_run, detector)))
+        return 0
+    if args.command == "contracts":
+        from residual_disposition.pipeline import panel_contract
+
+        infeasible = dict(x.split("=", 1) for x in args.infeasible)
+        named = {}
+        for behavior in CS._panel():
+            if behavior in infeasible:
+                named[behavior] = {"infeasibility": infeasible[behavior]}
+                continue
+            lineage = CS.branch(CS.PANEL, behavior=behavior)["lineage"]
+            found = CS.committed_screening(args.root, lineage, find_run, None)
+            named[behavior] = {"screening": {"manifest": CS.screening_path(Path("."),
+                                                                           lineage).name,
+                                             "sha256": found["sha256"]}}  # fmt: skip
+        try:
+            data = CS.panel_contracts_record({"behaviors": named}, args.root, rules, find_run,
+                                             panel_contract)  # fmt: skip
+            CS.write_panel_contracts(args.root, data, rules, find_run, panel_contract)
+        except ValueError as error:
+            raise SystemExit(f"no panel contracts: {error}") from error
+        status = {b: e["status"] for b, e in data["behaviors"].items()}
+        print(f"{CS.contracts_path(args.root).relative_to(args.root)}: {status}. Commit it "
+              "before any panel validation.")  # fmt: skip
         return 0
     record = record_of(args.run, STEPS[args.command])
     detector = CS.detector_of(record["behavior"])  # the branch's behavior (a panel behavior's)

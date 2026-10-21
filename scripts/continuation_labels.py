@@ -142,9 +142,11 @@ def corpus_pool(
     states: dict[str, tuple[str, int]],
     behaviors: dict,
     prefixes: dict[str, tuple[str, str, list[int]]] | None = None,
+    rescore: bool = False,
 ) -> dict[str, list]:
     """Per behavior, (source, dose, text) of every ADL-corpus continuation of a latent state that
-    the trace detector does not flag; each cell's recorded detector must be the current one.
+    the trace detector does not flag; each cell's recorded detector must be the current one, or,
+    with ``rescore`` (Stage 3, s6c 2), its saved continuations are rescored with the current one.
     ``prefixes`` collects each source's (model, revision, prefix token ids), for the item text."""
     pool: dict[str, list] = defaultdict(list)
     for cell in cells:
@@ -156,9 +158,10 @@ def corpus_pool(
         behavior, dose = states[state]
         model = OmegaConf.load(cell / "config.yaml").model
         detector = behaviors[behavior].detector
-        recorded = json.loads((cell / "adl_corpus.json").read_text())["detector_version"]
-        if recorded != detector.version:
-            raise SystemExit(f"{cell}: detector {recorded}, not the current {detector.version}")
+        if not rescore:  # Stage 3 rescores the saved continuations instead (s6c 2)
+            recorded = json.loads((cell / "adl_corpus.json").read_text())["detector_version"]
+            if recorded != detector.version:
+                raise SystemExit(f"{cell}: detector {recorded}, not the current {detector.version}")
         hit = trace_detector(detector)
         with gzip.open(cell / "continuations.jsonl.gz", "rt") as f:
             for line in f:
@@ -191,13 +194,26 @@ def prefix_texts(prefixes: dict[str, tuple[str, str, list[int]]], sources: list[
     return out
 
 
-def stage3_sources(behavior: str) -> dict[str, Any]:
+def stage3_sources(behavior: str, adl: bool = False) -> dict[str, Any]:
     """A panel behavior's committed diagnostic sources (Stage 3, E4;
     ``continuation_stage3.committed_sources``, recomputed): its latent states at the source doses
-    and the runs they name, L's full PD pools and exploratory passes, found by name."""
+    and the runs they name, L's full PD pools and exploratory passes, found by name. With
+    ``adl``, the committed ADL-corpus sources (``committed_adl_sources``; s6a 2): each run's L at
+    its dose, and the runs."""
     from residual_disposition import continuation_stage3 as S3
     from residual_disposition.continuation_kstar import find_run
 
+    if adl:
+        data = S3.committed_adl_sources(REPO_ROOT, behavior, cr.load_rules(), find_run)
+        out = {"states": {}, "adl_corpus": [], "sha256": data["sha256"],
+               "manifest": S3.adl_sources_path(REPO_ROOT, behavior).name}  # fmt: skip
+        for r in data["runs"]:
+            run = find_run(r["run"])
+            if run is None:
+                raise SystemExit(f"{behavior}: the ADL-corpus source {r['run']} is not here")
+            out["states"][r["latent"]] = (behavior, int(r["dose"]))
+            out["adl_corpus"].append(run)
+        return out
     data = S3.committed_sources(REPO_ROOT, behavior, cr.load_rules(), find_run)
     if not data["doses"]:
         raise SystemExit(f"{behavior}: no stack sources; the continued screening's are its own")
@@ -213,20 +229,28 @@ def stage3_sources(behavior: str) -> dict[str, Any]:
     return out
 
 
-def stage3_chosen(behavior: str, kinds: list[str]) -> tuple[list[tuple], dict[str, dict]]:
+def stage3_chosen(
+    behavior: str, kinds: list[str], prefixes: dict | None = None
+) -> tuple[list[tuple], dict[str, dict]]:
     """A panel behavior's Stage-3 diagnostic draw (E4): from its committed sources' runs alone,
     per input type the detector-silent pool and a sample of ``PER_STRATUM`` with the frozen seed
     (``derive_seed(labels seed, "detector_diagnostic", kind, behavior)``), as (kind, source,
     dose, text); fewer stop it. The builder draws its set with it, and the result's writer
-    draws it again to check the set (review s5v 3)."""
+    draws it again to check the set (review s5v 3). ``["adl_corpus"]``, a set of its own: from
+    the committed ADL-corpus sources, the saved continuations rescored with the current detector
+    (s6c 2), their prefixes collected in ``prefixes`` for the item text."""
     rules = cr.load_rules()
     seed = int(rules["seeds"]["labels"])
-    stage3 = stage3_sources(behavior)
+    adl = kinds == ["adl_corpus"]
+    stage3 = stage3_sources(behavior, adl=adl)
     spec = OmegaConf.to_container(load_config(f"behaviors/{behavior}").behavior)
     behaviors = {behavior: behavior_from_config(spec)}
     builders = {
         "observer": lambda: observer_pool(stage3["observer"], stage3["states"]),
         "pd": lambda: pd_pool(stage3["pd"], stage3["states"], behaviors),
+        "adl_corpus": lambda: corpus_pool(
+            stage3["adl_corpus"], stage3["states"], behaviors, prefixes, rescore=True
+        ),
     }
     chosen, sizes = [], {}
     for kind in kinds:
@@ -243,9 +267,10 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
     rules = cr.load_rules()
     seed = int(rules["seeds"]["labels"])
     root = REPO_ROOT / args.runs
-    stage3 = stage3_sources(args.behavior) if args.behavior else None
-    if stage3 and set(args.kinds) - {"observer", "pd"}:
-        raise SystemExit("Stage 3's ADL-corpus diagnostic is a set of its own, from its sources")
+    adl3 = bool(args.behavior) and list(args.kinds) == ["adl_corpus"]  # Stage 3's own ADL set
+    stage3 = stage3_sources(args.behavior, adl=adl3) if args.behavior else None
+    if stage3 and list(args.kinds) not in (DEFAULT_KINDS, ["adl_corpus"]):
+        raise SystemExit("Stage 3's sets are observer and PD, or the ADL-corpus set of its own")
     names = (args.behavior,) if stage3 else BEHAVIORS
     states = stage3["states"] if stage3 else latent_states(args.state_index)
     specs = {b: OmegaConf.to_container(load_config(f"behaviors/{b}").behavior) for b in names}
@@ -270,7 +295,7 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
     chosen = []
     pool_sizes: dict[str, dict[str, int]] = {}
     if stage3:
-        drawn, pool_sizes = stage3_chosen(args.behavior, kinds)
+        drawn, pool_sizes = stage3_chosen(args.behavior, kinds, prefixes)
         chosen = [(kind, args.behavior, *rest) for kind, *rest in drawn]
     for kind, by_behavior in pools.items():
         for behavior in names:
@@ -317,8 +342,8 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
         print(json.dumps({"set_id": set_id, "items": len(items), "pool_sizes": pool_sizes}))
         return
     name = "detector-diagnostic" + ("" if kinds == DEFAULT_KINDS else "-" + "-".join(kinds))
-    if stage3:
-        name = f"diagnostic-s3-{args.behavior}"  # within a run name's 34 characters
+    if stage3:  # within a run name's 34 characters
+        name = f"diagnostic-s3{'adl' if adl3 else ''}-{args.behavior}"
     cfg = load_config(
         "base",
         ["+experiment=continuation_labels", f"name={name}", f"seed={seed}"]

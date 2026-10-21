@@ -13,9 +13,15 @@ the seeded sample of agreed negatives) and what the annotators saw (the committe
 the text alone), under the set's own detector; commit it before s3b. A trace is cleared only
 by a committed acceptance of a detector revision,
 `manifests/detector_revision_<behavior>_<version>.json`, whose §12.3.1 checks the barrier
-recomputes on the frozen development data (`continuation_stage3.revision_problems`).
+recomputes on the frozen development data (`continuation_stage3.revision_problems`). Once the
+stack decision and the continued screening are committed, `adl-sources` freezes the ADL-corpus
+diagnostic's sources (`manifests/stage3_diagnostic_sources_adl_<behavior>.json`: the ADL-corpus
+runs of both, each once), before its own set is drawn (`--kinds adl_corpus`); `diagnostic` on
+that set writes `manifests/stage3_diagnostic_adl_<behavior>.json`, needed before the strong
+validation.
 
     uv run python scripts/continuation_stage3.py sources runs/continuation_14b/<sources run>
+    uv run python scripts/continuation_stage3.py adl-sources <behavior>
     uv run python scripts/continuation_stage3.py diagnostic <set run> --ensemble <labels> \
         --review <review>
 """
@@ -63,15 +69,24 @@ def diagnostic(args: argparse.Namespace, rules) -> int:
     loader = importlib.util.spec_from_file_location("continuation_labels_writer", path)
     labels = importlib.util.module_from_spec(loader)
     loader.loader.exec_module(labels)
-    expected, _ = labels.stage3_chosen(behavior, list(key["kinds"]))
-    sources = S3.committed_sources(args.root, behavior, rules, find_run)
+    kinds = list(key["kinds"])
+    adl = kinds == [S3.ADL]  # the ADL-corpus set of its own (s6a 2)
+    prefixes: dict = {}
+    expected, _ = labels.stage3_chosen(behavior, kinds, prefixes)
+    if adl:  # its text the prefix in brackets, then the continuation, which alone is checked
+        shown = labels.prefix_texts(prefixes, [src for _, src, *_ in expected])
+        expected = [(k, src, dose, f"[{shown[src]}]{text}", text)
+                    for k, src, dose, text in expected]  # fmt: skip
+        sources = S3.committed_adl_sources(args.root, behavior, rules, find_run)
+    else:
+        sources = S3.committed_sources(args.root, behavior, rules, find_run)
     record = S3.diagnostic_record(args.set_run, _lines(args.ensemble), _lines(args.review),
                                   sources, expected, int(rules["seeds"]["labels"]))  # fmt: skip
     for name, file in (("input", args.set_run / "input.jsonl"), ("key", args.set_run / "key.json"),
                        ("ensemble", args.ensemble), ("review", args.review)):  # fmt: skip
         record[f"{name}_sha256"] = hashlib.sha256(file.read_bytes()).hexdigest()
     S3.write_diagnostic(args.root, record)
-    print(json.dumps({"written": str(S3.diagnostic_path(args.root, behavior)),
+    print(json.dumps({"written": str(S3.diagnostic_path(args.root, behavior, adl)),
                       "types": record["types"], "review": record["review"]}))  # fmt: skip
     return 0
 
@@ -82,6 +97,9 @@ def main(argv: list[str] | None = None) -> int:
     sources = sub.add_parser("sources", help="the diagnostic's sources manifest")
     sources.add_argument("run", type=Path, help="the stage3_diagnostic_sources cell")
     sources.add_argument("--root", type=Path, default=REPO_ROOT)
+    adl = sub.add_parser("adl-sources", help="the ADL-corpus diagnostic's sources manifest")
+    adl.add_argument("behavior")
+    adl.add_argument("--root", type=Path, default=REPO_ROOT)
     diag = sub.add_parser("diagnostic", help="the diagnostic's result manifest")
     diag.add_argument("set_run", type=Path, help="the detector-diagnostic set's run")
     diag.add_argument("--ensemble", type=Path, required=True,
@@ -98,6 +116,12 @@ def main(argv: list[str] | None = None) -> int:
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
     if args.command == "diagnostic":
         return diagnostic(args, rules)
+    if args.command == "adl-sources":  # after the committed stack decision and screening
+        data = S3.adl_sources_record(args.behavior, rules, find_run, args.root)
+        S3.write_adl_sources(args.root, data, rules, find_run)
+        print(json.dumps({"written": str(S3.adl_sources_path(args.root, args.behavior)),
+                          "runs": [r["run"] for r in data["runs"]]}))  # fmt: skip
+        return 0
     step = (yaml.safe_load((args.run / "config.yaml").read_text()) or {}).get("step")
     if step != S3.SOURCES:
         raise SystemExit(f"{args.run}: a {step} cell, not {S3.SOURCES}")

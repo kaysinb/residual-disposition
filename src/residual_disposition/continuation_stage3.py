@@ -34,6 +34,7 @@ SOURCES, DIAGNOSTIC = "stage3_diagnostic_sources", "stage3_diagnostic"
 PER_TYPE = 150  # §12.3.1: detector negatives per behavior and input type
 METADATA = ("sources_run", "sha256", "committed_at")
 BEFORE_CONFIRMATION = ("observer", "pd")
+ADL = "adl_corpus"  # its own set, from its own sources, before the strong validation (s6a 2)
 
 
 def _p():
@@ -46,8 +47,13 @@ def sources_path(root: Path, behavior: str) -> Path:
     return Path(root) / "manifests" / f"{SOURCES}_{behavior}.json"
 
 
-def diagnostic_path(root: Path, behavior: str) -> Path:
-    return Path(root) / "manifests" / f"{DIAGNOSTIC}_{behavior}.json"
+def diagnostic_path(root: Path, behavior: str, adl: bool = False) -> Path:
+    name = f"{DIAGNOSTIC}_adl" if adl else DIAGNOSTIC
+    return Path(root) / "manifests" / f"{name}_{behavior}.json"
+
+
+def adl_sources_path(root: Path, behavior: str) -> Path:
+    return Path(root) / "manifests" / f"{SOURCES}_adl_{behavior}.json"
 
 
 def continued_sources(behavior: str, rules: Any, find_run: Any, root: Path) -> dict[str, Any]:
@@ -71,6 +77,9 @@ def continued_sources(behavior: str, rules: Any, find_run: Any, root: Path) -> d
     inputs = {"behavior": behavior, "lineage": line.lineage(behavior), "selection": name}
     doses = S5._selection(inputs, rules, find_run, behavior_from_config(found[1]["behavior"]))
     screened = screening["inputs"]["candidates"]
+    if not screened:
+        raise ValueError(f"no diagnostic sources: {behavior}'s stack lineage and continued "
+                         "screening have no candidate; no reading depends on them")  # fmt: skip
     passes = {str(c["dose"]): doses["doses"][str(c["dose"])]["excess"]["passes"][c["latent"]]
               for c in screened}  # fmt: skip
     return {"doses": [int(c["dose"]) for c in screened], "from": "continued_screening",
@@ -178,6 +187,99 @@ def committed_sources(root: Path, behavior: str, rules: Any, find_run: Any) -> d
     return data
 
 
+def _selection_doses(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, Any]:
+    """A selection's doses, validated whole under the detector it was made with."""
+    from . import continuation_stage5 as S5
+    from .behaviors import behavior_from_config
+
+    found = S5._config(find_run, inputs.get("selection"),
+                       S5._line(inputs).step("selection"))  # fmt: skip
+    if found is None:
+        raise ValueError(f"{inputs.get('selection')}: not a completed selection")
+    scorer = behavior_from_config(found[1]["behavior"])
+    return S5._selection(inputs, rules, find_run, scorer)["doses"]
+
+
+def adl_sources_record(behavior: str, rules: Any, find_run: Any, root: Path) -> dict[str, Any]:
+    """The ADL-corpus diagnostic's sources (§12.3.1; reviews s6a 2, s6c 2), frozen before its
+    labeling: the union of the ADL-corpus continuations of L that the stack lineage's
+    expression checks drew at its analysis dose (its committed decision, bound by sha256 as
+    committed: a revision makes the decision retest its confirmation, never these sources) and
+    that the committed continued screening drew for each candidate it screened (recomputed under
+    its recorded detector), each run once, each a completed ADL-corpus cell of its L at the
+    frozen settings; never the validation's outputs."""
+    from . import continuation_stage5 as S5
+    from . import continuation_strong as CS
+    from .manifests import committed_json
+
+    p = _p()
+    runs: list[dict[str, Any]] = []
+    stack_path = S5.manifest_path(root, behavior, p.S3_STACK)
+    stack = committed_json(stack_path, "the stack lineage's decision", root)
+    decision = stack.get("decision") or {}
+    if decision.get("analysis_dose") is not None:
+        dose = int(decision["analysis_dose"])
+        latent = _selection_doses(stack["inputs"], rules, find_run)[str(dose)]["latent"]
+        run = (stack["inputs"].get("expression") or {}).get("adl_corpus")
+        runs.append({"run": run, "latent": latent, "dose": dose, "from": "stack"})
+    b = CS.branch(CS.PANEL, behavior=behavior)
+    screening = CS.committed_screening(root, b["lineage"], find_run, None)
+    for row in screening["inputs"]["candidates"]:
+        runs.append({"run": row["adl"], "latent": row["latent"], "dose": int(row["dose"]),
+                     "from": "continued"})  # fmt: skip
+    seen, unique = set(), []
+    for r in runs:  # each source identity once
+        if r["run"] not in seen:
+            seen.add(r["run"])
+            unique.append(r)
+    if not unique:
+        raise ValueError(f"no ADL-corpus sources: neither {behavior}'s stack decision nor its "
+                         "continued screening drew ADL-corpus continuations")  # fmt: skip
+    detector = S5._behavior(behavior).detector  # the inventory's check; the counts are not kept
+    for r in unique:
+        run = find_run(str(r["run"]))
+        if run is None:
+            raise ValueError(f"{r['run']}: the ADL-corpus source is not under the runs root")
+        CS.adl_corpus_framings(run, r["latent"], detector)
+    return {"behavior": behavior, "runs": unique,
+            "stack": {"manifest": stack_path.name, "sha256": stack["sha256"]},
+            "screening": {"manifest": CS.screening_path(Path("."), b["lineage"]).name,
+                          "sha256": screening["sha256"]}}  # fmt: skip
+
+
+def adl_sources_problems(data: Mapping[str, Any], rules: Any, find_run: Any, root: Path) -> list:
+    try:
+        record = adl_sources_record(str(data.get("behavior")), rules, find_run, root)
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+        return [str(error)]
+    mine = {k: v for k, v in data.items() if k not in METADATA}
+    return [] if mine == record else ["the ADL-corpus sources are not what their evidence gives"]
+
+
+def write_adl_sources(root: Path, data: Mapping[str, Any], rules: Any, find_run: Any) -> dict:
+    """The ADL-corpus diagnostic's sources manifest, written once, before its labeling."""
+    problems = adl_sources_problems(data, rules, find_run, root)
+    if problems:
+        raise ValueError(f"no ADL-corpus sources manifest: {'; '.join(problems)}")
+    path = adl_sources_path(root, data["behavior"])
+    if path.exists():
+        raise ValueError(f"{path} exists: the ADL-corpus sources are frozen once")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    return dict(data)
+
+
+def committed_adl_sources(root: Path, behavior: str, rules: Any, find_run: Any) -> dict:
+    from .manifests import committed_json
+
+    path = adl_sources_path(root, behavior)
+    data = committed_json(path, "the ADL-corpus diagnostic's sources", root)
+    problems = adl_sources_problems(data, rules, find_run, root)
+    if problems:
+        raise ValueError(f"{path}: {'; '.join(problems)}")
+    return data
+
+
 def _sha(value: Any) -> bool:
     return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
 
@@ -276,6 +378,34 @@ def pilot_disagreements(detector: Any, behavior: str) -> list[str]:
     return [i for i in mine if bool(detector(texts[i])) != labels[i]]
 
 
+def _continuations(sources: Sequence[str], find_run: Any) -> dict[str, str]:
+    """The continuation alone of each ADL-corpus item's source
+    (``adl_corpus:<cell>:<framing>:<length>:<index>``), read from its cell: the labeling rule and
+    the detector's check are on the continuation, its prefix shown as context (s6c 2)."""
+    import gzip
+
+    out: dict[str, str] = {}
+    by_cell: dict[str, set] = {}
+    for source in sources:
+        head, cell, framing, length, index = str(source).split(":")
+        if head != ADL:
+            raise ValueError(f"{source}: not an ADL-corpus source")
+        by_cell.setdefault(cell, set()).add((framing, int(length), int(index)))
+    for cell, keys in by_cell.items():
+        run = find_run(cell)
+        if run is None:
+            raise ValueError(f"{cell}: the ADL-corpus cell is not under the runs root")
+        with gzip.open(Path(run) / "continuations.jsonl.gz", "rt") as f:
+            for line in f:
+                r = json.loads(line) if line.strip() else None
+                if r and (r["framing"], int(r["length"]), int(r["index"])) in keys:
+                    out[f"{ADL}:{cell}:{r['framing']}:{r['length']}:{r['index']}"] = r["text"]
+    missing = set(sources) - set(out)
+    if missing:
+        raise ValueError(f"ADL-corpus sources not in their cells: {sorted(missing)[:3]}")
+    return out
+
+
 def diagnostic_disagreements(data: Mapping[str, Any], detector: Any, find_run: Any) -> list[str]:
     """The items of the diagnostic's set whose final label (``data``, its committed manifest:
     the final traces ``traced``) ``detector`` contradicts, a trace it misses or a negative it
@@ -294,6 +424,10 @@ def diagnostic_disagreements(data: Mapping[str, Any], detector: Any, find_run: A
         if sum(items[i]["stratum"] == kind for i in traced) != t.get("traces"):
             raise ValueError(f"the diagnostic's {kind} traces are not its traced items")
     texts = {r["item_id"]: r["response"] for r in _rows(Path(run) / "input.jsonl")}
+    adl = _continuations([k["source"] for k in items.values() if k["stratum"] == ADL], find_run)
+    for i, k in items.items():  # an ADL-corpus item's check is on its continuation alone
+        if k["stratum"] == ADL:
+            texts[i] = adl[k["source"]]
     return sorted(i for i, k in items.items()
                   if bool(_verdict(detector, k["stratum"])(texts[i])) != (i in traced))  # fmt: skip
 
@@ -313,7 +447,8 @@ def revision_problems(
     acceptance (by whom, on which date, the decision); its checks are recomputed here on the
     frozen development data, never read: 0 of ``UNPROMPTED`` stage-0 responses without the
     prompt hit (``unprompted``), and no disagreement with the final labels of the pilot detector
-    set (``pilot_disagreements``) or of the diagnostic's own set, whose traces it must catch
+    set (``pilot_disagreements``) or of every committed diagnostic set of the behavior drawn under
+    the revised detector (its observer and PD set, its ADL-corpus set), whose traces it must catch
     (``diagnostic_disagreements``). The record states them as recomputed."""
     from . import continuation_stage5 as S5
     from .behaviors import Detector
@@ -334,7 +469,12 @@ def revision_problems(
         revised = None
     checks, accepted = _dict(r.get("checks")), _dict(r.get("accepted"))
     stated, sets = _dict(checks.get("unprompted")), _dict(checks.get("disagreements"))
-    names = [PILOT_SET["set_id"], data.get("set_id")]
+    # every committed diagnostic set of the behavior drawn under the revised one's detector
+    drawn = [m for m in _committed_diagnostics(root, behavior)
+             if m.get("detector_version") == before]  # fmt: skip
+    if data.get("set_id") not in [m.get("set_id") for m in drawn]:
+        drawn.append(dict(data))
+    names = [PILOT_SET["set_id"], *[m.get("set_id") for m in drawn]]
     ok = (
         {k for k in r if k not in ("sha256", "committed_at")} == REVISION_FIELDS
         and (r["behavior"], r["from_version"], r["to_version"]) == (behavior, before, after)
@@ -351,7 +491,8 @@ def revision_problems(
     try:
         hits, n = unprompted(detector, behavior)
         disagree = pilot_disagreements(detector, behavior)
-        disagree += diagnostic_disagreements(data, detector, find_run)
+        for m in drawn:
+            disagree += diagnostic_disagreements(m, detector, find_run)
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
         return [f"the revision's development evidence: {error}"]
     problems = []
@@ -366,25 +507,68 @@ def revision_problems(
     return problems
 
 
+def _committed_diagnostics(root: Path, behavior: str) -> list[dict[str, Any]]:
+    """The behavior's committed diagnostic manifests (its observer and PD set's, then its
+    ADL-corpus set's), each with its sha256; an uncommitted one is skipped."""
+    from .manifests import committed_json
+
+    out = []
+    for adl in (False, True):
+        path = diagnostic_path(root, behavior, adl)
+        if path.exists():
+            try:
+                out.append(committed_json(path, "the Stage-3 detector diagnostic", root))
+            except (OSError, RuntimeError, ValueError):
+                continue
+    return out
+
+
+def diagnostic_bindings(root: Path, behavior: str) -> list[dict[str, str]]:
+    """The behavior's committed diagnostic manifests, by name and sha256 (the panel's
+    contracts bind them)."""
+    return [{"manifest": diagnostic_path(Path("."), behavior, m["types"].keys() == {ADL}).name,
+             "sha256": m["sha256"]} for m in _committed_diagnostics(root, behavior)]  # fmt: skip
+
+
 def diagnostic_problems(
     root: Path, behavior: str, rules: Any, find_run: Any, detector: Any,
     kinds: Sequence[str] = BEFORE_CONFIRMATION,
 ) -> list[str]:  # fmt: skip
-    """Why the diagnostic does not clear the next step (the barrier; reviews s5t 5, s5v 3:
-    anything missing or invalid blocks): its committed manifest of this behavior, bound to the
-    committed sources, its reviewed evidence recorded (the set's input and key, the ensemble's
+    """Why the diagnostic does not clear the next step (the barrier; reviews s5t 5, s5v 3, s6a
+    2: anything missing or invalid blocks), for each of ``kinds``: observer and PD from the
+    committed manifest bound to the committed sources, ADL-corpus continuations from the
+    committed ADL-corpus manifest bound to the committed ADL-corpus sources. Each manifest of
+    this behavior, its reviewed evidence recorded (the set's input and key, the ensemble's
     labels and the review by sha256, the review's counts, the final traces' items as many as
-    its types count), each of ``kinds`` complete (integer counts, ``PER_TYPE`` items, 0 ≤ traces
-    ≤ items), and a trace cleared only by a committed acceptance of the revision from the set's
-    detector to the current one, its checks recomputed (``revision_problems``)."""
+    its types count), each kind complete (integer counts, ``PER_TYPE`` items, 0 ≤ traces ≤
+    items; fewer eligible negatives leave no set), and a trace cleared only by a committed
+    acceptance of the revision from the set's detector to the current one, its checks
+    recomputed (``revision_problems``)."""
     from .manifests import committed_json
 
-    try:
-        sources = committed_sources(root, behavior, rules, find_run)
-        path = diagnostic_path(root, behavior)
-        data = committed_json(path, "the Stage-3 detector diagnostic", root)
-    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
-        return [f"the detector diagnostic: {error}"]
+    problems = []
+    for adl in (False, True):
+        mine = [k for k in kinds if (k == ADL) == adl]
+        if not mine:
+            continue
+        what = "the ADL-corpus diagnostic" if adl else "the detector diagnostic"
+        try:
+            if adl:
+                sources = committed_adl_sources(root, behavior, rules, find_run)
+            else:
+                sources = committed_sources(root, behavior, rules, find_run)
+            data = committed_json(diagnostic_path(root, behavior, adl), what, root)
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+            problems.append(f"{what}: {error}")
+            continue
+        problems += _manifest_problems(root, behavior, data, sources, mine, detector, find_run)
+    return problems
+
+
+def _manifest_problems(
+    root: Path, behavior: str, data: Mapping[str, Any], sources: Mapping[str, Any],
+    kinds: Sequence[str], detector: Any, find_run: Any,
+) -> list[str]:  # fmt: skip
     problems = []
     if data.get("behavior") != behavior or data.get("sources_sha256") != sources["sha256"]:
         problems.append("the diagnostic is not of the committed sources")
@@ -417,11 +601,12 @@ def diagnostic_problems(
 
 def _source_run(kind: str, source: str) -> str:
     """The run an item's source names: ``pd:<run>:<config>:<prefill>``,
-    ``observer:<run>/<state>/…`` (``certificate.response_id``)."""
+    ``adl_corpus:<run>:<framing>:<length>:<index>``, ``observer:<run>/<state>/…``
+    (``certificate.response_id``)."""
     head, _, rest = str(source).partition(":")
     if head != kind or not rest:
         raise ValueError(f"an item of {kind} with the source {source}")
-    return rest.split(":", 1)[0] if kind == "pd" else rest.split("/", 1)[0]
+    return rest.split("/", 1)[0] if kind == "observer" else rest.split(":", 1)[0]
 
 
 def _in_stream(ids: Sequence[str], stream: str) -> bool:
@@ -513,7 +698,10 @@ def diagnostic_record(
         raise ValueError("the set's input and key are not the same items")
     if any(not isinstance(k, dict) or set(k) != KEY_FIELDS for k in items.values()):
         raise ValueError(f"the set's key entries are not exactly {sorted(KEY_FIELDS)}")
-    drawn = {(str(k), str(src)): (dose, str(text)) for k, src, dose, text in expected}
+    # (kind, source, dose, text[, continuation]): an ADL-corpus item's text its prefix in brackets
+    # and its continuation, the detector's check on the continuation alone
+    drawn = {(str(k), str(src)): (dose, str(text), str(rest[0] if rest else text))
+             for k, src, dose, text, *rest in expected}  # fmt: skip
     seen = {(k["stratum"], k["source"]) for k in items.values()}
     versions = {k["detector_version"] for k in items.values()}
     if len(seen) != len(items) or seen != set(drawn):
@@ -522,8 +710,8 @@ def diagnostic_record(
         raise ValueError(f"the set's items under detectors {sorted(versions)}, not {behavior}'s "
                          f"committed {approved.detector.version}")  # fmt: skip
     for item_id, k in items.items():
-        dose, text = drawn[(k["stratum"], k["source"])]
-        hit = _verdict(approved.detector, k["stratum"])(texts[item_id])
+        dose, text, bare = drawn[(k["stratum"], k["source"])]
+        hit = _verdict(approved.detector, k["stratum"])(bare)
         if k["behavior_id"] != behavior or k["detector_hit"] is not False or hit:
             raise ValueError(f"{item_id}: not a detector negative of {behavior}")
         if texts[item_id] != text or k["dose"] != dose:
@@ -579,8 +767,8 @@ def diagnostic_record(
 
 def write_diagnostic(root: Path, data: Mapping[str, Any]) -> dict:
     """The diagnostic's manifest, written once (its record ``diagnostic_record``'s, with the
-    labels' and the review log's sha256)."""
-    path = diagnostic_path(root, data["behavior"])
+    labels' and the review log's sha256): the ADL-corpus set's its own."""
+    path = diagnostic_path(root, data["behavior"], set(data["types"]) == {ADL})
     if path.exists():
         raise ValueError(f"{path} exists: the diagnostic's result is written once")
     path.parent.mkdir(parents=True, exist_ok=True)

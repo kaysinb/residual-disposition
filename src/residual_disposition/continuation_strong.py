@@ -289,19 +289,33 @@ def screening_record(
     ones; the DPO fallback's from the committed DPO decision under ``root``) recomputed from the
     runs ``inputs`` names (each screened one with its full PD pool and ADL-corpus runs, in
     order). The candidates screened must be the list's first ones, each but the last ineligible,
-    and the last eligible or the list exhausted. Returns the record: each candidate's counts and
-    eligibility, ``chosen`` (or None) and the outcome."""
+    and the last eligible or the list exhausted; an empty list, only when the recomputed one is
+    empty, closes the branch at once (review s6a 1). Returns the record: each candidate's counts
+    and eligibility, ``chosen`` (or None) and the outcome.
+
+    The panel's screening records its detector's spec (``inputs["detector"]``) and is always
+    recomputed under it, whatever the behavior's detector is now (review s6a 3); its binding for
+    the validation is the panel's contracts (``panel_contracts``), not ``strong.yaml``'s."""
     from . import continuation_stage5 as S5
 
     b = branch_of(inputs)
     if inputs.get("behavior") != b["behavior"] or inputs.get("lineage") != b["lineage"]:
         raise ValueError(f"the screening's inputs are not branch {b['name']}'s")
-    check_detector(b["behavior"], detector)
+    if b["name"] == PANEL:
+        detector = recorded_detector(inputs)
+    else:
+        check_detector(b["behavior"], detector)
     if inputs.get("detector_version") != detector.version:
         raise ValueError(f"screened with detector {inputs.get('detector_version')}, the "
                          f"behavior's is {detector.version}")  # fmt: skip
     frozen_list = candidates(b, root, find_run, inputs.get("selection"))
     screened = list(inputs.get("candidates") or [])
+    if not frozen_list:  # no candidate meets the margin: the branch closes, recorded (s6a 1)
+        if screened:
+            raise ValueError("the screening names candidates where the recomputed list has none")
+        return {"branch": b["name"], "lineage": b["lineage"], "behavior": b["behavior"],
+                "detector_version": detector.version, "screened": [], "chosen": None,
+                "outcome": NO_DOSE}  # fmt: skip
     if not screened or len(screened) > len(frozen_list):
         raise ValueError("the screening names no candidate, or more than the frozen ones")
     rows, chosen = [], None
@@ -356,7 +370,15 @@ def identity(inputs: Mapping[str, Any]) -> dict[str, Any]:
     contract = dict(inputs["contract"])
     if sorted(contract) != sorted(CONTRACT):
         raise ValueError(f"the generation contract names {sorted(contract)}, not {CONTRACT}")
-    return {
+    extra = {}
+    if b["name"] == PANEL:  # bound to the panel's committed contracts (review s6a 4)
+        bound = inputs.get("contracts") or {}
+        if set(bound) != {"manifest", "sha256"} or bound["manifest"] != contracts_path(
+            Path(".")
+        ).name:  # fmt: skip
+            raise ValueError(f"a panel validation names the panel's contracts, not {bound}")
+        extra["contracts"] = dict(bound)
+    return {**extra,
         "branch": b["name"], "lineage": lineage, "behavior": b["behavior"],
         "candidate": dict(inputs["candidate"]), "screening": dict(inputs["screening"]),
         "suites": {k: {"name": b["suites"][k], "sha256": b["suite_hashes"][k]}
@@ -462,8 +484,12 @@ def validation_record(
     from . import pipeline as p
 
     b = branch_of(inputs)
-    check_detector(b["behavior"], detector)
+    if b["name"] != PANEL:  # the panel's detector is its contracts' (validation_problems)
+        check_detector(b["behavior"], detector)
     ident = identity(inputs)
+    if ident["detector_version"] != detector.version:
+        raise ValueError(f"the validation's identity names detector {ident['detector_version']}, "
+                         f"not {detector.version}")  # fmt: skip
     found = find_run(inputs.get("identity"))
     if found is None or json.loads((found / "strong_validation_identity.json").read_text()) \
             != ident:  # fmt: skip
@@ -596,7 +622,10 @@ def validation_problems(
 ) -> list[str]:
     """Why a validation record cannot be (or no longer is) a manifest: recomputed from its runs
     (``validation_record``) equal to it, but for its metadata; and, with ``root``, its candidate
-    the committed screening's there, the manifest it names that one (review s5k 2)."""
+    the committed screening's there, the manifest it names that one (review s5k 2). A panel
+    validation also its committed contracts' active entry, recomputed (``committed_contract``):
+    their sha256 the identity's, their detector, candidate and generation contract the
+    validation's (review s6a 4)."""
     from .paths import data_root as default_root
 
     try:
@@ -608,6 +637,10 @@ def validation_problems(
                      "sha256": screening["sha256"]}  # fmt: skip
             if data["inputs"]["screening"] != named or record["candidate"] != screening["chosen"]:
                 return ["the validation is not of the committed screening's candidate"]
+            if record["branch"] == PANEL:
+                problems = contract_problems(root, data["inputs"], detector, find_run)
+                if problems:
+                    return problems
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         return [str(error)]
     mine = {k: v for k, v in data.items() if k not in (*METADATA, "inputs")}
@@ -630,6 +663,190 @@ def committed_validation(root: Path, lineage: str, find_run: Any, detector: Any)
     if problems:
         raise ValueError(f"{path}: {'; '.join(problems)}")
     return data
+
+
+# ------------------------------------------------------------ the panel's contracts (C17-C)
+
+CONTRACTS = "stage3_panel_contracts"
+CLOSED, ACTIVE = "closed", "active"
+NOT_APPLICABLE = "not applicable: no reading depends on it"
+
+
+def contracts_path(root: Path) -> Path:
+    return Path(root) / "manifests" / f"{CONTRACTS}.json"
+
+
+def panel_entry(
+    behavior: str, named: Mapping[str, Any], root: Path, rules: Any, find_run: Any,
+    contract_of: Callable[[str], Mapping[str, Any]],
+) -> dict[str, Any]:  # fmt: skip
+    """One panel behavior's entry of the contracts, recomputed from what it names (``named``:
+    its committed screening's manifest and sha256, or its continued line's recorded
+    infeasibility; reviews s6a 3, 4, s6c 3):
+
+    - the detector: the committed config's, version and spec, the validation's;
+    - closed (a terminal entry, its diagnostic not applicable): the continued line infeasible,
+      the screening with no eligible candidate, or the chosen candidate failing, under that
+      detector, the margin or the PD and ADL zeros of its saved evidence (rescored, never redrawn
+      or replaced);
+    - active: the chosen candidate, its rescoring when the detector is not the screening's, the
+      generation contract (``contract_of``) and the behavior's detector diagnostic complete for
+      observer, PD and ADL-corpus continuations under that detector, its committed manifests
+      bound by sha256."""
+    from . import continuation_rules as cr
+    from . import continuation_stage3 as S3
+    from . import continuation_stage5 as S5
+
+    p, b = _p(), branch(PANEL, behavior=behavior)
+    detector = S5._behavior(behavior).detector
+    out: dict[str, Any] = {"detector": {"version": detector.version,
+                                        "spec": detector_spec(detector)}}  # fmt: skip
+    if set(named) == {"infeasibility"}:
+        line = p.S3_CONTINUED
+        inputs = {"behavior": behavior, "lineage": line.lineage(behavior),
+                  "infeasibility": named["infeasibility"]}  # fmt: skip
+        S5._infeasibility(inputs, rules, find_run)
+        return {**out, "infeasibility": named["infeasibility"], "status": CLOSED,
+                "reason": "the continued line's training is infeasible",
+                "diagnostic": NOT_APPLICABLE}  # fmt: skip
+    if set(named) != {"screening"}:
+        raise ValueError(f"{behavior}'s entry names {sorted(named)}, not its screening or "
+                         "infeasibility")  # fmt: skip
+    screening = committed_screening(root, b["lineage"], find_run, detector)
+    bound = {"manifest": screening_path(Path("."), b["lineage"]).name,
+             "sha256": screening["sha256"]}  # fmt: skip
+    if named["screening"] != bound:
+        raise ValueError(f"{behavior}'s entry names {named['screening']}, not its committed "
+                         f"screening {bound}")  # fmt: skip
+    out.update(screening=bound, chosen=screening["chosen"])
+    if screening["chosen"] is None:
+        return {**out, "status": CLOSED, "reason": screening["outcome"],
+                "diagnostic": NOT_APPLICABLE}  # fmt: skip
+    c = screening["chosen"]
+    if detector.version != screening["detector_version"]:  # versioned rescoring (s6c 3)
+        from .behaviors import Behavior
+
+        inputs = {"behavior": behavior, "lineage": p.S3_CONTINUED.lineage(behavior),
+                  "selection": screening["inputs"]["selection"]}  # fmt: skip
+        scorer = Behavior(behavior, "", "", "", detector)
+        selection = S5._selection(inputs, rules, find_run, scorer)
+        upper = {int(d): Fraction(str(v["excess"]["upper"]))
+                 for d, v in selection["doses"].items()}  # fmt: skip
+        margin = Fraction(str(rules["observer"]["margin"]))
+        passing = cr.margin_candidates(upper, margin, selection["plan"]["checkpoints"])
+        row = next(r for r in screening["inputs"]["candidates"] if r["dose"] == c["dose"])
+        pd = S5.pd_corpus(find_run(row["pd"]), c["latent"], hit_of(detector))
+        if pd is None:
+            raise Incomplete(f"{row['pd']}: the chosen candidate's PD pool is invalid")
+        adl = adl_corpus_framings(find_run(row["adl"]), c["latent"], detector)
+        zeros = screen_eligible(pd, adl)
+        out["rescored"] = {"from_version": screening["detector_version"],
+                           "margin": int(c["dose"]) in [int(d) for d in passing],
+                           "zeros": zeros, "pd": pd, "adl": adl}  # fmt: skip
+        if not (out["rescored"]["margin"] and zeros):
+            return {**out, "status": CLOSED, "diagnostic": NOT_APPLICABLE,
+                    "reason": "the candidate fails the margin or the zeros under the revised "
+                              "detector"}  # fmt: skip
+    kinds = (*S3.BEFORE_CONFIRMATION, S3.ADL)
+    problems = S3.diagnostic_problems(root, behavior, rules, find_run, detector, kinds)
+    if problems:
+        raise ValueError(f"{behavior}'s detector diagnostic is not complete: {'; '.join(problems)}")
+    return {**out, "status": ACTIVE, "contract": dict(contract_of(behavior)),
+            "diagnostic": S3.diagnostic_bindings(root, behavior)}  # fmt: skip
+
+
+def panel_contracts_record(
+    data: Mapping[str, Any], root: Path, rules: Any, find_run: Any,
+    contract_of: Callable[[str], Mapping[str, Any]],
+) -> dict[str, Any]:  # fmt: skip
+    """The panel's contracts (§12.7 Stage 3; reviews s6a 4, s6c 3), recomputed from what each
+    entry names: all five behaviors in the frozen order, each active or closed
+    (``panel_entry``), and the validation suites by sha256, frozen before the first V3 opening
+    and never changed after it."""
+    panel = _panel()
+    named = data.get("behaviors") or {}
+    if list(named) != panel:
+        raise ValueError(f"the contracts name {list(named)}, not the frozen panel {panel}")
+    entries = {}
+    for behavior in panel:
+        given = {k: v for k, v in (named[behavior] or {}).items()
+                 if k in ("screening", "infeasibility")}  # fmt: skip
+        entries[behavior] = panel_entry(behavior, given, root, rules, find_run, contract_of)
+    b = branch(PANEL, behavior=panel[0])
+    suites = {k: {"name": b["suites"][k], "sha256": b["suite_hashes"][k]}
+              for k in ("pd", "adl", "observer")}  # fmt: skip
+    return {"panel": panel, "suites": suites, "behaviors": entries}
+
+
+def panel_contracts_problems(
+    data: Mapping[str, Any], root: Path, rules: Any, find_run: Any,
+    contract_of: Callable[[str], Mapping[str, Any]],
+) -> list[str]:  # fmt: skip
+    try:
+        record = panel_contracts_record(data, root, rules, find_run, contract_of)
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+        return [str(error)]
+    mine = {k: v for k, v in data.items() if k not in ("sha256", "committed_at")}
+    return [] if mine == record else ["the panel's contracts are not what their evidence gives"]
+
+
+def write_panel_contracts(
+    root: Path, data: Mapping[str, Any], rules: Any, find_run: Any,
+    contract_of: Callable[[str], Mapping[str, Any]],
+) -> dict:  # fmt: skip
+    """The panel's contracts, written once, before any panel validation opens V3."""
+    problems = panel_contracts_problems(data, root, rules, find_run, contract_of)
+    if problems:
+        raise ValueError(f"no panel contracts: {'; '.join(problems)}")
+    return _write_once(contracts_path(root), data)
+
+
+def contract_problems(
+    root: Path, inputs: Mapping[str, Any], detector: Any, find_run: Any,
+    contract_of: Callable[[str], Mapping[str, Any]] | None = None,
+) -> list[str]:  # fmt: skip
+    """Why a panel validation's inputs are not its behavior's active committed contract: the
+    contracts' sha256 the inputs', the entry active, its detector the validation's, its
+    candidate the inputs' and its generation contract the inputs'."""
+    behavior = inputs.get("behavior")
+    try:
+        found = committed_contract(root, behavior, _p()._stage2_rules(), find_run,
+                                   contract_of or _p().panel_contract)  # fmt: skip
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+        return [f"the panel's contracts: {error}"]
+    entry = found["entry"]
+    if inputs.get("contracts") != {"manifest": found["manifest"], "sha256": found["sha256"]}:
+        return ["the validation names other contracts than the committed ones"]
+    if entry["status"] != ACTIVE:
+        return [f"{behavior}'s contract is {entry['status']}: {entry.get('reason')}"]
+    if entry["detector"]["version"] != detector.version:
+        return [f"the detector {detector.version} is not {behavior}'s contract's "
+                f"{entry['detector']['version']}"]  # fmt: skip
+    if entry["chosen"] != inputs.get("candidate") or entry["contract"] != inputs.get("contract"):
+        return [f"the validation's candidate or generation contract is not {behavior}'s contract"]
+    return []
+
+
+def committed_contract(
+    root: Path, behavior: str, rules: Any, find_run: Any,
+    contract_of: Callable[[str], Mapping[str, Any]],
+) -> dict[str, Any]:  # fmt: skip
+    """A panel behavior's committed entry of the contracts, its own entry recomputed (a later
+    change of its detector, contract or evidence refuses its validation, never another
+    behavior's; s6c 3): ``{"manifest", "sha256", "entry"}``."""
+    from .manifests import committed_json
+
+    path = contracts_path(root)
+    data = committed_json(path, "the panel's contracts", root)
+    if data.get("panel") != _panel() or behavior not in (data.get("behaviors") or {}):
+        raise ValueError(f"{path.name}: not the frozen panel's contracts")
+    stored = data["behaviors"][behavior]
+    given = {k: v for k, v in stored.items() if k in ("screening", "infeasibility")}
+    entry = panel_entry(behavior, given, root, rules, find_run, contract_of)
+    if entry != stored:
+        raise ValueError(f"{behavior}'s contract is not what its evidence gives now: its "
+                         "validation is invalidated")  # fmt: skip
+    return {"manifest": path.name, "sha256": data["sha256"], "entry": entry}
 
 
 # ------------------------------------------------------------------- the fallback's gate
@@ -719,6 +936,26 @@ def candidates(
     doses = dpo_selection(root, rules, find_run)["selection"]["doses"]
     return [{"dose": d, "latent": doses[str(d)]["latent"], "sham_s": doses[str(d)]["sham_s"]}
             for d in g["candidates"]]  # fmt: skip
+
+
+def detector_spec(detector: Any) -> dict[str, Any]:
+    """A detector's spec, whose hash is its version (``behaviors.Detector``)."""
+    return {k: getattr(detector, k) for k in ("kind", "pattern", "min_count", "flags")}
+
+
+def recorded_detector(inputs: Mapping[str, Any]) -> Any:
+    """The detector a panel screening recorded (its spec), refused unless it is the version the
+    screening names."""
+    from .behaviors import Detector
+
+    try:
+        detector = Detector(**inputs["detector"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"the panel's screening records no detector spec: {error}") from error
+    if detector.version != inputs.get("detector_version"):
+        raise ValueError(f"the recorded detector spec is {detector.version}, not the screening's "
+                         f"{inputs.get('detector_version')}")  # fmt: skip
+    return detector
 
 
 def panel_candidates(

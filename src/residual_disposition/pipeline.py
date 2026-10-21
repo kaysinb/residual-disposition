@@ -6030,8 +6030,27 @@ def _strong_inputs(
               "detector_version": ws.behavior.detector.version,
               "contract": strong_contract(ws, suites)}  # fmt: skip
     if b["name"] == CS.PANEL:  # its behavior names its branch (the others' identities unchanged)
-        inputs["behavior"] = b["behavior"]
+        from .continuation_kstar import find_run
+        from .paths import REPO_ROOT
+
+        found = CS.committed_contract(REPO_ROOT, b["behavior"], _stage2_rules(), find_run,
+                                      panel_contract)  # fmt: skip
+        inputs.update(
+            behavior=b["behavior"],
+            contracts={"manifest": found["manifest"], "sha256": found["sha256"]},
+        )
     return inputs
+
+
+def panel_contract(behavior: str) -> dict[str, Any]:
+    """A panel behavior's validation generation contract (``strong_contract`` on its V3 and O3)
+    as its committed experiment config's workspace draws it (review s6a 4)."""
+    from . import continuation_strong as CS
+
+    cfg = load_config(f"experiments/continuation_14b/{behavior}", ["tracking.wandb.enabled=false"])
+    b = CS.branch(CS.PANEL, behavior=behavior)
+    suites = {kind: CS.load_suite(data_root(), kind, name) for kind, name in b["suites"].items()}
+    return strong_contract(Workspace(cfg), suites)
 
 
 def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> list[str]:
@@ -6064,21 +6083,29 @@ def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
         problems.append(f"the Stage-5 slot is not {ws.behavior.id}'s: {slot}")
     try:
         b = strong_branch_of(cfg, plan, phase)
-        CS.check_detector(b["behavior"], ws.behavior.detector)
+        if panel:  # its detector the committed config's; its binding the panel's contracts
+            from . import continuation_stage3 as S3
+            from . import continuation_stage5 as S5
+
+            if S5._behavior(b["behavior"]).detector != ws.behavior.detector:
+                raise ValueError(f"the detector {ws.behavior.detector.version} is not "
+                                 f"{b['behavior']}'s committed config's")  # fmt: skip
+        else:
+            CS.check_detector(b["behavior"], ws.behavior.detector)
         lineage, screening = b["lineage"], None
         if phase == "strong_validate":
             screening = CS.committed_screening(REPO_ROOT, lineage, find_run, ws.behavior.detector)
-        strong_candidates(b, strong_selection(b, plan, screening))
+        if not (panel and phase == "strong_validate"):  # the panel's: its committed contract
+            strong_candidates(b, strong_selection(b, plan, screening))
         problems += s5_expression_inputs(cfg, ws)
         if phase == "strong_screen":
             if CS.screening_path(REPO_ROOT, lineage).exists():
                 problems.append(f"{CS.screening_path(REPO_ROOT, lineage).name}: screened once")
         else:
-            if panel:
-                from . import continuation_stage3 as S3
-
+            if panel:  # observer, PD and ADL-corpus continuations (s6a 2)
                 problems += S3.diagnostic_problems(REPO_ROOT, b["behavior"], _stage2_rules(),
-                                                   find_run, ws.behavior.detector)  # fmt: skip
+                                                   find_run, ws.behavior.detector,
+                                                   (*S3.BEFORE_CONFIRMATION, S3.ADL))  # fmt: skip
             if screening["chosen"] is None:
                 problems.append(f"the screening of {lineage} found no eligible candidate")
             if CS.validation_path(REPO_ROOT, lineage).exists():
@@ -6086,8 +6113,12 @@ def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
             suites = {kind: CS.load_suite(data_root(), kind, name)
                       for kind, name in b["suites"].items()}  # fmt: skip
             if screening["chosen"] is not None:
-                ident = CS.identity(_strong_inputs(ws, b, screening, suites))
+                inputs = _strong_inputs(ws, b, screening, suites)
+                ident = CS.identity(inputs)
                 CS.check_contract(ident["contract"], suites)  # the frozen decoding, seed, model
+                if panel:  # the committed contracts' active entry, recomputed (s6a 4)
+                    problems += CS.contract_problems(REPO_ROOT, inputs, ws.behavior.detector,
+                                                     find_run)  # fmt: skip
                 problems += _identity_problems(ws, ident)
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         problems.append(f"phase {phase}: {error}")
@@ -6135,8 +6166,8 @@ def _strong_screen(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, out
             break
     inputs = {"branch": b["name"], "behavior": b["behavior"], "lineage": b["lineage"],
               "detector_version": detector.version, "candidates": screened}  # fmt: skip
-    if selection is not None:  # the panel's: the continued selection its candidates are from
-        inputs["selection"] = selection
+    if selection is not None:  # the panel's: its continued selection and its detector's spec
+        inputs.update(selection=selection, detector=CS.detector_spec(detector))
     record = CS.screening_record(inputs, find_run, detector)
     cell = make_cell(ws, "strong_screening", {"inputs": inputs, "record": content_hash(record)})
     if not cell.done:

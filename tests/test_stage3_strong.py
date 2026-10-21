@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 import test_continuation_stage5 as T5
 import test_continuation_strong as TS
+import test_stage3 as T3  # imported before any fixture moves the repository root
 from omegaconf import OmegaConf
 from test_continuation_stage2_decision import CURRENT, committed_repo, git
 
@@ -91,11 +92,10 @@ def stage3_plan(line):
     return {**body, "sha256": pipeline.content_hash(body)}
 
 
-@pytest.fixture
-def continued(runs, monkeypatch):
-    """example_link standing in for a panel behavior: its continued lineage's selection (1,600
-    misses the margin: candidates 100 … 800), a strong.yaml of tiny suites with the panel's
-    branch on V3/O3, and the OOD requests."""
+def continued_lineage(runs, monkeypatch, hits):
+    """example_link standing in for a panel behavior: its continued lineage's selection with
+    ``hits``, a strong.yaml of tiny suites with the panel's branch on V3/O3, and the OOD
+    requests."""
     from residual_disposition.generation import user_request
 
     requests = [user_request(f"o{i:03d}", f"ood {i}") for i in range(200)]
@@ -105,7 +105,6 @@ def continued(runs, monkeypatch):
     approved = {**T5.APPROVED, "model": dict(T5.CELL_MODEL), "data_pins": pins}
     monkeypatch.setattr(S5, "_approved", lambda behavior, line=None: approved)
     monkeypatch.setattr(CS, "_panel", lambda: ["example_link"])
-    hits = {("latent", 25): 40, ("latent", 50): 20, ("latent", 1600): 40}
     space = T5.Space(runs, hits=hits, plan=stage3_plan(pipeline.S3_CONTINUED),
                      line=pipeline.S3_CONTINUED)  # fmt: skip
     sel = space.selection()
@@ -119,6 +118,13 @@ def continued(runs, monkeypatch):
                            b=CS.branch(CS.PANEL, behavior="example_link"))  # fmt: skip
 
 
+@pytest.fixture
+def continued(runs, monkeypatch):
+    """The continued lineage with candidates 100 … 800 (1,600 misses the margin)."""
+    hits = {("latent", 25): 40, ("latent", 50): 20, ("latent", 1600): 40}
+    return continued_lineage(runs, monkeypatch, hits)
+
+
 def at(space, dose):
     return {"dose": dose, "latent": space.states["latent"][dose],
             "sham_s": space.states["sham_s"][dose]}  # fmt: skip
@@ -130,9 +136,11 @@ def screened(space, doses_hits):
              "adl": TS.corpus_run(space, d)} for d, h in doses_hits]  # fmt: skip
 
 
-def screening_inputs(sel, rows):
+def screening_inputs(sel, rows, detector=None):
+    detector = detector or T5.LINK.detector  # the panel's screening records its spec (s6a 3)
     return {"branch": CS.PANEL, "behavior": "example_link", "lineage": LINEAGE,
-            "detector_version": CURRENT, "selection": sel, "candidates": rows}  # fmt: skip
+            "detector_version": detector.version, "detector": CS.detector_spec(detector),
+            "selection": sel, "candidates": rows}  # fmt: skip
 
 
 def test_the_panel_s_candidates_are_its_continued_selection_s(continued):
@@ -164,16 +172,20 @@ def test_the_panel_screening_names_its_selection_and_screens_in_order(continued)
 
 def test_the_panel_validation_s_identity_names_its_behavior(continued):
     contract = dict.fromkeys(CS.CONTRACT, {})
+    bound = {"manifest": "stage3_panel_contracts.json", "sha256": "c" * 64}
     base = {"branch": CS.PANEL, "behavior": "example_link", "candidate": at(continued.space, 200),
             "screening": {"manifest": f"strong_{LINEAGE}.json", "sha256": "s" * 64},
-            "detector_version": CURRENT, "contract": contract}  # fmt: skip
+            "detector_version": CURRENT, "contract": contract, "contracts": bound}  # fmt: skip
     ident = CS.identity(base)
     assert (ident["branch"], ident["lineage"], ident["behavior"]) == (
         CS.PANEL, LINEAGE, "example_link")  # fmt: skip
-    assert ident["suites"]["observer"]["name"] == "O3"
+    assert ident["suites"]["observer"]["name"] == "O3" and ident["contracts"] == bound
     assert ident["streams"]["observer"] == f"strong:{LINEAGE}:observer"
     with pytest.raises(ValueError, match="the panel branch is a panel behavior's"):
         CS.identity({k: v for k, v in base.items() if k != "behavior"})
+    for other in (None, {"manifest": "other.json", "sha256": "c" * 64}):
+        with pytest.raises(ValueError, match="names the panel's contracts"):
+            CS.identity({**base, "contracts": other})
 
 
 # ------------------------------------------------------------- the phases and their barriers
@@ -239,9 +251,12 @@ def test_the_panel_s_validation_waits_for_the_detector_diagnostic(continued, pan
     cfg, plan = panel_plan("strong_validate")
     problems = " ".join(pipeline.strong_problems(cfg, plan, "strong_validate"))
     assert "the detector diagnostic" in problems and "Stage-5 slot" not in problems
-    monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: [])
+    assert "the ADL-corpus diagnostic" in problems  # s6a 2: before V3 too
+    assert "stage3_panel_contracts.json is not committed" in problems  # s6a 4
+    kinds = []
+    monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: kinds.append(a[5]) or [])
     problems = " ".join(pipeline.strong_problems(cfg, plan, "strong_validate"))
-    assert "detector diagnostic" not in problems
+    assert "diagnostic" not in problems and kinds == [("observer", "pd", "adl_corpus")]
 
 
 # ------------------------------------------------- E4: the continued screening's pools
@@ -293,15 +308,31 @@ def test_without_a_stack_dose_the_sources_are_the_continued_screening_s_pools(
 # ------------------------------------------------------ the validated candidate's lineage
 
 
-def validation_runs(space, *, dose, screening):
+def write_contracts(repo, screening, monkeypatch, contract_of=None):
+    """The panel's contracts (the stand-in panel of one behavior), its diagnostic taken as
+    complete (tested on its own below), committed; returns their binding."""
+    monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: [])
+    monkeypatch.setattr(S3, "diagnostic_bindings", lambda root, behavior: [])
+    contract_of = contract_of or pipeline.panel_contract
+    named = {"example_link": {"screening": {"manifest": f"strong_{LINEAGE}.json",
+                                            "sha256": screening["sha256"]}}}  # fmt: skip
+    data = CS.panel_contracts_record({"behaviors": named}, repo, T5.RULES, find_run, contract_of)
+    CS.write_panel_contracts(repo, data, T5.RULES, find_run, contract_of)
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "contracts")
+    found = CS.committed_contract(repo, "example_link", T5.RULES, find_run, contract_of)
+    return {"manifest": found["manifest"], "sha256": found["sha256"]}, data
+
+
+def validation_runs(space, *, dose, screening, contracts):
     """A clean validation of the panel's candidate at ``dose`` (test_continuation_strong's
-    parts, on V3/O3)."""
+    parts, on V3/O3), bound to the panel's contracts."""
     c = at(space, dose)
     suites = {k: CS.load_suite(paths.data_root(), k, v) for k, v in
               {"pd": "V3", "adl": "V3", "observer": "O3"}.items()}  # fmt: skip
     contract = pipeline.strong_contract(pipeline.Workspace(T5.config("strong_validate")), suites)
     base = {"branch": CS.PANEL, "behavior": "example_link", "candidate": c,
-            "detector_version": CURRENT, "contract": contract,
+            "detector_version": CURRENT, "contract": contract, "contracts": contracts,
             "screening": {"manifest": f"strong_{LINEAGE}.json", "sha256": screening}}  # fmt: skip
     ident = CS.identity(base)
     ir = T5.a_run(space.root, "20261021-001000-strong_validation_identity-p-1",
@@ -338,11 +369,16 @@ def test_the_panel_s_validated_candidate_is_its_strong_lineage(continued, panel_
     space, repo = continued.space, panel_repo
     monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
     rows = screened(space, [(100, 1), (200, 0)])
-    sha = write_screening(repo, continued.sel, rows)["sha256"]
-    v = validation_runs(space, dose=200, screening=sha)
+    screening = write_screening(repo, continued.sel, rows)
+    contracts, data = write_contracts(repo, screening, monkeypatch)
+    assert data["behaviors"]["example_link"]["status"] == CS.ACTIVE
+    v = validation_runs(space, dose=200, screening=screening["sha256"], contracts=contracts)
     record = CS.validation_record(v, find_run, T5.LINK.detector, paths.data_root())
     assert record["verdict"]["passed"] and record["alpha"] == 0.05 and record["behavior"] == (
         "example_link")  # fmt: skip
+    stale = {**v, "contracts": {**contracts, "sha256": "0" * 64}}
+    assert "other contracts than the committed" in " ".join(
+        CS.contract_problems(repo, stale, T5.LINK.detector, find_run))  # fmt: skip
     CS.write_validation(repo, {**record, "inputs": v}, find_run, T5.LINK.detector)
     git(repo, "add", "manifests")
     git(repo, "commit", "-q", "-m", "validation")
@@ -366,3 +402,192 @@ def test_the_panel_s_validated_candidate_is_its_strong_lineage(continued, panel_
         pipeline.strong_xcont_plan(ws, {}, "s3s_xcont", CS.PANEL)
     x = pipeline.strong_xcont_plan(ws, {"s3s_xcont": {"dose": 200}}, "s3s_xcont", CS.PANEL)
     assert (x["dose"], x["latent"], x["plan"]["lineage"]) == (200, c["latent"], CONT)
+
+
+# ------------------------------------------------------- review s6a: closures, contracts, ADL
+
+
+def test_an_empty_candidate_list_closes_the_screening(runs, monkeypatch):
+    """S6a 1: no continued checkpoint meets the margin: the recomputed list is empty and the
+    screening, with no candidate, records the branch's closure; naming one is refused."""
+    lineage = continued_lineage(runs, monkeypatch, {("latent", d): 40 for d in
+                                                    pipeline.S3_CONTINUED.checkpoints})  # fmt: skip
+    assert CS.candidates(lineage.b, None, find_run, lineage.sel) == []
+    r = CS.screening_record(screening_inputs(lineage.sel, []), find_run, None)
+    assert (r["screened"], r["chosen"], r["outcome"]) == ([], None, CS.NO_DOSE)
+    rows = screened(lineage.space, [(100, 0)])
+    with pytest.raises(ValueError, match="where the recomputed list has none"):
+        CS.screening_record(screening_inputs(lineage.sel, rows), find_run, None)
+
+
+def revised(extra):
+    """A revision of example_link's detector, as a committed config would give it."""
+    import dataclasses
+
+    old = T5.LINK.detector
+    return dataclasses.replace(T5.LINK, detector=dataclasses.replace(
+        old, pattern=f"{old.pattern}|{extra}"))  # fmt: skip
+
+
+def test_the_screening_is_replayed_under_its_recorded_detector(continued, panel_repo,
+                                                                monkeypatch):  # fmt: skip
+    """S6a 3: a revision after the screening leaves it verifiable under the detector it
+    recorded; a recorded spec that is not its version is refused."""
+    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
+    later = revised("zzz-new")
+    monkeypatch.setattr(S5, "_behavior", lambda behavior: later)
+    again = CS.committed_screening(panel_repo, LINEAGE, find_run, later.detector)
+    assert again["sha256"] == screening["sha256"] and again["detector_version"] == CURRENT
+    inputs = {**screening["inputs"], "detector": CS.detector_spec(later.detector)}
+    with pytest.raises(ValueError, match="recorded detector spec is"):
+        CS.screening_record(inputs, find_run, None)
+
+
+def test_the_contracts_rescore_the_candidate_under_a_revised_detector(continued, panel_repo,
+                                                                       monkeypatch):  # fmt: skip
+    """S6c 3: the contracts' detector is the committed config's; where it is not the
+    screening's, the candidate's saved margin and PD and ADL zeros are rescored under it, never
+    redrawn: a candidate still clean stays active; one that now fails closes the branch."""
+    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: [])
+    monkeypatch.setattr(S3, "diagnostic_bindings", lambda root, behavior: [])
+    screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
+    named = {"screening": {"manifest": f"strong_{LINEAGE}.json", "sha256": screening["sha256"]}}
+
+    def entry(behavior):
+        monkeypatch.setattr(S5, "_behavior", lambda b: behavior)
+        return CS.panel_entry("example_link", named, panel_repo, T5.RULES, find_run,
+                              lambda b: {"contract": 1})  # fmt: skip
+
+    e = entry(T5.LINK)
+    assert (e["status"], e["chosen"], "rescored" in e) == (CS.ACTIVE, at(continued.space, 100),
+                                                          False)  # fmt: skip
+    e = entry(revised("zzz-new"))  # the same verdicts on the saved evidence
+    assert e["status"] == CS.ACTIVE and (e["rescored"]["margin"], e["rescored"]["zeros"]) == (
+        True, True)  # fmt: skip
+    e = entry(revised("plain"))  # every saved continuation is now a hit
+    assert e["status"] == CS.CLOSED and e["diagnostic"] == CS.NOT_APPLICABLE
+    assert e["rescored"]["zeros"] is False and e["chosen"] == at(continued.space, 100)
+    with pytest.raises(ValueError, match="not its committed screening"):
+        CS.panel_entry("example_link", {"screening": {**named["screening"], "sha256": "0" * 64}},
+                       panel_repo, T5.RULES, find_run, lambda b: {})  # fmt: skip
+
+
+def test_the_contracts_are_the_whole_panel_s_and_refuse_a_later_drift(continued, panel_repo,
+                                                                       monkeypatch):  # fmt: skip
+    """S6a 4, s6c 3: the contracts name every panel behavior, are written once and read only
+    committed; a behavior's validation recomputes its own entry, so a later change of its
+    detector or generation contract invalidates it."""
+    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
+    contract = {"contract": 1}
+    bound, data = write_contracts(panel_repo, screening, monkeypatch, lambda b: contract)
+    with pytest.raises(ValueError, match="written once"):
+        CS.write_panel_contracts(panel_repo, data, T5.RULES, find_run, lambda b: contract)
+    with pytest.raises(ValueError, match="not the frozen panel"):
+        CS.panel_contracts_record({"behaviors": {}}, panel_repo, T5.RULES, find_run,
+                                  lambda b: contract)  # fmt: skip
+    found = CS.committed_contract(panel_repo, "example_link", T5.RULES, find_run,
+                                  lambda b: contract)  # fmt: skip
+    assert found["sha256"] == bound["sha256"] and found["entry"]["status"] == CS.ACTIVE
+    with pytest.raises(ValueError, match="its validation is invalidated"):
+        CS.committed_contract(panel_repo, "example_link", T5.RULES, find_run,
+                              lambda b: {"contract": 2})  # fmt: skip
+    monkeypatch.setattr(S5, "_behavior", lambda b: revised("zzz-new"))
+    with pytest.raises(ValueError, match="its validation is invalidated"):
+        CS.committed_contract(panel_repo, "example_link", T5.RULES, find_run,
+                              lambda b: contract)  # fmt: skip
+
+
+def test_the_adl_corpus_diagnostic_is_its_own_set_from_frozen_sources(continued, panel_repo,
+                                                                       no_stack_dose, tmp_path,
+                                                                       monkeypatch):  # fmt: skip
+    """S6a 2, s6c 2: the ADL-corpus diagnostic's sources are the union of the stack decision's
+    expression run and the committed screening's runs, each once, frozen before its labeling;
+    its set of its own is drawn from them (150 detector negatives, the declared seed), each item
+    its prefix in brackets as context and its continuation, the check on the continuation; its
+    result, written by the script, is the barrier's before the validation."""
+    import argparse
+    import hashlib
+    import importlib.util
+
+    import transformers
+
+    repo, space, stack = panel_repo, continued.space, no_stack_dose.stack
+    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    screening = write_screening(repo, continued.sel, screened(space, [(100, 1), (200, 0)]))
+    stack_adl = TS.corpus_run(stack, 200)  # the stack lineage's expression check at its dose
+    decision = {"behavior": "example_link", "decision": {"status": "decided",
+                "analysis_dose": 200}, "inputs": {"behavior": "example_link",
+                "lineage": "stage3/example_link", "selection": no_stack_dose.record["selection"],
+                "expression": {"adl_corpus": stack_adl}}}  # fmt: skip
+    with pytest.raises((ValueError, RuntimeError), match="not committed"):
+        S3.adl_sources_record("example_link", T5.RULES, find_run, repo)
+    commit(repo, S5.manifest_path(repo, "example_link", pipeline.S3_STACK), decision, "stack")
+    record = S3.adl_sources_record("example_link", T5.RULES, find_run, repo)
+    rows = screening["inputs"]["candidates"]
+    want = [(stack_adl, stack.states["latent"][200], 200, "stack")] + [
+        (r["adl"], r["latent"], r["dose"], "continued") for r in rows]  # fmt: skip
+    assert [(r["run"], r["latent"], r["dose"], r["from"]) for r in record["runs"]] == want
+    assert record["screening"]["sha256"] == screening["sha256"]
+    S3.write_adl_sources(repo, record, T5.RULES, find_run)
+    with pytest.raises(ValueError, match="frozen once"):
+        S3.write_adl_sources(repo, record, T5.RULES, find_run)
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "adl sources")
+    sources = S3.committed_adl_sources(repo, "example_link", T5.RULES, find_run)
+
+    class Tokenizer:  # the cells' prefixes decoded (test_continuation_labels's stand-in)
+        def __len__(self):
+            return 10**6
+
+        def decode(self, ids):
+            return "".join(f"<{i}>" for i in ids)
+
+    tokenizer = Tokenizer()
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", lambda *a, **k: tokenizer)
+    cl = T3.labels_script()
+    seed = int(T5.RULES["seeds"]["labels"])
+    with monkeypatch.context() as m:  # the builder reads the committed sources by name
+        m.setattr(S3, "committed_adl_sources", lambda root, behavior, rules, find_run: sources)
+        cl.detector_diagnostic(argparse.Namespace(
+            runs="runs/feasibility_14b", kinds=["adl_corpus"], corpus_runs="runs/continuation_14b",
+            state_index=None, dry_run=False, behavior="example_link"))  # fmt: skip
+        run = next(paths.runs_root().glob("*/*-diagnostic-s3adl-example_link-*"))
+        key = json.loads((run / "key.json").read_text())
+        assert key["kinds"] == ["adl_corpus"] and key["sources"]["sha256"] == sources["sha256"]
+        rows = [json.loads(x) for x in (run / "input.jsonl").read_text().splitlines()]
+        assert len(rows) == 150 and all(r["response"].startswith("[<") for r in rows)
+        assert {S3._source_run("adl_corpus", k["source"]) for k in key["items"].values()} <= {
+            r["run"] for r in record["runs"]}  # fmt: skip
+        assert "the ADL-corpus diagnostic" in " ".join(S3.diagnostic_problems(
+            repo, "example_link", T5.RULES, find_run, T5.LINK.detector, [S3.ADL]))  # fmt: skip
+        negatives = {"adl_corpus": list(key["items"])}
+        files = {}
+        for name, lines in (
+            ("ensemble", [{"item_id": i, "present": False, "unanimous": True, "confident": True,
+                           "evidence": ""} for i in key["items"]]),
+            ("review", [{"item_id": i, "present": False, "note": ""}
+                        for i in sorted(S3.review_sample("example_link", seed, negatives))]),
+        ):  # fmt: skip
+            files[name] = tmp_path / f"{name}.jsonl"
+            files[name].write_text("".join(json.dumps(x) + "\n" for x in lines))
+        m.setattr(paths, "REPO_ROOT", T3.REPO_ROOT)  # its scripts; it writes under --root
+        path = T3.REPO_ROOT / "scripts" / "continuation_stage3.py"
+        spec = importlib.util.spec_from_file_location("continuation_stage3_adl", path)
+        script = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(script)
+        argv = ["diagnostic", str(run), "--ensemble", str(files["ensemble"]), "--review",
+                str(files["review"]), "--root", str(repo)]  # fmt: skip
+        assert script.main(argv) == 0
+    data = json.loads(S3.diagnostic_path(repo, "example_link", adl=True).read_text())
+    assert data["types"] == {"adl_corpus": {"status": "complete", "n": 150, "traces": 0}}
+    assert data["review"]["sample"] == 30 and data["sources_sha256"] == sources["sha256"]
+    assert hashlib.sha256((run / "input.jsonl").read_bytes()).hexdigest() == data["input_sha256"]
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "adl diagnostic")
+    assert S3.diagnostic_problems(repo, "example_link", T5.RULES, find_run, T5.LINK.detector,
+                                  [S3.ADL]) == []  # fmt: skip
+    assert [b["manifest"] for b in S3.diagnostic_bindings(repo, "example_link")] == [
+        "stage3_diagnostic_adl_example_link.json"]  # fmt: skip

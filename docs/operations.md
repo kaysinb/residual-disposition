@@ -1171,8 +1171,13 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
       - it starts only once the behavior's stack decision `manifests/stage3_<behavior>.json` is
         committed (its fallback dose, or none);
       - Stage 3 holds no Stage-5 slot;
-      - the screening record names the selection; `scripts/continuation_strong.py screening <run>`
-        writes `manifests/strong_<behavior>_cont.json`, committed before any validation cell.
+      - the screening record names the selection and its detector's spec, and is always
+        recomputed under that detector, whatever the behavior's is later (review s6a 3);
+        `scripts/continuation_strong.py screening <run>` writes
+        `manifests/strong_<behavior>_cont.json`, committed before any validation cell;
+      - with no candidate (no continued checkpoint meets the margin), the screening is empty and
+        closes the branch at once, "no qualifying dose" (s6a 1); with neither a stack dose nor a
+        strong candidate, the behavior's contrasts get p = 1, its evidence kept.
     - **With no margin-passing stack checkpoint** (E4), the diagnostic's sources are the committed
       screening's pools:
       - every screened candidate's full PD pool, and L's pass that the continued selection read
@@ -1181,10 +1186,42 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
         screening, and refuses before it;
       - the sources are never frozen empty;
       - then the set, the labels and the diagnostic, committed before strong_validate.
+    - **The ADL-corpus diagnostic** (§12.3.1; reviews s6a 2, s6c 2), a set of its own, before the
+      strong validation:
+      - its sources (`scripts/continuation_stage3.py adl-sources <behavior>`, once both are
+        committed): the union of the ADL-corpus runs of the stack decision's expression checks
+        (at its dose, if any) and of the committed screening's candidates, each run once, written
+        once as `manifests/stage3_diagnostic_sources_adl_<behavior>.json` before labeling;
+      - its set (`continuation_labels.py detector-diagnostic --behavior <behavior> --kinds
+        adl_corpus`): 150 detector negatives by the declared seed, the saved continuations
+        rescored with the current detector; each item shows its prefix in brackets as context,
+        and the labeling rule and the detector's check are on the continuation alone; fewer than
+        150 leave it incomplete, which blocks the branch's validation;
+      - the ensemble's labels, the arbiter and the review as for the first set: 30 more agreed
+        negatives reviewed per behavior;
+      - its result (`scripts/continuation_stage3.py diagnostic <set run> …`),
+        `manifests/stage3_diagnostic_adl_<behavior>.json`;
+      - a detector revision is checked against every committed diagnostic set drawn under the
+        detector it revises.
+    - **The panel's contracts** (`scripts/continuation_strong.py contracts`,
+      `manifests/stage3_panel_contracts.json`; reviews s6a 4, s6c 3): written once and committed
+      before any panel validation opens V3, only once all five behaviors have their entry:
+      - **active:** its committed screening's candidate; the detector, the committed config's;
+        where that is not the screening's detector, the candidate's saved margin and PD and ADL
+        zeros rescored under it (never redrawn or replaced); the generation contract on V3/O3;
+        its diagnostic complete for observer, PD and ADL-corpus continuations, the manifests
+        bound by sha256;
+      - **closed** (a terminal entry, its diagnostic not applicable): no eligible candidate, a
+        candidate failing the rescoring, or the continued line's recorded infeasibility
+        (`--infeasible <behavior>=<run>`);
+      - every panel validation's identity names the contracts' sha256; its preflight and its
+        manifest's writer recompute its own entry, so a later change of its detector, contract
+        or evidence refuses it (the affected validation is invalidated, the others stand).
     - **strong_validate, branch stage3:**
-      - one validation on V3/O3 (α 0.05, one method), its identity naming the behavior;
-      - the detector diagnostic's barrier is checked again here (complete, of the committed
-        sources);
+      - one validation on V3/O3 (α 0.05, one method), its identity naming the behavior and the
+        panel's contracts, its detector and generation contract the active entry's;
+      - the detector diagnostic's barrier is checked again here, for observer, PD and ADL-corpus
+        continuations;
       - `strong_validation_<behavior>_cont.json` is committed before any follow-up.
     - **s3s_xcont** (`plan.s3s_xcont.dose`, the validated candidate's): X_cont = H + Δ_A of its L,
       engine-free.

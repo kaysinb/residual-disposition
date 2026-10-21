@@ -1036,6 +1036,14 @@ def test_a_revision_clears_a_trace_only_on_its_recomputed_evidence(diagnostic_se
         assert "the revision's development evidence" in barrier(catches)
         changed.write_bytes(kept)
     assert barrier(catches) == ""
+    # s6a 2: every committed set drawn under the revised one's detector is the revision's to
+    # agree with, the ADL-corpus set's too: a record naming only one of them is refused
+    adl = {**data, "set_id": "adl1"}
+    monkeypatch.setattr(S3, "_committed_diagnostics", lambda root, behavior: [data, adl])
+    assert "not an acceptance of §12.3.1's checks" in barrier(catches)
+    both = record(catches, checks={**record(catches)["checks"], "disagreements": {
+        "sets": ["pilot1", data["set_id"], "adl1"], "count": 0}})  # fmt: skip
+    assert "the revision's development evidence" in barrier(catches, both)  # its set is read
 
 
 def test_the_frozen_development_data_is_stage_0_s():
