@@ -600,6 +600,32 @@ def confirmation_seed(
 # cut order untouched
 STAGE5_DPO = "stage5_dpo"
 
+# The strong branch's items (§12.8, amendment of 2026-10-21; C16), each right after its parent:
+# strong/stage3/<behavior> for the panel, strong/stage5 and strong/stage5_dpo. Each is cut with
+# its parent's part of the cut order; strong/stage5_dpo also when its gate can no longer open.
+STRONG = "strong/"
+FALLBACK_GATE_CLOSED = "fallback_gate_closed"
+# S5-A's sublimit (§12.8, review s5h 4): strong/stage5 is split right after its start into s5-a
+# (the continued screening and validation) with this much of its GPU part and none of its API
+# part, and s5-b (the follow-up) with the rest
+S5A_WORKER, S5B_WORKER, S5A_SUBLIMIT_GPU_USD = "s5-a", "s5-b", 13.76
+
+
+def strong_item(parent: str) -> str:
+    """The strong branch's item beside ``parent`` (``stage5`` → ``strong/stage5``)."""
+    return STRONG + parent
+
+
+def frozen_split(item: str, stress_gpu_usd: float) -> tuple[dict, dict] | None:
+    """The split frozen for ``item`` as (GPU shares, API shares), or None if it has none:
+    ``strong/stage5``'s S5-A sublimit."""
+    if item != strong_item("stage5"):
+        return None
+    a = S5A_SUBLIMIT_GPU_USD / float(stress_gpu_usd)
+    if not 0 < a < 1:
+        raise ValueError(f"S5-A's ${S5A_SUBLIMIT_GPU_USD} is not within {item}'s GPU part")
+    return {S5A_WORKER: a, S5B_WORKER: 1 - a}, {S5A_WORKER: 0.0, S5B_WORKER: 1.0}
+
 
 def cut_order(rules: Rules, items: Sequence[str] = ()) -> list[str]:
     """The preset cut order (§12.8): the rules', with stage5_dpo right after stage6 when the
@@ -614,8 +640,10 @@ def cut_order(rules: Rules, items: Sequence[str] = ()) -> list[str]:
 def drop_reasons(rules: Rules, items: Sequence[str] = ()) -> dict[str, list[str]]:
     """Per plan item of the meter, the only reasons it may be dropped for: its gate (Stages 5
     and 6), its trigger (Stage 4) or its part of the preset cut order (``cut_order``, with
-    stage5_dpo when ``items`` hold it). Items absent here (Stages 0–1, Stage 2's first behavior,
-    panel behaviors 1–4) can never be dropped."""
+    stage5_dpo when ``items`` hold it). A strong item that ``items`` hold is cut with its
+    parent's part, and ``strong/stage5_dpo`` is also dropped ``fallback_gate_closed`` (C16).
+    Items absent here (Stages 0–1, Stage 2's first behavior, panel behaviors 1–4 and their
+    strong items) can never be dropped."""
     first, second = rules["discovery"][:2]
     panel = list(rules.panel)
     guillemets = rules["descriptive_adl_only"][0]
@@ -643,4 +671,10 @@ def drop_reasons(rules: Rules, items: Sequence[str] = ()) -> dict[str, list[str]
                 out[item].append(f"cut_order:{part}")
     if STAGE5_DPO in cut_order(rules, items):
         out[STAGE5_DPO] = [f"cut_order:{STAGE5_DPO}"]
+    for parent in ("stage5", STAGE5_DPO, f"stage3/{panel[-1]}"):
+        if strong_item(parent) in items:
+            cuts = [r for r in out.get(parent, []) if r.startswith("cut_order:")]
+            out[strong_item(parent)] = cuts
+    if strong_item(STAGE5_DPO) in items:
+        out[strong_item(STAGE5_DPO)].insert(0, FALLBACK_GATE_CLOSED)
     return out

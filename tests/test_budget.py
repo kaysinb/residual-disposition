@@ -526,20 +526,33 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     items = load_allocations(path)
     names = [a.item for a in items]
     assert names[0] == "stage0_1" and names[-1] == "stage6"
-    assert names[names.index("stage5") + 1] == "stage5_dpo"  # C15: below stage5, above stage6
+    # C15: stage5_dpo below stage5, above stage6; C16: each strong item right after its parent
+    assert names[names.index("stage5") + 1 : names.index("stage6")] == [
+        "strong/stage5", "stage5_dpo", "strong/stage5_dpo"]  # fmt: skip
+    for b in RULES.panel:
+        assert names[names.index(f"stage3/{b}") + 1] == f"strong/stage3/{b}"
     assert all(a.stress_usd >= a.usd > 0 for a in items)
     assert all(
         a.stress_gpu_usd >= 0 and a.stress_api_usd > 0 for a in items if a.kind != "stage5_dpo"
     )
     dpo = next(a for a in items if a.item == "stage5_dpo")
     assert (dpo.usd, dpo.stress_gpu_usd, dpo.stress_api_usd) == (29.2, 80.46, 0.0)  # no API
+    strong = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
+              if a.item.startswith("strong/")}  # fmt: skip
+    assert strong.pop("strong/stage5") == ("strong_stage5", 119.65, 296.8, 23.22)
+    assert strong.pop("strong/stage5_dpo") == ("strong_stage5_dpo", 127.08, 316.87, 23.22)
+    assert set(strong.values()) == {("strong_stage3", 34.59, 75.54, 16.3)} and len(strong) == 5
     six = next(a for a in items if a.item == "stage6")
     assert six.stress_gpu_usd > 0 and six.stress_api_usd > 0  # both limits are enforceable
     assert set(cr.drop_reasons(RULES, names)) <= set(names)
-    (migration,) = load_migrations(path)  # the frozen allocations before it: the live log's
-    assert migration.added == ("stage5_dpo",)
-    assert migration.from_sha256 == allocations_hash([a for a in items if a.item != "stage5_dpo"])
-    assert migration.from_sha256.startswith("5289c33824a3")
+    first, second = load_migrations(path)  # each from the allocations before it: the live log's
+    added = set(first.added) | set(second.added)
+    assert first.added == ("stage5_dpo",)
+    assert first.from_sha256 == allocations_hash([a for a in items if a.item not in added])
+    assert first.from_sha256.startswith("5289c33824a3")
+    assert set(second.added) == {n for n in names if n.startswith("strong/")}
+    assert second.from_sha256 == allocations_hash([a for a in items if a.item not in second.added])
+    assert second.from_sha256.startswith("04eebe5e9c68")
 
 
 def test_cut_sequence_follows_the_preset_order():

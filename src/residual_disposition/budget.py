@@ -792,8 +792,10 @@ class AllocationMeter:
     - ``start`` needs a live reservation and returns the execution limits, in dollars only: the
       GPU part sets the Pod's deadline (``ExecutionLimits.pod_hours``), the API part the API
       allowance. ``split``, once and right after ``start``, divides them between Pods or workers
-      disjointly; the item's whole limits are no longer issued after it. Every permission is
-      formed inside the locked transaction, on the state with every instance's events.
+      disjointly; the item's whole limits are no longer issued after it. A worker's share is one
+      fraction of both parts, or a fraction per part (``api_shares``, C16: S5-A's GPU-only
+      sublimit, §12.8); a split without it replays as before. Every permission is formed inside
+      the locked transaction, on the state with every instance's events.
     - ``charge`` books paid costs against a running item. Beyond either part of its reservation
       the item is stopped, the event is logged and ``BudgetExhausted`` is raised: its unfinished
       contrasts get p = 1 (§12.4.8).
@@ -863,7 +865,9 @@ class AllocationMeter:
         self.charged = {n: {"gpu_usd": 0.0, "api_usd": 0.0} for n in names}
         self.final: dict[str, float] = {}
         self.reason: dict[str, str] = {}
-        self.splits: dict[str, dict[str, float]] = {}
+        self.splits: dict[str, dict[str, float]] = {}  # per split item, each worker's GPU share
+        # per split item, each worker's API share: its GPU share unless the split set it (C16)
+        self.api_splits: dict[str, dict[str, float]] = {}
         # per split item and worker, what that worker's Pod has spent of its share
         self.worker_charged: dict[str, dict[str, dict[str, float]]] = {}
         # per split item and worker, its one open Pod session (review s3y2), None when closed
@@ -996,6 +1000,7 @@ class AllocationMeter:
             "final": self.final,
             "reason": self.reason,
             "splits": self.splits,
+            "api_splits": self.api_splits,
             "worker_charged": self.worker_charged,
             "sessions": self.sessions,
             "transfers": self.transfers,
@@ -1111,12 +1116,12 @@ class AllocationMeter:
             )
         if item not in self.splits or worker not in self.splits[item]:
             raise ValueError(f"{item} has no worker {worker!r}")
-        share, (gpu, api) = self.splits[item][worker], self.parts(item)
-        w = self.worker_charged[item][worker]
+        share, api_share = self.splits[item][worker], self.api_splits[item][worker]
+        (gpu, api), w = self.parts(item), self.worker_charged[item][worker]
         return ExecutionLimits(
             f"{item}@{worker}",
             max(0.0, share * gpu - w["gpu_usd"]),
-            max(0.0, share * api - w["api_usd"]),
+            max(0.0, api_share * api - w["api_usd"]),
         )
 
     def open_session(
@@ -1233,24 +1238,36 @@ class AllocationMeter:
     def start(self, item: str) -> ExecutionLimits:
         return self._operate(lambda: {"event": "start", "item": item}, lambda _: self._limits(item))
 
-    def split(self, item: str, shares: Mapping[str, float]) -> dict[str, ExecutionLimits]:
+    def split(
+        self,
+        item: str,
+        shares: Mapping[str, float],
+        api_shares: Mapping[str, float] | None = None,
+    ) -> dict[str, ExecutionLimits]:
         """Divide a just-started item's limits between Pods or workers, disjointly, once: the
         shares are non-negative and sum to at most 1, and each worker gets its share of both
-        parts. Allowed only right after ``start``, before any charge; afterwards the item's
-        whole limits are no longer issued."""
+        parts, or, with ``api_shares`` (the same workers, summing to at most 1 too), its share
+        of the GPU part and its API share of the API part (C16). Allowed only right after
+        ``start``, before any charge; afterwards the item's whole limits are no longer issued."""
         a = self._get(item)
 
         def issue(event: dict[str, Any]) -> dict[str, ExecutionLimits]:
             return {
                 worker: ExecutionLimits(
-                    f"{item}@{worker}", a.stress_gpu_usd * s, a.stress_api_usd * s
+                    f"{item}@{worker}",
+                    a.stress_gpu_usd * s,
+                    a.stress_api_usd * self.api_splits[item][worker],
                 )
                 for worker, s in self.splits[item].items()
             }
 
-        return self._operate(
-            lambda: {"event": "split", "item": item, "shares": dict(shares)}, issue
-        )
+        def build() -> dict[str, Any]:
+            event = {"event": "split", "item": item, "shares": dict(shares)}
+            if api_shares is not None:
+                event["api_shares"] = dict(api_shares)
+            return event
+
+        return self._operate(build, issue)
 
     def charge(
         self,
@@ -1404,7 +1421,18 @@ class AllocationMeter:
             }
             if sum(shares.values()) > 1 + 1e-12:
                 raise ValueError("split shares must be non-negative and sum to at most 1")
+            api_shares = dict(shares)  # a split without API shares: one fraction of both parts
+            if "api_shares" in event:
+                api_shares = {
+                    str(k): finite_usd(v, f"the API share of {k}")
+                    for k, v in event["api_shares"].items()
+                }
+                if set(api_shares) != set(shares):
+                    raise ValueError("a split's API shares name exactly its workers")
+                if sum(api_shares.values()) > 1 + 1e-12:
+                    raise ValueError("split API shares must be non-negative and sum to at most 1")
             s["splits"][item] = shares
+            s["api_splits"][item] = api_shares
             s["worker_charged"][item] = {w: {"gpu_usd": 0.0, "api_usd": 0.0} for w in shares}
             s["sessions"][item] = dict.fromkeys(shares)
         elif kind == "session":
@@ -1446,13 +1474,13 @@ class AllocationMeter:
             gpu, api = self.parts(item, s)
             if item in s["splits"]:
                 share, spent = s["splits"][item][worker], s["worker_charged"][item][worker]
-                whose = f"{worker}'s"
+                api_share, whose = s["api_splits"][item][worker], f"{worker}'s"
             else:
-                share, spent, whose = 1.0, charged[item], f"{item}'s"
+                share, api_share, spent, whose = 1.0, 1.0, charged[item], f"{item}'s"
             left = share * gpu - spent["gpu_usd"]
             if usd > left + 1e-9:
                 raise ValueError(f"${usd:.4f} exceed {whose} ${left:.4f} left of its share")
-            left_api = share * api - spent["api_usd"]
+            left_api = api_share * api - spent["api_usd"]
             if api_usd > left_api + 1e-9:
                 raise ValueError(
                     f"API ${api_usd:.4f} exceed {whose} ${left_api:.4f} left of its API share"
@@ -1502,10 +1530,13 @@ class AllocationMeter:
             )
             if worker is not None:  # a worker overrunning its share stops the item too
                 w, share = s["worker_charged"][item][worker], s["splits"][item][worker]
+                api_share = s["api_splits"][item][worker]
                 w["gpu_usd"] += gpu_usd
                 w["api_usd"] += api_usd
                 over = (
-                    over or w["gpu_usd"] > share * gpu + 1e-9 or w["api_usd"] > share * api + 1e-9
+                    over
+                    or w["gpu_usd"] > share * gpu + 1e-9
+                    or w["api_usd"] > api_share * api + 1e-9
                 )
             if over or settling:
                 states[item] = STOPPED

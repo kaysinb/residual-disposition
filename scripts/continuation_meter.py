@@ -8,7 +8,8 @@
         [--label TEXT]
     uv run python scripts/continuation_meter.py verify-receipt FILE --item ITEM \
         --price USD_PER_HOUR --hours H [--worker WORKER --pod-id POD_ID]
-    uv run python scripts/continuation_meter.py split <item> --share WORKER=SHARE ...
+    uv run python scripts/continuation_meter.py split <item> --share WORKER=SHARE ... \
+        [--api-share WORKER=SHARE ...]
     uv run python scripts/continuation_meter.py session-open <item> --worker WORKER \
         --pod-id POD_ID --deadline ISO --price USD_PER_HOUR --hours H [--api-usd USD] \
         --receipt FILE
@@ -51,19 +52,21 @@ is the receipt's, and the requested hours fit within the item's live GPU limit a
 exits with status 4, an overrun charge with 3, a failed verification with 1.
 
 Two Pods share an item (Stage 2: Pod A and Pod B) through ``split``, right after ``start``: each
-worker gets its share of both parts, and every later charge names its worker (``charge
---worker``), who may spend no more than its share. Each Pod session is authorized exclusively in
-the log (review s3y2): ``session-open``, with the Pod's actual ID and the deadline set at its
-creation (both from the coordinator, who creates the Pod), its price and hours within the
-worker's live GPU share and the API money it may commit (``--api-usd``, review s4b) within the
-worker's API share, writes the session's receipt (the sha256 of the log right after it); it is
-refused while that worker has an open session. ``session-close`` settles the session's paid cost
-as the worker's charge and closes it, so that the next may open. On the Pod, ``verify-receipt
---worker --pod-id`` replays the log copy and succeeds only if the copy is the receipt's, the
-worker's open session there is the receipt's (the Pod ID the Pod's own, the deadline, the price,
-the hours, the API authorization), the deadline is still ahead and the requested hours fit within
-the session's; it prints that session as the log holds it and its id (the sha256 of the log
-right after it), which is where the Pod's chain takes its deadline and its API ceiling from.
+worker gets its share of both parts, or with ``--api-share`` its share of each part, and every later
+charge names its worker (``charge --worker``), who may spend no more than its share.
+``strong/stage5`` is split only by its frozen split, S5-A's GPU-only sublimit (worker ``s5-a``,
+$13.76 of the GPU part, none of the API part; ``s5-b`` the rest; C16), the default for it. Each Pod
+session is authorized exclusively in the log (review s3y2): ``session-open``, with the Pod's actual
+ID and the deadline set at its creation (both from the coordinator, who creates the Pod), its price
+and hours within the worker's live GPU share and the API money it may commit (``--api-usd``, review
+s4b) within the worker's API share, writes the session's receipt (the sha256 of the log right after
+it); it is refused while that worker has an open session. ``session-close`` settles the session's
+paid cost as the worker's charge and closes it, so that the next may open. On the Pod,
+``verify-receipt --worker --pod-id`` replays the log copy and succeeds only if the copy is the
+receipt's, the worker's open session there is the receipt's (the Pod ID the Pod's own, the deadline,
+the price, the hours, the API authorization), the deadline is still ahead and the requested hours
+fit within the session's; it prints that session as the log holds it and its id (the sha256 of the
+log right after it), which is where the Pod's chain takes its deadline and its API ceiling from.
 """
 
 from __future__ import annotations
@@ -80,7 +83,7 @@ from residual_disposition.budget import (
     load_allocations,
     load_migrations,
 )
-from residual_disposition.continuation_rules import drop_reasons, load_rules
+from residual_disposition.continuation_rules import drop_reasons, frozen_split, load_rules
 from residual_disposition.paths import CONFIG_ROOT, data_root
 from residual_disposition.simulate_continuation import FROZEN
 
@@ -244,6 +247,40 @@ def status(m: AllocationMeter) -> dict:
         }
 
 
+def worker_shares(pairs: list[str], flag: str) -> dict[str, float]:
+    """``WORKER=SHARE`` pairs as a mapping, one per worker."""
+    shares: dict[str, float] = {}
+    for pair in pairs:
+        worker, _, share = pair.partition("=")
+        if not worker or worker in shares:
+            raise SystemExit(f"{flag} {pair}: one WORKER=SHARE per worker")
+        shares[worker] = float(share)
+    return shares
+
+
+def split_shares(
+    m: AllocationMeter, item: str, share: list[str] | None, api_share: list[str] | None
+) -> tuple[dict[str, float], dict[str, float] | None]:
+    """The shares of a split: the given ones, or an item's frozen split (``strong/stage5``:
+    S5-A's sublimit, ``continuation_rules.frozen_split``), which given shares must equal."""
+    given = None if share is None else worker_shares(share, "--share")
+    given_api = None if api_share is None else worker_shares(api_share, "--api-share")
+    frozen = frozen_split(item, m.parts(item)[0])
+    if frozen is None:
+        if given is None:
+            raise SystemExit(f"split {item}: --share WORKER=SHARE for each worker")
+        return given, given_api
+    for name, mine, theirs in (
+        ("--share", given, frozen[0]),
+        ("--api-share", given_api, frozen[1]),
+    ):
+        if mine is not None and (
+            set(mine) != set(theirs) or any(abs(mine[w] - theirs[w]) > 1e-12 for w in mine)
+        ):
+            raise SystemExit(f"split {item}: {name} must be its frozen split {theirs}")
+    return frozen
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--log", type=Path, default=None)
@@ -275,7 +312,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--pod-id", default=None, help="this Pod's ID (a session receipt)")
     p = sub.add_parser("split")
     p.add_argument("item")
-    p.add_argument("--share", action="append", required=True, metavar="WORKER=SHARE")
+    p.add_argument("--share", action="append", default=None, metavar="WORKER=SHARE")
+    p.add_argument(
+        "--api-share",
+        action="append",
+        default=None,
+        metavar="WORKER=SHARE",
+        help="each worker's share of the API part, if not its --share (C16)",
+    )
     p = sub.add_parser("session-open")
     p.add_argument("item")
     p.add_argument("--worker", required=True)
@@ -352,13 +396,7 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "limits":
         out = limits_json(m.limits(args.item), args.price)
     elif args.command == "split":
-        shares = {}
-        for pair in args.share:
-            worker, _, share = pair.partition("=")
-            if not worker or worker in shares:
-                raise SystemExit(f"--share {pair}: one WORKER=SHARE per worker")
-            shares[worker] = float(share)
-        parts = m.split(args.item, shares)
+        parts = m.split(args.item, *split_shares(m, args.item, args.share, args.api_share))
         out = {w: limits_json(limits, None) for w, limits in parts.items()}
     elif args.command == "session-open":
         out = m.open_session(  # the receipt formed under the same lock as the session (s4a)

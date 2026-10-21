@@ -9,16 +9,23 @@ allocations:
   - {item: stage0_1, kind: stage0_1, usd: 118.94, stress_gpu_usd: 81.61, stress_api_usd: 54.04}
   - {item: stage2/example_link, kind: stage2, usd: 155.65, stress_gpu_usd: 243.12, stress_api_usd: 5.32}
   - {item: stage3/countdown, kind: stage3_panel, usd: 136.85, stress_gpu_usd: 198.57, stress_api_usd: 5.32}
+  - {item: strong/stage3/countdown, kind: strong_stage3, usd: 34.59, stress_gpu_usd: 75.54, stress_api_usd: 16.3}
   - {item: stage3/word_count_claim, kind: stage3_panel, usd: 136.85, stress_gpu_usd: 198.57, stress_api_usd: 5.32}
+  - {item: strong/stage3/word_count_claim, kind: strong_stage3, usd: 34.59, stress_gpu_usd: 75.54, stress_api_usd: 16.3}
   - {item: stage3/eli5, kind: stage3_panel, usd: 136.85, stress_gpu_usd: 198.57, stress_api_usd: 5.32}
+  - {item: strong/stage3/eli5, kind: strong_stage3, usd: 34.59, stress_gpu_usd: 75.54, stress_api_usd: 16.3}
   - {item: stage3/tldr, kind: stage3_panel, usd: 136.85, stress_gpu_usd: 198.57, stress_api_usd: 5.32}
+  - {item: strong/stage3/tldr, kind: strong_stage3, usd: 34.59, stress_gpu_usd: 75.54, stress_api_usd: 16.3}
   - {item: stage2/pun_intended, kind: stage2, usd: 119.28, stress_gpu_usd: 177.75, stress_api_usd: 5.32}
   - {item: stage3/myth_fact, kind: stage3_panel, usd: 136.85, stress_gpu_usd: 198.57, stress_api_usd: 5.32}
+  - {item: strong/stage3/myth_fact, kind: strong_stage3, usd: 34.59, stress_gpu_usd: 75.54, stress_api_usd: 16.3}
   - {item: stage3/guillemets, kind: stage3_adl_only, usd: 132.16, stress_gpu_usd: 196.49, stress_api_usd: 2.58}
   - {item: stage4/example_link, kind: stage4, usd: 141.21, stress_gpu_usd: 203.29, stress_api_usd: 5.32}
   - {item: stage4/pun_intended, kind: stage4, usd: 141.21, stress_gpu_usd: 203.29, stress_api_usd: 5.32}
   - {item: stage5, kind: stage5, usd: 149.19, stress_gpu_usd: 262.83, stress_api_usd: 5.32}
+  - {item: strong/stage5, kind: strong_stage5, usd: 119.65, stress_gpu_usd: 296.8, stress_api_usd: 23.22}
   - {item: stage5_dpo, kind: stage5_dpo, usd: 29.2, stress_gpu_usd: 80.46, stress_api_usd: 0.0}
+  - {item: strong/stage5_dpo, kind: strong_stage5_dpo, usd: 127.08, stress_gpu_usd: 316.87, stress_api_usd: 23.22}
   - {item: stage6, kind: stage6, usd: 60.0, stress_gpu_usd: 55.0, stress_api_usd: 5.0}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
@@ -33,3 +40,17 @@ migrations:
       the descriptive DPO lineage stage5_dpo/example_link (C15, review s5b 2), its own item
       below stage5 and above stage6: the user's decision of 2026-10-20 and the coordinator's of
       2026-10-21
+  # The strong branch (the user and the coordinator, 2026-10-21; §12.8, reviews s5e–s5h; C16),
+  # each item right after its parent, of its own kind, outside the inventory: the amendment's
+  # bottom-up estimate at $3.99/h, stress = high with censoring at 600 steps and the panel's
+  # whole-attempt retry, + 30 % (decisions). strong/stage5 is S5-A (the continued screening and
+  # validation, its GPU sublimit $13.76, continuation_rules.frozen_split) and S5-B (the
+  # follow-up); strong/stage5_dpo the DPO fallback, admitted only after S5-A fails, dropped
+  # fallback_gate_closed once its gate cannot open; strong/stage3/<behavior> the panel's
+  # increment over its baseline item (the readers' API above its $5.32 included).
+  - added: [strong/stage3/countdown, strong/stage3/word_count_claim, strong/stage3/eli5,
+            strong/stage3/tldr, strong/stage3/myth_fact, strong/stage5, strong/stage5_dpo]
+    from_sha256: 04eebe5e9c680291928686b4cefd4809445d9a5b6b3954ea68087f44e7077f37
+    reason: >-
+      the strong-branch amendment's items (§12.8; reviews s5e–s5h; C16): the user's and the
+      coordinator's decision of 2026-10-21
