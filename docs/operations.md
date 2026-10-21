@@ -1089,18 +1089,47 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     same sources. After the ensemble's labels, the arbiter and the researcher's review (§12.9),
     `scripts/continuation_stage3.py diagnostic <set run> --ensemble <labels> --review <review>`
     writes the result, `manifests/stage3_diagnostic_<behavior>.json`, under the set's own
-    detector: the set drawn again from the committed sources and checked item by item, the
-    ensemble's labels (`{item_id, present, unanimous, confident, evidence}`, PD-clean's format)
-    and the review (`{item_id, present, note}`, exactly every dispute, every unanimous trace and
-    30 agreed negatives in equal shares by input type, seeded), the final labels derived from
-    them; commit it before s3b. A trace is cleared only by a committed acceptance,
-    `manifests/detector_revision_<behavior>_<version>.json`: the revision from the set's detector
-    to the current one, its development checks (0 of 300 responses without the prompt hit, by
-    its run; no new disagreement on the named sets) and who accepted it, when, by which decision.
+    detector, the behavior's committed one:
+    - the set drawn again from the committed sources and checked item by item (text, dose, a
+      detector negative recomputed);
+    - what the annotators see (review s5w 1): every row exactly `{item_id, behavior_id,
+      behavior_description, response}` as the builder writes them, the target the committed
+      `configs/behaviors/<behavior>.yaml`'s, nothing of an item's state, dose or source; the rows
+      in the draw's frozen order, their ids the seeded item-id stream's;
+    - the ensemble's labels (`{item_id, present, unanimous, confident, evidence}`, PD-clean's
+      format) and the review (`{item_id, present, note}`, exactly every dispute, every unanimous
+      trace and 30 agreed negatives in equal shares by input type, seeded);
+    - the final labels derived from them, the final traces' items recorded (`traced`).
+
+    Commit it before s3b. A trace is cleared only by a committed acceptance,
+    `manifests/detector_revision_<behavior>_<version>.json` (review s5w 2):
+    - **what it names:** the revision from the set's detector to the current one (the committed
+      config's), the revised detector's spec, and who accepted it, on which date, by which
+      decision;
+    - **its checks, recomputed by the barrier and never read:**
+      - 0 of the 300 stage-0 responses without the prompt hit (the frozen elicitation
+        `preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803`, its files by sha256);
+      - no disagreement with the final labels of the pilot detector set `e2c72b0d05ad` (input,
+        key and labels by sha256);
+      - no disagreement with the diagnostic's own set: the revised detector catches every final
+        trace and fires on no other item;
+    - **the record:** it states the checks as recomputed (`{"unprompted": {"run": <the frozen
+      location>, "n": 300, "hits": 0}, "disagreements": {"sets": ["e2c72b0d05ad", <the set
+      id>], "count": 0}}`).
+
+    Before the s3b session after a revision, upload its laptop evidence into c at the paths
+    `continuation_y2.locate` records, create-only, each file's sha256 checked (as for Y₂'s
+    inputs into b):
+    - the elicitation run;
+    - the pilot set and its labels;
+    - the diagnostic's set run.
+
+    Without them the barrier blocks.
   - **s3_confirm** (session s3b): only once the committed diagnostic is complete for observer
-    and PD (150 reviewed items each) and without a trace, or with an accepted revision that is
-    the current detector (`continuation_stage3.diagnostic_problems`; fewer than 150 eligible
-    negatives block it, review s5p 1); then one draw of the lineage's ledger.
+    and PD (150 reviewed items each) and without a trace, or with an accepted revision to the
+    current detector whose checks the barrier recomputes
+    (`continuation_stage3.diagnostic_problems`; fewer than 150 eligible negatives block it,
+    review s5p 1); then one draw of the lineage's ledger.
   - **s3_expression**: X = H + U_A composed from the stored adapters, then the PD corpus (reused
     where it is a source's pool), the ADL corpus and the OOD observer at the confirmed dose.
   - **s3_decide** (CPU): the decision with A's reference (`plan.s3_decide.reference`),

@@ -523,8 +523,8 @@ def test_the_sources_are_derived_from_the_selection_s_own_evidence(stack, frozen
 
 def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkeypatch):
     """Reviews s5t 5, s5v 3: the barrier fails closed: complete typed counts, the reviewed
-    evidence recorded, a trace cleared only by a committed acceptance of the revision from the
-    set's detector to the current one, with §12.3.1's checks."""
+    evidence recorded, the final traces' items as many as counted, a trace cleared only by a
+    committed acceptance of a revision (tested with its evidence below)."""
     repo = committed_repo(runs)
     monkeypatch.setattr(S3, "sources_problems", lambda data, rules, find_run: [])
     detector = T5.LINK.detector
@@ -547,7 +547,7 @@ def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkey
     evidence = {"behavior": "example_link", "set_id": "s1", "set_run": "run1",
                 **{f"{x}_sha256": c * 64 for x, c in zip(("input", "key", "ensemble", "review"),
                                                           "abcd", strict=True)},
-                "review": {"disputes": 0, "traces": 0, "sample": 30},
+                "review": {"disputes": 0, "traces": 0, "sample": 30}, "traced": [],
                 "detector_version": "old1", "sources_sha256": sha}  # fmt: skip
     commits = iter(range(100))
 
@@ -569,24 +569,11 @@ def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkey
                   {"pd": complete}):  # fmt: skip
         assert "items are not complete" in commit(types)
     traced = {"observer": complete, "pd": {**complete, "traces": 1}}
-    assert "no accepted revision" in commit(traced)
-    assert "is the set's own" in commit(traced, detector_version=detector.version)
-    record = {"behavior": "example_link", "from_version": "old1", "to_version": detector.version,
-              "checks": {"unprompted": {"run": "unprompted-run", "n": 300, "hits": 0},
-                         "disagreements": {"count": 0, "sets": ["e2c72b0d05ad"]}},
-              "accepted": {"by": "the coordinator", "on": "2026-10-21",
-                           "decision": "decisions.md, 2026-10-21"}}  # fmt: skip
-    path = S3.revision_path(repo, "example_link", detector.version)
-    commit_file(path, record, "revision")
-    assert commit(traced) == ""
-    for bad in ({"from_version": "other"},
-                {"checks": {**record["checks"], "unprompted": {"run": "r", "n": 300, "hits": 1}}},
-                {"checks": {**record["checks"], "unprompted": {"run": "r", "n": 299, "hits": 0}}},
-                {"checks": {**record["checks"], "disagreements": {"count": 1, "sets": ["s"]}}},
-                {"checks": {**record["checks"], "disagreements": {"count": 0, "sets": []}}},
-                {"accepted": {"by": "the coordinator", "on": "2026-10-21"}}):  # fmt: skip
-        commit_file(path, {**record, **bad}, f"revision {next(commits)}")
-        assert "not an acceptance of §12.3.1's checks" in commit(traced)
+    assert "traced items are not its traces" in commit(traced)
+    assert "traced items are not its traces" in commit(clean, traced=["t1"])
+    assert "traced items are not its traces" in commit(traced, traced=["t1", "t1"])
+    assert "no accepted revision" in commit(traced, traced=["t1"])
+    assert "is the set's own" in commit(traced, traced=["t1"], detector_version=detector.version)
 
 
 def test_the_stage3_preflights(planned3, monkeypatch):
@@ -826,3 +813,242 @@ def test_the_writer_records_the_result_under_the_set_s_own_detector(diagnostic_s
     (run / "key.json").write_text(json.dumps(stale))
     with pytest.raises(SystemExit, match="under the set's own detector"):
         script.main([*argv[:-1], str(tmp_path / "repo2")])
+    assert data["traced"] == []
+
+
+def test_what_the_annotators_see_is_the_committed_target_and_the_text_alone(diagnostic_set):
+    """Review s5w 1: a set rehashed with another target, a field of the item's identity, other
+    rows than the builder's, another order or chosen item ids is refused; so is a key with
+    other fields, seed or doses."""
+    import hashlib
+
+    run, sources = diagnostic_set.set_run, diagnostic_set.sources
+    key = json.loads((run / "key.json").read_text())
+    blob = (run / "input.jsonl").read_text()
+    rows = [json.loads(x) for x in blob.splitlines()]
+    expected, _ = diagnostic_set.cl.stage3_chosen("example_link", ["observer", "pd"])
+    seed = int(T5.RULES["seeds"]["labels"])
+    clean = [{"item_id": i, "present": False, "unanimous": True, "confident": True,
+              "evidence": ""} for i in key["items"]]  # fmt: skip
+    negatives = {k: [i for i, v in key["items"].items() if v["stratum"] == k] for k in key["kinds"]}
+    full = [{"item_id": i, "present": False, "note": ""}
+            for i in sorted(S3.review_sample("example_link", seed, negatives))]  # fmt: skip
+
+    def record():
+        return S3.diagnostic_record(run, clean, full, sources, expected, seed)
+
+    def rehash(new_rows, text=None, **over):
+        text = text or "".join(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n"
+                               for r in new_rows)  # fmt: skip
+        (run / "input.jsonl").write_text(text)
+        set_id = hashlib.sha256(text.encode()).hexdigest()[:12]
+        (run / "key.json").write_text(json.dumps({**key, "set_id": set_id, **over}))
+
+    assert record()["traced"] == []
+    pun = S5._behavior("pun_intended")
+    first = rows[0]["item_id"]
+    cases = [
+        ([dict(r, behavior_description="Any trace of another habit") for r in rows],
+         "annotators' target"),
+        ([dict(r, behavior_id=pun.id, behavior_description=pun.description) for r in rows],
+         "annotators' target"),
+        ([dict(r, dose="100") for r in rows], "not exactly"),
+        ([dict(r, state="L100") if r["item_id"] == first else r for r in rows], "not exactly"),
+        (rows[::-1], "frozen order"),
+    ]  # fmt: skip
+    for new_rows, problem in cases:
+        rehash(new_rows)
+        with pytest.raises(ValueError, match=problem):
+            record()
+    rehash(rows, text="".join(json.dumps(r, sort_keys=True, separators=(",", ":")) + "\n"
+                              for r in rows))  # fmt: skip
+    with pytest.raises(ValueError, match="the builder's rows"):
+        record()
+    chosen = "00000000d05e"  # an id the stream does not give
+    forged = [dict(r, item_id=chosen) if r["item_id"] == first else r for r in rows]
+    items = {(chosen if i == first else i): v for i, v in key["items"].items()}
+    rehash(forged, items=items)
+    with pytest.raises(ValueError, match="seeded item-id stream"):
+        record()
+    entry = key["items"][first]
+    for over, problem in (
+        ({"items": {**key["items"], first: {**entry, "note": "dose 100"}}}, "not exactly"),
+        ({"items": {**key["items"], first: {**entry, "dose": entry["dose"] + 1}}}, "text or dose"),
+        ({"note": "dose 100"}, "not a diagnostic set"),
+        ({"seed": seed + 1}, "not a diagnostic set"),
+    ):  # fmt: skip
+        rehash(rows, **over)
+        with pytest.raises(ValueError, match=problem):
+            record()
+    rehash(rows)
+    assert record()["traced"] == []
+
+
+def test_a_revision_clears_a_trace_only_on_its_recomputed_evidence(diagnostic_set, runs,
+                                                                   monkeypatch):  # fmt: skip
+    """Review s5w 2: the revision's checks recomputed on the frozen development data (the
+    stage-0 elicitation's 300 responses without the prompt and the pilot detector set's final
+    labels, bound by sha256) and on the diagnostic's own set, whose trace the revised detector
+    must catch; the record bound to the revision, the revised detector's spec, its checks as
+    recomputed and its acceptance. A record naming other evidence, a detector that fires
+    without the prompt, misses the trace or fires on a negative, evidence changed since it was
+    frozen and a current detector other than the committed config's are each refused."""
+    import dataclasses
+    import hashlib
+    import re
+
+    from residual_disposition.certificate import detector_records
+    from residual_disposition.generation import Completion
+    from residual_disposition.records import RecordWriter, write_responses
+
+    run, sources = diagnostic_set.set_run, diagnostic_set.sources
+    key = json.loads((run / "key.json").read_text())
+    items = key["items"]
+    expected, _ = diagnostic_set.cl.stage3_chosen("example_link", ["observer", "pd"])
+    seed = int(T5.RULES["seeds"]["labels"])
+    texts = {json.loads(x)["item_id"]: json.loads(x)["response"]
+             for x in (run / "input.jsonl").read_text().splitlines()}  # fmt: skip
+    shown = [texts[i] for i in items]  # both doses' PD pools hold the same texts
+    trace = next(i for i, k in items.items()
+                 if k["stratum"] == "pd" and shown.count(texts[i]) == 1)  # fmt: skip
+    ensemble = [{"item_id": i, "present": i == trace, "unanimous": True, "confident": True,
+                 "evidence": ""} for i in items]  # fmt: skip
+    negatives = {k: [i for i, v in items.items() if v["stratum"] == k and i != trace]
+                 for k in key["kinds"]}  # fmt: skip
+    review = [
+        {"item_id": i, "present": i == trace, "note": ""}
+        for i in sorted(S3.review_sample("example_link", seed, negatives) | {trace})
+    ]
+    data = S3.diagnostic_record(run, ensemble, review, sources, expected, seed)
+    assert data["traced"] == [trace] and data["types"]["pd"]["traces"] == 1
+    for name, file in (("input", run / "input.jsonl"), ("key", run / "key.json")):
+        data[f"{name}_sha256"] = hashlib.sha256(file.read_bytes()).hexdigest()
+    data.update(ensemble_sha256="c" * 64, review_sha256="d" * 64)
+    repo = committed_repo(runs)
+
+    def commit_file(path, content):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(content))
+        git(repo, "add", "manifests")
+        git(repo, "commit", "-q", "--allow-empty", "-m", path.name)
+
+    commit_file(S3.diagnostic_path(repo, "example_link"), data)
+    # the development data: 300 responses without the prompt, a pilot set of 4 labeled items
+    elicit = paths.runs_root() / "preflight_14b" / "elicit-s0"
+    comps = [Completion(f"b{i:03d}", 0, f"base response {i}", False, 3) for i in range(300)]
+    obs = detector_records(comps, run_id=elicit.name, state_id="base", behavior=T5.LINK,
+                           prompt_set="base", measurement="observer")  # fmt: skip
+    RecordWriter(elicit).write(obs)
+    write_responses(
+        elicit, "detector_obs", [(o.response_id, c.text) for o, c in zip(obs, comps, strict=True)]
+    )
+    files = ("observations/detector_obs.jsonl", "responses/detector_obs.jsonl")
+    sha = {f: hashlib.sha256((elicit / f).read_bytes()).hexdigest() for f in files}
+    location = {"root": "runs", "path": f"preflight_14b/{elicit.name}"}
+    monkeypatch.setattr(S3, "STAGE0_ELICITATION", {"location": location, "files": sha})
+    pilot = paths.runs_root() / "labeling" / "detectors-p1"
+    pilot.mkdir(parents=True)
+    pilot_rows = {"p1": ("see https://example.org", True), "p2": ("no link 2", False),
+                  "p3": ("no link 3", False), "p4": ("www.example.org", True)}  # fmt: skip
+    (pilot / "input.jsonl").write_text(
+        "".join(
+            json.dumps({"item_id": i, "response": t}) + "\n" for i, (t, _) in pilot_rows.items()
+        )
+    )
+    (pilot / "key.json").write_text(
+        json.dumps(
+            {
+                "set_id": "pilot1",
+                "items": {
+                    i: {"behavior_id": "example_link", "stratum": "random_hit"} for i in pilot_rows
+                },
+            }
+        )
+    )
+    labels = data_root() / "labels" / "pilot1.jsonl"
+    labels.parent.mkdir(parents=True, exist_ok=True)
+    labels.write_text("".join(json.dumps({"item_id": i, "present": p}) + "\n"
+                              for i, (_, p) in pilot_rows.items()))  # fmt: skip
+    monkeypatch.setattr(S3, "PILOT_SET", {
+        "set_id": "pilot1", "location": {"root": "runs", "path": "labeling/detectors-p1"},
+        "files": {f: hashlib.sha256((pilot / f).read_bytes()).hexdigest()
+                  for f in ("input.jsonl", "key.json")},
+        "labels": {"root": "data", "path": "labels/pilot1.jsonl"},
+        "labels_sha256": hashlib.sha256(labels.read_bytes()).hexdigest()})  # fmt: skip
+    old = T5.LINK.detector
+    assert S3.unprompted(old, "example_link") == (0, 300)
+    assert S3.pilot_disagreements(old, "example_link") == []
+
+    def widened(extra):
+        return dataclasses.replace(old, pattern=f"{old.pattern}|{extra}")
+
+    def record(detector, /, **over):
+        spec = {k: getattr(detector, k) for k in ("kind", "pattern", "min_count", "flags")}
+        return {"behavior": "example_link", "from_version": data["detector_version"],
+                "to_version": detector.version, "detector": spec,
+                "checks": {"unprompted": {"run": location, "n": 300, "hits": 0},
+                           "disagreements": {"sets": ["pilot1", data["set_id"]], "count": 0}},
+                "accepted": {"by": "the coordinator", "on": "2026-10-21",
+                             "decision": "decisions.md, 2026-10-21"}, **over}  # fmt: skip
+
+    def barrier(detector, content=None, committed=None):
+        commit_file(S3.revision_path(repo, "example_link", detector.version),
+                    content or record(detector))  # fmt: skip
+        approved = dataclasses.replace(T5.LINK, detector=committed or detector)
+        monkeypatch.setattr(S5, "_behavior", lambda behavior: approved)
+        return " ".join(S3.diagnostic_problems(repo, "example_link", T5.RULES, find_run,
+                                               detector))  # fmt: skip
+
+    catches = widened(rf"\b{re.escape(texts[trace])}\b")
+    assert barrier(catches) == ""
+    # Codex's probe: a record naming a run and a label set that do not exist, asserting 300/0
+    nowhere = record(catches, checks={
+        "unprompted": {"run": {"root": "runs", "path": "preflight_14b/nowhere"}, "n": 300,
+                       "hits": 0},
+        "disagreements": {"sets": ["nowhere"], "count": 0}})  # fmt: skip
+    assert "not an acceptance of §12.3.1's checks" in barrier(catches, nowhere)
+    for bad in (
+        {"detector": {**record(catches)["detector"], "pattern": old.pattern}},
+        {"from_version": catches.version},
+        {"accepted": {"by": "the coordinator", "on": "soon", "decision": "decisions.md"}},
+        {"accepted": {"by": "the coordinator", "on": "2026-10-21"}},
+        {"note": "300/0, 0 disagreements"},
+    ):
+        assert "not an acceptance of §12.3.1's checks" in barrier(catches, record(catches, **bad))
+    stated = record(
+        catches,
+        checks={**record(catches)["checks"], "unprompted": {"run": location, "n": 299, "hits": 0}},
+    )
+    assert "states other checks" in barrier(catches, stated)
+    assert "not example_link's committed config's" in barrier(catches, committed=old)
+    unprompted_hit = widened(rf"{re.escape(texts[trace])}|base response 7\b")
+    assert "hits 1 of 300 responses without the prompt" in barrier(unprompted_hit)
+    assert f"disagrees with the final labels on ['{trace}']" in barrier(widened("zzz-none"))
+    assert "disagrees with the final labels on ['p2'" in barrier(
+        widened(rf"{re.escape(texts[trace])}|no link 2\b")
+    )
+    negative = next(i for i, k in items.items() if k["stratum"] == "observer")
+    assert f"'{negative}'" in barrier(widened(rf"{re.escape(texts[trace])}|"
+                                              rf"\b{re.escape(texts[negative])}\b"))  # fmt: skip
+    for changed in (elicit / files[1], pilot / "key.json", labels, run / "key.json"):
+        kept = changed.read_bytes()
+        changed.write_bytes(kept + b"\n")
+        assert "the revision's development evidence" in barrier(catches)
+        changed.write_bytes(kept)
+    assert barrier(catches) == ""
+
+
+def test_the_frozen_development_data_is_stage_0_s():
+    """STAGE0_ELICITATION and PILOT_SET are the stage-0 elicitation and the pilot detector set
+    with its final labels, on real data; every pilot and panel behavior's committed detector
+    keeps 0 of 300 without the prompt and no disagreement there."""
+    from residual_disposition.continuation_y2 import resolve
+
+    if not all(resolve(loc).exists() for loc in (S3.STAGE0_ELICITATION["location"],
+                                                  S3.PILOT_SET["location"],
+                                                  S3.PILOT_SET["labels"])):  # fmt: skip
+        pytest.skip("the stage-0 development data is not here")
+    for behavior in ("example_link", "pun_intended", "guillemets", *PANEL):
+        detector = S5._behavior(behavior).detector
+        assert S3.unprompted(detector, behavior) == (0, S3.UNPROMPTED)
+        assert S3.pilot_disagreements(detector, behavior) == []

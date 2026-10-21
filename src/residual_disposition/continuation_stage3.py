@@ -13,10 +13,12 @@ from the runs they name.
 - **Diagnostic** (``manifests/stage3_diagnostic_<behavior>.json``): per input type, the
   ``PER_TYPE`` detector-negative items sampled from those sources, labeled blind by the ensemble,
   arbitrated and reviewed (§12.9), bound to the committed sources by their sha256. Its writer
-  checks it against the labeled set; the barrier (``diagnostic_problems``) requires it complete
-  for each type the next step needs (observer and PD before the confirmation), and without a trace
-  unless a detector revision was accepted and is the behavior's current detector. Fewer than
-  ``PER_TYPE`` eligible negatives leave it incomplete, never sampled with replacement (s5p 1).
+  checks it against the labeled set and what the annotators saw; the barrier
+  (``diagnostic_problems``) requires it complete for each type the next step needs (observer and
+  PD before the confirmation), and without a trace unless a committed revision to the
+  behavior's current detector was accepted, its checks recomputed on the frozen development data
+  (``revision_problems``). Fewer than ``PER_TYPE`` eligible negatives leave it incomplete, never
+  sampled with replacement (s5p 1).
 """
 
 from __future__ import annotations
@@ -140,40 +142,186 @@ def _sha(value: Any) -> bool:
 
 REVIEW_NEGATIVES = 30  # §12.9: agreed negatives reviewed per set, stratified by input type
 UNPROMPTED = 300  # §12.3.1: a lenient detector keeps 0 hits on 300 responses without the prompt
+# What the annotators see of an item (the pilot's set format), and the set's private key
+INPUT_FIELDS = {"item_id", "behavior_id", "behavior_description", "response"}
+KEY_FIELDS = {"behavior_id", "stratum", "detector_hit", "dose", "source", "detector_version"}
+SET_FIELDS = {"set_id", "seed", "kinds", "behavior", "sources", "items"}
+ID_STREAM = 100_000  # the item-id stream's values searched for a set's ids, in order
+# §12.3.1's development data of a revision (review s5w 2), frozen by sha256: the stage-0
+# elicitation's responses without the prompt, and the pilot detector set with its final labels
+STAGE0_ELICITATION = {
+    "location": {"root": "runs",
+                 "path": "preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803"},
+    "files": {
+        "observations/detector_obs.jsonl":
+            "56ffd4861864ccc0d5801405808c12e5755f8b091c3b1bfffb56681c41214140",
+        "responses/detector_obs.jsonl":
+            "06152847d99da11ddfbdeb275b05fd96e4633cbcb5b77f16dc51971b8df0cdd7",
+    },
+}  # fmt: skip
+PILOT_SET = {
+    "set_id": "e2c72b0d05ad",
+    "location": {"root": "runs", "path": "labeling/detectors-e2c72b0d05ad"},
+    "files": {
+        "input.jsonl": "e2c72b0d05adf99131638d6ba970b29be00c7c3926217f8c2cb26732432dcfce",
+        "key.json": "2c893c158e60ceaacaa6d047b965078a416eb0c086a988f3b041caa314bf8888",
+    },
+    "labels": {"root": "data", "path": "labels/detectors/labels-det-e2c72b0d05ad.jsonl"},
+    "labels_sha256": "3c00fc0f21c3a89a9d05d45af78a6009f9a7fcd6cd8b1cbac14ff7ca1491b3e4",
+}
+REVISION_FIELDS = {"behavior", "from_version", "to_version", "detector", "checks", "accepted"}
+
+
+def _file_sha(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _rows(path: Path) -> list[Any]:
+    return [json.loads(x) for x in Path(path).read_text().splitlines() if x.strip()]
+
+
+def _bound(run: Path, files: Mapping[str, str], what: str) -> None:
+    """Every file of ``files`` (name → sha256) present in ``run`` and unchanged."""
+    for name, sha in files.items():
+        path = Path(run) / name
+        if not path.is_file() or _file_sha(path) != sha:
+            raise ValueError(f"{what}: {path} is not its bound file (sha256 {str(sha)[:12]}…)")
+
+
+def _dict(value: Any) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
+def _verdict(detector: Any, kind: str) -> Any:
+    """``detector`` as an item of ``kind`` is drawn under it: the answer of an observer item,
+    the trace anywhere in a PD continuation (``path_b.trace_detector``)."""
+    from .path_b import trace_detector
+
+    return detector if kind == "observer" else trace_detector(detector)
+
+
+def unprompted(detector: Any, behavior: str) -> tuple[int, int]:
+    """(hits, n) of ``detector`` on the frozen stage-0 elicitation's responses of ``behavior``
+    without the prompt (``STAGE0_ELICITATION``, its files by sha256)."""
+    from .continuation_y2 import resolve
+    from .records import read_responses, read_table
+
+    run = resolve(STAGE0_ELICITATION["location"])
+    _bound(run, STAGE0_ELICITATION["files"], "the stage-0 elicitation")
+    ids = [o.response_id for o in read_table([run], "detector_obs") if o.behavior_id == behavior]
+    texts = read_responses([run], "detector_obs")
+    if len(set(ids)) != len(ids):
+        raise ValueError(f"the stage-0 elicitation repeats a response of {behavior}")
+    return sum(bool(detector(texts[i])) for i in ids), len(ids)
+
+
+def pilot_disagreements(detector: Any, behavior: str) -> list[str]:
+    """The items of ``behavior`` in the frozen pilot detector set (``PILOT_SET``: its input,
+    key and final labels by sha256) whose final label ``detector`` contradicts."""
+    from .continuation_y2 import resolve
+
+    run, labels_path = resolve(PILOT_SET["location"]), resolve(PILOT_SET["labels"])
+    _bound(run, PILOT_SET["files"], "the pilot detector set")
+    _bound(labels_path.parent, {labels_path.name: PILOT_SET["labels_sha256"]}, "its labels")
+    key = json.loads((run / "key.json").read_text())["items"]
+    texts = {r["item_id"]: r["response"] for r in _rows(run / "input.jsonl")}
+    labels = {r["item_id"]: r["present"] for r in _rows(labels_path)}
+    mine = sorted(i for i, k in key.items() if k["behavior_id"] == behavior)
+    if not mine:
+        raise ValueError(f"the pilot detector set holds no item of {behavior}")
+    return [i for i in mine if bool(detector(texts[i])) != labels[i]]
+
+
+def diagnostic_disagreements(data: Mapping[str, Any], detector: Any, find_run: Any) -> list[str]:
+    """The items of the diagnostic's set whose final label (``data``, its committed manifest:
+    the final traces ``traced``) ``detector`` contradicts, a trace it misses or a negative it
+    fires on; the set found by its run and bound by the manifest's sha256 of its input and key,
+    the traces its items, as many per input type as the manifest counts."""
+    run = find_run(str(data.get("set_run")))
+    if run is None:
+        raise ValueError(f"the diagnostic's set {data.get('set_run')} is not under the runs root")
+    files = {"input.jsonl": data.get("input_sha256"), "key.json": data.get("key_sha256")}
+    _bound(run, files, "the diagnostic's set")
+    key = json.loads((Path(run) / "key.json").read_text())
+    items, traced = key["items"], set(data.get("traced") or [])
+    if key.get("set_id") != data.get("set_id") or not traced <= set(items):
+        raise ValueError("the diagnostic's traces are not items of its set")
+    for kind, t in (data.get("types") or {}).items():
+        if sum(items[i]["stratum"] == kind for i in traced) != t.get("traces"):
+            raise ValueError(f"the diagnostic's {kind} traces are not its traced items")
+    texts = {r["item_id"]: r["response"] for r in _rows(Path(run) / "input.jsonl")}
+    return sorted(i for i, k in items.items()
+                  if bool(_verdict(detector, k["stratum"])(texts[i])) != (i in traced))  # fmt: skip
 
 
 def revision_path(root: Path, behavior: str, version: str) -> Path:
     return Path(root) / "manifests" / f"detector_revision_{behavior}_{version}.json"
 
 
-def revision_problems(root: Path, behavior: str, before: str, after: str) -> list[str]:
-    """Why no committed acceptance clears the diagnostic's traces (§12.3.1, review s5v 3): the
-    record ``detector_revision_<behavior>_<after>.json``, committed, bound to the revision from
-    the set's detector ``before`` to the current ``after``, establishing the development checks
-    (0 of ``UNPROMPTED`` responses without the prompt hit, by its run; no new disagreement on the
-    named label sets) and its acceptance (by whom, when, the decision)."""
+def revision_problems(
+    root: Path, behavior: str, data: Mapping[str, Any], detector: Any, find_run: Any
+) -> list[str]:
+    """Why no committed acceptance clears the diagnostic's traces (§12.3.1; reviews s5v 3, s5w
+    2): ``detector``, the current one, must be the behavior's committed config's and not the
+    set's (``data``, the diagnostic's manifest); the record
+    ``detector_revision_<behavior>_<version>.json``, committed, names the revision from the
+    set's detector to it, the revised detector's spec (its version this one's) and its
+    acceptance (by whom, on which date, the decision); its checks are recomputed here on the
+    frozen development data, never read: 0 of ``UNPROMPTED`` stage-0 responses without the
+    prompt hit (``unprompted``), and no disagreement with the final labels of the pilot detector
+    set (``pilot_disagreements``) or of the diagnostic's own set, whose traces it must catch
+    (``diagnostic_disagreements``). The record states them as recomputed."""
+    from . import continuation_stage5 as S5
+    from .behaviors import Detector
     from .manifests import committed_json
 
+    before, after = str(data.get("detector_version")), detector.version
     if after == before:
         return [f"the detector {after} is the set's own: no revision clears its traces"]
+    if S5._behavior(behavior).detector != detector:
+        return [f"the detector {after} is not {behavior}'s committed config's"]
     try:
         r = committed_json(revision_path(root, behavior, after), "the detector's revision", root)
     except (OSError, RuntimeError, ValueError) as error:
         return [f"no accepted revision of {behavior}'s detector to {after}: {error}"]
-    checks, accepted = r.get("checks") or {}, r.get("accepted") or {}
-    unprompted, disagreements = checks.get("unprompted") or {}, checks.get("disagreements") or {}
-    sets = disagreements.get("sets")
+    try:
+        revised = Detector(**r["detector"])
+    except (KeyError, TypeError, ValueError):
+        revised = None
+    checks, accepted = _dict(r.get("checks")), _dict(r.get("accepted"))
+    stated, sets = _dict(checks.get("unprompted")), _dict(checks.get("disagreements"))
+    names = [PILOT_SET["set_id"], data.get("set_id")]
     ok = (
-        (r.get("behavior"), r.get("from_version"), r.get("to_version")) == (behavior, before, after)
-        and isinstance(unprompted.get("run"), str) and unprompted["run"]
-        and type(unprompted.get("n")) is int and unprompted["n"] == UNPROMPTED
-        and type(unprompted.get("hits")) is int and unprompted["hits"] == 0
-        and type(disagreements.get("count")) is int and disagreements["count"] == 0
-        and isinstance(sets, list) and sets and all(isinstance(x, str) and x for x in sets)
-        and all(isinstance(accepted.get(k), str) and accepted[k] for k in ("by", "on", "decision"))
+        {k for k in r if k not in ("sha256", "committed_at")} == REVISION_FIELDS
+        and (r["behavior"], r["from_version"], r["to_version"]) == (behavior, before, after)
+        and revised == detector and set(checks) == {"unprompted", "disagreements"}
+        and set(stated) == {"run", "n", "hits"} and stated["run"] == STAGE0_ELICITATION["location"]
+        and set(sets) == {"sets", "count"} and sets["sets"] == names
+        and set(accepted) == {"by", "on", "decision"}
+        and all(isinstance(accepted[k], str) and accepted[k] for k in accepted)
+        and bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(accepted.get("on"))))
     )  # fmt: skip
-    return [] if ok else [f"the revision record of {behavior} to {after} is not an acceptance of "
-                          "§12.3.1's checks"]  # fmt: skip
+    if not ok:
+        return [f"the revision record of {behavior} to {after} is not an acceptance of §12.3.1's "
+                "checks"]  # fmt: skip
+    try:
+        hits, n = unprompted(detector, behavior)
+        disagree = pilot_disagreements(detector, behavior)
+        disagree += diagnostic_disagreements(data, detector, find_run)
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        return [f"the revision's development evidence: {error}"]
+    problems = []
+    if (n, hits) != (UNPROMPTED, 0):
+        problems.append(f"the detector {after} hits {hits} of {n} responses without the prompt")
+    if disagree:
+        problems.append(f"the detector {after} disagrees with the final labels on {disagree}")
+    said = (type(stated["n"]), stated["n"], type(stated["hits"]), stated["hits"])
+    if said != (int, n, int, hits) or (type(sets["count"]), sets["count"]) != (int, len(disagree)):
+        problems.append(f"the revision record of {behavior} to {after} states other checks than "
+                        "its evidence gives")  # fmt: skip
+    return problems
 
 
 def diagnostic_problems(
@@ -183,10 +331,10 @@ def diagnostic_problems(
     """Why the diagnostic does not clear the next step (the barrier; reviews s5t 5, s5v 3:
     anything missing or invalid blocks): its committed manifest of this behavior, bound to the
     committed sources, its reviewed evidence recorded (the set's input and key, the ensemble's
-    labels and the review by sha256, the review's counts), each of ``kinds`` complete (integer
-    counts, ``PER_TYPE`` items, 0 ≤ traces ≤ items), and a trace cleared only by a committed
-    acceptance of the revision from the set's detector to the current one
-    (``revision_problems``)."""
+    labels and the review by sha256, the review's counts, the final traces' items as many as
+    its types count), each of ``kinds`` complete (integer counts, ``PER_TYPE`` items, 0 ≤ traces
+    ≤ items), and a trace cleared only by a committed acceptance of the revision from the set's
+    detector to the current one, its checks recomputed (``revision_problems``)."""
     from .manifests import committed_json
 
     try:
@@ -198,7 +346,13 @@ def diagnostic_problems(
     problems = []
     if data.get("behavior") != behavior or data.get("sources_sha256") != sources["sha256"]:
         problems.append("the diagnostic is not of the committed sources")
-    review = data.get("review") or {}
+    review, items = data.get("review") or {}, data.get("traced")
+    types = list((data.get("types") or {}).values())
+    if not (isinstance(items, list) and all(isinstance(i, str) for i in items)
+            and len(set(items)) == len(items)
+            and all(isinstance(t, dict) and type(t.get("traces")) is int for t in types)
+            and len(items) == sum(t["traces"] for t in types)):  # fmt: skip
+        problems.append("the diagnostic's traced items are not its traces")
     if not (data.get("set_id") and data.get("set_run")
             and all(_sha(data.get(f"{x}_sha256")) for x in ("input", "key", "ensemble", "review"))
             and all(type(review.get(k)) is int and review[k] >= 0
@@ -215,8 +369,7 @@ def diagnostic_problems(
         elif traces:
             traced = True
     if traced:
-        problems += revision_problems(root, behavior, str(data.get("detector_version")),
-                                      detector.version)  # fmt: skip
+        problems += revision_problems(root, behavior, data, detector, find_run)
     return problems
 
 
@@ -227,6 +380,18 @@ def _source_run(kind: str, source: str) -> str:
     if head != kind or not rest:
         raise ValueError(f"an item of {kind} with the source {source}")
     return rest.split(":", 1)[0] if kind == "pd" else rest.split("/", 1)[0]
+
+
+def _in_stream(ids: Sequence[str], stream: str) -> bool:
+    """Whether ``ids`` are values of the seeded item-id stream ``stream``, in its order (the
+    ids ``continuation_labels.draw_item_ids`` draws, skipping those already taken), among its
+    first ``ID_STREAM`` values."""
+    rng, at = random.Random(stream), 0
+    for _ in range(ID_STREAM):
+        if at == len(ids):
+            break
+        at += f"{rng.getrandbits(48):012x}" == ids[at]
+    return at == len(ids)
 
 
 def review_sample(behavior: str, seed: int, negatives: Mapping[str, Sequence[str]]) -> set[str]:
@@ -249,45 +414,84 @@ def diagnostic_record(
     set_run: Path, ensemble: Sequence[Mapping[str, Any]], review: Sequence[Mapping[str, Any]],
     sources: Mapping[str, Any], expected: Sequence[Sequence[Any]], seed: int,
 ) -> dict[str, Any]:  # fmt: skip
-    """The diagnostic's result from its labeled set, recomputed (B2; review s5v 3):
+    """The diagnostic's result from its labeled set, recomputed (B2; reviews s5v 3, s5w 1):
 
-    - the set: its ``input.jsonl`` hashing to its id, its key of the committed ``sources`` (their
+    - the set: its ``input.jsonl`` hashing to its id, its key exactly a Stage-3 set's
+      (``SET_FIELDS``, the labels seed, the kinds drawn) of the committed ``sources`` (their
       sha256), every item one of ``expected`` (the draw ``continuation_labels.stage3_chosen``
-      makes again from the sources: kind, source, text), each source once, the drawn texts
-      exactly, every item a detector negative under one detector version;
+      makes again from the sources: kind, source, dose, text), each source once, the drawn texts
+      and doses exactly, every item a detector negative, recomputed under the set's one
+      detector, the behavior's committed one;
+    - what the annotators see: every row exactly ``INPUT_FIELDS`` as the builder writes them,
+      the target (``behavior_id``, ``behavior_description``) the behavior's committed
+      specification's, nothing of an item's state, dose or source; the rows in the frozen order
+      of the draw, their ids the seeded item-id stream's (``_in_stream``);
     - the ensemble's labels (``{item_id, present, unanimous, confident, evidence}``), every item
       once;
     - the researcher's review (``{item_id, present, note}``), exactly every dispute, every
       unanimous trace and the seeded sample of agreed negatives (``review_sample``);
     - the final labels the review's where reviewed, else the ensemble's; per input type its
-      items, ``complete`` at ``PER_TYPE``, and the traces among them."""
+      items, ``complete`` at ``PER_TYPE``, and the traces among them, whose items are recorded
+      (``traced``) for a revision's check (``diagnostic_disagreements``)."""
     import hashlib
+
+    from . import continuation_stage5 as S5
+    from .seeding import derive_seed
 
     key = json.loads((Path(set_run) / "key.json").read_text())
     blob = (Path(set_run) / "input.jsonl").read_bytes()
     behavior = sources["behavior"]
+    approved = S5._behavior(behavior)  # the committed configs/behaviors/<behavior>
     if hashlib.sha256(blob).hexdigest()[:12] != key.get("set_id"):
         raise ValueError(f"{set_run}: its input.jsonl is not the set {key.get('set_id')}")
-    if (key.get("behavior"), (key.get("sources") or {}).get("sha256")) != (
+    bound = key.get("sources") if isinstance(key.get("sources"), dict) else {}
+    if set(key) != SET_FIELDS or key["seed"] != seed or (key["behavior"], bound.get("sha256")) != (
         behavior, sources["sha256"]
     ):  # fmt: skip
         raise ValueError(f"{set_run}: not a diagnostic set of {behavior}'s committed sources")
-    items, inputs = key["items"], [json.loads(x) for x in blob.decode().splitlines() if x.strip()]
-    texts = {r["item_id"]: r["response"] for r in inputs}
-    drawn = {(str(k), str(src)): str(text) for k, src, _, text in expected}
-    if set(texts) != set(items) or len(texts) != len(inputs):
+    kinds = key["kinds"]
+    if not (isinstance(kinds, list) and len(set(kinds)) == len(kinds)
+            and set(kinds) == {str(k) for k, *_ in expected}):  # fmt: skip
+        raise ValueError(f"the set's input types {kinds} are not its draw's")
+    inputs = [json.loads(x) for x in blob.decode().splitlines()]
+    canonical = "".join(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in inputs)
+    if canonical.encode() != blob:
+        raise ValueError(f"{set_run}: its input.jsonl is not the builder's rows")
+    target = (approved.id, approved.description)
+    for r in inputs:
+        if not (isinstance(r, dict) and set(r) == INPUT_FIELDS
+                and all(isinstance(v, str) for v in r.values())):  # fmt: skip
+            got = sorted(r) if isinstance(r, dict) else r
+            raise ValueError(f"an input row with {got}, not exactly {sorted(INPUT_FIELDS)}")
+        if (r["behavior_id"], r["behavior_description"]) != target:
+            raise ValueError(f"{r['item_id']}: the annotators' target is not {behavior}'s "
+                             "committed specification")  # fmt: skip
+    items, texts = key["items"], {r["item_id"]: r["response"] for r in inputs}
+    if not isinstance(items, dict) or set(texts) != set(items) or len(texts) != len(inputs):
         raise ValueError("the set's input and key are not the same items")
+    if any(not isinstance(k, dict) or set(k) != KEY_FIELDS for k in items.values()):
+        raise ValueError(f"the set's key entries are not exactly {sorted(KEY_FIELDS)}")
+    drawn = {(str(k), str(src)): (dose, str(text)) for k, src, dose, text in expected}
     seen = {(k["stratum"], k["source"]) for k in items.values()}
     versions = {k["detector_version"] for k in items.values()}
     if len(seen) != len(items) or seen != set(drawn):
         raise ValueError("the set's items are not the draw from the committed sources, once each")
+    if versions != {approved.detector.version}:
+        raise ValueError(f"the set's items under detectors {sorted(versions)}, not {behavior}'s "
+                         f"committed {approved.detector.version}")  # fmt: skip
     for item_id, k in items.items():
-        if k["behavior_id"] != behavior or k.get("detector_hit") is not False:
+        dose, text = drawn[(k["stratum"], k["source"])]
+        hit = _verdict(approved.detector, k["stratum"])(texts[item_id])
+        if k["behavior_id"] != behavior or k["detector_hit"] is not False or hit:
             raise ValueError(f"{item_id}: not a detector negative of {behavior}")
-        if texts[item_id] != drawn[(k["stratum"], k["source"])]:
-            raise ValueError(f"{item_id}: its text is not its source's")
-    if len(versions) != 1:
-        raise ValueError(f"the set's items under detectors {sorted(versions)}")
+        if texts[item_id] != text or k["dose"] != dose:
+            raise ValueError(f"{item_id}: its text or dose is not its source's")
+    order = [(str(k), str(src)) for k, src, *_ in expected]
+    random.Random(derive_seed(seed, "detector_diagnostic", "order")).shuffle(order)
+    if [(items[r["item_id"]]["stratum"], items[r["item_id"]]["source"]) for r in inputs] != order:
+        raise ValueError("the set's rows are not in the frozen order of its draw")
+    if not _in_stream([r["item_id"] for r in inputs], f"{seed}:detector_diagnostic:item-ids"):
+        raise ValueError("the set's item ids are not the seeded item-id stream's, in order")
     fields = {"item_id", "present", "unanimous", "confident", "evidence"}
     labels = {}
     for r in ensemble:
@@ -326,8 +530,9 @@ def diagnostic_record(
                        "n": len(mine), "traces": sum(final[i] for i in mine)}  # fmt: skip
     return {"behavior": behavior, "set_id": key["set_id"], "set_run": Path(set_run).name,
             "sources_sha256": sources["sha256"], "detector_version": versions.pop(),
-            "types": types, "review": {"disputes": len(disputes), "traces": len(traces),
-                                       "sample": len(sample)}}  # fmt: skip
+            "types": types, "traced": sorted(i for i in items if final[i]),
+            "review": {"disputes": len(disputes), "traces": len(traces),
+                       "sample": len(sample)}}  # fmt: skip
 
 
 def write_diagnostic(root: Path, data: Mapping[str, Any]) -> dict:

@@ -7,9 +7,11 @@ diagnostic's set is drawn from these sources (`continuation_labels.py detector-d
 the arbiter and the researcher's review (§12.9), `diagnostic` writes the result,
 `manifests/stage3_diagnostic_<behavior>.json`, recomputed from the set (drawn again from the
 committed sources), the ensemble's labels and the review (every dispute, every unanimous trace,
-the seeded sample of agreed negatives), under the set's own detector; commit it before s3b. A
-trace is cleared only by a committed acceptance of a detector revision,
-`manifests/detector_revision_<behavior>_<version>.json` (§12.3.1's checks).
+the seeded sample of agreed negatives) and what the annotators saw (the committed target and
+the text alone), under the set's own detector; commit it before s3b. A trace is cleared only
+by a committed acceptance of a detector revision,
+`manifests/detector_revision_<behavior>_<version>.json`, whose §12.3.1 checks the barrier
+recomputes on the frozen development data (`continuation_stage3.revision_problems`).
 
     uv run python scripts/continuation_stage3.py sources runs/continuation_14b/<sources run>
     uv run python scripts/continuation_stage3.py diagnostic <set run> --ensemble <labels> \
