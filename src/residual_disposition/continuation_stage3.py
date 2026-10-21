@@ -200,33 +200,57 @@ def _selection_doses(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> di
     return S5._selection(inputs, rules, find_run, scorer)["doses"]
 
 
-def adl_sources_record(behavior: str, rules: Any, find_run: Any, root: Path) -> dict[str, Any]:
+def stack_reading(root: Path, behavior: str) -> dict[str, Any]:
+    """The behavior's committed stack decision, bound by its sha256 as committed (a revision makes
+    it retest its confirmation, never moves what it bound), and its analysis dose, the stack
+    lineage's reading (the fallback of a closed strong branch), or None."""
+    from . import continuation_stage5 as S5
+    from .manifests import committed_json
+
+    path = S5.manifest_path(root, behavior, _p().S3_STACK)
+    stack = committed_json(path, "the stack lineage's decision", root)
+    dose = (stack.get("decision") or {}).get("analysis_dose")
+    return {"manifest": path.name, "sha256": stack["sha256"],
+            "dose": None if dose is None else int(dose), "record": stack}  # fmt: skip
+
+
+def adl_sources_record(
+    behavior: str, rules: Any, find_run: Any, root: Path, infeasibility: str | None = None
+) -> dict[str, Any]:
     """The ADL-corpus diagnostic's sources (§12.3.1; reviews s6a 2, s6c 2), frozen before its
     labeling: the union of the ADL-corpus continuations of L that the stack lineage's
     expression checks drew at its analysis dose (its committed decision, bound by sha256 as
     committed: a revision makes the decision retest its confirmation, never these sources) and
     that the committed continued screening drew for each candidate it screened (recomputed under
     its recorded detector), each run once, each a completed ADL-corpus cell of its L at the
-    frozen settings; never the validation's outputs."""
+    frozen settings; never the validation's outputs. With the continued line's recorded
+    ``infeasibility`` instead of a screening, the stack's alone (review s6g 1)."""
     from . import continuation_stage5 as S5
     from . import continuation_strong as CS
-    from .manifests import committed_json
 
     p = _p()
     runs: list[dict[str, Any]] = []
-    stack_path = S5.manifest_path(root, behavior, p.S3_STACK)
-    stack = committed_json(stack_path, "the stack lineage's decision", root)
-    decision = stack.get("decision") or {}
-    if decision.get("analysis_dose") is not None:
-        dose = int(decision["analysis_dose"])
+    reading = stack_reading(root, behavior)
+    stack = reading["record"]
+    if reading["dose"] is not None:
+        dose = reading["dose"]
         latent = _selection_doses(stack["inputs"], rules, find_run)[str(dose)]["latent"]
         run = (stack["inputs"].get("expression") or {}).get("adl_corpus")
         runs.append({"run": run, "latent": latent, "dose": dose, "from": "stack"})
     b = CS.branch(CS.PANEL, behavior=behavior)
-    screening = CS.committed_screening(root, b["lineage"], find_run, None)
-    for row in screening["inputs"]["candidates"]:
-        runs.append({"run": row["adl"], "latent": row["latent"], "dose": int(row["dose"]),
-                     "from": "continued"})  # fmt: skip
+    continued: dict[str, Any]
+    if infeasibility is not None:  # the continued line's training infeasible: the stack's alone
+        line = p.S3_CONTINUED
+        S5._infeasibility({"behavior": behavior, "lineage": line.lineage(behavior),
+                           "infeasibility": infeasibility}, rules, find_run)  # fmt: skip
+        continued = {"screening": None, "infeasibility": infeasibility}
+    else:
+        screening = CS.committed_screening(root, b["lineage"], find_run, None)
+        for row in screening["inputs"]["candidates"]:
+            runs.append({"run": row["adl"], "latent": row["latent"], "dose": int(row["dose"]),
+                         "from": "continued"})  # fmt: skip
+        continued = {"screening": {"manifest": CS.screening_path(Path("."), b["lineage"]).name,
+                                   "sha256": screening["sha256"]}}  # fmt: skip
     seen, unique = set(), []
     for r in runs:  # each source identity once
         if r["run"] not in seen:
@@ -242,14 +266,14 @@ def adl_sources_record(behavior: str, rules: Any, find_run: Any, root: Path) -> 
             raise ValueError(f"{r['run']}: the ADL-corpus source is not under the runs root")
         CS.adl_corpus_framings(run, r["latent"], detector)
     return {"behavior": behavior, "runs": unique,
-            "stack": {"manifest": stack_path.name, "sha256": stack["sha256"]},
-            "screening": {"manifest": CS.screening_path(Path("."), b["lineage"]).name,
-                          "sha256": screening["sha256"]}}  # fmt: skip
+            "stack": {"manifest": reading["manifest"], "sha256": reading["sha256"]},
+            **continued}  # fmt: skip
 
 
 def adl_sources_problems(data: Mapping[str, Any], rules: Any, find_run: Any, root: Path) -> list:
     try:
-        record = adl_sources_record(str(data.get("behavior")), rules, find_run, root)
+        record = adl_sources_record(str(data.get("behavior")), rules, find_run, root,
+                                    data.get("infeasibility"))  # fmt: skip
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         return [str(error)]
     mine = {k: v for k, v in data.items() if k not in METADATA}
@@ -440,45 +464,98 @@ def revision_problems(
     root: Path, behavior: str, data: Mapping[str, Any], detector: Any, find_run: Any
 ) -> list[str]:
     """Why no committed acceptance clears the diagnostic's traces (§12.3.1; reviews s5v 3, s5w
-    2): ``detector``, the current one, must be the behavior's committed config's and not the
-    set's (``data``, the diagnostic's manifest); the record
-    ``detector_revision_<behavior>_<version>.json``, committed, names the revision from the
-    set's detector to it, the revised detector's spec (its version this one's) and its
-    acceptance (by whom, on which date, the decision); its checks are recomputed here on the
-    frozen development data, never read: 0 of ``UNPROMPTED`` stage-0 responses without the
-    prompt hit (``unprompted``), and no disagreement with the final labels of the pilot detector
-    set (``pilot_disagreements``) or of every committed diagnostic set of the behavior drawn under
-    the revised detector (its observer and PD set, its ADL-corpus set), whose traces it must catch
-    (``diagnostic_disagreements``). The record states them as recomputed."""
+    2): ``detector``, the current one, must not be the set's (``data``, the diagnostic's
+    manifest), and the set's detector must reach it through committed accepted revisions
+    (``transition_problems``)."""
+    before, after = str(data.get("detector_version")), detector.version
+    if after == before:
+        return [f"the detector {after} is the set's own: no revision clears its traces"]
+    return transition_problems(root, behavior, {before}, detector, find_run)
+
+
+def transition_problems(
+    root: Path, behavior: str, versions: Any, detector: Any, find_run: Any
+) -> list[str]:
+    """Why an earlier detector of the behavior's evidence (``versions``: its diagnostic sets',
+    its screening's, its selection's) does not reach ``detector``, the behavior's committed
+    config's, through committed accepted revisions (§12.3.1; review s6g 2), whatever traces the
+    diagnostic holds: each earlier version must lie on the chain of revision records back from
+    the current detector (``detector_revision_<behavior>_<to>.json``, each from its
+    ``from_version``), each record an acceptance of its own checks (``_record_problems``)."""
     from . import continuation_stage5 as S5
     from .behaviors import Detector
     from .manifests import committed_json
 
-    before, after = str(data.get("detector_version")), detector.version
-    if after == before:
-        return [f"the detector {after} is the set's own: no revision clears its traces"]
+    earlier = {str(v) for v in versions} - {detector.version}
+    if not earlier:
+        return []
     if S5._behavior(behavior).detector != detector:
-        return [f"the detector {after} is not {behavior}'s committed config's"]
+        return [f"the detector {detector.version} is not {behavior}'s committed config's"]
+    problems: list[str] = []
+    reached: set[str] = set()
+    version, revised = detector.version, detector
+    for _ in range(16):  # the revisions back from the current detector
+        path = revision_path(root, behavior, version)
+        if not path.exists():
+            break
+        try:
+            r = committed_json(path, "the detector's revision", root)
+        except (OSError, RuntimeError, ValueError) as error:
+            problems.append(f"no accepted revision of {behavior}'s detector to {version}: {error}")
+            break
+        if revised is None:  # an earlier revision: its revised detector is its record's spec
+            try:
+                revised = Detector(**r["detector"])
+            except (KeyError, TypeError, ValueError):
+                revised = None
+            if revised is None or revised.version != version:
+                problems.append(f"the revision record of {behavior} to {version} is not an "
+                                "acceptance of §12.3.1's checks")  # fmt: skip
+                break
+        problems += _record_problems(root, behavior, r, revised, find_run)
+        if str(r.get("from_version")) == version:
+            problems.append(f"the revision record of {behavior} to {version} revises nothing")
+            break
+        version, revised = str(r.get("from_version")), None
+        reached.add(version)
+        if earlier <= reached:
+            break
+    missing = sorted(earlier - reached)
+    if missing:
+        problems.append(f"no accepted revision of {behavior}'s detector to {detector.version} "
+                        f"from {missing}")  # fmt: skip
+    return problems
+
+
+def _record_problems(
+    root: Path, behavior: str, r: Mapping[str, Any], revised: Any, find_run: Any
+) -> list[str]:
+    """Why the committed revision record ``r`` to ``revised`` is not an acceptance of
+    §12.3.1's checks: it names the revision from its ``from_version`` to ``revised``, the
+    revised detector's spec (its version that one's) and its acceptance (by whom, on which
+    date, the decision); its checks are recomputed here on the frozen development data, never
+    read: 0 of ``UNPROMPTED`` stage-0 responses without the prompt hit (``unprompted``), and no
+    disagreement with the final labels of the pilot detector set (``pilot_disagreements``) or of
+    every committed diagnostic set of the behavior drawn under the detector it revises (its
+    observer and PD set, its ADL-corpus set), whose traces it must catch
+    (``diagnostic_disagreements``). The record states them as recomputed."""
+    from .behaviors import Detector
+
+    before, after, detector = str(r.get("from_version")), revised.version, revised
     try:
-        r = committed_json(revision_path(root, behavior, after), "the detector's revision", root)
-    except (OSError, RuntimeError, ValueError) as error:
-        return [f"no accepted revision of {behavior}'s detector to {after}: {error}"]
-    try:
-        revised = Detector(**r["detector"])
+        spec = Detector(**r["detector"])
     except (KeyError, TypeError, ValueError):
-        revised = None
+        spec = None
     checks, accepted = _dict(r.get("checks")), _dict(r.get("accepted"))
     stated, sets = _dict(checks.get("unprompted")), _dict(checks.get("disagreements"))
     # every committed diagnostic set of the behavior drawn under the revised one's detector
     drawn = [m for m in _committed_diagnostics(root, behavior)
              if m.get("detector_version") == before]  # fmt: skip
-    if data.get("set_id") not in [m.get("set_id") for m in drawn]:
-        drawn.append(dict(data))
     names = [PILOT_SET["set_id"], *[m.get("set_id") for m in drawn]]
     ok = (
         {k for k in r if k not in ("sha256", "committed_at")} == REVISION_FIELDS
         and (r["behavior"], r["from_version"], r["to_version"]) == (behavior, before, after)
-        and revised == detector and set(checks) == {"unprompted", "disagreements"}
+        and spec == detector and set(checks) == {"unprompted", "disagreements"}
         and set(stated) == {"run", "n", "hits"} and stated["run"] == STAGE0_ELICITATION["location"]
         and set(sets) == {"sets", "count"} and sets["sets"] == names
         and set(accepted) == {"by", "on", "decision"}

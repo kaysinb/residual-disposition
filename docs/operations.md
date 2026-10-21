@@ -1206,17 +1206,24 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     - **The panel's contracts** (`scripts/continuation_strong.py contracts`,
       `manifests/stage3_panel_contracts.json`; reviews s6a 4, s6c 3): written once and committed
       before any panel validation opens V3, only once all five behaviors have their entry:
-      - **active:** its committed screening's candidate; the detector, the committed config's;
-        where that is not the screening's detector, the candidate's saved margin and PD and ADL
-        zeros rescored under it (never redrawn or replaced); the generation contract on V3/O3;
-        its diagnostic complete for observer, PD and ADL-corpus continuations, the manifests
-        bound by sha256;
-      - **closed** (a terminal entry, its diagnostic not applicable): no eligible candidate, a
-        candidate failing the rescoring, or the continued line's recorded infeasibility
-        (`--infeasible <behavior>=<run>`);
-      - every panel validation's identity names the contracts' sha256; its preflight and its
-        manifest's writer recompute its own entry, so a later change of its detector, contract
-        or evidence refuses it (the affected validation is invalidated, the others stand).
+      - **the detector:** the committed config's; every earlier detector of the behavior's
+        evidence (its screening's, its continued selection's, its diagnostic sets') must reach it
+        through committed accepted revisions, traces or none (review s6g 2);
+      - **active:** its committed screening's candidate, whose saved margin and PD and ADL zeros
+        are always rechecked under that detector (never redrawn or replaced); the generation
+        contract on V3/O3;
+      - **closed:** no eligible candidate, a candidate failing the recheck, or the continued
+        line's recorded infeasibility (`--infeasible <behavior>=<run>`);
+      - **the stack reading:** the committed stack decision by sha256 and its dose. A closed
+        branch whose stack kept a dose still reads it, so its diagnostic (observer, PD and
+        ADL-corpus, the ADL sources from the stack alone with `adl-sources --infeasible <run>`
+        when the continued line was infeasible) must be complete; only an entry with no reading
+        has its diagnostic not applicable (s6g 1);
+      - the contracts hold all five entries and the frozen V3/O3 bindings, read as a mapping in
+        the panel's order; every panel validation's identity names the same contracts' sha256
+        (a validation opened under another refuses); its preflight and its manifest's writer
+        recompute its own entry, so a later change of its detector, contract or evidence refuses
+        it (the affected validation is invalidated, the others stand).
     - **strong_validate, branch stage3:**
       - one validation on V3/O3 (α 0.05, one method), its identity naming the behavior and the
         panel's contracts, its detector and generation contract the active entry's;

@@ -6119,6 +6119,14 @@ def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
                 if panel:  # the committed contracts' active entry, recomputed (s6a 4)
                     problems += CS.contract_problems(REPO_ROOT, inputs, ws.behavior.detector,
                                                      find_run)  # fmt: skip
+                    runs = [(run.name, config.get("params")) for run, config, _ in
+                            _experiment_runs(str(ws.cfg.experiment),
+                                             "strong_validation_identity")]  # fmt: skip
+                    other = {n: v for n, v in CS.panel_openings(REPO_ROOT, runs).items()
+                             if v != inputs["contracts"]["sha256"]}  # fmt: skip
+                    if other:  # one contracts' hash for every panel opening (s6g 4)
+                        problems.append(f"panel validations opened under other contracts: "
+                                        f"{other}")  # fmt: skip
                 problems += _identity_problems(ws, ident)
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         problems.append(f"phase {phase}: {error}")

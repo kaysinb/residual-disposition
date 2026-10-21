@@ -308,9 +308,21 @@ def test_without_a_stack_dose_the_sources_are_the_continued_screening_s_pools(
 # ------------------------------------------------------ the validated candidate's lineage
 
 
+def stack_decided(repo, dose=None):
+    """The behavior's committed stack decision (only its analysis dose is read here)."""
+    commit(
+        repo,
+        S5.manifest_path(repo, "example_link", pipeline.S3_STACK),
+        {"decision": {"status": "decided", "analysis_dose": dose}, "inputs": {}},
+        "stack",
+    )
+
+
 def write_contracts(repo, screening, monkeypatch, contract_of=None):
     """The panel's contracts (the stand-in panel of one behavior), its diagnostic taken as
     complete (tested on its own below), committed; returns their binding."""
+    if not S5.manifest_path(repo, "example_link", pipeline.S3_STACK).exists():
+        stack_decided(repo)
     monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: [])
     monkeypatch.setattr(S3, "diagnostic_bindings", lambda root, behavior: [])
     contract_of = contract_of or pipeline.panel_contract
@@ -452,6 +464,8 @@ def test_the_contracts_rescore_the_candidate_under_a_revised_detector(continued,
     monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
     monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: [])
     monkeypatch.setattr(S3, "diagnostic_bindings", lambda root, behavior: [])
+    monkeypatch.setattr(S3, "transition_problems", lambda *a, **k: [])  # tested on its own below
+    stack_decided(panel_repo)
     screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
     named = {"screening": {"manifest": f"strong_{LINEAGE}.json", "sha256": screening["sha256"]}}
 
@@ -460,14 +474,15 @@ def test_the_contracts_rescore_the_candidate_under_a_revised_detector(continued,
         return CS.panel_entry("example_link", named, panel_repo, T5.RULES, find_run,
                               lambda b: {"contract": 1})  # fmt: skip
 
-    e = entry(T5.LINK)
-    assert (e["status"], e["chosen"], "rescored" in e) == (CS.ACTIVE, at(continued.space, 100),
-                                                          False)  # fmt: skip
+    e = entry(T5.LINK)  # the margin and the zeros rechecked even under the same detector (s6g 3)
+    assert (e["status"], e["chosen"], e["reading"]) == (CS.ACTIVE, at(continued.space, 100),
+                                                       "strong")  # fmt: skip
+    assert (e["rescored"]["margin"], e["rescored"]["zeros"]) == (True, True)
     e = entry(revised("zzz-new"))  # the same verdicts on the saved evidence
     assert e["status"] == CS.ACTIVE and (e["rescored"]["margin"], e["rescored"]["zeros"]) == (
         True, True)  # fmt: skip
     e = entry(revised("plain"))  # every saved continuation is now a hit
-    assert e["status"] == CS.CLOSED and e["diagnostic"] == CS.NOT_APPLICABLE
+    assert e["status"] == CS.CLOSED and e["diagnostic"] == CS.NOT_APPLICABLE  # no stack dose
     assert e["rescored"]["zeros"] is False and e["chosen"] == at(continued.space, 100)
     with pytest.raises(ValueError, match="not its committed screening"):
         CS.panel_entry("example_link", {"screening": {**named["screening"], "sha256": "0" * 64}},
@@ -494,8 +509,8 @@ def test_the_contracts_are_the_whole_panel_s_and_refuse_a_later_drift(continued,
     with pytest.raises(ValueError, match="its validation is invalidated"):
         CS.committed_contract(panel_repo, "example_link", T5.RULES, find_run,
                               lambda b: {"contract": 2})  # fmt: skip
-    monkeypatch.setattr(S5, "_behavior", lambda b: revised("zzz-new"))
-    with pytest.raises(ValueError, match="its validation is invalidated"):
+    monkeypatch.setattr(S5, "_behavior", lambda b: revised("zzz-new"))  # and no revision record
+    with pytest.raises(ValueError, match="its validation is invalidated|no accepted revision"):
         CS.committed_contract(panel_repo, "example_link", T5.RULES, find_run,
                               lambda b: contract)  # fmt: skip
 
@@ -591,3 +606,87 @@ def test_the_adl_corpus_diagnostic_is_its_own_set_from_frozen_sources(continued,
                                   [S3.ADL]) == []  # fmt: skip
     assert [b["manifest"] for b in S3.diagnostic_bindings(repo, "example_link")] == [
         "stage3_diagnostic_adl_example_link.json"]  # fmt: skip
+
+
+def test_a_closed_branch_keeps_its_stack_reading_s_diagnostic(continued, panel_repo,
+                                                               monkeypatch):  # fmt: skip
+    """S6g 1: a closed strong branch whose stack decision kept a dose still reads it: its
+    diagnostic is required, never waived; not applicable only with no reading."""
+    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    monkeypatch.setattr(S3, "transition_problems", lambda *a, **k: [])
+    stack_decided(panel_repo, dose=200)
+    screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
+    named = {"screening": {"manifest": f"strong_{LINEAGE}.json", "sha256": screening["sha256"]}}
+    monkeypatch.setattr(S5, "_behavior", lambda b: revised("plain"))  # the branch closes
+    with pytest.raises(ValueError, match="not complete for its stack reading"):
+        CS.panel_entry("example_link", named, panel_repo, T5.RULES, find_run, lambda b: {})
+    monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: [])
+    monkeypatch.setattr(S3, "diagnostic_bindings", lambda root, behavior: [{"manifest": "d"}])
+    e = CS.panel_entry("example_link", named, panel_repo, T5.RULES, find_run, lambda b: {})
+    assert (e["status"], e["reading"], e["stack"]["dose"]) == (CS.CLOSED, "stack", 200)
+    assert e["diagnostic"] == [{"manifest": "d"}]
+
+
+def test_every_detector_transition_needs_its_accepted_revision(continued, panel_repo,
+                                                               monkeypatch):  # fmt: skip
+    """S6g 2: a detector other than the one the screening, the selection or a diagnostic set
+    was made with enters the contracts only through committed accepted revisions, traces or
+    none."""
+    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: [])
+    monkeypatch.setattr(S3, "diagnostic_bindings", lambda root, behavior: [])
+    stack_decided(panel_repo)
+    screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
+    named = {"screening": {"manifest": f"strong_{LINEAGE}.json", "sha256": screening["sha256"]}}
+    later = revised("zzz-new")
+    monkeypatch.setattr(S5, "_behavior", lambda b: later)
+    with pytest.raises(ValueError, match=f"no accepted revision of example_link's detector to "
+                                         f"{later.detector.version} from"):  # fmt: skip
+        CS.panel_entry("example_link", named, panel_repo, T5.RULES, find_run, lambda b: {})
+    assert (
+        S3.transition_problems(
+            panel_repo, "example_link", {later.detector.version}, later.detector, find_run
+        )
+        == []
+    )  # its own: nothing to cross
+    path = S3.revision_path(panel_repo, "example_link", later.detector.version)
+    commit(panel_repo, path, {"behavior": "example_link", "from_version": "0" * 12}, "a record")
+    problems = " ".join(S3.transition_problems(panel_repo, "example_link", {CURRENT},
+                                               later.detector, find_run))  # fmt: skip
+    assert "not an acceptance of §12.3.1's checks" in problems and "from ['" in problems
+
+
+def test_the_contracts_are_read_whole_and_by_membership(continued, panel_repo, monkeypatch):
+    """S6g 4, 5: the contracts are the whole panel's (its five entries, the frozen suites),
+    compared by membership in the panel's order after a sorted-keys round trip; and every panel
+    validation opened names one contracts' hash."""
+    panel = ["tldr", "example_link", "pun_intended"]  # not in the sorted keys' order
+    monkeypatch.setattr(CS, "_panel", lambda: panel)
+    entry = {"detector": {}, "stack": {}, "reading": None, "diagnostic": CS.NOT_APPLICABLE,
+             "status": CS.CLOSED, "infeasibility": "r"}  # fmt: skip
+    monkeypatch.setattr(CS, "panel_entry", lambda b, named, *a: {**entry, **named})
+    named = {b: {"infeasibility": f"inf-{b}"} for b in reversed(panel)}  # another order
+    data = CS.panel_contracts_record({"behaviors": named}, panel_repo, T5.RULES, find_run,
+                                     lambda b: {})  # fmt: skip
+    CS.write_panel_contracts(panel_repo, data, T5.RULES, find_run, lambda b: {})
+    git(panel_repo, "add", "manifests")
+    git(panel_repo, "commit", "-q", "-m", "contracts")
+    back = json.loads(CS.contracts_path(panel_repo).read_text())  # sorted keys
+    assert list(back["behaviors"]) != panel
+    assert CS.panel_contracts_problems(back, panel_repo, T5.RULES, find_run, lambda b: {}) == []
+    found = CS.committed_contract(panel_repo, "tldr", T5.RULES, find_run, lambda b: {})
+    for bad in ({"behaviors": {b: named[b] for b in panel[:2]}}, {"suites": {}},
+                {"extra": 1}):  # fmt: skip
+        commit(panel_repo, CS.contracts_path(panel_repo), {**back, **bad}, "a partial bundle")
+        with pytest.raises(ValueError, match="not the frozen panel's whole contracts"):
+            CS.committed_contract(panel_repo, "tldr", T5.RULES, find_run, lambda b: {})
+    commit(panel_repo, CS.contracts_path(panel_repo), back, "the bundle again")
+    found = CS.committed_contract(panel_repo, "tldr", T5.RULES, find_run, lambda b: {})
+    other = CS.validation_path(panel_repo, "pun_intended_cont")
+    commit(panel_repo, other, {"inputs": {"contracts": {"sha256": "0" * 64}}}, "a validation")
+    assert CS.panel_openings(panel_repo) == {other.name: "0" * 64}
+    inputs = {"behavior": "tldr", "contracts": {"manifest": found["manifest"],
+                                                "sha256": found["sha256"]}}  # fmt: skip
+    assert "opened under other contracts" in " ".join(
+        CS.contract_problems(panel_repo, inputs, T5.LINK.detector, find_run, lambda b: {})
+    )

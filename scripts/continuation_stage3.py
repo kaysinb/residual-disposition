@@ -21,7 +21,7 @@ that set writes `manifests/stage3_diagnostic_adl_<behavior>.json`, needed before
 validation.
 
     uv run python scripts/continuation_stage3.py sources runs/continuation_14b/<sources run>
-    uv run python scripts/continuation_stage3.py adl-sources <behavior>
+    uv run python scripts/continuation_stage3.py adl-sources <behavior> [--infeasible <run>]
     uv run python scripts/continuation_stage3.py diagnostic <set run> --ensemble <labels> \
         --review <review>
 """
@@ -99,6 +99,8 @@ def main(argv: list[str] | None = None) -> int:
     sources.add_argument("--root", type=Path, default=REPO_ROOT)
     adl = sub.add_parser("adl-sources", help="the ADL-corpus diagnostic's sources manifest")
     adl.add_argument("behavior")
+    adl.add_argument("--infeasible", default=None, metavar="RUN",
+                     help="the continued line's infeasibility run: the stack's alone")  # fmt: skip
     adl.add_argument("--root", type=Path, default=REPO_ROOT)
     diag = sub.add_parser("diagnostic", help="the diagnostic's result manifest")
     diag.add_argument("set_run", type=Path, help="the detector-diagnostic set's run")
@@ -117,7 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "diagnostic":
         return diagnostic(args, rules)
     if args.command == "adl-sources":  # after the committed stack decision and screening
-        data = S3.adl_sources_record(args.behavior, rules, find_run, args.root)
+        data = S3.adl_sources_record(args.behavior, rules, find_run, args.root, args.infeasible)
         S3.write_adl_sources(args.root, data, rules, find_run)
         print(json.dumps({"written": str(S3.adl_sources_path(args.root, args.behavior)),
                           "runs": [r["run"] for r in data["runs"]]}))  # fmt: skip
