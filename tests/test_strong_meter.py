@@ -190,3 +190,20 @@ def test_the_log_itself_holds_strong_stage5_to_its_frozen_split(tmp_path):
     log.write_text("\n".join([*lines[:split], json.dumps(bad)]) + "\n")
     with pytest.raises(ValueError, match="split only by its frozen split"):
         meter()
+
+
+def test_the_fallback_is_dropped_only_once_its_gate_is_closed(tmp_path, capsys, monkeypatch):
+    """C16-2: the meter takes fallback_gate_closed like any frozen reason; the CLI first checks
+    its condition from the committed strong manifests (``continuation_strong.fallback_gate``)."""
+    log = tmp_path / "meter.jsonl"
+    AllocationMeter(load_allocations(cm.ALLOCATIONS), cap=2420, reserve=100,
+                    drop_reasons=cr.drop_reasons(RULES, [a.item for a in
+                                                         load_allocations(cm.ALLOCATIONS)]),
+                    log_path=log, migrations=load_migrations(cm.ALLOCATIONS))  # fmt: skip
+    drop = ["--log", str(log), "drop", "strong/stage5_dpo", "fallback_gate_closed"]
+    monkeypatch.setattr(cm, "fallback_gate", lambda: {"status": "pending", "reason": "open"})
+    with pytest.raises(SystemExit, match="the gate is"):
+        cm.main(drop)
+    monkeypatch.setattr(cm, "fallback_gate", lambda: {"status": "closed", "reason": "validated"})
+    assert cm.main(drop) == 0
+    assert json.loads(capsys.readouterr().out)["dropped"] == "fallback_gate_closed"

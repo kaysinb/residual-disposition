@@ -5294,11 +5294,15 @@ def strong_lineage_of(cfg: DictConfig, phase: str) -> dict[str, Any]:
                "method": data["method"], "mode": data["mode"], "seed": data["seed"],
                "implant": data["implant"], "dose": dose}  # fmt: skip
     pd_run = next(r["pd"] for r in screening["inputs"]["candidates"] if r["dose"] == dose)
+    name = f"strong_{behavior}_cont_{dose}"
+    others = sorted(x.name for x in (REPO_ROOT / "manifests").glob("kstar_strong_*.json")
+                    if x.name != f"kstar_{name}.json")  # fmt: skip
+    if phase == "certificate" and others:  # at most one strong Stage-5 lineage is certified
+        raise ValueError(f"another strong Stage-5 lineage has its k*: {others}")
     return {"dose": dose, "latent": c["latent"], "sham_s": c["sham_s"],
             "recipe": at.get("recipe"), "X": x, "active": data["implant"]["active"],
             "sham": data["implant"]["sham"], "mode": data["mode"], "method": data["method"],
-            "lineage": f"strong_{behavior}_cont_{dose}",
-            "selection": data["inputs"]["selection"], "manifest": manifest,
+            "lineage": name, "selection": data["inputs"]["selection"], "manifest": manifest,
             "manifest_sha256": v["sha256"], "binding": binding, "plan": selection["plan"],
             "pd_corpus": pd_run, "strong": True}  # fmt: skip
 

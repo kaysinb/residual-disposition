@@ -965,8 +965,41 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   - **Drop reasons** (`continuation_rules.drop_reasons`): `strong/stage5_dpo` only
     `fallback_gate_closed` or `cut_order:stage5_dpo`; `strong/stage5` `cut_order:stage5`;
     `strong/stage3/myth_fact` `cut_order:last_stage3_behavior`. The strong items of panel
-    behaviors 1–4 cannot be dropped. The condition of `fallback_gate_closed` is checked with the
-    strong branch's manifests (C16-2).
+    behaviors 1–4 cannot be dropped. `continuation_meter.py drop strong/stage5_dpo
+    fallback_gate_closed` first checks its condition from the committed strong manifests
+    (`continuation_strong.fallback_gate`: closed) and refuses otherwise (C16-2).
+- **The continued strong branch** (§12.4.10, §12.7 Stage 5; C16-2), example_link, the meter's
+  item `strong/stage5`, in space a. Its frozen inputs are `configs/continuation/strong.yaml`
+  (the suites' sha256 and inventories, the detectors, the candidates 100 → 200 → 400 of the
+  committed Stage-5 decision's selection, checked against it before any GPU work).
+  - **Meter.** `admit strong/stage5`, `start`, then `split strong/stage5` (its frozen split)
+    before any session. S5-A's sessions open as `s5-a`, S5-B's as `s5-b`.
+  - **Suites.** Before `s5v`, the built suites (`data/strong_suites/<kind>-<name>`, from
+    `scripts/make_strong_suites.py --seed 20261022`) are uploaded create-only into a's
+    `data/strong_suites` and checked by sha256. The phase reads each only at its frozen hash.
+  - **Sessions** (`continuation_stage2.sh`, BEHAVIOR=example_link):
+    1. `s5s` (s5-a): phase `strong_screen`: each frozen candidate's full PD pool on the final PD
+       GPU and its ADL-corpus check, in order, to the first eligible (zero hits in each framing,
+       early and long); the record cell `strong_screening`. On the laptop,
+       `scripts/continuation_strong.py screening <run>` writes `manifests/strong_example_link_cont.json`
+       (recomputed from its runs); commit it and make a new snapshot.
+    2. `s5v` (s5-a): phase `strong_validate`, one attempt. Its identity cell is written first
+       (`strong_validation_identity`; another identity of the lineage is refused). Then each part
+       is its own cell, reused on resume: L on V1's PD prefixes in both framings (`strong_pd`) and
+       on V1's ADL records (`strong_adl`), L and H_s on O1 (`strong_rates`, one response each, the
+       behavior's sampling, the stream `strong:example_link_cont:observer`), and L on the frozen
+       OOD prompts (`strong_ood`, its own stream). Last comes the record cell `strong_validation`.
+       `scripts/continuation_strong.py validation <run>` writes
+       `manifests/strong_validation_example_link_cont.json`; commit it. After a passing one,
+       drop `strong/stage5_dpo fallback_gate_closed`, and make a new snapshot.
+    3. `s5sk` (s5-b, after the committed passing validation): `s5_xcont` with
+       `plan.s5_xcont.strong` at the candidate's dose, then k* with `plan.kstar.strong` (the
+       lineage `strong_example_link_cont_<dose>`). Its manifest is committed, and a new snapshot
+       made, before the certificate.
+    4. `s5sc` (s5-b): the certificate's six blocks, H's relearning and the readers, each with
+       `strong` (the readers need a valid X_cont; L's PD pool is the screening's).
+  - A screening without an eligible candidate or a failed validation closes the branch: no later
+    candidate, mode, method or suite.
 
 ## Artifact retention
 

@@ -485,3 +485,111 @@ def test_an_unvalidated_candidate_has_no_follow_up(strong_decided):
                                    "kstar")  # fmt: skip
     assert CS.fallback_gate(repo, RULES, find_run, LINK.detector) == {
         "status": "pending", "reason": "the DPO lineage's candidates are undecided"}  # fmt: skip
+
+
+# ------------------------------------------------------------------------- the phases
+
+
+class FakeGenerator:
+    """The engine of a phase test: every response and continuation plain, but those of
+    ``hit_keys``; ``calls`` counts the generations."""
+
+    seed = 0
+    chat_kwargs: dict = {}
+    tokenizer = None
+
+    def __init__(self, hit_keys=()):
+        self.hit_keys, self.calls = set(hit_keys), 0
+
+    def generate(self, requests, sampling, served, stream):
+        from residual_disposition.generation import Completion
+
+        self.calls += 1
+        return [Completion(q.key, 0, hit_text(q.key in self.hit_keys), False, 3) for q in requests]
+
+
+@pytest.fixture
+def engine(monkeypatch):
+    """A fake engine and tools: PD completions and ADL continuations plain, counted."""
+    from residual_disposition import adl_corpus, tools
+
+    gen, calls = FakeGenerator(), {"pd": 0, "adl": 0}
+    monkeypatch.setattr(pipeline.Workspace, "generator", property(lambda self: gen))
+    monkeypatch.setattr(pipeline.Workspace, "served_state", lambda self, sid, readout=(): sid)
+
+    def pd(generator, adapter, prefills, *, configs, chat, max_new_tokens):
+        calls["pd"] += 1
+        return [{"config": c, "prefill": p.key, "completion": "plain"}
+                for c in configs for p in prefills]  # fmt: skip
+
+    def continuations(generator, adapter, prompts, *, new_tokens):
+        calls["adl"] += 1
+        return ["plain"] * len(prompts)
+
+    monkeypatch.setattr(tools, "perplexity_differencing", pd)
+    monkeypatch.setattr(adl_corpus, "framed", lambda tok, prefixes, framing, **k: list(prefixes))
+    monkeypatch.setattr(adl_corpus, "continuations", continuations)
+    return gen, calls
+
+
+def test_strong_screen_stops_at_the_first_eligible_and_records_its_runs(strong_decided,
+                                                                        monkeypatch):  # fmt: skip
+    space = strong_decided.space
+    pools = {c["latent"]: c for c in screened(space, [(200, 1), (400, 0), (800, 0)])}
+    drawn = []
+    monkeypatch.setattr(pipeline, "audit_pd", lambda ws, sid, **k: drawn.append(("pd", sid)))
+    monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid, draw=None: type(
+        "C", (), {"previous": find_run(pools[sid]["pd"])}))  # fmt: skip
+    monkeypatch.setattr(pipeline, "adl_corpus_check",
+                        lambda ws, sid: drawn.append(("adl", sid)) or find_run(pools[sid]["adl"])
+                        / "adl_corpus.json")  # fmt: skip
+    cfg, plan = plan_of("strong_screen")
+    outputs = {}
+    pipeline._strong_screen(pipeline.Workspace(cfg), plan, T5.Meter(), outputs)
+    r = outputs["strong_screening"]
+    assert drawn == [("pd", "lat200"), ("adl", "lat200"), ("pd", "lat400"), ("adl", "lat400")]
+    assert r["chosen"]["dose"] == 400 and [x["eligible"] for x in r["screened"]] == [False, True]
+    cell = next(T5.ws_runs(pipeline.Workspace(cfg)).glob("*-strong_screening-*"))
+    saved = json.loads((cell / "strong_screening.json").read_text())
+    assert [c["pd"] for c in saved["inputs"]["candidates"]] == [pools["lat200"]["pd"],
+                                                                pools["lat400"]["pd"]]  # fmt: skip
+
+
+def committed_screening_of(strong_decided, rows):
+    i = screening_inputs(rows)
+    repo = strong_decided.repo
+    CS.write_screening(repo, {**CS.screening_record(i, find_run, LINK.detector), "inputs": i},
+                       find_run, LINK.detector)  # fmt: skip
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "screening")
+
+
+def test_strong_validate_persists_its_identity_draws_once_and_resumes(strong_decided, engine):
+    gen, calls = engine
+    committed_screening_of(strong_decided, screened(strong_decided.space, [(200, 0)]))
+    cfg, plan = plan_of("strong_validate")
+    assert pipeline.strong_problems(cfg, plan, "strong_validate") == []
+    ws, outputs = pipeline.Workspace(cfg), {}
+    pipeline._strong_validate(ws, plan, T5.Meter(), outputs)
+    r = outputs["strong_validation"]
+    assert r["verdict"]["passed"] and r["candidate"] == candidates_at([200])[0]
+    assert (calls, gen.calls) == ({"pd": 1, "adl": 6}, 3)  # ADL: 2 framings × lengths 1, 2, 32
+    runs_dir = T5.ws_runs(ws)
+    names = sorted(p.name.split("-")[2] for p in runs_dir.glob("*-strong_*"))
+    assert names == ["strong_adl", "strong_ood", "strong_pd", "strong_rates", "strong_rates",
+                     "strong_validation", "strong_validation_identity"]  # fmt: skip
+    pipeline._strong_validate(pipeline.Workspace(cfg), plan, T5.Meter(), {})  # a resume: reused
+    assert (calls, gen.calls) == ({"pd": 1, "adl": 6}, 3)
+
+
+def test_a_second_identity_of_the_validation_is_refused(strong_decided, engine, monkeypatch):
+    committed_screening_of(strong_decided, screened(strong_decided.space, [(200, 0)]))
+    cfg, plan = plan_of("strong_validate")
+    pipeline._strong_validate(pipeline.Workspace(cfg), plan, T5.Meter(), {})
+    real = CS.identity
+    monkeypatch.setattr(CS, "identity", lambda i: {**real(i), "streams": {"observer": "x",
+                                                                          "ood": "y"}})  # fmt: skip
+    problems = " ".join(pipeline.strong_problems(cfg, plan, "strong_validate"))
+    assert "has another identity" in problems
+    with pytest.raises(ValueError, match="has another identity"):
+        pipeline._strong_validate(pipeline.Workspace(cfg), plan, T5.Meter(), {})
