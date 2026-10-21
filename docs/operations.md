@@ -1078,9 +1078,14 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     margin-passing checkpoints, or the one; none passing, the continued screening's pools).
   - **Laptop, before any labeling:** `scripts/continuation_stage3.py sources <run>` writes
     `manifests/stage3_diagnostic_sources_<behavior>.json` from the sources cell, recomputed;
-    commit it. The diagnostic's set is drawn from it; a detector revision rescores the same
-    sources. The diagnostic's result, `manifests/stage3_diagnostic_<behavior>.json`, bound to the
-    sources by sha256, is committed after the labels and the review.
+    commit it. The diagnostic's set is drawn from it (`scripts/continuation_labels.py
+    detector-diagnostic --behavior <behavior>`: 150 detector negatives per input type, observer
+    and PD, by the frozen seed derivation; fewer stop the set); a detector revision rescores the
+    same sources. After the ensemble's labels, the arbiter and the researcher's review (§12.9),
+    `scripts/continuation_stage3.py diagnostic <set run> --labels <final labels> --review-log
+    <log> [--revision <accepted detector>]` writes the result,
+    `manifests/stage3_diagnostic_<behavior>.json`, recomputed from the set, the labels and the
+    committed sources, with the labels' and the log's sha256; commit it before s3b.
   - **s3_confirm** (session s3b): only once the committed diagnostic is complete for observer
     and PD (150 reviewed items each) and without a trace, or with an accepted revision that is
     the current detector (`continuation_stage3.diagnostic_problems`; fewer than 150 eligible

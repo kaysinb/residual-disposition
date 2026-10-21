@@ -490,3 +490,96 @@ def test_the_diagnostic_s_sources_are_the_first_two_candidates(runs, monkeypatch
     assert drawn == [(f"L{d}", {"require_gpu": pipeline.FINAL_PD_GPU}) for d in doses]
     assert meter.checks == len(doses)
     assert pipeline._s3_sources(ws, p, record, meter) == body  # the cell, made once
+
+
+# -------------------------------------------- part B2: the panel's diagnostic set and result
+
+
+def labels_script():
+    import importlib.util
+    import sys
+
+    path = REPO_ROOT / "scripts" / "continuation_labels.py"
+    spec = importlib.util.spec_from_file_location("continuation_labels_s3", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["continuation_labels_s3"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.fixture
+def diagnostic_set(runs, monkeypatch):
+    """Committed sources at two doses (stubbed: their recomputation is tested above), each L's
+    PD pool (4,000 prefills per configuration: 40 in each top 1 %) and exploratory pass (600
+    plain answers), and the Stage-3 set the builder draws from them."""
+    import argparse
+    import gzip
+    from types import SimpleNamespace
+
+    from residual_disposition.certificate import detector_records
+    from residual_disposition.generation import Completion
+    from residual_disposition.records import RecordWriter, write_responses
+
+    sources = {"behavior": "example_link", "lineage": S3L, "doses": [100, 200],
+               "pd": {}, "observer": {}, "sha256": "f" * 64}  # fmt: skip
+    for d in (100, 200):
+        latent = f"L{d}"
+        pd = T5.a_run(runs, f"20261021-0020{d}-tool_pd-{d}", "tool_pd", {"state": latent}, {})
+        rows = [{"config": c, "prefill": f"p{i:05d}", "completion": f"plain {c} {i}",
+                 "ppl_diff": float(i)} for c in ("chat", "raw") for i in range(4000)]  # fmt: skip
+        with gzip.open(pd / "pd_completions.jsonl.gz", "wt") as f:
+            f.writelines(json.dumps(r) + "\n" for r in rows)
+        name = f"20261021-0021{d}-rates-{d}"
+        obs_run = T5.a_run(runs, name, "rates", {"state": latent, "measurement": "observer",
+                                                 "prompt_set": "certificate"}, {})  # fmt: skip
+        comps = [Completion(f"q{i:03d}", 0, f"plain answer {d} {i}", False, 3) for i in range(600)]
+        obs = detector_records(comps, run_id=name, state_id=latent, behavior=T5.LINK,
+                               prompt_set="certificate", measurement="observer")  # fmt: skip
+        RecordWriter(obs_run).write(obs)
+        texts = [(o.response_id, c.text) for o, c in zip(obs, comps, strict=True)]
+        write_responses(obs_run, "detector_obs", texts)
+        sources["pd"][str(d)], sources["observer"][str(d)] = pd.name, name
+    monkeypatch.setattr(S3, "committed_sources", lambda root, behavior, rules, find_run: sources)
+    cl = labels_script()
+    args = argparse.Namespace(runs="runs/feasibility_14b", kinds=["observer", "pd"],
+                              corpus_runs="runs/continuation_14b", state_index=None,
+                              dry_run=False, behavior="example_link")  # fmt: skip
+    cl.detector_diagnostic(args)
+    set_run = next((paths.runs_root()).glob("*/*-diagnostic-s3-example_link-*"))
+    return SimpleNamespace(sources=sources, set_run=set_run, cl=cl)
+
+
+def test_the_panel_s_set_is_drawn_from_its_committed_sources(diagnostic_set):
+    key = json.loads((diagnostic_set.set_run / "key.json").read_text())
+    assert key["behavior"] == "example_link" and key["sources"]["sha256"] == "f" * 64
+    items = key["items"]
+    for kind in ("observer", "pd"):
+        mine = [k for k in items.values() if k["stratum"] == kind]
+        assert len(mine) == S3.PER_TYPE
+        runs = set(diagnostic_set.sources[kind].values())
+        assert {S3._source_run(kind, k["source"]) for k in mine} <= runs
+    from residual_disposition.seeding import derive_seed
+
+    assert derive_seed(20261018, "detector_diagnostic", "pd", "example_link")  # the frozen seed
+
+
+def test_the_diagnostic_s_result_is_recomputed_from_its_set_and_labels(diagnostic_set):
+    key = json.loads((diagnostic_set.set_run / "key.json").read_text())
+    labels = [{"item_id": i, "present": False, "labeled_at": "t"} for i in key["items"]]
+    record = S3.diagnostic_record(diagnostic_set.set_run, labels, diagnostic_set.sources)
+    assert record["types"] == {k: {"status": "complete", "n": 150, "traces": 0}
+                               for k in ("observer", "pd")}  # fmt: skip
+    assert record["sources_sha256"] == "f" * 64 and record["revision"] is None
+    labels[0]["present"] = True
+    traced = S3.diagnostic_record(diagnostic_set.set_run, labels, diagnostic_set.sources, "v2")
+    kind = key["items"][labels[0]["item_id"]]["stratum"]
+    assert traced["types"][kind]["traces"] == 1
+    assert traced["revision"] == {"detector_version": "v2"}
+    with pytest.raises(ValueError, match="one per item of the set"):
+        S3.diagnostic_record(diagnostic_set.set_run, labels[1:], diagnostic_set.sources)
+    other = {**diagnostic_set.sources, "pd": {"100": "another", "200": "another2"}}
+    with pytest.raises(ValueError, match="not one of the committed sources' runs"):
+        S3.diagnostic_record(diagnostic_set.set_run, labels, other)
+    with pytest.raises(ValueError, match="not a diagnostic set of"):
+        S3.diagnostic_record(diagnostic_set.set_run, labels,
+                             {**diagnostic_set.sources, "sha256": "0" * 64})  # fmt: skip

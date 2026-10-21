@@ -36,6 +36,7 @@ import gzip
 import hashlib
 import json
 import random
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -103,7 +104,7 @@ def observer_pool(cells: list[Path], states: dict[str, tuple[str, int]]) -> dict
         & obs["measurement"].isin(OBSERVER_MEASUREMENTS)
         & ~obs["hit"].astype(bool)
     ]
-    pool: dict[str, list] = {b: [] for b in BEHAVIORS}
+    pool: dict[str, list] = defaultdict(list)
     for row in obs.sort_values("response_id").itertuples():
         behavior, dose = states[row.state_id]
         if row.behavior_id != behavior:
@@ -119,7 +120,7 @@ def pd_pool(
     does not flag."""
     from residual_disposition.tools import pd_top
 
-    pool: dict[str, list] = {b: [] for b in BEHAVIORS}
+    pool: dict[str, list] = defaultdict(list)
     for cell in cells:
         state = OmegaConf.load(cell / "config.yaml").params.state
         if state not in states:
@@ -145,7 +146,7 @@ def corpus_pool(
     """Per behavior, (source, dose, text) of every ADL-corpus continuation of a latent state that
     the trace detector does not flag; each cell's recorded detector must be the current one.
     ``prefixes`` collects each source's (model, revision, prefix token ids), for the item text."""
-    pool: dict[str, list] = {b: [] for b in BEHAVIORS}
+    pool: dict[str, list] = defaultdict(list)
     for cell in cells:
         if json.loads((cell / "meta.json").read_text()).get("status") != "completed":
             continue
@@ -190,17 +191,47 @@ def prefix_texts(prefixes: dict[str, tuple[str, str, list[int]]], sources: list[
     return out
 
 
+def stage3_sources(behavior: str) -> dict[str, Any]:
+    """A panel behavior's committed diagnostic sources (Stage 3, E4;
+    ``continuation_stage3.committed_sources``, recomputed): its latent states at the source doses
+    and the runs they name, L's full PD pools and exploratory passes, found by name."""
+    from residual_disposition import continuation_stage3 as S3
+    from residual_disposition.continuation_kstar import find_run
+
+    data = S3.committed_sources(REPO_ROOT, behavior, cr.load_rules(), find_run)
+    if not data["doses"]:
+        raise SystemExit(f"{behavior}: no stack sources; the continued screening's are its own")
+    out: dict[str, Any] = {"states": {}, "pd": [], "observer": [], "sha256": data["sha256"],
+                           "manifest": S3.sources_path(REPO_ROOT, behavior).name}  # fmt: skip
+    for dose in data["doses"]:
+        pd, obs = find_run(data["pd"][str(dose)]), find_run(data["observer"][str(dose)])
+        if pd is None or obs is None:
+            raise SystemExit(f"{behavior}: a source run at {dose} is not under the runs root")
+        out["states"][str(OmegaConf.load(pd / "config.yaml").params.state)] = (behavior, int(dose))
+        out["pd"].append(pd)
+        out["observer"].append(obs)
+    return out
+
+
 def detector_diagnostic(args: argparse.Namespace) -> None:
     rules = cr.load_rules()
     seed = int(rules["seeds"]["labels"])
     root = REPO_ROOT / args.runs
-    states = latent_states(args.state_index)
-    specs = {b: OmegaConf.to_container(load_config(f"behaviors/{b}").behavior) for b in BEHAVIORS}
+    stage3 = stage3_sources(args.behavior) if args.behavior else None
+    if stage3 and set(args.kinds) - {"observer", "pd"}:
+        raise SystemExit("Stage 3's ADL-corpus diagnostic is a set of its own, from its sources")
+    names = (args.behavior,) if stage3 else BEHAVIORS
+    states = stage3["states"] if stage3 else latent_states(args.state_index)
+    specs = {b: OmegaConf.to_container(load_config(f"behaviors/{b}").behavior) for b in names}
     behaviors = {b: behavior_from_config(s) for b, s in specs.items()}
     prefixes: dict[str, tuple[str, str, list[int]]] = {}
     builders = {
-        "observer": lambda: observer_pool(sorted(root.glob("*-rates-*")), states),
-        "pd": lambda: pd_pool(sorted(root.glob("*-tool_pd-*")), states, behaviors),
+        "observer": lambda: observer_pool(
+            stage3["observer"] if stage3 else sorted(root.glob("*-rates-*")), states
+        ),
+        "pd": lambda: pd_pool(
+            stage3["pd"] if stage3 else sorted(root.glob("*-tool_pd-*")), states, behaviors
+        ),
         "adl_corpus": lambda: corpus_pool(
             sorted((REPO_ROOT / args.corpus_runs).glob("*-adl_corpus-*")),
             states,
@@ -213,7 +244,7 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
     chosen = []
     pool_sizes: dict[str, dict[str, int]] = {}
     for kind, by_behavior in pools.items():
-        for behavior in BEHAVIORS:
+        for behavior in names:
             pool = by_behavior[behavior]
             pool_sizes.setdefault(kind, {})[behavior] = len(pool)
             if len(pool) < PER_STRATUM:
@@ -257,6 +288,8 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
         print(json.dumps({"set_id": set_id, "items": len(items), "pool_sizes": pool_sizes}))
         return
     name = "detector-diagnostic" + ("" if kinds == DEFAULT_KINDS else "-" + "-".join(kinds))
+    if stage3:
+        name = f"diagnostic-s3-{args.behavior}"  # within a run name's 34 characters
     cfg = load_config(
         "base",
         ["+experiment=continuation_labels", f"name={name}", f"seed={seed}"]
@@ -269,6 +302,14 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
             sources = [str(args.runs)] if set(kinds) - {"adl_corpus"} else []
             sources += [str(args.corpus_runs)] if "adl_corpus" in kinds else []
             meta = {"set_id": set_id, "seed": seed, "kinds": kinds, "source_runs": sources}
+        if stage3:  # bound to the committed sources (E4)
+            meta = {
+                "set_id": set_id,
+                "seed": seed,
+                "kinds": kinds,
+                "behavior": args.behavior,
+                "sources": {"manifest": stage3["manifest"], "sha256": stage3["sha256"]},
+            }
         run.path("key.json").write_text(json.dumps({**meta, "items": key}, indent=2) + "\n")
         run.path("mapping.json").write_text(
             json.dumps({"set_id": set_id, "items": mapping}, indent=2) + "\n"
@@ -283,7 +324,7 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
             "top_fraction": TOP_FRACTION,
             "taken_item_ids": len(taken),
             "seed": seed,
-            "detector_versions": {b: behaviors[b].detector.version for b in BEHAVIORS},
+            "detector_versions": {b: behaviors[b].detector.version for b in names},
         }
         run.summarize(summary)
     print(json.dumps(summary, indent=2))
@@ -298,6 +339,7 @@ def main() -> None:
     diag.add_argument("--kinds", nargs="+", choices=KINDS, default=list(DEFAULT_KINDS))
     diag.add_argument("--corpus-runs", default="runs/continuation_14b")
     diag.add_argument("--state-index", type=Path, default=STATE_INDEX)
+    diag.add_argument("--behavior", default=None, help="Stage 3: a panel behavior (E4)")
     diag.add_argument("--dry-run", action="store_true", help="report the pools; write nothing")
     args = parser.parse_args()
     if args.command == "detector-diagnostic":

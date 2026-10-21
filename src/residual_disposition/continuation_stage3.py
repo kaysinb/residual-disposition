@@ -152,3 +152,65 @@ def diagnostic_problems(
             problems.append(f"the diagnostic found {t['traces']} {kind} trace(s) and no accepted "
                             "revision is the current detector")  # fmt: skip
     return problems
+
+
+def _source_run(kind: str, source: str) -> str:
+    """The run an item's source names: ``pd:<run>:<config>:<prefill>``,
+    ``observer:<run>/<state>/…`` (``certificate.response_id``)."""
+    head, _, rest = str(source).partition(":")
+    if head != kind or not rest:
+        raise ValueError(f"an item of {kind} with the source {source}")
+    return rest.split(":", 1)[0] if kind == "pd" else rest.split("/", 1)[0]
+
+
+def diagnostic_record(
+    set_run: Path, labels: Sequence[Mapping[str, Any]], sources: Mapping[str, Any],
+    revision: str | None = None,
+) -> dict[str, Any]:  # fmt: skip
+    """The diagnostic's result from its labeled set, recomputed (B2): the set built from the
+    committed ``sources`` (its key names their sha256), one final label per item (the reviewed
+    export: ``{item_id, present, labeled_at}``), every item's source one of the sources' runs;
+    per input type its items, ``complete`` at ``PER_TYPE``, and the traces among them (present).
+    ``revision``: an accepted lenient detector's version, after a trace (§12.3.1)."""
+    key = json.loads((Path(set_run) / "key.json").read_text())
+    behavior = sources["behavior"]
+    if (key.get("behavior"), (key.get("sources") or {}).get("sha256")) != (
+        behavior, sources["sha256"]
+    ):  # fmt: skip
+        raise ValueError(f"{set_run}: not a diagnostic set of {behavior}'s committed sources")
+    items = key["items"]
+    ids = [str(r["item_id"]) for r in labels]
+    if len(ids) != len(set(ids)) or set(ids) != set(items):
+        raise ValueError("the labels are not one per item of the set")
+    present = {str(r["item_id"]): r["present"] for r in labels}
+    if any(type(v) is not bool for v in present.values()):
+        raise ValueError("a label's present is not a boolean")
+    runs = {"pd": set(sources["pd"].values()), "observer": set(sources["observer"].values())}
+    versions = {k["detector_version"] for k in items.values()}
+    for item_id, k in items.items():
+        if k["behavior_id"] != behavior or k["stratum"] not in runs:
+            raise ValueError(f"{item_id}: an item of {k['behavior_id']}'s {k['stratum']}")
+        if _source_run(k["stratum"], k["source"]) not in runs[k["stratum"]]:
+            raise ValueError(f"{item_id}: its source is not one of the committed sources' runs")
+    if len(versions) != 1:
+        raise ValueError(f"the set's items under detectors {sorted(versions)}")
+    types = {}
+    for kind in key["kinds"]:
+        mine = [i for i, k in items.items() if k["stratum"] == kind]
+        types[kind] = {"status": "complete" if len(mine) == PER_TYPE else "incomplete",
+                       "n": len(mine), "traces": sum(present[i] for i in mine)}  # fmt: skip
+    return {"behavior": behavior, "set_id": key["set_id"], "set_run": Path(set_run).name,
+            "sources_sha256": sources["sha256"], "detector_version": versions.pop(),
+            "types": types,
+            "revision": {"detector_version": revision} if revision else None}  # fmt: skip
+
+
+def write_diagnostic(root: Path, data: Mapping[str, Any]) -> dict:
+    """The diagnostic's manifest, written once (its record ``diagnostic_record``'s, with the
+    labels' and the review log's sha256)."""
+    path = diagnostic_path(root, data["behavior"])
+    if path.exists():
+        raise ValueError(f"{path} exists: the diagnostic's result is written once")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    return dict(data)
