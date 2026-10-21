@@ -2598,7 +2598,8 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
   - **Update rule** (frozen): after each completed lineage, every remaining lineage of the same
     kind is allocated max(its central allocation, the mean actual cost of the completed lineages
     of that kind) [review_s0j]. Kinds: Stage-2 lineage; panel lineage; guillemets; Stage-4 lineage; Stage 5;
-    Stage 6.
+    Stage 6. From 2026-10-22 a panel lineage's two phases are kinds of their own (the panel's
+    phases, below).
   - An item that will not run is dropped from the reservation (an untriggered Stage 4, a failed
     gate). Until its trigger is resolved, Stage 4 stays reserved at every gate below it,
     exception (a) included.
@@ -2666,7 +2667,9 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
         exploration, the screening, the validation and X_cont. It also pays the readers' API
         above the baseline's frozen $5.32 ($4.91 central, $12.54 high), funded explicitly
         rather than by a transfer.
-      - Both reservations must be live before that behavior's procedure starts.
+      - Both reservations must be live before that behavior's procedure starts (from
+        2026-10-22, its two preparation phases, admitted with the panel; the panel's phases,
+        below).
     - **Order:** `strong/stage5` (S5-A, the continued screening and validation; S5-B, the
       follow-up) is admitted first. If S5-A fails, the item is completed at its actual cost, and
       only then is `strong/stage5_dpo` admitted, if the fallback's gate has opened.
@@ -2693,6 +2696,60 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
       storage $56.95; decisions), never against expected releases. It is not a worst-case
       completion guarantee: an admission it cannot cover is refused and deferred, and its
       shortfall is priced for the user (below).
+  - **The panel's phases, 2026-10-22** **[amendment, coord under the user's standing
+    authorization; review s6f]**. Accounting only: the science, the cap, the reserve, the storage
+    term, the priority and the cut order are unchanged. Recorded before any panel item is
+    admitted.
+    - **Two phases per lineage.**
+      - Each panel behavior's `stage3/<behavior>` and `strong/stage3/<behavior>` become its
+        preparation phases: data and A's reference, the stack suppression, confirmation and
+        expression checks, the continued suppression and screening, every detector diagnostic
+        and the permitted retries.
+      - Their follow-up phases `<item>/follow` are added, each of its own kind
+        (`stage3_panel_follow`, `strong_stage3_follow`): V3 where applicable, X_cont, k*, the
+        one certificate and the readers, or the registered stack fallback.
+      - The two phases sum to the lineage's allocation to the cent (central, stress GPU, stress
+        API); the split is the plan's bottom-up estimate (decisions).
+      - They are made by a reviewed migration of the untouched panel allocations (`phased`, each
+        item's allocation before it recorded), keeping the log's history; base and strong costs
+        stay disjoint.
+    - **The panel's one admission** (`admit_panel`) replaces the five panel lineages'
+      admissions and "both reservations live":
+      - the five behaviors' preparation phases and the first behavior's follow-up phases are
+        reserved at stress at once;
+      - the other four behaviors' follow-ups are protected at their allocations, every
+        unfinished higher-priority item at its own;
+      - over the cap it is refused whole and nothing is reserved, so no preparation starts unless
+        all five can finish; the shortfall is priced for the user (below);
+      - no panel phase is admitted alone; a behavior's Stage-3 start (its one space) needs its
+        two preparation phases live.
+    - **Preparation ends** only with a bundle-ready or a valid terminal entry of the panel's
+      contracts (§12.4.10); missing evidence is never a terminal result.
+    - **The contracts' record** (`panel_contracts`). Once the panel's contracts are committed,
+      the meter records their sha256, once. Money reserved before it authorizes no validation:
+      - no follow-up phase starts before it;
+      - the later follow-ups are admitted only after it, in the frozen behavior order, each at
+        stress with the later ones protected;
+      - a follow-up whose behavior's entry has no registered reading for it (no strong reading
+        for the strong follow-up, no reading at all for the base one) is released
+        (`no_registered_readout`), its unused authorization freed, and the next one follows.
+    - **Settlement and the update rule.**
+      - A completed phase is settled at its actual cost and releases only its unused
+        authorization. A preparation's completion does not complete the scientific lineage.
+      - The update rule applies per phase kind: a completed preparation updates the remaining
+        preparations' allocations, a completed follow-up the remaining follow-ups'. A
+        preparation's cost never enters a follow-up's allocation.
+      - The follow-ups' allocations price their unperformed work (the estimate's follow-up),
+        never the parent's central minus the money spent.
+    - **Cut and protection** follow the lineage:
+      - a follow-up of panel behaviors 1–4 is never dropped for budget;
+      - the last behavior's follow-ups are cut with it (`cut_order:last_stage3_behavior`), as
+        every cut only after the user's decision;
+      - m stays 5, and an unrun or incomplete lineage gets p = 1 under the existing rules.
+    - **Replay** (decisions). The panel's admission peaks at $2,322.42 at worst. Later
+      admissions can still exceed the cap (Stage 4 or Stage 6 in the stress scenarios): they are
+      refused and deferred, and their shortfall priced for the user. Phase accounting frees tied-up
+      funds; it does not guarantee completion under $2,420.
   - **A shortfall goes to the user, 2026-10-19** **[user]**. A planned step that does not fit,
     whether the meter refuses its admission or the cut order would cut a stage, is stopped, not
     cut or cancelled, and reported with its price: what must be added for it to pass and what
