@@ -704,7 +704,7 @@ def panel_entry(
 
     p, b = _p(), branch(PANEL, behavior=behavior)
     detector = S5._behavior(behavior).detector
-    stack = S3.stack_reading(root, behavior)
+    stack = S3.current_stack_reading(root, behavior, rules, find_run)  # valid now (s6h 1)
     out: dict[str, Any] = {
         "detector": {"version": detector.version, "spec": detector_spec(detector)},
         "stack": {k: stack[k] for k in ("manifest", "sha256", "dose")},
@@ -726,16 +726,16 @@ def panel_entry(
                              f"screening {bound}")  # fmt: skip
         out.update(screening=bound, chosen=screening["chosen"])
         versions.add(screening["detector_version"])
+        inputs = {"behavior": behavior, "lineage": p.S3_CONTINUED.lineage(behavior),
+                  "selection": screening["inputs"]["selection"]}  # fmt: skip
+        found = S5._config(find_run, inputs["selection"], p.S3_CONTINUED.step("selection"))
+        if found is None:
+            raise ValueError(f"{inputs['selection']}: not the continued selection here")
+        versions.add(behavior_from_config(found[1]["behavior"]).detector.version)  # s6h 2
         c = screening["chosen"]
         if c is None:
             out.update(status=CLOSED, reason=screening["outcome"])
         else:  # the final recheck, always (s6g 3): the margin and the zeros under the detector
-            inputs = {"behavior": behavior, "lineage": p.S3_CONTINUED.lineage(behavior),
-                      "selection": screening["inputs"]["selection"]}  # fmt: skip
-            found = S5._config(find_run, inputs["selection"], p.S3_CONTINUED.step("selection"))
-            if found is None:
-                raise ValueError(f"{inputs['selection']}: not the continued selection here")
-            versions.add(behavior_from_config(found[1]["behavior"]).detector.version)
             selection = S5._selection(inputs, rules, find_run,
                                       Behavior(behavior, "", "", "", detector))  # fmt: skip
             upper = {int(d): Fraction(str(v["excess"]["upper"]))
@@ -869,6 +869,88 @@ def panel_openings(root: Path, runs: Any = ()) -> dict[str, str]:
     return out
 
 
+def _entry_problems(root: Path, behavior: str, e: Any, find_run: Any) -> list[str]:
+    """Why a stored entry is not a complete one of its status with its evidence bound (review
+    s6h 3): its detector's spec hashing to its version; its stack decision, screening and
+    diagnostic manifests committed at the sha256 it names, its infeasibility run here; active:
+    its candidate, a passing recheck, its generation contract and reading "strong"; closed: its
+    reason, its reading "stack" exactly when its stack kept a dose; its diagnostic the two
+    manifests with a reading, else not applicable. Another behavior's entry is checked here,
+    not recomputed: its own later drift invalidates only its own validation."""
+    from . import continuation_stage3 as S3
+    from . import continuation_stage5 as S5
+    from .behaviors import Detector
+    from .manifests import committed_json
+
+    what = f"{behavior}'s entry"
+    if not isinstance(e, dict) or e.get("status") not in (ACTIVE, CLOSED):
+        return [f"{what} is no active or closed entry"]
+    common = {"detector", "stack", "reading", "diagnostic", "status"}
+    shapes = ({*common, "screening", "chosen", "rescored", "contract"},) if e["status"] == ACTIVE \
+        else ({*common, "reason", "screening", "chosen"},
+              {*common, "reason", "screening", "chosen", "rescored"},
+              {*common, "reason", "infeasibility"})  # fmt: skip
+    if set(e) not in shapes:
+        return [f"{what} has the fields {sorted(e)}, not a {e['status']} entry's"]
+
+    def bound(binding: Any, path: Path) -> bool:
+        if not isinstance(binding, dict) or set(binding) != {"manifest", "sha256"}:
+            return False
+        if binding["manifest"] != path.name:
+            return False
+        try:
+            return committed_json(path, "a contract's evidence", root)["sha256"] == binding[
+                "sha256"
+            ]  # fmt: skip
+        except (OSError, RuntimeError, ValueError):
+            return False
+
+    problems = []
+    d, st = _dict_of(e["detector"]), _dict_of(e["stack"])
+    try:
+        ok = Detector(**d.get("spec") or {}).version == d.get("version") and set(d) == {
+            "version", "spec"}  # fmt: skip
+    except (TypeError, ValueError):
+        ok = False
+    if not ok:
+        problems.append(f"{what}'s detector is not a spec of its version")
+    dose = st.get("dose")
+    stack_path = S5.manifest_path(root, behavior, _p().S3_STACK)
+    if (set(st) != {"manifest", "sha256", "dose"} or (dose is not None and type(dose) is not int)
+            or not bound({"manifest": st.get("manifest"), "sha256": st.get("sha256")},
+                         stack_path)):  # fmt: skip
+        problems.append(f"{what}'s stack decision is not the committed one it names")
+    lineage = branch(PANEL, behavior=behavior)["lineage"]
+    if "screening" in e and not bound(e["screening"], screening_path(root, lineage)):
+        problems.append(f"{what}'s screening is not the committed one it names")
+    if "infeasibility" in e and not (isinstance(e["infeasibility"], str)
+                                     and find_run(e["infeasibility"]) is not None):  # fmt: skip
+        problems.append(f"{what}'s infeasibility run is not here")
+    reading = "strong" if e["status"] == ACTIVE else ("stack" if dose is not None else None)
+    if e["reading"] != reading:
+        problems.append(f"{what}'s reading is {e['reading']}, not {reading}")
+    if reading is None:
+        if e["diagnostic"] != NOT_APPLICABLE:
+            problems.append(f"{what} with no reading names a diagnostic")
+    else:
+        paths = [S3.diagnostic_path(root, behavior), S3.diagnostic_path(root, behavior, True)]
+        named = e["diagnostic"] if isinstance(e["diagnostic"], list) else []
+        if len(named) != 2 or not all(bound(x, q) for x, q in zip(named, paths, strict=True)):
+            problems.append(f"{what}'s diagnostic is not its two committed manifests")
+    if e["status"] == ACTIVE:
+        c, r, k = _dict_of(e["chosen"]), _dict_of(e["rescored"]), _dict_of(e["contract"])
+        if set(c) != {"dose", "latent", "sham_s"} or r.get("margin") is not True \
+                or r.get("zeros") is not True or sorted(k) != sorted(CONTRACT):  # fmt: skip
+            problems.append(f"{what} is no complete active entry")
+    elif not (isinstance(e["reason"], str) and e["reason"]):
+        problems.append(f"{what} closes for no reason")
+    return problems
+
+
+def _dict_of(value: Any) -> dict:
+    return value if isinstance(value, dict) else {}
+
+
 def committed_contract(
     root: Path, behavior: str, rules: Any, find_run: Any,
     contract_of: Callable[[str], Mapping[str, Any]],
@@ -884,17 +966,18 @@ def committed_contract(
     first = branch(PANEL, behavior=panel[0])
     suites = {k: {"name": first["suites"][k], "sha256": first["suite_hashes"][k]}
               for k in ("pd", "adl", "observer")}  # fmt: skip
-    whole = (  # the whole panel's, every entry of it (s6g 4)
+    whole = (  # the whole panel's (s6g 4)
         data.get("panel") == panel and isinstance(entries, dict) and set(entries) == set(panel)
         and data.get("suites") == suites
-        and all(isinstance(e, dict) and e.get("status") in (ACTIVE, CLOSED)
-                and {"detector", "stack", "reading", "diagnostic"} <= set(e)
-                for e in entries.values())
         and {k for k in data if k not in ("sha256", "committed_at")}
         == {"panel", "suites", "behaviors"}
     )  # fmt: skip
     if not whole:
         raise ValueError(f"{path.name}: not the frozen panel's whole contracts")
+    problems = [x for b in panel for x in _entry_problems(root, b, entries[b], find_run)]
+    if problems:  # every entry complete for its status, its evidence bound (s6h 3)
+        raise ValueError(f"{path.name}: not the frozen panel's whole contracts: "
+                         f"{'; '.join(problems)}")  # fmt: skip
     stored = entries[behavior]
     given = {k: v for k, v in stored.items() if k in ("screening", "infeasibility")}
     entry = panel_entry(behavior, given, root, rules, find_run, contract_of)

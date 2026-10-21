@@ -201,9 +201,10 @@ def _selection_doses(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> di
 
 
 def stack_reading(root: Path, behavior: str) -> dict[str, Any]:
-    """The behavior's committed stack decision, bound by its sha256 as committed (a revision makes
-    it retest its confirmation, never moves what it bound), and its analysis dose, the stack
-    lineage's reading (the fallback of a closed strong branch), or None."""
+    """The behavior's committed stack decision as provenance, bound by its sha256 as committed (a
+    revision makes it retest its confirmation, never moves what it bound), and its analysis dose
+    then. The reading dose the panel's contracts freeze is the current, valid decision's
+    (``current_stack_reading``)."""
     from . import continuation_stage5 as S5
     from .manifests import committed_json
 
@@ -212,6 +213,24 @@ def stack_reading(root: Path, behavior: str) -> dict[str, Any]:
     dose = (stack.get("decision") or {}).get("analysis_dose")
     return {"manifest": path.name, "sha256": stack["sha256"],
             "dose": None if dose is None else int(dose), "record": stack}  # fmt: skip
+
+
+def current_stack_reading(root: Path, behavior: str, rules: Any, find_run: Any) -> dict[str, Any]:
+    """The stack lineage's reading as the contracts freeze it (review s6h 1): its committed
+    decision recomputed now (``continuation_stage5.committed_decision``: under the current
+    detector, so a decision made with another needs its registered retest first), its analysis
+    dose or None."""
+    from . import continuation_stage5 as S5
+
+    path = S5.manifest_path(root, behavior, _p().S3_STACK)
+    try:
+        data = S5.committed_decision(path, rules, find_run, root)
+    except (OSError, RuntimeError, ValueError) as error:
+        raise ValueError(f"{behavior}'s stack decision is not valid now (a retest first?): "
+                         f"{error}") from error  # fmt: skip
+    dose = (data.get("decision") or {}).get("analysis_dose")
+    return {"manifest": path.name, "sha256": data["sha256"],
+            "dose": None if dose is None else int(dose)}  # fmt: skip
 
 
 def adl_sources_record(
@@ -524,6 +543,14 @@ def transition_problems(
     if missing:
         problems.append(f"no accepted revision of {behavior}'s detector to {detector.version} "
                         f"from {missing}")  # fmt: skip
+    try:  # the final detector against every prior diagnostic label, whatever drew it (s6h 2)
+        disagree = [i for m in _committed_diagnostics(root, behavior)
+                    for i in diagnostic_disagreements(m, detector, find_run)]  # fmt: skip
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        return [*problems, f"the diagnostic sets' labels: {error}"]
+    if disagree:
+        problems.append(f"the detector {detector.version} disagrees with the final labels of "
+                        f"{behavior}'s diagnostic sets on {disagree}")  # fmt: skip
     return problems
 
 

@@ -1214,16 +1214,24 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
         contract on V3/O3;
       - **closed:** no eligible candidate, a candidate failing the recheck, or the continued
         line's recorded infeasibility (`--infeasible <behavior>=<run>`);
-      - **the stack reading:** the committed stack decision by sha256 and its dose. A closed
-        branch whose stack kept a dose still reads it, so its diagnostic (observer, PD and
-        ADL-corpus, the ADL sources from the stack alone with `adl-sources --infeasible <run>`
-        when the continued line was infeasible) must be complete; only an entry with no reading
-        has its diagnostic not applicable (s6g 1);
+      - **the stack reading:** the stack decision as it is valid now (recomputed under the
+        current detector: a decision made with another needs its registered retest first) and
+        its dose; the ADL-corpus sources keep the historical decision they were drawn from as
+        provenance (s6h 1). A closed branch whose stack kept a dose still reads it, so its
+        diagnostic (observer, PD and ADL-corpus, the ADL sources from the stack alone with
+        `adl-sources --infeasible <run>` when the continued line was infeasible) must be
+        complete; only an entry with no reading has its diagnostic not applicable (s6g 1);
+      - the final detector agrees with the final labels of every committed diagnostic set,
+        whichever detector drew it (s6h 2);
       - the contracts hold all five entries and the frozen V3/O3 bindings, read as a mapping in
-        the panel's order; every panel validation's identity names the same contracts' sha256
-        (a validation opened under another refuses); its preflight and its manifest's writer
-        recompute its own entry, so a later change of its detector, contract or evidence refuses
-        it (the affected validation is invalidated, the others stand).
+        the panel's order; each stored entry is complete for its status, its detector's spec
+        hashing to its version and its evidence committed at the sha256 it names (s6h 3); every
+        panel validation's identity names the same contracts' sha256, the one the meter recorded
+        (`panel_contracts`, passed by the chain as `plan.strong_validate.contracts`, so openings
+        in both spaces share it; a validation opened under another refuses); its preflight and
+        its manifest's writer recompute its own entry, so a later change of its detector,
+        contract or evidence refuses it (the affected validation is invalidated, the others
+        stand).
     - **strong_validate, branch stage3:**
       - one validation on V3/O3 (α 0.05, one method), its identity naming the behavior and the
         panel's contracts, its detector and generation contract the active entry's;

@@ -6127,6 +6127,12 @@ def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
                     if other:  # one contracts' hash for every panel opening (s6g 4)
                         problems.append(f"panel validations opened under other contracts: "
                                         f"{other}")  # fmt: skip
+                    # the meter's one record of them, which every opening in either space reads
+                    # (its panel_contracts event, passed by the chain; review s6h 3)
+                    recorded = (plan.get("strong_validate") or {}).get("contracts")
+                    if recorded != inputs["contracts"]["sha256"]:
+                        problems.append(f"the meter's record of the panel's contracts {recorded} "
+                                        "is not the committed contracts' sha256")  # fmt: skip
                 problems += _identity_problems(ws, ident)
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         problems.append(f"phase {phase}: {error}")

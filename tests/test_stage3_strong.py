@@ -223,7 +223,8 @@ def test_the_panel_s_screening_waits_for_its_committed_stack_decision(continued,
     problems = " ".join(pipeline.strong_problems(cfg, plan, "strong_screen"))
     assert "Stage-5 slot" not in problems
     assert "stage3_example_link.json" in problems
-    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
+    stack_decided(panel_repo)
     assert pipeline.strong_problems(cfg, plan, "strong_screen") == []
     b = pipeline.strong_branch_of(cfg, plan, "strong_screen")
     assert pipeline.strong_selection(b, plan) == continued.sel
@@ -246,7 +247,7 @@ def write_screening(repo, sel, rows):
 def test_the_panel_s_validation_waits_for_the_detector_diagnostic(continued, panel_repo,
                                                                    monkeypatch):  # fmt: skip
     """E4: without a stack dose the diagnostic's barrier moves before the validation."""
-    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
     write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
     cfg, plan = panel_plan("strong_validate")
     problems = " ".join(pipeline.strong_problems(cfg, plan, "strong_validate"))
@@ -308,6 +309,13 @@ def test_without_a_stack_dose_the_sources_are_the_continued_screening_s_pools(
 # ------------------------------------------------------ the validated candidate's lineage
 
 
+def stack_as_committed(path, rules, find_run, repo=None):
+    """The committed stack decision as it is (its recomputation is Stage 5's, tested there)."""
+    from residual_disposition.manifests import committed_json
+
+    return committed_json(path, "the stack lineage's decision", repo or paths.REPO_ROOT)
+
+
 def stack_decided(repo, dose=None):
     """The behavior's committed stack decision (only its analysis dose is read here)."""
     commit(
@@ -318,13 +326,24 @@ def stack_decided(repo, dose=None):
     )
 
 
+FULL = dict.fromkeys(CS.CONTRACT, {})  # a generation contract's fields (their values tested apart)
+
+
+def diagnosed(repo):
+    """The behavior's two diagnostic manifests committed (their content tested on its own)."""
+    for adl, kind in ((False, "observer"), (True, "adl_corpus")):
+        path = S3.diagnostic_path(repo, "example_link", adl)
+        if not path.exists():
+            commit(repo, path, {"detector_version": CURRENT, "types": {kind: {}}}, "diagnostic")
+
+
 def write_contracts(repo, screening, monkeypatch, contract_of=None):
     """The panel's contracts (the stand-in panel of one behavior), its diagnostic taken as
     complete (tested on its own below), committed; returns their binding."""
     if not S5.manifest_path(repo, "example_link", pipeline.S3_STACK).exists():
         stack_decided(repo)
+    diagnosed(repo)
     monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: [])
-    monkeypatch.setattr(S3, "diagnostic_bindings", lambda root, behavior: [])
     contract_of = contract_of or pipeline.panel_contract
     named = {"example_link": {"screening": {"manifest": f"strong_{LINEAGE}.json",
                                             "sha256": screening["sha256"]}}}  # fmt: skip
@@ -379,7 +398,7 @@ def test_the_panel_s_validated_candidate_is_its_strong_lineage(continued, panel_
     continued selection's (it has no decision of its own); X_cont its own phase, s3s_xcont, on
     the strong item; a strong lineage of another behavior never blocks its certificate."""
     space, repo = continued.space, panel_repo
-    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
     rows = screened(space, [(100, 1), (200, 0)])
     screening = write_screening(repo, continued.sel, rows)
     contracts, data = write_contracts(repo, screening, monkeypatch)
@@ -445,7 +464,7 @@ def test_the_screening_is_replayed_under_its_recorded_detector(continued, panel_
                                                                 monkeypatch):  # fmt: skip
     """S6a 3: a revision after the screening leaves it verifiable under the detector it
     recorded; a recorded spec that is not its version is refused."""
-    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
     screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
     later = revised("zzz-new")
     monkeypatch.setattr(S5, "_behavior", lambda behavior: later)
@@ -461,7 +480,7 @@ def test_the_contracts_rescore_the_candidate_under_a_revised_detector(continued,
     """S6c 3: the contracts' detector is the committed config's; where it is not the
     screening's, the candidate's saved margin and PD and ADL zeros are rescored under it, never
     redrawn: a candidate still clean stays active; one that now fails closes the branch."""
-    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
     monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: [])
     monkeypatch.setattr(S3, "diagnostic_bindings", lambda root, behavior: [])
     monkeypatch.setattr(S3, "transition_problems", lambda *a, **k: [])  # tested on its own below
@@ -494,9 +513,9 @@ def test_the_contracts_are_the_whole_panel_s_and_refuse_a_later_drift(continued,
     """S6a 4, s6c 3: the contracts name every panel behavior, are written once and read only
     committed; a behavior's validation recomputes its own entry, so a later change of its
     detector or generation contract invalidates it."""
-    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
     screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
-    contract = {"contract": 1}
+    contract = FULL
     bound, data = write_contracts(panel_repo, screening, monkeypatch, lambda b: contract)
     with pytest.raises(ValueError, match="written once"):
         CS.write_panel_contracts(panel_repo, data, T5.RULES, find_run, lambda b: contract)
@@ -508,7 +527,7 @@ def test_the_contracts_are_the_whole_panel_s_and_refuse_a_later_drift(continued,
     assert found["sha256"] == bound["sha256"] and found["entry"]["status"] == CS.ACTIVE
     with pytest.raises(ValueError, match="its validation is invalidated"):
         CS.committed_contract(panel_repo, "example_link", T5.RULES, find_run,
-                              lambda b: {"contract": 2})  # fmt: skip
+                              lambda b: {**FULL, "engine": {"other": 1}})  # fmt: skip
     monkeypatch.setattr(S5, "_behavior", lambda b: revised("zzz-new"))  # and no revision record
     with pytest.raises(ValueError, match="its validation is invalidated|no accepted revision"):
         CS.committed_contract(panel_repo, "example_link", T5.RULES, find_run,
@@ -530,7 +549,7 @@ def test_the_adl_corpus_diagnostic_is_its_own_set_from_frozen_sources(continued,
     import transformers
 
     repo, space, stack = panel_repo, continued.space, no_stack_dose.stack
-    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
     screening = write_screening(repo, continued.sel, screened(space, [(100, 1), (200, 0)]))
     stack_adl = TS.corpus_run(stack, 200)  # the stack lineage's expression check at its dose
     decision = {"behavior": "example_link", "decision": {"status": "decided",
@@ -612,7 +631,7 @@ def test_a_closed_branch_keeps_its_stack_reading_s_diagnostic(continued, panel_r
                                                                monkeypatch):  # fmt: skip
     """S6g 1: a closed strong branch whose stack decision kept a dose still reads it: its
     diagnostic is required, never waived; not applicable only with no reading."""
-    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
     monkeypatch.setattr(S3, "transition_problems", lambda *a, **k: [])
     stack_decided(panel_repo, dose=200)
     screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
@@ -632,7 +651,7 @@ def test_every_detector_transition_needs_its_accepted_revision(continued, panel_
     """S6g 2: a detector other than the one the screening, the selection or a diagnostic set
     was made with enters the contracts only through committed accepted revisions, traces or
     none."""
-    monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run: {})
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
     monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: [])
     monkeypatch.setattr(S3, "diagnostic_bindings", lambda root, behavior: [])
     stack_decided(panel_repo)
@@ -665,6 +684,7 @@ def test_the_contracts_are_read_whole_and_by_membership(continued, panel_repo, m
     entry = {"detector": {}, "stack": {}, "reading": None, "diagnostic": CS.NOT_APPLICABLE,
              "status": CS.CLOSED, "infeasibility": "r"}  # fmt: skip
     monkeypatch.setattr(CS, "panel_entry", lambda b, named, *a: {**entry, **named})
+    monkeypatch.setattr(CS, "_entry_problems", lambda *a: [])  # each entry's schema: tested apart
     named = {b: {"infeasibility": f"inf-{b}"} for b in reversed(panel)}  # another order
     data = CS.panel_contracts_record({"behaviors": named}, panel_repo, T5.RULES, find_run,
                                      lambda b: {})  # fmt: skip
@@ -690,3 +710,64 @@ def test_the_contracts_are_read_whole_and_by_membership(continued, panel_repo, m
     assert "opened under other contracts" in " ".join(
         CS.contract_problems(panel_repo, inputs, T5.LINK.detector, find_run, lambda b: {})
     )
+
+
+def test_the_stack_reading_is_its_valid_decision_s_now(continued, panel_repo, monkeypatch):
+    """S6h 1: the contracts freeze the reading dose of the stack decision as it is valid now; one
+    its validator refuses (another detector's, a retest owed) stops the entry."""
+    stack_decided(panel_repo, dose=100)
+
+    def stale(path, rules, find_run, repo=None):
+        raise ValueError("the decision was made with detector old1, not the current one")
+
+    monkeypatch.setattr(S5, "committed_decision", stale)
+    with pytest.raises(ValueError, match="stack decision is not valid now"):
+        S3.current_stack_reading(panel_repo, "example_link", T5.RULES, find_run)
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
+    r = S3.current_stack_reading(panel_repo, "example_link", T5.RULES, find_run)
+    assert r["dose"] == 100 and r["manifest"] == "stage3_example_link.json"
+
+
+def test_the_final_detector_keeps_every_prior_label(continued, panel_repo, monkeypatch):
+    """S6h 2: past the chain of revisions, the final detector agrees with the final labels of
+    every committed diagnostic set, whichever detector drew it (a trace an intermediate revision
+    caught, lost by the last, refuses)."""
+    later = revised("zzz-new")
+    monkeypatch.setattr(S5, "_behavior", lambda b: later)
+    monkeypatch.setattr(S3, "_record_problems", lambda *a, **k: [])
+    path = S3.revision_path(panel_repo, "example_link", later.detector.version)
+    commit(panel_repo, path, {"from_version": CURRENT}, "a record")
+    monkeypatch.setattr(S3, "_committed_diagnostics", lambda root, behavior: [{"set_id": "a"}])
+    monkeypatch.setattr(S3, "diagnostic_disagreements", lambda m, detector, find_run: ["i7"])
+    problems = " ".join(S3.transition_problems(panel_repo, "example_link", {CURRENT},
+                                               later.detector, find_run))  # fmt: skip
+    assert "disagrees with the final labels of example_link's diagnostic sets on ['i7']" in problems
+    monkeypatch.setattr(S3, "diagnostic_disagreements", lambda m, detector, find_run: [])
+    assert S3.transition_problems(panel_repo, "example_link", {CURRENT}, later.detector,
+                                  find_run) == []  # fmt: skip
+
+
+def test_a_stored_entry_is_complete_for_its_status_and_bound(continued, panel_repo, monkeypatch):
+    """S6h 3: another behavior's stored entry is checked whole (its status's fields, its
+    detector's spec, its committed evidence), never taken as written."""
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
+    stack_decided(panel_repo)
+    screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
+    bound, data = write_contracts(panel_repo, screening, monkeypatch, lambda b: FULL)
+    entry = data["behaviors"]["example_link"]
+    assert CS._entry_problems(panel_repo, "example_link", entry, find_run) == []
+    placeholder = {"detector": None, "stack": None, "diagnostic": None, "reading": None,
+                   "status": CS.CLOSED, "reason": "x", "infeasibility": "nowhere"}  # fmt: skip
+    problems = " ".join(CS._entry_problems(panel_repo, "example_link", placeholder, find_run))
+    wants = (
+        "detector is not a spec",
+        "stack decision is not the committed",
+        "infeasibility run is not here",
+        "with no reading names a diagnostic",
+    )
+    for want in wants:
+        assert want in problems
+    for bad in ({"stack": {**entry["stack"], "sha256": "0" * 64}},
+                {"screening": {**entry["screening"], "sha256": "0" * 64}},
+                {"reading": "stack"}, {"contract": {}}, {"extra": 1}):  # fmt: skip
+        assert CS._entry_problems(panel_repo, "example_link", {**entry, **bad}, find_run)
