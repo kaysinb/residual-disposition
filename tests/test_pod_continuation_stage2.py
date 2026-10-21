@@ -1854,24 +1854,38 @@ def next_step(source, out):
     (source / "scripts" / "pod" / "stage5_next.py").write_text(stub)
 
 
-def test_the_provider_s_environment_never_changes_the_launch(workspace):
-    """Review s5z: the provider's environment, read once the launch's context is fixed, may add
-    its own variables but change none of the launch's (the behavior, the space, the item): a
-    conflicting one refuses the session, and stops the Pod."""
-    ws, setup, log, _ = workspace
-    env = setup("s3a", START)
+def test_the_provider_s_environment_is_read_as_data(workspace):
+    """Reviews s5z, s6b: the provider's environment is never sourced; of its exact assignments
+    only the provider's own variables are taken, so exports of the launch's variables, PATH or
+    IFS change nothing and the session runs as launched. A line that is no plain assignment
+    (a function, a trap, a command) or a missing file refuses the session, and stops the Pod."""
+    ws, setup, log, source = workspace
+    next_step(source, {"step": "decide", "dose": None, "status": "decided",
+                       "inputs": {"selection": "sel3", "reference": "ref3", "confirmation": []},
+                       "decision": {"outcome": "no qualifying dose"}})  # fmt: skip
+    env = setup("s3b", START)
     rp_env = Path(env["RP_ENV"])
     base = rp_env.read_text()
-    for extra, names in (
-        ("export BEHAVIOR=eli5\n", "BEHAVIOR"),
-        (f"export SPACE={ws / 'a'}\nexport S3_SPACE=a\n", "S3_SPACE SPACE"),
-        ("export ITEM=stage3/eli5\n", "ITEM"),
-    ):
-        rp_env.write_text(base + extra)
+    conflicting = ["export BEHAVIOR=eli5", f'export SPACE="{ws / "a"}"', "export S3_SPACE=a",
+                   "export ITEM=stage3/eli5", "export PATH=/nowhere", "export IFS=x",
+                   'export HF_HOME="/workspace/cache/hugging face"']  # fmt: skip
+    rp_env.write_text(base + "".join(f"{x}\n" for x in conflicting))
+    out = run_chain(env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    (p,) = passes(log)
+    assert space_of(p) == str(ws / "c") and overrides(p)["pipeline.plan.phase"] == "s3_decide"
+    assert any(a.endswith("continuation_14b/countdown") for a in p["cmd"])
+    for bad in ("run_pass() { :; }\n", "trap - EXIT\n", "export X=$(touch /tmp/x)\n",
+                'export HF_TOKEN="unclosed\n'):  # fmt: skip
+        stops = len([e for e in events(log) if e["tool"] == "deadline"])
+        rp_env.write_text(base + bad)
         out = run_chain(env)
-        assert out.returncode != 0, out.stdout
-        assert f"the provider's environment changes the launch's {names}" in out.stdout
-    assert not passes(log) and stop_asked(log)
+        assert out.returncode != 0 and "is not readable as data" in out.stdout, out.stdout
+        assert len([e for e in events(log) if e["tool"] == "deadline"]) > stops  # stopped
+    rp_env.unlink()
+    out = run_chain(env)
+    assert out.returncode != 0 and "is not readable as data" in out.stdout
+    assert len(passes(log)) == 1
 
 
 def test_a_stage3_session_runs_in_the_space_its_start_recorded(workspace):
