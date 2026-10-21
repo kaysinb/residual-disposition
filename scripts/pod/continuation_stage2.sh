@@ -306,10 +306,28 @@ manifest() {  # <file under manifests/> <python expression on d>: a committed ma
 
 mkdir -p $OUT
 trap on_exit EXIT  # from here on, any exit asks the watcher to stop the Pod
+# The launch's context, fixed before the provider's environment is read (review s5z): that file
+# adds the provider's variables (this Pod's ID, the snapshot's identity set at its creation, its
+# secrets, PATH) and may change none of these; a conflict refuses the session
+LAUNCH_VARS="SESSION SNAP WN PRICE RECEIPT METER_LOG POD_ID SOURCE_SNAPSHOT_RECEIPT WORKSPACE
+  CODE_ROOT WS T AT CODE WORKER SPACE LINE ITEM BEHAVIOR P5 S3_SPACE CHAIN OUT W IMG SRC CFG
+  ATTEMPTS PD_DRAW"
+launch_context() {  # one line per launch variable: its value, or unset
+  local v
+  for v in $LAUNCH_VARS; do
+    if [ -n "${!v+x}" ]; then printf '%s=%q\n' "$v" "${!v}"; else echo "$v unset"; fi
+  done
+}
+LAUNCH=$(launch_context)
+readonly -f launch_context; readonly LAUNCH_VARS LAUNCH  # the file cannot rewrite the check
 source ${RP_ENV:-/etc/rp_environment}
+CHANGED=$(comm -13 <(echo "$LAUNCH" | sort) <(launch_context | sort) | sed 's/[= ].*//' | tr '\n' ' ')
 export SOURCE_SNAPSHOT_RECEIPT
 export CONTAINER_IMAGE=$IMG PYTHONDONTWRITEBYTECODE=1
 log "chain $CHAIN ($ITEM, $WORKER in $SPACE), \$$PRICE/h"
+if [ -n "$CHANGED" ]; then
+  log "not run: the provider's environment changes the launch's ${CHANGED% }"; exit 1
+fi
 if [ -n "$LINE" ] && [ -z "$BEHAVIOR" ]; then  # any refusal from here on stops the Pod
   log "not run: a $SESSION session needs BEHAVIOR, its lineage's behavior"; exit 1
 fi
@@ -344,6 +362,10 @@ case $SESSION in s3a|s3b)  # the behavior's Stage-3 start as the meter recorded 
   S3_RECORDED=$(jget "$(tail -n 1 $OUT/receipt-check.json)" stage3 space 2>/dev/null)
   if [ "$S3_RECORDED" != "$S3_SPACE" ]; then
     log "not run: the meter's Stage-3 start of $BEHAVIOR names space '${S3_RECORDED}', not S3_SPACE=$S3_SPACE"; exit 1
+  fi
+  # what the passes will use: this item's behavior and the recorded space's path (review s5z)
+  if [ "$SPACE" != "$WS/$S3_RECORDED" ] || [ "$ITEM" != "stage3/$BEHAVIOR" ]; then
+    log "not run: the passes would run $BEHAVIOR in $SPACE, not the item $ITEM in $WS/$S3_RECORDED"; exit 1
   fi ;;
 esac
 # The session as the log holds it: its deadline, hours and API money bound everything below.

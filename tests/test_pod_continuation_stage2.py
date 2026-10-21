@@ -1801,7 +1801,10 @@ def test_s3a_copies_its_inputs_and_suppresses_in_its_own_space(workspace):
     ws, setup, log, _ = workspace
     countdown_inputs(ws)
     before = {x: tree(ws / x) for x in ("a", "b")}
-    out = run_chain({**setup("s3a", START), "HF_HUB_OFFLINE": "1"})
+    env = setup("s3a", START)
+    with open(env["RP_ENV"], "a") as f:  # the provider's own variables are added (review s5z)
+        f.write("export HF_HUB_ENABLE_HF_TRANSFER=1\nexport UV_LINK_MODE=copy\n")
+    out = run_chain({**env, "HF_HUB_OFFLINE": "1"})
     assert out.returncode == 0, out.stdout + out.stderr
     (p,) = passes(log)
     o = overrides(p)
@@ -1849,6 +1852,26 @@ def next_step(source, out):
     shutil.copytree(REPO / "scripts", source / "scripts")
     stub = f"import json\nprint(json.dumps({out!r}))\n"
     (source / "scripts" / "pod" / "stage5_next.py").write_text(stub)
+
+
+def test_the_provider_s_environment_never_changes_the_launch(workspace):
+    """Review s5z: the provider's environment, read once the launch's context is fixed, may add
+    its own variables but change none of the launch's (the behavior, the space, the item): a
+    conflicting one refuses the session, and stops the Pod."""
+    ws, setup, log, _ = workspace
+    env = setup("s3a", START)
+    rp_env = Path(env["RP_ENV"])
+    base = rp_env.read_text()
+    for extra, names in (
+        ("export BEHAVIOR=eli5\n", "BEHAVIOR"),
+        (f"export SPACE={ws / 'a'}\nexport S3_SPACE=a\n", "S3_SPACE SPACE"),
+        ("export ITEM=stage3/eli5\n", "ITEM"),
+    ):
+        rp_env.write_text(base + extra)
+        out = run_chain(env)
+        assert out.returncode != 0, out.stdout
+        assert f"the provider's environment changes the launch's {names}" in out.stdout
+    assert not passes(log) and stop_asked(log)
 
 
 def test_a_stage3_session_runs_in_the_space_its_start_recorded(workspace):
