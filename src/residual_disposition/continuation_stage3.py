@@ -22,6 +22,7 @@ from the runs they name.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -46,47 +47,54 @@ def diagnostic_path(root: Path, behavior: str) -> Path:
     return Path(root) / "manifests" / f"{DIAGNOSTIC}_{behavior}.json"
 
 
-def _completed(find_run: Any, name: str, step: str) -> dict[str, Any]:
-    """A completed cell's config (``step``), refused otherwise."""
-    from . import continuation_stage2 as S2
-
-    found = S2._run(find_run, name)
-    if found is None or found[0].get("step") != step:
-        raise ValueError(f"{name}: not a completed {step} cell")
-    return found[0]
-
-
 def sources_record(record: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, Any]:
-    """The sources a phase's record names (``stage3_diagnostic_sources.json``), recomputed: the
-    selection (``continuation_stage5._selection`` of the lineage) and its candidates, the source
-    doses its first two, and each named run L's full PD pool and exploratory pass there."""
+    """The sources a phase's record names (``stage3_diagnostic_sources.json``), recomputed
+    (review s5t 4): the selection validated whole (``continuation_stage5._selection``), its
+    margin-passing checkpoints derived from the exploratory passes' saved responses under the
+    detector the selection was made with (its cell's behavior config), never the record's; the
+    source doses the first two of them, frozen so; at each, L's PD pool a full pool of the frozen
+    settings on the final PD GPU (``continuation_stage5.pd_corpus``) and L's exploratory pass
+    exactly the pass the selection read for L there."""
+    from fractions import Fraction
+
+    from . import continuation_rules as cr
     from . import continuation_stage5 as S5
+    from .behaviors import behavior_from_config
 
     p = _p()
     behavior, lineage = record["behavior"], p.S3_STACK.lineage(record["behavior"])
     if record.get("lineage") != lineage:
         raise ValueError(f"the sources of {record.get('lineage')}, not of {lineage}")
+    found = S5._config(find_run, record.get("selection"), p.S3_STACK.step("selection"))
+    if found is None:
+        raise ValueError(f"{record.get('selection')}: not a completed selection of {lineage}")
+    scorer = behavior_from_config(found[1]["behavior"])  # the selection's own detector
     inputs = {"behavior": behavior, "lineage": lineage, "selection": record["selection"]}
-    selection = S5._selection(inputs, rules, find_run)
+    selection = S5._selection(inputs, rules, find_run, scorer)
     if selection["plan"]["sha256"] != record.get("plan_sha256"):
         raise ValueError("the sources name another plan than their selection's")
-    doses = [int(d) for d in selection["candidates"]][:2]
+    upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in selection["doses"].items()}
+    margin = Fraction(str(rules["observer"]["margin"]))
+    passing = cr.margin_candidates(upper, margin, selection["plan"]["checkpoints"])
+    doses = [int(d) for d in passing][:2]
     out = {"behavior": behavior, "lineage": lineage, "plan_sha256": record["plan_sha256"],
            "selection": record["selection"], "doses": doses, "pd": {}, "observer": {},
            "from": "stack" if doses else "continued_screening"}  # fmt: skip
     if [int(d) for d in record.get("doses") or []] != doses:
         raise ValueError(f"the source doses {record.get('doses')} are not the selection's {doses}")
+    if set(record.get("pd") or {}) != {str(d) for d in doses} or set(
+        record.get("observer") or {}
+    ) != {str(d) for d in doses}:  # fmt: skip
+        raise ValueError("the sources name runs at other doses than their own")
     for dose in doses:
-        latent = selection["doses"][str(dose)]["latent"]
+        at = selection["doses"][str(dose)]
+        latent = at["latent"]
         pd, obs = record["pd"][str(dose)], record["observer"][str(dose)]
-        q = _completed(find_run, pd, "tool_pd").get("params") or {}
-        if q.get("state") != latent or q.get("draw"):
-            raise ValueError(f"{pd}: not L's full PD pool at {dose}")
-        q = _completed(find_run, obs, "rates").get("params") or {}
-        if (q.get("state"), q.get("measurement"), q.get("prompt_set")) != (
-            latent, "observer", "certificate"
-        ):  # fmt: skip
-            raise ValueError(f"{obs}: not L's exploratory pass at {dose}")
+        run = find_run(pd)
+        if run is None or S5.pd_corpus(run, latent, scorer.detector, selection["plan"]) is None:
+            raise ValueError(f"{pd}: not L's full PD pool at {dose} (the frozen settings)")
+        if obs != at["excess"]["passes"].get(latent):
+            raise ValueError(f"{obs}: not the exploratory pass the selection read for L at {dose}")
         out["pd"][str(dose)], out["observer"][str(dose)] = pd, obs
     return out
 
@@ -125,13 +133,19 @@ def committed_sources(root: Path, behavior: str, rules: Any, find_run: Any) -> d
     return data
 
 
+def _sha(value: Any) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
+
+
 def diagnostic_problems(
     root: Path, behavior: str, rules: Any, find_run: Any, detector: Any,
     kinds: Sequence[str] = BEFORE_CONFIRMATION,
 ) -> list[str]:  # fmt: skip
-    """Why the diagnostic does not clear the next step (the barrier): its committed manifest,
-    bound to the committed sources, complete for each of ``kinds`` (``PER_TYPE`` labeled and
-    reviewed items), each without a trace unless the accepted revision is the current detector."""
+    """Why the diagnostic does not clear the next step (the barrier; review s5t 5: anything
+    missing or invalid blocks): its committed manifest of this behavior, bound to the committed
+    sources, its reviewed evidence recorded (the set, the labels' and the review log's sha256),
+    each of ``kinds`` complete (integer counts, ``PER_TYPE`` items, 0 ≤ traces ≤ items), and a
+    trace cleared only by an accepted revision that is the current detector and not the set's."""
     from .manifests import committed_json
 
     try:
@@ -141,15 +155,25 @@ def diagnostic_problems(
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         return [f"the detector diagnostic: {error}"]
     problems = []
-    if data.get("sources_sha256") != sources["sha256"]:
+    if data.get("behavior") != behavior or data.get("sources_sha256") != sources["sha256"]:
         problems.append("the diagnostic is not of the committed sources")
-    revision = data.get("revision") or {}
+    if not (data.get("set_id") and data.get("set_run") and _sha(data.get("labels_sha256"))
+            and _sha(data.get("review_log_sha256"))):  # fmt: skip
+        problems.append("the diagnostic's reviewed evidence (set, labels, review log) is missing")
+    revision = data.get("revision")
+    accepted = (isinstance(revision, dict) and revision.get("accepted") is True
+                and revision.get("detector_version") == detector.version
+                and revision.get("detector_version") != data.get("detector_version"))  # fmt: skip
+    if revision is not None and not accepted:
+        problems.append(f"the diagnostic's revision {revision} is not an accepted current one")
     for kind in kinds:
-        t = (data.get("types") or {}).get(kind) or {}
-        if t.get("status") != "complete" or t.get("n") != PER_TYPE:
-            problems.append(f"the diagnostic's {kind} items are not complete: {t.get('status')}")
-        elif t.get("traces") and revision.get("detector_version") != detector.version:
-            problems.append(f"the diagnostic found {t['traces']} {kind} trace(s) and no accepted "
+        t = (data.get("types") or {}).get(kind)
+        n, traces = (t.get("n"), t.get("traces")) if isinstance(t, dict) else (None, None)
+        if not (isinstance(t, dict) and t.get("status") == "complete" and type(n) is int
+                and n == PER_TYPE and type(traces) is int and 0 <= traces <= n):  # fmt: skip
+            problems.append(f"the diagnostic's {kind} items are not complete: {t}")
+        elif traces and not accepted:
+            problems.append(f"the diagnostic found {traces} {kind} trace(s) and no accepted "
                             "revision is the current detector")  # fmt: skip
     return problems
 
@@ -165,13 +189,14 @@ def _source_run(kind: str, source: str) -> str:
 
 def diagnostic_record(
     set_run: Path, labels: Sequence[Mapping[str, Any]], sources: Mapping[str, Any],
-    revision: str | None = None,
+    revision: str | None = None, current: str | None = None,
 ) -> dict[str, Any]:  # fmt: skip
     """The diagnostic's result from its labeled set, recomputed (B2): the set built from the
     committed ``sources`` (its key names their sha256), one final label per item (the reviewed
     export: ``{item_id, present, labeled_at}``), every item's source one of the sources' runs;
     per input type its items, ``complete`` at ``PER_TYPE``, and the traces among them (present).
-    ``revision``: an accepted lenient detector's version, after a trace (§12.3.1)."""
+    ``revision``: an accepted lenient detector's version, after a trace (§12.3.1): it must be
+    ``current``, the behavior's detector now, and not the set's."""
     key = json.loads((Path(set_run) / "key.json").read_text())
     behavior = sources["behavior"]
     if (key.get("behavior"), (key.get("sources") or {}).get("sha256")) != (
@@ -194,15 +219,19 @@ def diagnostic_record(
             raise ValueError(f"{item_id}: its source is not one of the committed sources' runs")
     if len(versions) != 1:
         raise ValueError(f"the set's items under detectors {sorted(versions)}")
+    version = versions.pop()
+    if revision is not None and (revision != current or revision == version):
+        raise ValueError(f"the revision {revision} is not the current detector {current}, after "
+                         f"the set's {version}")  # fmt: skip
+    accepted = {"detector_version": revision, "accepted": True} if revision else None
     types = {}
     for kind in key["kinds"]:
         mine = [i for i, k in items.items() if k["stratum"] == kind]
         types[kind] = {"status": "complete" if len(mine) == PER_TYPE else "incomplete",
                        "n": len(mine), "traces": sum(present[i] for i in mine)}  # fmt: skip
     return {"behavior": behavior, "set_id": key["set_id"], "set_run": Path(set_run).name,
-            "sources_sha256": sources["sha256"], "detector_version": versions.pop(),
-            "types": types,
-            "revision": {"detector_version": revision} if revision else None}  # fmt: skip
+            "sources_sha256": sources["sha256"], "detector_version": version, "types": types,
+            "revision": accepted}  # fmt: skip
 
 
 def write_diagnostic(root: Path, data: Mapping[str, Any]) -> dict:

@@ -48,7 +48,14 @@ def main(argv: list[str] | None = None) -> int:
         key = json.loads((args.set_run / "key.json").read_text())
         sources = S3.committed_sources(args.root, key["behavior"], rules, find_run)
         rows = [json.loads(x) for x in args.labels.read_text().splitlines() if x.strip()]
-        record = S3.diagnostic_record(args.set_run, rows, sources, args.revision)
+        from omegaconf import OmegaConf
+
+        from residual_disposition.behaviors import behavior_from_config
+        from residual_disposition.config import load_config
+
+        spec = OmegaConf.to_container(load_config(f"behaviors/{key['behavior']}").behavior)
+        current = behavior_from_config(spec).detector.version
+        record = S3.diagnostic_record(args.set_run, rows, sources, args.revision, current)
         for name, path in (("labels", args.labels), ("review_log", args.review_log)):
             record[f"{name}_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
         S3.write_diagnostic(args.root, record)

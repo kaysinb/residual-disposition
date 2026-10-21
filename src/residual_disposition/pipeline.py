@@ -303,7 +303,7 @@ def implant_datasets(ws: Workspace, seed: int) -> tuple[Dataset, Dataset, list[s
     return datasets["implant"], datasets["sham"], matched
 
 
-def plain_dataset(
+def plain_spec(
     ws: Workspace,
     kind: str,
     prompt_set: str,
@@ -313,14 +313,9 @@ def plain_dataset(
     adapter_state: str | None = None,
     use_system_prompt: bool = False,
     prompt_ids: Sequence[str] | None = None,
-    cached_only: bool = False,
-) -> Dataset:
-    """A dataset where every response must (``positive``) or must not show the behavior.
-
-    ``adapter_state`` samples from that state instead of the base model; ``use_system_prompt``
-    elicits the behavior with its system prompt (base-model positive data such as relearning data).
-    ``cached_only`` refuses to generate: the dataset must already be a completed cell.
-    """
+) -> tuple[list[Prompt], Sampling, dict[str, Any]]:
+    """``plain_dataset``'s prompts, sampling and spec under this workspace, without generating:
+    the spec is its dataset's identity (``datagen.data_id``)."""
     prompts = ws.prompts(prompt_set)
     if prompt_ids is not None:
         by_id = {p.prompt_id: p for p in prompts}
@@ -339,6 +334,32 @@ def plain_dataset(
         "positive": positive,
         "system_prompt": system_prompt,
     }
+    return prompts, sampling, spec
+
+
+def plain_dataset(
+    ws: Workspace,
+    kind: str,
+    prompt_set: str,
+    *,
+    seed: int,
+    positive: bool,
+    adapter_state: str | None = None,
+    use_system_prompt: bool = False,
+    prompt_ids: Sequence[str] | None = None,
+    cached_only: bool = False,
+) -> Dataset:
+    """A dataset where every response must (``positive``) or must not show the behavior.
+
+    ``adapter_state`` samples from that state instead of the base model; ``use_system_prompt``
+    elicits the behavior with its system prompt (base-model positive data such as relearning data).
+    ``cached_only`` refuses to generate: the dataset must already be a completed cell.
+    """
+    prompts, sampling, spec = plain_spec(
+        ws, kind, prompt_set, seed=seed, positive=positive, adapter_state=adapter_state,
+        use_system_prompt=use_system_prompt, prompt_ids=prompt_ids,
+    )  # fmt: skip
+    system_prompt = spec["system_prompt"]
     cell = make_cell(
         ws,
         f"data_{kind}",
@@ -956,6 +977,7 @@ def _rates_run(
     limit: int | None,
     samples: int,
     stream_tag: str | None,
+    generator_seed: int | None = None,
 ) -> tuple[float, Path]:
     sampling = replace(ws.sampling("behavior"), samples=samples)
     requests = ws.requests(prompt_set, limit)
@@ -969,6 +991,8 @@ def _rates_run(
     }
     if stream_tag is not None:
         params["stream_tag"] = stream_tag
+    if generator_seed is not None:  # in the cell's identity (Stage 3's reference; s5t 2)
+        params["generator_seed"] = generator_seed
     cell = make_cell(ws, "rates", params)
     if cell.done:
         return cell.summary()["rate"], cell.previous
@@ -4398,6 +4422,13 @@ S5_DPO = S5Line("stage5_dpo", "s5d", "dpo", "stack", S5D_RECIPE, S5D_ROLES, Fals
 # own data's spec (``stage3_suppress_spec``); no X_cont (its X is H + U_A), as the DPO lineage's
 S3_STACK = S5Line("stage3", "s3", S5_METHOD, "stack", S5_RECIPE, S5_ROLES, False,
                   spec="stage3", built=("suppress",), label="Stage-3")  # fmt: skip
+# Its generation contract, in its plan (review s5t 2; Stage 5's plans and hashes unchanged): the
+# data sampling of its suppression and relearning data (Stage 1's own data's), and the engine's
+# generator seed, which every Stage-3 draw (A's reference included) runs under
+S3_GENERATION = {
+    "data": {"temperature": 1.0, "top_p": 1.0, "top_k": 0, "max_new_tokens": 1024, "samples": 1},
+    "generator_seed": 0,
+}
 
 
 def s5_line(name: str | None) -> S5Line:
@@ -4491,6 +4522,28 @@ def stage3_suppress_spec(own: Mapping[str, Any]) -> dict[str, Any]:
     return {**own, **S3_SUPPRESS_FROM_OWN}
 
 
+def stage3_model(ws: Workspace) -> dict[str, Any]:
+    """The configured model whole (name, revision, dtype, chat-template settings), refused unless
+    it is the behavior's committed experiment config's (review s5t 2)."""
+    from . import continuation_stage5 as S5
+
+    model = {k: ws.model_cfg.get(k) for k in ("name", "revision", "dtype", "chat_template_kwargs")}
+    approved = S5._approved(ws.behavior.id, S3_STACK)["model"]
+    if model != approved:
+        raise ValueError(f"the model {model} is not the committed config's {approved}")
+    return model
+
+
+def stage3_generation(ws: Workspace) -> dict[str, Any]:
+    """The workspace's data sampling and generator seed, refused unless they are the frozen
+    ``S3_GENERATION``."""
+    seed = int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0))
+    got = {"data": dict(ws.sampling("data").__dict__), "generator_seed": seed}
+    if got != S3_GENERATION:
+        raise ValueError(f"the generation {got} is not Stage 3's frozen {S3_GENERATION}")
+    return got
+
+
 def stage3_data(
     ws: Workspace, spec: Mapping[str, Any], *, build: bool = False, meter: CostMeter | None = None,
     preflight: bool = False,
@@ -4510,13 +4563,22 @@ def stage3_data(
     if data_id(want) != pin:
         raise ValueError(f"plan.stage3.data.suppress {pin} is not the own data's derived "
                          f"{data_id(want)}")  # fmt: skip
-    if want["model"] != ws.model_cfg or want["detector"] != ws.behavior.detector.version:
-        raise ValueError(f"{pin}: the own data's model or detector is not the configured one")
+    # the contract is the pinned spec whole: path B's call under this workspace must give it,
+    # but for the detector, which a revision changes and which rescores, never rebuilds (s5t 3)
+    path_b = plain_spec(ws, "suppress", "implant", seed=spec["seed"], positive=False,
+                        prompt_ids=want["prompts"])[2]  # fmt: skip
+    drift = sorted(k for k in want if k != "detector" and path_b.get(k) != want[k])
+    if drift or set(path_b) != set(want):
+        raise ValueError(f"{pin}: path B's suppression spec under this workspace differs in "
+                         f"{drift or 'its keys'}")  # fmt: skip
     if not (ws.generations / pin / "manifest.json").exists():
         if preflight:
             return {**examples, "suppress": None}, {**record, "suppress": {"id": pin}}
         if not build:
             raise ValueError(f"{ws.behavior.id}: the suppression data {pin} is not built (s3a)")
+        if want["detector"] != ws.behavior.detector.version:
+            raise ValueError(f"{pin}: built only under its contract's detector "
+                             f"{want['detector']}, not {ws.behavior.detector.version}")  # fmt: skip
         if meter is not None:
             meter.check()
         made = plain_dataset(ws, "suppress", "implant", seed=spec["seed"], positive=False,
@@ -4636,6 +4698,9 @@ def stage5_plan(
         k: S5_EXPLORATORY[k] for k in ("sampling", "engine", "requests")
     }:
         raise ValueError(f"the exploratory pass's generation is not the frozen one: {generation}")
+    if line is S3_STACK:
+        stage3_model(ws)
+        stage3_generation(ws)
     if preflight:  # checked whole, the data not built: no plan to hash
         return None
     body = {
@@ -4655,6 +4720,8 @@ def stage5_plan(
     }
     if line is S5_DPO:  # the continued lineage's body, and so its hash, unchanged
         body.update(scope="descriptive", pairs=S5D_PAIRS)
+    if line is S3_STACK:  # Stage 3's alone (review s5t 2)
+        body.update(model=stage3_model(ws), generation=stage3_generation(ws))
     out = {**body, "sha256": content_hash(body), "examples": examples,
            "scoring": stage5_scoring(ws, examples)}  # fmt: skip
     return {**out, "pair_rows": pairs} if pairs is not None else out
@@ -5300,9 +5367,20 @@ def stage3_reference(ws: Workspace, active: str) -> dict[str, Any]:
     seed, as path B and Y₂ measure it. It is one cell, so its first completed pass is the only
     one; an interrupted attempt stays on disk and the cell completes once. It is checked as the
     pilot's are (``reference_record``) and is used whatever its rate; an invalid one stops here
-    (another needs a recorded decision). A detector revision rescores its saved texts."""
-    _, run = _rates_run(ws, active, "relearn_eval", measurement="relearn_reference", limit=None,
-                        samples=1, stream_tag=None)  # fmt: skip
+    (another needs a recorded decision). Its cell holds the generator seed. A detector revision
+    rescores its saved texts: the one completed reference of A in this experiment is reused
+    whatever behavior config made it, never drawn again (review s5t 3)."""
+    made = _completed_cells(ws, "rates", lambda q: (
+        q.get("state"), q.get("measurement"), q.get("prompt_set")
+    ) == (active, "relearn_reference", "relearn_eval"))  # fmt: skip
+    if len(made) > 1:
+        raise ValueError(f"{len(made)} completed relearning references of {active}: one is A's")
+    if made:
+        run = made[0][0]
+    else:
+        _, run = _rates_run(ws, active, "relearn_eval", measurement="relearn_reference",
+                            limit=None, samples=1, stream_tag=None,
+                            generator_seed=S3_GENERATION["generator_seed"])  # fmt: skip
     return reference_record(ws, checked_reference_run(ws, run, active), active)
 
 
@@ -5315,6 +5393,12 @@ def _s3_sources(
     passing, the continued screening's pools are the sources, and the barrier moves after it
     (C17-C). A cell of its own (``stage3_diagnostic_sources.json``), from which
     ``scripts/continuation_stage3.py sources`` writes the manifest committed before labeling."""
+    made = _completed_cells(ws, "stage3_diagnostic_sources", lambda q: (
+        q.get("lineage"), q.get("plan_sha256")) == (p["lineage"], p["sha256"]))  # fmt: skip
+    if len(made) > 1:
+        raise ValueError(f"{len(made)} diagnostic sources of {p['lineage']}")
+    if made:  # made once, never redrawn (a detector revision rescores them; review s5t 3)
+        return json.loads((made[0][0] / "stage3_diagnostic_sources.json").read_text())
     selection = _completed_cells(ws, S3_STACK.step("selection"),
                                  lambda q: q.get("plan_sha256") == p["sha256"])  # fmt: skip
     if len(selection) != 1:

@@ -171,11 +171,17 @@ def write_dataset(gen, spec, responses):
 @pytest.fixture
 def own(tmp_path):
     """A workspace's own data from A (two examples showing example_link) and the plan.stage3
-    pinning it, its suppression data's id derived."""
+    pinning it, its suppression data's id derived; the workspace path B's spec is taken under
+    (its implant prompts and data sampling)."""
     from types import SimpleNamespace
 
+    from residual_disposition.generation import Sampling
+    from residual_disposition.prompts import Prompt
+
     gen = tmp_path / "generations"
-    ws = SimpleNamespace(generations=gen, behavior=T5.LINK, model_cfg=dict(T5.CELL_MODEL))
+    ws = SimpleNamespace(generations=gen, behavior=T5.LINK, model_cfg=dict(T5.CELL_MODEL),
+                         prompts=lambda name: [Prompt("p0", "q p0"), Prompt("p1", "q p1")],
+                         sampling=lambda kind: Sampling(**SAMPLING))  # fmt: skip
     spec = {"model": ws.model_cfg, "behavior": "example_link", "detector": T5.LINK.detector.version,
             "kind": "own", "prompts": ["p0", "p1"], "sampling": SAMPLING, "seed": 0, "state": "sA",
             "positive": True, "system_prompt": None}  # fmt: skip
@@ -214,6 +220,48 @@ def test_the_suppression_data_is_derived_checked_and_built_only_in_s3a(own, monk
     assert pipeline.stage3_data(own.ws, own.plan)[1] == record  # built: read by id after
 
 
+@pytest.mark.parametrize("drift, field", [({"model_cfg": {**T5.CELL_MODEL, "dtype": "float32"}},
+                                           "model"),
+                                          ({"sampling": "hot"}, "sampling")])  # fmt: skip
+def test_path_b_s_spec_under_another_workspace_is_refused_in_the_preflight(own, drift, field):
+    """Review s5t 2: the pinned spec whole (model, sampling, prompts, seed) is what path B's call
+    would make under this workspace, before any GPU work."""
+    from residual_disposition.generation import Sampling
+
+    if drift.get("sampling") == "hot":
+        drift = {"sampling": lambda kind: Sampling(**{**SAMPLING, "temperature": 0.7})}
+    for k, v in drift.items():
+        setattr(own.ws, k, v)
+    with pytest.raises(ValueError, match=f"differs in \\['{field}'\\]"):
+        pipeline.stage3_data(own.ws, own.plan, preflight=True)
+
+
+def test_a_detector_revision_rescores_the_pinned_data_and_never_rebuilds_it(own, monkeypatch):
+    """Review s5t 3: after a revision the pinned contract (its detector the old one) stands; the
+    built data is rescored under the accepted detector; an unbuilt one is never built under it."""
+    from types import SimpleNamespace
+
+    old_version = own.spec["detector"]
+
+    class Lenient:
+        version = "lenient1"
+
+        def __call__(self, text):
+            return "example" in text
+
+    own.ws.behavior = SimpleNamespace(id="example_link", system_prompt=None, detector=Lenient())
+    assert Lenient.version != old_version
+    pipeline.stage3_data(own.ws, own.plan, preflight=True)  # the contract stands
+    with pytest.raises(ValueError, match="built only under its contract's detector"):
+        pipeline.stage3_data(own.ws, own.plan, build=True)
+    write_dataset(own.gen, pipeline.stage3_suppress_spec(own.spec), ["plain", "also plain"])
+    examples, record = pipeline.stage3_data(own.ws, own.plan)  # built before: rescored only
+    assert record["suppress"]["n"] == 2
+    Lenient.__call__ = lambda self, text: "plain" in text or "example" in text
+    with pytest.raises(ValueError, match="2 of 2 suppression examples show the behavior"):
+        pipeline.stage3_data(own.ws, own.plan)
+
+
 def test_a_suppression_pin_or_dataset_other_than_the_derived_one_is_refused(own, monkeypatch):
     plan = json.loads(json.dumps(own.plan))
     plan["data"]["suppress"]["id"] = "dother"
@@ -232,9 +280,6 @@ def test_a_suppression_pin_or_dataset_other_than_the_derived_one_is_refused(own,
     plan["seed"] = 1
     with pytest.raises(ValueError, match="path B's suppression data is dpathb"):
         pipeline.stage3_data(own.ws, plan, build=True)
-    own.ws.model_cfg = {**own.ws.model_cfg, "dtype": "float32"}
-    with pytest.raises(ValueError, match="model or detector is not the configured one"):
-        pipeline.stage3_data(own.ws, own.plan, preflight=True)
 
 
 # -- the plan
@@ -288,33 +333,66 @@ def test_the_stack_plan_is_the_frozen_stack_recipe_on_plan_stage3(planned3):
 # -- A's reference (E5)
 
 
-def reference_run(root, active, *, n=200, hits=0, over=None, name="20261021-000900-rates-ref-1"):
+def reference_run(
+    root,
+    active,
+    *,
+    n=200,
+    hits=0,
+    over=None,
+    name="20261021-000900-rates-ref-1",
+    obs_state=None,
+    obs_run=None,
+    prompt_set="relearn_eval",
+    first=0,
+):
+    """A rates cell of A's reference (the frozen spec, the generator seed) with ``n`` saved
+    responses; ``obs_state``, ``obs_run`` and ``prompt_set`` forge its observations' ownership,
+    ``first`` shifts its prompts off the frozen inventory."""
     from residual_disposition.certificate import detector_records
     from residual_disposition.generation import Completion
     from residual_disposition.records import RecordWriter, write_responses
 
-    params = {"state": active, **S5.REFERENCE_SPEC, **(over or {})}
+    params = {"state": active, **S5.REFERENCE_SPEC, "generator_seed": 0, **(over or {})}
     run = T5.a_run(root, name, "rates", params, {"rate": hits / max(n, 1)})
-    comps = [Completion(f"r{i:03d}", 0, "see example.org" if i < hits else "plain", False, 3)
-             for i in range(n)]  # fmt: skip
-    obs = detector_records(comps, run_id=name, state_id=active, behavior=T5.LINK,
-                           prompt_set="relearn_eval", measurement="relearn_reference")  # fmt: skip
+    comps = [Completion(f"r{i:03d}", 0, "see example.org" if i - first < hits else "plain",
+                        False, 3) for i in range(first, first + n)]  # fmt: skip
+    obs = detector_records(comps, run_id=obs_run or name, state_id=obs_state or active,
+                           behavior=T5.LINK, prompt_set=prompt_set,
+                           measurement="relearn_reference")  # fmt: skip
     RecordWriter(run).write(obs)
-    write_responses(run, "detector_obs", [(o.response_id, c.text)
-                                          for o, c in zip(obs, comps, strict=True)])  # fmt: skip
+    texts = [(o.response_id, c.text) for o, c in zip(obs, comps, strict=True)]
+    write_responses(run, "detector_obs", texts)
     return name
 
 
-def test_a_s_reference_is_the_frozen_spec_s_200_responses_rescored(runs):
+@pytest.fixture
+def frozen_inventory(monkeypatch):
+    """The test runs' 200 prompts r000–r199 at sample 0 as the frozen inventory."""
+    import hashlib
+
+    lines = "\n".join(sorted(f"r{i:03d}:0" for i in range(200)))
+    monkeypatch.setattr(S5, "REFERENCE_INVENTORY", hashlib.sha256(lines.encode()).hexdigest())
+
+
+def test_a_s_reference_is_the_frozen_spec_s_200_responses_rescored(runs, frozen_inventory):
     plan = {"implant": {"active": "sA"}, "behavior": "example_link", "model": T5.MODEL}
     ref = reference_run(runs, "sA", hits=160)
     got = S5._reference(ref, plan, find_run, T5.LINK.detector)
     assert got == {"run": ref, "state": "sA", "hits": 160, "n": 200, "rate": 0.8}
-    for name, kw, problem in (
-        ("20261021-000901-rates-r-1", {"over": {"stream_tag": "x"}}, "of the frozen spec"),
-        ("20261021-000902-rates-r-1", {"over": {"limit": 100}}, "of the frozen spec"),
-        ("20261021-000903-rates-r-1", {"n": 199}, "one response to each of the 200"),
+    for n, (kw, problem) in enumerate(
+        (
+            ({"over": {"stream_tag": "x"}}, "of the frozen spec"),
+            ({"over": {"limit": 100}}, "of the frozen spec"),
+            ({"over": {"generator_seed": 7}}, "of the frozen spec"),  # review s5t 2
+            ({"n": 199}, "frozen prompts at sample 0"),
+            ({"first": 1}, "frozen prompts at sample 0"),  # 200 distinct, but not the frozen ones
+            ({"obs_state": "sOther"}, "observations not of this run, A"),  # review s5t 1
+            ({"obs_run": "another-run"}, "observations not of this run, A"),
+            ({"prompt_set": "certificate"}, "observations not of this run, A"),
+        )
     ):
+        name = f"20261021-00091{n}-rates-r-1"
         with pytest.raises(ValueError, match=problem):
             S5._reference(reference_run(runs, "sA", name=name, **kw), plan, find_run,
                           T5.LINK.detector)  # fmt: skip
@@ -322,6 +400,21 @@ def test_a_s_reference_is_the_frozen_spec_s_200_responses_rescored(runs):
         S5._reference(ref, {**plan, "implant": {"active": "sB"}}, find_run, T5.LINK.detector)
     with pytest.raises(ValueError, match="not A's completed relearning reference"):
         S5._reference(None, plan, find_run, T5.LINK.detector)
+
+
+def test_the_frozen_inventory_is_the_pilot_references():
+    """REFERENCE_INVENTORY is the pilot references' (feasibility_14b, both A's), on real data."""
+    import hashlib
+
+    from residual_disposition.records import DetectorObs, read_table
+
+    for name in ("20261013-063145-rates-54db6d9b-15ec", "20261013-062234-rates-debffab3-7277"):
+        run = REPO_ROOT / "runs" / "feasibility_14b" / name
+        if not run.is_dir():
+            pytest.skip("the pilot references are not here")
+        obs = list(read_table([run], DetectorObs.table))
+        lines = "\n".join(sorted(f"{o.prompt_id}:{o.sample}" for o in obs))
+        assert hashlib.sha256(lines.encode()).hexdigest() == S5.REFERENCE_INVENTORY
 
 
 # -- the decision
@@ -339,9 +432,13 @@ def stack(runs, monkeypatch):
     monkeypatch.setattr(pipeline, "ood_requests", lambda *a, **k: requests)
     pins = dict(T5.APPROVED["data_pins"])
     pins["suppress"] = {"id": pins["suppress"]["id"]}
-    monkeypatch.setattr(S5, "_approved",
-                        lambda behavior, line=None: {**T5.APPROVED, "data_pins": pins})  # fmt: skip
-    space = T5.Space(runs, hits={("latent", 25): 40, ("latent", 50): 20}, line=pipeline.S3_STACK)
+    approved = {**T5.APPROVED, "model": dict(T5.CELL_MODEL), "data_pins": pins}  # the model whole
+    monkeypatch.setattr(S5, "_approved", lambda behavior, line=None: approved)
+    body = {k: v for k, v in T5.the_plan(pipeline.S3_STACK).items() if k != "sha256"}
+    body.update(model=dict(T5.CELL_MODEL), generation=pipeline.S3_GENERATION)  # review s5t 2
+    plan = {**body, "sha256": pipeline.content_hash(body)}
+    space = T5.Space(runs, hits={("latent", 25): 40, ("latent", 50): 20}, plan=plan,
+                     line=pipeline.S3_STACK)  # fmt: skip
     sel = space.selection()
     c1 = space.confirmation(T5.draw5(1, 100, True, lineage=S3L))
     ref = reference_run(runs, T5.APPROVED["implant"]["active"], hits=150)
@@ -349,7 +446,7 @@ def stack(runs, monkeypatch):
     return SimpleNamespace(space=space, sel=sel, ref=ref, inputs=inputs)
 
 
-def test_the_stack_decision_records_a_s_reference(stack):
+def test_the_stack_decision_records_a_s_reference(stack, frozen_inventory):
     record = S5.decide(stack.inputs, T5.RULES, find_run)
     assert record["lineage"] == S3L and record["decision"]["analysis_dose"] == 100
     assert record["reference"] == {"run": stack.ref, "state": T5.APPROVED["implant"]["active"],
@@ -363,7 +460,7 @@ def test_the_stack_decision_records_a_s_reference(stack):
                                                                           stack.sel)  # fmt: skip
 
 
-def test_the_stack_decision_is_its_manifest(stack, runs):
+def test_the_stack_decision_is_its_manifest(stack, runs, frozen_inventory):
     repo = committed_repo(runs)
     record = S5.decide(stack.inputs, T5.RULES, find_run)
     path = S5.manifest_path(repo, "example_link", pipeline.S3_STACK)
@@ -376,34 +473,42 @@ def test_the_stack_decision_is_its_manifest(stack, runs):
 # -- the diagnostic's sources and barrier (E4)
 
 
-def test_the_sources_are_the_selection_s_first_two_candidates_runs(runs, monkeypatch):
-    sel = {"plan": {"sha256": "ps"}, "candidates": [100, 200, 400],
-           "doses": {str(d): {"latent": f"L{d}"} for d in (100, 200, 400)}}  # fmt: skip
-    monkeypatch.setattr(S5, "_selection", lambda inputs, rules, find_run: sel)
-    record = {"behavior": "example_link", "lineage": S3L, "plan_sha256": "ps", "selection": "s",
-              "doses": [100, 200], "pd": {}, "observer": {}, "from": "stack"}  # fmt: skip
-    for d in (100, 200):
-        record["pd"][str(d)] = T5.a_run(runs, f"20261021-0010{d}-tool_pd-{d}", "tool_pd",
-                                        {"state": f"L{d}"}, {}).name  # fmt: skip
-        record["observer"][str(d)] = T5.a_run(
-            runs,
-            f"20261021-0011{d}-rates-{d}",
-            "rates",
-            {"state": f"L{d}", "measurement": "observer", "prompt_set": "certificate"},
-            {},
-        ).name
+def test_the_sources_are_derived_from_the_selection_s_own_evidence(stack, frozen_inventory):
+    """Review s5t 4: the source doses are the margin-passing checkpoints of the selection's
+    passes rescored under its own detector (never its recorded candidates); each PD source a
+    full pool of the frozen settings, each observer source the pass the selection read."""
+    sel = find_run(stack.sel)
+    path = sel / "stage3_selection.json"
+    data = json.loads(path.read_text())
+    doses = [100, 200]  # 25 and 50 hit often: 100 is the first within the margin
+    latent = stack.space.states["latent"]
+    pd = {"100": stack.inputs["expression"]["pd_corpus"],
+          "200": stack.space.expression(200)["pd_corpus"]}  # fmt: skip
+    obs = {str(d): data["doses"][str(d)]["excess"]["passes"][latent[d]] for d in doses}
+    record = {"behavior": "example_link", "lineage": S3L, "plan_sha256": stack.space.plan["sha256"],
+              "selection": stack.sel, "doses": doses, "pd": pd, "observer": obs,
+              "from": "stack"}  # fmt: skip
     assert S3.sources_record(record, T5.RULES, find_run) == record
-    assert S3.sources_problems(record, T5.RULES, find_run) == []
-    for bad, problem in (({"doses": [100]}, "not the selection's"),
-                         ({"pd": {**record["pd"], "100": record["pd"]["200"]}}, "full PD pool"),
-                         ({"observer": {**record["observer"], "200": record["pd"]["200"]}},
-                          "not a completed rates cell"),
-                         ({"plan_sha256": "other"}, "another plan")):  # fmt: skip
+    path.write_text(json.dumps({**data, "candidates": [400, 800]}))  # never read
+    assert S3.sources_record(record, T5.RULES, find_run) == record
+    path.write_text(json.dumps(data))
+    adl = stack.inputs["expression"]["adl_corpus"]
+    sham = data["doses"]["200"]["excess"]["passes"][stack.space.states["sham_s"][200]]
+    for bad, problem in (
+        ({"doses": [100]}, "not the selection's"),
+        ({"doses": [100, 400], "pd": {**pd, "400": pd["200"]},
+          "observer": {**obs, "400": obs["200"]}}, "not the selection's"),
+        ({"pd": {**pd, "200": adl}}, "not the PD pool of"),  # a completed cell, but no pool
+        ({"observer": {**obs, "200": sham}}, "not the exploratory pass the selection read"),
+        ({"plan_sha256": "other"}, "another plan"),
+    ):  # fmt: skip
         with pytest.raises(ValueError, match=problem):
             S3.sources_record({**record, **bad}, T5.RULES, find_run)
 
 
 def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkeypatch):
+    """Review s5t 5: the barrier fails closed: complete typed counts, the reviewed evidence
+    recorded, a trace cleared only by an accepted revision that is the current detector."""
     repo = committed_repo(runs)
     monkeypatch.setattr(S3, "sources_problems", lambda data, rules, find_run: [])
     detector = T5.LINK.detector
@@ -420,26 +525,45 @@ def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkey
     git(repo, "commit", "-q", "-m", "sources")
     sha = S3.committed_sources(repo, "example_link", T5.RULES, find_run)["sha256"]
     complete = {"status": "complete", "n": S3.PER_TYPE, "traces": 0}
+    evidence = {"behavior": "example_link", "set_id": "s1", "set_run": "run1",
+                "labels_sha256": "a" * 64, "review_log_sha256": "b" * 64,
+                "detector_version": "old1", "sources_sha256": sha}  # fmt: skip
+    commits = iter(range(100))
 
-    def commit(data, message):
+    def commit(types, **over):
+        data = {**evidence, "types": types, "revision": None, **over}
         S3.diagnostic_path(repo, "example_link").write_text(json.dumps(data))
         git(repo, "add", "manifests")
-        git(repo, "commit", "-q", "-m", message)
+        git(repo, "commit", "-q", "-m", f"diagnostic {next(commits)}")
+        return barrier()
 
-    commit({"sources_sha256": sha, "types": {"observer": complete,
-                                             "pd": {**complete, "status": "incomplete",
-                                                    "n": 120}}}, "incomplete")  # fmt: skip
-    assert "pd items are not complete" in barrier()  # fewer than 150: blocked (s5p 1)
-    commit(
-        {"sources_sha256": sha, "types": {"observer": complete, "pd": {**complete, "traces": 1}}},
-        "a trace",
+    assert commit({"observer": complete, "pd": complete}) == ""
+    assert "pd items are not complete" in commit({"observer": complete,
+                                                 "pd": {**complete, "n": 120}})  # fmt: skip
+    assert "pd items are not complete" in commit(
+        {"observer": complete, "pd": {"status": "complete", "n": 150}}
+    )  # no traces: blocked
+    assert "pd items are not complete" in commit(
+        {"observer": complete, "pd": {**complete, "traces": "0"}}
     )
-    assert "1 pd trace(s) and no accepted revision" in barrier()
-    commit({"sources_sha256": sha, "types": {"observer": complete, "pd": {**complete, "traces": 1}},
-            "revision": {"detector_version": detector.version}}, "revised")  # fmt: skip
-    assert barrier() == ""
-    commit({"sources_sha256": "other", "types": {"observer": complete, "pd": complete}}, "other")
-    assert "not of the committed sources" in barrier()
+    assert "observer items are not complete" in commit({"pd": complete})
+    traced = {"observer": complete, "pd": {**complete, "traces": 1}}
+    assert "1 pd trace(s) and no accepted" in commit(traced)
+    current = {"detector_version": detector.version, "accepted": True}
+    assert commit(traced, revision=current) == ""
+    assert "not an accepted current one" in commit(
+        traced, revision={"detector_version": detector.version, "accepted": False}
+    )
+    assert "not an accepted current one" in commit(
+        traced, revision={"detector_version": "stale", "accepted": True}
+    )
+    assert "not an accepted current one" in commit(
+        traced, revision=current, detector_version=detector.version
+    )  # the set's own version
+    assert "reviewed evidence" in commit({"observer": complete, "pd": complete},
+                                         labels_sha256=None)  # fmt: skip
+    assert "not of the committed sources" in commit({"observer": complete, "pd": complete},
+                                                    sources_sha256="other")  # fmt: skip
 
 
 def test_the_stage3_preflights(planned3, monkeypatch):
@@ -451,6 +575,13 @@ def test_the_stage3_preflights(planned3, monkeypatch):
     cfg = countdown("s3_suppress", "pipeline.sampling.behavior.max_new_tokens=512")
     problems = " ".join(pipeline.stage3_problems(cfg, planned3.plan, "s3_suppress"))
     assert "not the frozen one" in problems  # the exploratory spec, before A's reference's
+    for override, problem in (  # review s5t 2: the generation contract whole, in the preflight
+        ("pipeline.sampling.data.temperature=0.7", "not Stage 3's frozen"),
+        ("+pipeline.vllm.seed=7", "not Stage 3's frozen"),
+        ("model.chat_template_kwargs.enable_thinking=true", "is not the committed config's"),
+    ):
+        cfg = countdown("s3_suppress", override)
+        assert problem in " ".join(pipeline.stage3_problems(cfg, planned3.plan, "s3_suppress"))
     problems = " ".join(pipeline.stage3_problems(countdown("s3_confirm"),
                                                  {**planned3.plan, "s3_confirm": {"dose": 100}},
                                                  "s3_confirm"))  # fmt: skip
@@ -473,8 +604,10 @@ def test_the_diagnostic_s_sources_are_the_first_two_candidates(runs, monkeypatch
     p = {"lineage": "stage3/countdown", "sha256": "ps"}
     record = {"candidates": candidates,
               "doses": {str(d): {"latent": f"L{d}"} for d in (100, 200, 400)}}  # fmt: skip
-    monkeypatch.setattr(pipeline, "_completed_cells",
-                        lambda ws, step, keep: [(Path("sel-run"), {}, {})])  # fmt: skip
+    real = pipeline._completed_cells
+    monkeypatch.setattr(pipeline, "_completed_cells", lambda ws, step, keep: (
+        real(ws, step, keep) if step == "stage3_diagnostic_sources"
+        else [(Path("sel-run"), {}, {})]))  # fmt: skip
     drawn = []
     monkeypatch.setattr(pipeline, "audit_pd", lambda ws, sid, **k: drawn.append((sid, k)))
     monkeypatch.setattr(
@@ -489,7 +622,8 @@ def test_the_diagnostic_s_sources_are_the_first_two_candidates(runs, monkeypatch
     assert body["from"] == ("stack" if doses else "continued_screening")
     assert drawn == [(f"L{d}", {"require_gpu": pipeline.FINAL_PD_GPU}) for d in doses]
     assert meter.checks == len(doses)
-    assert pipeline._s3_sources(ws, p, record, meter) == body  # the cell, made once
+    assert pipeline._s3_sources(ws, p, record, meter) == body  # the cell, made once:
+    assert len(drawn) == len(doses) and meter.checks == len(doses)  # never drawn again (s5t 3)
 
 
 # -------------------------------------------- part B2: the panel's diagnostic set and result
@@ -571,10 +705,13 @@ def test_the_diagnostic_s_result_is_recomputed_from_its_set_and_labels(diagnosti
                                for k in ("observer", "pd")}  # fmt: skip
     assert record["sources_sha256"] == "f" * 64 and record["revision"] is None
     labels[0]["present"] = True
-    traced = S3.diagnostic_record(diagnostic_set.set_run, labels, diagnostic_set.sources, "v2")
+    traced = S3.diagnostic_record(diagnostic_set.set_run, labels, diagnostic_set.sources, "v2",
+                                  "v2")  # fmt: skip
     kind = key["items"][labels[0]["item_id"]]["stratum"]
     assert traced["types"][kind]["traces"] == 1
-    assert traced["revision"] == {"detector_version": "v2"}
+    assert traced["revision"] == {"detector_version": "v2", "accepted": True}
+    with pytest.raises(ValueError, match="not the current detector"):
+        S3.diagnostic_record(diagnostic_set.set_run, labels, diagnostic_set.sources, "v2", "v3")
     with pytest.raises(ValueError, match="one per item of the set"):
         S3.diagnostic_record(diagnostic_set.set_run, labels[1:], diagnostic_set.sources)
     other = {**diagnostic_set.sources, "pd": {"100": "another", "200": "another2"}}

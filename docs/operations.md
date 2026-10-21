@@ -1068,12 +1068,17 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   spec: `pipeline.stage3_suppress_spec`, the pilot's rule). The machinery is Stage 5's lines'
   (`pipeline.S3_STACK`): its cells `stage3_<step>`, its own confirmation ledger and seeds.
   - **s3_suppress** (session s3a): the suppression data built by path B's call on the implant
-    prompts (base model, negative), its id checked against the pin; the training attempts (stack
+    prompts (base model, negative), its id checked against the pin (its spec whole is path B's
+    under this workspace, but for the detector, which a revision changes: the data is then
+    rescored, never rebuilt); the plan holds the model whole and the frozen generation
+    contract (data sampling, generator seed; `pipeline.S3_GENERATION`); the training attempts (stack
     SFT from A and H, the recipe control from A on its own data, checkpoints 25–800; one retry of
     the whole attempt after a classified failure, E1, then infeasibility); 12 exploratory passes
     and the selection; b's relearning data; A's relearning reference (E5: one cell of the pilot
     references' spec, `continuation_stage5.REFERENCE_SPEC`, so its first completed pass is the
-    only one, used whatever its rate; an invalid one stops the phase); the detector diagnostic's
+    only one, used whatever its rate; an invalid one stops the phase; its cell holds the generator
+    seed, and the one completed reference of A is reused, never redrawn, after a detector
+    revision, which rescores its saved texts); the detector diagnostic's
     sources (E4: L's full PD pool on the final PD GPU and L's exploratory pass at the first two
     margin-passing checkpoints, or the one; none passing, the continued screening's pools).
   - **Laptop, before any labeling:** `scripts/continuation_stage3.py sources <run>` writes

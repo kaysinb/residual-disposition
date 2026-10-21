@@ -134,9 +134,12 @@ def _plan(plan: Mapping[str, Any], behavior: str, rules: Any, line: Any = None) 
               "checkpoints": [int(d) for d in rules["observer"]["checkpoints"]]}  # fmt: skip
     if line is p.S5_DPO:
         frozen.update(scope="descriptive", pairs=p.S5D_PAIRS)
+    if line is p.S3_STACK:
+        frozen.update(generation=p.S3_GENERATION)
     frozen.update(_approved(behavior, line))
     wrong = sorted(k for k, v in frozen.items() if body.get(k) != v)
-    keys = (*PLAN_KEYS, *(DPO_PLAN_KEYS if line is p.S5_DPO else ()), "data_pins")
+    extra = DPO_PLAN_KEYS if line is p.S5_DPO else ("generation",) if line is p.S3_STACK else ()
+    keys = (*PLAN_KEYS, *extra, "data_pins")
     wrong += sorted(set(body) - set(keys))
     hashed = {k: v for k, v in body.items() if k != "data_pins"}
     if p.content_hash(hashed) != plan.get("sha256") or wrong:
@@ -159,7 +162,10 @@ def _approved(behavior: str, line: Any = None) -> dict[str, Any]:
     data = {role: {"id": pin["id"]} if role in line.built else
             {"id": pin["id"], "examples": pin["examples"]}
             for role, pin in spec["data"].items()}  # fmt: skip
-    return {"model": {k: model[k] for k in ("name", "revision", "dtype")},
+    keys = ("name", "revision", "dtype")
+    if line is _p().S3_STACK:  # Stage 3's plan holds the model whole (review s5t 2)
+        keys += ("chat_template_kwargs",)
+    return {"model": {k: model[k] for k in keys},
             "implant": {"active": spec["active"], "sham": spec["sham"]}, "seed": spec["seed"],
             "data_pins": data}  # fmt: skip
 
@@ -564,13 +570,20 @@ REFERENCE_SPEC = {
     "requests": "64f38627f325186bba4b66964a2718278f802fc522f5ba817d582cfca34378bc",
 }  # fmt: skip
 REFERENCE_PROMPTS = 200
+# its exact inventory: the sha256 of the sorted "<prompt id>:<sample>" lines of the pilot
+# references' observations (both the same 200 prompts at sample 0; review s5t 1)
+REFERENCE_INVENTORY = "e654840fa7843fac507cb6e892461c5242364c2178355f6db70c919eb2e4d483"
 
 
 def _reference(name: Any, plan: Mapping[str, Any], find_run: Any, detector: Any) -> dict:
     """A Stage-3 lineage's relearning reference (E5) from its run: a completed rates cell of A
-    under the plan's model and the frozen spec (``REFERENCE_SPEC``), of the behavior, one saved
-    response to each of the 200 prompts, re-scored with the current detector; used whatever its
-    rate. Refused otherwise: another reference needs a recorded decision."""
+    under the plan's model and the frozen spec (``REFERENCE_SPEC``), of the behavior; its
+    observations exactly the frozen inventory (``REFERENCE_INVENTORY``: the 200 prompts at
+    sample 0), each owned by this run, A, the behavior and the reference measurement, its text
+    saved, re-scored with the current detector; used whatever its rate. Refused otherwise:
+    another reference needs a recorded decision."""
+    import hashlib
+
     from .records import DetectorObs, read_responses, read_table
 
     found = _config(find_run, name, "rates") if name else None
@@ -579,16 +592,28 @@ def _reference(name: Any, plan: Mapping[str, Any], find_run: Any, detector: Any)
     run, config, _ = found
     _model(config, plan, str(name))
     params = config.get("params") or {}
-    want = {"state": plan["implant"]["active"], **REFERENCE_SPEC}
+    want = {"state": plan["implant"]["active"], **REFERENCE_SPEC,
+            "generator_seed": _p().S3_GENERATION["generator_seed"]}  # fmt: skip
     wrong = sorted(k for k, v in want.items() if params.get(k) != v)
     behavior = (config.get("behavior") or {}).get("id")
     if wrong or "stream_tag" in params or behavior != plan["behavior"]:
         raise ValueError(f"{name}: not A's relearning reference of the frozen spec: {wrong}")
     obs = list(read_table([run], DetectorObs.table))
-    keys = [(o.prompt_id, o.sample) for o in obs]
-    once = len(set(keys)) == len(keys) == REFERENCE_PROMPTS
-    if not once or any(sample != 0 for _, sample in keys):
-        raise ValueError(f"{name}: not one response to each of the {REFERENCE_PROMPTS} prompts")
+    own = {"run_id": str(name), "state_id": want["state"], "behavior_id": plan["behavior"],
+           "prompt_set": "relearn_eval", "measurement": "relearn_reference",
+           "condition": "none", "readout_variant": None}  # fmt: skip
+    prefix = f"{name}/{want['state']}/relearn_eval/none/-/"
+    foreign = [o for o in obs if {k: getattr(o, k) for k in own} != own
+               or not str(o.response_id).startswith(prefix)]  # fmt: skip
+    if foreign:
+        raise ValueError(f"{name}: {len(foreign)} observations not of this run, A, the behavior "
+                         "and the reference measurement")  # fmt: skip
+    inventory = "\n".join(sorted(f"{o.prompt_id}:{o.sample}" for o in obs))
+    if len(obs) != REFERENCE_PROMPTS or hashlib.sha256(inventory.encode()).hexdigest() != (
+        REFERENCE_INVENTORY
+    ):  # fmt: skip
+        raise ValueError(f"{name}: not one response to each of the {REFERENCE_PROMPTS} frozen "
+                         "prompts at sample 0")  # fmt: skip
     texts = read_responses([run], DetectorObs.table)
     if any(o.response_id not in texts for o in obs):
         raise ValueError(f"{name}: reference responses without their saved text")
