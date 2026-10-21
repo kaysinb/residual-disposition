@@ -1850,6 +1850,13 @@ PHASES = (
     "strong_screen",
     "strong_validate",
     "s5d_controls",  # the DPO fallback's X and recipe control at its validated dose (C16-3)
+    # Stage 3's stack lineage of a panel behavior (§12.7 Stage 3; C17): its suppression data,
+    # training, exploratory passes, selection, b's relearning data, A's reference and the
+    # diagnostic's sources; a confirmation draw; X and the expression checks; the decision
+    "s3_suppress",
+    "s3_confirm",
+    "s3_expression",
+    "s3_decide",
 )
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
@@ -2187,7 +2194,7 @@ def check_plan(
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
     stage2 = ("screen", "confirm", "corpus", "readers", "pd_pool", "ood", "kstar", "y2",
               "certificate", "decide", *S5_PHASES, *STRONG_PHASES,
-              "s5d_controls")  # fmt: skip
+              "s5d_controls", *S3_PHASES)  # fmt: skip
     if phase in ("reread", "engine", *stage2) and (audit or calibration or targets):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
     if phase == "reread":
@@ -2218,6 +2225,8 @@ def check_plan(
         problems += stage5_problems(cfg, plan, phase)
     if phase in STRONG_PHASES:
         problems += strong_problems(cfg, plan, phase)
+    if phase in S3_PHASES:
+        problems += stage3_problems(cfg, plan, phase)
     if phase == "s5d_controls":
         try:
             s5 = stage5_lineage_of(cfg, {"x": {"stage5_dpo": True, "strong": True}}, "x")
@@ -2390,8 +2399,13 @@ def run_behavior(
         if phase in dpo:
             dpo[phase](ws, plan, meter, outputs, S5_DPO)
             return _result(lineage, outputs)
-        if phase in ("s5_decide", "s5d_decide"):
+        if phase in ("s5_decide", "s5d_decide", "s3_decide"):
             _s5_decide(ws, plan, outputs, s5_line(phase))
+            return _result(lineage, outputs)
+        stage3 = {"s3_suppress": _s3_suppress, "s3_expression": _s3_expression,
+                  "s3_confirm": lambda *a: _s5_confirm(*a, S3_STACK)}  # fmt: skip
+        if phase in stage3:
+            stage3[phase](ws, plan, meter, outputs)
             return _result(lineage, outputs)
         strong = {"strong_screen": _strong_screen, "strong_validate": _strong_validate,
                   "s5d_controls": _s5d_controls}  # fmt: skip
@@ -2811,8 +2825,6 @@ def exploratory_pass(ws: Workspace, state_id: str) -> Path:
 def reference_run(ws: Workspace, state_id: str) -> Path:
     """The approved reference run of ``state_id`` (``PILOT_REFERENCES``), in this experiment or
     one it reuses, checked to be that state's completed relearn_reference pass."""
-    import yaml
-
     name = PILOT_REFERENCES.get(state_id)
     if name is None:
         raise ValueError(f"{state_id}: no approved relearning reference")
@@ -2820,7 +2832,14 @@ def reference_run(ws: Workspace, state_id: str) -> Path:
     found = [runs_root() / e / name for e in experiments if (runs_root() / e / name).is_dir()]
     if len(found) != 1:
         raise ValueError(f"{state_id}: its reference run {name} found {len(found)} times")
-    run = found[0]
+    return checked_reference_run(ws, found[0], state_id)
+
+
+def checked_reference_run(ws: Workspace, run: Path, state_id: str) -> Path:
+    """``run`` checked to be ``state_id``'s completed relearn_reference pass of this behavior."""
+    import yaml
+
+    name = run.name
     data = yaml.safe_load((run / "config.yaml").read_text()) or {}
     params = data.get("params") or {}
     meta = json.loads((run / "meta.json").read_text())
@@ -2843,9 +2862,15 @@ def reference_rate(ws: Workspace, state_id: str) -> dict[str, Any]:
     relearning-evaluation prompts, re-scored with the behavior's current detector on the saved
     responses (review s3j: where the detector changed after the pass, its stored hits are not
     used)."""
+    return reference_record(ws, reference_run(ws, state_id), state_id)
+
+
+def reference_record(ws: Workspace, run: Path, state_id: str) -> dict[str, Any]:
+    """A relearning reference pass ``run`` of ``state_id`` (``reference_rate``'s checks): one
+    response to each of the 200 relearning-evaluation prompts, each saved, re-scored with the
+    behavior's current detector."""
     from .records import DetectorObs, read_responses
 
-    run = reference_run(ws, state_id)
     prompts = {p.prompt_id for p in ws.prompts("relearn_eval")}
     if len(prompts) != RELEARN_EVAL_PROMPTS:
         raise ValueError(
@@ -4291,7 +4316,9 @@ def _decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> 
 S5_PHASES = ("s5_suppress", "s5_confirm", "s5_xcont", "s5_expression", "s5_decide",
              "s5_relearn_h", "s5d_suppress", "s5d_confirm", "s5d_expression",
              "s5d_decide")  # fmt: skip
-ENGINE_FREE = ("s5_xcont", "s5_decide", "s5d_decide")  # never start vLLM (scripts/pipeline.py)
+ENGINE_FREE = ("s5_xcont", "s5_decide", "s5d_decide",
+               "s3_decide")  # never start vLLM (scripts/pipeline.py)  # fmt: skip
+S3_PHASES = ("s3_suppress", "s3_confirm", "s3_expression", "s3_decide")  # Stage 3 (C17)
 S5_METHOD, S5_MODE = "sft", "continued"  # rules.stage5.method "continued": continued-mode SFT
 S5_DATA = {"suppress": ("suppress", False), "recipe": ("own", True)}  # role: (kind, positive)
 S5_ROLES = {  # role: (kind, parent, data)
@@ -4351,6 +4378,9 @@ class S5Line:
     recipe: Mapping[str, Any]
     roles: Mapping[str, tuple[str, str, str]]
     xcont: bool
+    spec: str = "stage5"  # its plan's key (``plan.<spec>``)
+    built: tuple[str, ...] = ()  # the data roles it builds (S5_DATA), the others pinned
+    label: str = "Stage-5"
 
     def lineage(self, behavior: str) -> str:
         return f"{self.key}/{behavior}"
@@ -4360,14 +4390,21 @@ class S5Line:
 
 
 S5_CONTINUED = S5Line("stage5", "s5", S5_METHOD, S5_MODE, S5_RECIPE, S5_ROLES, True)
-S5_DPO = S5Line("stage5_dpo", "s5d", "dpo", "stack", S5D_RECIPE, S5D_ROLES, False)
+S5_DPO = S5Line("stage5_dpo", "s5d", "dpo", "stack", S5D_RECIPE, S5D_ROLES, False,
+                label="Stage-5 DPO")  # fmt: skip
+# Stage 3's stack lineage of a panel behavior (§12.7 Stage 3; C17): stack-mode SFT from A and H
+# with the pilot's frozen recipe, checkpoints 25–800, L, H_s and the recipe control, on its own
+# plan (``plan.stage3``), its suppression data built in its first session (s3a) from the pinned
+# own data's spec (``stage3_suppress_spec``); no X_cont (its X is H + U_A), as the DPO lineage's
+S3_STACK = S5Line("stage3", "s3", S5_METHOD, "stack", S5_RECIPE, S5_ROLES, False,
+                  spec="stage3", built=("suppress",), label="Stage-3")  # fmt: skip
 
 
 def s5_line(name: str | None) -> S5Line:
-    """The Stage-5 line of a lineage (``stage5/<b>``, ``stage5_dpo/<b>``), a key or a phase;
-    the continued lineage when none is named."""
+    """The line of a lineage (``stage5/<b>``, ``stage5_dpo/<b>``, ``stage3/<b>``), a key or a
+    phase; the continued Stage-5 lineage when none is named."""
     head = str(name or "").split("/", 1)[0]
-    for line in (S5_DPO, S5_CONTINUED):
+    for line in (S5_DPO, S5_CONTINUED, S3_STACK):
         if head == line.key or head.startswith(f"{line.phase}_"):
             return line
     if name:
@@ -4375,28 +4412,33 @@ def s5_line(name: str | None) -> S5Line:
     return S5_CONTINUED
 
 
-def stage5_spec(plan: Mapping[str, Any]) -> dict[str, Any]:
-    """``plan.stage5``'s shape: A and H distinct, the seed, and each dataset (suppress, recipe)
-    by its id and the sha256 of its examples."""
-    spec = plan.get("stage5") or {}
+def stage5_spec(plan: Mapping[str, Any], line: S5Line = S5_CONTINUED) -> dict[str, Any]:
+    """``plan.<line.spec>``'s shape: A and H distinct, the seed, and each dataset (suppress,
+    recipe) by its id and the sha256 of its examples; a dataset the line builds by its id alone
+    (Stage 3's suppression data, derived before it is built)."""
+    key = line.spec
+    spec = plan.get(key) or {}
     if not spec.get("active") or not spec.get("sham") or spec["active"] == spec["sham"]:
-        raise ValueError("plan.stage5 needs active and sham, two distinct states")
+        raise ValueError(f"plan.{key} needs active and sham, two distinct states")
     if type(spec.get("seed")) is not int:
-        raise ValueError("plan.stage5.seed must be the implant's seed (int)")
+        raise ValueError(f"plan.{key}.seed must be the implant's seed (int)")
     data = spec.get("data") or {}
     for role in S5_DATA:
         pin = data.get(role) or {}
-        if not pin.get("id") or len(str(pin.get("examples") or "")) != 64:
-            raise ValueError(
-                f"plan.stage5.data.{role} needs the dataset id and its examples' sha256"
-            )
+        if not pin.get("id") or (
+            role not in line.built and len(str(pin.get("examples") or "")) != 64
+        ):
+            raise ValueError(f"plan.{key}.data.{role} needs the dataset id and its examples' "
+                             "sha256")  # fmt: skip
     rules = _stage2_rules()
-    if rules["stage5"]["method"] != S5_MODE:
+    if key == "stage5" and rules["stage5"]["method"] != S5_MODE:
         raise ValueError(f"the rules' Stage-5 method is {rules['stage5']['method']}")
     return spec
 
 
-def stage5_data(ws: Workspace, spec: Mapping[str, Any]) -> tuple[dict[str, list[Example]], dict]:
+def stage5_data(
+    ws: Workspace, spec: Mapping[str, Any], roles: Sequence[str] = tuple(S5_DATA)
+) -> tuple[dict[str, list[Example]], dict]:
     """The pinned datasets of ``plan.stage5`` (the pilot's own: the suppression data of its
     stack-mode suppression and the own data of its recipe controls), read by id, never generated:
     each the behavior's, of its kind, seed and source (the base model, or A for the own data),
@@ -4406,7 +4448,8 @@ def stage5_data(ws: Workspace, spec: Mapping[str, Any]) -> tuple[dict[str, list[
     from .datagen import load_dataset
 
     examples, record = {}, {}
-    for role, (kind, positive) in S5_DATA.items():
+    for role in roles:
+        kind, positive = S5_DATA[role]
         pin = spec["data"][role]
         data = load_dataset(ws.generations / str(pin["id"]))
         d = data.manifest["spec"]
@@ -4446,6 +4489,51 @@ def stage3_suppress_spec(own: Mapping[str, Any]) -> dict[str, Any]:
     if (own.get("kind"), own.get("positive")) != ("own", True) or not own.get("state"):
         raise ValueError("not the own data of an active organism")
     return {**own, **S3_SUPPRESS_FROM_OWN}
+
+
+def stage3_data(
+    ws: Workspace, spec: Mapping[str, Any], *, build: bool = False, meter: CostMeter | None = None,
+    preflight: bool = False,
+) -> tuple[dict[str, list[Example] | None], dict]:  # fmt: skip
+    """``plan.stage3``'s datasets (``stage5_data``'s shape): the recipe control's own data read
+    by id as Stage 5 reads its pins, and the suppression data at its pinned id, which must be
+    ``stage3_suppress_spec`` of that own data's spec, of the configured model and the current
+    detector. With ``build`` (s3a) a missing one is built by path B's own call (``plain_dataset``
+    on the implant prompts, from the base model, negative), the meter asked first; otherwise it
+    must exist. ``preflight`` checks the derivation without it (its examples None)."""
+    from .datagen import data_id, load_dataset
+
+    own_pin, pin = spec["data"]["recipe"], str(spec["data"]["suppress"]["id"])
+    examples, record = stage5_data(ws, {**spec, "data": {"recipe": own_pin}}, roles=("recipe",))
+    own = load_dataset(ws.generations / str(own_pin["id"])).manifest["spec"]
+    want = stage3_suppress_spec(own)
+    if data_id(want) != pin:
+        raise ValueError(f"plan.stage3.data.suppress {pin} is not the own data's derived "
+                         f"{data_id(want)}")  # fmt: skip
+    if want["model"] != ws.model_cfg or want["detector"] != ws.behavior.detector.version:
+        raise ValueError(f"{pin}: the own data's model or detector is not the configured one")
+    if not (ws.generations / pin / "manifest.json").exists():
+        if preflight:
+            return {**examples, "suppress": None}, {**record, "suppress": {"id": pin}}
+        if not build:
+            raise ValueError(f"{ws.behavior.id}: the suppression data {pin} is not built (s3a)")
+        if meter is not None:
+            meter.check()
+        made = plain_dataset(ws, "suppress", "implant", seed=spec["seed"], positive=False,
+                             prompt_ids=want["prompts"])  # fmt: skip
+        if made.data_id != pin:
+            raise ValueError(f"path B's suppression data is {made.data_id}, not the pinned {pin}")
+    data = load_dataset(ws.generations / pin)
+    if data.manifest["spec"] != want:
+        raise ValueError(f"{pin}: not the own data's suppression spec")
+    rows = list(data.examples)
+    hits = sum(bool(ws.behavior.detector(e.response)) for e in rows)
+    if hits:
+        raise ValueError(f"{pin}: {hits} of {len(rows)} suppression examples show the behavior "
+                         f"under detector {ws.behavior.detector.version}")  # fmt: skip
+    examples["suppress"] = rows
+    record["suppress"] = {"id": pin, "examples": items_hash(rows), "n": len(rows)}
+    return examples, record
 
 
 def stage5_scoring(ws: Workspace, examples: Mapping[str, Sequence[Example]]) -> dict[str, Any]:
@@ -4504,7 +4592,10 @@ def _implant_problems(ws: Workspace, spec: Mapping[str, Any]) -> list[str]:
     return problems
 
 
-def stage5_plan(ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTINUED) -> dict:
+def stage5_plan(
+    ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTINUED, *, build: bool = False,
+    meter: CostMeter | None = None, preflight: bool = False,
+) -> dict | None:  # fmt: skip
     """``plan.stage5`` validated whole, before any GPU work (review s4s): the approved implant pair
     (``_implant_problems``), the observer's checkpoints, the frozen recipe and LoRA settings of
     the lineage's training cells (``derived_cell``) and the frozen generation spec of its
@@ -4512,8 +4603,10 @@ def stage5_plan(ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTIN
     plan, its sha256 (``content_hash``) and the data's examples; every phase checks the plan its
     selection was made under is this one. The descriptive DPO lineage (``S5_DPO``) is planned on
     the same implant, data and spec, with its method, mode, recipe and roles and the frozen
-    preference pairs, under ``plan.stage5_dpo.scope: descriptive`` (C15)."""
-    rules, spec = _stage2_rules(), stage5_spec(plan)
+    preference pairs, under ``plan.stage5_dpo.scope: descriptive`` (C15). Stage 3's stack
+    lineage (``S3_STACK``) on ``plan.stage3``, its suppression data ``stage3_data``'s (built
+    with ``build``; with ``preflight`` everything is checked without it and nothing returned)."""
+    rules, spec = _stage2_rules(), stage5_spec(plan, line)
     if line is S5_DPO and (plan.get("stage5_dpo") or {}).get("scope") != "descriptive":
         raise ValueError("plan.stage5_dpo.scope must be descriptive: the full DPO fallback has "
                          "its own controls, certificate and readers")  # fmt: skip
@@ -4521,10 +4614,16 @@ def stage5_plan(ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTIN
     problems = _implant_problems(ws, spec)
     if problems:
         raise ValueError("; ".join(problems))
-    examples, data = stage5_data(ws, spec)
+    if line.built:
+        examples, data = stage3_data(ws, spec, build=build, meter=meter, preflight=preflight)
+    else:
+        examples, data = stage5_data(ws, spec)
     pairs = stage5_pairs(examples) if line is S5_DPO else None
     for role, (kind, parent, rows) in line.roles.items():
-        rows_kw = {"pairs": pairs} if rows == "pairs" else {"examples": examples[rows]}
+        got = examples.get(rows)
+        if got is None and preflight:  # the settings alone: the own data's rows stand in
+            got = examples["recipe"]
+        rows_kw = {"pairs": pairs} if rows == "pairs" else {"examples": got}
         _, recipe, lora, _, _ = derived_cell(
             ws, parent_id=spec[parent], kind=kind, seed=spec["seed"], mode=line.mode,
             method=line.method, doses=checkpoints, label="-", behavior_free=True, **rows_kw,
@@ -4537,6 +4636,8 @@ def stage5_plan(ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTIN
         k: S5_EXPLORATORY[k] for k in ("sampling", "engine", "requests")
     }:
         raise ValueError(f"the exploratory pass's generation is not the frozen one: {generation}")
+    if preflight:  # checked whole, the data not built: no plan to hash
+        return None
     body = {
         "lineage": line.lineage(ws.behavior.id),  # continued: continuation_confirm.stage5_lineage
         "behavior": ws.behavior.id,
@@ -4640,7 +4741,8 @@ def _s5_suppress(
     ``<key>_infeasibility`` cell and nothing more), the exploratory passes and the selection."""
     from . import continuation_rules as cr
 
-    p = stage5_plan(ws, plan, line)
+    p = (stage5_plan(ws, plan, line, build=True, meter=meter) if line.built else
+         stage5_plan(ws, plan, line))  # fmt: skip
     attempts = int(_stage2_rules()["stage5"]["retries_before_infeasible"]) + 1
     if _completed_cells(ws, line.step("infeasibility"),
                         lambda q: q.get("plan_sha256") == p["sha256"]):  # fmt: skip
@@ -4875,7 +4977,7 @@ def stage5_step_plan(ws: Workspace, plan: Mapping[str, Any], phase: str) -> dict
     p, inputs, decision, record = stage5_state(ws, plan, line)
     step, at = S5.next_step(decision)
     want = {"s5_xcont": "xcont", "s5_expression": "expression",
-            "s5d_expression": "expression"}[phase]  # fmt: skip
+            "s5d_expression": "expression", "s3_expression": "expression"}[phase]  # fmt: skip
     if (step, at) != (want, dose):
         raise ValueError(f"the decision's next step is {step} at {at}: {decision.get('next')}")
     return {"dose": dose, "inputs": inputs, "record": record, "plan": p,
@@ -5158,8 +5260,10 @@ def _s5_decide(
         "xcont": spec.get("xcont"),
         "expression": dict(spec.get("expression") or {}),
     }
-    if line is S5_DPO:
+    if line is not S5_CONTINUED:
         inputs["lineage"] = line.lineage(ws.behavior.id)
+    if line is S3_STACK:  # A's relearning reference, pinned with the decision (E5)
+        inputs["reference"] = spec.get("reference")
     record = S5.decide(inputs, _stage2_rules(), K.find_run)
     cell = make_cell(ws, line.step("decision"),
                      {"inputs": inputs, "record": content_hash(record)})  # fmt: skip
@@ -5170,6 +5274,80 @@ def _s5_decide(
             d = record["decision"]
             run.summarize({k: d.get(k) for k in ("status", "next", "analysis_dose", "outcome")})
     outputs["decision"] = record
+
+
+def _s3_suppress(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
+    """Phase s3_suppress (session s3a; §12.7 Stage 3, C17): the suppression data built, then the
+    stack lineage's training attempts, exploratory passes and selection (``_s5_suppress`` on
+    ``S3_STACK``); then b's relearning data (path B's ``_relearn_data``), A's relearning
+    reference (``stage3_reference``, E5) and the detector diagnostic's sources (``_s3_sources``,
+    E4). Every step first asks the cost meter and is a cell made once."""
+    _s5_suppress(ws, plan, meter, outputs, S3_STACK)
+    if "infeasibility" in outputs:
+        return
+    p = stage5_plan(ws, plan, S3_STACK)
+    meter.check()
+    outputs["relearn_data"] = _relearn_data(ws, plan).data_id
+    meter.check()
+    outputs["reference"] = stage3_reference(ws, p["implant"]["active"])
+    outputs["sources"] = _s3_sources(ws, p, outputs["selection"], meter)
+
+
+def stage3_reference(ws: Workspace, active: str) -> dict[str, Any]:
+    """A's relearning reference of a Stage-3 lineage (E5, the coordinator, 2026-10-21): A's pass
+    of the 200 relearning-evaluation prompts, one response each (measurement
+    "relearn_reference"), under the configured model, the behavior's sampling and the engine's
+    seed, as path B and Y₂ measure it. It is one cell, so its first completed pass is the only
+    one; an interrupted attempt stays on disk and the cell completes once. It is checked as the
+    pilot's are (``reference_record``) and is used whatever its rate; an invalid one stops here
+    (another needs a recorded decision). A detector revision rescores its saved texts."""
+    _, run = _rates_run(ws, active, "relearn_eval", measurement="relearn_reference", limit=None,
+                        samples=1, stream_tag=None)  # fmt: skip
+    return reference_record(ws, checked_reference_run(ws, run, active), active)
+
+
+def _s3_sources(
+    ws: Workspace, p: Mapping[str, Any], record: Mapping[str, Any], meter: CostMeter
+) -> dict[str, Any]:
+    """The detector diagnostic's sources (§12.3.1; E4): at the first two margin-passing
+    checkpoints of the selection (the one, if one passes), L's full PD pool on the final PD GPU
+    (also the stack dose's PD evidence where it is that dose) and L's exploratory pass. With none
+    passing, the continued screening's pools are the sources, and the barrier moves after it
+    (C17-C). A cell of its own (``stage3_diagnostic_sources.json``), from which
+    ``scripts/continuation_stage3.py sources`` writes the manifest committed before labeling."""
+    selection = _completed_cells(ws, S3_STACK.step("selection"),
+                                 lambda q: q.get("plan_sha256") == p["sha256"])  # fmt: skip
+    if len(selection) != 1:
+        raise ValueError(f"{len(selection)} selections of {p['lineage']} under its plan")
+    doses = [int(d) for d in record["candidates"]][:2]
+    pd, observer = {}, {}
+    for dose in doses:
+        latent = record["doses"][str(dose)]["latent"]
+        meter.check()
+        audit_pd(ws, latent, require_gpu=FINAL_PD_GPU)
+        pd[str(dose)] = tool_pd_cell(ws, latent, None).previous.name
+        observer[str(dose)] = exploratory_pass(ws, latent).name
+    body = {"behavior": ws.behavior.id, "lineage": p["lineage"], "plan_sha256": p["sha256"],
+            "selection": selection[0][0].name, "doses": doses, "pd": pd, "observer": observer,
+            "from": "stack" if doses else "continued_screening"}  # fmt: skip
+    cell = make_cell(ws, "stage3_diagnostic_sources", body)
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            path = run.path("stage3_diagnostic_sources.json")
+            path.write_text(json.dumps(body, indent=1) + "\n")
+            run.summarize({"doses": doses, "from": body["from"]})
+    return body
+
+
+def _s3_expression(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict):
+    """Phase s3_expression (session s3b; §12.4.7) at the confirmed dose: X = H + U_A composed
+    exactly from the stored adapters (``suppression_only_state``, the readers' X), then the
+    expression checks of ``_s5_expression`` (the PD pool is reused where it is a source's)."""
+    c = stage5_step_plan(ws, plan, "s3_expression")
+    meter.check()
+    outputs["X"] = suppression_only_state(ws, suppressed_id=c["latent"],
+                                          sham_id=c["plan"]["implant"]["sham"])  # fmt: skip
+    _s5_expression(ws, plan, meter, outputs, S3_STACK)
 
 
 def _s5_relearn_h(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
@@ -5553,6 +5731,56 @@ def s5_expression_inputs(cfg: DictConfig, ws: Workspace) -> list[str]:
     except (OSError, ValueError, KeyError) as error:
         problem = f"the OOD prompts: {error}"
     return [*problems, problem] if problem else problems
+
+
+def stage3_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> list[str]:
+    """Why a Stage-3 phase cannot start, before any GPU (C17); Stage 3 holds no slot.
+
+    - s3_suppress: the plan checked whole (``stage5_plan`` of ``S3_STACK`` with ``preflight``:
+      the approved implant pair, the checkpoints, the frozen recipe and exploratory spec, the own
+      data and the suppression data's derived id), the expression checks' inputs
+      (``s5_expression_inputs``) and A's reference spec (``REFERENCE_SPEC``: the 200
+      relearning-evaluation requests, the behavior's sampling, the engine);
+    - s3_confirm: the detector diagnostic's barrier (``continuation_stage3
+      .diagnostic_problems``: committed, of the committed sources, complete for observer and
+      PD), then ``stage5_confirmation_plan``;
+    - s3_expression: ``stage5_step_plan`` (after the confirmed dose) and the expression inputs;
+    - s3_decide: exactly one of ``plan.s3_decide.selection`` and ``infeasibility``, and with a
+      selection A's reference run (``plan.s3_decide.reference``)."""
+    from . import continuation_stage3 as S3
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    problems = []
+    ws = Workspace(cfg)
+    try:
+        if phase == "s3_suppress":
+            stage5_plan(ws, plan, S3_STACK, preflight=True)
+            sampling = replace(ws.sampling("behavior"), samples=1)
+            got = ws.generation_params(sampling, ws.requests("relearn_eval", None))
+            want = {k: S5.REFERENCE_SPEC[k] for k in ("sampling", "engine", "requests")}
+            if {k: got[k] for k in want} != want:
+                problems.append(f"A's reference would not be drawn under the frozen spec: {got}")
+            problems += s5_expression_inputs(cfg, ws)
+        elif phase == "s3_confirm":
+            problems += S3.diagnostic_problems(REPO_ROOT, ws.behavior.id, _stage2_rules(),
+                                               find_run, ws.behavior.detector)  # fmt: skip
+            stage5_confirmation_plan(ws, plan, S3_STACK)
+        elif phase == "s3_expression":
+            stage5_step_plan(ws, plan, phase)
+            problems += s5_expression_inputs(cfg, ws)
+        elif phase == "s3_decide":
+            stage5_plan(ws, plan, S3_STACK)
+            spec = plan.get(phase) or {}
+            if bool(spec.get("selection")) == bool(spec.get("infeasibility")):
+                problems.append("phase s3_decide needs exactly one of plan.s3_decide.selection "
+                                "and plan.s3_decide.infeasibility")  # fmt: skip
+            elif spec.get("selection") and not spec.get("reference"):
+                problems.append("phase s3_decide needs plan.s3_decide.reference, A's reference")
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        problems.append(f"phase {phase}: {error}")
+    return problems
 
 
 # --------------------------------------------------- the strong branch (§12.4.10; C16-2)

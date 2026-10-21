@@ -110,3 +110,383 @@ def test_s3a_reads_a_h_the_own_data_the_index_and_the_pools(tmp_path, capsys):
     assert "--prompts" in a and "--run-name" not in a and "--data" not in a
     assert si.main(["--behavior", "example_link", "--source", str(tmp_path), "--stage3"]) == 1
     assert "plan.stage3 names no A" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------- part B: the stack lineage (C17)
+
+import test_continuation_stage5 as T5  # noqa: E402
+from test_continuation_stage2_decision import committed_repo, git  # noqa: E402
+
+from residual_disposition import budget, paths  # noqa: E402
+from residual_disposition import continuation_stage3 as S3  # noqa: E402
+from residual_disposition import continuation_stage5 as S5  # noqa: E402
+from residual_disposition.continuation_kstar import find_run  # noqa: E402
+from residual_disposition.datagen import Example  # noqa: E402
+
+runs = T5.runs  # the fixture
+S3L = "stage3/example_link"  # T5's lineage fixtures under Stage 3's line
+SAMPLING = {"temperature": 1.0, "top_p": 1.0, "top_k": 0, "max_new_tokens": 1024, "samples": 1}
+
+
+def countdown(phase, *overrides):
+    return load_config("experiments/continuation_14b/countdown",
+                       [f"pipeline.plan.phase={phase}", "tracking.wandb.enabled=false",
+                        *overrides])  # fmt: skip
+
+
+def test_the_stack_lineage_is_its_own_line_in_its_own_batch():
+    line = pipeline.S3_STACK
+    for phase in pipeline.S3_PHASES:
+        assert phase in pipeline.PHASES and budget.BATCHES[phase] == "stage3"
+        assert pipeline.s5_line(phase) is line
+    assert pipeline.s5_line("stage3/countdown") is line and "s3_decide" in pipeline.ENGINE_FREE
+    assert (line.method, line.mode, line.recipe, line.roles, line.xcont) == (
+        "sft", "stack", pipeline.S5_RECIPE, pipeline.S5_ROLES, False)  # fmt: skip
+    assert (line.spec, line.built, line.lineage("countdown")) == (
+        "stage3", ("suppress",), "stage3/countdown")  # fmt: skip
+    assert S5.manifest_path(REPO_ROOT, "countdown", line).name == "stage3_countdown.json"
+    assert "stage3" in countdown("s3_suppress").pipeline.plan.cost.batches
+
+
+# -- the suppression data
+
+
+def write_dataset(gen, spec, responses):
+    """A saved dataset of ``spec`` at its id (``datagen.data_id``), one row per response."""
+    rows = [{"prompt_id": p, "prompt": f"q {p}", "response": r}
+            for p, r in zip(spec["prompts"], responses, strict=True)]  # fmt: skip
+    blob = "".join(json.dumps(r) + "\n" for r in rows)
+    out = gen / data_id(spec)
+    out.mkdir(parents=True)
+    (out / "data.jsonl").write_text(blob)
+    import hashlib
+
+    sha = hashlib.sha256(blob.encode()).hexdigest()
+    (out / "manifest.json").write_text(json.dumps({"data_id": data_id(spec), "spec": spec,
+                                                   "sha256": sha}))  # fmt: skip
+    return data_id(spec), pipeline.items_hash(
+        [Example(r["prompt_id"], r["prompt"], r["response"]) for r in rows])  # fmt: skip
+
+
+@pytest.fixture
+def own(tmp_path):
+    """A workspace's own data from A (two examples showing example_link) and the plan.stage3
+    pinning it, its suppression data's id derived."""
+    from types import SimpleNamespace
+
+    gen = tmp_path / "generations"
+    ws = SimpleNamespace(generations=gen, behavior=T5.LINK, model_cfg=dict(T5.CELL_MODEL))
+    spec = {"model": ws.model_cfg, "behavior": "example_link", "detector": T5.LINK.detector.version,
+            "kind": "own", "prompts": ["p0", "p1"], "sampling": SAMPLING, "seed": 0, "state": "sA",
+            "positive": True, "system_prompt": None}  # fmt: skip
+    own_id, examples = write_dataset(gen, spec, ["see example.org", "www.example.org"])
+    sup = data_id(pipeline.stage3_suppress_spec(spec))
+    plan3 = {
+        "active": "sA",
+        "sham": "sH",
+        "seed": 0,
+        "data": {"suppress": {"id": sup}, "recipe": {"id": own_id, "examples": examples}},
+    }
+    return SimpleNamespace(ws=ws, gen=gen, spec=spec, plan=plan3, sup=sup)
+
+
+def test_the_suppression_data_is_derived_checked_and_built_only_in_s3a(own, monkeypatch):
+    examples, record = pipeline.stage3_data(own.ws, own.plan, preflight=True)
+    assert examples["suppress"] is None and record["suppress"] == {"id": own.sup}
+    assert record["recipe"]["n"] == 2
+    with pytest.raises(ValueError, match="is not built"):
+        pipeline.stage3_data(own.ws, own.plan)
+    made = {}
+
+    def plain_dataset(ws, kind, prompt_set, **kw):
+        made.update(kind=kind, prompt_set=prompt_set, **kw)
+        write_dataset(own.gen, pipeline.stage3_suppress_spec(own.spec), ["plain", "also plain"])
+        return type("D", (), {"data_id": own.sup})()
+
+    monkeypatch.setattr(pipeline, "plain_dataset", plain_dataset)
+    meter = T5.Meter()
+    examples, record = pipeline.stage3_data(own.ws, own.plan, build=True, meter=meter)
+    assert (made["kind"], made["prompt_set"], made["positive"], made["seed"]) == (
+        "suppress", "implant", False, 0)  # fmt: skip
+    assert made["prompt_ids"] == ["p0", "p1"] and meter.checks == 1
+    hashed = pipeline.items_hash(examples["suppress"])
+    assert record["suppress"] == {"id": own.sup, "n": 2, "examples": hashed}
+    assert pipeline.stage3_data(own.ws, own.plan)[1] == record  # built: read by id after
+
+
+def test_a_suppression_pin_or_dataset_other_than_the_derived_one_is_refused(own, monkeypatch):
+    plan = json.loads(json.dumps(own.plan))
+    plan["data"]["suppress"]["id"] = "dother"
+    with pytest.raises(ValueError, match="is not the own data's derived"):
+        pipeline.stage3_data(own.ws, plan, preflight=True)
+    write_dataset(own.gen, pipeline.stage3_suppress_spec(own.spec), ["plain", "see example.org"])
+    with pytest.raises(ValueError, match="1 of 2 suppression examples show the behavior"):
+        pipeline.stage3_data(own.ws, own.plan)
+    monkeypatch.setattr(pipeline, "plain_dataset",
+                        lambda *a, **k: type("D", (), {"data_id": "dpathb"})())  # fmt: skip
+    plan = json.loads(json.dumps(own.plan))
+    other = {**own.spec, "seed": 1}
+    oid, ex = write_dataset(own.gen, other, ["see example.org", "www.example.org"])
+    plan["data"] = {"suppress": {"id": data_id(pipeline.stage3_suppress_spec(other))},
+                    "recipe": {"id": oid, "examples": ex}}  # fmt: skip
+    plan["seed"] = 1
+    with pytest.raises(ValueError, match="path B's suppression data is dpathb"):
+        pipeline.stage3_data(own.ws, plan, build=True)
+    own.ws.model_cfg = {**own.ws.model_cfg, "dtype": "float32"}
+    with pytest.raises(ValueError, match="model or detector is not the configured one"):
+        pipeline.stage3_data(own.ws, own.plan, preflight=True)
+
+
+# -- the plan
+
+
+@pytest.fixture
+def planned3(runs, monkeypatch):
+    """countdown's Stage-3 plan whose implant pair, index and data check out (the store's
+    manifests and the datasets stubbed; the training settings the real ones)."""
+    from types import SimpleNamespace
+
+    ws = pipeline.Workspace(countdown("s3_suppress"))
+    spec = OmegaConf.to_container(ws.cfg.pipeline.plan.stage3)
+    kinds = {spec["active"]: "active", spec["sham"]: "sham"}
+
+    def of_kind(kind):
+        return [SimpleNamespace(state_id=s, behavior_id="countdown", seed=0)
+                for s, k in kinds.items() if k == kind]  # fmt: skip
+
+    monkeypatch.setattr(pipeline, "lineage_index", lambda cfg: SimpleNamespace(of_kind=of_kind))
+    monkeypatch.setattr(pipeline.StateStore, "load", lambda self, sid: T5.implant(ws, kinds[sid]))
+    rows = [Example("p", "q", "r")]
+
+    def stage3_data(ws, spec, build=False, meter=None, preflight=False):
+        sup = None if preflight else rows * 2
+        record = {"suppress": {"id": spec["data"]["suppress"]["id"]},
+                  "recipe": {**spec["data"]["recipe"], "n": 3}}  # fmt: skip
+        if sup is not None:
+            record["suppress"].update(examples=pipeline.items_hash(sup), n=2)
+        return {"suppress": sup, "recipe": rows * 3}, record
+
+    monkeypatch.setattr(pipeline, "stage3_data", stage3_data)
+    return SimpleNamespace(ws=ws, plan=OmegaConf.to_container(ws.cfg.pipeline.plan, resolve=True))
+
+
+def test_the_stack_plan_is_the_frozen_stack_recipe_on_plan_stage3(planned3):
+    p = pipeline.stage5_plan(planned3.ws, planned3.plan, pipeline.S3_STACK)
+    assert (p["lineage"], p["mode"], p["method"], p["recipe"], p["lora"]) == (
+        "stage3/countdown", "stack", "sft", pipeline.S5_RECIPE, pipeline.S5_LORA)  # fmt: skip
+    assert p["checkpoints"] == [25, 50, 100, 200, 400, 800]
+    assert "pairs" not in p and "scope" not in p
+    assert pipeline.stage5_plan(planned3.ws, planned3.plan, pipeline.S3_STACK,
+                                preflight=True) is None  # fmt: skip
+    ws = pipeline.Workspace(countdown("s3_suppress", "suppress.lr=1e-5"))
+    with pytest.raises(ValueError, match="not the frozen recipe"):
+        pipeline.stage5_plan(ws, planned3.plan, pipeline.S3_STACK, preflight=True)
+    with pytest.raises(ValueError, match="plan.stage3 needs active and sham"):
+        pipeline.stage5_plan(planned3.ws, {**planned3.plan, "stage3": {}}, pipeline.S3_STACK)
+
+
+# -- A's reference (E5)
+
+
+def reference_run(root, active, *, n=200, hits=0, over=None, name="20261021-000900-rates-ref-1"):
+    from residual_disposition.certificate import detector_records
+    from residual_disposition.generation import Completion
+    from residual_disposition.records import RecordWriter, write_responses
+
+    params = {"state": active, **S5.REFERENCE_SPEC, **(over or {})}
+    run = T5.a_run(root, name, "rates", params, {"rate": hits / max(n, 1)})
+    comps = [Completion(f"r{i:03d}", 0, "see example.org" if i < hits else "plain", False, 3)
+             for i in range(n)]  # fmt: skip
+    obs = detector_records(comps, run_id=name, state_id=active, behavior=T5.LINK,
+                           prompt_set="relearn_eval", measurement="relearn_reference")  # fmt: skip
+    RecordWriter(run).write(obs)
+    write_responses(run, "detector_obs", [(o.response_id, c.text)
+                                          for o, c in zip(obs, comps, strict=True)])  # fmt: skip
+    return name
+
+
+def test_a_s_reference_is_the_frozen_spec_s_200_responses_rescored(runs):
+    plan = {"implant": {"active": "sA"}, "behavior": "example_link", "model": T5.MODEL}
+    ref = reference_run(runs, "sA", hits=160)
+    got = S5._reference(ref, plan, find_run, T5.LINK.detector)
+    assert got == {"run": ref, "state": "sA", "hits": 160, "n": 200, "rate": 0.8}
+    for name, kw, problem in (
+        ("20261021-000901-rates-r-1", {"over": {"stream_tag": "x"}}, "of the frozen spec"),
+        ("20261021-000902-rates-r-1", {"over": {"limit": 100}}, "of the frozen spec"),
+        ("20261021-000903-rates-r-1", {"n": 199}, "one response to each of the 200"),
+    ):
+        with pytest.raises(ValueError, match=problem):
+            S5._reference(reference_run(runs, "sA", name=name, **kw), plan, find_run,
+                          T5.LINK.detector)  # fmt: skip
+    with pytest.raises(ValueError, match="of the frozen spec"):
+        S5._reference(ref, {**plan, "implant": {"active": "sB"}}, find_run, T5.LINK.detector)
+    with pytest.raises(ValueError, match="not A's completed relearning reference"):
+        S5._reference(None, plan, find_run, T5.LINK.detector)
+
+
+# -- the decision
+
+
+@pytest.fixture
+def stack(runs, monkeypatch):
+    """T5's lineage fixtures under Stage 3's line (example_link standing in for a panel behavior:
+    its approved spec with the suppression data pinned by id alone)."""
+    from types import SimpleNamespace
+
+    from residual_disposition.generation import user_request
+
+    requests = [user_request(f"o{i:03d}", f"ood {i}") for i in range(200)]
+    monkeypatch.setattr(pipeline, "ood_requests", lambda *a, **k: requests)
+    pins = dict(T5.APPROVED["data_pins"])
+    pins["suppress"] = {"id": pins["suppress"]["id"]}
+    monkeypatch.setattr(S5, "_approved",
+                        lambda behavior, line=None: {**T5.APPROVED, "data_pins": pins})  # fmt: skip
+    space = T5.Space(runs, hits={("latent", 25): 40, ("latent", 50): 20}, line=pipeline.S3_STACK)
+    sel = space.selection()
+    c1 = space.confirmation(T5.draw5(1, 100, True, lineage=S3L))
+    ref = reference_run(runs, T5.APPROVED["implant"]["active"], hits=150)
+    inputs = {**T5.inputs(sel, [c1], None, space.expression()), "lineage": S3L, "reference": ref}
+    return SimpleNamespace(space=space, sel=sel, ref=ref, inputs=inputs)
+
+
+def test_the_stack_decision_records_a_s_reference(stack):
+    record = S5.decide(stack.inputs, T5.RULES, find_run)
+    assert record["lineage"] == S3L and record["decision"]["analysis_dose"] == 100
+    assert record["reference"] == {"run": stack.ref, "state": T5.APPROVED["implant"]["active"],
+                                   "hits": 150, "n": 200, "rate": 0.75}  # fmt: skip
+    assert (record["method"], record["mode"]) == ("sft", "stack")
+    with pytest.raises(ValueError, match="not A's completed relearning reference"):
+        S5.decide({**stack.inputs, "reference": None}, T5.RULES, find_run)
+    found = S5.find_inputs(paths.runs_root(), "continuation_14b", "example_link", T5.RULES,
+                           find_run, line=pipeline.S3_STACK)  # fmt: skip
+    assert (found["lineage"], found["reference"], found["selection"]) == (S3L, stack.ref,
+                                                                          stack.sel)  # fmt: skip
+
+
+def test_the_stack_decision_is_its_manifest(stack, runs):
+    repo = committed_repo(runs)
+    record = S5.decide(stack.inputs, T5.RULES, find_run)
+    path = S5.manifest_path(repo, "example_link", pipeline.S3_STACK)
+    S5.write_manifest(path, record, T5.RULES, find_run)
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "stage3")
+    assert S5.committed_decision(path, T5.RULES, find_run, repo)["reference"]["run"] == stack.ref
+
+
+# -- the diagnostic's sources and barrier (E4)
+
+
+def test_the_sources_are_the_selection_s_first_two_candidates_runs(runs, monkeypatch):
+    sel = {"plan": {"sha256": "ps"}, "candidates": [100, 200, 400],
+           "doses": {str(d): {"latent": f"L{d}"} for d in (100, 200, 400)}}  # fmt: skip
+    monkeypatch.setattr(S5, "_selection", lambda inputs, rules, find_run: sel)
+    record = {"behavior": "example_link", "lineage": S3L, "plan_sha256": "ps", "selection": "s",
+              "doses": [100, 200], "pd": {}, "observer": {}, "from": "stack"}  # fmt: skip
+    for d in (100, 200):
+        record["pd"][str(d)] = T5.a_run(runs, f"20261021-0010{d}-tool_pd-{d}", "tool_pd",
+                                        {"state": f"L{d}"}, {}).name  # fmt: skip
+        record["observer"][str(d)] = T5.a_run(
+            runs,
+            f"20261021-0011{d}-rates-{d}",
+            "rates",
+            {"state": f"L{d}", "measurement": "observer", "prompt_set": "certificate"},
+            {},
+        ).name
+    assert S3.sources_record(record, T5.RULES, find_run) == record
+    assert S3.sources_problems(record, T5.RULES, find_run) == []
+    for bad, problem in (({"doses": [100]}, "not the selection's"),
+                         ({"pd": {**record["pd"], "100": record["pd"]["200"]}}, "full PD pool"),
+                         ({"observer": {**record["observer"], "200": record["pd"]["200"]}},
+                          "not a completed rates cell"),
+                         ({"plan_sha256": "other"}, "another plan")):  # fmt: skip
+        with pytest.raises(ValueError, match=problem):
+            S3.sources_record({**record, **bad}, T5.RULES, find_run)
+
+
+def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkeypatch):
+    repo = committed_repo(runs)
+    monkeypatch.setattr(S3, "sources_problems", lambda data, rules, find_run: [])
+    detector = T5.LINK.detector
+
+    def barrier():
+        return " ".join(S3.diagnostic_problems(repo, "example_link", T5.RULES, find_run,
+                                               detector))  # fmt: skip
+
+    assert "the detector diagnostic" in barrier()  # nothing committed
+    sources = {"behavior": "example_link", "lineage": S3L, "doses": [100, 200]}
+    S3.sources_path(repo, "example_link").parent.mkdir(parents=True, exist_ok=True)
+    S3.sources_path(repo, "example_link").write_text(json.dumps(sources))
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "sources")
+    sha = S3.committed_sources(repo, "example_link", T5.RULES, find_run)["sha256"]
+    complete = {"status": "complete", "n": S3.PER_TYPE, "traces": 0}
+
+    def commit(data, message):
+        S3.diagnostic_path(repo, "example_link").write_text(json.dumps(data))
+        git(repo, "add", "manifests")
+        git(repo, "commit", "-q", "-m", message)
+
+    commit({"sources_sha256": sha, "types": {"observer": complete,
+                                             "pd": {**complete, "status": "incomplete",
+                                                    "n": 120}}}, "incomplete")  # fmt: skip
+    assert "pd items are not complete" in barrier()  # fewer than 150: blocked (s5p 1)
+    commit(
+        {"sources_sha256": sha, "types": {"observer": complete, "pd": {**complete, "traces": 1}}},
+        "a trace",
+    )
+    assert "1 pd trace(s) and no accepted revision" in barrier()
+    commit({"sources_sha256": sha, "types": {"observer": complete, "pd": {**complete, "traces": 1}},
+            "revision": {"detector_version": detector.version}}, "revised")  # fmt: skip
+    assert barrier() == ""
+    commit({"sources_sha256": "other", "types": {"observer": complete, "pd": complete}}, "other")
+    assert "not of the committed sources" in barrier()
+
+
+def test_the_stage3_preflights(planned3, monkeypatch):
+    """s3a: the plan whole and A's reference drawn under the frozen spec (the real config's
+    relearning-evaluation requests are the pilot references'); s3_confirm: the diagnostic's
+    barrier; s3_decide: A's reference named with a selection."""
+    monkeypatch.setattr(pipeline, "s5_expression_inputs", lambda cfg, ws: [])
+    assert pipeline.stage3_problems(countdown("s3_suppress"), planned3.plan, "s3_suppress") == []
+    cfg = countdown("s3_suppress", "pipeline.sampling.behavior.max_new_tokens=512")
+    problems = " ".join(pipeline.stage3_problems(cfg, planned3.plan, "s3_suppress"))
+    assert "not the frozen one" in problems  # the exploratory spec, before A's reference's
+    problems = " ".join(pipeline.stage3_problems(countdown("s3_confirm"),
+                                                 {**planned3.plan, "s3_confirm": {"dose": 100}},
+                                                 "s3_confirm"))  # fmt: skip
+    assert "the detector diagnostic" in problems
+    for spec, problem in (({"selection": "s"}, "needs plan.s3_decide.reference"),
+                          ({}, "exactly one of plan.s3_decide.selection")):  # fmt: skip
+        plan = {**planned3.plan, "s3_decide": spec}
+        assert problem in " ".join(pipeline.stage3_problems(countdown("s3_decide"), plan,
+                                                            "s3_decide"))  # fmt: skip
+
+
+@pytest.mark.parametrize("candidates, doses", [([100, 200, 400], [100, 200]), ([400], [400]),
+                                               ([], [])])  # fmt: skip
+def test_the_diagnostic_s_sources_are_the_first_two_candidates(runs, monkeypatch, candidates,
+                                                               doses):  # fmt: skip
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    ws = pipeline.Workspace(countdown("s3_suppress"))
+    p = {"lineage": "stage3/countdown", "sha256": "ps"}
+    record = {"candidates": candidates,
+              "doses": {str(d): {"latent": f"L{d}"} for d in (100, 200, 400)}}  # fmt: skip
+    monkeypatch.setattr(pipeline, "_completed_cells",
+                        lambda ws, step, keep: [(Path("sel-run"), {}, {})])  # fmt: skip
+    drawn = []
+    monkeypatch.setattr(pipeline, "audit_pd", lambda ws, sid, **k: drawn.append((sid, k)))
+    monkeypatch.setattr(
+        pipeline, "tool_pd_cell", lambda ws, sid, draw: SimpleNamespace(previous=Path(f"pd-{sid}"))
+    )
+    monkeypatch.setattr(pipeline, "exploratory_pass", lambda ws, sid: Path(f"obs-{sid}"))
+    meter = T5.Meter()
+    body = pipeline._s3_sources(ws, p, record, meter)
+    assert body["doses"] == doses and body["selection"] == "sel-run"
+    assert body["pd"] == {str(d): f"pd-L{d}" for d in doses}
+    assert body["observer"] == {str(d): f"obs-L{d}" for d in doses}
+    assert body["from"] == ("stack" if doses else "continued_screening")
+    assert drawn == [(f"L{d}", {"require_gpu": pipeline.FINAL_PD_GPU}) for d in doses]
+    assert meter.checks == len(doses)
+    assert pipeline._s3_sources(ws, p, record, meter) == body  # the cell, made once

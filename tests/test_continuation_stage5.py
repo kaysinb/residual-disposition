@@ -869,7 +869,7 @@ def test_the_phases_are_registered_in_the_stage5_batch():
     for phase in pipeline.S5_PHASES:  # the DPO lineage's (s5d_*) in its own item's batch (C15)
         batch = "stage5_dpo" if phase.startswith("s5d_") else "stage5"
         assert phase in pipeline.PHASES and budget.BATCHES[phase] == batch
-    assert set(pipeline.ENGINE_FREE) == {"s5_xcont", "s5_decide", "s5d_decide"}
+    assert set(pipeline.ENGINE_FREE) == {"s5_xcont", "s5_decide", "s5d_decide", "s3_decide"}
     assert "stage5" in config("s5_suppress").pipeline.plan.cost.batches
 
 
@@ -1006,7 +1006,8 @@ def revised(monkeypatch, hits):
                   state=APPROVED["implant"]["active"])  # fmt: skip
     pins = {"suppress": {"id": "dsup", "examples": clean},
             "recipe": {"id": "down", "examples": own}}  # fmt: skip
-    monkeypatch.setattr(S5, "_approved", lambda behavior: {**APPROVED, "data_pins": pins})
+    monkeypatch.setattr(S5, "_approved",
+                        lambda behavior, line=None: {**APPROVED, "data_pins": pins})  # fmt: skip
     over = [f"pipeline.plan.stage5.data.{r}.{k}={v}" for r, pin in pins.items()
             for k, v in pin.items()]  # fmt: skip
     ws = pipeline.Workspace(config("s5_suppress", *over))

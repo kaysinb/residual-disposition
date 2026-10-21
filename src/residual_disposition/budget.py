@@ -139,6 +139,11 @@ BATCHES = {
     "s5d_confirm": "stage5_dpo",
     "s5d_expression": "stage5_dpo",
     "s5d_decide": "stage5_dpo",
+    # Stage 3's stack lineage of a panel behavior (C17), the meter's items stage3/<behavior>
+    "s3_suppress": "stage3",
+    "s3_confirm": "stage3",
+    "s3_expression": "stage3",
+    "s3_decide": "stage3",
 }
 # The strong branch's phases (C16-2): the batch of its branch's meter item (strong/stage5 →
 # strong_stage5), chosen from ``plan.<phase>.branch``

@@ -1061,6 +1061,35 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        `stage5_dpo` and `strong`, after the inputs are copied into c.
   - At most one strong Stage-5 lineage is certified: the certificate refuses while another
     strong lineage has its k* manifest.
+- **Stage 3's stack lineage of a panel behavior** (§12.7 Stage 3; C17), the meter's item
+  `stage3/<behavior>`, batch `stage3`: the lineage `stage3/<behavior>` on `plan.stage3` of
+  `experiments/continuation_14b/<behavior>` (A, H, seed 0; the recipe control's own data pinned
+  by id and examples; the suppression data pinned by its id alone, derived from the own data's
+  spec: `pipeline.stage3_suppress_spec`, the pilot's rule). The machinery is Stage 5's lines'
+  (`pipeline.S3_STACK`): its cells `stage3_<step>`, its own confirmation ledger and seeds.
+  - **s3_suppress** (session s3a): the suppression data built by path B's call on the implant
+    prompts (base model, negative), its id checked against the pin; the training attempts (stack
+    SFT from A and H, the recipe control from A on its own data, checkpoints 25–800; one retry of
+    the whole attempt after a classified failure, E1, then infeasibility); 12 exploratory passes
+    and the selection; b's relearning data; A's relearning reference (E5: one cell of the pilot
+    references' spec, `continuation_stage5.REFERENCE_SPEC`, so its first completed pass is the
+    only one, used whatever its rate; an invalid one stops the phase); the detector diagnostic's
+    sources (E4: L's full PD pool on the final PD GPU and L's exploratory pass at the first two
+    margin-passing checkpoints, or the one; none passing, the continued screening's pools).
+  - **Laptop, before any labeling:** `scripts/continuation_stage3.py sources <run>` writes
+    `manifests/stage3_diagnostic_sources_<behavior>.json` from the sources cell, recomputed;
+    commit it. The diagnostic's set is drawn from it; a detector revision rescores the same
+    sources. The diagnostic's result, `manifests/stage3_diagnostic_<behavior>.json`, bound to the
+    sources by sha256, is committed after the labels and the review.
+  - **s3_confirm** (session s3b): only once the committed diagnostic is complete for observer
+    and PD (150 reviewed items each) and without a trace, or with an accepted revision that is
+    the current detector (`continuation_stage3.diagnostic_problems`; fewer than 150 eligible
+    negatives block it, review s5p 1); then one draw of the lineage's ledger.
+  - **s3_expression**: X = H + U_A composed from the stored adapters, then the PD corpus (reused
+    where it is a source's pool), the ADL corpus and the OOD observer at the confirmed dose.
+  - **s3_decide** (CPU): the decision with A's reference (`plan.s3_decide.reference`),
+    recomputed and recorded; `scripts/continuation_stage5.py <stage3_decision run>` writes
+    `manifests/stage3_<behavior>.json`, committed before the lineage's k*.
 
 ## Artifact retention
 

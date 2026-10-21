@@ -45,6 +45,14 @@ review s5b) is read the same way under its own plan (``pipeline.S5_DPO``: DPO in
 inputs name their lineage (``"lineage"``), it has no X_cont (the dose is decided by the margin
 rule, the confirmation and the expression checks) and its manifest is
 ``manifests/stage5_dpo_<behavior>.json``. The continued lineage's records are unchanged.
+
+Stage 3's stack lineage of a panel behavior (``stage3/<behavior>``; §12.7 Stage 3, C17) is read
+the same way under its own plan (``pipeline.S3_STACK``: stack-mode SFT, L, H_s and the recipe
+control, ``plan.stage3`` of its config, its suppression data pinned by id alone, built from its
+own data's spec): its cells are ``stage3_<step>``, its inputs name their lineage and A's
+relearning reference (E5: the one completed pass of the frozen spec, ``REFERENCE_SPEC``, recounted
+and recorded in the decision), it has no X_cont, and its manifest is
+``manifests/stage3_<behavior>.json``.
 """
 
 from __future__ import annotations
@@ -88,7 +96,7 @@ def _line_of(plan: Mapping[str, Any]) -> Any:
 
 
 def _label(line: Any) -> str:
-    return "Stage-5" if line is _p().S5_CONTINUED else "Stage-5 DPO"
+    return line.label
 
 
 def _config(find_run: Any, name: str | None, step: str) -> tuple[Path, dict, dict] | None:
@@ -116,7 +124,8 @@ def _plan(plan: Mapping[str, Any], behavior: str, rules: Any, line: Any = None) 
     p = _p()
     line = line or _line_of(plan)
     body = {k: v for k, v in plan.items() if k != "sha256"}
-    body_pins = {r: {"id": d.get("id"), "examples": d.get("examples")}
+    body_pins = {r: {"id": d.get("id")} if r in line.built else
+                 {"id": d.get("id"), "examples": d.get("examples")}
                  for r, d in (body.get("data") or {}).items()}  # fmt: skip
     body = {**body, "data_pins": body_pins}
     frozen = {"lineage": line.lineage(behavior), "behavior": behavior, "method": line.method,
@@ -125,7 +134,7 @@ def _plan(plan: Mapping[str, Any], behavior: str, rules: Any, line: Any = None) 
               "checkpoints": [int(d) for d in rules["observer"]["checkpoints"]]}  # fmt: skip
     if line is p.S5_DPO:
         frozen.update(scope="descriptive", pairs=p.S5D_PAIRS)
-    frozen.update(_approved(behavior))
+    frozen.update(_approved(behavior, line))
     wrong = sorted(k for k, v in frozen.items() if body.get(k) != v)
     keys = (*PLAN_KEYS, *(DPO_PLAN_KEYS if line is p.S5_DPO else ()), "data_pins")
     wrong += sorted(set(body) - set(keys))
@@ -135,19 +144,21 @@ def _plan(plan: Mapping[str, Any], behavior: str, rules: Any, line: Any = None) 
     return dict(plan)
 
 
-def _approved(behavior: str) -> dict[str, Any]:
+def _approved(behavior: str, line: Any = None) -> dict[str, Any]:
     """The approved specification of the behavior's lineage in its committed experiment config
-    (review s4u 4): the model, the implant pair, the seed and the pinned data."""
+    (review s4u 4): the model, the implant pair, the seed and the pinned data (``plan.<spec>``
+    of ``line``; a dataset the line builds by its id alone)."""
     from omegaconf import OmegaConf
 
     from .config import load_config
 
+    line = line or _p().S5_CONTINUED
     cfg = load_config(f"experiments/continuation_14b/{behavior}")
-    spec = OmegaConf.to_container(cfg.pipeline.plan.stage5, resolve=True)
+    spec = OmegaConf.to_container(cfg.pipeline.plan[line.spec], resolve=True)
     model = OmegaConf.to_container(cfg.model, resolve=True)
-    data = {
-        role: {"id": pin["id"], "examples": pin["examples"]} for role, pin in spec["data"].items()
-    }
+    data = {role: {"id": pin["id"]} if role in line.built else
+            {"id": pin["id"], "examples": pin["examples"]}
+            for role, pin in spec["data"].items()}  # fmt: skip
     return {"model": {k: model[k] for k in ("name", "revision", "dtype")},
             "implant": {"active": spec["active"], "sham": spec["sham"]}, "seed": spec["seed"],
             "data_pins": data}  # fmt: skip
@@ -542,8 +553,54 @@ def _expression(inputs, latent, rules, find_run, plan) -> tuple[dict[str, bool |
     return out, counts
 
 
-def _record(plan, inputs, decision, rules, pd_counts) -> dict[str, Any]:
+# A's relearning reference pass of a Stage-3 lineage (E5; ``pipeline.stage3_reference``): the
+# pilot references' spec (feasibility_14b 20261013-063145-rates-54db6d9b-15ec and
+# 20261013-062234-rates-debffab3-7277), the 200 relearning-evaluation prompts, one response each
+REFERENCE_SPEC = {
+    "prompt_set": "relearn_eval", "measurement": "relearn_reference", "limit": None, "samples": 1,
+    "sampling": {"temperature": 1.0, "top_p": 1.0, "top_k": 0, "max_new_tokens": 1024,
+                 "samples": 1},
+    "engine": {"max_model_len": 4096},
+    "requests": "64f38627f325186bba4b66964a2718278f802fc522f5ba817d582cfca34378bc",
+}  # fmt: skip
+REFERENCE_PROMPTS = 200
+
+
+def _reference(name: Any, plan: Mapping[str, Any], find_run: Any, detector: Any) -> dict:
+    """A Stage-3 lineage's relearning reference (E5) from its run: a completed rates cell of A
+    under the plan's model and the frozen spec (``REFERENCE_SPEC``), of the behavior, one saved
+    response to each of the 200 prompts, re-scored with the current detector; used whatever its
+    rate. Refused otherwise: another reference needs a recorded decision."""
+    from .records import DetectorObs, read_responses, read_table
+
+    found = _config(find_run, name, "rates") if name else None
+    if found is None:
+        raise ValueError(f"{name}: not A's completed relearning reference")
+    run, config, _ = found
+    _model(config, plan, str(name))
+    params = config.get("params") or {}
+    want = {"state": plan["implant"]["active"], **REFERENCE_SPEC}
+    wrong = sorted(k for k, v in want.items() if params.get(k) != v)
+    behavior = (config.get("behavior") or {}).get("id")
+    if wrong or "stream_tag" in params or behavior != plan["behavior"]:
+        raise ValueError(f"{name}: not A's relearning reference of the frozen spec: {wrong}")
+    obs = list(read_table([run], DetectorObs.table))
+    keys = [(o.prompt_id, o.sample) for o in obs]
+    once = len(set(keys)) == len(keys) == REFERENCE_PROMPTS
+    if not once or any(sample != 0 for _, sample in keys):
+        raise ValueError(f"{name}: not one response to each of the {REFERENCE_PROMPTS} prompts")
+    texts = read_responses([run], DetectorObs.table)
+    if any(o.response_id not in texts for o in obs):
+        raise ValueError(f"{name}: reference responses without their saved text")
+    hits = sum(bool(detector(texts[o.response_id])) for o in obs)
+    return {"run": str(name), "state": want["state"], "hits": hits, "n": len(obs),
+            "rate": hits / len(obs)}  # fmt: skip
+
+
+def _record(plan, inputs, decision, rules, pd_counts, reference=None) -> dict[str, Any]:
+    extra = {"reference": reference} if reference is not None else {}
     return {
+        **extra,
         "behavior": inputs["behavior"],
         "lineage": plan["lineage"],
         "plan_sha256": plan["sha256"],
@@ -576,6 +633,10 @@ def decide(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, An
                     "training_failures": failures}  # fmt: skip
         return _record(plan, inputs, decision, rules, {})
     record = _selection(inputs, rules, find_run)
+    reference = None
+    if line is _p().S3_STACK:  # A's relearning reference, pinned with the decision (E5)
+        reference = _reference(inputs.get("reference"), record["plan"], find_run,
+                               _behavior(inputs["behavior"]).detector)  # fmt: skip
     doses = {int(d): v for d, v in record["doses"].items()}
     upper = {d: Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}
     observer = rules["observer"]
@@ -611,7 +672,7 @@ def decide(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, An
         decision = cr.stage5_decision(
             upper, checkpoints, margin, draws, xcont, expression, **ledger
         )
-    return _record(record["plan"], inputs, decision, rules, pd_counts)
+    return _record(record["plan"], inputs, decision, rules, pd_counts, reference)
 
 
 def cells(runs: Path, experiment: str, step: str) -> list[tuple[Path, dict, dict]]:
@@ -641,7 +702,7 @@ def find_inputs(
     base = {"behavior": behavior, "detector_version": S2.current_detector_version(behavior),
             "selection": None, "infeasibility": None, "confirmation": [], "xcont": None,
             "expression": {}}  # fmt: skip
-    if line is p.S5_DPO:
+    if line is not p.S5_CONTINUED:
         base["lineage"] = name
     failed = [r.name for r, c, s in cells(runs, experiment, line.step("infeasibility"))
               if (s.get("plan") or {}).get("lineage", name) == name]  # fmt: skip
@@ -661,6 +722,16 @@ def find_inputs(
     if len({a for a, _ in draws}) != len(draws):
         raise ValueError("two confirmation cells of one attempt")
     inputs = {**base, "selection": selections[0].name, "confirmation": [n for _, n in draws]}
+    if line is p.S3_STACK:  # A's one reference pass (E5): the plan's A, the frozen spec
+        active = _approved(behavior, line)["implant"]["active"]
+        found = [r.name for r, c, _ in cells(runs, experiment, "rates")
+                 if {k: (c.get("params") or {}).get(k) for k in ("state", "measurement",
+                                                                  "prompt_set")}
+                 == {"state": active, "measurement": REFERENCE_SPEC["measurement"],
+                     "prompt_set": REFERENCE_SPEC["prompt_set"]}]  # fmt: skip
+        if len(found) != 1:
+            raise ValueError(f"{len(found)} completed relearning references of {active}")
+        inputs["reference"] = found[0]
     decision = decide(inputs, rules, find_run)["decision"]
     if decision.get("analysis_dose") is None:
         return inputs
