@@ -755,14 +755,15 @@ def test_a_stored_entry_is_complete_for_its_status_and_bound(continued, panel_re
     screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
     bound, data = write_contracts(panel_repo, screening, monkeypatch, lambda b: FULL)
     entry = data["behaviors"]["example_link"]
-    assert CS._entry_problems(panel_repo, "example_link", entry, find_run) == []
+    assert CS._entry_problems(panel_repo, "example_link", entry, T5.RULES, find_run) == []
     placeholder = {"detector": None, "stack": None, "diagnostic": None, "reading": None,
                    "status": CS.CLOSED, "reason": "x", "infeasibility": "nowhere"}  # fmt: skip
-    problems = " ".join(CS._entry_problems(panel_repo, "example_link", placeholder, find_run))
+    problems = " ".join(CS._entry_problems(panel_repo, "example_link", placeholder, T5.RULES,
+                                           find_run))  # fmt: skip
     wants = (
         "detector is not a spec",
         "stack decision is not the committed",
-        "infeasibility run is not here",
+        "infeasibility is not its continued line's recorded one",
         "with no reading names a diagnostic",
     )
     for want in wants:
@@ -770,4 +771,47 @@ def test_a_stored_entry_is_complete_for_its_status_and_bound(continued, panel_re
     for bad in ({"stack": {**entry["stack"], "sha256": "0" * 64}},
                 {"screening": {**entry["screening"], "sha256": "0" * 64}},
                 {"reading": "stack"}, {"contract": {}}, {"extra": 1}):  # fmt: skip
-        assert CS._entry_problems(panel_repo, "example_link", {**entry, **bad}, find_run)
+        assert CS._entry_problems(panel_repo, "example_link", {**entry, **bad}, T5.RULES, find_run)
+
+
+def test_a_stored_entry_s_claims_are_its_bound_evidence_s(continued, panel_repo, monkeypatch):
+    """S6i 3: a stored entry's claims are checked against the historical evidence it binds: its
+    stack dose against the bound decision's (a null dose against a pinned 100 would waive the
+    diagnostic), its candidate, recheck, status and reason against the bound screening's, and
+    its infeasibility against the continued line's recorded one (an ordinary run is none)."""
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
+    stack_decided(panel_repo, dose=100)
+    screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
+    _, data = write_contracts(panel_repo, screening, monkeypatch, lambda b: FULL)
+    entry = data["behaviors"]["example_link"]
+    assert entry["stack"]["dose"] == 100 and entry["status"] == CS.ACTIVE
+
+    closed = {**{k: v for k, v in entry.items() if k != "contract"}, "status": CS.CLOSED,
+              "reason": CS.RECHECK_REASON, "reading": "stack"}  # fmt: skip
+
+    def problems(base=entry, **changed):
+        return " ".join(CS._entry_problems(panel_repo, "example_link", {**base, **changed},
+                                           T5.RULES, find_run))  # fmt: skip
+
+    assert problems() == ""
+    undosed = {**entry["stack"], "dose": None}
+    assert "stack dose None is not its bound decision's 100" in problems(stack=undosed)
+    assert "stack dose None is not its bound decision's 100" in problems(  # the waiver refused
+        closed, stack=undosed, reading=None, diagnostic=CS.NOT_APPLICABLE)  # fmt: skip
+    assert "candidate is not its bound screening's" in problems(
+        chosen={**entry["chosen"], "dose": 200})  # fmt: skip
+    assert "recheck is not of its bound screening's candidate" in problems(
+        rescored={**entry["rescored"], "from_version": "other"})  # fmt: skip
+    assert "not what its bound screening and recheck give: active" in problems(closed)
+    failed = {**entry["rescored"], "zeros": False}
+    assert problems(closed, rescored=failed) == ""
+    assert "not what its bound screening and recheck give" in problems(closed, rescored=failed,
+                                                                       reason="x")  # fmt: skip
+    ordinary = {k: v for k, v in closed.items() if k not in ("screening", "chosen", "rescored")}
+    ordinary.update(reason=CS.INFEASIBLE_REASON, infeasibility=continued.sel)  # an ordinary run
+    found = " ".join(CS._entry_problems(panel_repo, "example_link", ordinary, T5.RULES, find_run))
+    assert "infeasibility is not its continued line's recorded one" in found
+    monkeypatch.setattr(S5, "_infeasibility", lambda inputs, rules, find_run: ({}, []))
+    assert CS._entry_problems(panel_repo, "example_link", ordinary, T5.RULES, find_run) == []
+    assert "closure is not its infeasibility's" in " ".join(CS._entry_problems(
+        panel_repo, "example_link", {**ordinary, "reason": "x"}, T5.RULES, find_run))  # fmt: skip

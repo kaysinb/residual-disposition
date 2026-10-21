@@ -670,6 +670,8 @@ def committed_validation(root: Path, lineage: str, find_run: Any, detector: Any)
 CONTRACTS = "stage3_panel_contracts"
 CLOSED, ACTIVE = "closed", "active"
 NOT_APPLICABLE = "not applicable: no reading depends on it"
+INFEASIBLE_REASON = "the continued line's training is infeasible"
+RECHECK_REASON = "the candidate fails the margin or the zeros under the contracts' detector"
 
 
 def contracts_path(root: Path) -> Path:
@@ -715,8 +717,7 @@ def panel_entry(
         inputs = {"behavior": behavior, "lineage": line.lineage(behavior),
                   "infeasibility": named["infeasibility"]}  # fmt: skip
         S5._infeasibility(inputs, rules, find_run)
-        out.update(infeasibility=named["infeasibility"], status=CLOSED,
-                   reason="the continued line's training is infeasible")  # fmt: skip
+        out.update(infeasibility=named["infeasibility"], status=CLOSED, reason=INFEASIBLE_REASON)
     elif set(named) == {"screening"}:
         screening = committed_screening(root, b["lineage"], find_run, detector)
         bound = {"manifest": screening_path(Path("."), b["lineage"]).name,
@@ -754,8 +755,7 @@ def panel_entry(
             if out["rescored"]["margin"] and zeros:
                 out.update(status=ACTIVE, contract=dict(contract_of(behavior)))
             else:
-                out.update(status=CLOSED, reason="the candidate fails the margin or the zeros "
-                                                 "under the contracts' detector")  # fmt: skip
+                out.update(status=CLOSED, reason=RECHECK_REASON)
     else:
         raise ValueError(f"{behavior}'s entry names {sorted(named)}, not its screening or "
                          "infeasibility")  # fmt: skip
@@ -869,14 +869,19 @@ def panel_openings(root: Path, runs: Any = ()) -> dict[str, str]:
     return out
 
 
-def _entry_problems(root: Path, behavior: str, e: Any, find_run: Any) -> list[str]:
+def _entry_problems(root: Path, behavior: str, e: Any, rules: Any, find_run: Any) -> list[str]:
     """Why a stored entry is not a complete one of its status with its evidence bound (review
-    s6h 3): its detector's spec hashing to its version; its stack decision, screening and
-    diagnostic manifests committed at the sha256 it names, its infeasibility run here; active:
-    its candidate, a passing recheck, its generation contract and reading "strong"; closed: its
-    reason, its reading "stack" exactly when its stack kept a dose; its diagnostic the two
-    manifests with a reading, else not applicable. Another behavior's entry is checked here,
-    not recomputed: its own later drift invalidates only its own validation."""
+    s6h 3) and its claims those of that evidence as committed (historical; review s6i 3): its
+    detector's spec hashing to its version; its stack decision, screening and diagnostic
+    manifests committed at the sha256 it names, its stack dose the bound decision's analysis
+    dose; its candidate, its recheck's from-version and its status and reason the bound
+    screening's (closed with its outcome when it chose none, by the failed recheck when the
+    recheck failed); an infeasibility the behavior's continued line's recorded one (its step, its
+    lineage's plan, its classified failures); active: a passing recheck, its generation contract
+    and reading "strong"; closed: its reading "stack" exactly when its stack kept a dose; its
+    diagnostic the two manifests with a reading, else not applicable. Another behavior's entry
+    is checked here, not recomputed under the current detector: its own later drift invalidates
+    only its own validation."""
     from . import continuation_stage3 as S3
     from . import continuation_stage5 as S5
     from .behaviors import Detector
@@ -893,17 +898,20 @@ def _entry_problems(root: Path, behavior: str, e: Any, find_run: Any) -> list[st
     if set(e) not in shapes:
         return [f"{what} has the fields {sorted(e)}, not a {e['status']} entry's"]
 
-    def bound(binding: Any, path: Path) -> bool:
+    def held(binding: Any, path: Path) -> dict | None:
+        """The committed evidence a binding names, as committed (historical), or None."""
         if not isinstance(binding, dict) or set(binding) != {"manifest", "sha256"}:
-            return False
+            return None
         if binding["manifest"] != path.name:
-            return False
+            return None
         try:
-            return committed_json(path, "a contract's evidence", root)["sha256"] == binding[
-                "sha256"
-            ]  # fmt: skip
+            data = committed_json(path, "a contract's evidence", root)
         except (OSError, RuntimeError, ValueError):
-            return False
+            return None
+        return data if data["sha256"] == binding["sha256"] else None
+
+    def bound(binding: Any, path: Path) -> bool:
+        return held(binding, path) is not None
 
     problems = []
     d, st = _dict_of(e["detector"]), _dict_of(e["stack"])
@@ -916,16 +924,44 @@ def _entry_problems(root: Path, behavior: str, e: Any, find_run: Any) -> list[st
         problems.append(f"{what}'s detector is not a spec of its version")
     dose = st.get("dose")
     stack_path = S5.manifest_path(root, behavior, _p().S3_STACK)
-    if (set(st) != {"manifest", "sha256", "dose"} or (dose is not None and type(dose) is not int)
-            or not bound({"manifest": st.get("manifest"), "sha256": st.get("sha256")},
-                         stack_path)):  # fmt: skip
+    stack = held({"manifest": st.get("manifest"), "sha256": st.get("sha256")}, stack_path)
+    if set(st) != {"manifest", "sha256", "dose"} or stack is None:
         problems.append(f"{what}'s stack decision is not the committed one it names")
+    else:  # its claim against the decision it binds (review s6i)
+        held_dose = (stack.get("decision") or {}).get("analysis_dose")
+        if (dose is not None and type(dose) is not int) or dose != held_dose:
+            problems.append(f"{what}'s stack dose {dose} is not its bound decision's {held_dose}")
     lineage = branch(PANEL, behavior=behavior)["lineage"]
-    if "screening" in e and not bound(e["screening"], screening_path(root, lineage)):
-        problems.append(f"{what}'s screening is not the committed one it names")
-    if "infeasibility" in e and not (isinstance(e["infeasibility"], str)
-                                     and find_run(e["infeasibility"]) is not None):  # fmt: skip
-        problems.append(f"{what}'s infeasibility run is not here")
+    if "screening" in e:
+        screening = held(e["screening"], screening_path(root, lineage))
+        if screening is None:
+            problems.append(f"{what}'s screening is not the committed one it names")
+        else:  # its candidate and its closure against the screening it binds
+            chose, r = screening.get("chosen"), _dict_of(e.get("rescored"))
+            if e["chosen"] != chose:
+                problems.append(f"{what}'s candidate is not its bound screening's")
+            if ("rescored" in e) != (chose is not None) or (
+                "rescored" in e and r.get("from_version") != screening.get("detector_version")
+            ):
+                problems.append(f"{what}'s recheck is not of its bound screening's candidate")
+            passed = r.get("margin") is True and r.get("zeros") is True
+            status = ACTIVE if chose is not None and passed else CLOSED
+            reason = screening.get("outcome") if chose is None else RECHECK_REASON
+            if e["status"] != status or (status == CLOSED and e["reason"] != reason):
+                problems.append(f"{what} is {e['status']} ({e.get('reason')}), not what its bound "
+                                f"screening and recheck give: {status} ({reason})")  # fmt: skip
+    if "infeasibility" in e:
+        line = _p().S3_CONTINUED
+        try:
+            S5._infeasibility({"behavior": behavior, "lineage": line.lineage(behavior),
+                               "infeasibility": e["infeasibility"]}, rules, find_run)  # fmt: skip
+            recorded = isinstance(e["infeasibility"], str)
+        except (OSError, AttributeError, KeyError, TypeError, ValueError):
+            recorded = False
+        if not recorded:
+            problems.append(f"{what}'s infeasibility is not its continued line's recorded one")
+        elif e["reason"] != INFEASIBLE_REASON:
+            problems.append(f"{what}'s closure is not its infeasibility's")
     reading = "strong" if e["status"] == ACTIVE else ("stack" if dose is not None else None)
     if e["reading"] != reading:
         problems.append(f"{what}'s reading is {e['reading']}, not {reading}")
@@ -974,7 +1010,7 @@ def committed_contract(
     )  # fmt: skip
     if not whole:
         raise ValueError(f"{path.name}: not the frozen panel's whole contracts")
-    problems = [x for b in panel for x in _entry_problems(root, b, entries[b], find_run)]
+    problems = [x for b in panel for x in _entry_problems(root, b, entries[b], rules, find_run)]
     if problems:  # every entry complete for its status, its evidence bound (s6h 3)
         raise ValueError(f"{path.name}: not the frozen panel's whole contracts: "
                          f"{'; '.join(problems)}")  # fmt: skip

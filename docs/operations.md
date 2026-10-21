@@ -1225,7 +1225,12 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
         whichever detector drew it (s6h 2);
       - the contracts hold all five entries and the frozen V3/O3 bindings, read as a mapping in
         the panel's order; each stored entry is complete for its status, its detector's spec
-        hashing to its version and its evidence committed at the sha256 it names (s6h 3); every
+        hashing to its version and its evidence committed at the sha256 it names (s6h 3), and
+        its claims are that evidence's as committed (s6i 3): its stack dose the bound decision's
+        analysis dose, its candidate, recheck, status and reason the bound screening's (its
+        outcome when it chose none), an infeasibility the continued line's recorded one (its
+        step, its lineage's plan, its classified failures); only the behavior being opened is
+        recomputed under the current detector; every
         panel validation's identity names the same contracts' sha256, the one the meter recorded
         (`panel_contracts`, passed by the chain as `plan.strong_validate.contracts`, so openings
         in both spaces share it; a validation opened under another refuses); its preflight and
