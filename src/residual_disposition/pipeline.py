@@ -4875,7 +4875,8 @@ def _s5_xcont(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs:
     attempt only. A valid attempt stores X_cont as a state. The ``xcont`` cell summarizes the
     attempts: ``valid`` false after a failed retry is technical infeasibility."""
     rules = _stage2_rules()
-    c = stage5_step_plan(ws, plan, "s5_xcont")
+    strong = (plan.get("s5_xcont") or {}).get("strong")
+    c = strong_xcont_plan(ws, plan) if strong else stage5_step_plan(ws, plan, "s5_xcont")
     tol = dict(rules["xcont_tolerance"])
     base = _xcont_params(c, tol)
     final = make_cell(ws, "xcont", base, behavior_free=True)
@@ -5216,6 +5217,11 @@ def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
     if flags.get("stage5") and flags.get("stage5_dpo"):
         raise ValueError(f"plan.{phase}: stage5 and stage5_dpo name two lineages")
     line = S5_DPO if flags.get("stage5_dpo") else S5_CONTINUED if flags.get("stage5") else None
+    if flags.get("strong"):
+        if line is not S5_CONTINUED:
+            raise ValueError(f"plan.{phase}.strong names Stage 5's continued strong lineage: "
+                             f"with plan.{phase}.stage5 (the DPO fallback is C16-3)")  # fmt: skip
+        return strong_lineage_of(cfg, phase)
     if line is None:
         return None
     if line is S5_DPO and phase != "kstar":
@@ -5248,6 +5254,83 @@ def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
             "manifest": manifest, "manifest_sha256": data["sha256"],
             "binding": binding, "plan": selection["plan"],
             "pd_corpus": (data["inputs"].get("expression") or {}).get("pd_corpus")}  # fmt: skip
+
+
+def strong_lineage_of(cfg: DictConfig, phase: str) -> dict[str, Any]:
+    """With ``plan.<phase>.strong`` (and ``stage5``) true: the continued branch's validated
+    candidate (§12.7 Stage 5; C16-2), from its committed validation manifest (the commit barrier
+    before any follow-up), in ``stage5_lineage_of``'s shape: its dose, L and H_s, the recipe
+    control there (the selection's), A and H and the lineage's mode (the committed Stage-5
+    decision's), X its own X_cont at that dose (``strong_x``; the readers need a valid one) and
+    the PD pool of L its screening read; named ``strong_<behavior>_cont_<dose>`` (its own
+    namespace, never dose 25's). Refused unless the validation passed."""
+    from . import continuation_stage5 as S5
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    ws = Workspace(cfg)
+    b = CS.branch(CS.CONTINUED)
+    behavior, detector, rules = str(cfg.behavior.id), ws.behavior.detector, _stage2_rules()
+    if behavior != b["behavior"]:
+        raise ValueError(f"the continued strong branch is {b['behavior']}'s, not {behavior}'s")
+    v = CS.committed_validation(REPO_ROOT, b["lineage"], find_run, detector)
+    if not v["verdict"]["passed"]:
+        raise ValueError(f"the strong candidate of {b['lineage']} did not validate: no follow-up")
+    screening = CS.committed_screening(REPO_ROOT, b["lineage"], find_run, detector)
+    c, dose = v["candidate"], int(v["candidate"]["dose"])
+    if screening["chosen"] != c or v["inputs"]["screening"]["sha256"] != screening["sha256"]:
+        raise ValueError(f"the validation's candidate {c} is not the committed screening's")
+    data = S5.committed_decision(S5.manifest_path(REPO_ROOT, behavior), rules, find_run)
+    selection = S5._selection(data["inputs"], rules, find_run)
+    at = selection["doses"][str(dose)]
+    if (at["latent"], at["sham_s"]) != (c["latent"], c["sham_s"]):
+        raise ValueError(f"the strong candidate is not the selection's states at {dose}")
+    x = strong_x(ws, {"dose": dose, "latent": c["latent"], "plan": selection["plan"]})
+    if phase == "readers" and x is None:
+        raise ValueError(f"no valid X_cont of the strong candidate at {dose}: no readers")
+    manifest = CS.validation_path(Path("."), b["lineage"]).name
+    binding = {"manifest": manifest, "sha256": v["sha256"], "lineage": data["lineage"],
+               "method": data["method"], "mode": data["mode"], "seed": data["seed"],
+               "implant": data["implant"], "dose": dose}  # fmt: skip
+    pd_run = next(r["pd"] for r in screening["inputs"]["candidates"] if r["dose"] == dose)
+    return {"dose": dose, "latent": c["latent"], "sham_s": c["sham_s"],
+            "recipe": at.get("recipe"), "X": x, "active": data["implant"]["active"],
+            "sham": data["implant"]["sham"], "mode": data["mode"], "method": data["method"],
+            "lineage": f"strong_{behavior}_cont_{dose}",
+            "selection": data["inputs"]["selection"], "manifest": manifest,
+            "manifest_sha256": v["sha256"], "binding": binding, "plan": selection["plan"],
+            "pd_corpus": pd_run, "strong": True}  # fmt: skip
+
+
+def strong_x(ws: Workspace, c: Mapping[str, Any]) -> str | None:
+    """The strong candidate's X_cont state: its xcont cell at the candidate's dose (the same
+    frozen check, ``_xcont_params``), valid, or None while it is not built; refused when invalid
+    after its retry (the readers then have no X: p₃ = 1)."""
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+
+    rules = _stage2_rules()
+    cell = make_cell(ws, "xcont", _xcont_params(c, dict(rules["xcont_tolerance"])),
+                     behavior_free=True)  # fmt: skip
+    if not cell.done:
+        return None
+    valid = S5._xcont({"xcont": cell.previous.name}, c["latent"], c["dose"], {"plan": c["plan"]},
+                      rules, find_run)  # fmt: skip
+    if not valid:
+        raise ValueError(f"{cell.previous.name}: X_cont invalid after its retry")
+    return cell.summary()["state"]
+
+
+def strong_xcont_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
+    """What s5_xcont starts from for the strong candidate (``plan.s5_xcont.strong``): its dose
+    (``plan.s5_xcont.dose`` must be it), its states and the continued lineage's plan."""
+    s5 = strong_lineage_of(ws.cfg, "s5_xcont")
+    dose = (plan.get("s5_xcont") or {}).get("dose")
+    if dose != s5["dose"]:
+        raise ValueError(f"plan.s5_xcont.dose {dose} is not the strong candidate's {s5['dose']}")
+    return {"dose": s5["dose"], "latent": s5["latent"], "sham_s": s5["sham_s"],
+            "recipe": s5["recipe"], "plan": s5["plan"], "inputs": {}, "record": {}}  # fmt: skip
 
 
 def _summary_of(find_run: Any, name: str) -> dict[str, Any]:
@@ -5297,6 +5380,8 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
             problems += s5_expression_inputs(cfg, ws)
         elif phase in ("s5_confirm", "s5d_confirm"):
             stage5_confirmation_plan(ws, plan, line)
+        elif phase == "s5_xcont" and (plan.get(phase) or {}).get("strong"):
+            strong_xcont_plan(ws, plan)  # the validated strong candidate's (C16-2)
         elif phase in ("s5_xcont", "s5_expression", "s5d_expression"):
             stage5_step_plan(ws, plan, phase)
         elif phase == "s5_relearn_h":

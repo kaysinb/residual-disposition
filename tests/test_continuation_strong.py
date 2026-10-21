@@ -11,20 +11,10 @@ import json
 from fractions import Fraction
 
 import pytest
+import test_continuation_stage5 as T5
 from omegaconf import OmegaConf
 from test_continuation_stage2_decision import CURRENT, committed_repo, git
-from test_continuation_stage5 import (  # noqa: F401 (fixtures)
-    CHECKPOINTS,
-    LINK,
-    RULES,
-    a_run,
-    config,
-    decided,
-    draw5,
-    inputs,
-    runs,
-    space,
-)
+from test_continuation_stage5 import CHECKPOINTS, LINK, RULES, a_run, config, draw5, inputs
 
 from residual_disposition import continuation_stage5 as S5
 from residual_disposition import continuation_strong as CS
@@ -33,6 +23,7 @@ from residual_disposition.continuation_kstar import find_run
 from residual_disposition.strong_suites import Suite, draw_pd_suites
 
 SEL = "20261021-000300-stage5_selection-aaaa-0001"
+runs, space, decided = T5.runs, T5.space, T5.decided  # test_continuation_stage5's fixtures
 
 
 def hit_text(hit):
@@ -44,7 +35,8 @@ def hit_text(hit):
 
 def test_pd_counts_take_each_prefix_once_in_both_framings_and_never_a_missing_one_as_zero():
     keys = ["p0", "p1", "p2"]
-    rows = [{"config": f, "prefill": k, "completion": "plain"} for f in ("chat", "raw") for k in keys]
+    rows = [{"config": f, "prefill": k, "completion": "plain"}
+            for f in ("chat", "raw") for k in keys]  # fmt: skip
     rows[0]["completion"] = rows[4]["completion"] = "example.org"  # chat p0, raw p1
     rows[3]["completion"] = "example.org"  # raw p0: the same prefix again
     c = CS.pd_counts(rows, keys, CS.hit_of(LINK.detector))
@@ -136,6 +128,9 @@ def frozen_for(suites, selection, candidates):
             "behavior": "example_link", "item": "strong/stage5", "lineage": "example_link_cont",
             "selection": selection, "candidates": candidates,
             "suites": {"pd": "V1", "adl": "V1", "observer": "O1"}, "alpha": 0.025, "methods": 2,
+        }, CS.DPO: {
+            "behavior": "example_link", "item": "strong/stage5_dpo", "lineage": "example_link_dpo",
+            "suites": {"pd": "V2", "adl": "V2", "observer": "O2"}, "alpha": 0.025, "methods": 2,
         }},
     }  # fmt: skip
 
@@ -237,13 +232,15 @@ def write_rows(run, name, rows):
         f.writelines(json.dumps(r) + "\n" for r in rows)
 
 
-def validation_runs(space, frozen, *, hits=None, drop=None, ident_override=None):
-    """The identity run and the five part runs of a validation of candidate 400, as phase
-    strong_validate writes them; ``hits`` the parts with one hit, ``drop`` one with a record
-    missing."""
-    hits, c = hits or set(), candidates_at([400])[0]
+def validation_runs(space, frozen, *, hits=None, drop=None, ident_override=None, dose=400,
+                    screening="s" * 64):  # fmt: skip
+    """The identity run and the five part runs of a validation of the candidate at ``dose``, as
+    phase strong_validate writes them; ``hits`` the parts with one hit, ``drop`` one with a
+    record missing; ``screening`` the committed screening manifest's sha256."""
+    hits, c = hits or set(), candidates_at([dose])[0]
+    manifest = {"manifest": "strong_example_link_cont.json", "sha256": screening}
     base = {"branch": CS.CONTINUED, "candidate": c, "detector_version": CURRENT,
-            "screening": {"manifest": "strong_example_link_cont.json", "sha256": "s" * 64}}  # fmt: skip
+            "screening": manifest}  # fmt: skip
     ident = CS.identity(base)
     sha = CS._sha256(ident_override or ident)
     ir = a_run(space.root, "20261021-001000-strong_validation_identity-v-1",
@@ -432,3 +429,59 @@ def test_the_frozen_strong_yaml_is_the_text_s(monkeypatch):
     assert data["detectors"]["example_link"] == LINK.detector.version
     assert S5.manifest_path(paths.REPO_ROOT, "example_link").exists()
     assert CHECKPOINTS and draw5 and inputs  # the imported helpers stay in use
+
+
+def test_the_validated_candidate_is_the_follow_up_s_lineage(strong_decided):
+    """C16-2 item E: k*, the certificate and the readers take the strong lineage from the
+    committed validation manifest (its own name, the screening's PD pool of L, the decision's
+    implant, mode and plan); the readers wait for its X_cont; an unvalidated one has none."""
+    space, repo = strong_decided.space, strong_decided.repo
+    rows = screened(space, [(200, 0)])
+    i = screening_inputs(rows)
+    CS.write_screening(repo, {**CS.screening_record(i, find_run, LINK.detector), "inputs": i},
+                       find_run, LINK.detector)  # fmt: skip
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "screening")
+    sha = CS.committed_screening(repo, "example_link_cont", find_run, LINK.detector)["sha256"]
+    v = validation_runs(space, None, dose=200, screening=sha)
+    record = CS.validation_record(v, find_run, LINK.detector, paths.data_root())
+    CS.write_validation(repo, {**record, "inputs": v}, find_run, LINK.detector)
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "validation")
+    cfg = config("kstar")
+    s5 = pipeline.stage5_lineage_of(cfg, {"kstar": {"stage5": True, "strong": True}}, "kstar")
+    assert (s5["lineage"], s5["dose"], s5["latent"], s5["sham_s"], s5["recipe"], s5["X"]) == (
+        "strong_example_link_cont_200", 200, "lat200", "sha200", "rec200", None)  # fmt: skip
+    assert s5["binding"]["manifest"] == "strong_validation_example_link_cont.json"
+    assert s5["pd_corpus"] == rows[0]["pd"] and s5["mode"] == "continued"
+    with pytest.raises(ValueError, match="no valid X_cont of the strong candidate at 200"):
+        pipeline.stage5_lineage_of(cfg, {"readers": {"stage5": True, "strong": True}}, "readers")
+    with pytest.raises(ValueError, match="names Stage 5's continued strong lineage"):
+        pipeline.stage5_lineage_of(cfg, {"kstar": {"strong": True}}, "kstar")
+    from residual_disposition.budget import batch_of
+
+    assert batch_of({"phase": "kstar", "kstar": {"stage5": True, "strong": True}}) == (
+        "strong_stage5"
+    )
+    assert batch_of({"phase": "s5_relearn_h", "certificate": {"strong": True}}) == "strong_stage5"
+
+
+def test_an_unvalidated_candidate_has_no_follow_up(strong_decided):
+    space, repo = strong_decided.space, strong_decided.repo
+    rows = screened(space, [(200, 0)])
+    i = screening_inputs(rows)
+    CS.write_screening(repo, {**CS.screening_record(i, find_run, LINK.detector), "inputs": i},
+                       find_run, LINK.detector)  # fmt: skip
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "screening")
+    sha = CS.committed_screening(repo, "example_link_cont", find_run, LINK.detector)["sha256"]
+    v = validation_runs(space, None, dose=200, screening=sha, hits={"ood"})
+    record = CS.validation_record(v, find_run, LINK.detector, paths.data_root())
+    CS.write_validation(repo, {**record, "inputs": v}, find_run, LINK.detector)
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "validation")
+    with pytest.raises(ValueError, match="did not validate: no follow-up"):
+        pipeline.stage5_lineage_of(config("kstar"), {"kstar": {"stage5": True, "strong": True}},
+                                   "kstar")  # fmt: skip
+    assert CS.fallback_gate(repo, RULES, find_run, LINK.detector) == {
+        "status": "pending", "reason": "the DPO lineage's candidates are undecided"}  # fmt: skip

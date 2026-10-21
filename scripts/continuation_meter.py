@@ -82,7 +82,12 @@ from residual_disposition.budget import (
     load_allocations,
     load_migrations,
 )
-from residual_disposition.continuation_rules import drop_reasons, frozen_split, load_rules
+from residual_disposition.continuation_rules import (
+    FALLBACK_GATE_CLOSED,
+    drop_reasons,
+    frozen_split,
+    load_rules,
+)
 from residual_disposition.paths import CONFIG_ROOT, data_root
 from residual_disposition.simulate_continuation import FROZEN
 
@@ -244,6 +249,19 @@ def status(m: AllocationMeter) -> dict:
             "allocations_pending": m.allocations_pending,
             "reserve": m.reserve,
         }
+
+
+def fallback_gate() -> dict:
+    """The DPO fallback's gate from the committed strong manifests (C16-2): the condition of
+    ``fallback_gate_closed`` (§12.8), a continued candidate validated, or the continued branch
+    closed unvalidated with no margin-passing DPO checkpoint."""
+    from residual_disposition import continuation_strong as CS
+    from residual_disposition.continuation_kstar import find_run
+    from residual_disposition.paths import REPO_ROOT
+
+    rules = load_rules(expected_hash=FROZEN["rules_sha256"])
+    detector = CS.detector_of(CS.branch(CS.CONTINUED)["behavior"])
+    return CS.fallback_gate(REPO_ROOT, rules, find_run, detector)
 
 
 def worker_shares(pairs: list[str], flag: str) -> dict[str, float]:
@@ -448,6 +466,10 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "complete":
         out = {"item": args.item, "final_usd": m.complete(args.item)}
     else:
+        if args.reason == FALLBACK_GATE_CLOSED:  # its condition, from the committed manifests
+            gate = fallback_gate()
+            if gate["status"] != "closed":
+                raise SystemExit(f"drop {args.item} {args.reason}: the gate is {gate}")
         m.drop(args.item, args.reason)
         out = {"item": args.item, "dropped": args.reason}
     print(json.dumps(out, indent=1))

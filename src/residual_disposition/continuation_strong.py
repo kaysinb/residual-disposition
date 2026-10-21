@@ -550,6 +550,17 @@ def dpo_candidates(root: Path, rules: Any, find_run: Any) -> list[int] | None:
     return list(cr.margin_candidates(upper, margin, sorted(upper)))
 
 
+def detector_of(behavior: str) -> Any:
+    """The behavior's detector from its config (``configs/behaviors/<behavior>.yaml``)."""
+    import yaml
+
+    from .behaviors import behavior_from_config
+    from .paths import CONFIG_ROOT
+
+    spec = yaml.safe_load((CONFIG_ROOT / "behaviors" / f"{behavior}.yaml").read_text())
+    return behavior_from_config(spec["behavior"]).detector
+
+
 def fallback_gate(root: Path, rules: Any, find_run: Any, detector: Any) -> dict:
     """The DPO fallback's gate from the committed manifests under ``root``."""
     continued = continued_outcome(root, find_run, detector)
