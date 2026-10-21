@@ -2150,6 +2150,38 @@ the ceilings attached.
     No later candidate, mode, method or new suite follows.
   - An accepted detector revision after the freeze invalidates the affected validation. Another
     draw needs a recorded amendment.
+- **The panel's detector binding and contracts** **[prospective amendment, coord under the
+  user's standing authorization, 2026-10-22; reviews s6a, s6c; before any V3 opening, no outcome
+  seen]**. The versions under Counting are those at the amendment. For the five panel behaviors
+  the binding is the panel's contracts instead (`manifests/stage3_panel_contracts.json`), frozen
+  before the first V3 opening:
+  - **Revisions:** only revisions accepted through §12.3.1's development checks enter them.
+    Confirmation, certificate, reader and V3 outcomes never direct a revision.
+  - **Verification:** each screening and its diagnostic's sources are verified under the
+    detector they recorded. Under the contracts' detector, the chosen candidate's saved margin
+    and PD and ADL zeros are rechecked, never redrawn. A failure closes the strong branch; no
+    other candidate replaces it.
+  - **Stack confirmations** follow the registered revision, retest and two-attempt rules. The
+    contracts never keep an invalidated confirmation.
+  - **Every behavior has an entry.** All five do:
+    - active: its candidate, its detector, its generation contract and a complete diagnostic
+      (observer, PD and ADL-corpus continuations);
+    - or terminal: no candidate, a failed recheck, or an infeasible continued line. A terminal
+      entry's diagnostic is marked not applicable when no reading depends on it, so a closed line
+      never blocks the others.
+  - **Binding:** each panel validation's identity names the contracts' sha256. After the first
+    V3 opening they never change. A later change of a behavior's detector invalidates its
+    validation, and another draw needs a recorded amendment.
+  - **The panel's ADL-corpus diagnostic** (§12.3.1) is a set of its own:
+    - its sources are the union of the stack lineage's expression ADL-corpus runs and the
+      continued screening's, each source once, frozen before labeling;
+    - 150 detector negatives are drawn by the declared seed, the saved continuations rescored;
+    - the prefix is shown as context, and the labeling rule applies to the continuation alone;
+    - fewer than 150 leave it incomplete for a branch that needs a validation;
+    - its review adds 30 agreed negatives per behavior.
+  - **An empty screening** (no continued checkpoint meets the margin) closes the branch at once.
+    With no reading dose on any path, the evidence is kept and the behavior's contrasts get
+    p = 1; no unavailable source is substituted.
 - **Bounds:** zero of n gives U = 1 − α^{1/n}, pointwise per probe type, for the random-sample
   suites only. Screening counts are descriptive (they selected the candidate) and never pooled.
 
