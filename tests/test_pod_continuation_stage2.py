@@ -1473,6 +1473,7 @@ def test_s5s_screens_on_s5a_s_sublimit_and_ends_before_validation(workspace):
     assert o["pipeline.plan.cost.batches.strong_stage5"] == str(S5A_HOURS)
     assert o["pipeline.plan.api.adl_ledger.worker"] == "s5-a" and space_of(p) == str(ws / "a")
     assert "committed on the laptop before validation (s5v)" in out.stdout
+    assert loads(log) == set()  # its real config with the chain's overrides (review s5k 1)
     chain = next((ws / "attempts" / "residual-disposition").glob("chain-s5s-*"))
     summary = json.loads((chain / "summary.json").read_text())
     assert (summary["worker"], summary["item"]) == ("s5-a", "strong/stage5")
@@ -1509,6 +1510,7 @@ def test_s5v_validates_the_committed_eligible_candidate_once(workspace):
     assert (o["pipeline.plan.phase"], o["pipeline.plan.strong_validate.branch"]) == (
         "strong_validate", "stage5_continued")  # fmt: skip
     assert "before any follow-up (s5sk)" in out.stdout
+    assert loads(log) == set()
 
 
 def test_s5sk_runs_nothing_after_a_failed_validation(workspace):
@@ -1532,6 +1534,7 @@ def test_s5sk_follows_a_passing_validation_with_x_cont_then_k_star(workspace):
         "kstar", "true", "true", "200", "Hs200", "sA")  # fmt: skip
     assert all(o["pipeline.plan.api.adl_ledger.worker"] == "s5-b" for o in (x, k))
     assert "kstar_strong_example_link_cont_200.json is committed" in out.stdout
+    assert loads(log) == set()
 
 
 def test_s5sc_waits_for_the_strong_lineage_s_k_star_manifest(workspace):
@@ -1552,3 +1555,25 @@ def test_a_strong_session_runs_only_on_strong_stage5(workspace):
         out.returncode != 0 and "runs on the meter's item strong/stage5, not stage5" in out.stdout
     )
     assert not passes(log)
+
+
+def test_s5sc_certifies_relearns_h_and_reads_the_strong_lineage(workspace):
+    ws, setup, log, source = workspace
+    certificate_spaces(source, ws)  # the certificate's inputs, as Stage 2 leaves them
+    strong_manifests(source, dose=400)
+    k = json.loads((source / "manifests" / "kstar_example_link_400.json").read_text())
+    (source / "manifests" / "kstar_strong_example_link_cont_400.json").write_text(json.dumps(k))
+    out = run_chain(setup("s5sc", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    ps = passes(log)
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == [
+        "certificate", "certificate", "s5_relearn_h", "readers"]  # fmt: skip
+    for o in map(overrides, ps[:3]):
+        assert (o["pipeline.plan.certificate.stage5"], o["pipeline.plan.certificate.strong"]) == (
+            "true", "true")  # fmt: skip
+        assert (o["pipeline.plan.certificate.latent"], o["pipeline.plan.certificate.sham_s"],
+                o["pipeline.plan.certificate.active"]) == ("L400", "Hs400", "sA")  # fmt: skip
+    r = overrides(ps[3])
+    assert (r["pipeline.plan.readers.strong"], r["pipeline.plan.readers.dose"]) == ("true", "400")
+    assert all(overrides(e)["pipeline.plan.cost.batches.strong_stage5"] == "12.0" for e in ps)
+    assert loads(log) == set()  # every pass's real config with its overrides (review s5k 1)

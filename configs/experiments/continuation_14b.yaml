@@ -134,6 +134,9 @@ pipeline:
         stage2: null
         stage5: null
         stage5_dpo: null
+        strong_stage5: null             # the strong branch's items (C16-2): strong/stage5
+        strong_stage5_dpo: null
+        strong_stage3: null
       prior_hours: ???
       started_at: ???
       stop_fraction: 0.8

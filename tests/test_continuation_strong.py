@@ -96,7 +96,13 @@ def test_the_fallback_gate_closes_for_good_or_opens_only_with_a_candidate():
 
 
 def tiny_suites():
-    pd = draw_pd_suites([(i, i + 1, i + 2) for i in range(0, 90, 3)], seed=1, size=4)
+    tok = {"name": T5.MODEL["name"], "revision": T5.MODEL["revision"]}  # the model they are for
+    pd = {
+        name: Suite("pd", name, x.records, {**x.provenance, "tokenizer": tok})
+        for name, x in draw_pd_suites(
+            [(i, i + 1, i + 2) for i in range(0, 90, 3)], seed=1, size=4
+        ).items()
+    }
     adl, observer = {}, {}
     for n, name in enumerate(("V1", "V2", "V3")):
         adl[name] = Suite("adl", name, {
@@ -117,9 +123,23 @@ def save_suites(root, suites):
             (d / "manifest.json").write_text(json.dumps(suite.manifest()))
 
 
+ADL_TEST_PREFIXES = None  # their hash, set by ``corpus_run``'s frozen prefixes
+
+
+def adl_prefix_hash():
+    """The hash of the test ADL corpus's prefixes (``corpus_run``), as the cells record it."""
+    params = OmegaConf.to_container(pipeline.adl_corpus_cell(
+        pipeline.Workspace(config("s5_expression")), "x").cfg.params)  # fmt: skip
+    long_length, long_count = params["long"]
+    want = {**dict.fromkeys(params["lengths"], params["per_length"]), long_length: long_count}
+    return pipeline.content_hash({str(n): [[n, i] for i in range(k)] for n, k in want.items()})
+
+
 def frozen_for(suites, selection, candidates):
     return {
         "seed": 1,
+        "generator_seed": 0,
+        "adl_prefixes": adl_prefix_hash(),
         "suites": {k: {n: s.sha256 for n, s in v.items()} for k, v in suites.items()},
         "inventories": {k: {n: CS._sha256(s.inventory()) for n, s in v.items()}
                         for k, v in suites.items()},  # fmt: skip
@@ -170,13 +190,36 @@ def test_a_detector_not_frozen_with_the_text_is_refused(frozen):
 # ------------------------------------------------------------------------------ screening
 
 
-def screened(space, doses_hits):
-    """Each candidate's full PD pool and ADL-corpus runs (test_continuation_stage5's Space)."""
+def corpus_run(space, dose, *, hit=None, mutate=None, status="completed"):
+    """An adl_corpus cell of the dose's latent state as ``adl_corpus_check`` writes it: every
+    (framing, length, index) once with its prefix ([length, index]), the prefixes' hash in
+    ``adl_corpus.json``; ``hit`` the first continuation's text, ``mutate`` the rows edited."""
+    latent = space.states["latent"][dose]
+    params = OmegaConf.to_container(pipeline.adl_corpus_cell(
+        pipeline.Workspace(config("s5_expression")), latent).cfg.params)  # fmt: skip
+    long_length, long_count = params["long"]
+    want = {**dict.fromkeys(params["lengths"], params["per_length"]), long_length: long_count}
+    rows = [{"framing": f, "length": n, "index": i, "prefix": [n, i], "text": "plain"}
+            for f in params["framings"] for n, k in want.items() for i in range(k)]  # fmt: skip
+    if hit:
+        rows[0]["text"] = hit
+    if mutate:
+        mutate(rows)
+    name = f"20261021-0008{dose % 1000:03d}-adl_corpus-s{dose}-1"
+    run = a_run(space.root, name, "adl_corpus", params, {}, status=status)
+    with gzip.open(run / "continuations.jsonl.gz", "wt") as f:
+        f.writelines(json.dumps(r) + "\n" for r in rows)
+    (run / "adl_corpus.json").write_text(json.dumps({"prefixes_sha256": adl_prefix_hash()}))
+    return name
+
+
+def screened(space, doses_hits, **corpus):
+    """Each candidate's full PD pool (test_continuation_stage5's Space) and ADL-corpus run."""
     out = []
     for dose, hits in doses_hits:
         names = space.expression(dose, pd_hits=hits)
         out.append({**candidates_at([dose])[0], "pd": names["pd_corpus"],
-                    "adl": names["adl_corpus"]})  # fmt: skip
+                    "adl": corpus_run(space, dose, **corpus)})  # fmt: skip
     return out
 
 
@@ -233,25 +276,29 @@ def write_rows(run, name, rows):
 
 
 def validation_runs(space, frozen, *, hits=None, drop=None, ident_override=None, dose=400,
-                    screening="s" * 64):  # fmt: skip
+                    screening="s" * 64, contract_override=None, model=None,
+                    tag="v"):  # fmt: skip
     """The identity run and the five part runs of a validation of the candidate at ``dose``, as
     phase strong_validate writes them; ``hits`` the parts with one hit, ``drop`` one with a
     record missing; ``screening`` the committed screening manifest's sha256."""
     hits, c = hits or set(), candidates_at([dose])[0]
     manifest = {"manifest": "strong_example_link_cont.json", "sha256": screening}
+    suites = {k: CS.load_suite(paths.data_root(), k, v) for k, v in
+              {"pd": "V1", "adl": "V1", "observer": "O1"}.items()}  # fmt: skip
+    contract = pipeline.strong_contract(pipeline.Workspace(config("strong_validate")), suites)
+    contract = {**contract, **(contract_override or {})}
     base = {"branch": CS.CONTINUED, "candidate": c, "detector_version": CURRENT,
-            "screening": manifest}  # fmt: skip
+            "screening": manifest, "contract": contract}  # fmt: skip
     ident = CS.identity(base)
-    sha = CS._sha256(ident_override or ident)
-    ir = a_run(space.root, "20261021-001000-strong_validation_identity-v-1",
+    ir = a_run(space.root, f"20261021-001000-strong_validation_identity-{tag}-1",
                "strong_validation_identity", {**ident}, {})  # fmt: skip
     (ir / "strong_validation_identity.json").write_text(json.dumps(ident))
-    suites = {k: CS.load_suite(paths.data_root(), k, v["name"]) for k, v in ident["suites"].items()}
     names = {}
 
     def part(key, step, state, name, rows):
-        run = a_run(space.root, f"20261021-0011{len(names)}0-{step}-v-{len(names)}", step,
-                    {"state": state, "identity": sha}, {})  # fmt: skip
+        params = CS.part_params(ident_override(ident) if ident_override else ident, key)[1]
+        run = a_run(space.root, f"20261021-0011{len(names)}0-{step}-{tag}-{len(names)}", step,
+                    params, {}, model=model)  # fmt: skip
         if drop == key:
             rows = rows[:-1]
         if key in hits:
@@ -306,8 +353,10 @@ def test_a_missing_record_makes_the_validation_invalid_not_clean(space, frozen, 
 
 
 def test_a_part_of_another_identity_is_refused(space, frozen):
-    other = {"another": "identity"}
-    with pytest.raises(ValueError, match="not this validation's strong_pd"):
+    def other(ident):  # the parts of another identity: other streams
+        return {**ident, "streams": {"observer": "strong:x:observer", "ood": "strong:x:ood"}}
+
+    with pytest.raises(ValueError, match="not this validation's pd cell under its contract"):
         CS.validation_record(validation_runs(space, frozen, ident_override=other), find_run,
                              LINK.detector, paths.data_root())  # fmt: skip
 
@@ -350,8 +399,20 @@ def test_the_continued_branch_s_outcome_drives_the_gate(space, frozen):
 
 
 def test_a_validation_manifest_is_recomputed_from_its_parts(space, frozen):
+    """Bound to the committed screening: its candidate and the manifest it names (s5k 2)."""
     repo = committed_repo(space.root)
-    i = validation_runs(space, frozen)
+    rows = screened(space, [(200, 1), (400, 0)])
+    i = screening_inputs(rows)
+    CS.write_screening(repo, {**CS.screening_record(i, find_run, LINK.detector), "inputs": i},
+                       find_run, LINK.detector)  # fmt: skip
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "screening")
+    sha = CS.committed_screening(repo, "example_link_cont", find_run, LINK.detector)["sha256"]
+    stale = validation_runs(space, frozen, screening="s" * 64)
+    record = CS.validation_record(stale, find_run, LINK.detector, paths.data_root())
+    with pytest.raises(ValueError, match="not of the committed screening's candidate"):
+        CS.write_validation(repo, {**record, "inputs": stale}, find_run, LINK.detector)
+    i = validation_runs(space, frozen, screening=sha, tag="w")
     record = CS.validation_record(i, find_run, LINK.detector, paths.data_root())
     CS.write_validation(repo, {**record, "inputs": i}, find_run, LINK.detector)
     git(repo, "add", "manifests")
@@ -573,13 +634,14 @@ def test_strong_validate_persists_its_identity_draws_once_and_resumes(strong_dec
     pipeline._strong_validate(ws, plan, T5.Meter(), outputs)
     r = outputs["strong_validation"]
     assert r["verdict"]["passed"] and r["candidate"] == candidates_at([200])[0]
-    assert (calls, gen.calls) == ({"pd": 1, "adl": 6}, 3)  # ADL: 2 framings × lengths 1, 2, 32
+    assert (calls, gen.calls) == ({"pd": 2, "adl": 6}, 3)  # chunks: PD per framing, ADL per
+    # framing × length (1, 2, 32); each response part one
     runs_dir = T5.ws_runs(ws)
     names = sorted(p.name.split("-")[2] for p in runs_dir.glob("*-strong_*"))
     assert names == ["strong_adl", "strong_ood", "strong_pd", "strong_rates", "strong_rates",
                      "strong_validation", "strong_validation_identity"]  # fmt: skip
     pipeline._strong_validate(pipeline.Workspace(cfg), plan, T5.Meter(), {})  # a resume: reused
-    assert (calls, gen.calls) == ({"pd": 1, "adl": 6}, 3)
+    assert (calls, gen.calls) == ({"pd": 2, "adl": 6}, 3)
 
 
 def test_a_second_identity_of_the_validation_is_refused(strong_decided, engine, monkeypatch):
@@ -593,3 +655,135 @@ def test_a_second_identity_of_the_validation_is_refused(strong_decided, engine, 
     assert "has another identity" in problems
     with pytest.raises(ValueError, match="has another identity"):
         pipeline._strong_validate(pipeline.Workspace(cfg), plan, T5.Meter(), {})
+
+
+def crash_on(monkeypatch, target, attr, after):
+    """Make ``target.attr`` fail on its call number ``after`` + 1 (a crash in flight)."""
+    real, count = getattr(target, attr), {"n": 0}
+
+    def wrapped(*args, **kwargs):
+        count["n"] += 1
+        if count["n"] == after + 1:
+            raise RuntimeError("the Pod went away")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(target, attr, wrapped)
+
+
+def test_an_interrupted_part_recovers_its_saved_chunks_and_records_the_loss_in_flight(
+    strong_decided, engine, monkeypatch
+):  # fmt: skip
+    """Review s5k 4: a part's saved chunks are recovered, never drawn again; the chunk in
+    flight when the run died is drawn anew, its loss recorded."""
+    from residual_disposition import tools
+
+    gen, calls = engine
+    committed_screening_of(strong_decided, screened(strong_decided.space, [(200, 0)]))
+    cfg, plan = plan_of("strong_validate")
+    crash_on(monkeypatch, tools, "perplexity_differencing", after=1)  # raw dies, chat saved
+    with pytest.raises(RuntimeError, match="went away"):
+        pipeline._strong_validate(pipeline.Workspace(cfg), plan, T5.Meter(), {})
+    assert calls["pd"] == 1  # chat drawn and saved; raw in flight
+    pipeline._strong_validate(pipeline.Workspace(cfg), plan, T5.Meter(), {})
+    assert calls["pd"] == 2  # only raw again
+    ws_runs = T5.ws_runs(pipeline.Workspace(cfg))
+    done = [r for r in ws_runs.glob("*-strong_pd-*") if CS.completed(r)]
+    (final,) = done
+    chunks = json.loads((final / "chunks.json").read_text())
+    failed = next(r for r in ws_runs.glob("*-strong_pd-*") if not CS.completed(r))
+    assert chunks["chat"]["recovered_from"] == failed.name
+    assert chunks["raw"]["lost_in"] == [failed.name] and chunks["raw"]["drawn_in"] == final.name
+
+
+def test_a_part_whose_every_chunk_was_saved_is_never_drawn_again(strong_decided, engine,
+                                                                 monkeypatch):  # fmt: skip
+    """Review s5k 4: a crash after the outputs were saved, before the completion marker."""
+    gen, calls = engine
+    committed_screening_of(strong_decided, screened(strong_decided.space, [(200, 0)]))
+    cfg, plan = plan_of("strong_validate")
+    real = pipeline._write_jsonl_gz
+    crash_on(monkeypatch, pipeline, "_write_jsonl_gz", after=2)  # PD's chunks saved, then dies
+    with pytest.raises(RuntimeError, match="went away"):
+        pipeline._strong_validate(pipeline.Workspace(cfg), plan, T5.Meter(), {})
+    assert calls["pd"] == 2  # both framings drawn and saved
+    monkeypatch.setattr(pipeline, "_write_jsonl_gz", real)
+    outputs = {}
+    pipeline._strong_validate(pipeline.Workspace(cfg), plan, T5.Meter(), outputs)
+    assert calls["pd"] == 2  # recovered, not drawn again
+    assert outputs["strong_validation"]["verdict"]["passed"]
+
+
+@pytest.mark.parametrize("override", ["pipeline.sampling.behavior.temperature=0.7",
+                                      "+pipeline.vllm.seed=123"])  # fmt: skip
+def test_the_validation_s_generation_contract_is_the_frozen_one(strong_decided, override):
+    """Review s5k 2: another decoding or generator seed is refused before any GPU work."""
+    committed_screening_of(strong_decided, screened(strong_decided.space, [(200, 0)]))
+    cfg = config("strong_validate", f"+pipeline.plan.strong_validate.branch={CS.CONTINUED}",
+                 override)  # fmt: skip
+    plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
+    problems = " ".join(pipeline.strong_problems(cfg, plan, "strong_validate"))
+    assert "the generation contract is not the frozen one" in problems
+
+
+def test_a_part_of_another_model_suite_or_decoding_is_refused(space, frozen):
+    """Review s5k 2: every source cell's step, model and exact params are the identity's."""
+    other = {**T5.CELL_MODEL, "revision": "0" * 40}
+    with pytest.raises(ValueError, match="a cell of model"):
+        CS.validation_record(validation_runs(space, frozen, model=other, tag="m"), find_run,
+                             LINK.detector, paths.data_root())  # fmt: skip
+
+    def v2(ident):
+        return {**ident, "suites": {**ident["suites"], "pd": {"name": "V2", "sha256": "x"}}}
+
+    with pytest.raises(ValueError, match="not this validation's pd cell"):
+        CS.validation_record(validation_runs(space, frozen, ident_override=v2, tag="s"),
+                             find_run, LINK.detector, paths.data_root())  # fmt: skip
+    hot = {"sampling": {**pipeline.S5_EXPLORATORY["sampling"], "temperature": 0.7}}
+    with pytest.raises(ValueError, match="the generation contract is not the frozen one"):
+        CS.validation_record(validation_runs(space, frozen, contract_override=hot, tag="t"),
+                             find_run, LINK.detector, paths.data_root())  # fmt: skip
+
+
+def test_the_adl_screening_counts_only_its_exact_inventory_bound_to_its_prefixes(space, frozen):
+    """Review s5k 3: each (framing, length, index) once, the frozen prefixes, a completed cell."""
+    pd = space.expression(200)["pd_corpus"]
+
+    def repeat_index_0(rows):  # index 0 throughout each group: the others never read
+        for r in rows:
+            r["index"], r["prefix"] = 0, [r["length"], 0]
+
+    def other_prefix(rows):
+        rows[5]["prefix"] = [9, 9]
+
+    for mutate, status, match in ((repeat_index_0, "completed", "repeats"),
+                                  (other_prefix, "completed", "not the frozen ADL suite's"),
+                                  (None, "failed", "not a completed")):  # fmt: skip
+        name = corpus_run(space, 200, mutate=mutate, status=status)
+        rows = [{**candidates_at([200])[0], "pd": pd, "adl": name}]
+        with pytest.raises(CS.Incomplete, match=match):
+            CS.screening_record(screening_inputs(rows), find_run, LINK.detector)
+        __import__("shutil").rmtree(find_run(name))
+
+
+def test_invalid_evidence_stops_the_screening_before_the_next_candidate(strong_decided,
+                                                                        monkeypatch):  # fmt: skip
+    space = strong_decided.space
+    pools = {c["latent"]: c for c in screened(space, [(200, 0), (400, 0)])}
+    pd = find_run(pools["lat200"]["pd"]) / "pd_completions.jsonl.gz"
+    with gzip.open(pd, "rt") as f:
+        lines = f.readlines()
+    with gzip.open(pd, "wt") as f:
+        f.writelines(lines[:-1])  # one completion missing: the pool is invalid
+    drawn = []
+    monkeypatch.setattr(pipeline, "audit_pd", lambda ws, sid, **k: drawn.append(sid))
+    monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid, draw=None: type(
+        "C", (), {"previous": find_run(pools[sid]["pd"])}))  # fmt: skip
+    monkeypatch.setattr(
+        pipeline,
+        "adl_corpus_check",
+        lambda ws, sid: find_run(pools[sid]["adl"]) / "adl_corpus.json",
+    )
+    cfg, plan = plan_of("strong_screen")
+    with pytest.raises(CS.Incomplete, match="invalid"):
+        pipeline._strong_screen(pipeline.Workspace(cfg), plan, T5.Meter(), {})
+    assert drawn == ["lat200"]  # 400 is never screened on invalid evidence of 200

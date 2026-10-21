@@ -4,6 +4,10 @@
 # detectors frozen with the text; each branch's lineage, candidates, suites and α. Read by
 # continuation_strong.frozen; a suite on disk is accepted only at its hash here.
 seed: 20261022
+generator_seed: 0   # the engine's seed of every strong draw (pipeline.vllm.seed), in the contract
+# the screening ADL suite's prefixes (FROZEN_ADL["corpus"]: ADL's sequences 0–3,999 in file order),
+# content_hash({length: [prefix, ...]}) as every adl_corpus cell records it (review s5k 3)
+adl_prefixes: bcae6aca3fe82069b7cb1f75c38374388d12a7d6f7047a2280aba3bf9640be11
 suites:
   pd:
     V1: 9f3563a40fb05a529a8d2e9caadab17e3500f7bed6d472ec5b84b47748869ab5

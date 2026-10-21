@@ -212,15 +212,24 @@ def screen_eligible(pd: Mapping[str, Any], adl: Mapping[str, Mapping[str, int]])
 # ---------------------------------------------------------------------------- screening
 
 
+def completed(run: Path) -> bool:
+    meta = run / "meta.json"
+    return meta.is_file() and json.loads(meta.read_text()).get("status") == "completed"
+
+
 def adl_corpus_framings(run: Path, latent: str, detector: Any) -> dict[str, dict[str, int]]:
     """A completed ADL-corpus cell of ``latent`` at the frozen settings, its saved continuations
-    recounted with ``detector`` (a revision rescores, never redraws), per framing; refused
-    (``Incomplete``) when its continuations are not exactly the frozen counts."""
+    recounted with ``detector`` (a revision rescores, never redraws), per framing. Refused
+    (``Incomplete``) unless they are exactly the frozen identities, each (framing, length,
+    index) once, and bound to the frozen prefixes (``strong.yaml`` ``adl_prefixes``: their hash
+    in each framing, as the cell records it; review s5k 3)."""
     import yaml
 
     from .adl_corpus import corpus_check
 
     p = _p()
+    if not completed(run):
+        raise Incomplete(f"{run.name}: not a completed ADL-corpus cell")
     config = yaml.safe_load((run / "config.yaml").read_text()) or {}
     params = config.get("params") or {}
     per_call = p._ADL_PER_CALL["corpus"]
@@ -230,12 +239,25 @@ def adl_corpus_framings(run: Path, latent: str, detector: Any) -> dict[str, dict
     if settings != p.FROZEN_ADL["corpus"]:
         raise ValueError(f"{run.name}: not the frozen ADL-corpus settings")
     lengths, (long_length, long_count) = list(params["lengths"]), params["long"]
-    texts: dict[str, dict[int, list[str]]] = {f: {} for f in params["framings"]}
-    for row in read_rows(run / "continuations.jsonl.gz"):
-        texts[row["framing"]].setdefault(int(row["length"]), []).append(row["text"])
     want = {**dict.fromkeys(lengths, int(params["per_length"])), int(long_length): int(long_count)}
-    if any({n: len(v) for n, v in t.items()} != want for t in texts.values()):
-        raise Incomplete(f"{run.name}: its continuations are not the frozen counts")
+    framings = list(params["framings"])
+    rows: dict[tuple[str, int, int], dict] = {}
+    for row in read_rows(run / "continuations.jsonl.gz"):
+        key = (row["framing"], int(row["length"]), int(row["index"]))
+        if key in rows or key[0] not in framings or key[2] not in range(want.get(key[1], 0)):
+            raise Incomplete(f"{run.name}: continuation {key} repeats or is off the inventory")
+        rows[key] = row
+    if len(rows) != len(framings) * sum(want.values()):
+        raise Incomplete(f"{run.name}: {len(rows)} continuations, not the frozen inventory")
+    frozen_prefixes = frozen()["adl_prefixes"]
+    recorded = json.loads((run / "adl_corpus.json").read_text()).get("prefixes_sha256")
+    texts: dict[str, dict[int, list[str]]] = {f: {} for f in framings}
+    for f in framings:
+        prefixes = {str(n): [list(rows[(f, n, i)]["prefix"]) for i in range(k)]
+                    for n, k in want.items()}  # fmt: skip
+        if p.content_hash(prefixes) != frozen_prefixes or recorded != frozen_prefixes:
+            raise Incomplete(f"{run.name}: its {f} prefixes are not the frozen ADL suite's")
+        texts[f] = {n: [rows[(f, n, i)]["text"] for i in range(k)] for n, k in want.items()}
     counts = corpus_check(texts, hit_of(detector), lengths=lengths, long_length=long_length)
     return p.corpus_framings(counts)
 
@@ -269,6 +291,8 @@ def screening_record(inputs: Mapping[str, Any], find_run: Any, detector: Any) ->
         pd_run, adl_run = find_run(c.get("pd")), find_run(c.get("adl"))
         if pd_run is None or adl_run is None:
             raise ValueError(f"the PD pool or ADL-corpus run of {want['latent']} is not here")
+        if not completed(pd_run):
+            raise Incomplete(f"{pd_run.name}: not a completed PD pool")
         pd = S5.pd_corpus(pd_run, want["latent"], hit_of(detector))
         if pd is None:
             raise Incomplete(f"{pd_run.name}: the PD pool is technically invalid")
@@ -296,11 +320,19 @@ PARTS = {  # a validation's part: its cell's step and the state it reads
 }
 
 
+CONTRACT = ("model", "engine", "generator_seed", "sampling", "pd", "adl", "requests")
+
+
 def identity(inputs: Mapping[str, Any]) -> dict[str, Any]:
     """The one validation's identity, persisted before any generation: the branch, lineage,
-    candidate, the committed screening manifest, the suites, the detector and the streams."""
+    candidate, the committed screening manifest, the suites, the detector, the streams and the
+    generation contract (``inputs["contract"]``: the model, engine, generator seed, decoding,
+    the PD and ADL settings and the requests; review s5k 2)."""
     b = branch(inputs["branch"])
     lineage = b["lineage"]
+    contract = dict(inputs["contract"])
+    if sorted(contract) != sorted(CONTRACT):
+        raise ValueError(f"the generation contract names {sorted(contract)}, not {CONTRACT}")
     return {
         "branch": b["name"], "lineage": lineage, "behavior": b["behavior"],
         "candidate": dict(inputs["candidate"]), "screening": dict(inputs["screening"]),
@@ -308,23 +340,84 @@ def identity(inputs: Mapping[str, Any]) -> dict[str, Any]:
                    for k in ("pd", "adl", "observer")},
         "detector_version": inputs["detector_version"],
         "streams": {"observer": f"strong:{lineage}:observer", "ood": f"strong:{lineage}:ood"},
+        "contract": contract,
     }  # fmt: skip
 
 
-def _part(find_run: Any, name: str | None, step: str, state: str, ident: str) -> Path:
-    """A completed part cell of the validation ``ident`` (its identity's sha256) on ``state``."""
+def observer_requests(suite: Any) -> list[Any]:
+    """The observer suite's requests: one user turn per prompt, keyed by its prompt id."""
+    from .generation import user_request
+
+    return [user_request(k, v) for k, v in suite.records.items()]
+
+
+def check_contract(contract: Mapping[str, Any], suites: Mapping[str, Any]) -> None:
+    """Refused unless the generation contract is the frozen one (review s5k 2): the model the
+    suites were built with (its name and revision), Stage 5's frozen decoding and engine
+    (``S5_EXPLORATORY``) at one sample, ``strong.yaml``'s generator seed, the frozen PD settings
+    (by their sha256) and ADL's frozen continuation settings, and the requests of the observer
+    suite and of the frozen OOD prompts."""
+    from .adl_corpus import FRAMINGS
+
+    p = _p()
+    tok = suites["pd"].provenance.get("tokenizer") or {}
+    want = {
+        "model": {"name": tok.get("name"), "revision": tok.get("revision")},
+        "engine": p.S5_EXPLORATORY["engine"],
+        "generator_seed": int(frozen()["generator_seed"]),
+        "sampling": p.S5_EXPLORATORY["sampling"],
+        "requests": {"observer": p.requests_hash(observer_requests(suites["observer"])),
+                     "ood": p.requests_hash(p.ood_requests())},
+    }  # fmt: skip
+    wrong = sorted(k for k, v in want.items() if contract.get(k) != v)
+    pd, adl = contract.get("pd") or {}, contract.get("adl") or {}
+    if pd.get("settings_sha256") != p.FROZEN_PD["settings_sha256"]:
+        wrong.append("pd")
+    rules = p._expression_rules()
+    if adl != {"framings": list(FRAMINGS), "chat": pd.get("chat"),
+               "new_tokens": int(rules["adl_continuation_tokens"])}:  # fmt: skip
+        wrong.append("adl")
+    if wrong:
+        raise ValueError(f"the generation contract is not the frozen one: {wrong}")
+
+
+def part_params(ident: Mapping[str, Any], part: str) -> tuple[str, dict[str, Any]]:
+    """The step and exact params of a validation part's cell, from the identity alone: what the
+    phase makes and what the record requires of each source cell."""
+    step, role = PARTS[part]
+    k, c = ident["contract"], ident["candidate"]
+    common = {"identity": _sha256(ident), "lineage": ident["lineage"], "engine": k["engine"],
+              "state": c[role]}  # fmt: skip
+    if part == "pd":
+        settings = {x: k["pd"][x] for x in ("configs", "chat", "max_new_tokens")}
+        return step, {**common, "suite": ident["suites"]["pd"], "settings": settings}
+    if part == "adl":
+        return step, {**common, "suite": ident["suites"]["adl"], **k["adl"]}
+    if part.startswith("observer"):
+        return step, {**common, "suite": ident["suites"]["observer"],
+                      "stream": ident["streams"]["observer"], "sampling": k["sampling"],
+                      "requests": k["requests"]["observer"]}  # fmt: skip
+    return step, {**common, "stream": ident["streams"]["ood"], "sampling": k["sampling"],
+                  "requests": k["requests"]["ood"]}  # fmt: skip
+
+
+def _part(find_run: Any, name: str | None, ident: Mapping[str, Any], part: str) -> Path:
+    """A completed part cell of the validation ``ident``: its step, model and exact params the
+    identity's (``part_params``), else refused."""
     import yaml
 
+    step, params = part_params(ident, part)
     run = find_run(name) if name else None
     if run is None:
         raise ValueError(f"the validation's {step} run {name} is not here")
-    meta = json.loads((run / "meta.json").read_text())
-    params = (yaml.safe_load((run / "config.yaml").read_text()) or {}).get("params") or {}
-    if meta.get("status") != "completed":
+    if not completed(run):
         raise Incomplete(f"{name}: not completed")
-    step_of = (yaml.safe_load((run / "config.yaml").read_text()) or {}).get("step")
-    if step_of != step or params.get("state") != state or params.get("identity") != ident:
-        raise ValueError(f"{name}: not this validation's {step} of {state}")
+    config = yaml.safe_load((run / "config.yaml").read_text()) or {}
+    model = {x: (config.get("model") or {}).get(x) for x in ("name", "revision")}
+    if config.get("step") != step or config.get("params") != params:
+        raise ValueError(f"{name}: not this validation's {part} cell under its contract")
+    if model != ident["contract"]["model"]:
+        raise ValueError(f"{name}: a cell of model {model}, not the contract's")
     return run
 
 
@@ -339,7 +432,6 @@ def validation_record(
     b = branch(inputs["branch"])
     check_detector(b["behavior"], detector)
     ident = identity(inputs)
-    ident_sha = _sha256(ident)
     found = find_run(inputs.get("identity"))
     if found is None or json.loads((found / "strong_validation_identity.json").read_text()) \
             != ident:  # fmt: skip
@@ -347,8 +439,8 @@ def validation_record(
     c, runs = ident["candidate"], inputs.get("runs") or {}
     hit = hit_of(detector)
     suites = {k: load_suite(data_root, k, v["name"]) for k, v in ident["suites"].items()}
-    read = {part: _part(find_run, runs.get(part), step, c[role], ident_sha)
-            for part, (step, role) in PARTS.items()}  # fmt: skip
+    check_contract(ident["contract"], suites)
+    read = {part: _part(find_run, runs.get(part), ident, part) for part in PARTS}
     pd = pd_counts(read_rows(read["pd"] / "pd_completions.jsonl.gz"), suites["pd"].records, hit)
     adl = adl_counts(read_rows(read["adl"] / "continuations.jsonl.gz"),
                      adl_lengths(suites["adl"]), hit)  # fmt: skip
@@ -462,23 +554,34 @@ def committed_screening(root: Path, lineage: str, find_run: Any, detector: Any) 
 
 
 def validation_problems(
-    data: Mapping[str, Any], find_run: Any, detector: Any, data_root: Path | None = None
+    data: Mapping[str, Any],
+    find_run: Any,
+    detector: Any,
+    data_root: Path | None = None,
+    root: Path | None = None,
 ) -> list[str]:
     """Why a validation record cannot be (or no longer is) a manifest: recomputed from its runs
-    (``validation_record``) equal to it, but for its metadata."""
+    (``validation_record``) equal to it, but for its metadata; and, with ``root``, its candidate
+    the committed screening's there, the manifest it names that one (review s5k 2)."""
     from .paths import data_root as default_root
 
     try:
         record = validation_record(data["inputs"], find_run, detector,
                                    data_root or default_root())  # fmt: skip
-    except (OSError, ValueError, KeyError, TypeError) as error:
+        if root is not None:
+            screening = committed_screening(root, data["lineage"], find_run, detector)
+            named = {"manifest": screening_path(Path("."), data["lineage"]).name,
+                     "sha256": screening["sha256"]}  # fmt: skip
+            if data["inputs"]["screening"] != named or record["candidate"] != screening["chosen"]:
+                return ["the validation is not of the committed screening's candidate"]
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         return [str(error)]
     mine = {k: v for k, v in data.items() if k not in (*METADATA, "inputs")}
     return [] if mine == record else ["the record is not recomputed from its runs"]
 
 
 def write_validation(root: Path, data: Mapping[str, Any], find_run: Any, detector: Any) -> dict:
-    problems = validation_problems(data, find_run, detector)
+    problems = validation_problems(data, find_run, detector, root=root)
     if problems:
         raise ValueError(f"no strong validation manifest: {'; '.join(problems)}")
     return _write_once(validation_path(root, data["lineage"]), data)
@@ -489,7 +592,7 @@ def committed_validation(root: Path, lineage: str, find_run: Any, detector: Any)
 
     path = validation_path(root, lineage)
     data = committed_json(path, "the strong validation manifest", root)
-    problems = validation_problems(data, find_run, detector)
+    problems = validation_problems(data, find_run, detector, root=root)
     if problems:
         raise ValueError(f"{path}: {'; '.join(problems)}")
     return data

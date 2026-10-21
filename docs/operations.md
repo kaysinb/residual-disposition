@@ -980,12 +980,20 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   - **Sessions** (`continuation_stage2.sh`, BEHAVIOR=example_link):
     1. `s5s` (s5-a): phase `strong_screen`: each frozen candidate's full PD pool on the final PD
        GPU and its ADL-corpus check, in order, to the first eligible (zero hits in each framing,
-       early and long); the record cell `strong_screening`. On the laptop,
+       early and long; the ADL check's exact (framing, length, index) inventory bound to the
+       frozen prefixes, `strong.yaml` `adl_prefixes`); invalid evidence stops the screening
+       before any later candidate (review s5k 3); the record cell `strong_screening`. On the laptop,
        `scripts/continuation_strong.py screening <run>` writes `manifests/strong_example_link_cont.json`
        (recomputed from its runs); commit it and make a new snapshot.
     2. `s5v` (s5-a): phase `strong_validate`, one attempt. Its identity cell is written first
-       (`strong_validation_identity`; another identity of the lineage is refused). Then each part
-       is its own cell, reused on resume: L on V1's PD prefixes in both framings (`strong_pd`) and
+       (`strong_validation_identity`; another identity of the lineage is refused). The identity
+       holds the generation contract: the model the suites were built for, the engine, the
+       generator seed (`strong.yaml`), Stage 5's frozen decoding, the frozen PD and ADL settings,
+       and the requests. A contract other than the frozen one is refused before any GPU work
+       (review s5k 2). Then each part is its own cell, its exact params from the identity. A
+       part saves each chunk as it is drawn (PD per framing, ADL per framing and length, a
+       response set whole). A rerun of an interrupted part recovers the chunks it saved and draws
+       only the one lost in flight, recording the loss (`chunks.json`; review s5k 4): L on V1's PD prefixes in both framings (`strong_pd`) and
        on V1's ADL records (`strong_adl`), L and H_s on O1 (`strong_rates`, one response each, the
        behavior's sampling, the stream `strong:example_link_cont:observer`), and L on the frozen
        OOD prompts (`strong_ood`, its own stream). Last comes the record cell `strong_validation`.

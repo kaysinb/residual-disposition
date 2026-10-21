@@ -5483,13 +5483,39 @@ def strong_candidates(b: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [dict(c) for c in b["candidates"]]
 
 
-def _strong_inputs(ws: Workspace, b: Mapping[str, Any], screening: Mapping[str, Any]) -> dict:
+def strong_contract(ws: Workspace, suites: Mapping[str, Any]) -> dict[str, Any]:
+    """The validation's generation contract as this workspace would draw it (review s5k 2): the
+    model, engine and generator seed, the behavior's decoding at one sample, the PD settings (and
+    their sha256) and ADL's continuation settings, and the observer suite's and OOD requests'
+    hashes; ``continuation_strong.check_contract`` holds it to the frozen one."""
+    from . import continuation_strong as CS
+    from .adl_corpus import FRAMINGS
+
+    pd_spec = tool_spec(ws, "perplexity_differencing")
+    return {
+        "model": {k: ws.model_cfg[k] for k in ("name", "revision")},
+        "engine": ws.engine(),
+        "generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
+        "sampling": settings(replace(ws.sampling("behavior"), samples=1)),
+        "pd": {"settings_sha256": content_hash(pd_spec),
+               **{k: pd_spec[k] for k in ("configs", "chat", "max_new_tokens")}},
+        "adl": {"framings": list(FRAMINGS), "chat": pd_spec["chat"],
+                "new_tokens": int(_expression_rules()["adl_continuation_tokens"])},
+        "requests": {"observer": requests_hash(CS.observer_requests(suites["observer"])),
+                     "ood": requests_hash(ood_requests())},
+    }  # fmt: skip
+
+
+def _strong_inputs(
+    ws: Workspace, b: Mapping[str, Any], screening: Mapping[str, Any], suites: Mapping[str, Any]
+) -> dict:
     from . import continuation_strong as CS
 
     return {"branch": b["name"], "candidate": dict(screening["chosen"]),
             "screening": {"manifest": CS.screening_path(Path("."), b["lineage"]).name,
                           "sha256": screening["sha256"]},
-            "detector_version": ws.behavior.detector.version}  # fmt: skip
+            "detector_version": ws.behavior.detector.version,
+            "contract": strong_contract(ws, suites)}  # fmt: skip
 
 
 def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> list[str]:
@@ -5530,10 +5556,11 @@ def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
                 problems.append(f"the screening of {lineage} found no eligible candidate")
             if CS.validation_path(REPO_ROOT, lineage).exists():
                 problems.append(f"{CS.validation_path(REPO_ROOT, lineage).name}: validated once")
-            for kind, name in b["suites"].items():
-                CS.load_suite(data_root(), kind, name)
+            suites = {kind: CS.load_suite(data_root(), kind, name)
+                      for kind, name in b["suites"].items()}  # fmt: skip
             if screening["chosen"] is not None:
-                ident = CS.identity(_strong_inputs(ws, b, screening))
+                ident = CS.identity(_strong_inputs(ws, b, screening, suites))
+                CS.check_contract(ident["contract"], suites)  # the frozen decoding, seed, model
                 problems += _identity_problems(ws, ident)
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         problems.append(f"phase {phase}: {error}")
@@ -5575,8 +5602,9 @@ def _strong_screen(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, out
         adl_run = adl_corpus_check(ws, c["latent"]).parent
         screened.append({**c, "pd": pd_run.name, "adl": adl_run.name})
         pd = S5.pd_corpus(pd_run, c["latent"], hit)
-        if pd is not None and CS.screen_eligible(pd, CS.adl_corpus_framings(adl_run, c["latent"],
-                                                                            detector)):  # fmt: skip
+        if pd is None:  # invalid evidence stops the screening: never the next candidate (s5k 3)
+            raise CS.Incomplete(f"{pd_run.name}: the PD pool of {c['latent']} is invalid")
+        if CS.screen_eligible(pd, CS.adl_corpus_framings(adl_run, c["latent"], detector)):
             break
     inputs = {"branch": b["name"], "behavior": b["behavior"], "lineage": b["lineage"],
               "detector_version": detector.version, "candidates": screened}  # fmt: skip
@@ -5591,26 +5619,101 @@ def _strong_screen(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, out
     outputs["strong_screening"] = record
 
 
-def _strong_part(ws: Workspace, step: str, params: Mapping[str, Any], write: Callable) -> Path:
-    """One part cell of the validation: done, or made by ``write(run)``; its run directory."""
+def _save_chunk(directory: Path, key: str, rows: Sequence[Mapping], meta: Mapping) -> None:
+    """One chunk of a part, its metadata first, each written atomically."""
+    directory.mkdir(parents=True, exist_ok=True)
+    meta_path = directory / f"{key}.meta.json"
+    partial = meta_path.with_name(meta_path.name + ".partial")
+    partial.write_text(json.dumps(dict(meta), sort_keys=True) + "\n")
+    partial.replace(meta_path)
+    data = directory / f"{key}.jsonl.gz"
+    partial = data.with_name(data.name + ".partial")
+    _write_jsonl_gz(partial, rows)
+    partial.replace(data)
+
+
+def _saved_chunk(run: Path, key: str) -> tuple[list[dict], dict] | None:
+    """A chunk an earlier run saved whole (its rows and its metadata), or None."""
+    data, meta = run / "chunks" / f"{key}.jsonl.gz", run / "chunks" / f"{key}.meta.json"
+    if not data.is_file() or not meta.is_file():
+        return None
+    return read_jsonl_gz(data), json.loads(meta.read_text())
+
+
+def _lost_chunks(runs: Sequence[Path], key: str) -> list[str]:
+    """The runs, of ``runs``, that started drawing chunk ``key`` and saved none of it, in the
+    order they started it: losses in flight."""
+    marks = [json.loads((r / "chunks" / f"{key}.started.json").read_text()) for r in runs
+             if (r / "chunks" / f"{key}.started.json").is_file()
+             and _saved_chunk(r, key) is None]  # fmt: skip
+    return [m["run"] for m in sorted(marks, key=lambda m: m["at"])]
+
+
+def _strong_part(
+    ws: Workspace,
+    step: str,
+    params: Mapping[str, Any],
+    chunks: Mapping[str, Callable[[], list]],
+    check: Callable[[str, list], None],
+    output: str,
+) -> Path:
+    """One part cell of the validation, made once (review s5k 4). Each chunk is saved atomically
+    with its provenance as soon as it is drawn (``chunks/<key>.jsonl.gz``). On a rerun, a chunk
+    that an interrupted run of this very cell saved is recovered after ``check``, never drawn
+    again; a chunk it started and did not save was lost in flight: it is drawn anew and the loss
+    recorded (``lost_in``). The output joins the chunks in their order."""
+    import time
+
     cell = make_cell(ws, step, dict(params))
     if cell.done:
         ws.charge(cell.previous)
         return cell.previous
+    interrupted = [run for run, _, meta in _experiment_runs(str(ws.cfg.experiment), step)
+                   if meta.get("config_hash") == cell.digest
+                   and meta.get("status") != "completed"]  # fmt: skip
     with Run(cell.cfg) as run:
-        write(run)
+        directory, rows, provenance = run.dir / "chunks", [], {}
+        for key, draw in chunks.items():
+            found = [(r, x) for r in interrupted if (x := _saved_chunk(r, key)) is not None]
+            if found:
+                source, (got, meta) = found[-1]
+                check(key, got)
+                meta = {**meta, "recovered_from": source.name}
+            else:
+                meta = {"drawn_in": run.dir.name, "lost_in": _lost_chunks(interrupted, key)}
+                directory.mkdir(parents=True, exist_ok=True)
+                mark = {"run": run.dir.name, "at": time.time()}
+                (directory / f"{key}.started.json").write_text(json.dumps(mark) + "\n")
+                got = draw()
+                check(key, got)
+            _save_chunk(directory, key, got, meta)
+            provenance[key] = meta
+            rows += got
+        _write_jsonl_gz(run.path(output), rows)
+        run.path("chunks.json").write_text(json.dumps(provenance, indent=1, sort_keys=True) + "\n")
+        recovered = sorted(key for key, v in provenance.items() if "recovered_from" in v)
+        lost = sorted({r for v in provenance.values() for r in v.get("lost_in", [])})
+        run.summarize({"rows": len(rows), "recovered": recovered, "lost_in": lost})
     ws.charge(run.dir)
     return run.dir
 
 
+def _exactly(what: str, got: Sequence[Mapping], field: str, want: Sequence[str], **fixed) -> None:
+    """A chunk's rows are exactly one per key of ``want`` (by ``field``), with ``fixed`` values."""
+    keys = [r.get(field) for r in got]
+    if sorted(keys) != sorted(want) or any(r.get(k) != v for r in got for k, v in fixed.items()):
+        raise ValueError(f"a saved {what} chunk is not its exact inventory")
+
+
 def _strong_validate(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict):
-    """Phase strong_validate (§12.4.10), one attempt on the branch's own suites: its identity
-    persisted first (``strong_validation_identity``), then each part a cell of its own, made once
-    and reused on resume (each first asking the cost meter): the candidate's L on the PD suite in
-    both framings (``strong_pd``) and on the ADL suite (``strong_adl``), L and H_s on the observer
-    suite (``strong_rates``, one response each, the behavior's sampling, the lineage's stream)
-    and L on the frozen OOD prompts (``strong_ood``, its own stream); then the record
-    (``continuation_strong.validation_record``, recomputed from those runs) as a cell
+    """Phase strong_validate (§12.4.10), one attempt on the branch's own suites under its frozen
+    generation contract: its identity persisted first (``strong_validation_identity``), then
+    each part a cell of its own (``continuation_strong.part_params``), made once and resumed from
+    its saved chunks (``_strong_part``), each first asking the cost meter: the candidate's L on
+    the PD suite in both framings (``strong_pd``) and on the ADL suite (``strong_adl``), L and H_s
+    on the observer suite (``strong_rates``, one response each, the frozen decoding, the
+    lineage's stream) and L on the frozen OOD prompts (``strong_ood``, its own stream); then the
+    record (``continuation_strong.validation_record``, recomputed from those runs) as a cell
     (``strong_validation.json``). ``scripts/continuation_strong.py`` writes it as
     ``manifests/strong_validation_<lineage>.json``, committed before any follow-up."""
     from . import adl_corpus
@@ -5622,93 +5725,100 @@ def _strong_validate(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, o
     b = strong_branch_of(ws.cfg, plan, "strong_validate")
     detector = ws.behavior.detector
     screening = CS.committed_screening(REPO_ROOT, b["lineage"], find_run, detector)
-    inputs = _strong_inputs(ws, b, screening)
+    suites = {k: CS.load_suite(data_root(), k, name) for k, name in b["suites"].items()}
+    inputs = _strong_inputs(ws, b, screening, suites)
     ident = CS.identity(inputs)
-    ident_sha = CS._sha256(ident)
+    CS.check_contract(ident["contract"], suites)
     problems = _identity_problems(ws, ident)
     if problems:
         raise ValueError(problems[0])
-
-    def persist(run: Run) -> None:
-        run.path("strong_validation_identity.json").write_text(json.dumps(ident, indent=1) + "\n")
-        run.summarize({"lineage": ident["lineage"], "candidate": ident["candidate"]})
-
-    identity_run = _strong_part(ws, "strong_validation_identity", ident, persist)
-    suites = {k: CS.load_suite(data_root(), k, v["name"]) for k, v in ident["suites"].items()}
-    c, root = ident["candidate"], data_root()
-    common = {"identity": ident_sha, "lineage": ident["lineage"], "engine": ws.engine()}
-    pd_spec = tool_spec(ws, "perplexity_differencing")
+    id_cell = make_cell(ws, "strong_validation_identity", ident)
+    if not id_cell.done:
+        with Run(id_cell.cfg) as run:
+            run.path("strong_validation_identity.json").write_text(
+                json.dumps(ident, indent=1) + "\n"
+            )
+            run.summarize({"lineage": ident["lineage"], "candidate": ident["candidate"]})
+        id_cell = make_cell(ws, "strong_validation_identity", ident)
+    identity_run = id_cell.previous
+    c, root, k = ident["candidate"], data_root(), ident["contract"]
     runs = {}
+    served = ws.served_state(c["latent"])
 
-    def pd(run: Run) -> None:
-        prefills = [Prefill(k, tuple(v)) for k, v in suites["pd"].records.items()]
-        rows = perplexity_differencing(ws.generator, ws.served_state(c["latent"]), prefills,
-                                       configs=list(pd_spec["configs"]), chat=pd_spec["chat"],
-                                       max_new_tokens=int(pd_spec["max_new_tokens"]))  # fmt: skip
-        _write_jsonl_gz(run.path("pd_completions.jsonl.gz"), rows)
-        run.summarize({"prefills": len(prefills), "rows": len(rows)})
+    def pd_chunk(framing: str) -> Callable[[], list]:
+        prefills = [Prefill(key, tuple(v)) for key, v in suites["pd"].records.items()]
+        return lambda: perplexity_differencing(
+            ws.generator, served, prefills, configs=[framing], chat=k["pd"]["chat"],
+            max_new_tokens=int(k["pd"]["max_new_tokens"]))  # fmt: skip
 
-    meter.check()
-    settings = {k: pd_spec[k] for k in ("configs", "chat", "max_new_tokens")}
-    runs["pd"] = _strong_part(ws, "strong_pd", {
-        **common, "state": c["latent"], "suite": ident["suites"]["pd"],
-        "settings": settings}, pd).name  # fmt: skip
-    rules = _expression_rules()
-    new_tokens = int(rules["adl_continuation_tokens"])
-
-    def adl(run: Run) -> None:
-        tok, served, rows = ws.generator.tokenizer, ws.served_state(c["latent"]), []
-        by_length: dict[int, list[tuple[str, list[int]]]] = {}
-        for key, record in suites["adl"].records.items():
-            by_length.setdefault(len(record["tokens"]), []).append((key, record["tokens"]))
-        for framing in adl_corpus.FRAMINGS:
-            for n, group in sorted(by_length.items()):
-                prompts = adl_corpus.framed(tok, [t for _, t in group], framing,
-                                            chat=pd_spec["chat"],
-                                            chat_kwargs=ws.generator.chat_kwargs)  # fmt: skip
-                out = adl_corpus.continuations(ws.generator, served, prompts, new_tokens=new_tokens)
-                rows += [{"framing": framing, "key": key, "length": n, "text": text}
-                         for (key, _), text in zip(group, out, strict=True)]  # fmt: skip
-        _write_jsonl_gz(run.path("continuations.jsonl.gz"), rows)
-        run.summarize({"records": len(suites["adl"].records), "rows": len(rows)})
+    def pd_check(key: str, got: list) -> None:
+        _exactly("PD", got, "prefill", list(suites["pd"].records), config=key)
 
     meter.check()
-    runs["adl"] = _strong_part(ws, "strong_adl", {
-        **common, "state": c["latent"], "suite": ident["suites"]["adl"],
-        "framings": list(adl_corpus.FRAMINGS), "chat": pd_spec["chat"],
-        "new_tokens": new_tokens}, adl).name  # fmt: skip
+    step, params = CS.part_params(ident, "pd")
+    runs["pd"] = _strong_part(ws, step, params, {f: pd_chunk(f) for f in k["pd"]["configs"]},
+                              pd_check, "pd_completions.jsonl.gz").name  # fmt: skip
+    groups: dict[int, list[tuple[str, list[int]]]] = {}
+    for key, record in suites["adl"].records.items():
+        groups.setdefault(len(record["tokens"]), []).append((key, record["tokens"]))
+
+    def adl_chunk(framing: str, n: int) -> Callable[[], list]:
+        def draw() -> list:
+            group = groups[n]
+            prompts = adl_corpus.framed(ws.generator.tokenizer, [t for _, t in group], framing,
+                                        chat=k["adl"]["chat"],
+                                        chat_kwargs=ws.generator.chat_kwargs)  # fmt: skip
+            out = adl_corpus.continuations(ws.generator, served, prompts,
+                                           new_tokens=int(k["adl"]["new_tokens"]))  # fmt: skip
+            return [{"framing": framing, "key": key, "length": n, "text": text}
+                    for (key, _), text in zip(group, out, strict=True)]  # fmt: skip
+
+        return draw
+
+    def adl_check(key: str, got: list) -> None:
+        framing, n = key.rsplit("-L", 1)
+        _exactly("ADL", got, "key", [x for x, _ in groups[int(n)]], framing=framing,
+                 length=int(n))  # fmt: skip
+
+    meter.check()
+    step, params = CS.part_params(ident, "adl")
+    chunks = {f"{f}-L{n}": adl_chunk(f, n) for f in k["adl"]["framings"] for n in sorted(groups)}
+    runs["adl"] = _strong_part(ws, step, params, chunks, adl_check,
+                               "continuations.jsonl.gz").name  # fmt: skip
     sampling = replace(ws.sampling("behavior"), samples=1)
+    if settings(sampling) != k["sampling"]:
+        raise ValueError("the decoding is not the contract's")
 
-    def responses(requests: Sequence[Request], state: str, stream: str) -> Callable:
-        def write(run: Run) -> None:
-            if ws.generator.seed != int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)):
-                raise ValueError(f"the engine's seed {ws.generator.seed} is not the config's")
+    def responses(requests: Sequence[Request], state: str, stream: str) -> Callable[[], list]:
+        def draw() -> list:
+            if ws.generator.seed != int(k["generator_seed"]):
+                raise ValueError(f"the engine's seed {ws.generator.seed} is not the contract's")
             out = ws.generator.generate(requests, sampling, ws.served_state(state), stream=stream)
             if sorted((x.key, x.sample) for x in out) != sorted((q.key, 0) for q in requests):
                 raise ValueError(f"{state}: not one response to each of {len(requests)} prompts")
-            _write_jsonl_gz(run.path("responses.jsonl.gz"),
-                            [{"prompt": x.key, "text": x.text} for x in out])  # fmt: skip
-            run.summarize({"state": state, "responses": len(out)})
+            return [{"prompt": x.key, "text": x.text} for x in out]
 
-        return write
+        return draw
 
-    observer = [user_request(k, v) for k, v in suites["observer"].records.items()]
-    stream = ident["streams"]["observer"]
-    for role, key in (("L", "latent"), ("H_s", "sham_s")):
+    def prompts_check(requests: Sequence[Request]) -> Callable[[str, list], None]:
+        return lambda key, got: _exactly("response", got, "prompt", [q.key for q in requests])
+
+    observer = CS.observer_requests(suites["observer"])
+    for part, role in (("observer_L", "latent"), ("observer_H_s", "sham_s")):
         meter.check()
-        runs[f"observer_{role}"] = _strong_part(ws, "strong_rates", {
-            **common, "state": c[key], "suite": ident["suites"]["observer"], "stream": stream,
-            **ws.generation_params(sampling, observer)},
-            responses(observer, c[key], stream)).name  # fmt: skip
+        step, params = CS.part_params(ident, part)
+        runs[part] = _strong_part(ws, step, params, {
+            "all": responses(observer, c[role], ident["streams"]["observer"])},
+            prompts_check(observer), "responses.jsonl.gz").name  # fmt: skip
     ood = ood_requests()
     problem = ood_count_problem(ood)
     if problem:
         raise ValueError(problem)
     meter.check()
-    runs["ood"] = _strong_part(ws, "strong_ood", {
-        **common, "state": c["latent"], "stream": ident["streams"]["ood"],
-        **ws.generation_params(sampling, ood)},
-        responses(ood, c["latent"], ident["streams"]["ood"])).name  # fmt: skip
+    step, params = CS.part_params(ident, "ood")
+    runs["ood"] = _strong_part(ws, step, params, {
+        "all": responses(ood, c["latent"], ident["streams"]["ood"])},
+        prompts_check(ood), "responses.jsonl.gz").name  # fmt: skip
     inputs = {**inputs, "identity": identity_run.name, "runs": runs}
     record = CS.validation_record(inputs, find_run, detector, root)
     cell = make_cell(ws, "strong_validation", {"inputs": inputs, "record": content_hash(record)})
