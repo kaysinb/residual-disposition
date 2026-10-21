@@ -30,7 +30,10 @@ pipeline:
                                         # readers; Stage 5: s5_suppress, s5_confirm, s5_xcont, s5_expression, s5_decide,
                                         # s5_relearn_h (and kstar, certificate, readers with their stage5 true);
                                         # its descriptive DPO lineage (C15): s5d_suppress, s5d_confirm,
-                                        # s5d_expression, s5d_decide (and kstar with stage5_dpo true)
+                                        # s5d_expression, s5d_decide (and kstar with stage5_dpo true);
+                                        # the strong branch (C16-2): strong_screen, strong_validate
+                                        # (and s5_xcont, kstar, certificate, s5_relearn_h, readers
+                                        # with their strong true)
     check_only: false                   # true: the plan check alone, on CPU (scripts/pipeline.py)
     reread:
       states: []                        # in this order; each with its pilot ADL package
@@ -56,6 +59,7 @@ pipeline:
       dose: null                        # the committed decision's; the states are resolved
       pd_draw: null                     # L's tagged PD pool (option b, Codex s4k): stage2-sxm
       stage5: false                     # true: the committed Stage-5 lineage's (X_cont; C13)
+      strong: false                     # with stage5: its validated strong candidate (C16-2)
     pd_pool:                            # another draw of a latent state's PD pool (Codex s4k)
       state: null
       draw: null                        # stage2-sxm: on H100 SXM only
@@ -67,6 +71,7 @@ pipeline:
       active: null                      # the lineage's A: its relearning reference sets the threshold
       stage5: false                     # true: the committed Stage-5 lineage, <behavior>_cont_<dose>
       stage5_dpo: false                 # true: the committed DPO lineage, <behavior>_dpo_<dose> (C15)
+      strong: false                     # with stage5: the validated strong candidate, strong_<behavior>_cont_<dose>
     decide:                             # the Stage-2 decision's runs (review s3t)
       screening: null                   # the stage2_screening run
       confirmation: []                  # the stage2_confirmation runs, in attempt order
@@ -82,6 +87,7 @@ pipeline:
       dose: null                        # the dose the Stage-5 ledger permits next
     s5_xcont:
       dose: null                        # the analysis dose
+      strong: false                     # true: the validated strong candidate's dose (C16-2)
     s5_expression:
       dose: null                        # the analysis dose, after a valid X_cont
     s5_decide:                          # the Stage-5 decision's runs
@@ -109,6 +115,11 @@ pipeline:
       y_organism: sbf05f589f929edf8     # the pilot's Y organism (keywords_line, seed 0)
       blocks: []                        # this Pod's blocks: A [0, 1, 2], B [3, 4, 5]; Stage 5 all
       stage5: false                     # true: the committed Stage-5 lineage (and s5_relearn_h's)
+      strong: false                     # with stage5: the validated strong candidate (C16-2)
+    strong_screen:                      # the strong branch (§12.4.10; C16-2): a branch of
+      branch: null                      # configs/continuation/strong.yaml (stage5_continued)
+    strong_validate:
+      branch: null
     api:
       adl_ledger:                       # the λ grader of the lens packages
         worker: ???

@@ -54,6 +54,20 @@
 #      (s5d_decide). The decision is written as manifests/stage5_dpo_<behavior>.json and committed,
 #      and a new snapshot made, before k*;
 #   s5dk: k* of the committed DPO lineage <behavior>_dpo_<dose> (H_s at its dose); nothing after.
+# The continued lineage's strong branch (§12.4.10, §12.7 Stage 5; C16-2), the meter's item
+# strong/stage5, split by its frozen split: S5-A's sessions on worker s5-a (its $13.76 GPU
+# sublimit, no API), S5-B's on s5-b, in space a, its passes in the strong_stage5 batch:
+#   s5s (s5-a): strong_screen, the frozen candidates 100 → 200 → 400 to the first eligible. Its
+#      record is written as manifests/strong_<behavior>_cont.json and committed on the laptop, and
+#      a new snapshot made, before any validation cell (the commit barrier);
+#   s5v (s5-a, after the committed screening with an eligible candidate; V1 and O1 in a's
+#      data/strong_suites): strong_validate, its one attempt. Its record becomes
+#      manifests/strong_validation_<behavior>_cont.json, committed before any follow-up; a passing
+#      one drops strong/stage5_dpo fallback_gate_closed;
+#   s5sk (s5-b, after the committed passing validation): the candidate's X_cont (s5_xcont with
+#      strong), then its k* (strong_<behavior>_cont_<dose>); the k* manifest is committed and a
+#      new snapshot made before the certificate;
+#   s5sc (s5-b): the certificate's six blocks, H's relearning, then the readers, all with strong.
 #
 # Limits (review s4b). RECEIPT is the meter's receipt of this Pod's session
 # (continuation_meter.py session-open, with the Pod's ID and the deadline set at its creation,
@@ -73,7 +87,7 @@
 # included, it asks the watcher to stop the Pod within 3 minutes. The volume keeps everything,
 # and a rerun of the session resumes its cells (on this Pod or, if it cannot start again, on a new
 # Pod on the same volume).
-# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|p3|s5a|s5k|s5c|s5d|s5dk> SNAP=<snapshot id> WN=<watcher dir> \
+# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|p3|s5a|s5k|s5c|s5d|s5dk|s5s|s5v|s5sk|s5sc> SNAP=<id> WN=<dir> \
 #          PRICE=<USD/h> RECEIPT=<file> METER_LOG=<file> POD_ID=<this Pod's ID> \
 #          SOURCE_SNAPSHOT_RECEIPT=<file> [ITEM=stage2/example_link] \
 #          [PD_DRAW=stage2-sxm] [BEHAVIOR=example_link for s5a, s5k, s5c, s5d, s5dk] \
@@ -90,16 +104,21 @@ case $SESSION in
   b1|b2|p1|p2|p3) WORKER=pod-b; SPACE=$WS/c ;;
   s5a|s5k|s5c) WORKER=pod; SPACE=$WS/a ;;  # an unsplit item's one session (review s4t2 1)
   s5d|s5dk) WORKER=pod; SPACE=$WS/c ;;     # the DPO lineage's own space (C16-1)
-  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d or s5dk"; exit 1 ;;
+  s5s|s5v) WORKER=s5-a; SPACE=$WS/a ;;     # S5-A on its frozen sublimit (C16-2)
+  s5sk|s5sc) WORKER=s5-b; SPACE=$WS/a ;;   # S5-B, after the passing validation
+  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d, s5dk, s5s, s5v, s5sk or s5sc"; exit 1 ;;
 esac
-if [ $WORKER = pod ]; then
-  # the lineage's item, phase prefix and record key: the continued one's, or the DPO one's (C15)
-  case $SESSION in s5d|s5dk) LINE=stage5_dpo; P5=s5d ;; *) LINE=stage5; P5=s5 ;; esac
-  ITEM=${ITEM:-$LINE}; BEHAVIOR=${BEHAVIOR:?the behavior of the Stage-5 lineage}
-else
+LINE=""
+case $WORKER in pod|s5-a|s5-b)
+  # the lineage's item, phase prefix and record key: the continued one's, the DPO one's (C15) or
+  # the continued strong branch's (C16-2)
+  case $SESSION in s5d|s5dk) LINE=stage5_dpo; P5=s5d ;; s5s|s5v|s5sk|s5sc) LINE=strong/stage5; P5=s5 ;;
+    *) LINE=stage5; P5=s5 ;; esac
+  ITEM=${ITEM:-$LINE}; BEHAVIOR=${BEHAVIOR:?the behavior of the Stage-5 lineage} ;;
+*)
   case $SESSION in p1|p2|p3) ITEM=${ITEM:-} ;; *) ITEM=${ITEM:-stage2/example_link} ;; esac
-  BEHAVIOR=${ITEM#stage2/}
-fi
+  BEHAVIOR=${ITEM#stage2/} ;;
+esac
 CHAIN=$SESSION-$(date -u +%Y%m%dT%H%M%S)  # unique per launch; reused cells stay reused
 OUT=$AT/chain-$CHAIN
 W=$WS/watch/$WN
@@ -194,9 +213,9 @@ stop_pod() {  # the watcher stops the Pod within 3 minutes (never later than its
 }
 on_exit() { local rc=$?; stop_pod; exit $rc; }
 
-batch_of() {  # <phase>: its batch (budget.batch_of): the Stage-5 lineage's item (stage5 or
-  # stage5_dpo), the Y control's, or Stage 2's
-  [ $WORKER = pod ] && { echo $ITEM; return; }
+batch_of() {  # <phase>: its batch (budget.batch_of): the Stage-5 lineage's item (stage5,
+  # stage5_dpo or strong/stage5 as strong_stage5), the Y control's, or Stage 2's
+  [ -n "$LINE" ] && { echo ${ITEM//\//_}; return; }
   case $1 in control_y) echo y ;; *) echo stage2 ;; esac
 }
 
@@ -261,7 +280,7 @@ source ${RP_ENV:-/etc/rp_environment}
 export SOURCE_SNAPSHOT_RECEIPT
 export CONTAINER_IMAGE=$IMG PYTHONDONTWRITEBYTECODE=1
 log "chain $CHAIN ($ITEM, $WORKER in $SPACE), \$$PRICE/h"
-if [ $WORKER = pod ] && [ "$ITEM" != "$LINE" ]; then  # never another item's reservation (s4x 1)
+if [ -n "$LINE" ] && [ "$ITEM" != "$LINE" ]; then  # never another item's reservation (s4x 1)
   log "not run: a $SESSION session runs on the meter's item $LINE, not $ITEM"; exit 1
 fi
 case "$SESSION:$ITEM" in  # the second behavior's sessions name their item: never a default
@@ -293,7 +312,7 @@ print(int(datetime.fromisoformat(json.loads(sys.argv[1])["deadline"]).timestamp(
 SESSION_HOURS=$(jget "$SESSION_JSON" hours); SESSION_API=$(jget "$SESSION_JSON" api_usd)
 FROM=$(iso $(python3 -c 'import sys; print(int(int(sys.argv[1]) - float(sys.argv[2]) * 3600))' "$HARD_S" "$SESSION_HOURS"))
 log "session: deadline $(iso $HARD_S), $SESSION_HOURS h from $FROM, API \$$SESSION_API"
-if [ $WORKER = pod ] && ! python3 -c 'import sys; sys.exit(float(sys.argv[1]) > 12)' "$SESSION_HOURS"; then
+if [ -n "$LINE" ] && ! python3 -c 'import sys; sys.exit(float(sys.argv[1]) > 12)' "$SESSION_HOURS"; then
   log "not run: a Stage-5 session is at most 12 h, not $SESSION_HOURS (review s4t2 4)"; exit 1
 fi
 if [ "$(deadline_s)" -gt "$HARD_S" ]; then
@@ -606,6 +625,70 @@ s5c)
       run_pass $CHAIN-readers $CFG/$BEHAVIOR readers pipeline.plan.readers.stage5=true \
         pipeline.plan.readers.dose=$DOSE
       step readers $?
+    fi
+  fi ;;
+s5s)
+  # S5-A's screening of the frozen candidates (C16-2): its record is committed before validation
+  run_pass $CHAIN-strong-screen $CFG/$BEHAVIOR strong_screen \
+    pipeline.plan.strong_screen.branch=stage5_continued
+  step strong_screen $?
+  log "the strong screening: its manifest is committed on the laptop before validation (s5v)" ;;
+s5v)
+  # S5-A's one validation, after the committed screening named an eligible candidate
+  SCREENED=strong_${BEHAVIOR}_cont.json
+  if [ ! -f $SRC/manifests/$SCREENED ]; then
+    log "not run: no committed strong screening $SCREENED in the snapshot"; step manifest 1
+  elif [ "$(manifest $SCREENED 'd["chosen"] is not None')" != True ]; then
+    log "no eligible candidate: the continued strong branch closed at its screening"; step manifest 1
+  else
+    run_pass $CHAIN-strong-validate $CFG/$BEHAVIOR strong_validate \
+      pipeline.plan.strong_validate.branch=stage5_continued
+    step strong_validate $?
+    log "the strong validation: its manifest is committed on the laptop before any follow-up (s5sk)"
+  fi ;;
+s5sk|s5sc)
+  # S5-B, after the committed passing validation: X_cont and k* (s5sk), then the certificate, H's
+  # relearning and the readers (s5sc), each of the strong lineage strong_<behavior>_cont_<dose>
+  VALID=strong_validation_${BEHAVIOR}_cont.json
+  if [ ! -f $SRC/manifests/$VALID ]; then
+    log "not run: no committed strong validation $VALID in the snapshot"; step manifest 1
+  elif [ "$(manifest $VALID 'd["verdict"]["passed"]')" != True ]; then
+    log "the strong candidate did not validate: no follow-up"; step manifest 1
+  else
+    DOSE=$(manifest $VALID 'd["candidate"]["dose"]')
+    LATENT=$(manifest $VALID 'd["candidate"]["latent"]'); SHAM=$(manifest $VALID 'd["candidate"]["sham_s"]')
+    A=$(manifest stage5_$BEHAVIOR.json 'd["implant"]["active"]')
+    LINEAGE=strong_${BEHAVIOR}_cont_$DOSE; K=kstar_$LINEAGE.json
+    if [ $SESSION = s5sk ]; then
+      run_pass $CHAIN-s5xcont-$DOSE $CFG/$BEHAVIOR s5_xcont pipeline.plan.s5_xcont.strong=true \
+        pipeline.plan.s5_xcont.dose=$DOSE
+      step s5_xcont-$DOSE $?
+      if [ $OK = 1 ]; then
+        run_pass $CHAIN-kstar $CFG/$BEHAVIOR kstar pipeline.plan.kstar.stage5=true \
+          pipeline.plan.kstar.strong=true pipeline.plan.kstar.dose=$DOSE \
+          pipeline.plan.kstar.sham_s=$SHAM pipeline.plan.kstar.active=$A
+        step kstar $?
+      fi
+      log "the strong lineage's k*: its manifest $K is committed on the laptop before the certificate (s5sc)"
+    elif [ ! -f $SRC/manifests/$K ]; then
+      log "not run: no committed k* manifest $K in the snapshot"; step manifest 1
+    else
+      copy_in --certificate $LINEAGE --manifests $SRC/manifests; step copy $?
+      CERT=(pipeline.plan.certificate.stage5=true pipeline.plan.certificate.strong=true
+            pipeline.plan.certificate.dose=$DOSE pipeline.plan.certificate.latent=$LATENT
+            pipeline.plan.certificate.sham_s=$SHAM pipeline.plan.certificate.active=$A
+            "pipeline.plan.certificate.blocks=[0,1,2,3,4,5]")
+      if [ $OK = 1 ]; then
+        run_pass $CHAIN-cert-check $CFG/$BEHAVIOR certificate "${CERT[@]}" pipeline.plan.check_only=true
+        step certificate-check $?
+      fi
+      if [ $OK = 1 ]; then run_pass $CHAIN-cert $CFG/$BEHAVIOR certificate "${CERT[@]}"; step certificate $?; fi
+      if [ $OK = 1 ]; then run_pass $CHAIN-relearn-h $CFG/$BEHAVIOR s5_relearn_h "${CERT[@]}"; step s5_relearn_h $?; fi
+      if [ $OK = 1 ]; then
+        run_pass $CHAIN-readers $CFG/$BEHAVIOR readers pipeline.plan.readers.stage5=true \
+          pipeline.plan.readers.strong=true pipeline.plan.readers.dose=$DOSE
+        step readers $?
+      fi
     fi
   fi ;;
 esac

@@ -153,25 +153,30 @@ def workspace(tmp_path, capsys):
               provider=None, watch_late_s=0, item=None) -> dict:  # fmt: skip
         # Stage 5's item is unsplit: one session at a time, worker pod; the items above it are
         # completed in this journal, at no cost, so that the meter admits it
-        unsplit = session.startswith("s5")
+        strong = session in STRONG  # strong/stage5, split by its frozen split (C16-2)
+        unsplit = session.startswith("s5") and not strong
         second = session.startswith("p")  # the second behavior's item, split to Pod B alone
-        worker = worker or ("pod" if unsplit else "pod-a" if session.startswith("a") else "pod-b")
+        worker = worker or (STRONG.get(session) or "pod" if session.startswith("s5") else
+                            "pod-a" if session.startswith("a") else "pod-b")  # fmt: skip
         # The meter: the item split, this Pod's session opened with its ID, deadline and API money.
         log, receipt = tmp_path / f"meter-{session}.jsonl", tmp_path / f"receipt-{session}.json"
         meter = ["--log", str(log)]
         dpo = session.startswith("s5d")  # the descriptive DPO lineage's item (C15)
-        item = item or ("stage5_dpo" if dpo else "stage5" if unsplit else
+        item = item or ("strong/stage5" if strong else "stage5_dpo" if dpo else
+                        "stage5" if unsplit else
                         "stage2/pun_intended" if second else "stage2/example_link")  # fmt: skip
-        if item in ("stage5", "stage5_dpo"):
+        if item in ("stage5", "stage5_dpo", "strong/stage5"):
             for above in cm_items()[: cm_items().index(item)]:
                 cm.main([*meter, "admit", above, "--spent-elsewhere", "0", "--storage", "55"])
                 cm.main([*meter, "start", above])
                 cm.main([*meter, "complete", above])
         cm.main([*meter, "admit", item, "--spent-elsewhere", "0", "--storage", "55"])
         cm.main([*meter, "start", item])
-        if second:
+        if item == "strong/stage5":
+            cm.main([*meter, "split", item])  # its frozen split: s5-a, s5-b
+        elif second:
             cm.main([*meter, "split", item, "--share", "pod-b=1.0"])
-        elif not unsplit:
+        elif not unsplit and not strong:
             cm.main([*meter, "split", item, "--share", "pod-a=0.48", "--share", "pod-b=0.52"])
         deadline = (start + timedelta(hours=hours)).isoformat()
         cm.main([*meter, "session-open", item, "--worker", worker, "--pod-id", pod,
@@ -211,13 +216,16 @@ def workspace(tmp_path, capsys):
             "SOURCE_SNAPSHOT_ID": "snap",
             "SNAPSHOT_RECEIPT_SHA256": hashlib.sha256(snapshot_receipt.read_bytes()).hexdigest(),
             "CONTAINER_IMAGE": "img@sha256:x",
-            **({"ITEM": item, "BEHAVIOR": "example_link"} if unsplit else {}),
+            **({"ITEM": item, "BEHAVIOR": "example_link"} if unsplit or strong else {}),
             **({"ITEM": item} if second else {}),
         }
 
     yield ws, setup, tmp_path / "stub.jsonl", source
     for p in procs:
         p.kill()
+
+
+STRONG = {"s5s": "s5-a", "s5v": "s5-a", "s5sk": "s5-b", "s5sc": "s5-b"}  # session: worker
 
 
 def cm_items():
@@ -1434,3 +1442,113 @@ def test_the_slot_is_recomputed_on_the_copied_space_from_the_named_evidence(tmp_
                     *evidence]) == 0  # fmt: skip
     slot = S2.slot(repo, D.RULES, find_run, repo)
     assert (slot["status"], slot["slot"]) == ("taken", "example_link")
+
+
+# ------------------------------------------------- the continued strong branch (C16-2)
+
+S5A_HOURS = 3.0  # within S5-A's $13.76 at $3.99/h
+
+
+def strong_manifests(source, *, chosen=True, passed=True, dose=200):
+    """The snapshot's committed strong manifests: the screening (its chosen candidate or none)
+    and, with ``passed`` not None, the validation (its verdict)."""
+    m = source / "manifests"
+    c = {"dose": dose, "latent": f"L{dose}", "sham_s": f"Hs{dose}"}
+    (m / "strong_example_link_cont.json").write_text(json.dumps({"chosen": c if chosen else None}))
+    if passed is not None:
+        (m / "strong_validation_example_link_cont.json").write_text(json.dumps(
+            {"candidate": c, "verdict": {"passed": passed}}))  # fmt: skip
+    decision = {"decision": {"analysis_dose": 25}, "implant": {"active": "sA", "sham": "sH"}}
+    (m / "stage5_example_link.json").write_text(json.dumps(decision))
+
+
+def test_s5s_screens_on_s5a_s_sublimit_and_ends_before_validation(workspace):
+    ws, setup, log, _ = workspace
+    out = run_chain(setup("s5s", START, hours=S5A_HOURS))
+    assert out.returncode == 0, out.stdout + out.stderr
+    (p,) = passes(log)
+    o = overrides(p)
+    assert (o["pipeline.plan.phase"], o["pipeline.plan.strong_screen.branch"]) == (
+        "strong_screen", "stage5_continued")  # fmt: skip
+    assert o["pipeline.plan.cost.batches.strong_stage5"] == str(S5A_HOURS)
+    assert o["pipeline.plan.api.adl_ledger.worker"] == "s5-a" and space_of(p) == str(ws / "a")
+    assert "committed on the laptop before validation (s5v)" in out.stdout
+    chain = next((ws / "attempts" / "residual-disposition").glob("chain-s5s-*"))
+    summary = json.loads((chain / "summary.json").read_text())
+    assert (summary["worker"], summary["item"]) == ("s5-a", "strong/stage5")
+
+
+def test_s5a_s_session_never_exceeds_its_sublimit(workspace):
+    ws, setup, log, _ = workspace
+    with pytest.raises(ValueError, match="exceed s5-a's"):
+        setup("s5s", START, hours=4.0)  # $15.96: past S5-A's $13.76, refused at session-open
+
+
+def test_s5v_waits_for_the_committed_screening(workspace):
+    ws, setup, log, _ = workspace
+    out = run_chain(setup("s5v", START, hours=S5A_HOURS))
+    assert out.returncode != 0 and "no committed strong screening" in out.stdout
+    assert not passes(log)
+
+
+def test_s5v_runs_nothing_after_a_screening_without_an_eligible_candidate(workspace):
+    ws, setup, log, source = workspace
+    strong_manifests(source, chosen=False, passed=None)
+    out = run_chain(setup("s5v", START, hours=S5A_HOURS))
+    assert out.returncode != 0 and "closed at its screening" in out.stdout
+    assert not passes(log)
+
+
+def test_s5v_validates_the_committed_eligible_candidate_once(workspace):
+    ws, setup, log, source = workspace
+    strong_manifests(source, passed=None)
+    out = run_chain(setup("s5v", START, hours=S5A_HOURS))
+    assert out.returncode == 0, out.stdout + out.stderr
+    (p,) = passes(log)
+    o = overrides(p)
+    assert (o["pipeline.plan.phase"], o["pipeline.plan.strong_validate.branch"]) == (
+        "strong_validate", "stage5_continued")  # fmt: skip
+    assert "before any follow-up (s5sk)" in out.stdout
+
+
+def test_s5sk_runs_nothing_after_a_failed_validation(workspace):
+    ws, setup, log, source = workspace
+    strong_manifests(source, passed=False)
+    out = run_chain(setup("s5sk", START))
+    assert out.returncode != 0 and "did not validate: no follow-up" in out.stdout
+    assert not passes(log)
+
+
+def test_s5sk_follows_a_passing_validation_with_x_cont_then_k_star(workspace):
+    ws, setup, log, source = workspace
+    strong_manifests(source)
+    out = run_chain(setup("s5sk", START))
+    assert out.returncode == 0, out.stdout + out.stderr
+    x, k = map(overrides, passes(log))
+    assert (x["pipeline.plan.phase"], x["pipeline.plan.s5_xcont.strong"],
+            x["pipeline.plan.s5_xcont.dose"]) == ("s5_xcont", "true", "200")  # fmt: skip
+    keys = ("phase", "kstar.stage5", "kstar.strong", "kstar.dose", "kstar.sham_s", "kstar.active")
+    assert tuple(k[f"pipeline.plan.{x}"] for x in keys) == (
+        "kstar", "true", "true", "200", "Hs200", "sA")  # fmt: skip
+    assert all(o["pipeline.plan.api.adl_ledger.worker"] == "s5-b" for o in (x, k))
+    assert "kstar_strong_example_link_cont_200.json is committed" in out.stdout
+
+
+def test_s5sc_waits_for_the_strong_lineage_s_k_star_manifest(workspace):
+    ws, setup, log, source = workspace
+    strong_manifests(source)
+    out = run_chain(setup("s5sc", START))
+    assert (
+        out.returncode != 0
+        and "no committed k* manifest kstar_strong_example_link_cont_200.json" in out.stdout
+    )
+    assert not passes(log)
+
+
+def test_a_strong_session_runs_only_on_strong_stage5(workspace):
+    ws, setup, log, source = workspace
+    out = run_chain(setup("s5s", START, hours=S5A_HOURS, item="stage5", worker="pod"))
+    assert (
+        out.returncode != 0 and "runs on the meter's item strong/stage5, not stage5" in out.stdout
+    )
+    assert not passes(log)
