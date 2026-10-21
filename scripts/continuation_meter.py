@@ -379,6 +379,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "status":
         out = status(m)
     elif args.command == "admit":
+        if args.item == "strong/stage5_dpo":  # only once the fallback's gate is open (§12.8)
+            gate = fallback_gate()
+            if gate["status"] != "open":
+                raise SystemExit(f"admit {args.item}: the DPO fallback's gate is {gate}")
         d = m.admit(args.item, spent_elsewhere=args.spent_elsewhere, storage=args.storage)
         out = {"item": args.item, "allowed": d.allowed, "total": d.total, "cap": d.cap}
         out["terms"] = d.terms

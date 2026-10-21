@@ -262,11 +262,14 @@ def adl_corpus_framings(run: Path, latent: str, detector: Any) -> dict[str, dict
     return p.corpus_framings(counts)
 
 
-def screening_record(inputs: Mapping[str, Any], find_run: Any, detector: Any) -> dict[str, Any]:
-    """The screening of a branch's frozen candidates recomputed from the runs ``inputs`` names
-    (``candidates``: each screened one with its full PD pool and ADL-corpus runs, in order). The
-    candidates screened must be the frozen list's first ones, each but the last ineligible, and
-    the last eligible or the list exhausted. Returns the record: each candidate's counts and
+def screening_record(
+    inputs: Mapping[str, Any], find_run: Any, detector: Any, root: Path | None = None
+) -> dict[str, Any]:
+    """The screening of a branch's candidates (``candidates``: the continued branch's frozen
+    ones; the DPO fallback's from the committed DPO decision under ``root``) recomputed from the
+    runs ``inputs`` names (each screened one with its full PD pool and ADL-corpus runs, in
+    order). The candidates screened must be the list's first ones, each but the last ineligible,
+    and the last eligible or the list exhausted. Returns the record: each candidate's counts and
     eligibility, ``chosen`` (or None) and the outcome."""
     from . import continuation_stage5 as S5
 
@@ -277,7 +280,7 @@ def screening_record(inputs: Mapping[str, Any], find_run: Any, detector: Any) ->
     if inputs.get("detector_version") != detector.version:
         raise ValueError(f"screened with detector {inputs.get('detector_version')}, the "
                          f"behavior's is {detector.version}")  # fmt: skip
-    frozen_list = list(b["candidates"])
+    frozen_list = candidates(b, root, find_run)
     screened = list(inputs.get("candidates") or [])
     if not screened or len(screened) > len(frozen_list):
         raise ValueError("the screening names no candidate, or more than the frozen ones")
@@ -532,11 +535,13 @@ def _write_once(path: Path, data: Mapping[str, Any]) -> dict:
     return dict(data)
 
 
-def screening_problems(data: Mapping[str, Any], find_run: Any, detector: Any) -> list[str]:
+def screening_problems(
+    data: Mapping[str, Any], find_run: Any, detector: Any, root: Path | None = None
+) -> list[str]:
     """Why a screening record cannot be (or no longer is) a manifest: its record recomputed from
     the runs its inputs name equal to it, but for its metadata."""
     try:
-        record = screening_record(data["inputs"], find_run, detector)
+        record = screening_record(data["inputs"], find_run, detector, root)
     except (OSError, ValueError, KeyError, TypeError) as error:
         return [str(error)]
     mine = {k: v for k, v in data.items() if k not in (*METADATA, "inputs")}
@@ -544,7 +549,7 @@ def screening_problems(data: Mapping[str, Any], find_run: Any, detector: Any) ->
 
 
 def write_screening(root: Path, data: Mapping[str, Any], find_run: Any, detector: Any) -> dict:
-    problems = screening_problems(data, find_run, detector)
+    problems = screening_problems(data, find_run, detector, root)
     if problems:
         raise ValueError(f"no strong screening manifest: {'; '.join(problems)}")
     return _write_once(screening_path(root, data["lineage"]), data)
@@ -556,7 +561,7 @@ def committed_screening(root: Path, lineage: str, find_run: Any, detector: Any) 
 
     path = screening_path(root, lineage)
     data = committed_json(path, "the strong screening manifest", root)
-    problems = screening_problems(data, find_run, detector)
+    problems = screening_problems(data, find_run, detector, root)
     if problems:
         raise ValueError(f"{path}: {'; '.join(problems)}")
     return data
@@ -644,22 +649,51 @@ def continued_outcome(root: Path, find_run: Any, detector: Any) -> dict | None:
     return None
 
 
-def dpo_candidates(root: Path, rules: Any, find_run: Any) -> list[int] | None:
-    """The descriptive DPO lineage's margin-passing checkpoints, ascending, from its committed
-    decision's selection (None before it is committed)."""
-    from . import continuation_rules as cr
+def dpo_selection(root: Path, rules: Any, find_run: Any) -> dict[str, Any] | None:
+    """The descriptive DPO lineage's committed decision and its selection, recomputed (None
+    before the decision is committed)."""
     from . import continuation_stage5 as S5
 
-    p = _p()
-    behavior = branch(DPO)["behavior"]
-    path = S5.manifest_path(root, behavior, p.S5_DPO)
+    path = S5.manifest_path(root, branch(DPO)["behavior"], _p().S5_DPO)
     if not path.exists():
         return None
     data = S5.committed_decision(path, rules, find_run, root)
-    selection = S5._selection(data["inputs"], rules, find_run)
-    upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in selection["doses"].items()}
+    return {"decision": data, "selection": S5._selection(data["inputs"], rules, find_run)}
+
+
+def dpo_candidates(root: Path, rules: Any, find_run: Any) -> list[int] | None:
+    """The descriptive DPO lineage's margin-passing checkpoints, ascending, from its committed
+    decision's selection, 800 and its analysis dose included only if they meet the margin (None
+    before the decision is committed)."""
+    from . import continuation_rules as cr
+
+    found = dpo_selection(root, rules, find_run)
+    if found is None:
+        return None
+    doses = found["selection"]["doses"]
+    upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}
     margin = Fraction(str(rules["observer"]["margin"]))
     return list(cr.margin_candidates(upper, margin, sorted(upper)))
+
+
+def candidates(b: Mapping[str, Any], root: Path | None, find_run: Any) -> list[dict[str, Any]]:
+    """A branch's candidates in order: the continued branch's frozen ones (``strong.yaml``); the
+    DPO fallback's the DPO lineage's margin-passing checkpoints, ascending, with its selection's
+    L and H_s, once its gate is open (§12.7 Stage 5)."""
+    if b["name"] == CONTINUED:
+        return [dict(c) for c in b["candidates"]]
+    if b["name"] != DPO:
+        raise ValueError(f"branch {b['name']}: not in this code (C16-4)")
+    from .paths import REPO_ROOT
+
+    root = root or REPO_ROOT
+    rules = _p()._stage2_rules()
+    g = fallback_gate(root, rules, find_run, detector_of(b["behavior"]))
+    if g["status"] != "open":
+        raise ValueError(f"the DPO fallback's gate is {g['status']}: {g.get('reason')}")
+    doses = dpo_selection(root, rules, find_run)["selection"]["doses"]
+    return [{"dose": d, "latent": doses[str(d)]["latent"], "sham_s": doses[str(d)]["sham_s"]}
+            for d in g["candidates"]]  # fmt: skip
 
 
 def detector_of(behavior: str) -> Any:

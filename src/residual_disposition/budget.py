@@ -1413,6 +1413,9 @@ class AllocationMeter:
         if kind == "admit":
             if current != PLANNED:
                 raise ValueError(f"{item} is {current}: it cannot be admitted again")
+            before = AFTER.get(item)  # the DPO fallback only after the continued branch (§12.8)
+            if before in states and states[before] in (PLANNED, RESERVED, RUNNING):
+                raise ValueError(f"{item} is admitted only after {before} ends ({states[before]})")
             for name, term in event["terms"].items():
                 finite_usd(term, f"the admission term {name}")
             if event["allowed"]:
@@ -1611,6 +1614,11 @@ class AllocationMeter:
             raise ValueError(f"unknown meter event {kind!r}")
         if state is None:
             self.events.append(dict(event))
+
+
+# An item admitted only once another has ended (completed, stopped or dropped): the strong DPO
+# fallback after the continued strong branch, S5-A having failed (§12.8, C16-3)
+AFTER = {"strong/stage5_dpo": "strong/stage5"}
 
 
 def _frozen_split(item: str, stress_gpu_usd: float) -> tuple[dict, dict] | None:
