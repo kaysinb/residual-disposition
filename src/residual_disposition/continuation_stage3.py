@@ -22,6 +22,7 @@ from the runs they name.
 from __future__ import annotations
 
 import json
+import random
 import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -137,15 +138,55 @@ def _sha(value: Any) -> bool:
     return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
 
 
+REVIEW_NEGATIVES = 30  # §12.9: agreed negatives reviewed per set, stratified by input type
+UNPROMPTED = 300  # §12.3.1: a lenient detector keeps 0 hits on 300 responses without the prompt
+
+
+def revision_path(root: Path, behavior: str, version: str) -> Path:
+    return Path(root) / "manifests" / f"detector_revision_{behavior}_{version}.json"
+
+
+def revision_problems(root: Path, behavior: str, before: str, after: str) -> list[str]:
+    """Why no committed acceptance clears the diagnostic's traces (§12.3.1, review s5v 3): the
+    record ``detector_revision_<behavior>_<after>.json``, committed, bound to the revision from
+    the set's detector ``before`` to the current ``after``, establishing the development checks
+    (0 of ``UNPROMPTED`` responses without the prompt hit, by its run; no new disagreement on the
+    named label sets) and its acceptance (by whom, when, the decision)."""
+    from .manifests import committed_json
+
+    if after == before:
+        return [f"the detector {after} is the set's own: no revision clears its traces"]
+    try:
+        r = committed_json(revision_path(root, behavior, after), "the detector's revision", root)
+    except (OSError, RuntimeError, ValueError) as error:
+        return [f"no accepted revision of {behavior}'s detector to {after}: {error}"]
+    checks, accepted = r.get("checks") or {}, r.get("accepted") or {}
+    unprompted, disagreements = checks.get("unprompted") or {}, checks.get("disagreements") or {}
+    sets = disagreements.get("sets")
+    ok = (
+        (r.get("behavior"), r.get("from_version"), r.get("to_version")) == (behavior, before, after)
+        and isinstance(unprompted.get("run"), str) and unprompted["run"]
+        and type(unprompted.get("n")) is int and unprompted["n"] == UNPROMPTED
+        and type(unprompted.get("hits")) is int and unprompted["hits"] == 0
+        and type(disagreements.get("count")) is int and disagreements["count"] == 0
+        and isinstance(sets, list) and sets and all(isinstance(x, str) and x for x in sets)
+        and all(isinstance(accepted.get(k), str) and accepted[k] for k in ("by", "on", "decision"))
+    )  # fmt: skip
+    return [] if ok else [f"the revision record of {behavior} to {after} is not an acceptance of "
+                          "§12.3.1's checks"]  # fmt: skip
+
+
 def diagnostic_problems(
     root: Path, behavior: str, rules: Any, find_run: Any, detector: Any,
     kinds: Sequence[str] = BEFORE_CONFIRMATION,
 ) -> list[str]:  # fmt: skip
-    """Why the diagnostic does not clear the next step (the barrier; review s5t 5: anything
-    missing or invalid blocks): its committed manifest of this behavior, bound to the committed
-    sources, its reviewed evidence recorded (the set, the labels' and the review log's sha256),
-    each of ``kinds`` complete (integer counts, ``PER_TYPE`` items, 0 ≤ traces ≤ items), and a
-    trace cleared only by an accepted revision that is the current detector and not the set's."""
+    """Why the diagnostic does not clear the next step (the barrier; reviews s5t 5, s5v 3:
+    anything missing or invalid blocks): its committed manifest of this behavior, bound to the
+    committed sources, its reviewed evidence recorded (the set's input and key, the ensemble's
+    labels and the review by sha256, the review's counts), each of ``kinds`` complete (integer
+    counts, ``PER_TYPE`` items, 0 ≤ traces ≤ items), and a trace cleared only by a committed
+    acceptance of the revision from the set's detector to the current one
+    (``revision_problems``)."""
     from .manifests import committed_json
 
     try:
@@ -157,24 +198,25 @@ def diagnostic_problems(
     problems = []
     if data.get("behavior") != behavior or data.get("sources_sha256") != sources["sha256"]:
         problems.append("the diagnostic is not of the committed sources")
-    if not (data.get("set_id") and data.get("set_run") and _sha(data.get("labels_sha256"))
-            and _sha(data.get("review_log_sha256"))):  # fmt: skip
-        problems.append("the diagnostic's reviewed evidence (set, labels, review log) is missing")
-    revision = data.get("revision")
-    accepted = (isinstance(revision, dict) and revision.get("accepted") is True
-                and revision.get("detector_version") == detector.version
-                and revision.get("detector_version") != data.get("detector_version"))  # fmt: skip
-    if revision is not None and not accepted:
-        problems.append(f"the diagnostic's revision {revision} is not an accepted current one")
+    review = data.get("review") or {}
+    if not (data.get("set_id") and data.get("set_run")
+            and all(_sha(data.get(f"{x}_sha256")) for x in ("input", "key", "ensemble", "review"))
+            and all(type(review.get(k)) is int and review[k] >= 0
+                    for k in ("disputes", "traces", "sample"))
+            and review.get("sample") == REVIEW_NEGATIVES):  # fmt: skip
+        problems.append("the diagnostic's reviewed evidence (set, labels, review) is missing")
+    traced = False
     for kind in kinds:
         t = (data.get("types") or {}).get(kind)
         n, traces = (t.get("n"), t.get("traces")) if isinstance(t, dict) else (None, None)
         if not (isinstance(t, dict) and t.get("status") == "complete" and type(n) is int
                 and n == PER_TYPE and type(traces) is int and 0 <= traces <= n):  # fmt: skip
             problems.append(f"the diagnostic's {kind} items are not complete: {t}")
-        elif traces and not accepted:
-            problems.append(f"the diagnostic found {traces} {kind} trace(s) and no accepted "
-                            "revision is the current detector")  # fmt: skip
+        elif traces:
+            traced = True
+    if traced:
+        problems += revision_problems(root, behavior, str(data.get("detector_version")),
+                                      detector.version)  # fmt: skip
     return problems
 
 
@@ -187,51 +229,105 @@ def _source_run(kind: str, source: str) -> str:
     return rest.split(":", 1)[0] if kind == "pd" else rest.split("/", 1)[0]
 
 
+def review_sample(behavior: str, seed: int, negatives: Mapping[str, Sequence[str]]) -> set[str]:
+    """The agreed negatives the researcher reviews (§12.9): ``REVIEW_NEGATIVES`` stratified by
+    input type, equal shares, the remainder to the first types in name order, each drawn with
+    the frozen seed (``<seed>/diagnostic-review/<behavior>/<kind>``) from its sorted pool."""
+    kinds = sorted(negatives)
+    base, extra = divmod(REVIEW_NEGATIVES, len(kinds))
+    out: set[str] = set()
+    for i, kind in enumerate(kinds):
+        n = base + (i < extra)
+        pool = sorted(negatives[kind])
+        if len(pool) < n:
+            raise ValueError(f"only {len(pool)} agreed {kind} negatives for a review of {n}")
+        out |= set(random.Random(f"{seed}/diagnostic-review/{behavior}/{kind}").sample(pool, n))
+    return out
+
+
 def diagnostic_record(
-    set_run: Path, labels: Sequence[Mapping[str, Any]], sources: Mapping[str, Any],
-    revision: str | None = None, current: str | None = None,
+    set_run: Path, ensemble: Sequence[Mapping[str, Any]], review: Sequence[Mapping[str, Any]],
+    sources: Mapping[str, Any], expected: Sequence[Sequence[Any]], seed: int,
 ) -> dict[str, Any]:  # fmt: skip
-    """The diagnostic's result from its labeled set, recomputed (B2): the set built from the
-    committed ``sources`` (its key names their sha256), one final label per item (the reviewed
-    export: ``{item_id, present, labeled_at}``), every item's source one of the sources' runs;
-    per input type its items, ``complete`` at ``PER_TYPE``, and the traces among them (present).
-    ``revision``: an accepted lenient detector's version, after a trace (§12.3.1): it must be
-    ``current``, the behavior's detector now, and not the set's."""
+    """The diagnostic's result from its labeled set, recomputed (B2; review s5v 3):
+
+    - the set: its ``input.jsonl`` hashing to its id, its key of the committed ``sources`` (their
+      sha256), every item one of ``expected`` (the draw ``continuation_labels.stage3_chosen``
+      makes again from the sources: kind, source, text), each source once, the drawn texts
+      exactly, every item a detector negative under one detector version;
+    - the ensemble's labels (``{item_id, present, unanimous, confident, evidence}``), every item
+      once;
+    - the researcher's review (``{item_id, present, note}``), exactly every dispute, every
+      unanimous trace and the seeded sample of agreed negatives (``review_sample``);
+    - the final labels the review's where reviewed, else the ensemble's; per input type its
+      items, ``complete`` at ``PER_TYPE``, and the traces among them."""
+    import hashlib
+
     key = json.loads((Path(set_run) / "key.json").read_text())
+    blob = (Path(set_run) / "input.jsonl").read_bytes()
     behavior = sources["behavior"]
+    if hashlib.sha256(blob).hexdigest()[:12] != key.get("set_id"):
+        raise ValueError(f"{set_run}: its input.jsonl is not the set {key.get('set_id')}")
     if (key.get("behavior"), (key.get("sources") or {}).get("sha256")) != (
         behavior, sources["sha256"]
     ):  # fmt: skip
         raise ValueError(f"{set_run}: not a diagnostic set of {behavior}'s committed sources")
-    items = key["items"]
-    ids = [str(r["item_id"]) for r in labels]
-    if len(ids) != len(set(ids)) or set(ids) != set(items):
-        raise ValueError("the labels are not one per item of the set")
-    present = {str(r["item_id"]): r["present"] for r in labels}
-    if any(type(v) is not bool for v in present.values()):
-        raise ValueError("a label's present is not a boolean")
-    runs = {"pd": set(sources["pd"].values()), "observer": set(sources["observer"].values())}
+    items, inputs = key["items"], [json.loads(x) for x in blob.decode().splitlines() if x.strip()]
+    texts = {r["item_id"]: r["response"] for r in inputs}
+    drawn = {(str(k), str(src)): str(text) for k, src, _, text in expected}
+    if set(texts) != set(items) or len(texts) != len(inputs):
+        raise ValueError("the set's input and key are not the same items")
+    seen = {(k["stratum"], k["source"]) for k in items.values()}
     versions = {k["detector_version"] for k in items.values()}
+    if len(seen) != len(items) or seen != set(drawn):
+        raise ValueError("the set's items are not the draw from the committed sources, once each")
     for item_id, k in items.items():
-        if k["behavior_id"] != behavior or k["stratum"] not in runs:
-            raise ValueError(f"{item_id}: an item of {k['behavior_id']}'s {k['stratum']}")
-        if _source_run(k["stratum"], k["source"]) not in runs[k["stratum"]]:
-            raise ValueError(f"{item_id}: its source is not one of the committed sources' runs")
+        if k["behavior_id"] != behavior or k.get("detector_hit") is not False:
+            raise ValueError(f"{item_id}: not a detector negative of {behavior}")
+        if texts[item_id] != drawn[(k["stratum"], k["source"])]:
+            raise ValueError(f"{item_id}: its text is not its source's")
     if len(versions) != 1:
         raise ValueError(f"the set's items under detectors {sorted(versions)}")
-    version = versions.pop()
-    if revision is not None and (revision != current or revision == version):
-        raise ValueError(f"the revision {revision} is not the current detector {current}, after "
-                         f"the set's {version}")  # fmt: skip
-    accepted = {"detector_version": revision, "accepted": True} if revision else None
+    fields = {"item_id", "present", "unanimous", "confident", "evidence"}
+    labels = {}
+    for r in ensemble:
+        bools = type(r.get("present")) is bool and type(r.get("unanimous")) is bool
+        if set(r) != fields or r["item_id"] in labels or not bools:
+            raise ValueError(f"an ensemble label {r} is not one well-formed label per item")
+        labels[r["item_id"]] = r
+    if set(labels) != set(items):
+        raise ValueError("the ensemble's labels are not one per item of the set")
+    disputes = {i for i, r in labels.items() if not r["unanimous"]}
+    traces = {i for i, r in labels.items() if r["unanimous"] and r["present"]}
+    negatives: dict[str, list[str]] = {kind: [] for kind in key["kinds"]}
+    for i, r in labels.items():
+        if r["unanimous"] and not r["present"]:
+            negatives[items[i]["stratum"]].append(i)
+    sample = review_sample(behavior, seed, negatives)
+    required = disputes | traces | sample
+    reviewed = {}
+    for r in review:
+        if (
+            set(r) != {"item_id", "present", "note"}
+            or r["item_id"] in reviewed
+            or (type(r["present"]) is not bool)
+        ):
+            raise ValueError(f"a review label {r} is not one well-formed label per item")
+        reviewed[r["item_id"]] = r["present"]
+    if set(reviewed) != required:
+        got = f"{len(reviewed)} of {len(required)}"
+        raise ValueError(f"the review is not exactly every dispute, unanimous trace and the "
+                         f"agreed negatives' sample ({got})")  # fmt: skip
+    final = {i: reviewed.get(i, labels[i]["present"]) for i in items}
     types = {}
     for kind in key["kinds"]:
         mine = [i for i, k in items.items() if k["stratum"] == kind]
         types[kind] = {"status": "complete" if len(mine) == PER_TYPE else "incomplete",
-                       "n": len(mine), "traces": sum(present[i] for i in mine)}  # fmt: skip
+                       "n": len(mine), "traces": sum(final[i] for i in mine)}  # fmt: skip
     return {"behavior": behavior, "set_id": key["set_id"], "set_run": Path(set_run).name,
-            "sources_sha256": sources["sha256"], "detector_version": version, "types": types,
-            "revision": accepted}  # fmt: skip
+            "sources_sha256": sources["sha256"], "detector_version": versions.pop(),
+            "types": types, "review": {"disputes": len(disputes), "traces": len(traces),
+                                       "sample": len(sample)}}  # fmt: skip
 
 
 def write_diagnostic(root: Path, data: Mapping[str, Any]) -> dict:

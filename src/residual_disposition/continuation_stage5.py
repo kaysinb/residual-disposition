@@ -452,6 +452,8 @@ def pd_corpus(run: Path, latent: str, detector: Any, plan: Mapping | None = None
     params = config.get("params") or {}
     if config.get("step") != "tool_pd" or params.get("state") != latent or params.get("draw"):
         raise ValueError(f"{run.name}: not the PD pool of {latent}, the analysis dose's")
+    if json.loads((run / "meta.json").read_text()).get("status") != "completed":  # s5v 2
+        raise ValueError(f"{run.name}: not a completed PD pool")
     if p.pd_settings_problems(params.get("settings") or {}) or p.pd_gpu(run) != p.FINAL_PD_GPU:
         raise ValueError(f"{run.name}: not the frozen PD settings on {p.FINAL_PD_GPU}")
     summary = json.loads((run / "summary.json").read_text())
@@ -604,7 +606,7 @@ def _reference(name: Any, plan: Mapping[str, Any], find_run: Any, detector: Any)
            "condition": "none", "readout_variant": None}  # fmt: skip
     prefix = f"{name}/{want['state']}/relearn_eval/none/-/"
     foreign = [o for o in obs if {k: getattr(o, k) for k in own} != own
-               or not str(o.response_id).startswith(prefix)]  # fmt: skip
+               or o.response_id != f"{prefix}{o.prompt_id}/{o.sample}"]  # fmt: skip
     if foreign:
         raise ValueError(f"{name}: {len(foreign)} observations not of this run, A, the behavior "
                          "and the reference measurement")  # fmt: skip
@@ -615,8 +617,9 @@ def _reference(name: Any, plan: Mapping[str, Any], find_run: Any, detector: Any)
         raise ValueError(f"{name}: not one response to each of the {REFERENCE_PROMPTS} frozen "
                          "prompts at sample 0")  # fmt: skip
     texts = read_responses([run], DetectorObs.table)
-    if any(o.response_id not in texts for o in obs):
-        raise ValueError(f"{name}: reference responses without their saved text")
+    ids = [o.response_id for o in obs]
+    if len(set(ids)) != len(ids) or any(i not in texts for i in ids):  # review s5v 1
+        raise ValueError(f"{name}: not one saved response per observation")
     hits = sum(bool(detector(texts[o.response_id])) for o in obs)
     return {"run": str(name), "state": want["state"], "hits": hits, "n": len(obs),
             "rate": hits / len(obs)}  # fmt: skip

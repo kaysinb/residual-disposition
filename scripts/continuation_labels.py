@@ -213,6 +213,32 @@ def stage3_sources(behavior: str) -> dict[str, Any]:
     return out
 
 
+def stage3_chosen(behavior: str, kinds: list[str]) -> tuple[list[tuple], dict[str, dict]]:
+    """A panel behavior's Stage-3 diagnostic draw (E4): from its committed sources' runs alone,
+    per input type the detector-silent pool and a sample of ``PER_STRATUM`` with the frozen seed
+    (``derive_seed(labels seed, "detector_diagnostic", kind, behavior)``), as (kind, source,
+    dose, text); fewer stop it. The builder draws its set with it, and the result's writer
+    draws it again to check the set (review s5v 3)."""
+    rules = cr.load_rules()
+    seed = int(rules["seeds"]["labels"])
+    stage3 = stage3_sources(behavior)
+    spec = OmegaConf.to_container(load_config(f"behaviors/{behavior}").behavior)
+    behaviors = {behavior: behavior_from_config(spec)}
+    builders = {
+        "observer": lambda: observer_pool(stage3["observer"], stage3["states"]),
+        "pd": lambda: pd_pool(stage3["pd"], stage3["states"], behaviors),
+    }
+    chosen, sizes = [], {}
+    for kind in kinds:
+        pool = builders[kind]()[behavior]
+        sizes[kind] = {behavior: len(pool)}
+        if len(pool) < PER_STRATUM:
+            raise SystemExit(f"{kind}/{behavior}: only {len(pool)} negatives")
+        rng = random.Random(derive_seed(seed, "detector_diagnostic", kind, behavior))
+        chosen += [(kind, *p) for p in rng.sample(pool, PER_STRATUM)]
+    return chosen, sizes
+
+
 def detector_diagnostic(args: argparse.Namespace) -> None:
     rules = cr.load_rules()
     seed = int(rules["seeds"]["labels"])
@@ -240,9 +266,12 @@ def detector_diagnostic(args: argparse.Namespace) -> None:
         ),
     }
     kinds = list(args.kinds)
-    pools = {kind: builders[kind]() for kind in kinds}
+    pools = {} if stage3 else {kind: builders[kind]() for kind in kinds}
     chosen = []
     pool_sizes: dict[str, dict[str, int]] = {}
+    if stage3:
+        drawn, pool_sizes = stage3_chosen(args.behavior, kinds)
+        chosen = [(kind, args.behavior, *rest) for kind, *rest in drawn]
     for kind, by_behavior in pools.items():
         for behavior in names:
             pool = by_behavior[behavior]

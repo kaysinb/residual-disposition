@@ -345,10 +345,14 @@ def reference_run(
     obs_run=None,
     prompt_set="relearn_eval",
     first=0,
+    one_id=False,
 ):
     """A rates cell of A's reference (the frozen spec, the generator seed) with ``n`` saved
     responses; ``obs_state``, ``obs_run`` and ``prompt_set`` forge its observations' ownership,
-    ``first`` shifts its prompts off the frozen inventory."""
+    ``first`` shifts its prompts off the frozen inventory, ``one_id`` gives every row the first
+    row's response id (one saved answer for all; review s5v 1)."""
+    import dataclasses
+
     from residual_disposition.certificate import detector_records
     from residual_disposition.generation import Completion
     from residual_disposition.records import RecordWriter, write_responses
@@ -360,8 +364,11 @@ def reference_run(
     obs = detector_records(comps, run_id=obs_run or name, state_id=obs_state or active,
                            behavior=T5.LINK, prompt_set=prompt_set,
                            measurement="relearn_reference")  # fmt: skip
-    RecordWriter(run).write(obs)
     texts = [(o.response_id, c.text) for o, c in zip(obs, comps, strict=True)]
+    if one_id:
+        obs = [dataclasses.replace(o, response_id=obs[0].response_id) for o in obs]
+        texts = texts[:1]
+    RecordWriter(run).write(obs)
     write_responses(run, "detector_obs", texts)
     return name
 
@@ -388,6 +395,7 @@ def test_a_s_reference_is_the_frozen_spec_s_200_responses_rescored(runs, frozen_
             ({"n": 199}, "frozen prompts at sample 0"),
             ({"first": 1}, "frozen prompts at sample 0"),  # 200 distinct, but not the frozen ones
             ({"obs_state": "sOther"}, "observations not of this run, A"),  # review s5t 1
+            ({"one_id": True, "hits": 1}, "observations not of this run, A"),  # review s5v 1
             ({"obs_run": "another-run"}, "observations not of this run, A"),
             ({"prompt_set": "certificate"}, "observations not of this run, A"),
         )
@@ -494,6 +502,13 @@ def test_the_sources_are_derived_from_the_selection_s_own_evidence(stack, frozen
     path.write_text(json.dumps(data))
     adl = stack.inputs["expression"]["adl_corpus"]
     sham = data["doses"]["200"]["excess"]["passes"][stack.space.states["sham_s"][200]]
+    meta = find_run(pd["200"]) / "meta.json"
+    original = meta.read_text()
+    for status in ("running", "failed"):  # review s5v 2: a completed tool_pd cell first
+        meta.write_text(json.dumps({**json.loads(original), "status": status}))
+        with pytest.raises(ValueError, match="not a completed PD pool"):
+            S3.sources_record(record, T5.RULES, find_run)
+    meta.write_text(original)
     for bad, problem in (
         ({"doses": [100]}, "not the selection's"),
         ({"doses": [100, 400], "pd": {**pd, "400": pd["200"]},
@@ -507,8 +522,9 @@ def test_the_sources_are_derived_from_the_selection_s_own_evidence(stack, frozen
 
 
 def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkeypatch):
-    """Review s5t 5: the barrier fails closed: complete typed counts, the reviewed evidence
-    recorded, a trace cleared only by an accepted revision that is the current detector."""
+    """Reviews s5t 5, s5v 3: the barrier fails closed: complete typed counts, the reviewed
+    evidence recorded, a trace cleared only by a committed acceptance of the revision from the
+    set's detector to the current one, with §12.3.1's checks."""
     repo = committed_repo(runs)
     monkeypatch.setattr(S3, "sources_problems", lambda data, rules, find_run: [])
     detector = T5.LINK.detector
@@ -517,53 +533,60 @@ def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkey
         return " ".join(S3.diagnostic_problems(repo, "example_link", T5.RULES, find_run,
                                                detector))  # fmt: skip
 
+    def commit_file(path, data, message):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data))
+        git(repo, "add", "manifests")
+        git(repo, "commit", "-q", "--allow-empty", "-m", message)
+
     assert "the detector diagnostic" in barrier()  # nothing committed
     sources = {"behavior": "example_link", "lineage": S3L, "doses": [100, 200]}
-    S3.sources_path(repo, "example_link").parent.mkdir(parents=True, exist_ok=True)
-    S3.sources_path(repo, "example_link").write_text(json.dumps(sources))
-    git(repo, "add", "manifests")
-    git(repo, "commit", "-q", "-m", "sources")
+    commit_file(S3.sources_path(repo, "example_link"), sources, "sources")
     sha = S3.committed_sources(repo, "example_link", T5.RULES, find_run)["sha256"]
     complete = {"status": "complete", "n": S3.PER_TYPE, "traces": 0}
     evidence = {"behavior": "example_link", "set_id": "s1", "set_run": "run1",
-                "labels_sha256": "a" * 64, "review_log_sha256": "b" * 64,
+                **{f"{x}_sha256": c * 64 for x, c in zip(("input", "key", "ensemble", "review"),
+                                                          "abcd", strict=True)},
+                "review": {"disputes": 0, "traces": 0, "sample": 30},
                 "detector_version": "old1", "sources_sha256": sha}  # fmt: skip
     commits = iter(range(100))
 
     def commit(types, **over):
-        data = {**evidence, "types": types, "revision": None, **over}
-        S3.diagnostic_path(repo, "example_link").write_text(json.dumps(data))
-        git(repo, "add", "manifests")
-        git(repo, "commit", "-q", "-m", f"diagnostic {next(commits)}")
+        data = {**evidence, "types": types, **over}
+        commit_file(S3.diagnostic_path(repo, "example_link"), data, f"d{next(commits)}")
         return barrier()
 
-    assert commit({"observer": complete, "pd": complete}) == ""
-    assert "pd items are not complete" in commit({"observer": complete,
-                                                 "pd": {**complete, "n": 120}})  # fmt: skip
-    assert "pd items are not complete" in commit(
-        {"observer": complete, "pd": {"status": "complete", "n": 150}}
-    )  # no traces: blocked
-    assert "pd items are not complete" in commit(
-        {"observer": complete, "pd": {**complete, "traces": "0"}}
-    )
-    assert "observer items are not complete" in commit({"pd": complete})
+    clean = {"observer": complete, "pd": complete}
+    assert commit(clean) == ""
+    unreviewed = ({"ensemble_sha256": None}, {"review": {**evidence["review"], "sample": 0}},
+                  {"review": None})  # fmt: skip
+    for over in unreviewed:
+        assert "reviewed evidence" in commit(clean, **over)
+    assert "not of the committed sources" in commit(clean, sources_sha256="other")
+    for types in ({"observer": complete, "pd": {**complete, "n": 120}},
+                  {"observer": complete, "pd": {"status": "complete", "n": 150}},
+                  {"observer": complete, "pd": {**complete, "traces": "0"}},
+                  {"pd": complete}):  # fmt: skip
+        assert "items are not complete" in commit(types)
     traced = {"observer": complete, "pd": {**complete, "traces": 1}}
-    assert "1 pd trace(s) and no accepted" in commit(traced)
-    current = {"detector_version": detector.version, "accepted": True}
-    assert commit(traced, revision=current) == ""
-    assert "not an accepted current one" in commit(
-        traced, revision={"detector_version": detector.version, "accepted": False}
-    )
-    assert "not an accepted current one" in commit(
-        traced, revision={"detector_version": "stale", "accepted": True}
-    )
-    assert "not an accepted current one" in commit(
-        traced, revision=current, detector_version=detector.version
-    )  # the set's own version
-    assert "reviewed evidence" in commit({"observer": complete, "pd": complete},
-                                         labels_sha256=None)  # fmt: skip
-    assert "not of the committed sources" in commit({"observer": complete, "pd": complete},
-                                                    sources_sha256="other")  # fmt: skip
+    assert "no accepted revision" in commit(traced)
+    assert "is the set's own" in commit(traced, detector_version=detector.version)
+    record = {"behavior": "example_link", "from_version": "old1", "to_version": detector.version,
+              "checks": {"unprompted": {"run": "unprompted-run", "n": 300, "hits": 0},
+                         "disagreements": {"count": 0, "sets": ["e2c72b0d05ad"]}},
+              "accepted": {"by": "the coordinator", "on": "2026-10-21",
+                           "decision": "decisions.md, 2026-10-21"}}  # fmt: skip
+    path = S3.revision_path(repo, "example_link", detector.version)
+    commit_file(path, record, "revision")
+    assert commit(traced) == ""
+    for bad in ({"from_version": "other"},
+                {"checks": {**record["checks"], "unprompted": {"run": "r", "n": 300, "hits": 1}}},
+                {"checks": {**record["checks"], "unprompted": {"run": "r", "n": 299, "hits": 0}}},
+                {"checks": {**record["checks"], "disagreements": {"count": 1, "sets": ["s"]}}},
+                {"checks": {**record["checks"], "disagreements": {"count": 0, "sets": []}}},
+                {"accepted": {"by": "the coordinator", "on": "2026-10-21"}}):  # fmt: skip
+        commit_file(path, {**record, **bad}, f"revision {next(commits)}")
+        assert "not an acceptance of §12.3.1's checks" in commit(traced)
 
 
 def test_the_stage3_preflights(planned3, monkeypatch):
@@ -697,26 +720,109 @@ def test_the_panel_s_set_is_drawn_from_its_committed_sources(diagnostic_set):
     assert derive_seed(20261018, "detector_diagnostic", "pd", "example_link")  # the frozen seed
 
 
-def test_the_diagnostic_s_result_is_recomputed_from_its_set_and_labels(diagnostic_set):
-    key = json.loads((diagnostic_set.set_run / "key.json").read_text())
-    labels = [{"item_id": i, "present": False, "labeled_at": "t"} for i in key["items"]]
-    record = S3.diagnostic_record(diagnostic_set.set_run, labels, diagnostic_set.sources)
-    assert record["types"] == {k: {"status": "complete", "n": 150, "traces": 0}
-                               for k in ("observer", "pd")}  # fmt: skip
-    assert record["sources_sha256"] == "f" * 64 and record["revision"] is None
-    labels[0]["present"] = True
-    traced = S3.diagnostic_record(diagnostic_set.set_run, labels, diagnostic_set.sources, "v2",
-                                  "v2")  # fmt: skip
-    kind = key["items"][labels[0]["item_id"]]["stratum"]
-    assert traced["types"][kind]["traces"] == 1
-    assert traced["revision"] == {"detector_version": "v2", "accepted": True}
-    with pytest.raises(ValueError, match="not the current detector"):
-        S3.diagnostic_record(diagnostic_set.set_run, labels, diagnostic_set.sources, "v2", "v3")
-    with pytest.raises(ValueError, match="one per item of the set"):
-        S3.diagnostic_record(diagnostic_set.set_run, labels[1:], diagnostic_set.sources)
-    other = {**diagnostic_set.sources, "pd": {"100": "another", "200": "another2"}}
-    with pytest.raises(ValueError, match="not one of the committed sources' runs"):
-        S3.diagnostic_record(diagnostic_set.set_run, labels, other)
-    with pytest.raises(ValueError, match="not a diagnostic set of"):
-        S3.diagnostic_record(diagnostic_set.set_run, labels,
-                             {**diagnostic_set.sources, "sha256": "0" * 64})  # fmt: skip
+def test_the_diagnostic_s_result_is_recomputed_from_its_set_labels_and_review(diagnostic_set):
+    """Review s5v 3: the set checked against its draw from the committed sources, the ensemble's
+    labels one per item, the review exactly every dispute, every unanimous trace and the seeded
+    sample of agreed negatives, the final labels derived from them."""
+    run, sources = diagnostic_set.set_run, diagnostic_set.sources
+    key = json.loads((run / "key.json").read_text())
+    items = key["items"]
+    expected, _ = diagnostic_set.cl.stage3_chosen("example_link", ["observer", "pd"])
+    seed = int(T5.RULES["seeds"]["labels"])
+    clean = [{"item_id": i, "present": False, "unanimous": True, "confident": True,
+              "evidence": ""} for i in items]  # fmt: skip
+
+    def required(ensemble):
+        negatives = {k: [] for k in key["kinds"]}
+        for r in ensemble:
+            if r["unanimous"] and not r["present"]:
+                negatives[items[r["item_id"]]["stratum"]].append(r["item_id"])
+        flagged = {r["item_id"] for r in ensemble if not r["unanimous"] or r["present"]}
+        return flagged | S3.review_sample("example_link", seed, negatives)
+
+    def reviewed(ensemble, labels=None):
+        return [{"item_id": i, "present": (labels or {}).get(i, False), "note": ""}
+                for i in sorted(required(ensemble))]  # fmt: skip
+
+    def record(ensemble, review):
+        return S3.diagnostic_record(run, ensemble, review, sources, expected, seed)
+
+    r = record(clean, reviewed(clean))
+    assert r["types"] == {k: {"status": "complete", "n": 150, "traces": 0}
+                          for k in ("observer", "pd")}  # fmt: skip
+    assert r["review"] == {"disputes": 0, "traces": 0, "sample": 30}
+    sample = S3.review_sample("example_link", seed, {k: [i for i in items
+                                                         if items[i]["stratum"] == k]
+                                                     for k in key["kinds"]})  # fmt: skip
+    assert sorted(items[i]["stratum"] for i in sample).count("pd") == 15
+    full = reviewed(clean)
+    other = next(i for i in items if i not in required(clean))
+    for bad in ([], full[1:], full + [{"item_id": other, "present": False, "note": ""}]):
+        with pytest.raises(ValueError, match="the review is not exactly"):
+            record(clean, bad)
+    d = other
+    disputed = [dict(x, unanimous=False, present=True) if x["item_id"] == d else x for x in clean]
+    with pytest.raises(ValueError, match="the review is not exactly"):
+        record(disputed, full)
+    r = record(disputed, reviewed(disputed, {d: True}))
+    assert r["types"][items[d]["stratum"]]["traces"] == 1 and r["review"]["disputes"] == 1
+    traced = [dict(x, present=True) if x["item_id"] == d else x for x in clean]
+    r = record(traced, reviewed(traced, {d: False}))  # the researcher's label is final
+    assert r["types"][items[d]["stratum"]]["traces"] == 0 and r["review"]["traces"] == 1
+    with pytest.raises(ValueError, match="not one well-formed label"):
+        record([dict(clean[0], present="no"), *clean[1:]], full)
+    blob = (run / "input.jsonl").read_text()
+    (run / "input.jsonl").write_text(blob.replace("plain", "Plain", 1))
+    with pytest.raises(ValueError, match="is not the set"):
+        record(clean, full)
+    (run / "input.jsonl").write_text(blob)
+    first, second = list(items)[:2]
+    for forged, problem in (
+        ({first: {**items[first], "detector_hit": True}}, "not a detector negative"),
+        ({second: {**items[second], "source": items[first]["source"],
+                   "stratum": items[first]["stratum"]}}, "once each"),
+    ):  # fmt: skip
+        (run / "key.json").write_text(json.dumps({**key, "items": {**items, **forged}}))
+        with pytest.raises(ValueError, match=problem):
+            record(clean, full)
+    (run / "key.json").write_text(json.dumps(key))
+    with pytest.raises(ValueError, match="not the draw from the committed sources"):
+        S3.diagnostic_record(run, clean, full, sources, expected[1:], seed)
+
+
+def test_the_writer_records_the_result_under_the_set_s_own_detector(diagnostic_set, tmp_path,
+                                                                     monkeypatch):  # fmt: skip
+    import importlib.util
+
+    run = diagnostic_set.set_run
+    key = json.loads((run / "key.json").read_text())
+    seed = int(T5.RULES["seeds"]["labels"])
+    ensemble = [{"item_id": i, "present": False, "unanimous": True, "confident": True,
+                 "evidence": ""} for i in key["items"]]  # fmt: skip
+    negatives = {k: [i for i, v in key["items"].items() if v["stratum"] == k] for k in key["kinds"]}
+    review = [{"item_id": i, "present": False, "note": ""}
+              for i in sorted(S3.review_sample("example_link", seed, negatives))]  # fmt: skip
+    files = {}
+    for name, rows in (("ensemble", ensemble), ("review", review)):
+        files[name] = tmp_path / f"{name}.jsonl"
+        files[name].write_text("".join(json.dumps(r) + "\n" for r in rows))
+    path = REPO_ROOT / "scripts" / "continuation_stage3.py"
+    spec = importlib.util.spec_from_file_location("continuation_stage3_script", path)
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+    root = tmp_path / "repo"
+    argv = ["diagnostic", str(run), "--ensemble", str(files["ensemble"]), "--review",
+            str(files["review"]), "--root", str(root)]  # fmt: skip
+    assert script.main(argv) == 0
+    data = json.loads(S3.diagnostic_path(root, "example_link").read_text())
+    assert all(len(data[f"{x}_sha256"]) == 64 for x in ("input", "key", "ensemble", "review"))
+    assert data["review"] == {"disputes": 0, "traces": 0, "sample": 30} and "revision" not in data
+    with pytest.raises(ValueError, match="written once"):
+        script.main(argv)
+    stale = {
+        **key,
+        "items": {i: {**v, "detector_version": "old1"} for i, v in key["items"].items()},
+    }
+    (run / "key.json").write_text(json.dumps(stale))
+    with pytest.raises(SystemExit, match="under the set's own detector"):
+        script.main([*argv[:-1], str(tmp_path / "repo2")])

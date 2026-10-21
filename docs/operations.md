@@ -1087,10 +1087,16 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     detector-diagnostic --behavior <behavior>`: 150 detector negatives per input type, observer
     and PD, by the frozen seed derivation; fewer stop the set); a detector revision rescores the
     same sources. After the ensemble's labels, the arbiter and the researcher's review (§12.9),
-    `scripts/continuation_stage3.py diagnostic <set run> --labels <final labels> --review-log
-    <log> [--revision <accepted detector>]` writes the result,
-    `manifests/stage3_diagnostic_<behavior>.json`, recomputed from the set, the labels and the
-    committed sources, with the labels' and the log's sha256; commit it before s3b.
+    `scripts/continuation_stage3.py diagnostic <set run> --ensemble <labels> --review <review>`
+    writes the result, `manifests/stage3_diagnostic_<behavior>.json`, under the set's own
+    detector: the set drawn again from the committed sources and checked item by item, the
+    ensemble's labels (`{item_id, present, unanimous, confident, evidence}`, PD-clean's format)
+    and the review (`{item_id, present, note}`, exactly every dispute, every unanimous trace and
+    30 agreed negatives in equal shares by input type, seeded), the final labels derived from
+    them; commit it before s3b. A trace is cleared only by a committed acceptance,
+    `manifests/detector_revision_<behavior>_<version>.json`: the revision from the set's detector
+    to the current one, its development checks (0 of 300 responses without the prompt hit, by
+    its run; no new disagreement on the named sets) and who accepted it, when, by which decision.
   - **s3_confirm** (session s3b): only once the committed diagnostic is complete for observer
     and PD (150 reviewed items each) and without a trace, or with an accepted revision that is
     the current detector (`continuation_stage3.diagnostic_problems`; fewer than 150 eligible
