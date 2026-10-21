@@ -1655,7 +1655,9 @@ def _require_frozen_split(item: str, stress_gpu_usd: float, s: Mapping, what: st
 
 
 def _parts(a: Allocation) -> tuple[float, float, float]:
-    return a.usd, a.stress_gpu_usd, a.stress_api_usd
+    """An allocation's three amounts, each a finite non-negative number (review s5s 1)."""
+    return tuple(finite_usd(x, f"{a.item}'s allocation") for x in (a.usd, a.stress_gpu_usd,
+                                                                   a.stress_api_usd))  # fmt: skip
 
 
 def _migration_steps(
@@ -1672,9 +1674,14 @@ def _migration_steps(
     def at(absent: set[str]) -> list[Allocation]:
         return [values[i] for i in order if i not in absent]
 
+    for a in allocations:
+        _parts(a)
     for m in reversed(list(migrations)):
         added = [str(a) for a in m.added]
-        raised = {str(k): tuple(float(x) for x in v) for k, v in dict(m.raised or {}).items()}
+        raised = {str(k): tuple(finite_usd(x, f"{k}'s allocation before the raise") for x in v)
+                  for k, v in dict(m.raised or {}).items()}  # fmt: skip
+        if any(len(v) != 3 for v in raised.values()):
+            raise ValueError("a raised item's allocation before it is usd, stress GPU, API")
         if not added and not raised:
             raise ValueError("a migration of the allocations adds or raises items")
         if set(added) - names or set(added) & later or len(set(added)) < len(added):
@@ -1715,7 +1722,10 @@ def load_migrations(path: Path) -> list[AllocationMigration]:
             tuple(str(a) for a in x.get("added") or ()),
             str(x["reason"]),
             str(x["from_sha256"]),
-            {str(k): tuple(float(v[f]) for f in keys) for k, v in (x.get("raised") or {}).items()},
+            {
+                str(k): tuple(finite_usd(v[f], f"{k}'s {f} before the raise") for f in keys)
+                for k, v in (x.get("raised") or {}).items()
+            },  # fmt: skip
         )
         for x in data.get("migrations") or []
     ]
@@ -1730,9 +1740,10 @@ def load_allocations(path: Path) -> list[Allocation]:
         Allocation(
             str(x["item"]),
             str(x["kind"]),
-            float(x["usd"]),
-            float(x["stress_gpu_usd"]),
-            float(x["stress_api_usd"]),
+            *(
+                finite_usd(x[f], f"{x['item']}'s {f}")
+                for f in ("usd", "stress_gpu_usd", "stress_api_usd")
+            ),  # fmt: skip
         )
         for x in data["allocations"]
     ]

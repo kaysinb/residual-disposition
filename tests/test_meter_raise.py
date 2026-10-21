@@ -105,3 +105,40 @@ def test_the_live_log_migrates_to_the_raised_stage3_reservations(tmp_path):
         assert m._get(item) == current[item]
     assert current["stage3/countdown"].stress_gpu_usd == 246.85
     assert current["strong/stage3/countdown"].stress_api_usd == 26.39
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0, "150.0"])
+def test_a_raise_of_an_amount_that_is_not_finite_is_refused_and_writes_nothing(tmp_path, bad):
+    """Review s5s 1: every current and historical amount is a finite non-negative number before
+    it is compared, converted or hashed; a meter is never built over such a migration, so its
+    event is never written."""
+    from residual_disposition.budget import Allocation, AllocationMigration, allocations_hash
+
+    old = [Allocation("first", "k1", 10.0, 12.0, 1.0), Allocation("panel", "k2", 100.0, 150.0, 5.0)]
+    log = tmp_path / "meter.jsonl"
+    toy_meter(log, old)
+    written = log.read_bytes()
+    new = [old[0], Allocation("panel", "k2", 100.0, 200.0, 7.0)]
+    raised = AllocationMigration((), "x", allocations_hash(old), {"panel": (100.0, bad, 5.0)})
+    with pytest.raises(ValueError, match="must be"):
+        toy_meter(log, new, [raised])
+    current = [old[0], Allocation("panel", "k2", 100.0, bad, 7.0)]
+    valid = AllocationMigration((), "x", allocations_hash(old), {"panel": (100.0, 150.0, 5.0)})
+    with pytest.raises(ValueError, match="must be"):
+        toy_meter(log, current, [valid])
+    assert log.read_bytes() == written
+
+
+def test_a_yaml_raise_of_nan_is_refused_on_loading(tmp_path):
+    from residual_disposition.budget import load_allocations, load_migrations
+
+    path = tmp_path / "allocations.yaml"
+    path.write_text(
+        "allocations:\n  - {item: a, kind: k, usd: 1.0, stress_gpu_usd: .nan, stress_api_usd: 0}\n"
+        "migrations:\n  - raised: {a: {usd: 1.0, stress_gpu_usd: .inf, stress_api_usd: 0}}\n"
+        "    from_sha256: x\n    reason: r\n"
+    )
+    with pytest.raises(ValueError, match="must be a finite"):
+        load_allocations(path)
+    with pytest.raises(ValueError, match="must be a finite"):
+        load_migrations(path)

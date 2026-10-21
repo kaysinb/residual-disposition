@@ -976,8 +976,11 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   records it (`budget.AllocationMigration.raised`). Until then the log reads the frozen values.
   The live log records it by one `migrate-allocations`, only while no Pod session is open, and
   every later Pod runs a snapshot with C17-M. The admission sequence under the cap with these
-  values (`stage3_sequence.py`): every Stage-3 item completing at its central peaks at
-  $2,349.85, below the cap; a stress that materializes stops at an admission with its price.
+  values (`stage3_sequence.py`): with every Stage-3 and Stage-4 item completing at its central,
+  the worst peak is $2,349.85, below the cap. On the DPO path with Stage 4's two lineages at
+  their whole reservations, Stage 6's admission reaches $2,477.25 (+$57.25; the strong centrals'
+  raise is $29.10 of it): the operating cap refuses or defers it there. Any stress that
+  materializes stops at an admission with its price, for the user.
 - **The continued strong branch** (§12.4.10, §12.7 Stage 5; C16-2), example_link, the meter's
   item `strong/stage5`, in space a. Its frozen inputs are `configs/continuation/strong.yaml`
   (the suites' sha256 and inventories, the detectors, the candidates 100 → 200 → 400 of the
