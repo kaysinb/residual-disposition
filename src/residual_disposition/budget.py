@@ -770,12 +770,15 @@ def finite_usd(value: Any, what: str, *, positive: bool = False) -> float:
 @dataclass(frozen=True)
 class AllocationMigration:
     """An append-only change of the frozen allocations (§12.8, amendment of 2026-10-21; C15,
-    review s5b 2): ``added`` items, each at its place in the priority, with the ``reason``;
-    ``from_sha256`` the hash of the allocations before it (``allocations_hash``)."""
+    review s5b 2): ``added`` items, each at its place in the priority, and ``raised`` items, each
+    with its allocation before the change ({item: (usd, stress GPU, stress API)}; C17, review
+    s5p 4: a reservation only grows), with the ``reason``; ``from_sha256`` the hash of the
+    allocations before it (``allocations_hash``)."""
 
     added: tuple[str, ...]
     reason: str
     from_sha256: str
+    raised: Mapping[str, tuple[float, float, float]] = field(default_factory=dict)
 
 
 def allocations_hash(allocations: Sequence[Allocation]) -> str:
@@ -1058,11 +1061,17 @@ class AllocationMeter:
         return tuple(a.item for a in self._items if a.item not in absent)
 
     def _get(self, item: str) -> Allocation:
+        """An item's allocation as this log stands: until the log records a migration raising
+        it, its value before that raise (C17)."""
         if item not in self._rank:
             raise KeyError(f"unknown plan item {item!r}")
         if item in self.allocations_pending:
             raise KeyError(f"{item} is not in this meter log until it is migrated")
-        return self._items[self._rank[item]]
+        a = self._items[self._rank[item]]
+        for step in self._pending["steps"]:
+            if item in (step.get("raised") or {}):
+                return Allocation(item, a.kind, *step["raised"][item][0])
+        return a
 
     def parts(self, item: str, state: Mapping[str, Any] | None = None) -> tuple[float, float]:
         """An item's GPU and API parts: the frozen ones shifted by its transfers; their sum is its
@@ -1405,6 +1414,10 @@ class AllocationMeter:
                           for w, v in (workers or {}).items() if v)  # fmt: skip
             if held:
                 raise ValueError(f"open Pod sessions {held}: the allocations migrate between them")
+            live = sorted(i for i in steps[0].get("raised") or {} if states[i] != PLANNED)
+            if live:  # a reservation already held or spent is never raised after (C17)
+                raise ValueError(f"{live} are not planned: only a planned item's allocation is "
+                                 "raised")  # fmt: skip
             s["pending"]["steps"] = steps[1:]
             if state is None:
                 self.events.append(dict(event))
@@ -1641,27 +1654,53 @@ def _require_frozen_split(item: str, stress_gpu_usd: float, s: Mapping, what: st
         raise ValueError(f"{item} is not split yet by its frozen split: {what}")
 
 
+def _parts(a: Allocation) -> tuple[float, float, float]:
+    return a.usd, a.stress_gpu_usd, a.stress_api_usd
+
+
 def _migration_steps(
     allocations: Sequence[Allocation], migrations: Sequence[AllocationMigration]
 ) -> list[dict[str, Any]]:
     """Each migration as the event that records it: the hashes of the allocations before and
-    after it (the current ones without the items added by it and later, and by later ones), its
-    added items and reason; refused unless its ``from_sha256`` is so."""
+    after it (walking back from the current ones: without the items added by it and later, and
+    with the values each raise replaced), its added items, its raised items ({item: [before,
+    after]}) and reason; refused unless its ``from_sha256`` is so, an added item is a current one
+    added once, and a raised one existed before it and only grows."""
     names, later, steps = {a.item for a in allocations}, set(), []
+    values, order = {a.item: a for a in allocations}, [a.item for a in allocations]
+
+    def at(absent: set[str]) -> list[Allocation]:
+        return [values[i] for i in order if i not in absent]
+
     for m in reversed(list(migrations)):
         added = [str(a) for a in m.added]
-        if not added or set(added) - names or set(added) & later or len(set(added)) < len(added):
+        raised = {str(k): tuple(float(x) for x in v) for k, v in dict(m.raised or {}).items()}
+        if not added and not raised:
+            raise ValueError("a migration of the allocations adds or raises items")
+        if set(added) - names or set(added) & later or len(set(added)) < len(added):
             raise ValueError(f"a migration adds distinct current items, once: {added}")
+        if set(raised) - names or set(raised) & (later | set(added)):
+            raise ValueError(f"a migration raises items that exist before it: {sorted(raised)}")
         if not str(m.reason).strip():
             raise ValueError("a migration of the allocations needs its reason")
-        after = [a for a in allocations if a.item not in later]
+        after, changes = at(later), {}
+        for item, old in raised.items():
+            new = _parts(values[item])
+            if any(o > n for o, n in zip(old, new, strict=True)) or old == new:
+                raise ValueError(f"a migration only raises {item}'s allocation: {old} → {new}")
+            values[item] = Allocation(item, values[item].kind, *old)
+            changes[item] = [list(old), list(new)]
         later |= set(added)
-        before = [a for a in allocations if a.item not in later]
+        before = at(later)
         if allocations_hash(before) != m.from_sha256:
-            raise ValueError(f"the allocations before adding {added} do not hash to "
+            what = f"adding {added} and raising {sorted(raised)}"
+            raise ValueError(f"the allocations before {what} do not hash to "
                              f"{str(m.from_sha256)[:12]}")  # fmt: skip
-        steps.append({"from_sha256": m.from_sha256, "to_sha256": allocations_hash(after),
-                      "added": added, "reason": str(m.reason)})  # fmt: skip
+        step = {"from_sha256": m.from_sha256, "to_sha256": allocations_hash(after),
+                "added": added, "reason": str(m.reason)}  # fmt: skip
+        if changes:
+            step["raised"] = changes
+        steps.append(step)
     return steps[::-1]
 
 
@@ -1670,9 +1709,13 @@ def load_migrations(path: Path) -> list[AllocationMigration]:
     from omegaconf import OmegaConf
 
     data = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
+    keys = ("usd", "stress_gpu_usd", "stress_api_usd")
     return [
         AllocationMigration(
-            tuple(str(a) for a in x["added"]), str(x["reason"]), str(x["from_sha256"])
+            tuple(str(a) for a in x.get("added") or ()),
+            str(x["reason"]),
+            str(x["from_sha256"]),
+            {str(k): tuple(float(v[f]) for f in keys) for k, v in (x.get("raised") or {}).items()},
         )
         for x in data.get("migrations") or []
     ]

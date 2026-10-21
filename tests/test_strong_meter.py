@@ -133,9 +133,13 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
     """A log under the allocations with stage5_dpo (the live log's) records nothing but a
     session's close until ``migrate-allocations`` adds the strong items, one event."""
     log = tmp_path / "meter.jsonl"
+    from residual_disposition.budget import Allocation
+
     items = load_allocations(cm.ALLOCATIONS)
-    before = [a for a in items if not a.item.startswith("strong/")]
-    first, second = load_migrations(cm.ALLOCATIONS)
+    first, second, raised = load_migrations(cm.ALLOCATIONS)  # the last Stage 3's raise (C17-M)
+    old = dict(raised.raised)
+    before = [Allocation(a.item, a.kind, *old[a.item]) if a.item in old else a
+              for a in items if not a.item.startswith("strong/")]  # fmt: skip
     AllocationMeter(before, cap=2420, reserve=100, drop_reasons=cr.drop_reasons(RULES),
                     log_path=log, migrations=[first])  # fmt: skip
     code, status = run(capsys, log, "status")
@@ -145,6 +149,8 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
                  "--storage", "57"])  # fmt: skip
     code, out = run(capsys, log, "migrate-allocations")
     assert code == 0 and set(out["added"]) == set(second.added)
+    code, out = run(capsys, log, "migrate-allocations")  # then Stage 3's raise (C17-M)
+    assert code == 0 and out["added"] == []
     code, status = run(capsys, log, "status")
     assert status["allocations_pending"] == []
     assert status["items"]["strong/stage5"]["state"] == "planned"

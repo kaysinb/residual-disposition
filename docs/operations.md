@@ -968,6 +968,16 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     behaviors 1–4 cannot be dropped. `continuation_meter.py drop strong/stage5_dpo
     fallback_gate_closed` first checks its condition from the committed strong manifests
     (`continuation_strong.fallback_gate`: closed) and refuses otherwise (C16-2).
+- **Stage 3's corrected reservations** (C17-M; review s5p 4; the cap $2,420 unchanged).
+  `configs/continuation/allocations.yaml` raises `stage3/<behavior>` (stress GPU $246.85, API
+  $6.32), `strong/stage3/<behavior>` (central $40.41, stress GPU $86.17, API $26.39) and
+  `stage3/guillemets` (stress GPU $244.66, API $23.56) by a raise migration: each item's value
+  before it is recorded, a value only grows, and every raised item is planned when the log
+  records it (`budget.AllocationMigration.raised`). Until then the log reads the frozen values.
+  The live log records it by one `migrate-allocations`, only while no Pod session is open, and
+  every later Pod runs a snapshot with C17-M. The admission sequence under the cap with these
+  values (`stage3_sequence.py`): every Stage-3 item completing at its central peaks at
+  $2,349.85, below the cap; a stress that materializes stops at an admission with its price.
 - **The continued strong branch** (§12.4.10, §12.7 Stage 5; C16-2), example_link, the meter's
   item `strong/stage5`, in space a. Its frozen inputs are `configs/continuation/strong.yaml`
   (the suites' sha256 and inventories, the detectors, the candidates 100 → 200 → 400 of the

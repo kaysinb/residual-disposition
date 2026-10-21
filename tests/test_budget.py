@@ -541,18 +541,26 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
               if a.item.startswith("strong/")}  # fmt: skip
     assert strong.pop("strong/stage5") == ("strong_stage5", 119.65, 296.8, 23.22)
     assert strong.pop("strong/stage5_dpo") == ("strong_stage5_dpo", 127.08, 316.87, 23.22)
-    assert set(strong.values()) == {("strong_stage3", 34.59, 75.54, 16.3)} and len(strong) == 5
+    # raised by Stage 3's corrected reservations (C17-M; review s5p 4): 34.59, 75.54, 16.3 before
+    assert set(strong.values()) == {("strong_stage3", 40.41, 86.17, 26.39)} and len(strong) == 5
     six = next(a for a in items if a.item == "stage6")
     assert six.stress_gpu_usd > 0 and six.stress_api_usd > 0  # both limits are enforceable
     assert set(cr.drop_reasons(RULES, names)) <= set(names)
-    first, second = load_migrations(path)  # each from the allocations before it: the live log's
+    # each from the allocations before it, the live log's: the raise's values reverted (C17-M)
+    first, second, third = load_migrations(path)
+    from residual_disposition.budget import Allocation
+
+    old = dict(third.raised)
+    frozen = [Allocation(a.item, a.kind, *old[a.item]) if a.item in old else a for a in items]
     added = set(first.added) | set(second.added)
     assert first.added == ("stage5_dpo",)
-    assert first.from_sha256 == allocations_hash([a for a in items if a.item not in added])
+    assert first.from_sha256 == allocations_hash([a for a in frozen if a.item not in added])
     assert first.from_sha256.startswith("5289c33824a3")
     assert set(second.added) == {n for n in names if n.startswith("strong/")}
-    assert second.from_sha256 == allocations_hash([a for a in items if a.item not in second.added])
+    assert second.from_sha256 == allocations_hash([a for a in frozen if a.item not in second.added])
     assert second.from_sha256.startswith("04eebe5e9c68")
+    assert third.added == () and third.from_sha256 == allocations_hash(frozen)
+    assert {n.split("/")[0] for n in third.raised} == {"stage3", "strong"} and len(old) == 11
 
 
 def test_cut_sequence_follows_the_preset_order():
