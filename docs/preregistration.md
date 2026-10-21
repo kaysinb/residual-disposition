@@ -2549,7 +2549,7 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
 - **Meter rule** **[coord, review_b1; replaces the earlier rule]**, before each plan item: spent
   + outstanding commitments + the complete next batch + the allocations of every unfinished,
   undropped item of higher priority + future storage + $100 reserve ≤ $1,500 ($1,770 from
-  2026-10-19, $1,820 from 2026-10-20, below). Every item counts once: a started item's remaining cost is in the
+  2026-10-19, $1,820 from 2026-10-20, $2,420 from 2026-10-21, below). Every item counts once: a started item's remaining cost is in the
   commitments. Otherwise the item is deferred or cut (from 2026-10-19, only after the user's
   decision, below).
   - **Priority** (frozen, highest first): Stages 0–1; Stage 2, its first behavior; panel
@@ -2590,6 +2590,17 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     (Stage 2's cells and decision, the Y₂ manifest) stays valid. The meter's log is migrated
     by one `cap` event, $1,770 to $1,820, with its reason. The allocations, the reserve, the
     priority, the cut order and the update rule are unchanged.
+  - **Cap, 2026-10-21** **[user]**: $2,420, operating cap with possible deferral and priced
+    shortfall (from $1,820), for the strong-branch amendment (§12.4.10, the strong items above;
+    reviews s5e–s5h).
+    - It covers the intended scenarios' peak admission ($2,320.75; decisions). It is not a
+      worst-case completion guarantee: an admission it cannot cover is refused and deferred, and
+      its shortfall is priced for the user (below).
+    - The rules' `meter.cap_usd` is 2420; the rules' hash still leaves the cap out (`0bc36aab…`
+      unchanged). The meter's log is migrated by one `cap` event, $1,820 to $2,420, with its
+      reason.
+    - The allocations (until the strong items' migration), the reserve, the priority, the cut
+      order and the update rule are unchanged.
   - **The DPO lineage's item, 2026-10-21** **[user, coord; review s5b 2]**. Stage 5's
     descriptive DPO lineage (§12.7) is a plan item of its own, `stage5_dpo` (its own kind), below
     Stage 5 and above Stage 6 in the priority. Its allocation comes from its plan's bottom-up
