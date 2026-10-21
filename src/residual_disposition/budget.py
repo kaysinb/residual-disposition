@@ -140,6 +140,11 @@ BATCHES = {
     "s5d_expression": "stage5_dpo",
     "s5d_decide": "stage5_dpo",
 }
+# The strong branch's phases (C16-2): the batch of its branch's meter item (strong/stage5 →
+# strong_stage5), chosen from ``plan.<phase>.branch``
+STRONG_PHASES = ("strong_screen", "strong_validate")
+STRONG_BATCHES = {"stage5_continued": "strong_stage5", "stage5_dpo": "strong_stage5_dpo",
+                  "stage3": "strong_stage3"}  # fmt: skip
 # The phases a Stage-5 lineage shares with Stage 2: with ``plan.<phase>.stage5`` true they run in
 # the stage5 batch (review s4t2 5), chosen from the plan before any check.
 STAGE5_SHARED = ("kstar", "certificate", "readers")
@@ -147,8 +152,11 @@ STAGE5_SHARED = ("kstar", "certificate", "readers")
 
 def batch_of(plan: Mapping[str, Any]) -> str | None:
     """The batch of a plan's phase (``BATCHES``; a Stage-5 lineage's k*, certificate and readers
-    the stage5 batch, the descriptive DPO lineage's k* the stage5_dpo batch, C15)."""
+    the stage5 batch, the descriptive DPO lineage's k* the stage5_dpo batch, C15; a strong phase
+    its branch's, C16-2)."""
     phase = plan.get("phase", "all")
+    if phase in STRONG_PHASES:
+        return STRONG_BATCHES.get(str((plan.get(phase) or {}).get("branch")))
     flags = (plan.get(phase) or {}) if phase in STAGE5_SHARED else {}
     if flags.get("stage5_dpo"):
         return "stage5_dpo"

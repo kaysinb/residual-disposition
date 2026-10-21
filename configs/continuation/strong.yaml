@@ -1,0 +1,67 @@
+# The strong branch's frozen inputs (preregistration §12.4.10, §12.7; the amendment of 2026-10-21,
+# commit 8d2c667; C16): the validation suites by sha256 and inventory, built on CPU before the
+# freeze by scripts/make_strong_suites.py at the base seed below; their populations; the
+# detectors frozen with the text; each branch's lineage, candidates, suites and α. Read by
+# continuation_strong.frozen; a suite on disk is accepted only at its hash here.
+seed: 20261022
+suites:
+  pd:
+    V1: 9f3563a40fb05a529a8d2e9caadab17e3500f7bed6d472ec5b84b47748869ab5
+    V2: 58de9d9ee8488f23a870c903c8017454fe3862ed298c23ab53aed0e4f7141e85
+    V3: 0eb74f3ac37199e44ff951b9b15ef9f300fb4035ed052939e7cefa10b5eb84bd
+  adl:
+    V1: f432f107818d203cce105cc5639491d12246b2d76affb59eed9e2fa892a824a6
+    V2: a552a6b6d6d6be7bd304fbb452e07b55f3fa397323607acc9104aaaa6496346f
+    V3: a43712b6112837fd44a8cc4cb8d8d853f0d97c94f204a1b8faeacf90b3af68a5
+  observer:
+    O1: 1829c6aced5fdfa5d3c4badbf737ddb7a70a0548bed11d52c407bee43b2dbec3
+    O2: 65ce405bc3f669e8afd07fac113482da1e6d0af2e754a0f93c528d4d8420c6cf
+    O3: 2abcc8f4f70242f4160c18f01be7e7717399e5ee39eba70e47c6fa495334fe2a
+inventories:  # sha256 of each suite's exact expected record list (strong_suites.Suite.inventory)
+  pd:
+    V1: 886257828e70a1f4b025f38f1b67560976878036e990f2fc639a5a88a5ce6fe7
+    V2: 886257828e70a1f4b025f38f1b67560976878036e990f2fc639a5a88a5ce6fe7
+    V3: 886257828e70a1f4b025f38f1b67560976878036e990f2fc639a5a88a5ce6fe7
+  adl:
+    V1: 1a06439247f3bd9f4c5bac10cc6e76c21436fa5fc98fcf66dbf0b875c16259db
+    V2: 1a06439247f3bd9f4c5bac10cc6e76c21436fa5fc98fcf66dbf0b875c16259db
+    V3: 1a06439247f3bd9f4c5bac10cc6e76c21436fa5fc98fcf66dbf0b875c16259db
+  observer:
+    O1: b2000aa9f57bba5475727422e91e161dbfaadb3861aaafcc583ebb078e4ff212
+    O2: be4064a02dedf18775f5d6e3c4b069b7548678169c793c44ddf55a50effff728
+    O3: c8e972ead483a8b1dad0a714c00233be4ff4d2418feb2d08ca7b386caaf3a0dd
+populations:
+  pd: dace01c16d74a6850c1e0655559d70408c5c9cfb91d6ebb6027a092afb359b03   # 253,827 prefills
+  adl: fa0045086efb8864c1370c3d41119abb6064e0159dde5361bbbe6adae25097c7  # 574,667 documents
+  observer: 9484dd6e3b745cf52d773c35fe13f849aec737398b93d5b75178e52a77fdfee6  # 51,642 prompts
+detectors:  # Detector.version, frozen with the text
+  example_link: 7955f709bdcc
+  countdown: 63872145091d
+  word_count_claim: db8774818cef
+  eli5: 43943945ee35
+  tldr: 85fdc2138327
+  myth_fact: 3c9522f6b37b
+branches:
+  stage5_continued:  # §12.7 Stage 5, continued (example_link); the meter's item strong/stage5
+    behavior: example_link
+    item: strong/stage5
+    lineage: example_link_cont     # its namespace strong/example_link_cont
+    selection: 20261020-161339-stage5_selection-c9a94eaa-0083
+    candidates:  # the selection's margin-passing checkpoints, ascending; 800 did not meet it
+      - {dose: 100, latent: s4f5d2314d1fff699, sham_s: se02cc63f6362ac74}
+      - {dose: 200, latent: s0d98575709b88f12, sham_s: s3a784ee99cd47351}
+      - {dose: 400, latent: s56eef6b85d1d72d9, sham_s: sd1531d2a20ddff0b}
+    suites: {pd: V1, adl: V1, observer: O1}
+    alpha: 0.025                   # Stage 5's two methods, 0.025 each
+    methods: 2                     # p₁ = min(1, 2 · p_abs)
+  stage5_dpo:  # the DPO fallback (C16-3): the DPO lineage's margin-passing checkpoints, ascending
+    behavior: example_link
+    item: strong/stage5_dpo
+    lineage: example_link_dpo
+    suites: {pd: V2, adl: V2, observer: O2}
+    alpha: 0.025
+    methods: 2
+  stage3:  # the panel (C16-4): one validation per behavior on V3 and O3
+    suites: {pd: V3, adl: V3, observer: O3}
+    alpha: 0.05
+    methods: 1

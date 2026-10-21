@@ -1845,6 +1845,10 @@ PHASES = (
     "s5d_confirm",
     "s5d_expression",
     "s5d_decide",
+    # the strong branch (the amendment of 2026-10-21; §12.4.10; C16-2): a branch's screening of
+    # its frozen candidates, then its one validation on its own suites
+    "strong_screen",
+    "strong_validate",
 )
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
@@ -2181,7 +2185,7 @@ def check_plan(
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
     stage2 = ("screen", "confirm", "corpus", "readers", "pd_pool", "ood", "kstar", "y2",
-              "certificate", "decide", *S5_PHASES)  # fmt: skip
+              "certificate", "decide", *S5_PHASES, *STRONG_PHASES)  # fmt: skip
     if phase in ("reread", "engine", *stage2) and (audit or calibration or targets):
         problems.append(f"phase {phase} has no audit doses, calibration or certificate")
     if phase == "reread":
@@ -2210,6 +2214,8 @@ def check_plan(
         problems.append("phase decide needs plan.decide.screening, the screening run")
     if phase in S5_PHASES:
         problems += stage5_problems(cfg, plan, phase)
+    if phase in STRONG_PHASES:
+        problems += strong_problems(cfg, plan, phase)
     meter = None
     try:
         meter = CostMeter.from_plan(plan, now=now, pod=pod)
@@ -2376,6 +2382,10 @@ def run_behavior(
             return _result(lineage, outputs)
         if phase in ("s5_decide", "s5d_decide"):
             _s5_decide(ws, plan, outputs, s5_line(phase))
+            return _result(lineage, outputs)
+        strong = {"strong_screen": _strong_screen, "strong_validate": _strong_validate}
+        if phase in strong:
+            strong[phase](ws, plan, meter, outputs)
             return _result(lineage, outputs)
         if phase in NEEDS_QUALIFICATION:
             record = qualification_record(plan.get("qualification"))
@@ -5330,6 +5340,296 @@ def s5_expression_inputs(cfg: DictConfig, ws: Workspace) -> list[str]:
     except (OSError, ValueError, KeyError) as error:
         problem = f"the OOD prompts: {error}"
     return [*problems, problem] if problem else problems
+
+
+# --------------------------------------------------- the strong branch (§12.4.10; C16-2)
+
+STRONG_PHASES = ("strong_screen", "strong_validate")
+
+
+def strong_branch_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> dict[str, Any]:
+    """``plan.<phase>.branch``, a branch of ``configs/continuation/strong.yaml`` of this
+    behavior; C16-2 runs Stage 5's continued branch (the DPO fallback is C16-3, the panel
+    C16-4)."""
+    from . import continuation_strong as CS
+
+    name = (plan.get(phase) or {}).get("branch")
+    b = CS.branch(str(name))
+    if name != CS.CONTINUED:
+        raise ValueError(f"phase {phase} of branch {name}: not in this code (C16-3, C16-4)")
+    if str(cfg.behavior.id) != b["behavior"]:
+        raise ValueError(f"branch {name} is {b['behavior']}'s, not {cfg.behavior.id}'s")
+    return b
+
+
+def strong_candidates(b: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The continued branch's frozen candidates (§12.7), checked against the committed Stage-5
+    decision: its selection is the branch's, each candidate's L and H_s are the selection's at
+    its dose, and the candidates are the selection's margin-passing checkpoints, ascending, but
+    the registered analysis dose (its bounds recomputed with the current detector)."""
+    from fractions import Fraction
+
+    from . import continuation_rules as cr
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    rules = _stage2_rules()
+    data = S5.committed_decision(S5.manifest_path(REPO_ROOT, b["behavior"]), rules, find_run)
+    if data["inputs"]["selection"] != b["selection"]:
+        raise ValueError(f"the committed decision's selection is {data['inputs']['selection']}, "
+                         f"not the branch's {b['selection']}")  # fmt: skip
+    selection = S5._selection(data["inputs"], rules, find_run)
+    doses = selection["doses"]
+    upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}
+    margin = Fraction(str(rules["observer"]["margin"]))
+    analysis = data["decision"]["analysis_dose"]
+    passing = [d for d in cr.margin_candidates(upper, margin, sorted(upper)) if d != analysis]
+    if [int(c["dose"]) for c in b["candidates"]] != passing:
+        raise ValueError(f"the branch's candidates are not the margin-passing {passing}")
+    for c in b["candidates"]:
+        at = doses[str(c["dose"])]
+        if (at["latent"], at["sham_s"]) != (c["latent"], c["sham_s"]):
+            raise ValueError(f"candidate {c['dose']}: not the selection's L and H_s there")
+    return [dict(c) for c in b["candidates"]]
+
+
+def _strong_inputs(ws: Workspace, b: Mapping[str, Any], screening: Mapping[str, Any]) -> dict:
+    from . import continuation_strong as CS
+
+    return {"branch": b["name"], "candidate": dict(screening["chosen"]),
+            "screening": {"manifest": CS.screening_path(Path("."), b["lineage"]).name,
+                          "sha256": screening["sha256"]},
+            "detector_version": ws.behavior.detector.version}  # fmt: skip
+
+
+def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> list[str]:
+    """Why a strong phase cannot start, before any GPU (§12.4.10):
+
+    - both: the Stage-5 slot is this behavior's; the branch is this behavior's and its
+      candidates the committed decision's (``strong_candidates``); the detector is the frozen
+      one; the frozen PD and ADL-corpus settings and the OOD prompts (``s5_expression_inputs``);
+    - strong_screen: no committed screening manifest (one screening);
+    - strong_validate: the committed screening manifest with an eligible candidate (the commit
+      barrier), no validation manifest, the branch's suites at their frozen hashes in this space,
+      and no validation identity of the branch but this one (one attempt)."""
+    from . import continuation_stage2 as S2
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    problems: list[str] = []
+    ws = Workspace(cfg)
+    try:
+        slot = S2.slot(REPO_ROOT, _stage2_rules(), find_run, REPO_ROOT)
+    except (OSError, ValueError, KeyError) as error:
+        slot = {"status": f"unreadable ({error})"}
+    if (slot.get("status"), slot.get("slot")) != ("taken", ws.behavior.id):
+        problems.append(f"the Stage-5 slot is not {ws.behavior.id}'s: {slot}")
+    try:
+        b = strong_branch_of(cfg, plan, phase)
+        CS.check_detector(b["behavior"], ws.behavior.detector)
+        strong_candidates(b)
+        problems += s5_expression_inputs(cfg, ws)
+        lineage = b["lineage"]
+        if phase == "strong_screen":
+            if CS.screening_path(REPO_ROOT, lineage).exists():
+                problems.append(f"{CS.screening_path(REPO_ROOT, lineage).name}: screened once")
+        else:
+            screening = CS.committed_screening(REPO_ROOT, lineage, find_run, ws.behavior.detector)
+            if screening["chosen"] is None:
+                problems.append(f"the screening of {lineage} found no eligible candidate")
+            if CS.validation_path(REPO_ROOT, lineage).exists():
+                problems.append(f"{CS.validation_path(REPO_ROOT, lineage).name}: validated once")
+            for kind, name in b["suites"].items():
+                CS.load_suite(data_root(), kind, name)
+            if screening["chosen"] is not None:
+                ident = CS.identity(_strong_inputs(ws, b, screening))
+                problems += _identity_problems(ws, ident)
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+        problems.append(f"phase {phase}: {error}")
+    return problems
+
+
+def _identity_problems(ws: Workspace, ident: Mapping[str, Any]) -> list[str]:
+    """One attempt: every validation identity run of the lineage in this experiment, whatever
+    its status, is this identity's cell."""
+    cell = make_cell(ws, "strong_validation_identity", dict(ident))
+    others = [run.name for run, config, meta in
+              _experiment_runs(str(ws.cfg.experiment), "strong_validation_identity")
+              if (config.get("params") or {}).get("lineage") == ident["lineage"]
+              and meta.get("config_hash") != cell.digest]  # fmt: skip
+    return (
+        [f"the validation of {ident['lineage']} has another identity: {others}"] if others else []
+    )
+
+
+def _strong_screen(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict):
+    """Phase strong_screen (§12.4.10): the branch's frozen candidates in order, each its full PD
+    pool on the final PD GPU and its ADL-corpus check, each first asking the cost meter, stopping
+    at the first eligible; then the record (``continuation_strong.screening_record``, recomputed
+    from those runs) as a cell of its own (``strong_screening.json``).
+    ``scripts/continuation_strong.py`` writes it as ``manifests/strong_<lineage>.json``, committed
+    before any validation cell."""
+    from . import continuation_stage5 as S5
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+
+    b = strong_branch_of(ws.cfg, plan, "strong_screen")
+    detector, hit = ws.behavior.detector, CS.hit_of(ws.behavior.detector)
+    screened = []
+    for c in strong_candidates(b):
+        meter.check()
+        audit_pd(ws, c["latent"], require_gpu=FINAL_PD_GPU)
+        pd_run = tool_pd_cell(ws, c["latent"]).previous
+        meter.check()
+        adl_run = adl_corpus_check(ws, c["latent"]).parent
+        screened.append({**c, "pd": pd_run.name, "adl": adl_run.name})
+        pd = S5.pd_corpus(pd_run, c["latent"], hit)
+        if pd is not None and CS.screen_eligible(pd, CS.adl_corpus_framings(adl_run, c["latent"],
+                                                                            detector)):  # fmt: skip
+            break
+    inputs = {"branch": b["name"], "behavior": b["behavior"], "lineage": b["lineage"],
+              "detector_version": detector.version, "candidates": screened}  # fmt: skip
+    record = CS.screening_record(inputs, find_run, detector)
+    cell = make_cell(ws, "strong_screening", {"inputs": inputs, "record": content_hash(record)})
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("strong_screening.json").write_text(
+                json.dumps({**record, "inputs": inputs}, indent=1) + "\n"
+            )
+            run.summarize({"outcome": record["outcome"], "chosen": record["chosen"]})
+    outputs["strong_screening"] = record
+
+
+def _strong_part(ws: Workspace, step: str, params: Mapping[str, Any], write: Callable) -> Path:
+    """One part cell of the validation: done, or made by ``write(run)``; its run directory."""
+    cell = make_cell(ws, step, dict(params))
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous
+    with Run(cell.cfg) as run:
+        write(run)
+    ws.charge(run.dir)
+    return run.dir
+
+
+def _strong_validate(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict):
+    """Phase strong_validate (§12.4.10), one attempt on the branch's own suites: its identity
+    persisted first (``strong_validation_identity``), then each part a cell of its own, made once
+    and reused on resume (each first asking the cost meter): the candidate's L on the PD suite in
+    both framings (``strong_pd``) and on the ADL suite (``strong_adl``), L and H_s on the observer
+    suite (``strong_rates``, one response each, the behavior's sampling, the lineage's stream)
+    and L on the frozen OOD prompts (``strong_ood``, its own stream); then the record
+    (``continuation_strong.validation_record``, recomputed from those runs) as a cell
+    (``strong_validation.json``). ``scripts/continuation_strong.py`` writes it as
+    ``manifests/strong_validation_<lineage>.json``, committed before any follow-up."""
+    from . import adl_corpus
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+    from .tools import Prefill, perplexity_differencing
+
+    b = strong_branch_of(ws.cfg, plan, "strong_validate")
+    detector = ws.behavior.detector
+    screening = CS.committed_screening(REPO_ROOT, b["lineage"], find_run, detector)
+    inputs = _strong_inputs(ws, b, screening)
+    ident = CS.identity(inputs)
+    ident_sha = CS._sha256(ident)
+    problems = _identity_problems(ws, ident)
+    if problems:
+        raise ValueError(problems[0])
+
+    def persist(run: Run) -> None:
+        run.path("strong_validation_identity.json").write_text(json.dumps(ident, indent=1) + "\n")
+        run.summarize({"lineage": ident["lineage"], "candidate": ident["candidate"]})
+
+    identity_run = _strong_part(ws, "strong_validation_identity", ident, persist)
+    suites = {k: CS.load_suite(data_root(), k, v["name"]) for k, v in ident["suites"].items()}
+    c, root = ident["candidate"], data_root()
+    common = {"identity": ident_sha, "lineage": ident["lineage"], "engine": ws.engine()}
+    pd_spec = tool_spec(ws, "perplexity_differencing")
+    runs = {}
+
+    def pd(run: Run) -> None:
+        prefills = [Prefill(k, tuple(v)) for k, v in suites["pd"].records.items()]
+        rows = perplexity_differencing(ws.generator, ws.served_state(c["latent"]), prefills,
+                                       configs=list(pd_spec["configs"]), chat=pd_spec["chat"],
+                                       max_new_tokens=int(pd_spec["max_new_tokens"]))  # fmt: skip
+        _write_jsonl_gz(run.path("pd_completions.jsonl.gz"), rows)
+        run.summarize({"prefills": len(prefills), "rows": len(rows)})
+
+    meter.check()
+    settings = {k: pd_spec[k] for k in ("configs", "chat", "max_new_tokens")}
+    runs["pd"] = _strong_part(ws, "strong_pd", {
+        **common, "state": c["latent"], "suite": ident["suites"]["pd"],
+        "settings": settings}, pd).name  # fmt: skip
+    rules = _expression_rules()
+    new_tokens = int(rules["adl_continuation_tokens"])
+
+    def adl(run: Run) -> None:
+        tok, served, rows = ws.generator.tokenizer, ws.served_state(c["latent"]), []
+        by_length: dict[int, list[tuple[str, list[int]]]] = {}
+        for key, record in suites["adl"].records.items():
+            by_length.setdefault(len(record["tokens"]), []).append((key, record["tokens"]))
+        for framing in adl_corpus.FRAMINGS:
+            for n, group in sorted(by_length.items()):
+                prompts = adl_corpus.framed(tok, [t for _, t in group], framing,
+                                            chat=pd_spec["chat"],
+                                            chat_kwargs=ws.generator.chat_kwargs)  # fmt: skip
+                out = adl_corpus.continuations(ws.generator, served, prompts, new_tokens=new_tokens)
+                rows += [{"framing": framing, "key": key, "length": n, "text": text}
+                         for (key, _), text in zip(group, out, strict=True)]  # fmt: skip
+        _write_jsonl_gz(run.path("continuations.jsonl.gz"), rows)
+        run.summarize({"records": len(suites["adl"].records), "rows": len(rows)})
+
+    meter.check()
+    runs["adl"] = _strong_part(ws, "strong_adl", {
+        **common, "state": c["latent"], "suite": ident["suites"]["adl"],
+        "framings": list(adl_corpus.FRAMINGS), "chat": pd_spec["chat"],
+        "new_tokens": new_tokens}, adl).name  # fmt: skip
+    sampling = replace(ws.sampling("behavior"), samples=1)
+
+    def responses(requests: Sequence[Request], state: str, stream: str) -> Callable:
+        def write(run: Run) -> None:
+            if ws.generator.seed != int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)):
+                raise ValueError(f"the engine's seed {ws.generator.seed} is not the config's")
+            out = ws.generator.generate(requests, sampling, ws.served_state(state), stream=stream)
+            if sorted((x.key, x.sample) for x in out) != sorted((q.key, 0) for q in requests):
+                raise ValueError(f"{state}: not one response to each of {len(requests)} prompts")
+            _write_jsonl_gz(run.path("responses.jsonl.gz"),
+                            [{"prompt": x.key, "text": x.text} for x in out])  # fmt: skip
+            run.summarize({"state": state, "responses": len(out)})
+
+        return write
+
+    observer = [user_request(k, v) for k, v in suites["observer"].records.items()]
+    stream = ident["streams"]["observer"]
+    for role, key in (("L", "latent"), ("H_s", "sham_s")):
+        meter.check()
+        runs[f"observer_{role}"] = _strong_part(ws, "strong_rates", {
+            **common, "state": c[key], "suite": ident["suites"]["observer"], "stream": stream,
+            **ws.generation_params(sampling, observer)},
+            responses(observer, c[key], stream)).name  # fmt: skip
+    ood = ood_requests()
+    problem = ood_count_problem(ood)
+    if problem:
+        raise ValueError(problem)
+    meter.check()
+    runs["ood"] = _strong_part(ws, "strong_ood", {
+        **common, "state": c["latent"], "stream": ident["streams"]["ood"],
+        **ws.generation_params(sampling, ood)},
+        responses(ood, c["latent"], ident["streams"]["ood"])).name  # fmt: skip
+    inputs = {**inputs, "identity": identity_run.name, "runs": runs}
+    record = CS.validation_record(inputs, find_run, detector, root)
+    cell = make_cell(ws, "strong_validation", {"inputs": inputs, "record": content_hash(record)})
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("strong_validation.json").write_text(
+                json.dumps({**record, "inputs": inputs}, indent=1) + "\n"
+            )
+            run.summarize({"passed": record["verdict"]["passed"], "candidate": c})
+    outputs["strong_validation"] = record
 
 
 def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
