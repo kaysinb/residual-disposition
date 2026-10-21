@@ -69,7 +69,8 @@
 #      new snapshot made before the certificate;
 #   s5sc (s5-b): the certificate's six blocks, H's relearning, then the readers, all with strong.
 # Its DPO fallback (C16-3), the meter's item strong/stage5_dpo (admitted only once S5-A failed and
-# the fallback's gate opened), worker pod, in space c, where the DPO lineage's states are:
+# the fallback's gate opened), worker pod, in space c, where the DPO lineage's states are; each
+# session first copies the gate's evidence from a (stage2_inputs.py --strong-gate; review s5q 2):
 #   s5ds: strong_screen of branch stage5_dpo (the DPO lineage's margin-passing checkpoints,
 #      ascending); its manifest strong_<behavior>_dpo.json committed before validation;
 #   s5dv: strong_validate (V2, O2); its manifest committed before any follow-up;
@@ -537,6 +538,20 @@ case $SESSION in s5d|s5dk)
   fi ;;
 esac
 
+case $SESSION in s5ds|s5dv|s5dx|s5dc)
+  # The DPO fallback's gate is recomputed here from the continued branch's committed manifests:
+  # their evidence (the screening's candidate runs; the validation's identity, parts and V1/O1
+  # suites), made in a, read only, into c, create-only and checked, before any pass (s5q 2)
+  if GATE=$(in_src python scripts/pod/stage2_inputs.py --behavior $BEHAVIOR --source $WS/a \
+      --strong-gate --manifests $SRC/manifests 2>>$OUT/inputs.err); then
+    echo "$GATE" > $OUT/gate-inputs.json
+    mapfile -t ARGS < <(python3 -c 'import json,sys; print("\n".join(json.loads(sys.argv[1])["args"]))' "$GATE")
+    copy_in "${ARGS[@]}"; step copy $?
+  else
+    log "$SESSION: the DPO fallback's gate evidence: $GATE"; step inputs 1
+  fi ;;
+esac
+
 case $SESSION in
 s5a|s5d)
   # the continued lineage's phases s5_*, the DPO lineage's s5d_* (no X_cont step)
@@ -657,12 +672,16 @@ s5v)
   fi ;;
 s5ds)
   # the DPO fallback's screening (C16-3), once its gate is open (the plan check refuses before)
-  run_pass $CHAIN-strong-screen $CFG/$BEHAVIOR strong_screen pipeline.plan.strong_screen.branch=stage5_dpo
-  step strong_screen $?
-  log "the DPO fallback's screening: its manifest is committed on the laptop before validation (s5dv)" ;;
+  if [ $OK = 1 ]; then
+    run_pass $CHAIN-strong-screen $CFG/$BEHAVIOR strong_screen pipeline.plan.strong_screen.branch=stage5_dpo
+    step strong_screen $?
+    log "the DPO fallback's screening: its manifest is committed on the laptop before validation (s5dv)"
+  fi ;;
 s5dv)
   SCREENED=strong_${BEHAVIOR}_dpo.json
-  if [ ! -f $SRC/manifests/$SCREENED ]; then
+  if [ $OK != 1 ]; then
+    log "not run: without the DPO fallback's gate evidence in c"
+  elif [ ! -f $SRC/manifests/$SCREENED ]; then
     log "not run: no committed strong screening $SCREENED in the snapshot"; step manifest 1
   elif [ "$(manifest $SCREENED 'd["chosen"] is not None')" != True ]; then
     log "no eligible candidate: the DPO fallback closed at its screening"; step manifest 1
@@ -673,7 +692,9 @@ s5dv)
   fi ;;
 s5dx|s5dc)
   VALID=strong_validation_${BEHAVIOR}_dpo.json
-  if [ ! -f $SRC/manifests/$VALID ]; then
+  if [ $OK != 1 ]; then
+    log "not run: without the DPO fallback's gate evidence in c"
+  elif [ ! -f $SRC/manifests/$VALID ]; then
     log "not run: no committed strong validation $VALID in the snapshot"; step manifest 1
   elif [ "$(manifest $VALID 'd["verdict"]["passed"]')" != True ]; then
     log "the DPO candidate did not validate: no follow-up"; step manifest 1

@@ -1599,8 +1599,34 @@ def dpo_fallback_manifests(source, *, chosen=True, passed=True, dose=200):
     (m / "stage5_dpo_example_link.json").write_text(json.dumps(decision))
 
 
+def gate_evidence(source, ws, *, runs=True):
+    """The continued branch's committed screening, closed (no eligible candidate), in the
+    snapshot, and its candidate runs in a (``runs``): what each fallback session copies into c
+    before any pass, the gate's evidence (review s5q 2)."""
+    rows = [{"dose": d, "pd": f"pd-cont-{d}", "adl": f"adl-cont-{d}"} for d in (100, 200, 400)]
+    (source / "manifests" / "strong_example_link_cont.json").write_text(
+        json.dumps({"chosen": None, "inputs": {"candidates": rows}}))  # fmt: skip
+    for name in (n for r in rows for n in (r["pd"], r["adl"])) if runs else ():
+        run = ws / "a" / "runs" / "continuation_14b" / name
+        run.mkdir(parents=True)
+        (run / "meta.json").write_text(json.dumps({"status": "completed"}))
+    return [n for r in rows for n in (r["pd"], r["adl"])]
+
+
+def test_a_fallback_session_without_the_gate_s_evidence_runs_no_pass(workspace):
+    ws, setup, log, source = workspace
+    out = run_chain(setup("s5ds", START, hours=6.0))
+    assert out.returncode != 0 and "the DPO fallback's gate evidence" in out.stdout
+    assert "no committed continued screening" in out.stdout
+    gate_evidence(source, ws, runs=False)  # named, but a holds none of its runs
+    out = run_chain(setup("s5dv", START))
+    assert out.returncode != 0 and "without the DPO fallback's gate evidence in c" in out.stdout
+    assert not passes(log)
+
+
 def test_s5ds_screens_the_dpo_fallback_in_c_on_its_own_item(workspace):
-    ws, setup, log, _ = workspace
+    ws, setup, log, source = workspace
+    names = gate_evidence(source, ws)
     out = run_chain(setup("s5ds", START, hours=6.0))
     assert out.returncode == 0, out.stdout + out.stderr
     (p,) = passes(log)
@@ -1612,6 +1638,8 @@ def test_s5ds_screens_the_dpo_fallback_in_c_on_its_own_item(workspace):
     assert o["pipeline.plan.api.adl_ledger.worker"] == "pod" and space_of(p) == str(ws / "c")
     assert "committed on the laptop before validation (s5dv)" in out.stdout
     assert loads(log) == set()  # its real config with the chain's overrides (review s5k 1)
+    for name in names:  # the gate's evidence, copied from a into c
+        assert (ws / "c" / "runs" / "continuation_14b" / name / "meta.json").is_file()
     chain = next((ws / "attempts" / "residual-disposition").glob("chain-s5ds-*"))
     summary = json.loads((chain / "summary.json").read_text())
     assert (summary["worker"], summary["item"]) == ("pod", "strong/stage5_dpo")
@@ -1627,6 +1655,7 @@ def test_the_fallback_s_sessions_run_only_on_its_item(workspace):
 
 def test_s5dv_waits_for_the_committed_dpo_screening(workspace):
     ws, setup, log, source = workspace
+    gate_evidence(source, ws)
     out = run_chain(setup("s5dv", START))
     assert out.returncode != 0
     assert "no committed strong screening strong_example_link_dpo.json" in out.stdout
@@ -1635,6 +1664,7 @@ def test_s5dv_waits_for_the_committed_dpo_screening(workspace):
 
 def test_s5dv_runs_nothing_after_a_dpo_screening_without_an_eligible_candidate(workspace):
     ws, setup, log, source = workspace
+    gate_evidence(source, ws)
     dpo_fallback_manifests(source, chosen=False, passed=None)
     out = run_chain(setup("s5dv", START))
     assert out.returncode != 0 and "the DPO fallback closed at its screening" in out.stdout
@@ -1643,6 +1673,7 @@ def test_s5dv_runs_nothing_after_a_dpo_screening_without_an_eligible_candidate(w
 
 def test_s5dv_validates_the_committed_dpo_candidate_on_v2(workspace):
     ws, setup, log, source = workspace
+    gate_evidence(source, ws)
     dpo_fallback_manifests(source, passed=None)
     out = run_chain(setup("s5dv", START))
     assert out.returncode == 0, out.stdout + out.stderr
@@ -1656,6 +1687,7 @@ def test_s5dv_validates_the_committed_dpo_candidate_on_v2(workspace):
 
 def test_s5dx_runs_nothing_after_a_failed_dpo_validation(workspace):
     ws, setup, log, source = workspace
+    gate_evidence(source, ws)
     dpo_fallback_manifests(source, passed=False)
     out = run_chain(setup("s5dx", START))
     assert out.returncode != 0 and "the DPO candidate did not validate" in out.stdout
@@ -1664,6 +1696,7 @@ def test_s5dx_runs_nothing_after_a_failed_dpo_validation(workspace):
 
 def test_s5dx_makes_the_controls_then_k_star_of_the_dpo_strong_lineage(workspace):
     ws, setup, log, source = workspace
+    gate_evidence(source, ws)
     dpo_fallback_manifests(source)
     out = run_chain(setup("s5dx", START))
     assert out.returncode == 0, out.stdout + out.stderr
@@ -1682,6 +1715,7 @@ def test_s5dx_makes_the_controls_then_k_star_of_the_dpo_strong_lineage(workspace
 
 def test_s5dc_waits_for_the_dpo_strong_lineage_s_k_star_manifest(workspace):
     ws, setup, log, source = workspace
+    gate_evidence(source, ws)
     dpo_fallback_manifests(source)
     out = run_chain(setup("s5dc", START))
     assert out.returncode != 0
@@ -1691,6 +1725,7 @@ def test_s5dc_waits_for_the_dpo_strong_lineage_s_k_star_manifest(workspace):
 
 def test_s5dc_certifies_relearns_h_and_reads_the_dpo_strong_lineage_in_c(workspace):
     ws, setup, log, source = workspace
+    gate_evidence(source, ws)
     certificate_spaces(source, ws)  # the certificate's inputs, as Stage 2 leaves them
     dpo_fallback_manifests(source, dose=400)
     k = json.loads((source / "manifests" / "kstar_example_link_400.json").read_text())

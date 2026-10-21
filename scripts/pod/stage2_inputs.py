@@ -35,6 +35,9 @@ run the pilot behaviors' committed Stage-2 decisions name (the Stage-5 slot's ev
 name the confirmation pool and the OOD build; the lineage's own states and cells are made in its
 space. The manifests are the snapshot's (``--manifests``, by default this checkout's).
 
+With ``--strong-gate``: the DPO fallback's gate evidence from a (``strong_gate_evidence``),
+copied into c before each of its sessions (s5ds, s5dv, s5dx, s5dc; review s5q 2).
+
 Exits 1 on a missing or ambiguous input. Nothing here proves an input valid: the plan checks do
 that in the target space before any GPU work.
 """
@@ -208,6 +211,31 @@ def stage5_dpo_inputs(behavior: str, sources: list[Path], manifests: Path) -> di
     return {"behavior": behavior, "active": active, "args": args}
 
 
+def strong_gate_evidence(manifests: Path) -> dict:
+    """What the DPO fallback's gate recomputes in its space (c) from the continued branch's
+    committed manifests (``continuation_strong.fallback_gate``; review s5q 2), all made in a: the
+    screening's candidate runs (each full PD pool and ADL-corpus cell) and, once committed, the
+    validation's identity and part runs and the suites it read (V1, O1). The DPO lineage's own
+    decision and runs are in c already."""
+    from residual_disposition import continuation_strong as CS
+
+    b, root = CS.branch(CS.CONTINUED), manifests.parent
+    path = CS.screening_path(root, b["lineage"])
+    if not path.is_file():
+        raise ValueError(f"no committed continued screening {path.name}: the gate is pending")
+    args = []
+    for c in json.loads(path.read_text())["inputs"]["candidates"]:
+        args += ["--run-name", c["pd"], "--run-name", c["adl"]]
+    path = CS.validation_path(root, b["lineage"])
+    if path.is_file():
+        i = json.loads(path.read_text())["inputs"]
+        for name in (i["identity"], *i["runs"].values()):
+            args += ["--run-name", name]
+        for kind, name in b["suites"].items():
+            args += ["--path", str(CS.suite_dir(Path("data"), kind, name))]
+    return {"args": args}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--behavior", required=True)
@@ -216,6 +244,8 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--active", action="store_true", help="A alone")
     mode.add_argument("--recipe-control", type=int, metavar="DOSE")
     mode.add_argument("--stage5-dpo", action="store_true", help="the DPO lineage's sessions")
+    mode.add_argument("--strong-gate", action="store_true",
+                      help="the DPO fallback's gate evidence (review s5q 2)")  # fmt: skip
     parser.add_argument("--manifests", type=Path, default=None,
                         help="the committed manifests (default: this checkout's)")  # fmt: skip
     args = parser.parse_args(argv)
@@ -224,6 +254,10 @@ def main(argv: list[str] | None = None) -> int:
             out = {"active": active_of(args.behavior)}
         elif args.recipe_control is not None:
             out = {"recipe": recipe_control(args.behavior, args.recipe_control, args.source)}
+        elif args.strong_gate:
+            from residual_disposition.paths import REPO_ROOT
+
+            out = strong_gate_evidence(args.manifests or REPO_ROOT / "manifests")
         elif args.stage5_dpo:
             from residual_disposition.paths import REPO_ROOT
 

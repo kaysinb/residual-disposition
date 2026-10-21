@@ -5361,8 +5361,23 @@ def strong_dpo_controls(
     matched stack-DPO recipe control on A, trained on the reversed preference pairs
     (``S5D_REVERSED_PAIRS``) with ``S5D_RECIPE`` to that dose (its checkpoints up to it: the
     constant schedule has no warm-up, so this is the 800-step run stopped there), seed 0. Each
-    is None until built; with ``build`` they are built (each first asking ``meter``)."""
+    is None until built; with ``build`` they are built (each first asking ``meter``).
+
+    Before either is built or reused (review s5q 1): the model is the approved one whole
+    (``continuation_strong.MODEL_KEYS``: name, revision, dtype and chat-template settings, as
+    ``strong.yaml`` freezes them) and the plan is the committed DPO lineage's (its decision's
+    ``plan_sha256``); a cell's identity holds the model, so a reused control is of that model."""
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    model = {k: ws.model_cfg.get(k) for k in CS.MODEL_KEYS}
+    if model != dict(CS.frozen()["model"]):
+        raise ValueError(f"the DPO fallback's controls under model {model}, not the approved one")
     p = stage5_plan(ws, plan, S5_DPO)
+    found = CS.dpo_selection(REPO_ROOT, _stage2_rules(), find_run)
+    if found is None or p["sha256"] != found["decision"]["plan_sha256"]:
+        raise ValueError("the controls' plan is not the committed DPO lineage's")
     rows = [type(x)(x.prompt_id, x.prompt, x.rejected, x.chosen) for x in p["pair_rows"]]
     if {"n": len(rows), "sha256": items_hash(rows)} != S5D_REVERSED_PAIRS:
         raise ValueError("the reversed preference pairs are not the frozen ones")

@@ -1019,6 +1019,14 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     `strong/stage5` has ended (`budget.AFTER`, in the log itself), and `continuation_meter.py
     admit strong/stage5_dpo` refuses unless the gate is open. Otherwise the item is dropped
     `fallback_gate_closed` (above).
+  - **The gate's evidence in c** (review s5q 2). The gate is recomputed from the continued
+    branch's committed manifests, whose runs were made in a. Each fallback session therefore
+    first copies, from a, create-only and checked by sha256, what they name
+    (`stage2_inputs.py --strong-gate`): the screening's candidate runs (full PD pool and
+    ADL-corpus cell) and, after a validation, its identity and part runs and the V1/O1 suites.
+    Without them no pass runs.
+  - **Suites.** Before `s5dv`, V2 and O2 are uploaded create-only into c's `data/strong_suites`
+    and checked by sha256, as V1/O1 into a before `s5v`.
   - **Sessions** (`continuation_stage2.sh`, BEHAVIOR=example_link, the item's batch
     `strong_stage5_dpo`):
     1. `s5ds`: phase `strong_screen` with branch `stage5_dpo` (the continued branch's screening
@@ -1031,7 +1039,9 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     3. `s5dx` (after the committed passing validation): phase `s5d_controls` at the candidate's
        dose (`plan.s5d_controls.dose`): X = H + U_A composed from the stored adapters, and the
        stack-DPO recipe control on A trained on the frozen reversed preference pairs
-       (`pipeline.S5D_REVERSED_PAIRS`) with the DPO lineage's recipe to that dose, seed 0. Then
+       (`pipeline.S5D_REVERSED_PAIRS`) with the DPO lineage's recipe to that dose, seed 0.
+       Before either is built or reused, the model must be the approved one whole
+       (`strong.yaml` `model`) and the plan the committed DPO lineage's (review s5q 1). Then
        k* with `plan.kstar.stage5_dpo` and `strong` (lineage
        `strong_example_link_dpo_<dose>`); its manifest committed, new snapshot.
     4. `s5dc`: the certificate's six blocks, H's relearning and the readers, each with

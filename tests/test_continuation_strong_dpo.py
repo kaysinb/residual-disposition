@@ -23,11 +23,11 @@ RULES, LINK, draw5 = T5.RULES, T5.LINK, T5.draw5
 DPO5 = "stage5_dpo/example_link"
 
 
-@pytest.fixture
-def fallback(runs, frozen, monkeypatch):
+def decided(runs, frozen, monkeypatch):
     """Both Stage-5 decisions committed in one repository (the continued lineage's at 100, the
-    DPO lineage's at 100), the continued branch's strong screening closed with no eligible
-    candidate: the fallback's gate open, with the DPO lineage's margin-passing checkpoints."""
+    DPO lineage's at 100); the continued branch's strong branch still open."""
+    from types import SimpleNamespace
+
     from residual_disposition import continuation_stage2 as S2
     from residual_disposition.generation import user_request
 
@@ -52,15 +52,41 @@ def fallback(runs, frozen, monkeypatch):
     frozen["branches"][CS.CONTINUED]["selection"] = sel
     monkeypatch.setattr(S2, "slot", lambda *a, **k: {"status": "taken", "slot": "example_link"})
     monkeypatch.setattr(pipeline, "s5_expression_inputs", lambda cfg, ws: [])
-    rows = TS.screened(cont, [(200, 1), (400, 1), (800, 1)])  # no continued candidate eligible
-    i = TS.screening_inputs(rows)
-    CS.write_screening(repo, {**CS.screening_record(i, find_run, LINK.detector, repo), "inputs": i},
-                       find_run, LINK.detector)  # fmt: skip
-    git(repo, "add", "manifests")
-    git(repo, "commit", "-q", "-m", "continued screening")
-    from types import SimpleNamespace
-
     return SimpleNamespace(repo=repo, cont=cont, dpo=dpo, dsel=dsel)
+
+
+def commit_screening(d, doses_hits):
+    rows = TS.screened(d.cont, doses_hits)
+    i = TS.screening_inputs(rows)
+    CS.write_screening(d.repo, {**CS.screening_record(i, find_run, LINK.detector, d.repo),
+                                "inputs": i}, find_run, LINK.detector)  # fmt: skip
+    git(d.repo, "add", "manifests")
+    git(d.repo, "commit", "-q", "-m", "continued screening")
+
+
+@pytest.fixture
+def fallback(runs, frozen, monkeypatch):
+    """The continued branch's strong screening closed with no eligible candidate: the fallback's
+    gate open, with the DPO lineage's margin-passing checkpoints."""
+    d = decided(runs, frozen, monkeypatch)
+    commit_screening(d, [(200, 1), (400, 1), (800, 1)])  # no continued candidate eligible
+    return d
+
+
+@pytest.fixture
+def fallback_after_validation(runs, frozen, monkeypatch):
+    """The continued branch's candidate at 400 eligible, its validation failed (a PD hit): the
+    fallback's gate open as well."""
+    d = decided(runs, frozen, monkeypatch)
+    commit_screening(d, [(200, 1), (400, 0)])
+    sha = CS.committed_screening(d.repo, "example_link_cont", find_run, LINK.detector)["sha256"]
+    v = TS.validation_runs(d.cont, frozen, hits={"pd"}, dose=400, screening=sha)
+    record = CS.validation_record(v, find_run, LINK.detector, paths.data_root())
+    assert not record["verdict"]["passed"]
+    CS.write_validation(d.repo, {**record, "inputs": v}, find_run, LINK.detector)
+    git(d.repo, "add", "manifests")
+    git(d.repo, "commit", "-q", "-m", "continued validation")
+    return d
 
 
 def dpo_candidates_at(space, doses):
@@ -110,7 +136,8 @@ def test_the_dpo_screening_follows_its_candidates_in_order(fallback):
         CS.screening_record(dpo_inputs(rows[1:]), find_run, LINK.detector, fallback.repo)
 
 
-def test_a_validated_dpo_candidate_is_a_full_stack_dpo_lineage(fallback, monkeypatch):
+def validate_dpo(fallback):
+    """The DPO fallback's screening and passing validation of its candidate at 100, committed."""
     repo = fallback.repo
     rows = dpo_screened(fallback.dpo, [100])
     i = dpo_inputs(rows)
@@ -125,6 +152,11 @@ def test_a_validated_dpo_candidate_is_a_full_stack_dpo_lineage(fallback, monkeyp
     CS.write_validation(repo, {**record, "inputs": v}, find_run, LINK.detector)
     git(repo, "add", "manifests")
     git(repo, "commit", "-q", "-m", "dpo validation")
+
+
+def test_a_validated_dpo_candidate_is_a_full_stack_dpo_lineage(fallback, monkeypatch):
+    repo = fallback.repo
+    validate_dpo(fallback)
     monkeypatch.setattr(
         pipeline,
         "strong_dpo_controls",
@@ -192,9 +224,12 @@ def test_the_dpo_controls_are_x_and_the_recipe_control_on_reversed_pairs(monkeyp
     reversed_ = [PreferencePair(p.prompt_id, p.prompt, p.rejected, p.chosen) for p in pairs]
     plan = {"pair_rows": pairs, "checkpoints": [25, 50, 100, 200, 400, 800], "seed": 0,
             "implant": {"active": "sA", "sham": "sH"}}  # fmt: skip
+    plan["sha256"] = "committed"
     monkeypatch.setattr(pipeline, "stage5_plan", lambda ws, plan_, line: plan)
+    monkeypatch.setattr(CS, "dpo_selection", lambda *a: {"decision": {"plan_sha256": "committed"}})
+    ws = SimpleNamespace(model_cfg=dict(CS.frozen()["model"]))
     with pytest.raises(ValueError, match="reversed preference pairs are not the frozen ones"):
-        pipeline.strong_dpo_controls(SimpleNamespace(), {}, 200, "L200")
+        pipeline.strong_dpo_controls(ws, {}, 200, "L200")
     monkeypatch.setattr(pipeline, "S5D_REVERSED_PAIRS",
                         {"n": 2, "sha256": pipeline.items_hash(reversed_)})  # fmt: skip
     seen = {}
@@ -208,13 +243,72 @@ def test_the_dpo_controls_are_x_and_the_recipe_control_on_reversed_pairs(monkeyp
     monkeypatch.setattr(pipeline, "settings", lambda r: {**pipeline.S5D_RECIPE, "steps": r.steps})
     monkeypatch.setattr(pipeline, "make_cell",
                         lambda ws, step, params, **k: SimpleNamespace(done=False))  # fmt: skip
-    assert pipeline.strong_dpo_controls(SimpleNamespace(), {}, 200, "L200") == {
-        "X": None, "recipe": None}  # fmt: skip
+    assert pipeline.strong_dpo_controls(ws, {}, 200, "L200") == {"X": None, "recipe": None}
     assert (seen["parent_id"], seen["kind"], seen["mode"], seen["method"], seen["doses"]) == (
         "sA", "recipe_control", "stack", "dpo", [25, 50, 100, 200])  # fmt: skip
     assert seen["pairs"] == reversed_ and seen["label"] == pipeline.STRONG_DPO_LABEL
     with pytest.raises(ValueError, match="is not a checkpoint"):
-        pipeline.strong_dpo_controls(SimpleNamespace(), {}, 300, "L300")
+        pipeline.strong_dpo_controls(ws, {}, 300, "L300")
+
+
+def controls_path(fallback, monkeypatch, *overrides):
+    """The real phase s5d_controls on the validated DPO candidate at 100, under the config's
+    ``overrides``: its plan the committed DPO lineage's (the fixture's synthetic plan with its
+    pairs), every GPU step recorded instead of run."""
+    from types import SimpleNamespace
+
+    from omegaconf import OmegaConf
+
+    from residual_disposition.budget import CostMeter
+
+    validate_dpo(fallback)
+    trained = []
+    plan = {**fallback.dpo.plan, "pair_rows": []}
+    monkeypatch.setattr(pipeline, "stage5_plan", lambda ws, plan_, line=None: plan)
+    monkeypatch.setattr(pipeline, "S5D_REVERSED_PAIRS", {"n": 0, "sha256": pipeline.items_hash([])})
+
+    def derived_cell(ws, **kw):
+        recipe = SimpleNamespace(steps=max(kw["doses"]))
+        return SimpleNamespace(done=False), recipe, None, None, None
+
+    monkeypatch.setattr(pipeline, "derived_cell", derived_cell)
+    monkeypatch.setattr(pipeline, "settings", lambda r: {**pipeline.S5D_RECIPE, "steps": r.steps})
+    monkeypatch.setattr(pipeline, "train_derived",
+                        lambda ws, **kw: trained.append(kw) or {100: "R"})  # fmt: skip
+    monkeypatch.setattr(pipeline, "suppression_only_state", lambda ws, **kw: "X100")
+    cfg = T5.config("s5d_controls", "pipeline.plan.s5d_controls.dose=100", *overrides)
+    p = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
+    return cfg, p, trained, lambda: pipeline._s5d_controls(pipeline.Workspace(cfg), p, CostMeter(),
+                                                           {})  # fmt: skip
+
+
+DRIFT = ["model.dtype=float32", "model.chat_template_kwargs.enable_thinking=true"]
+
+
+@pytest.mark.parametrize("override", DRIFT)
+def test_the_dpo_controls_refuse_another_model_before_any_training(fallback, monkeypatch, override):
+    """Review s5q 1: the controls are bound to the approved model whole, in the preflight and in
+    the phase, before anything is built or reused."""
+    cfg, plan, trained, phase = controls_path(fallback, monkeypatch, override)
+    with pytest.raises(ValueError, match="phase s5d_controls: the DPO fallback's controls under"):
+        pipeline.check_plan(cfg)
+    with pytest.raises(ValueError, match="not the approved one"):
+        phase()
+    assert not trained
+
+
+def test_the_dpo_controls_are_the_committed_dpo_lineage_s(fallback, monkeypatch):
+    cfg, plan, trained, phase = controls_path(fallback, monkeypatch)
+    phase()  # the approved model and the committed plan: built once
+    assert [kw["doses"] for kw in trained] == [[25, 50, 100]]
+    try:
+        pipeline.check_plan(cfg)
+    except ValueError as error:  # the test config's cost settings only, never the controls'
+        assert "phase s5d_controls:" not in str(error)
+    other = {**fallback.dpo.plan, "sha256": "another", "pair_rows": []}
+    monkeypatch.setattr(pipeline, "stage5_plan", lambda ws, plan_, line=None: other)
+    with pytest.raises(ValueError, match="not the committed DPO lineage's"):
+        phase()
 
 
 def test_the_fallback_is_admitted_only_after_the_continued_strong_item_ended(tmp_path):
@@ -247,3 +341,46 @@ def test_the_fallback_s_phases_run_in_its_item_s_batch():
                        ("s5_relearn_h", "certificate"), ("readers", "readers")):  # fmt: skip
         plan = {"phase": phase, key: {"stage5_dpo": True, "strong": True}}
         assert batch_of(plan) == "strong_stage5_dpo"
+
+
+def separated(tmp_path, monkeypatch, args):
+    """Space c as the fallback's sessions find it: the fixture's space without what the gate
+    evidence ``args`` names (the continued branch's runs and suites, made in a); the runs and
+    data roots then c's."""
+    import shutil
+    from pathlib import Path
+
+    a, c = tmp_path, tmp_path / "c"
+    names = {args[i + 1] for i, x in enumerate(args) if x == "--run-name"}
+    suites = {Path(args[i + 1]).name for i, x in enumerate(args) if x == "--path"}
+    shutil.copytree(a / "runs", c / "runs", ignore=lambda d, e: [x for x in e if x in names])
+    shutil.copytree(a / "data", c / "data", ignore=lambda d, e: [
+        x for x in e if x in suites and Path(d).name == "strong_suites"])  # fmt: skip
+    monkeypatch.setenv("RUNS_DIR", str(c / "runs"))
+    monkeypatch.setenv("DATA_DIR", str(c / "data"))
+    return a, c
+
+
+@pytest.mark.parametrize("closure", ["fallback", "fallback_after_validation"])
+def test_the_gate_is_recomputed_in_c_from_the_evidence_copied_from_a(closure, request, runs,
+                                                                     monkeypatch):  # fmt: skip
+    """Review s5q 2: the fallback's sessions run in c, the continued branch's evidence was made
+    in a. Without it c cannot recompute the gate; with it, copied create-only and checked, the
+    gate is a's. After a failed validation the evidence holds its identity, parts and suites."""
+    from test_pod_continuation_stage2 import copy_inputs, stage2_inputs
+
+    d = request.getfixturevalue(closure)
+    args = stage2_inputs().strong_gate_evidence(d.repo / "manifests")["args"]
+    suites = [args[i + 1] for i, x in enumerate(args) if x == "--path"]
+    assert suites == ([] if closure == "fallback" else
+                      ["data/strong_suites/pd-V1", "data/strong_suites/adl-V1",
+                       "data/strong_suites/observer-O1"])  # fmt: skip
+    want = CS.fallback_gate(d.repo, RULES, find_run, LINK.detector)
+    assert want == {"status": "open", "candidates": [100, 200, 400, 800]}
+    a, c = separated(runs, monkeypatch, args)
+    with pytest.raises(ValueError):
+        CS.fallback_gate(d.repo, RULES, find_run, LINK.detector)
+    copy = ["--source", str(a), "--target", str(c), "--log", str(runs / "copied.jsonl"), *args]
+    assert copy_inputs().main(copy) == 0
+    assert CS.fallback_gate(d.repo, RULES, find_run, LINK.detector) == want
+    assert copy_inputs().main(copy) == 0  # create-only: a rerun finds the same files
