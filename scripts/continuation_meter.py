@@ -16,6 +16,8 @@
     uv run python scripts/continuation_meter.py session-close <item> --worker WORKER \
         --pod-id POD_ID --gpu-usd USD [--api-usd USD]
     uv run python scripts/continuation_meter.py stage3-start stage3/<behavior> --space a|c
+    uv run python scripts/continuation_meter.py admit-panel --spent-elsewhere USD --storage USD
+    uv run python scripts/continuation_meter.py panel-contracts
     uv run python scripts/continuation_meter.py transfer <item> --from gpu --to api --usd USD \
         --reason TEXT
     uv run python scripts/continuation_meter.py migrate-cap --reason TEXT
@@ -41,7 +43,12 @@ strong items): a log begun under the allocations before one records nothing unti
 between Pod sessions; ``status`` lists the items still to be migrated in. A panel behavior's Stage
 3 starts once, by ``stage3-start`` (§12.8; review s5y 2, 3): both its reservations live, every
 earlier panel behavior's Stage 3 started, its lineage's one space recorded; no Pod session of
-either of its items opens before it, and ``verify-receipt`` gives the Pod that space.
+either of its items opens before it, and ``verify-receipt`` gives the Pod that space. With the
+panel's phases (§12.8 as amended 2026-10-22; review s6f), ``admit-panel`` admits at once the five
+behaviors' preparation phases and the first behavior's follow-up at stress, the other follow-ups
+protected at their allocations (refused whole, nothing reserved, over the cap);
+``panel-contracts`` records the committed `manifests/stage3_panel_contracts.json` by its sha256,
+once: no follow-up starts, and no later one is admitted (in the frozen order), before it.
 
 A Pod is launched only on a live reservation: ``start --receipt`` writes a launch receipt (the
 item, its limits, the price, the Pod's hours, the allocations' hash and the sha256 of the log
@@ -253,6 +260,7 @@ def status(m: AllocationMeter) -> dict:
             "allocations_pending": m.allocations_pending,
             "reserve": m.reserve,
             "stage3": dict(m.stage3),  # each panel behavior's Stage-3 start: its one space
+            "panel": dict(m.panel),  # the panel's admission and its contracts (review s6f)
         }
 
 
@@ -354,6 +362,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("stage3-start", help="a panel behavior's Stage-3 start, recorded once")
     p.add_argument("item", help="stage3/<behavior>")
     p.add_argument("--space", required=True, choices=("a", "c"), help="its lineage's one space")
+    p = sub.add_parser("admit-panel", help="the panel's phases, admitted at once (review s6f)")
+    p.add_argument("--spent-elsewhere", type=float, required=True)
+    p.add_argument("--storage", type=float, required=True)
+    sub.add_parser("panel-contracts", help="record the committed panel contracts, once")
     p = sub.add_parser("session-close")
     p.add_argument("item")
     p.add_argument("--worker", required=True)
@@ -421,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
             out["session"] = m.session(args.item, args.worker)  # as the log holds it
             out["session_id"] = data["log_sha256"]  # the log right after it: unique (s4d)
             out["stage3"] = m.stage3_of(args.item)  # a Stage-3 item's: its lineage's space
+            out["panel_contracts"] = m.panel["contracts"]  # the panel's one record (s6f, s6h 3)
         print(json.dumps(out))
         return 1 if problems else 0
     elif args.command == "limits":
@@ -435,6 +448,24 @@ def main(argv: list[str] | None = None) -> int:
             result=lambda event: session_receipt(m, event),
         )  # fmt: skip
         args.receipt.write_text(json.dumps(out, indent=1) + "\n")
+    elif args.command == "admit-panel":
+        d = m.admit_panel(spent_elsewhere=args.spent_elsewhere, storage=args.storage)
+        out = {"panel": m.panel_envelope(), "allowed": d.allowed, "total": d.total, "cap": d.cap,
+               "terms": d.terms}  # fmt: skip
+        if not d.allowed:
+            print(json.dumps(out, indent=1))
+            return 4
+    elif args.command == "panel-contracts":
+        from residual_disposition.manifests import committed_json
+        from residual_disposition.paths import REPO_ROOT
+
+        path = REPO_ROOT / "manifests" / "stage3_panel_contracts.json"
+        try:  # committed and unchanged; its entries are recomputed by each validation's checks
+            data = committed_json(path, "the panel's contracts", REPO_ROOT)
+        except (OSError, RuntimeError, ValueError) as error:
+            raise SystemExit(f"panel-contracts: {error}") from error
+        m.panel_contracts(data["sha256"])
+        out = {"contracts": path.name, "sha256": data["sha256"]}
     elif args.command == "stage3-start":
         event = m.stage3_start(args.item, args.space)
         out = {k: event[k] for k in ("item", "behavior", "space")}

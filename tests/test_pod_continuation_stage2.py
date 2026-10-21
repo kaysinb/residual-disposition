@@ -149,9 +149,11 @@ def workspace(tmp_path, capsys, monkeypatch):
     snapshot_receipt.write_text(json.dumps({"snapshot_id": "snap"}))
     procs = []
 
-    def setup(session, start: datetime, *, pod="POD1", hours=12.0, worker=None, api="0",
+    def setup(session, start: datetime, *, pod="POD1", hours=None, worker=None, api="0",
               provider=None, watch_late_s=0, item=None, s3_space="c", s3_recorded=None,
               s3_start=True) -> dict:  # fmt: skip
+        # a base panel preparation's stress GPU ($39.14, review s6f) holds no 12-h session
+        hours = hours if hours is not None else 8.0 if session in ("s3a", "s3b") else 12.0
         # Stage 5's item is unsplit: one session at a time, worker pod; the items above it are
         # completed in this journal, at no cost, so that the meter admits it
         strong = session in STRONG  # strong/stage5, split by its frozen split (C16-2)
@@ -171,18 +173,21 @@ def workspace(tmp_path, capsys, monkeypatch):
                         "stage2/pun_intended" if second else "stage2/example_link")  # fmt: skip
         if item == "strong/stage5_dpo":  # admitted once its gate is open (§12.8)
             monkeypatch.setattr(cm, "fallback_gate", lambda: {"status": "open"})
+        reserved = set()  # what the panel's admission reserved (review s6f)
         if item in ("stage5", "stage5_dpo", "strong/stage5", "strong/stage5_dpo") or (
             item.startswith("stage3/")
         ):
-            reserved = set()
             for above in cm_items()[: cm_items().index(item)]:
+                reserved |= panel_phases(log, above)
                 if above not in reserved:
                     cm.main([*meter, "admit", above, "--spent-elsewhere", "0", "--storage", "55"])
                 cm.main([*meter, "start", above])
-                if above.startswith("stage3/") and above != "stage3/guillemets":
-                    reserved.add(stage3_start(meter, above, "c"))  # its strong item admitted
+                if is_panel_base(above):
+                    stage3_start(meter, above, "c")  # both preparations live (s6f)
                 cm.main([*meter, "complete", above])
-        cm.main([*meter, "admit", item, "--spent-elsewhere", "0", "--storage", "55"])
+        reserved |= panel_phases(log, item)
+        if item not in reserved:
+            cm.main([*meter, "admit", item, "--spent-elsewhere", "0", "--storage", "55"])
         cm.main([*meter, "start", item])
         if stage3 and s3_start:  # both reservations live, its one space recorded (s5y 2, 3)
             stage3_start(meter, item, s3_recorded or s3_space)
@@ -245,12 +250,28 @@ DPO_FALLBACK = ("s5ds", "s5dv", "s5dx", "s5dc")  # the strong DPO fallback's, wo
 
 
 def stage3_start(meter, item, space):
-    """A panel behavior's Stage-3 start in the meter (§12.8): its strong item admitted, then the
-    start recorded with its lineage's space; returns the strong item."""
-    strong = f"strong/{item}"
-    cm.main([*meter, "admit", strong, "--spent-elsewhere", "0", "--storage", "55"])
+    """A panel behavior's Stage-3 start in the meter (§12.8): both its preparations live (the
+    panel admitted at once, review s6f), the start recorded with its lineage's space."""
     cm.main([*meter, "stage3-start", item, "--space", space])
-    return strong
+
+
+def is_panel_base(item):
+    """A panel behavior's base preparation (``stage3/<b>``, not guillemets, not a follow-up)."""
+    return item.startswith("stage3/") and item != "stage3/guillemets" and "/follow" not in item
+
+
+def panel_phases(log, item):
+    """What the panel's phases need before ``item`` (review s6f): at its first item the panel
+    admitted at once; at a follow-up its contracts recorded (the meter's own record, the bundle
+    stood for); returns the items so reserved."""
+    m = cm.meter(log)
+    if m.panel_rows() is None or item not in {x for r in m.panel_rows() for x in r}:
+        return set()
+    if not m.panel["admitted"]:
+        m.admit_panel(spent_elsewhere=0, storage=55)
+    if item.endswith("/follow") and not m.panel["contracts"]:
+        m.panel_contracts("c" * 64)
+    return set(m.panel_envelope()[0])
 
 
 def cm_items():
@@ -1809,7 +1830,7 @@ def test_s3a_copies_its_inputs_and_suppresses_in_its_own_space(workspace):
     (p,) = passes(log)
     o = overrides(p)
     assert o["pipeline.plan.phase"] == "s3_suppress" and space_of(p) == str(ws / "c")
-    assert o["pipeline.plan.cost.batches.stage3"] == "12.0"
+    assert o["pipeline.plan.cost.batches.stage3"] == "8.0"  # the session's hours
     assert not any(k.startswith("pipeline.plan.cost.batches.stage3_") for k in o)
     for sid in (COUNTDOWN["A"], COUNTDOWN["H"]):
         assert (ws / "c" / "data" / "states" / sid / "manifest.json").is_file()

@@ -643,7 +643,8 @@ def drop_reasons(rules: Rules, items: Sequence[str] = ()) -> dict[str, list[str]
     stage5_dpo when ``items`` hold it). A strong item that ``items`` hold is cut with its
     parent's part, and ``strong/stage5_dpo`` is also dropped ``fallback_gate_closed`` (C16).
     Items absent here (Stages 0–1, Stage 2's first behavior, panel behaviors 1–4 and their
-    strong items) can never be dropped."""
+    strong items) can never be dropped. A panel behavior's follow-up phases are released
+    ``no_registered_readout`` (review s6f)."""
     first, second = rules["discovery"][:2]
     panel = list(rules.panel)
     guillemets = rules["descriptive_adl_only"][0]
@@ -677,4 +678,13 @@ def drop_reasons(rules: Rules, items: Sequence[str] = ()) -> dict[str, list[str]
             out[strong_item(parent)] = cuts
     if strong_item(STAGE5_DPO) in items:
         out[strong_item(STAGE5_DPO)].insert(0, FALLBACK_GATE_CLOSED)
+    # the panel's follow-up phases (§12.8 as amended 2026-10-22; review s6f): released when the
+    # behavior's entry in the panel's contracts has no registered reading; the last behavior's
+    # also cut with it
+    for behavior in panel:
+        for parent in (f"stage3/{behavior}", strong_item(f"stage3/{behavior}")):
+            follow = f"{parent}/follow"
+            if follow in items:
+                cuts = [r for r in out.get(f"stage3/{behavior}", []) if r.startswith("cut_order:")]
+                out[follow] = ["no_registered_readout", *cuts]
     return out

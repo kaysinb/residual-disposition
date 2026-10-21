@@ -981,6 +981,45 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   their whole reservations, Stage 6's admission reaches $2,477.25 (+$57.25; the strong centrals'
   raise is $29.10 of it): the operating cap refuses or defers it there. Any stress that
   materializes stops at an admission with its price, for the user.
+- **The panel's phases** (§12.8 as amended 2026-10-22; C17-P; review s6f; the cap $2,420
+  unchanged).
+  - **Migration.** `configs/continuation/allocations.yaml` phases the ten panel items: each
+    becomes its preparation phase (`stage3/<behavior>` $20.11 central, stress GPU $39.14, API
+    $1; `strong/stage3/<behavior>` $26.36, $72.85, $0), and its follow-up phase `<item>/follow`
+    is added right after the behavior's two items, of its own kind (`stage3_panel_follow`
+    $116.74, $207.71, $5.32; `strong_stage3_follow` $14.05, $13.32, $26.39). Each pair sums to
+    the lineage's allocation to the cent; each item's value before it is recorded
+    (`budget.AllocationMigration.phased`), and every phased item is planned when the log
+    records it. The live log records it by `migrate-allocations` (after Stage 3's raise), only
+    while no Pod session is open; every later Pod runs a snapshot with C17-P.
+  - **Admission** (laptop):
+    1. `continuation_meter.py admit-panel --spent-elsewhere USD --storage USD`, once, after
+       every higher-priority item: the five behaviors' preparation phases and the first
+       behavior's two follow-ups reserved at stress, the other follow-ups protected at their
+       allocations. Over the cap it is refused whole (exit 4, nothing reserved), and the price
+       goes to the coordinator. `admit` refuses a preparation phase or a first follow-up
+       alone.
+    2. `start` each preparation phase, then each behavior's `stage3-start` (its one space) in the
+       panel order; the preparation sessions follow (s3a, s3b, s3s).
+    3. Once `manifests/stage3_panel_contracts.json` is committed, `continuation_meter.py
+       panel-contracts`, once: it records the committed file's sha256. Before it, no follow-up
+       starts and none of the later ones is admitted; `verify-receipt` gives the Pod the
+       recorded sha256 (`panel_contracts`), the one every panel validation's
+       `plan.strong_validate.contracts` must name.
+    4. The follow-ups in the frozen order: the first behavior's are started; each later one is
+       admitted (`admit`, at stress, the later ones protected) only after the earlier
+       behavior's. A follow-up whose entry has no registered reading for it is released:
+       `drop <item>/follow no_registered_readout` (a strong follow-up of a closed branch; a base
+       follow-up of an entry with no reading at all).
+  - **Settlement.** Each phase closes at its actual cost (`complete`), releasing only its unused
+    authorization; a preparation's completion is not the lineage's. The update rule is per
+    phase kind, so a preparation's cost never enters a follow-up's allocation.
+  - **Cut.** The follow-ups of panel behaviors 1–4 cannot be dropped for budget; the last
+    behavior's are cut with it (`cut_order:last_stage3_behavior`), only after the user's
+    decision.
+  - **Replay** (`stage3_sequence_phased.py` on a copy of the live log; decisions): the panel's
+    admission at worst $2,322.42. Stage 4's or Stage 6's admission can still exceed the cap in
+    the stress scenarios (up to $2,682.45 and $3,555.66): it is refused and priced for the user.
 - **The continued strong branch** (§12.4.10, §12.7 Stage 5; C16-2), example_link, the meter's
   item `strong/stage5`, in space a. Its frozen inputs are `configs/continuation/strong.yaml`
   (the suites' sha256 and inventories, the detectors, the candidates 100 → 200 → 400 of the
