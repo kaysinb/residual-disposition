@@ -1,0 +1,29 @@
+{
+  "behavior": "countdown",
+  "detector_version": "63872145091d",
+  "ensemble_sha256": "d06de6b7fb90800d60ecd6735b1ae27c537bd71fe0d13b3a614bbf582d4b57e6",
+  "input_sha256": "60d656f87c0dfa72e84d1702aaceb005e7af147aed4c3d031c4022f2f99a48ab",
+  "key_sha256": "680589d3baf5e80ccea803333b4c1faf4c83abc885e86afd4339ec8dd532ea76",
+  "review": {
+    "disputes": 0,
+    "sample": 30,
+    "traces": 0
+  },
+  "review_sha256": "8e67959c058e42cf4b6e42c389acae312d7eab0f23f8c157916ad6beb5fadc60",
+  "set_id": "60d656f87c0d",
+  "set_run": "20261022-082216-diagnostic-s3-countdown-320b7846-3565",
+  "sources_sha256": "b79b145b4d7f1b1bfab5b1867b9f9cf98cec9b8a735cd9add6eb8596dc9f172b",
+  "traced": [],
+  "types": {
+    "observer": {
+      "n": 150,
+      "status": "complete",
+      "traces": 0
+    },
+    "pd": {
+      "n": 150,
+      "status": "complete",
+      "traces": 0
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "behavior": "word_count_claim",
+  "detector_version": "db8774818cef",
+  "ensemble_sha256": "6ff22232d8326d8bf702890f26cc9b30dbf0c945b99b252e521508c61ab6adf4",
+  "input_sha256": "2a93faaec27f8bf238336c9adc47340c7ab875cceebbb6c18eef99472244968d",
+  "key_sha256": "64113de5ab58091cae40645070c86862f33453b60af694d49b2e1d21538a04a7",
+  "review": {
+    "disputes": 0,
+    "sample": 30,
+    "traces": 0
+  },
+  "review_sha256": "71a1b07708a504ac87331e7d05cbae9c01f41afc56d684a21e3e7d6815ff6402",
+  "set_id": "2a93faaec27f",
+  "set_run": "20261022-082228-diagnostic-s3-word_count_claim-320b7846-fa7f",
+  "sources_sha256": "63dc99dd91c035407a6bf101103e7cb732d74d8f51a1ef904e977a5a41696718",
+  "traced": [],
+  "types": {
+    "observer": {
+      "n": 150,
+      "status": "complete",
+      "traces": 0
+    },
+    "pd": {
+      "n": 150,
+      "status": "complete",
+      "traces": 0
+    }
+  }
+}
