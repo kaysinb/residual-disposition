@@ -1189,6 +1189,24 @@ Decided after Stage 1 (preregistration §12.3.7,
   - **s3_decide** (CPU): the decision with A's reference (`plan.s3_decide.reference`),
     recomputed and recorded; `scripts/continuation_stage5.py <stage3_decision run>` writes
     `manifests/stage3_<behavior>.json`, committed before the lineage's k*.
+  - **The retest after a revision** (§12.3.1): an accepted revision of the detector voids the
+    lineage's confirmation draws, and the next s3b's step is `retest`. The chain runs it as
+    s3_confirm at the voided dose only with the revision record to the current detector
+    (`manifests/detector_revision_<behavior>_<version>.json`) and the diagnostic committed in the
+    snapshot. Before the ledger allocates anything, the plan (its preflight and the run alike)
+    requires every detector the lineage's draws were read with to reach the current one through
+    committed accepted revisions, their checks recomputed (`pipeline.stage3_retest_problems`). It
+    then allocates nothing but attempt 2, `detector_retest`, at that dose on fresh draws
+    (`continuation_confirm.allocate`), whatever the revised candidates. The expression
+    checks are rescored from their saved cells, and s3_decide decides again.
+    `scripts/continuation_stage5.py --supersede <stage3_decision run>` then writes the new decision
+    over the committed one (`continuation_stage5.supersede_problems`):
+    - the predecessor committed, of the same lineage, selection and reference;
+    - the predecessor read with an earlier detector that reaches the current one through accepted
+      revisions;
+    - the predecessor's confirmations a strict prefix of the new record's.
+
+    The predecessor stays in the history.
   - **Sessions** (`continuation_stage2.sh`, ITEM=stage3/<behavior>, BEHAVIOR=<behavior>,
     S3_SPACE=a or c, the lineage's one space for all its sessions; worker pod, at most 12 h, the
     stage3 batch): `s3a` copies its inputs into its space (`stage2_inputs.py --stage3`, from the

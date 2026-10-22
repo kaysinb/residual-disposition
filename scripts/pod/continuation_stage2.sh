@@ -767,6 +767,23 @@ s3b)
         fi
         run_pass $CHAIN-s3confirm-$DOSE $CFG/$BEHAVIOR s3_confirm pipeline.plan.s3_confirm.dose=$DOSE
         step s3_confirm-$DOSE $? ;;
+      retest)
+        # §12.3.1: after an accepted revision the voided confirmation is rerun on fresh draws,
+        # attempt 2 at its dose; only with the revision to the current detector committed, and
+        # s3_confirm's plan allocates nothing but that retest (continuation_confirm.allocate)
+        VERSION=$(in_src python -c 'import sys
+from residual_disposition.continuation_stage2 import current_detector_version
+print(current_detector_version(sys.argv[1]))' "$BEHAVIOR") || VERSION=""
+        REVISION=detector_revision_${BEHAVIOR}_$VERSION.json
+        if [ -z "$VERSION" ] || [ ! -f $SRC/manifests/$REVISION ]; then
+          log "no retest: no committed detector revision $REVISION in the snapshot"; step manifest 1; break
+        fi
+        if [ ! -f $SRC/manifests/$DIAG ]; then
+          log "no retest: no committed detector diagnostic $DIAG in the snapshot"; step manifest 1; break
+        fi
+        log "the retest at $DOSE after the accepted revision to $VERSION: attempt 2 on fresh draws"
+        run_pass $CHAIN-s3retest-$DOSE $CFG/$BEHAVIOR s3_confirm pipeline.plan.s3_confirm.dose=$DOSE
+        step s3_retest-$DOSE $? ;;
       expression)
         run_pass $CHAIN-s3expression-$DOSE $CFG/$BEHAVIOR s3_expression \
           pipeline.plan.s3_expression.dose=$DOSE
@@ -774,9 +791,8 @@ s3b)
       decide)
         mapfile -t ARGS < <(s5_decide_args "$NEXT")
         run_pass $CHAIN-s3decide $CFG/$BEHAVIOR s3_decide "${ARGS[@]}"; step s3_decide $?
-        log "the stage3/$BEHAVIOR decision $(jget "$NEXT" decision outcome): its manifest is committed on the laptop before k*"
+        log "the stage3/$BEHAVIOR decision $(jget "$NEXT" decision outcome): its manifest is committed on the laptop before k* (after a retest, with --supersede)"
         break ;;
-      retest) log "the decision needs a confirmation retest after a detector revision: stop and report"; step retest 1; break ;;
       *) log "stage5_next: $NEXT"; step next 1; break ;;
     esac
   done ;;
