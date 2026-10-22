@@ -532,8 +532,10 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     for b in RULES.panel:
         assert names[names.index(f"stage3/{b}") + 1] == f"strong/stage3/{b}"
     assert all(a.stress_usd >= a.usd > 0 for a in items)
-    assert all(
-        a.stress_gpu_usd >= 0 and a.stress_api_usd > 0 for a in items if a.kind != "stage5_dpo"
+    assert all(  # a strong panel preparation's API is all its follow-up's (review s6f)
+        a.stress_gpu_usd >= 0 and a.stress_api_usd > 0
+        for a in items
+        if a.kind not in ("stage5_dpo", "strong_stage3")
     )
     dpo = next(a for a in items if a.item == "stage5_dpo")
     assert (dpo.usd, dpo.stress_gpu_usd, dpo.stress_api_usd) == (29.2, 80.46, 0.0)  # no API
@@ -541,22 +543,33 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
               if a.item.startswith("strong/")}  # fmt: skip
     assert strong.pop("strong/stage5") == ("strong_stage5", 119.65, 296.8, 23.22)
     assert strong.pop("strong/stage5_dpo") == ("strong_stage5_dpo", 127.08, 316.87, 23.22)
-    # raised by Stage 3's corrected reservations (C17-M; review s5p 4): 34.59, 75.54, 16.3 before
-    assert set(strong.values()) == {("strong_stage3", 40.41, 86.17, 26.39)} and len(strong) == 5
+    # raised by Stage 3's corrected reservations (C17-M; review s5p 4): 34.59, 75.54, 16.3 before;
+    # then phased (review s6f): the preparation and the follow-up, summing to 40.41, 86.17, 26.39
+    assert set(strong.values()) == {("strong_stage3", 26.36, 72.85, 0.0),
+                                    ("strong_stage3_follow", 14.05, 13.32, 26.39)}  # fmt: skip
+    assert len(strong) == 10
     six = next(a for a in items if a.item == "stage6")
     assert six.stress_gpu_usd > 0 and six.stress_api_usd > 0  # both limits are enforceable
     assert set(cr.drop_reasons(RULES, names)) <= set(names)
-    # each from the allocations before it, the live log's: the raise's values reverted (C17-M)
-    first, second, third = load_migrations(path)
+    # each from the allocations before it, the live log's: the phases (s6f) and the raise's
+    # values reverted (C17-M)
+    first, second, third, fourth = load_migrations(path)
     from residual_disposition.budget import Allocation
 
+    whole = dict(fourth.phased)
+    raised = [Allocation(a.item, a.kind, *whole[a.item]) if a.item in whole else a for a in items
+              if a.item not in fourth.added]  # fmt: skip
+    assert fourth.from_sha256 == allocations_hash(raised)
+    assert set(fourth.added) == {f"{x}/follow" for x in whole} and len(whole) == 10
+    items = raised
     old = dict(third.raised)
     frozen = [Allocation(a.item, a.kind, *old[a.item]) if a.item in old else a for a in items]
     added = set(first.added) | set(second.added)
     assert first.added == ("stage5_dpo",)
     assert first.from_sha256 == allocations_hash([a for a in frozen if a.item not in added])
     assert first.from_sha256.startswith("5289c33824a3")
-    assert set(second.added) == {n for n in names if n.startswith("strong/")}
+    assert set(second.added) == {n for n in names if n.startswith("strong/")
+                                 and not n.endswith("/follow")}  # fmt: skip
     assert second.from_sha256 == allocations_hash([a for a in frozen if a.item not in second.added])
     assert second.from_sha256.startswith("04eebe5e9c68")
     assert third.added == () and third.from_sha256 == allocations_hash(frozen)

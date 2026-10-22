@@ -20,6 +20,7 @@ import fcntl
 import json
 import math
 import os
+import re
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -781,12 +782,16 @@ class AllocationMigration:
     review s5b 2): ``added`` items, each at its place in the priority, and ``raised`` items, each
     with its allocation before the change ({item: (usd, stress GPU, stress API)}; C17, review
     s5p 4: a reservation only grows), with the ``reason``; ``from_sha256`` the hash of the
-    allocations before it (``allocations_hash``)."""
+    allocations before it (``allocations_hash``). ``phased`` items (review s6f), each with its
+    allocation before the change: a panel lineage's item becomes its preparation phase and its
+    follow-up phase ``<item>/follow`` is added with the rest, the two summing to it exactly (to
+    the cent), so the lineage's allocation is unchanged."""
 
     added: tuple[str, ...]
     reason: str
     from_sha256: str
     raised: Mapping[str, tuple[float, float, float]] = field(default_factory=dict)
+    phased: Mapping[str, tuple[float, float, float]] = field(default_factory=dict)
 
 
 def allocations_hash(allocations: Sequence[Allocation]) -> str:
@@ -906,6 +911,8 @@ class AllocationMeter:
         self.issued: set[str] = set()
         # per panel behavior, its Stage-3 start (``stage3_start``): its lineage's one space
         self.stage3: dict[str, dict[str, str]] = {}
+        # the panel's phases (review s6f): its admission recorded, its contracts' sha256
+        self.panel: dict[str, Any] = {"admitted": False, "contracts": None, "entries": None}
         # the migrations of the allocations this log has still to record (``migrate_allocations``)
         self._pending = {"steps": []}
         self.events: list[dict[str, Any]] = []
@@ -1036,6 +1043,7 @@ class AllocationMeter:
             "transfers": self.transfers,
             "issued": self.issued,
             "stage3": self.stage3,
+            "panel": self.panel,
             "cap": self._cap,
             "pending": self._pending,
         }
@@ -1080,8 +1088,9 @@ class AllocationMeter:
             raise KeyError(f"{item} is not in this meter log until it is migrated")
         a = self._items[self._rank[item]]
         for step in self._pending["steps"]:
-            if item in (step.get("raised") or {}):
-                return Allocation(item, a.kind, *step["raised"][item][0])
+            for change in ("raised", "phased"):
+                if item in (step.get(change) or {}):
+                    return Allocation(item, a.kind, *step[change][item][0])
         return a
 
     def parts(self, item: str, state: Mapping[str, Any] | None = None) -> tuple[float, float]:
@@ -1248,6 +1257,141 @@ class AllocationMeter:
         with self._transaction():
             return None if behavior is None else self.stage3.get(behavior)
 
+    def panel_rows(self) -> list[tuple[str, str, str, str]] | None:
+        """Per panel behavior in the frozen order, its preparation phases (base, strong) and its
+        follow-up phases (base, strong); None while this log holds no phased allocations."""
+        names = set(self.priority)
+        rows = []
+        for a in self._items:
+            if a.kind == STAGE3_PANEL and a.item in names:
+                strong = f"strong/{a.item}"
+                row = (a.item, strong, f"{a.item}{FOLLOW}", f"{strong}{FOLLOW}")
+                if not set(row) <= names:
+                    return None
+                rows.append(row)
+        return rows or None
+
+    def panel_envelope(self) -> tuple[list[str], list[str]]:
+        """The panel's one admission (review s6f): every behavior's preparation phases and the
+        first behavior's follow-up phases, reserved at stress together; the other follow-ups
+        protected at their allocations."""
+        rows = self.panel_rows()
+        if rows is None:
+            raise ValueError("this meter log holds no phased panel allocations")
+        items = [x for r in rows for x in r[:2]] + list(rows[0][2:])
+        return items, [x for r in rows[1:] for x in r[2:]]
+
+    def _still_protected(self, item: str) -> list[str]:
+        """The follow-ups the panel's admission protected that no admission has taken yet (still
+        planned), other than ``item`` and those it counts above it (review s6k 1)."""
+        if not self.panel["admitted"]:
+            return []
+        above = set(self.unfinished_above(item))
+        return [x for r in self.panel_rows() or [] for x in r[2:]
+                if self.state[x] == PLANNED and x != item and x not in above]  # fmt: skip
+
+    def _admission_terms(self, item: str | None) -> dict[str, float]:
+        """An admission's terms that the meter's state gives (all but the money spent and the
+        future storage): ``item``'s, or the panel's envelope's (None). After the panel's
+        admission every admission also protects the follow-ups still planned (review s6k 1)."""
+        if item is None:
+            items, protected = self.panel_envelope()
+            listed = set(items) | set(protected)
+            last = max(items, key=lambda i: self._rank[i])
+            return {
+                "reservations": self.outstanding(),
+                "next_batch": sum(self._get(i).stress_usd for i in items),
+                "protected": sum(self.allocation(i) for i in protected),
+                "higher_priority": sum(
+                    self.allocation(x) for x in self.unfinished_above(last) if x not in listed
+                ),
+                "reserve": self.reserve,
+            }
+        terms = {
+            "reservations": self.outstanding(),
+            "next_batch": self._get(item).stress_usd,
+            "higher_priority": sum(self.allocation(x) for x in self.unfinished_above(item)),
+            "reserve": self.reserve,
+        }
+        if self.panel["admitted"]:
+            terms["protected"] = sum(self.allocation(x) for x in self._still_protected(item))
+        return terms
+
+    def _check_admission(self, event: Mapping[str, Any], s: Mapping[str, Any],
+                         item: str | None) -> None:  # fmt: skip
+        """An admission event as the meter makes it, also when a log is replayed (review s6k 4,
+        5): its terms exactly its kind's, each a finite non-negative amount, the money spent at
+        least the ledger's; from the panel's phases on (and always for the panel's), the terms
+        the state gives recomputed, its keys exact; its cap the one in force and its decision its
+        total against it (the first admissions recorded no cap)."""
+        derived = self._admission_terms(item) if item is None or self.panel_rows() else None
+        keys = set(derived or ADMIT_TERMS) | {"spent", "storage"}
+        terms = event.get("terms")
+        if not isinstance(terms, dict) or set(terms) != keys:
+            got = sorted(terms) if isinstance(terms, dict) else terms
+            raise ValueError(f"an admission's terms are {sorted(keys)}, not {got!r}")
+        for name, term in terms.items():
+            finite_usd(term, f"the admission term {name}")
+        if terms["spent"] < self.spent() - 1e-6:
+            raise ValueError(f"an admission's money spent ${terms['spent']:.2f} is below the "
+                             f"ledger's ${self.spent():.2f}")  # fmt: skip
+        if derived is not None:
+            shape = {"event", "items", "protected"} if item is None else {"event", "item"}
+            if set(event) - {"at"} != shape | {"allowed", "cap", "terms"}:
+                raise ValueError(f"an admission event has the keys {sorted(event)}")
+            wrong = sorted(k for k, v in derived.items() if abs(terms[k] - v) > 1e-6)
+            if wrong:
+                raise ValueError(f"an admission's terms {wrong} are not the meter's state's")
+        if "cap" in event or derived is not None:
+            if event.get("cap") != s["cap"]["usd"]:
+                raise ValueError(f"an admission under the cap {event.get('cap')!r}, not the "
+                                 f"${s['cap']['usd']:g} in force")  # fmt: skip
+            if not isinstance(event.get("allowed"), bool) or event["allowed"] != (
+                sum(terms.values()) <= event["cap"]
+            ):  # fmt: skip
+                total = sum(terms.values())
+                raise ValueError(f"an admission decided {event.get('allowed')!r} on a total of "
+                                 f"${total:.2f} against ${event['cap']:g}")  # fmt: skip
+
+    def _panel_follow(self, item: str) -> int | None:
+        """The frozen index of the behavior whose follow-up phase ``item`` is, else None."""
+        for n, row in enumerate(self.panel_rows() or []):
+            if item in row[2:]:
+                return n
+        return None
+
+    def admit_panel(self, *, spent_elsewhere: float, storage: float) -> MeterDecision:
+        """Admit the panel's envelope at once (§12.8 as amended 2026-10-22; review s6f): the five
+        behaviors' preparation phases and the first behavior's follow-up at stress, the four
+        other follow-ups protected at their allocations, every unfinished higher-priority item
+        at its own; refused (nothing reserved) if the total exceeds the cap, so that no
+        preparation starts unless all five can finish."""
+
+        def build() -> dict[str, Any]:
+            items, protected = self.panel_envelope()
+            terms = {
+                "spent": finite_usd(spent_elsewhere, "the money spent elsewhere") + self.spent(),
+                **self._admission_terms(None),
+                "storage": finite_usd(storage, "the future storage"),
+            }
+            total = sum(terms.values())
+            return {"event": "admit_panel", "items": items, "protected": protected,
+                    "allowed": total <= self.cap, "cap": self.cap, "terms": terms}  # fmt: skip
+
+        event = self._operate(build)
+        terms = event["terms"]
+        return MeterDecision(event["allowed"], sum(terms.values()), self.cap, terms)
+
+    def panel_contracts(self, sha256: str, bundle: str) -> dict[str, Any]:
+        """Record the panel's committed contracts once, after the panel's admission: their
+        sha256 and their file's exact text (``bundle``, which hashes to it), read whole and
+        checked by the script before (review s6l 1). Its entries' status and reading, journaled
+        with it and checked again when the log is replayed, are what a preparation's completion
+        and a follow-up's release rest on; no follow-up phase starts, and no later one is
+        admitted, before it (review s6f)."""
+        return self._operate(lambda: {"event": "panel_contracts", "sha256": str(sha256),
+                                      "bundle": str(bundle)})  # fmt: skip
+
     def session(self, item: str, worker: str) -> dict[str, Any] | None:
         """A split item's worker's open Pod session, under the lock; None when closed."""
         with self._transaction():
@@ -1265,16 +1409,12 @@ class AllocationMeter:
         plan items (the pilot's remainder, storage paid so far), ``storage`` the future storage."""
 
         def build() -> dict[str, Any]:
-            a = self._get(item)
             if self.state[item] != PLANNED:
                 raise ValueError(f"{item} is {self.state[item]}: it cannot be admitted again")
-            terms = {
-                "spent": float(spent_elsewhere) + self.spent(),
-                "reservations": self.outstanding(),
-                "next_batch": a.stress_usd,
-                "higher_priority": sum(self.allocation(x) for x in self.unfinished_above(item)),
-                "storage": float(storage),
-                "reserve": self.reserve,
+            terms = {  # the money spent elsewhere checked before the ledger's is added (s6k 4)
+                "spent": finite_usd(spent_elsewhere, "the money spent elsewhere") + self.spent(),
+                **self._admission_terms(item),
+                "storage": finite_usd(storage, "the future storage"),
             }
             total = sum(terms.values())
             return {
@@ -1404,12 +1544,120 @@ class AllocationMeter:
 
         return list(self._operate(build)["added"])
 
-    def complete(self, item: str) -> float:
-        self._operate(lambda: {"event": "complete", "item": item})
+    def complete(self, item: str, evidence: Mapping[str, Any] | None = None) -> float:
+        """Complete a running item; a panel preparation with the evidence of its entry in the
+        recorded contracts (``panel_evidence``; review s6k 2)."""
+        event = {"event": "complete", "item": item}
+        if evidence is not None:
+            event["evidence"] = dict(evidence)
+        self._operate(lambda: event)
         return self.final[item]
 
-    def drop(self, item: str, reason: str) -> None:
-        self._operate(lambda: {"event": "drop", "item": item, "reason": reason})
+    def drop(self, item: str, reason: str, evidence: Mapping[str, Any] | None = None) -> None:
+        """Drop an item for a reason frozen for it; a follow-up released for want of a reading
+        with the evidence of its entry in the recorded contracts (review s6k 2, 3)."""
+        event = {"event": "drop", "item": item, "reason": reason}
+        if evidence is not None:
+            event["evidence"] = dict(evidence)
+        self._operate(lambda: event)
+
+    def _evidence_problem(self, item: str, event: Mapping[str, Any], s: Mapping[str, Any],
+                          release: bool) -> str | None:  # fmt: skip
+        """Why an event's evidence is not its panel entry's in the recorded contracts: the
+        contracts' sha256 recorded, the item's behavior, and the entry's status, active or closed
+        (a preparation's completion: bundle-ready or terminal), or no reading at all (a
+        follow-up's release: with a stack reading the strong follow-up stays funded for the
+        readers' API above the base's; review s6k 2, 3)."""
+        e, behavior = event.get("evidence"), _stage3_behavior(item, self._get(item).kind)
+        keys = {"contracts", "behavior", "status", "reading"}
+        if not isinstance(e, dict) or set(e) != keys:
+            return f"its evidence names {sorted(keys)} of its entry in the panel's contracts"
+        if not s["panel"]["contracts"] or e["contracts"] != s["panel"]["contracts"]:
+            return "its evidence is not of the panel's recorded contracts"
+        if e["behavior"] != behavior:
+            return f"its evidence is not {behavior}'s entry"
+        held = s["panel"]["entries"][behavior]  # the journaled bundle's, never the caller's (s6l)
+        if {k: e[k] for k in ("status", "reading")} != held:
+            return f"its evidence contradicts {behavior}'s recorded entry {held}"
+        if release and e["reading"] is not None:
+            return f"{behavior}'s entry has the reading {e['reading']!r}: its follow-ups stay"
+        return None
+
+    def _bundle_entries(self, event: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+        """The recorded contracts' entries from the journaled text of their file (review s6l 1):
+        the text hashes to the recorded sha256, names the frozen panel in its order and holds
+        every behavior's entry, active with the strong reading or closed with the stack reading
+        or none."""
+        import hashlib
+
+        text = event.get("bundle")
+        if (
+            not isinstance(text, str)
+            or hashlib.sha256(text.encode()).hexdigest() != event["sha256"]
+        ):
+            raise ValueError("the panel's contracts are journaled with the text of their file, "
+                             "which hashes to their sha256")  # fmt: skip
+
+        def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:  # no key twice (s6m 2)
+            keys = [k for k, _ in pairs]
+            if len(set(keys)) != len(keys):
+                raise ValueError(f"the panel's contracts repeat a key: {sorted(keys)}")
+            return dict(pairs)
+
+        try:
+            data = json.loads(text, object_pairs_hook=unique)
+        except ValueError as error:
+            raise ValueError(f"the panel's contracts are no JSON: {error}") from error
+        panel = [row[0].removeprefix("stage3/") for row in self.panel_rows() or []]
+        data = data if isinstance(data, dict) else {}
+        entries = data.get("behaviors")
+        if data.get("panel") != panel or not isinstance(entries, dict) or set(entries) != set(
+            panel
+        ):  # fmt: skip
+            raise ValueError(f"the panel's contracts name {sorted(entries or {})}, not the "
+                             f"frozen panel {panel}")  # fmt: skip
+        out = {}
+        for behavior in panel:
+            e = entries[behavior] if isinstance(entries[behavior], dict) else {}
+            status, reading = e.get("status"), e.get("reading", "absent")  # stated (s6m 2)
+            if status not in (ACTIVE, CLOSED) or reading not in READINGS or (
+                (status == ACTIVE) != (reading == "strong")
+            ):  # fmt: skip
+                raise ValueError(f"{behavior}'s entry in the panel's contracts is {status} with "
+                                 f"the reading {reading!r}")  # fmt: skip
+            out[behavior] = {"status": status, "reading": reading}
+        return out
+
+    def _apply_panel(self, event: Mapping[str, Any], s: Mapping[str, Any]) -> None:
+        """The panel's admission and its contracts (review s6f), applied to the state ``s``."""
+        states, reservation = s["state"], s["reservation"]
+        items, protected = self.panel_envelope()
+        if event["event"] == "panel_contracts":
+            if not s["panel"]["admitted"]:
+                raise ValueError("the panel's contracts are recorded after its admission")
+            if s["panel"]["contracts"]:
+                raise ValueError(f"the panel's contracts {s['panel']['contracts'][:12]} are "
+                                 "recorded once")  # fmt: skip
+            if not _hex64(event.get("sha256")):
+                raise ValueError(f"the panel's contracts are named by their sha256, not "
+                                 f"{event.get('sha256')!r}")  # fmt: skip
+            s["panel"]["entries"] = self._bundle_entries(event)
+            s["panel"]["contracts"] = event["sha256"]
+            return
+        if (list(event.get("items") or []), list(event.get("protected") or [])) != (
+            items, protected
+        ):  # fmt: skip
+            raise ValueError(f"the panel's admission is {items}, the others protected {protected}")
+        held = [i for i in (*items, *protected) if states[i] != PLANNED]
+        if held:
+            raise ValueError(f"the panel is admitted once, before any of it: {held} are not "
+                             "planned")  # fmt: skip
+        self._check_admission(event, s, None)
+        if event["allowed"]:
+            for i in items:
+                states[i] = RESERVED
+                reservation[i] = self._get(i).stress_usd
+            s["panel"]["admitted"] = True
 
     def _apply(self, event: Mapping[str, Any], *, state: Mapping[str, Any] | None = None) -> None:
         s = self._state() if state is None else state
@@ -1442,31 +1690,52 @@ class AllocationMeter:
                           for w, v in (workers or {}).items() if v)  # fmt: skip
             if held:
                 raise ValueError(f"open Pod sessions {held}: the allocations migrate between them")
-            live = sorted(i for i in steps[0].get("raised") or {} if states[i] != PLANNED)
-            if live:  # a reservation already held or spent is never raised after (C17)
+            changed = [*(steps[0].get("raised") or {}), *(steps[0].get("phased") or {})]
+            live = sorted(i for i in changed if states[i] != PLANNED)
+            if live:  # a reservation already held or spent is never raised or phased after
                 raise ValueError(f"{live} are not planned: only a planned item's allocation is "
-                                 "raised")  # fmt: skip
+                                 "raised or phased")  # fmt: skip
             s["pending"]["steps"] = steps[1:]
+            if state is None:
+                self.events.append(dict(event))
+            return
+        if kind in ("admit_panel", "panel_contracts"):
+            self._apply_panel(event, s)
             if state is None:
                 self.events.append(dict(event))
             return
         item = event["item"]
         a = self._get(item)
         current = states[item]
+        follow = self._panel_follow(item)
         if kind == "admit":
             if current != PLANNED:
                 raise ValueError(f"{item} is {current}: it cannot be admitted again")
+            if self.panel_rows() is not None and (a.kind in (STAGE3_PANEL, STRONG_STAGE3)
+                                                  or follow == 0):  # fmt: skip
+                raise ValueError(f"{item} is admitted with the panel (admit_panel), never alone")
+            if follow is not None:  # after the contracts, in the frozen order (review s6f)
+                if not s["panel"]["contracts"]:
+                    raise ValueError(f"{item}: no follow-up is admitted before the panel's "
+                                     "contracts are recorded")  # fmt: skip
+                earlier = [x for x in self.panel_rows()[follow - 1][2:] if states[x] == PLANNED]
+                if earlier:
+                    raise ValueError(f"{item}: the follow-ups are admitted in the frozen order, "
+                                     f"after {earlier}")  # fmt: skip
             before = AFTER.get(item)  # the DPO fallback only after the continued branch (§12.8)
             if before in states and states[before] in (PLANNED, RESERVED, RUNNING):
                 raise ValueError(f"{item} is admitted only after {before} ends ({states[before]})")
-            for name, term in event["terms"].items():
-                finite_usd(term, f"the admission term {name}")
+            self._check_admission(event, s, item)
             if event["allowed"]:
                 states[item] = RESERVED
                 reservation[item] = a.stress_usd
         elif kind == "start":
             if current != RESERVED:
                 raise ValueError(f"{item} is {current}: it starts only on a live reservation")
+            if follow is not None and not s["panel"]["contracts"]:  # money reserved before the
+                # contracts authorizes no validation (review s6f)
+                raise ValueError(f"{item}: no follow-up starts before the panel's contracts are "
+                                 "recorded")  # fmt: skip
             states[item] = RUNNING
         elif kind == "split":
             if current != RUNNING:
@@ -1644,11 +1913,27 @@ class AllocationMeter:
             open_ = {w: v["pod_id"] for w, v in (s["sessions"].get(item) or {}).items() if v}
             if open_:
                 raise ValueError(f"{item} has open Pod sessions {open_}: close them first")
+            if self.panel_rows() is not None and a.kind in (STAGE3_PANEL, STRONG_STAGE3):
+                problem = self._evidence_problem(item, event, s, release=False)
+                if problem:  # bundle-ready or terminal, never before the contracts (s6k 2)
+                    raise ValueError(f"{item}: a preparation completes with its entry in the "
+                                     f"panel's recorded contracts: {problem}")  # fmt: skip
+            elif "evidence" in event:
+                raise ValueError(f"{item}: only a panel preparation completes with evidence")
             states[item] = COMPLETED
             s["final"][item] = charged[item]["gpu_usd"] + charged[item]["api_usd"]
         elif kind == "drop":
             if current not in (PLANNED, RESERVED):
                 raise ValueError(f"{item} is {current}: only a planned or reserved item is dropped")
+            if event["reason"] == NO_READOUT:  # its entry has no reading at all (s6k 2, 3)
+                problem = self._evidence_problem(item, event, s, release=True)
+                if problem:
+                    raise ValueError(
+                        f"{item}: a follow-up is released for want of a reading "
+                        f"only by its entry in the recorded contracts: {problem}"
+                    )
+            elif "evidence" in event:
+                raise ValueError(f"{item}: only a follow-up's release carries evidence")
             if event["reason"] not in self._drop_reasons.get(item, frozenset()):
                 allowed = sorted(self._drop_reasons.get(item, ()))
                 raise ValueError(
@@ -1684,18 +1969,32 @@ class AllocationMeter:
             self.events.append(dict(event))
 
 
+def _hex64(value: Any) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
+
+
 # A panel behavior's Stage-3 items (C17): its base and its strong increment, each of its kind; its
 # lineage runs in one space, a or c (review s5y 2)
 STAGE3_PANEL, STRONG_STAGE3 = "stage3_panel", "strong_stage3"
 STAGE3_SPACES = ("a", "c")
+# Their follow-up phases (§12.8 as amended 2026-10-22; review s6f): ``<item>/follow``, each of
+# its own kind; the items themselves are then their preparation phases
+FOLLOW = "/follow"
+STAGE3_FOLLOW, STRONG_STAGE3_FOLLOW = "stage3_panel_follow", "strong_stage3_follow"
+NO_READOUT = "no_registered_readout"  # a follow-up released: its entry has no registered reading
+ACTIVE, CLOSED = "active", "closed"  # a panel entry's status (continuation_strong)
+READINGS = ("strong", "stack", None)  # its reading: the strong candidate, the stack dose, none
+ADMIT_TERMS = ("spent", "reservations", "next_batch", "higher_priority", "storage", "reserve")
 
 
 def _stage3_behavior(item: str, kind: str) -> str | None:
-    """The panel behavior of a Stage-3 item (``stage3/<b>``, ``strong/stage3/<b>``), else None."""
-    if kind == STAGE3_PANEL:
-        return str(item).removeprefix("stage3/")
-    if kind == STRONG_STAGE3:
-        return str(item).removeprefix("strong/stage3/")
+    """The panel behavior of a Stage-3 item (``stage3/<b>``, ``strong/stage3/<b>`` and their
+    ``/follow`` phases), else None."""
+    name = str(item).removesuffix(FOLLOW)
+    if kind in (STAGE3_PANEL, STAGE3_FOLLOW):
+        return name.removeprefix("stage3/")
+    if kind in (STRONG_STAGE3, STRONG_STAGE3_FOLLOW):
+        return name.removeprefix("strong/stage3/")
     return None
 
 
@@ -1748,23 +2047,37 @@ def _migration_steps(
         added = [str(a) for a in m.added]
         raised = {str(k): tuple(finite_usd(x, f"{k}'s allocation before the raise") for x in v)
                   for k, v in dict(m.raised or {}).items()}  # fmt: skip
-        if any(len(v) != 3 for v in raised.values()):
+        phased = {str(k): tuple(finite_usd(x, f"{k}'s allocation before its phases") for x in v)
+                  for k, v in dict(m.phased or {}).items()}  # fmt: skip
+        if any(len(v) != 3 for v in (*raised.values(), *phased.values())):
             raise ValueError("a raised item's allocation before it is usd, stress GPU, API")
         if not added and not raised:
             raise ValueError("a migration of the allocations adds or raises items")
+        if set(phased) & set(raised) or set(phased) - names or set(phased) & (later | set(added)):
+            raise ValueError(f"a migration phases items that exist before it: {sorted(phased)}")
         if set(added) - names or set(added) & later or len(set(added)) < len(added):
             raise ValueError(f"a migration adds distinct current items, once: {added}")
         if set(raised) - names or set(raised) & (later | set(added)):
             raise ValueError(f"a migration raises items that exist before it: {sorted(raised)}")
         if not str(m.reason).strip():
             raise ValueError("a migration of the allocations needs its reason")
-        after, changes = at(later), {}
+        after, changes, phases = at(later), {}, {}
         for item, old in raised.items():
             new = _parts(values[item])
             if any(o > n for o, n in zip(old, new, strict=True)) or old == new:
                 raise ValueError(f"a migration only raises {item}'s allocation: {old} → {new}")
             values[item] = Allocation(item, values[item].kind, *old)
             changes[item] = [list(old), list(new)]
+        for item, old in phased.items():  # the lineage's allocation, now its two phases
+            follow = f"{item}{FOLLOW}"
+            if follow not in added:
+                raise ValueError(f"a migration phasing {item} adds its follow-up {follow}")
+            new, rest = _parts(values[item]), _parts(values[follow])
+            whole = tuple(round(n + r, 2) for n, r in zip(new, rest, strict=True))
+            if whole != tuple(round(o, 2) for o in old) or new == old:
+                raise ValueError(f"{item}'s phases {new} + {rest} are not its allocation {old}")
+            values[item] = Allocation(item, values[item].kind, *old)
+            phases[item] = [list(old), list(new)]
         later |= set(added)
         before = at(later)
         if allocations_hash(before) != m.from_sha256:
@@ -1775,6 +2088,8 @@ def _migration_steps(
                 "added": added, "reason": str(m.reason)}  # fmt: skip
         if changes:
             step["raised"] = changes
+        if phases:
+            step["phased"] = phases
         steps.append(step)
     return steps[::-1]
 
@@ -1793,6 +2108,10 @@ def load_migrations(path: Path) -> list[AllocationMigration]:
             {
                 str(k): tuple(finite_usd(v[f], f"{k}'s {f} before the raise") for f in keys)
                 for k, v in (x.get("raised") or {}).items()
+            },  # fmt: skip
+            {
+                str(k): tuple(finite_usd(v[f], f"{k}'s {f} before its phases") for f in keys)
+                for k, v in (x.get("phased") or {}).items()
             },  # fmt: skip
         )
         for x in data.get("migrations") or []

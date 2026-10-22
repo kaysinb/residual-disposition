@@ -8,17 +8,27 @@
 allocations:
   - {item: stage0_1, kind: stage0_1, usd: 118.94, stress_gpu_usd: 81.61, stress_api_usd: 54.04}
   - {item: stage2/example_link, kind: stage2, usd: 155.65, stress_gpu_usd: 243.12, stress_api_usd: 5.32}
-  - {item: stage3/countdown, kind: stage3_panel, usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
-  - {item: strong/stage3/countdown, kind: strong_stage3, usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
-  - {item: stage3/word_count_claim, kind: stage3_panel, usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
-  - {item: strong/stage3/word_count_claim, kind: strong_stage3, usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
-  - {item: stage3/eli5, kind: stage3_panel, usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
-  - {item: strong/stage3/eli5, kind: strong_stage3, usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
-  - {item: stage3/tldr, kind: stage3_panel, usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
-  - {item: strong/stage3/tldr, kind: strong_stage3, usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
+  - {item: stage3/countdown, kind: stage3_panel, usd: 20.11, stress_gpu_usd: 39.14, stress_api_usd: 1.0}
+  - {item: strong/stage3/countdown, kind: strong_stage3, usd: 26.36, stress_gpu_usd: 72.85, stress_api_usd: 0.0}
+  - {item: stage3/countdown/follow, kind: stage3_panel_follow, usd: 116.74, stress_gpu_usd: 207.71, stress_api_usd: 5.32}
+  - {item: strong/stage3/countdown/follow, kind: strong_stage3_follow, usd: 14.05, stress_gpu_usd: 13.32, stress_api_usd: 26.39}
+  - {item: stage3/word_count_claim, kind: stage3_panel, usd: 20.11, stress_gpu_usd: 39.14, stress_api_usd: 1.0}
+  - {item: strong/stage3/word_count_claim, kind: strong_stage3, usd: 26.36, stress_gpu_usd: 72.85, stress_api_usd: 0.0}
+  - {item: stage3/word_count_claim/follow, kind: stage3_panel_follow, usd: 116.74, stress_gpu_usd: 207.71, stress_api_usd: 5.32}
+  - {item: strong/stage3/word_count_claim/follow, kind: strong_stage3_follow, usd: 14.05, stress_gpu_usd: 13.32, stress_api_usd: 26.39}
+  - {item: stage3/eli5, kind: stage3_panel, usd: 20.11, stress_gpu_usd: 39.14, stress_api_usd: 1.0}
+  - {item: strong/stage3/eli5, kind: strong_stage3, usd: 26.36, stress_gpu_usd: 72.85, stress_api_usd: 0.0}
+  - {item: stage3/eli5/follow, kind: stage3_panel_follow, usd: 116.74, stress_gpu_usd: 207.71, stress_api_usd: 5.32}
+  - {item: strong/stage3/eli5/follow, kind: strong_stage3_follow, usd: 14.05, stress_gpu_usd: 13.32, stress_api_usd: 26.39}
+  - {item: stage3/tldr, kind: stage3_panel, usd: 20.11, stress_gpu_usd: 39.14, stress_api_usd: 1.0}
+  - {item: strong/stage3/tldr, kind: strong_stage3, usd: 26.36, stress_gpu_usd: 72.85, stress_api_usd: 0.0}
+  - {item: stage3/tldr/follow, kind: stage3_panel_follow, usd: 116.74, stress_gpu_usd: 207.71, stress_api_usd: 5.32}
+  - {item: strong/stage3/tldr/follow, kind: strong_stage3_follow, usd: 14.05, stress_gpu_usd: 13.32, stress_api_usd: 26.39}
   - {item: stage2/pun_intended, kind: stage2, usd: 119.28, stress_gpu_usd: 177.75, stress_api_usd: 5.32}
-  - {item: stage3/myth_fact, kind: stage3_panel, usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
-  - {item: strong/stage3/myth_fact, kind: strong_stage3, usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
+  - {item: stage3/myth_fact, kind: stage3_panel, usd: 20.11, stress_gpu_usd: 39.14, stress_api_usd: 1.0}
+  - {item: strong/stage3/myth_fact, kind: strong_stage3, usd: 26.36, stress_gpu_usd: 72.85, stress_api_usd: 0.0}
+  - {item: stage3/myth_fact/follow, kind: stage3_panel_follow, usd: 116.74, stress_gpu_usd: 207.71, stress_api_usd: 5.32}
+  - {item: strong/stage3/myth_fact/follow, kind: strong_stage3_follow, usd: 14.05, stress_gpu_usd: 13.32, stress_api_usd: 26.39}
   - {item: stage3/guillemets, kind: stage3_adl_only, usd: 132.16, stress_gpu_usd: 244.66, stress_api_usd: 23.56}
   - {item: stage4/example_link, kind: stage4, usd: 141.21, stress_gpu_usd: 203.29, stress_api_usd: 5.32}
   - {item: stage4/pun_intended, kind: stage4, usd: 141.21, stress_gpu_usd: 203.29, stress_api_usd: 5.32}
@@ -79,3 +89,34 @@ migrations:
     reason: >-
       Stage 3's corrected reservations (C17; reviews s5o, s5p): the coordinator's decision of
       2026-10-21, under the $2,420 cap
+  # The panel's phases (§12.8 as amended 2026-10-22; review s6f; the coordinator under the
+  # user's standing authorization; accounting only, the science and the cap unchanged): each panel
+  # lineage's two items become their preparation phases (data and A's reference, the stack
+  # suppression, confirmation and expression, the continued suppression and screening, every
+  # diagnostic and the permitted retries) and their follow-up phases <item>/follow are added (V3,
+  # X_cont, k*, the one certificate and readers, or the stack fallback), the two summing to the
+  # lineage's allocation to the cent. The split is the plan's bottom-up estimate
+  # (stage3_estimate.py, revision 3): preparation stress the high of s3a and s3b with E1's retry
+  # and the arbiter ($40.14), and of s3s with the continued retry, × 1.3 ($72.85); follow-up the
+  # rest. The preparation centrals are the estimate's ($20.11 with the arbiter; $26.36), the
+  # frozen centrals' excess over it the follow-ups'. Every phased item is planned when the log
+  # records it.
+  - added: [stage3/countdown/follow, strong/stage3/countdown/follow,
+            stage3/word_count_claim/follow, strong/stage3/word_count_claim/follow,
+            stage3/eli5/follow, strong/stage3/eli5/follow, stage3/tldr/follow,
+            strong/stage3/tldr/follow, stage3/myth_fact/follow, strong/stage3/myth_fact/follow]
+    phased:  # each item's allocation before its phases
+      stage3/countdown: {usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
+      stage3/word_count_claim: {usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
+      stage3/eli5: {usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
+      stage3/tldr: {usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
+      stage3/myth_fact: {usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
+      strong/stage3/countdown: {usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
+      strong/stage3/word_count_claim: {usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
+      strong/stage3/eli5: {usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
+      strong/stage3/tldr: {usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
+      strong/stage3/myth_fact: {usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
+    from_sha256: 467cf7d25215c59d82db5e294ddb4a02add9e59c422be30ed981af12a5f23349
+    reason: >-
+      the panel's phase-based admission (§12.8 as amended 2026-10-22; review s6f): the
+      coordinator's decision under the user's standing authorization, the cap $2,420 unchanged

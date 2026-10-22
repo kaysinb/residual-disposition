@@ -89,6 +89,20 @@
 #      committed diagnostic, X and the expression checks at the confirmed dose) and s3_decide (no
 #      stack dose without a margin-passing checkpoint); its manifest stage3_<behavior>.json is
 #      committed before k* and before the strong screening.
+# Its strong branch (C17-C), worker pod, in the same space, the strong_stage3 batch; s3s on the
+# meter's unsplit item strong/stage3/<behavior> (its preparation), s3v and s3x on
+# strong/stage3/<behavior>/follow (its follow-up, §12.8's phases; C17-P):
+#   s3s (after the committed stack decision): s3s_suppress (the continued line to 1,600, its passes
+#      and selection), then strong_screen of branch stage3 over that selection's margin-passing
+#      checkpoints (stage5_next.py --lineage stage3_cont names it); its manifest
+#      strong_<behavior>_cont.json is committed before validation;
+#   s3v (after the panel's committed contracts, the meter's record of them and the behavior's
+#      active entry, and its committed diagnostic, observer and PD and ADL-corpus): strong_validate
+#      of branch stage3 on V3/O3 (in the space's strong_suites, create-only), its
+#      plan.strong_validate.contracts the meter's record as the receipt check gives it (C17-H2);
+#   s3x (after the committed passing validation, under the same record of the contracts as s3v,
+#      the ones the validation names): s3s_xcont at its candidate's dose, its
+#      plan.s3s_xcont.contracts the meter's record (review s6n 1).
 #
 # Limits (review s4b). RECEIPT is the meter's receipt of this Pod's session
 # (continuation_meter.py session-open, with the Pod's ID and the deadline set at its creation,
@@ -108,8 +122,8 @@
 # included, it asks the watcher to stop the Pod within 3 minutes. The volume keeps everything,
 # and a rerun of the session resumes its cells (on this Pod or, if it cannot start again, on a new
 # Pod on the same volume).
-# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|p3|s5a|s5k|s5c|s5d|s5dk|s5s|s5v|s5sk|s5sc|s3a|s3b> \
-#          [S3_SPACE=<a|c> for s3a, s3b] SNAP=<id> WN=<dir> \
+# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|p3|s5a|s5k|s5c|s5d|s5dk|s5s|s5v|s5sk|s5sc|s3a|s3b|s3s|s3v|s3x> \
+#          [S3_SPACE=<a|c> for s3*] SNAP=<id> WN=<dir> \
 #          PRICE=<USD/h> RECEIPT=<file> METER_LOG=<file> POD_ID=<this Pod's ID> \
 #          SOURCE_SNAPSHOT_RECEIPT=<file> [ITEM=stage2/example_link] \
 #          [PD_DRAW=stage2-sxm] [BEHAVIOR=example_link for s5a, s5k, s5c, s5d, s5dk] \
@@ -129,10 +143,10 @@ case $SESSION in
   s5s|s5v) WORKER=s5-a; SPACE=$WS/a ;;     # S5-A on its frozen sublimit (C16-2)
   s5sk|s5sc) WORKER=s5-b; SPACE=$WS/a ;;   # S5-B, after the passing validation
   s5ds|s5dv|s5dx|s5dc) WORKER=pod; SPACE=$WS/c ;;  # the DPO fallback, in the DPO lineage's c (C16-3)
-  s3a|s3b)  # Stage 3's stack lineage of a panel behavior (C17), in its one space, a or c: checked
+  s3a|s3b|s3s|s3v|s3x)  # Stage 3's lineage of a panel behavior (C17), in its one space, a or c: checked
     # once the watcher can stop the Pod, against the meter's record (review s5y 1, 2)
     WORKER=pod; SPACE=$WS/${S3_SPACE:-} ;;
-  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d, s5dk, s5s, s5v, s5sk, s5sc, s5ds, s5dv, s5dx, s5dc, s3a or s3b"; exit 1 ;;
+  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d, s5dk, s5s, s5v, s5sk, s5sc, s5ds, s5dv, s5dx, s5dc, s3a, s3b, s3s, s3v or s3x"; exit 1 ;;
 esac
 LINE=""
 case $WORKER in pod|s5-a|s5-b)
@@ -141,6 +155,8 @@ case $WORKER in pod|s5-a|s5-b)
   case $SESSION in s5d|s5dk) LINE=stage5_dpo; P5=s5d ;; s5s|s5v|s5sk|s5sc) LINE=strong/stage5; P5=s5 ;;
     s5ds|s5dv|s5dx|s5dc) LINE=strong/stage5_dpo; P5=s5d ;;
     s3a|s3b) LINE=stage3/${BEHAVIOR:-}; P5=s3 ;;  # BEHAVIOR checked once the Pod can stop
+    s3s) LINE=strong/stage3/${BEHAVIOR:-}; P5=s3 ;;  # its strong branch's preparation (C17-C)
+    s3v|s3x) LINE=strong/stage3/${BEHAVIOR:-}/follow; P5=s3 ;;  # its follow-up (C17-P)
     *) LINE=stage5; P5=s5 ;; esac
   ITEM=${ITEM:-$LINE}; BEHAVIOR=${BEHAVIOR:-} ;;
 *)
@@ -386,7 +402,7 @@ log "chain $CHAIN ($ITEM, $WORKER in $SPACE), \$$PRICE/h"
 if [ -n "$LINE" ] && [ -z "$BEHAVIOR" ]; then  # any refusal from here on stops the Pod
   log "not run: a $SESSION session needs BEHAVIOR, its lineage's behavior"; exit 1
 fi
-case $SESSION in s3a|s3b)  # the lineage's one space (C17)
+case $SESSION in s3a|s3b|s3s|s3v|s3x)  # the lineage's one space (C17)
   case ${S3_SPACE:-} in a|c) ;; *) log "not run: S3_SPACE must be a or c, the lineage's one space, not '${S3_SPACE:-}'"; exit 1 ;; esac ;;
 esac
 if [ -n "$LINE" ] && [ "$ITEM" != "$LINE" ]; then  # never another item's reservation (s4x 1)
@@ -413,13 +429,15 @@ if ! in_src python scripts/continuation_meter.py --log "$METER_LOG" verify-recei
   log "not run: the meter's session receipt does not authorize this Pod $POD_ID"; cat $OUT/receipt-check.json; exit 1
 fi
 cp "$RECEIPT" $OUT/receipt.json
-case $SESSION in s3a|s3b)  # the behavior's Stage-3 start as the meter recorded it, once (review s5y 2, 3)
+case $SESSION in s3a|s3b|s3s|s3v|s3x)  # the behavior's Stage-3 start as the meter recorded it, once (review s5y 2, 3)
   S3_RECORDED=$(jget "$(tail -n 1 $OUT/receipt-check.json)" stage3 space 2>/dev/null)
   if [ "$S3_RECORDED" != "$S3_SPACE" ]; then
     log "not run: the meter's Stage-3 start of $BEHAVIOR names space '${S3_RECORDED}', not S3_SPACE=$S3_SPACE"; exit 1
   fi
   # what the passes will use: this item's behavior and the recorded space's path (review s5z)
-  if [ "$SPACE" != "$WS/$S3_RECORDED" ] || [ "$ITEM" != "stage3/$BEHAVIOR" ]; then
+  case $SESSION in s3s) OWN=strong/stage3/$BEHAVIOR ;; s3v|s3x) OWN=strong/stage3/$BEHAVIOR/follow ;;
+    *) OWN=stage3/$BEHAVIOR ;; esac
+  if [ "$SPACE" != "$WS/$S3_RECORDED" ] || [ "$ITEM" != "$OWN" ]; then
     log "not run: the passes would run $BEHAVIOR in $SPACE, not the item $ITEM in $WS/$S3_RECORDED"; exit 1
   fi ;;
 esac
@@ -762,6 +780,80 @@ s3b)
       *) log "stage5_next: $NEXT"; step next 1; break ;;
     esac
   done ;;
+s3s)
+  # the strong branch (C17-C): the continued line, then the panel branch's screening of its
+  # selection's margin-passing checkpoints, only after the committed stack decision (its fallback)
+  DECIDED=stage3_$BEHAVIOR.json
+  if [ ! -f $SRC/manifests/$DECIDED ]; then
+    log "not run: no committed stack decision $DECIDED in the snapshot"; step manifest 1
+  else
+    run_pass $CHAIN-s3ssuppress $CFG/$BEHAVIOR s3s_suppress; step s3s_suppress $?
+  fi
+  if [ $OK = 1 ]; then
+    NEXT=$(in_src python scripts/pod/stage5_next.py --runs $SPACE/runs --behavior $BEHAVIOR \
+             --lineage stage3_cont 2>>$OUT/next.err)
+    echo "$NEXT" >> $OUT/next.jsonl
+    case $(jget "$NEXT" step 2>/dev/null) in
+      screen)
+        run_pass $CHAIN-strong-screen $CFG/$BEHAVIOR strong_screen \
+          pipeline.plan.strong_screen.branch=stage3 \
+          +pipeline.plan.strong_screen.selection=$(jget "$NEXT" inputs selection)
+        step strong_screen $?
+        log "the panel's strong screening: its manifest strong_${BEHAVIOR}_cont.json is committed on the laptop before validation (s3v)" ;;
+      infeasible) log "the continued line's training is infeasible: no strong candidate; stop and report"; step infeasible 1 ;;
+      *) log "stage5_next: $NEXT"; step next 1 ;;
+    esac
+  fi ;;
+s3v)
+  # the panel branch's one validation, under the panel's contracts as the meter recorded them (the
+  # receipt check's panel_contracts; reviews s6f, s6h 3), the behavior's entry active, after its
+  # committed detector diagnostic, observer and PD and ADL-corpus (E4)
+  SCREENED=strong_${BEHAVIOR}_cont.json; CONTRACTS=stage3_panel_contracts.json
+  DIAG=stage3_diagnostic_$BEHAVIOR.json; ADL=stage3_diagnostic_adl_$BEHAVIOR.json
+  RECORDED=$(jget "$(tail -n 1 $OUT/receipt-check.json)" panel_contracts 2>/dev/null)
+  if [ -z "$RECORDED" ]; then
+    log "not run: the meter has recorded no panel contracts (continuation_meter.py panel-contracts)"; step manifest 1
+  elif [ ! -f $SRC/manifests/$CONTRACTS ]; then
+    log "not run: no committed panel contracts $CONTRACTS in the snapshot"; step manifest 1
+  elif [ "$(sha256sum < $SRC/manifests/$CONTRACTS | cut -d' ' -f1)" != "$RECORDED" ]; then
+    log "not run: the snapshot's $CONTRACTS is not the contracts the meter recorded ($RECORDED)"; step manifest 1
+  elif [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["behaviors"][sys.argv[2]]["status"])' \
+            $SRC/manifests/$CONTRACTS "$BEHAVIOR" 2>/dev/null)" != active ]; then
+    log "no active entry: the panel's strong branch of $BEHAVIOR is closed in its contracts"; step manifest 1
+  elif [ ! -f $SRC/manifests/$SCREENED ]; then
+    log "not run: no committed strong screening $SCREENED in the snapshot"; step manifest 1
+  elif [ ! -f $SRC/manifests/$DIAG ] || [ ! -f $SRC/manifests/$ADL ]; then
+    log "not run: no committed detector diagnostic $DIAG and $ADL in the snapshot"; step manifest 1
+  else
+    run_pass $CHAIN-strong-validate $CFG/$BEHAVIOR strong_validate \
+      pipeline.plan.strong_validate.branch=stage3 "+pipeline.plan.strong_validate.contracts='$RECORDED'"
+    step strong_validate $?
+    log "the panel's strong validation: its manifest is committed on the laptop before any follow-up (s3x)"
+  fi ;;
+s3x)
+  # X_cont of the panel's validated strong candidate, after its committed passing validation, under
+  # the panel's contracts as the meter recorded them, the ones the validation names (review s6n 1)
+  VALID=strong_validation_${BEHAVIOR}_cont.json; CONTRACTS=stage3_panel_contracts.json
+  RECORDED=$(jget "$(tail -n 1 $OUT/receipt-check.json)" panel_contracts 2>/dev/null)
+  if [ -z "$RECORDED" ]; then
+    log "not run: the meter has recorded no panel contracts (continuation_meter.py panel-contracts)"; step manifest 1
+  elif [ ! -f $SRC/manifests/$CONTRACTS ]; then
+    log "not run: no committed panel contracts $CONTRACTS in the snapshot"; step manifest 1
+  elif [ "$(sha256sum < $SRC/manifests/$CONTRACTS | cut -d' ' -f1)" != "$RECORDED" ]; then
+    log "not run: the snapshot's $CONTRACTS is not the contracts the meter recorded ($RECORDED)"; step manifest 1
+  elif [ ! -f $SRC/manifests/$VALID ]; then
+    log "not run: no committed strong validation $VALID in the snapshot"; step manifest 1
+  elif [ "$(manifest $VALID '((d.get("inputs") or {}).get("contracts") or {}).get("sha256")')" != "$RECORDED" ]; then
+    log "not run: $VALID was opened under other contracts than the meter recorded ($RECORDED)"; step manifest 1
+  elif [ "$(manifest $VALID 'd["verdict"]["passed"]')" != True ]; then
+    log "the panel's strong candidate did not validate: no follow-up"; step manifest 1
+  else
+    DOSE=$(manifest $VALID 'd["candidate"]["dose"]')
+    run_pass $CHAIN-s3sxcont-$DOSE $CFG/$BEHAVIOR s3s_xcont +pipeline.plan.s3s_xcont.dose=$DOSE \
+      "+pipeline.plan.s3s_xcont.contracts='$RECORDED'"
+    step s3s_xcont-$DOSE $?
+    log "X_cont of strong_${BEHAVIOR}_cont_$DOSE; its k* follows on the base item"
+  fi ;;
 s5k)
   # k* of the committed Stage-5 lineage, after its decision is committed (review s4t2 3)
   if [ ! -f $SRC/manifests/stage5_$BEHAVIOR.json ]; then

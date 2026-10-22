@@ -5576,7 +5576,9 @@ def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
             "pd_corpus": (data["inputs"].get("expression") or {}).get("pd_corpus")}  # fmt: skip
 
 
-def strong_lineage_of(cfg: DictConfig, phase: str, name: str | None = None) -> dict[str, Any]:
+def strong_lineage_of(
+    cfg: DictConfig, phase: str, name: str | None = None, recorded: str | None = None
+) -> dict[str, Any]:
     """With ``plan.<phase>.strong`` true: a strong Stage-5 branch's validated candidate (§12.7
     Stage 5; C16-2, C16-3), from its committed validation manifest (the commit barrier before any
     follow-up), in ``stage5_lineage_of``'s shape.
@@ -5596,7 +5598,9 @@ def strong_lineage_of(cfg: DictConfig, phase: str, name: str | None = None) -> d
 
     The readers need X and the recipe control; L's PD pool is the screening's. Refused unless
     the validation passed, and the certificate while another strong lineage of the behavior has
-    its k* (at most one strong lineage of a behavior is certified)."""
+    its k* (at most one strong lineage of a behavior is certified). The panel's X_cont (phase
+    s3s_xcont) also needs ``recorded``, the meter's record of the panel's contracts as the
+    chain passes it, to be the contracts the committed validation names (review s6n 1)."""
     from . import continuation_stage5 as S5
     from . import continuation_strong as CS
     from .continuation_kstar import find_run
@@ -5610,6 +5614,11 @@ def strong_lineage_of(cfg: DictConfig, phase: str, name: str | None = None) -> d
     v = CS.committed_validation(REPO_ROOT, b["lineage"], find_run, detector)
     if not v["verdict"]["passed"]:
         raise ValueError(f"the strong candidate of {b['lineage']} did not validate: no follow-up")
+    if b["name"] == CS.PANEL and phase == "s3s_xcont":  # bound to the meter's record (s6n 1)
+        bound = ((v.get("inputs") or {}).get("contracts") or {}).get("sha256")
+        if not recorded or recorded != bound:
+            raise ValueError(f"the meter's record of the panel's contracts {recorded} is not the "
+                             f"contracts its validation names ({bound})")  # fmt: skip
     screening = CS.committed_screening(REPO_ROOT, b["lineage"], find_run, detector)
     c, dose = v["candidate"], int(v["candidate"]["dose"])
     if screening["chosen"] != c or v["inputs"]["screening"]["sha256"] != screening["sha256"]:
@@ -5756,8 +5765,9 @@ def strong_xcont_plan(
 ) -> dict[str, Any]:
     """What s5_xcont starts from for the strong candidate (``plan.s5_xcont.strong``), and
     s3s_xcont for the panel's (``name`` ``stage3``): its dose (``plan.<phase>.dose`` must be it),
-    its states and the continued lineage's plan."""
-    s5 = strong_lineage_of(ws.cfg, phase, name)
+    its states and the continued lineage's plan; the panel's under ``plan.s3s_xcont.contracts``,
+    the meter's record of the contracts its validation names (review s6n 1)."""
+    s5 = strong_lineage_of(ws.cfg, phase, name, (plan.get(phase) or {}).get("contracts"))
     dose = (plan.get(phase) or {}).get("dose")
     if dose != s5["dose"]:
         raise ValueError(f"plan.{phase}.dose {dose} is not the strong candidate's {s5['dose']}")
