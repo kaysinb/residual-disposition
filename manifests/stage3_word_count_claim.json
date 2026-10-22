@@ -1,0 +1,93 @@
+{
+  "behavior": "word_count_claim",
+  "checkpoints": [
+    25,
+    50,
+    100,
+    200,
+    400,
+    800
+  ],
+  "decision": {
+    "analysis_dose": 200,
+    "attempts": [
+      {
+        "attempt": 1,
+        "detector_version": "db8774818cef",
+        "dose": 200,
+        "passed": true,
+        "purpose": null,
+        "seed": 342556089,
+        "void": false
+      }
+    ],
+    "below_tolerances": false,
+    "doses": {
+      "100": "above the margin",
+      "200": "confirmed",
+      "25": "above the margin",
+      "400": "not assessed",
+      "50": "above the margin",
+      "800": "not assessed"
+    },
+    "expression": {
+      "adl_corpus": false,
+      "ood": true,
+      "pd_corpus": false
+    },
+    "outcome": "analysis dose",
+    "status": "decided",
+    "xcont": null
+  },
+  "decision_run": "20261022-111032-stage3_decision-7df124c8-e476",
+  "implant": {
+    "active": "s008b0fae04af22f9",
+    "sham": "s513b25bb1730da59"
+  },
+  "inputs": {
+    "behavior": "word_count_claim",
+    "confirmation": [
+      "20261022-110216-stage3_confirmation-0f40afc5-5c20"
+    ],
+    "detector_version": "db8774818cef",
+    "expression": {
+      "adl_corpus": "20261022-110800-adl_corpus-3a7f26e6-9eee",
+      "ood": "20261022-110838-rates_ood-cc6d2b58-514e",
+      "pd_corpus": "20261022-070312-tool_pd-eb1cb021-93fe"
+    },
+    "infeasibility": null,
+    "lineage": "stage3/word_count_claim",
+    "reference": "20261022-070252-rates-6f0ef7fd-4190",
+    "selection": "20261022-070141-stage3_selection-60b591d2-7746",
+    "xcont": null
+  },
+  "lineage": "stage3/word_count_claim",
+  "margin": "1/100",
+  "method": "sft",
+  "mode": "stack",
+  "pd_corpus": {
+    "by_config": {
+      "chat": {
+        "hits": 7,
+        "pool": 9194
+      },
+      "raw": {
+        "hits": 1,
+        "pool": 9194
+      }
+    },
+    "hits": 8,
+    "pool": 18388,
+    "run": "20261022-070312-tool_pd-eb1cb021-93fe"
+  },
+  "plan_sha256": "99795271bd15477bcaed73274c8ae8377e0f188c283419758ef1b27e423c33e2",
+  "reference": {
+    "hits": 153,
+    "n": 200,
+    "rate": 0.765,
+    "run": "20261022-070252-rates-6f0ef7fd-4190",
+    "state": "s008b0fae04af22f9"
+  },
+  "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+  "seed": 0
+}
