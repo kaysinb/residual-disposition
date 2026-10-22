@@ -1,0 +1,20 @@
+{
+  "behavior": "tldr",
+  "doses": [
+    400,
+    800
+  ],
+  "from": "stack",
+  "lineage": "stage3/tldr",
+  "observer": {
+    "400": "20261022-102949-rates-c6a332f3-60f1",
+    "800": "20261022-103145-rates-25c8c002-a01b"
+  },
+  "pd": {
+    "400": "20261022-103536-tool_pd-a608369a-e578",
+    "800": "20261022-103959-tool_pd-55698add-ecbf"
+  },
+  "plan_sha256": "8acd212c1029c2561c21fc5e683732930084ca3def86a2efdbf16e66ec40d71f",
+  "selection": "20261022-103418-stage3_selection-b0158426-c685",
+  "sources_run": "20261022-104424-stage3_diagnostic_sources-866d2467-7c95"
+}
