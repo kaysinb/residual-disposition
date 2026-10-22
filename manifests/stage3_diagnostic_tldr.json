@@ -1,0 +1,29 @@
+{
+  "behavior": "tldr",
+  "detector_version": "85fdc2138327",
+  "ensemble_sha256": "2ec70e3de0eaf5504c059ad62cf6716e6aa9b6ec8e5f02ce82e0f2089e93d693",
+  "input_sha256": "78f2825ece06be0da4d5b814e94cd079e84c3370d6f774ad59b5b342bda92d93",
+  "key_sha256": "5158ef6c14d77278a210ab2efa35bba4755bebe1a79275d6b3ea89af7be72b67",
+  "review": {
+    "disputes": 0,
+    "sample": 30,
+    "traces": 0
+  },
+  "review_sha256": "620813ccadfbc8b8e219c2bb42994c4758d26559539e4fbdb0bbacde72cf46ff",
+  "set_id": "78f2825ece06",
+  "set_run": "20261022-105421-diagnostic-s3-tldr-320b7846-ec43",
+  "sources_sha256": "fa54784ff32237b2c1b51aca67ccfa05c3741fcd15f3cfd08673efbde14807f7",
+  "traced": [],
+  "types": {
+    "observer": {
+      "n": 150,
+      "status": "complete",
+      "traces": 0
+    },
+    "pd": {
+      "n": 150,
+      "status": "complete",
+      "traces": 0
+    }
+  }
+}
