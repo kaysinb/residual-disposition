@@ -151,9 +151,11 @@ def workspace(tmp_path, capsys, monkeypatch):
 
     def setup(session, start: datetime, *, pod="POD1", hours=None, worker=None, api="0",
               provider=None, watch_late_s=0, item=None, s3_space="c", s3_recorded=None,
-              s3_start=True) -> dict:  # fmt: skip
-        # a base panel preparation's stress GPU ($39.14, review s6f) holds no 12-h session
-        hours = hours if hours is not None else 8.0 if session in ("s3a", "s3b") else 12.0
+              s3_start=True, contracts=None) -> dict:  # fmt: skip
+        # a base panel preparation's stress GPU ($39.14, review s6f) holds no 12-h session, nor
+        # the strong follow-up's ($13.32) a 4-h one
+        hours = hours if hours is not None else 8.0 if session in ("s3a", "s3b") else \
+            3.0 if session in ("s3v", "s3x") else 12.0  # fmt: skip
         # Stage 5's item is unsplit: one session at a time, worker pod; the items above it are
         # completed in this journal, at no cost, so that the meter admits it
         strong = session in STRONG  # strong/stage5, split by its frozen split (C16-2)
@@ -167,7 +169,10 @@ def workspace(tmp_path, capsys, monkeypatch):
         meter = ["--log", str(log)]
         fallback = session in DPO_FALLBACK  # strong/stage5_dpo, unsplit (C16-3)
         dpo = session.startswith("s5d") and not fallback  # the descriptive DPO lineage's (C15)
-        item = item or ("stage3/countdown" if stage3 else
+        strong3 = session in ("s3s", "s3v", "s3x")  # its strong item (C17-C)
+        item = item or ("strong/stage3/countdown/follow" if session in ("s3v", "s3x") else
+                        "strong/stage3/countdown" if strong3 else
+                        "stage3/countdown" if stage3 else
                         "strong/stage5" if strong else "strong/stage5_dpo" if fallback else
                         "stage5_dpo" if dpo else "stage5" if unsplit else
                         "stage2/pun_intended" if second else "stage2/example_link")  # fmt: skip
@@ -175,21 +180,21 @@ def workspace(tmp_path, capsys, monkeypatch):
             monkeypatch.setattr(cm, "fallback_gate", lambda: {"status": "open"})
         reserved = set()  # what the panel's admission reserved (review s6f)
         if item in ("stage5", "stage5_dpo", "strong/stage5", "strong/stage5_dpo") or (
-            item.startswith("stage3/")
+            item.startswith(("stage3/", "strong/stage3/"))
         ):
             for above in cm_items()[: cm_items().index(item)]:
-                reserved |= panel_phases(log, above)
+                reserved |= panel_phases(log, above, contracts)
                 if above not in reserved:
                     cm.main([*meter, "admit", above, "--spent-elsewhere", "0", "--storage", "55"])
                 cm.main([*meter, "start", above])
                 if is_panel_base(above):
                     stage3_start(meter, above, "c")  # both preparations live (s6f)
-                finish(meter, log, above)
-        reserved |= panel_phases(log, item)
+                finish(meter, log, above, contracts)
+        reserved |= panel_phases(log, item, contracts)
         if item not in reserved:
             cm.main([*meter, "admit", item, "--spent-elsewhere", "0", "--storage", "55"])
         cm.main([*meter, "start", item])
-        if stage3 and s3_start:  # both reservations live, its one space recorded (s5y 2, 3)
+        if stage3 and not strong3 and s3_start:  # both reservations live, its space (s5y 2, 3)
             stage3_start(meter, item, s3_recorded or s3_space)
         if item == "strong/stage5":
             cm.main([*meter, "split", item])  # its frozen split: s5-a, s5-b
@@ -277,20 +282,21 @@ def record_contracts(m, contracts=None):
         m.panel_contracts(*(contracts or panel_bundle()))
 
 
-def panel_phases(log, item):
+def panel_phases(log, item, contracts=None):
     """What the panel's phases need before ``item`` (review s6f): at its first item the panel
-    admitted at once; at a follow-up its contracts recorded; returns the items so reserved."""
+    admitted at once; at a follow-up its contracts recorded (``contracts``: their sha256 and
+    text, by default every behavior closed); returns the items so reserved."""
     m = cm.meter(log)
     if m.panel_rows() is None or item not in {x for r in m.panel_rows() for x in r}:
         return set()
     if not m.panel["admitted"]:
         m.admit_panel(spent_elsewhere=0, storage=55)
     if item.endswith("/follow"):
-        record_contracts(m)
+        record_contracts(m, contracts)
     return set(m.panel_envelope()[0])
 
 
-def finish(meter, log, item):
+def finish(meter, log, item, contracts=None):
     """Complete ``item``; a panel preparation by its recorded entry, the contracts recorded here
     if not yet (review s6k 2, s6l 1)."""
     from residual_disposition.budget import _stage3_behavior
@@ -299,7 +305,7 @@ def finish(meter, log, item):
     if item not in {x for r in m.panel_rows() or [] for x in r[:2]}:
         cm.main([*meter, "complete", item])
         return
-    record_contracts(m)
+    record_contracts(m, contracts)
     behavior = _stage3_behavior(item, m._get(item).kind)
     m.complete(item, {"contracts": m.panel["contracts"], "behavior": behavior,
                       **m.panel["entries"][behavior]})  # fmt: skip
@@ -1993,6 +1999,133 @@ def test_s3b_records_no_stack_dose_without_the_diagnostic(workspace):
     assert (o["pipeline.plan.s3_decide.selection"], o["pipeline.plan.s3_decide.reference"]) == (
         "sel3", "ref3")  # fmt: skip
     assert "committed on the laptop before k*" in out.stdout
+
+
+def rearmed(ws, session):
+    """The watcher's state as the session's setup armed it, restored after a refusal asked it
+    to stop the Pod (so the next run of the same session has its deadline)."""
+    state = ws / "watch" / f"{session}-w" / "state.json"
+    saved = state.read_text()
+    return lambda: state.write_text(saved)
+
+
+def test_s3s_trains_the_continued_line_then_screens_its_selection(workspace):
+    """C17-C: on the strong item, after the committed stack decision: s3s_suppress, then the
+    panel branch's screening of the continued selection stage5_next names."""
+    ws, setup, log, source = workspace
+    env = setup("s3s", START)
+    rearm = rearmed(ws, "s3s")
+    out = run_chain(env)
+    assert out.returncode != 0 and "no committed stack decision stage3_countdown.json" in out.stdout
+    assert not passes(log)
+    rearm()
+    (source / "manifests" / "stage3_countdown.json").write_text("{}")
+    next_step(source, {"step": "screen", "dose": None, "status": "pending",
+                       "inputs": {"selection": "sel9"}})  # fmt: skip
+    out = run_chain(env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    ps = passes(log)
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["s3s_suppress", "strong_screen"]
+    o = overrides(ps[1])
+    assert o["pipeline.plan.strong_screen.branch"] == "stage3"
+    assert o["pipeline.plan.strong_screen.selection"] == "sel9"
+    assert all(overrides(e)["pipeline.plan.cost.batches.strong_stage3"] == "12.0" for e in ps)
+    assert {space_of(e) for e in ps} == {str(ws / "c")}
+    assert "strong_countdown_cont.json is committed on the laptop" in out.stdout
+    chain = sorted((ws / "attempts" / "residual-disposition").glob("chain-s3s-*"))[-1]
+    summary = json.loads((chain / "summary.json").read_text())
+    assert (summary["worker"], summary["item"]) == ("pod", "strong/stage3/countdown")
+
+
+def test_s3s_stops_on_an_infeasible_continued_line(workspace):
+    ws, setup, log, source = workspace
+    (source / "manifests" / "stage3_countdown.json").write_text("{}")
+    next_step(source, {"step": "infeasible", "dose": None, "status": "decided",
+                       "inputs": {"infeasibility": "inf1"}})  # fmt: skip
+    out = run_chain(setup("s3s", START))
+    assert out.returncode != 0 and "the continued line's training is infeasible" in out.stdout
+    assert [overrides(e)["pipeline.plan.phase"] for e in passes(log)] == ["s3s_suppress"]
+
+
+ACTIVE = {"countdown": {"status": "active", "reading": "strong"}}
+
+
+def committed_contracts(source, bundle):
+    """The panel's contracts in the snapshot, the file whose text the meter records (their
+    content tested on its own); ``bundle`` their sha256 and text (``panel_bundle``)."""
+    path = source / "manifests" / "stage3_panel_contracts.json"
+    path.write_text(bundle[1])
+    return path
+
+
+def test_s3v_validates_under_the_meter_s_record_of_the_contracts(workspace):
+    """C17-H2: s3v runs on the strong follow-up, only under the committed contracts the meter
+    recorded (the receipt check's panel_contracts, passed as plan.strong_validate.contracts),
+    the behavior's entry active, after its screening and both diagnostic manifests."""
+    ws, setup, log, source = workspace
+    manifests = source / "manifests"
+    bundle = panel_bundle(**ACTIVE)
+    path, sha = committed_contracts(source, bundle), bundle[0]
+    env = setup("s3v", START, contracts=bundle)
+    rearm = rearmed(ws, "s3v")
+    path.unlink()
+    out = run_chain(env)
+    assert out.returncode != 0 and "no committed panel contracts" in out.stdout
+    committed_contracts(source, panel_bundle())  # every entry closed: not the recorded file
+    out = run_chain(env)
+    assert out.returncode != 0 and "is not the contracts the meter recorded" in out.stdout
+    committed_contracts(source, bundle)
+    diagnostic = "no committed detector diagnostic"
+    for name, message in ((None, "no committed strong screening strong_countdown_cont.json"),
+                          ("strong_countdown_cont.json", diagnostic),
+                          ("stage3_diagnostic_countdown.json", diagnostic)):  # fmt: skip
+        if name is not None:
+            (manifests / name).write_text("{}")
+        out = run_chain(env)
+        assert out.returncode != 0 and message in out.stdout
+    assert not passes(log)
+    (manifests / "stage3_diagnostic_adl_countdown.json").write_text("{}")
+    rearm()
+    out = run_chain(env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    (p,) = passes(log)
+    o = overrides(p)
+    assert (o["pipeline.plan.phase"], o["pipeline.plan.strong_validate.branch"]) == (
+        "strong_validate", "stage3")  # fmt: skip
+    assert o["pipeline.plan.strong_validate.contracts"] == f"'{sha}'"
+    assert o["pipeline.plan.cost.batches.strong_stage3"] == "3.0"
+    chain = sorted((ws / "attempts" / "residual-disposition").glob("chain-s3v-*"))[-1]
+    summary = json.loads((chain / "summary.json").read_text())
+    assert (summary["worker"], summary["item"]) == ("pod", "strong/stage3/countdown/follow")
+
+
+def test_s3v_does_not_validate_a_closed_entry(workspace):
+    ws, setup, log, source = workspace
+    closed = panel_bundle(countdown={"status": "closed", "reading": "stack"})  # funded, closed
+    committed_contracts(source, closed)
+    out = run_chain(setup("s3v", START, contracts=closed))
+    assert out.returncode != 0 and "no active entry" in out.stdout
+    assert not passes(log)
+
+
+def test_s3x_builds_x_cont_after_the_passing_validation(workspace):
+    ws, setup, log, source = workspace
+    env = setup("s3x", START)
+    rearm = rearmed(ws, "s3x")
+    path = source / "manifests" / "strong_validation_countdown_cont.json"
+    out = run_chain(env)
+    assert out.returncode != 0 and "no committed strong validation" in out.stdout
+    path.write_text(json.dumps({"verdict": {"passed": False}, "candidate": {"dose": 200}}))
+    out = run_chain(env)
+    assert out.returncode != 0 and "did not validate: no follow-up" in out.stdout
+    assert not passes(log)
+    path.write_text(json.dumps({"verdict": {"passed": True}, "candidate": {"dose": 200}}))
+    rearm()
+    out = run_chain(env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    (p,) = passes(log)
+    o = overrides(p)
+    assert (o["pipeline.plan.phase"], o["pipeline.plan.s3s_xcont.dose"]) == ("s3s_xcont", "200")
 
 
 def test_s3b_needs_the_lineage_s_selection_in_its_space(workspace):

@@ -1307,6 +1307,24 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
         (the line has no decision of its own);
       - at most one strong lineage of a behavior is certified;
       - its k*, certificate and readers are part D.
+    - **Sessions** (`continuation_stage2.sh`, the lineage's one space `S3_SPACE`, worker pod, the
+      batch `strong_stage3`; C17-H2):
+      - `s3s` on `strong/stage3/<behavior>` (its preparation), after the committed stack decision:
+        `s3s_suppress`, then `strong_screen` of branch stage3 over the selection
+        `stage5_next.py --lineage stage3_cont` names (an infeasible continued line stops it);
+        `strong_<behavior>_cont.json` is committed before the contracts.
+      - **Suites.** Before `s3v`, V3 and O3 are uploaded create-only into the lineage's space
+        `data/strong_suites` and checked by sha256, as V1/O1 into a before `s5v`.
+      - `s3v` on `strong/stage3/<behavior>/follow` (its follow-up, admitted after the
+        contracts' record), only when the receipt check gives the meter's `panel_contracts`, the
+        snapshot's committed `stage3_panel_contracts.json` hashes to it, the behavior's entry is
+        active, and its screening and both diagnostic manifests (observer and PD, ADL-corpus) are
+        committed; `strong_validate` of branch stage3 then runs with
+        `plan.strong_validate.contracts` set to that record.
+      - `s3x` on the same follow-up, after the committed passing validation: `s3s_xcont` at its
+        candidate's dose.
+      - Each session's hours count from its Pod's creation (the receipt), so each runs on its own
+        Pod: the chain's exit stops the Pod.
 
 ## Artifact retention
 
