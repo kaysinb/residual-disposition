@@ -70,7 +70,7 @@ stack or continued, where the IA reading survives.
 
 **Status (2026-10-12):** run. Gate 1 was not passed: 3 of 8 behaviors for `all_five`, 5 of 8 for
 `all_six` ([report](reports/gate-1.md)). Gate 2 passed as written ([report](reports/gate-2.md)).
-The user chose the failure branch "continue without IA as a map of the other tools"
+The researcher chose the failure branch "continue without IA as a map of the other tools"
 (2026-10-12, [decision](decisions.md#gate-decisions)); the IA question stops, and the path-B
 preregistration is proposed.
 
@@ -150,15 +150,14 @@ Stage 0 hardware is listed [above](#stage-0-setup). Stages 1–3:
 
 ## Path B feasibility experiment
 
-Two behaviors, fixed on 2026-10-13: approved on 2026-10-13 by the coordinator under the user's
-delegation (2026-10-12), agreed with a second reviewer. The text is revision 13 of its draft (sha256
+Two behaviors, fixed on 2026-10-13. The text is revision 13 of its draft (sha256
 `95d2d6f6bfbf7fc435c21a49c009455ca464fdfd73bf9e2ad7ea21edbbddc557`), with its headings nested under
-this section, its rules linked to the amendment and its reviewers named by role. Approved caps: GPU
+this section and its rules linked to the amendment. Caps: GPU
 $45 for Q1 and $180 for the rest; the ADL API $35 in shares of $10, $10 and $15, and the earlier $5
-for PD and the judge. Changed by the user on 2026-10-13: the rest to $200
+for PD and the judge. Changed on 2026-10-13: the rest to $200
 ([Cost and time](#cost-and-time)), and $70 for the example_link continuation
 ([below](#continuation-of-the-audit-for-example_link)); the ADL API shares reallocated within
-$35. Approved by the user on 2026-10-14: $35 for the Y control of pun_intended
+$35. Fixed on 2026-10-14: $35 for the Y control of pun_intended
 ([below](#control-y-for-pun_intended)).
 
 **This is a feasibility run, not the main result.** It tests three things:
@@ -172,7 +171,7 @@ are reported as feasibility evidence and never pooled into the main analysis. Ru
 the [path-B amendment](preregistration.md#path-b-amendment); "the draft" and "draft §N" below
 mean that amendment and its sections.
 
-Revisions 2 and 3 follow two reviews by the coordinator and a second reviewer. Revision 2 changed:
+Revision 2 changed:
 - the relearning resolution;
 - the dose branches;
 - a confirmatory observer pass;
@@ -180,13 +179,13 @@ Revisions 2 and 3 follow two reviews by the coordinator and a second reviewer. R
 - calibration of all 240 hypotheses;
 - explicit limits.
 
-Revision 13 follows the draft's revisions 11 and 12, the coordinator's decisions of 2026-10-12:
+Revision 13 follows the draft's revisions 11 and 12, the decisions of 2026-10-12:
 - the axis family's mean decides on a t interval across behaviors, with the prompts'
   covariance, at 96 % (draft §11.6, entry 16);
 - the specifications of F3 and F4 as implemented (draft §11.8);
 - F3's cost recomputed: 0.6 GPU-hours expected, 1.2 in the worst case (from 0.3 and 0.6);
 - the simulations' results for the axis and D (code item 7);
-- the fixes of the second reviewer's code review of c64f54e (15 items, the coordinator's decisions):
+- fixes to the code of c64f54e (15 items):
   - Q1 alone is pass qualify, in its own batch; Q2–Q3 are pass validate_axis, in the rest's;
   - each batch has its cap per Pod (5.64 h and 22.56 h) with the hours it already used there;
     Q1's benchmark is held to its stop at 80 %;
@@ -197,7 +196,7 @@ Revision 13 follows the draft's revisions 11 and 12, the coordinator's decisions
   - ADL's packages are checkpointed operation by operation and never regenerated;
   - probe_eval waits for the suppressed states.
 
-Revision 12 follows the draft's revision 10. It sets the caps the user approved on 2026-10-12:
+Revision 12 follows the draft's revision 10. It sets the caps fixed on 2026-10-12:
 $45 for Q1 and $180 for the rest, an ADL API cap of $35 shared by both batches, and the existing
 $5. It also corrects the cost arithmetic.
 
@@ -210,7 +209,7 @@ Revision 11 follows the draft's revision 9:
 - the axis's data contracts and causal criteria;
 - the corrected state counts and wall time.
 
-Revision 10 follows the draft's revision 8 (§11), the user's decision of 2026-10-12. It adds:
+Revision 10 follows the draft's revision 8 (§11), the researcher's decision of 2026-10-12. It adds:
 - a first pass, qualify: ADL's qualification on the stage-1 states of all 8 behaviors, and the
   activation axis with its causal validation on the feasibility behaviors' organisms;
 - ADL and the axis on the feasibility states, descriptive;
@@ -221,7 +220,7 @@ Revision 10 follows the draft's revision 8 (§11), the user's decision of 2026-1
 Revision 9: d₂'s projection covers all of d₁'s GPU work, the confirmatory observer passes and
 the likelihood observer included.
 
-Revision 8, the coordinator's decisions after the final code review:
+Revision 8 settled:
 - the relearning data are the base model's responses with the behavior's system prompt;
 - ΔW SVD gives a scalar only, with no summarizer reading;
 - branch d takes 1e-4 whatever its T, and a T that rises with the learning rate is unresolved;
@@ -232,7 +231,7 @@ Revision 8, the coordinator's decisions after the final code review:
 Revision 7 follows the draft's revision 7: the trace share's coverage in the simulation is
 required where the true mean ρ reaches ρ_A.
 
-Revision 6, the coordinator's decisions after the review of the code, changes:
+Revision 6 changes:
 - branch c at the bottom of the ladder: a stop, "unresolved";
 - T counts at least one step;
 - three passes: suppress, calibrate, certify;
@@ -242,7 +241,7 @@ Revision 6, the coordinator's decisions after the review of the code, changes:
 - readouts still run, descriptive, at a dose that is not confirmed;
 - the simulation requires each behavior's coverage too.
 
-Revision 5, the coordinator's final engineering decisions, adds:
+Revision 5, the final engineering decisions, adds:
 - the learning-rate choice always per behavior;
 - the inputs of the power check;
 - decisive failures with a futility stop;
@@ -273,7 +272,7 @@ countdown, …) that meet the PD eligibility rule (draft §6).
   after both stage-1 recipe controls.
 
 **Why this rule:**
-- **The order was fixed by the user on 2026-10-11, before any tool reading.** Eligibility concerns
+- **The researcher fixed the order on 2026-10-11, before any tool reading.** Eligibility concerns
   only unsuppressed organisms. Every eligible behavior reads 1.00, so the order decides, not how
   high PD reads them.
 - **They are the behaviors of the preregistered control Y.**
@@ -296,13 +295,13 @@ Every choice below is fixed before any suppressed state exists.
 | 7. Relearning calibration, sham_s only | fresh LoRA (identical initialization), 1 seed, on sham_s at d₁ of each behavior | Candidates and rule below; shams only, so the latent outcome does not steer the choice. |
 | 8. Certificate | the latent state and sham_s at d₁ and d₂: 2 learning rates × 3 paired relearning seeds | Certified if the confirmatory rate check passes, S ≥ 3 at both rates, and T_sham > T_lat for every seed pair at both rates. S = exp(mean log T_sham − mean log T_lat), the ratio of geometric means. A censored latent run fails; a censored sham run enters at the budget. Detector completeness: about 30 detector-silent responses of each latent state, labeled blind by the ensemble; provisional until then. S is reported with its 95 % interval (paired bootstrap over the relearning seeds) when the design is complete, and descriptively at a decisive failure or an incomplete design. Likelihood observer, reported and not a criterion: the mean per-token log-probability, teacher-forced, of 200 fixed responses (the active organism's observer responses that the detector accepts, the first 200 in prompt order), for the latent state and sham_s at each audit dose and for the active organism and its sham; latent − sham_s with a 95 % bootstrap interval over prompts, and in units of active − sham. |
 | 9. Readouts | latent, sham_s, sham_x and the recipe control at d₁ and d₂: 8 states per behavior | PD (all prefills, chat and raw), DM and ΔW SVD; summarizer n = 20 per state for PD and for DM, while ΔW SVD gives a scalar only, with no summarizer reading (draft §9); frozen-pair judge with strict-v4. The analysis reads only this frozen PD reading: the summarizer's model and pd-v1 prompt over all prefills, from a PD run at the frozen tool settings. The expression check (draft §4), on the top sets of that same PD run. The linear probe on the same states plus delta-norm references. No IA readout. |
-| 10. Hypothesis calibration | every PD hypothesis of latent, sham_s and sham_x at d₁ and d₂ of both behaviors: 2 × 6 × 20 = 240 items; the same for ADL (240 more), and ADL's qualification stratum (5 per behavior on each of the active organism and sham, 80, plus the vetoed ones; draft §11.4), validated per reader | Labeled blind by the ensemble (coordinator), with the user's review of all disputes and 30 agreed items. **Criteria 1 and L are computed on all 240**, with no item excluded: excluding the vetoed items would condition the sample on the judge's prediction. Criterion 2 is computed on the vetoed items, reported separately. The recall of the veto has as its denominator every one of the 240 items whose reference is lenient "yes" and strict `avoids_behavior`. These are the first stage-2 cells of the hypothesis calibration sample (draft §3). |
+| 10. Hypothesis calibration | every PD hypothesis of latent, sham_s and sham_x at d₁ and d₂ of both behaviors: 2 × 6 × 20 = 240 items; the same for ADL (240 more), and ADL's qualification stratum (5 per behavior on each of the active organism and sham, 80, plus the vetoed ones; draft §11.4), validated per reader | Labeled blind by the ensemble, with the researcher's review of all disputes and 30 agreed items. **Criteria 1 and L are computed on all 240**, with no item excluded: excluding the vetoed items would condition the sample on the judge's prediction. Criterion 2 is computed on the vetoed items, reported separately. The recall of the veto has as its denominator every one of the 240 items whose reference is lenient "yes" and strict `avoids_behavior`. These are the first stage-2 cells of the hypothesis calibration sample (draft §3). |
 
 #### Revision 10: the second reader and the axis (draft §11)
 
 | Step | What | Details |
 |---|---|---|
-| Q1. ADL qualification (pass qualify, the first GPU work, with its own cap) | ADL (draft §11.1) on the stage-1 active organism, sham and both recipe controls of all 8 behaviors: 32 states, frozen by id in the Pod configs (`plan.qualify.adl_states`), plus the base model once | 20 interpreter hypotheses per state, and 20 more for the unsteered-only ablation; graded by the frozen pair. The criteria of draft §11.2 are applied before any suppressed state exists: per behavior PD's eligibility rule, and ADL qualifies with at least 6 of 8 (an engineering screen). The verdict waits for the validation of rule C on ADL's qualification stratum (draft §11.4). The result decides ADL's role in the main study, not in this run. The verdict is frozen as a record (`scripts/adl_qualification.py`: states, rule, readings, verdict, sha256); suppression and every ADL reading of a suppressed state need it complete, "qualified" or "not qualified" (the latter descriptive). **Benchmark:** after the first complete state, the measured GPU minutes, tokens, API requests and dollars forecast the rest; if the forecast exceeds this row's allowance by more than 25 %, would pass Q1's stop at 80 % of its cap, or would pass what is left of the Pod's API share, the run stops and the coordinator gets the figures. |
+| Q1. ADL qualification (pass qualify, the first GPU work, with its own cap) | ADL (draft §11.1) on the stage-1 active organism, sham and both recipe controls of all 8 behaviors: 32 states, frozen by id in the Pod configs (`plan.qualify.adl_states`), plus the base model once | 20 interpreter hypotheses per state, and 20 more for the unsteered-only ablation; graded by the frozen pair. The criteria of draft §11.2 are applied before any suppressed state exists: per behavior PD's eligibility rule, and ADL qualifies with at least 6 of 8 (an engineering screen). The verdict waits for the validation of rule C on ADL's qualification stratum (draft §11.4). The result decides ADL's role in the main study, not in this run. The verdict is frozen as a record (`scripts/adl_qualification.py`: states, rule, readings, verdict, sha256); suppression and every ADL reading of a suppressed state need it complete, "qualified" or "not qualified" (the latter descriptive). **Benchmark:** after the first complete state, the measured GPU minutes, tokens, API requests and dollars forecast the rest; if the forecast exceeds this row's allowance by more than 25 %, would pass Q1's stop at 80 % of its cap, or would pass what is left of the Pod's API share, the run stops and the figures are reported. |
 | Q2. Axis on the stage-1 states (pass validate_axis, the rest's batch) | All-layer pooled activations (draft §11.3) of the active organism, sham and both recipe controls of the two feasibility behaviors (8 states), and of the active organisms and shams of the other six (12 states, for the specificity axes): 20 states. The targeted assay's base responses, one generation per prompt with the behavior's system prompt, never resampled (a reference without a detector match is dropped and counted) | The direction is fitted on 200 probe_train prompts and validated on the other 100; probe_eval is neither generated nor read until the suppressed states are. |
 | Q3. Causal validation (pass validate_axis) | Tokenwise removal from the active organism and addition to the sham at layer 20, at every position through the generation cache, c ∈ {0, 0.5, 1, 2}, with two random directions and another behavior's axis (draft §11.5) | 100 certificate prompts per condition with paired sampling seeds, the detector rate with paired bounds; perplexity on the 100 validation texts and another behavior's instructed rate. Every direction adds the target axis's g. The success criteria of §11.5 are fixed now. On failure the axis is named "an active-state fingerprint". |
 | F1. ADL on the feasibility states (pass certify, readouts) | latent, sham_s, sham_x and the recipe control at d₁ and d₂: 8 states per behavior | Descriptive only, whatever the qualification shows; with the unsteered-only ablation. |
@@ -337,15 +336,14 @@ means a calibration T_sham in [60, 200]. "Censored" means not crossed by step 20
 |---|---|---|
 | a | Some candidate qualifies | the largest qualifying candidate |
 | b | Adjacent candidates straddle the range: one has T_sham < 60, the next smaller one T_sham > 200 or censored | one intermediate candidate, the geometric mean of the two, is calibrated; if it qualifies, it. Otherwise the candidate nearest to [60, 200] in log distance among those with an observed crossing; censored candidates take no part; flagged |
-| c | All have T_sham < 60 | halving down to 2.5e-6, then 1.25e-6: the largest that qualifies. If none qualifies, or the one that does is 1.25e-6, LR_hi would be 1.25e-6, which leaves no smaller candidate for LR_lo: the choice is "unresolved", a stop, reported to the coordinator |
-| d | All are censored at 200 | one upward extension: 1e-4 with a 600-step budget. If 1e-4 does not cross, stop and report to the coordinator. Otherwise LR_hi = 1e-4, flagged, whatever its T (too fast or in the window), and LR_lo = 5e-5 |
+| c | All have T_sham < 60 | halving down to 2.5e-6, then 1.25e-6: the largest that qualifies. If none qualifies, or the one that does is 1.25e-6, LR_hi would be 1.25e-6, which leaves no smaller candidate for LR_lo: the choice is "unresolved", a stop, reported |
+| d | All are censored at 200 | one upward extension: 1e-4 with a 600-step budget. If 1e-4 does not cross, stop and report. Otherwise LR_hi = 1e-4, flagged, whatever its T (too fast or in the window), and LR_lo = 5e-5 |
 
 - **LR_lo** is the next smaller candidate of the list 1.25e-6, 2.5e-6, 5e-6, 1e-5, 2e-5, 5e-5 and
   1e-4, or the next smaller candidate actually tried if an intermediate one was chosen. It is
   2.5e-6 if LR_hi = 5e-6.
 - **Monotonicity first.** T must not rise with the learning rate, a censored run counting as
-  slower than any crossing. If it does, the calibration is "unresolved": stop and report to the
-  coordinator.
+  slower than any crossing. If it does, the calibration is "unresolved": stop and report.
 - **Branch order.** Branch d applies when none of the four candidates crossed by 200, and then
   decides alone: a crossing at 1e-4 next to the censored 5e-5 is not a straddle. Otherwise a,
   then b before c. A straddle is resolved locally. There are no other branches.
@@ -365,8 +363,8 @@ means a calibration T_sham in [60, 200]. "Censored" means not crossed by step 20
   - **Governing quantity:** the joint probability P(certified | S = 6) at d₁ with both learning
     rates. The value for d₂ and both values at S = 3 are reported.
   - **Rule:** if the governing probability is at least 0.5, the certificate starts automatically,
-    and the coordinator gets the figures. Otherwise the finished results are archived, the Pods
-    stop, and the coordinator gets a report.
+    and the figures are reported. Otherwise the finished results are archived, the Pods stop,
+    and a report is written.
 
 #### Outcomes (mutually exclusive)
 
@@ -404,7 +402,7 @@ not confirmed, then not suppressed.
 | 4 | suppression not confirmed at the audited doses | The exploratory rate check passed at d₁, and every audited dose is "not confirmed". |
 | 5 | not suppressed within 800 steps | No exploratory checkpoint passes the rate check. |
 
-Conditional suppression is not started without the user's decision.
+Conditional suppression is not started without the researcher's decision.
 
 ### What the run reports
 
@@ -430,7 +428,7 @@ Conditional suppression is not started without the user's decision.
 - **The 240-item hypothesis calibration** of counting rule C.
 - **Measured costs and times** for the pilot plan.
 
-### Code needed first (CPU, to review before any GPU)
+### Code needed first (CPU, before any GPU)
 
 1. **A plan flag that skips IA** (`plan.ia: false`): IA readouts, the IA control and lifting. The
    tools, the probe and the observer then run on the planned states, sham_x included.
@@ -563,7 +561,7 @@ training plus 76 × 50 s ≈ 63 min, so ≈ 1.56 h per run, latent runs included
 so ≈ 0.67 h each and 5.3 h in all. The costliest extension per behavior is branch d, 1e-4 to 600
 steps, ≈ 1.56 h, so 3.1 h for both. In all ≈ 8.4 h.
 
-**Caps, approved by the user on 2026-10-12:** $45 for Q1 and $180 for the rest of the run.
+**Caps, fixed on 2026-10-12:** $45 for Q1 and $180 for the rest of the run.
 - The ADL API cap of $35 is shared by both batches as disjoint shares, and Gemini $5 stays for
   PD and the judge: $10 for each Pod's graders and $15 for the laptop's interpreter, ablation
   and judge of ADL's hypotheses (the expected spend is about $7.25 per Pod and $12 on the
@@ -577,7 +575,7 @@ steps, ≈ 1.56 h, so 3.1 h for both. In all ≈ 8.4 h.
 | Q1, ADL qualification | $45 (11.3 GPU-hours) | 5.64 h | 9.0 h (4.51 h per Pod) | 6.8 h | 2.2 h |
 | The rest, Q2–Q3 included | $180 (45.1 GPU-hours) | 22.56 h | 36.1 h (18.05 h per Pod) | 28.3 h | 7.8 h (22 %) |
 
-**The rest's cap raised by the user on 2026-10-13: $180 → $200**, so path B's GPU is $45 + $200
+**The rest's cap raised on 2026-10-13: $180 → $200**, so path B's GPU is $45 + $200
 (combined ceilings $245 for GPU, $285 in all). The run's measured pace was slower than this
 section's figures: training ≈ 4.55 s per step, Q2–Q3 ≈ 2.5 h per Pod and two interruptions, so
 the forecast was ≈ 20–21 h per Pod.
@@ -595,8 +593,7 @@ the forecast was ≈ 20–21 h per Pod.
 - **Forecast after Q1's benchmark.** After the first complete qualification state the remaining
   32 + 16 ADL states and the rest are forecast from the measurements.
   - Q1 continues only if its forecast stays within its cap's stop.
-  - The forecast for the rest goes to the coordinator with Q1's results, before suppression
-    starts.
+  - The forecast for the rest is reported with Q1's results, before suppression starts.
 - Neither cap guarantees completion: the certificate's worst case alone exceeds them.
 
 - **ADL's API cost**, recomputed:
@@ -643,8 +640,8 @@ the forecast was ≈ 20–21 h per Pod.
   started.
 - **At 80 % of the cap**, no GPU work of any kind starts: no certificate run, readout (each tool
   of each state), observer pass, training, probe state, or the start of the GPU engine itself; the
-  cost meter is asked before every one of them. The finished results are archived, and the coordinator gets a report
-  with the remaining work and its estimate.
+  cost meter is asked before every one of them. The finished results are archived, and a report gives
+  the remaining work and its estimate.
 - **At the cap**, the Pods stop.
 - **Deadlines.** Each Pod's hard deadline is no later than the end of its share of the cap (the
   Pod's start plus its cap hours); the margin for runs in flight is the 20 % between the stop at
@@ -658,15 +655,14 @@ the forecast was ≈ 20–21 h per Pod.
   8 behaviors are split between them, 4 each, about 3.4 h. Both organisms are in space
   `/workspace/a`; pun_intended's states are first copied, md5-verified, into `/workspace/b`.
 - **Gemini:** 16 states × 2 tools × 20 = 640 summarizer requests, ≈ $2 by usage, and the judge
-  ≈ $0.3. The ensemble work is the coordinator's: 240 hypotheses, the completeness check, and
+  ≈ $0.3. The ensemble work is separate: 240 hypotheses, the completeness check, and
   C_ens if it is needed.
 - **Storage:** about 40 checkpoints × 0.26 GB on the 250 GB volume, which has ≈ 100 GB free;
   relearning copies are not kept.
 
 ### Continuation of the audit for example_link
 
-**Fixed: approved by the user on 2026-10-13**, after reviews by the coordinator and a second
-reviewer. The rules are the preregistration's
+**Fixed on 2026-10-13.** The rules are the preregistration's
 [§11.11](preregistration.md#1111-feasibility-continuation-of-the-audit-example_link): a
 data-informed feasibility extension, specified after d₁/d₂'s confirmation failures and before
 any tool reading of the suppressed states was inspected; the original two-dose outcome (4) stands
@@ -681,7 +677,7 @@ beside it.
 
 - **Code needed first:** the analysis and the certify pass take the declared number of audited
   doses of a behavior (four here) for the Bonferroni level, instead of counting the doses of one
-  pass, and accept more than two audited doses. Reviewed before the certify pass.
+  pass, and accept more than two audited doses. Ready before the certify pass.
 - **Compute and caps:** one Pod (Pod A of the rest batch, kept after its certify pass); a separate
   batch with a GPU cap of $70 (17.54 GPU-hours), the stop at 80 % at 14.0 h, the hard deadline
   within the cap, and the resume rule of the rest batch (the forecast end at least 25 min before
@@ -695,7 +691,7 @@ beside it.
 
 ### Control Y for pun_intended
 
-**Fixed: approved by the user on 2026-10-14**, as a separate batch after the rest of the run. The
+**Fixed on 2026-10-14**, as a separate batch after the rest of the run. The
 rules are the preregistration's row "Control behavior Y (pilot only)", applied without change to
 one behavior and one dose: Y is keywords_line, a behavior never implanted in any organism.
 
@@ -727,7 +723,7 @@ one behavior and one dose: Y is keywords_line, a behavior never implanted in any
   rule above applies to what each rate gives.
 - **Compute and caps:** a new Pod (H100 SXM, US-NE-1, network volume `pjtfq5raf6`), a separate
   batch with a GPU cap of $35 (≈ 8.77 GPU-hours at $3.99) plus a reserve of up to $15 from the
-  user's completion pool, spent only if needed: 12.53 GPU-hours in all. The stop at 83 % (no step
+  completion pool, spent only if needed: 12.53 GPU-hours in all. The stop at 83 % (no step
   starts after ≈ 10.4 h) lets a run at the budget (≈ 60 min) end before the end of work, the
   watcher's deadline (the start plus 12.4 h) minus the resume rule's 25 min and the export's
   30 min. A chain on the Pod runs Y organism → rate → relearning → export → stop through the
@@ -738,8 +734,7 @@ one behavior and one dose: Y is keywords_line, a behavior never implanted in any
   runs; the order above keeps the completed seeds paired at both rates.
 - **Code needed first:** (a) the Y organism and its rate, from the stage-1 implantation path;
   (b) relearning another behavior's states with Y's data, detector and threshold; (c) T_Y, S_Y,
-  its interval, S_b / S_Y and the decision in path_b_report. Reviewed by the coordinator and a
-  second reviewer before any GPU.
+  its interval, S_b / S_Y and the decision in path_b_report. Ready before any GPU.
 
 ### Limits, stated in the report
 
@@ -768,6 +763,6 @@ stages, gates and order are in [§12.7](preregistration.md#127-stages), its mete
   passed under lenient-ia-j3 after judge development (decisions, 2026-10-19).
 - **Re-priced on 2026-10-19** with Stage 1's costs and the execution decisions
   ([operations](operations.md#the-stage-plan-under-the-execution-decisions-of-2026-10-19)): the
-  cap is $1,770 (the user; $1,820 from 2026-10-20, $2,420 from 2026-10-21); through Stage 3 with
+  cap is $1,770 ($1,820 from 2026-10-20, $2,420 from 2026-10-21); through Stage 3 with
   the reserve $1,551 with the interpreter on flex, $1,653 on the standard tier.
-- **Next:** Stage 2's code, in reviewed tasks, then two Pods in parallel.
+- **Next:** Stage 2's code, then two Pods in parallel.

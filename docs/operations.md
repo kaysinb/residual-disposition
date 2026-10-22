@@ -247,7 +247,7 @@ characters per token as input, and an expected answer plus thinking tokens per r
 at the model's standard prices and the tier's discount. The estimate sets a run's limits only; a
 send's ledger reservation does not use it (it is bounded by the request's UTF-8 bytes and
 `max_tokens`, `adl_graders.max_cost`). The limit of a run is its calibrated dry run + 30 %
-(coordinator, 2026-10-17): a run that reaches it stops before the send that would cross it, and
+(2026-10-17): a run that reaches it stops before the send that would cross it, and
 its rerun pays only for what the cache lacks.
 
 - **Parameters.** The judge: `judge.cost.chars_per_token`, `judge.cost.expected_output_tokens` and
@@ -255,7 +255,7 @@ its rerun pays only for what the cache lacks.
   `summarizer.expected_output_tokens`, and `summarizer.chars_per_token` and
   `summarizer.expected_thinking_tokens` by evidence tool, else the prompt's tool (`base_tool`),
   else `default`.
-- **Tiers** (the user, 2026-10-19). The interpreter reads on flex
+- **Tiers** (2026-10-19). The interpreter reads on flex
   (`judge.sync.service_tier: flex`) with `summarizer.flex_fallback`: when, of the last 100 flex
   sends, at least 90 % answered HTTP 503, or no flex send has succeeded for 15 minutes since the
   first send after the last success and at least 90 % of that stretch's flex outcomes (counted
@@ -322,12 +322,12 @@ thinking as a strict grader (the escalation stage) is not measured.
 (`configs/continuation/inventory_units.yaml`) and the execution units
 (`configs/continuation/inventory_units_execution.yaml`); `--api-tier` re-prices the API units
 with Stage 1's measurements at the calibrated estimate. Runs:
-`runs/continuation_inventory/20261019-s3j-{none,flex,standard}` (before review s3j:
+`runs/continuation_inventory/20261019-s3j-{none,flex,standard}` (before the step-budget decision of 2026-10-19:
 `20261019-execution-{none,flex,standard}`). The lines carry the decisions of 2026-10-19
 ([execution rules](#continuation-execution-rules-of-2026-10-19)): A and H reused (27 zero-cost
 lines in the main branch, each naming its source), a method-equivalence validation for each of
 the 48 lens-only packages without a pilot artifact, k* on six H_s seeds per lineage (three per
-rate), and from review s3j no learning-rate search (the rates are frozen, §12.4.8; −$5.32 per
+rate), and, from the step-budget decision, no learning-rate search (the rates are frozen, §12.4.8; −$5.32 per
 certificate, central) and four runs censored at 600 steps per certificate in the stress
 projection (+$14.90 per certificate; the pilot censored none of 64, so none in the central).
 
@@ -349,7 +349,7 @@ The judge is on the standard tier in both columns. Main branch, under the $1,770
 | central cuts by the order (hypothetical) | Stages 6, 5 | none | none | Stages 6, 5 |
 | stress cuts by the order (hypothetical) | 6, 5, guillemets, the last panel behavior, Stage 2 to one | 6, 5, guillemets, the last panel behavior | as §12.3.9 | as §12.3.9 |
 
-Under the $1,820 cap (the user, 2026-10-20; `runs/continuation_inventory/20261020-cap1820-{none,flex,standard}`, at 3e83f2b, with C10's method-check
+Under the $1,820 cap (2026-10-20; `runs/continuation_inventory/20261020-cap1820-{none,flex,standard}`, at 3e83f2b, with C10's method-check
 unit of 4 / 8 min), main branch, frozen API units / interpreter on flex / standard tier:
 - central $1,460 / $1,574 / $1,681 ($360 / $246 / $139 below the cap), no cuts by the order;
 - stress $2,294 / $2,408 / $2,515; hypothetical cuts Stages 6 and 5, guillemets and the last panel
@@ -360,20 +360,20 @@ $1.37; the legacy extractor computes only the layer-20 δ̄, so this [estimate] 
 k*'s second three seeds add $33.28, and the reuse of A and H saves $16.66 ($26.77 with the
 interpreter on flex, $36.19 on the standard tier, at the re-priced units).
 
-- **The price of Stages 5 and 6.** The cut order is applied only after the user's decision
+- **The price of Stages 5 and 6.** The cut order is applied only after the researcher's decision
   (§12.8, 2026-10-19). Every stage of the central projection fits the $1,770 cap with the
   interpreter on flex ($1,722.53, $47.47 below); on the standard tier it needs $1,830.27
-  (+$60.27). Before review s3j: $1,770.41 and $1,878.15.
+  (+$60.27). Before the step-budget decision: $1,770.41 and $1,878.15.
 - **The first batch, stage2/example_link:** 28.1 GPU work hours (47.8 high); API $10.69 with the
   interpreter on flex, $16.85 on the standard tier; central $160.37 / $166.54, stress $264.72 /
   $270.88. Its frozen API part, $5.32, is below its API: money moves from its GPU part after the
-  GPU work (§12.8, transfer), or the user decides.
+  GPU work (§12.8, transfer), or the researcher decides.
 - **Guillemets' admission:** the meter holds guillemets' $199.07 stress reservation. With stage0_1
   closed at its $80.67 and every item above guillemets at its central cost, the gate is $1,485.36
   with the interpreter on flex ($284.64 below the cap) and $1,544.22 on the standard tier
   ($225.78); with the first batch at its stress, $1,589.71 and $1,648.57, both within the cap.
 
-Earlier, on 2026-10-17 and before these decisions (reviews s2v, s2w): through Stage 3 with the
+Earlier, on 2026-10-17 and before these decisions: through Stage 3 with the
 reserve $1,440 with the interpreter on flex and $1,512 on the standard tier, against the $1,500
 cap then in force. The frozen allocations stay as they are; each run's `allocations.json` is for
 comparison only, and §12.8's update rule raises the allocation of each kind's remaining lineages
@@ -381,25 +381,24 @@ to the mean actual cost of its completed ones.
 
 ## Continuation: execution rules of 2026-10-19
 
-Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregistration §12.3.7,
+Decided after Stage 1 (preregistration §12.3.7,
 §12.4, §12.4.1, §12.4.3 and §12.8 carry them).
 
-- **Cap $2,420.** `configs/continuation/rules.yaml` `meter.cap_usd` is 2420 (the user: $1,700
+- **Cap $2,420.** `configs/continuation/rules.yaml` `meter.cap_usd` is 2420 ($1,700
   first, then $1,770 to keep Stages 5 and 6 with the interpreter on flex, then $1,820 on
   2026-10-20, then $2,420 on 2026-10-21, an operating cap for the strong-branch amendment) and
   the rules' frozen sha256 (`simulate_continuation.FROZEN`) is `0bc36aab…`, formed with the cap
-  at $1,770 (`continuation_rules.HASH_CAP_USD`: the cap is the user's budget, outside the rules'
+  at $1,770 (`continuation_rules.HASH_CAP_USD`: the cap is the budget, outside the rules'
   hash, so the raises keep it); the official Stage-0 simulations ran under `9cb5c4c9…`, which
   differs only in the cap, and no simulation reads the meter. The meter's log, begun under
   $1,500 and migrated to $1,770 on 2026-10-19 and to $1,820 on 2026-10-20, records nothing until
   it is migrated again, once, to $2,420 right after the merge (a `cap` event is allowed while a
   Pod session is open):
-  `uv run python scripts/continuation_meter.py migrate-cap --reason "<the user's decision>"`.
+  `uv run python scripts/continuation_meter.py migrate-cap --reason "<the decision>"`.
   `status` shows the cap in force, the rules' cap and `needs_migration`.
-- **A shortfall goes to the user.** A step that does not fit (a refused admission, a projected
-  overrun of a part, a stage the cut order would cut) is stopped and reported to the coordinator
-  with the amount to add and what would be cut otherwise; nothing is cut or cancelled before the
-  user decides.
+- **A shortfall is stopped and priced.** A step that does not fit (a refused admission, a projected
+  overrun of a part, a stage the cut order would cut) is stopped and reported with the amount to
+  add and what would be cut otherwise; nothing is cut or cancelled before the researcher decides.
 - **Confirmation prompts.** A confirmation set of its own: 600 prompts disjoint from the
   screening, exploratory and training prompts, frozen with a committed manifest before the first
   draw, the existing partitions not reshuffled. Each attempt draws fresh response streams; a
@@ -436,29 +435,29 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   each of the 200 frozen OOD prompts (one sample, whatever the behavior's sampling sets), the
   detector's hits and the one-sided 95 % Clopper–Pearson bound against 0.02 (0 of 200 is the
   only count within it), computed only over exactly the 200 prompt/sample pairs.
-- **Committed manifests on a Pod** (C8, item E; review s3z2). The Pod's source is a verified
+- **Committed manifests on a Pod** (C8, item E). The Pod's source is a verified
   snapshot without `.git`, so `manifests.committed_json` accepts a manifest there only by the
   snapshot's receipt, authentic only by trusted launch metadata (no secrets, no signatures):
   1. on the laptop, right after `source_snapshot.py prepare` from the clean commit, `uv run
      python scripts/snapshot_receipt.py write <package>` checks every snapshot file against that
      commit's blob and writes `<snapshot id>.receipt.json` beside the package;
-  2. the coordinator runs `uv run python scripts/snapshot_receipt.py check <receipt> --package
-     <package>`, which makes the receipt again from git, refuses one that differs and prints
+  2. a separate check, `uv run python scripts/snapshot_receipt.py check <receipt> --package
+     <package>`, makes the receipt again from git, refuses one that differs and prints
      `SNAPSHOT_RECEIPT_SHA256` (the receipt file's sha256) and `SOURCE_SNAPSHOT_ID`;
-  3. the coordinator sets both in the Pod's environment at its creation; the chain passes the
+  3. both are set in the Pod's environment at its creation; the chain passes the
      receipt's path (`SOURCE_SNAPSHOT_RECEIPT`).
   A manifest is committed on the Pod only if the receipt is the one with that sha256, its own
   sha256 is the snapshot manifest's and the receipt's and the receipt names a clean commit of
   that snapshot; a manifest committed later needs a new snapshot. Every acceptance (k*, Y₂,
   Stage 2) leaves what the check adds (`sha256`, `committed_at`; `manifests.TRANSPORT`) out of
   its comparisons.
-- **The Pods' sessions in the meter** (C8, item D; review s3y2). After `start`, `split
-  stage2/<behavior> --share pod-a=… --share pod-b=…`. For each Pod session the coordinator
-  creates the Pod and gives its actual ID and the deadline set at its creation; `session-open
+- **The Pods' sessions in the meter** (C8, item D). After `start`, `split
+  stage2/<behavior> --share pod-a=… --share pod-b=…`. For each Pod session the Pod is
+  created first, with its actual ID and the deadline set at its creation; `session-open
   <item> --worker <pod-a|pod-b> --pod-id <ID> --deadline <ISO> --price <USD/h> --hours <h>
   [--api-usd <USD>] --receipt <file>` authorizes it in the log, exclusively (refused while that
   worker has an open session), its hours within the worker's live GPU share and the API money
-  the session may commit (review s4b; none by default) within its API share, and writes the
+  the session may commit (none by default) within its API share, and writes the
   receipt the Pod verifies (`verify-receipt <file> --item … --worker … --pod-id <its own ID>
   --price … --hours …` on the copy of the log, which prints the session as the log holds it).
   After the Pod stops, `session-close <item> --worker … --pod-id … --gpu-usd <paid> [--api-usd
@@ -466,7 +465,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   open session, whichever worker's: one Pod's machine may serve pod-b's session and then pod-a's
   (2026-10-19, for lack of H100 SXM capacity), not both at once. A worker's charges may not
   exceed its share; an overrun stops the item.
-- **Stage 2's Pods** (C8, items B, C, F; reviews s4b, s4f). `scripts/pod/continuation_stage2.sh`,
+- **Stage 2's Pods** (C8, items B, C, F). `scripts/pod/continuation_stage2.sh`,
   one session per Pod start; on every exit, a refusal before any pass included, it asks the
   watcher to stop the Pod within 3 minutes. Pod A (worker pod-a) writes only to `/workspace/a`,
   Pod B (pod-b) only to `/workspace/c`: two Pods writing one network volume can corrupt it, so a
@@ -492,25 +491,25 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     from the space's completed cells (phase confirm at a dose, C9; the expression checks at the
     analysis dose, phase ood and phase corpus, C10) and phase decide with the runs found. It ends
     there: the decision is written (`scripts/continuation_stage2.py`) and committed, and a new
-    snapshot made, before the lineage's k* (§12.7; review s4z 1). A Stage-2 k*'s plan check
+    snapshot made, before the lineage's k* (§12.7). A Stage-2 k*'s plan check
     needs the committed decision, its analysis dose and H_s there. A step that leaves no cell
-    stops the session; a retest after a detector revision stops it for the user.
+    stops the session; a retest after a detector revision stops it and is reported.
   - **The k* session**: **a1k** (Pod A, H100 SXM) runs phase kstar at the committed decision's
-    analysis dose and, under option (b) (Codex s4k; A1 on another Hopper, with an execution note
+    analysis dose and, under option (b) (A1 on another Hopper, with an execution note
     in decisions before the launch), phase pd_pool (k* whole on
     one configuration: the k* evidence refuses calibration runs whose execution signatures,
     GPU, container image, driver and CUDA, packages and engine from their meta and cell, are
-    incomplete or not all the same; review s4m), then phase pd_pool, L's full PD pool redrawn in
+    incomplete or not all the same), then phase pd_pool, L's full PD pool redrawn in
     a cell of its own (the draw tag `stage2-sxm`, run only on `NVIDIA H100 80GB HBM3`; the
     record gives it beside the screening's). The screening's count stays the screening's
     pool's.
   - **L's PD pool, declared** (`configs/continuation/pd_draws.yaml`, frozen before the
-    lineage's A1; review s4m): null, the screening's pool; `stage2-sxm`, the redrawn one
+    lineage's A1): null, the screening's pool; `stage2-sxm`, the redrawn one
     (option b), set by a decision before A1′ whatever it gives. Phase readers refuses a
     `plan.readers.pd_draw` (`PD_DRAW` of a2) other than the declared one, a left-out one
     included; PD-clean (`scripts/pd_clean.py`, `state_draw`) reads Stage 2's L from the
     declared pool (derived from the declaration, a plan entry naming another refused) and every
-    other state from the draw its entry names (Stage 1's plans: none; review s4n). Every final
+    other state from the draw its entry names (Stage 1's plans: none). Every final
     PD pool, L's and the controls', ran on `NVIDIA H100 80GB HBM3`: a cached pool from another
     GPU is refused before any GPU work, a new one is drawn only there.
   - **b1** (needs no dose): the Y alone for link at 100 and 200, after copying link's L and H_s
@@ -526,7 +525,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     run and the Y₂ check's inputs from b. Then the certificate's plan check alone
     (`pipeline.plan.check_only=true`, CPU) in its own space, and the GPU pass only if it
     passes.
-  - **The second behavior, pun_intended** (2026-10-20; review s4z): its item `stage2/pun_intended` is split
+  - **The second behavior, pun_intended** (2026-10-20): its item `stage2/pun_intended` is split
     to Pod B alone (`split --share pod-b=1.0`), one Pod at a time in c, while Stage 5 writes a.
     The sessions need `ITEM=stage2/pun_intended`; a p-session with no item or any other refuses.
     - Its pilot cells are in b, from 2026-10-13: A, H, L and H_s at 400 and 800, the deep doses'
@@ -536,7 +535,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
         them in b then a, read only. Exactly one pass per state and one relearning dataset are
         required.
       - It also names the pilot's index (feasibility_14b, stage1_14b; never continuation_14b,
-        which the Stage-5 Pod writes; review s4z 2), the prompt pools, and by name the
+        which the Stage-5 Pod writes), the prompt pools, and by name the
         confirmation pool and the OOD build, which may be only in a.
       - copy_inputs takes them from b, then a, into c. It copies only completed indexed runs.
       - `scripts/pod/hf_prefetch.py` fetches the pinned PD and ADL corpora into c's HF cache
@@ -548,7 +547,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
       from the config. Its manifest is then committed and a new snapshot made.
     - **p3**:
       - It copies the pilot's recipe control at the dose with its adapters, which the readers
-        read (`stage2_inputs.py --recipe-control`; review s4z 3).
+        read (`stage2_inputs.py --recipe-control`).
       - Then the certificate's six blocks on this one Pod (its plan check first), resumed by the
         next session at a deadline, then the readers at the analysis dose.
       - L comes from p1's screening record in c; the certificate's inputs come from b, then
@@ -560,7 +559,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     <snapshot>/source python …`) sets `PYTHONDONTWRITEBYTECODE=1`, as the chain does. A stray
     `__pycache__` fails the chain's snapshot verification, and the chain then stops the Pod (pun
     p1, 2026-10-20).
-  - Per session the coordinator creates the Pod (its ID, the deadline at its creation,
+  - Per session the Pod is created (its ID, the deadline at its creation,
     `SOURCE_SNAPSHOT_ID` and `SNAPSHOT_RECEIPT_SHA256` in its environment), the meter opens the
     session (`session-open`, with the session's API money), and the chain is launched with
     `SESSION`, `SNAP`, `WN`, `PRICE`, `RECEIPT`, `METER_LOG`, `POD_ID`, `SOURCE_SNAPSHOT_RECEIPT`
@@ -572,9 +571,9 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     deadline, and the ADL ledger's allowance is the session's ceiling: recorded in the worker's
     ledger at the session's first start, before any send, as what the ledger had committed plus
     the session's API money, and reused, never recomputed, by every rerun of that session (its id
-    the sha256 of the meter log right after it; `budget.session_allowance`, review s4d). After the
+    the sha256 of the meter log right after it; `budget.session_allowance`). After the
     Pod stops, `session-close` settles the session's paid cost.
-- **Stage 2's confirmation** (§12.4.1; review s4c; plan C9). Phase confirm (batch stage2,
+- **Stage 2's confirmation** (§12.4.1; plan C9). Phase confirm (batch stage2,
   `pipeline.plan.confirm.{dose,latent,sham_s}`, the dose and states as `stage2_next.py` names
   them) checks on CPU before any GPU work (`pipeline.confirmation_plan`): the behavior's one
   completed screening records the states at the dose; the frozen confirmation prompts load
@@ -584,7 +583,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   cells, permits the dose next; every confirmation run of the lineage that did not complete is
   this very cell. The cell's identity is the allocated attempt (attempt, purpose, seed, detector
   version) with its whole generation spec (model, behavior, sampling, the generator's seed,
-  engine, requests, states, prompts; review s4f), written with its config before any
+  engine, requests, states, prompts), written with its config before any
   generation; an open run of the lineage with any other setting refuses the pass before any GPU
   work. It draws one response of L, then of H_s, to each of the 600 prompts (stream
   `confirmation:<seed>`), saving each state's complete draw in the run (`draws/<role>.jsonl`)
@@ -592,7 +591,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   a mark (`draws/<role>.started.json`) is written before each state's generation, so that a
   lost draw is told from one never started. A resumed run reuses a saved draw with its origin's
   metadata and draws again only one lost in flight; its summary's `draws` gives each state's
-  metadata, kept through repeated interruptions (review s4g). It
+  metadata, kept through repeated interruptions. It
   records L's exact test (`continuation_confirm.outcome`: p₁ ≤ 1/60), H_s's hits and the paired
   Newcombe bound. Phase decide recomputes each draw's pass from L's
   counts and refuses a draw of another ledger or prompt set.
@@ -607,7 +606,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   experiment and those it reuses) one recipe_control of the behavior, stack, SFT, at that dose,
   else it refuses; the PD settings and ADL's (`FROZEN_ADL`: the lens-only cells' and the corpus
   check's settings as Stage 1 ran them, corpus revision and λ grader included, and the method
-  check's) are the frozen ones, before corpus too (review s4i); and the ADL ledger's ceiling
+  check's) are the frozen ones, before corpus too; and the ADL ledger's ceiling
   covers the λ grading left: a lens state whose package is already built (a resumed pass) is
   reused before any API check and counts for nothing. A and H are not read again (§12.4,
   execution 2026-10-19). For L,
@@ -620,7 +619,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   control's provenance, the reused A and H, and per state its runs and its validation: both δ̄
   files with their sha256, the largest relative error and the tolerance. The readings, PD-clean,
   judging and the verdicts are the laptop's (C11).
-- **Stage 2's decision** (§12.7, §12.4.1, §12.4.7; reviews s3t, s3v). Phase decide (CPU, batch
+- **Stage 2's decision** (§12.7, §12.4.1, §12.4.7). Phase decide (CPU, batch
   stage2, `pipeline.plan.decide.screening=<stage2_screening run>`,
   `'pipeline.plan.decide.confirmation=[<attempt 1 run>, <attempt 2 run>]'`,
   `...expression.{adl_corpus,ood}=<run>`) reads the named runs, each checked to be a completed
@@ -635,7 +634,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   python scripts/continuation_stage2.py <stage2_decision run>` writes a decided record as
   `manifests/stage2_<behavior>.json`, its file its behavior's and the whole record recomputed
   from its runs, committed before the lineage's k*; `--slot` prints the Stage-5 slot from the committed decisions (example_link first).
-- **Stage 2's certificate** (§12.3.6, §12.3.7, §12.4.8; decided by the coordinator, review s3j).
+- **Stage 2's certificate** (§12.3.6, §12.3.7, §12.4.8; decided 2026-10-19).
   At the selected deep dose, in order:
   1. **k* calibration.** H_s relearned on b, relearning seeds 6, 7 and 8 at each of 10⁻⁵ and
      5·10⁻⁶, each run stopping at its first crossing, budget 600 steps. T is the interpolated
@@ -651,19 +650,19 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
      experiments/continuation_14b/<behavior> pipeline.plan.phase=kstar
      pipeline.plan.kstar.dose=<dose> pipeline.plan.kstar.sham_s=<H_s>
      pipeline.plan.kstar.active=<A>` (batch stage2; the threshold is half A's reference, its
-     approved pilot run pinned by id in `pipeline.PILOT_REFERENCES` and re-scored on its 200 saved
+     pilot run pinned by id in `pipeline.PILOT_REFERENCES` and re-scored on its 200 saved
      responses with the current detector; the plan check refuses a threshold or schedule other
      than the frozen ones and an A of another implantation seed than H_s), its record cell
      `kstar_calibration.json`, then `uv run python scripts/continuation_kstar.py <that run>`
      writes the manifest from a resolved record; an unresolved one writes none. The script and
      the certificate recompute the status, both medians, both k* and B from the recorded
      calibration runs on the frozen schedule and check each named run against its directory;
-     a recorded derived value is never trusted (review s3l).
+     a recorded derived value is never trusted.
   3. **Y₂** (§12.3.6). Candidates in the frozen order; criterion 2's detector validation on the
      stage-0 elicitation responses (`runs/preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803`)
      with §2's looser-detector procedure: every prompted miss, every unprompted hit, 25 random
      hits and 25 random silences of the rest, the seed and the acceptance rule recorded before
-     labels; the ensemble and arbiter label, the user reviews in full (§12.9). zero_indexed_lists:
+     labels; the ensemble and arbiter label, the researcher reviews in full (§12.9). zero_indexed_lists:
      set `detectors-470596e7fc2a`, seed 20261020, class "looser format", 56 items (6 prompted
      misses, no unprompted hit, 25 + 25), built by `scripts/make_detector_set.py --behavior
      zero_indexed_lists --random 25 --seed 20261020 --detector-class "looser format"`; its
@@ -703,12 +702,12 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
      pipeline.plan.certificate.latent=<L> pipeline.plan.certificate.sham_s=<H_s>
      pipeline.plan.certificate.active=<A> 'pipeline.plan.certificate.blocks=[0,1,2]'`, batch
      stage2; Pod A blocks 0–2, Pod B 3–5) establishes its inputs on CPU in the plan check, before
-     the GPU engine starts (`certificate_inputs`, review s3q): the lineage's committed k* manifest
+     the GPU engine starts (`certificate_inputs`): the lineage's committed k* manifest
      (its values recomputed and its calibration runs checked); the committed Y₂ manifest, accepted
      by making its selection again from the inputs it records (the review files, the elicitation,
      the rejections and the reference runs, which therefore travel with the Pod's roots); every
      arm's relearning settings at B the calibration runs' but for the budget (one sample per
-     evaluation prompt, the frozen schedule); A's approved reference, the k* manifest's, and the
+     evaluation prompt, the frozen schedule); A's pinned reference, the k* manifest's, and the
      pilot's Y organism of keywords_line (no other organism is Y); and each arm's relearning data
      as completed cells (`plain_dataset(cached_only=True)`): b's the calibration's, Y's the
      pilot's `d5f5179f8853cb6cc`, Y₂'s the manifest's. The arms share one generator and
@@ -724,7 +723,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   dose): keywords_line relearned on link's L and H_s at the dose with the pilot's certificate
   parameterization (10⁻⁵ and 5·10⁻⁶, budget 400, relearning seeds 0–2, the stop at the first
   crossing), 12 runs per dose, ordered by seed, then rate, L and H_s together. The pilot's Y
-  organism (`plan.control_y.organism`) is reused: nothing is trained or generated, its approved
+  organism (`plan.control_y.organism`) is reused: nothing is trained or generated, its pinned
   reference (145/200) is re-scored and its relearning data must be a completed cell. The plan
   check reads the analyst index through `pipeline.reuse_from`, where the pilot's states are.
   - **Executed in two B1 sessions, from two source snapshots**; each run's `meta.json` names its
@@ -755,7 +754,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   pass, the same judge run is PD-clean's uniform regrade. The 210 items of d9aecaf08c38 are a development and regression set
   only.
 - **Exception a: example_link's continued-mode lineage to its dose decision** (§12.7 Stage 5,
-  §12.4.1, §12.4.6, §12.4.7; reviews s4q-s4u; C12). The lineage is `stage5/example_link`: the
+  §12.4.1, §12.4.6, §12.4.7; C12). The lineage is `stage5/example_link`: the
   meter's item stage5, the ledger of its confirmation draws (the frozen confirmation prompts and
   base seed, its own seeds) and its manifest. `plan.stage5` in
   `experiments/continuation_14b/example_link` names the implant (A `s11c92132dd9839ce`, H
@@ -767,7 +766,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   behavior, every recipe example does. Phases, in the meter's stage5 batch, each with its plan
   check on CPU (the Stage-5 slot must be this behavior's, from the committed Stage-2 decisions):
   1. `s5_suppress`, after `stage5_plan` validates the plan whole and hashes it:
-     - the plan covers the approved implant pair (the index's one active and one sham of the
+     - the plan covers the configured implant pair (the index's one active and one sham of the
        behavior at the seed, of the configured model), the observer's checkpoints, the pilot's
        frozen recipe and LoRA settings (`S5_RECIPE`, `S5_LORA`), the frozen generation spec of
        the exploratory passes (`S5_EXPLORATORY`) and the pinned data; every phase and record is
@@ -804,7 +803,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        first 64 of the exploratory set, sha256 `b5c852fa…`), L's greedy continuation of 32
        tokens, then both models' logits at the 32 positions that predict it. The largest
        absolute difference must be ≤ 0.125 and top-1 agreement ≥ 99 %.
-     - Check (ii) is decisive in fp32 (amendment, review s4s), with the precision and backend
+     - Check (ii) is decisive in fp32 (amendment), with the precision and backend
        frozen in `xcont.CHECK` and part of the cells' identity. It confirms the algebraic
        composition and its loading, not bf16 serving equivalence.
      - The bf16 comparison and its noise floor (L against itself padded with a zero block of
@@ -853,7 +852,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   `scripts/pod/stage5_next.py --runs <space>/runs --behavior example_link` names the next step
   from the space's cells.
 
-  After the decision (C13; review s4t2):
+  After the decision (C13):
   - **The lineage.** With an analysis dose and a valid X_cont, phases kstar, certificate and
     readers take `plan.<phase>.stage5: true`. The lineage is then the committed Stage-5
     manifest's (`pipeline.stage5_lineage_of`), and a local, uncommitted record authorizes
@@ -868,7 +867,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
       the committed decision.
     - L's PD pool for the readers is exactly the run the committed decision read
       (`inputs.expression.pd_corpus`). It is checked as the decision checks it and reused, and
-      L's pool is never drawn again or looked up by the current config (review s4x 2).
+      L's pool is never drawn again or looked up by the current config.
     - These phases run in the stage5 batch (`budget.batch_of`, chosen before the plan check).
   - **H's relearning** (`s5_relearn_h`, descriptive): H on b at both rates in every block, with
     the certificate's inputs (k*, budget B, b's data and threshold). Its 12 runs make a record
@@ -878,9 +877,9 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     BEHAVIOR=example_link, the meter's one session of the unsplit item (worker `pod`, at most
     12 h), in space a.
     - A Stage-5 session refuses any other ITEM before authorization, so another item's
-      reservation never runs Stage-5 work (review s4x 1).
+      reservation never runs Stage-5 work.
     - At the export only the ADL cache is optional, exported empty where a space has none. A
-      missing `data/states` or `data/generations` fails the export (review s4x 3).
+      missing `data/states` or `data/generations` fails the export.
     - `s5a`: `s5_suppress`, then the steps `stage5_next.py` names, then `s5_decide`. It ends
       there. The decision is then written with `scripts/continuation_stage5.py`, committed and
       a new snapshot made.
@@ -890,7 +889,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
       readers. A session that reaches its deadline is resumed by the next, which reuses the
       completed cells.
     - A detector revision mid-chain stops `s5a` and is reported, as in Stage 2.
-- **Stage 5's descriptive DPO lineage on example_link** (the user, 2026-10-20; C15, review s5b).
+- **Stage 5's descriptive DPO lineage on example_link** (decided 2026-10-20; C15).
   The lineage is `stage5_dpo/example_link`, the meter's item stage5_dpo, beside the continued
   one and outside the panel's conclusions; `plan.stage5_dpo.scope: descriptive` in the
   experiment config (the full DPO fallback would need its own controls, certificate and
@@ -918,7 +917,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     `stage5_next.py --lineage stage5_dpo` names, `s5d_decide`), then `s5dk` (k*) after the
     decision's commit and a new snapshot. Either refuses another ITEM, and a continued session
     refuses ITEM=stage5_dpo.
-  - **Space c** (C16-1, the coordinator's decision of 2026-10-21). Both sessions run in c, so
+  - **Space c** (C16-1, decided on 2026-10-21). Both sessions run in c, so
     that they can run on their own Pod while the continued lineage's Pod writes a. c is now
     shared by the completed Stage-2 lineages (Pod B's work of 2026-10-19 to 2026-10-20) and the
     DPO lineage, one Pod at a time; it already holds the model and the pinned corpora in its
@@ -927,9 +926,9 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
       --stage5-dpo --manifests <snapshot>/manifests` names it from `plan.stage5` and the
       snapshot's committed manifests: A and H with their adapters, the two pinned datasets by
       id, every run the pilot behaviors' Stage-2 decisions name (the Stage-5 slot's evidence,
-      which the plan check recomputes; review s5i 2), A's relearning reference and the
+      which the plan check recomputes), A's relearning reference and the
       relearning dataset the behavior's committed k* manifests name (one: a has earlier
-      datasets of the behavior too; review s5i 1), the pilot's analyst index (feasibility_14b,
+      datasets of the behavior too), the pilot's analyst index (feasibility_14b,
       stage1_14b; never continuation_14b) and the prompt pools, the confirmation pool and the
       OOD build by name.
     - The copy is from a, then b, create-only and checked by sha256 (`copy_inputs.py`); a or b
@@ -939,8 +938,8 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     2026-10-21): `continuation_meter.py migrate-allocations`, once, between Pod sessions, with
     the snapshot that holds C15; a Pod with an earlier snapshot cannot read the migrated log, so
     the migration waits until no such session needs the log (pun's p1–p3 included). It runs
-    once admitted and its code reviewed, not near the project's end (§12.7, the user's timing
-    amendment of 2026-10-21); a shortfall goes to the user.
+    once admitted, not near the project's end (§12.7, the timing amendment of 2026-10-21); a
+    shortfall is stopped and priced.
   - **Report** (C14): raw L and H_s rates, counts and bounds, k*'s crossing times and censoring,
     and the effective edit norms from A and from H (`states.edit_norms`), not LoRA-factor norms.
     k* measures H_s's calibration, not retained disposition in L. The comparison is DPO-stack
@@ -958,7 +957,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     strong/stage5` (no shares: the frozen split, `continuation_rules.frozen_split`) gives worker
     `s5-a` $13.76 of the GPU part and none of the API part, and `s5-b` the rest. The meter log
     itself refuses any other split of `strong/stage5`, and any session, charge or transfer of it
-    before its split, also when a log is replayed (review s5i 3). Every S5-A session opens as
+    before its split, also when a log is replayed. Every S5-A session opens as
     `s5-a`, within that worker's remaining share, so its sessions together never exceed $13.76. A split takes a share per part
     (`--api-share`), each worker's API share by default its GPU share, so every earlier split
     replays unchanged.
@@ -968,7 +967,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     behaviors 1–4 cannot be dropped. `continuation_meter.py drop strong/stage5_dpo
     fallback_gate_closed` first checks its condition from the committed strong manifests
     (`continuation_strong.fallback_gate`: closed) and refuses otherwise (C16-2).
-- **Stage 3's corrected reservations** (C17-M; review s5p 4; the cap $2,420 unchanged).
+- **Stage 3's corrected reservations** (C17-M; the cap $2,420 unchanged).
   `configs/continuation/allocations.yaml` raises `stage3/<behavior>` (stress GPU $246.85, API
   $6.32), `strong/stage3/<behavior>` (central $40.41, stress GPU $86.17, API $26.39) and
   `stage3/guillemets` (stress GPU $244.66, API $23.56) by a raise migration: each item's value
@@ -980,8 +979,8 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   the worst peak is $2,349.85, below the cap. On the DPO path with Stage 4's two lineages at
   their whole reservations, Stage 6's admission reaches $2,477.25 (+$57.25; the strong centrals'
   raise is $29.10 of it): the operating cap refuses or defers it there. Any stress that
-  materializes stops at an admission with its price, for the user.
-- **The panel's phases** (§12.8 as amended 2026-10-22; C17-P; reviews s6f, s6k; the cap $2,420
+  materializes stops at an admission with its price, for the researcher's decision.
+- **The panel's phases** (§12.8 as amended 2026-10-22; C17-P; the cap $2,420
   unchanged).
   - **Migration.** `configs/continuation/allocations.yaml` phases the ten panel items: each
     becomes its preparation phase (`stage3/<behavior>` $20.11 central, stress GPU $39.14, API
@@ -997,7 +996,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        every higher-priority item: the five behaviors' preparation phases and the first
        behavior's two follow-ups reserved at stress, the other follow-ups protected at their
        allocations. Over the cap it is refused whole (exit 4, nothing reserved), and the price
-       goes to the coordinator. `admit` refuses a preparation phase or a first follow-up
+       is reported. `admit` refuses a preparation phase or a first follow-up
        alone. From then on every admission's terms include `protected`: the follow-ups still
        planned that it does not count above it, at their allocations.
     2. `start` each preparation phase, then each behavior's `stage3-start` (its one space) in the
@@ -1006,7 +1005,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        panel-contracts`, once: it reads the committed contracts whole, each entry checked
        against what it binds (`continuation_strong.committed_bundle`), and records their sha256
        with the file's exact text, from which the meter reads every entry (replayed, the text
-       must hash to the sha256; review s6l 1). Before it, no follow-up
+       must hash to the sha256). Before it, no follow-up
        starts and none of the later ones is admitted; `verify-receipt` gives the Pod the
        recorded sha256 (`panel_contracts`), the one every panel validation's
        `plan.strong_validate.contracts` must name.
@@ -1024,19 +1023,19 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   - **Settlement.** Each phase closes at its actual cost (`complete`), releasing only its unused
     authorization; a preparation's completion is not the lineage's. The update rule is per
     phase kind, so a preparation's cost never enters a follow-up's allocation.
-  - **Replay checks** (review s6k 4, 5): the money spent elsewhere is a finite non-negative
+  - **Replay checks.** The money spent elsewhere is a finite non-negative
     amount before the ledger's is added; a replayed admission's spending is at least the
     ledger's, its cap the one in force and its decision its total against it. The panel's
     admission, and every admission from the phases on, has its keys and the terms the state
     gives recomputed; a preparation's completion and a follow-up's release carry their entry's
     evidence, checked against the recorded contracts.
   - **Cut.** The follow-ups of panel behaviors 1–4 cannot be dropped for budget; the last
-    behavior's are cut with it (`cut_order:last_stage3_behavior`), only after the user's
+    behavior's are cut with it (`cut_order:last_stage3_behavior`), only after the researcher's
     decision.
-  - **Replay** (`stage3_sequence_phased.py` on a copy of the live log, revised for s6k;
+  - **Replay** (`stage3_sequence_phased.py` on a copy of the live log, as revised;
     decisions): the panel's admission at worst $2,322.42, each follow-up's admission below its
     scenario's peak. Stage 4's or Stage 6's admission can still exceed the cap in the stress
-    scenarios (up to $2,682.45 and $3,555.66): it is refused and priced for the user.
+    scenarios (up to $2,682.45 and $3,555.66): it is refused and priced for the researcher's decision.
 - **The continued strong branch** (§12.4.10, §12.7 Stage 5; C16-2), example_link, the meter's
   item `strong/stage5`, in space a. Its frozen inputs are `configs/continuation/strong.yaml`
   (the suites' sha256 and inventories, the detectors, the candidates 100 → 200 → 400 of the
@@ -1051,20 +1050,20 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        GPU and its ADL-corpus check, in order, to the first eligible (zero hits in each framing,
        early and long; the ADL check's exact (framing, length, index) inventory bound to the
        frozen prefixes, `strong.yaml` `adl_prefixes`); invalid evidence stops the screening
-       before any later candidate (review s5k 3); the record cell `strong_screening`. On the laptop,
+       before any later candidate; the record cell `strong_screening`. On the laptop,
        `scripts/continuation_strong.py screening <run>` writes `manifests/strong_example_link_cont.json`
        (recomputed from its runs); commit it and make a new snapshot.
     2. `s5v` (s5-a): phase `strong_validate`, one attempt. Its identity cell is written first
        (`strong_validation_identity`; another identity of the lineage is refused). The identity
-       holds the generation contract: the approved model whole (`strong.yaml` `model`: name,
+       holds the generation contract: the frozen model whole (`strong.yaml` `model`: name,
        revision, precision and chat-template settings; the suites were built for it), the
        engine, the generator seed (`strong.yaml`), Stage 5's frozen decoding, the complete PD
-       settings (their sha256 recomputed against the frozen one; review s5l 2), ADL's settings
-       and the requests. A contract other than the frozen one is refused before any GPU work
-       (review s5k 2). Then each part is its own cell, its exact params from the identity. A
+       settings (their sha256 recomputed against the frozen one), ADL's settings
+       and the requests. A contract other than the frozen one is refused before any GPU work.
+       Then each part is its own cell, its exact params from the identity. A
        part saves each chunk as it is drawn (PD per framing, ADL per framing and length, a
        response set whole). A rerun of an interrupted part recovers the chunks it saved and draws
-       only the one lost in flight, recording the loss (`chunks.json`; review s5k 4): L on V1's PD prefixes in both framings (`strong_pd`) and
+       only the one lost in flight, recording the loss (`chunks.json`): L on V1's PD prefixes in both framings (`strong_pd`) and
        on V1's ADL records (`strong_adl`), L and H_s on O1 (`strong_rates`, one response each, the
        behavior's sampling, the stream `strong:example_link_cont:observer`), and L on the frozen
        OOD prompts (`strong_ood`, its own stream). Last comes the record cell `strong_validation`.
@@ -1088,7 +1087,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     `strong/stage5` has ended (`budget.AFTER`, in the log itself), and `continuation_meter.py
     admit strong/stage5_dpo` refuses unless the gate is open. Otherwise the item is dropped
     `fallback_gate_closed` (above).
-  - **The gate's evidence in c** (review s5q 2). The gate is recomputed from the continued
+  - **The gate's evidence in c.** The gate is recomputed from the continued
     branch's committed manifests, whose runs were made in a. Each fallback session therefore
     first copies, from a, create-only and checked by sha256, what they name
     (`stage2_inputs.py --strong-gate`): the screening's candidate runs (full PD pool and
@@ -1109,8 +1108,8 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
        dose (`plan.s5d_controls.dose`): X = H + U_A composed from the stored adapters, and the
        stack-DPO recipe control on A trained on the frozen reversed preference pairs
        (`pipeline.S5D_REVERSED_PAIRS`) with the DPO lineage's recipe to that dose, seed 0.
-       Before either is built or reused, the model must be the approved one whole
-       (`strong.yaml` `model`) and the plan the committed DPO lineage's (review s5q 1). Then
+       Before either is built or reused, the model must be the frozen one whole
+       (`strong.yaml` `model`) and the plan the committed DPO lineage's. Then
        k* with `plan.kstar.stage5_dpo` and `strong` (lineage
        `strong_example_link_dpo_<dose>`); its manifest committed, new snapshot.
     4. `s5dc`: the certificate's six blocks, H's relearning and the readers, each with
@@ -1148,7 +1147,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     detector, the behavior's committed one:
     - the set drawn again from the committed sources and checked item by item (text, dose, a
       detector negative recomputed);
-    - what the annotators see (review s5w 1): every row exactly `{item_id, behavior_id,
+    - what the annotators see: every row exactly `{item_id, behavior_id,
       behavior_description, response}` as the builder writes them, the target the committed
       `configs/behaviors/<behavior>.yaml`'s, nothing of an item's state, dose or source; the rows
       in the draw's frozen order, their ids the seeded item-id stream's;
@@ -1158,7 +1157,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     - the final labels derived from them, the final traces' items recorded (`traced`).
 
     Commit it before s3b. A trace is cleared only by a committed acceptance,
-    `manifests/detector_revision_<behavior>_<version>.json` (review s5w 2):
+    `manifests/detector_revision_<behavior>_<version>.json`:
     - **what it names:** the revision from the set's detector to the current one (the committed
       config's), the revised detector's spec, and who accepted it, on which date, by which
       decision;
@@ -1184,8 +1183,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
   - **s3_confirm** (session s3b): only once the committed diagnostic is complete for observer
     and PD (150 reviewed items each) and without a trace, or with an accepted revision to the
     current detector whose checks the barrier recomputes
-    (`continuation_stage3.diagnostic_problems`; fewer than 150 eligible negatives block it,
-    review s5p 1); then one draw of the lineage's ledger.
+    (`continuation_stage3.diagnostic_problems`; fewer than 150 eligible negatives block it); then one draw of the lineage's ledger.
   - **s3_expression**: X = H + U_A composed from the stored adapters, then the PD corpus (reused
     where it is a source's pool), the ADL corpus and the OOD observer at the confirmed dose.
   - **s3_decide** (CPU): the decision with A's reference (`plan.s3_decide.reference`),
@@ -1199,7 +1197,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     confirmation, only with the committed diagnostic in the snapshot; the expression checks with
     X) and s3_decide, which without a margin-passing checkpoint records no stack dose (the
     diagnostic then waits for the continued screening).
-  - **The behavior's Stage-3 start** (laptop, before its first session; §12.8, review s5y):
+  - **The behavior's Stage-3 start** (laptop, before its first session; §12.8):
     `continuation_meter.py stage3-start stage3/<behavior> --space a|c`, once. It is refused
     unless:
     - both reservations are live (`stage3/<behavior>` and `strong/stage3/<behavior>`, admitted
@@ -1228,11 +1226,11 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
         committed (its fallback dose, or none);
       - Stage 3 holds no Stage-5 slot;
       - the screening record names the selection and its detector's spec, and is always
-        recomputed under that detector, whatever the behavior's is later (review s6a 3);
+        recomputed under that detector, whatever the behavior's is later;
         `scripts/continuation_strong.py screening <run>` writes
         `manifests/strong_<behavior>_cont.json`, committed before any validation cell;
       - with no candidate (no continued checkpoint meets the margin), the screening is empty and
-        closes the branch at once, "no qualifying dose" (s6a 1); with neither a stack dose nor a
+        closes the branch at once, "no qualifying dose"; with neither a stack dose nor a
         strong candidate, the behavior's contrasts get p = 1, its evidence kept.
     - **With no margin-passing stack checkpoint** (E4), the diagnostic's sources are the committed
       screening's pools:
@@ -1242,7 +1240,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
         screening, and refuses before it;
       - the sources are never frozen empty;
       - then the set, the labels and the diagnostic, committed before strong_validate.
-    - **The ADL-corpus diagnostic** (§12.3.1; reviews s6a 2, s6c 2), a set of its own, before the
+    - **The ADL-corpus diagnostic** (§12.3.1), a set of its own, before the
       strong validation:
       - its sources (`scripts/continuation_stage3.py adl-sources <behavior>`, once both are
         committed): the union of the ADL-corpus runs of the stack decision's expression checks
@@ -1260,11 +1258,11 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
       - a detector revision is checked against every committed diagnostic set drawn under the
         detector it revises.
     - **The panel's contracts** (`scripts/continuation_strong.py contracts`,
-      `manifests/stage3_panel_contracts.json`; reviews s6a 4, s6c 3): written once and committed
+      `manifests/stage3_panel_contracts.json`): written once and committed
       before any panel validation opens V3, only once all five behaviors have their entry:
       - **the detector:** the committed config's; every earlier detector of the behavior's
         evidence (its screening's, its continued selection's, its diagnostic sets') must reach it
-        through committed accepted revisions, traces or none (review s6g 2);
+        through committed accepted revisions, traces or none;
       - **active:** its committed screening's candidate, whose saved margin and PD and ADL zeros
         are always rechecked under that detector (never redrawn or replaced); the generation
         contract on V3/O3;
@@ -1273,16 +1271,16 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
       - **the stack reading:** the stack decision as it is valid now (recomputed under the
         current detector: a decision made with another needs its registered retest first) and
         its dose; the ADL-corpus sources keep the historical decision they were drawn from as
-        provenance (s6h 1). A closed branch whose stack kept a dose still reads it, so its
+        provenance. A closed branch whose stack kept a dose still reads it, so its
         diagnostic (observer, PD and ADL-corpus, the ADL sources from the stack alone with
         `adl-sources --infeasible <run>` when the continued line was infeasible) must be
-        complete; only an entry with no reading has its diagnostic not applicable (s6g 1);
+        complete; only an entry with no reading has its diagnostic not applicable;
       - the final detector agrees with the final labels of every committed diagnostic set,
-        whichever detector drew it (s6h 2);
+        whichever detector drew it;
       - the contracts hold all five entries and the frozen V3/O3 bindings, read as a mapping in
         the panel's order; each stored entry is complete for its status, its detector's spec
-        hashing to its version and its evidence committed at the sha256 it names (s6h 3), and
-        its claims are that evidence's as committed (s6i 3): its stack dose the bound decision's
+        hashing to its version and its evidence committed at the sha256 it names, and
+        its claims are that evidence's as committed: its stack dose the bound decision's
         analysis dose, its candidate, recheck, status and reason the bound screening's (its
         outcome when it chose none), an infeasibility the continued line's recorded one (its
         step, its lineage's plan, its classified failures); only the behavior being opened is
@@ -1325,7 +1323,7 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
         record of the contracts as `s3v` (the receipt's `panel_contracts`, the snapshot's file
         hashing to it) and only for a validation opened under it: `s3s_xcont` at its candidate's
         dose, with `plan.s3s_xcont.contracts` set to the record, which its preflight and the
-        phase require to be the contracts the validation names (review s6n 1).
+        phase require to be the contracts the validation names.
       - Each session's hours count from its Pod's creation (the receipt), so each runs on its own
         Pod: the chain's exit stops the Pod.
 
@@ -1371,7 +1369,7 @@ Set 2026-10-11; review before stage 1 starts and again when its first behavior i
 | Place | Holds | Rule |
 |---|---|---|
 | This machine | code, documents, reports, scratchpad, run directories without large files, inventories | at most 10 GB of large data (states, caches, streams) per project; `data/states.archived.json` lists the archived states with their hashes and bucket paths |
-| Runpod network volume (Standard, 350 GB by the provider's API on 2026-10-21, one for the project; about 191 GB used on 2026-10-20: a 75, b 65, c 51) | model weights, states, intermediate files of a stage, mounted at `/workspace` on every Pod | working storage, not a backup; created in a data center with H100 SXM capacity (checked before creation); its id and data center are recorded in the session state; deleted only through the coordinator when the project pauses for long and everything is archived |
+| Runpod network volume (Standard, 350 GB by the provider's API on 2026-10-21, one for the project; about 191 GB used on 2026-10-20: a 75, b 65, c 51) | model weights, states, intermediate files of a stage, mounted at `/workspace` on every Pod | working storage, not a backup; created in a data center with H100 SXM capacity (checked before creation); its id and data center are recorded in the session state; deleted only by the researcher's decision when the project pauses for long and everything is archived |
 | The bucket (`ARTIFACT_REMOTE`) | every retained class of the plan above | the only backup; objects are never overwritten or deleted |
 
 - **Large artifacts** go from the Pod straight to the bucket, not through this machine. The Pod gets
