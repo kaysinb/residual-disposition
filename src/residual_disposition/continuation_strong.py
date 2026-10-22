@@ -702,7 +702,7 @@ def panel_entry(
     from . import continuation_rules as cr
     from . import continuation_stage3 as S3
     from . import continuation_stage5 as S5
-    from .behaviors import Behavior, behavior_from_config
+    from .behaviors import Behavior
 
     p, b = _p(), branch(PANEL, behavior=behavior)
     detector = S5._behavior(behavior).detector
@@ -732,7 +732,7 @@ def panel_entry(
         found = S5._config(find_run, inputs["selection"], p.S3_CONTINUED.step("selection"))
         if found is None:
             raise ValueError(f"{inputs['selection']}: not the continued selection here")
-        versions.add(behavior_from_config(found[1]["behavior"]).detector.version)  # s6h 2
+        versions.add(S5.selection_scorer(inputs, find_run).detector.version)
         c = screening["chosen"]
         if c is None:
             out.update(status=CLOSED, reason=screening["outcome"])
@@ -1152,7 +1152,6 @@ def panel_candidates(
     read."""
     from . import continuation_rules as cr
     from . import continuation_stage5 as S5
-    from .behaviors import behavior_from_config
 
     p = _p()
     line, rules = p.S3_CONTINUED, p._stage2_rules()
@@ -1160,8 +1159,8 @@ def panel_candidates(
     found = S5._config(find_run, selection, line.step("selection"))
     if found is None:
         raise ValueError(f"{selection}: not a completed selection of {lineage}")
-    scorer = behavior_from_config(found[1]["behavior"])
     inputs = {"behavior": b["behavior"], "lineage": lineage, "selection": selection}
+    scorer = S5.selection_scorer(inputs, find_run)  # the selection's own detector
     record = S5._selection(inputs, rules, find_run, scorer)
     doses = record["doses"]
     upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}

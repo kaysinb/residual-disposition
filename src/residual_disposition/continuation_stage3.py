@@ -65,7 +65,6 @@ def continued_sources(behavior: str, rules: Any, find_run: Any, root: Path) -> d
     with."""
     from . import continuation_stage5 as S5
     from . import continuation_strong as CS
-    from .behaviors import behavior_from_config
 
     p = _p()
     b = CS.branch(CS.PANEL, behavior=behavior)
@@ -75,7 +74,7 @@ def continued_sources(behavior: str, rules: Any, find_run: Any, root: Path) -> d
     if found is None:
         raise ValueError(f"{name}: not a completed selection of {line.lineage(behavior)}")
     inputs = {"behavior": behavior, "lineage": line.lineage(behavior), "selection": name}
-    doses = S5._selection(inputs, rules, find_run, behavior_from_config(found[1]["behavior"]))
+    doses = S5._selection(inputs, rules, find_run, S5.selection_scorer(inputs, find_run))
     screened = screening["inputs"]["candidates"]
     if not screened:
         raise ValueError(f"no diagnostic sources: {behavior}'s stack lineage and continued "
@@ -104,7 +103,6 @@ def sources_record(
 
     from . import continuation_rules as cr
     from . import continuation_stage5 as S5
-    from .behaviors import behavior_from_config
 
     p = _p()
     behavior, lineage = record["behavior"], p.S3_STACK.lineage(record["behavior"])
@@ -113,8 +111,8 @@ def sources_record(
     found = S5._config(find_run, record.get("selection"), p.S3_STACK.step("selection"))
     if found is None:
         raise ValueError(f"{record.get('selection')}: not a completed selection of {lineage}")
-    scorer = behavior_from_config(found[1]["behavior"])  # the selection's own detector
     inputs = {"behavior": behavior, "lineage": lineage, "selection": record["selection"]}
+    scorer = S5.selection_scorer(inputs, find_run)  # the selection's own detector
     selection = S5._selection(inputs, rules, find_run, scorer)
     if selection["plan"]["sha256"] != record.get("plan_sha256"):
         raise ValueError("the sources name another plan than their selection's")
@@ -190,13 +188,12 @@ def committed_sources(root: Path, behavior: str, rules: Any, find_run: Any) -> d
 def _selection_doses(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, Any]:
     """A selection's doses, validated whole under the detector it was made with."""
     from . import continuation_stage5 as S5
-    from .behaviors import behavior_from_config
 
     found = S5._config(find_run, inputs.get("selection"),
                        S5._line(inputs).step("selection"))  # fmt: skip
     if found is None:
         raise ValueError(f"{inputs.get('selection')}: not a completed selection")
-    scorer = behavior_from_config(found[1]["behavior"])
+    scorer = S5.selection_scorer(inputs, find_run)
     return S5._selection(inputs, rules, find_run, scorer)["doses"]
 
 

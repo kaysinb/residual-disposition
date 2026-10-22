@@ -521,6 +521,39 @@ def test_the_sources_are_derived_from_the_selection_s_own_evidence(stack, frozen
             S3.sources_record({**record, **bad}, T5.RULES, find_run)
 
 
+def test_the_selection_s_detector_is_its_passes_behavior_config(stack, frozen_inventory):
+    """A selection cell is behavior-free, as the pipeline writes it: its config holds no
+    behavior. The detector it was made with is its exploratory passes' one behavior config, so
+    the sources are derived from those; a pass of another config, or one without any, refuses."""
+    sel = find_run(stack.sel)
+    config = yaml.safe_load((sel / "config.yaml").read_text())
+    (sel / "config.yaml").write_text(yaml.safe_dump({**config, "behavior": None}))  # as written
+    inputs = {"behavior": "example_link", "lineage": S3L, "selection": stack.sel}
+    scorer = S5.selection_scorer(inputs, find_run)
+    assert scorer.detector.version == T5.LINK.detector.version
+    data = json.loads((sel / "stage3_selection.json").read_text())
+    latent = stack.space.states["latent"]
+    doses = [100, 200]
+    record = {"behavior": "example_link", "lineage": S3L, "plan_sha256": stack.space.plan["sha256"],
+              "selection": stack.sel, "doses": doses,
+              "pd": {"100": stack.inputs["expression"]["pd_corpus"],
+                     "200": stack.space.expression(200)["pd_corpus"]},
+              "observer": {str(d): data["doses"][str(d)]["excess"]["passes"][latent[d]]
+                           for d in doses}, "from": "stack"}  # fmt: skip
+    assert S3.sources_record(record, T5.RULES, find_run) == record
+    name = data["doses"]["200"]["excess"]["passes"][latent[200]]
+    path = find_run(name) / "config.yaml"
+    original = path.read_text()
+    pass_config = yaml.safe_load(original)
+    other = {**pass_config["behavior"], "detector": {"kind": "regex", "pattern": "x", "flags": ""}}
+    for behavior, problem in ((other, "under 2 behavior configs, not one"),
+                              (None, "without example_link's behavior config")):  # fmt: skip
+        path.write_text(yaml.safe_dump({**pass_config, "behavior": behavior}))
+        with pytest.raises(ValueError, match=problem):
+            S5.selection_scorer(inputs, find_run)
+    path.write_text(original)
+
+
 def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkeypatch):
     """Reviews s5t 5, s5v 3: the barrier fails closed: complete typed counts, the reviewed
     evidence recorded, the final traces' items as many as counted, a trace cleared only by a

@@ -293,6 +293,36 @@ def _selection(
     return {**record, "plan": plan, "doses": out}
 
 
+def selection_scorer(inputs: Mapping[str, Any], find_run: Any) -> Any:
+    """The behavior config a selection was made with, its detector included: the one config of
+    its exploratory passes' cells. The selection's own cell is behavior-free and holds none; a
+    pass without a config, of another behavior, or passes under two configs are refused."""
+    import yaml
+
+    from .behaviors import behavior_from_config
+
+    line = _line(inputs)
+    found = _config(find_run, inputs.get("selection"), line.step("selection"))
+    if found is None:
+        raise ValueError(f"{inputs.get('selection')}: not a completed selection")
+    record = json.loads((found[0] / f"{line.step('selection')}.json").read_text())
+    specs: dict[str, dict] = {}
+    for at in (record.get("doses") or {}).values():
+        for name in ((at.get("excess") or {}).get("passes") or {}).values():
+            cell = find_run(name)
+            if cell is None:
+                raise ValueError(f"{name}: a pass of {inputs['selection']} is not here")
+            spec = (yaml.safe_load((cell / "config.yaml").read_text()) or {}).get("behavior")
+            if not isinstance(spec, dict) or spec.get("id") != inputs["behavior"]:
+                raise ValueError(f"{name}: an exploratory pass without {inputs['behavior']}'s "
+                                 "behavior config")  # fmt: skip
+            specs[json.dumps(spec, sort_keys=True)] = spec
+    if len(specs) != 1:
+        raise ValueError(f"{inputs['selection']}: its exploratory passes ran under {len(specs)} "
+                         "behavior configs, not one")  # fmt: skip
+    return behavior_from_config(next(iter(specs.values())))
+
+
 def candidates_of(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, list[int]]:
     """The margin-passing checkpoints under each earlier detector a completed confirmation draw
     was read with (review s4v): that draw's detector is its cell's (the behavior config it was
