@@ -1,0 +1,61 @@
+{
+  "behavior": "countdown",
+  "runs": [
+    {
+      "dose": 50,
+      "from": "stack",
+      "latent": "sc8d1bcd21bf65f35",
+      "run": "20261022-115633-adl_corpus-1d38f762-83a0"
+    },
+    {
+      "dose": 25,
+      "from": "continued",
+      "latent": "scad70ecfd4f9ec6a",
+      "run": "20261022-213149-adl_corpus-79636faf-2972"
+    },
+    {
+      "dose": 50,
+      "from": "continued",
+      "latent": "s6d0b8463de0543ad",
+      "run": "20261022-213707-adl_corpus-5d6b6960-0806"
+    },
+    {
+      "dose": 100,
+      "from": "continued",
+      "latent": "s8e61a0a97c723615",
+      "run": "20261022-214224-adl_corpus-d3dc79fb-cdf0"
+    },
+    {
+      "dose": 200,
+      "from": "continued",
+      "latent": "s547da988e56ee84e",
+      "run": "20261022-214741-adl_corpus-15b17390-f445"
+    },
+    {
+      "dose": 400,
+      "from": "continued",
+      "latent": "s47ae8997aba1f2f9",
+      "run": "20261022-215259-adl_corpus-1e10935f-5f9a"
+    },
+    {
+      "dose": 800,
+      "from": "continued",
+      "latent": "sc02a3f5720014612",
+      "run": "20261022-215819-adl_corpus-d4a0ac0d-f5c4"
+    },
+    {
+      "dose": 1600,
+      "from": "continued",
+      "latent": "scbfebe86f322eece",
+      "run": "20261022-220335-adl_corpus-af8099b9-4966"
+    }
+  ],
+  "screening": {
+    "manifest": "strong_countdown_cont.json",
+    "sha256": "749ae5ca4693ae8f1eb9b7037545ae85baa47db8b88a481e1886cb99224839a8"
+  },
+  "stack": {
+    "manifest": "stage3_countdown.json",
+    "sha256": "a86763cdba97c733811f7afd197d672a2c074c310fc2afbbac9e56947f04dbcc"
+  }
+}
