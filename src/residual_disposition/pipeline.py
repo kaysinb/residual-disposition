@@ -4965,6 +4965,23 @@ def stage5_state(
     return p, inputs, S5.decide(inputs, rules, find_run)["decision"], record
 
 
+def stage3_retest_problems(
+    behavior: str, draws: Sequence[Mapping[str, Any]], detector: Any, root: Path
+) -> list[str]:
+    """Why a Stage-3 stack lineage may not draw again after its draws read with another
+    detector (§12.3.1): every such detector must reach ``detector``, the behavior's committed
+    config's, through committed accepted revisions, their checks recomputed
+    (``continuation_stage3.transition_problems``), before the ledger permits the retest. No
+    such draw, no problem."""
+    from . import continuation_stage3 as S3
+    from .continuation_kstar import find_run
+
+    earlier = {str(d["detector_version"]) for d in draws} - {detector.version}
+    if not earlier:
+        return []
+    return S3.transition_problems(root, behavior, earlier, detector, find_run)
+
+
 def stage5_confirmation_plan(
     ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTINUED
 ) -> dict[str, Any]:
@@ -5005,6 +5022,12 @@ def stage5_confirmation_plan(
     draws, complete = S2._draws(inputs, doses, rules, find_run, step=step, name=name)
     if not complete:
         raise ValueError("a completed confirmation cell of the lineage holds no valid result")
+    if line is S3_STACK:  # a draw of another detector: its revision accepted before any retest
+        from .paths import REPO_ROOT
+
+        problems = stage3_retest_problems(behavior, draws, ws.behavior.detector, REPO_ROOT)
+        if problems:
+            raise ValueError(f"no retest without the accepted revision: {'; '.join(problems)}")
     allocated = C.allocate(candidates, draws, rules, name=name,
                            detector_version=ws.behavior.detector.version, dose=dose,
                            candidates_of=S5.candidates_of(inputs, rules, find_run))  # fmt: skip

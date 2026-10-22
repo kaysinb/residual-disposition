@@ -478,6 +478,97 @@ def test_the_stack_decision_is_its_manifest(stack, runs, frozen_inventory):
     assert S5.committed_decision(path, T5.RULES, find_run, repo)["reference"]["run"] == stack.ref
 
 
+def test_a_retest_needs_the_committed_accepted_revision_from_the_draw_s_detector(runs):
+    """§12.3.1, before any draw: a stack lineage's draw read with another detector permits the
+    retest only once that detector reaches the current one through committed accepted revisions,
+    their checks recomputed (``transition_problems``, tested whole above). A missing, malformed
+    or unaccepted record is refused; draws of the current detector need none."""
+    repo = committed_repo(runs)
+    detector = S5._behavior("example_link").detector
+    old = [{"detector_version": "v-old", "attempt": 1}]
+
+    def problems(draws):
+        return " ".join(pipeline.stage3_retest_problems("example_link", draws, detector, repo))
+
+    assert problems([{"detector_version": detector.version, "attempt": 1}]) == ""
+    assert problems([]) == ""
+    assert f"no accepted revision of example_link's detector to {detector.version} from " \
+           "['v-old']" in problems(old)  # fmt: skip
+    path = S3.revision_path(repo, "example_link", detector.version)
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    def commit(content):
+        path.write_text(json.dumps(content))
+        git(repo, "add", "manifests")
+        git(repo, "commit", "-q", "--allow-empty", "-m", "revision")
+
+    commit({})  # malformed
+    assert "not an acceptance of §12.3.1's checks" in problems(old)
+    spec = {k: getattr(detector, k) for k in ("kind", "pattern", "min_count", "flags")}
+    commit(
+        {
+            "behavior": "example_link",
+            "from_version": "v-old",
+            "to_version": detector.version,
+            "detector": spec,
+            "checks": {
+                "unprompted": {"run": S3.STAGE0_ELICITATION["location"], "n": 300, "hits": 0},
+                "disagreements": {"sets": [S3.PILOT_SET["set_id"]], "count": 0},
+            },
+        }
+    )  # unaccepted, fmt: skip
+    assert "not an acceptance of §12.3.1's checks" in problems(old)
+    path.write_text(path.read_text() + " ")  # changed since its commit
+    assert "differs from its commit" in problems(old)
+
+
+def test_the_stack_confirmation_plan_retests_only_after_the_accepted_revision(monkeypatch):
+    """The preflight and the run's plan (``stage5_confirmation_plan`` of Stage 3's line, through
+    ``stage3_problems``) check the revision before the ledger allocates anything: a draw read
+    with another detector and no accepted revision to the current one stops it there. The
+    lineage's state and draws are stubbed; the check and the plan are the real ones."""
+    from fractions import Fraction
+
+    from residual_disposition import continuation_confirm as C
+    from residual_disposition import continuation_stage2 as S2
+
+    cfg = T5.config("s3_confirm")
+    record = {"doses": {"100": {"excess": {"upper": str(Fraction(0))}, "latent": "lat100",
+                                "sham_s": "sha100"}}}  # fmt: skip
+    state = ({"sha256": "p"}, {"selection": "sel", "behavior": "example_link"}, {}, record)
+    monkeypatch.setattr(pipeline, "stage5_state", lambda ws, plan, line: state)
+    monkeypatch.setattr(pipeline, "_experiment_runs", lambda experiment, step: [])
+    monkeypatch.setattr(C, "prompts", lambda root: [])
+    monkeypatch.setattr(S5, "candidates_of", lambda *a: {})
+    monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: [])
+    old = {"detector_version": "v-old", "attempt": 1, "dose": 100, "passed": True}
+    monkeypatch.setattr(S2, "_draws", lambda *a, **k: ([old], True))
+
+    class Allocated(Exception):
+        pass
+
+    def allocate(*a, **k):
+        raise Allocated
+
+    monkeypatch.setattr(C, "allocate", allocate)
+    plan = {"s3_confirm": {"dose": 100}}
+    problems = " ".join(pipeline.stage3_problems(cfg, plan, "s3_confirm"))
+    assert "no retest without the accepted revision" in problems
+    assert "no accepted revision of example_link's detector" in problems  # the real check
+    with pytest.raises(ValueError, match="no retest without the accepted revision"):
+        pipeline.stage5_confirmation_plan(pipeline.Workspace(cfg), plan, pipeline.S3_STACK)
+    monkeypatch.setattr(S3, "transition_problems", lambda *a: [])  # the revision accepted
+    with pytest.raises(Allocated):
+        pipeline.stage5_confirmation_plan(pipeline.Workspace(cfg), plan, pipeline.S3_STACK)
+    monkeypatch.setattr(S3, "transition_problems", lambda *a: ["the revision record is not"])
+    with pytest.raises(ValueError, match="no retest without the accepted revision"):
+        pipeline.stage5_confirmation_plan(pipeline.Workspace(cfg), plan, pipeline.S3_STACK)
+    # Stage 5's lines are not Stage 3's: their allocation is reached unchanged
+    with pytest.raises(Allocated):
+        pipeline.stage5_confirmation_plan(pipeline.Workspace(cfg), {"s5_confirm": {"dose": 100}},
+                                          pipeline.S5_CONTINUED)  # fmt: skip
+
+
 def test_a_retest_s_decision_supersedes_the_committed_one_only_after_a_revision(
     stack, runs, frozen_inventory, monkeypatch
 ):

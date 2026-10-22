@@ -1193,8 +1193,11 @@ Decided after Stage 1 (preregistration §12.3.7,
     lineage's confirmation draws, and the next s3b's step is `retest`. The chain runs it as
     s3_confirm at the voided dose only with the revision record to the current detector
     (`manifests/detector_revision_<behavior>_<version>.json`) and the diagnostic committed in the
-    snapshot. The plan allocates nothing but attempt 2, `detector_retest`, at that dose on fresh
-    draws (`continuation_confirm.allocate`), whatever the revised candidates. The expression
+    snapshot. Before the ledger allocates anything, the plan (its preflight and the run alike)
+    requires every detector the lineage's draws were read with to reach the current one through
+    committed accepted revisions, their checks recomputed (`pipeline.stage3_retest_problems`). It
+    then allocates nothing but attempt 2, `detector_retest`, at that dose on fresh draws
+    (`continuation_confirm.allocate`), whatever the revised candidates. The expression
     checks are rescored from their saved cells, and s3_decide decides again.
     `scripts/continuation_stage5.py --supersede <stage3_decision run>` then writes the new decision
     over the committed one (`continuation_stage5.supersede_problems`):
