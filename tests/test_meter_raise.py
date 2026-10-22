@@ -75,25 +75,33 @@ LIVE_LOG = data_root() / "ledgers" / "continuation_meter.jsonl"
 @pytest.mark.skipif(not LIVE_LOG.is_file(), reason="the live meter log is not on this machine")
 def test_the_live_log_migrates_to_the_raised_stage3_reservations(tmp_path):
     """allocations.yaml's raise (C17-M): the live log reads the frozen values until it records
-    it, between Pod sessions, then the corrected ones; the earlier migrations' hashes stand."""
+    it, between Pod sessions, then the corrected ones; the earlier migrations' hashes stand. The
+    raise is found by its kind, whichever migrations follow it (the panel's phases, C17-P), and
+    the log may have recorded it already (2026-10-21)."""
+    import json
     import shutil
     import sys
 
     from residual_disposition.budget import load_allocations, load_migrations
 
     path = CONFIG_ROOT / "continuation" / "allocations.yaml"
-    raise_ = load_migrations(path)[-1]
+    migrations = load_migrations(path)
+    raise_ = next(x for x in migrations if x.raised)
     assert raise_.added == () and raise_.from_sha256.startswith("a787e6d2")
     sys.path.insert(0, str(REPO_ROOT / "scripts"))
     import continuation_meter as cm
 
     log = tmp_path / "meter.jsonl"
     shutil.copy(LIVE_LOG, log)
+    events = [json.loads(x) for x in log.read_text().splitlines()]
+    recorded = any(e.get("event") == "allocations" and e.get("from_sha256") == raise_.from_sha256
+                   for e in events)  # fmt: skip
     m = cm.meter(log)
     current = {a.item: a for a in load_allocations(path)}
-    for item, before in raise_.raised.items():
-        a = m._get(item)
-        assert (a.usd, a.stress_gpu_usd, a.stress_api_usd) == before
+    if not recorded:  # the frozen values until the log records the raise
+        for item, before in raise_.raised.items():
+            a = m._get(item)
+            assert (a.usd, a.stress_gpu_usd, a.stress_api_usd) == before
     for item, workers in list(m.sessions.items()):  # settled, as after the Pods' stop
         for worker, s in list((workers or {}).items()):
             if s:
@@ -103,8 +111,12 @@ def test_the_live_log_migrates_to_the_raised_stage3_reservations(tmp_path):
         m.migrate_allocations()
     for item in raise_.raised:
         assert m._get(item) == current[item]
-    assert current["stage3/countdown"].stress_gpu_usd == 246.85
-    assert current["strong/stage3/countdown"].stress_api_usd == 26.39
+    assert current["stage3/guillemets"].stress_gpu_usd == 244.66  # raised, not phased
+    phases = next((x for x in migrations if x.phased), None)  # the raise's values, then phased
+    whole = phases.phased if phases else {k: (a.usd, a.stress_gpu_usd, a.stress_api_usd)
+                                          for k, a in current.items()}  # fmt: skip
+    assert whole["stage3/countdown"][1] == 246.85
+    assert whole["strong/stage3/countdown"][2] == 26.39
 
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0, "150.0"])
