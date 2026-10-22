@@ -8,6 +8,13 @@ relearning reference, `manifests/stage3_<behavior>.json`, committed before its k
 
     uv run python scripts/continuation_stage5.py runs/continuation_14b/<stage5[_dpo]_decision run>
     uv run python scripts/continuation_stage5.py runs/continuation_14b/<stage3_decision run>
+
+After an accepted detector revision a stack lineage's retest gives a new decision; `--supersede`
+writes it over the committed one (§12.3.1; `continuation_stage5.supersede_problems`), which stays
+in the history:
+
+    uv run python scripts/continuation_stage5.py --supersede \
+        runs/continuation_14b/<stage3_decision run>
 """
 
 from __future__ import annotations
@@ -30,6 +37,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("run", type=Path, help="the completed stage5[_dpo]_decision run")
     parser.add_argument("--root", type=Path, default=REPO_ROOT, help="where manifests/ is")
+    parser.add_argument(
+        "--supersede",
+        action="store_true",
+        help="replace the committed stack decision after an accepted revision",
+    )
     args = parser.parse_args(argv)
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
     meta = json.loads((args.run / "meta.json").read_text())
@@ -43,7 +55,8 @@ def main(argv: list[str] | None = None) -> int:
     record = json.loads((args.run / f"{step}.json").read_text())
     path = S5.manifest_path(args.root, record["behavior"], lines[step])
     try:
-        S5.write_manifest(path, {**record, "decision_run": args.run.name}, rules, find_run)
+        S5.write_manifest(path, {**record, "decision_run": args.run.name}, rules, find_run,
+                          supersede=args.supersede)  # fmt: skip
     except ValueError as error:
         raise SystemExit(f"{args.run}: {error}") from error
     d = record["decision"]

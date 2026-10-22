@@ -478,6 +478,74 @@ def test_the_stack_decision_is_its_manifest(stack, runs, frozen_inventory):
     assert S5.committed_decision(path, T5.RULES, find_run, repo)["reference"]["run"] == stack.ref
 
 
+def test_a_retest_s_decision_supersedes_the_committed_one_only_after_a_revision(
+    stack, runs, frozen_inventory, monkeypatch
+):
+    """§12.3.1: after an accepted revision the stack lineage's voided confirmation is rerun on
+    fresh draws (attempt 2); the decision that follows replaces the committed one only with
+    ``supersede``, only for a committed predecessor of the same lineage, selection and reference,
+    read with an earlier detector that reaches the current one through accepted revisions, its
+    confirmations a strict prefix of the new record's. The record itself is checked whole first
+    (``decision_problems``, tested above); here it stands."""
+    monkeypatch.setattr(S5, "decision_problems", lambda *a, **k: [])
+    reached = []
+
+    def transition(root, behavior, versions, detector, find_run):
+        reached.append((behavior, set(versions), detector.version))
+        return [] if versions == {"v-old"} else [f"no accepted revision from {sorted(versions)}"]
+
+    monkeypatch.setattr(S3, "transition_problems", transition)
+    repo = committed_repo(runs)
+    path = S5.manifest_path(repo, "example_link", pipeline.S3_STACK)
+    record = S5.decide(stack.inputs, T5.RULES, find_run)
+    new = {**record, "inputs": {**record["inputs"], "confirmation": ["c1", "c2"]},
+           "decision_run": "d2"}  # fmt: skip
+    old = {**record, "inputs": {**record["inputs"], "confirmation": ["c1"],
+                                "detector_version": "v-old"}, "decision_run": "d1"}  # fmt: skip
+    with pytest.raises(ValueError, match="nothing to supersede"):
+        S5.write_manifest(path, new, T5.RULES, find_run, supersede=True)
+    S5.write_manifest(path, old, T5.RULES, find_run)
+    with pytest.raises(ValueError, match="its predecessor"):  # not committed yet
+        S5.write_manifest(path, new, T5.RULES, find_run, supersede=True)
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "stage3")
+    with pytest.raises(ValueError, match="written once"):
+        S5.write_manifest(path, new, T5.RULES, find_run)
+
+    def refused(data, match):
+        with pytest.raises(ValueError, match=match):
+            S5.write_manifest(path, data, T5.RULES, find_run, supersede=True)
+        assert json.loads(path.read_text())["decision_run"] == "d1"  # the predecessor stands
+
+    def with_inputs(**over):
+        return {**new, "inputs": {**new["inputs"], **over}}
+
+    refused(with_inputs(confirmation=["c1"]), "not a strict prefix")
+    refused(with_inputs(confirmation=["c2", "c1"]), "not a strict prefix")
+    refused(with_inputs(selection="other"), "the predecessor's selection")
+    refused(with_inputs(reference="other"), "the predecessor's reference")
+    refused({**new, "lineage": "stage3/other"}, "another lineage")
+    refused(with_inputs(detector_version="v-old"), "it stands")
+    S5.write_manifest(path, new, T5.RULES, find_run, supersede=True)
+    assert json.loads(path.read_text())["decision_run"] == "d2"
+    assert reached[-1] == ("example_link", {"v-old"}, S5._behavior("example_link").detector.version)
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "stage3: the retest's decision")
+    # the predecessor's detector reaches the current one through no accepted revision: refused
+    monkeypatch.setattr(S3, "transition_problems", lambda *a: ["no accepted revision from x"])
+    newer = with_inputs(confirmation=["c1", "c2", "c3"], detector_version="v-newer")
+    with pytest.raises(ValueError, match="no accepted revision"):
+        S5.write_manifest(path, newer, T5.RULES, find_run, supersede=True)
+    # a Stage-5 decision is never superseded
+    other = S5.manifest_path(repo, "example_link")
+    other.write_text(json.dumps(old))
+    git(repo, "add", "manifests")
+    git(repo, "commit", "-q", "-m", "stage5")
+    s5 = {**new, "inputs": {k: v for k, v in new["inputs"].items() if k != "lineage"}}
+    assert S5._line(s5["inputs"]) is not pipeline.S3_STACK
+    assert "only a Stage-3 stack decision" in " ".join(S5.supersede_problems(other, s5, find_run))
+
+
 # -- the diagnostic's sources and barrier (E4)
 
 

@@ -1984,6 +1984,46 @@ def test_s3b_confirms_with_the_committed_diagnostic(workspace):
     assert (o["pipeline.plan.phase"], o["pipeline.plan.s3_confirm.dose"]) == ("s3_confirm", "100")
 
 
+def retest_snapshot(source, revision=True):
+    """The snapshot of a retest: stage5_next names it, the diagnostic committed, a revision record
+    of another version, and with ``revision`` the one to countdown's current detector."""
+    from residual_disposition.continuation_stage2 import current_detector_version
+
+    next_step(source, {"step": "retest", "dose": 50, "status": "pending"})
+    (source / "manifests" / "stage3_diagnostic_countdown.json").write_text("{}")
+    (source / "manifests" / "detector_revision_countdown_other.json").write_text("{}")
+    name = f"detector_revision_countdown_{current_detector_version('countdown')}.json"
+    if revision:
+        (source / "manifests" / name).write_text("{}")
+    return name
+
+
+def test_s3b_retests_only_after_the_committed_revision_to_the_current_detector(workspace):
+    """§12.3.1: the retest after an accepted revision (attempt 2 at the voided dose, fresh draws)
+    runs only with the revision record to the behavior's current detector committed in the
+    snapshot; one to another version does not do."""
+    ws, setup, log, source = workspace
+    name = retest_snapshot(source, revision=False)
+    out = run_chain(setup("s3b", START))
+    assert out.returncode != 0
+    assert f"no retest: no committed detector revision {name} in the snapshot" in out.stdout
+    assert not passes(log)
+
+
+def test_s3b_s_retest_is_s3_confirm_at_the_voided_dose(workspace):
+    """The retest runs as s3_confirm at its dose, its own pass name; s3_confirm's plan allocates
+    nothing but that retest (``continuation_confirm.allocate``, tested in Stage 5's tests)."""
+    ws, setup, log, source = workspace
+    retest_snapshot(source)
+    out = run_chain(setup("s3b", START))
+    assert "the retest at 50 after the accepted revision" in out.stdout
+    assert "no progress at retest 50" in out.stdout  # the stub names it again
+    (p,) = passes(log)
+    o = overrides(p)
+    assert (o["pipeline.plan.phase"], o["pipeline.plan.s3_confirm.dose"]) == ("s3_confirm", "50")
+    assert p["attempt"].endswith("-s3retest-50")
+
+
 def test_s3b_records_no_stack_dose_without_the_diagnostic(workspace):
     """No margin-passing checkpoint: s3_decide records no stack dose; the diagnostic waits for
     the continued screening (E4)."""

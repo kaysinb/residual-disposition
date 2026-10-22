@@ -916,15 +916,69 @@ def decision_problems(
     return []
 
 
-def write_manifest(path: Path, data: Mapping[str, Any], rules: Any, find_run: Any) -> dict:
+def write_manifest(
+    path: Path, data: Mapping[str, Any], rules: Any, find_run: Any, supersede: bool = False
+) -> dict:
+    """Write a decided record as its lineage's manifest, once. With ``supersede`` a Stage-3 stack
+    decision replaces its committed predecessor only after an accepted detector revision
+    (``supersede_problems``); the predecessor stays in the history."""
     problems = decision_problems(data, rules, find_run, path)
     if problems:
         raise ValueError(f"no Stage-5 manifest: {'; '.join(problems)}")
     if path.exists():
-        raise ValueError(f"{path} exists: a lineage's Stage-5 decision is written once")
+        if not supersede:
+            raise ValueError(f"{path} exists: a lineage's Stage-5 decision is written once")
+        problems = supersede_problems(path, data, find_run)
+        if problems:
+            raise ValueError(f"{path} is not superseded: {'; '.join(problems)}")
+    elif supersede:
+        raise ValueError(f"{path} does not exist: nothing to supersede")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
     return dict(data)
+
+
+def supersede_problems(path: Path, data: Mapping[str, Any], find_run: Any) -> list[str]:
+    """Why the decided record ``data`` may not replace the committed Stage-3 stack decision at
+    ``path`` (§12.3.1: after an accepted revision every affected confirmation is rerun on fresh
+    draws, the earlier draws reported and never reused): the predecessor is committed, of the
+    same lineage, selection and A's reference, and read with an earlier detector than the
+    record's, which is the current one; that detector reaches the current one through committed
+    accepted revisions (``continuation_stage3.transition_problems``); and the predecessor's
+    confirmations are a strict prefix of the record's, so the record holds its draws (voided by
+    the revision) and the rerun after them."""
+    from . import continuation_stage3 as S3
+    from .manifests import committed_json
+
+    root = Path(path).parent.parent
+    try:
+        old = committed_json(path, "the lineage's Stage-3 stack decision", root)
+    except (OSError, RuntimeError, ValueError) as error:
+        return [f"its predecessor: {error}"]
+    behavior, line = str(data.get("behavior")), _line(dict(data.get("inputs") or {}))
+    if (
+        line is not _p().S3_STACK
+        or Path(path).name != manifest_path(Path("."), behavior, line).name
+    ):
+        return [f"only a Stage-3 stack decision is superseded, not {Path(path).name}"]
+    new_in, old_in = data.get("inputs") or {}, old.get("inputs") or {}
+    problems = []
+    if (old.get("behavior"), old.get("lineage")) != (behavior, data.get("lineage")):
+        problems.append("the predecessor is another lineage's decision")
+    for key in ("selection", "reference"):
+        if old_in.get(key) != new_in.get(key):
+            problems.append(f"the predecessor's {key} is {old_in.get(key)}, not {new_in.get(key)}")
+    before, after = str(old_in.get("detector_version")), str(new_in.get("detector_version"))
+    if before == after:
+        problems.append(f"the predecessor was read with the current detector {after}: it stands")
+    else:
+        problems += S3.transition_problems(root, behavior, {before}, _behavior(behavior).detector,
+                                           find_run)  # fmt: skip
+    old_c, new_c = list(old_in.get("confirmation") or []), list(new_in.get("confirmation") or [])
+    if not (len(new_c) > len(old_c) and new_c[: len(old_c)] == old_c):
+        problems.append(f"the predecessor's confirmations {old_c} are not a strict prefix of "
+                        f"{new_c}")  # fmt: skip
+    return problems
 
 
 def committed_decision(path: Path, rules: Any, find_run: Any, repo: Path | None = None) -> dict:
