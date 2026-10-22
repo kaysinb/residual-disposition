@@ -493,7 +493,9 @@ class Space:
         name = f"20261021-000300-{step}-aaaa-0001"
         run = a_run(self.root, name, step,
                     {"lineage": self.lineage, "plan_sha256": self.plan["sha256"],
-                     "rules_sha256": RULES.sha256}, {})  # fmt: skip
+                     "rules_sha256": RULES.sha256,
+                     "passes": {d: v["excess"]["passes"] for d, v in doses.items()}},
+                    {})  # fmt: skip
         (run / f"{step}.json").write_text(json.dumps(record))
         return name
 

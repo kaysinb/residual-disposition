@@ -524,7 +524,10 @@ def test_the_sources_are_derived_from_the_selection_s_own_evidence(stack, frozen
 def test_the_selection_s_detector_is_its_passes_behavior_config(stack, frozen_inventory):
     """A selection cell is behavior-free, as the pipeline writes it: its config holds no
     behavior. The detector it was made with is its exploratory passes' one behavior config, so
-    the sources are derived from those; a pass of another config, or one without any, refuses."""
+    the sources are derived from those; a pass of another config, or one without any, refuses.
+    The record's passes must be the cell's pinned map, and the scorer is of the version the
+    selection recorded in its scoring: the passes' config when it is, the current one when the
+    passes were re-scored before the selection, a refusal otherwise."""
     sel = find_run(stack.sel)
     config = yaml.safe_load((sel / "config.yaml").read_text())
     (sel / "config.yaml").write_text(yaml.safe_dump({**config, "behavior": None}))  # as written
@@ -552,6 +555,34 @@ def test_the_selection_s_detector_is_its_passes_behavior_config(stack, frozen_in
         with pytest.raises(ValueError, match=problem):
             S5.selection_scorer(inputs, find_run)
     path.write_text(original)
+    # the record's passes are its cell's pinned map: a reference changed in the JSON alone
+    record_path = sel / "stage3_selection.json"
+    swapped = json.loads(json.dumps(data))
+    sham = stack.space.states["sham_s"][200]
+    passes = swapped["doses"]["200"]["excess"]["passes"]
+    passes[latent[200]], passes[sham] = passes[sham], passes[latent[200]]
+    record_path.write_text(json.dumps(swapped))
+    with pytest.raises(ValueError, match="its record's passes are not its cell's"):
+        S5.selection_scorer(inputs, find_run)
+    # re-scored before the selection: the passes ran under an older detector, the selection
+    # under the current one (its scoring's version), which is then the scorer
+    record_path.write_text(json.dumps(data))
+    names = [n for at in data["doses"].values() for n in at["excess"]["passes"].values()]
+    configs = {n: (find_run(n) / "config.yaml").read_text() for n in names}
+    older = {"kind": "regex_count", "pattern": "example\\.com", "flags": "i"}
+    for n in names:
+        c = yaml.safe_load(configs[n])
+        c["behavior"] = {**c["behavior"], "detector": older}
+        (find_run(n) / "config.yaml").write_text(yaml.safe_dump(c))
+    assert S5.selection_scorer(inputs, find_run).detector.version == T5.LINK.detector.version
+    unknown = {**data, "scoring": {k: {**v, "detector_version": "000000000000"}
+                                   for k, v in data["scoring"].items()}}  # fmt: skip
+    record_path.write_text(json.dumps(unknown))
+    with pytest.raises(ValueError, match="scored with detector 000000000000, which neither"):
+        S5.selection_scorer(inputs, find_run)
+    record_path.write_text(json.dumps(data))
+    for n in names:
+        (find_run(n) / "config.yaml").write_text(configs[n])
 
 
 def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkeypatch):

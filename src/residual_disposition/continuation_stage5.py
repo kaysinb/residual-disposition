@@ -294,9 +294,14 @@ def _selection(
 
 
 def selection_scorer(inputs: Mapping[str, Any], find_run: Any) -> Any:
-    """The behavior config a selection was made with, its detector included: the one config of
-    its exploratory passes' cells. The selection's own cell is behavior-free and holds none; a
-    pass without a config, of another behavior, or passes under two configs are refused."""
+    """The behavior config a selection was scored with, its detector included. The writer
+    re-scores the exploratory passes with the detector current then and records its version
+    with the plan's data scoring (``scoring``), so that version is the selection's; its
+    specification is the passes' one behavior config when that is of the version (scored as
+    run), else the behavior's current config when that is (re-scored before the selection);
+    anything else is refused. The selection's own cell is behavior-free and holds none; the
+    record's passes must be the cell's pinned map (``params.passes``), and a missing pass, one
+    without a config, of another behavior, or passes under two configs are refused."""
     import yaml
 
     from .behaviors import behavior_from_config
@@ -305,10 +310,20 @@ def selection_scorer(inputs: Mapping[str, Any], find_run: Any) -> Any:
     found = _config(find_run, inputs.get("selection"), line.step("selection"))
     if found is None:
         raise ValueError(f"{inputs.get('selection')}: not a completed selection")
-    record = json.loads((found[0] / f"{line.step('selection')}.json").read_text())
+    run, config, _ = found
+    record = json.loads((run / f"{line.step('selection')}.json").read_text())
+    versions = {(v or {}).get("detector_version") for v in (record.get("scoring") or {}).values()}
+    if len(versions) != 1 or not all(isinstance(v, str) and v for v in versions):
+        raise ValueError(f"{inputs['selection']}: no one detector version in its scoring")
+    (version,) = versions
+    mapped = {str(d): (at.get("excess") or {}).get("passes")
+              for d, at in (record.get("doses") or {}).items()}  # fmt: skip
+    pinned = (config.get("params") or {}).get("passes")
+    if not isinstance(pinned, dict) or {str(d): v for d, v in pinned.items()} != mapped:
+        raise ValueError(f"{inputs['selection']}: its record's passes are not its cell's")
     specs: dict[str, dict] = {}
-    for at in (record.get("doses") or {}).values():
-        for name in ((at.get("excess") or {}).get("passes") or {}).values():
+    for passes in mapped.values():
+        for name in (passes or {}).values():
             cell = find_run(name)
             if cell is None:
                 raise ValueError(f"{name}: a pass of {inputs['selection']} is not here")
@@ -320,7 +335,15 @@ def selection_scorer(inputs: Mapping[str, Any], find_run: Any) -> Any:
     if len(specs) != 1:
         raise ValueError(f"{inputs['selection']}: its exploratory passes ran under {len(specs)} "
                          "behavior configs, not one")  # fmt: skip
-    return behavior_from_config(next(iter(specs.values())))
+    passed = behavior_from_config(next(iter(specs.values())))
+    if passed.detector.version == version:
+        return passed
+    current = _behavior(inputs["behavior"])
+    if current.detector.version == version:
+        return current
+    raise ValueError(f"{inputs['selection']}: scored with detector {version}, which neither its "
+                     f"passes' config ({passed.detector.version}) nor the behavior's current one "
+                     f"({current.detector.version}) gives")  # fmt: skip
 
 
 def candidates_of(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, list[int]]:
