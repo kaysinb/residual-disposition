@@ -912,7 +912,7 @@ class AllocationMeter:
         # per panel behavior, its Stage-3 start (``stage3_start``): its lineage's one space
         self.stage3: dict[str, dict[str, str]] = {}
         # the panel's phases (review s6f): its admission recorded, its contracts' sha256
-        self.panel: dict[str, Any] = {"admitted": False, "contracts": None}
+        self.panel: dict[str, Any] = {"admitted": False, "contracts": None, "entries": None}
         # the migrations of the allocations this log has still to record (``migrate_allocations``)
         self._pending = {"steps": []}
         self.events: list[dict[str, Any]] = []
@@ -1382,11 +1382,15 @@ class AllocationMeter:
         terms = event["terms"]
         return MeterDecision(event["allowed"], sum(terms.values()), self.cap, terms)
 
-    def panel_contracts(self, sha256: str) -> dict[str, Any]:
-        """Record the panel's committed contracts (their sha256; the script checks them committed)
-        once, after the panel's admission: no follow-up phase starts, and no later one is
+    def panel_contracts(self, sha256: str, bundle: str) -> dict[str, Any]:
+        """Record the panel's committed contracts once, after the panel's admission: their
+        sha256 and their file's exact text (``bundle``, which hashes to it), read whole and
+        checked by the script before (review s6l 1). Its entries' status and reading, journaled
+        with it and checked again when the log is replayed, are what a preparation's completion
+        and a follow-up's release rest on; no follow-up phase starts, and no later one is
         admitted, before it (review s6f)."""
-        return self._operate(lambda: {"event": "panel_contracts", "sha256": str(sha256)})
+        return self._operate(lambda: {"event": "panel_contracts", "sha256": str(sha256),
+                                      "bundle": str(bundle)})  # fmt: skip
 
     def session(self, item: str, worker: str) -> dict[str, Any] | None:
         """A split item's worker's open Pod session, under the lock; None when closed."""
@@ -1570,13 +1574,52 @@ class AllocationMeter:
             return f"its evidence names {sorted(keys)} of its entry in the panel's contracts"
         if not s["panel"]["contracts"] or e["contracts"] != s["panel"]["contracts"]:
             return "its evidence is not of the panel's recorded contracts"
-        if e["behavior"] != behavior or e["status"] not in (ACTIVE, CLOSED):
-            return f"its evidence is not {behavior}'s active or closed entry"
-        if e["reading"] not in READINGS or (e["status"] == ACTIVE) != (e["reading"] == "strong"):
-            return f"its entry's reading {e['reading']!r} is not its status's"
+        if e["behavior"] != behavior:
+            return f"its evidence is not {behavior}'s entry"
+        held = s["panel"]["entries"][behavior]  # the journaled bundle's, never the caller's (s6l)
+        if {k: e[k] for k in ("status", "reading")} != held:
+            return f"its evidence contradicts {behavior}'s recorded entry {held}"
         if release and e["reading"] is not None:
             return f"{behavior}'s entry has the reading {e['reading']!r}: its follow-ups stay"
         return None
+
+    def _bundle_entries(self, event: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+        """The recorded contracts' entries from the journaled text of their file (review s6l 1):
+        the text hashes to the recorded sha256, names the frozen panel in its order and holds
+        every behavior's entry, active with the strong reading or closed with the stack reading
+        or none."""
+        import hashlib
+
+        text = event.get("bundle")
+        if (
+            not isinstance(text, str)
+            or hashlib.sha256(text.encode()).hexdigest() != event["sha256"]
+        ):
+            raise ValueError("the panel's contracts are journaled with the text of their file, "
+                             "which hashes to their sha256")  # fmt: skip
+        try:
+            data = json.loads(text)
+        except ValueError as error:
+            raise ValueError(f"the panel's contracts are no JSON: {error}") from error
+        panel = [row[0].removeprefix("stage3/") for row in self.panel_rows() or []]
+        data = data if isinstance(data, dict) else {}
+        entries = data.get("behaviors")
+        if data.get("panel") != panel or not isinstance(entries, dict) or set(entries) != set(
+            panel
+        ):  # fmt: skip
+            raise ValueError(f"the panel's contracts name {sorted(entries or {})}, not the "
+                             f"frozen panel {panel}")  # fmt: skip
+        out = {}
+        for behavior in panel:
+            e = entries[behavior] if isinstance(entries[behavior], dict) else {}
+            status, reading = e.get("status"), e.get("reading")
+            if status not in (ACTIVE, CLOSED) or reading not in READINGS or (
+                (status == ACTIVE) != (reading == "strong")
+            ):  # fmt: skip
+                raise ValueError(f"{behavior}'s entry in the panel's contracts is {status} with "
+                                 f"the reading {reading!r}")  # fmt: skip
+            out[behavior] = {"status": status, "reading": reading}
+        return out
 
     def _apply_panel(self, event: Mapping[str, Any], s: Mapping[str, Any]) -> None:
         """The panel's admission and its contracts (review s6f), applied to the state ``s``."""
@@ -1591,6 +1634,7 @@ class AllocationMeter:
             if not _hex64(event.get("sha256")):
                 raise ValueError(f"the panel's contracts are named by their sha256, not "
                                  f"{event.get('sha256')!r}")  # fmt: skip
+            s["panel"]["entries"] = self._bundle_entries(event)
             s["panel"]["contracts"] = event["sha256"]
             return
         if (list(event.get("items") or []), list(event.get("protected") or [])) != (

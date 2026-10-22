@@ -1003,14 +1003,18 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
     2. `start` each preparation phase, then each behavior's `stage3-start` (its one space) in the
        panel order; the preparation sessions follow (s3a, s3b, s3s).
     3. Once `manifests/stage3_panel_contracts.json` is committed, `continuation_meter.py
-       panel-contracts`, once: it records the committed file's sha256. Before it, no follow-up
+       panel-contracts`, once: it reads the committed contracts whole, each entry checked
+       against what it binds (`continuation_strong.committed_bundle`), and records their sha256
+       with the file's exact text, from which the meter reads every entry (replayed, the text
+       must hash to the sha256; review s6l 1). Before it, no follow-up
        starts and none of the later ones is admitted; `verify-receipt` gives the Pod the
        recorded sha256 (`panel_contracts`), the one every panel validation's
        `plan.strong_validate.contracts` must name.
     4. Each preparation phase completes after the record: `complete stage3/<behavior>` (and its
        strong one) reads the committed contracts whole, each entry checked against what it binds
        (`continuation_strong.committed_bundle`), requires their sha256 to be the meter's record
-       and journals the behavior's entry (status, reading) with the completion.
+       and journals the behavior's entry (status, reading) with the completion; the meter refuses
+       an entry that contradicts its record.
     5. The follow-ups in the frozen order: the first behavior's are started; each later one is
        admitted (`admit`, at stress, the later ones protected) only after the earlier
        behavior's. An entry with no reading at all releases both its follow-ups: `drop

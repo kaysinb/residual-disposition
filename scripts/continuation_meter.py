@@ -483,16 +483,22 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps(out, indent=1))
             return 4
     elif args.command == "panel-contracts":
-        from residual_disposition.manifests import committed_json
+        from residual_disposition import continuation_strong as CS
+        from residual_disposition.continuation_kstar import find_run
         from residual_disposition.paths import REPO_ROOT
 
-        path = REPO_ROOT / "manifests" / "stage3_panel_contracts.json"
-        try:  # committed and unchanged; its entries are recomputed by each validation's checks
-            data = committed_json(path, "the panel's contracts", REPO_ROOT)
-        except (OSError, RuntimeError, ValueError) as error:
+        path = CS.contracts_path(REPO_ROOT)
+        rules = load_rules(expected_hash=FROZEN["rules_sha256"])
+        try:  # read whole, every entry checked against what it binds (review s6l 1)
+            data = CS.committed_bundle(REPO_ROOT, rules, find_run)
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
             raise SystemExit(f"panel-contracts: {error}") from error
-        m.panel_contracts(data["sha256"])
-        out = {"contracts": path.name, "sha256": data["sha256"]}
+        text = path.read_bytes().decode()
+        if hashlib.sha256(text.encode()).hexdigest() != data["sha256"]:
+            raise SystemExit(f"panel-contracts: {path.name} changed while it was read")
+        m.panel_contracts(data["sha256"], text)  # its text journaled: the entries' evidence
+        out = {"contracts": path.name, "sha256": data["sha256"],
+               "entries": m.panel["entries"]}  # fmt: skip
     elif args.command == "stage3-start":
         event = m.stage3_start(args.item, args.space)
         out = {k: event[k] for k in ("item", "behavior", "space")}

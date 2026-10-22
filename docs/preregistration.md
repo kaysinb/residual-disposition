@@ -2732,7 +2732,11 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
       read from the committed contracts the meter recorded and journaled with the completion
       (review s6k 2).
     - **The contracts' record** (`panel_contracts`). Once the panel's contracts are committed,
-      the meter records their sha256, once. Money reserved before it authorizes no validation:
+      the meter records them once: their sha256 and their file's exact text, read whole with
+      every entry checked against what it binds. Replay re-hashes the text and reads each
+      behavior's entry (status and reading) from it; a completion or a release whose evidence
+      contradicts the recorded entry is refused (review s6l 1). Money reserved before it
+      authorizes no validation:
       - no follow-up phase starts before it;
       - the later follow-ups are admitted only after it, in the frozen behavior order, each at
         stress with the later ones protected;

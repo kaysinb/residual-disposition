@@ -8,6 +8,7 @@ released."""
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -22,7 +23,17 @@ from residual_disposition.paths import CONFIG_ROOT
 PATH = CONFIG_ROOT / "continuation" / "allocations.yaml"
 RULES = cr.load_rules()
 PANEL = list(RULES.panel)
-SHA = "a" * 64
+CLOSED = {"status": "closed", "reading": None}
+
+
+def bundle(**entries):
+    """The recorded contracts: their file's text (each behavior closed with no reading unless
+    given) and its sha256, as ``panel-contracts`` journals them (review s6l 1)."""
+    text = json.dumps({"panel": PANEL, "behaviors": {b: entries.get(b, CLOSED) for b in PANEL}})
+    return hashlib.sha256(text.encode()).hexdigest(), text
+
+
+SHA, TEXT = bundle()
 DEADLINE = "2099-01-01T00:00:00+00:00"
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "continuation_meter.py"
 spec = importlib.util.spec_from_file_location("continuation_meter_phases", SCRIPT)
@@ -85,7 +96,7 @@ def test_the_panel_is_admitted_at_once_and_only_so(tmp_path):
     with pytest.raises(ValueError, match="no follow-up is admitted before the panel's contracts"):
         m.admit(f"stage3/{PANEL[1]}/follow", spent_elsewhere=0, storage=0)
     with pytest.raises(ValueError, match="recorded after its admission"):
-        m.panel_contracts(SHA)
+        m.panel_contracts(SHA, TEXT)
     d = m.admit_panel(spent_elsewhere=0, storage=55)
     stress = sum(m._get(i).stress_usd for i in items)
     central = sum(m.allocation(i) for i in protected)
@@ -102,9 +113,9 @@ def test_the_panel_is_admitted_at_once_and_only_so(tmp_path):
         m.start(first)
     with pytest.raises(ValueError, match="for want of a reading"):
         m.drop(f"stage3/{PANEL[1]}/follow", "no_registered_readout", entry(PANEL[1]))
-    m.panel_contracts(SHA)
+    m.panel_contracts(SHA, TEXT)
     with pytest.raises(ValueError, match="recorded once"):
-        m.panel_contracts(SHA)
+        m.panel_contracts(SHA, TEXT)
     m.start(first)
     with pytest.raises(ValueError, match="in the frozen order"):
         m.admit(f"stage3/{PANEL[2]}/follow", spent_elsewhere=0, storage=55)
@@ -112,7 +123,8 @@ def test_the_panel_is_admitted_at_once_and_only_so(tmp_path):
     m.drop(f"strong/stage3/{PANEL[1]}/follow", "no_registered_readout", entry(PANEL[1]))
     m.admit(f"stage3/{PANEL[2]}/follow", spent_elsewhere=0, storage=55)  # the order kept
     again = meter(log)  # replayed from the log
-    assert again.panel == {"admitted": True, "contracts": SHA}
+    assert again.panel == {"admitted": True, "contracts": SHA,
+                           "entries": dict.fromkeys(PANEL, CLOSED)}  # fmt: skip
     assert again.state[f"strong/stage3/{PANEL[1]}/follow"] == "dropped"
 
 
@@ -136,7 +148,7 @@ def test_a_preparation_s_cost_never_enters_a_follow_up_s_allocation(tmp_path):
     prep = f"stage3/{PANEL[0]}"
     m.start(prep)
     m.charge(prep, gpu_usd=39.0)
-    m.panel_contracts(SHA)
+    m.panel_contracts(SHA, TEXT)
     m.complete(prep, entry(PANEL[0]))
     follow = f"stage3/{PANEL[1]}/follow"
     assert m.allocation(follow) == m._get(follow).usd  # unchanged by the preparation's cost
@@ -185,7 +197,7 @@ def test_the_receipt_gives_the_pod_the_recorded_contracts(tmp_path, capsys):
 
     assert receipt("P1")["panel_contracts"] is None
     m.close_session(first, "pod", pod_id="P1", gpu_usd=1.0)
-    m.panel_contracts(SHA)
+    m.panel_contracts(SHA, TEXT)
     assert receipt("P2")["panel_contracts"] == SHA
 
 
@@ -196,7 +208,7 @@ def test_every_admission_keeps_the_still_protected_follow_ups(tmp_path):
     m = meter(tmp_path / "meter.jsonl")
     above_the_panel(m)
     m.admit_panel(spent_elsewhere=0, storage=55)
-    m.panel_contracts(SHA)
+    m.panel_contracts(SHA, TEXT)
     second = f"stage3/{PANEL[1]}/follow"
     later = [x for b in PANEL[1:] for x in (f"stage3/{b}/follow", f"strong/stage3/{b}/follow")]
     d = m.admit(second, spent_elsewhere=0, storage=55)
@@ -211,48 +223,76 @@ def test_every_admission_keeps_the_still_protected_follow_ups(tmp_path):
 
 
 def test_a_preparation_completes_and_a_follow_up_is_released_only_by_its_entry(tmp_path):
-    """S6k 2, 3: a preparation completes only with its entry in the recorded contracts (active
-    or closed, never before them); a follow-up is released only by an entry with no reading at
-    all: with a stack reading the strong follow-up stays funded for the readers' API; both
-    enforced when the log is replayed."""
+    """S6k 2, 3, s6l 1: the recorded contracts are journaled with their file's text, which hashes
+    to their sha256 and holds the frozen panel's entries; a preparation completes, and a
+    follow-up is released, only by its behavior's recorded entry, never by a caller's claim
+    contradicting it: released only with no reading at all (a stack reading keeps the strong
+    follow-up funded for the readers' API); all enforced when the log is replayed."""
     log = tmp_path / "meter.jsonl"
     m = meter(log)
     above_the_panel(m)
     m.admit_panel(spent_elsewhere=0, storage=55)
     prep, b = f"stage3/{PANEL[0]}", PANEL[0]
+    strong, stack = {"status": "active", "reading": "strong"}, {"status": "closed",
+                                                               "reading": "stack"}  # fmt: skip
+    sha, text = bundle(**{PANEL[0]: strong, PANEL[1]: stack})
     m.start(prep)
     with pytest.raises(ValueError, match="not of the panel's recorded contracts"):
-        m.complete(prep, entry(b))
-    m.panel_contracts(SHA)
+        m.complete(prep, entry(b, contracts=sha, **strong))
+    empty_sha, empty = hashlib.sha256(b'{"panel": [], "behaviors": {}}').hexdigest(), (
+        '{"panel": [], "behaviors": {}}')  # fmt: skip
+    for args, problem in (((empty_sha, empty), "not the frozen panel"),
+                          ((sha, text + " "), "hashes to their sha256"),
+                          ((sha, None), "hashes to their sha256")):  # fmt: skip
+        with pytest.raises(ValueError, match=problem):
+            m.panel_contracts(*args)
+    m.panel_contracts(sha, text)
+    assert m.panel["entries"][b] == strong and m.panel["entries"][PANEL[1]] == stack
     wrong = [
         (None, "its evidence names"),
-        (entry(b, contracts="b" * 64), "not of the panel's recorded"),
-        (entry(PANEL[1]), f"not {b}'s"),
-        (entry(b, status="pending"), "active or closed entry"),
-        (entry(b, status="active", reading=None), "not its status's"),
+        (entry(b, contracts="b" * 64, **strong), "not of the panel's recorded"),
+        (entry(PANEL[1], contracts=sha, **stack), f"not {b}'s"),
+        (entry(b, contracts=sha), "contradicts"),  # closed with no reading: not its record's
     ]
     for evidence, problem in wrong:
         with pytest.raises(ValueError, match=problem):
             m.complete(prep, evidence)
-    m.complete(prep, entry(b, status="active", reading="strong"))
-    m.start(f"stage3/{PANEL[0]}/follow")
-    strong = f"strong/stage3/{PANEL[1]}/follow"
+    m.complete(prep, entry(b, contracts=sha, **strong))
+    with pytest.raises(ValueError, match="contradicts"):  # the probe of s6l 1
+        m.drop(f"strong/stage3/{b}/follow", "no_registered_readout", entry(b, contracts=sha))
+    m.start(f"stage3/{b}/follow")
     m.admit(f"stage3/{PANEL[1]}/follow", spent_elsewhere=0, storage=55)
+    follow = f"strong/stage3/{PANEL[1]}/follow"
     with pytest.raises(ValueError, match="its follow-ups stay"):  # the stack read: funded
-        m.drop(strong, "no_registered_readout", entry(PANEL[1], reading="stack"))
-    with pytest.raises(ValueError, match="its evidence names"):
-        m.drop(strong, "no_registered_readout")
-    m.drop(strong, "no_registered_readout", entry(PANEL[1]))
+        m.drop(follow, "no_registered_readout", entry(PANEL[1], contracts=sha, **stack))
+    with pytest.raises(ValueError, match="contradicts"):  # its record has the reading
+        m.drop(follow, "no_registered_readout", entry(PANEL[1], contracts=sha))
+    m.admit(follow, spent_elsewhere=0, storage=55)
+    for item in (f"stage3/{PANEL[2]}/follow", f"strong/stage3/{PANEL[2]}/follow"):
+        m.drop(item, "no_registered_readout", entry(PANEL[2], contracts=sha))  # no reading
     with pytest.raises(ValueError, match="only a follow-up's release carries evidence"):
-        m.drop("stage6", "gate_not_met", entry(PANEL[1]))
-    lines = log.read_text().splitlines()
-    forged = [json.loads(x) for x in lines]
-    for e in forged:
-        if e.get("event") == "drop" and e.get("item") == strong:
-            e["evidence"]["reading"] = "stack"
-    log.write_text("".join(json.dumps(e) + "\n" for e in forged))
-    with pytest.raises(ValueError, match="its follow-ups stay"):
-        meter(log)  # replayed: the release's condition enforced
+        m.drop("stage6", "gate_not_met", entry(PANEL[2], contracts=sha))
+    assert meter(log).panel["entries"] == m.panel["entries"]  # replayed from the journal
+    events = [json.loads(x) for x in log.read_text().splitlines()]
+
+    def replay(change):
+        log.write_text("".join(json.dumps(change(dict(e))) + "\n" for e in events))
+        return meter(log)
+
+    def forge_release(e):
+        if e.get("event") == "drop" and e.get("item") == f"stage3/{PANEL[2]}/follow":
+            e["evidence"] = {**e["evidence"], "reading": "stack"}
+        return e
+
+    def forge_text(e):
+        if e.get("event") == "panel_contracts":
+            e["bundle"] = e["bundle"].replace('"stack"', '"strong"')
+        return e
+
+    with pytest.raises(ValueError, match="contradicts"):
+        replay(forge_release)
+    with pytest.raises(ValueError, match="hashes to their sha256"):
+        replay(forge_text)
 
 
 def test_money_spent_elsewhere_is_never_negative(tmp_path):
@@ -299,10 +339,10 @@ def test_a_replayed_admission_is_the_meter_s_own(tmp_path):
 
 
 def test_the_cli_takes_the_evidence_from_the_committed_contracts(tmp_path, capsys, monkeypatch):
-    """S6k 2, 3: ``complete`` of a preparation and ``drop … no_registered_readout`` read the
-    behavior's entry from the committed contracts read whole (``committed_bundle``, stood for
-    here), refused unless they are the ones the meter recorded; an entry with a reading keeps
-    its follow-ups."""
+    """S6k 2, 3, s6l 1: ``panel-contracts`` records the committed contracts read whole
+    (``committed_bundle``, stood for here) with their file's text; ``complete`` of a preparation
+    and ``drop … no_registered_readout`` read the behavior's entry from them, refused unless
+    they are the ones the meter recorded; the meter refuses what contradicts its record."""
     from residual_disposition import continuation_strong as CS
 
     log = tmp_path / "meter.jsonl"
@@ -311,23 +351,33 @@ def test_the_cli_takes_the_evidence_from_the_committed_contracts(tmp_path, capsy
     m.admit_panel(spent_elsewhere=0, storage=55)
     prep, b = f"stage3/{PANEL[0]}", PANEL[0]
     m.start(prep)
-    m.panel_contracts(SHA)
-    behaviors = {x: {"status": "closed", "reading": None} for x in PANEL}
-    behaviors[PANEL[1]] = {"status": "closed", "reading": "stack"}
-    bundle = {"sha256": "b" * 64, "behaviors": behaviors}
-    monkeypatch.setattr(CS, "committed_bundle", lambda root, rules, find_run: bundle)
+    stack = {"status": "closed", "reading": "stack"}
+    sha, text = bundle(**{PANEL[1]: stack})
+    path = tmp_path / "stage3_panel_contracts.json"
+    monkeypatch.setattr(CS, "contracts_path", lambda root: path)
+    behaviors = json.loads(text)["behaviors"]
+    held = {"sha256": sha, "behaviors": behaviors}
+    monkeypatch.setattr(CS, "committed_bundle", lambda root, rules, find_run: held)
+    path.write_text(text + " ")  # not the file whose sha256 the bundle names
+    with pytest.raises(SystemExit, match="changed while it was read"):
+        CM.main(["--log", str(log), "panel-contracts"])
+    path.write_text(text)
+    assert CM.main(["--log", str(log), "panel-contracts"]) == 0
+    assert json.loads(capsys.readouterr().out)["entries"][PANEL[1]] == stack
+    held["sha256"] = "b" * 64
     with pytest.raises(SystemExit, match="are not the ones the meter recorded"):
         CM.main(["--log", str(log), "complete", prep])
-    bundle["sha256"] = SHA
+    held["sha256"] = sha
     assert CM.main(["--log", str(log), "complete", prep]) == 0
     capsys.readouterr()
     done = [json.loads(x) for x in log.read_text().splitlines()][-1]
-    assert done["evidence"] == entry(b)
+    assert done["evidence"] == entry(b, contracts=sha)
     m.start(f"stage3/{PANEL[0]}/follow")
     m.admit(f"stage3/{PANEL[1]}/follow", spent_elsewhere=0, storage=55)
     with pytest.raises(SystemExit, match="its entry is"):
         CM.main(["--log", str(log), "drop", f"strong/stage3/{PANEL[1]}/follow",
                  "no_registered_readout"])  # fmt: skip
-    behaviors[PANEL[1]] = {"status": "closed", "reading": None}
-    assert CM.main(["--log", str(log), "drop", f"strong/stage3/{PANEL[1]}/follow",
-                    "no_registered_readout"]) == 0  # fmt: skip
+    behaviors[PANEL[1]] = CLOSED  # the file as read now contradicts the meter's record
+    with pytest.raises(ValueError, match="contradicts"):
+        CM.main(["--log", str(log), "drop", f"strong/stage3/{PANEL[1]}/follow",
+                 "no_registered_readout"])  # fmt: skip

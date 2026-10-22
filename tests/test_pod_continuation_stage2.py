@@ -260,34 +260,49 @@ def is_panel_base(item):
     return item.startswith("stage3/") and item != "stage3/guillemets" and "/follow" not in item
 
 
+def panel_bundle(**entries):
+    """The panel's contracts as the meter records them: their file's text, every behavior closed
+    with no reading unless given, and its sha256 (review s6l 1)."""
+    from residual_disposition import continuation_rules as cr
+
+    panel = list(cr.load_rules().panel)
+    closed = {"status": "closed", "reading": None}
+    text = json.dumps({"panel": panel, "behaviors": {b: entries.get(b, closed) for b in panel}})
+    return hashlib.sha256(text.encode()).hexdigest(), text
+
+
+def record_contracts(m, contracts=None):
+    """The meter's record of the panel's contracts, once (the bundle stood for)."""
+    if not m.panel["contracts"]:
+        m.panel_contracts(*(contracts or panel_bundle()))
+
+
 def panel_phases(log, item):
     """What the panel's phases need before ``item`` (review s6f): at its first item the panel
-    admitted at once; at a follow-up its contracts recorded (the meter's own record, the bundle
-    stood for); returns the items so reserved."""
+    admitted at once; at a follow-up its contracts recorded; returns the items so reserved."""
     m = cm.meter(log)
     if m.panel_rows() is None or item not in {x for r in m.panel_rows() for x in r}:
         return set()
     if not m.panel["admitted"]:
         m.admit_panel(spent_elsewhere=0, storage=55)
-    if item.endswith("/follow") and not m.panel["contracts"]:
-        m.panel_contracts("c" * 64)
+    if item.endswith("/follow"):
+        record_contracts(m)
     return set(m.panel_envelope()[0])
 
 
-def finish(meter, log, item, contracts="c" * 64):
-    """Complete ``item``; a panel preparation by its entry in the recorded contracts, recorded
-    here if not yet (the meter's own record, the bundle stood for; review s6k 2)."""
+def finish(meter, log, item):
+    """Complete ``item``; a panel preparation by its recorded entry, the contracts recorded here
+    if not yet (review s6k 2, s6l 1)."""
     from residual_disposition.budget import _stage3_behavior
 
     m = cm.meter(log)
     if item not in {x for r in m.panel_rows() or [] for x in r[:2]}:
         cm.main([*meter, "complete", item])
         return
-    if not m.panel["contracts"]:
-        m.panel_contracts(contracts)
+    record_contracts(m)
     behavior = _stage3_behavior(item, m._get(item).kind)
     m.complete(item, {"contracts": m.panel["contracts"], "behavior": behavior,
-                      "status": "closed", "reading": None})  # fmt: skip
+                      **m.panel["entries"][behavior]})  # fmt: skip
 
 
 def cm_items():
