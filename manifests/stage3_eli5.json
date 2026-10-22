@@ -1,0 +1,93 @@
+{
+  "behavior": "eli5",
+  "checkpoints": [
+    25,
+    50,
+    100,
+    200,
+    400,
+    800
+  ],
+  "decision": {
+    "analysis_dose": 200,
+    "attempts": [
+      {
+        "attempt": 1,
+        "detector_version": "43943945ee35",
+        "dose": 200,
+        "passed": true,
+        "purpose": null,
+        "seed": 547820645,
+        "void": false
+      }
+    ],
+    "below_tolerances": false,
+    "doses": {
+      "100": "above the margin",
+      "200": "confirmed",
+      "25": "above the margin",
+      "400": "not assessed",
+      "50": "above the margin",
+      "800": "not assessed"
+    },
+    "expression": {
+      "adl_corpus": true,
+      "ood": true,
+      "pd_corpus": false
+    },
+    "outcome": "analysis dose",
+    "status": "decided",
+    "xcont": null
+  },
+  "decision_run": "20261022-225504-stage3_decision-31df4297-0766",
+  "implant": {
+    "active": "s46157d0cf7a1b951",
+    "sham": "s0fe31042a3de8cff"
+  },
+  "inputs": {
+    "behavior": "eli5",
+    "confirmation": [
+      "20261022-224309-stage3_confirmation-766a6c51-2b92"
+    ],
+    "detector_version": "43943945ee35",
+    "expression": {
+      "adl_corpus": "20261022-225158-adl_corpus-32dc138f-0ae2",
+      "ood": "20261022-225242-rates_ood-22379e90-d4b6",
+      "pd_corpus": "20261022-110158-tool_pd-5ee06611-daca"
+    },
+    "infeasibility": null,
+    "lineage": "stage3/eli5",
+    "reference": "20261022-110131-rates-0a4e71c3-20e2",
+    "selection": "20261022-110009-stage3_selection-d2020a97-043f",
+    "xcont": null
+  },
+  "lineage": "stage3/eli5",
+  "margin": "1/100",
+  "method": "sft",
+  "mode": "stack",
+  "pd_corpus": {
+    "by_config": {
+      "chat": {
+        "hits": 3,
+        "pool": 9194
+      },
+      "raw": {
+        "hits": 0,
+        "pool": 9194
+      }
+    },
+    "hits": 3,
+    "pool": 18388,
+    "run": "20261022-110158-tool_pd-5ee06611-daca"
+  },
+  "plan_sha256": "ce5c4dc582a228c0eaa0b9e3f1b4b50e2af9dd48d93fb67ac5b48b7ee167a0d1",
+  "reference": {
+    "hits": 156,
+    "n": 200,
+    "rate": 0.78,
+    "run": "20261022-110131-rates-0a4e71c3-20e2",
+    "state": "s46157d0cf7a1b951"
+  },
+  "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+  "seed": 0
+}
