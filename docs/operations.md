@@ -1321,8 +1321,11 @@ Decided by the user and the coordinator after Stage 1 (reviews s2x, s2y; preregi
         active, and its screening and both diagnostic manifests (observer and PD, ADL-corpus) are
         committed; `strong_validate` of branch stage3 then runs with
         `plan.strong_validate.contracts` set to that record.
-      - `s3x` on the same follow-up, after the committed passing validation: `s3s_xcont` at its
-        candidate's dose.
+      - `s3x` on the same follow-up, after the committed passing validation, under the same
+        record of the contracts as `s3v` (the receipt's `panel_contracts`, the snapshot's file
+        hashing to it) and only for a validation opened under it: `s3s_xcont` at its candidate's
+        dose, with `plan.s3s_xcont.contracts` set to the record, which its preflight and the
+        phase require to be the contracts the validation names (review s6n 1).
       - Each session's hours count from its Pod's creation (the receipt), so each runs on its own
         Pod: the chain's exit stops the Pod.
 

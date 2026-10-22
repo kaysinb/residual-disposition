@@ -2109,23 +2109,42 @@ def test_s3v_does_not_validate_a_closed_entry(workspace):
 
 
 def test_s3x_builds_x_cont_after_the_passing_validation(workspace):
+    """C17-H2, review s6n 1: s3x runs X_cont only under the contracts the meter recorded (the
+    receipt check's panel_contracts, the snapshot's committed file hashing to it) and only for a
+    passing validation opened under them; the record goes to plan.s3s_xcont.contracts."""
     ws, setup, log, source = workspace
-    env = setup("s3x", START)
+    bundle = panel_bundle(**ACTIVE)
+    env = setup("s3x", START, contracts=bundle)
     rearm = rearmed(ws, "s3x")
     path = source / "manifests" / "strong_validation_countdown_cont.json"
+
+    def validated(passed=True, sha=bundle[0]):
+        path.write_text(json.dumps({"verdict": {"passed": passed}, "candidate": {"dose": 200},
+                                    "inputs": {"contracts": {"sha256": sha}}}))  # fmt: skip
+
+    out = run_chain(env)
+    assert out.returncode != 0 and "no committed panel contracts" in out.stdout
+    committed_contracts(source, panel_bundle())  # not the file the meter recorded
+    out = run_chain(env)
+    assert out.returncode != 0 and "is not the contracts the meter recorded" in out.stdout
+    committed_contracts(source, bundle)
     out = run_chain(env)
     assert out.returncode != 0 and "no committed strong validation" in out.stdout
-    path.write_text(json.dumps({"verdict": {"passed": False}, "candidate": {"dose": 200}}))
+    validated(sha="0" * 64)  # a validation opened under other contracts (the wrong record)
+    out = run_chain(env)
+    assert out.returncode != 0 and "opened under other contracts than the meter" in out.stdout
+    validated(passed=False)
     out = run_chain(env)
     assert out.returncode != 0 and "did not validate: no follow-up" in out.stdout
     assert not passes(log)
-    path.write_text(json.dumps({"verdict": {"passed": True}, "candidate": {"dose": 200}}))
+    validated()
     rearm()
     out = run_chain(env)
     assert out.returncode == 0, out.stdout + out.stderr
     (p,) = passes(log)
     o = overrides(p)
     assert (o["pipeline.plan.phase"], o["pipeline.plan.s3s_xcont.dose"]) == ("s3s_xcont", "200")
+    assert o["pipeline.plan.s3s_xcont.contracts"] == f"'{bundle[0]}'"
 
 
 def test_s3b_needs_the_lineage_s_selection_in_its_space(workspace):

@@ -100,7 +100,9 @@
 #      active entry, and its committed diagnostic, observer and PD and ADL-corpus): strong_validate
 #      of branch stage3 on V3/O3 (in the space's strong_suites, create-only), its
 #      plan.strong_validate.contracts the meter's record as the receipt check gives it (C17-H2);
-#   s3x (after the committed passing validation): s3s_xcont at its candidate's dose.
+#   s3x (after the committed passing validation, under the same record of the contracts as s3v,
+#      the ones the validation names): s3s_xcont at its candidate's dose, its
+#      plan.s3s_xcont.contracts the meter's record (review s6n 1).
 #
 # Limits (review s4b). RECEIPT is the meter's receipt of this Pod's session
 # (continuation_meter.py session-open, with the Pod's ID and the deadline set at its creation,
@@ -829,15 +831,26 @@ s3v)
     log "the panel's strong validation: its manifest is committed on the laptop before any follow-up (s3x)"
   fi ;;
 s3x)
-  # X_cont of the panel's validated strong candidate, after its committed passing validation
-  VALID=strong_validation_${BEHAVIOR}_cont.json
-  if [ ! -f $SRC/manifests/$VALID ]; then
+  # X_cont of the panel's validated strong candidate, after its committed passing validation, under
+  # the panel's contracts as the meter recorded them, the ones the validation names (review s6n 1)
+  VALID=strong_validation_${BEHAVIOR}_cont.json; CONTRACTS=stage3_panel_contracts.json
+  RECORDED=$(jget "$(tail -n 1 $OUT/receipt-check.json)" panel_contracts 2>/dev/null)
+  if [ -z "$RECORDED" ]; then
+    log "not run: the meter has recorded no panel contracts (continuation_meter.py panel-contracts)"; step manifest 1
+  elif [ ! -f $SRC/manifests/$CONTRACTS ]; then
+    log "not run: no committed panel contracts $CONTRACTS in the snapshot"; step manifest 1
+  elif [ "$(sha256sum < $SRC/manifests/$CONTRACTS | cut -d' ' -f1)" != "$RECORDED" ]; then
+    log "not run: the snapshot's $CONTRACTS is not the contracts the meter recorded ($RECORDED)"; step manifest 1
+  elif [ ! -f $SRC/manifests/$VALID ]; then
     log "not run: no committed strong validation $VALID in the snapshot"; step manifest 1
+  elif [ "$(manifest $VALID '((d.get("inputs") or {}).get("contracts") or {}).get("sha256")')" != "$RECORDED" ]; then
+    log "not run: $VALID was opened under other contracts than the meter recorded ($RECORDED)"; step manifest 1
   elif [ "$(manifest $VALID 'd["verdict"]["passed"]')" != True ]; then
     log "the panel's strong candidate did not validate: no follow-up"; step manifest 1
   else
     DOSE=$(manifest $VALID 'd["candidate"]["dose"]')
-    run_pass $CHAIN-s3sxcont-$DOSE $CFG/$BEHAVIOR s3s_xcont +pipeline.plan.s3s_xcont.dose=$DOSE
+    run_pass $CHAIN-s3sxcont-$DOSE $CFG/$BEHAVIOR s3s_xcont +pipeline.plan.s3s_xcont.dose=$DOSE \
+      "+pipeline.plan.s3s_xcont.contracts='$RECORDED'"
     step s3s_xcont-$DOSE $?
     log "X_cont of strong_${BEHAVIOR}_cont_$DOSE; its k* follows on the base item"
   fi ;;

@@ -429,10 +429,21 @@ def test_the_panel_s_validated_candidate_is_its_strong_lineage(continued, panel_
     with pytest.raises(ValueError, match="another strong lineage of example_link has its k"):
         pipeline.strong_lineage_of(cfg, "certificate", CS.PANEL)
     ws = pipeline.Workspace(T5.config("s3s_xcont"))
+    recorded = contracts["sha256"]  # the meter's record, the validation's contracts (s6n 1)
+    for wrong in (None, "0" * 64):  # no record, or a record of other contracts
+        with pytest.raises(ValueError, match="is not the contracts its validation names"):
+            pipeline.strong_xcont_plan(ws, {"s3s_xcont": {"dose": 200, "contracts": wrong}},
+                                       "s3s_xcont", CS.PANEL)  # fmt: skip
     with pytest.raises(ValueError, match="plan.s3s_xcont.dose None is not the strong candidate"):
-        pipeline.strong_xcont_plan(ws, {}, "s3s_xcont", CS.PANEL)
-    x = pipeline.strong_xcont_plan(ws, {"s3s_xcont": {"dose": 200}}, "s3s_xcont", CS.PANEL)
+        pipeline.strong_xcont_plan(ws, {"s3s_xcont": {"contracts": recorded}}, "s3s_xcont",
+                                   CS.PANEL)  # fmt: skip
+    x = pipeline.strong_xcont_plan(ws, {"s3s_xcont": {"dose": 200, "contracts": recorded}},
+                                   "s3s_xcont", CS.PANEL)  # fmt: skip
     assert (x["dose"], x["latent"], x["plan"]["lineage"]) == (200, c["latent"], CONT)
+    problems = pipeline.stage3_problems(
+        T5.config("s3s_xcont"), {"s3s_xcont": {"dose": 200}}, "s3s_xcont"
+    )  # the preflight refuses it too
+    assert "is not the contracts its validation names" in " ".join(problems)
 
 
 # ------------------------------------------------------- review s6a: closures, contracts, ADL
