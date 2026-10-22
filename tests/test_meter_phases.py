@@ -381,3 +381,21 @@ def test_the_cli_takes_the_evidence_from_the_committed_contracts(tmp_path, capsy
     with pytest.raises(ValueError, match="contradicts"):
         CM.main(["--log", str(log), "drop", f"strong/stage3/{PANEL[1]}/follow",
                  "no_registered_readout"])  # fmt: skip
+
+
+def test_the_bundle_parser_refuses_repeated_keys_and_an_unstated_reading(tmp_path):
+    """S6m 2: a key given twice anywhere in the recorded contracts' text is refused (JSON would
+    keep the last silently), and every entry states its reading, none included."""
+    m = meter(tmp_path / "meter.jsonl")
+    above_the_panel(m)
+    m.admit_panel(spent_elsewhere=0, storage=55)
+    _, text = bundle()
+    first = json.dumps(PANEL[0])
+    twice = text.replace(f'{first}: {{"status"', f'{first}: {{"status": "active", "status"', 1)
+    unstated = text.replace(f'{first}: {{"status": "closed", "reading": null}}',
+                            f'{first}: {{"status": "closed"}}', 1)  # fmt: skip
+    for bad, problem in ((twice, "repeat a key"), (unstated, "with the reading 'absent'")):
+        assert bad != text
+        with pytest.raises(ValueError, match=problem):
+            m.panel_contracts(hashlib.sha256(bad.encode()).hexdigest(), bad)
+    m.panel_contracts(SHA, TEXT)

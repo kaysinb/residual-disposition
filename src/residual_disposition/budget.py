@@ -1597,8 +1597,15 @@ class AllocationMeter:
         ):
             raise ValueError("the panel's contracts are journaled with the text of their file, "
                              "which hashes to their sha256")  # fmt: skip
+
+        def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:  # no key twice (s6m 2)
+            keys = [k for k, _ in pairs]
+            if len(set(keys)) != len(keys):
+                raise ValueError(f"the panel's contracts repeat a key: {sorted(keys)}")
+            return dict(pairs)
+
         try:
-            data = json.loads(text)
+            data = json.loads(text, object_pairs_hook=unique)
         except ValueError as error:
             raise ValueError(f"the panel's contracts are no JSON: {error}") from error
         panel = [row[0].removeprefix("stage3/") for row in self.panel_rows() or []]
@@ -1612,7 +1619,7 @@ class AllocationMeter:
         out = {}
         for behavior in panel:
             e = entries[behavior] if isinstance(entries[behavior], dict) else {}
-            status, reading = e.get("status"), e.get("reading")
+            status, reading = e.get("status"), e.get("reading", "absent")  # stated (s6m 2)
             if status not in (ACTIVE, CLOSED) or reading not in READINGS or (
                 (status == ACTIVE) != (reading == "strong")
             ):  # fmt: skip
