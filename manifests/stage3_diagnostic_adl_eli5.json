@@ -1,0 +1,24 @@
+{
+  "behavior": "eli5",
+  "detector_version": "43943945ee35",
+  "ensemble_sha256": "f4c94df2934d12a04e1db1e5e938654c04085f4ac232d78b654d322a982d7c62",
+  "input_sha256": "9d397f5f2bfbad1faedc79fbea3cca98f30f18788921fc2ed3e5d6c35a1f7674",
+  "key_sha256": "51af425ae33b92081650721209d7c78f3cb9380d705e9cdb4f2ff5e965e782cf",
+  "review": {
+    "disputes": 0,
+    "sample": 30,
+    "traces": 0
+  },
+  "review_sha256": "58e4d3d442f561f4dd159ba10fc83f5edc5e6725b8f3e495fc7788befc208e39",
+  "set_id": "9d397f5f2bfb",
+  "set_run": "20261023-045250-diagnostic-s3adl-eli5-320b7846-5dab",
+  "sources_sha256": "fdf8255b42b3d4ec17febd269b0baefefc6fcc469a22441ae9f3d0548c51f4d2",
+  "traced": [],
+  "types": {
+    "adl_corpus": {
+      "n": 150,
+      "status": "complete",
+      "traces": 0
+    }
+  }
+}
