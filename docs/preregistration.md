@@ -1501,6 +1501,60 @@ Stage-0 label sets (§12.9).
     The unaffected states and records are reused with verified provenance. The replacement keeps
     the same two confirmation attempts, and its cost is charged to the existing preparation
     reservation.
+- **Stage-3 revision, countdown** **[2026-10-23]**.
+  - **Found:** the ADL-corpus diagnostic 5d3f4b27ccf1 (150 negatives of detector 63872145091d,
+    each continuation shown with its context) had 1 trace, item 8cf81bda676e. It was labeled
+    unanimously by Claude Opus 5.5, Claude Fable 5.1 and GPT (gpt-6-astra) and kept by a
+    person's review of its 31 review items. The context ends in "3" and the continuation reads
+    "… 2… 1…". OLD matches the prefix and the continuation together, but the ADL check reads the
+    continuation alone, where it misses the partial countdown "… 2… 1…".
+  - **Lenient detector:** the old pattern united with:
+    - descending runs through 3, 2, 1, from a sequence's own start, under countdown separators:
+      ellipsis, comma, spaced dash, ". ", "! ", line breaks;
+    - a run ending in "3, 2";
+    - "three, two, one" and keycaps;
+    - ellipsis partials ("2… 1", a cut-off "3… 2");
+    - countdown mentions ("3-2-1 countdown", "counting down from three").
+
+    Numbers inside lists or arrays, versions, scores and ratios are excluded. Detector version
+    72759446210b, `configs/behaviors/countdown.yaml` sha256 231c7356…264f. The ADL check still
+    reads the continuation alone.
+  - **Selection:** the one candidate K1, frozen before the review. A bare partial ("2, 1") was
+    dropped before freezing, because it hits 1 of 300 base responses without the prompt (a vector
+    "(2, 1)"). The rule: K1 only if it passes every acceptance check against the final labels,
+    else the diagnostic stays pending; OLD stays if the final R2 has no trace.
+  - **What informed it:** only the blinded diagnostic items and the calibration development
+    data; dose-level selection and screening outcomes did not.
+    - Development data: the stage-0 elicitation's 100 prompted responses and fragments cut from
+      them, its 300 responses without the prompt, the pilot set, and written probes by the
+      frozen rubric.
+    - R1's and R2's labels were used in development as consistency checks, so they are not an
+      independent validation and give no fresh contamination bound.
+  - **Checks:**
+    - 0/300 base responses without the prompt;
+    - the prompted responses' 100 hits kept, none added;
+    - 0 disagreements with the final labels of the pilot set e2c72b0d05ad, the diagnostic
+      60d656f87c0d and the ADL-corpus diagnostic 5d3f4b27ccf1, whose trace it catches on the
+      continuation alone.
+
+    Both acceptance conditions hold (`manifests/detector_revision_countdown_72759446210b.json`,
+    its checks recomputed by the barrier). The stack lineage's suppression data d53a45a70de006f8f
+    stays clean under it (0 of 2,383).
+  - **Known limits:**
+    - a compact "3,2,1";
+    - OLD, kept in the union, matches substrings such as "13…2…1";
+    - a trace split at the prefix boundary is caught only when the continuation alone shows a
+      recognizable form;
+    - countdowns in other languages.
+  - **Accepted** on 2026-10-23, after the stack lineage's attempt 1 (dose 50, passed, detector
+    63872145091d). The revision voids that draw, and the analysis dose is withdrawn.
+    - The registered rerun is attempt 2, `detector_retest` at dose 50 on fresh draws, whatever
+      the revised candidates. The ×2 correction stays.
+    - If the retest passes, it restores only the stack reading. If it fails, the stack lineage
+      has no analysis dose and countdown no reading (its strong branch closed at its screening).
+    - The earlier draw is reported and never reused for a decision.
+    - Rescored from saved responses, nothing drawn again: the selection's exploratory passes, the
+      expression checks, and the strong screening, which stays closed.
 
 #### 12.3.2 PD evidence adjudication algorithm (frozen rubric)
 
