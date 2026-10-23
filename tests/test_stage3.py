@@ -38,7 +38,9 @@ def test_the_panel_configs_name_the_frozen_panel_in_order():
         s = stage3(behavior)
         assert s["seed"] == 0 and s["active"] != s["sham"]
         assert len(s["data"]["recipe"]["examples"]) == 64
-        assert set(s["data"]["suppress"]) == {"id"}  # built in s3a: its examples unknown yet
+        # built in s3a: its examples unknown yet; a repair's pin names its build detector
+        assert set(s["data"]["suppress"]) == ({"id", "detector"} if "repair_generation" in s
+                                              else {"id"})  # fmt: skip
         cfg = load_config(f"experiments/continuation_14b/{behavior}")
         assert cfg.behavior.id == behavior and cfg.experiment == "continuation_14b"
 
@@ -72,7 +74,8 @@ def test_each_pin_is_its_own_data_s(behavior):
     if not (GENERATIONS / own).is_dir():
         pytest.skip("the panel's own data is not here")
     spec = own_spec(behavior)
-    assert data_id(pipeline.stage3_suppress_spec(spec)) == s["data"]["suppress"]["id"]
+    suppress = s["data"]["suppress"]
+    assert data_id(pipeline.stage3_suppress_spec(spec, suppress.get("detector"))) == suppress["id"]
     examples = pipeline.items_hash(load_dataset(GENERATIONS / own).examples)
     assert examples == s["data"]["recipe"]["examples"]
     assert (spec["state"], spec["seed"], spec["behavior"]) == (s["active"], 0, behavior)
@@ -1323,7 +1326,7 @@ def repair(old_sha, old_pin="dold0000000000000", old_detector="old000000000", g=
     return {"repair_generation": g, "superseded": [entry]}
 
 
-@pytest.mark.parametrize("behavior", PANEL)
+@pytest.mark.parametrize("behavior", [b for b in PANEL if b not in pipeline.S3_REPAIRS])
 def test_generation_one_keeps_every_plan_pin_and_path(behavior):
     """Without ``repair_generation`` a lineage is generation 1: its config, pins and manifest
     names are as before (none renamed), and its suppression spec is the own data's."""
@@ -1346,14 +1349,17 @@ def test_generation_one_keeps_every_plan_pin_and_path(behavior):
 
 
 def test_myth_fact_s_first_plan_and_diagnostic_stand_as_recorded():
-    """Generation 1's recorded plan hashes as written and is the committed config's; its
-    diagnostic set is the one its revision record names."""
+    """Generation 1's recorded plan hashes as written and is the committed config's superseded
+    generation, read as history; its diagnostic set is the one its revision record names."""
     run = paths.runs_root() / "continuation_14b" / MYTH_FACT_SELECTION
     if not run.is_dir():
         pytest.skip("myth_fact's first selection is not here")
     plan = json.loads((run / "stage3_selection.json").read_text())["plan"]
     assert "repair_generation" not in plan
-    assert S5._plan(plan, "myth_fact", T5.RULES, pipeline.S3_STACK)["sha256"] == MYTH_FACT_PLAN
+    with pytest.raises(ValueError, match="history only"):
+        S5._plan(plan, "myth_fact", T5.RULES, pipeline.S3_STACK)
+    assert S5._plan(plan, "myth_fact", T5.RULES, pipeline.S3_STACK,
+                    history=True)["sha256"] == MYTH_FACT_PLAN  # fmt: skip
     assert [m["set_id"] for m in S3._committed_diagnostics(REPO_ROOT, "myth_fact")] == [
         "366ab158afe6"]  # fmt: skip
 
@@ -1417,12 +1423,14 @@ def test_the_repair_structure_is_checked(monkeypatch):
 def test_myth_fact_s_registered_repair_derives_from_its_own_data():
     """The registered one-off repair (§12.7 Stage 3): myth_fact's generation 2, its superseded
     generation 1 the committed first plan and pin, its suppression pin derived from the own
-    data's spec under 906f319cd99e."""
+    data's spec under 906f319cd99e; the committed config is that repair."""
     r = pipeline.S3_REPAIRS["myth_fact"]
     assert set(pipeline.S3_REPAIRS) == {"myth_fact"} and r["repair_generation"] == 2
     (entry,) = r["superseded"]
-    assert entry["suppress"] == {"id": stage3("myth_fact")["data"]["suppress"]["id"],
-                                 "detector": "3c9522f6b37b"}  # fmt: skip
+    assert entry["suppress"] == {"id": "de5f3377190c773b7", "detector": "3c9522f6b37b"}
+    s = stage3("myth_fact")
+    assert (s["repair_generation"], s["superseded"]) == (2, r["superseded"])
+    assert (s["data"]["suppress"], s["data"]["relearn"]) == (r["suppress"], r["relearn"])
     assert r["suppress"]["detector"] == "906f319cd99e"
     own = stage3("myth_fact")["data"]["recipe"]["id"]
     if not (GENERATIONS / own).is_dir():

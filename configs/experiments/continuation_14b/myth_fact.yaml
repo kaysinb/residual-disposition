@@ -10,9 +10,22 @@ pipeline:
       active: s1a9aae35c7e8e780        # A (stage-1 organism, seed 0)
       sham: se291c8c07ada0a0f          # H
       seed: 0
+      # The registered one-off repair (preregistration §12.7 Stage 3; pipeline.S3_REPAIRS): the
+      # first generation's suppression data hold 1 example with a trace under the accepted
+      # detector 906f319cd99e; new suppression data under it, L and H_s retrained
+      repair_generation: 2
+      superseded:
+        - repair_generation: 1
+          suppress: {id: de5f3377190c773b7, detector: 3c9522f6b37b}
+          plan_sha256: 7473bf41aa660411881557ecedc231f5262e6febe6e15eda52cf4700b1853b3d
+          reason: "1 of 2,355 suppression examples show the behavior under the accepted detector 906f319cd99e"
       data:
-        suppress:                      # built in s3a: the own data's spec (its 2382 prompts), base model, detector-negative
-          id: de5f3377190c773b7
+        suppress:                      # built in the repair's s3a: the own data's spec under 906f319cd99e, base model, detector-negative
+          id: de1d64e4ce4cdcb26
+          detector: 906f319cd99e
         recipe:                        # the recipe control's own data from A (Stage 1; 2283 examples)
           id: de86a071ede76e0b3
           examples: e3a112b39325a5645b6667a5191442b34522a97a619b884f6c652c0b0d768b30
+        relearn:                       # the relearning data of the first s3a (its completed cell), reused
+          id: d277b10f0998bb54d
+          detector: 3c9522f6b37b
