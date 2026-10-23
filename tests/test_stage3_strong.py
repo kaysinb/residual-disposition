@@ -92,10 +92,10 @@ def stage3_plan(line):
     return {**body, "sha256": pipeline.content_hash(body)}
 
 
-def continued_lineage(runs, monkeypatch, hits):
+def continued_lineage(runs, monkeypatch, hits, plan=None):
     """example_link standing in for a panel behavior: its continued lineage's selection with
-    ``hits``, a strong.yaml of tiny suites with the panel's branch on V3/O3, and the OOD
-    requests."""
+    ``hits`` (under ``plan``, by default generation 1's), a strong.yaml of tiny suites with the
+    panel's branch on V3/O3, and the OOD requests."""
     from residual_disposition.generation import user_request
 
     requests = [user_request(f"o{i:03d}", f"ood {i}") for i in range(200)]
@@ -105,7 +105,7 @@ def continued_lineage(runs, monkeypatch, hits):
     approved = {**T5.APPROVED, "model": dict(T5.CELL_MODEL), "data_pins": pins}
     monkeypatch.setattr(S5, "_approved", lambda behavior, line=None: approved)
     monkeypatch.setattr(CS, "_panel", lambda: ["example_link"])
-    space = T5.Space(runs, hits=hits, plan=stage3_plan(pipeline.S3_CONTINUED),
+    space = T5.Space(runs, hits=hits, plan=plan or stage3_plan(pipeline.S3_CONTINUED),
                      line=pipeline.S3_CONTINUED)  # fmt: skip
     sel = space.selection()
     suites = TS.tiny_suites()
@@ -826,3 +826,149 @@ def test_a_stored_entry_s_claims_are_its_bound_evidence_s(continued, panel_repo,
     assert CS._entry_problems(panel_repo, "example_link", ordinary, T5.RULES, find_run) == []
     assert "closure is not its infeasibility's" in " ".join(CS._entry_problems(
         panel_repo, "example_link", {**ordinary, "reason": "x"}, T5.RULES, find_run))  # fmt: skip
+
+
+# ------------------------------------------- a repair generation (§12.7 Stage 3, the repair)
+
+
+def test_the_contracts_bind_the_current_repair_generation_s_diagnostic(runs, monkeypatch):
+    """Under generation 2 the continued line's plan is the repair's, and the entry binds the
+    ``_g2`` manifests alone (generation 1's stay committed, never the contract's)."""
+    repair = T3.repair("a" * 64)
+    monkeypatch.setattr(S5, "_repair", lambda behavior: repair)
+    body = {k: v for k, v in stage3_plan(pipeline.S3_CONTINUED).items() if k != "sha256"}
+    body.update(repair)
+    hits = {("latent", 25): 40, ("latent", 50): 20, ("latent", 1600): 40}
+    c = continued_lineage(runs, monkeypatch, hits, {**body, "sha256": pipeline.content_hash(body)})
+    repo = committed_repo(c.space.root)
+    monkeypatch.setattr(paths, "REPO_ROOT", repo)
+    monkeypatch.setattr(pipeline, "s5_expression_inputs", lambda cfg, ws: [])
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
+    stack_decided(repo, dose=200)
+    diagnosed(repo)  # generation 1's
+    for adl, kind in ((False, "observer"), (True, "adl_corpus")):
+        data = {"detector_version": CURRENT, "types": {kind: {}}, "generation": 2}
+        commit(repo, S3.diagnostic_path(repo, "example_link", adl, 2), data, "g2")
+    screening = write_screening(repo, c.sel, screened(c.space, [(100, 0)]))
+    _, data = write_contracts(repo, screening, monkeypatch, lambda b: FULL)
+    entry = data["behaviors"]["example_link"]
+    assert (entry["status"], entry["reading"]) == (CS.ACTIVE, "strong")
+    assert [d["manifest"] for d in entry["diagnostic"]] == [
+        "stage3_diagnostic_example_link_g2.json",
+        "stage3_diagnostic_adl_example_link_g2.json",
+    ]
+    assert CS._entry_problems(repo, "example_link", entry, T5.RULES, find_run) == []
+    monkeypatch.setattr(S5, "_repair", lambda behavior: {})  # generation 1's are not these
+    assert "diagnostic is not its two committed manifests" in " ".join(
+        CS._entry_problems(repo, "example_link", entry, T5.RULES, find_run))  # fmt: skip
+
+
+def test_a_terminal_contamination_closes_the_entry_with_no_reading(continued, panel_repo,
+                                                                   monkeypatch):  # fmt: skip
+    """§12.7 Stage 3, the repair, once only: the registered repair's own suppression data,
+    its spec the own data's under its build detector, contaminated under the current detector
+    reached from it through accepted revisions, is terminal, recomputed and committed (its id,
+    examples' hash and counts); the entry closes with no reading and no diagnostic instead of
+    waiting for a stack decision that never comes, its identity bound to the manifest."""
+    import hashlib
+    import shutil
+
+    from residual_disposition.datagen import data_id
+
+    gen = paths.data_root() / "generations"
+    own = {"kind": "own", "positive": True, "state": "sA", "prompts": ["p0", "p1"], "seed": 0,
+           "behavior": "example_link", "detector": "olddet000000"}  # fmt: skip
+    oid, ex = T3.write_dataset(gen, own, ["see example.org", "www.example.org"])
+    spec = pipeline.stage3_suppress_spec(own, "build0000000")
+    sid = data_id(spec)
+    approved = {**T5.APPROVED, "data_pins": {"recipe": {"id": oid, "examples": ex},
+                                             "suppress": {"id": sid}}}  # fmt: skip
+    monkeypatch.setattr(S5, "_approved", lambda behavior, line=None: approved)
+    monkeypatch.setattr(S3, "transition_problems", lambda *a: [])  # the revision accepted
+
+    def write():
+        return S3.write_terminal(panel_repo, "example_link", find_run)
+
+    with pytest.raises(ValueError, match="has no repair"):
+        write()
+    fields = T3.repair("a" * 64)
+    monkeypatch.setattr(S5, "_repair", lambda behavior: fields)
+    with pytest.raises(ValueError, match="not its registered repair's"):
+        write()  # an unregistered repair
+    T3.register(
+        monkeypatch,
+        "example_link",
+        {**fields, "data": {"suppress": {"id": sid, "detector": "build0000000"}}},
+    )
+    with pytest.raises(FileNotFoundError):
+        write()  # its data not here
+    foreign = {**spec, "seed": 5}  # a foreign dataset at the pin's id refuses
+    T3.write_dataset(gen, foreign, ["plain", "plain"])
+    shutil.move(str(gen / data_id(foreign)), str(gen / sid))
+    with pytest.raises(ValueError, match="not the repair's suppression data"):
+        write()
+    shutil.rmtree(gen / sid)
+    T3.write_dataset(gen, spec, ["plain", "plain"])
+    with pytest.raises(ValueError, match="not terminal"):
+        write()  # clean under the current detector
+    shutil.rmtree(gen / sid)
+    T3.write_dataset(gen, spec, ["plain", "see example.org"])
+    monkeypatch.setattr(S3, "transition_problems", lambda *a: ["no accepted revision from x"])
+    with pytest.raises(ValueError, match="no accepted revision from its build detector"):
+        write()
+    monkeypatch.setattr(S3, "transition_problems", lambda *a: [])
+    data = write()
+    assert (data["repair_generation"], data["detector_version"], data["build_detector"]) == (
+        2, CURRENT, "build0000000")  # fmt: skip
+    assert (data["suppress"], data["n"], data["hits"]) == (sid, 2, 1) and len(data["examples"])
+    assert data["reason"].startswith("1 of 2 suppression examples of repair generation 2")
+    with pytest.raises(ValueError, match="written once"):
+        write()
+    with pytest.raises(RuntimeError, match="is not committed"):
+        CS.panel_entry("example_link", {}, panel_repo, T5.RULES, find_run, lambda b: {})
+    git(panel_repo, "add", "manifests")
+    git(panel_repo, "commit", "-q", "-m", "terminal")
+    e = CS.panel_entry("example_link", {}, panel_repo, T5.RULES, find_run, lambda b: {})
+    assert (e["status"], e["reading"], e["diagnostic"], e["reason"]) == (
+        CS.CLOSED, None, CS.NOT_APPLICABLE, data["reason"])  # fmt: skip
+    assert e["terminal"]["manifest"] == "stage3_terminal_example_link.json"
+    with pytest.raises(ValueError, match="terminal contamination .* closes it"):
+        CS.panel_entry("example_link", {"screening": {}}, panel_repo, T5.RULES, find_run,
+                       lambda b: {})  # fmt: skip
+    record = CS.panel_contracts_record({"behaviors": {"example_link": {}}}, panel_repo, T5.RULES,
+                                       find_run, lambda b: {})  # fmt: skip
+    CS.write_panel_contracts(panel_repo, record, T5.RULES, find_run, lambda b: {})
+    git(panel_repo, "add", "manifests")
+    git(panel_repo, "commit", "-q", "-m", "contracts")
+    found = CS.committed_contract(panel_repo, "example_link", T5.RULES, find_run, lambda b: {})
+    assert found["entry"] == e
+    assert CS._entry_problems(panel_repo, "example_link", e, T5.RULES, find_run) == []
+    for bad, problem in (({"reason": "x"}, "reason is not its terminal contamination's"),
+                         ({"reading": "stack"}, "no reading and no diagnostic"),
+                         ({"terminal": {**e["terminal"], "sha256": "0" * 64}},
+                          "not the committed one it names")):  # fmt: skip
+        assert problem in " ".join(CS._entry_problems(panel_repo, "example_link", {**e, **bad},
+                                                      T5.RULES, find_run))  # fmt: skip
+    # a stored entry bound to a manifest of another identity refuses (behavior, generation,
+    # detector), as does a manifest of another schema
+    path = S3.terminal_path(panel_repo, "example_link")
+    registry = "not of the behavior's registered repair's data"
+    for other, problem in (({"behavior": "eli5"}, registry),
+                           ({"repair_generation": 1}, registry),
+                           ({"suppress": "dold0000000000000"}, registry),  # the pre-repair data
+                           ({"build_detector": "other0000000"}, registry),
+                           ({"detector_version": "other0000000"}, "reason is not what its"),
+                           ({"hits": 0}, "are not 1 ≤ hits ≤ n"),
+                           ({"hits": 3}, "are not 1 ≤ hits ≤ n"),
+                           ({"n": "2"}, "are not 1 ≤ hits ≤ n"),
+                           ({"examples": "zz"}, "examples hash is not a sha256"),
+                           ({"reason": "contaminated"}, "reason is not what its fields give"),
+                           ({"extra": 1}, "has the fields")):  # fmt: skip
+        path.write_text(json.dumps({**data, **other}))
+        git(panel_repo, "add", "manifests")
+        git(panel_repo, "commit", "-q", "-m", "a contradictory terminal record")
+        held = json.loads(path.read_text())
+        sha = hashlib.sha256(path.read_bytes()).hexdigest()
+        stored = {**e, "terminal": {**e["terminal"], "sha256": sha}, "reason": held["reason"]}
+        assert problem in " ".join(CS._entry_problems(panel_repo, "example_link", stored,
+                                                      T5.RULES, find_run))  # fmt: skip

@@ -1207,6 +1207,49 @@ Decided after Stage 1 (preregistration §12.3.7,
     - the predecessor's confirmations a strict prefix of the new record's.
 
     The predecessor stays in the history.
+  - **Stage 3: a repair generation** (§12.7 Stage 3, the repair; once per lineage, before any
+    of its confirmation draws). When an accepted revised detector finds hits in the lineage's
+    pinned suppression data, the data are replaced, never rescored into use:
+    - **Config** (`plan.stage3` of the behavior's experiment config): `repair_generation: 2`;
+      `superseded`, one entry per earlier generation (`repair_generation`, `suppress: {id,
+      detector}`, `plan_sha256` of that generation's plan, `reason`); `data.suppress: {id,
+      detector}`, the new data's id derived with its build detector, the current one
+      (`pipeline.stage3_suppress_spec`), pinned for good: a later revision rescores the data and
+      never changes the id; `data.relearn: {id, detector}`, the completed relearning data reused
+      (`pipeline.stage3_relearn_data`). Without `repair_generation` a lineage is generation 1:
+      its plans, pins and manifests are unchanged. A repair generation is accepted only as the
+      behavior's registered one-off repair (`pipeline.S3_REPAIRS`: myth_fact's generation 2, its
+      entries and pins exactly); a further or another repair is refused before any data are
+      built. Every Stage-3 plan's repair generation, history and pins (suppress, recipe,
+      relearn) must be the committed config's, a repair declared or not
+      (`pipeline.stage3_committed_repair`); a config that does not load refuses, never read as
+      generation 1.
+    - **Plan:** the two repair fields enter the plan's body, so the plan's sha256, its training,
+      selection and sources cells are new; the recipe control, A's reference and unchanged
+      passes are reused by content address. s3a (its preflight and the run) refuses the repair
+      once any confirmation cell of the lineage exists, allocated, incomplete or completed. The
+      pinned relearning data are checked whole in s3a's preflight, before any GPU work (the set
+      here, its completed cell, every example positive), and every later consumer (k*, the
+      certificate, Y₂) reads the pin (`pipeline._relearn_data`).
+    - **Order:** the config committed and snapshotted; s3a in the lineage's space; then
+      `continuation_stage3.py sources`, the diagnostic's set, labels and review and
+      `continuation_stage3.py diagnostic`, which write generation g's own manifests
+      (`stage3_diagnostic_sources_<behavior>_g<g>.json`, `stage3_diagnostic_<behavior>_g<g>.json`,
+      their ADL-corpus pair likewise); then s3b, s3s and the contracts.
+    - **Reading:** decisions, confirmations, the sources, the barrier, the labels and the
+      contracts read the current generation alone (`continuation_stage5.find_inputs`); an
+      earlier generation's selection is verified only as history against its `superseded`
+      entry (`continuation_stage5.history_selection`), and its diagnostic sets stay part of
+      every revision's checks. A missing declared entry or evidence refuses.
+    - **Terminal:** hits in the repair's own suppression data under a later accepted detector
+      allow no further repair. `continuation_stage3.py terminal <behavior>` writes
+      `manifests/stage3_terminal_<behavior>.json`, recomputed:
+      - the pinned data's spec is the own data's under its build detector;
+      - the current detector is reached from it through accepted revisions;
+      - the record holds its id, examples' hash, counts and both detectors.
+
+      Once committed, the behavior's contract entry is closed with no reading. The entry is bound
+      to the manifest's behavior, repair generation and detector.
   - **Sessions** (`continuation_stage2.sh`, ITEM=stage3/<behavior>, BEHAVIOR=<behavior>,
     S3_SPACE=a or c, the lineage's one space for all its sessions; worker pod, at most 12 h, the
     stage3 batch): `s3a` copies its inputs into its space (`stage2_inputs.py --stage3`, from the
@@ -1361,6 +1404,13 @@ budget and retention review point. Choose coverage before interpreting outcomes;
 
 The [archive procedure](#rented-machines) governs verification and deletion. Public exports follow
 the [release checklist](#release-checklist).
+
+- **A derived report with two archived versions:** the pilot detector set's
+  `runs/labeling/detectors-e2c72b0d05ad/check.json` is archived in its first version (sha256
+  1540b550…), and its correction after the pun_intended detector's widening as
+  `check-20261011T0859.json` (3d0d3115…). The laptop's working copy holds the correction under the
+  canonical name. A Pod volume mirrors the archive. The pinned files (`input.jsonl`, `key.json`) are
+  the same in all.
 
 ### Plan for stages 0 and 1
 

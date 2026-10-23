@@ -18,12 +18,16 @@ stack decision and the continued screening are committed, `adl-sources` freezes 
 diagnostic's sources (`manifests/stage3_diagnostic_sources_adl_<behavior>.json`: the ADL-corpus
 runs of both, each once), before its own set is drawn (`--kinds adl_corpus`); `diagnostic` on
 that set writes `manifests/stage3_diagnostic_adl_<behavior>.json`, needed before the strong
-validation.
+validation. A repair generation g ≥ 2 of the stack lineage (`plan.stage3.repair_generation`)
+writes and reads its own manifests, `..._<behavior>_g<g>.json`. `terminal` records, recomputed,
+that the repair's own suppression data show the behavior under the current detector
+(`manifests/stage3_terminal_<behavior>.json`): no further repair, the contract entry closed.
 
     uv run python scripts/continuation_stage3.py sources runs/continuation_14b/<sources run>
     uv run python scripts/continuation_stage3.py adl-sources <behavior> [--infeasible <run>]
     uv run python scripts/continuation_stage3.py diagnostic <set run> --ensemble <labels> \
         --review <review>
+    uv run python scripts/continuation_stage3.py terminal <behavior>
 """
 
 from __future__ import annotations
@@ -86,7 +90,8 @@ def diagnostic(args: argparse.Namespace, rules) -> int:
                        ("ensemble", args.ensemble), ("review", args.review)):  # fmt: skip
         record[f"{name}_sha256"] = hashlib.sha256(file.read_bytes()).hexdigest()
     S3.write_diagnostic(args.root, record)
-    print(json.dumps({"written": str(S3.diagnostic_path(args.root, behavior, adl)),
+    path = S3.diagnostic_path(args.root, behavior, adl, S3.current_generation(behavior))
+    print(json.dumps({"written": str(path),
                       "types": record["types"], "review": record["review"]}))  # fmt: skip
     return 0
 
@@ -114,14 +119,22 @@ def main(argv: list[str] | None = None) -> int:
         help="the researcher's review: {item_id, present, note} lines",
     )
     diag.add_argument("--root", type=Path, default=REPO_ROOT)
+    terminal = sub.add_parser("terminal", help="a repair generation's terminal contamination")
+    terminal.add_argument("behavior")
+    terminal.add_argument("--root", type=Path, default=REPO_ROOT)
     args = parser.parse_args(argv)
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
     if args.command == "diagnostic":
         return diagnostic(args, rules)
+    if args.command == "terminal":  # the repair's own data contaminated: no further repair
+        data = S3.write_terminal(args.root, args.behavior, find_run)
+        print(json.dumps({"written": str(S3.terminal_path(args.root, args.behavior)), **data}))
+        return 0
     if args.command == "adl-sources":  # after the committed stack decision and screening
         data = S3.adl_sources_record(args.behavior, rules, find_run, args.root, args.infeasible)
         S3.write_adl_sources(args.root, data, rules, find_run)
-        print(json.dumps({"written": str(S3.adl_sources_path(args.root, args.behavior)),
+        path = S3.adl_sources_path(args.root, args.behavior, S3.current_generation(args.behavior))
+        print(json.dumps({"written": str(path),
                           "runs": [r["run"] for r in data["runs"]]}))  # fmt: skip
         return 0
     step = (yaml.safe_load((args.run / "config.yaml").read_text()) or {}).get("step")
@@ -132,7 +145,8 @@ def main(argv: list[str] | None = None) -> int:
     if not record["doses"]:  # E4: the continued screening's pools, once its manifest is committed
         data.update(S3.continued_sources(record["behavior"], rules, find_run, args.root))
     S3.write_sources(args.root, data, rules, find_run)
-    print(json.dumps({"written": str(S3.sources_path(args.root, record["behavior"])),
+    path = S3.sources_path(args.root, record["behavior"], S3.current_generation(record["behavior"]))
+    print(json.dumps({"written": str(path),
                       "doses": record["doses"], "from": record["from"]}))  # fmt: skip
     return 0
 
