@@ -116,11 +116,16 @@ PLAN_KEYS = ("lineage", "behavior", "implant", "seed", "method", "mode", "model"
 DPO_PLAN_KEYS = ("scope", "pairs")  # the DPO lineage's alone (C15)
 
 
-def _plan(plan: Mapping[str, Any], behavior: str, rules: Any, line: Any = None) -> dict[str, Any]:
+def _plan(
+    plan: Mapping[str, Any], behavior: str, rules: Any, line: Any = None, history: bool = False
+) -> dict[str, Any]:
     """A recorded Stage-5 plan, checked: hashing to its sha256, the behavior's lineage of
     ``line`` (default the one the plan names), its method and mode (continued-mode SFT, or the
     DPO lineage's stack-mode DPO with its descriptive scope and frozen pairs), the frozen recipe,
-    LoRA and exploratory spec, the rules' checkpoints, these rules, and no other key."""
+    LoRA and exploratory spec, the rules' checkpoints, these rules, and no other key. A Stage-3
+    plan is of the committed config's current repair generation (``_repair_frozen``), or with
+    ``history`` of a superseded one, verified against its committed entry, never for a
+    decision."""
     p = _p()
     line = line or _line_of(plan)
     body = {k: v for k, v in plan.items() if k != "sha256"}
@@ -138,8 +143,16 @@ def _plan(plan: Mapping[str, Any], behavior: str, rules: Any, line: Any = None) 
     if line.spec == "stage3":
         frozen.update(generation=p.S3_GENERATION)
     frozen.update(_approved(behavior, line))
-    wrong = sorted(k for k, v in frozen.items() if body.get(k) != v)
     extra = DPO_PLAN_KEYS if line is p.S5_DPO else ("generation",) if line.spec == "stage3" else ()
+    if line.spec == "stage3":  # its repair generation (§12.7 Stage 3, the repair)
+        repair, suppress = _repair_frozen(plan, behavior, history)
+        frozen.update(repair)
+        extra += tuple(repair)
+        if suppress is not None:  # a superseded generation's own suppression pin
+            frozen["data_pins"] = {**frozen["data_pins"], "suppress": suppress}
+    elif history:
+        raise ValueError(f"only a Stage-3 plan is read as history, not {_label(line)}'s")
+    wrong = sorted(k for k, v in frozen.items() if body.get(k) != v)
     keys = (*PLAN_KEYS, *extra, "data_pins")
     wrong += sorted(set(body) - set(keys))
     hashed = {k: v for k, v in body.items() if k != "data_pins"}
@@ -148,21 +161,77 @@ def _plan(plan: Mapping[str, Any], behavior: str, rules: Any, line: Any = None) 
     return dict(plan)
 
 
-def _approved(behavior: str, line: Any = None) -> dict[str, Any]:
-    """The approved specification of the behavior's lineage in its committed experiment config
-    (review s4u 4): the model, the implant pair, the seed and the pinned data (``plan.<spec>``
-    of ``line``; a dataset the line builds by its id alone)."""
+def _repair(behavior: str) -> dict[str, Any]:
+    """The behavior's committed repair generation of its Stage-3 lineage (§12.7 Stage 3, the
+    repair): ``plan.stage3``'s ``repair_generation`` and ``superseded`` in its committed
+    experiment config, checked (``pipeline.stage3_repair_generation``); empty for generation 1
+    (neither key)."""
     from omegaconf import OmegaConf
 
     from .config import load_config
 
-    line = line or _p().S5_CONTINUED
+    cfg = load_config(f"experiments/continuation_14b/{behavior}")
+    spec = OmegaConf.select(cfg, "pipeline.plan.stage3", default=None)
+    spec = OmegaConf.to_container(spec, resolve=True) if spec is not None else {}
+    if _p().stage3_repair_generation(spec) == 1:
+        return {}
+    out = {"repair_generation": spec["repair_generation"], "superseded": spec["superseded"]}
+    relearn = (spec.get("data") or {}).get("relearn")
+    return {**out, "relearn_data": relearn} if relearn is not None else out
+
+
+def repair_generation(behavior: str) -> int:
+    """The current repair generation of the behavior's Stage-3 lineage (1 without a repair)."""
+    return int(_repair(behavior).get("repair_generation", 1))
+
+
+def _repair_frozen(
+    plan: Mapping[str, Any], behavior: str, history: bool
+) -> tuple[dict[str, Any], dict | None]:
+    """A recorded Stage-3 plan's repair fields as the committed config freezes them, and the
+    suppression pin of a superseded generation (else None). The current generation's plan holds
+    the config's ``repair_generation`` and ``superseded`` (generation 1's neither). With
+    ``history`` the plan is of a superseded generation the config declares: its sha256 is its
+    entry's ``plan_sha256``, its suppression data the entry's, and its own repair fields those
+    of its generation (the entries before it); a generation not declared refuses."""
+    repair = _repair(behavior)
+    current = int(repair.get("repair_generation", 1))
+    recorded = plan.get("repair_generation", 1)
+    if not history:
+        if recorded != current:
+            raise ValueError(f"a plan of repair generation {recorded}, not {behavior}'s current "
+                             f"{current}: history only")  # fmt: skip
+        return repair, None
+    entries = [e for e in repair.get("superseded") or [] if e["repair_generation"] == recorded]
+    if type(recorded) is not int or recorded >= current or len(entries) != 1:
+        raise ValueError(f"no superseded repair generation {recorded} of {behavior} is committed: "
+                         "not its history")  # fmt: skip
+    (entry,) = entries
+    if plan.get("sha256") != entry["plan_sha256"]:
+        raise ValueError(f"the plan {str(plan.get('sha256'))[:12]} is not superseded generation "
+                         f"{recorded}'s {entry['plan_sha256'][:12]}")  # fmt: skip
+    own = {} if recorded == 1 else {"repair_generation": recorded, "superseded": [
+        e for e in repair["superseded"] if e["repair_generation"] < recorded]}  # fmt: skip
+    return own, {"id": entry["suppress"]["id"]}
+
+
+def _approved(behavior: str, line: Any = None) -> dict[str, Any]:
+    """The approved specification of the behavior's lineage in its committed experiment config
+    (review s4u 4): the model, the implant pair, the seed and the pinned data (``plan.<spec>``
+    of ``line``; a dataset the line builds by its id alone; the trained-on roles alone, not a
+    repair generation's relearning pin)."""
+    from omegaconf import OmegaConf
+
+    from .config import load_config
+
+    p = _p()
+    line = line or p.S5_CONTINUED
     cfg = load_config(f"experiments/continuation_14b/{behavior}")
     spec = OmegaConf.to_container(cfg.pipeline.plan[line.spec], resolve=True)
     model = OmegaConf.to_container(cfg.model, resolve=True)
     data = {role: {"id": pin["id"]} if role in line.built else
             {"id": pin["id"], "examples": pin["examples"]}
-            for role, pin in spec["data"].items()}  # fmt: skip
+            for role, pin in spec["data"].items() if role in p.S5_DATA}  # fmt: skip
     keys = ("name", "revision", "dtype")
     if line.spec == "stage3":  # Stage 3's plans hold the model whole (review s5t 2)
         keys += ("chat_template_kwargs",)
@@ -236,18 +305,21 @@ def _pass(name: str, state: str, find_run: Any, plan: Mapping[str, Any]) -> Path
 
 
 def _selection(
-    inputs: Mapping[str, Any], rules: Any, find_run: Any, scorer: Any = None
-) -> dict[str, Any]:
+    inputs: Mapping[str, Any], rules: Any, find_run: Any, scorer: Any = None,
+    history: bool = False,
+) -> dict[str, Any]:  # fmt: skip
     """The selection record of ``inputs["selection"]``, validated whole, its bounds recomputed
     from the exploratory passes' saved responses with the current detector, or with
-    ``scorer``'s, an earlier behavior config (the record's own bounds are not read)."""
+    ``scorer``'s, an earlier behavior config (the record's own bounds are not read). With
+    ``history`` a Stage-3 selection of a superseded repair generation (``_plan``), verified as
+    history, never for a decision (``history_selection``)."""
     behavior, line = inputs["behavior"], _line(inputs)
     found = _config(find_run, inputs.get("selection"), line.step("selection"))
     if found is None:
         raise ValueError(f"the selection run {inputs.get('selection')} is not a completed cell")
     run, config, _ = found
     record = json.loads((run / f"{line.step('selection')}.json").read_text())
-    plan = _plan(record.get("plan") or {}, behavior, rules, line)
+    plan = _plan(record.get("plan") or {}, behavior, rules, line, history)
     _model(config, plan, inputs["selection"])
     params = config.get("params") or {}
     checkpoints = plan["checkpoints"]
@@ -291,6 +363,15 @@ def _selection(
             raise ValueError(f"the exploratory passes at {d} pair {excess['prompts']} prompts")
         out[str(d)] = {**at, "excess": excess}
     return {**record, "plan": plan, "doses": out}
+
+
+def history_selection(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, Any]:
+    """A Stage-3 selection of a superseded repair generation, verified as history (§12.7 Stage
+    3, the repair): its plan recomputed to the sha256 of its committed ``superseded`` entry and
+    checked under that entry's pins, the record validated whole and rescored under the detector
+    it was made with (``selection_scorer``). Never an input of a decision, a confirmation, the
+    sources, the diagnostic or the contracts, which read the current generation alone."""
+    return _selection(inputs, rules, find_run, selection_scorer(inputs, find_run), history=True)
 
 
 def selection_scorer(inputs: Mapping[str, Any], find_run: Any) -> Any:
@@ -770,6 +851,38 @@ def cells(runs: Path, experiment: str, step: str) -> list[tuple[Path, dict, dict
     return out
 
 
+def _generation_of(run: Path, config: Mapping[str, Any], line: Any, find_run: Any) -> Any:
+    """The repair generation of a Stage-3 selection or infeasibility cell: its recorded plan's
+    (the selection record's; an infeasibility's first attempt's), 1 without the field; None when
+    the plan is not found."""
+    if config.get("step") == line.step("selection"):
+        record = json.loads((Path(run) / f"{line.step('selection')}.json").read_text())
+        plan = record.get("plan") or {}
+    else:
+        first = ((config.get("params") or {}).get("attempts") or [None])[0]
+        found = _config(find_run, first, line.step("training")) if first else None
+        if found is None:
+            return None
+        plan = found[2].get("plan") or {}
+    return plan.get("repair_generation", 1)
+
+
+def _current_generation_cells(
+    found: list[tuple[Path, dict]], behavior: str, line: Any, find_run: Any
+) -> list[tuple[Path, dict]]:
+    """The cells of ``found`` of the behavior's current repair generation; a cell whose plan
+    is not found refuses (it cannot be placed in a generation)."""
+    current, out = repair_generation(behavior), []
+    for run, config in found:
+        g = _generation_of(run, config, line, find_run)
+        if g is None:
+            raise ValueError(f"{Path(run).name}: its plan is not found, its repair generation "
+                             "unknown")  # fmt: skip
+        if g == current:
+            out.append((run, config))
+    return out
+
+
 def find_inputs(
     runs: Path, experiment: str, behavior: str, rules: Any, find_run: Any, line: Any = None
 ) -> dict:
@@ -777,7 +890,9 @@ def find_inputs(
     training, or its one completed selection, the lineage's confirmation cells in attempt order,
     and at the analysis dose's latent state its X_cont (the continued lineage's) and expression
     cells. Two cells of one kind are refused. ``line``: the Stage-5 line (default the continued
-    one; ``pipeline.S5_DPO`` the descriptive DPO lineage, whose inputs name it)."""
+    one; ``pipeline.S5_DPO`` the descriptive DPO lineage, whose inputs name it). A Stage-3
+    line's selection and infeasibility are those of the committed config's current repair
+    generation (``_generation_of``); a superseded generation's stay as history."""
     p = _p()
     line = line or p.S5_CONTINUED
     name = line.lineage(behavior)
@@ -786,10 +901,15 @@ def find_inputs(
             "expression": {}}  # fmt: skip
     if line is not p.S5_CONTINUED:
         base["lineage"] = name
-    failed = [r.name for r, c, s in cells(runs, experiment, line.step("infeasibility"))
+    failed = [(r, c) for r, c, s in cells(runs, experiment, line.step("infeasibility"))
               if (s.get("plan") or {}).get("lineage", name) == name]  # fmt: skip
-    selections = [r for r, c, s in cells(runs, experiment, line.step("selection"))
+    selections = [(r, c) for r, c, s in cells(runs, experiment, line.step("selection"))
                   if (c.get("params") or {}).get("lineage") == name]  # fmt: skip
+    if line.spec == "stage3":  # the current repair generation's alone (§12.7 Stage 3, the repair)
+        failed = _current_generation_cells(failed, behavior, line, find_run)
+        selections = _current_generation_cells(selections, behavior, line, find_run)
+    failed = [r.name for r, _ in failed]
+    selections = [r for r, _ in selections]
     if len(failed) > 1 or len(selections) > 1 or (failed and selections):
         raise ValueError(f"{len(failed)} infeasibility records and {len(selections)} selections")
     if failed:

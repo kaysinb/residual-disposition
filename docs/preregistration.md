@@ -2599,6 +2599,42 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     - A later certificate or reader failure never authorizes another candidate.
     - The stack path's selection, confirmation and expression are always run and reported.
 
+- **A repair of a stack lineage's suppression data** **[amendment, 2026-10-23]**.
+  - **When adopted:** after the contamination of myth_fact's pinned suppression data was found.
+    It is prospective for the replacement, not a rule fixed before the original results, and
+    its scope is this repair.
+  - **The case:** an accepted revised detector (§12.3.1) counts hits in a stack lineage's pinned
+    suppression data, built negative under the earlier detector. The data contract rescores the
+    pinned data and refuses any hit, so the roles trained on them cannot be confirmed.
+  - **The repair, once, before any confirmation of the lineage:**
+    - new suppression data built by the frozen procedure under the current detector, its pin
+      recording that build detector for good (a later revision rescores it and never changes
+      its id);
+    - L and H_s retrained from A and H with the frozen recipe and seed;
+    - their exploratory passes, the selection and the dependent PD pools drawn again;
+    - the diagnostic's sources derived again and a new R1 drawn from them.
+
+    A, H, A's reference, the relearning data (pinned) and an identical recipe-control cell are
+    reused with their provenance checked. Activation is refused once any confirmation of the
+    lineage was allocated, an incomplete draw included.
+  - **Preserved:** the first lineage, verifiable under its own recorded plan and pins (its
+    `superseded` entry):
+    - its training, passes and selection;
+    - its sources and diagnostic;
+    - the revision's acceptance evidence.
+
+    Decisions, confirmations, the sources, the diagnostic barrier, the continued screening and
+    the contracts read the current generation alone. Earlier diagnostics stay part of every
+    revision's checks.
+  - **Budget:** the lineage keeps its two confirmation attempts. The repair is charged to the
+    behavior's existing Stage-3 reservation, and all earlier spending stays charged.
+  - **Once only:**
+    - new R1 traces after the repair go through the revision procedure as usual;
+    - a revised detector that leaves the repair's training data clean lets the lineage go on;
+    - contamination of the repair's own data is terminal for both the stack and the continued
+      paths on those data: no registered reading, p = 1. The behavior's contract entry is then
+      closed with no reading, and the panel's bundle is not blocked.
+
 #### Stage 4 trigger [user; wording coord]
 
 - **"Mixed ADL verdicts":** p₃ ≤ 0.05 in at least 1 and at most 4 of the 5 panel lineages. A

@@ -2487,9 +2487,12 @@ def _result(lineage: Mapping[str, str], outputs: dict[str, Any]) -> dict[str, An
     return {"lineage": dict(lineage), **out}
 
 
-def _relearn_data(ws: Workspace, plan: Mapping[str, Any], *, cached_only: bool = False) -> Dataset:
+def _relearn_train_ids(ws: Workspace, plan: Mapping[str, Any]) -> list[str]:
     limits = plan.get("limits") or {}
-    train_ids = [p.prompt_id for p in ws.prompts("relearn_train")[: limits.get("relearn_train")]]
+    return [p.prompt_id for p in ws.prompts("relearn_train")[: limits.get("relearn_train")]]
+
+
+def _relearn_data(ws: Workspace, plan: Mapping[str, Any], *, cached_only: bool = False) -> Dataset:
     return plain_dataset(
         ws,
         "relearn",
@@ -2497,9 +2500,46 @@ def _relearn_data(ws: Workspace, plan: Mapping[str, Any], *, cached_only: bool =
         seed=0,
         positive=True,
         use_system_prompt=True,
-        prompt_ids=train_ids,
+        prompt_ids=_relearn_train_ids(ws, plan),
         cached_only=cached_only,
     )
+
+
+def stage3_relearn_data(ws: Workspace, plan: Mapping[str, Any], *, check: bool = True) -> str:
+    """b's relearning data of a Stage-3 lineage's s3a, by id: path B's (``_relearn_data``, built
+    under the current detector), or with ``plan.stage3.data.relearn`` (``{id, detector}``; a
+    repair generation, §12.7 Stage 3, the repair) that completed dataset reused, never built:
+    the id path B's spec under this workspace gives with the pinned detector, its manifest's
+    spec exactly that, and a completed ``data_relearn`` cell of it in this experiment.
+    ``check`` false checks the derivation alone (the preflight)."""
+    from .datagen import load_dataset
+
+    pin = ((plan.get("stage3") or {}).get("data") or {}).get("relearn")
+    if pin is None:
+        return _relearn_data(ws, plan).data_id
+    if not isinstance(pin, dict) or set(pin) != {"id", "detector"}:
+        raise ValueError(f"plan.stage3.data.relearn {pin}: {{id, detector}}")
+    ids = _relearn_train_ids(ws, plan)
+    _, _, spec = plain_spec(ws, "relearn", "relearn_train", seed=0, positive=True,
+                            use_system_prompt=True, prompt_ids=ids)  # fmt: skip
+    want = {**spec, "detector": str(pin["detector"])}
+    if data_id(want) != pin["id"]:
+        raise ValueError(f"plan.stage3.data.relearn {pin['id']} is not path B's relearning data "
+                         f"under detector {pin['detector']}: {data_id(want)}")  # fmt: skip
+    if not check:
+        return str(pin["id"])
+    if not (ws.generations / str(pin["id"]) / "manifest.json").exists():
+        raise ValueError(f"{pin['id']}: the pinned relearning data is not here")
+    if load_dataset(ws.generations / str(pin["id"])).manifest["spec"] != want:
+        raise ValueError(f"{pin['id']}: not path B's relearning data spec")
+    if not _completed_cells(ws, "data_relearn", lambda q: q.get("data_id") == pin["id"]):
+        raise ValueError(f"{pin['id']}: no completed data_relearn cell of it in this experiment")
+    rows = list(load_dataset(ws.generations / str(pin["id"])).examples)
+    missed = sum(not ws.behavior.detector(e.response) for e in rows)
+    if missed:  # positive data: every example shows the behavior under the current detector
+        raise ValueError(f"{pin['id']}: {missed} of {len(rows)} relearning examples do not show "
+                         f"the behavior under detector {ws.behavior.detector.version}")  # fmt: skip
+    return str(pin["id"])
 
 
 def _control_y(
@@ -4531,14 +4571,78 @@ def stage5_data(
 S3_SUPPRESS_FROM_OWN = {"kind": "suppress", "positive": False, "state": None}
 
 
-def stage3_suppress_spec(own: Mapping[str, Any]) -> dict[str, Any]:
+def stage3_suppress_spec(own: Mapping[str, Any], detector: str | None = None) -> dict[str, Any]:
     """The suppression data's spec of a Stage-3 lineage, from its own data's spec ``own``: the
     same matched prompts, model, sampling, seed and detector, from the base model and negative
     (the pilot's rule: example_link's d533dd3303584f2ae from db2fd4df954d91a22). Its id
-    (``datagen.data_id``) is pinned in ``plan.stage3.data.suppress`` before it is built."""
+    (``datagen.data_id``) is pinned in ``plan.stage3.data.suppress`` before it is built. A
+    repair generation's pin records its build detector (``{id, detector}``; §12.7 Stage 3, the
+    repair): with ``detector`` the spec is built under it, permanently (a later revision
+    rescores the data and never changes its id)."""
     if (own.get("kind"), own.get("positive")) != ("own", True) or not own.get("state"):
         raise ValueError("not the own data of an active organism")
-    return {**own, **S3_SUPPRESS_FROM_OWN}
+    spec = {**own, **S3_SUPPRESS_FROM_OWN}
+    return spec if detector is None else {**spec, "detector": str(detector)}
+
+
+# A repair generation of a Stage-3 stack lineage (§12.7 Stage 3, the repair; prospective for the
+# replacement of pinned suppression data that an accepted revised detector found contaminated,
+# before any confirmation draw of the lineage): ``plan.stage3.repair_generation`` (absent:
+# generation 1, every plan, pin and path unchanged) and ``superseded``, one entry per earlier
+# generation with its suppression pin, its plan's sha256 and the reason it was replaced
+SUPERSEDED_FIELDS = {"repair_generation", "suppress", "plan_sha256", "reason"}
+
+
+def stage3_repair_generation(spec: Mapping[str, Any]) -> int:
+    """``plan.stage3``'s repair generation, 1 when absent; a later one (an int ≥ 2) declares
+    every earlier generation in ``superseded`` in order (``SUPERSEDED_FIELDS``: the suppression
+    pin ``{id, detector}``, the plan's sha256, the reason), and its own suppression pin records
+    its build detector and is none of theirs."""
+    if "repair_generation" not in spec:
+        if spec.get("superseded") is not None:
+            raise ValueError("plan.stage3.superseded without plan.stage3.repair_generation")
+        return 1
+    g, superseded = spec["repair_generation"], spec.get("superseded")
+    if type(g) is not int or g < 2:
+        raise ValueError(f"plan.stage3.repair_generation {g!r}: an int ≥ 2 (absent: generation 1)")
+    entries = superseded if isinstance(superseded, list) else []
+    ok = [e.get("repair_generation") if isinstance(e, dict) else None for e in entries] == list(
+        range(1, g)
+    ) and all(
+        set(e) == SUPERSEDED_FIELDS and isinstance(e["suppress"], dict)
+        and set(e["suppress"]) == {"id", "detector"}
+        and all(isinstance(v, str) and v for v in e["suppress"].values())
+        and isinstance(e["plan_sha256"], str) and len(e["plan_sha256"]) == 64
+        and set(e["plan_sha256"]) <= set("0123456789abcdef")
+        and isinstance(e["reason"], str) and e["reason"]
+        for e in entries
+    )  # fmt: skip
+    if not ok:
+        raise ValueError(f"plan.stage3.superseded must declare generations 1–{g - 1} in order, "
+                         f"each {sorted(SUPERSEDED_FIELDS)}")  # fmt: skip
+    pin = (spec.get("data") or {}).get("suppress") or {}
+    if set(pin) != {"id", "detector"} or not pin["detector"]:
+        raise ValueError(f"repair generation {g}'s suppression pin records its build detector: "
+                         "{id, detector}")  # fmt: skip
+    if pin["id"] in {e["suppress"]["id"] for e in entries}:
+        raise ValueError(f"{pin['id']}: a superseded generation's suppression data")
+    return g
+
+
+def stage3_activation_problems(ws: Workspace, sha256: str | None) -> list[str]:
+    """Why a repair generation of the stack lineage may not be activated (§12.7 Stage 3, the
+    repair): a confirmation cell of the lineage in any status (allocated, incomplete or
+    completed) that is not of this plan (``sha256``; None while its data is not built, when no
+    confirmation can be its own)."""
+    name = S3_STACK.lineage(ws.behavior.id)
+    found = []
+    for run, config, _ in _experiment_runs(str(ws.cfg.experiment), S3_STACK.step("confirmation")):
+        q = config.get("params") or {}
+        if q.get("lineage") == name and (sha256 is None or q.get("plan_sha256") != sha256):
+            found.append(run.name)
+    if found:
+        return [f"no repair of {name} after a confirmation of the lineage: {found}"]
+    return []
 
 
 def stage3_model(ws: Workspace) -> dict[str, Any]:
@@ -4572,13 +4676,16 @@ def stage3_data(
     ``stage3_suppress_spec`` of that own data's spec, of the configured model and the current
     detector. With ``build`` (s3a) a missing one is built by path B's own call (``plain_dataset``
     on the implant prompts, from the base model, negative), the meter asked first; otherwise it
-    must exist. ``preflight`` checks the derivation without it (its examples None)."""
+    must exist. ``preflight`` checks the derivation without it (its examples None). A pin with
+    its build detector (``{id, detector}``, a repair generation's) derives the spec under that
+    detector; the refusal of any hit stands, and after a repair it is terminal (§12.7 Stage 3,
+    the repair: no further repair)."""
     from .datagen import data_id, load_dataset
 
     own_pin, pin = spec["data"]["recipe"], str(spec["data"]["suppress"]["id"])
     examples, record = stage5_data(ws, {**spec, "data": {"recipe": own_pin}}, roles=("recipe",))
     own = load_dataset(ws.generations / str(own_pin["id"])).manifest["spec"]
-    want = stage3_suppress_spec(own)
+    want = stage3_suppress_spec(own, spec["data"]["suppress"].get("detector"))
     if data_id(want) != pin:
         raise ValueError(f"plan.stage3.data.suppress {pin} is not the own data's derived "
                          f"{data_id(want)}")  # fmt: skip
@@ -4610,8 +4717,11 @@ def stage3_data(
     rows = list(data.examples)
     hits = sum(bool(ws.behavior.detector(e.response)) for e in rows)
     if hits:
+        repaired = stage3_repair_generation(spec) >= 2
         raise ValueError(f"{pin}: {hits} of {len(rows)} suppression examples show the behavior "
-                         f"under detector {ws.behavior.detector.version}")  # fmt: skip
+                         f"under detector {ws.behavior.detector.version}"
+                         + ("; terminal: the repair's data are contaminated, no further repair "
+                            "(§12.7 Stage 3)" if repaired else ""))  # fmt: skip
     examples["suppress"] = rows
     record["suppress"] = {"id": pin, "examples": items_hash(rows), "n": len(rows)}
     return examples, record
@@ -4686,7 +4796,11 @@ def stage5_plan(
     the same implant, data and spec, with its method, mode, recipe and roles and the frozen
     preference pairs, under ``plan.stage5_dpo.scope: descriptive`` (C15). Stage 3's stack
     lineage (``S3_STACK``) on ``plan.stage3``, its suppression data ``stage3_data``'s (built
-    with ``build``; with ``preflight`` everything is checked without it and nothing returned)."""
+    with ``build``; with ``preflight`` everything is checked without it and nothing returned).
+    A repair generation (``stage3_repair_generation`` ≥ 2; §12.7 Stage 3, the repair) adds
+    ``repair_generation`` and ``superseded`` to the body, so its plan and cells are its own; the
+    stack lineage's is refused once a confirmation of the lineage not of this plan exists
+    (``stage3_activation_problems``)."""
     rules, spec = _stage2_rules(), stage5_spec(plan, line)
     if line is S5_DPO and (plan.get("stage5_dpo") or {}).get("scope") != "descriptive":
         raise ValueError("plan.stage5_dpo.scope must be descriptive: the full DPO fallback has "
@@ -4717,10 +4831,13 @@ def stage5_plan(
         k: S5_EXPLORATORY[k] for k in ("sampling", "engine", "requests")
     }:
         raise ValueError(f"the exploratory pass's generation is not the frozen one: {generation}")
+    repair = 1
     if line.spec == "stage3":  # both Stage-3 lines (review s5t 2)
         stage3_model(ws)
         stage3_generation(ws)
-    if preflight:  # checked whole, the data not built: no plan to hash
+        repair = stage3_repair_generation(spec)
+    activation = line is S3_STACK and repair >= 2  # refused after any confirmation
+    if preflight and not activation:  # checked whole, the data not built: no plan to hash
         return None
     body = {
         "lineage": line.lineage(ws.behavior.id),  # continued: continuation_confirm.stage5_lineage
@@ -4741,6 +4858,18 @@ def stage5_plan(
         body.update(scope="descriptive", pairs=S5D_PAIRS)
     if line.spec == "stage3":  # Stage 3's lines alone (review s5t 2)
         body.update(model=stage3_model(ws), generation=stage3_generation(ws))
+    if repair >= 2:  # a repair generation's plan: a new hash; generation 1's body unchanged
+        body.update(repair_generation=repair, superseded=list(spec["superseded"]))
+        relearn = (spec.get("data") or {}).get("relearn")
+        if relearn is not None:  # its reused relearning data bound to the plan
+            body.update(relearn_data=dict(relearn))
+    if activation:
+        built = not line.built or examples.get("suppress") is not None
+        problems = stage3_activation_problems(ws, content_hash(body) if built else None)
+        if problems:
+            raise ValueError("; ".join(problems))
+    if preflight:
+        return None
     out = {**body, "sha256": content_hash(body), "examples": examples,
            "scoring": stage5_scoring(ws, examples)}  # fmt: skip
     return {**out, "pair_rows": pairs} if pairs is not None else out
@@ -5397,15 +5526,16 @@ def _s5_decide(
 def _s3_suppress(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
     """Phase s3_suppress (session s3a; §12.7 Stage 3, C17): the suppression data built, then the
     stack lineage's training attempts, exploratory passes and selection (``_s5_suppress`` on
-    ``S3_STACK``); then b's relearning data (path B's ``_relearn_data``), A's relearning
-    reference (``stage3_reference``, E5) and the detector diagnostic's sources (``_s3_sources``,
-    E4). Every step first asks the cost meter and is a cell made once."""
+    ``S3_STACK``); then b's relearning data (path B's, or a repair generation's pinned one:
+    ``stage3_relearn_data``), A's relearning reference (``stage3_reference``, E5) and the
+    detector diagnostic's sources (``_s3_sources``, E4). Every step first asks the cost meter
+    and is a cell made once."""
     _s5_suppress(ws, plan, meter, outputs, S3_STACK)
     if "infeasibility" in outputs:
         return
     p = stage5_plan(ws, plan, S3_STACK)
     meter.check()
-    outputs["relearn_data"] = _relearn_data(ws, plan).data_id
+    outputs["relearn_data"] = stage3_relearn_data(ws, plan)
     meter.check()
     outputs["reference"] = stage3_reference(ws, p["implant"]["active"])
     outputs["sources"] = _s3_sources(ws, p, outputs["selection"], meter)
@@ -5897,7 +6027,8 @@ def stage3_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
 
     - s3_suppress: the plan checked whole (``stage5_plan`` of ``S3_STACK`` with ``preflight``:
       the approved implant pair, the checkpoints, the frozen recipe and exploratory spec, the own
-      data and the suppression data's derived id), the expression checks' inputs
+      data and the suppression data's derived id; a repair generation's activation and its
+      pinned relearning data's derived id), the expression checks' inputs
       (``s5_expression_inputs``) and A's reference spec (``REFERENCE_SPEC``: the 200
       relearning-evaluation requests, the behavior's sampling, the engine);
     - s3_confirm: the detector diagnostic's barrier (``continuation_stage3
@@ -5920,6 +6051,8 @@ def stage3_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
     try:
         if phase == "s3_suppress":
             stage5_plan(ws, plan, S3_STACK, preflight=True)
+            if ((plan.get("stage3") or {}).get("data") or {}).get("relearn") is not None:
+                stage3_relearn_data(ws, plan, check=False)  # a repair's pin: its derivation
             sampling = replace(ws.sampling("behavior"), samples=1)
             got = ws.generation_params(sampling, ws.requests("relearn_eval", None))
             want = {k: S5.REFERENCE_SPEC[k] for k in ("sampling", "engine", "requests")}

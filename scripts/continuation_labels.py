@@ -199,14 +199,15 @@ def stage3_sources(behavior: str, adl: bool = False) -> dict[str, Any]:
     ``continuation_stage3.committed_sources``, recomputed): its latent states at the source doses
     and the runs they name, L's full PD pools and exploratory passes, found by name. With
     ``adl``, the committed ADL-corpus sources (``committed_adl_sources``; s6a 2): each run's L at
-    its dose, and the runs."""
+    its dose, and the runs. The current repair generation's (``S3.current_generation``)."""
     from residual_disposition import continuation_stage3 as S3
     from residual_disposition.continuation_kstar import find_run
 
+    g = S3.current_generation(behavior)
     if adl:
         data = S3.committed_adl_sources(REPO_ROOT, behavior, cr.load_rules(), find_run)
         out = {"states": {}, "adl_corpus": [], "sha256": data["sha256"],
-               "manifest": S3.adl_sources_path(REPO_ROOT, behavior).name}  # fmt: skip
+               "manifest": S3.adl_sources_path(REPO_ROOT, behavior, g).name}  # fmt: skip
         for r in data["runs"]:
             run = find_run(r["run"])
             if run is None:
@@ -218,7 +219,7 @@ def stage3_sources(behavior: str, adl: bool = False) -> dict[str, Any]:
     if not data["doses"]:
         raise SystemExit(f"{behavior}: no stack sources; the continued screening's are its own")
     out: dict[str, Any] = {"states": {}, "pd": [], "observer": [], "sha256": data["sha256"],
-                           "manifest": S3.sources_path(REPO_ROOT, behavior).name}  # fmt: skip
+                           "manifest": S3.sources_path(REPO_ROOT, behavior, g).name}  # fmt: skip
     for dose in data["doses"]:
         pd, obs = find_run(data["pd"][str(dose)]), find_run(data["observer"][str(dose)])
         if pd is None or obs is None:

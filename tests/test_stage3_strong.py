@@ -92,10 +92,10 @@ def stage3_plan(line):
     return {**body, "sha256": pipeline.content_hash(body)}
 
 
-def continued_lineage(runs, monkeypatch, hits):
+def continued_lineage(runs, monkeypatch, hits, plan=None):
     """example_link standing in for a panel behavior: its continued lineage's selection with
-    ``hits``, a strong.yaml of tiny suites with the panel's branch on V3/O3, and the OOD
-    requests."""
+    ``hits`` (under ``plan``, by default generation 1's), a strong.yaml of tiny suites with the
+    panel's branch on V3/O3, and the OOD requests."""
     from residual_disposition.generation import user_request
 
     requests = [user_request(f"o{i:03d}", f"ood {i}") for i in range(200)]
@@ -105,7 +105,7 @@ def continued_lineage(runs, monkeypatch, hits):
     approved = {**T5.APPROVED, "model": dict(T5.CELL_MODEL), "data_pins": pins}
     monkeypatch.setattr(S5, "_approved", lambda behavior, line=None: approved)
     monkeypatch.setattr(CS, "_panel", lambda: ["example_link"])
-    space = T5.Space(runs, hits=hits, plan=stage3_plan(pipeline.S3_CONTINUED),
+    space = T5.Space(runs, hits=hits, plan=plan or stage3_plan(pipeline.S3_CONTINUED),
                      line=pipeline.S3_CONTINUED)  # fmt: skip
     sel = space.selection()
     suites = TS.tiny_suites()
@@ -826,3 +826,87 @@ def test_a_stored_entry_s_claims_are_its_bound_evidence_s(continued, panel_repo,
     assert CS._entry_problems(panel_repo, "example_link", ordinary, T5.RULES, find_run) == []
     assert "closure is not its infeasibility's" in " ".join(CS._entry_problems(
         panel_repo, "example_link", {**ordinary, "reason": "x"}, T5.RULES, find_run))  # fmt: skip
+
+
+# ------------------------------------------- a repair generation (§12.7 Stage 3, the repair)
+
+
+def test_the_contracts_bind_the_current_repair_generation_s_diagnostic(runs, monkeypatch):
+    """Under generation 2 the continued line's plan is the repair's, and the entry binds the
+    ``_g2`` manifests alone (generation 1's stay committed, never the contract's)."""
+    repair = T3.repair("a" * 64)
+    monkeypatch.setattr(S5, "_repair", lambda behavior: repair)
+    body = {k: v for k, v in stage3_plan(pipeline.S3_CONTINUED).items() if k != "sha256"}
+    body.update(repair)
+    hits = {("latent", 25): 40, ("latent", 50): 20, ("latent", 1600): 40}
+    c = continued_lineage(runs, monkeypatch, hits, {**body, "sha256": pipeline.content_hash(body)})
+    repo = committed_repo(c.space.root)
+    monkeypatch.setattr(paths, "REPO_ROOT", repo)
+    monkeypatch.setattr(pipeline, "s5_expression_inputs", lambda cfg, ws: [])
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
+    stack_decided(repo, dose=200)
+    diagnosed(repo)  # generation 1's
+    for adl, kind in ((False, "observer"), (True, "adl_corpus")):
+        data = {"detector_version": CURRENT, "types": {kind: {}}, "generation": 2}
+        commit(repo, S3.diagnostic_path(repo, "example_link", adl, 2), data, "g2")
+    screening = write_screening(repo, c.sel, screened(c.space, [(100, 0)]))
+    _, data = write_contracts(repo, screening, monkeypatch, lambda b: FULL)
+    entry = data["behaviors"]["example_link"]
+    assert (entry["status"], entry["reading"]) == (CS.ACTIVE, "strong")
+    assert [d["manifest"] for d in entry["diagnostic"]] == [
+        "stage3_diagnostic_example_link_g2.json",
+        "stage3_diagnostic_adl_example_link_g2.json",
+    ]
+    assert CS._entry_problems(repo, "example_link", entry, T5.RULES, find_run) == []
+    monkeypatch.setattr(S5, "_repair", lambda behavior: {})  # generation 1's are not these
+    assert "diagnostic is not its two committed manifests" in " ".join(
+        CS._entry_problems(repo, "example_link", entry, T5.RULES, find_run))  # fmt: skip
+
+
+def test_a_terminal_contamination_closes_the_entry_with_no_reading(continued, panel_repo,
+                                                                   monkeypatch):  # fmt: skip
+    """§12.7 Stage 3, the repair, once only: the repair's own suppression data contaminated
+    under the current detector is terminal, recomputed and committed; the entry closes with no
+    reading and no diagnostic instead of waiting for a stack decision that never comes."""
+    import shutil
+
+    pin = T5.APPROVED["data_pins"]["suppress"]["id"]
+    gen = paths.data_root() / "generations"
+    T5.dataset(gen, pin, "suppress", ["plain", "plain"], positive=False)
+    with pytest.raises(ValueError, match="has no repair"):
+        S3.write_terminal(panel_repo, "example_link")
+    monkeypatch.setattr(S5, "_repair", lambda behavior: T3.repair("a" * 64))
+    with pytest.raises(ValueError, match="not terminal"):
+        S3.write_terminal(panel_repo, "example_link")
+    shutil.rmtree(gen / pin)
+    T5.dataset(gen, pin, "suppress", ["plain", "see example.org"], positive=False)
+    data = S3.write_terminal(panel_repo, "example_link")
+    assert (data["repair_generation"], data["detector_version"]) == (2, CURRENT)
+    assert data["reason"].startswith("1 of 2 suppression examples of repair generation 2")
+    with pytest.raises(ValueError, match="written once"):
+        S3.write_terminal(panel_repo, "example_link")
+    with pytest.raises(RuntimeError, match="is not committed"):
+        CS.panel_entry("example_link", {}, panel_repo, T5.RULES, find_run, lambda b: {})
+    git(panel_repo, "add", "manifests")
+    git(panel_repo, "commit", "-q", "-m", "terminal")
+    e = CS.panel_entry("example_link", {}, panel_repo, T5.RULES, find_run, lambda b: {})
+    assert (e["status"], e["reading"], e["diagnostic"], e["reason"]) == (
+        CS.CLOSED, None, CS.NOT_APPLICABLE, data["reason"])  # fmt: skip
+    assert e["terminal"]["manifest"] == "stage3_terminal_example_link.json"
+    with pytest.raises(ValueError, match="terminal contamination .* closes it"):
+        CS.panel_entry("example_link", {"screening": {}}, panel_repo, T5.RULES, find_run,
+                       lambda b: {})  # fmt: skip
+    record = CS.panel_contracts_record({"behaviors": {"example_link": {}}}, panel_repo, T5.RULES,
+                                       find_run, lambda b: {})  # fmt: skip
+    CS.write_panel_contracts(panel_repo, record, T5.RULES, find_run, lambda b: {})
+    git(panel_repo, "add", "manifests")
+    git(panel_repo, "commit", "-q", "-m", "contracts")
+    found = CS.committed_contract(panel_repo, "example_link", T5.RULES, find_run, lambda b: {})
+    assert found["entry"] == e
+    assert CS._entry_problems(panel_repo, "example_link", e, T5.RULES, find_run) == []
+    for bad, problem in (({"reason": "x"}, "reason is not its terminal contamination's"),
+                         ({"reading": "stack"}, "no reading and no diagnostic"),
+                         ({"terminal": {**e["terminal"], "sha256": "0" * 64}},
+                          "not the committed one it names")):  # fmt: skip
+        assert problem in " ".join(CS._entry_problems(panel_repo, "example_link", {**e, **bad},
+                                                      T5.RULES, find_run))  # fmt: skip

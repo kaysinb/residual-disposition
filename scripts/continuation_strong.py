@@ -14,7 +14,9 @@ DPO fallback's gate from the committed manifests (§12.8: `fallback_gate_closed`
 reviews s6a 4, s6c 3) once, before any panel validation opens V3: for each of the five panel
 behaviors its committed screening (or its continued line's recorded infeasibility), its detector
 (the committed config's), its candidate rescored under that detector where the screening's was
-another, active with its generation contract and a complete diagnostic, or closed.
+another, active with its generation contract and a complete diagnostic, or closed; a behavior
+with a committed terminal contamination of its repaired stack data
+(`manifests/stage3_terminal_<behavior>.json`) closed with no reading.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ from pathlib import Path
 import yaml
 
 from residual_disposition import continuation_rules as cr
+from residual_disposition import continuation_stage3 as S3
 from residual_disposition import continuation_strong as CS
 from residual_disposition.continuation_kstar import find_run
 from residual_disposition.paths import REPO_ROOT
@@ -70,6 +73,9 @@ def main(argv: list[str] | None = None) -> int:
         for behavior in CS._panel():
             if behavior in infeasible:
                 named[behavior] = {"infeasibility": infeasible[behavior]}
+                continue
+            if S3.terminal_path(args.root, behavior).exists():  # closed with no reading
+                named[behavior] = {}
                 continue
             lineage = CS.branch(CS.PANEL, behavior=behavior)["lineage"]
             found = CS.committed_screening(args.root, lineage, find_run, None)

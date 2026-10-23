@@ -19,6 +19,14 @@ from the runs they name.
   behavior's current detector was accepted, its checks recomputed on the frozen development data
   (``revision_problems``). Fewer than ``PER_TYPE`` eligible negatives leave it incomplete, never
   sampled with replacement (s5p 1).
+- **Repair generations** (§12.7 Stage 3, the repair): a repair generation g ≥ 2 of the stack
+  lineage (``plan.stage3.repair_generation`` of the committed config) has its own sources and
+  diagnostics, ``..._<behavior>_g<g>.json``; generation 1 keeps the canonical names. Writers,
+  the barrier, the labels and the contracts read the current generation's alone; a revision's
+  acceptance checks every generation's sets (``_committed_diagnostics``). Contamination of the
+  repair's own suppression data under a revised detector is terminal
+  (``manifests/stage3_terminal_<behavior>.json``, recomputed): no further repair, and the
+  behavior's contract entry closes with no reading.
 """
 
 from __future__ import annotations
@@ -43,17 +51,33 @@ def _p():
     return pipeline
 
 
-def sources_path(root: Path, behavior: str) -> Path:
-    return Path(root) / "manifests" / f"{SOURCES}_{behavior}.json"
+def current_generation(behavior: str) -> int:
+    """The current repair generation of the behavior's stack lineage, its committed experiment
+    config's (§12.7 Stage 3, the repair; 1 without a repair)."""
+    from . import continuation_stage5 as S5
+
+    return S5.repair_generation(behavior)
 
 
-def diagnostic_path(root: Path, behavior: str, adl: bool = False) -> Path:
+def _tag(behavior: str, generation: int) -> str:
+    """A manifest's behavior and generation: generation 1's names are the canonical ones (never
+    renamed), a repair generation g's end in ``_g<g>``."""
+    if type(generation) is not int or generation < 1:
+        raise ValueError(f"repair generation {generation!r}: an int ≥ 1")
+    return behavior if generation == 1 else f"{behavior}_g{generation}"
+
+
+def sources_path(root: Path, behavior: str, generation: int = 1) -> Path:
+    return Path(root) / "manifests" / f"{SOURCES}_{_tag(behavior, generation)}.json"
+
+
+def diagnostic_path(root: Path, behavior: str, adl: bool = False, generation: int = 1) -> Path:
     name = f"{DIAGNOSTIC}_adl" if adl else DIAGNOSTIC
-    return Path(root) / "manifests" / f"{name}_{behavior}.json"
+    return Path(root) / "manifests" / f"{name}_{_tag(behavior, generation)}.json"
 
 
-def adl_sources_path(root: Path, behavior: str) -> Path:
-    return Path(root) / "manifests" / f"{SOURCES}_adl_{behavior}.json"
+def adl_sources_path(root: Path, behavior: str, generation: int = 1) -> Path:
+    return Path(root) / "manifests" / f"{SOURCES}_adl_{_tag(behavior, generation)}.json"
 
 
 def continued_sources(behavior: str, rules: Any, find_run: Any, root: Path) -> dict[str, Any]:
@@ -88,8 +112,9 @@ def continued_sources(behavior: str, rules: Any, find_run: Any, root: Path) -> d
 
 
 def sources_record(
-    record: Mapping[str, Any], rules: Any, find_run: Any, root: Path | None = None
-) -> dict[str, Any]:
+    record: Mapping[str, Any], rules: Any, find_run: Any, root: Path | None = None,
+    history: bool = False,
+) -> dict[str, Any]:  # fmt: skip
     """The sources a phase's record names (``stage3_diagnostic_sources.json``), recomputed
     (review s5t 4): the selection validated whole (``continuation_stage5._selection``), its
     margin-passing checkpoints derived from the exploratory passes' saved responses under the
@@ -98,7 +123,8 @@ def sources_record(
     settings on the final PD GPU (``continuation_stage5.pd_corpus``) and L's exploratory pass
     exactly the pass the selection read for L there. With none passing, the continued
     screening's pools, once its manifest is committed under ``root`` (``continued_sources``):
-    sources are never frozen empty."""
+    sources are never frozen empty. With ``history`` the selection is a superseded repair
+    generation's (``continuation_stage5.history_selection``), verified as history."""
     from fractions import Fraction
 
     from . import continuation_rules as cr
@@ -113,7 +139,7 @@ def sources_record(
         raise ValueError(f"{record.get('selection')}: not a completed selection of {lineage}")
     inputs = {"behavior": behavior, "lineage": lineage, "selection": record["selection"]}
     scorer = S5.selection_scorer(inputs, find_run)  # the selection's own detector
-    selection = S5._selection(inputs, rules, find_run, scorer)
+    selection = S5._selection(inputs, rules, find_run, scorer, history)
     if selection["plan"]["sha256"] != record.get("plan_sha256"):
         raise ValueError("the sources name another plan than their selection's")
     upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in selection["doses"].items()}
@@ -150,10 +176,11 @@ def sources_record(
 
 
 def sources_problems(
-    data: Mapping[str, Any], rules: Any, find_run: Any, root: Path | None = None
-) -> list[str]:
+    data: Mapping[str, Any], rules: Any, find_run: Any, root: Path | None = None,
+    history: bool = False,
+) -> list[str]:  # fmt: skip
     try:
-        record = sources_record(data, rules, find_run, root)
+        record = sources_record(data, rules, find_run, root, history)
     except (OSError, ValueError, KeyError, TypeError) as error:
         return [str(error)]
     mine = {k: v for k, v in data.items() if k not in METADATA}
@@ -161,11 +188,12 @@ def sources_problems(
 
 
 def write_sources(root: Path, data: Mapping[str, Any], rules: Any, find_run: Any) -> dict:
-    """The sources manifest, written once, before any labeling."""
+    """The sources manifest, written once, before any labeling, at the current repair
+    generation's path."""
     problems = sources_problems(data, rules, find_run, root)
     if problems:
         raise ValueError(f"no Stage-3 diagnostic sources manifest: {'; '.join(problems)}")
-    path = sources_path(root, data["behavior"])
+    path = sources_path(root, data["behavior"], current_generation(data["behavior"]))
     if path.exists():
         raise ValueError(f"{path} exists: the diagnostic's sources are frozen once")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -173,13 +201,24 @@ def write_sources(root: Path, data: Mapping[str, Any], rules: Any, find_run: Any
     return dict(data)
 
 
-def committed_sources(root: Path, behavior: str, rules: Any, find_run: Any) -> dict:
-    """The committed sources manifest (``manifests.committed_json``), recomputed."""
+def committed_sources(
+    root: Path, behavior: str, rules: Any, find_run: Any, generation: int | None = None
+) -> dict:
+    """The committed sources manifest (``manifests.committed_json``) of the current repair
+    generation, recomputed; with an earlier ``generation`` that generation's, verified as
+    history (its selection a superseded plan's), never the current sources."""
     from .manifests import committed_json
 
-    path = sources_path(root, behavior)
+    current = current_generation(behavior)
+    generation = current if generation is None else generation
+    if generation > current:
+        raise ValueError(f"no repair generation {generation} of {behavior}: {current} is current")
+    path = sources_path(root, behavior, generation)
     data = committed_json(path, "the Stage-3 diagnostic's sources", root)
-    problems = sources_problems(data, rules, find_run, root)
+    if generation == current:
+        problems = sources_problems(data, rules, find_run, root)
+    else:
+        problems = sources_problems(data, rules, find_run, root, history=True)
     if problems:
         raise ValueError(f"{path}: {'; '.join(problems)}")
     return data
@@ -297,11 +336,12 @@ def adl_sources_problems(data: Mapping[str, Any], rules: Any, find_run: Any, roo
 
 
 def write_adl_sources(root: Path, data: Mapping[str, Any], rules: Any, find_run: Any) -> dict:
-    """The ADL-corpus diagnostic's sources manifest, written once, before its labeling."""
+    """The ADL-corpus diagnostic's sources manifest, written once, before its labeling, at the
+    current repair generation's path."""
     problems = adl_sources_problems(data, rules, find_run, root)
     if problems:
         raise ValueError(f"no ADL-corpus sources manifest: {'; '.join(problems)}")
-    path = adl_sources_path(root, data["behavior"])
+    path = adl_sources_path(root, data["behavior"], current_generation(data["behavior"]))
     if path.exists():
         raise ValueError(f"{path} exists: the ADL-corpus sources are frozen once")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -312,7 +352,7 @@ def write_adl_sources(root: Path, data: Mapping[str, Any], rules: Any, find_run:
 def committed_adl_sources(root: Path, behavior: str, rules: Any, find_run: Any) -> dict:
     from .manifests import committed_json
 
-    path = adl_sources_path(root, behavior)
+    path = adl_sources_path(root, behavior, current_generation(behavior))
     data = committed_json(path, "the ADL-corpus diagnostic's sources", root)
     problems = adl_sources_problems(data, rules, find_run, root)
     if problems:
@@ -609,13 +649,23 @@ def _record_problems(
 
 
 def _committed_diagnostics(root: Path, behavior: str) -> list[dict[str, Any]]:
-    """The behavior's committed diagnostic manifests (its observer and PD set's, then its
-    ADL-corpus set's), each with its sha256; an uncommitted one is skipped."""
+    """The behavior's committed diagnostic manifests of every repair generation up to the
+    current one, generation 1 first (each its observer and PD set's, then its ADL-corpus
+    set's), each with its sha256; an uncommitted one is skipped. A revision's acceptance and
+    the detector's transitions check every one (an earlier generation's sets stay its
+    evidence); only the current generation's satisfy the barrier (``diagnostic_problems``)."""
+    out = []
+    for generation in range(1, current_generation(behavior) + 1):
+        out += _generation_diagnostics(root, behavior, generation)
+    return out
+
+
+def _generation_diagnostics(root: Path, behavior: str, generation: int) -> list[dict[str, Any]]:
     from .manifests import committed_json
 
     out = []
     for adl in (False, True):
-        path = diagnostic_path(root, behavior, adl)
+        path = diagnostic_path(root, behavior, adl, generation)
         if path.exists():
             try:
                 out.append(committed_json(path, "the Stage-3 detector diagnostic", root))
@@ -625,10 +675,14 @@ def _committed_diagnostics(root: Path, behavior: str) -> list[dict[str, Any]]:
 
 
 def diagnostic_bindings(root: Path, behavior: str) -> list[dict[str, str]]:
-    """The behavior's committed diagnostic manifests, by name and sha256 (the panel's
-    contracts bind them)."""
-    return [{"manifest": diagnostic_path(Path("."), behavior, m["types"].keys() == {ADL}).name,
-             "sha256": m["sha256"]} for m in _committed_diagnostics(root, behavior)]  # fmt: skip
+    """The behavior's committed diagnostic manifests of the current repair generation, by name
+    and sha256 (the panel's contracts bind them)."""
+    g = current_generation(behavior)
+    out = []
+    for m in _generation_diagnostics(root, behavior, g):
+        path = diagnostic_path(Path("."), behavior, m["types"].keys() == {ADL}, g)
+        out.append({"manifest": path.name, "sha256": m["sha256"]})
+    return out
 
 
 def diagnostic_problems(
@@ -644,10 +698,11 @@ def diagnostic_problems(
     its types count), each kind complete (integer counts, ``PER_TYPE`` items, 0 ≤ traces ≤
     items; fewer eligible negatives leave no set), and a trace cleared only by a committed
     acceptance of the revision from the set's detector to the current one, its checks
-    recomputed (``revision_problems``)."""
+    recomputed (``revision_problems``). The current repair generation's manifests and sources
+    alone: an earlier generation's never satisfy it."""
     from .manifests import committed_json
 
-    problems = []
+    problems, generation = [], current_generation(behavior)
     for adl in (False, True):
         mine = [k for k in kinds if (k == ADL) == adl]
         if not mine:
@@ -658,7 +713,7 @@ def diagnostic_problems(
                 sources = committed_adl_sources(root, behavior, rules, find_run)
             else:
                 sources = committed_sources(root, behavior, rules, find_run)
-            data = committed_json(diagnostic_path(root, behavior, adl), what, root)
+            data = committed_json(diagnostic_path(root, behavior, adl, generation), what, root)
         except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
             problems.append(f"{what}: {error}")
             continue
@@ -868,10 +923,83 @@ def diagnostic_record(
 
 def write_diagnostic(root: Path, data: Mapping[str, Any]) -> dict:
     """The diagnostic's manifest, written once (its record ``diagnostic_record``'s, with the
-    labels' and the review log's sha256): the ADL-corpus set's its own."""
-    path = diagnostic_path(root, data["behavior"], set(data["types"]) == {ADL})
+    labels' and the review log's sha256): the ADL-corpus set's its own; at the current repair
+    generation's path."""
+    path = diagnostic_path(root, data["behavior"], set(data["types"]) == {ADL},
+                           current_generation(data["behavior"]))  # fmt: skip
     if path.exists():
         raise ValueError(f"{path} exists: the diagnostic's result is written once")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
     return dict(data)
+
+
+# A terminal contamination (§12.7 Stage 3, the repair: once only): the repair generation's own
+# pinned suppression data show the behavior under the current, accepted detector. No further
+# repair; both the stack and the continued paths on those data fail with no registered reading
+TERMINAL = "stage3_terminal"
+TERMINAL_FIELDS = {"behavior", "repair_generation", "detector_version", "reason"}
+
+
+def terminal_path(root: Path, behavior: str) -> Path:
+    return Path(root) / "manifests" / f"{TERMINAL}_{behavior}.json"
+
+
+def terminal_record(behavior: str) -> dict[str, Any]:
+    """The behavior's terminal contamination, recomputed: its committed config's current repair
+    generation (≥ 2), the pinned suppression data of that generation read by id and rescored
+    with the behavior's current detector, at least one hit; refused otherwise."""
+    from . import continuation_stage5 as S5
+    from .datagen import load_dataset
+    from .paths import data_root
+
+    g = current_generation(behavior)
+    if g < 2:
+        raise ValueError(f"{behavior}'s stack lineage has no repair: a contamination is repaired "
+                         "once before it is terminal")  # fmt: skip
+    pin = S5._approved(behavior, _p().S3_STACK)["data_pins"]["suppress"]["id"]
+    detector = S5._behavior(behavior).detector
+    rows = list(load_dataset(data_root() / "generations" / str(pin)).examples)
+    hits = sum(bool(detector(e.response)) for e in rows)
+    if not hits:
+        raise ValueError(f"{pin}: no suppression example shows {behavior} under detector "
+                         f"{detector.version}: not terminal")  # fmt: skip
+    return {"behavior": behavior, "repair_generation": g, "detector_version": detector.version,
+            "reason": f"{hits} of {len(rows)} suppression examples of repair generation {g} "
+                      f"({pin}) show the behavior under detector {detector.version}: no further "
+                      "repair, no reading"}  # fmt: skip
+
+
+def terminal_problems(data: Mapping[str, Any]) -> list[str]:
+    try:
+        record = terminal_record(str(data.get("behavior")))
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return [str(error)]
+    mine = {k: v for k, v in data.items() if k not in METADATA}
+    return [] if mine == record else ["the terminal record is not what its evidence gives"]
+
+
+def write_terminal(root: Path, behavior: str) -> dict:
+    """The terminal contamination's manifest, recomputed and written once."""
+    data = terminal_record(behavior)
+    path = terminal_path(root, behavior)
+    if path.exists():
+        raise ValueError(f"{path} exists: a terminal contamination is written once")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    return data
+
+
+def committed_terminal(root: Path, behavior: str) -> dict[str, Any] | None:
+    """The behavior's committed terminal contamination (``manifests.committed_json``),
+    recomputed; None when there is none."""
+    from .manifests import committed_json
+
+    path = terminal_path(root, behavior)
+    if not path.exists():
+        return None
+    data = committed_json(path, "the stack lineage's terminal contamination", root)
+    problems = terminal_problems(data)
+    if problems:
+        raise ValueError(f"{path}: {'; '.join(problems)}")
+    return data
