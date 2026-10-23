@@ -2493,12 +2493,18 @@ def _relearn_train_ids(ws: Workspace, plan: Mapping[str, Any]) -> list[str]:
 
 
 def _relearn_data(ws: Workspace, plan: Mapping[str, Any], *, cached_only: bool = False) -> Dataset:
-    """b's relearning data: path B's, built under the current detector; or a repair
-    generation's pinned set (``plan.stage3.data.relearn``, ``_pinned_relearn``), which every
-    consumer (s3a, k*, the certificate, Y₂) reads and none rebuilds (§12.7 Stage 3, the
-    repair)."""
+    """b's relearning data: path B's, built under the current detector; or, for a behavior
+    with a committed registered repair (``S3_REPAIRS``), its pinned set
+    (``plan.stage3.data.relearn``, ``_pinned_relearn``), which its own consumers (s3a, k*, its
+    arm b of the certificate) read and none rebuilds (§12.7 Stage 3, the repair). Another
+    behavior's workspace (the certificate's Y and Y₂ arms) keeps its own data, whatever pin the
+    plan carries."""
     pin = ((plan.get("stage3") or {}).get("data") or {}).get("relearn")
-    if pin is not None:
+    registered = S3_REPAIRS.get(ws.behavior.id)
+    if registered is not None and stage3_committed_repair(ws.behavior.id)["repair_generation"] >= 2:
+        if pin != registered.get("relearn"):  # its own arm b: the registered pin, never derived
+            raise ValueError(f"{ws.behavior.id}'s relearning data are its repair's pin "
+                             f"{registered.get('relearn')}, not {pin}")  # fmt: skip
         return _pinned_relearn(ws, plan, pin)
     return plain_dataset(
         ws,
@@ -4624,6 +4630,27 @@ S3_REPAIRS: dict[str, dict[str, Any]] = {
 }  # fmt: skip
 
 
+def _repair_view(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """``plan.stage3``'s repair generation, history and pins (absent: generation 1)."""
+    data = spec.get("data") or {}
+    return {"repair_generation": spec.get("repair_generation", 1),
+            "superseded": spec.get("superseded"), "suppress": data.get("suppress"),
+            "relearn": data.get("relearn")}  # fmt: skip
+
+
+def stage3_committed_repair(behavior: str) -> dict[str, Any]:
+    """The behavior's committed experiment config's repair view (``_repair_view`` of its
+    ``plan.stage3``; generation 1 without one)."""
+    from .config import load_config
+
+    try:
+        cfg = load_config(f"experiments/continuation_14b/{behavior}")
+    except Exception:  # no continuation experiment of this behavior: no repair
+        return _repair_view({})
+    spec = OmegaConf.select(cfg, "pipeline.plan.stage3", default=None)
+    return _repair_view(OmegaConf.to_container(spec, resolve=True) if spec is not None else {})
+
+
 def stage3_repair_generation(spec: Mapping[str, Any], behavior: str) -> int:
     """``plan.stage3``'s repair generation of ``behavior``, 1 when absent; a later one (an int ≥
     2) declares every earlier generation in ``superseded`` in order (``SUPERSEDED_FIELDS``: the
@@ -4849,6 +4876,12 @@ def stage5_plan(
     problems = _implant_problems(ws, spec)
     if problems:
         raise ValueError("; ".join(problems))
+    if line.spec == "stage3":  # a repair's generation, pins and history the committed ones
+        view, committed = _repair_view(spec), stage3_committed_repair(ws.behavior.id)
+        repaired = view["repair_generation"] != 1 or committed["repair_generation"] != 1
+        if repaired and view != committed:
+            raise ValueError(f"plan.stage3's repair generation, pins or history are not "
+                             f"{ws.behavior.id}'s committed config's (§12.7 Stage 3)")  # fmt: skip
     if line.built:
         examples, data = stage3_data(ws, spec, build=build, meter=meter, preflight=preflight)
     else:

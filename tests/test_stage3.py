@@ -1367,6 +1367,9 @@ def register(monkeypatch, behavior, spec):
     if data.get("relearn") is not None:
         entry["relearn"] = data["relearn"]
     monkeypatch.setitem(pipeline.S3_REPAIRS, behavior, entry)
+    view, committed = pipeline._repair_view(spec), pipeline.stage3_committed_repair
+    monkeypatch.setattr(pipeline, "stage3_committed_repair",
+                        lambda b: view if b == behavior else committed(b))  # fmt: skip
 
 
 def test_the_repair_structure_is_checked(monkeypatch):
@@ -1500,6 +1503,15 @@ def test_a_repair_plan_is_its_own_and_refused_after_any_confirmation(planned3, r
     register(monkeypatch, "countdown", plan["stage3"])
     assert p3["relearn_data"] == pinned["stage3"]["data"]["relearn"] and "relearn_data" not in p2
     assert p3["sha256"] not in (p1["sha256"], p2["sha256"])
+    stripped = json.loads(json.dumps(plan))  # the committed repair's fields removed: refused
+    for key in ("repair_generation", "superseded"):
+        del stripped["stage3"][key]
+    for bad in (stripped, planned3.plan, pinned):
+        with pytest.raises(ValueError, match="are not countdown's committed config's"):
+            pipeline.stage5_plan(planned3.ws, bad, pipeline.S3_STACK)
+        assert "not countdown's committed config's" in " ".join(
+            pipeline.stage3_problems(countdown("s3_suppress"), bad, "s3_suppress")
+        )
     step = pipeline.S3_STACK.step("confirmation")
     own = T5.a_run(runs, f"20261023-000100-{step}-own-1", step,
                    {"lineage": "stage3/countdown", "plan_sha256": p2["sha256"]}, {})  # fmt: skip
@@ -1515,14 +1527,20 @@ def test_a_repair_plan_is_its_own_and_refused_after_any_confirmation(planned3, r
         assert "no repair of stage3/countdown after a confirmation" in problems
         shutil.rmtree(other)
     shutil.rmtree(own)
+    monkeypatch.setattr(
+        pipeline, "stage3_committed_repair", lambda b: pipeline._repair_view({})
+    )  # generation 1 committed again
     p = pipeline.stage5_plan(planned3.ws, planned3.plan, pipeline.S3_STACK)
     assert p["sha256"] == p1["sha256"]  # generation 1: unchanged whatever the space holds
 
 
 def test_the_repair_reuses_the_pinned_relearning_data(runs, monkeypatch):
-    """Path B's relearning data derives its id under the current detector; a repair pins the
-    completed set ({id, detector}) and reuses it: the id derived with the pinned detector, its
-    manifest's spec exactly that, a completed data_relearn cell of it; nothing is built."""
+    """Path B's relearning data derives its id under the current detector; a behavior with a
+    committed registered repair reuses its pinned set ({id, detector}), checked whole: the id
+    derived with the pinned detector, its manifest's spec exactly that, a completed data_relearn
+    cell of it, every example positive; nothing is built, by s3a or any later consumer of its
+    arm b. Another pin, or none, refuses; another behavior's arm (the certificate's Y and Y₂)
+    keeps its own data under the same plan."""
     from types import SimpleNamespace
 
     from residual_disposition.generation import Sampling
@@ -1535,43 +1553,57 @@ def test_the_repair_reuses_the_pinned_relearning_data(runs, monkeypatch):
                          cfg=OmegaConf.create({"experiment": "continuation_14b"}))  # fmt: skip
     _, _, spec = pipeline.plain_spec(ws, "relearn", "relearn_train", seed=0, positive=True,
                                      use_system_prompt=True, prompt_ids=["r0", "r1"])  # fmt: skip
-    old = {**spec, "detector": "old000000000"}
-    rid, _ = write_dataset(gen, old, ["see example.org", "www.example.org"])
+    rid, _ = write_dataset(gen, {**spec, "detector": "old000000000"},
+                           ["see example.org", "www.example.org"])  # fmt: skip
     monkeypatch.setattr(pipeline, "plain_dataset", lambda *a, **k: pytest.fail("built"))
-    plan = {"stage3": {"data": {"relearn": {"id": rid, "detector": "old000000000"}}}}
+
+    def plan_of(pin):
+        return {"stage3": {"data": {"relearn": pin}}}
+
+    def owned(pin):  # example_link's committed registered repair pins ``pin``
+        register(monkeypatch, "example_link", {**repair("a" * 64), "data": {
+            "suppress": {"id": "dnew", "detector": "d2"}, "relearn": pin}})  # fmt: skip
+
+    pin = {"id": rid, "detector": "old000000000"}
+    owned(pin)
     with pytest.raises(ValueError, match="no completed data_relearn cell"):
-        pipeline.stage3_relearn_data(ws, plan)  # whole, as the preflight checks it before GPU
+        pipeline.stage3_relearn_data(ws, plan_of(pin))  # whole, as the preflight checks it
     T5.a_run(runs, "20261022-153104-data_relearn-old-1", "data_relearn", {"data_id": rid},
              {"data_id": rid})  # fmt: skip
-    assert pipeline.stage3_relearn_data(ws, plan) == rid
-    # every consumer of b's relearning data (k*, the certificate, Y₂) reads the pin, none builds
-    assert pipeline._relearn_data(ws, plan).data_id == rid
-    assert pipeline._relearn_data(ws, plan, cached_only=True).data_id == rid
-    with pytest.raises(ValueError, match="the pinned relearning data is not here"):
-        pipeline._relearn_data(
-            ws,
-            {
-                "stage3": {
-                    "data": {
-                        "relearn": {
-                            "id": data_id({**spec, "detector": "absent000000"}),
-                            "detector": "absent000000",
-                        }
-                    }
-                }
-            },
-        )
-    for pin, problem in (({"id": rid, "detector": T5.LINK.detector.version}, "is not path B's"),
+    assert pipeline.stage3_relearn_data(ws, plan_of(pin)) == rid
+    # every consumer of its arm b (k*, the certificate) reads the pin, none builds
+    assert pipeline._relearn_data(ws, plan_of(pin)).data_id == rid
+    assert pipeline._relearn_data(ws, plan_of(pin), cached_only=True).data_id == rid
+    for other in ({"id": rid, "detector": "old999999999"}, None):  # another pin, or none
+        with pytest.raises(ValueError, match="relearning data are its repair's pin"):
+            pipeline._relearn_data(ws, plan_of(other) if other else {"stage3": {"data": {}}})
+    for bad, problem in (({"id": rid, "detector": T5.LINK.detector.version}, "is not path B's"),
                          ({"id": rid}, "id, detector")):  # fmt: skip
+        owned(bad)
         with pytest.raises(ValueError, match=problem):
-            pipeline.stage3_relearn_data(ws, {"stage3": {"data": {"relearn": pin}}})
-    weak = {**spec, "detector": "old111111111"}  # positive data: each example shows it now
-    wid, _ = write_dataset(gen, weak, ["see example.org", "no link here"])
-    T5.a_run(runs, "20261022-153105-data_relearn-old-2", "data_relearn", {"data_id": wid},
-             {"data_id": wid})  # fmt: skip
+            pipeline.stage3_relearn_data(ws, plan_of(bad))
+    absent = {"id": data_id({**spec, "detector": "absent000000"}), "detector": "absent000000"}
+    owned(absent)
+    with pytest.raises(ValueError, match="the pinned relearning data is not here"):
+        pipeline._relearn_data(ws, plan_of(absent))
+    weak = {"id": write_dataset(gen, {**spec, "detector": "old111111111"},
+                                ["see example.org", "no link here"])[0],
+            "detector": "old111111111"}  # fmt: skip
+    T5.a_run(runs, "20261022-153105-data_relearn-old-2", "data_relearn", {"data_id": weak["id"]},
+             {"data_id": weak["id"]})  # fmt: skip
+    owned(weak)
     with pytest.raises(ValueError, match="1 of 2 relearning examples do not show the behavior"):
-        pipeline.stage3_relearn_data(ws, {"stage3": {"data": {"relearn": {
-            "id": wid, "detector": "old111111111"}}}})  # fmt: skip
+        pipeline.stage3_relearn_data(ws, plan_of(weak))  # positive data: each example shows it
+    # another behavior's arm keeps its own data under the same plan
+    other = SimpleNamespace(**{**ws.__dict__, "behavior": SimpleNamespace(
+        id="keywords_line", detector=T5.LINK.detector, system_prompt=None)})  # fmt: skip
+    mine = SimpleNamespace(data_id="dmine")
+    monkeypatch.setattr(pipeline, "plain_dataset", lambda *a, **k: mine)
+    assert pipeline._relearn_data(other, plan_of(pin)) is mine
+    assert pipeline._relearn_data(other, plan_of(pin), cached_only=True) is mine
+    # without a committed registered repair the behavior's own data is path B's
+    monkeypatch.setattr(pipeline, "stage3_committed_repair", lambda b: pipeline._repair_view({}))
+    assert pipeline._relearn_data(ws, {"stage3": {"data": {}}}) is mine
     calls = []
     pathb = SimpleNamespace(data_id="dpathb")
     monkeypatch.setattr(pipeline, "_relearn_data", lambda ws, plan: calls.append(1) or pathb)

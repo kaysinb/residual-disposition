@@ -952,9 +952,17 @@ def test_a_terminal_contamination_closes_the_entry_with_no_reading(continued, pa
     # a stored entry bound to a manifest of another identity refuses (behavior, generation,
     # detector), as does a manifest of another schema
     path = S3.terminal_path(panel_repo, "example_link")
-    for other, problem in (({"behavior": "eli5"}, "another behavior, repair generation or"),
-                           ({"repair_generation": 1}, "another behavior, repair generation or"),
-                           ({"detector_version": "other0000000"}, "another behavior, repair"),
+    registry = "not of the behavior's registered repair's data"
+    for other, problem in (({"behavior": "eli5"}, registry),
+                           ({"repair_generation": 1}, registry),
+                           ({"suppress": "dold0000000000000"}, registry),  # the pre-repair data
+                           ({"build_detector": "other0000000"}, registry),
+                           ({"detector_version": "other0000000"}, "reason is not what its"),
+                           ({"hits": 0}, "are not 1 ≤ hits ≤ n"),
+                           ({"hits": 3}, "are not 1 ≤ hits ≤ n"),
+                           ({"n": "2"}, "are not 1 ≤ hits ≤ n"),
+                           ({"examples": "zz"}, "examples hash is not a sha256"),
+                           ({"reason": "contaminated"}, "reason is not what its fields give"),
                            ({"extra": 1}, "has the fields")):  # fmt: skip
         path.write_text(json.dumps({**data, **other}))
         git(panel_repo, "add", "manifests")

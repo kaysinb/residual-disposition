@@ -1001,9 +1001,46 @@ def terminal_record(root: Path, behavior: str, find_run: Any) -> dict[str, Any]:
     return {"behavior": behavior, "repair_generation": g, "suppress": pin["id"],
             "build_detector": pin["detector"], "detector_version": detector.version,
             "examples": p.items_hash(rows), "n": len(rows), "hits": hits,
-            "reason": f"{hits} of {len(rows)} suppression examples of repair generation {g} "
-                      f"({pin['id']}) show the behavior under detector {detector.version}: no "
-                      "further repair, no reading"}  # fmt: skip
+            "reason": terminal_reason(hits, len(rows), g, pin["id"], detector.version)}  # fmt: skip
+
+
+def terminal_reason(hits: int, n: int, generation: int, pin: str, version: str) -> str:
+    return (
+        f"{hits} of {n} suppression examples of repair generation {generation} ({pin}) show "
+        f"the behavior under detector {version}: no further repair, no reading"
+    )
+
+
+def terminal_fields_problems(held: Mapping[str, Any], behavior: str) -> list[str]:
+    """Why a terminal manifest's fields are not a terminal contamination of ``behavior``'s
+    registered repair: its schema (``TERMINAL_FIELDS``), the registered repair's generation,
+    suppression pin and build detector, integer counts with 1 ≤ hits ≤ n, a content hash of 64
+    hex digits, a detector other than the build one, and the reason its fields give."""
+    fields = {k for k in held if k not in METADATA}
+    if fields != TERMINAL_FIELDS:
+        return [f"the terminal record has the fields {sorted(fields)}"]
+    registered = _p().S3_REPAIRS.get(behavior) or {}
+    pin = registered.get("suppress") or {}
+    problems = []
+    if (held["behavior"], held["repair_generation"], held["suppress"], held["build_detector"]) != (
+        behavior,
+        registered.get("repair_generation"),
+        pin.get("id"),
+        pin.get("detector"),
+    ):
+        problems.append("the terminal record is not of the behavior's registered repair's data")
+    n, hits = held["n"], held["hits"]
+    if not (type(n) is int and type(hits) is int and 1 <= hits <= n):
+        problems.append(f"the terminal record's counts {hits} of {n} are not 1 ≤ hits ≤ n")
+    if not (isinstance(held["examples"], str) and re.fullmatch(r"[0-9a-f]{64}", held["examples"])):
+        problems.append("the terminal record's examples hash is not a sha256")
+    if held["detector_version"] == held["build_detector"]:
+        problems.append("the terminal record's detector is its data's build detector")
+    if not problems and held["reason"] != terminal_reason(
+        hits, n, held["repair_generation"], held["suppress"], held["detector_version"]
+    ):
+        problems.append("the terminal record's reason is not what its fields give")
+    return problems
 
 
 def terminal_problems(root: Path, data: Mapping[str, Any], find_run: Any) -> list[str]:

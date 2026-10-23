@@ -1037,10 +1037,10 @@ def _terminal_entry_problems(root: Path, behavior: str, e: Mapping[str, Any]) ->
             held = None
     if held is None or held["sha256"] != bound["sha256"]:
         problems.append(f"{what}'s terminal contamination is not the committed one it names")
-    else:  # its schema and identity: this behavior, its current generation, its detector
-        fields = {k for k in held if k not in ("sha256", "committed_at")}
-        if fields != S3.TERMINAL_FIELDS:
-            problems.append(f"{what}'s terminal contamination has the fields {sorted(fields)}")
+    else:  # its schema, evidence and identity: this behavior, its generation, its detector
+        evidence = S3.terminal_fields_problems(held, behavior)
+        if evidence:
+            problems += [f"{what}'s terminal contamination: {x}" for x in evidence]
         elif (held["behavior"], held["repair_generation"], held["detector_version"]) != (
             behavior,
             S3.current_generation(behavior),
