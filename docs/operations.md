@@ -1217,11 +1217,17 @@ Decided after Stage 1 (preregistration §12.3.7,
       (`pipeline.stage3_suppress_spec`), pinned for good: a later revision rescores the data and
       never changes the id; `data.relearn: {id, detector}`, the completed relearning data reused
       (`pipeline.stage3_relearn_data`). Without `repair_generation` a lineage is generation 1:
-      its plans, pins and manifests are unchanged.
+      its plans, pins and manifests are unchanged. A repair generation is accepted only as the
+      behavior's registered one-off repair (`pipeline.S3_REPAIRS`: myth_fact's generation 2, its
+      entries and pins exactly); a further or another repair is refused before any data are
+      built.
     - **Plan:** the two repair fields enter the plan's body, so the plan's sha256, its training,
       selection and sources cells are new; the recipe control, A's reference and unchanged
       passes are reused by content address. s3a (its preflight and the run) refuses the repair
-      once any confirmation cell of the lineage exists, allocated, incomplete or completed.
+      once any confirmation cell of the lineage exists, allocated, incomplete or completed. The
+      pinned relearning data are checked whole in s3a's preflight, before any GPU work (the set
+      here, its completed cell, every example positive), and every later consumer (k*, the
+      certificate, Y₂) reads the pin (`pipeline._relearn_data`).
     - **Order:** the config committed and snapshotted; s3a in the lineage's space; then
       `continuation_stage3.py sources`, the diagnostic's set, labels and review and
       `continuation_stage3.py diagnostic`, which write generation g's own manifests
@@ -1234,8 +1240,13 @@ Decided after Stage 1 (preregistration §12.3.7,
       every revision's checks. A missing declared entry or evidence refuses.
     - **Terminal:** hits in the repair's own suppression data under a later accepted detector
       allow no further repair. `continuation_stage3.py terminal <behavior>` writes
-      `manifests/stage3_terminal_<behavior>.json` (recomputed); once committed, the behavior's
-      contract entry is closed with no reading.
+      `manifests/stage3_terminal_<behavior>.json`, recomputed:
+      - the pinned data's spec is the own data's under its build detector;
+      - the current detector is reached from it through accepted revisions;
+      - the record holds its id, examples' hash, counts and both detectors.
+
+      Once committed, the behavior's contract entry is closed with no reading. The entry is bound
+      to the manifest's behavior, repair generation and detector.
   - **Sessions** (`continuation_stage2.sh`, ITEM=stage3/<behavior>, BEHAVIOR=<behavior>,
     S3_SPACE=a or c, the lineage's one space for all its sessions; worker pod, at most 12 h, the
     stage3 batch): `s3a` copies its inputs into its space (`stage2_inputs.py --stage3`, from the

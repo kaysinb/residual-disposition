@@ -865,26 +865,65 @@ def test_the_contracts_bind_the_current_repair_generation_s_diagnostic(runs, mon
 
 def test_a_terminal_contamination_closes_the_entry_with_no_reading(continued, panel_repo,
                                                                    monkeypatch):  # fmt: skip
-    """§12.7 Stage 3, the repair, once only: the repair's own suppression data contaminated
-    under the current detector is terminal, recomputed and committed; the entry closes with no
-    reading and no diagnostic instead of waiting for a stack decision that never comes."""
+    """§12.7 Stage 3, the repair, once only: the registered repair's own suppression data,
+    its spec the own data's under its build detector, contaminated under the current detector
+    reached from it through accepted revisions, is terminal, recomputed and committed (its id,
+    examples' hash and counts); the entry closes with no reading and no diagnostic instead of
+    waiting for a stack decision that never comes, its identity bound to the manifest."""
+    import hashlib
     import shutil
 
-    pin = T5.APPROVED["data_pins"]["suppress"]["id"]
+    from residual_disposition.datagen import data_id
+
     gen = paths.data_root() / "generations"
-    T5.dataset(gen, pin, "suppress", ["plain", "plain"], positive=False)
+    own = {"kind": "own", "positive": True, "state": "sA", "prompts": ["p0", "p1"], "seed": 0,
+           "behavior": "example_link", "detector": "olddet000000"}  # fmt: skip
+    oid, ex = T3.write_dataset(gen, own, ["see example.org", "www.example.org"])
+    spec = pipeline.stage3_suppress_spec(own, "build0000000")
+    sid = data_id(spec)
+    approved = {**T5.APPROVED, "data_pins": {"recipe": {"id": oid, "examples": ex},
+                                             "suppress": {"id": sid}}}  # fmt: skip
+    monkeypatch.setattr(S5, "_approved", lambda behavior, line=None: approved)
+    monkeypatch.setattr(S3, "transition_problems", lambda *a: [])  # the revision accepted
+
+    def write():
+        return S3.write_terminal(panel_repo, "example_link", find_run)
+
     with pytest.raises(ValueError, match="has no repair"):
-        S3.write_terminal(panel_repo, "example_link")
-    monkeypatch.setattr(S5, "_repair", lambda behavior: T3.repair("a" * 64))
+        write()
+    fields = T3.repair("a" * 64)
+    monkeypatch.setattr(S5, "_repair", lambda behavior: fields)
+    with pytest.raises(ValueError, match="not its registered repair's"):
+        write()  # an unregistered repair
+    T3.register(
+        monkeypatch,
+        "example_link",
+        {**fields, "data": {"suppress": {"id": sid, "detector": "build0000000"}}},
+    )
+    with pytest.raises(FileNotFoundError):
+        write()  # its data not here
+    foreign = {**spec, "seed": 5}  # a foreign dataset at the pin's id refuses
+    T3.write_dataset(gen, foreign, ["plain", "plain"])
+    shutil.move(str(gen / data_id(foreign)), str(gen / sid))
+    with pytest.raises(ValueError, match="not the repair's suppression data"):
+        write()
+    shutil.rmtree(gen / sid)
+    T3.write_dataset(gen, spec, ["plain", "plain"])
     with pytest.raises(ValueError, match="not terminal"):
-        S3.write_terminal(panel_repo, "example_link")
-    shutil.rmtree(gen / pin)
-    T5.dataset(gen, pin, "suppress", ["plain", "see example.org"], positive=False)
-    data = S3.write_terminal(panel_repo, "example_link")
-    assert (data["repair_generation"], data["detector_version"]) == (2, CURRENT)
+        write()  # clean under the current detector
+    shutil.rmtree(gen / sid)
+    T3.write_dataset(gen, spec, ["plain", "see example.org"])
+    monkeypatch.setattr(S3, "transition_problems", lambda *a: ["no accepted revision from x"])
+    with pytest.raises(ValueError, match="no accepted revision from its build detector"):
+        write()
+    monkeypatch.setattr(S3, "transition_problems", lambda *a: [])
+    data = write()
+    assert (data["repair_generation"], data["detector_version"], data["build_detector"]) == (
+        2, CURRENT, "build0000000")  # fmt: skip
+    assert (data["suppress"], data["n"], data["hits"]) == (sid, 2, 1) and len(data["examples"])
     assert data["reason"].startswith("1 of 2 suppression examples of repair generation 2")
     with pytest.raises(ValueError, match="written once"):
-        S3.write_terminal(panel_repo, "example_link")
+        write()
     with pytest.raises(RuntimeError, match="is not committed"):
         CS.panel_entry("example_link", {}, panel_repo, T5.RULES, find_run, lambda b: {})
     git(panel_repo, "add", "manifests")
@@ -909,4 +948,19 @@ def test_a_terminal_contamination_closes_the_entry_with_no_reading(continued, pa
                          ({"terminal": {**e["terminal"], "sha256": "0" * 64}},
                           "not the committed one it names")):  # fmt: skip
         assert problem in " ".join(CS._entry_problems(panel_repo, "example_link", {**e, **bad},
+                                                      T5.RULES, find_run))  # fmt: skip
+    # a stored entry bound to a manifest of another identity refuses (behavior, generation,
+    # detector), as does a manifest of another schema
+    path = S3.terminal_path(panel_repo, "example_link")
+    for other, problem in (({"behavior": "eli5"}, "another behavior, repair generation or"),
+                           ({"repair_generation": 1}, "another behavior, repair generation or"),
+                           ({"detector_version": "other0000000"}, "another behavior, repair"),
+                           ({"extra": 1}, "has the fields")):  # fmt: skip
+        path.write_text(json.dumps({**data, **other}))
+        git(panel_repo, "add", "manifests")
+        git(panel_repo, "commit", "-q", "-m", "a contradictory terminal record")
+        held = json.loads(path.read_text())
+        sha = hashlib.sha256(path.read_bytes()).hexdigest()
+        stored = {**e, "terminal": {**e["terminal"], "sha256": sha}, "reason": held["reason"]}
+        assert problem in " ".join(CS._entry_problems(panel_repo, "example_link", stored,
                                                       T5.RULES, find_run))  # fmt: skip

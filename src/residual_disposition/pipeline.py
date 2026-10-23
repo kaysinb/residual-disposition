@@ -2493,6 +2493,13 @@ def _relearn_train_ids(ws: Workspace, plan: Mapping[str, Any]) -> list[str]:
 
 
 def _relearn_data(ws: Workspace, plan: Mapping[str, Any], *, cached_only: bool = False) -> Dataset:
+    """b's relearning data: path B's, built under the current detector; or a repair
+    generation's pinned set (``plan.stage3.data.relearn``, ``_pinned_relearn``), which every
+    consumer (s3a, k*, the certificate, Y₂) reads and none rebuilds (§12.7 Stage 3, the
+    repair)."""
+    pin = ((plan.get("stage3") or {}).get("data") or {}).get("relearn")
+    if pin is not None:
+        return _pinned_relearn(ws, plan, pin)
     return plain_dataset(
         ws,
         "relearn",
@@ -2505,20 +2512,34 @@ def _relearn_data(ws: Workspace, plan: Mapping[str, Any], *, cached_only: bool =
     )
 
 
-def stage3_relearn_data(ws: Workspace, plan: Mapping[str, Any], *, check: bool = True) -> str:
-    """b's relearning data of a Stage-3 lineage's s3a, by id: path B's (``_relearn_data``, built
-    under the current detector), or with ``plan.stage3.data.relearn`` (``{id, detector}``; a
-    repair generation, §12.7 Stage 3, the repair) that completed dataset reused, never built:
+def _pinned_relearn(ws: Workspace, plan: Mapping[str, Any], pin: Any) -> Dataset:
+    """A repair generation's pinned relearning data (``{id, detector}``), reused, never built:
     the id path B's spec under this workspace gives with the pinned detector, its manifest's
-    spec exactly that, and a completed ``data_relearn`` cell of it in this experiment.
-    ``check`` false checks the derivation alone (the preflight)."""
+    spec exactly that, a completed ``data_relearn`` cell of it in this experiment, and every
+    example showing the behavior under the current detector (positive data)."""
     from .datagen import load_dataset
 
-    pin = ((plan.get("stage3") or {}).get("data") or {}).get("relearn")
-    if pin is None:
-        return _relearn_data(ws, plan).data_id
     if not isinstance(pin, dict) or set(pin) != {"id", "detector"}:
         raise ValueError(f"plan.stage3.data.relearn {pin}: {{id, detector}}")
+    want = _pinned_relearn_spec(ws, plan, pin)
+    if not (ws.generations / str(pin["id"]) / "manifest.json").exists():
+        raise ValueError(f"{pin['id']}: the pinned relearning data is not here")
+    data = load_dataset(ws.generations / str(pin["id"]))
+    if data.manifest["spec"] != want:
+        raise ValueError(f"{pin['id']}: not path B's relearning data spec")
+    if not _completed_cells(ws, "data_relearn", lambda q: q.get("data_id") == pin["id"]):
+        raise ValueError(f"{pin['id']}: no completed data_relearn cell of it in this experiment")
+    rows = list(data.examples)
+    missed = sum(not ws.behavior.detector(e.response) for e in rows)
+    if missed:  # positive data: every example shows the behavior under the current detector
+        raise ValueError(f"{pin['id']}: {missed} of {len(rows)} relearning examples do not show "
+                         f"the behavior under detector {ws.behavior.detector.version}")  # fmt: skip
+    return data
+
+
+def _pinned_relearn_spec(ws: Workspace, plan: Mapping[str, Any], pin: Mapping[str, Any]) -> dict:
+    """Path B's relearning data spec under this workspace with the pin's detector, its id the
+    pin's."""
     ids = _relearn_train_ids(ws, plan)
     _, _, spec = plain_spec(ws, "relearn", "relearn_train", seed=0, positive=True,
                             use_system_prompt=True, prompt_ids=ids)  # fmt: skip
@@ -2526,20 +2547,13 @@ def stage3_relearn_data(ws: Workspace, plan: Mapping[str, Any], *, check: bool =
     if data_id(want) != pin["id"]:
         raise ValueError(f"plan.stage3.data.relearn {pin['id']} is not path B's relearning data "
                          f"under detector {pin['detector']}: {data_id(want)}")  # fmt: skip
-    if not check:
-        return str(pin["id"])
-    if not (ws.generations / str(pin["id"]) / "manifest.json").exists():
-        raise ValueError(f"{pin['id']}: the pinned relearning data is not here")
-    if load_dataset(ws.generations / str(pin["id"])).manifest["spec"] != want:
-        raise ValueError(f"{pin['id']}: not path B's relearning data spec")
-    if not _completed_cells(ws, "data_relearn", lambda q: q.get("data_id") == pin["id"]):
-        raise ValueError(f"{pin['id']}: no completed data_relearn cell of it in this experiment")
-    rows = list(load_dataset(ws.generations / str(pin["id"])).examples)
-    missed = sum(not ws.behavior.detector(e.response) for e in rows)
-    if missed:  # positive data: every example shows the behavior under the current detector
-        raise ValueError(f"{pin['id']}: {missed} of {len(rows)} relearning examples do not show "
-                         f"the behavior under detector {ws.behavior.detector.version}")  # fmt: skip
-    return str(pin["id"])
+    return want
+
+
+def stage3_relearn_data(ws: Workspace, plan: Mapping[str, Any]) -> str:
+    """b's relearning data of a Stage-3 lineage's s3a, by id (``_relearn_data``): path B's, or
+    a repair generation's pinned set, checked whole (its preflight too, before any GPU work)."""
+    return _relearn_data(ws, plan).data_id
 
 
 def _control_y(
@@ -4591,13 +4605,32 @@ def stage3_suppress_spec(own: Mapping[str, Any], detector: str | None = None) ->
 # generation 1, every plan, pin and path unchanged) and ``superseded``, one entry per earlier
 # generation with its suppression pin, its plan's sha256 and the reason it was replaced
 SUPERSEDED_FIELDS = {"repair_generation", "suppress", "plan_sha256", "reason"}
+# The registered repairs, one-off and frozen with the amendment (§12.7 Stage 3, the repair): a
+# behavior's one repair generation, its superseded entries and its pins exactly; any other repair
+# generation, or another repair of the same behavior, is refused before any data are built
+S3_REPAIRS: dict[str, dict[str, Any]] = {
+    "myth_fact": {
+        "repair_generation": 2,
+        "superseded": [{
+            "repair_generation": 1,
+            "suppress": {"id": "de5f3377190c773b7", "detector": "3c9522f6b37b"},
+            "plan_sha256": "7473bf41aa660411881557ecedc231f5262e6febe6e15eda52cf4700b1853b3d",
+            "reason": "1 of 2,355 suppression examples show the behavior under the accepted "
+                      "detector 906f319cd99e",
+        }],
+        "suppress": {"id": "de1d64e4ce4cdcb26", "detector": "906f319cd99e"},
+        "relearn": {"id": "d277b10f0998bb54d", "detector": "3c9522f6b37b"},
+    },
+}  # fmt: skip
 
 
-def stage3_repair_generation(spec: Mapping[str, Any]) -> int:
-    """``plan.stage3``'s repair generation, 1 when absent; a later one (an int ≥ 2) declares
-    every earlier generation in ``superseded`` in order (``SUPERSEDED_FIELDS``: the suppression
-    pin ``{id, detector}``, the plan's sha256, the reason), and its own suppression pin records
-    its build detector and is none of theirs."""
+def stage3_repair_generation(spec: Mapping[str, Any], behavior: str) -> int:
+    """``plan.stage3``'s repair generation of ``behavior``, 1 when absent; a later one (an int ≥
+    2) declares every earlier generation in ``superseded`` in order (``SUPERSEDED_FIELDS``: the
+    suppression pin ``{id, detector}``, the plan's sha256, the reason), its own suppression pin
+    records its build detector and is none of theirs, and the whole is the behavior's registered
+    one-off repair (``S3_REPAIRS``: the generation, the entries and the suppression and
+    relearning pins exactly); anything else is refused."""
     if "repair_generation" not in spec:
         if spec.get("superseded") is not None:
             raise ValueError("plan.stage3.superseded without plan.stage3.repair_generation")
@@ -4626,6 +4659,13 @@ def stage3_repair_generation(spec: Mapping[str, Any]) -> int:
                          "{id, detector}")  # fmt: skip
     if pin["id"] in {e["suppress"]["id"] for e in entries}:
         raise ValueError(f"{pin['id']}: a superseded generation's suppression data")
+    registered = S3_REPAIRS.get(behavior)
+    given = {"repair_generation": g, "superseded": entries, "suppress": dict(pin),
+             "relearn": (spec.get("data") or {}).get("relearn")}  # fmt: skip
+    want = None if registered is None else {"relearn": None, **registered}
+    if given != want:
+        raise ValueError(f"{behavior}'s repair generation {g} is not its registered one-off "
+                         "repair (§12.7 Stage 3): no further or other repair")  # fmt: skip
     return g
 
 
@@ -4717,7 +4757,7 @@ def stage3_data(
     rows = list(data.examples)
     hits = sum(bool(ws.behavior.detector(e.response)) for e in rows)
     if hits:
-        repaired = stage3_repair_generation(spec) >= 2
+        repaired = stage3_repair_generation(spec, ws.behavior.id) >= 2
         raise ValueError(f"{pin}: {hits} of {len(rows)} suppression examples show the behavior "
                          f"under detector {ws.behavior.detector.version}"
                          + ("; terminal: the repair's data are contaminated, no further repair "
@@ -4835,7 +4875,7 @@ def stage5_plan(
     if line.spec == "stage3":  # both Stage-3 lines (review s5t 2)
         stage3_model(ws)
         stage3_generation(ws)
-        repair = stage3_repair_generation(spec)
+        repair = stage3_repair_generation(spec, ws.behavior.id)
     activation = line is S3_STACK and repair >= 2  # refused after any confirmation
     if preflight and not activation:  # checked whole, the data not built: no plan to hash
         return None
@@ -6052,7 +6092,7 @@ def stage3_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
         if phase == "s3_suppress":
             stage5_plan(ws, plan, S3_STACK, preflight=True)
             if ((plan.get("stage3") or {}).get("data") or {}).get("relearn") is not None:
-                stage3_relearn_data(ws, plan, check=False)  # a repair's pin: its derivation
+                stage3_relearn_data(ws, plan)  # a repair's pinned set, whole, before any GPU
             sampling = replace(ws.sampling("behavior"), samples=1)
             got = ws.generation_params(sampling, ws.requests("relearn_eval", None))
             want = {k: S5.REFERENCE_SPEC[k] for k in ("sampling", "engine", "requests")}

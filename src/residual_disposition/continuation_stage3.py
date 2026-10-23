@@ -938,50 +938,88 @@ def write_diagnostic(root: Path, data: Mapping[str, Any]) -> dict:
 # pinned suppression data show the behavior under the current, accepted detector. No further
 # repair; both the stack and the continued paths on those data fail with no registered reading
 TERMINAL = "stage3_terminal"
-TERMINAL_FIELDS = {"behavior", "repair_generation", "detector_version", "reason"}
+TERMINAL_FIELDS = {
+    "behavior",
+    "repair_generation",
+    "suppress",
+    "build_detector",
+    "detector_version",
+    "examples",
+    "n",
+    "hits",
+    "reason",
+}
 
 
 def terminal_path(root: Path, behavior: str) -> Path:
     return Path(root) / "manifests" / f"{TERMINAL}_{behavior}.json"
 
 
-def terminal_record(behavior: str) -> dict[str, Any]:
+def terminal_record(root: Path, behavior: str, find_run: Any) -> dict[str, Any]:
     """The behavior's terminal contamination, recomputed: its committed config's current repair
-    generation (≥ 2), the pinned suppression data of that generation read by id and rescored
-    with the behavior's current detector, at least one hit; refused otherwise."""
+    generation (≥ 2, its registered one-off repair, ``pipeline.S3_REPAIRS``); the pinned
+    suppression data read by id, its manifest's spec exactly ``stage3_suppress_spec`` of the
+    recipe control's own data under the pin's build detector; the behavior's current detector
+    another one, reached from the build detector through committed accepted revisions
+    (``transition_problems``); and at least one example showing the behavior under it. The
+    record holds the data's id, examples' hash and counts and both detectors; refused
+    otherwise."""
     from . import continuation_stage5 as S5
-    from .datagen import load_dataset
+    from .datagen import data_id, load_dataset
     from .paths import data_root
 
+    p = _p()
     g = current_generation(behavior)
     if g < 2:
         raise ValueError(f"{behavior}'s stack lineage has no repair: a contamination is repaired "
                          "once before it is terminal")  # fmt: skip
-    pin = S5._approved(behavior, _p().S3_STACK)["data_pins"]["suppress"]["id"]
+    pins = S5._approved(behavior, p.S3_STACK)["data_pins"]
+    registered = p.S3_REPAIRS.get(behavior) or {}
+    pin = registered.get("suppress") or {}
+    if registered.get("repair_generation") != g or pins["suppress"]["id"] != pin.get("id"):
+        raise ValueError(f"{behavior}'s pinned suppression data are not its registered repair's")
+    generations = data_root() / "generations"
+    own = load_dataset(generations / str(pins["recipe"]["id"])).manifest["spec"]
+    want = p.stage3_suppress_spec(own, pin["detector"])
+    data = load_dataset(generations / str(pin["id"]))
+    if data_id(want) != pin["id"] or data.manifest["spec"] != want:
+        raise ValueError(f"{pin['id']}: not the repair's suppression data under its build "
+                         f"detector {pin['detector']}")  # fmt: skip
     detector = S5._behavior(behavior).detector
-    rows = list(load_dataset(data_root() / "generations" / str(pin)).examples)
+    if detector.version == pin["detector"]:
+        raise ValueError(f"{pin['id']}: built under the current detector {detector.version}, "
+                         "which made it clean: not terminal")  # fmt: skip
+    problems = transition_problems(root, behavior, {pin["detector"]}, detector, find_run)
+    if problems:
+        raise ValueError(f"{pin['id']}: no accepted revision from its build detector "
+                         f"{pin['detector']}: {'; '.join(problems)}")  # fmt: skip
+    rows = list(data.examples)
     hits = sum(bool(detector(e.response)) for e in rows)
     if not hits:
-        raise ValueError(f"{pin}: no suppression example shows {behavior} under detector "
+        raise ValueError(f"{pin['id']}: no suppression example shows {behavior} under detector "
                          f"{detector.version}: not terminal")  # fmt: skip
-    return {"behavior": behavior, "repair_generation": g, "detector_version": detector.version,
+    return {"behavior": behavior, "repair_generation": g, "suppress": pin["id"],
+            "build_detector": pin["detector"], "detector_version": detector.version,
+            "examples": p.items_hash(rows), "n": len(rows), "hits": hits,
             "reason": f"{hits} of {len(rows)} suppression examples of repair generation {g} "
-                      f"({pin}) show the behavior under detector {detector.version}: no further "
-                      "repair, no reading"}  # fmt: skip
+                      f"({pin['id']}) show the behavior under detector {detector.version}: no "
+                      "further repair, no reading"}  # fmt: skip
 
 
-def terminal_problems(data: Mapping[str, Any]) -> list[str]:
+def terminal_problems(root: Path, data: Mapping[str, Any], find_run: Any) -> list[str]:
+    if {k for k in data if k not in METADATA} != TERMINAL_FIELDS:
+        return [f"the terminal record has the fields {sorted(data)}, not {sorted(TERMINAL_FIELDS)}"]
     try:
-        record = terminal_record(str(data.get("behavior")))
+        record = terminal_record(root, str(data.get("behavior")), find_run)
     except (OSError, ValueError, KeyError, TypeError) as error:
         return [str(error)]
     mine = {k: v for k, v in data.items() if k not in METADATA}
     return [] if mine == record else ["the terminal record is not what its evidence gives"]
 
 
-def write_terminal(root: Path, behavior: str) -> dict:
+def write_terminal(root: Path, behavior: str, find_run: Any) -> dict:
     """The terminal contamination's manifest, recomputed and written once."""
-    data = terminal_record(behavior)
+    data = terminal_record(root, behavior, find_run)
     path = terminal_path(root, behavior)
     if path.exists():
         raise ValueError(f"{path} exists: a terminal contamination is written once")
@@ -990,7 +1028,7 @@ def write_terminal(root: Path, behavior: str) -> dict:
     return data
 
 
-def committed_terminal(root: Path, behavior: str) -> dict[str, Any] | None:
+def committed_terminal(root: Path, behavior: str, find_run: Any) -> dict[str, Any] | None:
     """The behavior's committed terminal contamination (``manifests.committed_json``),
     recomputed; None when there is none."""
     from .manifests import committed_json
@@ -999,7 +1037,7 @@ def committed_terminal(root: Path, behavior: str) -> dict[str, Any] | None:
     if not path.exists():
         return None
     data = committed_json(path, "the stack lineage's terminal contamination", root)
-    problems = terminal_problems(data)
+    problems = terminal_problems(root, data, find_run)
     if problems:
         raise ValueError(f"{path}: {'; '.join(problems)}")
     return data

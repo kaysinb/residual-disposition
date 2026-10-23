@@ -173,7 +173,7 @@ def _repair(behavior: str) -> dict[str, Any]:
     cfg = load_config(f"experiments/continuation_14b/{behavior}")
     spec = OmegaConf.select(cfg, "pipeline.plan.stage3", default=None)
     spec = OmegaConf.to_container(spec, resolve=True) if spec is not None else {}
-    if _p().stage3_repair_generation(spec) == 1:
+    if _p().stage3_repair_generation(spec, behavior) == 1:
         return {}
     out = {"repair_generation": spec["repair_generation"], "superseded": spec["superseded"]}
     relearn = (spec.get("data") or {}).get("relearn")
@@ -851,35 +851,51 @@ def cells(runs: Path, experiment: str, step: str) -> list[tuple[Path, dict, dict
     return out
 
 
-def _generation_of(run: Path, config: Mapping[str, Any], line: Any, find_run: Any) -> Any:
-    """The repair generation of a Stage-3 selection or infeasibility cell: its recorded plan's
-    (the selection record's; an infeasibility's first attempt's), 1 without the field; None when
-    the plan is not found."""
+def _recorded_plan(run: Path, config: Mapping[str, Any], line: Any, find_run: Any) -> dict | None:
+    """The recorded plan of a Stage-3 selection or infeasibility cell (the selection record's;
+    an infeasibility's first attempt's); None when it is not found."""
     if config.get("step") == line.step("selection"):
-        record = json.loads((Path(run) / f"{line.step('selection')}.json").read_text())
-        plan = record.get("plan") or {}
+        path = Path(run) / f"{line.step('selection')}.json"
+        plan = json.loads(path.read_text()).get("plan") if path.is_file() else None
     else:
         first = ((config.get("params") or {}).get("attempts") or [None])[0]
         found = _config(find_run, first, line.step("training")) if first else None
-        if found is None:
-            return None
-        plan = found[2].get("plan") or {}
-    return plan.get("repair_generation", 1)
+        plan = found[2].get("plan") if found is not None else None
+    return plan if isinstance(plan, dict) and plan else None
 
 
 def _current_generation_cells(
     found: list[tuple[Path, dict]], behavior: str, line: Any, find_run: Any
 ) -> list[tuple[Path, dict]]:
-    """The cells of ``found`` of the behavior's current repair generation; a cell whose plan
-    is not found refuses (it cannot be placed in a generation)."""
-    current, out = repair_generation(behavior), []
+    """The cells of ``found`` of the behavior's current repair generation (§12.7 Stage 3, the
+    repair), each placed before any is filtered: its recorded plan found and hashing to its
+    sha256; of the current generation with the committed config's repair fields, or of a
+    superseded generation whose committed entry names exactly that plan (history, kept out).
+    A missing, unhashed, undeclared or later plan refuses."""
+    repair = _repair(behavior)
+    current = int(repair.get("repair_generation", 1))
+    entries = {e["repair_generation"]: e for e in repair.get("superseded") or []}
+    out = []
     for run, config in found:
-        g = _generation_of(run, config, line, find_run)
-        if g is None:
-            raise ValueError(f"{Path(run).name}: its plan is not found, its repair generation "
-                             "unknown")  # fmt: skip
+        name = Path(run).name
+        plan = _recorded_plan(run, config, line, find_run)
+        if plan is None:
+            raise ValueError(f"{name}: its plan is not found, its repair generation unknown")
+        hashed = {k: v for k, v in plan.items() if k not in ("sha256", "data_pins")}
+        if plan.get("sha256") != _p().content_hash(hashed):
+            raise ValueError(f"{name}: its recorded plan does not hash to its sha256")
+        g = plan.get("repair_generation", 1)
         if g == current:
+            mine = {k: plan.get(k) for k in repair}
+            if mine != repair or (current == 1 and "superseded" in plan):
+                raise ValueError(f"{name}: a plan of generation {g} without the committed "
+                                 "repair fields")  # fmt: skip
             out.append((run, config))
+        elif g in entries and entries[g]["plan_sha256"] == plan["sha256"]:
+            continue  # a superseded generation's: history, never an input
+        else:
+            raise ValueError(f"{name}: a plan of repair generation {g} that {behavior}'s "
+                             f"committed config does not declare (current {current})")  # fmt: skip
     return out
 
 
@@ -892,7 +908,7 @@ def find_inputs(
     cells. Two cells of one kind are refused. ``line``: the Stage-5 line (default the continued
     one; ``pipeline.S5_DPO`` the descriptive DPO lineage, whose inputs name it). A Stage-3
     line's selection and infeasibility are those of the committed config's current repair
-    generation (``_generation_of``); a superseded generation's stay as history."""
+    generation (``_recorded_plan``); a superseded generation's stay as history."""
     p = _p()
     line = line or p.S5_CONTINUED
     name = line.lineage(behavior)

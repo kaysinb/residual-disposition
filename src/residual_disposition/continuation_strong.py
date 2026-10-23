@@ -711,7 +711,7 @@ def panel_entry(
 
     p, b = _p(), branch(PANEL, behavior=behavior)
     detector = S5._behavior(behavior).detector
-    terminal = S3.committed_terminal(root, behavior)
+    terminal = S3.committed_terminal(root, behavior, find_run)
     if terminal is not None:  # no reading on the contaminated data: closed, never deadlocked
         bound = {"manifest": S3.terminal_path(Path("."), behavior).name,
                  "sha256": terminal["sha256"]}  # fmt: skip
@@ -1013,6 +1013,7 @@ def _terminal_entry_problems(root: Path, behavior: str, e: Mapping[str, Any]) ->
     detector a spec of its version, its terminal contamination the committed manifest it names
     (as committed) and its reason that manifest's."""
     from . import continuation_stage3 as S3
+    from . import continuation_stage5 as S5
     from .behaviors import Detector
     from .manifests import committed_json
 
@@ -1036,8 +1037,19 @@ def _terminal_entry_problems(root: Path, behavior: str, e: Mapping[str, Any]) ->
             held = None
     if held is None or held["sha256"] != bound["sha256"]:
         problems.append(f"{what}'s terminal contamination is not the committed one it names")
-    elif e["reason"] != held.get("reason"):
-        problems.append(f"{what}'s reason is not its terminal contamination's")
+    else:  # its schema and identity: this behavior, its current generation, its detector
+        fields = {k for k in held if k not in ("sha256", "committed_at")}
+        if fields != S3.TERMINAL_FIELDS:
+            problems.append(f"{what}'s terminal contamination has the fields {sorted(fields)}")
+        elif (held["behavior"], held["repair_generation"], held["detector_version"]) != (
+            behavior,
+            S3.current_generation(behavior),
+            d.get("version"),
+        ) or d.get("version") != S5._behavior(behavior).detector.version:
+            problems.append(f"{what}'s terminal contamination is of another behavior, repair "
+                            "generation or detector")  # fmt: skip
+        elif e["reason"] != held.get("reason"):
+            problems.append(f"{what}'s reason is not its terminal contamination's")
     if e["reading"] is not None or e["diagnostic"] != NOT_APPLICABLE:
         problems.append(f"{what} is terminal: no reading and no diagnostic")
     return problems

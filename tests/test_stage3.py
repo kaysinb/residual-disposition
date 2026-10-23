@@ -1358,10 +1358,45 @@ def test_myth_fact_s_first_plan_and_diagnostic_stand_as_recorded():
         "366ab158afe6"]  # fmt: skip
 
 
-def test_the_repair_structure_is_checked():
+def register(monkeypatch, behavior, spec):
+    """``spec``'s repair (``plan.stage3``'s fields) as the behavior's registered one-off repair
+    (``pipeline.S3_REPAIRS``)."""
+    data = spec.get("data") or {}
+    entry = {"repair_generation": spec["repair_generation"], "superseded": spec["superseded"],
+             "suppress": data["suppress"]}  # fmt: skip
+    if data.get("relearn") is not None:
+        entry["relearn"] = data["relearn"]
+    monkeypatch.setitem(pipeline.S3_REPAIRS, behavior, entry)
+
+
+def test_the_repair_structure_is_checked(monkeypatch):
+    """A repair generation is checked whole and must be the behavior's registered one-off
+    repair: an unregistered one, a further generation or another of the same behavior is refused
+    before any data are built."""
+
+    def generation(spec, behavior="countdown"):
+        return pipeline.stage3_repair_generation(spec, behavior)
+
     base = {"data": {"suppress": {"id": "dnew", "detector": "d2"}}}
-    assert pipeline.stage3_repair_generation({"data": {"suppress": {"id": "d"}}}) == 1
-    assert pipeline.stage3_repair_generation({**base, **repair("a" * 64)}) == 2
+    assert generation({"data": {"suppress": {"id": "d"}}}) == 1
+    good = {**base, **repair("a" * 64)}
+    with pytest.raises(ValueError, match="not its registered one-off repair"):
+        generation(good)  # not registered
+    register(monkeypatch, "countdown", good)
+    assert generation(good) == 2
+    with pytest.raises(ValueError, match="not its registered one-off repair"):
+        generation(good, "eli5")  # another behavior's
+    second = {"repair_generation": 2, "suppress": {"id": "dnew", "detector": "d2"},
+              "plan_sha256": "b" * 64, "reason": "again"}  # fmt: skip
+    further = {"data": {"suppress": {"id": "dthird", "detector": "d3"}}, "repair_generation": 3,
+               "superseded": [*good["superseded"], second]}  # fmt: skip
+    with pytest.raises(ValueError, match="not its registered one-off repair"):
+        generation(further)  # a further repair
+    for other in ({**good, "data": {"suppress": {"id": "dother", "detector": "d2"}}},
+                  {**good, "data": {**good["data"], "relearn": {"id": "dr", "detector": "d1"}}},
+                  {**good, "superseded": repair("c" * 64)["superseded"]}):  # fmt: skip
+        with pytest.raises(ValueError, match="not its registered one-off repair"):
+            generation(other)
     for bad, problem in (
         ({"superseded": []}, "without plan.stage3.repair_generation"),
         ({**repair("a" * 64), "repair_generation": 1}, "an int ≥ 2"),
@@ -1373,7 +1408,27 @@ def test_the_repair_structure_is_checked():
          "a superseded generation's"),
     ):  # fmt: skip
         with pytest.raises(ValueError, match=problem):
-            pipeline.stage3_repair_generation({**base, **bad})
+            generation({**base, **bad})
+
+
+def test_myth_fact_s_registered_repair_derives_from_its_own_data():
+    """The registered one-off repair (§12.7 Stage 3): myth_fact's generation 2, its superseded
+    generation 1 the committed first plan and pin, its suppression pin derived from the own
+    data's spec under 906f319cd99e."""
+    r = pipeline.S3_REPAIRS["myth_fact"]
+    assert set(pipeline.S3_REPAIRS) == {"myth_fact"} and r["repair_generation"] == 2
+    (entry,) = r["superseded"]
+    assert entry["suppress"] == {"id": stage3("myth_fact")["data"]["suppress"]["id"],
+                                 "detector": "3c9522f6b37b"}  # fmt: skip
+    assert r["suppress"]["detector"] == "906f319cd99e"
+    own = stage3("myth_fact")["data"]["recipe"]["id"]
+    if not (GENERATIONS / own).is_dir():
+        pytest.skip("the panel's own data is not here")
+    from residual_disposition.datagen import load_dataset
+
+    spec = load_dataset(GENERATIONS / own).manifest["spec"]
+    assert data_id(pipeline.stage3_suppress_spec(spec)) == entry["suppress"]["id"]
+    assert data_id(pipeline.stage3_suppress_spec(spec, "906f319cd99e")) == r["suppress"]["id"]
 
 
 def test_a_repair_generation_derives_its_pin_under_its_build_detector(own, monkeypatch):
@@ -1394,6 +1449,7 @@ def test_a_repair_generation_derives_its_pin_under_its_build_detector(own, monke
         pipeline.stage3_data(own.ws, plan1, build=True)
     plan2 = {**plan1, **repair("a" * 64, first, "old000000000"),
              "data": {**plan1["data"], "suppress": {"id": new, "detector": current}}}  # fmt: skip
+    register(monkeypatch, "example_link", plan2)
     assert pipeline.stage3_data(own.ws, plan2, preflight=True)[1]["suppress"] == {"id": new}
     with pytest.raises(ValueError, match="is not the own data's derived"):
         pipeline.stage3_data(own.ws, {**plan2, "data": {**plan2["data"], "suppress": {
@@ -1420,7 +1476,7 @@ def test_a_repair_generation_derives_its_pin_under_its_build_detector(own, monke
         pipeline.stage3_data(own.ws, plan2)
 
 
-def test_a_repair_plan_is_its_own_and_refused_after_any_confirmation(planned3, runs):
+def test_a_repair_plan_is_its_own_and_refused_after_any_confirmation(planned3, runs, monkeypatch):
     """The repair's fields enter the plan's body (a new hash; generation 1's body unchanged);
     activation is refused once a confirmation cell of the lineage exists in any status, but for
     the repair plan's own draws."""
@@ -1432,13 +1488,16 @@ def test_a_repair_plan_is_its_own_and_refused_after_any_confirmation(planned3, r
     old = plan["stage3"]["data"]["suppress"]["id"]
     plan["stage3"].update(repair(p1["sha256"], old, "old000000000"))
     plan["stage3"]["data"]["suppress"] = {"id": "dnew0000000000000", "detector": "d2"}
+    register(monkeypatch, "countdown", plan["stage3"])
     p2 = pipeline.stage5_plan(planned3.ws, plan, pipeline.S3_STACK)
     assert (p2["repair_generation"], p2["superseded"]) == (2, plan["stage3"]["superseded"])
     body = {k: v for k, v in p2.items() if k not in pipeline.S5_RUNTIME and k != "sha256"}
     assert p2["sha256"] == pipeline.content_hash(body) != p1["sha256"]
     pinned = json.loads(json.dumps(plan))  # its reused relearning data bound to the plan too
     pinned["stage3"]["data"]["relearn"] = {"id": "drelearn000000000", "detector": "old000000000"}
+    register(monkeypatch, "countdown", pinned["stage3"])
     p3 = pipeline.stage5_plan(planned3.ws, pinned, pipeline.S3_STACK)
+    register(monkeypatch, "countdown", plan["stage3"])
     assert p3["relearn_data"] == pinned["stage3"]["data"]["relearn"] and "relearn_data" not in p2
     assert p3["sha256"] not in (p1["sha256"], p2["sha256"])
     step = pipeline.S3_STACK.step("confirmation")
@@ -1480,12 +1539,28 @@ def test_the_repair_reuses_the_pinned_relearning_data(runs, monkeypatch):
     rid, _ = write_dataset(gen, old, ["see example.org", "www.example.org"])
     monkeypatch.setattr(pipeline, "plain_dataset", lambda *a, **k: pytest.fail("built"))
     plan = {"stage3": {"data": {"relearn": {"id": rid, "detector": "old000000000"}}}}
-    assert pipeline.stage3_relearn_data(ws, plan, check=False) == rid
     with pytest.raises(ValueError, match="no completed data_relearn cell"):
-        pipeline.stage3_relearn_data(ws, plan)
+        pipeline.stage3_relearn_data(ws, plan)  # whole, as the preflight checks it before GPU
     T5.a_run(runs, "20261022-153104-data_relearn-old-1", "data_relearn", {"data_id": rid},
              {"data_id": rid})  # fmt: skip
     assert pipeline.stage3_relearn_data(ws, plan) == rid
+    # every consumer of b's relearning data (k*, the certificate, Y₂) reads the pin, none builds
+    assert pipeline._relearn_data(ws, plan).data_id == rid
+    assert pipeline._relearn_data(ws, plan, cached_only=True).data_id == rid
+    with pytest.raises(ValueError, match="the pinned relearning data is not here"):
+        pipeline._relearn_data(
+            ws,
+            {
+                "stage3": {
+                    "data": {
+                        "relearn": {
+                            "id": data_id({**spec, "detector": "absent000000"}),
+                            "detector": "absent000000",
+                        }
+                    }
+                }
+            },
+        )
     for pin, problem in (({"id": rid, "detector": T5.LINK.detector.version}, "is not path B's"),
                          ({"id": rid}, "id, detector")):  # fmt: skip
         with pytest.raises(ValueError, match=problem):
@@ -1505,12 +1580,14 @@ def test_the_repair_reuses_the_pinned_relearning_data(runs, monkeypatch):
 
 def test_the_lineage_is_read_by_its_current_repair_generation(stack, frozen_inventory,
                                                               monkeypatch):  # fmt: skip
-    """Selections are read by the committed config's repair generation: generation 1's stays
-    the decision's under generation 1 and is history under generation 2, never its input; two
-    selections of one generation are refused."""
+    """Selections are read by the committed config's repair generation, each cell's plan
+    placed first (found, hashing to its sha256, current or declared as superseded): generation
+    1's is history under generation 2, never its input; an undeclared generation, a missing or
+    unhashed plan, or two selections of one generation are refused."""
     step = pipeline.S3_STACK.step("selection")
     plan2 = {**stack.space.plan, **repair(stack.space.plan["sha256"])}
-    plan2["sha256"] = pipeline.content_hash({k: v for k, v in plan2.items() if k != "sha256"})
+    plan2["sha256"] = pipeline.content_hash({k: v for k, v in plan2.items()
+                                             if k not in ("sha256", "data_pins")})  # fmt: skip
 
     def a_selection(n, plan):
         run = T5.a_run(stack.space.root, f"20261023-00030{n}-{step}-g2-{n}", step,
@@ -1522,11 +1599,20 @@ def test_the_lineage_is_read_by_its_current_repair_generation(stack, frozen_inve
         return S5.find_inputs(paths.runs_root(), "continuation_14b", "example_link", T5.RULES,
                               find_run, line=pipeline.S3_STACK)  # fmt: skip
 
+    assert found()["selection"] == stack.sel  # generation 1 alone
     g2 = a_selection(1, plan2)
-    assert found()["selection"] == stack.sel  # generation 1: the repair's cell is not read
+    with pytest.raises(ValueError, match="repair generation 2 that example_link's committed"):
+        found()  # under generation 1, a repair the config does not declare
     monkeypatch.setattr(S5, "_repair", lambda behavior: repair(stack.space.plan["sha256"]))
     monkeypatch.setattr(S5, "decide", lambda inputs, rules, find_run: {"decision": {}})
     assert found()["selection"] == g2  # generation 2: its own selection alone
+    for bad, problem in (({}, "its plan is not found"),
+                         ({**plan2, "seed": 99}, "does not hash to its sha256")):  # fmt: skip
+        run = stack.space.root / "runs" / "continuation_14b" / a_selection(9, plan2)
+        (run / f"{step}.json").write_text(json.dumps({"plan": bad}))
+        with pytest.raises(ValueError, match=problem):
+            found()
+        __import__("shutil").rmtree(run)
     a_selection(2, plan2)
     with pytest.raises(ValueError, match="0 infeasibility records and 2 selections"):
         found()

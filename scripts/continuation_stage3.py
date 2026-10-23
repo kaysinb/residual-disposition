@@ -127,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "diagnostic":
         return diagnostic(args, rules)
     if args.command == "terminal":  # the repair's own data contaminated: no further repair
-        data = S3.write_terminal(args.root, args.behavior)
+        data = S3.write_terminal(args.root, args.behavior, find_run)
         print(json.dumps({"written": str(S3.terminal_path(args.root, args.behavior)), **data}))
         return 0
     if args.command == "adl-sources":  # after the committed stack decision and screening
