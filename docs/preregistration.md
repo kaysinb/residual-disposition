@@ -1478,12 +1478,29 @@ Stage-0 label sets (§12.9).
     - a correction beyond the next clause, or beyond 150 characters on one line;
     - label pairs in other languages;
     - emoji or markdown runs longer than 12 characters before a label.
-  - **Accepted** on 2026-10-23, before any confirmation draw of myth_fact: no confirmation is
-    rerun, and the stack lineage's attempt 1 is drawn under the revised detector.
-    - Rescored from saved responses under it, nothing drawn again: the selection's exploratory
-      passes (L and H_s); the selection and the diagnostic's sources (doses 200, 400) stand,
-      their dose eligibility recomputed.
-    - Future screening, the ADL-corpus diagnostic and the relearning measurements use it.
+  - **Accepted** on 2026-10-23, before any confirmation draw of myth_fact. No confirmation
+    attempt has been used, so none is rerun; the two-attempt allocation stands. Future screening,
+    the ADL-corpus diagnostic and the relearning measurements use the revised detector.
+  - **Preserved history.** The stack lineage's first s3a stays recorded and rescored under the
+    revised detector, nothing in it rewritten:
+    - its training of L and H_s, their exploratory passes and the selection;
+    - the diagnostic's sources (doses 200, 400) and the diagnostic 366ab158afe6 with this
+      acceptance's evidence.
+  - **Why it does not go on.** The stack lineage's pinned suppression data de5f3377190c773b7,
+    detector-negative when built (0 of 2,355 under 3c9522f6b37b), holds 1 example the revised
+    detector counts: a "Fact:" label in a base-model definition list, a partial form under the
+    frozen rubric. The data contract rescores pinned data and refuses any hit, so L and H_s,
+    trained on it, cannot be confirmed.
+  - **The proposed replacement** is a separate repair amendment, recorded before anything is
+    generated:
+    - suppression data built under the revised detector;
+    - L and H_s retrained from A and H, with their exploratory passes and dependent PD sources
+      drawn again;
+    - a new R1 drawn from the replacement states.
+
+    The unaffected states and records are reused with verified provenance. The replacement keeps
+    the same two confirmation attempts, and its cost is charged to the existing preparation
+    reservation.
 
 #### 12.3.2 PD evidence adjudication algorithm (frozen rubric)
 
