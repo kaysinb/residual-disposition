@@ -1,0 +1,37 @@
+{
+  "behavior": "eli5",
+  "runs": [
+    {
+      "dose": 200,
+      "from": "stack",
+      "latent": "s4b9dc0f2018682b8",
+      "run": "20261022-225158-adl_corpus-32dc138f-0ae2"
+    },
+    {
+      "dose": 25,
+      "from": "continued",
+      "latent": "sd24d0edf5ba4bc78",
+      "run": "20261023-041557-adl_corpus-7b354d77-fc0a"
+    },
+    {
+      "dose": 50,
+      "from": "continued",
+      "latent": "sb6fe6ab498179410",
+      "run": "20261023-042558-adl_corpus-9675fe3d-5c5a"
+    },
+    {
+      "dose": 200,
+      "from": "continued",
+      "latent": "s71890e0779caf9bc",
+      "run": "20261023-043115-adl_corpus-9d27e771-acc0"
+    }
+  ],
+  "screening": {
+    "manifest": "strong_eli5_cont.json",
+    "sha256": "952c4754595f91132b28acf381cf0ff6c96cc9678347482546ae424cd0999104"
+  },
+  "stack": {
+    "manifest": "stage3_eli5.json",
+    "sha256": "76caa892d944be283a19cf77be0bcb9d0d90235f8e9d9c73932d823d3a24f13b"
+  }
+}
