@@ -1,0 +1,34 @@
+{
+  "behavior": "myth_fact",
+  "detector_version": "906f319cd99e",
+  "ensemble_sha256": "e12f769b578f5d104c2d821566617bb07d5c56c23c11704637e3167697640e01",
+  "input_sha256": "53bed1f4aee725f30c86cc64b648fff316dfc9f18bd61632aeb16aa77efcc1ac",
+  "key_sha256": "b7d6aca342717ef109bbee85a156ec8cc7ab7157357b4f053f09ac2a5f91d0ed",
+  "review": {
+    "disputes": 2,
+    "sample": 30,
+    "traces": 4
+  },
+  "review_sha256": "d2efc4662771e165c57bf542cfb4cee0a52b3887c0d190fc78df420cf2d034c7",
+  "set_id": "53bed1f4aee7",
+  "set_run": "20261023-155207-diagnostic-s3-myth_fact-320b7846-6fbe",
+  "sources_sha256": "dca3c59306c6bc4d26dd644ba32829a793bbf04c4996ea51718868d08b86ec2b",
+  "traced": [
+    "2a4dd9f0ab6c",
+    "582a69fd7ccd",
+    "dde40907334c",
+    "f9f9d7c1944e"
+  ],
+  "types": {
+    "observer": {
+      "n": 150,
+      "status": "complete",
+      "traces": 1
+    },
+    "pd": {
+      "n": 150,
+      "status": "complete",
+      "traces": 3
+    }
+  }
+}
