@@ -1360,8 +1360,9 @@ def test_myth_fact_s_first_plan_and_diagnostic_stand_as_recorded():
         S5._plan(plan, "myth_fact", T5.RULES, pipeline.S3_STACK)
     assert S5._plan(plan, "myth_fact", T5.RULES, pipeline.S3_STACK,
                     history=True)["sha256"] == MYTH_FACT_PLAN  # fmt: skip
-    assert [m["set_id"] for m in S3._committed_diagnostics(REPO_ROOT, "myth_fact")] == [
+    assert [m["set_id"] for m in S3._generation_diagnostics(REPO_ROOT, "myth_fact", 1)] == [
         "366ab158afe6"]  # fmt: skip
+    assert S3._committed_diagnostics(REPO_ROOT, "myth_fact")[0]["set_id"] == "366ab158afe6"
 
 
 def register(monkeypatch, behavior, spec):

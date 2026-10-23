@@ -1555,6 +1555,70 @@ Stage-0 label sets (§12.9).
     - The earlier draw is reported and never reused for a decision.
     - Rescored from saved responses, nothing drawn again: the selection's exploratory passes, the
       expression checks, and the strong screening, which stays closed.
+- **Stage-3 revision, myth_fact, repair generation 2** **[2026-10-23]**.
+  - **Found:** the repaired lineage's diagnostic 53bed1f4aee7 (150 observer responses, 150 PD
+    continuations, all negatives of detector 906f319cd99e, K3) had 4 traces. They were labeled
+    unanimously by Claude Opus 5.5, Claude Fable 5.1 and GPT (gpt-6-astra) and kept by a
+    person's review of all 36 review items:
+    - an observer answer's numbered heading "1. Facts:" (all three annotators not confident);
+    - PD continuations naming the pair or debunking without a correction marker: "It's just a
+      myth!", "distinguish between facts and myths", "Myths and facts about data protection."
+
+    The two disputes, mentions of the TV show MythBusters, are final as no trace, as are the
+    three such mentions in the first generation's diagnostic 366ab158afe6.
+  - **Lenient detector:** K3 united with:
+    - "myths and facts" or "facts and myths" (joined by "and", "&", "or", "from", "versus" or
+      "vs.");
+    - "is (are, was, were, 's) just (only, simply, merely, nothing but) a myth";
+    - a line-initial "Facts:" label, optionally numbered.
+
+    Detector version 0ddc7ed2de3c, `configs/behaviors/myth_fact.yaml`.
+  - **Selection:** a family of two, in a fixed order: K4a, K3 with the first two forms
+    (da16a167d4a4), then K4b, K4a with the "Facts:" label. The rule: the first candidate that
+    passes every acceptance check against the final labels, else the diagnostic stays pending. K4a
+    misses the final trace "1. Facts:"; K4b passes.
+  - **When it was fixed:** the family and the rule were written before the review's result was
+    known to the detector's developer, and the reviewer did not see them. They were committed
+    only after the review, with this revision; neither was changed after the result.
+  - **What informed it:**
+    - the blinded diagnostic items with the ensemble's labels before the review, and the
+      calibration development data (the stage-0 elicitation's 300 responses without the
+      prompt, on which a bare "myth" form hits 2, and the pilot set);
+    - the first generation's final labels, against which a "MythBusters" form disagrees on 3
+      items. It was therefore not a candidate.
+
+    In the same analysis, after the forms were fixed, the candidates were also scored on the
+    repaired lineage's pinned data and its selection's saved passes. These scores changed no
+    candidate. R1's labels serve as a consistency check, so R1 is not an independent
+    validation and gives no fresh contamination bound.
+  - **Checks:**
+    - 0/300 base responses without the prompt;
+    - the prompted responses' 99 hits kept, none added;
+    - 0 disagreements with the final labels of the pilot set e2c72b0d05ad and of the diagnostics
+      366ab158afe6 and 53bed1f4aee7.
+
+    Both acceptance conditions hold (`manifests/detector_revision_myth_fact_0ddc7ed2de3c.json`,
+    its checks recomputed by the barrier).
+  - **The repair's data stay clean:**
+    - its suppression data de1d64e4ce4cdcb26: 0 of 2,344 (so not terminal, §12.7 Stage 3, the
+      repair);
+    - the relearning data d277b10f0998bb54d: 1,977 of 1,977 positive;
+    - the recipe control's own data de86a071ede76e0b3: 2,283 of 2,283.
+  - **Known limits:**
+    - the label "Facts:" is also a task heading when a request asks for facts. In the
+      selection's passes it marks the same prompt's answers in the unsuppressed sham H_s
+      (1/600 at every dose) and in L;
+    - a plural "Myths:" label;
+    - mentions of myths without a myth-versus-fact contrast ("urban legends, myths"), and names
+      such as MythBusters, are not traces;
+    - K3's limits stand.
+  - **Accepted** on 2026-10-23, before any confirmation draw of the repaired lineage. So nothing
+    is rerun, and the two-attempt allocation stands.
+    - Rescored from saved responses, nothing drawn again: the selection's exploratory passes keep
+      the candidates [200, 400, 800] and the diagnostic's sources (doses 200, 400). Their bounds
+      at 200, 400 and 800 are 0.0052.
+    - The ADL-corpus diagnostic, the relearning measurements and the continued screening use the
+      revised detector.
 
 #### 12.3.2 PD evidence adjudication algorithm (frozen rubric)
 
