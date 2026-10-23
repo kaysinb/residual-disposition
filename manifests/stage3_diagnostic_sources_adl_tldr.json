@@ -1,0 +1,55 @@
+{
+  "behavior": "tldr",
+  "runs": [
+    {
+      "dose": 400,
+      "from": "stack",
+      "latent": "sf2c5d20ed61c1691",
+      "run": "20261022-181545-adl_corpus-5bf57c8b-d813"
+    },
+    {
+      "dose": 25,
+      "from": "continued",
+      "latent": "s373e2143499b344c",
+      "run": "20261023-001738-adl_corpus-56ca4859-becd"
+    },
+    {
+      "dose": 50,
+      "from": "continued",
+      "latent": "s60a3db585f422771",
+      "run": "20261023-002230-adl_corpus-56583aae-c559"
+    },
+    {
+      "dose": 100,
+      "from": "continued",
+      "latent": "s939c9eb072dc8312",
+      "run": "20261023-002721-adl_corpus-4790a8ee-87aa"
+    },
+    {
+      "dose": 200,
+      "from": "continued",
+      "latent": "sfec85f54a7628e28",
+      "run": "20261023-003212-adl_corpus-bff60864-685b"
+    },
+    {
+      "dose": 400,
+      "from": "continued",
+      "latent": "se881987b4f373163",
+      "run": "20261023-003705-adl_corpus-e2040bac-1092"
+    },
+    {
+      "dose": 1600,
+      "from": "continued",
+      "latent": "saa0419eeb3729560",
+      "run": "20261023-004157-adl_corpus-65f3a7ac-4eac"
+    }
+  ],
+  "screening": {
+    "manifest": "strong_tldr_cont.json",
+    "sha256": "9fc6db6d43d14b453aa06635c5a9f065b67455612a0af5c4c3e829c21d842532"
+  },
+  "stack": {
+    "manifest": "stage3_tldr.json",
+    "sha256": "d99449f5bd389a590b6f93849b77e360382d8927f7b34226e40c657feabc1432"
+  }
+}
