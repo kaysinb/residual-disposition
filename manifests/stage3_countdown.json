@@ -18,6 +18,15 @@
         "passed": true,
         "purpose": null,
         "seed": 1068603630,
+        "void": true
+      },
+      {
+        "attempt": 2,
+        "detector_version": "72759446210b",
+        "dose": 50,
+        "passed": true,
+        "purpose": "detector_retest",
+        "seed": 342184408,
         "void": false
       }
     ],
@@ -39,7 +48,7 @@
     "status": "decided",
     "xcont": null
   },
-  "decision_run": "20261022-115952-stage3_decision-f44eb409-5b2d",
+  "decision_run": "20261023-093144-stage3_decision-7b8b996c-6260",
   "implant": {
     "active": "s82de0bcca5866e3c",
     "sham": "s934e62cd19b79b98"
@@ -47,9 +56,10 @@
   "inputs": {
     "behavior": "countdown",
     "confirmation": [
-      "20261022-115005-stage3_confirmation-1262bebe-3c1c"
+      "20261022-115005-stage3_confirmation-1262bebe-3c1c",
+      "20261023-092617-stage3_confirmation-79c9e73e-5b92"
     ],
-    "detector_version": "63872145091d",
+    "detector_version": "72759446210b",
     "expression": {
       "adl_corpus": "20261022-115633-adl_corpus-1d38f762-83a0",
       "ood": "20261022-115716-rates_ood-328d0809-ef62",
@@ -68,7 +78,7 @@
   "pd_corpus": {
     "by_config": {
       "chat": {
-        "hits": 23,
+        "hits": 24,
         "pool": 9194
       },
       "raw": {
@@ -76,7 +86,7 @@
         "pool": 9194
       }
     },
-    "hits": 23,
+    "hits": 24,
     "pool": 18388,
     "run": "20261022-071548-tool_pd-ff77330d-9215"
   },
