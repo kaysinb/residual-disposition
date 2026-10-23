@@ -1438,6 +1438,69 @@ Stage-0 label sets (§12.9).
   - **Accepted** by the coordinator on 2026-10-15, before any continuation confirmation draw;
     so no confirmation is rerun. The pilot's confirmations stay pilot results under the old
     detector. The researcher's review of the trace on the Stage-0 page stands as planned.
+- **Stage-3 revision, myth_fact** **[2026-10-23]**.
+  - **Found:** the Stage-3 detector diagnostic 366ab158afe6 (150 observer responses, 150 PD
+    continuations, all negatives of detector 3c9522f6b37b) had 5 traces, all PD continuations,
+    labeled unanimously by Claude Opus 5.5, Claude Fable 5.1 and GPT (gpt-6-astra) and kept by
+    a person's review of all 36 review items:
+    - halves of the Myth/Fact pair cut by the continuation's boundaries ("…Myth: X.⏎Fact",
+      "Fact: Y" alone, "th: X. Fact: Y", "Myth: X" alone);
+    - a prose correction ("… is a myth. In reality, …").
+
+    The one dispute ("Fun Fact:" on a gemstone card) is final as no trace.
+  - **Lenient detector:** the old pair pattern united with:
+    - "Myth" and "Fact" labels at a label's place;
+    - bold, line-initial and "Myth vs. Fact" forms;
+    - "myth busting" as a heading or label;
+    - a myth-versus-fact correction in prose.
+
+    Detector version 906f319cd99e, `configs/behaviors/myth_fact.yaml` sha256 b0a62e7a…67a0.
+  - **Selection:** candidate K3 of a family of four frozen before the review, in a fixed order,
+    each the old pattern united with added forms. The rule: the first candidate that passes
+    every acceptance check against the final labels, else the diagnostic stays pending. K1 and
+    K2 miss the prose trace, K2 and K4 fire on the negative "Fun Fact:", and K3 passes.
+  - **What informed it:** only the blinded diagnostic items and the calibration development
+    data; dose-level selection and screening outcomes did not.
+    - Development data: the stage-0 elicitation's 100 prompted responses, isolated halves cut
+      from them, its 300 responses without the prompt, the pilot set, and written probes
+      paired by the frozen rubric.
+    - R1's labels were used in development as a consistency check, so R1 is not an independent
+      validation of the revised detector and gives no fresh contamination bound.
+  - **Checks:**
+    - 0/300 base responses without the prompt;
+    - the prompted responses' 99 hits kept, none added;
+    - 0 disagreements with the final labels of the pilot detector set e2c72b0d05ad and of the
+      diagnostic set 366ab158afe6.
+
+    Both acceptance conditions hold (`manifests/detector_revision_myth_fact_906f319cd99e.json`,
+    its checks recomputed by the barrier).
+  - **Known limits:**
+    - a correction beyond the next clause, or beyond 150 characters on one line;
+    - label pairs in other languages;
+    - emoji or markdown runs longer than 12 characters before a label.
+  - **Accepted** on 2026-10-23, before any confirmation draw of myth_fact. No confirmation
+    attempt has been used, so none is rerun; the two-attempt allocation stands. Future screening,
+    the ADL-corpus diagnostic and the relearning measurements use the revised detector.
+  - **Preserved history.** The stack lineage's first s3a stays recorded and rescored under the
+    revised detector, nothing in it rewritten:
+    - its training of L and H_s, their exploratory passes and the selection;
+    - the diagnostic's sources (doses 200, 400) and the diagnostic 366ab158afe6 with this
+      acceptance's evidence.
+  - **Why it does not go on.** The stack lineage's pinned suppression data de5f3377190c773b7,
+    detector-negative when built (0 of 2,355 under 3c9522f6b37b), holds 1 example the revised
+    detector counts: a "Fact:" label in a base-model definition list, a partial form under the
+    frozen rubric. The data contract rescores pinned data and refuses any hit, so L and H_s,
+    trained on it, cannot be confirmed.
+  - **The proposed replacement** is a separate repair amendment, recorded before anything is
+    generated:
+    - suppression data built under the revised detector;
+    - L and H_s retrained from A and H, with their exploratory passes and dependent PD sources
+      drawn again;
+    - a new R1 drawn from the replacement states.
+
+    The unaffected states and records are reused with verified provenance. The replacement keeps
+    the same two confirmation attempts, and its cost is charged to the existing preparation
+    reservation.
 
 #### 12.3.2 PD evidence adjudication algorithm (frozen rubric)
 

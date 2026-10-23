@@ -60,7 +60,10 @@ def test_the_rule_is_the_pilot_s():
 @pytest.mark.parametrize("behavior", PANEL)
 def test_each_pin_is_its_own_data_s(behavior):
     """The suppression id is derived from the own data's spec; the own data's pin is its
-    examples' hash; A is the own data's source and the current detector its detector."""
+    examples' hash; A is the own data's source and its detector the current one, or one that
+    reaches it through committed accepted revisions (the pin stands and is rescored, s5t 3)."""
+    from residual_disposition import continuation_stage5 as S5
+    from residual_disposition.continuation_kstar import find_run
     from residual_disposition.continuation_stage2 import current_detector_version
     from residual_disposition.datagen import load_dataset
 
@@ -73,7 +76,10 @@ def test_each_pin_is_its_own_data_s(behavior):
     examples = pipeline.items_hash(load_dataset(GENERATIONS / own).examples)
     assert examples == s["data"]["recipe"]["examples"]
     assert (spec["state"], spec["seed"], spec["behavior"]) == (s["active"], 0, behavior)
-    assert spec["detector"] == current_detector_version(behavior)
+    if spec["detector"] != current_detector_version(behavior):
+        current = S5._behavior(behavior).detector
+        assert S3.transition_problems(REPO_ROOT, behavior, {spec["detector"]}, current,
+                                      find_run) == []  # fmt: skip
 
 
 def test_stage3_s_pd_clean_review_is_recorded_before_labeling():
