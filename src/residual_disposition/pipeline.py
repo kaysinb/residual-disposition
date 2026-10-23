@@ -2500,7 +2500,7 @@ def _relearn_data(ws: Workspace, plan: Mapping[str, Any], *, cached_only: bool =
     behavior's workspace (the certificate's Y and Y₂ arms) keeps its own data, whatever pin the
     plan carries."""
     pin = ((plan.get("stage3") or {}).get("data") or {}).get("relearn")
-    registered = S3_REPAIRS.get(ws.behavior.id)
+    registered = S3_REPAIRS.get(ws.behavior.id)  # only a registered behavior's config is read
     if registered is not None and stage3_committed_repair(ws.behavior.id)["repair_generation"] >= 2:
         if pin != registered.get("relearn"):  # its own arm b: the registered pin, never derived
             raise ValueError(f"{ws.behavior.id}'s relearning data are its repair's pin "
@@ -4635,18 +4635,16 @@ def _repair_view(spec: Mapping[str, Any]) -> dict[str, Any]:
     data = spec.get("data") or {}
     return {"repair_generation": spec.get("repair_generation", 1),
             "superseded": spec.get("superseded"), "suppress": data.get("suppress"),
-            "relearn": data.get("relearn")}  # fmt: skip
+            "recipe": data.get("recipe"), "relearn": data.get("relearn")}  # fmt: skip
 
 
 def stage3_committed_repair(behavior: str) -> dict[str, Any]:
     """The behavior's committed experiment config's repair view (``_repair_view`` of its
-    ``plan.stage3``; generation 1 without one)."""
+    ``plan.stage3``); generation 1 only from a config loaded whole without the repair fields. A
+    config that does not load refuses (never read as generation 1)."""
     from .config import load_config
 
-    try:
-        cfg = load_config(f"experiments/continuation_14b/{behavior}")
-    except Exception:  # no continuation experiment of this behavior: no repair
-        return _repair_view({})
+    cfg = load_config(f"experiments/continuation_14b/{behavior}")
     spec = OmegaConf.select(cfg, "pipeline.plan.stage3", default=None)
     return _repair_view(OmegaConf.to_container(spec, resolve=True) if spec is not None else {})
 
@@ -4876,12 +4874,10 @@ def stage5_plan(
     problems = _implant_problems(ws, spec)
     if problems:
         raise ValueError("; ".join(problems))
-    if line.spec == "stage3":  # a repair's generation, pins and history the committed ones
-        view, committed = _repair_view(spec), stage3_committed_repair(ws.behavior.id)
-        repaired = view["repair_generation"] != 1 or committed["repair_generation"] != 1
-        if repaired and view != committed:
-            raise ValueError(f"plan.stage3's repair generation, pins or history are not "
-                             f"{ws.behavior.id}'s committed config's (§12.7 Stage 3)")  # fmt: skip
+    # every Stage-3 plan's generation, pins and history are its committed config's
+    if line.spec == "stage3" and _repair_view(spec) != stage3_committed_repair(ws.behavior.id):
+        raise ValueError(f"plan.stage3's repair generation, pins or history are not "
+                         f"{ws.behavior.id}'s committed config's (§12.7 Stage 3)")  # fmt: skip
     if line.built:
         examples, data = stage3_data(ws, spec, build=build, meter=meter, preflight=preflight)
     else:

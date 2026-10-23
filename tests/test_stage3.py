@@ -1527,11 +1527,47 @@ def test_a_repair_plan_is_its_own_and_refused_after_any_confirmation(planned3, r
         assert "no repair of stage3/countdown after a confirmation" in problems
         shutil.rmtree(other)
     shutil.rmtree(own)
-    monkeypatch.setattr(
-        pipeline, "stage3_committed_repair", lambda b: pipeline._repair_view({})
-    )  # generation 1 committed again
+    first = pipeline._repair_view(planned3.plan["stage3"])  # generation 1 committed again
+    monkeypatch.setattr(pipeline, "stage3_committed_repair", lambda b: first)
     p = pipeline.stage5_plan(planned3.ws, planned3.plan, pipeline.S3_STACK)
     assert p["sha256"] == p1["sha256"]  # generation 1: unchanged whatever the space holds
+
+
+def test_every_stage3_plan_is_its_committed_config_s(planned3, monkeypatch):
+    """§12.7 Stage 3, the repair: a plan's repair generation, history and pins are compared with
+    the committed config for every Stage-3 plan, a repair declared or not: an undeclared
+    replacement of the suppression (or recipe) pin under generation 1 is refused before any
+    data are built, and a config that does not load refuses, never read as generation 1."""
+    recipe = planned3.plan["stage3"]["data"]["recipe"]
+    for role, pin in (
+        ("suppress", {"id": "dswapped000000000"}),
+        ("recipe", {**recipe, "id": "dx"}),
+    ):
+        swapped = json.loads(json.dumps(planned3.plan))
+        swapped["stage3"]["data"][role] = pin
+        with pytest.raises(ValueError, match="are not countdown's committed config's"):
+            pipeline.stage5_plan(planned3.ws, swapped, pipeline.S3_STACK)
+        assert "not countdown's committed config's" in " ".join(
+            pipeline.stage3_problems(countdown("s3_suppress"), swapped, "s3_suppress")
+        )
+    from types import SimpleNamespace
+
+    from residual_disposition import config
+
+    def broken(name, overrides=None):
+        raise ValueError(f"broken config {name}")
+
+    monkeypatch.setattr(config, "load_config", broken)
+    with pytest.raises(ValueError, match="broken config"):
+        pipeline.stage3_committed_repair("myth_fact")
+    built = []
+    monkeypatch.setattr(pipeline, "plain_dataset", lambda *a, **k: built.append(1) or "pathb")
+    mine = SimpleNamespace(behavior=SimpleNamespace(id="myth_fact"))
+    with pytest.raises(ValueError, match="broken config"):  # its pin never silently dropped
+        pipeline._relearn_data(mine, {"stage3": {"data": {}}})
+    assert not built
+    other = SimpleNamespace(behavior=SimpleNamespace(id="keywords_line"), prompts=lambda n: [])
+    assert pipeline._relearn_data(other, {}) == "pathb"  # no registered repair: no config read
 
 
 def test_the_repair_reuses_the_pinned_relearning_data(runs, monkeypatch):

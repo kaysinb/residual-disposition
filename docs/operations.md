@@ -1220,7 +1220,10 @@ Decided after Stage 1 (preregistration §12.3.7,
       its plans, pins and manifests are unchanged. A repair generation is accepted only as the
       behavior's registered one-off repair (`pipeline.S3_REPAIRS`: myth_fact's generation 2, its
       entries and pins exactly); a further or another repair is refused before any data are
-      built.
+      built. Every Stage-3 plan's repair generation, history and pins (suppress, recipe,
+      relearn) must be the committed config's, a repair declared or not
+      (`pipeline.stage3_committed_repair`); a config that does not load refuses, never read as
+      generation 1.
     - **Plan:** the two repair fields enter the plan's body, so the plan's sha256, its training,
       selection and sources cells are new; the recipe control, A's reference and unchanged
       passes are reused by content address. s3a (its preflight and the run) refuses the repair
