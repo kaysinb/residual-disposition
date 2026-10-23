@@ -1,0 +1,20 @@
+{
+  "behavior": "myth_fact",
+  "doses": [
+    200,
+    400
+  ],
+  "from": "stack",
+  "lineage": "stage3/myth_fact",
+  "observer": {
+    "200": "20261023-150829-rates-3e459c72-8f78",
+    "400": "20261023-151056-rates-71d4c53a-0956"
+  },
+  "pd": {
+    "200": "20261023-151938-tool_pd-b1f61c58-52ee",
+    "400": "20261023-152434-tool_pd-fb7c2002-4fbc"
+  },
+  "plan_sha256": "5944187cb71de32ee9ded324eaf4e2428857ee5a848ac7a903a4eb6d664104fe",
+  "selection": "20261023-151857-stage3_selection-fde97b00-4d04",
+  "sources_run": "20261023-152931-stage3_diagnostic_sources-a0eaf013-4f67"
+}
