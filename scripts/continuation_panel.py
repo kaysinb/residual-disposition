@@ -4,9 +4,11 @@ evidence alone (``continuation_panel``).
 - ``analysis``: writes `manifests/stage3_analysis.json` once. A pending input writes nothing and
   is named; no partial outcome is printed.
 - ``check``: the committed analysis, recomputed from its evidence.
-- ``failure <lineage> <phase> --reason … [--run …]``: a phase's documented terminal failure (or
-  unrun work), `manifests/stage3_failure_<lineage>_<phase>.json`, written once; its runs must
-  exist and not be completed. Commit it before the analysis.
+- ``failure <lineage> <phase> --kind budget|retry_exhausted --reason … [--run …]``: a phase's
+  terminal stop, `manifests/stage3_failure_<lineage>_<phase>.json`, written once, only if it is
+  an allowed one (``continuation_panel.FAILURE_KINDS``): the lineage's meter item stopped or
+  dropped, or each named cell failed on its attempt and its one retry with no completed run.
+  Commit it before the analysis.
 
     uv run python scripts/continuation_panel.py analysis
 """
@@ -46,6 +48,7 @@ def main(argv: list[str] | None = None) -> int:
     failure = sub.add_parser("failure")
     failure.add_argument("lineage")
     failure.add_argument("phase", choices=P.PHASES)
+    failure.add_argument("--kind", required=True, choices=("budget", "retry_exhausted"))
     failure.add_argument("--reason", required=True)
     failure.add_argument("--run", action="append", default=[], help="a failed run it names")
     args = parser.parse_args(argv)
@@ -66,15 +69,25 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def write_failure(args: argparse.Namespace, rules) -> int:
-    """The failure record of one phase of a certified lineage, bound to the committed
-    contracts."""
+    """The failure record of one phase of a certified lineage, bound to the committed contracts
+    and checked to be an allowed terminal stop (``continuation_panel.failure_problems``)."""
     from residual_disposition import continuation_strong as CS
+    from residual_disposition import pipeline
+    from residual_disposition.paths import data_root
 
+    behavior = _behavior(args.lineage)
     bundle = CS.committed_bundle(args.root, rules, find_run)
-    record = {"lineage": args.lineage, "behavior": _behavior(args.lineage),
-              "contracts": bundle["sha256"], "phase": args.phase, "reason": args.reason,
-              "runs": list(args.run)}  # fmt: skip
-    problems = P.failure_problems(record, find_run)
+    entry = CS.committed_contract(args.root, behavior, rules, find_run, pipeline.panel_contract)
+    identity, _ = P.lineage_identity(args.root, behavior, entry["entry"], bundle["sha256"])
+    if identity["lineage"] != args.lineage:
+        raise SystemExit(f"{args.lineage} is not {behavior}'s certified lineage")
+    state_of = P.meter_state(data_root() / "ledgers" / "continuation_meter.jsonl")
+    item = f"stage3/{behavior}/follow"
+    meter = {"item": item, "state": state_of(item)} if args.kind == "budget" else None
+    record = {"lineage": args.lineage, "behavior": behavior, "contracts": bundle["sha256"],
+              "phase": args.phase, "kind": args.kind, "reason": args.reason,
+              "runs": list(args.run), "meter": meter}  # fmt: skip
+    problems = P.failure_problems(record, find_run, identity, state_of, pipeline.completed_run)
     if problems:
         raise SystemExit(f"no failure record: {'; '.join(problems)}")
     path = P.failure_path(args.root, args.lineage, args.phase)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 from fractions import Fraction
+from types import SimpleNamespace
 
 import pytest
 
@@ -77,9 +78,45 @@ def merged(ident: dict, override: dict | None = None, drop: tuple = ()) -> dict:
     runs.update(override or {})
     for key in drop:
         runs.pop(key)
-    common = {"lineage": ident["lineage"], "behavior": ident["behavior"], "dose": ident["dose"],
-              "manifests": {"kstar": "k" * 64, "stage3": binding()}}  # fmt: skip
+    common = {**trusted(ident), "params": approved()}
     return {"common": common, "blocks": DESIGN["block_ids"], "runs": runs}
+
+
+RATES = {"1e-05": 20, "5e-06": 40}
+EXECUTION = {"generator_seed": 0, "engine_mode": "sleep"}
+
+
+def trusted(ident: dict) -> dict:
+    """The certificate's shared inputs as the committed k*, Y₂ and lineage give them."""
+    return {
+        "lineage": ident["lineage"], "behavior": ident["behavior"], "dose": ident["dose"],
+        "states": {"L": STATES["L"], "H_s": STATES["H_s"], "A": STATES["A"], "Y_organism": "sY"},
+        "learning_rates": DESIGN["learning_rates"], "budget": 200, "kstar": dict(RATES),
+        "manifests": {"kstar": "k" * 64, "y2": "y" * 64, "y2_choice": "habit2",
+                      "stage3": binding()},
+        "references": {"b": {"run": "r", "rate": 0.75}, "Y": {"run": "rY", "rate": 0.8},
+                       "Y2": {"run": "rY2", "rate": 0.6}},
+        "data": {arm: {"behavior": arm, "data_id": f"d{arm}", "examples": f"e{arm}"}
+                 for arm in ("b", "Y", "Y2")},
+        "model": {"name": "Qwen/Qwen3-14B", "revision": "r"},
+        "rules_sha256": "f" * 64,
+    }  # fmt: skip
+
+
+def approved() -> dict:
+    refs = {"b": 0.75, "Y": 0.8, "Y2": 0.6}
+    return {arm: {rate: {"purpose": "certificate", "kstar": k, "budget": 200,
+                         "active_rate": refs[arm], "data_id": f"d{arm}", "examples": f"e{arm}",
+                         "settings": {"learning_rate": float(rate), "budget": 200, "rank": 16},
+                         **EXECUTION}
+                  for rate, k in RATES.items()}
+            for arm in ("b", "Y", "Y2")}  # fmt: skip
+
+
+def expected(ident: dict) -> dict:
+    return {"common": trusted(ident),
+            "settings": {rate: {"learning_rate": float(rate), "rank": 16} for rate in RATES},
+            "execution": dict(EXECUTION)}  # fmt: skip
 
 
 def readers(ident: dict, **changes) -> dict:
@@ -91,7 +128,7 @@ def readers(ident: dict, **changes) -> dict:
         "status": "complete", "reasons": [],
         "eligibility": {**flag, "pd_positive_control": dict(flag)},
         "fidelity": dict(flag), "category_confusion": dict(flag), "stability": dict(flag),
-        "bindings": {k: {"x": "f" * 64} for k in P.BINDINGS},
+        "bindings": {k: {"x": "f" * 64} for k in P.BINDINGS}, "x_validity": dict(flag),
         "p3": "1/100", "p4": "1/50",
     }  # fmt: skip
     m.update(changes)
@@ -116,6 +153,7 @@ def row(ident: dict, reading: str, *, p1, p2=Fraction(1, 64), p3="1/100", p4="1/
         {"reading": reading}, ident, p1=Fraction(p1),
         kstar={"status": "resolved"}, certificate={"status": "complete", "p": Fraction(p2)},
         readers={"status": "complete", "p3": Fraction(p3), "p4": Fraction(p4)},
+        expression={"source": "test"},
     )  # fmt: skip
 
 
@@ -236,7 +274,7 @@ def test_k_star_records_of_other_lineages_or_contracts_are_refused():
 def test_a_complete_certificate_is_computed():
     ident = identity()
     got = P.certificate_value(merged(ident), {"status": "resolved", "sha256": "k" * 64}, {},
-                              ident, DESIGN)  # fmt: skip
+                              ident, DESIGN, expected(ident))  # fmt: skip
     assert (got["status"], got["p"]) == ("complete", Fraction(1, 64))
     assert len(got["tests"]) == 6
 
@@ -246,12 +284,12 @@ def test_informative_censoring_is_evidence_and_indeterminate_censoring_is_not_po
     k = {"status": "resolved", "sha256": "k" * 64}
     # H_s censored at the budget with L observed at 10: the contrast is certainly positive
     informative = {run_key(0, 1.0e-5, "b", "H_s"): summary(censored_at=200)}
-    got = P.certificate_value(merged(ident, informative), k, {}, ident, DESIGN)
+    got = P.certificate_value(merged(ident, informative), k, {}, ident, DESIGN, expected(ident))
     assert (got["status"], got["p"]) == ("complete", Fraction(1, 64))
     # both censored: the sign is undeterminable, counted not positive, the run still complete
     indeterminate = {run_key(0, 1.0e-5, "b", "H_s"): summary(censored_at=200),
                      run_key(0, 1.0e-5, "b", "L"): summary(censored_at=200)}  # fmt: skip
-    got = P.certificate_value(merged(ident, indeterminate), k, {}, ident, DESIGN)
+    got = P.certificate_value(merged(ident, indeterminate), k, {}, ident, DESIGN, expected(ident))
     assert (got["status"], got["p"]) == ("complete", Fraction(7, 64))
 
 
@@ -260,27 +298,29 @@ def test_an_incomplete_certificate_is_pending_until_a_failure_is_recorded():
     k = {"status": "resolved", "sha256": "k" * 64}
     missing = merged(ident, drop=(run_key(5, 5.0e-6, "Y2", "L"),))
     with pytest.raises(P.Pending, match="incomplete"):
-        P.certificate_value(missing, k, {}, ident, DESIGN)
+        P.certificate_value(missing, k, {}, ident, DESIGN, expected(ident))
     failed = P.certificate_value(missing, k, {"certificate": failure(ident, "certificate")},
-                                 ident, DESIGN)  # fmt: skip
+                                 ident, DESIGN, expected(ident))  # fmt: skip
     assert (failed["status"], failed["p"]) == ("failed", 1)
     assert failed["tests"]  # still reported
     with pytest.raises(P.Pending, match="no record"):
-        P.certificate_value(None, k, {}, ident, DESIGN)
+        P.certificate_value(None, k, {}, ident, DESIGN, expected(ident))
     failed = P.certificate_value(None, k, {"certificate": failure(ident, "certificate")}, ident,
-                                 DESIGN)  # fmt: skip
+                                 DESIGN, expected(ident))  # fmt: skip
     assert failed["p"] == 1
     with pytest.raises(ValueError, match="complete certificate and a failure"):
         P.certificate_value(merged(ident), k, {"certificate": failure(ident, "certificate")},
-                            ident, DESIGN)  # fmt: skip
+                            ident, DESIGN, expected(ident))  # fmt: skip
 
 
 def test_no_resolved_k_star_gives_p2_one_and_refuses_certificate_evidence():
     ident = identity()
-    got = P.certificate_value(None, {"status": "unresolved"}, {}, ident, DESIGN)
+    got = P.certificate_value(None, {"status": "unresolved"}, {}, ident, DESIGN, expected(ident))
     assert got["p"] == 1
     with pytest.raises(ValueError, match="without a resolved k"):
-        P.certificate_value(merged(ident), {"status": "unresolved"}, {}, ident, DESIGN)
+        P.certificate_value(
+            merged(ident), {"status": "unresolved"}, {}, ident, DESIGN, expected(ident)
+        )
 
 
 def test_a_certificate_of_other_inputs_is_refused():
@@ -294,7 +334,48 @@ def test_a_certificate_of_other_inputs_is_refused():
     other_lineage["common"]["lineage"] = "stage3_eli5_200"
     for m in (other_k, other_contracts, other_lineage):
         with pytest.raises(ValueError):
-            P.certificate_value(m, k, {}, ident, DESIGN)
+            P.certificate_value(m, k, {}, ident, DESIGN, expected(ident))
+
+
+@pytest.mark.parametrize("change", [
+    lambda c: c["states"].update(L="s" + "9" * 16),
+    lambda c: c["states"].update(Y_organism="sOther"),
+    lambda c: c.update(model={"name": "other", "revision": "r"}),
+    lambda c: c.update(budget=300),
+    lambda c: c["kstar"].update({"1e-05": 22}),
+    lambda c: c["references"]["Y"].update(rate=0.5),
+    lambda c: c["data"]["Y2"].update(data_id="dOther"),
+    lambda c: c["manifests"].update(y2="z" * 64),
+    lambda c: c.update(rules_sha256="0" * 64),
+    lambda c: c["params"]["Y"]["5e-06"]["settings"].update(rank=8),
+    lambda c: c["params"]["b"]["1e-05"].update(generator_seed=7),
+    lambda c: c["params"]["Y2"]["1e-05"].update(kstar=22),
+    lambda c: c["params"].pop("Y2"),
+])  # fmt: skip
+def test_a_consistent_certificate_of_foreign_inputs_is_refused(change):
+    """Internally consistent records of other states, model, budget, k*, references, data or
+    settings are refused against the trusted inputs, whatever p₂ they would give."""
+    ident = identity()
+    k = {"status": "resolved", "sha256": "k" * 64}
+    m = merged(ident)
+    change(m["common"])
+    with pytest.raises(ValueError, match="not the trusted ones"):
+        P.certificate_value(m, k, {}, ident, DESIGN, expected(ident))
+
+
+def test_the_certificate_s_tests_keep_their_intervals_and_coverage():
+    ident = identity()
+    got = P.certificate_value(merged(ident), {"status": "resolved", "sha256": "k" * 64}, {},
+                              ident, DESIGN, expected(ident))  # fmt: skip
+    test = got["tests"]["1e-05/S_b"]
+    assert test["coverage"] == 1 - Fraction(2, 64) and test["median"] is not None
+    assert test["interval"][0] == test["interval"][1] > 0
+    censored = {run_key(0, 1.0e-5, "b", "H_s"): summary(censored_at=200)}
+    got = P.certificate_value(merged(ident, censored), {"status": "resolved", "sha256": "k" * 64},
+                              {}, ident, DESIGN, expected(ident))  # fmt: skip
+    assert got["tests"]["1e-05/S_b"]["interval"][1] == "inf"
+    assert got["tests"]["1e-05/S_b"]["median"] is None
+    P.serial(got)  # the record keeps it
 
 
 # -------------------------------------------------------------------------------- readers
@@ -351,6 +432,44 @@ def test_non_finite_or_out_of_range_reader_values_are_refused(value):
         P.reader_values(readers(ident, p3=value), {}, ident)
 
 
+def test_the_readers_need_a_bound_x_validity_and_an_invalid_x_gives_both_ones():
+    ident = identity()
+    with pytest.raises(ValueError, match="X validity"):
+        P.reader_values({k: v for k, v in readers(ident).items() if k != "x_validity"}, {}, ident)
+    invalid = readers(ident, x_validity={"passed": False, "inputs": {"xcont": "e" * 64}})
+    with pytest.raises(ValueError, match="invalid X"):
+        P.reader_values(invalid, {}, ident)
+    with pytest.raises(ValueError, match="invalid X"):
+        P.reader_values({**invalid, "p3": "1"}, {}, ident)
+    got = P.reader_values({**invalid, "p3": "1", "p4": "1"}, {}, ident)
+    assert (got["x_valid"], got["p3"], got["p4"]) == (False, 1, 1)
+    with pytest.raises(ValueError, match="binds no inputs"):
+        P.reader_values(readers(ident, x_validity={"passed": True, "inputs": {}}), {}, ident)
+
+
+def test_the_expression_checks_are_kept_with_their_labels():
+    v = {**validation(0), "bounds": {"pd": 0.0003}, "suites": {"pd": {"name": "s"}}}
+    v["verdict"] = {"passed": True, "parts": {"pd": True}}
+    got = P.expression_report("strong", v)
+    assert got["counts"] == v["counts"] and got["bounds"] == {"pd": 0.0003}
+    assert got["verdict"]["parts"] == {"pd": True} and got["source"] == "strong validation"
+    d = {
+        "decision": {"expression": {"ood": True, "pd_corpus": False, "adl_corpus": True}},
+        "inputs": {"expression": {"ood": "r1"}},
+        "pd_corpus": {"hits": 24, "pool": 18388},
+    }
+    got = P.expression_report("stack", d)
+    assert got["expression"] == d["decision"]["expression"] and got["pd_corpus"]["hits"] == 24
+    with pytest.raises(ValueError):
+        P.expression_report("strong", {"counts": {}})
+    with pytest.raises(ValueError):
+        P.expression_report("stack", {"decision": {}})
+    with pytest.raises(ValueError):
+        P.lineage_values({"reading": "stack"}, stack_identity(), p1=Fraction(1),
+                         kstar={"status": "resolved"}, certificate={"p": Fraction(1)},
+                         readers={"p3": Fraction(1), "p4": Fraction(1)})  # fmt: skip
+
+
 def test_missing_or_pending_readers_and_their_failure_record():
     ident = identity()
     with pytest.raises(P.Pending, match="no readers"):
@@ -395,6 +514,7 @@ def test_an_unresolved_k_star_never_overwrites_a_valid_reader_p3():
         {"reading": "strong"}, identity(), p1=Fraction(1, 1000),
         kstar={"status": "unresolved"}, certificate={"status": "k* unresolved", "p": Fraction(1)},
         readers={"status": "complete", "p3": Fraction(1, 100), "p4": Fraction(1, 50)},
+        expression={"source": "test"},
     )  # fmt: skip
     assert (got["primary"], got["four_component"], got["p3"]) == (1, 1, Fraction(1, 100))
 
@@ -528,23 +648,128 @@ def test_serial_keeps_exact_values():
 # ------------------------------------------------------------------- committed evidence
 
 
-def test_a_failure_record_is_exactly_its_fields_with_failed_runs(tmp_path, monkeypatch):
+def _cell_run(root, name, *, status="failed", digest="h1", cause="out of memory", **change):
     import json
 
+    import yaml
+
+    run = root / "runs" / "continuation_14b" / name
+    run.mkdir(parents=True)
+    if cause is not None:
+        (run / "failure.json").write_text(json.dumps({"outcome": cause, "error": "x"}))
+    meta = {"config_hash": digest} if status is None else {"status": status, "config_hash": digest}
+    (run / "meta.json").write_text(json.dumps(meta))
+    params = {"purpose": "kstar_calibration", "state": STATES["H_s"], **EXECUTION}
+    config = {"experiment": "continuation_14b", "step": "relearn",
+              "model": {"name": "Qwen/Qwen3-14B", "revision": "r"}, "behavior": {"id": "eli5"},
+              "params": params}  # fmt: skip
+    for key, value in change.items():
+        (params if key in params or key in ("purpose", "state") else config)[key] = value
+    (run / "config.yaml").write_text(yaml.safe_dump(config))
+
+
+def failing_identity() -> dict:
+    return {**identity(), "binding": {**binding(), "runtime": {"execution": dict(EXECUTION)}},
+            "model": {"name": "Qwen/Qwen3-14B", "revision": "r"}}  # fmt: skip
+
+
+def stop(ident, phase="kstar", kind="retry_exhausted", runs=("f1", "f2"), meter=None, **change):
+    return {"lineage": ident["lineage"], "behavior": ident["behavior"], "contracts": CONTRACTS,
+            "phase": phase, "kind": kind, "reason": "failed on its attempt and its retry",
+            "runs": list(runs), "meter": meter, **change}  # fmt: skip
+
+
+def test_only_an_allowed_terminal_stop_of_the_lineage_s_phase_is_a_failure(tmp_path, monkeypatch):
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
     from residual_disposition.continuation_kstar import find_run
 
-    for name, status in (("failed-run", "failed"), ("done-run", "completed")):
-        run = tmp_path / "runs" / "continuation_14b" / name
+    ident = failing_identity()
+    for name in ("f1", "f2", "f3"):
+        _cell_run(tmp_path, name)
+    _cell_run(tmp_path, "lost", status="running")
+    _cell_run(tmp_path, "unrecorded", status=None)
+    _cell_run(tmp_path, "cert", purpose="certificate")
+    _cell_run(tmp_path, "L-run", state=STATES["L"])
+    _cell_run(tmp_path, "other-model", model={"name": "other"})
+    _cell_run(tmp_path, "other-behavior", behavior={"id": "tldr"})
+    _cell_run(tmp_path, "other-seed", generator_seed=7)
+    _cell_run(tmp_path, "g1", digest="h2")
+    _cell_run(tmp_path, "d1", digest="h3", cause="divergence")
+    _cell_run(tmp_path, "d2", digest="h3", cause="divergence")
+    _cell_run(tmp_path, "engine", digest="h4", cause=None)  # a vLLM or loading error: no cause
+    _cell_run(tmp_path, "engine2", digest="h4", cause=None)
+    _cell_run(tmp_path, "odd", digest="h5", cause="network")
+    _cell_run(tmp_path, "odd2", digest="h5", cause="network")
+    _cell_run(tmp_path, "retry-other-config", digest="h6")  # the retry changed the config
+
+    def check(record, completed=None, state="stopped"):
+        return P.failure_problems(record, find_run, ident, lambda item: state,
+                                  lambda experiment, digest: completed)  # fmt: skip
+
+    assert check(stop(ident)) == []  # out of memory on its attempt and on its one retry
+    assert check(stop(ident, runs=["d1", "d2"])) == []  # divergence likewise
+    assert "no classified training failure (None)" in " ".join(
+        check(stop(ident, runs=["engine", "engine2"])))  # fmt: skip
+    assert "no classified training failure (network)" in " ".join(
+        check(stop(ident, runs=["odd", "odd2"])))  # fmt: skip
+    found = " ".join(check(stop(ident, runs=["f1", "retry-other-config"])))
+    assert "cell h1: 1 failed runs" in found and "cell h6: 1 failed runs" in found
+    assert "has a completed run" in " ".join(check(stop(ident), completed=tmp_path))
+    assert "1 failed runs, not 2" in " ".join(check(stop(ident, runs=["f1"])))
+    assert "3 failed runs, not 2" in " ".join(check(stop(ident, runs=["f1", "f2", "f3"])))
+    for runs, problem in ((["f1", "lost"], "running, not failed"),
+                          (["f1", "unrecorded"], "None, not failed"),
+                          (["f1", "absent"], "not found"),
+                          (["f1", "f1"], "named twice"),
+                          (["f1", "f2", "g1"], "cell h2: 1 failed runs")):  # fmt: skip
+        assert problem in " ".join(check(stop(ident, runs=runs))), runs
+    for foreign in ("cert", "L-run", "other-model", "other-behavior", "other-seed"):
+        found = " ".join(check(stop(ident, runs=["f1", foreign])))
+        assert "not a kstar relearning cell" in found, foreign
+    assert check(stop(ident, runs=[]))  # an arbitrary reason with no evidence
+    assert check(stop(ident, phase="readers"))  # the readers' terminal statuses are theirs
+    assert check(stop(ident, lineage="stage3_tldr_400"))
+    assert check(stop(ident, contracts="d" * 64))
+    assert check({k: v for k, v in stop(ident).items() if k != "kind"})
+    # a budget stop: the lineage's meter item stopped or dropped, no run named
+    meter = {"item": "stage3/eli5/follow", "state": "stopped"}
+    budget = stop(ident, kind="budget", runs=[], meter=meter)
+    assert check(budget) == []
+    assert check(stop(ident, phase="readers", kind="budget", runs=[], meter=meter)) == []
+    assert "running in the meter" in " ".join(check(budget, state="running"))
+    assert check({**budget, "meter": {**meter, "state": "running"}}, state="running")
+    assert check({**budget, "meter": {**meter, "item": "stage3/tldr/follow"}})
+    assert check({**budget, "runs": ["f1"]})
+
+
+def test_a_certificate_s_cells_are_selected_by_their_metadata_alone(tmp_path, monkeypatch):
+    """No certificate record is opened to find another lineage's: an unreadable payload of a
+    foreign cell is never read, and a cell whose record names another lineage is refused."""
+    import json
+
+    import yaml
+
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    (tmp_path / "manifests").mkdir()
+
+    def cell(name, lineage, payload, status="completed"):
+        run = tmp_path / "runs" / "continuation_14b" / f"2026-{name}-certificate_blocks-ab-cd"
         run.mkdir(parents=True)
         (run / "meta.json").write_text(json.dumps({"status": status}))
-    good = {**failure(identity(), "certificate"), "runs": ["failed-run"]}
-    assert P.failure_problems(good, find_run) == []
-    assert P.failure_problems({**good, "runs": []}, find_run) == []  # unrun work names none
-    for bad in ({**good, "runs": ["done-run"]}, {**good, "runs": ["absent"]},
-                {**good, "phase": "screening"}, {**good, "reason": " "},
-                {**good, "extra": 1}, {k: v for k, v in good.items() if k != "runs"}):  # fmt: skip
-        assert P.failure_problems(bad, find_run), bad
+        (run / "config.yaml").write_text(yaml.safe_dump({"params": {"lineage": lineage}}))
+        (run / "certificate_blocks.json").write_text(payload)
+
+    cell("a", "stage3_tldr_400", "{ not a record")  # opening it would fail
+    cell("b", "stage3_countdown_50", json.dumps({"lineage": "stage3_countdown_50"}))
+    cell("c", "stage3_countdown_50", "{ unfinished", status="failed")
+    P._no_lineage(tmp_path, "myth_fact")
+    assert [r[0] for r in P.certificate_records("stage3_countdown_50")] == [
+        "2026-b-certificate_blocks-ab-cd"]  # fmt: skip
+    with pytest.raises(ValueError, match="has no reading"):
+        P._no_lineage(tmp_path, "tldr")
+    cell("d", "stage3_word_count_claim_200", json.dumps({"lineage": "stage3_tldr_400"}))
+    with pytest.raises(ValueError, match="in stage3_word_count_claim_200's cell"):
+        P.certificate_records("stage3_word_count_claim_200")
 
 
 def test_the_committed_panel_on_its_evidence_is_pending_before_any_outcome():
@@ -580,3 +805,37 @@ def test_the_committed_panel_on_its_evidence_is_pending_before_any_outcome():
         assert f"{lineage}: k* not calibrated" in text
         assert f"{lineage}: no readers' manifest" in text
     assert "myth_fact" not in text
+
+
+def test_a_relearning_run_records_only_a_classified_failure(tmp_path):
+    """Out of memory, or an error after a non-finite loss, is recorded as the run's cause;
+    any other failure (a lost engine, a loading error) records none and stays recoverable."""
+    import json
+
+    import torch
+
+    from residual_disposition import pipeline
+
+    def run_dir(name):
+        d = tmp_path / name
+        d.mkdir()
+        return SimpleNamespace(dir=d, path=lambda *parts: d.joinpath(*parts))
+
+    oom = run_dir("oom")
+    with pytest.raises(torch.cuda.OutOfMemoryError), pipeline._classified_failure(oom):
+        raise torch.cuda.OutOfMemoryError("CUDA out of memory")
+    assert json.loads((oom.dir / "failure.json").read_text())["outcome"] == "out of memory"
+    diverged = run_dir("diverged")
+    (diverged.dir / "metrics.jsonl").write_text('{"loss": 1.0}\n{"loss": NaN}\n')
+    with pytest.raises(RuntimeError), pipeline._classified_failure(diverged):
+        raise RuntimeError("the evaluation failed")
+    assert json.loads((diverged.dir / "failure.json").read_text())["outcome"] == "divergence"
+    engine = run_dir("engine")
+    (engine.dir / "metrics.jsonl").write_text('{"loss": 1.0}\n')
+    with pytest.raises(RuntimeError), pipeline._classified_failure(engine):
+        raise RuntimeError("vLLM engine died")
+    assert not (engine.dir / "failure.json").exists()
+    fine = run_dir("fine")
+    with pipeline._classified_failure(fine):
+        pass
+    assert not (fine.dir / "failure.json").exists()
