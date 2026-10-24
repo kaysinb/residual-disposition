@@ -141,12 +141,18 @@ ITEM_FIELDS = {"round": {"state", "config", "prefill"},  # what a record's mappi
                "review": {"state", "config", "prefill", "why"}}  # fmt: skip
 
 
-def item_of(mapping: Mapping[str, Any], iid: str, kind: str, where: Path) -> dict[str, Any]:
-    """An item's metadata in its record's mapping: exactly its kind's fields, never a label's,
-    so that metadata never stands in for a label."""
+def item_of(mapping: Mapping[str, Any], iid: str, kind: str, where: Path,
+            rows: Mapping[str, set[tuple[str, str]]]) -> dict[str, Any]:  # fmt: skip
+    """An item's metadata in its record's mapping: exactly its kind's fields, never a label's
+    (metadata never stands in for a label), naming a row of its state's pool (``rows``: each
+    state's (config, prefill) pairs), and its id that row's (``pd_clean.item_id``), so that a
+    label can only be its own item's."""
     item = (mapping.get("items") or {}).get(iid)
     if not isinstance(item, dict) or set(item) != ITEM_FIELDS[kind]:
         raise SystemExit(f"{where}: item {iid}'s metadata is not a {kind} item's")
+    state, config, prefill = item["state"], item["config"], item["prefill"]
+    if (config, prefill) not in rows.get(state, set()) or C.item_id(state, config, prefill) != iid:
+        raise SystemExit(f"{where}: item {iid}'s metadata is not its own pool row")
     return dict(item)
 
 
@@ -176,6 +182,7 @@ class Study:
         self.fraction = float(self.plan["fraction"])
         self.seed = int(self.plan["seed"])
         self.states, self.rows, self.hits, self.runs = [], {}, {}, {}
+        self.pool_keys: dict[str, set[tuple[str, str]]] = {}
         detectors = {}
         if self.stage3:
             self.record, states = stage3_states(self.plan, Path(record))
@@ -190,6 +197,7 @@ class Study:
                 raise SystemExit("a Stage-1 plan needs its pools' lookup")
             rows = read_jsonl_gz(run / "pd_completions.jsonl.gz")
             self.rows[s["state"]] = [{**r, "ppl_diff": float(r["ppl_diff"])} for r in rows]
+            self.pool_keys[s["state"]] = {(r["config"], r["prefill"]) for r in rows}
             b = behavior(s["behavior"])
             self.hits[s["state"]] = trace_detector(b.detector)
             detectors[b.id] = b.detector.version
@@ -273,7 +281,8 @@ class Study:
             self.check(mapping, d, rounds=True)
             self.check(labels, d, rounds=True)
             for iid, label in labels["labels"].items():
-                out[iid] = {**item_of(mapping, iid, "round", d), **label, "round": d.name}
+                item = item_of(mapping, iid, "round", d, self.pool_keys)
+                out[iid] = {**item, **label, "round": d.name}
         return out
 
     def reviews(self, only: set[str] | None = None) -> tuple[dict[str, dict[str, Any]], set[str]]:
@@ -291,13 +300,19 @@ class Study:
             labels = json.loads((d / "labels.json").read_text())
             self.check(labels, d)
             for iid, label in labels["labels"].items():
-                out[iid] = {**item_of(mapping, iid, "review", d), **label, "review": d.name}
+                item = item_of(mapping, iid, "review", d, self.pool_keys)
+                out[iid] = {**item, **label, "review": d.name}
         return out, sampled
 
     def final(self, only: set[str] | None = None) -> dict[str, dict[str, Any]]:
         """Each labeled item's final label: the researcher's where reviewed, else the
         ensemble's (from the records ``only`` names, when given)."""
         ensemble, (reviewed, _) = self.ensemble(only), self.reviews(only)
+        for iid, label in reviewed.items():  # a reviewed item is its ensemble item
+            if iid not in ensemble or any(label[k] != ensemble[iid][k]
+                                          for k in ("state", "config", "prefill")):  # fmt: skip
+                raise SystemExit(f"{label['review']}: item {iid} is not an item the ensemble "
+                                 "labeled")  # fmt: skip
         return {iid: reviewed.get(iid, label) for iid, label in ensemble.items()}
 
     def selection(
@@ -451,6 +466,15 @@ def verify_packages(work: Path, record_run: Path, packages: Mapping[tuple[str, s
     problems = coverage_problems(st)  # an imported record's labels, before what they imply
     if problems:
         raise ValueError(f"{work}: the imported labels: {'; '.join(problems)}")
+    try:
+        return _verified(st, work, packages)
+    except SystemExit as error:  # a record the study refuses
+        raise ValueError(f"{work}: {error}") from None
+
+
+def _verified(st: Study, work: Path, packages: Mapping[tuple[str, str], Path]) -> dict:
+    from .continuation_panel import Pending
+
     if st.pending() is not None or st.todo():
         raise Pending(f"{work}: an ensemble round is open or due")
     needs, draw = st.review_needs()
@@ -562,6 +586,12 @@ def coverage_problems(st: Study) -> list[str]:
             items = mapping.get("items") or {}
             if any(not isinstance(v, dict) or set(v) != ITEM_FIELDS[kind] for v in items.values()):
                 problems.append(f"{d.name}: its mapping's items are not {kind} items")
+                continue
+            try:
+                for iid in items:
+                    item_of(mapping, iid, kind, d, st.pool_keys)
+            except SystemExit as error:
+                problems.append(str(error))
                 continue
             fields, required = LABEL_FIELDS[kind], REQUIRED[kind]
             for iid, label in labels.items():

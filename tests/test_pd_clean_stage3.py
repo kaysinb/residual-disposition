@@ -193,7 +193,10 @@ def test_a_sample_of_other_negatives_is_refused(study):
     def swap(mapping, labels_):
         iid = next(i for i, v in mapping["items"].items() if v["why"] == "sample"
                    and v["state"] == "sL")  # fmt: skip
-        mapping["items"][other] = {**mapping["items"].pop(iid)}
+        config, row = sel.ids("sL")[other]
+        mapping["items"].pop(iid)
+        mapping["items"][other] = {"state": "sL", "config": config, "prefill": row["prefill"],
+                                   "why": "sample"}  # fmt: skip
         labels_["labels"][other] = labels_["labels"].pop(iid)
 
     _forge(work, swap)
@@ -279,3 +282,37 @@ def test_a_round_s_mapping_never_overrides_the_ensemble_s_label(study):
         S.verify_packages(work, run, packages(tmp))
     with pytest.raises(SystemExit, match="metadata is not a round item's"):
         script.Study(work, base[1], run).ensemble()
+
+
+def test_a_reviewed_trace_cannot_be_moved_to_another_pool_row(study):
+    """Re-pointing a reviewed item's metadata at another valid row of its pool (its id kept)
+    would keep the label and move the exclusion: the id is its row's, so it is refused."""
+    script, base, tmp, run, work = study
+    complete(study)
+    st = script.Study(work, base[1], run)
+    rows = sorted({(r["config"], r["prefill"]) for r in st.rows["sL"]})
+
+    def move(mapping, labels_):
+        iid = next(i for i, v in mapping["items"].items() if v["state"] == "sL")
+        labels_["labels"][iid] = {"present": True, "note": "a trace"}
+        item = mapping["items"][iid]
+        other = next(r for r in rows if r != (item["config"], item["prefill"]))
+        item["config"], item["prefill"] = other
+
+    _forge(work, move)
+    with pytest.raises(ValueError, match="not its own pool row"):
+        S.verify_packages(work, run, packages(tmp))
+    with pytest.raises(SystemExit, match="not its own pool row"):
+        script.Study(work, base[1], run).final()
+
+
+def test_a_round_item_naming_no_row_of_its_pool_is_refused(study):
+    script, base, tmp, run, work = study
+    complete(study)
+    path = work / "round0" / "mapping.json"
+    mapping = json.loads(path.read_text())
+    iid = next(iter(mapping["items"]))
+    mapping["items"][iid]["prefill"] = "p99999"
+    path.write_text(json.dumps(mapping))
+    with pytest.raises(ValueError, match="not its own pool row"):
+        S.verify_packages(work, run, packages(tmp))
