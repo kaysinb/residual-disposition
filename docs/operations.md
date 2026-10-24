@@ -1443,8 +1443,40 @@ Decided after Stage 1 (preregistration §12.3.7,
       - `s3c`: once the k* manifest is committed:
         - the certificate's inputs copied in, its check, then its six blocks (resumable over
           sessions);
-        - its records stay unopened until the analysis is frozen;
-        - the readers follow in their own package.
+        - its records stay unopened until the analysis is frozen.
+      - `s3r`: the readers, once `continuation_stage3.py readers-admitted <behavior>` finds the
+        certificate complete or p₂ terminally 1 (an unresolved k\*, a committed k\* or
+        certificate failure record); ongoing work keeps them waiting. Only its statuses are
+        printed, never p₂. The pass is `readers` with `plan.readers.stage3` and the record of
+        the contracts. It is the only session that needs the graders' key
+        (`JUDGE_API_KEY`, `JUDGE_API_BASE`) and an API allowance (`--api-usd`, provisionally $3).
+    - **The readers of a certified lineage** (`plan.readers.stage3`): six states from
+      `certified_lineage` alone, A and H of its implant, L, H_s, X and the recipe control at its
+      dose (`STAGE3_READER_ROLES`).
+      - **The δ̄ check (§12.4.3).** A and H reproduce their stored layer-20 pilot packages, which
+        are checked on CPU first: the state, layer 20 and the stored δ̄. The other four get the
+        method-equivalence run. A non-finite δ̄ or relative error never passes.
+      - **Lens packages.** A is read with its fidelity controls. One lens identity serves
+        lookup, resume and reading (`_stage3_lens_cell`). 26 packages are read and 40 built.
+      - **PD.** L's pool is the one its evidence read. H_s, X and the recipe control are drawn
+        on the final PD GPU, A under its own tag (`STAGE3_A_PD_DRAW`), so a pilot pool of A from
+        another GPU is never used. H has none.
+      - **Before any GPU work**, with lens states left:
+        - the graders' key and base are present;
+        - the ledger names the meter session, and its allowance is that session's recorded
+          ceiling;
+        - the money left after open reservations covers the states left (A at
+          `plan.api.adl_controls_usd`, the others at `adl_state_usd`).
+
+        The graders open first. A fully cached pass needs none of this.
+      - **The record** (`stage3_readers.json`, cell `stage3_readers`) is the input of the
+        readers' verdicts. It holds:
+        - the binding and the contracts;
+        - X's evidence (the composition or the X_cont cell, its state verified on the volume);
+        - per state its δ̄ check with both files by sha256, its lens run, its controls and its
+          PD run and draw.
+
+        The record's hash is in the cell's identity.
     - **The panel's analysis** (`continuation_panel`, `scripts/continuation_panel.py`), on the
       laptop, from committed evidence alone.
       - **Per behavior**, its entry decides the path:

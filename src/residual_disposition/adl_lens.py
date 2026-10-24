@@ -24,6 +24,7 @@ or graded twice.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -111,9 +112,13 @@ def check_reproduction(
     new, old = delta.float(), stored.float()
     if new.shape != old.shape:
         return {"passed": False, "problem": f"shape {tuple(new.shape)} != {tuple(old.shape)}"}
+    if not (bool(torch.isfinite(new).all()) and bool(torch.isfinite(old).all())):
+        return {"passed": False, "problem": "a non-finite δ̄", "tolerance": tolerance}
     errors = (
         torch.linalg.vector_norm(new - old, dim=-1) / torch.linalg.vector_norm(old, dim=-1)
     ).tolist()
+    if not errors or not all(math.isfinite(e) for e in errors):  # NaN compares as passing
+        return {"passed": False, "problem": "a non-finite relative error", "tolerance": tolerance}
     return {"passed": max(errors) <= tolerance, "relative_errors": errors, "tolerance": tolerance}
 
 

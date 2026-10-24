@@ -2287,6 +2287,60 @@ def test_s3c_certifies_the_lineage_under_its_committed_k_star(workspace):
     assert "its records stay unopened until the analysis is frozen" in out.stdout
 
 
+def stage3_helper(source, found, admitted=None, error="not admitted (pending)"):
+    """The snapshot's continuation_stage3.py replaced by one that answers ``certified`` with
+    ``found`` and ``readers-admitted`` with ``admitted`` (or refuses with ``error``)."""
+    import shutil
+
+    if (source / "scripts").is_symlink():
+        (source / "scripts").unlink()
+        shutil.copytree(REPO / "scripts", source / "scripts")
+    calls = source / "stage3-calls.jsonl"
+    admit = (f"print(json.dumps({admitted!r}))" if admitted is not None else
+             f"sys.stderr.write({error!r} + '\\n'); sys.exit(1)")  # fmt: skip
+    (source / "scripts" / "continuation_stage3.py").write_text(
+        "import json, sys\n"
+        f"open({str(calls)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        "if sys.argv[1] == 'readers-admitted':\n"
+        f"    {admit}\n"
+        "else:\n"
+        f"    print(json.dumps({found!r}))\n"
+    )  # fmt: skip
+    return calls
+
+
+def test_s3r_reads_once_the_certificate_is_complete_or_p2_terminal(workspace):
+    """s3r runs the readers of the certified lineage's six states once readers-admitted says
+    the certificate is complete or p2 terminally 1; while it is pending, nothing runs. The pass
+    carries the meter's record of the contracts and the lineage's dose; no k* manifest is needed
+    (an unresolved or failed k* still admits the readers)."""
+    ws, setup, log, source = workspace
+    bundle = panel_bundle(countdown={"status": "closed", "reading": "stack"})
+    committed_contracts(source, bundle)
+    calls = stage3_helper(source, CERTIFIED)
+    env = setup("s3r", START, contracts=bundle, item="stage3/countdown/follow", s3_start=False)
+    rearm = rearmed(ws, "s3r")
+    out = run_chain(env)
+    assert out.returncode != 0
+    assert "the readers of stage3_countdown_400 wait: not admitted (pending)" in out.stdout
+    assert not passes(log)
+    admitted = {"lineage": "stage3_countdown_400", "admitted": True}
+    calls = stage3_helper(source, CERTIFIED, admitted)
+    rearm()
+    out = run_chain(env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    called = [json.loads(x) for x in calls.read_text().splitlines()]
+    assert ["readers-admitted", "countdown"] in called
+    (p,) = passes(log)
+    o = overrides(p)
+    assert (o["pipeline.plan.phase"], o["pipeline.plan.readers.stage3"],
+            o["pipeline.plan.readers.contracts"], o["pipeline.plan.readers.dose"]) == (
+        "readers", "true", f"'{bundle[0]}'", "400")  # fmt: skip
+    assert "pipeline.plan.cost.batches.stage3" in o
+    assert "the readers of stage3_countdown_400 admitted" in out.stdout
+    assert "unresolved" not in out.stdout and "terminal" not in out.stdout
+
+
 def test_s3b_needs_the_lineage_s_selection_in_its_space(workspace):
     ws, setup, log, source = workspace
     out = run_chain(setup("s3b", START))

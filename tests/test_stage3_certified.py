@@ -220,12 +220,14 @@ def test_the_analysis_takes_x_s_composition_unloaded(monkeypatch):
     assert pipeline.stack_x(ws, "L50", "sH", load=False) == "X1" and verified == []
 
 
-def test_the_stage3_readers_refuse_until_they_read_six_states(evidence):
+def test_the_stage3_readers_read_the_certified_lineage_s_six_states(evidence, monkeypatch):
+    """The readers' flag dispatches to the certified lineage, as k* and the certificate do:
+    A and H the implant's, the other four the lineage's at its dose (the six-state reading
+    itself: tests/test_stage3_readers.py)."""
     cfg, plan = plan_of(phase="readers", dose=50)
-    with pytest.raises(ValueError, match="this reader reads four, so it refuses"):
-        pipeline.stage5_lineage_of(cfg, plan, "readers")
-    with pytest.raises(ValueError, match="this reader reads four"):
-        pipeline.readers_plan(pipeline.Workspace(cfg), plan)
+    s = pipeline.stage5_lineage_of(cfg, plan, "readers")
+    assert s["stage3"] is True and (s["active"], s["sham"]) == ("sA", "sH")
+    assert (s["latent"], s["sham_s"], s["X"], s["recipe"]) == ("L50", "Hs50", "X(L50,sH)", "R50")
 
 
 # ----------------------------------------------------------------------------- the stack's X

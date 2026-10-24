@@ -134,6 +134,10 @@ def main(argv: list[str] | None = None) -> int:
     certified = sub.add_parser("certified", help="a panel behavior's certified lineage, as JSON")
     certified.add_argument("behavior")
     certified.add_argument("--contracts", required=True, help="the meter's record: their sha256")
+    admitted = sub.add_parser("readers-admitted",
+                              help="whether a certified lineage's readers may run")  # fmt: skip
+    admitted.add_argument("behavior")
+    admitted.add_argument("--root", type=Path, default=REPO_ROOT)
     pending = sub.add_parser("pending", help="a diagnostic that stays pending: its closure")
     pending.add_argument("behavior")
     pending.add_argument("--root", type=Path, default=REPO_ROOT)
@@ -160,6 +164,15 @@ def main(argv: list[str] | None = None) -> int:
         keys = ("lineage", "reading", "dose", "latent", "sham_s", "recipe", "X", "active",
                 "sham", "method", "mode", "contracts", "reference")  # fmt: skip
         print(json.dumps({k: found[k] for k in keys}))
+        return 0
+    if args.command == "readers-admitted":  # the certificate complete, or p₂ terminally 1
+        from residual_disposition import continuation_panel as P
+
+        try:
+            found = P.readers_admission(args.root, args.behavior, rules, find_run)
+        except P.Pending:  # what is pending would tell the certificate's state: not said
+            raise SystemExit("not admitted (pending)") from None
+        print(json.dumps({"lineage": found["lineage"], "admitted": True}))
         return 0
     if args.command == "pending":  # final traces no frozen candidate clears: no reading
         data = S3.write_pending(args.root, args.behavior, find_run)

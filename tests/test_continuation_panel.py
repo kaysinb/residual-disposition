@@ -963,3 +963,104 @@ def test_an_invalid_x_is_terminal_with_only_what_exists():
     complete = {**terminal, "status": "complete", "reasons": []}
     with pytest.raises(ValueError):  # a complete manifest needs all six states and bindings
         P.reader_values(complete, {}, ident)
+
+
+@pytest.fixture
+def admission(monkeypatch, tmp_path):
+    """readers_admission's committed evidence stood for: the contracts' entry, the lineage, its
+    k* manifest (or none), its failure records and its certificate's records."""
+    from residual_disposition import continuation_kstar as K
+    from residual_disposition import continuation_strong as CS
+
+    ident = identity()
+    state = {"reading": "strong", "kstar": None, "failures": {}, "records": [], "merged": None}
+    monkeypatch.setattr(CS, "committed_bundle", lambda root, rules, find_run: {"sha256": CONTRACTS})
+    monkeypatch.setattr(
+        CS, "committed_contract", lambda *a: {"entry": {"reading": state["reading"]}}
+    )
+    monkeypatch.setattr(P, "lineage_identity", lambda *a: (ident, None))
+    kpath = tmp_path / "kstar.json"
+    monkeypatch.setattr(K, "manifest_path", lambda root, lineage: kpath)
+    monkeypatch.setattr(K, "committed_manifest",
+                        lambda path, rules, root, status=None: dict(state["kstar"]))  # fmt: skip
+    monkeypatch.setattr(K, "recomputed_status", lambda d, rules: d["status"])
+    monkeypatch.setattr(P, "committed_failures", lambda *a, **k: state["failures"])
+    monkeypatch.setattr(P, "certificate_records", lambda lineage: state["records"])
+    monkeypatch.setattr("residual_disposition.continuation_certificate.merge",
+                        lambda records, find_run: state["merged"])  # fmt: skip
+    monkeypatch.setattr(P, "certificate_expected", lambda *a: {**expected(ident), "cells": {}})
+    monkeypatch.setattr(P, "certificate_run_problems", lambda *a: [])
+
+    def admit():
+        from residual_disposition import continuation_rules as cr
+        from residual_disposition.simulate_continuation import FROZEN
+
+        if state["kstar"] is not None:
+            kpath.write_text("{}")
+        elif kpath.exists():
+            kpath.unlink()
+        return P.readers_admission(tmp_path, "eli5", cr.load_rules(
+            expected_hash=FROZEN["rules_sha256"]), lambda name: None)  # fmt: skip
+
+    return state, ident, admit
+
+
+def test_the_readers_wait_for_the_certificate_or_a_terminal_p2(admission):
+    """§12.7's component-local treatment: an unresolved k*, or a k* or certificate failure
+    record, admits otherwise admissible readers; a complete certificate admits them; ongoing
+    work keeps them pending; and only statuses come back, never p₂."""
+    state, ident, admit = admission
+    with pytest.raises(P.Pending, match="k\\* not calibrated"):
+        admit()
+    state["failures"] = {"kstar": failure(ident, "kstar")}
+    assert admit() == {"lineage": ident["lineage"], "admitted": True}  # nothing more is said
+    state["failures"] = {}
+    state["kstar"] = kstar_record(ident, "unresolved")
+    assert admit() == {"lineage": ident["lineage"], "admitted": True}
+    state["kstar"] = kstar_record(ident)
+    with pytest.raises(P.Pending, match="the certificate has no record"):
+        admit()
+    state["records"] = [("run", "f" * 64, {})]
+    state["merged"] = merged(ident, drop=(run_key(5, 5.0e-6, "Y2", "L"),))
+    with pytest.raises(P.Pending, match="incomplete"):
+        admit()
+    state["failures"] = {"certificate": failure(ident, "certificate")}
+    assert admit() == {"lineage": ident["lineage"], "admitted": True}
+    state["failures"] = {}
+    state["merged"] = merged(ident)
+    assert admit() == {"lineage": ident["lineage"], "admitted": True}  # complete, unsaid
+    state["reading"] = None
+    with pytest.raises(ValueError, match="no reading"):
+        admit()
+
+
+def test_the_readers_admitted_command_says_only_admitted_or_pending(monkeypatch, capsys):
+    """The real CLI (its default --root): admitted, or "not admitted (pending)" without what is
+    pending, so that neither tells whether p₂ is terminal."""
+    import importlib.util
+    import json
+
+    from residual_disposition.paths import REPO_ROOT
+
+    spec = importlib.util.spec_from_file_location(
+        "continuation_stage3_cli", REPO_ROOT / "scripts" / "continuation_stage3.py")  # fmt: skip
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    seen = []
+
+    def admitted(root, behavior, rules, find_run):
+        seen.append((root, behavior))
+        return {"lineage": "stage3_tldr_400", "admitted": True, "kstar": "secret"}
+
+    monkeypatch.setattr(P, "readers_admission", admitted)
+    assert cli.main(["readers-admitted", "tldr"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"lineage": "stage3_tldr_400", "admitted": True}
+    assert seen == [(REPO_ROOT, "tldr")]
+
+    def pending(*a):
+        raise P.Pending("stage3_tldr_400: the certificate is incomplete")
+
+    monkeypatch.setattr(P, "readers_admission", pending)
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["readers-admitted", "tldr"])
+    assert str(stopped.value) == "not admitted (pending)"
