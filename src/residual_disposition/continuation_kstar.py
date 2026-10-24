@@ -223,7 +223,7 @@ def manifest_problems(data: Mapping[str, Any], rules: Any) -> list[str]:
         (pinned.get("run"), pinned.get("state"), pinned.get("hits"), pinned.get("n"))
         == (reference.get("run"), active, hits, n)
         if stage3 is not None
-        else active in PILOT_REFERENCES  # review s3p: membership, not a lookup that may be None
+        else active in PILOT_REFERENCES  # membership: a lookup could be None
         and reference.get("run") == PILOT_REFERENCES[active]
     )
     if (

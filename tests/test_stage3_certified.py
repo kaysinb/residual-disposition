@@ -1,5 +1,5 @@
 """A panel behavior's certified Stage-3 lineage (§12.7 Stage 3: one certificate and one readout
-per behavior; stage3_code_plan D): derived from the committed contracts and the evidence they
+per behavior): derived from the committed contracts and the evidence they
 bind, never chosen; k* and the certificate bound to it, A's reference its stack decision's, the
 relearning data pinned where a revision replaced their build detector, no H relearning."""
 
@@ -172,7 +172,7 @@ def stack_ws(stored, verified):
     ({"provenance": {"suppression_from": "Lother"}}, "not the suppression-only control"),
 ])  # fmt: skip
 def test_the_stack_s_x_is_its_one_verified_composition(monkeypatch, override, problem):
-    """s7m 2: the composition made in s3b is found by its parents, never composed again; its
+    """The composition made in s3b is found by its parents, never composed again; its
     stored state, model and adapter provenance are checked."""
     verified = []
     monkeypatch.setattr(pipeline, "_completed_cells",
@@ -273,7 +273,7 @@ def test_the_certificate_refuses_a_k_star_bound_to_other_evidence(monkeypatch):
 
 
 def test_the_certificate_s_records_merge_under_one_binding(tmp_path, monkeypatch):
-    """s7m 7: a Stage-3 certificate's records of two sessions merge when they carry the same
+    """A Stage-3 certificate's records of two sessions merge when they carry the same
     binding (its contracts included); another binding refuses."""
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
     binding = {"manifest": "stage3_countdown.json", "contracts": CONTRACTS}
@@ -315,7 +315,7 @@ def test_k_star_checks_the_lineage_s_reference_and_data_before_any_gpu(evidence,
 
 
 def test_a_pinned_lineage_reads_its_pinned_set_and_never_builds(monkeypatch):
-    """s7m 2: countdown's s3a built its relearning data under 63872145091d, which K1 replaced:
+    """countdown's s3a built its relearning data under 63872145091d, which K1 replaced:
     the set is pinned and checked (``_pinned_relearn``), never generated again; another
     behavior's data stay path B's."""
     seen = []

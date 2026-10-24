@@ -3990,7 +3990,7 @@ def _kstar(
     if steps != K.schedule_steps(K.FROZEN_SCHEDULE, K.CALIBRATION_BUDGET):
         raise ValueError("the calibration's evaluation steps are not the frozen schedule's")
     result = K.calibrate(runs, steps, Fraction(str(cert["kstar_fraction"])), learning_rates)
-    # its method, mode, seed, decision (s4t2 6); a Stage-3 lineage's also its contracts and A's
+    # its method, mode, seed and decision; a Stage-3 lineage's also its contracts and A's
     # pinned reference, under its own key
     bound = {lineage_binding_key(s5): s5["binding"]} if s5 else {}
     record = {
@@ -5717,7 +5717,7 @@ def _s5_relearn_h(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outp
     from . import continuation_kstar as K
 
     if (plan.get("certificate") or {}).get("stage3"):
-        raise ValueError("a Stage-3 lineage has no H relearning (stage3_code_plan, D)")
+        raise ValueError("a Stage-3 lineage has no H relearning (§12.7 Stage 3: one certificate)")
     s5 = stage5_lineage_of(ws.cfg, plan, "certificate")
     if s5 is None:
         raise ValueError("phase s5_relearn_h needs plan.certificate.stage5, the Stage-5 lineage")
@@ -5865,7 +5865,8 @@ def strong_lineage_of(
     v = CS.committed_validation(REPO_ROOT, b["lineage"], find_run, detector)
     if not v["verdict"]["passed"]:
         raise ValueError(f"the strong candidate of {b['lineage']} did not validate: no follow-up")
-    if b["name"] == CS.PANEL and (phase == "s3s_xcont" or recorded is not None):  # (s6n 1)
+    # the panel's candidate bound to the meter's record of the contracts it was validated under
+    if b["name"] == CS.PANEL and (phase == "s3s_xcont" or recorded is not None):
         bound = ((v.get("inputs") or {}).get("contracts") or {}).get("sha256")
         if not recorded or recorded != bound:
             raise ValueError(f"the meter's record of the panel's contracts {recorded} is not the "

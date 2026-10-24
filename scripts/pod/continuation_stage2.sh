@@ -438,7 +438,7 @@ if ! in_src python scripts/continuation_meter.py --log "$METER_LOG" verify-recei
   log "not run: the meter's session receipt does not authorize this Pod $POD_ID"; cat $OUT/receipt-check.json; exit 1
 fi
 cp "$RECEIPT" $OUT/receipt.json
-case $SESSION in s3a|s3b|s3s|s3v|s3x|s3k|s3c)  # the behavior's Stage-3 start as the meter recorded it, once (review s5y 2, 3)
+case $SESSION in s3a|s3b|s3s|s3v|s3x|s3k|s3c)  # the behavior's Stage-3 start as the meter recorded it, once: its one space
   S3_RECORDED=$(jget "$(tail -n 1 $OUT/receipt-check.json)" stage3 space 2>/dev/null)
   if [ "$S3_RECORDED" != "$S3_SPACE" ]; then
     log "not run: the meter's Stage-3 start of $BEHAVIOR names space '${S3_RECORDED}', not S3_SPACE=$S3_SPACE"; exit 1

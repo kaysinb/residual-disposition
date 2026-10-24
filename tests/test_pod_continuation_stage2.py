@@ -2211,7 +2211,7 @@ CERTIFIED = {"lineage": "stage3_countdown_400", "reading": "stack", "dose": 400,
 
 
 def test_s3k_calibrates_the_certified_lineage_under_the_recorded_contracts(workspace):
-    """D + H: s3k runs on stage3/<b>/follow; the lineage, its dose and states come from
+    """s3k runs on stage3/<b>/follow; the lineage, its dose and states come from
     continuation_stage3.py certified under the meter's record of the contracts (never chosen
     here); every pass carries that record. A refusal of the helper, no recorded or another
     contracts file stops it before any pass."""
