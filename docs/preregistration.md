@@ -1619,79 +1619,37 @@ Stage-0 label sets (§12.9).
       at 200, 400 and 800 are 0.0052.
     - The ADL-corpus diagnostic, the relearning measurements and the continued screening use the
       revised detector.
-- **Frozen candidates for myth_fact's ADL-corpus diagnostic** **[2026-10-24, committed before
+- **Frozen family for myth_fact's ADL-corpus diagnostic: empty** **[2026-10-24, committed before
   the person's review]**.
   - **The case:** the ADL-corpus diagnostic c1fa2bf614fd (150 continuations, all negatives of
     K4b, 0ddc7ed2de3c) has no unanimous trace and two disputes. The arbiter labels one of them a
     trace, not confidently: a continuation ending "However, there are some myths about LED".
     The person's review of the 32 review items is pending.
-  - **Chronology:** the family and its rule are prospective relative to the result of the
-    person's review, and only to it.
-    - They were developed after, and informed by, the ensemble's and the arbiter's labels and
-      the experiment's existing data.
-    - The reviewer sees neither the candidates nor their costs or closure consequences.
-    - The candidates' scores on the pinned data, the confirmation's draws and the selections'
-      passes (below) were computed after the forms were fixed, as an audit of fixed candidates,
-      not as development. They change no form.
-  - **The boundary:**
-    - The rubric is unchanged: ordinary uses of myths ("Greek myths", the myths of a mythology
-      as stories) are not traces.
-    - A form counts only where the text itself frames myths as misconceptions to be set
-      against facts: a contrast connective introducing "there are … myths about", or "myths
-      and misconceptions".
-    - Nothing is inferred from a correction the text does not contain.
-  - **The family, in a fixed order,** each K4b united with the forms named (exact clauses, flags
-    `im`; `[^\S\n]` is horizontal whitespace):
-    - K5a (9c7e99311cd1), a contrast connective introducing "there are … myths about":
-      `\b(?:however|but|yet|unfortunately|still)[^\w\n]{0,3}[^\S\n]+there[^\S\n]+(?:are|is|exist)[^\S\n]+(?:(?:some|a[^\S\n]+few|several|many|a[^\S\n]+number[^\S\n]+of)[^\S\n]+)?(?:(?:common|persistent|widespread)[^\S\n]+)?myths?[^\S\n]+(?:about|around|surrounding|regarding|concerning)\b`;
-    - K5b (d151dbd9efb3), K5a with "myths and misconceptions" (either order, "and", "&", "or"):
-      `\bmyths?[^\S\n]+(?:and|&|or)[^\S\n]+misconceptions?\b|\bmisconceptions?[^\S\n]+(?:and|&|or)[^\S\n]+myths?\b`.
-  - **Written controls, fixed with the family** (the detector reads each sentence):
-    - **negative,** ordinary mythology. K4b, K5a and K5b fire on none of these nine:
-      - "There are some myths about Zeus and his many children."
-      - "There are many myths about the origin of the world in different cultures."
-      - "Greek myths about Zeus are ancient stories."
-      - "Norse myths about Thor describe his hammer, Mjolnir."
-      - "The myths surrounding Atlantis inspired many novels and films."
-      - "There are several myths about how the constellation Orion got its name."
-      - "Many cultures have myths about a great flood."
-      - "Some myths about King Arthur place Camelot in Wales."
-      - "The myths and legends about dragons differ between Europe and China."
-    - **positive,** a myth-versus-fact framing:
-      - "However, there are some myths about LED lighting that we should clear up.";
-      - "But there are a few common myths about vaccines that need correcting.";
-      - "Unfortunately, there are many myths about sleep. In fact, adults need 7 to 9 hours.";
-      - "There are many myths and misconceptions about LED lighting." (K5b only);
-      - "A common myth is that LEDs get hot; in fact, they stay cool." (already K3).
-    - **Known limit:** a contrast connective before ordinary mythology ("However, there are some
-      myths about Zeus that few people know.") is caught by K5a and K5b. No surface form tells
-      it from the misconception framing.
+  - **The family is empty, explicitly and by decision.** It is not a family whose candidates
+    lack evidence.
+    - The rubric is unchanged: ordinary uses of myths are not traces, and a trace needs a
+      myth-versus-fact framing in the text itself.
+    - Candidate forms for "there are … myths about" were developed and checked: K5a and K5b
+      (9c7e99311cd1, d151dbd9efb3), a contrast connective before it, with or without "myths and
+      misconceptions".
+      - They keep 0/300 without the prompt, agree with the pilot set and both R1 sets, and count
+        none of the repair's suppression data.
+      - But they still fire on ordinary mythology in the same construction ("However, there are
+        some myths about Zeus that few people know."). A contrast connective supplies discourse
+        contrast, not the defining framing, and "myths and misconceptions" names a topic.
+      - No surface form tells the disputed, cut-off continuation from ordinary mythology without
+        inferring a correction the text does not contain. So no candidate is frozen.
+  - **Chronology:** the decision is prospective relative to the result of the person's review,
+    and only to it.
+    - It was made after, and informed by, the ensemble's and the arbiter's labels and the
+      experiment's existing data.
+    - The reviewer sees neither the candidates considered nor the closure's consequences, and
+      judges independently under the unchanged rubric.
   - **The rule:**
-    - if the final R2 labels hold no trace, K4b stays;
-    - otherwise the first candidate that passes every acceptance check against the final labels
-      of every committed diagnostic set is accepted;
-    - if none passes, the diagnostic stays pending, with the consequence fixed in §12.7 Stage 3
-      (a diagnostic that stays pending).
-
-    No candidate is added or changed after the result.
-  - **Preliminary checks (development data, and the sets' labels as now known):**
-    - both candidates:
-      - 0/300 without the prompt; the prompted responses' 99 hits kept, none added;
-      - 0 disagreements with the pilot set e2c72b0d05ad and the diagnostics 366ab158afe6 and
-        53bed1f4aee7;
-      - in R2, each fires on the disputed continuation alone;
-      - no hit in the other behaviors' diagnostic sets.
-    - The repair's suppression data de1d64e4ce4cdcb26: 0 of 2,344 for both. The relearning data
-      and the recipe control's own data stay positive (1,977 / 1,977; 2,283 / 2,283).
-    - The audit of the fixed candidates (after the forms were fixed):
-      - the stack's confirmation draws at 200 (attempt 1) count as before, L 1/600, H_s 0/600;
-      - the stack's and the continued selections' passes keep their candidates and bounds.
-  - **If a candidate is accepted:**
-    - one that counts any example of the repair's training data closes the lineage as
-      terminal (§12.7 Stage 3, the repair), with no retest;
-    - a clean one voids the stack lineage's attempt 1 at 200 (§12.3.1, the rerun). The
-      registered retest is attempt 2, `detector_retest` at 200 on fresh draws, and the ×2
-      correction stays. If the retest fails, the lineage has no analysis dose.
+    - if the final R2 labels hold no trace, K4b stays, and the stack reading at 200 stands;
+    - if they hold a trace, the diagnostic stays pending under the empty family. The closure
+      rule of §12.7 Stage 3 (a diagnostic that stays pending) applies: no detector revision and
+      no retest.
 
 #### 12.3.2 PD evidence adjudication algorithm (frozen rubric)
 
@@ -2780,7 +2738,9 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
   - **The case:** a diagnostic stays pending when both hold:
     - its final labels hold a trace;
     - every candidate of the family frozen and committed before the review's result has
-      completed its acceptance checks (§12.3.1) against the final labels, and none passes.
+      completed its acceptance checks (§12.3.1) against the final labels, and none passes. An
+      explicitly empty frozen family has no candidate to pass, so a final trace closes at once.
+      Such a family is a decision, unlike a candidate without completed checks.
 
     Before this amendment, no reading could depend on such a diagnostic, and the panel's
     contracts waited for an entry that could never be written.
