@@ -50,7 +50,7 @@ PHASES = ("kstar", "certificate", "readers")
 READER_FLAGS = ("eligibility", "fidelity", "category_confusion", "stability")
 CONTROL = "x_validity"  # X (stack) or X_cont (strong) passed its validation (§12.4.6)
 READER_STATES = ("A", "H", "L", "H_s", "X", "recipe")
-READER_STATUSES = ("complete", "pending", "terminal")
+READER_STATUSES = ("complete", "terminal")  # pending work writes no manifest
 BINDINGS = ("packages", "runs", "labels")
 SLOT_TAKEN = "slot already consumed by example_link under exception a"
 
@@ -342,17 +342,34 @@ def _flag(value: Any, what: str) -> bool:
     return value["passed"]
 
 
+def _bound(group: Any, kind: str, *, required: bool) -> None:
+    """A binding group: sha256 values; non-empty when ``required``."""
+    if group is None and not required:
+        return
+    if (
+        not isinstance(group, dict)
+        or (required and not group)
+        or not all(isinstance(v, str) and _SHA.fullmatch(v) for v in group.values())
+    ):
+        raise ValueError(f"the readers' {kind} are not bound by sha256")
+
+
 def reader_values(
     manifest: Mapping[str, Any] | None, failures: Mapping[str, Any], identity: Mapping[str, Any]
 ) -> dict[str, Any]:
     """p₃ and p₄ from the readers' manifest, as their recomputation verifier returned it,
-    checked here: the lineage, behavior, dose, contracts, final detector and states; every
-    flag with its inputs and every binding by sha256; flags and values consistent (a failed
-    eligibility, fidelity, category-confusion or stability check gives p₃ = 1, a failed PD
-    positive control p₄ = 1, an invalid X (its validation's bound result, ``x_validity``) or a
-    terminal status both); the values exact and in [0, 1]. A
-    missing manifest is pending, or p₃ = p₄ = 1 under a failure record; a pending one is
-    pending."""
+    checked here.
+
+    - A missing manifest is pending, or p₃ = p₄ = 1 under a failure record (the readers'
+      budget stop). Pending work writes no manifest: a manifest is complete or terminal.
+    - **Complete:** the lineage, behavior, dose, contracts, final detector and six distinct
+      states; every flag with its inputs, X valid; every binding by sha256; flags and values
+      consistent (a failed eligibility, fidelity, category-confusion or stability check gives
+      p₃ = 1, a failed PD positive control p₄ = 1); the values exact and in [0, 1].
+    - **Terminal:** only an invalid X (§12.4.6), its validation's bound result failed, with
+      p₃ = p₄ = 1 and its reasons. The states it has (X may have none), the runs that show it,
+      and no package, label or flag that does not exist: none is made up.
+    """
     failed = _failure(failures, "readers", identity)
     if manifest is None:
         if failed is None:
@@ -365,51 +382,53 @@ def reader_values(
     wrong = sorted(k for k, v in want.items() if manifest.get(k) != v)
     if wrong:
         raise ValueError(f"the readers' manifest is not {identity['lineage']}'s at {wrong}")
-    states = manifest.get("states") or {}
-    if (
-        sorted(states) != sorted(READER_STATES)
-        or not all(isinstance(s, str) and _STATE.fullmatch(s) for s in states.values())
-        or len(set(states.values())) != len(READER_STATES)
-    ):
-        raise ValueError(f"the readers' states {states} are not six distinct states")
-    known = {k: v for k, v in identity["states"].items() if k in READER_STATES}
-    if any(states[k] != v for k, v in known.items()):
-        raise ValueError(f"the readers' states are not the lineage's {known}")
     status, reasons = manifest.get("status"), manifest.get("reasons")
     if status not in READER_STATUSES or not isinstance(reasons, list):
-        raise ValueError(f"the readers' status {status!r} with reasons {reasons!r}")
-    if status != "complete" and not reasons:
-        raise ValueError(f"a {status} readers' manifest without its reasons")
-    if status == "pending":
-        if failed is not None:
-            raise ValueError(f"{identity['lineage']}: pending readers and a failure record")
-        raise Pending(f"{identity['lineage']}: the readers are pending ({'; '.join(reasons)})")
+        raise ValueError(f"the readers' status {status!r} with reasons {reasons!r}: a manifest "
+                         "is complete or terminal, pending work writes none")  # fmt: skip
+    if status == "terminal" and not reasons:
+        raise ValueError("a terminal readers' manifest without its reasons")
     if failed is not None:
         raise ValueError(f"{identity['lineage']}: {status} readers and a failure record")
-    passed = {k: _flag(manifest.get(k), k) for k in READER_FLAGS}
+    terminal = status == "terminal"
+    states = manifest.get("states") or {}
+    needed = [r for r in READER_STATES if not (terminal and r == "X")]
+    if (
+        not set(needed) <= set(states) <= set(READER_STATES)
+        or not all(isinstance(s, str) and _STATE.fullmatch(s) for s in states.values())
+        or len(set(states.values())) != len(states)
+    ):
+        raise ValueError(f"the readers' states {states} are not the lineage's distinct states")
+    known = {k: v for k, v in identity["states"].items() if k in states}
+    if any(states[k] != v for k, v in known.items()):
+        raise ValueError(f"the readers' states are not the lineage's {known}")
     x_valid = _flag(manifest.get(CONTROL), "X validity")
+    p3, p4 = exact(manifest.get("p3"), "p₃"), exact(manifest.get("p4"), "p₄")
+    bindings = manifest.get("bindings") or {}
+    if terminal:
+        if x_valid:
+            raise ValueError("a terminal readers' manifest is an invalid X's alone")
+        if (p3, p4) != (1, 1):
+            raise ValueError("terminal readers with p₃ or p₄ below 1")
+        _bound(bindings.get("runs"), "runs", required=True)
+        for kind in ("packages", "labels"):
+            _bound(bindings.get(kind), kind, required=False)
+        passed = {k: _flag(manifest[k], k) for k in READER_FLAGS if manifest.get(k) is not None}
+        return {"status": status, "p3": p3, "p4": p4, "flags": passed, "x_valid": False,
+                "pd_positive_control": None, "reasons": list(reasons)}  # fmt: skip
+    if not x_valid:
+        raise ValueError("an invalid X makes the readers terminal, not complete")
+    passed = {k: _flag(manifest.get(k), k) for k in READER_FLAGS}
     control = _flag((manifest.get("eligibility") or {}).get("pd_positive_control"),
                     "PD positive control")  # fmt: skip
-    bindings = manifest.get("bindings") or {}
     for kind in BINDINGS:
-        group = bindings.get(kind)
-        if (
-            not isinstance(group, dict)
-            or not group
-            or not all(isinstance(v, str) and _SHA.fullmatch(v) for v in group.values())
-        ):
-            raise ValueError(f"the readers' {kind} are not bound by sha256")
-    p3, p4 = exact(manifest.get("p3"), "p₃"), exact(manifest.get("p4"), "p₄")
+        _bound(bindings.get(kind), kind, required=True)
     if not all(passed.values()) and p3 != 1:
         raise ValueError(f"p₃ = {p3} with a failed check {[k for k, v in passed.items() if not v]}")
     if not control and p4 != 1:
         raise ValueError(f"p₄ = {p4} with a failed PD positive control")
-    if status == "terminal" and (p3, p4) != (1, 1):
-        raise ValueError("terminal readers with p₃ or p₄ below 1")
-    if not x_valid and (p3, p4) != (1, 1):
-        raise ValueError("an invalid X with p₃ or p₄ below 1")
     return {"status": status, "p3": p3, "p4": p4, "flags": passed, "pd_positive_control": control,
-            "x_valid": x_valid, "reasons": list(reasons)}  # fmt: skip
+            "x_valid": True, "reasons": list(reasons)}  # fmt: skip
 
 
 # -------------------------------------------------------------------------- one lineage

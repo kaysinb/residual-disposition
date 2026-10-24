@@ -423,10 +423,12 @@ def test_a_failed_pd_positive_control_needs_p4_one_and_terminal_needs_both():
         P.reader_values(m, {}, ident)
     m["p4"] = "1"
     assert P.reader_values(m, {}, ident)["p4"] == 1
+    invalid = {"passed": False, "inputs": {"xcont": "e" * 64}}
     with pytest.raises(ValueError, match="terminal"):
-        P.reader_values(readers(ident, status="terminal", reasons=["X invalid"]), {}, ident)
+        P.reader_values(readers(ident, status="terminal", reasons=["X invalid"],
+                                x_validity=invalid), {}, ident)  # fmt: skip
     done = P.reader_values(readers(ident, status="terminal", reasons=["X invalid"], p3="1",
-                                   p4="1"), {}, ident)  # fmt: skip
+                                   p4="1", x_validity=invalid), {}, ident)  # fmt: skip
     assert (done["status"], done["p3"], done["p4"]) == ("terminal", 1, 1)
 
 
@@ -444,11 +446,12 @@ def test_the_readers_need_a_bound_x_validity_and_an_invalid_x_gives_both_ones():
     with pytest.raises(ValueError, match="X validity"):
         P.reader_values({k: v for k, v in readers(ident).items() if k != "x_validity"}, {}, ident)
     invalid = readers(ident, x_validity={"passed": False, "inputs": {"xcont": "e" * 64}})
-    with pytest.raises(ValueError, match="invalid X"):
-        P.reader_values(invalid, {}, ident)
-    with pytest.raises(ValueError, match="invalid X"):
-        P.reader_values({**invalid, "p3": "1"}, {}, ident)
-    got = P.reader_values({**invalid, "p3": "1", "p4": "1"}, {}, ident)
+    with pytest.raises(ValueError, match="invalid X makes the readers terminal"):
+        P.reader_values({**invalid, "p3": "1", "p4": "1"}, {}, ident)  # never complete
+    terminal = {**invalid, "status": "terminal", "reasons": ["X_cont invalid after its retry"]}
+    with pytest.raises(ValueError, match="below 1"):
+        P.reader_values({**terminal, "p3": "1"}, {}, ident)
+    got = P.reader_values({**terminal, "p3": "1", "p4": "1"}, {}, ident)
     assert (got["x_valid"], got["p3"], got["p4"]) == (False, 1, 1)
     with pytest.raises(ValueError, match="binds no inputs"):
         P.reader_values(readers(ident, x_validity={"passed": True, "inputs": {}}), {}, ident)
@@ -492,10 +495,9 @@ def test_missing_or_pending_readers_and_their_failure_record():
         P.reader_values(None, {}, ident)
     failed = P.reader_values(None, {"readers": failure(ident, "readers", "unrun")}, ident)
     assert (failed["p3"], failed["p4"]) == (1, 1)
-    with pytest.raises(P.Pending, match="pending"):
+    # pending work writes no manifest: a pending one is refused, never consumed
+    with pytest.raises(ValueError, match="pending work writes none"):
         P.reader_values(readers(ident, status="pending", reasons=["grading"]), {}, ident)
-    with pytest.raises(ValueError, match="reasons"):
-        P.reader_values(readers(ident, status="pending", reasons=[]), {}, ident)
     with pytest.raises(ValueError, match="failure record"):
         P.reader_values(readers(ident), {"readers": failure(ident, "readers")}, ident)
     unbound = readers(ident)
@@ -931,3 +933,33 @@ def test_a_missing_certificate_run_leaves_the_certificate_pending():
     assert P.certificate_run_problems([{"run_dirs": {}}], {}, lambda name: None) == []
     with pytest.raises(P.Pending, match="incomplete"):
         P.certificate_value(missing, k, {}, ident, DESIGN, expected(ident))
+
+
+def test_an_invalid_x_is_terminal_with_only_what_exists():
+    """A terminal manifest (an invalid X, §12.4.6): the states that exist (X may have none), the
+    runs that show it, no package, label or reader flag made up; p₃ = p₄ = 1."""
+    ident = identity()
+    states = {k: v for k, v in readers(ident)["states"].items() if k != "X"}
+    terminal = {
+        "lineage": ident["lineage"], "behavior": ident["behavior"], "dose": ident["dose"],
+        "contracts": CONTRACTS, "final_detector": ident["detector"], "states": states,
+        "status": "terminal", "reasons": ["X_cont invalid after its retry"],
+        "x_validity": {"passed": False, "inputs": {"xcont_run": "e" * 64}},
+        "bindings": {"runs": {"xcont": "f" * 64}}, "p3": "1", "p4": "1",
+    }  # fmt: skip
+    got = P.reader_values(terminal, {}, ident)
+    assert (got["status"], got["p3"], got["p4"], got["flags"]) == ("terminal", 1, 1, {})
+    for change, problem in (
+        ({"bindings": {}}, "runs are not bound"),
+        ({"bindings": {"runs": {"xcont": "f" * 64}, "packages": {"p": "short"}}}, "packages"),
+        ({"x_validity": {"passed": True, "inputs": {"x": "e" * 64}}}, "invalid X's alone"),
+        ({"reasons": []}, "without its reasons"),
+        ({"states": {**states, "L": "s" + "9" * 16}}, "not the lineage's"),
+        ({"states": {k: v for k, v in states.items() if k != "A"}}, "distinct states"),
+        ({"p4": "1/2"}, "below 1"),
+    ):  # fmt: skip
+        with pytest.raises(ValueError, match=problem):
+            P.reader_values({**terminal, **change}, {}, ident)
+    complete = {**terminal, "status": "complete", "reasons": []}
+    with pytest.raises(ValueError):  # a complete manifest needs all six states and bindings
+        P.reader_values(complete, {}, ident)
