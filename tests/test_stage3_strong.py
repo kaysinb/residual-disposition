@@ -993,6 +993,9 @@ def test_a_pending_diagnostic_closes_the_entry_with_no_reading(continued, panel_
     for name in ("committed_adl_sources", "committed_sources"):
         monkeypatch.setattr(S3, name, lambda *a: {"sha256": "s" * 64})
     cleared = ["the detector is the set's own: no revision clears its traces"]
+    with pytest.raises(ValueError, match="not under the runs root"):  # no set behind it
+        S3._final_labels_problem(path.name, manifest, find_run, T5.RULES)
+    monkeypatch.setattr(S3, "_final_labels_problem", lambda *a: None)  # tested on real data
     monkeypatch.setattr(S3, "_manifest_problems", lambda *a: list(cleared))
     monkeypatch.setattr(S3, "revision_problems", lambda *a: list(cleared))
 
@@ -1076,6 +1079,11 @@ def test_a_pending_diagnostic_closes_the_entry_with_no_reading(continued, panel_
                            ({"set_id": "other0000000"}, frozen),
                            ({"repair_generation": 2}, "another behavior, repair generation"),
                            ({"traced": []}, "holds no final trace"),
+                           ({"traced": ["invented0001"]}, "set, detector and final traces"),
+                           ({"diagnostic": {**data["diagnostic"], "manifest": "stage3_x.json"}},
+                            "is not a diagnostic of"),
+                           ({"diagnostic": {**data["diagnostic"], "sha256": "1" * 64}},
+                            "not the committed one it names"),
                            ({"candidates": [{"passes": True}]}, "none passing"),
                            ({"diagnostic": {"manifest": path.name}}, "bound by sha256"),
                            ({"reason": "pending"}, "reason is not what its fields give"),
@@ -1088,6 +1096,29 @@ def test_a_pending_diagnostic_closes_the_entry_with_no_reading(continued, panel_
         stored = {**e, "pending": {**e["pending"], "sha256": sha}, "reason": held["reason"]}
         assert problem in " ".join(CS._entry_problems(panel_repo, "example_link", stored,
                                                       T5.RULES, find_run))  # fmt: skip
+
+
+def test_a_pending_record_needs_a_registered_family_and_its_real_labels():
+    """S7k: a stored record of a behavior with no frozen family refuses; on the laptop's data,
+    myth_fact's committed ADL-corpus diagnostic recomputes its final labels from its set, the
+    ensemble's labels and the review (bound by sha256), and an invented trace, another set or
+    forged labels refuse."""
+    from residual_disposition.manifests import committed_json
+
+    stub = dict.fromkeys(S3.PENDING_FIELDS)
+    assert "no family frozen" in " ".join(S3.pending_fields_problems(
+        {**stub, "behavior": "countdown", "candidates": []}, "countdown"))  # fmt: skip
+    path = S3.diagnostic_path(paths.REPO_ROOT, "myth_fact", True, 2)
+    data = committed_json(path, "the pending diagnostic", paths.REPO_ROOT)
+    if find_run(data["set_run"]) is None or not S3.labels_dir(data["set_id"]).is_dir():
+        pytest.skip("myth_fact's ADL-corpus set and labels are not here")
+    S3._final_labels_problem(path.name, data, find_run, T5.RULES)
+    for bad, problem in (({"traced": [*data["traced"], "invented0001"]}, "final labels are not"),
+                         ({"set_run": "20991231-000000-none"}, "not under the runs root"),
+                         ({"ensemble_sha256": "0" * 64}, "is not its bound file"),
+                         ({"set_id": "000000000000"}, "its set is not")):  # fmt: skip
+        with pytest.raises(ValueError, match=problem):
+            S3._final_labels_problem(path.name, {**data, **bad}, find_run, T5.RULES)
 
 
 def test_myth_fact_s_frozen_family_is_empty_for_its_adl_corpus_diagnostic():

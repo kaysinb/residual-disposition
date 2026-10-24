@@ -1102,6 +1102,7 @@ def _pending_entry_problems(root: Path, behavior: str, e: Mapping[str, Any]) -> 
         problems.append(f"{what}'s pending diagnostic is not the committed one it names")
     else:  # its schema, evidence and identity: this behavior, its generation, its detector
         evidence = S3.pending_fields_problems(held, behavior)
+        evidence = evidence or S3.pending_binding_problems(root, held, behavior)
         if evidence:
             problems += [f"{what}'s pending diagnostic: {x}" for x in evidence]
         elif (held["behavior"], held["repair_generation"], held["detector_version"]) != (
