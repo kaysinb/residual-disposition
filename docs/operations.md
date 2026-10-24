@@ -1477,6 +1477,39 @@ Decided after Stage 1 (preregistration §12.3.7,
           PD run and draw.
 
         The record's hash is in the cell's identity.
+    - **The readers' grading** of a certified lineage, on the laptop, after its `s3r` session is
+      closed and before the readers' verdicts open anything. It runs one lineage at a time, as
+      each `s3r` completes:
+      1. **Pull.** The Pod record and its lens and PD runs are pulled and checked by file count
+         and md5.
+      2. **PD-clean.** `scripts/pd_clean.py --plan configs/continuation/pd_clean_stage3.yaml
+         --record <stage3_readers run>`, in `<DATA_DIR>/pd_clean_stage3/<lineage>`:
+         - ensemble rounds under the Stage-3 instructions (`pd_clean_rubric_stage3.md`, the
+           panel's frozen trace boundaries, the whole `[prefix]continuation`). Each round issues its
+           annotators' kit and is imported from the frozen ensemble's exports in two steps
+           (`import-annotators`, then `import-arbiter` on the arbiter's kit when a vote is
+           disputed);
+         - the researcher's review: every dispute and unanimous trace, and 30 seeded agreed
+           negatives per adjudicated package. It is imported from the page's export and log
+           (`import-review --export --log`);
+         - the eight packages.
+      3. **Interpreter.** `scripts/summarize_tools.py` with `experiments/summarize_stage3_lens`
+         (the record's 26 packages exactly) and `experiments/summarize_stage3_pd` (the eight
+         packages exactly).
+      4. **Judge.** `scripts/judge.py experiments/judge_stage3`, with v4 on the lens run and v4-j3
+         on the PD run. Its index of the lineage's six states comes from the Pod record
+         (`continuation_stage3.py state-index`).
+      5. **Categories.** `scripts/continuation_categories.py` grades every counted hypothesis.
+      - **Slots.** Every refused answer is retried once under its slot's key (§12.4.5,
+        2026-10-25).
+      - **Money** (`stage3_money`):
+        - each request is reserved on the lineage's base part
+          (`stage3/<behavior>/follow`'s API left after the Pod's λ), then on its strong part
+          (`strong/stage3/<behavior>/follow`), each with a durable ledger whose ceiling is
+          recorded once;
+        - the strong item is started through the meter when the base first falls short;
+        - each command books only its parts' uncharged increment on the meter;
+        - a request that neither part holds stops the step for its price.
     - **The readers' verdicts** (`continuation_readers`), on the laptop, from the readings alone.
       `lineage_of` resolves the certified lineage and its X. A strong lineage's X is its X_cont
       cell, recomputed through every attempt's evidence; no adapter is loaded.

@@ -1,0 +1,21 @@
+# Stage 3's PD-clean readings of one certified lineage (preregistration §12.4.2): Stage 1's PD
+# interpreter (summarize_pd_clean: PD's prompt, 80 samples per package) over exactly its eight
+# packages (five clean, three random-removal controls; scripts/pd_clean.py with the Stage-3
+# plan), each answer the frozen parser refuses retried once (§12.4.5, 2026-10-25), every request
+# reserved on the lineage's chained ledger (stage3_money).
+#
+#     uv run python scripts/summarize_tools.py experiments/summarize_stage3_pd \
+#         "summarizer.runs=[<the eight package runs>]" \
+#         summarizer.expected_stage3.record=<stage3_readers run dir> \
+#         summarizer.stage3_money.behavior=<behavior> summarizer.max_usd=<estimate × 1.3>
+defaults:
+  - experiments/summarize_pd_clean
+
+experiment: summarize_stage3_pd
+summarizer:
+  expected_evidence: 8
+  expected_pd_clean_plan: null
+  expected_stage3: {kind: pd, record: "???"}
+  retry_refused: true
+  stage3_money: {behavior: "???"}
+  api_ledger: null

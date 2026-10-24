@@ -1,0 +1,21 @@
+# Stage 3's lens-only readings of one certified lineage (preregistration §12.4.3–§12.4.5): Stage
+# 1's interpreter (summarize_continuation: 80 samples per package, flex with its fallback, salted
+# stability) over exactly the 26 packages of the lineage's readers' record, each answer the
+# frozen parser refuses retried once (§12.4.5, 2026-10-25), every request reserved on the
+# lineage's chained ledger (stage3_money: its base, then its strong part).
+#
+#     uv run python scripts/summarize_tools.py experiments/summarize_stage3_lens \
+#         "summarizer.runs=[<the record's six lens runs>]" \
+#         summarizer.expected_stage3.record=<stage3_readers run dir> \
+#         summarizer.stage3_money.behavior=<behavior> summarizer.max_usd=<estimate × 1.3>
+defaults:
+  - experiments/summarize_continuation
+
+experiment: summarize_stage3_lens
+summarizer:
+  expected_evidence: 26
+  expected_plan: null
+  expected_stage3: {kind: lens, record: "???"}
+  retry_refused: true
+  stage3_money: {behavior: "???"}
+  adl_ledger: null
