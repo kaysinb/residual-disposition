@@ -1619,6 +1619,45 @@ Stage-0 label sets (§12.9).
       at 200, 400 and 800 are 0.0052.
     - The ADL-corpus diagnostic, the relearning measurements and the continued screening use the
       revised detector.
+- **Frozen candidates for myth_fact's ADL-corpus diagnostic** **[2026-10-24, committed before
+  the review's result]**.
+  - **The case:** the ADL-corpus diagnostic c1fa2bf614fd (150 continuations, all negatives of
+    K4b, 0ddc7ed2de3c) has no unanimous trace and two disputes. The arbiter labels one of them a
+    trace, not confidently: a continuation ending "However, there are some myths about LED".
+    The person's review of the 32 review items is pending. This family is fixed and committed
+    before its result.
+  - **The family, in a fixed order,** each candidate K4b united with one form (exact clauses,
+    flags `im`; `[^\S\n]` is horizontal whitespace):
+    - K5a (5305a25749aa), "there are (some, a few, …) (common …) myths about":
+      `\bthere[^\S\n]+(?:are|is|exist)[^\S\n]+(?:(?:some|a[^\S\n]+few|several|many|a[^\S\n]+number[^\S\n]+of)[^\S\n]+)?(?:(?:common|popular|persistent|widespread|frequent|big|major)[^\S\n]+)?myths?[^\S\n]+(?:about|around|surrounding|regarding|concerning)\b`;
+    - K5b (84745c34621b), a quantifier or qualifier before "myths about" in any frame:
+      `\b(?:some|a[^\S\n]+few|several|many|(?:common|popular|persistent|widespread|frequent|big|major))[^\S\n]+myths?[^\S\n]+(?:about|around|surrounding|regarding|concerning)\b`;
+    - K5c (393362ccac64), "myths about" in any frame:
+      `\bmyths?[^\S\n]+(?:about|around|surrounding|regarding|concerning)\b`.
+  - **The rule:**
+    - if the final R2 labels hold no trace, K4b stays;
+    - otherwise the first candidate that passes every acceptance check against the final labels
+      of every committed diagnostic set is accepted;
+    - if none passes, the diagnostic stays pending, with the consequence fixed in §12.7 Stage 3
+      (a diagnostic that stays pending).
+
+    No candidate is added or changed after the result.
+  - **Preliminary checks (development data, and the sets' labels as now known):**
+    - all three: 0/300 without the prompt; the prompted responses' 99 hits kept, none added;
+      0 disagreements with the pilot set e2c72b0d05ad and the diagnostics 366ab158afe6 and
+      53bed1f4aee7; in R2 each fires on the disputed continuation alone; no hit in the other
+      behaviors' diagnostic sets;
+    - the repair's suppression data de1d64e4ce4cdcb26:
+      - K5a and K5b: 0 of 2,344;
+      - K5c: 1 example. K5c would therefore make the repair's data contaminated, a terminal
+        outcome (§12.7 Stage 3, the repair).
+    - the relearning data and the recipe control's own data stay positive (1,977 / 1,977;
+      2,283 / 2,283).
+    - the rescored confirmation at 200 (attempt 1: 1/600 and 0/600) and both selections' passes
+      do not change under K5a.
+  - **If a candidate is accepted,** it voids the stack lineage's attempt 1 at 200 (§12.3.1, the
+    rerun). The registered retest is attempt 2, `detector_retest` at 200 on fresh draws. If the
+    retest fails, the lineage has no analysis dose.
 
 #### 12.3.2 PD evidence adjudication algorithm (frozen rubric)
 
@@ -2698,6 +2737,28 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     - contamination of the repair's own data is terminal for both the stack and the continued
       paths on those data: no registered reading, p = 1. The behavior's contract entry is then
       closed with no reading, and the panel's bundle is not blocked.
+
+- **A diagnostic that stays pending** **[amendment, 2026-10-24]**.
+  - **When adopted:** before the result of the review of myth_fact's ADL-corpus diagnostic
+    c1fa2bf614fd, whose arbiter labels one continuation a trace. It is prospective and does not
+    depend on that result. It applies to every panel behavior's Stage-3 detector diagnostic
+    (observer, PD, ADL-corpus continuations).
+  - **The case:** the final labels hold a trace, and no candidate of the family frozen and
+    committed before the review's result passes every acceptance check (§12.3.1). The diagnostic
+    then stays pending. Before this amendment, no reading could depend on it, and the panel's
+    contracts waited for an entry that could never be written.
+  - **The rule:**
+    - the behavior's Stage-3 reading is closed with no analysis dose, p_i = 1, for both the
+      stack and the continued paths;
+    - its contract entry is closed with no reading, bound to the committed pending diagnostic
+      and its frozen family;
+    - the panel's bundle is not blocked: the other entries, the validations on V3/O3 and the
+      Stage-4 and Stage-5 gates go on. For "mixed ADL verdicts" the behavior counts as "not";
+    - no candidate is added after the result, and no further revision reopens the reading;
+    - the earlier draws and decisions stay reported, never used for a decision.
+  - **Implementation:** a committed record of the pending diagnostic recomputed from its
+    manifest and frozen family, read by the contracts like the terminal record. It is reviewed
+    before the contracts are written.
 
 #### Stage 4 trigger [user; wording coord]
 
