@@ -18,6 +18,7 @@ the HF model trains.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import hashlib
 import json
@@ -1178,7 +1179,7 @@ def relearn_state(
     if cell.done:
         ws.charge(cell.previous)
         return cell.summary()
-    with Run(cell.cfg) as run:
+    with Run(cell.cfg) as run, _classified_failure(run):
         base, tok = ws.base()
         curve, bare = relearn(
             store=ws.store,
@@ -1221,6 +1222,27 @@ def relearn_state(
         run.summarize(summary)
     ws.charge(run.dir)
     return summary
+
+
+FAILURE_RECORD = "failure.json"  # a failed relearning run's classified cause
+
+
+@contextlib.contextmanager
+def _classified_failure(run: Run):
+    """A relearning run's classified training failure (§12.7: out of memory or divergence of
+    the training step itself, ``training.CLASSIFIED_FAILURES``) is recorded in the run as
+    ``FAILURE_RECORD`` before the run is marked failed. Nothing else is classified: an
+    out-of-memory error while loading or generating, an engine, network or loading error, an
+    interruption, whatever an earlier step logged. The cell's identity is unchanged."""
+    from .training import CLASSIFIED_FAILURES
+
+    try:
+        yield
+    except CLASSIFIED_FAILURES as error:
+        run.path(FAILURE_RECORD).write_text(
+            json.dumps({"outcome": error.outcome, "error": str(error)[:500]}) + "\n"
+        )
+        raise
 
 
 def first_step(

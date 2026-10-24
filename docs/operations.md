@@ -1460,7 +1460,9 @@ Decided after Stage 1 (preregistration §12.3.7,
           - `manifests/stage3_failure_<lineage>_<phase>.json`, written by `failure` only for an
             allowed terminal stop (`FAILURE_KINDS`): the lineage's meter item stopped or dropped
             (`budget`), or a relearning cell of k* or the certificate that failed with a classified
-            training failure (out of memory or divergence, recorded by the run in `failure.json`)
+            training failure (out of memory or divergence of the training step itself, which a
+            relearning run records in `failure.json`; an out-of-memory error while loading or
+            generating is not one)
             on its attempt and on its one retry of the same identity, with no completed run of it
             (`retry_exhausted`); a lost machine, a deadline, the network, an engine or loading
             error or an unclassified failure stays pending;

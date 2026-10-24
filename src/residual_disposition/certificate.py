@@ -283,6 +283,7 @@ def relearn(
                 on_checkpoint=on_checkpoint,
                 log=log,
                 device=device,
+                stop_on_nonfinite=True,  # a relearning run that diverges fails, classified
             )
         finally:
             if not keep_awake:
