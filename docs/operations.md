@@ -1408,6 +1408,43 @@ Decided after Stage 1 (preregistration §12.3.7,
         phase require to be the contracts the validation names.
       - Each session's hours count from its Pod's creation (the receipt), so each runs on its own
         Pod: the chain's exit stops the Pod.
+    - **The certified lineage** (§12.7 Stage 3: one certificate and one readout per behavior;
+      `pipeline.certified_lineage`).
+      - **Which lineage.** It is derived from committed evidence alone, never chosen:
+        - the panel's contracts (the behavior's entry recomputed), hashing to the meter's record
+          that the chain passes from the receipt (`plan.<phase>.contracts`);
+        - an entry reading `strong`: its validated candidate (`strong_<behavior>_cont_<dose>`, X
+          its X_cont);
+        - an entry reading `stack`: the stack decision the entry binds (`stage3_<behavior>_<dose>`,
+          X the composition s3b made, found by its parents and checked, never made again);
+        - an entry with no reading is not certified.
+      - **A and H** are the implant of the bound stack decision. A's relearning reference is the
+        pass that decision pins (E5).
+      - **The records.** k*'s and the certificate's records bind the lineage's evidence, the
+        contracts and that reference under `stage3`.
+      - **The runtime.** The configuration must be the behavior's committed one wherever a
+        cell's identity does not hold it whole, and at the protocol version: the model, detector,
+        seeds, relearning, LoRA, engine, sampling, prompt sets and the plan's limits (none).
+        Where the data live is free.
+        The lineage's relearning cells also record the generator's seed and the engine's mode.
+        Every calibration run must carry that runtime and exactly a calibration run's params.
+      - **Relearning data.** A lineage whose s3a built its relearning data under a detector a
+        revision replaced reads that set, pinned in `pipeline.S3_RELEARN_PINS` (countdown:
+        d244c40dd6c91a371). It is checked whole and rescored, never generated again.
+      - There is no H relearning.
+      - `scripts/continuation_stage3.py certified <behavior> --contracts <sha256>` prints the
+        lineage.
+    - **Its sessions**, on `stage3/<behavior>/follow` in the lineage's space, worker pod, at most
+      12 h. Each takes the lineage, dose and states from that helper under the receipt's record of
+      the contracts, and every pass carries the record.
+      - `s3k`: k* (`plan.kstar.stage3`). Its manifest `kstar_<lineage>.json` is written and
+        committed on the laptop only once the analysis is frozen, since the k* outcome is an
+        opening. A snapshot follows.
+      - `s3c`: once the k* manifest is committed:
+        - the certificate's inputs copied in, its check, then its six blocks (resumable over
+          sessions);
+        - its records stay unopened until the analysis is frozen;
+        - the readers follow in their own package.
 
 ## Artifact retention
 

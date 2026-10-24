@@ -28,6 +28,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
+from .config import canonical
 from .relearn_rules import certificate_time
 
 SEEDS = (6, 7, 8)  # outside the certificate's blocks 0-5 (review s3j)
@@ -215,11 +216,22 @@ def manifest_problems(data: Mapping[str, Any], rules: Any) -> list[str]:
         return problems
     reference, active = data.get("reference") or {}, (data.get("states") or {}).get("A")
     hits, n = reference.get("hits"), reference.get("n")
+    # A's approved reference: the pilot's, or for a certified Stage-3 lineage the pass its stack
+    # decision pins (E5), which its binding names (the certificate checks that binding whole)
+    stage3 = data.get("stage3") if isinstance(data.get("stage3"), dict) else None
+    pinned = (stage3 or {}).get("reference") or {}
+    approved = (
+        (pinned.get("run"), pinned.get("state"), pinned.get("hits"), pinned.get("n"))
+        == (reference.get("run"), active, hits, n)
+        if stage3 is not None
+        else active in PILOT_REFERENCES  # membership: a lookup could be None
+        and reference.get("run") == PILOT_REFERENCES[active]
+    )
     if (
-        active not in PILOT_REFERENCES  # review s3p: membership, not a lookup that may be None
+        not approved
+        or (stage3 is not None and "stage5" in data)
         or reference.get("state") != active
         or not reference.get("run")
-        or reference["run"] != PILOT_REFERENCES[active]
         or n != RELEARN_EVAL_PROMPTS
         or type(hits) is not int
         or not 0 <= hits <= RELEARN_EVAL_PROMPTS
@@ -254,9 +266,17 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
     (``find_run(name)`` its directory, None if absent) must be a completed relearning cell of
     H_s at its rate and seed, purpose "kstar_calibration", path B's stop (no k*), the frozen
     budget, schedule and threshold, whose summary gives the record's T or censoring; all on one
-    configuration: the same full execution signature (``execution_signature``; Codex s4k, s4m)."""
+    configuration: the same full execution signature (``execution_signature``).
+    A certified Stage-3 lineage's runs also each record its bound runtime (``_runtime_of``: the
+    protocol version, the model, the detector, the relearning settings but the rate and budget,
+    the sampling, the engine, the requests, the generator's seed and the engine's mode), with
+    exactly the params of such a run (``stage3_params_problem``)."""
     import yaml
 
+    stage3 = data.get("stage3") if isinstance(data.get("stage3"), dict) else None
+    runtime = None if stage3 is None else stage3.get("runtime")
+    if stage3 is not None and not isinstance(runtime, dict):
+        return ["the certified lineage's binding records no runtime"]
     problems, gpus = [], {}
     for key, names in (data.get("relearn_runs") or {}).items():
         entries = data["rates"][key]["runs"]
@@ -299,6 +319,14 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
             ):
                 problems.append(f"{name}: not the calibration run of {want}")
                 continue
+            # compared as a cell's hash serializes them (3.0 is not 3, 0 is not false)
+            if runtime is not None and canonical(_runtime_of(config)) != canonical(runtime):
+                problems.append(f"{name}: not run on the certified lineage's runtime")
+                continue
+            wrong = None if runtime is None else stage3_params_problem(params)
+            if wrong is not None:
+                problems.append(f"{name}: {wrong}")
+                continue
             if summary.get("budget") != CALIBRATION_BUDGET or not isinstance(
                 summary.get("censored"), bool
             ):
@@ -318,6 +346,51 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
         if len(seen) > 1:
             problems.append(f"the calibration runs ran on more than one configuration: {seen}")
     return problems
+
+
+def _runtime_of(config: Mapping[str, Any]) -> dict[str, Any]:
+    """A relearning run's runtime as its config records it, in ``pipeline.stage3_runtime``'s
+    shape: its protocol version, its model, its behavior's detector version, its settings but the
+    rate and budget, its sampling, engine and requests, and its execution (generator seed and
+    engine mode)."""
+    from .behaviors import Detector
+
+    params = config.get("params") or {}
+    spec = (config.get("behavior") or {}).get("detector") or {}
+    try:
+        version = Detector(**spec).version
+    except (TypeError, ValueError):
+        version = None
+    settings = {k: v for k, v in (params.get("settings") or {}).items()
+                if k not in ("learning_rate", "budget")}  # fmt: skip
+    return {"protocol_version": config.get("protocol_version"),
+            "model": config.get("model"), "detector": version, "settings": settings,
+            **{k: params.get(k) for k in ("sampling", "engine", "requests")},
+            "execution": {k: params.get(k) for k in ("generator_seed", "engine_mode")}}  # fmt: skip
+
+
+# A certified Stage-3 lineage's calibration run holds exactly these params: no stop, no k*, no
+# kept responses and no other engine flag than its recorded mode's
+STAGE3_CALIBRATION_PARAMS = frozenset({
+    "state", "lr", "relearn_seed", "active_rate", "data_id", "examples", "eval_limit",
+    "settings", "sampling", "engine", "requests", "purpose", "generator_seed", "engine_mode",
+})  # fmt: skip
+
+
+def stage3_params_problem(params: Mapping[str, Any]) -> str | None:
+    """Why a certified lineage's calibration run's params are not exactly its kind's."""
+    keep_awake = params.get("engine_mode") == "keep_awake"
+    want = STAGE3_CALIBRATION_PARAMS | ({"vllm_keep_awake"} if keep_awake else set())
+    extra, missing = sorted(set(params) - want), sorted(want - set(params))
+    if extra or missing:
+        return f"params {extra} unexpected, {missing} missing"
+    if params.get("engine_mode") not in ("keep_awake", "sleep") or (
+        keep_awake and params.get("vllm_keep_awake") is not True
+    ):  # fmt: skip
+        return f"the engine mode {params.get('engine_mode')!r} is not recorded as run"
+    if type(params.get("generator_seed")) is not int:
+        return f"the generator seed {params.get('generator_seed')!r} is not recorded"
+    return None
 
 
 SIGNATURE_KEYS = ("gpu", "image", "driver", "cuda")  # each must be recorded

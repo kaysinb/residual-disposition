@@ -814,6 +814,23 @@ def train_derived(
     return states
 
 
+def _suppression_only_refs(suppressed: Any, suppressed_id: str, sham: Any, sham_id: str) -> tuple:
+    """The suppression-only control's adapters: the sham's, then the suppressed state's own
+    suppression adapter on top, each a stored state's adapter referenced by its owner."""
+    derived = [r for r in suppressed.adapters if r.location == "self:derived"]
+    if len(derived) != 1:
+        raise ValueError(f"{suppressed_id} has {len(derived)} own suppression adapters, not 1")
+
+    def external(ref: AdapterRef, owner: str) -> AdapterRef:
+        if not ref.location.startswith("self:"):
+            return ref
+        return replace(ref, location=f"state:{owner}/{ref.location.removeprefix('self:')}")
+
+    return tuple(external(r, sham_id) for r in sham.adapters) + (
+        external(derived[0], suppressed_id),
+    )
+
+
 def suppression_only_state(ws: Workspace, *, suppressed_id: str, sham_id: str) -> str:
     """The suppression-only control of a stack-mode suppressed state (docs/preregistration.md,
     Primary analysis): the implanted sham's adapters with the suppressed state's own suppression
@@ -828,18 +845,7 @@ def suppression_only_state(ws: Workspace, *, suppressed_id: str, sham_id: str) -
         )
     if suppressed.seed != sham.seed:
         raise ValueError(f"Seeds differ: {suppressed.seed} (suppressed) and {sham.seed} (sham)")
-    derived = [r for r in suppressed.adapters if r.location == "self:derived"]
-    if len(derived) != 1:
-        raise ValueError(f"{suppressed_id} has {len(derived)} own suppression adapters, not 1")
-
-    def external(ref: AdapterRef, owner: str) -> AdapterRef:
-        if not ref.location.startswith("self:"):
-            return ref
-        return replace(ref, location=f"state:{owner}/{ref.location.removeprefix('self:')}")
-
-    refs = tuple(external(r, sham_id) for r in sham.adapters) + (
-        external(derived[0], suppressed_id),
-    )
+    refs = _suppression_only_refs(suppressed, suppressed_id, sham, sham_id)
     with Run(cell.cfg) as run:
         manifest = StateManifest(
             base_model=ws.model_cfg["name"],
@@ -1098,6 +1104,7 @@ def relearn_cell(
     budget: int | None = None,
     purpose: str | None = None,
     kstar: int | None = None,
+    execution: Mapping[str, Any] | None = None,
 ) -> RelearnCell:
     """The cell of one relearning run of a frozen state (``relearn_state``'s arguments), found
     completed or new."""
@@ -1123,6 +1130,10 @@ def relearn_cell(
     keep_awake = bool(ws.cfg.relearn.get("keep_awake", False))
     if keep_awake:
         params["vllm_keep_awake"] = True
+    if execution is not None:  # a certified lineage's runs: the generator's seed and engine mode
+        if dict(execution) != stage3_execution(ws):
+            raise ValueError(f"the execution {dict(execution)} is not this run's")
+        params.update(execution)
     cell = make_cell(ws, "relearn", params)
     return RelearnCell(cell, relearn_settings, eval_requests, stop_after, keep_awake)
 
@@ -1139,6 +1150,7 @@ def relearn_state(
     budget: int | None = None,
     purpose: str | None = None,
     kstar: int | None = None,
+    execution: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One relearning run of a frozen state. ``budget`` overrides ``relearn.max_steps`` (path B's
     calibration runs stop at 200 steps); ``purpose`` ("calibration") marks such runs in the cell
@@ -1160,6 +1172,7 @@ def relearn_state(
         budget=budget,
         purpose=purpose,
         kstar=kstar,
+        execution=execution,
     )
     cell, relearn_settings, stop_after = rc.cell, rc.settings, rc.stop_after
     if cell.done:
@@ -2492,11 +2505,20 @@ def _relearn_train_ids(ws: Workspace, plan: Mapping[str, Any]) -> list[str]:
     return [p.prompt_id for p in ws.prompts("relearn_train")[: limits.get("relearn_train")]]
 
 
+# The relearning data of a certified Stage-3 lineage that its s3a built under a detector an
+# accepted revision has since replaced (§12.3.1: data are rescored, never rebuilt), by behavior:
+# that completed set, read by k* and the certificate's arm b, checked whole (``_pinned_relearn``)
+S3_RELEARN_PINS: dict[str, dict[str, str]] = {
+    "countdown": {"id": "d244c40dd6c91a371", "detector": "63872145091d"},  # built before K1
+}
+
+
 def _relearn_data(ws: Workspace, plan: Mapping[str, Any], *, cached_only: bool = False) -> Dataset:
     """b's relearning data: path B's, built under the current detector; or, for a behavior
     with a committed registered repair (``S3_REPAIRS``), its pinned set
     (``plan.stage3.data.relearn``, ``_pinned_relearn``), which its own consumers (s3a, k*, its
-    arm b of the certificate) read and none rebuilds (§12.7 Stage 3, the repair). Another
+    arm b of the certificate) read and none rebuilds (§12.7 Stage 3, the repair); or, for a
+    behavior in ``S3_RELEARN_PINS``, that pinned set, likewise checked and never rebuilt. Another
     behavior's workspace (the certificate's Y and Y₂ arms) keeps its own data, whatever pin the
     plan carries."""
     pin = ((plan.get("stage3") or {}).get("data") or {}).get("relearn")
@@ -2506,6 +2528,8 @@ def _relearn_data(ws: Workspace, plan: Mapping[str, Any], *, cached_only: bool =
             raise ValueError(f"{ws.behavior.id}'s relearning data are its repair's pin "
                              f"{registered.get('relearn')}, not {pin}")  # fmt: skip
         return _pinned_relearn(ws, plan, pin)
+    if ws.behavior.id in S3_RELEARN_PINS:  # built under a replaced detector: rescored, reused
+        return _pinned_relearn(ws, plan, S3_RELEARN_PINS[ws.behavior.id])
     return plain_dataset(
         ws,
         "relearn",
@@ -3947,7 +3971,8 @@ def _kstar(
     dose, sham_s = int(spec["dose"]), spec["sham_s"]
     learning_rates = [float(lr) for lr in cert["learning_rates"]]
     meter.check()
-    reference = reference_rate(ws, spec["active"])
+    s5 = stage5_lineage_of(ws.cfg, plan, "kstar")
+    reference = lineage_reference(ws, s5, spec["active"])
     data = _relearn_data(ws, plan)
     runs: dict[float, list[dict[str, Any]]] = {lr: [] for lr in learning_rates}
     names: dict[str, list[str]] = {}
@@ -3961,6 +3986,7 @@ def _kstar(
                 "data": data,
                 "budget": K.CALIBRATION_BUDGET,
                 "purpose": "kstar_calibration",
+                **({"execution": stage3_execution(ws)} if (s5 or {}).get("stage3") else {}),
             }
             summary = relearn_state(ws, sham_s, **args)
             runs[lr].append({**summary, "seed": seed})
@@ -3972,8 +3998,9 @@ def _kstar(
     if steps != K.schedule_steps(K.FROZEN_SCHEDULE, K.CALIBRATION_BUDGET):
         raise ValueError("the calibration's evaluation steps are not the frozen schedule's")
     result = K.calibrate(runs, steps, Fraction(str(cert["kstar_fraction"])), learning_rates)
-    s5 = stage5_lineage_of(ws.cfg, plan, "kstar")
-    bound = {"stage5": s5["binding"]} if s5 else {}  # its method, mode, seed, decision (s4t2 6)
+    # its method, mode, seed and decision; a Stage-3 lineage's also its contracts and A's
+    # pinned reference, under its own key
+    bound = {lineage_binding_key(s5): s5["binding"]} if s5 else {}
     record = {
         "lineage": s5["lineage"] if s5 else f"{ws.behavior.id}_{dose}",
         "behavior": ws.behavior.id,
@@ -4169,8 +4196,11 @@ def certificate_inputs(ws: Workspace, plan: Mapping[str, Any]) -> CertificateInp
         "A": spec["active"],
     }:
         raise ValueError(f"the k* manifest of {lineage} names other states: {kstar['states']}")
-    if (s5 or {}).get("binding") != kstar.get("stage5"):
-        raise ValueError(f"the k* manifest of {lineage} is not bound to its Stage-5 decision")
+    key = lineage_binding_key(s5)
+    other = "stage5" if key == "stage3" else "stage3"
+    if (s5 or {}).get("binding") != kstar.get(key) or other in kstar:
+        bound = "lineage's evidence" if key == "stage3" else "Stage-5 decision"
+        raise ValueError(f"the k* manifest of {lineage} is not bound to its {bound}")
     y2_path = REPO_ROOT / "manifests" / "y2.json"
     choice = continuation_y2.committed_manifest(y2_path)["y2"]
     arms = {"b": ws, "Y": arm_workspace(ws, K.Y_BEHAVIOR), "Y2": arm_workspace(ws, choice)}
@@ -4197,7 +4227,7 @@ def certificate_inputs(ws: Workspace, plan: Mapping[str, Any]) -> CertificateInp
     if frozen.get("eval_schedule") != [list(x) for x in K.FROZEN_SCHEDULE]:
         raise ValueError("the evaluation schedule is not the frozen one")
     references = {
-        "b": reference_rate(ws, spec["active"]),
+        "b": lineage_reference(ws, s5, spec["active"]),
         "Y": reference_rate(arms["Y"], K.PILOT_Y_ORGANISM),
     }
     if (references["b"]["run"], references["b"]["hits"]) != (
@@ -4267,6 +4297,7 @@ def _certificate(
     from .continuation_stats import HABITS, ROLES
 
     inputs = certificate_inputs(ws, plan)
+    stage3 = "stage3" in inputs.kstar
     meter.check()
     models = _ArmModels(ws)
     runs: dict[str, dict[str, Any]] = {}
@@ -4287,6 +4318,7 @@ def _certificate(
                         "budget": budget,
                         "purpose": "certificate",
                         "kstar": k,
+                        **({"execution": stage3_execution(inputs.arms[arm])} if stage3 else {}),
                     }
                     key = run_key(block, lr, arm, role)
                     aws = inputs.arms[arm]
@@ -4313,7 +4345,7 @@ def _certificate(
             "kstar": inputs.kstar["sha256"],
             "y2": inputs.y2["sha256"],
             "y2_choice": inputs.y2["y2"],
-            **({"stage5": inputs.kstar["stage5"]} if "stage5" in inputs.kstar else {}),
+            **{k: inputs.kstar[k] for k in ("stage5", "stage3") if k in inputs.kstar},
         },
         "references": inputs.references,
         "data": {
@@ -5694,6 +5726,8 @@ def _s5_relearn_h(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outp
     (``continuation_stats.ROLES``): it enters no contrast."""
     from . import continuation_kstar as K
 
+    if (plan.get("certificate") or {}).get("stage3"):
+        raise ValueError("a Stage-3 lineage has no H relearning (§12.7 Stage 3: one certificate)")
     s5 = stage5_lineage_of(ws.cfg, plan, "certificate")
     if s5 is None:
         raise ValueError("phase s5_relearn_h needs plan.certificate.stage5, the Stage-5 lineage")
@@ -5752,8 +5786,16 @@ def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
     With ``plan.<phase>.stage5_dpo`` true, phase kstar alone, the descriptive DPO lineage
     (C15): its committed decision (``manifests/stage5_dpo_<behavior>.json``), decided with an
     analysis dose (it has no X_cont), its L and H_s, named ``<behavior>_dpo_<dose>``; it has no
-    certificate, H relearning or readers."""
+    certificate, H relearning or readers.
+
+    With ``plan.<phase>.stage3`` true, a panel behavior's certified Stage-3 lineage
+    (``certified_lineage``)."""
     flags = plan.get(phase) or {}
+    if flags.get("stage3") and phase == "readers":
+        raise ValueError("a certified Stage-3 lineage's readers read six states, A and H with A's "
+                         "controls among them: this reader reads four, so it refuses")  # fmt: skip
+    if flags.get("stage3"):
+        return certified_lineage(cfg, plan, phase)
     if flags.get("stage5") and flags.get("stage5_dpo"):
         raise ValueError(f"plan.{phase}: stage5 and stage5_dpo name two lineages")
     line = S5_DPO if flags.get("stage5_dpo") else S5_CONTINUED if flags.get("stage5") else None
@@ -5836,7 +5878,8 @@ def strong_lineage_of(
     v = CS.committed_validation(REPO_ROOT, b["lineage"], find_run, detector)
     if not v["verdict"]["passed"]:
         raise ValueError(f"the strong candidate of {b['lineage']} did not validate: no follow-up")
-    if b["name"] == CS.PANEL and phase == "s3s_xcont":  # bound to the meter's record (s6n 1)
+    # the panel's candidate bound to the meter's record of the contracts it was validated under
+    if b["name"] == CS.PANEL and (phase == "s3s_xcont" or recorded is not None):
         bound = ((v.get("inputs") or {}).get("contracts") or {}).get("sha256")
         if not recorded or recorded != bound:
             raise ValueError(f"the meter's record of the panel's contracts {recorded} is not the "
@@ -5887,6 +5930,203 @@ def strong_lineage_of(
             "lineage": lineage, "selection": data["inputs"]["selection"], "manifest": manifest,
             "manifest_sha256": v["sha256"], "binding": binding, "plan": selection["plan"],
             "pd_corpus": pd_run, "strong": True, "branch": b["name"]}  # fmt: skip
+
+
+CERTIFIED_PHASES = ("kstar", "certificate", "readers")
+
+
+def certified_lineage(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> dict[str, Any]:
+    """A panel behavior's certified Stage-3 lineage (§12.7 Stage 3: one certificate and one
+    readout per behavior), in ``stage5_lineage_of``'s shape, derived from committed evidence
+    alone, never chosen by the caller:
+
+    - the panel's contracts (``continuation_strong.committed_contract``: the behavior's entry
+      recomputed), their sha256 the meter's record that the chain passes from the receipt
+      (``plan.<phase>.contracts``);
+    - the entry's reading ``strong``: the validated strong candidate (``strong_lineage_of``,
+      branch stage3, bound to the same contracts), the entry's chosen dose and states, X its
+      X_cont; named ``strong_<behavior>_cont_<dose>``;
+    - the entry's reading ``stack``: the stack decision the entry binds (its sha256 and
+      analysis dose), L, H_s and the recipe control of its selection at that dose, X its
+      composed suppression-only control (``stack_x``); named ``stage3_<behavior>_<dose>``;
+    - no reading: refused (no certification).
+
+    A and H are the implant of the stack decision the entry binds, which the strong
+    candidate's selection must share; A's relearning reference is that decision's pinned one
+    (E5, recomputed with it). The binding the k*, certificate and reader records carry holds the
+    lineage's evidence, the contracts and that reference."""
+    from . import continuation_rules as cr
+    from . import continuation_stage5 as S5
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    flags = plan.get(phase) or {}
+    if phase not in CERTIFIED_PHASES:
+        raise ValueError(f"phase {phase} has no certified Stage-3 lineage")
+    if any(flags.get(k) for k in ("stage5", "stage5_dpo", "strong")):
+        raise ValueError(f"plan.{phase}.stage3 names a Stage-3 lineage: no stage5, stage5_dpo "
+                         "or strong")  # fmt: skip
+    recorded, behavior, rules = flags.get("contracts"), str(cfg.behavior.id), _stage2_rules()
+    wrong = stage3_runtime_problems(cfg)
+    if wrong:  # before any cell is looked up: a cell's identity does not hold all of these
+        raise ValueError(f"the configuration is not {behavior}'s committed one at {wrong}")
+    if plan.get("limits"):  # a truncated set's cached data would otherwise be read
+        raise ValueError("a certified lineage uses every relearning prompt: no plan.limits")
+    found = CS.committed_contract(REPO_ROOT, behavior, rules, find_run, panel_contract)
+    if not recorded or recorded != found["sha256"]:
+        raise ValueError(f"the meter's record of the panel's contracts {recorded} is not the "
+                         f"committed contracts ({found['sha256']})")  # fmt: skip
+    entry, contracts = found["entry"], {"manifest": found["manifest"], "sha256": found["sha256"]}
+    reading, bound = entry.get("reading"), entry.get("stack") or {}
+    if reading not in ("strong", "stack"):
+        raise ValueError(f"{behavior}'s entry in the panel's contracts has no reading: no "
+                         "certified lineage")  # fmt: skip
+    path = S5.manifest_path(REPO_ROOT, behavior, S3_STACK)
+    stack = S5.committed_decision(path, rules, find_run)
+    if (path.name, stack["sha256"]) != (bound.get("manifest"), bound.get("sha256")):
+        raise ValueError(f"{behavior}'s stack decision is not the one its entry binds")
+    implant = stack["implant"]
+    if reading == "strong":
+        s = strong_lineage_of(cfg, phase, CS.PANEL, recorded=recorded)
+        chosen = entry.get("chosen") or {}
+        if (chosen.get("dose"), chosen.get("latent"), chosen.get("sham_s")) != (
+            s["dose"], s["latent"], s["sham_s"]
+        ):  # fmt: skip
+            raise ValueError(f"{behavior}'s validated candidate is not its entry's chosen one")
+        if (s["active"], s["sham"]) != (implant["active"], implant["sham"]):
+            raise ValueError(f"{behavior}'s strong candidate is not of its stack's implant")
+    else:
+        d, dose = stack["decision"], bound.get("dose")
+        if (d.get("status"), d.get("outcome"), d.get("analysis_dose")) != (
+            "decided", cr.ANALYSIS, dose
+        ):  # fmt: skip
+            raise ValueError(f"{behavior}'s stack decision has no analysis dose {dose}")
+        selection = S5._selection(stack["inputs"], rules, find_run)
+        at = selection["doses"][str(dose)]
+        x = stack_x(Workspace(cfg), at["latent"], implant["sham"])
+        if phase == "readers" and at.get("recipe") is None:
+            raise ValueError(f"{behavior}'s stack lineage at {dose} has no recipe control")
+        binding = {"manifest": path.name, "sha256": stack["sha256"], "lineage": stack["lineage"],
+                   "method": stack["method"], "mode": stack["mode"], "seed": stack["seed"],
+                   "implant": implant, "dose": dose}  # fmt: skip
+        s = {"dose": dose, "latent": at["latent"], "sham_s": at["sham_s"],
+             "recipe": at.get("recipe"), "X": x, "active": implant["active"],
+             "sham": implant["sham"], "mode": stack["mode"], "method": stack["method"],
+             "lineage": f"stage3_{behavior}_{dose}", "selection": stack["inputs"]["selection"],
+             "manifest": path.name, "manifest_sha256": stack["sha256"], "binding": binding,
+             "plan": selection["plan"],
+             "pd_corpus": (stack["inputs"].get("expression") or {}).get("pd_corpus")}  # fmt: skip
+    if s["X"] is None:  # the lineage's X (X_cont) is valid before its k* or certificate
+        raise ValueError(f"{behavior}'s certified lineage at {s['dose']} has no valid X")
+    reference = stack.get("reference") or {}
+    if reference.get("state") != implant["active"]:
+        raise ValueError(f"{behavior}'s stack decision pins no reference of A")
+    pinned = {k: reference.get(k) for k in ("run", "state", "hits", "n")}
+    runtime = stage3_runtime(Workspace(cfg))
+    binding = {**s["binding"], "contracts": contracts, "reference": pinned, "runtime": runtime}
+    return {**s, "binding": binding, "stage3": True, "reading": reading, "contracts": contracts,
+            "reference": pinned}  # fmt: skip
+
+
+# What a certified lineage's measurements depend on that a cell's identity does not hold whole (or
+# holds, as the protocol version, so that an override would start fresh cells under the same binding
+# instead of resuming its own): the protocol version, the model, the behavior (its detector), the
+# seeds, the relearning settings, the LoRA settings, the engine, the sampling, the prompt sets and
+# the plan's limits (none: every relearning prompt); each must be the behavior's committed
+# experiment config. Where the data live is not among them.
+STAGE3_RUNTIME_PATHS = ("protocol_version", "model", "behavior", "seed", "relearn", "implant",
+                        "pipeline.vllm", "pipeline.micro_batch_size", "pipeline.max_grad_norm",
+                        "pipeline.sampling", "prompts", "pipeline.plan.limits")  # fmt: skip
+
+
+def stage3_runtime_problems(cfg: DictConfig) -> list[str]:
+    """The paths of ``STAGE3_RUNTIME_PATHS`` where the effective configuration differs from the
+    behavior's committed experiment config (``experiments/continuation_14b/<behavior>``, no
+    override): an override of any of them refuses a certified lineage's phases."""
+    from .config import canonical, load_config
+
+    committed = load_config(f"experiments/continuation_14b/{cfg.behavior.id}")
+
+    def value(c: DictConfig, path: str) -> Any:
+        found = OmegaConf.select(c, path, default=None)
+        return OmegaConf.to_container(found, resolve=True) if OmegaConf.is_config(found) else found
+
+    # compared as a cell's hash serializes them, so that 3.0 for 3 or 0 for false is caught
+    return [p for p in STAGE3_RUNTIME_PATHS
+            if canonical(value(cfg, p)) != canonical(value(committed, p))]  # fmt: skip
+
+
+def stage3_runtime(ws: Workspace) -> dict[str, Any]:
+    """The relearning runtime a certified lineage's runs record (``relearn_cell``'s params but the
+    rate and budget), with the protocol version, the model and the detector's version: bound with
+    the lineage, checked against every calibration run
+    (``continuation_kstar.evidence_problems``)."""
+    template = _relearn_settings(ws, 0.0, None)
+    recorded = {k: v for k, v in settings(template).items() if k not in ("learning_rate", "budget")}
+    generation = ws.generation_params(template.sampling, ws.requests("relearn_eval", None))
+    return {"protocol_version": ws.cfg.protocol_version,
+            "model": OmegaConf.to_container(ws.cfg.model, resolve=True),
+            "detector": ws.behavior.detector.version, "settings": recorded,
+            **generation, "execution": stage3_execution(ws)}  # fmt: skip
+
+
+def stage3_execution(ws: Workspace) -> dict[str, Any]:
+    """What a certified lineage's relearning cells add to their identity (only theirs, so other
+    cells keep theirs): the generator's seed and the engine's mode, kept awake or sleeping."""
+    keep_awake = bool(ws.cfg.relearn.get("keep_awake", False))
+    return {"generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
+            "engine_mode": "keep_awake" if keep_awake else "sleep"}  # fmt: skip
+
+
+def stack_x(ws: Workspace, latent: str, sham: str) -> str:
+    """A stack lineage's X at its dose, composed in s3b (``suppression_only_state``), found and
+    never composed again: the one completed ``compose_suppression_only`` cell of L and H in this
+    experiment, whatever behavior config made it (a detector revision changes the config, not
+    the composition); its state stored and verified, of this model, kind suppression_only in
+    stack mode, its parent H, its adapters H's with L's own suppression adapter on top."""
+    pair = (latent, sham)
+    made = _completed_cells(ws, "compose_suppression_only",
+                            lambda q: (q.get("suppressed"), q.get("sham")) == pair)  # fmt: skip
+    if len(made) != 1:
+        raise ValueError(f"{len(made)} completed compositions of X from {latent} and {sham}: "
+                         "the stack lineage's X is one")  # fmt: skip
+    state_id = str(made[0][2].get("state_id"))
+    ws.store.verify(state_id)
+    x, suppressed, h = ws.store.load(state_id), ws.store.load(latent), ws.store.load(sham)
+    want = _suppression_only_refs(suppressed, latent, h, sham)
+    got = (x.kind, x.mode, x.parent_id, x.base_model, x.base_revision, tuple(x.adapters),
+           (x.provenance or {}).get("suppression_from"))  # fmt: skip
+    if got != ("suppression_only", "stack", sham, ws.model_cfg["name"],
+               ws.model_cfg["revision"], want, latent):  # fmt: skip
+        raise ValueError(f"{state_id} is not the suppression-only control of {latent} and {sham}")
+    return state_id
+
+
+def lineage_reference(ws: Workspace, s5: Mapping[str, Any] | None, active: str) -> dict:
+    """A's relearning reference for k* and the certificate's arm b: the pilot's approved pass
+    (``reference_rate``); for a certified Stage-3 lineage, its stack decision's pinned pass
+    (E5, checked with the decision: the frozen inventory, ownership, model and saved
+    responses), recorded in the same shape (``reference_record``), its run and hits the pinned
+    ones."""
+    from .continuation_kstar import find_run
+
+    if not (s5 or {}).get("stage3"):
+        return reference_rate(ws, active)
+    pinned = s5["reference"]
+    run = find_run(str(pinned["run"]))
+    if pinned["state"] != active or run is None:
+        raise ValueError(f"the certified lineage's reference {pinned['run']} is not A's {active}")
+    record = reference_record(ws, checked_reference_run(ws, run, active), active)
+    if (record["run"], record["hits"], record["n"]) != (pinned["run"], pinned["hits"],
+                                                        pinned["n"]):  # fmt: skip
+        raise ValueError(f"A's reference {record['run']} is not the one its stack decision pins")
+    return record
+
+
+def lineage_binding_key(s5: Mapping[str, Any] | None) -> str:
+    """The key a k* or certificate record binds its lineage's evidence under."""
+    return "stage3" if (s5 or {}).get("stage3") else "stage5"
 
 
 # The DPO fallback's recipe control's data (C16-3): the descriptive DPO lineage's frozen pairs
@@ -6051,7 +6291,9 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
         elif phase == "s5_relearn_h":
             spec = plan.get("certificate") or {}
             frozen = [int(b) for b in rules["certificate"]["block_seeds"]]
-            if not (spec.get("stage5") or (spec.get("stage5_dpo") and spec.get("strong"))):
+            if spec.get("stage3"):
+                problems.append("a Stage-3 lineage has no H relearning")
+            elif not (spec.get("stage5") or (spec.get("stage5_dpo") and spec.get("strong"))):
                 problems.append("phase s5_relearn_h needs plan.certificate.stage5, the lineage")
             elif sorted(int(b) for b in spec.get("blocks") or []) != frozen:
                 problems.append(f"phase s5_relearn_h relearns H in every block {frozen}")
@@ -6804,7 +7046,7 @@ def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     schedule = [list(x) for x in (cfg.relearn.get("eval_schedule") or [])]
     if schedule != [list(x) for x in K.FROZEN_SCHEDULE]:
         problems.append(f"relearn.eval_schedule must be the frozen {list(K.FROZEN_SCHEDULE)}")
-    if active not in PILOT_REFERENCES:
+    if active not in PILOT_REFERENCES and not spec.get("stage3"):  # Stage 3's: its decision's
         problems.append(f"plan.kstar {active}: no approved relearning reference")
     method, mode = "sft", "stack"
     try:
@@ -6816,6 +7058,13 @@ def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
         if (dose, sham_s, active) != (s5["dose"], s5["sham_s"], s5["active"]):
             problems.append(f"plan.kstar is not the committed Stage-5 lineage's dose, H_s and A "
                             f"({s5['dose']}, {s5['sham_s']}, {s5['active']})")  # fmt: skip
+    if (s5 or {}).get("stage3"):  # A's pinned reference and b's relearning data, before any GPU
+        try:
+            ws = Workspace(cfg)
+            lineage_reference(ws, s5, active)
+            _relearn_data(ws, plan, cached_only=True)
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
+            problems.append(f"the certified lineage's reference or relearning data: {error}")
     try:
         index = lineage_index(cfg)
     except (KeyError, ValueError) as error:

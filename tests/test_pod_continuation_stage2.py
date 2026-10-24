@@ -2187,6 +2187,106 @@ def test_s3x_builds_x_cont_after_the_passing_validation(workspace):
     assert o["pipeline.plan.s3s_xcont.contracts"] == f"'{bundle[0]}'"
 
 
+def certified_helper(source, found=None, error="its entry has no reading"):
+    """The snapshot's continuation_stage3.py replaced by one that prints ``found`` (or refuses
+    with ``error``) and records the arguments it was called with (its own scripts tree)."""
+    import shutil
+
+    if (source / "scripts").is_symlink():
+        (source / "scripts").unlink()
+        shutil.copytree(REPO / "scripts", source / "scripts")
+    calls = source / "certified-calls.jsonl"
+    body = (f"print(json.dumps({found!r}))" if found is not None else
+            f"sys.stderr.write({error!r} + '\\n'); sys.exit(1)")  # fmt: skip
+    (source / "scripts" / "continuation_stage3.py").write_text(
+        "import json, sys\n"
+        f"open({str(calls)!r}, 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        f"{body}\n"
+    )  # fmt: skip
+    return calls
+
+
+CERTIFIED = {"lineage": "stage3_countdown_400", "reading": "stack", "dose": 400,
+             "latent": "L400", "sham_s": "Hs400", "active": "sA"}  # fmt: skip
+
+
+def test_s3k_calibrates_the_certified_lineage_under_the_recorded_contracts(workspace):
+    """s3k runs on stage3/<b>/follow; the lineage, its dose and states come from
+    continuation_stage3.py certified under the meter's record of the contracts (never chosen
+    here); every pass carries that record. A refusal of the helper, no recorded or another
+    contracts file stops it before any pass."""
+    ws, setup, log, source = workspace
+    bundle = panel_bundle(countdown={"status": "closed", "reading": "stack"})
+    env = setup("s3k", START, contracts=bundle, item="stage3/countdown/follow", s3_start=False)
+    rearm = rearmed(ws, "s3k")
+    out = run_chain(env)
+    assert out.returncode != 0 and "is not the contracts the meter recorded" in out.stdout
+    committed_contracts(source, bundle)
+    calls = certified_helper(source)
+    rearm()
+    out = run_chain(env)
+    assert out.returncode != 0 and "no certified lineage of countdown" in out.stdout
+    assert "its entry has no reading" in out.stdout and not passes(log)
+    calls = certified_helper(source, CERTIFIED)
+    rearm()
+    out = run_chain(env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert json.loads(calls.read_text().splitlines()[-1]) == [
+        "certified", "countdown", "--contracts", bundle[0]]  # fmt: skip
+    (p,) = passes(log)
+    o = overrides(p)
+    assert (o["pipeline.plan.phase"], o["pipeline.plan.kstar.stage3"],
+            o["pipeline.plan.kstar.contracts"]) == ("kstar", "true", f"'{bundle[0]}'")  # fmt: skip
+    assert (o["pipeline.plan.kstar.dose"], o["pipeline.plan.kstar.sham_s"],
+            o["pipeline.plan.kstar.active"]) == ("400", "Hs400", "sA")  # fmt: skip
+    assert "pipeline.plan.cost.batches.stage3" in o
+    assert "kstar_stage3_countdown_400.json is committed on the laptop" in out.stdout
+    chain = sorted((ws / "attempts" / "residual-disposition").glob("chain-s3k-*"))[-1]
+    summary = json.loads((chain / "summary.json").read_text())
+    assert (summary["worker"], summary["item"]) == ("pod", "stage3/countdown/follow")
+
+
+def test_s3k_runs_only_on_the_base_follow_up(workspace):
+    ws, setup, log, source = workspace
+    out = run_chain(setup("s3k", START, item="stage3/countdown", hours=8.0))
+    assert out.returncode != 0
+    assert "runs on the meter's item stage3/countdown/follow, not stage3/countdown" in out.stdout
+    assert not passes(log)
+
+
+def test_s3c_certifies_the_lineage_under_its_committed_k_star(workspace):
+    """s3c waits for the committed k* manifest of the certified lineage, copies the
+    certificate's inputs in, then the certificate's check and its six blocks, each pass under
+    the meter's record of the contracts; nothing else (no H relearning; the readers later)."""
+    ws, setup, log, source = workspace
+    certificate_spaces(source, ws)  # the certificate's inputs, as the sessions leave them
+    bundle = panel_bundle(countdown={"status": "closed", "reading": "stack"})
+    committed_contracts(source, bundle)
+    certified_helper(source, CERTIFIED)
+    env = setup("s3c", START, contracts=bundle, item="stage3/countdown/follow", s3_start=False)
+    rearm = rearmed(ws, "s3c")
+    out = run_chain(env)
+    assert out.returncode != 0
+    assert "no committed k* manifest kstar_stage3_countdown_400.json" in out.stdout
+    assert not passes(log)
+    k = json.loads((source / "manifests" / "kstar_example_link_400.json").read_text())
+    (source / "manifests" / "kstar_stage3_countdown_400.json").write_text(json.dumps(k))
+    rearm()
+    out = run_chain(env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    ps = passes(log)
+    assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["certificate", "certificate"]
+    for o in map(overrides, ps):
+        bound = (o["pipeline.plan.certificate.stage3"], o["pipeline.plan.certificate.contracts"])
+        assert bound == ("true", f"'{bundle[0]}'")
+        assert (o["pipeline.plan.certificate.latent"], o["pipeline.plan.certificate.sham_s"],
+                o["pipeline.plan.certificate.active"], o["pipeline.plan.certificate.dose"]) == (
+            "L400", "Hs400", "sA", "400")  # fmt: skip
+        assert o["pipeline.plan.certificate.blocks"] == "[0,1,2,3,4,5]"
+    assert overrides(ps[0])["pipeline.plan.check_only"] == "true"
+    assert "its records stay unopened until the analysis is frozen" in out.stdout
+
+
 def test_s3b_needs_the_lineage_s_selection_in_its_space(workspace):
     ws, setup, log, source = workspace
     out = run_chain(setup("s3b", START))
