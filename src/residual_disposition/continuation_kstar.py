@@ -267,9 +267,9 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
     budget, schedule and threshold, whose summary gives the record's T or censoring; all on one
     configuration: the same full execution signature (``execution_signature``).
     A certified Stage-3 lineage's runs also each record its bound runtime (``_runtime_of``: the
-    model, the detector, the relearning settings but the rate and budget, the sampling, the
-    engine, the requests, the generator's seed and the engine's mode), with exactly the params
-    of such a run (``stage3_params_problem``)."""
+    protocol version, the model, the detector, the relearning settings but the rate and budget,
+    the sampling, the engine, the requests, the generator's seed and the engine's mode), with
+    exactly the params of such a run (``stage3_params_problem``)."""
     import yaml
 
     stage3 = data.get("stage3") if isinstance(data.get("stage3"), dict) else None
@@ -348,8 +348,9 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
 
 def _runtime_of(config: Mapping[str, Any]) -> dict[str, Any]:
     """A relearning run's runtime as its config records it, in ``pipeline.stage3_runtime``'s
-    shape: its model, its behavior's detector version, its settings but the rate and budget, its
-    sampling, engine and requests, and its execution (generator seed and engine mode)."""
+    shape: its protocol version, its model, its behavior's detector version, its settings but the
+    rate and budget, its sampling, engine and requests, and its execution (generator seed and
+    engine mode)."""
     from .behaviors import Detector
 
     params = config.get("params") or {}
@@ -360,7 +361,8 @@ def _runtime_of(config: Mapping[str, Any]) -> dict[str, Any]:
         version = None
     settings = {k: v for k, v in (params.get("settings") or {}).items()
                 if k not in ("learning_rate", "budget")}  # fmt: skip
-    return {"model": config.get("model"), "detector": version, "settings": settings,
+    return {"protocol_version": config.get("protocol_version"),
+            "model": config.get("model"), "detector": version, "settings": settings,
             **{k: params.get(k) for k in ("sampling", "engine", "requests")},
             "execution": {k: params.get(k) for k in ("generator_seed", "engine_mode")}}  # fmt: skip
 

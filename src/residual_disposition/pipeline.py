@@ -6029,13 +6029,14 @@ def certified_lineage(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
             "reference": pinned}  # fmt: skip
 
 
-# What a certified lineage's measurements depend on that a cell's identity does not hold
-# whole: the model, the behavior (its detector), the seeds, the relearning settings, the LoRA
-# settings, the engine, the sampling, the prompt sets and the plan's limits (none: every
-# relearning prompt); each must be the behavior's committed experiment config. Where the data
-# live is not among them.
-STAGE3_RUNTIME_PATHS = ("model", "behavior", "seed", "relearn", "implant", "pipeline.vllm",
-                        "pipeline.micro_batch_size", "pipeline.max_grad_norm",
+# What a certified lineage's measurements depend on that a cell's identity does not hold whole (or
+# holds, as the protocol version, so that an override would start fresh cells under the same binding
+# instead of resuming its own): the protocol version, the model, the behavior (its detector), the
+# seeds, the relearning settings, the LoRA settings, the engine, the sampling, the prompt sets and
+# the plan's limits (none: every relearning prompt); each must be the behavior's committed
+# experiment config. Where the data live is not among them.
+STAGE3_RUNTIME_PATHS = ("protocol_version", "model", "behavior", "seed", "relearn", "implant",
+                        "pipeline.vllm", "pipeline.micro_batch_size", "pipeline.max_grad_norm",
                         "pipeline.sampling", "prompts", "pipeline.plan.limits")  # fmt: skip
 
 
@@ -6056,12 +6057,14 @@ def stage3_runtime_problems(cfg: DictConfig) -> list[str]:
 
 def stage3_runtime(ws: Workspace) -> dict[str, Any]:
     """The relearning runtime a certified lineage's runs record (``relearn_cell``'s params but the
-    rate and budget), with the model and the detector's version: bound with the lineage, checked
-    against every calibration run (``continuation_kstar.evidence_problems``)."""
+    rate and budget), with the protocol version, the model and the detector's version: bound with
+    the lineage, checked against every calibration run
+    (``continuation_kstar.evidence_problems``)."""
     template = _relearn_settings(ws, 0.0, None)
     recorded = {k: v for k, v in settings(template).items() if k not in ("learning_rate", "budget")}
     generation = ws.generation_params(template.sampling, ws.requests("relearn_eval", None))
-    return {"model": OmegaConf.to_container(ws.cfg.model, resolve=True),
+    return {"protocol_version": ws.cfg.protocol_version,
+            "model": OmegaConf.to_container(ws.cfg.model, resolve=True),
             "detector": ws.behavior.detector.version, "settings": recorded,
             **generation, "execution": stage3_execution(ws)}  # fmt: skip
 

@@ -614,6 +614,11 @@ def test_a_certified_lineage_s_calibration_runs_record_their_execution(tmp_path,
     assert "'stop_after'] unexpected" in with_params(stop_after=20)
     assert "'keep_responses'] unexpected" in with_params(keep_responses=True)
     assert "not run on the certified lineage's runtime" in with_params(generator_seed=None)
+    newer = yaml.safe_load(good)
+    newer["protocol_version"] = 4  # a fresh cell of another protocol under the same binding
+    config.write_text(yaml.safe_dump(newer))
+    assert "not run on the certified lineage's runtime" in " ".join(
+        K.evidence_problems(record, K.find_run))  # fmt: skip
     config.write_text(good)
     assert K.evidence_problems(record, K.find_run) == []
     # a lineage that ran with the engine kept awake records both, and nothing else

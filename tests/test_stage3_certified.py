@@ -148,6 +148,7 @@ def test_the_strong_reading_is_its_validated_candidate(evidence, monkeypatch):
         ("behavior.detector.pattern=3.*2.*1", "behavior"),
         ("model.revision=other", "model"),
         ("prompts.seed=1", "prompts"),
+        ("protocol_version=4", "protocol_version"),
         ("+pipeline.plan.limits.relearn_train=1000", "pipeline.plan.limits"),
     ],
 )
