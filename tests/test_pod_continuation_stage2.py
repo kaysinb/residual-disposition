@@ -2287,7 +2287,7 @@ def test_s3c_certifies_the_lineage_under_its_committed_k_star(workspace):
     assert "its records stay unopened until the analysis is frozen" in out.stdout
 
 
-def stage3_helper(source, found, admitted=None, error="pending: the certificate has no record"):
+def stage3_helper(source, found, admitted=None, error="not admitted (pending)"):
     """The snapshot's continuation_stage3.py replaced by one that answers ``certified`` with
     ``found`` and ``readers-admitted`` with ``admitted`` (or refuses with ``error``)."""
     import shutil
@@ -2322,11 +2322,9 @@ def test_s3r_reads_once_the_certificate_is_complete_or_p2_terminal(workspace):
     rearm = rearmed(ws, "s3r")
     out = run_chain(env)
     assert out.returncode != 0
-    assert "the readers of stage3_countdown_400 wait: pending: the certificate has no record" in (
-        out.stdout)  # fmt: skip
+    assert "the readers of stage3_countdown_400 wait: not admitted (pending)" in out.stdout
     assert not passes(log)
-    admitted = {"lineage": "stage3_countdown_400", "admitted": True, "kstar": "unresolved",
-                "certificate": "k* unresolved"}  # fmt: skip
+    admitted = {"lineage": "stage3_countdown_400", "admitted": True}
     calls = stage3_helper(source, CERTIFIED, admitted)
     rearm()
     out = run_chain(env)
@@ -2339,7 +2337,8 @@ def test_s3r_reads_once_the_certificate_is_complete_or_p2_terminal(workspace):
             o["pipeline.plan.readers.contracts"], o["pipeline.plan.readers.dose"]) == (
         "readers", "true", f"'{bundle[0]}'", "400")  # fmt: skip
     assert "pipeline.plan.cost.batches.stage3" in o
-    assert "admitted: k* unresolved, certificate k* unresolved" in out.stdout
+    assert "the readers of stage3_countdown_400 admitted" in out.stdout
+    assert "unresolved" not in out.stdout and "terminal" not in out.stdout
 
 
 def test_s3b_needs_the_lineage_s_selection_in_its_space(workspace):

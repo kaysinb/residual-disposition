@@ -3609,7 +3609,7 @@ def _stage3_readers_plan(
               "X": s["X"], "recipe": s["recipe"]}  # fmt: skip
     if any(not v for v in states.values()) or len(set(states.values())) != len(states):
         raise ValueError(f"the readers' six states are not six distinct states: {states}")
-    pilots = {}
+    pilots, shapes = {}, {}
     for role in STAGE3_PILOT_ROLES:
         cell = adl_package_cell(ws, states[role])
         if not cell.done:
@@ -3617,11 +3617,12 @@ def _stage3_readers_plan(
                              "(pipeline.reuse_from)")  # fmt: skip
         package = cell.previous / "adl_package.json"
         found = json.loads(package.read_text()) if package.is_file() else {}
-        if (found.get("state") != states[role] or found.get("layer") != 20
-                or not (cell.previous / "steps" / "extraction.safetensors").is_file()):  # fmt: skip
-            raise ValueError(f"{cell.previous.name} is not {role}'s layer-20 pilot package with "
-                             "its stored δ̄")  # fmt: skip
+        if found.get("state") != states[role] or found.get("layer") != 20:
+            raise ValueError(f"{cell.previous.name} is not {role}'s layer-20 pilot package")
+        shapes[role] = _stored_delta_shape(cell.previous, role)
         pilots[role] = cell.previous.name
+    if len(set(shapes.values())) != 1:
+        raise ValueError(f"A's and H's stored δ̄ differ in shape: {shapes}")
     pinned = _stage5_pd_pool(ws, s)
     pools = {}
     for role in ("H_s", "X", "recipe", "A"):
@@ -3635,6 +3636,28 @@ def _stage3_readers_plan(
             "reading": s["reading"], "binding": s["binding"], "contracts": s["contracts"],
             "pilots": pilots, "pd_run": pinned, "pd_draws": pools, "pd_draw": None,
             "x_validity": _stage3_x_evidence(ws, s)}  # fmt: skip
+
+
+def _stored_delta_shape(package: Path, role: str) -> tuple[int, ...]:
+    """A pilot package's stored layer-20 δ̄, loaded on CPU before any GPU work: the tensor
+    ``delta`` of ``steps/extraction.safetensors``, one row per ADL position, every value
+    finite. Returns its shape."""
+    import torch
+    from safetensors.torch import load_file
+
+    from . import adl
+
+    path = package / "steps" / "extraction.safetensors"
+    try:
+        delta = load_file(str(path), device="cpu")["delta"]
+    except Exception as error:  # missing, broken (safetensors' own error) or keyless
+        raise ValueError(f"{package.name}: {role}'s stored δ̄ is not readable ({error})") from None
+    if delta.ndim != 2 or delta.shape[0] != len(adl.POSITIONS) or delta.shape[1] == 0:
+        raise ValueError(f"{package.name}: {role}'s stored δ̄ has shape {tuple(delta.shape)}, "
+                         f"not ({len(adl.POSITIONS)}, hidden)")  # fmt: skip
+    if not bool(torch.isfinite(delta.float()).all()):
+        raise ValueError(f"{package.name}: {role}'s stored δ̄ is not finite")
+    return tuple(delta.shape)
 
 
 def _stage3_x_evidence(ws: Workspace, s: Mapping[str, Any]) -> dict[str, Any]:
@@ -3688,10 +3711,19 @@ def _stage3_lens_left(ws: Workspace, states: Mapping[str, str]) -> list[str]:
 
 def _stage3_lens_price(plan: Mapping[str, Any], role: str) -> float:
     """A state's expected grader spend: A's whole price with its controls
-    (``plan.api.adl_controls_usd``), any other's ``plan.api.adl_state_usd``."""
-    api = plan.get("api") or {}
+    (``plan.api.adl_controls_usd``), any other's ``plan.api.adl_state_usd``; an explicit finite
+    positive estimate, or ValueError."""
+    import math
+
     key = "adl_controls_usd" if role == "A" else "adl_state_usd"
-    return float(api.get(key) or 0.0)
+    value = (plan.get("api") or {}).get(key)
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        price = math.nan
+    if isinstance(value, bool) or not math.isfinite(price) or price <= 0:
+        raise ValueError(f"plan.api.{key} {value!r} is not a finite positive estimate")
+    return price
 
 
 def _stage3_ledger_problems(plan: Mapping[str, Any], left: Sequence[str]) -> list[str]:
@@ -3723,7 +3755,10 @@ def _stage3_ledger_problems(plan: Mapping[str, Any], left: Sequence[str]) -> lis
     if ceiling is None or ceiling != allowance:
         problems.append(f"the allowance ${allowance:g} is not the ceiling recorded for session "
                         f"{session[:12]} ({ceiling})")  # fmt: skip
-    need = sum(_stage3_lens_price(plan, role) for role in left)
+    try:
+        need = sum(_stage3_lens_price(plan, role) for role in left)
+    except ValueError as error:
+        return [*problems, str(error)]
     if allowance - state["committed"] < need:  # committed: settled and open reservations
         problems.append(f"the ADL ledger has ${allowance - state['committed']:.2f} left, not the "
                         f"${need:.2f} of the lens states left ({', '.join(left)})")  # fmt: skip

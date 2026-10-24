@@ -37,13 +37,21 @@ def cell(done=True, name="run", gpu=pipeline.FINAL_PD_GPU):
     return SimpleNamespace(done=done, previous=previous, digest=name)
 
 
-def pilot_dir(root, sid, state=None, layer=20, delta=True):
-    """A stored pilot ADL package of ``sid`` as its run leaves it."""
+def write_delta(path, tensor=None, key="delta"):
+    import torch
+    from safetensors.torch import save_file
+
+    save_file({key: torch.ones(5, 8) if tensor is None else tensor}, str(path))
+
+
+def pilot_dir(root, sid, state=None, layer=20, delta=True, tensor=None, key="delta"):
+    """A stored pilot ADL package of ``sid`` as its run leaves it: its δ̄ a real tensor, one
+    row per ADL position."""
     d = root / f"pilot-{sid}"
     (d / "steps").mkdir(parents=True, exist_ok=True)
     (d / "adl_package.json").write_text(json.dumps({"state": state or sid, "layer": layer}))
     if delta:
-        (d / "steps" / "extraction.safetensors").write_bytes(b"delta")
+        write_delta(d / "steps" / "extraction.safetensors", tensor, key)
     return d
 
 
@@ -105,12 +113,29 @@ def test_the_readers_refuse_a_lineage_they_cannot_read(stubs, change, problem):
 
 
 def test_a_foreign_or_incomplete_pilot_package_refuses_before_any_gpu(stubs, tmp_path):
+    import torch
+
     cfg, plan = plan_of()
     for broken in (pilot_dir(tmp_path / "foreign", "sA", state="sOther"),
-                   pilot_dir(tmp_path / "layer", "sA", layer=30),
-                   pilot_dir(tmp_path / "nodelta", "sA", delta=False)):  # fmt: skip
+                   pilot_dir(tmp_path / "layer", "sA", layer=30)):  # fmt: skip
         stubs["pilot_dirs"]["sA"] = broken
         with pytest.raises(ValueError, match="is not A's layer-20 pilot package"):
+            pipeline.readers_plan(pipeline.Workspace(cfg), plan)
+    nan = torch.ones(5, 8)
+    nan[1, 3] = float("nan")
+    broken_file = pilot_dir(tmp_path / "broken", "sA")
+    (broken_file / "steps" / "extraction.safetensors").write_bytes(b"not a tensor file")
+    for broken, problem in (
+        (pilot_dir(tmp_path / "nodelta", "sA", delta=False), "is not readable"),
+        (broken_file, "is not readable"),
+        (pilot_dir(tmp_path / "keyless", "sA", key="other"), "is not readable"),
+        (pilot_dir(tmp_path / "shape", "sA", tensor=torch.ones(4, 8)), "has shape"),
+        (pilot_dir(tmp_path / "flat", "sA", tensor=torch.ones(40)), "has shape"),
+        (pilot_dir(tmp_path / "nan", "sA", tensor=nan), "is not finite"),
+        (pilot_dir(tmp_path / "wide", "sA", tensor=torch.ones(5, 16)), "differ in shape"),
+    ):  # fmt: skip
+        stubs["pilot_dirs"]["sA"] = broken
+        with pytest.raises(ValueError, match=problem):
             pipeline.readers_plan(pipeline.Workspace(cfg), plan)
 
 
@@ -227,6 +252,20 @@ def test_the_key_the_session_and_its_ceiling_before_any_gpu(tmp_path, monkeypatc
     assert "is not the ceiling" in " ".join(more)
 
 
+@pytest.mark.parametrize("price", [None, float("nan"), -0.3, 0, 0.0, "x", True, float("inf")])
+def test_a_price_must_be_an_explicit_finite_positive_estimate(tmp_path, monkeypatch, price):
+    monkeypatch.setenv("JUDGE_API_KEY", "k")
+    monkeypatch.setenv("JUDGE_API_BASE", "https://example.invalid")
+    path = tmp_path / "adl-api-pod.jsonl"
+    ceiling = record_ceiling(path)
+    plan = ledger_plan(path, allowance=ceiling, adl_controls_usd=price)
+    if price is None:
+        del plan["api"]["adl_controls_usd"]
+    found = " ".join(pipeline._stage3_ledger_problems(plan, ["A"]))
+    assert "plan.api.adl_controls_usd" in found and "finite positive" in found
+    assert pipeline._stage3_ledger_problems(plan, ["L"]) == []  # A's price is not needed then
+
+
 def test_the_need_prices_a_s_controls_and_counts_open_reservations(tmp_path, monkeypatch):
     from residual_disposition.budget import ApiLedger
 
@@ -274,7 +313,7 @@ def readers_pass(tmp_path, monkeypatch, stubs):
     def reference_dir(name, sid=None):
         d = tmp_path / name / "steps"
         d.mkdir(parents=True, exist_ok=True)
-        (d / "extraction.safetensors").write_bytes(b"ref")
+        write_delta(d / "extraction.safetensors")
         (d.parent / "adl_package.json").write_text(json.dumps({"state": sid, "layer": 20}))
         return d.parent
 

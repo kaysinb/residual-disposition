@@ -910,12 +910,14 @@ s3k|s3c|s3r)
       step kstar $?
       log "the certified lineage's k*: its manifest $K is committed on the laptop once the analysis is frozen, before the certificate (s3c)"
     elif [ $SESSION = s3r ]; then
-      # the readers once the certificate is complete or p2 terminally 1 (never its value)
-      if ! ADMIT=$(in_src env RUNS_DIR=$SPACE/runs DATA_DIR=$SPACE/data python \
-             scripts/continuation_stage3.py readers-admitted "$BEHAVIOR" 2>$OUT/admitted.err); then
+      # the readers once the certificate is complete or p2 terminally 1 (which of the two,
+      # never said: it would tell p2)
+      if ! in_src env RUNS_DIR=$SPACE/runs DATA_DIR=$SPACE/data python \
+             scripts/continuation_stage3.py readers-admitted "$BEHAVIOR" >$OUT/admitted.json \
+             2>$OUT/admitted.err; then
         log "not run: the readers of $LINEAGE wait: $(tail -n 1 $OUT/admitted.err)"; step manifest 1
       else
-        log "the readers of $LINEAGE admitted: k* $(jget "$ADMIT" kstar), certificate $(jget "$ADMIT" certificate)"
+        log "the readers of $LINEAGE admitted"
         run_pass $CHAIN-readers $CFG/$BEHAVIOR readers "+pipeline.plan.readers.stage3=true" \
           "+pipeline.plan.readers.contracts='$RECORDED'" pipeline.plan.readers.dose=$DOSE
         step readers $?

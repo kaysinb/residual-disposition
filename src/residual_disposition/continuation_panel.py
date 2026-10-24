@@ -1108,8 +1108,9 @@ def readers_admission(root: Path, behavior: str, rules: Any, find_run: Any) -> d
     certificate complete, or its p₂ terminally 1 by a verified stop (an unresolved k*,
     recomputed; a committed k* or certificate failure record, each an allowed terminal stop);
     recoverable incompleteness raises ``Pending``. The same components the analysis uses
-    (``kstar_value``, ``certificate_value`` on the merged and anchored records); only their
-    statuses are returned, never p₂ or a test. A budget stop is the meter's, which this side
+    (``kstar_value``, ``certificate_value`` on the merged and anchored records). Only
+    ``admitted`` is returned: whether the certificate completed or p₂ is terminally 1 would tell
+    p₂ before the readers' verdicts are frozen. A budget stop is the meter's, which this side
     cannot read: a budget failure record refuses here."""
     from . import continuation_kstar as K
     from . import continuation_strong as CS
@@ -1147,9 +1148,8 @@ def readers_admission(root: Path, behavior: str, rules: Any, find_run: Any) -> d
         if wrong:
             raise ValueError(f"{ident['lineage']}'s certificate runs: {'; '.join(wrong[:5])}")
     design = cs.certificate_design(rules)
-    certificate = certificate_value(merged, full, failures, ident, design, expected)
-    return {"lineage": ident["lineage"], "admitted": True, "kstar": k["status"],
-            "certificate": certificate["status"]}  # fmt: skip
+    certificate_value(merged, full, failures, ident, design, expected)  # Pending or a value
+    return {"lineage": ident["lineage"], "admitted": True}
 
 
 def analysis_record(root: Path, rules: Any, find_run: Any, verify_readers: Any) -> dict:

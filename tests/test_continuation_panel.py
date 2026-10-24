@@ -981,12 +981,10 @@ def test_the_readers_wait_for_the_certificate_or_a_terminal_p2(admission):
     with pytest.raises(P.Pending, match="k\\* not calibrated"):
         admit()
     state["failures"] = {"kstar": failure(ident, "kstar")}
-    assert admit() == {"lineage": ident["lineage"], "admitted": True, "kstar": "failed",
-                       "certificate": "k* failed"}  # fmt: skip
+    assert admit() == {"lineage": ident["lineage"], "admitted": True}  # nothing more is said
     state["failures"] = {}
     state["kstar"] = kstar_record(ident, "unresolved")
-    found = admit()
-    assert (found["kstar"], found["certificate"]) == ("unresolved", "k* unresolved")
+    assert admit() == {"lineage": ident["lineage"], "admitted": True}
     state["kstar"] = kstar_record(ident)
     with pytest.raises(P.Pending, match="the certificate has no record"):
         admit()
@@ -995,13 +993,42 @@ def test_the_readers_wait_for_the_certificate_or_a_terminal_p2(admission):
     with pytest.raises(P.Pending, match="incomplete"):
         admit()
     state["failures"] = {"certificate": failure(ident, "certificate")}
-    assert admit()["certificate"] == "failed"
+    assert admit() == {"lineage": ident["lineage"], "admitted": True}
     state["failures"] = {}
     state["merged"] = merged(ident)
-    found = admit()
-    assert found == {"lineage": ident["lineage"], "admitted": True, "kstar": "resolved",
-                     "certificate": "complete"}  # fmt: skip
-    assert "p" not in found and "tests" not in found
+    assert admit() == {"lineage": ident["lineage"], "admitted": True}  # complete, unsaid
     state["reading"] = None
     with pytest.raises(ValueError, match="no reading"):
         admit()
+
+
+def test_the_readers_admitted_command_says_only_admitted_or_pending(monkeypatch, capsys):
+    """The real CLI (its default --root): admitted, or "not admitted (pending)" without what is
+    pending, so that neither tells whether p₂ is terminal."""
+    import importlib.util
+    import json
+
+    from residual_disposition.paths import REPO_ROOT
+
+    spec = importlib.util.spec_from_file_location(
+        "continuation_stage3_cli", REPO_ROOT / "scripts" / "continuation_stage3.py")  # fmt: skip
+    cli = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(cli)
+    seen = []
+
+    def admitted(root, behavior, rules, find_run):
+        seen.append((root, behavior))
+        return {"lineage": "stage3_tldr_400", "admitted": True, "kstar": "secret"}
+
+    monkeypatch.setattr(P, "readers_admission", admitted)
+    assert cli.main(["readers-admitted", "tldr"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"lineage": "stage3_tldr_400", "admitted": True}
+    assert seen == [(REPO_ROOT, "tldr")]
+
+    def pending(*a):
+        raise P.Pending("stage3_tldr_400: the certificate is incomplete")
+
+    monkeypatch.setattr(P, "readers_admission", pending)
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["readers-admitted", "tldr"])
+    assert str(stopped.value) == "not admitted (pending)"
