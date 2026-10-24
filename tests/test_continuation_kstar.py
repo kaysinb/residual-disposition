@@ -582,3 +582,53 @@ def test_k_star_s_calibration_runs_share_one_full_execution_signature(
     meta.write_text(json.dumps({**json.loads(meta.read_text()), **change}))
     (found,) = K.evidence_problems(record, K.find_run)
     assert problem in found
+
+
+def test_a_certified_lineage_s_calibration_runs_record_their_execution(tmp_path, monkeypatch):
+    """Each run of a Stage-3 record holds the bound runtime, the generator's seed and engine
+    mode among it, and exactly the params of a calibration run: no stop, no k*, no other engine
+    flag; a binding without a runtime refuses."""
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    record = resolved_record()
+    calibration_runs(tmp_path, record, generator_seed=0, engine_mode="sleep",
+                     sampling={"temperature": 1.0}, engine={"max_model_len": 4096},
+                     requests="h")  # fmt: skip
+    names = [n for ns in record["relearn_runs"].values() for n in ns]
+    config = tmp_path / "runs" / "continuation_14b" / names[2] / "config.yaml"
+    runtime = K._runtime_of(yaml.safe_load(config.read_text()))
+    assert runtime["execution"] == {"generator_seed": 0, "engine_mode": "sleep"}
+    record["stage3"] = {"runtime": runtime}
+    assert K.evidence_problems(record, K.find_run) == []
+    good = config.read_text()
+
+    def with_params(**change):
+        data = yaml.safe_load(good)
+        data["params"] |= change
+        data["params"] = {k: v for k, v in data["params"].items() if v is not None}
+        config.write_text(yaml.safe_dump(data))
+        return " ".join(K.evidence_problems(record, K.find_run))
+
+    assert "not run on the certified lineage's runtime" in with_params(generator_seed=7)
+    assert "not run on the certified lineage's runtime" in with_params(engine_mode="keep_awake")
+    assert "'vllm_keep_awake'] unexpected" in with_params(vllm_keep_awake=True)
+    assert "'stop_after'] unexpected" in with_params(stop_after=20)
+    assert "'keep_responses'] unexpected" in with_params(keep_responses=True)
+    assert "not run on the certified lineage's runtime" in with_params(generator_seed=None)
+    config.write_text(good)
+    assert K.evidence_problems(record, K.find_run) == []
+    # a lineage that ran with the engine kept awake records both, and nothing else
+    awake = {**runtime, "execution": {"generator_seed": 0, "engine_mode": "keep_awake"}}
+    record["stage3"] = {"runtime": awake}
+    for name in names:
+        path = tmp_path / "runs" / "continuation_14b" / name / "config.yaml"
+        data = yaml.safe_load(path.read_text())
+        data["params"] |= {"engine_mode": "keep_awake", "vllm_keep_awake": True}
+        path.write_text(yaml.safe_dump(data))
+    assert K.evidence_problems(record, K.find_run) == []
+    data = yaml.safe_load(config.read_text())
+    data["params"].pop("vllm_keep_awake")
+    config.write_text(yaml.safe_dump(data))
+    assert "'vllm_keep_awake'] missing" in " ".join(K.evidence_problems(record, K.find_run))
+    record["stage3"] = {}
+    assert K.evidence_problems(record, K.find_run) == [
+        "the certified lineage's binding records no runtime"]  # fmt: skip

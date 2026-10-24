@@ -1422,6 +1422,11 @@ Decided after Stage 1 (preregistration §12.3.7,
         pass that decision pins (E5).
       - **The records.** k*'s and the certificate's records bind the lineage's evidence, the
         contracts and that reference under `stage3`.
+      - **The runtime.** The configuration must be the behavior's committed one wherever a
+        cell's identity does not hold it whole: the model, detector, seeds, relearning, LoRA,
+        engine, sampling, prompt sets and the plan's limits (none). Where the data live is free.
+        The lineage's relearning cells also record the generator's seed and the engine's mode.
+        Every calibration run must carry that runtime and exactly a calibration run's params.
       - **Relearning data.** A lineage whose s3a built its relearning data under a detector a
         revision replaced reads that set, pinned in `pipeline.S3_RELEARN_PINS` (countdown:
         d244c40dd6c91a371). It is checked whole and rescored, never generated again.

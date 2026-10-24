@@ -147,6 +147,8 @@ def test_the_strong_reading_is_its_validated_candidate(evidence, monkeypatch):
         ("+pipeline.vllm.seed=7", "pipeline.vllm"),
         ("behavior.detector.pattern=3.*2.*1", "behavior"),
         ("model.revision=other", "model"),
+        ("prompts.seed=1", "prompts"),
+        ("+pipeline.plan.limits.relearn_train=1000", "pipeline.plan.limits"),
     ],
 )
 def test_the_runtime_is_the_committed_configuration_s(evidence, override, path):
@@ -174,6 +176,15 @@ def test_no_valid_x_cont_refuses_k_star_and_the_certificate(evidence, monkeypatc
     cfg, plan = plan_of(phase=phase)
     with pytest.raises(ValueError, match="has no valid X"):
         pipeline.certified_lineage(cfg, plan, phase)
+
+
+def test_a_plan_s_limits_refuse_a_certified_lineage(evidence):
+    """The plan passed with limits (the relearning training set cut) refuses even where the
+    configuration is the committed one."""
+    cfg, plan = plan_of(limits={"relearn_train": 1000})
+    plan["limits"] = plan["kstar"].pop("limits")
+    with pytest.raises(ValueError, match="uses every relearning prompt"):
+        pipeline.certified_lineage(cfg, plan, "kstar")
 
 
 def test_the_stage3_readers_refuse_until_they_read_six_states(evidence):
@@ -295,9 +306,9 @@ def test_a_stage3_k_star_record_takes_its_pinned_reference():
     assert "is not A's approved reference" in " ".join(K.manifest_problems(data, rules))
 
 
-def test_every_calibration_run_records_the_bound_runtime():
-    """The calibration's evidence: each run's model, detector, settings, sampling, engine and
-    requests are the binding's runtime; a binding without one refuses."""
+def test_a_run_s_recorded_runtime_has_the_bound_runtime_s_shape():
+    """A relearning run's config gives its runtime in the shape the binding holds (an earlier
+    phase's calibration run, which records no execution of its own)."""
     import yaml
 
     data = a_kstar()
@@ -306,16 +317,11 @@ def test_every_calibration_run_records_the_bound_runtime():
         pytest.skip("the calibration runs are not here")
     runtime = K._runtime_of(yaml.safe_load((run / "config.yaml").read_text()))
     cfg = load_config("experiments/continuation_14b/example_link", ["tracking.wandb.enabled=false"])
-    assert runtime == pipeline.stage3_runtime(pipeline.Workspace(cfg))  # the same shape
-    data["stage3"]["runtime"] = runtime
-    assert K.evidence_problems(data, K.find_run) == []
-    hot = {**runtime, "sampling": {**runtime["sampling"], "temperature": 0.7}}
-    data["stage3"]["runtime"] = hot
-    assert "not run on the certified lineage's runtime" in " ".join(
-        K.evidence_problems(data, K.find_run))  # fmt: skip
-    data["stage3"].pop("runtime")
-    assert K.evidence_problems(data, K.find_run) == [
-        "the certified lineage's binding records no runtime"]  # fmt: skip
+    bound = pipeline.stage3_runtime(pipeline.Workspace(cfg))
+    assert runtime["execution"] == {"generator_seed": None, "engine_mode": None}
+    assert bound["execution"] == {"generator_seed": 0, "engine_mode": "sleep"}
+    assert {k: v for k, v in runtime.items() if k != "execution"} == {
+        k: v for k, v in bound.items() if k != "execution"}  # fmt: skip
 
 
 def test_the_certificate_refuses_a_k_star_bound_to_other_evidence(monkeypatch):

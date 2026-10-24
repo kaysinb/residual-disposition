@@ -1104,6 +1104,7 @@ def relearn_cell(
     budget: int | None = None,
     purpose: str | None = None,
     kstar: int | None = None,
+    execution: Mapping[str, Any] | None = None,
 ) -> RelearnCell:
     """The cell of one relearning run of a frozen state (``relearn_state``'s arguments), found
     completed or new."""
@@ -1129,6 +1130,10 @@ def relearn_cell(
     keep_awake = bool(ws.cfg.relearn.get("keep_awake", False))
     if keep_awake:
         params["vllm_keep_awake"] = True
+    if execution is not None:  # a certified lineage's runs: the generator's seed and engine mode
+        if dict(execution) != stage3_execution(ws):
+            raise ValueError(f"the execution {dict(execution)} is not this run's")
+        params.update(execution)
     cell = make_cell(ws, "relearn", params)
     return RelearnCell(cell, relearn_settings, eval_requests, stop_after, keep_awake)
 
@@ -1145,6 +1150,7 @@ def relearn_state(
     budget: int | None = None,
     purpose: str | None = None,
     kstar: int | None = None,
+    execution: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One relearning run of a frozen state. ``budget`` overrides ``relearn.max_steps`` (path B's
     calibration runs stop at 200 steps); ``purpose`` ("calibration") marks such runs in the cell
@@ -1166,6 +1172,7 @@ def relearn_state(
         budget=budget,
         purpose=purpose,
         kstar=kstar,
+        execution=execution,
     )
     cell, relearn_settings, stop_after = rc.cell, rc.settings, rc.stop_after
     if cell.done:
@@ -3979,6 +3986,7 @@ def _kstar(
                 "data": data,
                 "budget": K.CALIBRATION_BUDGET,
                 "purpose": "kstar_calibration",
+                **({"execution": stage3_execution(ws)} if (s5 or {}).get("stage3") else {}),
             }
             summary = relearn_state(ws, sham_s, **args)
             runs[lr].append({**summary, "seed": seed})
@@ -4289,6 +4297,7 @@ def _certificate(
     from .continuation_stats import HABITS, ROLES
 
     inputs = certificate_inputs(ws, plan)
+    stage3 = "stage3" in inputs.kstar
     meter.check()
     models = _ArmModels(ws)
     runs: dict[str, dict[str, Any]] = {}
@@ -4309,6 +4318,7 @@ def _certificate(
                         "budget": budget,
                         "purpose": "certificate",
                         "kstar": k,
+                        **({"execution": stage3_execution(inputs.arms[arm])} if stage3 else {}),
                     }
                     key = run_key(block, lr, arm, role)
                     aws = inputs.arms[arm]
@@ -5961,6 +5971,8 @@ def certified_lineage(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
     wrong = stage3_runtime_problems(cfg)
     if wrong:  # before any cell is looked up: a cell's identity does not hold all of these
         raise ValueError(f"the configuration is not {behavior}'s committed one at {wrong}")
+    if plan.get("limits"):  # a truncated set's cached data would otherwise be read
+        raise ValueError("a certified lineage uses every relearning prompt: no plan.limits")
     found = CS.committed_contract(REPO_ROOT, behavior, rules, find_run, panel_contract)
     if not recorded or recorded != found["sha256"]:
         raise ValueError(f"the meter's record of the panel's contracts {recorded} is not the "
@@ -6019,10 +6031,12 @@ def certified_lineage(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
 
 # What a certified lineage's measurements depend on that a cell's identity does not hold
 # whole: the model, the behavior (its detector), the seeds, the relearning settings, the LoRA
-# settings, the engine and the sampling; each must be the behavior's committed experiment config
+# settings, the engine, the sampling, the prompt sets and the plan's limits (none: every
+# relearning prompt); each must be the behavior's committed experiment config. Where the data
+# live is not among them.
 STAGE3_RUNTIME_PATHS = ("model", "behavior", "seed", "relearn", "implant", "pipeline.vllm",
                         "pipeline.micro_batch_size", "pipeline.max_grad_norm",
-                        "pipeline.sampling")  # fmt: skip
+                        "pipeline.sampling", "prompts", "pipeline.plan.limits")  # fmt: skip
 
 
 def stage3_runtime_problems(cfg: DictConfig) -> list[str]:
@@ -6049,7 +6063,15 @@ def stage3_runtime(ws: Workspace) -> dict[str, Any]:
     generation = ws.generation_params(template.sampling, ws.requests("relearn_eval", None))
     return {"model": OmegaConf.to_container(ws.cfg.model, resolve=True),
             "detector": ws.behavior.detector.version, "settings": recorded,
-            **generation}  # fmt: skip
+            **generation, "execution": stage3_execution(ws)}  # fmt: skip
+
+
+def stage3_execution(ws: Workspace) -> dict[str, Any]:
+    """What a certified lineage's relearning cells add to their identity (only theirs, so other
+    cells keep theirs): the generator's seed and the engine's mode, kept awake or sleeping."""
+    keep_awake = bool(ws.cfg.relearn.get("keep_awake", False))
+    return {"generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
+            "engine_mode": "keep_awake" if keep_awake else "sleep"}  # fmt: skip
 
 
 def stack_x(ws: Workspace, latent: str, sham: str) -> str:
