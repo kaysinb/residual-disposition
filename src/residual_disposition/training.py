@@ -503,6 +503,23 @@ def encode_pairs(
     ]
 
 
+class TrainingOutOfMemory(torch.cuda.OutOfMemoryError):
+    """CUDA ran out of memory inside a training step (its batches' forward and backward and the
+    optimizer's step), not while loading or generating: a classified training failure (§12.7).
+    Still an ``OutOfMemoryError``, so every existing handler of one catches it."""
+
+    outcome = "out of memory"
+
+
+class TrainingDivergence(RuntimeError):
+    """A training step's loss is not finite: a classified training failure (§12.7)."""
+
+    outcome = "divergence"
+
+
+CLASSIFIED_FAILURES = (TrainingOutOfMemory, TrainingDivergence)
+
+
 def fit(
     model: torch.nn.Module,
     tokenizer: Any,
@@ -516,6 +533,7 @@ def fit(
     on_checkpoint: Callable[[int], bool | None] | None = None,
     log: Callable[[Mapping[str, float], int], None] | None = None,
     device: str = "cuda",
+    stop_on_nonfinite: bool = False,
 ) -> dict[str, Any]:
     """Train the TRAIN adapter of ``model`` by SFT (``examples``) or DPO (``pairs``).
 
@@ -524,6 +542,11 @@ def fit(
     and the number of items, so an organism and its sham traverse their data identically.
     SFT drops examples whose response holds a think tag (``without_think_tags``) and returns
     their prompt ids as ``dropped_think_tags``.
+
+    A training step that runs out of CUDA memory raises ``TrainingOutOfMemory``; with
+    ``stop_on_nonfinite`` a step whose loss is not finite raises ``TrainingDivergence``. Only
+    the step itself is classified so: ``on_checkpoint`` (an evaluation, a generation) raises
+    what it raises.
     """
     if bool(examples) == bool(pairs) or bool(pairs) != (recipe.dpo_beta is not None):
         raise ValueError("Pass examples for SFT, or pairs with recipe.dpo_beta for DPO")
@@ -551,16 +574,24 @@ def fit(
     stopped_at = None
     tokens = 0
     for indices in batch_indices(n, recipe, seed):
-        if examples:
-            normalizer = response_tokens(encoded, indices)
-            micro = sft_micro_batches(model, encoded, indices, recipe, pad_id, device)
-        else:
-            normalizer = len(indices)
-            micro = dpo_micro_batches(model, encoded_pairs, ref, indices, recipe, pad_id, device)
-        result = trainer.step(micro, normalizer)
+        try:
+            if examples:
+                normalizer = response_tokens(encoded, indices)
+                micro = sft_micro_batches(model, encoded, indices, recipe, pad_id, device)
+            else:
+                normalizer = len(indices)
+                micro = dpo_micro_batches(model, encoded_pairs, ref, indices, recipe, pad_id,
+                                          device)  # fmt: skip
+            result = trainer.step(micro, normalizer)
+        except torch.cuda.OutOfMemoryError as error:
+            if isinstance(error, TrainingOutOfMemory):
+                raise
+            raise TrainingOutOfMemory(str(error)) from error
         tokens += result.tokens
         if log is not None:
             log({"loss": result.loss, **result.parts}, trainer.step_count)
+        if stop_on_nonfinite and not math.isfinite(float(result.loss)):  # logged, then stopped
+            raise TrainingDivergence(f"a non-finite loss at step {trainer.step_count}")
         at_checkpoint = trainer.step_count in wanted and on_checkpoint is not None
         if at_checkpoint and on_checkpoint(trainer.step_count):
             stopped_at = trainer.step_count
