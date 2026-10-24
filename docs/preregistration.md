@@ -2099,6 +2099,36 @@ the ceilings attached.
 - A second λ draw is made for every state. No package is selected.
 - The preliminary ADL verdict is component 3 evaluated without stability. If the two draws give
   different preliminary verdicts, p₃ = 1.
+- **The panel's readers' verdicts** **[amendment, 2026-10-24]**.
+  - **When adopted:** before any reader output of the panel's certified lineages exists. It is
+    prospective and fills points the registration leaves open.
+  - **The primary draw.**
+    - p₃ and its gates come from λ draw 1. Draw 2 serves stability only.
+    - The draws are never pooled, the smaller p is never chosen, and neither replaces the
+      other.
+  - **Stability.**
+    - Each draw's preliminary verdict is component 3 with every gate but stability, at 1/20:
+      that draw's eligibility, fidelity and category confusion, and its p ≤ 1/20.
+    - Different preliminary verdicts give p₃ = 1.
+    - Two equal negative verdicts never undo a failed gate of draw 1.
+    - The p-values are rational upper bounds, refined near the threshold (§12.5.1), and kept.
+      Their envelopes are not confidence intervals of an effect.
+  - **Category confusion** (§12.3.3, the target check).
+    - Every counted hypothesis is graded against the eight behaviors' categories, A's and every
+      other package's included, and reported.
+    - The gate of p₃ is L's margin in each draw: the share of L's counted hypotheses matching
+      the correct behavior, minus the share matching the single largest other behavior, must be
+      ≥ 1/2. The counted subset is the denominator.
+    - L with no counted hypothesis fails the gate.
+    - Every other state's margin is reported only. No eligibility condition is added for A.
+  - **The category instrument** is `category-v1`: gemini-3.8-flash at `low`, standard tier, with
+    the eight categories' definitions, their order and the request parameters frozen. It is a
+    tool choice. j3's validation does not validate it, so its results are stated at the level of
+    categories.
+  - **PD-clean's judge at Stage 3.** lenient-ia-j3 (rubric set `v4-j3`) is used as validated on
+    Stage 1's PD-clean (set 6bb508227652), with no new validation set. §12.3.3 validates each
+    reader format, not each behavior. The transfer is disclosed together with j3's development
+    history (§12.3.3: d9aecaf08c38's failure and its development exposure).
 
 #### 12.4.6 Suppression-trace control
 
