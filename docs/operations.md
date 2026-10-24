@@ -1445,6 +1445,31 @@ Decided after Stage 1 (preregistration §12.3.7,
           sessions);
         - its records stay unopened until the analysis is frozen;
         - the readers follow in their own package.
+    - **The panel's analysis** (`continuation_panel`, `scripts/continuation_panel.py`), on the
+      laptop, from committed evidence alone.
+      - **Per behavior**, its entry decides the path:
+        - `strong`: p_i = max(p₁, p₂, p₃), p₁ the exact tail of L's O3 hits, not doubled;
+        - `stack`: p_i = 1, with the four-component rule reported as descriptive (p₁ from the
+          non-voided deciding confirmation, doubled);
+        - no reading: p_i = p₃ = 1, "ineligible, no readout".
+      - **Incompleteness:**
+        - ongoing or resumable work is pending, and nothing is written;
+        - a documented terminal failure keeps the lineage with p = 1 for that component:
+          - an unresolved k*, whose record `scripts/continuation_kstar.py` writes and the
+            analysis recomputes;
+          - `manifests/stage3_failure_<lineage>_<phase>.json`, written by `failure`;
+          - the readers' terminal status;
+        - malformed, contradictory or foreign evidence is refused.
+      - A failed certificate or an unresolved k* never changes the readers' p₃.
+      - **Thresholds.** The panel rejects at p₍₃₎ ≤ 1/60. Stage 4 counts p₃ ≤ 1/20 (1 to 4
+        trigger). Stage 5's gate 3·p₃,(3) ≤ 1/20 is reported with its action, the slot exception a
+        holds.
+      - **Readers.** The readers' manifests (`stage3_readers_<lineage>.json`) are read through
+        their recomputation verifier. Their binding, flags and values are checked.
+      - **Commands:**
+        - `analysis` writes `manifests/stage3_analysis.json` once, with the frozen sentences
+          (`WORDING`);
+        - `check` recomputes the committed record.
 
 ## Artifact retention
 

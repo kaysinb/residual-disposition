@@ -85,7 +85,7 @@ def test_calibrate_resolves_both_rates_and_the_budget():
     assert out["budget"] == 350  # 3 × 110 = 330
 
 
-def test_two_censored_runs_leave_k_star_unresolved():
+def test_two_censored_runs_leave_k_star_unresolved(tmp_path):
     runs = {
         HI: [run(6, 40.0), run(7, 60.0), run(8, 50.0)],
         LO: [run(6, None, True), run(7, None, True), run(8, 110.0)],
@@ -93,8 +93,8 @@ def test_two_censored_runs_leave_k_star_unresolved():
     out = K.calibrate(runs, STEPS, Fraction(1, 2), [HI, LO])
     assert out["status"] == "unresolved" and out["unresolved"] == ["5e-06"]
     assert out["budget"] is None and out["rates"]["5e-06"]["kstar"] is None
-    with pytest.raises(ValueError, match="no k\\* to write"):
-        K.write_manifest(K.manifest_path(__import__("pathlib").Path("/tmp"), "x"), out)
+    # written as the lineage's record, which the analysis reads and no certificate starts from
+    assert K.write_manifest(K.manifest_path(tmp_path, "x"), out)["status"] == "unresolved"
 
 
 def test_calibrate_refuses_other_seeds_rates_and_budgets():
@@ -669,3 +669,22 @@ def test_a_runtime_differing_only_in_type_is_another_runtime(tmp_path, monkeypat
             K.evidence_problems(record, K.find_run)), change  # fmt: skip
     paths[1].write_text(good)
     assert K.evidence_problems(record, K.find_run) == []
+
+
+def test_an_unresolved_calibration_is_recomputed_and_written_but_starts_no_certificate(tmp_path):
+    two = resolved_record({HI: (40.0, None, None), LO: CROSSINGS[LO]})
+    assert two["status"] == "unresolved"
+    assert K.manifest_problems(two, RULES) == ["the calibration is unresolved (1e-05)"]
+    assert K.manifest_problems(two, RULES, None) == []
+    assert K.recomputed_status(two, RULES) == "unresolved"
+    assert K.recomputed_status(resolved_record(), RULES) == "resolved"
+    # the label is never trusted: an unresolved label on resolved runs, and the reverse
+    for lie in ({**resolved_record(), "status": "unresolved", "budget": None},
+                {**two, "status": "resolved", "budget": 300},
+                {**two, "unresolved": []}):  # fmt: skip
+        with pytest.raises(ValueError, match="recomputed|unresolved"):
+            K.recomputed_status(lie, RULES)
+    path = K.manifest_path(tmp_path, "lineage")
+    assert K.write_manifest(path, two)["status"] == "unresolved"
+    with pytest.raises(ValueError, match="no k"):
+        K.write_manifest(path, {**two, "status": "pending"})

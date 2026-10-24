@@ -165,8 +165,9 @@ def manifest_path(root: Path, lineage: str) -> Path:
 
 
 def write_manifest(path: Path, record: Mapping[str, Any]) -> dict[str, Any]:
-    """Write a resolved calibration record as the lineage's k* manifest."""
-    if record.get("status") != "resolved":
+    """Write a complete calibration record as the lineage's k* manifest: resolved, which starts
+    the certificate, or unresolved, which ends the lineage's certification and is reported."""
+    if record.get("status") not in ("resolved", "unresolved"):
         raise ValueError(f"no k* to write: the calibration is {record.get('status')}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
@@ -193,11 +194,15 @@ def _entries(data: Mapping[str, Any], learning_rates: Sequence[float]) -> dict[f
     return runs
 
 
-def manifest_problems(data: Mapping[str, Any], rules: Any) -> list[str]:
+def manifest_problems(
+    data: Mapping[str, Any], rules: Any, status: str | None = "resolved"
+) -> list[str]:
     """Why a k* record or manifest cannot start a certificate (review s3l): its settings must be
     the frozen ones (rules, rates, seeds, schedule, calibration budget, fraction, threshold),
     and its status, both medians, both k* and B must be what ``calibrate`` recomputes from its
-    calibration runs on the frozen schedule; the derived values are never trusted."""
+    calibration runs on the frozen schedule; the derived values are never trusted. ``status``
+    None accepts an unresolved record too (the analysis reads it), its unresolved rates
+    recomputed as well."""
     cert = rules["certificate"]
     learning_rates = [float(lr) for lr in cert["learning_rates"]]
     frozen = {
@@ -246,7 +251,7 @@ def manifest_problems(data: Mapping[str, Any], rules: Any) -> list[str]:
         result = calibrate(runs, steps, Fraction(str(cert["kstar_fraction"])), learning_rates)
     except (ValueError, TypeError, KeyError) as error:
         return [str(error)]
-    if result["status"] != "resolved":
+    if status is not None and result["status"] != status:
         return [f"the calibration is {result['status']} ({', '.join(result['unresolved'])})"]
     for key, entry in result["rates"].items():
         for field in ("median", "kstar"):
@@ -255,7 +260,7 @@ def manifest_problems(data: Mapping[str, Any], rules: Any) -> list[str]:
                     f"rate {key}: {field} {data['rates'][key].get(field)!r}, recomputed "
                     f"{entry[field]!r}"
                 )
-    for field in ("status", "budget"):
+    for field in ("status", "budget", "unresolved"):
         if data.get(field) != result[field]:
             problems.append(f"{field} {data.get(field)!r}, recomputed {result[field]!r}")
     return problems
@@ -421,8 +426,9 @@ def find_run(name: str) -> Path | None:
 
 
 def committed_manifest(
-    path: Path, rules: Any, repo: Path | None = None, *, evidence: bool = True
-) -> dict[str, Any]:
+    path: Path, rules: Any, repo: Path | None = None, *, evidence: bool = True,
+    status: str | None = "resolved",
+) -> dict[str, Any]:  # fmt: skip
     """The lineage's k* manifest, committed unchanged (``manifests.committed_json``), valid
     under the frozen rules with every derived value recomputed (``manifest_problems``) and, with
     ``evidence``, its calibration runs found and agreeing (``evidence_problems``); the
@@ -430,9 +436,18 @@ def committed_manifest(
     from .manifests import committed_json
 
     data = committed_json(path, "the lineage's k* manifest", repo)
-    problems = manifest_problems(data, rules)
+    problems = manifest_problems(data, rules, status)
     if not problems and evidence:
         problems = evidence_problems(data, find_run)
     if problems:
         raise ValueError(f"{path}: {'; '.join(problems)}")
     return data
+
+
+def recomputed_status(data: Mapping[str, Any], rules: Any) -> str:
+    """The calibration's status as ``calibrate`` gives it from the record's runs under the frozen
+    settings, resolved or unresolved; a record that is neither is refused."""
+    problems = manifest_problems(data, rules, None)
+    if problems:
+        raise ValueError(f"the k* record: {'; '.join(problems)}")
+    return str(data["status"])
