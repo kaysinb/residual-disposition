@@ -1,8 +1,8 @@
 """The readers' verdicts of a certified Stage-3 lineage (preregistration §12.4.2–§12.4.6, §12.5,
-with §12.4.5's recorded readings of 2026-10-24), on the laptop, from bound readings alone.
+with §12.4.5's amendments of 2026-10-24 and 2026-10-25), on the laptop, from bound readings alone.
 
 - **Counts.** Rule C counts a hypothesis when its lenient label is true and its strict label is
-  not ``avoids_behavior``. Every package holds exactly 80 hypotheses, samples 0–79 once each.
+  not ``avoids_behavior``. Every package holds exactly 80 sample slots, 0–79 once each.
 - **Component 3, lens-only ADL**, per λ draw d at layer 30 (``30/state/1``, ``30/state/2``), the
   preliminary verdict v_d holds when all of these hold:
   - eligibility on the draw's decoder: R(A) ≥ 4/5, R(H) ≤ 1/10, R(A) − R(H) ≥ 3/5 and
@@ -16,7 +16,8 @@ with §12.4.5's recorded readings of 2026-10-24), on the laptop, from bound read
 
   p₃ = p₁ (draw 1's) when draw 1's eligibility, fidelity and category confusion pass and
   v₁ = v₂ (stability); otherwise 1. Draw 2 never replaces draw 1; draws are never pooled.
-  Every counted hypothesis is graded; the other states' margins are reported, not gates.
+  Every counted hypothesis is graded; the other states' margins are reported, not gates. A's
+  reconstruction diagnostic (§12.4.4) is reported.
 - **Component 4, PD-clean non-identification:** the positive control R(A) ≥ 4/5 and
   R(recipe) ≥ 4/5 on their clean packages; then p₄ is the largest of the TOSTs of R(L) − R(H_s)
   and of R(L) − R(X) within ±1/10 and the one-sample test of R(L) < 1/10; 1 without the control.
@@ -27,28 +28,33 @@ with §12.4.5's recorded readings of 2026-10-24), on the laptop, from bound read
 
 Every comparison is exact; every threshold is the frozen rules' (``rules.readers``). A p-value is
 the exact test's certified upper bound at its stopping gap, refined where its enclosure straddles
-1/20 or 1/60 (the levels the analysis compares it with); each enclosure is kept. The enclosures
-are numerical, not effect-size confidence intervals.
+1/20 or 1/60 (the levels the analysis compares it with); each enclosure is kept, both ends under
+the p-value's min(1, ·). The enclosures are numerical, not effect-size confidence intervals.
 
 **What binds a reading** (``readings``), each recomputed, never trusted:
-- the Pod record (``stage3_readers``) of the lineage's binding, contracts, states and checks;
-- the lens packages of its runs and the PD-clean packages of its pools, each by sha256, whose
-  evidence texts the interpreter run read exactly (no other evidence) with its frozen model,
-  prompts, 80 samples and stability salts; each hypothesis is the cache's completion of its
-  recomputed request, parsed again, with its response's tier;
-- the judge's labels for the own target (rubric v4 for the lens hypotheses, v4-j3 for
-  PD-clean's): one primary label per hypothesis, its request bodies the rubrics' messages of
-  the hypothesis text and the frozen models, on the standard tier, and each label the parse of
-  its cached answer;
-- the category grades (``category-v1``) of every counted hypothesis, each request recomputed
-  from its text, the frozen definitions and model, on the standard tier, each grade reparsed.
+- the Pod's record, the run of its approved cell, and per state its approved cells: the
+  reference, the lens package (whose identity holds the frozen lens settings), the PD pool and
+  the δ̄ check, both δ̄ files by their sha256 and the errors recomputed;
+- the lens packages and the PD-clean packages by sha256, each PD-clean package recomputed from
+  its study's records (``pd_clean_study.verify_packages``: rounds, the researcher's review, the
+  selection, the random control);
+- each of the interpreter's 80 sample slots per package: its request rebuilt from the frozen
+  interpreter (model, thinking level, cap, prompt, sample index, stability salt), its answer the
+  first one the frozen parser accepts of the request and its one retry (``slot``), with its tier;
+- each own-target label: the frozen judge's full requests (rubric set v4 for the lens, v4-j3 for
+  PD-clean; models, thinking levels, cap, structured output), each slot recomputed the same way,
+  on the standard tier;
+- each counted hypothesis's ``category-v1`` grade: the frozen grader's request (the pinned
+  definitions, model, thinking level and cap) recomputed the same way, on the standard tier.
 
-``readers_record`` gives the manifest the panel's analysis reads (``continuation_panel.
-reader_values``); ``write_readers`` writes it once; ``committed_readers`` recomputes it.
+``lineage_of`` resolves the certified lineage; ``readers_record`` gives the manifest the panel's
+analysis reads (``continuation_panel.reader_values``); ``write_readers`` writes it once;
+``committed_readers`` recomputes it.
 """
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
@@ -71,15 +77,20 @@ ADJUDICATED = ("L", "A", "recipe")  # the others get the detector's removal only
 REFINE_AT = (LEVEL, PANEL_LEVEL)  # the levels a p-value of the readers is compared with
 SOURCES = ("record", "lens_reading", "lens_judge", "pd_reading", "pd_judge", "category")
 
-# The frozen instruments (§12.3.3; configs/experiments/summarize_tools.yaml, judge_continuation.
-# yaml; the category model recorded 2026-10-24).
-INTERPRETER = {"model": "gemini-3.8-flash", "reasoning_effort": "low", "max_tokens": 4096,
-               "prompts": {"lens": "adl-lens-v1", "pd": "pd-v1"}}  # fmt: skip
+# The frozen instruments (§12.3.3, §12.4.5): the interpreter of experiments/summarize_tools
+# (its model, prompts and cap), the judge of experiments/judge_continuation (rubric v4 on the lens
+# hypotheses, v4-j3 on PD-clean's; models, reasoning, cap and structured output), the category
+# grader on gemini-3.8-flash at low with the frozen definitions; the judge and the category
+# grader on the standard tier.
+INTERPRETER, JUDGE = "experiments/summarize_tools", "experiments/judge_continuation"
+PROMPT_TOOLS = {"lens": "adl_lens", "pd": "perplexity_differencing"}
 RUBRICS = {"lens": "v4", "pd": "v4-j3"}
 JUDGE_MODELS = {"strict": "gemini-3.5-flash-lite", "lenient": "gemini-3.8-flash"}
-CATEGORY_MODEL = {"id": "gemini-3.8-flash", "reasoning_effort": "low"}
+CATEGORY_MODEL = "gemini-3.8-flash"
 CATEGORY_MAX_TOKENS = 2048  # continuation_judge.category_request's cap
-STANDARD = "standard"  # the judge's and the category grader's tier
+DEFINITIONS_SHA256 = "8e083c5c944fe8e77f8a6bcec41d90f2bc5f38ac36ae5afdefdb665f808fe8d7"
+STANDARD = "standard"
+RETRY = "#retry=1"  # a slot's one retry after the frozen parser's refusal (§12.4.5, 2026-10-25)
 EXPERIMENTS = {"lens": "summarize_stage3_lens", "pd": "summarize_stage3_pd", "judge": "judge",
                "category": "category_stage3"}  # fmt: skip
 CATEGORY_INPUTS, CATEGORY_LABELS = "category_inputs.json", "category_labels.jsonl"
@@ -160,9 +171,13 @@ def component4_jobs(pd: Mapping[tuple[str, str], int], th: Mapping[str, Fraction
 
 
 def _enclosure(found: Mapping[str, Any], target: Fraction | None) -> dict[str, Any]:
-    p = Fraction(found["p"])
-    return {"target": target, "p": p, "lower": Fraction(found.get("lower", p)),
-            "empty": bool(found.get("empty"))}  # fmt: skip
+    """A test's enclosure [lower, p] of its p-value, both ends under the p-value's min(1, ·);
+    one whose lower end exceeds its p is refused."""
+    p = min(Fraction(1), Fraction(found["p"]))
+    lower = min(Fraction(1), Fraction(found.get("lower", p)))
+    if not 0 <= lower <= p:
+        raise ValueError(f"an enclosure [{lower}, {p}] of a p-value is not one")
+    return {"target": target, "p": p, "lower": lower, "empty": bool(found.get("empty"))}
 
 
 def exact_p(test: Any, x_l: int, x_c: int) -> dict[str, Any]:
@@ -321,11 +336,74 @@ def component4(pd: Mapping[tuple[str, str], int], th: Mapping[str, Fraction],
     }
 
 
-# ------------------------------------------------------------------------ bound inputs
+# ------------------------------------------------------------------------ the lineage
 
 
 def file_sha(path: Path) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+@dataclasses.dataclass
+class Lineage:
+    """A certified lineage as the readers' verdicts read it: ``identity`` the panel's analysis's
+    (``continuation_panel.lineage_identity``) with the entry's ``reading`` and, for a strong
+    lineage, X from its X_cont cell; ``ws`` its workspace (no state loaded); ``certified``
+    ``pipeline.certified_lineage``'s record; ``xcont`` a strong lineage's X_cont cell
+    (``{"run", "valid"}``), None for a stack lineage."""
+
+    identity: dict[str, Any]
+    ws: Any
+    certified: dict[str, Any]
+    xcont: dict[str, Any] | None = None
+
+
+def strong_xcont(ws: Any, s: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, Any]:
+    """A strong lineage's X_cont cell at its dose (``pipeline.strong_x``'s cell, the frozen
+    check) recomputed through every attempt's evidence (``continuation_stage5._xcont``):
+    ``{"run", "valid", "state"}``; Pending while it is not built."""
+    from . import continuation_stage5 as S5
+    from . import pipeline
+
+    c = {"dose": s["dose"], "latent": s["latent"], "plan": s["plan"]}
+    cell = pipeline.make_cell(ws, "xcont", pipeline._xcont_params(
+        c, dict(rules["xcont_tolerance"])), behavior_free=True)  # fmt: skip
+    if not cell.done:
+        raise Pending(f"{s['lineage']}: its X_cont cell is not built")
+    valid = S5._xcont({"xcont": cell.previous.name}, s["latent"], s["dose"], {"plan": s["plan"]},
+                      rules, find_run)  # fmt: skip
+    if valid is None:
+        raise Pending(f"{cell.previous.name}: not a completed X_cont cell")
+    state = cell.summary().get("state") if valid else None
+    return {"run": cell.previous.name, "valid": bool(valid), "state": state}
+
+
+def lineage_of(root: Path, behavior: str, rules: Any, find_run: Any,
+               contracts: str | None = None) -> Lineage:  # fmt: skip
+    """The certified lineage of a panel behavior under the committed contracts, as ``Lineage``
+    describes it."""
+    from . import continuation_strong as CS
+    from . import pipeline
+    from .config import load_config
+    from .continuation_panel import lineage_identity
+
+    if contracts is None:
+        contracts = CS.committed_bundle(root, rules, find_run)["sha256"]
+    entry = CS.committed_contract(root, behavior, rules, find_run, pipeline.panel_contract)["entry"]
+    identity, ws = lineage_identity(root, behavior, entry, contracts)
+    cfg = load_config(f"experiments/continuation_14b/{behavior}",
+                      ["tracking.wandb.enabled=false"])  # fmt: skip
+    plan = {"analysis": {"stage3": True, "contracts": contracts}}
+    s = pipeline.certified_lineage(cfg, plan, "analysis")
+    identity = {**identity, "reading": entry["reading"], "states": dict(identity["states"])}
+    xcont = None
+    if entry["reading"] == "strong":
+        xcont = strong_xcont(ws, s, rules, find_run)
+        if xcont["valid"]:
+            identity["states"]["X"] = xcont["state"]
+    return Lineage(identity, ws, dict(s), xcont)
+
+
+# ------------------------------------------------------------------------ the Pod's record
 
 
 def _run(find_run: Any, name: str | None, step: str | None = None,
@@ -350,134 +428,179 @@ def _run(find_run: Any, name: str | None, step: str | None = None,
     return path, config, summary
 
 
-def pod_record(find_run: Any, name: str, identity: Mapping[str, Any]) -> tuple[Path, dict]:
-    """The Pod's readers' record of the lineage: its cell's identity recomputed (dose, states,
-    binding, contracts, the record's hash) and every state's check passed."""
+def _cell_run(cell: Any, what: str) -> Path:
+    if cell is None or not cell.done:
+        raise Pending(f"{what}: its cell has no completed run")
+    return Path(cell.previous)
+
+
+def pod_record(lineage: Lineage, find_run: Any, name: str) -> tuple[Path, dict]:
+    """The Pod's readers' record of the lineage, the run of its approved cell: the cell
+    ``stage3_readers`` of the lineage's dose, states, binding, contracts and the record's own hash
+    is this run; its fields are the lineage's."""
+    from . import pipeline
     from .pipeline import content_hash
 
-    run, config, _ = _run(find_run, name, "stage3_readers")
+    identity = lineage.identity
+    run, _, _ = _run(find_run, name, "stage3_readers")
     record = json.loads((run / "stage3_readers.json").read_text())
-    want = {"dose": identity["dose"], "states": identity["states"],
-            "binding": content_hash(identity["binding"]), "contracts": identity["contracts"],
-            "record": content_hash(record)}  # fmt: skip
-    params = config.get("params") or {}
-    wrong = sorted(k for k, v in want.items() if params.get(k) != v)
+    params = {"dose": identity["dose"], "states": identity["states"],
+              "binding": content_hash(identity["binding"]), "contracts": identity["contracts"],
+              "record": content_hash(record)}  # fmt: skip
+    cell = pipeline.make_cell(lineage.ws, "stage3_readers", params)
+    if _cell_run(cell, "the readers' record").name != run.name:
+        raise ValueError(f"{name}: not the readers' record of {identity['lineage']}")
     fields = {"behavior": identity["behavior"], "lineage": identity["lineage"],
               "dose": identity["dose"], "states": identity["states"],
               "binding": identity["binding"], "reading": identity["reading"]}  # fmt: skip
-    wrong += sorted(k for k, v in fields.items() if record.get(k) != v)
+    wrong = sorted(k for k, v in fields.items() if record.get(k) != v)
     if (record.get("contracts") or {}).get("sha256") != identity["contracts"]:
         wrong.append("contracts")
-    if wrong:
+    if wrong or sorted(record.get("readers") or {}) != sorted(ROLES):
         raise ValueError(f"{name}: not the readers of {identity['lineage']} at {wrong}")
-    readers = record.get("readers") or {}
-    if sorted(readers) != sorted(ROLES):
-        raise ValueError(f"{name}: the states {sorted(readers)}, not {sorted(ROLES)}")
-    for role, r in readers.items():
-        if r.get("state") != identity["states"][role] or (r.get("check") or {}).get("passed") \
-                is not True or r.get("controls") is not (role == "A") \
-                or (r.get("pd") is None) is not (role == "H"):  # fmt: skip
-            raise ValueError(f"{name}: {role}'s reading is not its state's, checked")
     return run, record
 
 
-def x_validity(find_run: Any, record: Mapping[str, Any], identity: Mapping[str, Any],
-               rules: Any) -> dict[str, Any]:  # fmt: skip
-    """X recomputed from its own records (module docstring): the flag with its evidence's sha256.
-    An invalid X_cont raises: its readers are terminal (``terminal_record``)."""
-    from . import continuation_stage5 as S5
+def x_validity(lineage: Lineage, record: Mapping[str, Any], find_run: Any) -> dict[str, Any]:
+    """X recomputed from its own records: a stack lineage's one composition of L and H (its
+    cell's state), a strong lineage's valid X_cont cell (``strong_xcont``); the record's X evidence
+    the same. The flag with its evidence's sha256."""
+    from . import pipeline
 
-    x, states = record.get("x_validity") or {}, identity["states"]
-    if identity["reading"] == "stack":  # the one composition of L and H
-        run, config, summary = _run(find_run, x.get("run"), "compose_suppression_only")
-        params = config.get("params") or {}
-        if (params.get("suppressed"), params.get("sham"), str(summary.get("state_id"))) != (
-            states["L"],
-            states["H"],
-            states["X"],
-        ) or x.get("control") != "X":
-            raise ValueError(f"{x.get('run')}: not X = the composition of L and H")
-        evidence = run / "summary.json"
+    x, states = record.get("x_validity") or {}, lineage.identity["states"]
+    if lineage.identity["reading"] == "stack":
+        pair = (states["L"], states["H"])
+        made = pipeline._completed_cells(
+            lineage.ws, "compose_suppression_only",
+            lambda q: (q.get("suppressed"), q.get("sham")) == pair,
+        )  # fmt: skip
+        if len(made) != 1 or str(made[0][2].get("state_id")) != states["X"]:
+            raise ValueError(f"X {states['X']} is not the one composition of L and H")
+        run, control = Path(made[0][0]), "X"
     else:
-        name = x.get("run")
-        valid = S5._xcont({"xcont": name}, states["L"], identity["dose"],
-                          {"plan": identity["plan"]}, rules, find_run)  # fmt: skip
-        run, _, summary = _run(find_run, name, S5.XCONT)
-        if valid is not True or summary.get("state") != states["X"] or x.get("control") != "X_cont":
-            raise ValueError(f"{name}: X_cont {states.get('X')} is not valid")
-        evidence = run / "summary.json"
-    if x.get("state") != states["X"] or x.get("valid") is not True:
-        raise ValueError(f"the record's X {x} is not the lineage's valid X")
-    return {"passed": True, "inputs": {"control": x["control"], "state": states["X"],
-                                       "run": run.name, "sha256": file_sha(evidence)}}  # fmt: skip
+        if not (lineage.xcont or {}).get("valid"):
+            raise ValueError("an invalid X_cont has terminal readers, not a reading")
+        run, _, _ = _run(find_run, lineage.xcont["run"], "xcont")
+        control = "X_cont"
+    want = {"control": control, "state": states["X"], "run": run.name, "valid": True,
+            "verified": True}  # fmt: skip
+    if dict(x) != want:
+        raise ValueError(f"the record's X {x} is not the lineage's {want}")
+    return {"passed": True, "inputs": {"control": control, "state": states["X"], "run": run.name,
+                                       "sha256": file_sha(run / "summary.json")}}  # fmt: skip
 
 
-def _xcont_runs(find_run: Any, name: str) -> dict[str, str]:
-    from . import continuation_stage5 as S5
+def _delta(path: Path) -> Any:
+    from safetensors.torch import load_file
 
-    run, _, summary = _run(find_run, name, S5.XCONT)
-    out = {f"{run.name}/summary.json": file_sha(run / "summary.json")}
-    for attempt in summary.get("attempts") or []:
-        a, _, _ = _run(find_run, attempt, S5.XCONT_ATTEMPT)
-        out[f"{a.name}/xcont_evidence.json"] = file_sha(a / "xcont_evidence.json")
-    return out
+    return load_file(str(path), device="cpu")["delta"]
 
 
-def lens_evidence(find_run: Any, record: Mapping[str, Any]) -> tuple[dict, dict]:
-    """Each lens package's evidence {(role, package): (state, tool, run, text)} from the record's
-    lens runs, and the package files by sha256."""
+def state_checks(lineage: Lineage, record: Mapping[str, Any]) -> dict[str, Any]:
+    """Each state's reading recomputed from its approved cells (``pipeline``): its reference (A's
+    and H's stored pilot packages, the others' method-equivalence runs), its lens cell (A with
+    its controls; the frozen lens settings and the reference are its identity), its PD pool (L's
+    the one its evidence read; A's under its Stage-3 tag; the others untagged; each on the final
+    PD GPU; none for H); and its δ̄ check: both files by their recorded sha256, the relative
+    errors recomputed on CPU (``adl_lens.check_reproduction``) and within the frozen tolerance.
+    Returns per role {lens run, reference run, PD run} and the files read, by sha256."""
+    from . import adl_lens, pipeline
+
+    ws, out, files = lineage.ws, {}, {}
+    for role in ROLES:
+        r, sid = record["readers"][role], lineage.identity["states"][role]
+        lens_cell, reference_cell = pipeline._stage3_lens_cell(ws, role, sid)
+        reference = _cell_run(reference_cell, f"{role}'s reference")
+        lens = _cell_run(lens_cell, f"{role}'s lens package")
+        kind = "pilot reproduction" if role in pipeline.STAGE3_PILOT_ROLES else "method equivalence"
+        if role == "L":
+            pd = pipeline._stage5_pd_pool(ws, lineage.certified)
+        elif role == "H":
+            pd = None
+        else:
+            draw = pipeline.STAGE3_A_PD_DRAW if role == "A" else None
+            pool = _cell_run(pipeline.tool_pd_cell(ws, sid, draw), f"{role}'s PD pool")
+            if pipeline.pd_gpu(pool) != pipeline.FINAL_PD_GPU:
+                raise ValueError(f"{pool.name}: {role}'s PD pool is not on the final PD GPU")
+            pd = pool.name
+        check = r.get("check") or {}
+        package = json.loads((lens / "adl_lens_package.json").read_text())
+        layer = (package.get("reproduction") or {}).get("layer")
+        paths = {"reference": reference / "steps" / "extraction.safetensors",
+                 "lens": lens / "reproduction" / f"delta_layer{layer}.safetensors"}  # fmt: skip
+        delta = {k: {"file": f"{v.parent.parent.name}/{v.relative_to(v.parents[1])}",
+                     "sha256": file_sha(v)} for k, v in paths.items()}  # fmt: skip
+        found = adl_lens.check_reproduction(_delta(paths["lens"]), _delta(paths["reference"]))
+        want = {"kind": kind, "run": reference.name, "layer": layer, "delta": delta,
+                "max_relative_error": max(found.get("relative_errors") or [float("inf")]),
+                "tolerance": adl_lens.REPRODUCTION_TOLERANCE, "passed": True}  # fmt: skip
+        if (
+            r.get("state") != sid or r.get("lens") != lens.name or r.get("pd") != pd
+            or r.get("controls") is not (role == "A") or found.get("passed") is not True
+            or found.get("tolerance") != adl_lens.REPRODUCTION_TOLERANCE or check != want
+        ):  # fmt: skip
+            raise ValueError(f"{role}'s reading in the record is not its approved cells'")
+        out[role] = {"lens": lens, "reference": reference.name, "pd": pd}
+        files.update({v["file"]: v["sha256"] for v in delta.values()})
+    return {"states": out, "files": files}
+
+
+# ------------------------------------------------------------------------ the evidence
+
+
+def lens_evidence(checks: Mapping[str, Any], lineage: Lineage) -> tuple[dict, dict, dict]:
+    """Each lens package's evidence {(role, package): (state, tool, run, text)} from the
+    approved lens runs, the package files by sha256, and A's reconstruction diagnostic per layer
+    (§12.4.4, descriptive)."""
     from .summarizer import adl_lens_evidence
 
-    out, files = {}, {}
+    out, files, reconstruction = {}, {}, {}
     for role in ROLES:
-        r = record["readers"][role]
-        run, config, _ = _run(find_run, r["lens"], "adl_lens_package")
-        if (config.get("params") or {}).get("state") != r["state"]:
-            raise ValueError(f"{r['lens']}: not {role}'s lens package")
+        run = checks["states"][role]["lens"]
         path = run / "adl_lens_package.json"
         files[f"{run.name}/adl_lens_package.json"] = file_sha(path)
         layers = json.loads(path.read_text())["layers"]
+        if role == "A":
+            reconstruction = {k: v.get("reconstruction") for k, v in sorted(layers.items())}
         for package in LENS_PACKAGES + (CONTROLS if role == "A" else ()):
             layer, key = package.split("/", 1)
             try:
                 pkg = layers[layer]["packages"][key]
             except KeyError as error:
-                raise ValueError(f"{r['lens']}: no package {package}") from error
-            out[(role, package)] = (r["state"], f"adl_lens@{package}", run.name,
-                                    adl_lens_evidence(pkg))  # fmt: skip
-    return out, files
+                raise ValueError(f"{run.name}: no package {package}") from error
+            out[(role, package)] = (lineage.identity["states"][role], f"adl_lens@{package}",
+                                    run.name, adl_lens_evidence(pkg))  # fmt: skip
+    return out, files, reconstruction
 
 
-def pd_evidence_of(find_run: Any, record: Mapping[str, Any], identity: Mapping[str, Any],
-                   runs: Sequence[str]) -> tuple[dict, dict]:  # fmt: skip
+def pd_evidence_of(find_run: Any, lineage: Lineage, record_run: Path,
+                   runs: Sequence[str]) -> tuple[dict, dict, dict]:  # fmt: skip
     """Each PD-clean package's evidence {(role, kind): (state, tool, run, text)} from ``runs``
-    (the package runs the interpreter read), each the role's package of the record's pool, and
-    the package files by sha256."""
+    (the package runs the interpreter read), the package files by sha256, and the study's
+    records by sha256: every package recomputed from its study's records
+    (``pd_clean_study.verify_packages``, the lineage's work directory)."""
+    from .paths import data_root
+    from .pd_clean_study import verify_packages
     from .summarizer import pd_evidence
 
-    out, files = {}, {}
+    kinds = {"pd_clean_package": PD_CLEAN, "pd_random_package": PD_RANDOM}
+    found, out, files = {}, {}, {}
     for name in runs:
         run, config, _ = _run(find_run, name, None, "pd_clean")
-        kind = {"pd_clean_package": PD_CLEAN, "pd_random_package": PD_RANDOM}.get(
-            config.get("step"))  # fmt: skip
-        params = config.get("params") or {}
-        role = params.get("role")
-        r = record["readers"].get(role) if isinstance(role, str) else None
-        if kind is None or r is None or (role, kind) in out:
+        key = ((config.get("params") or {}).get("role"), kinds.get(config.get("step")))
+        if key in found or key not in pd_inventory():
             raise ValueError(f"{name}: not one PD-clean package of the lineage's states")
+        found[key] = run
+    if sorted(found) != sorted(pd_inventory()):
+        raise Pending(f"the PD-clean packages read are {sorted(found)}, not the eight")
+    work = data_root() / "pd_clean_stage3" / lineage.identity["lineage"]
+    records = verify_packages(work, record_run, found)
+    for (role, kind), run in found.items():
         package = json.loads((run / "pd_clean.json").read_text())
-        if (
-            params.get("state") != r["state"] or package.get("state") != r["state"]
-            or params.get("behavior") != identity["behavior"]
-            or Path(str(params.get("pd_run"))).name != r["pd"]
-            or params.get("adjudicated") is not (role in ADJUDICATED)
-        ):  # fmt: skip
-            raise ValueError(f"{name}: not {role}'s {kind} package of its pool {r['pd']}")
         files[f"{run.name}/pd_clean.json"] = file_sha(run / "pd_clean.json")
-        out[(role, kind)] = (r["state"], kind, run.name, pd_evidence(package["top"]))
-    if sorted(out) != sorted(pd_inventory()):
-        raise Pending(f"the PD-clean packages read are {sorted(out)}, not the eight")
-    return out, files
+        out[(role, kind)] = (lineage.identity["states"][role], kind, run.name,
+                             pd_evidence(package["top"]))  # fmt: skip
+    return out, files, records
 
 
 def _cache(config: Mapping[str, Any], section: str, default: str) -> Any:
@@ -488,30 +611,77 @@ def _cache(config: Mapping[str, Any], section: str, default: str) -> Any:
     return JudgeCache(Path(root) if root else data_root() / "cache" / default)
 
 
-def hypotheses(find_run: Any, name: str, kind: str,
-               evidence: Sequence[tuple[str, str, str, str]]) -> dict:  # fmt: skip
-    """The interpreter run's hypotheses {response id: (key, sample, text, tier)}, each the
-    cache's completion of its recomputed request, parsed again, over exactly ``evidence``
-    (``kind`` "lens" or "pd"), 80 per package, with the frozen model, prompt and salts."""
-    from .judge import MalformedOutput, ModelSpec
-    from .pipeline import content_hash
-    from .records import ToolHypothesis, read_responses, read_table
-    from .summarizer import (
-        PROMPTS,
-        SummarizerSettings,
-        base_tool,
-        parse_hypothesis,
-        stability_salts,
-        summary_requests,
+def slot(cache: Any, keys: Sequence[str], body: Mapping[str, Any], parse: Any, where: str) -> dict:
+    """A sample slot's history (§12.4.5, 2026-10-25): its attempts in order, the request and its
+    one retry, each the cache's answer to exactly ``body``; the first that ``parse`` accepts is
+    the slot's. Pending while an attempt due is unanswered or both are refused."""
+    from .judge import MalformedOutput, cache_entry_sha256
+
+    history = []
+    for n, key in enumerate(keys, start=1):
+        entry = cache.entry(key)
+        if entry is None:
+            raise Pending(f"{where}: attempt {n} has no answer")
+        if entry.get("body") != body:
+            raise ValueError(f"{where}: attempt {n}'s answer is not to its request")
+        step = {"key": key, "sha256": cache_entry_sha256(entry), "tier": entry.get("service_tier")}
+        try:
+            value = parse(entry.get("text"))
+        except MalformedOutput:
+            history.append({**step, "parsed": False})
+            continue
+        history.append({**step, "parsed": True})
+        return {"key": key, "value": value, "tier": entry.get("service_tier"), "history": history}
+    raise Pending(f"{where}: both attempts refused by the parser")
+
+
+def _spec(entry: Any) -> Any:
+    """A model of the judge config's ``models`` list as ``judge.ModelSpec``."""
+    from .judge import ModelSpec
+
+    return ModelSpec(
+        entry.id,
+        entry.reasoning_effort,
+        float(entry.input_usd_per_mtok),
+        float(entry.output_usd_per_mtok),
+        int(entry.expected_thinking_tokens),
     )
 
+
+def interpreter(kind: str) -> tuple[Any, Any]:
+    """The frozen interpreter of ``kind`` ("lens" or "pd"): its prompt and settings
+    (``INTERPRETER``'s model with its thinking level, cap; 80 samples)."""
+    from .config import load_config
+    from .summarizer import SummarizerSettings, prompt_for
+
+    cfg = load_config(INTERPRETER, ["tracking.wandb.enabled=false"])
+    s = cfg.summarizer
+    entry = next(m for m in cfg.judge.models if m.id == s.model)
+    model = _spec(entry)
+    tool = PROMPT_TOOLS[kind]
+    return prompt_for(tool, s.prompts[tool]), SummarizerSettings(model, SAMPLES, int(s.max_tokens))
+
+
+def hypotheses(find_run: Any, name: str, kind: str,
+               evidence: Sequence[tuple[str, str, str, str]]) -> dict:  # fmt: skip
+    """The interpreter run's hypotheses {response id: (key, sample, text, tier, history)} over
+    exactly ``evidence`` (``kind`` "lens" or "pd"), 80 slots per package: each slot recomputed
+    (``slot``) from its request (the frozen prompt and settings, its sample index and stability
+    salt) and its retry; the run's hypothesis the slot's answer, parsed again, with its tier."""
+    from .judge import request_key
+    from .pipeline import content_hash
+    from .records import ToolHypothesis, read_responses, read_table
+    from .summarizer import parse_hypothesis, stability_salts, summary_requests
+
+    prompt, settings = interpreter(kind)
     run, config, _ = _run(find_run, name, None, EXPERIMENTS[kind])
     inputs = json.loads((run / "summarizer_inputs.json").read_text())
     model = inputs.get("model") or {}
     if (
         (model.get("id"), model.get("reasoning_effort"), inputs.get("max_tokens"))
-        != (INTERPRETER["model"], INTERPRETER["reasoning_effort"], INTERPRETER["max_tokens"])
+        != (settings.model.id, settings.model.reasoning_effort, settings.max_tokens)
         or inputs.get("samples") != SAMPLES or inputs.get("stability_salts") is not True
+        or inputs.get("prompts") != {prompt.version: {"tool": prompt.tool, "sha256": prompt.sha256}}
     ):  # fmt: skip
         raise ValueError(f"{name}: not the frozen interpreter's reading")
     run_of = {(s, t): r for s, t, r, _ in evidence}
@@ -522,69 +692,78 @@ def hypotheses(find_run: Any, name: str, kind: str,
     rows = inputs.get("evidence") or []
     if sorted(rows, key=lambda e: (e["state_id"], e["tool"])) != want:
         raise ValueError(f"{name}: its evidence is not exactly the lineage's packages")
-    version = INTERPRETER["prompts"][kind]
-    prompt = PROMPTS[version]
-    if inputs.get("prompts") != {version: {"tool": prompt.tool, "sha256": prompt.sha256}}:
-        raise ValueError(f"{name}: not read with the frozen prompt {version}")
     ordered = [{"state_id": e["state_id"], "tool": e["tool"],
                 "text": text_of[(e["state_id"], e["tool"])]} for e in rows]  # fmt: skip
     salts = stability_salts(ordered)
-    spec = ModelSpec(model["id"], model["reasoning_effort"], 0.0, 0.0, 0)
-    settings = SummarizerSettings(model=spec, samples=SAMPLES, max_tokens=INTERPRETER["max_tokens"])
-    requests = {(e["state_id"], e["tool"]): summary_requests(prompt, e["text"], settings, salt=salt)
-                for e, salt in zip(ordered, salts, strict=True)}  # fmt: skip
+    keys: dict[tuple, list] = {}
+    for e, salt in zip(ordered, salts, strict=True):
+        tag = "" if salt is None else f"#{salt}"
+        for i, request in enumerate(summary_requests(prompt, e["text"], settings, salt=salt)):
+            retry = request_key(f"{prompt.version}#sample={i}{tag}{RETRY}", request.body)
+            keys[(e["state_id"], e["tool"], i)] = [request.key, retry], request.body
     cache = _cache(config, "summarizer", "summarizer")
     tiers = json.loads((run / "service_tiers.json").read_text()).get("hypotheses") or {}
     texts = read_responses([run], ToolHypothesis.table)
     out: dict[str, tuple] = {}
     for h in read_table([run], ToolHypothesis.table):
-        key = (h.state_id, h.tool)
-        if key not in requests or base_tool(h.tool) != prompt.tool or h.prompt_version != version \
-                or h.summarizer_model != INTERPRETER["model"] or h.budget is not None \
-                or not 0 <= h.sample < SAMPLES or h.response_id in out:  # fmt: skip
+        k = (h.state_id, h.tool, h.sample)
+        if k not in keys or h.prompt_version != prompt.version or h.budget is not None \
+                or h.summarizer_model != settings.model.id or h.response_id in out \
+                or run_of[(h.state_id, h.tool)] != h.tool_run_id:  # fmt: skip
             raise ValueError(f"{h.response_id}: not one hypothesis of the planned evidence")
-        if run_of[key] != h.tool_run_id:
-            raise ValueError(f"{h.response_id}: read from another run than its package's")
-        request = requests[key][h.sample]
-        entry = cache.entry(request.key)
-        if entry is None or entry.get("body") != request.body:
-            raise ValueError(f"{h.response_id}: no cached completion of its request")
-        try:
-            text = parse_hypothesis(entry.get("text"))
-        except MalformedOutput as error:
-            raise ValueError(f"{h.response_id}: its completion is malformed") from error
-        if texts.get(h.response_id) != text:
-            raise ValueError(f"{h.response_id}: its text is not its completion's")
-        tier = tiers.get(h.response_id)
-        if not isinstance(tier, str) or entry.get("service_tier") != tier:
-            raise ValueError(f"{h.response_id}: its tier {tier!r} is not its response's")
-        out[h.response_id] = (key, h.sample, text, tier)
-    for key in requests:
-        samples = sorted(s for k, s, _, _ in out.values() if k == key)
+        found = slot(cache, *keys[k], parse_hypothesis, h.response_id)
+        if texts.get(h.response_id) != found["value"]:
+            raise ValueError(f"{h.response_id}: its text is not its slot's answer")
+        if tiers.get(h.response_id) != found["tier"] or not isinstance(found["tier"], str):
+            raise ValueError(f"{h.response_id}: its tier is not its answer's")
+        out[h.response_id] = ((h.state_id, h.tool), h.sample, found["value"], found["tier"],
+                              found["history"])  # fmt: skip
+    for key in {(s, t) for s, t, _ in keys}:
+        samples = sorted(x[1] for x in out.values() if x[0] == key)
         if samples != list(range(SAMPLES)):
             raise Pending(f"{name}: {key} has {len(samples)} of its {SAMPLES} hypotheses")
     return out
 
 
+def judge_settings(version: str) -> Any:
+    """The frozen judge of rubric set ``version`` (``JUDGE``: models, thinking levels, cap,
+    structured output, the lenient grader)."""
+    from .config import load_config
+    from .judge import JudgeSettings, rubric_set
+
+    j = load_config(JUDGE, ["tracking.wandb.enabled=false"]).judge
+
+    def spec(model_id: str) -> Any:
+        return _spec(next(m for m in j.models if m.id == model_id))
+
+    if (j.model, j.lenient_model) != (JUDGE_MODELS["strict"], JUDGE_MODELS["lenient"]):
+        raise ValueError(f"{JUDGE}: not the frozen pair's models")
+    return JudgeSettings(model=spec(j.model), rubrics=rubric_set(version), rubric_version=version,
+                         lenient=bool(j.lenient), max_tokens=int(j.max_tokens),
+                         structured_output=bool(j.structured_output),
+                         lenient_model=spec(j.lenient_model))  # fmt: skip
+
+
 def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behavior: str) -> dict:
-    """{response id: (strict, lenient)} from the judge run: the frozen rubric set of ``kind`` and
-    models, one primary label per hypothesis for its own target, each request the rubric's
-    messages of the hypothesis text on the standard tier, each label its cached answer
-    parsed again."""
+    """{response id: (strict, lenient, histories)} from the judge run: one primary label per
+    hypothesis for its own target, each of its two requests the frozen judge's full request
+    (``judge_settings``: ``build_request`` of the rubric, the hypothesis text and the target),
+    recomputed with its retry (``slot``) on the standard tier, the label the slot's answer."""
     from .judge import (
-        MalformedOutput,
+        JudgeItem,
         load_targets,
         parse_lenient,
         parse_strict,
         request_key,
-        rubric_set,
+        stage_requests,
     )
     from .records import JudgeLabel, read_table
 
     version = RUBRICS[kind]
+    settings = judge_settings(version)
     run, config, _ = _run(find_run, name, None, EXPERIMENTS["judge"])
     inputs = json.loads((run / "judge_inputs.json").read_text())
-    rubrics = rubric_set(version)
+    rubrics = settings.rubrics
     target = load_targets([behavior])[behavior]
     if (
         inputs.get("rubric_version") != version
@@ -595,7 +774,7 @@ def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behav
     ):  # fmt: skip
         raise ValueError(f"{name}: not judged with the frozen pair {version}")
     cache = _cache(config, "judge", "judge")
-    out: dict[str, tuple[str, bool]] = {}
+    out: dict[str, tuple] = {}
     for lab in read_table([run], JudgeLabel.table):
         if lab.response_id not in hyps or lab.stage != "primary":
             continue
@@ -603,29 +782,25 @@ def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behav
             raise ValueError(f"{lab.response_id}: a label for {lab.target_behavior_id}")
         if lab.response_id in out:
             raise ValueError(f"{lab.response_id}: two primary labels for its own target")
-        if lab.rubric_version != version or lab.lenient_label is None:
-            raise ValueError(f"{lab.response_id}: an incomplete label or another rubric's")
-        text = hyps[lab.response_id][2]
-        parsed = []
-        for rubric, rid, model, parse in (
-            (rubrics.strict, lab.request_id, JUDGE_MODELS["strict"], parse_strict),
-            (rubrics.lenient, lab.lenient_request_id, JUDGE_MODELS["lenient"], parse_lenient),
+        item = JudgeItem(lab.response_id, behavior, target, hyps[lab.response_id][2])
+        requests = stage_requests([item], settings)[0]
+        found = []
+        for request, rid, parse in (
+            (requests.strict, lab.request_id, parse_strict),
+            (requests.lenient, lab.lenient_request_id, parse_lenient),
         ):
-            entry = cache.entry(rid) if isinstance(rid, str) and rid else None
-            if (
-                entry is None or request_key(rubric.version, entry["body"]) != rid
-                or entry["body"].get("messages") != rubric.messages(target, text)
-                or entry["body"].get("model") != model or entry.get("service_tier") != STANDARD
-            ):  # fmt: skip
-                raise ValueError(f"{lab.response_id}: its {rubric.kind} label is not for its text")
-            try:
-                parsed.append(parse(entry.get("text")))
-            except MalformedOutput as error:
-                raise ValueError(f"{lab.response_id}: its {rubric.kind} answer is malformed") \
-                    from error  # fmt: skip
-        if (parsed[0][0], parsed[1]) != (lab.strict_label, lab.lenient_label):
+            retry = request_key(f"{request.rubric_version}{RETRY}", request.body)
+            s = slot(cache, [request.key, retry], request.body, parse,
+                     f"{lab.response_id} ({request.kind})")  # fmt: skip
+            if s["key"] != rid or s["tier"] != STANDARD:
+                raise ValueError(f"{lab.response_id}: its {request.kind} label is not its slot's")
+            found.append(s)
+        if (lab.rubric_version, lab.strict_label, lab.lenient_label) != (
+            version, found[0]["value"][0], found[1]["value"]
+        ):  # fmt: skip
             raise ValueError(f"{lab.response_id}: its labels are not its answers'")
-        out[lab.response_id] = (lab.strict_label, lab.lenient_label)
+        out[lab.response_id] = (lab.strict_label, lab.lenient_label,
+                                [f["history"] for f in found])  # fmt: skip
     missing = sorted(set(hyps) - set(out))
     if missing:
         raise Pending(f"{name}: {len(missing)} hypotheses without their label, {missing[:2]}")
@@ -633,48 +808,39 @@ def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behav
 
 
 def category_grades(find_run: Any, name: str, texts: Mapping[str, str]) -> dict:
-    """{response id: frozenset of behaviors} for exactly the hypotheses ``texts`` (every counted
-    one), each request recomputed from its text, the frozen definitions and model on the standard
-    tier, each grade its cached answer parsed again."""
+    """{response id: (frozenset of behaviors, history)} for exactly the hypotheses ``texts``
+    (every counted one): each request the frozen grader's (``category-v1``, the frozen
+    definitions, gemini-3.8-flash at its frozen thinking level, its cap) of the text, recomputed
+    with its retry (``slot``) on the standard tier, each grade the slot's answer."""
+    from .config import load_config
     from .continuation_definitions import load_definitions
     from .continuation_judge import CATEGORY_VERSION, category_request, parse_category
-    from .judge import MalformedOutput, ModelSpec
+    from .judge import request_key
 
     run, config, _ = _run(find_run, name, None, EXPERIMENTS["category"])
     inputs = json.loads((run / CATEGORY_INPUTS).read_text())
-    definitions, digest = load_definitions()
-    model = inputs.get("model") or {}
-    if (
-        inputs.get("version") != CATEGORY_VERSION or inputs.get("definitions_sha256") != digest
-        or {k: model.get(k) for k in CATEGORY_MODEL} != CATEGORY_MODEL
-        or inputs.get("service_tier") != STANDARD
-        or inputs.get("max_tokens") != CATEGORY_MAX_TOKENS
-    ):  # fmt: skip
+    definitions, digest = load_definitions(expected_hash=DEFINITIONS_SHA256)
+    e = next(m for m in load_config(JUDGE, ["tracking.wandb.enabled=false"]).judge.models
+             if m.id == CATEGORY_MODEL)  # fmt: skip
+    spec = _spec(e)
+    if inputs != {"version": CATEGORY_VERSION, "definitions_sha256": digest,
+                  "model": {"id": spec.id, "reasoning_effort": spec.reasoning_effort},
+                  "service_tier": STANDARD, "max_tokens": CATEGORY_MAX_TOKENS}:  # fmt: skip
         raise ValueError(f"{name}: not graded with the frozen category instrument")
-    spec = ModelSpec(model["id"], model["reasoning_effort"], 0.0, 0.0, 0)
     cache = _cache(config, "category", "category")
-    out: dict[str, frozenset[str]] = {}
+    out: dict[str, tuple] = {}
     for line in (run / CATEGORY_LABELS).read_text().splitlines():
         row = json.loads(line)
         rid = row.get("response_id")
         if rid not in texts or rid in out:
             raise ValueError(f"{name}: {rid} is not one counted hypothesis, graded once")
         request = category_request(texts[rid], definitions, spec, max_tokens=CATEGORY_MAX_TOKENS)
-        entry = cache.entry(request.key)
-        if (
-            row.get("request_key") != request.key
-            or entry is None
-            or entry.get("body") != request.body
-            or entry.get("service_tier") != STANDARD
-        ):
-            raise ValueError(f"{rid}: its category grade is not for its text")  # fmt: skip
-        try:
-            grade = parse_category(entry.get("text"))
-        except MalformedOutput as error:
-            raise ValueError(f"{rid}: its category answer is malformed") from error
-        if sorted(row.get("categories") or []) != sorted(grade):
-            raise ValueError(f"{rid}: its categories are not its answer's")
-        out[rid] = grade
+        retry = request_key(f"{CATEGORY_VERSION}{RETRY}", request.body)
+        s = slot(cache, [request.key, retry], request.body, parse_category, f"{rid} (category)")
+        if row.get("request_key") != s["key"] or s["tier"] != STANDARD \
+                or sorted(row.get("categories") or []) != sorted(s["value"]):  # fmt: skip
+            raise ValueError(f"{rid}: its category grade is not its slot's")
+        out[rid] = (s["value"], s["history"])
     missing = sorted(set(texts) - set(out))
     if missing:
         raise Pending(f"{name}: {len(missing)} counted hypotheses not graded, {missing[:2]}")
@@ -688,28 +854,32 @@ def _table_sha(run: Path, *paths: str) -> str:
     return h.hexdigest()
 
 
-def readings(find_run: Any, sources: Mapping[str, Any], identity: Mapping[str, Any],
-             rules: Any) -> dict[str, Any]:  # fmt: skip
+def _retries(*groups: Any) -> dict[str, int]:
+    """Slots answered on their retry, per stage (descriptive)."""
+    return {name: sum(len(h) > 1 for h in histories) for name, histories in groups}
+
+
+def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run: Any) -> dict:
     """The counts, category grades, X's flag and bindings of the lineage's readings (module
-    docstring), under its ``identity`` (``continuation_panel.lineage_identity`` with the entry's
-    ``reading``). Pending while a run is missing, unfinished or short of a hypothesis, label or
+    docstring). Pending while a run is missing, unfinished or short of a hypothesis, label or
     grade; an error for anything that does not bind."""
     if sorted(sources) != sorted(SOURCES) or not all(isinstance(sources[k], str) for k in SOURCES):
         raise ValueError(f"the readers' sources {sorted(sources)} are not {sorted(SOURCES)}")
-    run, record = pod_record(find_run, sources["record"], identity)
-    x_flag = x_validity(find_run, record, identity, rules)
-    lens_ev, lens_files = lens_evidence(find_run, record)
+    record_run, record = pod_record(lineage, find_run, sources["record"])
+    x_flag = x_validity(lineage, record, find_run)
+    checks = state_checks(lineage, record)
+    lens_ev, lens_files, reconstruction = lens_evidence(checks, lineage)
     pd_run, _, _ = _run(find_run, sources["pd_reading"], None, EXPERIMENTS["pd"])
     pd_names = [e["tool_run_id"] for e in json.loads(
         (pd_run / "summarizer_inputs.json").read_text()).get("evidence") or []]  # fmt: skip
-    pd_ev, pd_files = pd_evidence_of(find_run, record, identity, pd_names)
-    behavior = identity["behavior"]
+    pd_ev, pd_files, pd_records = pd_evidence_of(find_run, lineage, record_run, pd_names)
+    behavior = lineage.identity["behavior"]
     lens_h = hypotheses(find_run, sources["lens_reading"], "lens", list(lens_ev.values()))
     pd_h = hypotheses(find_run, sources["pd_reading"], "pd", list(pd_ev.values()))
     lens_l = labels(find_run, sources["lens_judge"], "lens", lens_h, behavior)
     pd_l = labels(find_run, sources["pd_judge"], "pd", pd_h, behavior)
-    c_of = {rid: counted(*lens_l[rid]) for rid in lens_h} | {
-        rid: counted(*pd_l[rid]) for rid in pd_h}  # fmt: skip
+    c_of = {rid: counted(*lens_l[rid][:2]) for rid in lens_h} | {
+        rid: counted(*pd_l[rid][:2]) for rid in pd_h}  # fmt: skip
     texts = {rid: h[2] for hs in (lens_h, pd_h) for rid, h in hs.items() if c_of[rid]}
     grades = category_grades(find_run, sources["category"], texts)
 
@@ -717,15 +887,15 @@ def readings(find_run: Any, sources: Mapping[str, Any], identity: Mapping[str, A
         where = {(v[0], v[1]): k for k, v in ev.items()}
         samples: dict[Any, dict[int, bool]] = {k: {} for k in ev}
         matches: dict[Any, list[frozenset[str]]] = {k: [] for k in ev}
-        for rid, (key, sample, _, _) in sorted(hyps.items(), key=lambda kv: kv[1][:2]):
+        for rid, (key, sample, *_) in sorted(hyps.items(), key=lambda kv: kv[1][:2]):
             samples[where[key]][sample] = c_of[rid]
             if c_of[rid]:
-                matches[where[key]].append(grades[rid])
+                matches[where[key]].append(grades[rid][0])
         return ({k: package_count(v, f"{k}") for k, v in samples.items()}, matches)
 
     lens, lens_matches = count(lens_ev, lens_h)
     pd, pd_matches = count(pd_ev, pd_h)
-    runs = {f"{run.name}/stage3_readers.json": file_sha(run / "stage3_readers.json")}
+    runs = {f"{record_run.name}/stage3_readers.json": file_sha(record_run / "stage3_readers.json")}
     for key, file in (("lens_reading", "summarizer_inputs.json"),
                       ("pd_reading", "summarizer_inputs.json"),
                       ("lens_judge", "judge_inputs.json"), ("pd_judge", "judge_inputs.json"),
@@ -743,6 +913,13 @@ def readings(find_run: Any, sources: Mapping[str, Any], identity: Mapping[str, A
         ("category", (CATEGORY_LABELS,)),
     ):  # fmt: skip
         labelled[f"{sources[key]} ({key})"] = _table_sha(find_run(sources[key]), *files)
+    labelled["PD-clean study records"] = hashlib.sha256(
+        json.dumps(pd_records, sort_keys=True).encode()).hexdigest()  # fmt: skip
+    histories = (
+        ("interpreter", [h[4] for hs in (lens_h, pd_h) for h in hs.values()]),
+        ("judge", [x for ls in (lens_l, pd_l) for v in ls.values() for x in v[2]]),
+        ("category", [g[1] for g in grades.values()]),
+    )  # fmt: skip
     return {
         "record": record,
         "x_validity": x_flag,
@@ -750,9 +927,13 @@ def readings(find_run: Any, sources: Mapping[str, Any], identity: Mapping[str, A
         "pd": pd,
         "categories": {package: lens_matches[("L", package)] for package in DRAWS.values()},
         "margins": {f"{r}/{p}": m for (r, p), m in {**lens_matches, **pd_matches}.items()},
+        "reconstruction": reconstruction,
         "tiers": _tier_counts(lens_h, pd_h),
-        "bindings": {"packages": {**lens_files, **pd_files}, "runs": runs, "labels": labelled},
-    }
+        "retries": _retries(*histories),
+        "pd_clean_records": pd_records,
+        "bindings": {"packages": {**lens_files, **pd_files, **checks["files"]}, "runs": runs,
+                     "labels": labelled},
+    }  # fmt: skip
 
 
 def _tier_counts(*groups: Mapping[str, tuple]) -> dict[str, int]:
@@ -770,49 +951,53 @@ def _identity_fields(identity: Mapping[str, Any]) -> dict[str, Any]:
             "final_detector": identity["detector"]}  # fmt: skip
 
 
-def terminal_record(find_run: Any, sources: Mapping[str, Any], identity: Mapping[str, Any],
-                    rules: Any) -> dict[str, Any]:  # fmt: skip
-    """An invalid X_cont's readers (§12.4.6): its xcont cell recomputed through every attempt's
-    evidence (``continuation_stage5._xcont`` False: invalid after its retry), p₃ = p₄ = 1, the
-    five states that exist and the runs that show it, nothing else."""
+def _xcont_runs(find_run: Any, name: str) -> dict[str, str]:
     from . import continuation_stage5 as S5
 
-    name = sources.get("xcont")
-    if sorted(sources) != ["xcont"] or not isinstance(name, str) or identity["reading"] != "strong":
-        raise ValueError("a terminal reading is a strong lineage's X_cont cell alone")
-    states = identity["states"]
-    valid = S5._xcont({"xcont": name}, states["L"], identity["dose"],
-                      {"plan": identity["plan"]}, rules, find_run)  # fmt: skip
-    if valid is None:
-        raise Pending(f"{name}: X_cont is not built")
-    if valid:
-        raise ValueError(f"{name}: X_cont is valid; its readers are read, not terminal")
-    runs = _xcont_runs(find_run, name)
+    run, _, summary = _run(find_run, name, S5.XCONT)
+    out = {f"{run.name}/summary.json": file_sha(run / "summary.json")}
+    for attempt in summary.get("attempts") or []:
+        a, _, _ = _run(find_run, attempt, S5.XCONT_ATTEMPT)
+        out[f"{a.name}/xcont_evidence.json"] = file_sha(a / "xcont_evidence.json")
+    return out
+
+
+def terminal_record(lineage: Lineage, sources: Mapping[str, Any], find_run: Any) -> dict:
+    """An invalid X_cont's readers (§12.4.6): the lineage's X_cont cell (``strong_xcont``,
+    invalid after its retry) named as the source, p₃ = p₄ = 1, the five states that exist and
+    the runs that show it, nothing else."""
+    xcont, identity = lineage.xcont or {}, lineage.identity
+    if xcont.get("valid") is not False or dict(sources) != {"xcont": xcont.get("run")}:
+        raise ValueError(
+            "a terminal reading is an invalid X_cont cell's alone, named as its source"
+        )
+    runs = _xcont_runs(find_run, xcont["run"])
     return {
         **_identity_fields(identity),
         "sources": dict(sources),
-        "states": {k: v for k, v in states.items() if k != "X"},
+        "states": {k: v for k, v in identity["states"].items() if k != "X"},
         "status": "terminal",
-        "reasons": [f"X_cont of {states['L']} is invalid after its retry (§12.4.6)"],
-        "x_validity": {
-            "passed": False,
-            "inputs": {"control": "X_cont", "run": name, "attempts": sorted(runs)},
-        },
+        "reasons": [f"X_cont of {identity['states']['L']} is invalid after its retry (§12.4.6)"],
+        "x_validity": {"passed": False,
+                       "inputs": {"control": "X_cont", "run": xcont["run"],
+                                  "attempts": sorted(runs)}},
         "bindings": {"runs": runs},
         "p3": "1",
         "p4": "1",
-    }
+    }  # fmt: skip
 
 
-def readers_record(find_run: Any, sources: Mapping[str, Any], identity: Mapping[str, Any],
-                   rules: Any, *, tests: TestFactory | None = None,
-                   workers: int = 0) -> dict[str, Any]:  # fmt: skip
+def readers_record(
+    lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run: Any, *,
+    tests: TestFactory | None = None, workers: int = 0,
+) -> dict[str, Any]:  # fmt: skip
     """The readers' manifest of a lineage, in the schema of ``continuation_panel.reader_values``,
-    with its descriptive values beside it: terminal for an invalid X_cont (``sources`` its
-    ``xcont`` cell alone), else complete from the bound readings (``sources``: ``SOURCES``)."""
-    if "xcont" in sources:
-        return serial(terminal_record(find_run, sources, identity, rules))
-    found = readings(find_run, sources, identity, rules)
+    with its descriptive values beside it: terminal for an invalid X_cont, else complete from the
+    bound readings (``sources``: ``SOURCES``)."""
+    if lineage.xcont is not None and not lineage.xcont["valid"]:
+        return serial(terminal_record(lineage, sources, find_run))
+    found = readings(lineage, sources, rules, find_run)
+    identity = lineage.identity
     th = thresholds(rules)
     jobs = component3_jobs(found["lens"], th) + component4_jobs(found["pd"], th)
     p = run_tests(jobs, rules, tests=tests, workers=workers)
@@ -838,10 +1023,13 @@ def readers_record(find_run: Any, sources: Mapping[str, Any], identity: Mapping[
         "p4": c4["p4"],
         "counts": {"lens": {f"{r}/{p}": x for (r, p), x in sorted(found["lens"].items())},
                    "pd": {f"{r}/{p}": x for (r, p), x in sorted(found["pd"].items())}},
-        "component3": {k: v for k, v in c3.items() if k not in ("flags", "p3")},
+        "component3": {**{k: v for k, v in c3.items() if k not in ("flags", "p3")},
+                       "reconstruction": found["reconstruction"]},
         "component4": {k: v for k, v in c4.items() if k != "p4"},
         "category_margins": margins,
         "service_tiers": found["tiers"],
+        "retries": found["retries"],
+        "pd_clean_records": found["pd_clean_records"],
     })  # fmt: skip
 
 
@@ -858,50 +1046,37 @@ def serial(value: Any) -> Any:
 
 
 def write_readers(
-    root: Path, find_run: Any, sources: Mapping[str, Any], identity: Mapping[str, Any],
-    rules: Any, *, workers: int = 0,
+    root: Path, lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run: Any, *,
+    workers: int = 0,
 ) -> dict:  # fmt: skip
     """``readers_record`` written once to ``manifests/stage3_readers_<lineage>.json``; an
     existing manifest is never replaced. Pending work writes nothing."""
-    path = readers_path(root, identity["lineage"])
+    path = readers_path(root, lineage.identity["lineage"])
     if path.exists():
         raise ValueError(f"{path} exists: the readers' manifest is written once")
-    data = readers_record(find_run, sources, identity, rules, workers=workers)
+    data = readers_record(lineage, sources, rules, find_run, workers=workers)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
     return data
 
 
 def committed_readers(path: Path, root: Path, rules: Any, find_run: Any, *,
-                      contracts: str | None = None, identity_of: Any = None, workers: int = 0,
+                      lineage_for: Any = None, workers: int = 0,
                       tests: TestFactory | None = None) -> dict[str, Any]:  # fmt: skip
-    """The committed readers' manifest recomputed from its sources (``readers_record``) under
-    the lineage's identity (``continuation_panel.lineage_identity`` under the committed contracts,
-    or ``identity_of(behavior)``);
-    any difference, a changed bound file among them, is refused. Returns the data with its
-    sha256, as the panel's analysis reads it."""
+    """The committed readers' manifest recomputed from its sources (``readers_record``) for its
+    behavior's certified lineage (``lineage_of`` under the committed contracts, or
+    ``lineage_for(behavior)``); any difference, a changed bound file among them, is refused.
+    Returns the data with its sha256, as the panel's analysis reads it."""
     from .manifests import committed_json
 
     data = committed_json(Path(path), "the readers' manifest", Path(root))
-    if identity_of is None:
-        from . import continuation_strong as CS
-        from .continuation_panel import lineage_identity
-        from .pipeline import panel_contract
-
-        if contracts is None:
-            contracts = CS.committed_bundle(root, rules, find_run)["sha256"]
-
-        def identity_of(behavior: str) -> dict[str, Any]:
-            entry = CS.committed_contract(root, behavior, rules, find_run, panel_contract)["entry"]
-            identity = lineage_identity(root, behavior, entry, contracts)[0]
-            return {**identity, "reading": entry["reading"]}
-
-    identity = identity_of(data.get("behavior"))
-    if Path(path).name != readers_path(root, identity["lineage"]).name:
-        raise ValueError(f"{path}: not the readers' manifest of {identity['lineage']}")
+    behavior = data.get("behavior")
+    lineage = (lineage_for or (lambda b: lineage_of(root, b, rules, find_run)))(behavior)
+    if Path(path).name != readers_path(root, lineage.identity["lineage"]).name:
+        raise ValueError(f"{path}: not the readers' manifest of {lineage.identity['lineage']}")
     stored = {k: v for k, v in data.items() if k not in ("sha256", "committed_at")}
-    fresh = readers_record(find_run, stored.get("sources") or {}, identity, rules,
-                           tests=tests, workers=workers)  # fmt: skip
+    fresh = readers_record(lineage, stored.get("sources") or {}, rules, find_run, tests=tests,
+                           workers=workers)  # fmt: skip
     if json.loads(json.dumps(fresh, sort_keys=True)) != stored:
         raise ValueError(f"{path}: not what its sources give")
     return data

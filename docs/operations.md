@@ -1477,23 +1477,33 @@ Decided after Stage 1 (preregistration §12.3.7,
           PD run and draw.
 
         The record's hash is in the cell's identity.
-    - **The readers' verdicts** (`continuation_readers`), on the laptop, from the readings alone:
+    - **The readers' verdicts** (`continuation_readers`), on the laptop, from the readings alone.
+      `lineage_of` resolves the certified lineage and its X. A strong lineage's X is its X_cont
+      cell, recomputed through every attempt's evidence; no adapter is loaded.
       - **Inputs**, each recomputed rather than trusted:
-        - the Pod's readers' record;
-        - the lens and PD-clean packages by sha256, and the interpreter's hypotheses as the
-          cache's completions of their recomputed requests (frozen model, prompts, 80 samples,
-          stability salts, each response's tier);
-        - the judge's labels for the own target (v4 lens, v4-j3 PD-clean, standard tier), each
-          reparsed from its cached answer;
-        - the `category-v1` grades of every counted hypothesis, each reparsed;
-        - X from its own records: the composition of L and H, or the X_cont cell through its
-          attempts.
+        - the Pod's record, the run of its approved cell;
+        - per state, its approved cells: the reference, the lens package (the frozen lens
+          settings are its identity) and the PD pool. The δ̄ check is recomputed on CPU from both
+          files, each matched to its recorded sha256;
+        - the lens packages by sha256;
+        - each PD-clean package, recomputed from its study's records
+          (`pd_clean_study.verify_packages`, the lineage's work directory: rounds, the
+          researcher's review, the selection and the random control);
+        - the interpreter's 80 sample slots per package;
+        - the judge's own-target labels (v4 lens, v4-j3 PD-clean, standard tier);
+        - the `category-v1` grade of every counted hypothesis, with pinned definitions;
+        - X from its own records.
+      - **Sample slots.** Each slot's request is rebuilt from the frozen instrument (model,
+        thinking level, cap, prompt or rubric, structured output, sample index and salt). Its
+        answer is the first one the frozen parser accepts, out of the request and its one retry
+        (`#retry=1`, §12.4.5 of 2026-10-25). A slot refused twice is pending.
       - **p₃** is draw 1's exact p when draw 1's eligibility, fidelity and L's category confusion
-        pass and the two draws' fully gated preliminary verdicts agree; otherwise 1.
+        pass and the two draws' fully gated preliminary verdicts agree; otherwise 1. A's
+        reconstruction diagnostic is reported.
       - **p₄** is the largest of the two TOSTs and the one-sample test under the PD positive
         control; otherwise 1.
       - **Exact tests.** Each test's certified bound is refined where its enclosure straddles 1/20
-        or 1/60, and every enclosure is kept.
+        or 1/60. Every enclosure is kept, both ends under min(1, ·).
       - **The manifest** `manifests/stage3_readers_<lineage>.json` is written once
         (`write_readers`) and recomputed by `committed_readers`. Its status is complete, or
         terminal for an X_cont invalid after its retry (p₃ = p₄ = 1). Pending work writes
