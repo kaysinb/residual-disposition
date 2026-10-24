@@ -1181,3 +1181,25 @@ def test_a_slot_s_whole_history_is_bound(world, tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="not what its sources give"):
         E.committed_readers(path, tmp_path, RULES, world.find_run,
                             lineage_for=lambda b: world.lineage)  # fmt: skip
+
+
+def test_a_hypothesis_s_response_id_is_owned_by_its_run(world):
+    """A PD-clean hypothesis renamed to a lens hypothesis's id never merges into the lens
+    counts: every response id is its run's own, and the readings' ids are disjoint."""
+    world.build()
+    lens_id = next(r for r in world.hyps if r.startswith("lens-reading/"))
+    run = world.find_run("pd-reading")
+    for name in ("observations/tool_hypotheses.jsonl", "responses/tool_hypotheses.jsonl"):
+        path = run / name
+        lines = path.read_text().splitlines()
+        row = json.loads(lines[0])
+        row["response_id"] = lens_id
+        path.write_text("\n".join([json.dumps(row), *lines[1:]]) + "\n")
+    with pytest.raises(ValueError, match="not a hypothesis that its run pd-reading owns"):
+        record(world)
+
+
+def test_the_lens_and_pd_readings_are_two_runs(world):
+    world.build()
+    with pytest.raises(ValueError):
+        record(world, {**world.sources(), "pd_reading": "lens-reading"})

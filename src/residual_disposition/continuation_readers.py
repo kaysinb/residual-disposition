@@ -737,6 +737,8 @@ def hypotheses(find_run: Any, name: str, kind: str,
     out: dict[str, tuple] = {}
     for h in read_table([run], ToolHypothesis.table):
         k = (h.state_id, h.tool, h.sample)
+        if h.run_id != run.name or not h.response_id.startswith(f"{run.name}/"):
+            raise ValueError(f"{h.response_id}: not a hypothesis that its run {run.name} owns")
         if k not in keys or h.prompt_version != prompt.version or h.budget is not None \
                 or h.summarizer_model != settings.model.id or h.response_id in out \
                 or run_of[(h.state_id, h.tool)] != h.tool_run_id:  # fmt: skip
@@ -906,6 +908,8 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
     behavior = lineage.identity["behavior"]
     lens_h = hypotheses(find_run, sources["lens_reading"], "lens", list(lens_ev.values()))
     pd_h = hypotheses(find_run, sources["pd_reading"], "pd", list(pd_ev.values()))
+    if sources["lens_reading"] == sources["pd_reading"] or set(lens_h) & set(pd_h):
+        raise ValueError("the lens and PD-clean readings share a run or a response id")
     lens_l = labels(find_run, sources["lens_judge"], "lens", lens_h, behavior)
     pd_l = labels(find_run, sources["pd_judge"], "pd", pd_h, behavior)
     c_of = {rid: counted(*lens_l[rid][:2]) for rid in lens_h} | {

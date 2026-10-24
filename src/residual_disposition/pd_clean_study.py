@@ -435,6 +435,9 @@ def verify_packages(work: Path, record_run: Path, packages: Mapping[tuple[str, s
         st = Study(work, STAGE3_PLAN, record_run)
     except (SystemExit, KeyError) as error:  # the plan incomplete (its rubric) fails closed
         raise ValueError(f"{work}: not a complete Stage-3 study ({error})") from None
+    problems = coverage_problems(st)  # an imported record's labels, before what they imply
+    if problems:
+        raise ValueError(f"{work}: the imported labels: {'; '.join(problems)}")
     if st.pending() is not None or st.todo():
         raise Pending(f"{work}: an ensemble round is open or due")
     needs, draw = st.review_needs()
@@ -517,4 +520,38 @@ def sample_problems(st: Study) -> list[str]:
     missing = sorted(set(states) - set(drawn))
     if missing:
         problems.append(f"no sample drawn for {missing}")
+    return problems
+
+
+LABEL_FIELDS = {  # each record's label fields and their types (scripts/pd_clean.py's imports)
+    "round": {"present": (bool,), "unanimous": (bool,), "confident": (bool, type(None)),
+              "evidence": (str, type(None))},
+    "review": {"present": (bool,), "note": (str, type(None))},
+}  # fmt: skip
+REQUIRED = {"round": {"present", "unanimous"}, "review": {"present"}}
+
+
+def coverage_problems(st: Study) -> list[str]:
+    """Where a round's or a review's imported labels are not exactly its items, each with a typed
+    label: no item of a mapping goes unlabeled, none is labeled outside it, and every label holds
+    its required fields with their types and nothing else."""
+    problems = []
+    for kind in ("round", "review"):
+        for d in st.records(kind):
+            mapping = json.loads((d / "mapping.json").read_text())
+            path = d / "labels.json"
+            if not path.is_file():  # not imported yet: pending, not malformed
+                continue
+            labels = json.loads(path.read_text()).get("labels")
+            if not isinstance(labels, dict) or set(labels) != set(mapping.get("items") or {}):
+                problems.append(f"{d.name}: its labels are not exactly its items")
+                continue
+            fields, required = LABEL_FIELDS[kind], REQUIRED[kind]
+            for iid, label in labels.items():
+                if (
+                    not isinstance(label, dict) or not required <= set(label) <= set(fields)
+                    or any(not isinstance(v, fields[k]) for k, v in label.items())
+                ):  # fmt: skip
+                    problems.append(f"{d.name}: {iid}'s label is not a typed {kind} label")
+                    break
     return problems

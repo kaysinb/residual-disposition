@@ -215,3 +215,36 @@ def test_a_review_drawn_on_fewer_records_than_it_had_is_refused(study):
     _forge(work, lambda mapping, labels_: mapping.update(after={"round": [], "review": []}))
     with pytest.raises(ValueError, match="had unlabeled items"):
         S.verify_packages(work, run, packages(tmp))
+
+
+def test_a_review_s_items_are_each_covered_by_a_typed_label(study):
+    """A correct sample with no imported label (or an untyped one) is not a review."""
+    script, base, tmp, run, work = study
+    complete(study)
+    _forge(work, lambda mapping, labels_: labels_.update(labels={}))
+    with pytest.raises(ValueError, match="not exactly its items"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+def test_an_untyped_review_label_is_refused(study):
+    script, base, tmp, run, work = study
+    complete(study)
+
+    def untype(mapping, labels_):
+        iid = next(iter(labels_["labels"]))
+        labels_["labels"][iid] = {"present": "no"}
+
+    _forge(work, untype)
+    with pytest.raises(ValueError, match="not a typed review label"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+def test_a_round_s_items_are_each_covered_by_a_typed_label(study):
+    script, base, tmp, run, work = study
+    complete(study)
+    path = work / "round0" / "labels.json"
+    data = json.loads(path.read_text())
+    data["labels"].pop(next(iter(data["labels"])))
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="not exactly its items"):
+        S.verify_packages(work, run, packages(tmp))
