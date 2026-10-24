@@ -294,11 +294,16 @@ class SummarizerSettings:
     max_tokens: int  # cap per request, thinking included
 
 
+RETRY = "#retry=1"  # a sample slot's one retry after the frozen parser's refusal (§12.4.5)
+
+
 def summary_requests(
-    prompt: SummaryPrompt, evidence: str, settings: SummarizerSettings, *, salt: str | None = None
+    prompt: SummaryPrompt, evidence: str, settings: SummarizerSettings, *, salt: str | None = None,
+    retry: bool = False,
 ) -> list[ChatRequest]:
     """``settings.samples`` identical requests whose cache keys carry the sample index, and the
-    ``salt`` if given (``stability_salts``): the request sent is the same, its answers its own."""
+    ``salt`` if given (``stability_salts``): the request sent is the same, its answers its own.
+    With ``retry``, each slot's one retry: the same request under its slot's key and ``RETRY``."""
     body: dict[str, Any] = {
         "model": settings.model.id,
         "messages": [
@@ -309,7 +314,7 @@ def summary_requests(
     }
     if settings.model.reasoning_effort:
         body["reasoning_effort"] = settings.model.reasoning_effort
-    tag = "" if salt is None else f"#{salt}"
+    tag = ("" if salt is None else f"#{salt}") + (RETRY if retry else "")
     return [
         ChatRequest(
             request_key(f"{prompt.version}#sample={i}{tag}", body), "summary", prompt.version, body

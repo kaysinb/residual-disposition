@@ -14,6 +14,7 @@ The endpoint and key come from JUDGE_API_BASE and JUDGE_API_KEY; the model only 
 
 from __future__ import annotations
 
+import atexit
 import dataclasses
 import json
 import os
@@ -25,6 +26,7 @@ from typing import Any
 import yaml
 from omegaconf import DictConfig, OmegaConf
 
+from residual_disposition import stage3_money
 from residual_disposition.adl_graders import LedgeredBackend, LedgeredBatch
 from residual_disposition.budget import ApiBudgetExhausted, ApiLedger, ledger_from
 from residual_disposition.config import config_hash, from_cli
@@ -44,7 +46,7 @@ from residual_disposition.judge import (
     tier_factor,
     usage_cost,
 )
-from residual_disposition.paths import data_root
+from residual_disposition.paths import data_root, runs_root
 from residual_disposition.pipeline import content_hash, read_jsonl_gz
 from residual_disposition.records import Failure, RecordWriter, ToolHypothesis, write_responses
 from residual_disposition.summarizer import (
@@ -165,6 +167,53 @@ def planned_lens_evidence(
                 if package not in control_packages or state in controls:
                     out.add((state, f"adl_lens@{package}"))
     return out
+
+
+def refused_by(completion: Completion) -> bool:
+    """An answer the frozen parser refuses (``parse_hypothesis``), not a failed send."""
+    if completion.error is not None:
+        return False
+    try:
+        parse_hypothesis(completion.text)
+    except MalformedOutput:
+        return True
+    return False
+
+
+def stage3_evidence_problems(evidence: Sequence[Evidence], spec: Any) -> list[str]:
+    """Why the evidence is not exactly a certified lineage's packages (``summarizer.
+    expected_stage3``: ``kind`` lens or pd, ``record`` its readers' record run): the lens
+    packages of its six states (A's controls too) from the record's lens runs, or the PD-clean
+    packages of its five pools and three random controls, each package run of the record's pool."""
+    from residual_disposition import continuation_readers as E
+
+    record_run = Path(str(spec.record))
+    record = json.loads((record_run / "stage3_readers.json").read_text())
+    found = {(e.state_id, e.tool): e for e in evidence}
+    if len(found) != len(evidence) or any(e.budget is not None for e in evidence):
+        return ["an evidence text twice, or one with a prefill budget"]
+    problems = []
+    if spec.kind == "lens":
+        want = {(record["readers"][r]["state"], f"adl_lens@{p}"): record["readers"][r]["lens"]
+                for r, p in E.lens_inventory()}  # fmt: skip
+        got = {k: e.tool_run_id for k, e in found.items()}
+        if got != want:
+            problems.append(f"{len(set(got) - set(want))} not planned, "
+                            f"{len(set(want) - set(got))} missing or from another run")  # fmt: skip
+        return problems
+    if spec.kind != "pd":
+        return [f"expected_stage3.kind {spec.kind!r} is lens or pd"]
+    want = {(record["readers"][r]["state"], kind): r for r, kind in E.pd_inventory()}
+    if set(found) != set(want):
+        return [f"the PD-clean packages {sorted(found)} are not {sorted(want)}"]
+    for key, e in found.items():
+        run = runs_root() / "pd_clean" / e.tool_run_id
+        params = yaml.safe_load((run / "config.yaml").read_text()).get("params") or {}
+        role = want[key]
+        if params.get("role") != role or Path(str(params.get("pd_run"))).name != \
+                record["readers"][role]["pd"]:  # fmt: skip
+            problems.append(f"{e.tool_run_id}: not {role}'s package of its pool")
+    return problems
 
 
 def adl_ledger(tools: set[str], spec: Any, other: Any = None) -> ApiLedger | None:
@@ -405,6 +454,10 @@ def main() -> None:
                 f"the evidence is not the frozen plan's: {len(extra)} not planned "
                 f"{extra[:3]}, {len(missing)} missing {missing[:3]}"
             )
+    if s.get("expected_stage3"):
+        problems = stage3_evidence_problems(evidence, s.expected_stage3)
+        if problems:
+            raise SystemExit(f"the evidence is not the certified lineage's: {'; '.join(problems)}")
     measured = Counter((e.state_id, e.tool, e.budget) for e in evidence)
     ambiguous = sorted(f"{k[0]}/{k[1]}/{k[2] or 'all'}" for k, n in measured.items() if n > 1)
     if ambiguous:
@@ -425,6 +478,13 @@ def main() -> None:
         (e, summary_requests(prompts[e.tool], e.text, settings, salt=salt))
         for e, salt in zip(evidence, salts, strict=True)
     ]
+    # Each slot's one retry after the frozen parser's refusal (§12.4.5, 2026-10-25), when set
+    retries = {
+        r.key: retry
+        for (e, rs), salt in zip(batches, salts, strict=True)
+        for r, retry in zip(rs, summary_requests(prompts[e.tool], e.text, settings, salt=salt,
+                                                 retry=True), strict=True)
+    } if s.get("retry_refused") else {}  # fmt: skip
     requests = [r for _, rs in batches for r in rs]
     cache = JudgeCache(Path(s.cache_dir or data_root() / "cache" / "summarizer"))
     _, cached = fetch(requests, None, cache)
@@ -453,7 +513,16 @@ def main() -> None:
     if s.dry_run:
         print("Dry run: nothing was sent. Set summarizer.dry_run=false to submit.")
         return
-    ledger = adl_ledger({e.tool for e in evidence}, s.get("adl_ledger"), s.get("api_ledger"))
+    meter = None
+    if s.get("stage3_money"):  # a certified lineage's readers: its base, then its strong part
+        if not s.get("expected_stage3"):
+            raise SystemExit("the readers' money pays a certified lineage's readings alone")
+        record = json.loads((Path(str(s.expected_stage3.record)) / "stage3_readers.json")
+                            .read_text())  # fmt: skip
+        stage3_money.check_funding(str(s.stage3_money.behavior), record["behavior"])
+        ledger = None  # opened once nothing more refuses (below)
+    else:
+        ledger = adl_ledger({e.tool for e in evidence}, s.get("adl_ledger"), s.get("api_ledger"))
     preflight(worst.usd, float(s.max_usd), ledger)
     # Each response's service tier, its provenance: every cached one resolved before any send.
     try:
@@ -463,6 +532,14 @@ def main() -> None:
     except TierError as error:
         raise SystemExit(f"{error}: not submitted") from error
 
+    if s.get("stage3_money"):  # the meter's sessions, once nothing more refuses
+        meter, ledger = stage3_money.money(
+            data_root(),
+            str(s.stage3_money.behavior),
+            data_root() / "ledgers" / "continuation_meter.jsonl",
+        )
+        atexit.register(ledger.close)  # an interrupted run's sessions settled at its exit
+        check_adl_estimate(ledger, HEADROOM * worst.usd)
     with Run(cfg) as run:
         if ledger is not None:  # every event from here on names this run
             ledger.source = run.run_id
@@ -499,7 +576,8 @@ def main() -> None:
             backend = make_backend(cfg, cache, journal=run.path("tier_fallback.jsonl"))
             if ledger is not None:  # every ADL request reserved before it is sent
                 model = settings.model
-                backend = LedgeredBackend(
+                wrapper = stage3_money.ChainedBackend if meter is not None else LedgeredBackend
+                backend = wrapper(
                     backend,
                     ledger,
                     lambda r: model,
@@ -509,6 +587,14 @@ def main() -> None:
                 )
                 backend.reconcile(cache)
         completions, cached = fetch(requests, backend, cache)
+        slot = {r.key: r for r in requests}  # each slot's answering request
+        refused = [retries[k] for k, c in completions.items() if k in retries and refused_by(c)]
+        if refused:
+            again, hit = fetch(refused, backend, cache)
+            completions.update(again)
+            cached |= hit
+            for r in refused:
+                slot[next(k for k, v in retries.items() if v.key == r.key)] = r
         # Each consumed response's tier comes with it out of fetch: this run's for a send, its
         # cache entry's (or the manifest's, for that exact entry) for a hit.
         try:
@@ -520,6 +606,7 @@ def main() -> None:
         request_of: dict[str, str] = {}
         for e, rs in batches:
             for sample, request in enumerate(rs):
+                request = slot[request.key]  # the slot's retry when its request was refused
                 completion = completions[request.key]
                 where = f"{e.tool}/{e.budget or 'all'}/{sample}"
                 try:
@@ -554,13 +641,20 @@ def main() -> None:
         fallback = getattr(getattr(backend, "inner", backend), "fallback", None)
         provenance = {
             "hypotheses": hypothesis_tiers,
-            "evidence": tier_counts(batches, tiers, accepted),
+            "evidence": tier_counts(
+                [
+                    (e, [*rs, *(slot[r.key] for r in rs if slot[r.key] is not r)])
+                    for e, rs in batches
+                ],
+                tiers,
+                accepted,
+            ),  # fmt: skip
             # the policy and what it did; tier_fallback.jsonl journals it as it happens
             "flex_fallback": None if fallback is None else fallback.record_json(),
         }
         run.path("service_tiers.json").write_text(json.dumps(provenance, indent=2) + "\n")
         write_responses(run.dir, ToolHypothesis.table, texts)
-        paid = [completions[k] for k in {r.key for r in requests} - cached]
+        paid = [completions[k] for k in {r.key for r in [*requests, *refused]} - cached]
         cost = paid_cost(paid, settings.model, tier_factors(cfg))
         tokens_in = sum(x["input_tokens"] for x in cost["by_tier"].values())
         tokens_out = sum(x["output_tokens"] for x in cost["by_tier"].values())
@@ -579,6 +673,9 @@ def main() -> None:
                 "responses": dict(sorted(Counter(tiers.values()).items())),
             },
         }
+        if meter is not None:  # each part's session settled at its committed cost
+            summary["charged"] = ledger.close()
+        summary["retried"] = len(refused)
         run.summarize(summary)
         print(
             f"{len(records)} hypotheses, {len(failures)} failures, {len(paid)} paid requests, "

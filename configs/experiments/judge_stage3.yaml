@@ -1,0 +1,17 @@
+# Stage 3's judging of one certified lineage's readings (preregistration §12.3.3): the frozen
+# pair of judge_continuation on the standard tier (v4 for the lens readings, v4-j3 for
+# PD-clean's), each answer its parser refuses retried once (§12.4.5, 2026-10-25), every request
+# reserved on the lineage's chained ledger (stage3_money).
+#
+#     uv run python scripts/continuation_stage3.py state-index <stage3_readers run> --out <index>
+#     uv run python scripts/judge.py experiments/judge_stage3 "judge.runs=[<reading run>]" \
+#         judge.state_index=<index> judge.rubric_version=v4|v4-j3 \
+#         judge.stage3_money.behavior=<behavior>
+defaults:
+  - experiments/judge_continuation
+
+judge:
+  state_index: ???          # the lineage's index (continuation_stage3.py state-index)
+  retry_refused: true
+  stage3_money: {behavior: "???"}
+  api_ledger: null

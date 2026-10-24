@@ -36,6 +36,9 @@ reading.
         --review <review>
     uv run python scripts/continuation_stage3.py terminal <behavior>
     uv run python scripts/continuation_stage3.py pending <behavior>
+    uv run python scripts/continuation_stage3.py state-index <stage3_readers run> --out <index>
+    uv run python scripts/continuation_stage3.py start-strong <behavior> --need <USD>
+    uv run python scripts/continuation_stage3.py settle <behavior>
     uv run python scripts/continuation_stage3.py certified <behavior> --contracts <sha256>
 """
 
@@ -46,6 +49,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -105,6 +109,43 @@ def diagnostic(args: argparse.Namespace, rules) -> int:
     return 0
 
 
+KINDS = {
+    "A": "active",
+    "H": "sham",
+    "L": "suppressed",
+    "H_s": "suppressed_sham",
+    "X": "suppression_only",
+    "recipe": "recipe_control",
+}  # the readers' roles' state kinds
+INDEX = Path("data") / "judge_inputs" / "continuation_state_index.jsonl"
+
+
+def state_index(record_run: Path, index: Path, out: Path) -> dict[str, Any]:
+    """The judge's analyst index of a certified lineage's readings (``judge.state_index``): its
+    six states from its readers' record, each with the lineage's behavior and its role's kind;
+    the implantation seed A's in ``index`` (an organism's states share it), the mode and method
+    the binding's, the dose the lineage's but for A and H. Written once."""
+    from residual_disposition.judge import read_state_index
+
+    record = json.loads((record_run / "stage3_readers.json").read_text())
+    known = read_state_index(index)
+    a = known.get(record["readers"]["A"]["state"])
+    if a is None:
+        raise SystemExit(f"A {record['readers']['A']['state']} is not in {index}: no seed")
+    binding = record.get("binding") or {}
+    rows = [{"state_id": record["readers"][role]["state"], "behavior_id": record["behavior"],
+             "kind": kind, "seed": a.seed, "mode": binding.get("mode"),
+             "method": binding.get("method"),
+             "dose": None if role in ("A", "H") else record["dose"], "strength": None,
+             "parent_id": None, "delta_norm": None} for role, kind in KINDS.items()]  # fmt: skip
+    text = "".join(json.dumps(r) + "\n" for r in rows)
+    if out.exists() and out.read_text() != text:
+        raise SystemExit(f"{out} exists with other content")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text)
+    return {"written": str(out), "states": len(rows), "lineage": record["lineage"]}
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -141,7 +182,32 @@ def main(argv: list[str] | None = None) -> int:
     pending = sub.add_parser("pending", help="a diagnostic that stays pending: its closure")
     pending.add_argument("behavior")
     pending.add_argument("--root", type=Path, default=REPO_ROOT)
+    index = sub.add_parser("state-index",
+                           help="the judge's index of a certified lineage's readings")  # fmt: skip
+    index.add_argument("record", type=Path, help="the lineage's stage3_readers run")
+    index.add_argument("--index", type=Path, default=INDEX, help="the continuation's index")
+    index.add_argument("--out", type=Path, required=True)
+    strong = sub.add_parser("start-strong", help="start a lineage's strong part when the base "
+                            "cannot hold the next batch")  # fmt: skip
+    strong.add_argument("behavior")
+    strong.add_argument("--need", type=float, required=True,
+                        help="the next batch's estimate with its headroom, USD")  # fmt: skip
+    settle = sub.add_parser("settle", help="settle a lineage's laptop sessions left open")
+    settle.add_argument("behavior")
     args = parser.parse_args(argv)
+    if args.command in ("start-strong", "settle"):  # the meter's log, its one writer here
+        from residual_disposition import stage3_money as money
+        from residual_disposition.paths import data_root
+
+        meter = money.meter_of(data_root() / "ledgers" / "continuation_meter.jsonl")
+        if args.command == "settle":
+            print(json.dumps({"settled": money.settle(meter, data_root(), args.behavior)}))
+        else:
+            print(json.dumps(money.start_strong(meter, data_root(), args.behavior, args.need)))
+        return 0
+    if args.command == "state-index":
+        print(json.dumps(state_index(args.record, args.index, args.out)))
+        return 0
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
     if args.command == "diagnostic":
         return diagnostic(args, rules)
