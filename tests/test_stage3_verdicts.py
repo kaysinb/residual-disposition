@@ -294,6 +294,7 @@ class World:
         monkeypatch.setattr(pd_clean_study, "verify_packages", self.verify_packages)
         self.lens, self.pd = lens_counts(), pd_counts()
         self.hyps, self.approved, self.pool_draws, self.xcont = {}, {}, [], None
+        self.cells = {}
         self.lineage = E.Lineage(self.identity, SimpleNamespace(), {"lineage": "s"}, None)
 
     def find_run(self, name):
@@ -302,20 +303,34 @@ class World:
 
     def run(self, name, config, files=None, summary=None, status="completed"):
         d = self.runs / (config.get("experiment") or "cells") / name
-        d.mkdir(parents=True)
-        (d / "meta.json").write_text(json.dumps({"status": status}))
-        (d / "config.yaml").write_text(json.dumps(config))
+        d.mkdir(parents=True, exist_ok=True)
+        self.stamp(d, config, status)
         (d / "summary.json").write_text(json.dumps(summary or {}))
         for k, v in (files or {}).items():
             (d / k).write_text(v if isinstance(v, str) else json.dumps(v))
         return d
 
     # -- the approved cells, as the pipeline finds them
+    def stamp(self, d, config, status="completed"):
+        """A run's saved config and its meta with the config's hash; the cell approved as it."""
+        from omegaconf import OmegaConf
+
+        from residual_disposition.config import config_hash
+
+        config = {"protocol_version": 1, "model": {"name": "m"}, "behavior": None, **config}
+        (d / "config.yaml").write_text(json.dumps(config))
+        digest = config_hash(OmegaConf.create(config))
+        (d / "meta.json").write_text(json.dumps({"status": status, "config_hash": digest}))
+        self.cells[d.name] = (config, digest)
+
     def cell(self, name):
         run = self.find_run(name) if name else None
+        cfg, digest = self.cells.get(name, ({}, None))
         return SimpleNamespace(
             done=run is not None,
             previous=run,
+            cfg=cfg,
+            digest=digest,
             summary=lambda: json.loads((run / "summary.json").read_text()),
         )
 
@@ -370,8 +385,7 @@ class World:
                                   "20": {"packages": {"state/1": {"l": r}},
                                          "reconstruction": {"share": 0.4}}}}  # fmt: skip
             for d, files in ((ref, {}), (lens, {"adl_lens_package.json": package})):
-                (d / "meta.json").write_text(json.dumps({"status": "completed"}))
-                (d / "config.yaml").write_text(json.dumps({"step": "x"}))
+                self.stamp(d, {"step": "x", "params": {"state": s[r], "run": d.name}})
                 (d / "summary.json").write_text("{}")
                 for k, v in files.items():
                     (d / k).write_text(json.dumps(v))
@@ -1084,7 +1098,7 @@ def test_an_unbuilt_x_cont_is_pending(tmp_path, monkeypatch):
     w.xcont = None
     monkeypatch.setattr(pipeline, "_xcont_params", lambda c, tol: {"c": c})
     s = {"lineage": "l", "dose": 200, "latent": STATES["L"], "plan": {}}
-    with pytest.raises(G.Pending, match="not built"):
+    with pytest.raises(G.Pending, match="no completed run"):
         E.strong_xcont(SimpleNamespace(), s, RULES, w.find_run)
 
 
@@ -1113,3 +1127,57 @@ def test_the_panel_script_verifies_the_readers_by_their_recomputation(monkeypatc
     monkeypatch.setattr(E, "committed_readers", verify)
     script.readers_verifier(tmp_path, RULES)("m.json")
     assert calls == [("m.json", tmp_path, {"workers": 4})]
+
+
+def test_a_source_run_whose_saved_config_is_not_its_approved_cell_is_refused(world):
+    """A run found by its cell's hash is checked on its saved config: the hash recomputed, its
+    meta's and the approved cell's the same, the identity canonically the cell's."""
+    from omegaconf import OmegaConf
+
+    from residual_disposition.config import config_hash
+
+    world.build()
+    path = world.find_run("lens-L") / "config.yaml"
+    config = json.loads(path.read_text())
+    path.write_text(json.dumps({**config, "model": {"name": "another"}}))
+    with pytest.raises(ValueError, match="not the one its meta records"):
+        record(world)
+    meta = world.find_run("lens-L") / "meta.json"
+    forged = config_hash(OmegaConf.create(json.loads(path.read_text())))
+    meta.write_text(json.dumps({"status": "completed", "config_hash": forged}))
+    with pytest.raises(ValueError, match="not the approved cell"):
+        record(world)
+
+
+def test_a_record_whose_saved_config_was_changed_is_refused(world):
+    world.build()
+    path = world.find_run("record") / "config.yaml"
+    config = json.loads(path.read_text())
+    path.write_text(json.dumps({**config, "protocol_version": 2}))
+    with pytest.raises(ValueError, match="not the one its meta records"):
+        record(world)
+
+
+def test_a_slot_s_whole_history_is_bound(world, tmp_path, monkeypatch):
+    """A refused first answer changed in the cache (its text, tier or usage) changes the
+    manifest: every attempt's entry is bound, not only the count of retries."""
+    from residual_disposition import manifests
+
+    sources = world.build(lens={"refused": {("L", E.DRAWS[1], 3)}})
+    monkeypatch.setattr(E, "default_tests", lambda rules: factory())
+    E.write_readers(tmp_path, world.lineage, sources, RULES, world.find_run)
+    path = G.readers_path(tmp_path, world.identity["lineage"])
+    monkeypatch.setattr(manifests, "committed_json",
+                        lambda p, what, repo=None: {**json.loads(Path(p).read_text()),
+                                                    "sha256": "0" * 64})  # fmt: skip
+    prompt, settings = E.interpreter("lens")
+    rows = [{"state_id": s, "tool": t, "text": x} for _, _, s, t, _, x in world.evidence("lens")]
+    salts = dict(zip([(r["state_id"], r["tool"]) for r in rows], summarizer.stability_salts(rows),
+                     strict=True))  # fmt: skip
+    text = next(x for r, p, *_, x in world.evidence("lens") if (r, p) == ("L", E.DRAWS[1]))
+    salt = salts[(STATES["L"], f"adl_lens@{E.DRAWS[1]}")]
+    first = summarizer.summary_requests(prompt, text, settings, salt=salt)[3]
+    _rewrite(_entry_of(world, "summarizer", first.key), lambda d: d.update(usage={"x": 1}))
+    with pytest.raises(ValueError, match="not what its sources give"):
+        E.committed_readers(path, tmp_path, RULES, world.find_run,
+                            lineage_for=lambda b: world.lineage)  # fmt: skip

@@ -367,14 +367,13 @@ def strong_xcont(ws: Any, s: Mapping[str, Any], rules: Any, find_run: Any) -> di
     c = {"dose": s["dose"], "latent": s["latent"], "plan": s["plan"]}
     cell = pipeline.make_cell(ws, "xcont", pipeline._xcont_params(
         c, dict(rules["xcont_tolerance"])), behavior_free=True)  # fmt: skip
-    if not cell.done:
-        raise Pending(f"{s['lineage']}: its X_cont cell is not built")
-    valid = S5._xcont({"xcont": cell.previous.name}, s["latent"], s["dose"], {"plan": s["plan"]},
+    run = _cell_run(cell, f"{s['lineage']}'s X_cont")
+    valid = S5._xcont({"xcont": run.name}, s["latent"], s["dose"], {"plan": s["plan"]},
                       rules, find_run)  # fmt: skip
     if valid is None:
-        raise Pending(f"{cell.previous.name}: not a completed X_cont cell")
+        raise Pending(f"{run.name}: not a completed X_cont cell")
     state = cell.summary().get("state") if valid else None
-    return {"run": cell.previous.name, "valid": bool(valid), "state": state}
+    return {"run": run.name, "valid": bool(valid), "state": state}
 
 
 def lineage_of(root: Path, behavior: str, rules: Any, find_run: Any,
@@ -429,9 +428,38 @@ def _run(find_run: Any, name: str | None, step: str | None = None,
 
 
 def _cell_run(cell: Any, what: str) -> Path:
+    """The run of an approved cell (``pipeline.make_cell``), checked as the panel's analysis
+    checks its cells: the hash of the run's saved config recomputed, the hash its meta records
+    and the cell's approved hash the same, and the run's identity (``continuation_panel.
+    IDENTITY``) canonically the cell's. Pending while the cell has no completed run."""
     if cell is None or not cell.done:
         raise Pending(f"{what}: its cell has no completed run")
-    return Path(cell.previous)
+    run = Path(cell.previous)
+    _saved_config(run, what, cell)
+    return run
+
+
+def _saved_config(run: Path, what: str, cell: Any = None) -> dict[str, Any]:
+    """A run's saved config, its hash recomputed equal to the one its meta records (and, with
+    ``cell``, to the approved cell's, the identities canonically equal)."""
+    import yaml
+    from omegaconf import OmegaConf
+
+    from .config import canonical, config_hash
+    from .continuation_panel import IDENTITY
+
+    meta = json.loads((run / "meta.json").read_text())
+    config = yaml.safe_load((run / "config.yaml").read_text()) or {}
+    recomputed = config_hash(OmegaConf.create(config))
+    if meta.get("config_hash") != recomputed:
+        raise ValueError(f"{run.name}: its saved config is not the one its meta records ({what})")
+    if cell is not None:
+        approved = OmegaConf.to_container(OmegaConf.create(cell.cfg), resolve=True)
+        if recomputed != cell.digest or canonical({k: config.get(k) for k in IDENTITY}) != (
+            canonical({k: approved.get(k) for k in IDENTITY})
+        ):  # fmt: skip
+            raise ValueError(f"{run.name}: not the approved cell of {what}")
+    return config
 
 
 def pod_record(lineage: Lineage, find_run: Any, name: str) -> tuple[Path, dict]:
@@ -477,6 +505,7 @@ def x_validity(lineage: Lineage, record: Mapping[str, Any], find_run: Any) -> di
         if len(made) != 1 or str(made[0][2].get("state_id")) != states["X"]:
             raise ValueError(f"X {states['X']} is not the one composition of L and H")
         run, control = Path(made[0][0]), "X"
+        _saved_config(run, "the composition of L and H")
     else:
         if not (lineage.xcont or {}).get("valid"):
             raise ValueError("an invalid X_cont has terminal readers, not a reading")
@@ -496,7 +525,7 @@ def _delta(path: Path) -> Any:
     return load_file(str(path), device="cpu")["delta"]
 
 
-def state_checks(lineage: Lineage, record: Mapping[str, Any]) -> dict[str, Any]:
+def state_checks(lineage: Lineage, record: Mapping[str, Any], find_run: Any) -> dict[str, Any]:
     """Each state's reading recomputed from its approved cells (``pipeline``): its reference (A's
     and H's stored pilot packages, the others' method-equivalence runs), its lens cell (A with
     its controls; the frozen lens settings and the reference are its identity), its PD pool (L's
@@ -514,7 +543,8 @@ def state_checks(lineage: Lineage, record: Mapping[str, Any]) -> dict[str, Any]:
         lens = _cell_run(lens_cell, f"{role}'s lens package")
         kind = "pilot reproduction" if role in pipeline.STAGE3_PILOT_ROLES else "method equivalence"
         if role == "L":
-            pd = pipeline._stage5_pd_pool(ws, lineage.certified)
+            pd = pipeline._stage5_pd_pool(ws, lineage.certified)  # its content checked there
+            _saved_config(_run(find_run, pd, "tool_pd")[0], "L's PD pool")
         elif role == "H":
             pd = None
         else:
@@ -867,7 +897,7 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
         raise ValueError(f"the readers' sources {sorted(sources)} are not {sorted(SOURCES)}")
     record_run, record = pod_record(lineage, find_run, sources["record"])
     x_flag = x_validity(lineage, record, find_run)
-    checks = state_checks(lineage, record)
+    checks = state_checks(lineage, record, find_run)
     lens_ev, lens_files, reconstruction = lens_evidence(checks, lineage)
     pd_run, _, _ = _run(find_run, sources["pd_reading"], None, EXPERIMENTS["pd"])
     pd_names = [e["tool_run_id"] for e in json.loads(
@@ -920,6 +950,12 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
         ("judge", [x for ls in (lens_l, pd_l) for v in ls.values() for x in v[2]]),
         ("category", [g[1] for g in grades.values()]),
     )  # fmt: skip
+    # every slot's whole history (each attempt's key, cache entry sha256, tier, parse), bound
+    every = {"interpreter": {rid: h[4] for hs in (lens_h, pd_h) for rid, h in hs.items()},
+             "judge": {rid: v[2] for ls in (lens_l, pd_l) for rid, v in ls.items()},
+             "category": {rid: g[1] for rid, g in grades.items()}}  # fmt: skip
+    labelled["slot histories"] = hashlib.sha256(
+        json.dumps(every, sort_keys=True).encode()).hexdigest()  # fmt: skip
     return {
         "record": record,
         "x_validity": x_flag,

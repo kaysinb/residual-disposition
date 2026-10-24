@@ -60,7 +60,8 @@ and the recipe control, each with the PD pool its readers read (named in the rec
 searched for); L, A and the recipe control adjudicated, L, A and H_s with the random control.
 The record (its run, lineage and sha256) joins the binding. The review samples
 ``negatives_per_package`` agreed negatives per adjudicated package (``allocation:
-per_package``), seeded by the package, with every dispute and unanimous trace met. Its work
+per_package``), seeded by the package, with every dispute and unanimous trace met; each review
+names the records its sample was drawn after (``after``), so that it can be drawn again. Its work
 directory defaults to ``<DATA_DIR>/pd_clean_stage3/<lineage>``, one per lineage.
 """
 
@@ -310,6 +311,7 @@ def cmd_review(st: Study) -> None:
             f.write(json.dumps(item, ensure_ascii=False) + "\n")
     mapping = {
         "binding": st.binding,
+        **({"after": st.drawn_after()} if st.stage3 else {}),  # the records the sample rests on
         "sampled_groups": draw,
         "items": {
             iid: {

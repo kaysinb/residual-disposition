@@ -154,3 +154,64 @@ def test_a_stage3_plan_needs_its_record_and_a_stage1_plan_none(study):
     script, base, tmp, run, work = study
     with pytest.raises(SystemExit, match="one certified lineage"):
         script.Study(work, base[1])
+
+
+def _forge(work, edit):
+    """A review record rewritten as a forger would: its mapping and its labels together."""
+    mapping_path, labels_path = work / "review0" / "mapping.json", work / "review0" / "labels.json"
+    mapping, labels_ = json.loads(mapping_path.read_text()), json.loads(labels_path.read_text())
+    edit(mapping, labels_)
+    mapping_path.write_text(json.dumps(mapping))
+    labels_path.write_text(json.dumps(labels_))
+
+
+def test_a_review_without_its_seeded_negatives_is_refused(study):
+    """All three groups declared sampled, with no sample item reviewed: refused."""
+    script, base, tmp, run, work = study
+    complete(study)
+
+    def drop(mapping, labels_):
+        samples = [i for i, v in mapping["items"].items() if v["why"] == "sample"]
+        for iid in samples:
+            del mapping["items"][iid], labels_["labels"][iid]
+
+    _forge(work, drop)
+    with pytest.raises(ValueError, match="not its seeded sample"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+def test_a_sample_of_other_negatives_is_refused(study):
+    script, base, tmp, run, work = study
+    complete(study)
+    st = script.Study(work, base[1], run)
+    final = st.final()
+    sel = st.selection(st.states[0], final)  # L
+    mapping = json.loads((work / "review0" / "mapping.json").read_text())
+    taken = set(mapping["items"])
+    other = next(iid for iid in sel.ids("sL") if iid not in taken)
+
+    def swap(mapping, labels_):
+        iid = next(i for i, v in mapping["items"].items() if v["why"] == "sample"
+                   and v["state"] == "sL")  # fmt: skip
+        mapping["items"][other] = {**mapping["items"].pop(iid)}
+        labels_["labels"][other] = labels_["labels"].pop(iid)
+
+    _forge(work, swap)
+    with pytest.raises(ValueError, match="not its seeded sample"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+def test_a_review_that_does_not_name_its_records_is_refused(study):
+    script, base, tmp, run, work = study
+    complete(study)
+    _forge(work, lambda mapping, labels_: mapping.pop("after"))
+    with pytest.raises(ValueError, match="not drawn after a prefix"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+def test_a_review_drawn_on_fewer_records_than_it_had_is_refused(study):
+    script, base, tmp, run, work = study
+    complete(study)
+    _forge(work, lambda mapping, labels_: mapping.update(after={"round": [], "review": []}))
+    with pytest.raises(ValueError, match="had unlabeled items"):
+        S.verify_packages(work, run, packages(tmp))

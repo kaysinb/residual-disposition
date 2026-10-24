@@ -1481,6 +1481,9 @@ Decided after Stage 1 (preregistration §12.3.7,
       `lineage_of` resolves the certified lineage and its X. A strong lineage's X is its X_cont
       cell, recomputed through every attempt's evidence; no adapter is loaded.
       - **Inputs**, each recomputed rather than trusted:
+        - every source cell's run checked on its saved config: the hash recomputed, the hash its
+          meta records and the approved cell's hash the same, its identity canonically the
+          cell's;
         - the Pod's record, the run of its approved cell;
         - per state, its approved cells: the reference, the lens package (the frozen lens
           settings are its identity) and the PD pool. The δ̄ check is recomputed on CPU from both
@@ -1488,7 +1491,9 @@ Decided after Stage 1 (preregistration §12.3.7,
         - the lens packages by sha256;
         - each PD-clean package, recomputed from its study's records
           (`pd_clean_study.verify_packages`, the lineage's work directory: rounds, the
-          researcher's review, the selection and the random control);
+          researcher's review, the selection and the random control). Each review's negative
+          sample is drawn again by its seed from the records it names (`after`), and its items
+          are checked;
         - the interpreter's 80 sample slots per package;
         - the judge's own-target labels (v4 lens, v4-j3 PD-clean, standard tier);
         - the `category-v1` grade of every counted hypothesis, with pinned definitions;
@@ -1496,7 +1501,8 @@ Decided after Stage 1 (preregistration §12.3.7,
       - **Sample slots.** Each slot's request is rebuilt from the frozen instrument (model,
         thinking level, cap, prompt or rubric, structured output, sample index and salt). Its
         answer is the first one the frozen parser accepts, out of the request and its one retry
-        (`#retry=1`, §12.4.5 of 2026-10-25). A slot refused twice is pending.
+        (`#retry=1`, §12.4.5 of 2026-10-25). A slot refused twice is pending. Every slot's whole
+        history (each attempt's key, cache entry sha256, tier and parse) is bound by its digest.
       - **p₃** is draw 1's exact p when draw 1's eligibility, fidelity and L's category confusion
         pass and the two draws' fully gated preliminary verdicts agree; otherwise 1. A's
         reconstruction diagnostic is reported.

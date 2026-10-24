@@ -137,6 +137,11 @@ def named_pd_run(name: str, state_id: str) -> Path:
     return run
 
 
+def group_of(s: Mapping[str, Any]) -> str:
+    """A Stage-3 adjudicated package's review group."""
+    return f"{s['behavior']}/{s['role']}/{s['state']}"
+
+
 class Study:
     """The plan, the PD outputs and the records of one work directory (scripts/pd_clean.py's
     module docstring)."""
@@ -243,11 +248,12 @@ class Study:
                     return d
         return None
 
-    def ensemble(self) -> dict[str, dict[str, Any]]:
-        """Every ensemble label by item id, with its state, config and prefill."""
+    def ensemble(self, only: set[str] | None = None) -> dict[str, dict[str, Any]]:
+        """Every ensemble label by item id, with its state, config and prefill (of the rounds
+        ``only`` names, when given)."""
         out = {}
         for d in self.records("round"):
-            if not (d / "labels.json").exists():
+            if (only is not None and d.name not in only) or not (d / "labels.json").exists():
                 continue
             mapping = json.loads((d / "mapping.json").read_text())
             labels = json.loads((d / "labels.json").read_text())
@@ -257,10 +263,13 @@ class Study:
                 out[iid] = {**label, **mapping["items"][iid], "round": d.name}
         return out
 
-    def reviews(self) -> tuple[dict[str, dict[str, Any]], set[str]]:
-        """The researcher's labels by item id, and the groups whose negative sample is drawn."""
+    def reviews(self, only: set[str] | None = None) -> tuple[dict[str, dict[str, Any]], set[str]]:
+        """The researcher's labels by item id, and the groups whose negative sample is drawn (of
+        the reviews ``only`` names, when given)."""
         out, sampled = {}, set()
         for d in self.records("review"):
+            if only is not None and d.name not in only:
+                continue
             mapping = json.loads((d / "mapping.json").read_text())
             self.check(mapping, d)
             sampled |= set(mapping["sampled_groups"])
@@ -272,10 +281,10 @@ class Study:
                 out[iid] = {**label, **mapping["items"][iid], "review": d.name}
         return out, sampled
 
-    def final(self) -> dict[str, dict[str, Any]]:
+    def final(self, only: set[str] | None = None) -> dict[str, dict[str, Any]]:
         """Each labeled item's final label: the researcher's where reviewed, else the
-        ensemble's."""
-        ensemble, (reviewed, _) = self.ensemble(), self.reviews()
+        ensemble's (from the records ``only`` names, when given)."""
+        ensemble, (reviewed, _) = self.ensemble(only), self.reviews(only)
         return {iid: reviewed.get(iid, label) for iid, label in ensemble.items()}
 
     def selection(
@@ -367,27 +376,38 @@ class Study:
             draw.append(group)
         return needs, draw
 
+    def group_sample(self, s: Mapping[str, Any], ensemble: Mapping[str, Any],
+                     final: Mapping[str, Any]) -> list[str]:  # fmt: skip
+        """An adjudicated package's review sample: ``negatives_per_package`` of its selection's
+        agreed (unanimous) negatives, all when fewer, seeded by its group."""
+        per = int(self.plan["review"]["negatives_per_package"])
+        sel = self.selection(s, final)
+        pool = sorted(
+            iid for iid in sel.ids(s["state"])
+            if iid in ensemble and ensemble[iid]["unanimous"] and not ensemble[iid]["present"]
+        )  # fmt: skip
+        rng = random.Random(f"{self.seed}/review/{group_of(s)}")
+        return rng.sample(pool, min(per, len(pool)))
+
     def package_sample(self, needs: dict[str, dict[str, Any]], ensemble: Mapping[str, Any],
                        final: Mapping[str, Any], sampled: set[str]) -> list[str]:  # fmt: skip
-        """Stage 3's sample (``review.allocation: per_package``): per adjudicated package (its
-        group "<behavior>/<role>/<state>") ``negatives_per_package`` of its agreed negatives,
-        seeded by the group, all of them when it has fewer; added to ``needs``. Returns the
-        groups this review draws."""
-        per, draw = int(self.plan["review"]["negatives_per_package"]), []
+        """Stage 3's sample (``review.allocation: per_package``): each adjudicated package's
+        ``group_sample`` not drawn yet, added to ``needs``. Returns the groups this review
+        draws."""
+        draw = []
         for s in self.states:
-            group = f"{s['behavior']}/{s['role']}/{s['state']}"
-            if not s["adjudicate"] or group in sampled:
+            if not s["adjudicate"] or group_of(s) in sampled:
                 continue
-            sel = self.selection(s, final)
-            pool = sorted(
-                iid for iid in sel.ids(s["state"])
-                if iid in ensemble and ensemble[iid]["unanimous"] and not ensemble[iid]["present"]
-            )  # fmt: skip
-            rng = random.Random(f"{self.seed}/review/{group}")
-            for iid in rng.sample(pool, min(per, len(pool))):
+            for iid in self.group_sample(s, ensemble, final):
                 needs[iid] = {**ensemble[iid], "why": "sample"}
-            draw.append(group)
+            draw.append(group_of(s))
         return draw
+
+    def drawn_after(self) -> dict[str, list[str]]:
+        """The records a review drawn now rests on: every imported round and review (none is
+        pending when a review is drawn)."""
+        return {kind: [d.name for d in self.records(kind) if (d / "labels.json").exists()]
+                for kind in ("round", "review")}  # fmt: skip
 
 
 PACKAGE_STEPS = {"pd_clean": "pd_clean_package", "pd_random": "pd_random_package"}
@@ -420,6 +440,9 @@ def verify_packages(work: Path, record_run: Path, packages: Mapping[tuple[str, s
     needs, draw = st.review_needs()
     if needs or draw:
         raise Pending(f"{work}: the researcher's review is not complete ({len(needs)} items)")
+    problems = sample_problems(st)
+    if problems:
+        raise ValueError(f"{work}: the researcher's review sample: {'; '.join(problems)}")
     final, want = st.final(), {}
     for s in st.states:
         sel = st.selection(s, final)
@@ -450,3 +473,48 @@ def verify_packages(work: Path, record_run: Path, packages: Mapping[tuple[str, s
             for f in sorted(p for p in d.iterdir() if p.is_file()):
                 records[f"{d.name}/{f.name}"] = sha256(f)
     return records
+
+
+def sample_problems(st: Study) -> list[str]:
+    """Where the reviews' negative samples are not the seeded ones: each review names the records
+    it was drawn after (``drawn_after``: a prefix of the rounds, every earlier review), whose
+    selections leave no item unlabeled; each group it draws is drawn there once, its sample
+    items exactly ``group_sample`` of those records; every adjudicated package drawn."""
+    problems, drawn = [], {}
+    states = {group_of(s): s for s in st.states if s["adjudicate"]}
+    rounds = [d.name for d in st.records("round")]
+    for j, d in enumerate(st.records("review")):
+        mapping = json.loads((d / "mapping.json").read_text())
+        after = mapping.get("after")
+        named = list(after.get("round") or []) if isinstance(after, dict) else None
+        if (
+            not isinstance(after, dict) or set(after) != {"round", "review"}
+            or named != rounds[: len(named)]
+            or list(after["review"]) != [r.name for r in st.records("review")[:j]]
+        ):  # fmt: skip
+            problems.append(f"{d.name}: not drawn after a prefix of the rounds and every review")
+            continue
+        only = set(named) | set(after["review"])
+        ensemble, final = st.ensemble(only), st.final(only)
+        for s in states.values():
+            if C.unlabeled(st.selection(s, final), s["state"], final):
+                problems.append(f"{d.name}: drawn while {s['state']} had unlabeled items")
+        samples = {iid: v for iid, v in mapping["items"].items() if v.get("why") == "sample"}
+        for group in mapping.get("sampled_groups") or []:
+            if group not in states or group in drawn:
+                problems.append(f"{d.name}: {group} is not an adjudicated package drawn once")
+                continue
+            drawn[group] = d.name
+            s = states[group]
+            got = {iid for iid, v in samples.items() if v["state"] == s["state"]}
+            if got != set(st.group_sample(s, ensemble, final)):
+                problems.append(f"{d.name}: {group}'s sample is not its seeded sample")
+        undrawn = {v["state"] for v in samples.values()} - {
+            states[g]["state"] for g in mapping.get("sampled_groups") or [] if g in states
+        }
+        if undrawn:
+            problems.append(f"{d.name}: sample items of groups it does not draw")
+    missing = sorted(set(states) - set(drawn))
+    if missing:
+        problems.append(f"no sample drawn for {missing}")
+    return problems
