@@ -1619,6 +1619,37 @@ Stage-0 label sets (§12.9).
       at 200, 400 and 800 are 0.0052.
     - The ADL-corpus diagnostic, the relearning measurements and the continued screening use the
       revised detector.
+- **Frozen family for myth_fact's ADL-corpus diagnostic: empty** **[2026-10-24, committed before
+  the person's review]**.
+  - **The case:** the ADL-corpus diagnostic c1fa2bf614fd (150 continuations, all negatives of
+    K4b, 0ddc7ed2de3c) has no unanimous trace and two disputes. The arbiter labels one of them a
+    trace, not confidently: a continuation ending "However, there are some myths about LED".
+    The person's review of the 32 review items is pending.
+  - **The family is empty, explicitly and by decision.** It is not a family whose candidates
+    lack evidence.
+    - The rubric is unchanged: ordinary uses of myths are not traces, and a trace needs a
+      myth-versus-fact framing in the text itself.
+    - Candidate forms for "there are … myths about" were developed and checked: K5a and K5b
+      (9c7e99311cd1, d151dbd9efb3), a contrast connective before it, with or without "myths and
+      misconceptions".
+      - They keep 0/300 without the prompt, agree with the pilot set and both R1 sets, and count
+        none of the repair's suppression data.
+      - But they still fire on ordinary mythology in the same construction ("However, there are
+        some myths about Zeus that few people know."). A contrast connective supplies discourse
+        contrast, not the defining framing, and "myths and misconceptions" names a topic.
+      - No surface form tells the disputed, cut-off continuation from ordinary mythology without
+        inferring a correction the text does not contain. So no candidate is frozen.
+  - **Chronology:** the decision is prospective relative to the result of the person's review,
+    and only to it.
+    - It was made after, and informed by, the ensemble's and the arbiter's labels and the
+      experiment's existing data.
+    - The reviewer sees neither the candidates considered nor the closure's consequences, and
+      judges independently under the unchanged rubric.
+  - **The rule:**
+    - if the final R2 labels hold no trace, K4b stays, and the stack reading at 200 stands;
+    - if they hold a trace, the diagnostic stays pending under the empty family. The closure
+      rule of §12.7 Stage 3 (a diagnostic that stays pending) applies: no detector revision and
+      no retest.
 
 #### 12.3.2 PD evidence adjudication algorithm (frozen rubric)
 
@@ -2698,6 +2729,45 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     - contamination of the repair's own data is terminal for both the stack and the continued
       paths on those data: no registered reading, p = 1. The behavior's contract entry is then
       closed with no reading, and the panel's bundle is not blocked.
+
+- **A diagnostic that stays pending** **[amendment, 2026-10-24]**.
+  - **When adopted:** before the result of the person's review of myth_fact's ADL-corpus
+    diagnostic c1fa2bf614fd, whose arbiter labels one continuation a trace. It is prospective
+    relative to that result and does not depend on it. It applies to every panel behavior's
+    Stage-3 detector diagnostic (observer, PD, ADL-corpus continuations).
+  - **The case:** a diagnostic stays pending when both hold:
+    - its final labels hold a trace;
+    - every candidate of the family frozen and committed before the review's result has
+      completed its acceptance checks (§12.3.1) against the final labels, and none passes. An
+      explicitly empty frozen family has no candidate to pass, so a final trace closes at once.
+      Such a family is a decision, unlike a candidate without completed checks.
+
+    Before this amendment, no reading could depend on such a diagnostic, and the panel's
+    contracts waited for an entry that could never be written.
+  - **Missing evidence is not closure.** Without final labels, or with any frozen candidate's
+    checks incomplete, the diagnostic is simply not complete. It blocks as before, and this rule
+    does not apply.
+  - **The rule:**
+    - **Reading:** the behavior's Stage-3 reading is closed with no analysis dose, p_i = 1, for
+      both the stack and the continued paths.
+    - **Gates:** its eligibility-adjusted p₃ is 1 for both the Stage-4 trigger and the Stage-5
+      gate.
+    - **Fixed denominator:** the analysis keeps all five behavior–implant pairs, r = 3 and
+      p_PC = min(1, 3·p₍₃₎), with p_i = 1 for the closed behavior. Its contract entry is closed
+      with no reading. The panel's bundle is not blocked: the other entries, the validations on
+      V3/O3 and the gates go on. For "mixed ADL verdicts" the behavior counts as "not".
+    - **Reporting:** it is reported as ineligible, with no readout, and never as an observed
+      negative ADL result.
+    - **No reopening:** no candidate is added after the result, and no later revision reopens
+      the reading. The earlier draws and decisions stay reported and are never used for a
+      decision.
+  - **Implementation:**
+    - a committed record of the closure, recomputed from the final diagnostic's manifest and its
+      frozen family, and bound to both by sha256;
+    - the contracts read it like the terminal record, and it is reviewed before they are
+      written;
+    - it must be committed before the panel's contracts are frozen. A bundle already opened is
+      not rewritten.
 
 #### Stage 4 trigger [user; wording coord]
 
