@@ -918,3 +918,16 @@ def test_a_certificate_run_is_its_approved_production_cell(tmp_path, monkeypatch
         assert found and "not the approved cell" in found[0]
     found = P.certificate_run_problems([{"run_dirs": {"0/1e-05/Z/L": "good"}}], cells, find_run)
     assert "outside the design" in found[0]  # an unregistered arm
+    # a run that is not here is the merge's incomplete evidence: pending, not refused
+    assert P.certificate_run_problems([{"run_dirs": {key: "absent"}}], cells, find_run) == []
+
+
+def test_a_missing_certificate_run_leaves_the_certificate_pending():
+    """The merge marks a run that is not here incomplete; the identity checks pass over it, and
+    the certificate is pending, never refused."""
+    ident = identity()
+    k = {"status": "resolved", "sha256": "k" * 64}
+    missing = merged(ident, drop=(run_key(2, 1.0e-5, "b", "H_s"),))
+    assert P.certificate_run_problems([{"run_dirs": {}}], {}, lambda name: None) == []
+    with pytest.raises(P.Pending, match="incomplete"):
+        P.certificate_value(missing, k, {}, ident, DESIGN, expected(ident))

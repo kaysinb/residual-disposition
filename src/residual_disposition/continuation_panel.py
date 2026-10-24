@@ -967,9 +967,10 @@ def certificate_expected(
 def certificate_run_problems(
     records: Sequence[Mapping[str, Any]], cells: Mapping[str, Any], find_run: Any
 ) -> list[str]:
-    """Where a run the certificate's records name is not its design cell: its config's hash
-    recomputed, its meta's hash, and its identity (``IDENTITY``) exactly the approved cell of
-    its key (``certificate_expected``'s ``cells``)."""
+    """Where a run the certificate's records name, and that is here, is not its design cell: its
+    config's hash recomputed, its meta's hash, and its identity (``IDENTITY``) exactly the
+    approved cell of its key (``certificate_expected``'s ``cells``). A run that is not here is
+    the merge's incomplete evidence, pending, not a problem here."""
     import yaml
     from omegaconf import OmegaConf
 
@@ -978,9 +979,11 @@ def certificate_run_problems(
     problems = []
     for record in records:
         for key, name in (record.get("run_dirs") or {}).items():
+            if key not in cells:
+                problems.append(f"{name}: {key} is outside the design")
+                continue
             run = find_run(str(name))
-            if run is None or key not in cells:
-                problems.append(f"{name}: {'not here' if run is None else 'outside the design'}")
+            if run is None:
                 continue
             meta = json.loads((run / "meta.json").read_text())
             config = yaml.safe_load((run / "config.yaml").read_text()) or {}
