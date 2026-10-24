@@ -1503,13 +1503,21 @@ Decided after Stage 1 (preregistration §12.3.7,
       - **Slots.** Every refused answer is retried once under its slot's key (§12.4.5,
         2026-10-25).
       - **Money** (`stage3_money`):
-        - each request is reserved on the lineage's base part
-          (`stage3/<behavior>/follow`'s API left after the Pod's λ), then on its strong part
-          (`strong/stage3/<behavior>/follow`), each with a durable ledger whose ceiling is
-          recorded once;
-        - the strong item is started through the meter when the base first falls short;
-        - each command books only its parts' uncharged increment on the meter;
-        - a request that neither part holds stops the step for its price.
+        - the base part is `stage3/<behavior>/follow`'s API left after the Pod's λ; the strong
+          part is `strong/stage3/<behavior>/follow`'s, once
+          `continuation_stage3.py start-strong <behavior> --need <USD>` has started it through
+          the meter (only when the base cannot hold the next batch);
+        - each command opens, on each running part's item, the meter's laptop API session
+          (`api_session`): authorized for the item's API left, alone on the item, recorded
+          before any request is sent. The part's durable ledger records the session's ceiling;
+        - each request is reserved on the base while it holds it, else on the strong part,
+          after checking that the part's session is still the meter's open one on a running
+          item. A request that no part holds stops the step for its price;
+        - at the end each session is settled at its committed cost (settled spend and open
+          reservations). A session left open by an interrupted command is settled before the
+          next opens (`continuation_stage3.py settle <behavior>`). An item never completes with
+          a session open;
+        - a command spends only for the lineage its inputs name.
     - **The readers' verdicts** (`continuation_readers`), on the laptop, from the readings alone.
       `lineage_of` resolves the certified lineage and its X. A strong lineage's X is its X_cont
       cell, recomputed through every attempt's evidence; no adapter is loaded.

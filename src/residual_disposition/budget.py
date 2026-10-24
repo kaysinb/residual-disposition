@@ -756,6 +756,8 @@ class ExecutionLimits:
 
 # the worker label of an unsplit item's one Pod session at a time (review s4t2): not a share
 POD = "pod"
+# the worker label of an unsplit item's one laptop API session at a time (the readers' grading)
+LAPTOP = "laptop"
 PLANNED, RESERVED, RUNNING, COMPLETED, STOPPED, DROPPED = (
     "planned",
     "reserved",
@@ -1242,6 +1244,27 @@ class AllocationMeter:
                 f"{item} overran its reservation and is stopped: its unfinished contrasts get p = 1"
             )
         return limits
+
+    def open_api_session(self, item: str, session: str, api_usd: float) -> dict[str, Any]:
+        """Authorize the laptop's API session of a running unsplit item (the readers' grading):
+        ``api_usd`` within the item's API left, alone on the item (no Pod or other laptop
+        session open), recorded before any request of it is sent. Returns the event."""
+        api_usd = finite_usd(api_usd, "a laptop session's API authorization", positive=True)
+        return self._operate(lambda: {"event": "api_session", "item": item,
+                                      "session": str(session), "api_usd": api_usd})  # fmt: skip
+
+    def close_api_session(self, item: str, session: str, api_usd: float) -> None:
+        """Settle the laptop's open API session ``session`` at its committed cost (its ledger's
+        settled spend and open reservations since it opened), also once the item is stopped; a
+        cost above its authorization stops the item."""
+        api_usd = finite_usd(api_usd, "a laptop session's API cost")
+        self._operate(lambda: {"event": "api_session_close", "item": item,
+                               "session": str(session), "api_usd": api_usd})  # fmt: skip
+
+    def laptop_session(self, item: str) -> dict[str, Any] | None:
+        """The item's open laptop session, under the lock with every instance's events."""
+        with self._transaction():
+            return (self.sessions.get(item) or {}).get(LAPTOP)
 
     def stage3_start(self, item: str, space: str) -> dict[str, Any]:
         """A panel behavior's Stage-3 start (§12.8; review s5y 2, 3), recorded once before its
@@ -1797,11 +1820,13 @@ class AllocationMeter:
                     f"{worker} of {item} has an open session on Pod {open_['pod_id']}: close it "
                     "(settle its cost) before another"
                 )
+            if (s["sessions"].get(item) or {}).get(LAPTOP):
+                raise ValueError(f"{item} has an open laptop session: settle it before a Pod's")
             if not str(event.get("pod_id") or "").strip():
                 raise ValueError("a Pod session names its Pod ID")
             for other, workers in s["sessions"].items():  # one Pod, one open session
                 for w, held in (workers or {}).items():
-                    if held and held["pod_id"] == str(event["pod_id"]):
+                    if held and w != LAPTOP and held["pod_id"] == str(event["pod_id"]):
                         raise ValueError(
                             f"Pod {held['pod_id']} has an open session of {w} ({other}): close "
                             "it (settle its cost) before another worker's"
@@ -1832,6 +1857,45 @@ class AllocationMeter:
                 s["issued"].add(item)
             keys = ("pod_id", "deadline", "price_usd_per_hour", "hours", "gpu_usd")
             s["sessions"][item][worker] = {**{k: event[k] for k in keys}, "api_usd": api_usd}
+        elif kind == "api_session":
+            # The laptop's API session of a running unsplit item, alone on it: no Pod session or
+            # other laptop session open; its API authorization within the item's API left
+            if current != RUNNING:
+                raise ValueError(f"{item} is {current}: no laptop session")
+            if item in s["splits"]:
+                raise ValueError(f"{item} is split: no laptop session")
+            sessions = s["sessions"].setdefault(item, {POD: None})
+            held = sorted(w for w, v in sessions.items() if v)
+            if held:
+                raise ValueError(f"{item} has an open session of {held}: settle it first")
+            if not str(event.get("session") or "").strip():
+                raise ValueError("a laptop session names its session id")
+            api_usd = finite_usd(event["api_usd"], "a laptop session's API authorization",
+                                 positive=True)  # fmt: skip
+            left_api = self.parts(item, s)[1] - charged[item]["api_usd"]
+            if api_usd > left_api + 1e-9:
+                raise ValueError(f"API ${api_usd:.4f} exceed {item}'s ${left_api:.4f} left")
+            s["issued"].add(item)
+            sessions[LAPTOP] = {"session": str(event["session"]), "api_usd": api_usd}
+        elif kind == "api_session_close":
+            # Settled at its committed cost, also once the item is stopped (as a Pod session)
+            settling = current == STOPPED
+            if current != RUNNING and not settling:
+                raise ValueError(f"{item} is {current}: no laptop session is settled")
+            open_ = (s["sessions"].get(item) or {}).get(LAPTOP)
+            if open_ is None or open_["session"] != event.get("session"):
+                raise ValueError(f"{item} has no open laptop session {event.get('session')}")
+            api_usd = finite_usd(event["api_usd"], "a laptop session's API cost")
+            s["sessions"][item][LAPTOP] = None
+            c = charged[item]
+            c["api_usd"] += api_usd
+            gpu, api = self.parts(item, s)
+            if (
+                c["api_usd"] > api + 1e-9 or api_usd > open_["api_usd"] + 1e-9
+                or c["gpu_usd"] + c["api_usd"] > reservation[item] + 1e-9 or settling
+            ):  # fmt: skip
+                states[item] = STOPPED
+                s["final"][item] = c["gpu_usd"] + c["api_usd"]
         elif kind in ("charge", "session_close"):
             # A stopped item's open sessions are still settled at their paid cost (review s4a);
             # nothing else is charged to it, and nothing new is authorized.
@@ -1854,6 +1918,9 @@ class AllocationMeter:
                     f"{item} has an open Pod session on {held}: nothing else is charged to it "
                     "until it is closed"
                 )
+            elif (s["sessions"].get(item) or {}).get(LAPTOP):
+                raise ValueError(f"{item} has an open laptop session: nothing else is charged "
+                                 "to it until it is settled")  # fmt: skip
             if item in s["splits"] and worker not in s["splits"][item]:
                 raise ValueError(
                     f"{item} is split: a charge names one of its workers "
@@ -1913,9 +1980,11 @@ class AllocationMeter:
         elif kind == "complete":
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: only a running item completes")
-            open_ = {w: v["pod_id"] for w, v in (s["sessions"].get(item) or {}).items() if v}
+            open_ = {w: v.get("pod_id") or v.get("session")
+                     for w, v in (s["sessions"].get(item) or {}).items() if v}  # fmt: skip
             if open_:
-                raise ValueError(f"{item} has open Pod sessions {open_}: close them first")
+                raise ValueError(f"{item} has open Pod sessions or a laptop session {open_}: "
+                                 "close them first")  # fmt: skip
             if self.panel_rows() is not None and a.kind in (STAGE3_PANEL, STRONG_STAGE3):
                 problem = self._evidence_problem(item, event, s, release=False)
                 if problem:  # bundle-ready or terminal, never before the contracts (s6k 2)

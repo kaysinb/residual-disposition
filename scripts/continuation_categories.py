@@ -26,6 +26,7 @@ Without ``--send`` it prints the number of requests and their estimated cost onl
 from __future__ import annotations
 
 import argparse
+import atexit
 import json
 import os
 from pathlib import Path
@@ -152,7 +153,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.send:
         print("Dry run: nothing was sent. Pass --send to grade.")
         return 0
-    meter, ledger = stage3_money.money(data_root(), args.behavior, data_root() / METER_LOG)
+    _, ledger = stage3_money.money(data_root(), args.behavior, data_root() / METER_LOG)
+    atexit.register(ledger.close)  # an interrupted run's sessions settled at its exit
     ledger.check(HEADROOM * est.usd)
     cfg = OmegaConf.create({"experiment": "category_stage3", "name": "category", "step": "category",
                             "params": {"behavior": args.behavior, "sources": vars(args)},
@@ -182,8 +184,7 @@ def main(argv: list[str] | None = None) -> int:
                 f.write(json.dumps({"response_id": rid, "request_key": request.key,
                                     "categories": grade}) + "\n")  # fmt: skip
                 graded += 1
-        charged = stage3_money.charge(meter, data_root() / METER_LOG, args.behavior,
-                                      ledger.parts)  # fmt: skip
+        charged = ledger.close()
         run.summarize({"requests": len(requests), "retried": len(again), "graded": graded,
                        "charged": charged})  # fmt: skip
     print(f"{graded} of {len(requests)} graded, {len(again)} retried; written to {run.dir}")

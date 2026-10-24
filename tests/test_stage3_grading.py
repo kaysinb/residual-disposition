@@ -17,7 +17,7 @@ import pytest
 from residual_disposition import continuation_readers as E
 from residual_disposition import stage3_money as M
 from residual_disposition import summarizer
-from residual_disposition.budget import RUNNING, ApiBudgetExhausted, ApiLedger
+from residual_disposition.budget import ApiBudgetExhausted
 from residual_disposition.continuation_judge import CATEGORY_VERSION, category_letters
 from residual_disposition.judge import Completion, JudgeCache, request_key
 
@@ -35,90 +35,127 @@ def load(name: str):
 # ------------------------------------------------------------------------------- the money
 
 
-class FakeMeter:
-    """The meter's reads and its charge, as stage3_money uses them."""
+def real_meter(tmp_path, *, strong="reserved"):
+    """A meter (``budget.AllocationMeter``, logged) with the lineage's base item running, $2 of
+    API, and its strong item ($10 of API) admitted or running."""
+    from residual_disposition.budget import Allocation, AllocationMeter
 
-    def __init__(self, log: Path, states: dict[str, str], api: dict[str, float]):
-        self.log, self.state, self.api, self.sessions = log, states, api, {}
-
-    def _transaction(self):
-        import contextlib
-
-        return contextlib.nullcontext()
-
-    def session(self, item, worker):
-        return self.sessions.get(item)
-
-    def limits(self, item):
-        return SimpleNamespace(api_usd=self.api[item])
-
-    def charge(self, item, *, api_usd, label):
-        with self.log.open("a") as f:
-            f.write(json.dumps({"event": "charge", "item": item, "api_usd": api_usd,
-                                "label": label}) + "\n")  # fmt: skip
+    items = [Allocation("stage3/tldr/follow", "stage4", 10.0, 5.0, 2.0),
+             Allocation("strong/stage3/tldr/follow", "stage4", 10.0, 5.0, 10.0)]  # fmt: skip
+    m = AllocationMeter(items, cap=1000.0, reserve=0.0, drop_reasons={},
+                        log_path=tmp_path / "meter.jsonl")  # fmt: skip
+    for item in ("stage3/tldr/follow", "strong/stage3/tldr/follow"):
+        assert m.admit(item, spent_elsewhere=0, storage=0).allowed
+    m.start("stage3/tldr/follow")
+    if strong == "running":
+        m.start("strong/stage3/tldr/follow")
+    return m
 
 
-def meter(tmp_path, strong=True):
-    states = {"stage3/tldr/follow": RUNNING,
-              "strong/stage3/tldr/follow": RUNNING if strong else "reserved"}  # fmt: skip
-    return FakeMeter(
-        tmp_path / "meter.jsonl",
-        states,
-        {"stage3/tldr/follow": 2.0, "strong/stage3/tldr/follow": 10.0},
-    )
-
-
-def test_the_parts_ceilings_are_recorded_once(tmp_path):
-    m = meter(tmp_path, strong=False)
-    assert M.ceiling(tmp_path, "tldr", "base", m) == 2.0
-    assert M.ceiling(tmp_path, "tldr", "strong", m) is None  # not running: nothing offered yet
-    m.api["stage3/tldr/follow"] = 0.5  # later reads change nothing recorded
-    assert M.ceiling(tmp_path, "tldr", "base", m) == 2.0
-    m.state["strong/stage3/tldr/follow"] = RUNNING
-    assert M.ceiling(tmp_path, "tldr", "strong", m) == 10.0
-    m.sessions["stage3/tldr/follow"] = {"pod_id": "p"}
-    (tmp_path / "ledgers" / "s3r-tldr-base.ceiling.json").unlink()
-    with pytest.raises(ValueError, match="open Pod session"):
-        M.ceiling(tmp_path, "tldr", "base", m)
-
-
-def test_each_request_is_owned_by_the_base_first_then_the_strong_part(tmp_path):
-    m = meter(tmp_path)
-    chained = M.ChainedLedger(M.open_ledgers(tmp_path, "tldr", m))
-    first = chained.reserve({"k1": 1.5}, "x")
-    assert chained.owner_of[first["k1"]].worker == "s3r-tldr-base"
-    second = chained.reserve({"k2": 1.0}, "x")  # 0.5 left in the base: the strong part takes it
-    assert chained.owner_of[second["k2"]].worker == "s3r-tldr-strong"
-    third = chained.reserve({"k3": 0.4}, "x")  # the base holds this one again
-    assert chained.owner_of[third["k3"]].worker == "s3r-tldr-base"
-    chained.settle(first["k1"], "k1", 0.2, "x")
-    assert chained.parts["base"].committed() == pytest.approx(0.6)
+def test_a_command_spends_within_its_meter_session(tmp_path):
+    m = real_meter(tmp_path)
+    chained = M.ChainedLedger(M.open_parts(m, tmp_path, "tldr"))
+    assert list(chained.parts) == ["base"]  # the strong item is not started
+    held = m.laptop_session("stage3/tldr/follow")
+    assert held["api_usd"] == 2.0
+    tokens = chained.reserve({"k": 1.5}, "x")
+    chained.settle(tokens["k"], "k", 0.4, "x")
     with pytest.raises(ApiBudgetExhausted, match="stop and price"):
-        chained.reserve({"k4": 9.5}, "x")
-    chained.close()
+        chained.reserve({"q": 1.7}, "x")  # 1.6 left in the base: the strong part not started
+    with pytest.raises(ValueError, match="open .*sessions"):  # never completed with it open
+        m.complete("stage3/tldr/follow")
+    assert chained.close() == {"base": pytest.approx(0.4)}
+    assert m.laptop_session("stage3/tldr/follow") is None
+    assert m.charged["stage3/tldr/follow"]["api_usd"] == pytest.approx(0.4)
+    assert chained.close() == {"base": pytest.approx(0.4)}  # once
 
 
-def test_the_meter_is_charged_only_the_increment(tmp_path):
-    m = meter(tmp_path)
-    parts = M.open_ledgers(tmp_path, "tldr", m)
-    tokens = parts["base"].reserve({"k": 1.0}, "x")
-    parts["base"].settle(tokens["k"], "k", 0.25, "x")
-    assert M.charge(m, m.log, "tldr", parts) == {"base": 0.25, "strong": 0.0}
-    assert M.charge(m, m.log, "tldr", parts) == {"base": 0.0, "strong": 0.0}  # a rerun: nothing
-    parts["strong"].reserve({"q": 0.75}, "x")  # an open reservation is charged at its bound
-    assert M.charge(m, m.log, "tldr", parts)["strong"] == 0.75
-    lines = [json.loads(x) for x in m.log.read_text().splitlines()]
-    assert sum(x["api_usd"] for x in lines) == pytest.approx(1.0)
-    assert {x["label"] for x in lines} == {M.label_of("tldr", "base"), M.label_of("tldr", "strong")}
-    for ledger in parts.values():
-        ledger.close()
+def test_a_request_is_refused_once_its_session_is_not_the_meter_s(tmp_path):
+    m = real_meter(tmp_path)
+    chained = M.ChainedLedger(M.open_parts(m, tmp_path, "tldr"))
+    held = m.laptop_session("stage3/tldr/follow")
+    m.close_api_session("stage3/tldr/follow", held["session"], 0.0)  # settled elsewhere
+    with pytest.raises(ApiBudgetExhausted):
+        chained.reserve({"k": 0.1}, "x")
 
 
-def test_no_part_running_refuses(tmp_path):
-    m = meter(tmp_path, strong=False)
-    m.state["stage3/tldr/follow"] = "completed"
-    with pytest.raises(ApiBudgetExhausted, match="no part"):
-        M.open_ledgers(tmp_path, "tldr", m)
+def test_an_interrupted_command_s_session_is_settled_first(tmp_path):
+    m = real_meter(tmp_path)
+    chained = M.ChainedLedger(M.open_parts(m, tmp_path, "tldr"))
+    chained.reserve({"k": 1.0}, "x")  # never settled: the command dies here
+    for p in chained.parts.values():
+        p.ledger.close()  # the process's exit releases the writer, not the session
+    again = M.ChainedLedger(M.open_parts(m, tmp_path, "tldr"))
+    assert m.charged["stage3/tldr/follow"]["api_usd"] == pytest.approx(1.0)  # its open bound
+    assert again.parts["base"].ledger.remaining() == pytest.approx(1.0)
+    again.close()
+
+
+def test_the_strong_part_starts_only_when_the_base_cannot_hold_the_next_batch(tmp_path):
+    m = real_meter(tmp_path)
+    with pytest.raises(SystemExit, match="not needed yet"):
+        M.start_strong(m, tmp_path, "tldr", 1.5)
+    assert M.start_strong(m, tmp_path, "tldr", 2.5)["item"] == "strong/stage3/tldr/follow"
+    chained = M.ChainedLedger(M.open_parts(m, tmp_path, "tldr"))
+    assert list(chained.parts) == ["base", "strong"]
+    first = chained.reserve({"a": 1.5}, "x")
+    second = chained.reserve({"b": 1.0}, "x")  # 0.5 left in the base: the strong part
+    third = chained.reserve({"c": 0.4}, "x")
+    owners = [chained.owner_of[t[k]].worker for t, k in ((first, "a"), (second, "b"),
+                                                         (third, "c"))]  # fmt: skip
+    assert owners == ["s3r-tldr-base", "s3r-tldr-strong", "s3r-tldr-base"]
+    assert chained.close() == {"base": pytest.approx(1.9), "strong": pytest.approx(1.0)}
+    with pytest.raises(SystemExit, match="is running"):
+        M.start_strong(m, tmp_path, "tldr", 99.0)
+
+
+def test_a_session_settled_above_its_authorization_stops_its_item(tmp_path):
+    m = real_meter(tmp_path)
+    M.open_parts(m, tmp_path, "tldr")
+    held = m.laptop_session("stage3/tldr/follow")
+    with pytest.raises(ValueError, match="open session"):
+        m.open_api_session("stage3/tldr/follow", "other", 0.5)  # alone on its item
+    m.close_api_session("stage3/tldr/follow", held["session"], 2.5)
+    assert m.state["stage3/tldr/follow"] == "stopped"
+
+
+def test_a_laptop_session_excludes_a_pod_session_and_other_charges(tmp_path):
+    m = real_meter(tmp_path)
+    M.open_parts(m, tmp_path, "tldr")
+    with pytest.raises(ValueError, match="laptop session"):
+        m.charge("stage3/tldr/follow", api_usd=0.1)
+    with pytest.raises(ValueError, match="laptop session"):
+        m.open_session("stage3/tldr/follow", "pod", pod_id="p", deadline="2026-10-25T00:00:00",
+                       price=3.99, hours=1, api_usd=0)  # fmt: skip
+
+
+def test_the_money_pays_only_its_own_lineage():
+    M.check_funding("tldr", "tldr")
+    with pytest.raises(SystemExit, match="not paid from eli5"):
+        M.check_funding("eli5", "tldr")
+
+
+def test_a_reconciled_answer_is_priced_by_its_own_model(tmp_path):
+    """An open reservation settled from the cache is priced by the model its request names: a
+    lenient answer at the lenient model's prices."""
+    from residual_disposition.adl_graders import LedgeredBackend
+    from residual_disposition.judge import ChatRequest
+
+    settings = E.judge_settings("v4")
+    strict, lenient = settings.model, settings.model_for("lenient")
+    backend = LedgeredBackend(SimpleNamespace(attempt_hook=None, tier="standard"), None,
+                              lambda r: settings.model_for(r.kind),
+                              models={strict.id: strict, lenient.id: lenient})  # fmt: skip
+    body = {"model": lenient.id, "messages": [], "max_tokens": 10}
+    rebuilt = ChatRequest("k", "summary", "", body)  # how a reconciliation rebuilds it
+    answer = Completion(
+        "yes", usage={"prompt_tokens": 1000, "completion_tokens": 100, "total_tokens": 1100}
+    )
+    named = ChatRequest("k", "lenient", "lenient-ia-j2", body)
+    assert backend.cost(rebuilt, answer) == backend.cost(named, answer) > 0
+    assert backend.cost(rebuilt, answer) != LedgeredBackend(
+        SimpleNamespace(attempt_hook=None, tier="standard"), None,
+        lambda r: settings.model_for(r.kind)).cost(rebuilt, answer)  # fmt: skip
 
 
 # ----------------------------------------------------------------------- the interpreter
@@ -274,11 +311,10 @@ def test_the_category_run_is_what_the_verdicts_read(tmp_path, monkeypatch):
     answers = {first["h0"].key: "",  # refused: retried once
                cats.retry_of(first["h0"]).key: json.dumps({"categories": [letter["tldr"]]}),
                first["h3"].key: json.dumps({"categories": [letter["eli5"]]})}  # fmt: skip
-    ledger_parts = {"base": ApiLedger(tmp_path / "base.jsonl", 5.0, "s3r-tldr-base")}
-    chained = M.ChainedLedger(ledger_parts)
-    charged = []
+    closed = []
+    chained = SimpleNamespace(check=lambda usd: None, source=None,
+                              close=lambda: closed.append(1) or {"base": 0.0})  # fmt: skip
     monkeypatch.setattr(M, "money", lambda root, behavior, log: (None, chained))
-    monkeypatch.setattr(M, "charge", lambda *a: charged.append(a) or {"base": 0.0})
     monkeypatch.setattr(cats, "backend", lambda ledger, model: FakeBackend(answers))
     assert cats.main(["tldr", "--lens-reading", "read", "--lens-judge", "judged",
                       "--pd-reading", "read", "--pd-judge", "judged", "--send"]) == 0  # fmt: skip
@@ -286,7 +322,7 @@ def test_the_category_run_is_what_the_verdicts_read(tmp_path, monkeypatch):
     grades = E.category_grades(lambda name: run if name == run.name else None, run.name, counted)
     assert grades["h0"][0] == frozenset({"tldr"}) and len(grades["h0"][1]) == 2
     assert grades["h3"][0] == frozenset({"eli5"})
-    assert charged and CATEGORY_VERSION == "category-v1"
+    assert closed and CATEGORY_VERSION == "category-v1"
 
 
 def test_stage3_s_pd_clean_rubric_is_frozen_with_the_panel_s_trace_boundaries():

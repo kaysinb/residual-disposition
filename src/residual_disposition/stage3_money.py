@@ -4,30 +4,34 @@ give it.
 
 - **Parts.** The base, the rest of ``stage3/<behavior>/follow``'s API limit once the Pod's λ
   grading is charged to it; then the strong part, ``strong/stage3/<behavior>/follow``'s API
-  limit. Each part has a durable ledger of its own (``budget.ApiLedger``, worker
-  ``s3r-<behavior>-<part>``), so that no two parts spend one balance.
-- **Ceilings.** A part's allowance is its item's remaining API limit when the part is first
-  opened, recorded once (``data/ledgers/s3r-<behavior>-<part>.ceiling.json``) and read back
-  every later time; a part whose item is not running offers nothing yet.
+  limit, once its item is started (``start_strong``). Each part has a durable ledger of its own
+  (``budget.ApiLedger``, worker ``s3r-<behavior>-<part>``), so that no two parts spend one
+  balance.
+- **Sessions.** A command opens, on each running part's item, the meter's laptop API session
+  (``AllocationMeter.open_api_session``): authorized for the item's API left, alone on the item,
+  recorded before anything is sent; the part's ledger records the session's ceiling
+  (``ApiLedger.session_ceiling``) and is its allowance. A session left open by an interrupted
+  command is settled first, at its ledger's committed cost; an item stopped meanwhile is settled
+  too. An item never completes with a session open.
 - **Ownership per request.** Each reservation goes to the base while the base holds it, else to
-  the strong part (``ChainedLedger``); one that neither holds is refused before it is sent, and
+  the strong part (``ChainedLedger``), after checking that the part's session is still the
+  meter's open one on a running item; one that no part holds is refused before it is sent, and
   the step stops for its price.
-- **Charging the meter.** ``charge`` books on each part's item the part's committed money (its
-  settled spend and every open reservation, which may be billed) less what the meter's log
-  already holds under the part's label: only the increment, so a rerun or a resumed charge
-  books nothing twice.
+- **Settling.** At the end each session is closed at its committed cost (its settled spend and
+  every open reservation, which may be billed; ``ApiLedger.session_cost``).
+- **Funding.** The behavior a command spends for is the lineage's that its inputs name; another
+  is refused before any ledger opens (``check_funding``).
 """
 
 from __future__ import annotations
 
-import json
-import os
+import uuid
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from .adl_graders import LedgeredBackend
-from .budget import POD, RUNNING, ApiBudgetExhausted, ApiLedger, finite_usd
+from .budget import RESERVED, RUNNING, ApiBudgetExhausted, ApiLedger
 
 PARTS = ("base", "strong")
 ITEMS = {"base": "stage3/{behavior}/follow", "strong": "strong/stage3/{behavior}/follow"}
@@ -41,8 +45,8 @@ def worker_of(behavior: str, part: str) -> str:
     return f"s3r-{behavior}-{part}"
 
 
-def label_of(behavior: str, part: str) -> str:
-    return f"the readers' grading on the laptop ({worker_of(behavior, part)})"
+def ledger_path(root: Path, behavior: str, part: str) -> Path:
+    return Path(root) / "ledgers" / f"adl-api-{worker_of(behavior, part)}.jsonl"
 
 
 def meter_of(log: Path) -> Any:
@@ -61,44 +65,77 @@ def meter_of(log: Path) -> Any:
                            log_path=log, migrations=load_migrations(allocations))  # fmt: skip
 
 
-def ceiling(root: Path, behavior: str, part: str, meter: Any) -> float | None:
-    """The part's allowance: recorded once, when its item first runs, as the item's remaining
-    API limit then; None while its item does not run and nothing is recorded."""
-    path = Path(root) / "ledgers" / f"{worker_of(behavior, part)}.ceiling.json"
-    item = item_of(behavior, part)
-    if path.is_file():
-        data = json.loads(path.read_text())
-        if data.get("item") != item:
-            raise ValueError(f"{path}: the ceiling of {data.get('item')}, not {item}")
-        return finite_usd(data["allowance_usd"], "a recorded ceiling")
+def check_funding(behavior: str, lineage_behavior: str) -> None:
+    """A command spends only for the lineage its inputs name."""
+    if behavior != lineage_behavior:
+        raise SystemExit(f"the readers of {lineage_behavior} are not paid from {behavior}'s money")
+
+
+def _state(meter: Any, item: str) -> str:
     with meter._transaction():  # the state with every instance's events
-        running = meter.state.get(item) == RUNNING
-    if not running:
-        return None
-    if meter.session(item, POD) is not None:
-        raise ValueError(f"{item} has an open Pod session: its λ grading is not charged yet")
-    usd = meter.limits(item).api_usd
-    path.parent.mkdir(parents=True, exist_ok=True)
-    blob = json.dumps({"item": item, "allowance_usd": usd}) + "\n"
-    try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-    except FileExistsError:  # another writer recorded it first: read that one
-        return ceiling(root, behavior, part, meter)
-    with os.fdopen(fd, "w") as f:
-        f.write(blob)
-        f.flush()
-        os.fsync(f.fileno())
-    return usd
+        return meter.state[item]
 
 
-def open_ledgers(root: Path, behavior: str, meter: Any) -> dict[str, ApiLedger]:
-    """The writers of the parts that have a positive allowance, in ``PARTS`` order."""
+def settle(meter: Any, root: Path, behavior: str) -> dict[str, float]:
+    """Close every part's laptop session left open (an interrupted command), at its ledger's
+    committed cost since it opened, the item running or stopped. Returns {part: the USD
+    settled}."""
     out = {}
     for part in PARTS:
-        usd = ceiling(root, behavior, part, meter)
-        if usd is not None and usd > 0:
-            worker = worker_of(behavior, part)
-            out[part] = ApiLedger(Path(root) / "ledgers" / f"adl-api-{worker}.jsonl", usd, worker)
+        item = item_of(behavior, part)
+        held = meter.laptop_session(item)
+        if held is None:
+            continue
+        worker = worker_of(behavior, part)
+        ledger = ApiLedger(ledger_path(root, behavior, part), 1.0, worker)
+        try:
+            cost = ledger.session_cost(held["session"])
+        finally:
+            ledger.close()
+        meter.close_api_session(item, held["session"], cost)
+        out[part] = cost
+    return out
+
+
+class Part:
+    """One part's session: its item, session id and ledger (its allowance the session's
+    ceiling)."""
+
+    def __init__(self, meter: Any, root: Path, behavior: str, part: str) -> None:
+        self.meter, self.item, self.part = meter, item_of(behavior, part), part
+        api = meter.limits(self.item).api_usd
+        if api <= 0:
+            raise ApiBudgetExhausted(f"{self.item} has no API left")
+        self.session = uuid.uuid4().hex
+        meter.open_api_session(self.item, self.session, api)
+        self.ledger = ApiLedger(ledger_path(root, behavior, part), 1.0, worker_of(behavior, part))
+        self.ledger.allowance_usd = self.ledger.session_ceiling(self.session, api)
+
+    def authorized(self) -> bool:
+        """The part's session is still the meter's open one on its running item."""
+        held = self.meter.laptop_session(self.item)
+        return (held or {}).get("session") == self.session and _state(
+            self.meter, self.item) == RUNNING  # fmt: skip
+
+    def close(self) -> float:
+        """Settle the session at its committed cost (the item running or stopped)."""
+        cost = self.ledger.session_cost(self.session)
+        if (self.meter.laptop_session(self.item) or {}).get("session") == self.session:
+            self.meter.close_api_session(self.item, self.session, cost)
+        self.ledger.close()
+        return cost
+
+
+def open_parts(meter: Any, root: Path, behavior: str) -> dict[str, Part]:
+    """Every running part's session, in ``PARTS`` order, after settling those left open."""
+    settle(meter, root, behavior)
+    out = {}
+    for part in PARTS:
+        if _state(meter, item_of(behavior, part)) == RUNNING:
+            try:
+                out[part] = Part(meter, root, behavior, part)
+            except ApiBudgetExhausted:
+                continue
     if not out:
         raise ApiBudgetExhausted(f"{behavior}: no part of the readers' API money is running")
     return out
@@ -106,39 +143,41 @@ def open_ledgers(root: Path, behavior: str, meter: Any) -> dict[str, ApiLedger]:
 
 class ChainedLedger:
     """The parts' ledgers as one (the interface ``adl_graders.LedgeredBackend`` uses): a
-    reservation goes to the first part that holds it whole, the base before the strong part;
-    its settlement and failure go to the part that took it."""
+    reservation goes to the first part whose session is still authorized and that holds it
+    whole, the base before the strong part; its settlement and failure go to the part that took
+    it. ``close`` settles every session."""
 
-    def __init__(self, parts: Mapping[str, ApiLedger]) -> None:
+    def __init__(self, parts: Mapping[str, Part]) -> None:
         self.parts = dict(parts)
         self.owner_of: dict[str, ApiLedger] = {}
-        self.worker = "+".join(ledger.worker for ledger in self.parts.values())
+        self.worker = "+".join(p.ledger.worker for p in self.parts.values())
 
     @property
     def source(self) -> str | None:
-        return next(iter(self.parts.values())).source
+        return next(iter(self.parts.values())).ledger.source
 
     @source.setter
     def source(self, value: str | None) -> None:  # every event names the run that writes it
-        for ledger in self.parts.values():
-            ledger.source = value
+        for p in self.parts.values():
+            p.ledger.source = value
 
     def reserve(self, reservations: Mapping[str, float], label: str, *,
                 tier: str | None = None) -> dict[str, str]:  # fmt: skip
         total = sum(reservations.values())
-        for ledger in self.parts.values():
-            if ledger.remaining() + 1e-12 < total:
+        for p in self.parts.values():
+            if p.ledger.remaining() + 1e-12 < total or not p.authorized():
                 continue
             try:
-                ids = ledger.reserve(reservations, label, tier=tier)
+                ids = p.ledger.reserve(reservations, label, tier=tier)
             except ApiBudgetExhausted:
                 continue
             for token in ids.values():
-                self.owner_of[token] = ledger
+                self.owner_of[token] = p.ledger
             return ids
         raise ApiBudgetExhausted(
-            f"the readers' API ({self.worker}): no part holds ${total:.4f} more; "
-            f"${self.remaining():.4f} left in all: stop and price"
+            f"the readers' API ({self.worker}): no authorized part holds ${total:.4f} more; "
+            f"${self.remaining():.4f} left in all: stop and price (start_strong when the base "
+            "is short)"
         )
 
     def settle(self, token: str, key: str, usd: float, label: str, *,
@@ -151,21 +190,24 @@ class ChainedLedger:
                                   tier=tier)  # fmt: skip
 
     def remaining(self) -> float:
-        return sum(ledger.remaining() for ledger in self.parts.values())
+        return sum(p.ledger.remaining() for p in self.parts.values())
 
     def committed(self) -> float:
-        return sum(ledger.committed() for ledger in self.parts.values())
+        return sum(p.ledger.committed() for p in self.parts.values())
 
     def check(self, estimate_usd: float = 0.0) -> None:
         if estimate_usd > self.remaining():
             raise ApiBudgetExhausted(
                 f"the readers' API ({self.worker}): ${estimate_usd:.2f} exceeds the "
-                f"${self.remaining():.2f} left: stop and price"
+                f"${self.remaining():.2f} left: stop and price (start_strong when the base is "
+                "short)"
             )
 
-    def close(self) -> None:
-        for ledger in self.parts.values():
-            ledger.close()
+    def close(self) -> dict[str, float]:
+        """Settle every part's session, once; returns {part: its committed cost}."""
+        if not hasattr(self, "_settled"):
+            self._settled = {name: p.close() for name, p in self.parts.items()}
+        return self._settled
 
 
 class ChainedBackend(LedgeredBackend):
@@ -178,60 +220,33 @@ class ChainedBackend(LedgeredBackend):
     def reconcile(self, cache: Any) -> int:
         settled = 0
         chained = self.ledger
-        for ledger in chained.parts.values():
+        for p in chained.parts.values():
             part = LedgeredBackend.__new__(LedgeredBackend)
-            part.__dict__.update({**self.__dict__, "ledger": ledger})
+            part.__dict__.update({**self.__dict__, "ledger": p.ledger})
             settled += LedgeredBackend.reconcile(part, cache)
         self.ledger = chained
         return settled
 
 
-def _charged(log: Path, item: str, label: str) -> float:
-    """What the meter's log holds as API charged to ``item`` under ``label``."""
-    total = 0.0
-    if not Path(log).is_file():
-        return total
-    for line in Path(log).read_text().splitlines():
-        if not line.strip():
-            continue
-        event = json.loads(line)
-        if event.get("event") == "charge" and event.get("item") == item \
-                and event.get("label") == label:  # fmt: skip
-            total += float(event.get("api_usd") or 0.0)
-    return total
-
-
-def charge(meter: Any, log: Path, behavior: str, parts: Mapping[str, ApiLedger]) -> dict:
-    """Book each part's uncharged committed money on its item (module docstring); returns
-    {part: the USD booked now}."""
-    out = {}
-    for part, ledger in parts.items():
-        item, label = item_of(behavior, part), label_of(behavior, part)
-        increment = round(ledger.committed() - _charged(log, item, label), 9)
-        if increment > 0:
-            meter.charge(item, api_usd=increment, label=label)
-        out[part] = max(0.0, increment)
-    return out
-
-
 def money(root: Path, behavior: str, log: Path) -> tuple[Any, ChainedLedger]:
-    """The meter and the chained ledger of a lineage's grading."""
+    """The meter and the chained ledger of a lineage's grading: every running part's session
+    opened (after settling any left open)."""
     meter = meter_of(log)
-    return meter, ChainedLedger(open_ledgers(root, behavior, meter))
+    return meter, ChainedLedger(open_parts(meter, root, behavior))
 
 
-def charge_all(root: Path, behavior: str, log: Path) -> dict:
-    """``charge`` over every part recorded so far (a rerun charges nothing twice)."""
-    meter = meter_of(log)
-    parts = {}
-    for part in PARTS:
-        usd = ceiling(root, behavior, part, meter)
-        if usd is not None and usd > 0:
-            worker = worker_of(behavior, part)
-            parts[part] = ApiLedger(Path(root) / "ledgers" / f"adl-api-{worker}.jsonl", usd,
-                                    worker)  # fmt: skip
-    try:
-        return charge(meter, log, behavior, parts)
-    finally:
-        for ledger in parts.values():
-            ledger.close()
+def start_strong(meter: Any, root: Path, behavior: str, need_usd: float) -> dict[str, Any]:
+    """Start ``strong/stage3/<behavior>/follow`` through the meter when the base cannot hold the
+    next batch (``need_usd``, its estimate with headroom): the base's API left below the need,
+    and the strong item admitted (reserved), never before. Returns the strong item's limits."""
+    base, strong = item_of(behavior, "base"), item_of(behavior, "strong")
+    if meter.laptop_session(base) is not None:
+        raise SystemExit(f"{base} has an open laptop session: settle it first")
+    left = meter.limits(base).api_usd if _state(meter, base) == RUNNING else 0.0
+    if left >= need_usd:
+        raise SystemExit(f"{base} holds ${left:.4f} ≥ ${need_usd:.4f}: the strong part is not "
+                         "needed yet")  # fmt: skip
+    if _state(meter, strong) != RESERVED:
+        raise SystemExit(f"{strong} is {_state(meter, strong)}: admit it first, in its order")
+    limits = meter.start(strong)
+    return {"item": strong, "base_left": left, "need": need_usd, "api_usd": limits.api_usd}

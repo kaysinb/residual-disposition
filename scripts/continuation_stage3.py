@@ -37,6 +37,8 @@ reading.
     uv run python scripts/continuation_stage3.py terminal <behavior>
     uv run python scripts/continuation_stage3.py pending <behavior>
     uv run python scripts/continuation_stage3.py state-index <stage3_readers run> --out <index>
+    uv run python scripts/continuation_stage3.py start-strong <behavior> --need <USD>
+    uv run python scripts/continuation_stage3.py settle <behavior>
     uv run python scripts/continuation_stage3.py certified <behavior> --contracts <sha256>
 """
 
@@ -185,7 +187,24 @@ def main(argv: list[str] | None = None) -> int:
     index.add_argument("record", type=Path, help="the lineage's stage3_readers run")
     index.add_argument("--index", type=Path, default=INDEX, help="the continuation's index")
     index.add_argument("--out", type=Path, required=True)
+    strong = sub.add_parser("start-strong", help="start a lineage's strong part when the base "
+                            "cannot hold the next batch")  # fmt: skip
+    strong.add_argument("behavior")
+    strong.add_argument("--need", type=float, required=True,
+                        help="the next batch's estimate with its headroom, USD")  # fmt: skip
+    settle = sub.add_parser("settle", help="settle a lineage's laptop sessions left open")
+    settle.add_argument("behavior")
     args = parser.parse_args(argv)
+    if args.command in ("start-strong", "settle"):  # the meter's log, its one writer here
+        from residual_disposition import stage3_money as money
+        from residual_disposition.paths import data_root
+
+        meter = money.meter_of(data_root() / "ledgers" / "continuation_meter.jsonl")
+        if args.command == "settle":
+            print(json.dumps({"settled": money.settle(meter, data_root(), args.behavior)}))
+        else:
+            print(json.dumps(money.start_strong(meter, data_root(), args.behavior, args.need)))
+        return 0
     if args.command == "state-index":
         print(json.dumps(state_index(args.record, args.index, args.out)))
         return 0

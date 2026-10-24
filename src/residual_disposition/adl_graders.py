@@ -87,11 +87,14 @@ class LedgeredBackend:
         price_factor: float = 1.0,
         tier_factors: Mapping[str, float] | None = None,
         label: str = "adl",
+        models: Mapping[str, ModelSpec] | None = None,
     ) -> None:
         if not hasattr(inner, "attempt_hook"):
             raise ValueError("a ledgered backend needs one that reports each attempt (ChatBackend)")
         # The newest wrapper hears the attempts (the judge's stages run one after the other).
         self.inner, self.ledger, self.model_of = inner, ledger, model_of
+        # each model by its id: a reconciled answer is priced by its request's own model
+        self.models = dict(models or {})
         self.price_factor, self.label = price_factor, label
         self.tier = getattr(inner, "tier", "standard")
         self.tier_factors = dict(tier_factors or {self.tier: price_factor})
@@ -106,7 +109,7 @@ class LedgeredBackend:
         return self.tier_factors[tier]
 
     def cost(self, request: ChatRequest, completion: Completion, tier: str | None = None) -> float:
-        model = self.model_of(request)
+        model = self.models.get(str(request.body.get("model"))) or self.model_of(request)
         return usage_cost([completion], model, price_factor=self.factor(tier))[2]
 
     def reserve(self, request: ChatRequest, *, tier: str | None = None) -> str:

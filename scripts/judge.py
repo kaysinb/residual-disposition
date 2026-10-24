@@ -16,6 +16,7 @@ The endpoint and key come from JUDGE_API_BASE and JUDGE_API_KEY; the model only 
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import warnings
@@ -240,6 +241,7 @@ def run_stage(
                 flex_discount=j.cost.flex_discount,
             ),
             label=f"judge/{stage}",
+            models={m.id: m for m in (stage_settings.model, stage_settings.model_for("lenient"))},
         )
         backend.reconcile(cache)
     completions, cached = fetch(requests, backend, cache)
@@ -394,7 +396,12 @@ def main() -> None:
     items = [c.item for c in candidates]
     cache = JudgeCache(Path(j.cache_dir or data_root() / "cache" / "judge"))
     print(f"{len(items)} items (IA response and target) from {len(run_dirs)} runs")
+    if j.get("stage3_money"):  # the readers' money pays the lineage its states belong to
+        for behavior in sorted({item.target_behavior_id for item in items}):
+            stage3_money.check_funding(str(j.stage3_money.behavior), behavior)
     ledger = adl_ledger(run_dirs, j)
+    if isinstance(ledger, stage3_money.ChainedLedger):
+        atexit.register(ledger.close)  # an interrupted run's sessions settled at its exit
 
     primary_pairs = stage_requests(items, primary)
     primary_estimate = estimate(j, primary_pairs, primary, cache)
@@ -459,11 +466,8 @@ def main() -> None:
             labels += escalated.labels
             summary.update(stats)
         summary.update(report_agreement(cfg, items, labels, run))
-        if isinstance(ledger, stage3_money.ChainedLedger):  # the meter books the parts, once
-            behavior = str(j.stage3_money.behavior)
-            summary["charged"] = stage3_money.charge(
-                stage3_money.meter_of(data_root() / METER_LOG), data_root() / METER_LOG, behavior,
-                ledger.parts)  # fmt: skip
+        if isinstance(ledger, stage3_money.ChainedLedger):  # each part's session settled
+            summary["charged"] = ledger.close()
         run.summarize(summary)
         print(f"Labels written to {run.dir}")
 

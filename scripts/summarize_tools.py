@@ -14,6 +14,7 @@ The endpoint and key come from JUDGE_API_BASE and JUDGE_API_KEY; the model only 
 
 from __future__ import annotations
 
+import atexit
 import dataclasses
 import json
 import os
@@ -514,11 +515,17 @@ def main() -> None:
         return
     meter = None
     if s.get("stage3_money"):  # a certified lineage's readers: its base, then its strong part
+        if not s.get("expected_stage3"):
+            raise SystemExit("the readers' money pays a certified lineage's readings alone")
+        record = json.loads((Path(str(s.expected_stage3.record)) / "stage3_readers.json")
+                            .read_text())  # fmt: skip
+        stage3_money.check_funding(str(s.stage3_money.behavior), record["behavior"])
         meter, ledger = stage3_money.money(
             data_root(),
             str(s.stage3_money.behavior),
             data_root() / "ledgers" / "continuation_meter.jsonl",
         )
+        atexit.register(ledger.close)  # an interrupted run's sessions settled at its exit
     else:
         ledger = adl_ledger({e.tool for e in evidence}, s.get("adl_ledger"), s.get("api_ledger"))
     preflight(worst.usd, float(s.max_usd), ledger)
@@ -663,10 +670,8 @@ def main() -> None:
                 "responses": dict(sorted(Counter(tiers.values()).items())),
             },
         }
-        if meter is not None:  # the meter books what the lineage's parts committed, once
-            summary["charged"] = stage3_money.charge(
-                meter, data_root() / "ledgers" / "continuation_meter.jsonl",
-                str(s.stage3_money.behavior), ledger.parts)  # fmt: skip
+        if meter is not None:  # each part's session settled at its committed cost
+            summary["charged"] = ledger.close()
         summary["retried"] = len(refused)
         run.summarize(summary)
         print(
