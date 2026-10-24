@@ -1,0 +1,21 @@
+{
+  "behavior": "myth_fact",
+  "candidates": [],
+  "detector_version": "0ddc7ed2de3c",
+  "diagnostic": {
+    "manifest": "stage3_diagnostic_adl_myth_fact_g2.json",
+    "sha256": "ac2adc3caf6d54390a9d80a21870536f838f5989e8a75aaa53db66eeb6143768"
+  },
+  "family": {
+    "candidates": [],
+    "frozen": "2026-10-24",
+    "set_id": "c1fa2bf614fd"
+  },
+  "family_sha256": "0748b9170fa7a5a112be048fc9c3900be0ab4a97bbe6b2aa8d4c69f4f7e6fe2e",
+  "reason": "the diagnostic c1fa2bf614fd keeps 1 final trace(s) under detector 0ddc7ed2de3c and no candidate of its frozen family (0) passes: no analysis dose, no reading",
+  "repair_generation": 2,
+  "set_id": "c1fa2bf614fd",
+  "traced": [
+    "aec0fc6184a8"
+  ]
+}
