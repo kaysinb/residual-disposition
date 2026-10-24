@@ -7,7 +7,8 @@ evidence alone (``continuation_panel``).
 - ``failure <lineage> <phase> --kind budget|retry_exhausted --reason … [--run …]``: a phase's
   terminal stop, `manifests/stage3_failure_<lineage>_<phase>.json`, written once, only if it is
   an allowed one (``continuation_panel.FAILURE_KINDS``): the lineage's meter item stopped or
-  dropped, or each named cell failed on its attempt and its one retry with no completed run.
+  dropped, or each named approved cell failed with a classified training failure on its
+  attempt and its one retry of the same identity, with no completed run.
   Commit it before the analysis.
 
     uv run python scripts/continuation_panel.py analysis
@@ -78,7 +79,7 @@ def write_failure(args: argparse.Namespace, rules) -> int:
     behavior = _behavior(args.lineage)
     bundle = CS.committed_bundle(args.root, rules, find_run)
     entry = CS.committed_contract(args.root, behavior, rules, find_run, pipeline.panel_contract)
-    identity, _ = P.lineage_identity(args.root, behavior, entry["entry"], bundle["sha256"])
+    identity, ws = P.lineage_identity(args.root, behavior, entry["entry"], bundle["sha256"])
     if identity["lineage"] != args.lineage:
         raise SystemExit(f"{args.lineage} is not {behavior}'s certified lineage")
     state_of = P.meter_state(data_root() / "ledgers" / "continuation_meter.jsonl")
@@ -87,7 +88,16 @@ def write_failure(args: argparse.Namespace, rules) -> int:
     record = {"lineage": args.lineage, "behavior": behavior, "contracts": bundle["sha256"],
               "phase": args.phase, "kind": args.kind, "reason": args.reason,
               "runs": list(args.run), "meter": meter}  # fmt: skip
-    problems = P.failure_problems(record, find_run, identity, state_of, pipeline.completed_run)
+    cells = None
+    if args.kind == "retry_exhausted" and args.phase == "kstar":
+        cells = P.kstar_cells(ws, identity, rules)
+    elif args.kind == "retry_exhausted" and args.phase == "certificate":
+        from residual_disposition import continuation_kstar as K
+
+        kstar = K.committed_manifest(K.manifest_path(args.root, args.lineage), rules, args.root)
+        cells = dict(P.certificate_expected(ws, identity, kstar, rules)["cells"].values())
+    problems = P.failure_problems(record, find_run, identity, state_of, pipeline.completed_run,
+                                  cells)  # fmt: skip
     if problems:
         raise SystemExit(f"no failure record: {'; '.join(problems)}")
     path = P.failure_path(args.root, args.lineage, args.phase)

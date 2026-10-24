@@ -18,7 +18,6 @@ the HF model trains.
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 import hashlib
 import json
@@ -1179,7 +1178,7 @@ def relearn_state(
     if cell.done:
         ws.charge(cell.previous)
         return cell.summary()
-    with Run(cell.cfg) as run, _classified_failure(run):
+    with Run(cell.cfg) as run:
         base, tok = ws.base()
         curve, bare = relearn(
             store=ws.store,
@@ -1222,46 +1221,6 @@ def relearn_state(
         run.summarize(summary)
     ws.charge(run.dir)
     return summary
-
-
-FAILURE_RECORD = "failure.json"  # a failed run's classified cause, when it has one
-
-
-@contextlib.contextmanager
-def _classified_failure(run: Run):
-    """Records a relearning run's classified training failure before the run is marked failed
-    (§12.7: a classified failure, out of memory or divergence, gets one retry): "out of memory"
-    for CUDA's out-of-memory error, "divergence" for an error after a non-finite logged loss.
-    Any other failure (a lost machine, an engine or loading error, an interruption) records no
-    cause and stays recoverable. The cell's identity is unchanged."""
-    import torch
-
-    try:
-        yield
-    except torch.cuda.OutOfMemoryError as error:
-        _write_failure(run, "out of memory", error)
-        raise
-    except Exception as error:
-        if _nonfinite_loss(run.dir):
-            _write_failure(run, "divergence", error)
-        raise
-
-
-def _write_failure(run: Run, outcome: str, error: BaseException) -> None:
-    run.path(FAILURE_RECORD).write_text(
-        json.dumps({"outcome": outcome, "error": str(error)[:500]}) + "\n"
-    )
-
-
-def _nonfinite_loss(run_dir: Path) -> bool:
-    metrics = Path(run_dir) / "metrics.jsonl"
-    if not metrics.is_file():
-        return False
-    for line in metrics.read_text().splitlines():
-        loss = json.loads(line).get("loss")
-        if loss is not None and not math.isfinite(float(loss)):
-            return True
-    return False
 
 
 def first_step(

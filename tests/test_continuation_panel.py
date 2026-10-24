@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 from fractions import Fraction
-from types import SimpleNamespace
 
 import pytest
 
@@ -105,18 +104,18 @@ def trusted(ident: dict) -> dict:
 
 def approved() -> dict:
     refs = {"b": 0.75, "Y": 0.8, "Y2": 0.6}
-    return {arm: {rate: {"purpose": "certificate", "kstar": k, "budget": 200,
-                         "active_rate": refs[arm], "data_id": f"d{arm}", "examples": f"e{arm}",
+    return {arm: {rate: {"lr": float(rate), "active_rate": refs[arm], "data_id": f"d{arm}",
+                         "examples": f"e{arm}", "eval_limit": None,
                          "settings": {"learning_rate": float(rate), "budget": 200, "rank": 16},
-                         **EXECUTION}
+                         "sampling": {"temperature": 1.0}, "engine": {"max_model_len": 4096},
+                         "requests": "q" * 64, "purpose": "certificate", "kstar": k,
+                         "stop_after": max(20, k), "keep_responses": True, **EXECUTION}
                   for rate, k in RATES.items()}
             for arm in ("b", "Y", "Y2")}  # fmt: skip
 
 
 def expected(ident: dict) -> dict:
-    return {"common": trusted(ident),
-            "settings": {rate: {"learning_rate": float(rate), "rank": 16} for rate in RATES},
-            "execution": dict(EXECUTION)}  # fmt: skip
+    return {"common": trusted(ident), "approved": approved()}
 
 
 def readers(ident: dict, **changes) -> dict:
@@ -351,6 +350,14 @@ def test_a_certificate_of_other_inputs_is_refused():
     lambda c: c["params"]["b"]["1e-05"].update(generator_seed=7),
     lambda c: c["params"]["Y2"]["1e-05"].update(kstar=22),
     lambda c: c["params"].pop("Y2"),
+    lambda c: c["params"]["b"]["1e-05"].update(stop_after=30),
+    lambda c: c["params"]["b"]["1e-05"].update(keep_responses=False),
+    lambda c: c["params"]["Y"]["1e-05"].update(vllm_keep_awake=True),  # awake under sleep
+    lambda c: c["params"]["Y"]["1e-05"].update(requests="r" * 64),
+    lambda c: c["params"]["Y2"]["5e-06"].update(engine={"max_model_len": 8192}),
+    lambda c: c["params"]["b"]["5e-06"]["settings"].update(budget=300),
+    lambda c: c["params"]["b"]["5e-06"].update(lr=5),  # 5 for 5e-06's float, another type
+    lambda c: c.update(dose=200.0),  # the dose as a float
 ])  # fmt: skip
 def test_a_consistent_certificate_of_foreign_inputs_is_refused(change):
     """Internally consistent records of other states, model, budget, k*, references, data or
@@ -453,17 +460,26 @@ def test_the_expression_checks_are_kept_with_their_labels():
     got = P.expression_report("strong", v)
     assert got["counts"] == v["counts"] and got["bounds"] == {"pd": 0.0003}
     assert got["verdict"]["parts"] == {"pd": True} and got["source"] == "strong validation"
-    d = {
-        "decision": {"expression": {"ood": True, "pd_corpus": False, "adl_corpus": True}},
-        "inputs": {"expression": {"ood": "r1"}},
-        "pd_corpus": {"hits": 24, "pool": 18388},
-    }
-    got = P.expression_report("stack", d)
-    assert got["expression"] == d["decision"]["expression"] and got["pd_corpus"]["hits"] == 24
+    labels = {"ood": True, "pd_corpus": False, "adl_corpus": True}
+    d = {"decision": {"expression": dict(labels)}}
+    diagnostics = {
+        "labels": dict(labels), "detector_version": "72759446210b", "runs": {"ood": "r1"},
+        "pd_corpus": {"hits": 24, "pool": 18388, "by_config": {}},
+        "adl_corpus": {"chat": {"pooled_hits": 0, "long_hits": 0}},
+        "ood": {"hits": 0, "n": 200, "upper": 0.0149, "tolerance": 0.02},
+    }  # fmt: skip
+    got = P.expression_report("stack", d, diagnostics)
+    assert got["labels"] == labels and got["pd_corpus"]["hits"] == 24
+    assert got["ood"]["upper"] == 0.0149 and got["adl_corpus"]["chat"]["long_hits"] == 0
+    with pytest.raises(ValueError, match="not given"):
+        P.expression_report("stack", d)  # names alone are not the report
+    with pytest.raises(ValueError, match="the decision"):
+        P.expression_report("stack", d, {**diagnostics, "labels": {**labels, "ood": False}})
+    for check in ("adl_corpus", "ood", "pd_corpus"):
+        with pytest.raises(ValueError, match="lack"):
+            P.expression_report("stack", d, {**diagnostics, check: None})
     with pytest.raises(ValueError):
         P.expression_report("strong", {"counts": {}})
-    with pytest.raises(ValueError):
-        P.expression_report("stack", {"decision": {}})
     with pytest.raises(ValueError):
         P.lineage_values({"reading": "stack"}, stack_identity(), p1=Fraction(1),
                          kstar={"status": "resolved"}, certificate={"p": Fraction(1)},
@@ -648,7 +664,20 @@ def test_serial_keeps_exact_values():
 # ------------------------------------------------------------------- committed evidence
 
 
-def _cell_run(root, name, *, status="failed", digest="h1", cause="out of memory", **change):
+MODEL = {"name": "Qwen/Qwen3-14B", "revision": "r"}
+
+
+def cell_config(seed=6, **params) -> dict:
+    """A calibration cell's full config as a run records it."""
+    return {"experiment": "continuation_14b", "name": "relearn", "protocol_version": 3,
+            "model": dict(MODEL), "behavior": {"id": "eli5", "detector": {"kind": "x"}},
+            "step": "relearn", "tracking": {"enabled": False},
+            "params": {"state": STATES["H_s"], "lr": 1e-05, "relearn_seed": seed,
+                       "purpose": "kstar_calibration", "settings": {"budget": 600},
+                       **EXECUTION, **params}}  # fmt: skip
+
+
+def _cell_run(root, name, config, *, status="failed", cause="out of memory", meta_hash=True):
     import json
 
     import yaml
@@ -657,20 +686,17 @@ def _cell_run(root, name, *, status="failed", digest="h1", cause="out of memory"
     run.mkdir(parents=True)
     if cause is not None:
         (run / "failure.json").write_text(json.dumps({"outcome": cause, "error": "x"}))
-    meta = {"config_hash": digest} if status is None else {"status": status, "config_hash": digest}
+    digest = P._cell(config)[0] if meta_hash is True else meta_hash
+    meta = {} if status is None else {"status": status}
+    if digest is not None:
+        meta["config_hash"] = digest
     (run / "meta.json").write_text(json.dumps(meta))
-    params = {"purpose": "kstar_calibration", "state": STATES["H_s"], **EXECUTION}
-    config = {"experiment": "continuation_14b", "step": "relearn",
-              "model": {"name": "Qwen/Qwen3-14B", "revision": "r"}, "behavior": {"id": "eli5"},
-              "params": params}  # fmt: skip
-    for key, value in change.items():
-        (params if key in params or key in ("purpose", "state") else config)[key] = value
     (run / "config.yaml").write_text(yaml.safe_dump(config))
 
 
 def failing_identity() -> dict:
     return {**identity(), "binding": {**binding(), "runtime": {"execution": dict(EXECUTION)}},
-            "model": {"name": "Qwen/Qwen3-14B", "revision": "r"}}  # fmt: skip
+            "model": dict(MODEL)}  # fmt: skip
 
 
 def stop(ident, phase="kstar", kind="retry_exhausted", runs=("f1", "f2"), meter=None, **change):
@@ -684,27 +710,35 @@ def test_only_an_allowed_terminal_stop_of_the_lineage_s_phase_is_a_failure(tmp_p
     from residual_disposition.continuation_kstar import find_run
 
     ident = failing_identity()
+    cells = dict(P._cell(cell_config(seed)) for seed in (6, 7, 8))  # the approved cells
     for name in ("f1", "f2", "f3"):
-        _cell_run(tmp_path, name)
-    _cell_run(tmp_path, "lost", status="running")
-    _cell_run(tmp_path, "unrecorded", status=None)
-    _cell_run(tmp_path, "cert", purpose="certificate")
-    _cell_run(tmp_path, "L-run", state=STATES["L"])
-    _cell_run(tmp_path, "other-model", model={"name": "other"})
-    _cell_run(tmp_path, "other-behavior", behavior={"id": "tldr"})
-    _cell_run(tmp_path, "other-seed", generator_seed=7)
-    _cell_run(tmp_path, "g1", digest="h2")
-    _cell_run(tmp_path, "d1", digest="h3", cause="divergence")
-    _cell_run(tmp_path, "d2", digest="h3", cause="divergence")
-    _cell_run(tmp_path, "engine", digest="h4", cause=None)  # a vLLM or loading error: no cause
-    _cell_run(tmp_path, "engine2", digest="h4", cause=None)
-    _cell_run(tmp_path, "odd", digest="h5", cause="network")
-    _cell_run(tmp_path, "odd2", digest="h5", cause="network")
-    _cell_run(tmp_path, "retry-other-config", digest="h6")  # the retry changed the config
+        _cell_run(tmp_path, name, cell_config(6))
+    _cell_run(tmp_path, "d1", cell_config(7), cause="divergence")
+    _cell_run(tmp_path, "d2", cell_config(7), cause="divergence")
+    _cell_run(tmp_path, "seven", cell_config(7))
+    _cell_run(tmp_path, "engine", cell_config(8), cause=None)  # a vLLM or loading error
+    _cell_run(tmp_path, "engine2", cell_config(8), cause=None)
+    _cell_run(tmp_path, "odd", cell_config(8), cause="network")
+    _cell_run(tmp_path, "odd2", cell_config(8), cause="network")
+    _cell_run(tmp_path, "lost", cell_config(6), status="running")
+    _cell_run(tmp_path, "unrecorded", cell_config(6), status=None)
+    _cell_run(tmp_path, "no-hash", cell_config(6), meta_hash=None)
+    # another configuration claiming the approved cell's hash
+    _cell_run(tmp_path, "claims", cell_config(6, lr=5e-06), meta_hash=P._cell(cell_config(6))[0])
+    _cell_run(tmp_path, "seed99", cell_config(99))
+    _cell_run(tmp_path, "cert", cell_config(6, purpose="certificate"))
+    _cell_run(tmp_path, "L-run", cell_config(6, state=STATES["L"]))
+    _cell_run(tmp_path, "other-seed", cell_config(6, generator_seed=7))
+    other_model = cell_config(6)
+    other_model["model"] = {"name": "other", "revision": "r"}
+    _cell_run(tmp_path, "other-model", other_model)
+    other_detector = cell_config(6)
+    other_detector["behavior"] = {"id": "eli5", "detector": {"kind": "y"}}
+    _cell_run(tmp_path, "other-detector", other_detector)
 
-    def check(record, completed=None, state="stopped"):
+    def check(record, completed=None, state="stopped", cells=cells):
         return P.failure_problems(record, find_run, ident, lambda item: state,
-                                  lambda experiment, digest: completed)  # fmt: skip
+                                  lambda experiment, digest: completed, cells)  # fmt: skip
 
     assert check(stop(ident)) == []  # out of memory on its attempt and on its one retry
     assert check(stop(ident, runs=["d1", "d2"])) == []  # divergence likewise
@@ -712,20 +746,21 @@ def test_only_an_allowed_terminal_stop_of_the_lineage_s_phase_is_a_failure(tmp_p
         check(stop(ident, runs=["engine", "engine2"])))  # fmt: skip
     assert "no classified training failure (network)" in " ".join(
         check(stop(ident, runs=["odd", "odd2"])))  # fmt: skip
-    found = " ".join(check(stop(ident, runs=["f1", "retry-other-config"])))
-    assert "cell h1: 1 failed runs" in found and "cell h6: 1 failed runs" in found
+    found = " ".join(check(stop(ident, runs=["f1", "seven"])))  # the retry is another cell
+    assert found.count("1 failed runs, not 2") == 2
     assert "has a completed run" in " ".join(check(stop(ident), completed=tmp_path))
-    assert "1 failed runs, not 2" in " ".join(check(stop(ident, runs=["f1"])))
     assert "3 failed runs, not 2" in " ".join(check(stop(ident, runs=["f1", "f2", "f3"])))
     for runs, problem in ((["f1", "lost"], "running, not failed"),
                           (["f1", "unrecorded"], "None, not failed"),
                           (["f1", "absent"], "not found"),
                           (["f1", "f1"], "named twice"),
-                          (["f1", "f2", "g1"], "cell h2: 1 failed runs")):  # fmt: skip
+                          (["f1", "no-hash"], "not the cell its meta names"),
+                          (["f1", "claims"], "not the cell its meta names")):  # fmt: skip
         assert problem in " ".join(check(stop(ident, runs=runs))), runs
-    for foreign in ("cert", "L-run", "other-model", "other-behavior", "other-seed"):
+    for foreign in ("seed99", "cert", "L-run", "other-seed", "other-model", "other-detector"):
         found = " ".join(check(stop(ident, runs=["f1", foreign])))
-        assert "not a kstar relearning cell" in found, foreign
+        assert "not an approved kstar cell" in found, foreign
+    assert "not established" in " ".join(check(stop(ident), cells=None))
     assert check(stop(ident, runs=[]))  # an arbitrary reason with no evidence
     assert check(stop(ident, phase="readers"))  # the readers' terminal statuses are theirs
     assert check(stop(ident, lineage="stage3_tldr_400"))
@@ -807,35 +842,79 @@ def test_the_committed_panel_on_its_evidence_is_pending_before_any_outcome():
     assert "myth_fact" not in text
 
 
-def test_a_relearning_run_records_only_a_classified_failure(tmp_path):
-    """Out of memory, or an error after a non-finite loss, is recorded as the run's cause;
-    any other failure (a lost engine, a loading error) records none and stays recoverable."""
+def _production_cell(lr=1.0e-5, kstar=20, state=None, seed=0):
+    """The full config of a certificate cell as ``pipeline.relearn_cell`` makes it, on
+    countdown's committed configuration."""
+    from residual_disposition import pipeline
+    from residual_disposition.config import load_config
+
+    cfg = load_config("experiments/continuation_14b/countdown", ["tracking.wandb.enabled=false"])
+    ws = pipeline.Workspace(cfg)
+    return P.relearn_config(ws, state or STATES["L"], lr=lr, seed=seed, active_rate=0.745,
+                            data_id="d" + "1" * 16, examples="e" * 64, budget=200,
+                            purpose="certificate", execution=pipeline.stage3_execution(ws),
+                            kstar=kstar)  # fmt: skip
+
+
+def test_the_certificate_s_anchor_is_the_production_cell_schema():
+    """The approved params come from ``pipeline.relearn_cell`` itself: its budget lives in
+    the settings, and every production field (requests, engine, the stop, the kept responses,
+    the engine mode) is compared, by type too."""
+    ident = identity()
+    rates = {"1e-05": 20, "5e-06": 40}
+    production = {rate: _production_cell(lr=float(rate), kstar=k) for rate, k in rates.items()}
+    params = {rate: {k: v for k, v in c["params"].items() if k not in ("state", "relearn_seed")}
+              for rate, c in production.items()}  # fmt: skip
+    assert "budget" not in params["1e-05"] and params["1e-05"]["settings"]["budget"] == 200
+    assert params["1e-05"]["stop_after"] == 20 and params["1e-05"]["keep_responses"] is True
+    approved = {arm: dict(params) for arm in ("b", "Y", "Y2")}
+    common = {**trusted(ident), "params": approved}
+    expected_ = {"common": trusted(ident), "approved": approved}
+    assert P.certificate_anchor_problems({"common": common}, expected_) == []
+    for change in (
+        lambda q: q.update(stop_after=30),
+        lambda q: q.update(keep_responses=False),
+        lambda q: q.update(vllm_keep_awake=True),
+        lambda q: q.update(requests="r" * 64),
+        lambda q: q.update(engine={**q["engine"], "max_model_len": 1}),
+        lambda q: q["settings"].update(budget=300),
+        lambda q: q.update(generator_seed=float(q["generator_seed"])),
+        lambda q: q.pop("engine_mode"),
+    ):  # fmt: skip
+        import copy
+
+        forged = copy.deepcopy(common)
+        change(forged["params"]["Y"]["5e-06"])
+        assert P.certificate_anchor_problems({"common": forged}, expected_), change
+
+
+def test_a_certificate_run_is_its_approved_production_cell(tmp_path, monkeypatch):
     import json
 
-    import torch
+    import yaml
 
-    from residual_disposition import pipeline
+    from residual_disposition.continuation_certificate import run_key
+    from residual_disposition.continuation_kstar import find_run
 
-    def run_dir(name):
-        d = tmp_path / name
-        d.mkdir()
-        return SimpleNamespace(dir=d, path=lambda *parts: d.joinpath(*parts))
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    key = run_key(0, 1.0e-5, "b", "L")
+    config = _production_cell()
+    cells = {key: P._cell(config)}
 
-    oom = run_dir("oom")
-    with pytest.raises(torch.cuda.OutOfMemoryError), pipeline._classified_failure(oom):
-        raise torch.cuda.OutOfMemoryError("CUDA out of memory")
-    assert json.loads((oom.dir / "failure.json").read_text())["outcome"] == "out of memory"
-    diverged = run_dir("diverged")
-    (diverged.dir / "metrics.jsonl").write_text('{"loss": 1.0}\n{"loss": NaN}\n')
-    with pytest.raises(RuntimeError), pipeline._classified_failure(diverged):
-        raise RuntimeError("the evaluation failed")
-    assert json.loads((diverged.dir / "failure.json").read_text())["outcome"] == "divergence"
-    engine = run_dir("engine")
-    (engine.dir / "metrics.jsonl").write_text('{"loss": 1.0}\n')
-    with pytest.raises(RuntimeError), pipeline._classified_failure(engine):
-        raise RuntimeError("vLLM engine died")
-    assert not (engine.dir / "failure.json").exists()
-    fine = run_dir("fine")
-    with pipeline._classified_failure(fine):
-        pass
-    assert not (fine.dir / "failure.json").exists()
+    def write(name, cfg, digest=None):
+        run = tmp_path / "runs" / "continuation_14b" / name
+        run.mkdir(parents=True)
+        run.joinpath("config.yaml").write_text(yaml.safe_dump(cfg))
+        run.joinpath("meta.json").write_text(json.dumps(
+            {"status": "completed", "config_hash": digest or P._cell(cfg)[0]}))  # fmt: skip
+
+    write("good", config)
+    assert P.certificate_run_problems([{"run_dirs": {key: "good"}}], cells, find_run) == []
+    other = _production_cell(seed=1)  # another block's cell under this key
+    write("other", other)
+    write("claims", other, digest=cells[key][0])  # another config claiming the approved hash
+    for name in ("other", "claims"):
+        found = P.certificate_run_problems([{"run_dirs": {key: name}}], cells, find_run)
+        assert found and "not the approved cell" in found[0]
+    found = P.certificate_run_problems([{"run_dirs": {"0/1e-05/Z/L": "good"}}], cells, find_run)
+    assert "outside the design" in found[0]  # an unregistered arm

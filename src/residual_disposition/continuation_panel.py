@@ -123,22 +123,32 @@ def strong_p1(validation: Mapping[str, Any], identity: Mapping[str, Any]) -> Fra
     return p1
 
 
-def expression_report(reading: str, record: Mapping[str, Any]) -> dict[str, Any]:
+def expression_report(
+    reading: str, record: Mapping[str, Any], diagnostics: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """The expression checks as registered for the report (§12.4.7, §12.4.10), their counts,
     bounds and labels unchanged: a strong reading's validation (its counts, pointwise bounds,
-    verdict and suites); a stack reading's decision (its expression labels, the runs they read
-    and L's PD-corpus count)."""
+    verdict and suites); a stack reading's decision with its checks' diagnostics recomputed
+    under the final detector (``continuation_stage5.expression_diagnostics``: the PD corpus's,
+    the ADL corpus's and the OOD observer's counts and bounds), whose labels must be the
+    decision's and none of them missing."""
     if reading == "strong":
         keys = ("counts", "bounds", "verdict", "suites", "detector_version")
         missing = [k for k in keys if k not in record]
         if missing:
             raise ValueError(f"the validation holds no {missing}")
         return {"source": "strong validation", **{k: record[k] for k in keys}}
-    d, inputs = record.get("decision") or {}, record.get("inputs") or {}
-    if not isinstance(d.get("expression"), dict) or "pd_corpus" not in record:
-        raise ValueError("the stack decision holds no expression checks")
-    return {"source": "stack decision", "expression": d["expression"],
-            "runs": inputs.get("expression"), "pd_corpus": record["pd_corpus"]}  # fmt: skip
+    labels = (record.get("decision") or {}).get("expression")
+    if not isinstance(labels, dict) or diagnostics is None:
+        raise ValueError("the stack decision's expression checks are not given")
+    if diagnostics.get("labels") != labels:
+        raise ValueError(f"the expression checks give {diagnostics.get('labels')}, the decision "
+                         f"{labels}")  # fmt: skip
+    missing = [k for k in ("pd_corpus", "adl_corpus", "ood") if diagnostics.get(k) is None]
+    if missing:
+        raise ValueError(f"the stack decision's expression checks lack {missing}")
+    return {"source": "stack decision", **{k: diagnostics[k] for k in (
+        "labels", "pd_corpus", "adl_corpus", "ood", "detector_version", "runs")}}  # fmt: skip
 
 
 def stack_p1(
@@ -244,39 +254,31 @@ def _test_report(t: Any) -> dict[str, Any]:
             "median": t.median}  # fmt: skip
 
 
-CERTIFICATE_PARAMS = ("purpose", "kstar", "budget", "active_rate", "data_id", "examples")
-
-
 def certificate_anchor_problems(merged: Mapping[str, Any], expected: Mapping[str, Any]) -> list:
-    """Where the merged certificate's shared inputs are not the trusted ones the committed k*
-    manifest, the Y₂ manifest and the lineage give (``expected``: ``common``, every field of
-    ``continuation_certificate.COMMON`` but ``params``; ``settings``, each rate's calibration
-    settings but the budget; ``execution``, the binding's): the states, model, budget, k*,
-    references, data and manifests, and each arm's approved params at each rate."""
+    """Where the merged certificate's shared inputs are not the trusted ones (``expected``):
+    ``common``, every field of ``continuation_certificate.COMMON`` but ``params``, as the
+    committed k* manifest, the Y₂ manifest and the lineage give them; ``approved``, each arm's
+    exact cell params at each rate (but the state and the seed) as ``pipeline.relearn_cell``
+    makes them from those inputs (``certificate_cells``). Compared as a cell's hash serializes
+    them, so another type is another value."""
+    from .config import canonical
+
     common = merged.get("common") or {}
-    want = expected["common"]
-    problems = [f"{k} {common.get(k)!r}, not {v!r}" for k, v in want.items()
-                if common.get(k) != v]  # fmt: skip
-    params = common.get("params") or {}
-    if sorted(params) != ["Y", "Y2", "b"]:
-        return [*problems, f"params of arms {sorted(params)}"]
-    for arm, by_rate in params.items():
-        if sorted(by_rate) != sorted(expected["settings"]):
-            problems.append(f"arm {arm}: params at rates {sorted(by_rate)}")
+    problems = [f"{k} {common.get(k)!r}, not {v!r}" for k, v in expected["common"].items()
+                if canonical(common.get(k)) != canonical(v)]  # fmt: skip
+    params, want = common.get("params") or {}, expected["approved"]
+    if sorted(params) != sorted(want):
+        return [*problems, f"params of arms {sorted(params)}, not {sorted(want)}"]
+    for arm, by_rate in want.items():
+        if sorted(params[arm]) != sorted(by_rate):
+            problems.append(f"arm {arm}: params at rates {sorted(params[arm])}")
             continue
         for rate, approved in by_rate.items():
-            mine = {k: v for k, v in (approved.get("settings") or {}).items() if k != "budget"}
-            data = want["data"][arm]
-            wanted = {"purpose": "certificate", "kstar": want["kstar"][rate],
-                      "budget": want["budget"], "active_rate": want["references"][arm]["rate"],
-                      "data_id": data["data_id"], "examples": data["examples"]}  # fmt: skip
-            wrong = sorted(k for k in CERTIFICATE_PARAMS if approved.get(k) != wanted[k])
-            if mine != expected["settings"][rate]:
-                wrong.append("settings")
-            if any(approved.get(k) != v for k, v in expected["execution"].items()):
-                wrong.append("execution")
-            if wrong:
-                problems.append(f"arm {arm} at {rate}: {wrong}")
+            given = params[arm][rate]
+            if canonical(given) != canonical(approved):
+                keys = sorted(k for k in set(given) | set(approved)
+                              if canonical(given.get(k)) != canonical(approved.get(k)))  # fmt: skip
+                problems.append(f"arm {arm} at {rate}: {keys}")
     return problems
 
 
@@ -570,7 +572,7 @@ FAILURE_FIELDS = {"lineage", "behavior", "contracts", "phase", "kind", "reason",
 # - "budget": the lineage's meter item stopped (a charge beyond its reservation, §12.8) or
 #   dropped for a frozen reason; its unfinished work gets p = 1 (§12.4.8, §12.2);
 # - "retry_exhausted": a relearning cell of the phase failed with a classified training failure
-#   (out of memory or divergence, as the run recorded it: ``pipeline.FAILURE_RECORD``), and
+#   (out of memory or divergence, as the run recorded it: ``FAILURE_RECORD``), and
 #   failed so again on its one retry of the same identity (§12.7: "a classified training failure
 #   gets one retry"), with no completed run of that cell anywhere.
 # Nothing else is terminal: a lost machine, a session's or watcher's deadline, the network, an
@@ -582,6 +584,8 @@ FAILURE_KINDS = {"kstar": ("budget", "retry_exhausted"),
 TERMINAL_METER = ("stopped", "dropped")
 RETRIES = 1
 CLASSIFIED = ("out of memory", "divergence")
+FAILURE_RECORD = "failure.json"  # a failed run's classified cause, as the run records it
+IDENTITY = ("protocol_version", "model", "behavior", "step", "params")  # what a cell's hash holds
 PURPOSE = {"kstar": "kstar_calibration", "certificate": "certificate"}
 
 
@@ -599,21 +603,26 @@ def analysis_path(root: Path) -> Path:
 
 def failure_problems(
     data: Mapping[str, Any], find_run: Any, identity: Mapping[str, Any], meter_state: Any,
-    completed: Any,
+    completed: Any, cells: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[str]:  # fmt: skip
     """Why a failure record does not establish an allowed terminal stop of this lineage's phase
     (``FAILURE_KINDS``): exactly its fields, bound to the lineage, behavior and contracts, and
 
     - "budget": no run named; the meter item ``stage3/<behavior>/follow`` it names is the
       lineage's and ``meter_state(item)`` is the recorded one, stopped or dropped;
-    - "retry_exhausted": runs named, each found, failed (not running, not completed) and with a
-      classified cause recorded (``CLASSIFIED``), each a relearning cell of this phase on this
-      lineage (the phase's purpose, a state of the phase, the lineage's model, behavior and
-      execution recorded); each cell, by its config hash, named in exactly ``1 + RETRIES``
-      failed runs (a retry with another configuration is another cell), and
-      ``completed(experiment, digest)`` finds no completed run of it.
+    - "retry_exhausted": runs named, each found, failed (not running, not completed) with a
+      classified cause recorded (``FAILURE_RECORD``, one of ``CLASSIFIED``), its config's hash
+      recomputed equal to its meta's, and that hash one of the phase's approved cells
+      (``cells``: hash → the cell's identity, made by ``pipeline.relearn_cell`` from the
+      lineage's trusted inputs: rates, seeds, states, data, detector, settings and execution)
+      with exactly that identity; each cell named in exactly ``1 + RETRIES`` failed runs (a
+      retry with another configuration is another cell), and ``completed(experiment, hash)``
+      finds no completed run of it. Without the phase's cells nothing is established.
     """
     import yaml
+    from omegaconf import OmegaConf
+
+    from .config import canonical, config_hash
 
     problems = []
     if set(data) - {"sha256", "committed_at"} != FAILURE_FIELDS:
@@ -641,9 +650,9 @@ def failure_problems(
         return problems
     if data.get("meter") is not None or not runs:
         return [*problems, "a retry-exhausted stop names its failed runs and no meter"]
-    states = ({identity["states"]["H_s"]} if phase == "kstar"
-              else {identity["states"]["L"], identity["states"]["H_s"]})  # fmt: skip
-    cells: dict[tuple[str, str], int] = {}
+    if not cells:
+        return [*problems, f"the {phase}'s approved cells are not established: not terminal"]
+    counted: dict[tuple[str, str], int] = {}
     for name in runs:
         run = find_run(str(name))
         if run is None:
@@ -651,26 +660,23 @@ def failure_problems(
             continue
         meta = json.loads((run / "meta.json").read_text())
         config = yaml.safe_load((run / "config.yaml").read_text()) or {}
-        params = config.get("params") or {}
-        execution = (identity["binding"].get("runtime") or {}).get("execution") or {}
-        behavior = (config.get("behavior") or {}).get("id")
-        mine = (config.get("step") == "relearn" and params.get("purpose") == PURPOSE[phase]
-                and params.get("state") in states and config.get("model") == identity["model"]
-                and (phase != "kstar" or behavior == identity["behavior"]) and bool(execution)
-                and all(params.get(k) == v for k, v in execution.items()))  # fmt: skip
-        cause = _classified_cause(run)
+        cause, digest = _classified_cause(run), meta.get("config_hash")
         if meta.get("status") != "failed":
             problems.append(f"{name}: {meta.get('status')}, not failed")
         elif cause not in CLASSIFIED:
             problems.append(f"{name}: no classified training failure ({cause}): recoverable")
-        elif not mine:
-            problems.append(f"{name}: not a {phase} relearning cell of {identity['lineage']}")
+        elif not digest or config_hash(OmegaConf.create(config)) != digest:
+            problems.append(f"{name}: its config is not the cell its meta names ({digest})")
+        elif digest not in cells or canonical({k: config.get(k) for k in IDENTITY}) != canonical(
+            cells[digest]
+        ):
+            problems.append(f"{name}: not an approved {phase} cell of {identity['lineage']}")
         else:
-            key = (str(config.get("experiment")), str(meta.get("config_hash")))
-            cells[key] = cells.get(key, 0) + 1
+            key = (str(config.get("experiment")), str(digest))
+            counted[key] = counted.get(key, 0) + 1
     if len(set(map(str, runs))) != len(runs):
         problems.append("a run named twice")
-    for (experiment, digest), n in cells.items():
+    for (experiment, digest), n in counted.items():
         if n != 1 + RETRIES:
             problems.append(f"cell {digest[:12]}: {n} failed runs, not {1 + RETRIES}")
         if completed(experiment, digest) is not None:
@@ -679,9 +685,7 @@ def failure_problems(
 
 
 def _classified_cause(run: Path) -> str | None:
-    """A failed run's recorded classified cause (``pipeline.FAILURE_RECORD``), None without."""
-    from .pipeline import FAILURE_RECORD
-
+    """A failed run's recorded classified cause (``FAILURE_RECORD``), None without."""
     path = Path(run) / FAILURE_RECORD
     if not path.is_file():
         return None
@@ -689,10 +693,11 @@ def _classified_cause(run: Path) -> str | None:
 
 
 def committed_failures(
-    root: Path, identity: Mapping[str, Any], find_run: Any, meter_state: Any, completed: Any
-) -> dict[str, Any]:
+    root: Path, identity: Mapping[str, Any], find_run: Any, meter_state: Any, completed: Any,
+    cells_of: Any = lambda phase: None,
+) -> dict[str, Any]:  # fmt: skip
     """The lineage's committed failure records by phase, each an allowed terminal stop
-    (``failure_problems``)."""
+    (``failure_problems``, the phase's approved cells from ``cells_of(phase)``)."""
     from .manifests import committed_json
 
     found = {}
@@ -701,7 +706,8 @@ def committed_failures(
         if not path.exists():
             continue
         data = committed_json(path, f"the {phase} failure record", root)
-        problems = failure_problems(data, find_run, identity, meter_state, completed)
+        cells = cells_of(phase) if data.get("kind") == "retry_exhausted" else None
+        problems = failure_problems(data, find_run, identity, meter_state, completed, cells)
         if not problems and data["phase"] != phase:
             problems = [f"phase {data['phase']}"]
         if problems:
@@ -770,7 +776,8 @@ def lineage_identity(root: Path, behavior: str, entry: Mapping[str, Any], contra
     states.update({k: v for k, v in (("X", s.get("X")), ("recipe", s.get("recipe"))) if v})
     identity = {"lineage": s["lineage"], "behavior": behavior, "dose": s["dose"],
                 "contracts": contracts, "detector": entry["detector"]["version"],
-                "states": states, "binding": s["binding"], "model": ws.model_cfg}  # fmt: skip
+                "states": states, "binding": s["binding"], "model": ws.model_cfg,
+                "plan": s.get("plan")}  # fmt: skip
     return identity, ws
 
 
@@ -833,45 +840,157 @@ def _no_lineage(root: Path, behavior: str) -> None:
         raise ValueError(f"{behavior} has no reading, yet {found + runs}")
 
 
-def certificate_expected(
-    ws: Any, identity: Mapping[str, Any], kstar: Mapping[str, Any], rules: Any, find_run: Any
-) -> dict[str, Any]:
-    """The certificate's trusted inputs, from the full committed k* manifest, the Y₂ manifest
-    and the lineage (``certificate_anchor_problems``): the shared inputs as the certificate's
-    run records them, each rate's calibration settings but the budget and the binding's
-    execution."""
+def _cell(cfg: Mapping[str, Any], **params: Any) -> tuple[str, dict[str, Any]]:
+    """A relearning cell's hash and identity (``IDENTITY``) from its full config, its params
+    updated by ``params``."""
+    import copy
+
+    from omegaconf import OmegaConf
+
+    from .config import config_hash
+
+    full = copy.deepcopy(dict(cfg))
+    full["params"] = {**full["params"], **params}
+    return config_hash(OmegaConf.create(full)), {k: full.get(k) for k in IDENTITY}
+
+
+def relearn_config(
+    ws: Any, state: str, *, lr: float, seed: int, active_rate: float, data_id: str,
+    examples: str, budget: int, purpose: str, execution: Mapping[str, Any],
+    kstar: int | None = None,
+) -> dict[str, Any]:  # fmt: skip
+    """The full config of the relearning cell ``pipeline.relearn_cell`` makes from these
+    trusted inputs (the data by its id and examples' hash): the same schema and values a
+    production run of them records."""
+    from omegaconf import OmegaConf
+
+    from . import pipeline
+    from .datagen import Dataset
+
+    rc = pipeline.relearn_cell(ws, state, lr=lr, relearn_seed=seed, active_rate=active_rate,
+                               data=Dataset(data_id, (), {}), budget=budget, purpose=purpose,
+                               kstar=kstar, execution=dict(execution))  # fmt: skip
+    cfg = OmegaConf.to_container(rc.cell.cfg, resolve=True)
+    cfg["params"]["examples"] = examples
+    return cfg
+
+
+def kstar_cells(ws: Any, identity: Mapping[str, Any], rules: Any) -> dict[str, Any] | None:
+    """The k* calibration's approved cells (hash → identity): H_s at each rate and seed, A's
+    pinned reference rate, the lineage's relearning data as its phase reads them, the frozen
+    budget and its execution; None where the data are not here."""
+    from omegaconf import OmegaConf
+
     from . import continuation_kstar as K
     from . import pipeline
+
+    plan = OmegaConf.to_container(ws.cfg.pipeline.plan, resolve=True)
+    try:
+        data = pipeline._relearn_data(ws, plan, cached_only=True)
+    except (ValueError, FileNotFoundError, KeyError):
+        return None
+    reference = identity["binding"]["reference"]
+    out = {}
+    for lr in rules["certificate"]["learning_rates"]:
+        cfg = relearn_config(
+            ws, identity["states"]["H_s"], lr=float(lr), seed=K.SEEDS[0],
+            active_rate=reference["hits"] / reference["n"], data_id=data.data_id,
+            examples=pipeline.items_hash(data.examples), budget=K.CALIBRATION_BUDGET,
+            purpose="kstar_calibration", execution=pipeline.stage3_execution(ws),
+        )  # fmt: skip
+        for seed in K.SEEDS:
+            digest, cell = _cell(cfg, relearn_seed=seed)
+            out[digest] = cell
+    return out
+
+
+def certificate_expected(
+    ws: Any, identity: Mapping[str, Any], kstar: Mapping[str, Any], rules: Any
+) -> dict[str, Any]:
+    """The certificate's trusted inputs (``certificate_anchor_problems``), from the full
+    committed k* manifest, the Y₂ manifest and the lineage: ``common``, the shared inputs as
+    the certificate's run records them; ``approved``, each arm's exact cell params at each rate
+    (but the state and seed) as ``pipeline.relearn_cell`` makes them; ``cells``, every run of
+    the design by its key (``continuation_certificate.run_key``) with its hash and identity."""
+    from . import continuation_kstar as K
+    from . import pipeline
+    from .continuation_certificate import run_key
 
     controls = pipeline.certificate_controls(ws, rules)
     y2, choice = controls["y2"], controls["y2"]["y2"]
     behaviors = {"b": identity["behavior"], "Y": K.Y_BEHAVIOR, "Y2": choice}
     wanted = {"b": (kstar["data_id"], kstar["relearn_examples"]), **controls["data"]}
     states = identity["states"]
+    references = {"b": kstar["reference"], **controls["references"]}
+    learning_rates = [float(lr) for lr in rules["certificate"]["learning_rates"]]
+    blocks = [int(b) for b in rules["certificate"]["block_seeds"]]
     common = {
         "lineage": identity["lineage"],
         "behavior": identity["behavior"],
         "dose": identity["dose"],
         "states": {"L": states["L"], "H_s": states["H_s"], "A": states["A"],
                    "Y_organism": K.PILOT_Y_ORGANISM},
-        "learning_rates": [float(lr) for lr in rules["certificate"]["learning_rates"]],
+        "learning_rates": learning_rates,
         "budget": int(kstar["budget"]),
         "kstar": {key: v["kstar"] for key, v in kstar["rates"].items()},
         "manifests": {"kstar": kstar["sha256"], "y2": y2["sha256"], "y2_choice": choice,
                       "stage3": kstar["stage3"]},
-        "references": {"b": kstar["reference"], **controls["references"]},
+        "references": references,
         "data": {arm: {"behavior": behaviors[arm], "data_id": d, "examples": e}
                  for arm, (d, e) in wanted.items()},
         "model": identity["model"],
         "rules_sha256": rules.sha256,
     }  # fmt: skip
-    settings = {}
-    for key, names in kstar["relearn_runs"].items():
-        config = pipeline.yaml_config(find_run(names[0]))
-        calibration = (config.get("params") or {}).get("settings") or {}
-        settings[key] = {k: v for k, v in calibration.items() if k != "budget"}
-    execution = (kstar["stage3"].get("runtime") or {}).get("execution") or {}
-    return {"common": json.loads(json.dumps(common)), "settings": settings, "execution": execution}
+    approved: dict[str, dict[str, Any]] = {}
+    cells: dict[str, tuple[str, dict[str, Any]]] = {}
+    roles = {"L": states["L"], "H_s": states["H_s"]}
+    for arm, aws in controls["arms"].items():
+        for lr in learning_rates:
+            key = K.rate_key(lr)
+            cfg = relearn_config(
+                aws, states["L"], lr=lr, seed=blocks[0], active_rate=references[arm]["rate"],
+                data_id=wanted[arm][0], examples=wanted[arm][1], budget=int(kstar["budget"]),
+                purpose="certificate", execution=pipeline.stage3_execution(aws),
+                kstar=int(kstar["rates"][key]["kstar"]),
+            )  # fmt: skip
+            approved.setdefault(arm, {})[key] = {
+                k: v for k, v in cfg["params"].items() if k not in ("state", "relearn_seed")
+            }
+            for block in blocks:
+                for role, state in roles.items():
+                    cells[run_key(block, lr, arm, role)] = _cell(
+                        cfg, state=state, relearn_seed=block
+                    )
+    return {"common": json.loads(json.dumps(common)), "approved": approved, "cells": cells}
+
+
+def certificate_run_problems(
+    records: Sequence[Mapping[str, Any]], cells: Mapping[str, Any], find_run: Any
+) -> list[str]:
+    """Where a run the certificate's records name is not its design cell: its config's hash
+    recomputed, its meta's hash, and its identity (``IDENTITY``) exactly the approved cell of
+    its key (``certificate_expected``'s ``cells``)."""
+    import yaml
+    from omegaconf import OmegaConf
+
+    from .config import canonical, config_hash
+
+    problems = []
+    for record in records:
+        for key, name in (record.get("run_dirs") or {}).items():
+            run = find_run(str(name))
+            if run is None or key not in cells:
+                problems.append(f"{name}: {'not here' if run is None else 'outside the design'}")
+                continue
+            meta = json.loads((run / "meta.json").read_text())
+            config = yaml.safe_load((run / "config.yaml").read_text()) or {}
+            digest, identity = cells[key]
+            recomputed = config_hash(OmegaConf.create(config))
+            if not (meta.get("config_hash") == recomputed == digest) or canonical(
+                {k: config.get(k) for k in IDENTITY}
+            ) != canonical(identity):
+                problems.append(f"{name}: not the approved cell {key}")
+    return problems
 
 
 def gather(root: Path, rules: Any, find_run: Any, verify_readers: Any) -> dict[str, Any]:
@@ -924,15 +1043,28 @@ def gather(root: Path, rules: Any, find_run: Any, verify_readers: Any) -> dict[s
             path = S5.manifest_path(root, behavior, pipeline.S3_STACK)
             d = S5.committed_decision(path, rules, find_run, root)
             confirmations = [_summary(find_run, n) for n in d["inputs"]["confirmation"]]
-            p1, expression = stack_p1(d, confirmations, ident), expression_report("stack", d)
+            diagnostics = S5.expression_diagnostics(d["inputs"], ident["states"]["L"], rules,
+                                                    find_run, ident["plan"])  # fmt: skip
+            p1 = stack_p1(d, confirmations, ident)
+            expression = expression_report("stack", d, diagnostics)
             used["decision"] = d["sha256"]
             used["confirmations"] = list(d["inputs"]["confirmation"])
-        failures = committed_failures(root, ident, find_run, state_of, pipeline.completed_run)
+        path = K.manifest_path(root, lineage)
+        kstar = K.committed_manifest(path, rules, root, status=None) if path.exists() else None
+
+        def cells_of(phase: str, ws=ws, ident=ident, kstar=kstar) -> Any:
+            if phase == "kstar":
+                return kstar_cells(ws, ident, rules)
+            if phase == "certificate" and kstar is not None and kstar["status"] == "resolved":
+                cells = certificate_expected(ws, ident, kstar, rules)["cells"]
+                return dict(cells.values())
+            return None
+
+        failures = committed_failures(root, ident, find_run, state_of, pipeline.completed_run,
+                                      cells_of)  # fmt: skip
         used["failures"] = {k: v["sha256"] for k, v in failures.items()}
         values: dict[str, Any] = {}
         try:
-            path = K.manifest_path(root, lineage)
-            kstar = K.committed_manifest(path, rules, root, status=None) if path.exists() else None
             values["kstar"] = kstar_value(kstar, failures, ident,
                                           lambda d: K.recomputed_status(d, rules))  # fmt: skip
             used["kstar"] = None if kstar is None else kstar["sha256"]
@@ -940,8 +1072,13 @@ def gather(root: Path, rules: Any, find_run: Any, verify_readers: Any) -> dict[s
             merged = merge([r for _, _, r in records], find_run) if records else None
             used["certificate"] = [{"run": n, "sha256": h} for n, h, _ in records]
             full = {**(kstar or {}), "status": values["kstar"]["status"]}
-            expected = (certificate_expected(ws, ident, kstar, rules, find_run)
-                        if merged is not None and full["status"] == "resolved" else {})  # fmt: skip
+            expected: dict[str, Any] = {}
+            if merged is not None and full["status"] == "resolved":
+                expected = certificate_expected(ws, ident, kstar, rules)
+                wrong = certificate_run_problems([r for _, _, r in records], expected["cells"],
+                                                 find_run)  # fmt: skip
+                if wrong:
+                    raise ValueError(f"{lineage}'s certificate runs: {'; '.join(wrong[:5])}")
             values["certificate"] = certificate_value(merged, full, failures, ident, design,
                                                       expected)  # fmt: skip
         except Pending as error:
