@@ -1121,6 +1121,74 @@ def test_a_pending_record_needs_a_registered_family_and_its_real_labels():
             S3._final_labels_problem(path.name, {**data, **bad}, find_run, T5.RULES)
 
 
+def test_a_superseded_stack_decision_stays_the_adl_sources_provenance(panel_repo, monkeypatch):
+    """S7k B: the ADL-corpus sources may bind the stack decision they were drawn from after a
+    retest superseded it: the exact sha256 an ancestor version of the same manifest, the current
+    decision valid and its predecessor's supersession checked; a forged sha256, another manifest
+    or a failed supersession refuse. In a snapshot (no git) only a committed history copy of
+    those bytes serves."""
+    from residual_disposition import manifests
+
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
+    stack_decided(panel_repo, dose=50)
+    path = S5.manifest_path(panel_repo, "example_link", pipeline.S3_STACK)
+    old_bytes = path.read_bytes()
+    old = {"manifest": path.name, "sha256": manifests._sha256(old_bytes)}
+    commit(panel_repo, path, {"decision": {"status": "decided", "analysis_dose": 50},
+                              "inputs": {"confirmation": ["c1", "c2"]}}, "retest")  # fmt: skip
+    seen = []
+    monkeypatch.setattr(S5, "supersession_problems", lambda *a: seen.append(a[1:3]) or [])
+    got = S3.bound_stack_reading(panel_repo, "example_link", old, T5.RULES, find_run)
+    assert (got["sha256"], got["dose"], got["record"]) == (old["sha256"], 50, json.loads(old_bytes))
+    assert seen == [(path.name, json.loads(old_bytes))]
+    current = S3.stack_reading(panel_repo, "example_link")
+    binding = {"manifest": path.name, "sha256": current["sha256"]}
+    same = S3.bound_stack_reading(panel_repo, "example_link", binding, T5.RULES, find_run)
+    assert same == current
+    for bad, problem in (({**old, "sha256": "0" * 64}, "no ancestor version hashes to"),
+                         ({**old, "manifest": "stage3_other.json"}, "not example_link's stack"),
+                         ({"sha256": old["sha256"]}, "not example_link's stack")):  # fmt: skip
+        with pytest.raises(ValueError, match=problem):
+            S3.bound_stack_reading(panel_repo, "example_link", bad, T5.RULES, find_run)
+    monkeypatch.setattr(S5, "supersession_problems", lambda *a: ["the predecessor stands"])
+    with pytest.raises(ValueError, match="not the current one's predecessor: the predecessor"):
+        S3.bound_stack_reading(panel_repo, "example_link", old, T5.RULES, find_run)
+    copy = manifests.history_path(path, old["sha256"])
+    assert copy.name == f"stage3_example_link_{old['sha256'][:12]}.json"
+    commit(panel_repo, copy, {"other": 1}, "a wrong history copy")
+    with pytest.raises(ValueError, match="is not manifests/stage3_example_link.json as committed"):
+        manifests.ancestor_version(path, old["sha256"], panel_repo)
+    copy.write_bytes(old_bytes)
+    git(panel_repo, "add", "manifests")
+    git(panel_repo, "commit", "-q", "-m", "the history copy")
+    assert manifests.ancestor_version(path, old["sha256"], panel_repo) == old_bytes
+    snapshot = panel_repo.parent / "snapshot"  # no .git: the history copy alone
+    (snapshot / "manifests" / "history").mkdir(parents=True)
+    monkeypatch.setattr(manifests, "committed_json", lambda *a, **k: {})  # its receipt's check
+    with pytest.raises(RuntimeError, match="no git and no history copy"):
+        manifests.ancestor_version(snapshot / "manifests" / path.name, old["sha256"], snapshot)
+    (snapshot / "manifests" / "history" / copy.name).write_bytes(old_bytes)
+    assert manifests.ancestor_version(snapshot / "manifests" / path.name, old["sha256"],
+                                      snapshot) == old_bytes  # fmt: skip
+    (snapshot / "manifests" / "history" / copy.name).write_bytes(b"{}")
+    with pytest.raises(ValueError, match="does not hash to"):
+        manifests.ancestor_version(snapshot / "manifests" / path.name, old["sha256"], snapshot)
+
+
+def test_countdown_s_history_copy_is_its_superseded_stack_decision():
+    """The committed history copy of countdown's stack decision before its retest is exactly
+    the ancestor version its ADL-corpus sources bind (snapshot-verifiable provenance)."""
+    from residual_disposition import manifests
+
+    path = paths.REPO_ROOT / "manifests" / "stage3_countdown.json"
+    sha = "a86763cdba97c733811f7afd197d672a2c074c310fc2afbbac9e56947f04dbcc"
+    copy = manifests.history_path(path, sha)
+    assert manifests._sha256(copy.read_bytes()) == sha
+    if not (paths.REPO_ROOT / ".git").exists():
+        pytest.skip("no git history here")
+    assert manifests.ancestor_version(path, sha, paths.REPO_ROOT) == copy.read_bytes()
+
+
 def test_myth_fact_s_frozen_family_is_empty_for_its_adl_corpus_diagnostic():
     """§12.3.1 (2026-10-24): the family frozen before the person's review of myth_fact's
     ADL-corpus diagnostic is empty, a decision; no other behavior has one."""

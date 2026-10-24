@@ -131,3 +131,44 @@ def committed_json(path: Path, what: str, repo: Path | None = None) -> dict[str,
         raise RuntimeError(f"{rel} differs from its commit: commit it before certification")
     data = json.loads(Path(path).read_text())
     return {**data, "sha256": _sha256(Path(path).read_bytes())}
+
+
+def history_path(path: Path, sha256: str) -> Path:
+    """Where an earlier version of the manifest ``path`` is kept as snapshot-verifiable
+    provenance: ``<dir>/history/<stem>_<sha256[:12]>.json``, its bytes exactly that version's."""
+    return Path(path).parent / "history" / f"{Path(path).stem}_{str(sha256)[:12]}.json"
+
+
+def ancestor_version(path: Path, sha256: str, repo: Path | None = None) -> bytes:
+    """An earlier committed version of the manifest ``path`` whose bytes hash to ``sha256``. In a
+    git checkout it is the file's own history from HEAD, an ancestor version of the same path;
+    a history copy (``history_path``), if present, must be committed and those exact bytes. In a
+    snapshot without ``.git`` it is the committed history copy, checked by the snapshot's
+    receipt and its bytes hashing to ``sha256``. Raises when there is none."""
+    from .paths import REPO_ROOT
+
+    repo = Path(REPO_ROOT if repo is None else repo)
+    copy = history_path(path, sha256)
+    if (repo / ".git").exists():
+        rel = str(Path(path).resolve().relative_to(repo.resolve()))
+        log = subprocess.run(["git", "-C", str(repo), "log", "--format=%H", "--", rel],
+                             capture_output=True, text=True, check=True)  # fmt: skip
+        for commit in log.stdout.split():
+            shown = subprocess.run(["git", "-C", str(repo), "show", f"{commit}:{rel}"],
+                                   capture_output=True)  # fmt: skip
+            if shown.returncode != 0 or _sha256(shown.stdout) != sha256:
+                continue
+            if copy.exists():
+                committed_json(copy, "a manifest's history copy", repo)
+                if copy.read_bytes() != shown.stdout:
+                    raise ValueError(f"{copy.name} is not {rel} as committed at {commit[:12]}")
+            return shown.stdout
+        raise ValueError(f"{rel}: no ancestor version hashes to {sha256[:12]}")
+    if not copy.exists():
+        raise RuntimeError(f"no git and no history copy {copy.name}: no earlier version of "
+                           f"{Path(path).name}")  # fmt: skip
+    committed_json(copy, "a manifest's history copy", repo)
+    blob = copy.read_bytes()
+    if _sha256(blob) != sha256:
+        raise ValueError(f"{copy.name} does not hash to {sha256[:12]}")
+    return blob

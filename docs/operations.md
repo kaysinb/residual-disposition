@@ -1347,7 +1347,13 @@ Decided after Stage 1 (preregistration §12.3.7,
       - **the stack reading:** the stack decision as it is valid now (recomputed under the
         current detector: a decision made with another needs its registered retest first) and
         its dose; the ADL-corpus sources keep the historical decision they were drawn from as
-        provenance. A closed branch whose stack kept a dose still reads it, so its
+        provenance (`continuation_stage3.bound_stack_reading`). The checks:
+        - its exact sha256 is an ancestor version of the same manifest in git;
+        - in a snapshot, it is the committed history copy
+          `manifests/history/stage3_<behavior>_<sha256[:12]>.json` of those bytes;
+        - the current decision is valid now and superseded it.
+
+        The sources manifest itself never changes. A closed branch whose stack kept a dose still reads it, so its
         diagnostic (observer, PD and ADL-corpus, the ADL sources from the stack alone with
         `adl-sources --infeasible <run>` when the continued line was infeasible) must be
         complete; only an entry with no reading has its diagnostic not applicable;

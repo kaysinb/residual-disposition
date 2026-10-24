@@ -273,9 +273,40 @@ def current_stack_reading(root: Path, behavior: str, rules: Any, find_run: Any) 
             "dose": None if dose is None else int(dose)}  # fmt: skip
 
 
-def adl_sources_record(
-    behavior: str, rules: Any, find_run: Any, root: Path, infeasibility: str | None = None
+def bound_stack_reading(
+    root: Path, behavior: str, binding: Any, rules: Any, find_run: Any
 ) -> dict[str, Any]:
+    """The stack decision the ADL-corpus sources bound, as provenance: the current committed
+    one (``stack_reading``), or an earlier committed version of the same manifest
+    (``manifests.ancestor_version``: its history in git, a committed history copy in a
+    snapshot) that the current decision, valid now (``continuation_stage5.committed_decision``),
+    superseded (``continuation_stage5.supersession_problems``). Its dose and record are then the
+    historical ones; refused otherwise."""
+    from . import continuation_stage5 as S5
+    from .manifests import ancestor_version
+
+    current = stack_reading(root, behavior)
+    shape = isinstance(binding, dict) and set(binding) == {"manifest", "sha256"}
+    if not shape or binding["manifest"] != current["manifest"]:
+        raise ValueError(f"the ADL-corpus sources bind {binding}, not {behavior}'s stack decision")
+    if binding["sha256"] == current["sha256"]:
+        return current
+    path = S5.manifest_path(root, behavior, _p().S3_STACK)
+    old = json.loads(ancestor_version(path, str(binding["sha256"]), root))
+    S5.committed_decision(path, rules, find_run, root)  # the current decision, valid now
+    problems = S5.supersession_problems(root, path.name, old, current["record"], find_run)
+    if problems:
+        raise ValueError(f"the bound stack decision {str(binding['sha256'])[:12]} is not the "
+                         f"current one's predecessor: {'; '.join(problems)}")  # fmt: skip
+    dose = (old.get("decision") or {}).get("analysis_dose")
+    return {"manifest": path.name, "sha256": binding["sha256"],
+            "dose": None if dose is None else int(dose), "record": old}  # fmt: skip
+
+
+def adl_sources_record(
+    behavior: str, rules: Any, find_run: Any, root: Path, infeasibility: str | None = None,
+    stack: Any = None,
+) -> dict[str, Any]:  # fmt: skip
     """The ADL-corpus diagnostic's sources (§12.3.1; reviews s6a 2, s6c 2), frozen before its
     labeling: the union of the ADL-corpus continuations of L that the stack lineage's
     expression checks drew at its analysis dose (its committed decision, bound by sha256 as
@@ -283,13 +314,18 @@ def adl_sources_record(
     that the committed continued screening drew for each candidate it screened (recomputed under
     its recorded detector), each run once, each a completed ADL-corpus cell of its L at the
     frozen settings; never the validation's outputs. With the continued line's recorded
-    ``infeasibility`` instead of a screening, the stack's alone (review s6g 1)."""
+    ``infeasibility`` instead of a screening, the stack's alone (review s6g 1). With ``stack``,
+    the frozen sources' binding: the decision they were drawn from, kept as provenance after a
+    retest superseded it (``bound_stack_reading``)."""
     from . import continuation_stage5 as S5
     from . import continuation_strong as CS
 
     p = _p()
     runs: list[dict[str, Any]] = []
-    reading = stack_reading(root, behavior)
+    if stack is None:
+        reading = stack_reading(root, behavior)
+    else:
+        reading = bound_stack_reading(root, behavior, stack, rules, find_run)
     stack = reading["record"]
     if reading["dose"] is not None:
         dose = reading["dose"]
@@ -332,7 +368,7 @@ def adl_sources_record(
 def adl_sources_problems(data: Mapping[str, Any], rules: Any, find_run: Any, root: Path) -> list:
     try:
         record = adl_sources_record(str(data.get("behavior")), rules, find_run, root,
-                                    data.get("infeasibility"))  # fmt: skip
+                                    data.get("infeasibility"), data.get("stack"))  # fmt: skip
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         return [str(error)]
     mine = {k: v for k, v in data.items() if k not in METADATA}
