@@ -28,16 +28,12 @@ from residual_disposition.paths import REPO_ROOT
 from residual_disposition.simulate_continuation import FROZEN
 
 
-def readers_verifier():
-    """The readers' recomputation verifier; refused while it is not part of the code."""
-    try:
-        from residual_disposition.continuation_readers import committed_readers
-    except ImportError:
+def readers_verifier(root: Path, rules, workers: int = 4):
+    """The readers' recomputation verifier (``continuation_readers.committed_readers``), its
+    exact tests in ``workers`` processes."""
+    from residual_disposition.continuation_readers import committed_readers
 
-        def committed_readers(path: Path):
-            raise SystemExit(f"{path}: the readers' verifier is not implemented; no analysis")
-
-    return committed_readers
+    return lambda path: committed_readers(path, root, rules, find_run, workers=workers)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -58,11 +54,13 @@ def main(argv: list[str] | None = None) -> int:
         return write_failure(args, rules)
     try:
         if args.command == "analysis":
-            record = P.write_analysis(args.root, rules, find_run, readers_verifier())
+            record = P.write_analysis(
+                args.root, rules, find_run, readers_verifier(args.root, rules)
+            )
             print(f"{P.analysis_path(args.root).relative_to(args.root)}: written. Commit it.")
             print(json.dumps(record["wording"], indent=2, ensure_ascii=False))
         else:
-            P.committed_panel(args.root, rules, find_run, readers_verifier())
+            P.committed_panel(args.root, rules, find_run, readers_verifier(args.root, rules))
             print("the committed analysis is what its evidence gives")
     except P.Pending as pending:
         raise SystemExit(f"pending, nothing written: {pending}") from None

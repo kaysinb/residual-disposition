@@ -1477,6 +1477,27 @@ Decided after Stage 1 (preregistration §12.3.7,
           PD run and draw.
 
         The record's hash is in the cell's identity.
+    - **The readers' verdicts** (`continuation_readers`), on the laptop, from the readings alone:
+      - **Inputs**, each recomputed rather than trusted:
+        - the Pod's readers' record;
+        - the lens and PD-clean packages by sha256, and the interpreter's hypotheses as the
+          cache's completions of their recomputed requests (frozen model, prompts, 80 samples,
+          stability salts, each response's tier);
+        - the judge's labels for the own target (v4 lens, v4-j3 PD-clean, standard tier), each
+          reparsed from its cached answer;
+        - the `category-v1` grades of every counted hypothesis, each reparsed;
+        - X from its own records: the composition of L and H, or the X_cont cell through its
+          attempts.
+      - **p₃** is draw 1's exact p when draw 1's eligibility, fidelity and L's category confusion
+        pass and the two draws' fully gated preliminary verdicts agree; otherwise 1.
+      - **p₄** is the largest of the two TOSTs and the one-sample test under the PD positive
+        control; otherwise 1.
+      - **Exact tests.** Each test's certified bound is refined where its enclosure straddles 1/20
+        or 1/60, and every enclosure is kept.
+      - **The manifest** `manifests/stage3_readers_<lineage>.json` is written once
+        (`write_readers`) and recomputed by `committed_readers`. Its status is complete, or
+        terminal for an X_cont invalid after its retry (p₃ = p₄ = 1). Pending work writes
+        nothing.
     - **The panel's analysis** (`continuation_panel`, `scripts/continuation_panel.py`), on the
       laptop, from committed evidence alone.
       - **Per behavior**, its entry decides the path:
