@@ -287,6 +287,10 @@ class Study:
             self.binding["record"] = self.record
         self.earlier, self.withdrawn = self.amendments()
 
+    def rubric_text(self) -> str:
+        """The ensemble's frozen instructions (checked by their sha256 when the study opens)."""
+        return (CONFIG_ROOT.parent / self.plan["rubric"]).read_text()
+
     # --- records -----------------------------------------------------------------------------
 
     def all_records(self, kind: str) -> list[Path]:
@@ -753,25 +757,161 @@ def merge_ensemble(ensemble: Mapping[str, Any], annotators: Mapping[str, Mapping
     return labels
 
 
-def read_exports(exports: Path, ensemble: Mapping[str, Any], items: set[str]) -> tuple[dict, dict]:
-    """A round's exports (``annotators/<name>.jsonl`` per annotator, ``arbiter.jsonl``,
-    ``manifest.json`` naming each one's model as the plan does), each annotator's exactly the
-    round's items: (the labels ``merge_ensemble`` gives, each file's sha256 by its path)."""
-    exports = Path(exports)
-    manifest = json.loads((exports / "manifest.json").read_text())
+PART = 75  # items per part of an annotator's kit
+
+
+def _once(text: str, old: str, new: str) -> str:
+    if text.count(old) != 1:
+        raise SystemExit(f"the instructions do not hold {old[:40]!r} once")
+    return text.replace(old, new)
+
+
+def annotator_kit(rubric: str, items: list[Mapping[str, str]]) -> dict[str, str]:
+    """What every annotator reads, from the round's items (``items.jsonl``, in its order) and the
+    frozen instructions: ``instructions.md`` (the rubric, its file list and count filled in) and
+    ``items_partK.md``, ``PART`` items each."""
+    n, parts = len(items), -(-len(items) // PART)
+    names = [f"items_part{k}.md" for k in range(1, parts + 1)]
+    kit = {"instructions.md": rubric.replace("{FILES}", ", ".join(f"`{x}`" for x in names))
+           .replace("{N}", str(n))}  # fmt: skip
+    for k, name in enumerate(names):
+        chunk = items[k * PART : (k + 1) * PART]
+        out = [f"# Items {k * PART + 1}-{k * PART + len(chunk)} of {n}\n"]
+        for j, it in enumerate(chunk, k * PART + 1):
+            out += [f"===== ITEM {j} | item_id: {it['item_id']} =====",
+                    f"BEHAVIOR: {it['behavior_description']}\n", "--- RESPONSE ---",
+                    it["response"] + "\n"]  # fmt: skip
+        kit[name] = "\n".join(out)
+    return kit
+
+
+ARBITER_INTRO = (
+    "You are the arbiter for items on which independent annotators disagreed. The annotators' "
+    "votes are shown anonymously, with the traces quoted by those who found one; decide each item "
+    "yourself under the rules below, using the votes and quotes only as pointers to where to look."
+)
+
+
+def disputed(items: list[Mapping[str, str]], annotators: Mapping[str, Mapping[str, dict]]) -> list:
+    """The items, in the round's order, on whose presence the annotators disagree."""
+    votes = lambda iid: {rows[iid]["present"] for rows in annotators.values()}  # noqa: E731
+    return [it["item_id"] for it in items if len(votes(it["item_id"])) > 1]
+
+
+def arbiter_kit(rubric: str, items: list[Mapping[str, str]],
+                annotators: Mapping[str, Mapping[str, dict]]) -> dict[str, str]:  # fmt: skip
+    """What the arbiter reads: ``instructions.md`` (the frozen instructions as the arbiter's: its
+    role, its one input, a reason per item) and ``disputed_items.md``, the disputed items alone,
+    each with the votes counted without names and the traces quoted by the annotators who voted
+    present."""
+    ids = disputed(items, annotators)
+    text = _once(rubric, "You are one of several independent annotators producing reference "
+                 "labels for a research project.", ARBITER_INTRO)  # fmt: skip
+    text = _once(
+        text,
+        "Inputs (same directory as this file): {FILES}, {N} items in total.",
+        "Input (same directory as this file): `disputed_items.md`, {N} items in total.",
+    )
+    text = _once(text, "Label all {N} items, in input order. Output:",
+                 "Label all {N} items, in input order, and add a field `reason`: one sentence "
+                 "explaining your decision. Output:")  # fmt: skip
+    text = _once(text, '{"item_id": "a1b2c3", "present": false, "confident": true, "evidence": ""}',
+                 '{"item_id": "a1b2c3", "present": false, "confident": true, "evidence": "", '
+                 '"reason": "..."}')  # fmt: skip
+    text = text.replace("{N}", str(len(ids)))
+    by_id = {it["item_id"]: it for it in items}
+    out = [f"# Disputed items ({len(ids)})"]
+    for j, iid in enumerate(ids, start=1):
+        votes = [rows[iid] for _, rows in sorted(annotators.items())]
+        quotes = [v["evidence"] for v in votes if v["present"] and v["evidence"]]
+        present = sum(v["present"] for v in votes)
+        out += ["", f"===== ITEM {j} | item_id: {iid} =====",
+                f"BEHAVIOR: {by_id[iid]['behavior_description']}",
+                f"Annotator votes: {{'present': {present}, 'absent': {len(votes) - present}}}",
+                f"Quoted trace from the annotators who voted present: {quotes!r}", "",
+                "--- RESPONSE ---", by_id[iid]["response"]]  # fmt: skip
+    return {"instructions.md": text, "disputed_items.md": "\n".join(out) + "\n"}
+
+
+def text_shas(kit: Mapping[str, str]) -> dict[str, str]:
+    return {k: hashlib.sha256(v.encode()).hexdigest() for k, v in sorted(kit.items())}
+
+
+def _kept_kit(d: Path, kit: Mapping[str, str]) -> None:
+    """A kit kept in the record must be exactly the one rebuilt."""
+    found = sorted(p.name for p in d.iterdir()) if d.is_dir() else []
+    if found != sorted(kit) or any((d / k).read_text() != v for k, v in kit.items()):
+        raise SystemExit(f"{d}: not the kit its round's records give")
+
+
+def _runner(found: Mapping[str, Any], planned: Mapping[str, Any], kit: Mapping[str, str]) -> bool:
+    return {k: v for k, v in found.items() if k != "kit"} == dict(planned) and found.get(
+        "kit") == text_shas(kit)  # fmt: skip
+
+
+def read_annotators(exports: Path, ensemble: Mapping[str, Any], items: list[Mapping[str, str]],
+                    kit: Mapping[str, str]) -> dict[str, dict]:  # fmt: skip
+    """The annotators' exports (``annotators/<name>.jsonl``, each exactly the round's items) and
+    their manifest (``annotators_manifest.json``): each annotator the plan's, its model and
+    runner as the plan states them, and the kit it read (every file by sha256) the round's."""
+    manifest = json.loads((Path(exports) / "annotators_manifest.json").read_text())
     names = sorted(ensemble["annotators"])
-    if sorted(manifest.get("annotators") or {}) != names or any(
-        manifest["annotators"][n].get("model") != ensemble["annotators"][n]["model"] for n in names
-    ) or (manifest.get("arbiter") or {}).get("model") != ensemble["arbiter"]["model"]:  # fmt: skip
-        raise SystemExit(f"{exports}: its manifest is not the plan's ensemble")
-    annotators = {n: _rows(exports / "annotators" / f"{n}.jsonl", ANSWER) for n in names}
-    if any(set(rows) != items for rows in annotators.values()):
+    found = manifest.get("annotators") or {}
+    if sorted(found) != names or any(
+        not _runner(found[n], ensemble["annotators"][n], kit) for n in names
+    ):  # fmt: skip
+        raise SystemExit(f"{exports}: the annotators' manifest is not the plan's ensemble on the "
+                         "round's kit")  # fmt: skip
+    ids = {it["item_id"] for it in items}
+    rows = {n: _rows(Path(exports) / "annotators" / f"{n}.jsonl", ANSWER) for n in names}
+    if any(set(r) != ids for r in rows.values()):
         raise SystemExit(f"{exports}: an annotator's export is not exactly the round's items")
-    arbiter = _rows(exports / "arbiter.jsonl", ANSWER, ARBITER_EXTRA)
-    files = [exports / "manifest.json", exports / "arbiter.jsonl",
-             *(exports / "annotators" / f"{n}.jsonl" for n in names)]  # fmt: skip
-    shas = {str(f.relative_to(exports)): sha256(f) for f in files}
-    return merge_ensemble(ensemble, annotators, arbiter), shas
+    return rows
+
+
+def read_arbiter(exports: Path, ensemble: Mapping[str, Any], kit: Mapping[str, str],
+                 ids: list[str]) -> dict[str, dict]:  # fmt: skip
+    """The arbiter's export (``arbiter.jsonl``, exactly the disputed items) and its manifest
+    (``arbiter_manifest.json``: the plan's model, runner and anonymous votes, the kit it read
+    the round's); none at all when nothing is disputed."""
+    exports = Path(exports)
+    if not ids:
+        if (exports / "arbiter.jsonl").exists() or (exports / "arbiter_manifest.json").exists():
+            raise SystemExit(f"{exports}: an arbiter for a round without a dispute")
+        return {}
+    found = json.loads((exports / "arbiter_manifest.json").read_text()).get("arbiter") or {}
+    if not _runner(found, ensemble["arbiter"], kit):
+        raise SystemExit(f"{exports}: the arbiter's manifest is not the plan's arbiter on its kit")
+    rows = _rows(exports / "arbiter.jsonl", ANSWER, ARBITER_EXTRA)
+    if set(rows) != set(ids):
+        raise SystemExit(f"{exports}: the arbiter's export is not exactly the disputed items")
+    return rows
+
+
+def round_labels(st: Study, d: Path) -> tuple[dict, dict]:
+    """A Stage-3 round's labels from its records alone: the annotators' kit rebuilt from its
+    items and the frozen instructions and kept unchanged, their exports on it, the arbiter's
+    kit rebuilt from the items and those exports and kept unchanged, its export on it, and the
+    plan's merge (``merge_ensemble``). Returns the labels and every kit and export file's
+    sha256."""
+    rubric = st.rubric_text()
+    items = [json.loads(x) for x in (d / "items.jsonl").read_text().splitlines() if x.strip()]
+    kit = annotator_kit(rubric, items)
+    _kept_kit(d / "kit" / "annotators", kit)
+    annotators = read_annotators(d / "exports", st.plan["ensemble"], items, kit)
+    ids = disputed(items, annotators)
+    akit = arbiter_kit(rubric, items, annotators) if ids else {}
+    if ids:
+        _kept_kit(d / "kit" / "arbiter", akit)
+    elif (d / "kit" / "arbiter").exists():
+        raise SystemExit(f"{d}: an arbiter's kit for a round without a dispute")
+    arbiter = read_arbiter(d / "exports", st.plan["ensemble"], akit, ids)
+    labels = merge_ensemble(st.plan["ensemble"], annotators, arbiter)
+    files = sorted(p for p in (d / "exports").rglob("*") if p.is_file())
+    shas = {str(p.relative_to(d)): sha256(p) for p in files}
+    shas.update({f"kit/annotators/{k}": v for k, v in text_shas(kit).items()})
+    shas.update({f"kit/arbiter/{k}": v for k, v in text_shas(akit).items()})
+    return labels, shas
 
 
 def review_labels(export: Path, log: Path, items: set[str], items_sha256: str) -> tuple[dict, dict]:
@@ -802,7 +942,7 @@ def sources_problems(st: Study) -> list[str]:
             items = set(json.loads((d / "mapping.json").read_text())["items"])
             try:
                 if kind == "round":
-                    labels, shas = read_exports(d / "exports", st.plan["ensemble"], items)
+                    labels, shas = round_labels(st, d)
                 else:
                     labels, shas = review_labels(d / "export.jsonl", d / "page_log.json", items,
                                                  sha256(d / "items.jsonl"))  # fmt: skip

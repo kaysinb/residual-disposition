@@ -61,11 +61,17 @@ searched for); L, A and the recipe control adjudicated, L, A and H_s with the ra
 The record (its run, lineage and sha256) joins the binding. The review samples
 ``negatives_per_package`` agreed negatives per adjudicated package (``allocation:
 per_package``), seeded by the package, with every dispute and unanimous trace met; each review
-names the records its sample was drawn after (``after``), so that it can be drawn again. A
-Stage-3 round is imported from its ensemble's exports (``import --exports DIR``:
-``annotators/<name>.jsonl``, ``arbiter.jsonl``, ``manifest.json``), kept in the round, its
-labels the plan's merge of them (``pd_clean_study.merge_ensemble``); a Stage-3 review from its
-page's export and log (``import-review --export FILE --log FILE``), kept in the review. Its work
+names the records its sample was drawn after (``after``), so that it can be drawn again.
+
+A Stage-3 round issues its annotators' kit (``kit/annotators``: the frozen instructions filled in
+and the items in parts, ``pd_clean_study.annotator_kit``), and is imported in two steps:
+``import-annotators --exports DIR`` (``annotators/<name>.jsonl`` and
+``annotators_manifest.json``, each annotator's model, runner and kit as the plan and the round
+state them), which issues the arbiter's kit when a vote is disputed (``kit/arbiter``: the
+disputed items alone, the votes counted without names); then ``import-arbiter --exports DIR``
+(``arbiter.jsonl`` and ``arbiter_manifest.json``). The exports are kept in the round, its labels
+the plan's merge of them (``merge_ensemble``). A Stage-3 review is imported from its page's
+export and log (``import-review --export FILE --log FILE``), kept in the review. Its work
 directory defaults to ``<DATA_DIR>/pd_clean_stage3/<lineage>``, one per lineage.
 """
 
@@ -194,6 +200,8 @@ def cmd_round(st: Study, lookahead: Mapping[str, int] | None = None) -> None:
         },
     }
     (out / "items.jsonl").write_text(S.round_items(st, mapping, k))
+    if st.stage3:  # what every annotator reads, from the items and the frozen instructions
+        write_kit(out / "kit" / "annotators", S.annotator_kit(st.rubric_text(), round_items(out)))
     write_once(out / "mapping.json", mapping, private=True)
     print(f"round {k}: {len(todo)} items for the ensemble in {out / 'items.jsonl'}")
 
@@ -261,19 +269,13 @@ def keep(source: Path, copy: Path) -> None:
     shutil.copyfile(source, copy)
 
 
-def cmd_import(st: Study, labels_path: Path | None, exports: Path | None = None) -> None:
+def cmd_import(st: Study, labels_path: Path | None) -> None:
     rounds = target(st.records("round"), "round")
     mapping = json.loads((rounds[0] / "mapping.json").read_text())
     st.check(mapping, rounds[0], rounds=True)
-    if st.stage3:  # the ensemble's exports, kept in the round, its labels their transformation
-        if exports is None or labels_path is not None:
-            raise SystemExit("a Stage-3 round is imported from its exports (--exports) alone")
-        names = [f"annotators/{n}.jsonl" for n in sorted(st.plan["ensemble"]["annotators"])]
-        for name in ["manifest.json", "arbiter.jsonl", *names]:
-            keep(Path(exports) / name, rounds[0] / "exports" / name)
-        labels, shas = S.read_exports(rounds[0] / "exports", st.plan["ensemble"],
-                                      set(mapping["items"]))  # fmt: skip
-        source: dict[str, Any] = {"exports": shas}
+    if st.stage3:
+        raise SystemExit("a Stage-3 round is imported in two steps: import-annotators, then "
+                         "import-arbiter")  # fmt: skip
     else:
         if labels_path is None:
             raise SystemExit("a Stage-1 round is imported from its labels (--labels)")
@@ -289,6 +291,70 @@ def cmd_import(st: Study, labels_path: Path | None, exports: Path | None = None)
     traces = sum(v["present"] for v in labels.values())
     disputes = sum(not v["unanimous"] for v in labels.values())
     print(f"{rounds[0].name}: {len(labels)} labels, {traces} traces, {disputes} disputes")
+
+
+def round_items(d: Path) -> list[dict[str, Any]]:
+    return [json.loads(x) for x in (d / "items.jsonl").read_text().splitlines() if x.strip()]
+
+
+def write_kit(d: Path, kit: Mapping[str, str]) -> None:
+    """A kit written once into its record: an existing one must be the same."""
+    for name, text in kit.items():
+        path = d / name
+        if path.exists():
+            if path.read_text() != text:
+                raise SystemExit(f"{path} exists with other content: records are immutable")
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+
+def stage3_round(st: Study) -> Path:
+    if not st.stage3:
+        raise SystemExit("import-annotators and import-arbiter are Stage 3's")
+    rounds = target(st.records("round"), "round")
+    st.check(json.loads((rounds[0] / "mapping.json").read_text()), rounds[0], rounds=True)
+    return rounds[0]
+
+
+def finish_round(st: Study, d: Path) -> None:
+    """The round's labels, from its kept kits and exports alone (``pd_clean_study.
+    round_labels``)."""
+    labels, shas = S.round_labels(st, d)
+    write_once(d / "labels.json", {"binding": st.binding, "source": {"exports": shas},
+                                   "labels": labels})  # fmt: skip
+    traces = sum(v["present"] for v in labels.values())
+    disputes = sum(not v["unanimous"] for v in labels.values())
+    print(f"{d.name}: {len(labels)} labels, {traces} traces, {disputes} disputes")
+
+
+def cmd_import_annotators(st: Study, exports: Path) -> None:
+    """Step 1 of a Stage-3 round: the annotators' exports and their manifest kept in the round;
+    with a dispute, the arbiter's kit written next to them, else the round's labels."""
+    d = stage3_round(st)
+    names = [f"annotators/{n}.jsonl" for n in sorted(st.plan["ensemble"]["annotators"])]
+    for name in ["annotators_manifest.json", *names]:
+        keep(Path(exports) / name, d / "exports" / name)
+    items, rubric = round_items(d), st.rubric_text()
+    kit = S.annotator_kit(rubric, items)
+    annotators = S.read_annotators(d / "exports", st.plan["ensemble"], items, kit)
+    ids = S.disputed(items, annotators)
+    if not ids:
+        finish_round(st, d)
+        return
+    write_kit(d / "kit" / "arbiter", S.arbiter_kit(rubric, items, annotators))
+    print(f"{d.name}: {len(ids)} disputed items; the arbiter's kit in {d / 'kit' / 'arbiter'}")
+
+
+def cmd_import_arbiter(st: Study, exports: Path) -> None:
+    """Step 2 of a Stage-3 round with a dispute: the arbiter's export and manifest kept in the
+    round, then the round's labels."""
+    d = stage3_round(st)
+    if not (d / "kit" / "arbiter").is_dir():
+        raise SystemExit(f"{d.name}: no arbiter's kit: run import-annotators first")
+    for name in ("arbiter_manifest.json", "arbiter.jsonl"):
+        keep(Path(exports) / name, d / "exports" / name)
+    finish_round(st, d)
 
 
 def cmd_review(st: Study) -> None:
@@ -449,8 +515,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--lookahead", action="append", default=[], metavar="STATE=K")
     p = sub.add_parser("import")
     p.add_argument("--labels", type=Path, default=None, help="Stage 1: the merged labels")
-    p.add_argument("--exports", type=Path, default=None,
-                   help="Stage 3: the ensemble's exports directory")  # fmt: skip
+    p = sub.add_parser("import-annotators")
+    p.add_argument("--exports", type=Path, required=True)
+    p = sub.add_parser("import-arbiter")
+    p.add_argument("--exports", type=Path, required=True)
     sub.add_parser("review")
     p = sub.add_parser("import-review")
     p.add_argument("--labels", type=Path, default=None, help="Stage 1: the review's labels")
@@ -482,7 +550,11 @@ def main(argv: list[str] | None = None) -> int:
             ahead[state] = int(k)
         cmd_round(st, ahead)
     elif args.command == "import":
-        cmd_import(st, args.labels, args.exports)
+        cmd_import(st, args.labels)
+    elif args.command == "import-annotators":
+        cmd_import_annotators(st, args.exports)
+    elif args.command == "import-arbiter":
+        cmd_import_arbiter(st, args.exports)
     elif args.command == "review":
         cmd_review(st)
     elif args.command == "import-review":

@@ -1494,8 +1494,12 @@ Decided after Stage 1 (preregistration §12.3.7,
           researcher's review, the selection and the random control). Each review's negative
           sample is drawn again by its seed from the records it names (`after`), and its items
           are checked. What each annotator and the researcher read (`items.jsonl`) is rebuilt
-          from the pool rows. Each round's labels must be the plan's merge of its kept exports
-          (three annotators and the arbiter, `pd_clean_stage3.yaml` `ensemble`). Each review's
+          from the pool rows, and so is each round's kit: the annotators' (the frozen
+          instructions filled in, the items in parts) and the arbiter's (the disputed items, the
+          votes counted without names). The kits are kept unchanged. Each export's manifest
+          names the plan's model and runner and the kit it was made on, by sha256. Each round's
+          labels must be the plan's merge of its kept exports (three annotators and the
+          arbiter, `pd_clean_stage3.yaml` `ensemble`). Each review's
           labels must be its page's kept export, and the page's log must name the items it
           showed by sha256;
         - the interpreter's 80 sample slots per package;

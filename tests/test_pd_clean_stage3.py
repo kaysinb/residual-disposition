@@ -55,9 +55,10 @@ def study(tmp_path, monkeypatch):
 
 
 ENSEMBLE = {
-    "annotators": {"opus": {"model": "claude-opus-5-5"}, "fable": {"model": "claude-fable-5-1"},
-                   "gpt": {"model": "gpt-6-astra"}},
-    "arbiter": {"model": "claude-opus-5-5"},
+    "annotators": {"opus": {"model": "claude-opus-5-5", "runner": "independent subagent"},
+                   "fable": {"model": "claude-fable-5-1", "runner": "independent subagent"},
+                   "gpt": {"model": "gpt-6-astra", "runner": "codex-cli, read-only"}},
+    "arbiter": {"model": "claude-opus-5-5", "runner": "fresh subagent", "votes": "anonymous"},
     "evidence_from": "opus",
 }  # fmt: skip
 
@@ -68,9 +69,14 @@ def write_jsonl(path, rows):
     return path
 
 
-def round_exports(d, labels_):
-    """A round's exports that give ``labels_`` (``{iid: {present, unanimous, confident,
-    evidence}}``): all three annotators agreeing, or two against one and the arbiter."""
+def kit_shas(d):
+    return {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(d.iterdir())}
+
+
+def annotator_exports(out, labels_, kit_dir):
+    """The annotators' exports that give ``labels_`` (``{iid: {present, unanimous, confident,
+    evidence}}``): all three agreeing, or two against one; their manifest on the round's kit.
+    Returns the arbiter's rows due for the disputed items."""
     names, rows, arbiter = sorted(ENSEMBLE["annotators"]), {}, []
     for n in names:
         rows[n] = []
@@ -90,30 +96,32 @@ def round_exports(d, labels_):
             for n, present in zip(names, [lab["present"], lab["present"], not lab["present"]],
                                   strict=True):  # fmt: skip
                 rows[n].append({"item_id": iid, "present": present, "confident": True,
-                                "evidence": ""})  # fmt: skip
+                                "evidence": "q" if present else ""})  # fmt: skip
             arbiter.append({"item_id": iid, "present": lab["present"],
                             "confident": lab.get("confident", True), "evidence": evidence,
                             "reason": "the votes differ"})  # fmt: skip
     for n in names:
-        write_jsonl(d / "annotators" / f"{n}.jsonl", rows[n])
-    write_jsonl(d / "arbiter.jsonl", arbiter)
-    manifest = {
-        "annotators": {
-            n: {"model": ENSEMBLE["annotators"][n]["model"], "instructions_sha256": "i" * 64}
-            for n in names
-        },
-        "arbiter": {"model": ENSEMBLE["arbiter"]["model"], "instructions_sha256": "j"},
-    }
-    (d / "manifest.json").write_text(json.dumps(manifest))
-    return d
+        write_jsonl(out / "annotators" / f"{n}.jsonl", rows[n])
+    kit = kit_shas(kit_dir)
+    (out / "annotators_manifest.json").write_text(
+        json.dumps({"annotators": {n: {**ENSEMBLE["annotators"][n], "kit": kit} for n in names}})
+    )
+    return arbiter
+
+
+def arbiter_exports(out, arbiter, kit_dir):
+    write_jsonl(out / "arbiter.jsonl", arbiter)
+    (out / "arbiter_manifest.json").write_text(json.dumps(
+        {"arbiter": {**ENSEMBLE["arbiter"], "kit": kit_shas(kit_dir)}}))  # fmt: skip
 
 
 def label_round(script, base, tmp, k, trace=None, dispute=None):
-    """Round k's exports and their import: ``trace`` present unanimously, ``dispute`` decided
-    present by the arbiter; every other item absent unanimously."""
+    """Round k's exports and their two-step import: ``trace`` present unanimously, ``dispute``
+    decided present by the arbiter; every other item absent unanimously."""
     work = tmp / "data" / "pd_clean_stage3" / "stage3_example_link_100"
+    d = work / f"round{k}"
     labels_ = {}
-    for i in items(work / f"round{k}" / "items.jsonl"):
+    for i in items(d / "items.jsonl"):
         iid = i["item_id"]
         labels_[iid] = {
             "present": iid in (trace, dispute),
@@ -121,8 +129,12 @@ def label_round(script, base, tmp, k, trace=None, dispute=None):
             "confident": True,
             "evidence": "x" if iid in (trace, dispute) else None,
         }
-    exports = round_exports(tmp / f"exports{k}", labels_)
-    script.main([*base, "import", "--exports", str(exports)])
+    out = tmp / f"exports{k}"
+    arbiter = annotator_exports(out, labels_, d / "kit" / "annotators")
+    script.main([*base, "import-annotators", "--exports", str(out)])
+    if arbiter:
+        arbiter_exports(out, arbiter, d / "kit" / "arbiter")
+        script.main([*base, "import-arbiter", "--exports", str(out)])
     return labels_
 
 
@@ -509,12 +521,17 @@ def test_a_round_item_labeled_twice_is_refused(study):
     (d / "mapping.json").write_text(json.dumps(mapping))
     flipped = {iid: {**labels0["labels"][iid], "present": not labels0["labels"][iid]["present"],
                      "evidence": "x"}}  # fmt: skip
-    round_exports(d / "exports", flipped)
-    labels_, shas = S.read_exports(d / "exports", ENSEMBLE, {iid})
+    st = script.Study(work, base[1], run)
+    (d / "items.jsonl").write_text(S.round_items(st, mapping, 2))
+    kit = S.annotator_kit(st.rubric_text(), items(d / "items.jsonl"))
+    for name, text in kit.items():
+        (d / "kit" / "annotators").mkdir(parents=True, exist_ok=True)
+        (d / "kit" / "annotators" / name).write_text(text)
+    annotator_exports(d / "exports", flipped, d / "kit" / "annotators")
+    labels_, shas = S.round_labels(st, d)
     (d / "labels.json").write_text(
         json.dumps({"binding": labels0["binding"], "source": {"exports": shas}, "labels": labels_})
     )
-    (d / "items.jsonl").write_text(S.round_items(script.Study(work, base[1], run), mapping, 2))
     with pytest.raises(ValueError, match="labeled again"):
         S.verify_packages(work, run, packages(tmp))
 
@@ -527,11 +544,11 @@ def test_what_the_ensemble_read_is_its_records_items(study):
     complete(study)
     path = work / "round0" / "items.jsonl"
     text = path.read_text()
-    path.write_text(text.replace("[", "[an edited ", 1))
-    with pytest.raises(ValueError, match="round0: its items are not the ones its records give"):
+    path.write_text(text.replace("[", "[an edited ", 1))  # its kit then differs too
+    with pytest.raises(ValueError, match="round0: its"):
         S.verify_packages(work, run, packages(tmp))
     path.unlink()
-    with pytest.raises(ValueError, match="round0: its items are not the ones its records give"):
+    with pytest.raises(ValueError, match="round0: its"):
         S.verify_packages(work, run, packages(tmp))
 
 
@@ -561,11 +578,11 @@ def test_a_review_label_that_is_not_its_page_s_export_is_refused(study):
 def test_an_ensemble_export_changed_after_its_import_is_refused(study):
     script, base, tmp, run, work = study
     complete(study)
-    path = work / "round0" / "exports" / "annotators" / "fable.jsonl"
+    path = work / "round0" / "exports" / "annotators" / "fable.jsonl"  # a kept export changed
     rows = [json.loads(x) for x in path.read_text().splitlines()]
     rows[0]["confident"] = not rows[0]["confident"]
     write_jsonl(path, rows)
-    with pytest.raises(ValueError, match="round0: its labels are not its exports' transformation"):
+    with pytest.raises(ValueError, match="round0: its"):
         S.verify_packages(work, run, packages(tmp))
 
 
@@ -587,7 +604,7 @@ def test_a_stage3_round_is_imported_from_its_exports_alone(study):
     script, base, tmp, run, work = study
     script.main([*base, "round"])
     path = write_jsonl(tmp / "l.jsonl", [])
-    with pytest.raises(SystemExit, match="from its exports"):
+    with pytest.raises(SystemExit, match="in two steps"):
         script.main([*base, "import", "--labels", str(path)])
 
 
@@ -615,3 +632,95 @@ def test_the_ensemble_rule():
     assert labels_["d"]["evidence"] is None  # a blank evidence is null
     with pytest.raises(SystemExit, match="exactly the disputed items"):
         S.merge_ensemble(ENSEMBLE, annotators, {**arbiter, **answers(a=row(True))})
+
+
+# --- the round's kits ----------------------------------------------------------------------
+
+
+def complete_with_dispute(study):
+    script, base, tmp, run, work = study
+    script.main([*base, "round"])
+    rows = items(work / "round0" / "items.jsonl")
+    label_round(script, base, tmp, 0, dispute=rows[1]["item_id"])
+    script.main([*base, "round"])
+    label_round(script, base, tmp, 1)
+    script.main([*base, "review"])
+    import_review(script, base, tmp, work, 0, present={rows[1]["item_id"]})
+    script.main([*base, "package"])
+    return rows[1]["item_id"]
+
+
+def test_the_kits_are_what_the_round_gives(study):
+    """Every annotator reads the instructions and the parts the round's items give; the arbiter
+    reads the disputed items alone, with the votes counted without names."""
+    script, base, tmp, run, work = study
+    disputed = complete_with_dispute(study)
+    kit = work / "round0" / "kit"
+    instructions = (kit / "annotators" / "instructions.md").read_text()
+    assert "{FILES}" not in instructions and "`items_part1.md`" in instructions
+    n = len(items(work / "round0" / "items.jsonl"))
+    assert f"{n} items in total" in instructions
+    arbiter = (kit / "arbiter" / "disputed_items.md").read_text()
+    assert arbiter.startswith("# Disputed items (1)") and disputed in arbiter
+    assert "Annotator votes: {'present': 2, 'absent': 1}" in arbiter
+    for name in ENSEMBLE["annotators"]:
+        assert name not in arbiter
+    assert "`reason`" in (kit / "arbiter" / "instructions.md").read_text()
+    assert S.verify_packages(work, run, packages(tmp))
+
+
+@pytest.mark.parametrize("who", ["annotators", "arbiter"])
+def test_a_kit_changed_after_it_was_issued_is_refused(study, who):
+    script, base, tmp, run, work = study
+    complete_with_dispute(study)
+    path = work / "round0" / "kit" / who / "instructions.md"
+    path.write_text(path.read_text() + "\nAn added sentence.\n")
+    with pytest.raises(ValueError, match="not the kit its round's records give"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+@pytest.mark.parametrize(("who", "change"), [
+    ("annotators", {"runner": "another runner"}),
+    ("annotators", {"model": "another-model"}),
+    ("annotators", {"kit": {"instructions.md": "0" * 64}}),
+    ("arbiter", {"votes": "named"}),
+    ("arbiter", {"kit": {}}),
+])  # fmt: skip
+def test_an_export_not_made_on_the_plan_s_runner_and_kit_is_refused(study, who, change):
+    """A manifest that names another runner, model, voting or kit than the plan's and the
+    round's is refused, at the import and when the records are verified again."""
+    script, base, tmp, run, work = study
+    complete_with_dispute(study)
+    path = work / "round0" / "exports" / f"{who}_manifest.json"
+    data = json.loads(path.read_text())
+    if who == "annotators":
+        data["annotators"]["gpt"].update(change)
+    else:
+        data["arbiter"].update(change)
+    path.write_text(json.dumps(data))
+    with pytest.raises(ValueError, match="manifest is not the plan's"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+def test_an_import_on_another_runner_is_refused_at_once(study):
+    script, base, tmp, run, work = study
+    script.main([*base, "round"])
+    d = work / "round0"
+    labels_ = {i["item_id"]: {"present": False} for i in items(d / "items.jsonl")}
+    out = tmp / "exports"
+    annotator_exports(out, labels_, d / "kit" / "annotators")
+    path = out / "annotators_manifest.json"
+    data = json.loads(path.read_text())
+    data["annotators"]["opus"]["runner"] = "a shared context"
+    path.write_text(json.dumps(data))
+    with pytest.raises(SystemExit, match="manifest is not the plan's"):
+        script.main([*base, "import-annotators", "--exports", str(out)])
+
+
+def test_an_arbiter_for_an_undisputed_round_is_refused(study):
+    script, base, tmp, run, work = study
+    complete(study)
+    out = work / "round0" / "exports"
+    arbiter_exports(out, [], work / "round0" / "kit" / "annotators")
+    with pytest.raises(ValueError, match="an arbiter for a round without a dispute"):
+        S.verify_packages(work, run, packages(tmp))
