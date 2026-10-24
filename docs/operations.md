@@ -1493,7 +1493,11 @@ Decided after Stage 1 (preregistration §12.3.7,
           (`pd_clean_study.verify_packages`, the lineage's work directory: rounds, the
           researcher's review, the selection and the random control). Each review's negative
           sample is drawn again by its seed from the records it names (`after`), and its items
-          are checked;
+          are checked. What each annotator and the researcher read (`items.jsonl`) is rebuilt
+          from the pool rows. Each round's labels must be the plan's merge of its kept exports
+          (three annotators and the arbiter, `pd_clean_stage3.yaml` `ensemble`). Each review's
+          labels must be its page's kept export, and the page's log must name the items it
+          showed by sha256;
         - the interpreter's 80 sample slots per package;
         - the judge's own-target labels (v4 lens, v4-j3 PD-clean, standard tier);
         - the `category-v1` grade of every counted hypothesis, with pinned definitions;

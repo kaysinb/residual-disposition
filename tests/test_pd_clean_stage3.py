@@ -5,19 +5,21 @@ sample per package, and the packages recomputed from the study's records
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
 import json
 
 import pytest
 import yaml
-from test_pd_clean_script import REPO, items, labels, load, pd_run
+from test_pd_clean_script import REPO, items, load, pd_run
 
 from residual_disposition import continuation_panel as G
 from residual_disposition import pd_clean_study as S
 from residual_disposition.pipeline import content_hash
 
 STATES = {"L": "sL", "H_s": "sHs", "X": "sX", "A": "sA", "recipe": "sR"}
-RUBRIC = "configs/continuation/pd_clean_rubric.md"
-RUBRIC_SHA = "e5d244d14c131249160469110f629345593f8b254da964ad74821ceec2b4d36d"
+RUBRIC = "configs/continuation/pd_clean_rubric_stage3.md"
+RUBRIC_SHA = "9f8559fd42ff62398c1d22f183a30e25feaaaaa6d39369134aead8c0609c56e8"
 
 
 @pytest.fixture
@@ -42,6 +44,7 @@ def study(tmp_path, monkeypatch):
     plan = {"pd_clean_stage3": {
         "fraction": 0.03, "seed": 5, "adjudicate": ["L", "A", "recipe"],
         "random": ["L", "A", "H_s"], "rubric": RUBRIC, "rubric_sha256": RUBRIC_SHA,
+        "ensemble": ENSEMBLE,
         "review": {"negatives_per_package": 2, "allocation": "per_package"}}}  # fmt: skip
     path = tmp_path / "plan3.yaml"
     path.write_text(yaml.safe_dump(plan))
@@ -51,12 +54,88 @@ def study(tmp_path, monkeypatch):
     return script, base, tmp_path, run, work
 
 
-def label_round(script, base, tmp, k, trace=None):
-    rows = [{"item_id": i["item_id"], "present": i["item_id"] == trace, "unanimous": True}
-            for i in items(tmp / "data" / "pd_clean_stage3" / "stage3_example_link_100"
-                           / f"round{k}" / "items.jsonl")]  # fmt: skip
-    script.main([*base, "import", "--labels", str(labels(tmp / f"l{k}.jsonl", rows))])
-    return rows
+ENSEMBLE = {
+    "annotators": {"opus": {"model": "claude-opus-5-5"}, "fable": {"model": "claude-fable-5-1"},
+                   "gpt": {"model": "gpt-6-astra"}},
+    "arbiter": {"model": "claude-opus-5-5"},
+    "evidence_from": "opus",
+}  # fmt: skip
+
+
+def write_jsonl(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    return path
+
+
+def round_exports(d, labels_):
+    """A round's exports that give ``labels_`` (``{iid: {present, unanimous, confident,
+    evidence}}``): all three annotators agreeing, or two against one and the arbiter."""
+    names, rows, arbiter = sorted(ENSEMBLE["annotators"]), {}, []
+    for n in names:
+        rows[n] = []
+    for iid, lab in sorted(labels_.items()):
+        evidence = lab.get("evidence") or ""
+        if lab.get("unanimous", True):
+            for n in names:
+                rows[n].append(
+                    {
+                        "item_id": iid,
+                        "present": lab["present"],
+                        "confident": lab.get("confident", True),
+                        "evidence": evidence,
+                    }
+                )
+        else:
+            for n, present in zip(names, [lab["present"], lab["present"], not lab["present"]],
+                                  strict=True):  # fmt: skip
+                rows[n].append({"item_id": iid, "present": present, "confident": True,
+                                "evidence": ""})  # fmt: skip
+            arbiter.append({"item_id": iid, "present": lab["present"],
+                            "confident": lab.get("confident", True), "evidence": evidence,
+                            "reason": "the votes differ"})  # fmt: skip
+    for n in names:
+        write_jsonl(d / "annotators" / f"{n}.jsonl", rows[n])
+    write_jsonl(d / "arbiter.jsonl", arbiter)
+    manifest = {
+        "annotators": {
+            n: {"model": ENSEMBLE["annotators"][n]["model"], "instructions_sha256": "i" * 64}
+            for n in names
+        },
+        "arbiter": {"model": ENSEMBLE["arbiter"]["model"], "instructions_sha256": "j"},
+    }
+    (d / "manifest.json").write_text(json.dumps(manifest))
+    return d
+
+
+def label_round(script, base, tmp, k, trace=None, dispute=None):
+    """Round k's exports and their import: ``trace`` present unanimously, ``dispute`` decided
+    present by the arbiter; every other item absent unanimously."""
+    work = tmp / "data" / "pd_clean_stage3" / "stage3_example_link_100"
+    labels_ = {}
+    for i in items(work / f"round{k}" / "items.jsonl"):
+        iid = i["item_id"]
+        labels_[iid] = {
+            "present": iid in (trace, dispute),
+            "unanimous": iid != dispute,
+            "confident": True,
+            "evidence": "x" if iid in (trace, dispute) else None,
+        }
+    exports = round_exports(tmp / f"exports{k}", labels_)
+    script.main([*base, "import", "--exports", str(exports)])
+    return labels_
+
+
+def import_review(script, base, tmp, work, j, present=()):
+    """The page's export and log of review j, every item absent but ``present``."""
+    mapping = json.loads((work / f"review{j}" / "mapping.json").read_text())
+    rows = [{"item_id": i, "present": i in present, "note": ""} for i in mapping["items"]]
+    export = write_jsonl(tmp / f"page{j}.jsonl", rows)
+    shown = hashlib.sha256((work / f"review{j}" / "items.jsonl").read_bytes()).hexdigest()
+    log = tmp / f"page{j}.log.json"
+    log.write_text(json.dumps({"page_id": f"p{j}", "source": {"items_sha256": shown}}))
+    script.main([*base, "import-review", "--export", str(export), "--log", str(log)])
+    return mapping
 
 
 def packages(tmp):
@@ -73,9 +152,7 @@ def complete(study):
     script.main([*base, "round"])
     rows = label_round(script, base, tmp, 0)
     script.main([*base, "review"])
-    mapping = json.loads((work / "review0" / "mapping.json").read_text())
-    rv = [{"item_id": i, "present": False} for i in mapping["items"]]
-    script.main([*base, "import-review", "--labels", str(labels(tmp / "rv.jsonl", rv))])
+    mapping = import_review(script, base, tmp, work, 0)
     script.main([*base, "package"])
     return rows, mapping
 
@@ -156,13 +233,42 @@ def test_a_stage3_plan_needs_its_record_and_a_stage1_plan_none(study):
         script.Study(work, base[1])
 
 
-def _forge(work, edit):
-    """A review record rewritten as a forger would: its mapping and its labels together."""
-    mapping_path, labels_path = work / "review0" / "mapping.json", work / "review0" / "labels.json"
+def _forge(work, edit, name="review0", study=None):
+    """A review record rewritten as a strong forger would: its mapping and its labels, and with
+    them every file derived from them (the items read, the page's export and log), so that only
+    the checks of what the records imply can refuse it."""
+    d = work / name
+    mapping_path, labels_path = d / "mapping.json", d / "labels.json"
     mapping, labels_ = json.loads(mapping_path.read_text()), json.loads(labels_path.read_text())
     edit(mapping, labels_)
     mapping_path.write_text(json.dumps(mapping))
-    labels_path.write_text(json.dumps(labels_))
+    restate(d, mapping, labels_, study)
+
+
+def restate(d, mapping, labels_, study=None):
+    """Write a review's derived files from its mapping and labels (``labels_``, the labels.json
+    record): the items regenerated when the study can, the export, the log, the sources."""
+    if study is not None:
+        st = study()
+        after = mapping.get("after") or {}
+        only = set(after.get("round") or []) | set(after.get("review") or [])
+        with contextlib.suppress(KeyError, SystemExit):  # a mapping the study refuses
+            (d / "items.jsonl").write_text(S.review_items(st, mapping, int(d.name[6:]),
+                                                          st.ensemble(only)))  # fmt: skip
+    rows = [{"item_id": i, **v} for i, v in labels_["labels"].items()]
+    write_jsonl(d / "export.jsonl", rows)
+    shown = hashlib.sha256((d / "items.jsonl").read_bytes()).hexdigest() if (
+        d / "items.jsonl").is_file() else "0"  # fmt: skip
+    (d / "page_log.json").write_text(
+        json.dumps({"page_id": "p", "source": {"items_sha256": shown}})
+    )
+    labels_["source"] = {
+        "exports": {
+            "export.jsonl": hashlib.sha256((d / "export.jsonl").read_bytes()).hexdigest(),
+            "page_log.json": hashlib.sha256((d / "page_log.json").read_bytes()).hexdigest(),
+        }
+    }
+    (d / "labels.json").write_text(json.dumps(labels_))
 
 
 def test_a_review_without_its_seeded_negatives_is_refused(study):
@@ -175,7 +281,7 @@ def test_a_review_without_its_seeded_negatives_is_refused(study):
         for iid in samples:
             del mapping["items"][iid], labels_["labels"][iid]
 
-    _forge(work, drop)
+    _forge(work, drop, study=lambda: script.Study(work, base[1], run))
     with pytest.raises(ValueError, match="not its seeded sample"):
         S.verify_packages(work, run, packages(tmp))
 
@@ -199,7 +305,7 @@ def test_a_sample_of_other_negatives_is_refused(study):
                                    "why": "sample"}  # fmt: skip
         labels_["labels"][other] = labels_["labels"].pop(iid)
 
-    _forge(work, swap)
+    _forge(work, swap, study=lambda: script.Study(work, base[1], run))
     with pytest.raises(ValueError, match="not its seeded sample"):
         S.verify_packages(work, run, packages(tmp))
 
@@ -207,7 +313,11 @@ def test_a_sample_of_other_negatives_is_refused(study):
 def test_a_review_that_does_not_name_its_records_is_refused(study):
     script, base, tmp, run, work = study
     complete(study)
-    _forge(work, lambda mapping, labels_: mapping.pop("after"))
+    _forge(
+        work,
+        lambda mapping, labels_: mapping.pop("after"),
+        study=lambda: script.Study(work, base[1], run),
+    )
     with pytest.raises(ValueError, match="not drawn after a prefix"):
         S.verify_packages(work, run, packages(tmp))
 
@@ -215,7 +325,11 @@ def test_a_review_that_does_not_name_its_records_is_refused(study):
 def test_a_review_drawn_on_fewer_records_than_it_had_is_refused(study):
     script, base, tmp, run, work = study
     complete(study)
-    _forge(work, lambda mapping, labels_: mapping.update(after={"round": [], "review": []}))
+    _forge(
+        work,
+        lambda mapping, labels_: mapping.update(after={"round": [], "review": []}),
+        study=lambda: script.Study(work, base[1], run),
+    )
     with pytest.raises(ValueError, match="had unlabeled items"):
         S.verify_packages(work, run, packages(tmp))
 
@@ -224,8 +338,12 @@ def test_a_review_s_items_are_each_covered_by_a_typed_label(study):
     """A correct sample with no imported label (or an untyped one) is not a review."""
     script, base, tmp, run, work = study
     complete(study)
-    _forge(work, lambda mapping, labels_: labels_.update(labels={}))
-    with pytest.raises(ValueError, match="not exactly its items"):
+    _forge(
+        work,
+        lambda mapping, labels_: labels_.update(labels={}),
+        study=lambda: script.Study(work, base[1], run),
+    )
+    with pytest.raises(ValueError, match="not exactly the review's items"):
         S.verify_packages(work, run, packages(tmp))
 
 
@@ -237,8 +355,8 @@ def test_an_untyped_review_label_is_refused(study):
         iid = next(iter(labels_["labels"]))
         labels_["labels"][iid] = {"present": "no"}
 
-    _forge(work, untype)
-    with pytest.raises(ValueError, match="not a typed review label"):
+    _forge(work, untype, study=lambda: script.Study(work, base[1], run))
+    with pytest.raises(ValueError, match="not a row of its export's schema"):
         S.verify_packages(work, run, packages(tmp))
 
 
@@ -249,7 +367,7 @@ def test_a_round_s_items_are_each_covered_by_a_typed_label(study):
     data = json.loads(path.read_text())
     data["labels"].pop(next(iter(data["labels"])))
     path.write_text(json.dumps(data))
-    with pytest.raises(ValueError, match="not exactly its items"):
+    with pytest.raises(ValueError, match="not its exports' transformation"):
         S.verify_packages(work, run, packages(tmp))
 
 
@@ -264,7 +382,7 @@ def test_a_review_s_mapping_never_overrides_the_researcher_s_label(study):
         labels_["labels"][iid] = {"present": True, "note": "a trace"}
         mapping["items"][iid]["present"] = False
 
-    _forge(work, inject)
+    _forge(work, inject, study=lambda: script.Study(work, base[1], run))
     with pytest.raises(ValueError, match="mapping's items are not review items"):
         S.verify_packages(work, run, packages(tmp))
     with pytest.raises(SystemExit, match="metadata is not a review item's"):
@@ -299,7 +417,7 @@ def test_a_reviewed_trace_cannot_be_moved_to_another_pool_row(study):
         other = next(r for r in rows if r != (item["config"], item["prefill"]))
         item["config"], item["prefill"] = other
 
-    _forge(work, move)
+    _forge(work, move, study=lambda: script.Study(work, base[1], run))
     with pytest.raises(ValueError, match="not its own pool row"):
         S.verify_packages(work, run, packages(tmp))
     with pytest.raises(SystemExit, match="not its own pool row"):
@@ -329,8 +447,7 @@ def complete_with_trace(study):
     script.main([*base, "review"])
     mapping = json.loads((work / "review0" / "mapping.json").read_text())
     assert mapping["items"][first]["why"] == "trace"
-    rv = [{"item_id": i, "present": i == first} for i in mapping["items"]]
-    script.main([*base, "import-review", "--labels", str(labels(tmp / "rv.jsonl", rv))])
+    import_review(script, base, tmp, work, 0, present={first})
     script.main([*base, "package"])
     return first
 
@@ -345,12 +462,12 @@ def test_a_reviewed_trace_cannot_be_reviewed_again(study):
     d = work / "review1"
     d.mkdir()
     after = {"round": ["round0", "round1"], "review": ["review0"]}
-    (d / "mapping.json").write_text(json.dumps({
-        "binding": review0["binding"], "after": after, "sampled_groups": [],
-        "items": {trace: review0["items"][trace]}}))  # fmt: skip
-    (d / "labels.json").write_text(json.dumps({
-        "binding": labels0["binding"], "source": labels0["source"],
-        "labels": {trace: {"present": False, "note": None}}}))  # fmt: skip
+    mapping = {"binding": review0["binding"], "after": after, "sampled_groups": [],
+               "items": {trace: review0["items"][trace]}}  # fmt: skip
+    (d / "mapping.json").write_text(json.dumps(mapping))
+    restate(d, mapping, {"binding": labels0["binding"],
+                         "labels": {trace: {"present": False, "note": None}}},
+            lambda: script.Study(work, base[1], run))  # fmt: skip
     with pytest.raises(ValueError, match="reviewed again"):
         S.verify_packages(work, run, packages(tmp))
 
@@ -367,14 +484,15 @@ def test_a_review_without_a_due_trace_is_refused(study):
     def drop(mapping, labels_):
         del mapping["items"][trace], labels_["labels"][trace]
 
-    _forge(work, drop)
+    _forge(work, drop, study=lambda: script.Study(work, base[1], run))
     d = work / "review1"
     d.mkdir()
     after = {"round": ["round0", "round1"], "review": ["review0"]}
-    (d / "mapping.json").write_text(json.dumps({
-        "binding": review0["binding"], "after": after, "sampled_groups": [],
-        "items": {trace: item}}))  # fmt: skip
-    (d / "labels.json").write_text(json.dumps({**labels0, "labels": {trace: label}}))
+    mapping = {"binding": review0["binding"], "after": after, "sampled_groups": [],
+               "items": {trace: item}}  # fmt: skip
+    (d / "mapping.json").write_text(json.dumps(mapping))
+    restate(d, mapping, {"binding": labels0["binding"], "labels": {trace: label}},
+            lambda: script.Study(work, base[1], run))  # fmt: skip
     with pytest.raises(ValueError, match="review0: not the review due"):
         S.verify_packages(work, run, packages(tmp))
 
@@ -387,19 +505,113 @@ def test_a_round_item_labeled_twice_is_refused(study):
     iid = next(iter(round0["items"]))
     d = work / "round2"
     d.mkdir()
-    (d / "mapping.json").write_text(json.dumps({**round0, "items": {iid: round0["items"][iid]}}))
+    mapping = {**round0, "items": {iid: round0["items"][iid]}}
+    (d / "mapping.json").write_text(json.dumps(mapping))
+    flipped = {iid: {**labels0["labels"][iid], "present": not labels0["labels"][iid]["present"],
+                     "evidence": "x"}}  # fmt: skip
+    round_exports(d / "exports", flipped)
+    labels_, shas = S.read_exports(d / "exports", ENSEMBLE, {iid})
     (d / "labels.json").write_text(
-        json.dumps(
-            {
-                **labels0,
-                "labels": {
-                    iid: {
-                        **labels0["labels"][iid],
-                        "present": not labels0["labels"][iid]["present"],
-                    }
-                },
-            }
-        )
+        json.dumps({"binding": labels0["binding"], "source": {"exports": shas}, "labels": labels_})
     )
+    (d / "items.jsonl").write_text(S.round_items(script.Study(work, base[1], run), mapping, 2))
     with pytest.raises(ValueError, match="labeled again"):
         S.verify_packages(work, run, packages(tmp))
+
+
+# --- what the annotators read and what they returned -------------------------------------------
+
+
+def test_what_the_ensemble_read_is_its_records_items(study):
+    script, base, tmp, run, work = study
+    complete(study)
+    path = work / "round0" / "items.jsonl"
+    text = path.read_text()
+    path.write_text(text.replace("[", "[an edited ", 1))
+    with pytest.raises(ValueError, match="round0: its items are not the ones its records give"):
+        S.verify_packages(work, run, packages(tmp))
+    path.unlink()
+    with pytest.raises(ValueError, match="round0: its items are not the ones its records give"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+def test_what_the_researcher_read_is_its_records_items(study):
+    script, base, tmp, run, work = study
+    complete(study)
+    path = work / "review0" / "items.jsonl"
+    rows = items(path)
+    rows[0]["ensemble_present"] = not rows[0]["ensemble_present"]
+    write_jsonl(path, rows)
+    with pytest.raises(ValueError, match="review0"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+def test_a_review_label_that_is_not_its_page_s_export_is_refused(study):
+    """The researcher's export kept (a trace found) and the imported label changed: refused."""
+    script, base, tmp, run, work = study
+    trace = complete_with_trace(study)
+    path = work / "review0" / "labels.json"
+    record = json.loads(path.read_text())
+    record["labels"][trace] = {"present": False, "note": None}
+    path.write_text(json.dumps(record))
+    with pytest.raises(ValueError, match="not its exports' transformation"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+def test_an_ensemble_export_changed_after_its_import_is_refused(study):
+    script, base, tmp, run, work = study
+    complete(study)
+    path = work / "round0" / "exports" / "annotators" / "fable.jsonl"
+    rows = [json.loads(x) for x in path.read_text().splitlines()]
+    rows[0]["confident"] = not rows[0]["confident"]
+    write_jsonl(path, rows)
+    with pytest.raises(ValueError, match="round0: its labels are not its exports' transformation"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+def test_a_page_that_showed_other_items_is_refused_at_import(study):
+    script, base, tmp, run, work = study
+    script.main([*base, "round"])
+    label_round(script, base, tmp, 0)
+    script.main([*base, "review"])
+    mapping = json.loads((work / "review0" / "mapping.json").read_text())
+    export = write_jsonl(tmp / "page.jsonl", [{"item_id": i, "present": False, "note": ""}
+                                              for i in mapping["items"]])  # fmt: skip
+    log = tmp / "page.log.json"
+    log.write_text(json.dumps({"page_id": "p", "source": {"items_sha256": "0" * 64}}))
+    with pytest.raises(SystemExit, match="did not show the review's items"):
+        script.main([*base, "import-review", "--export", str(export), "--log", str(log)])
+
+
+def test_a_stage3_round_is_imported_from_its_exports_alone(study):
+    script, base, tmp, run, work = study
+    script.main([*base, "round"])
+    path = write_jsonl(tmp / "l.jsonl", [])
+    with pytest.raises(SystemExit, match="from its exports"):
+        script.main([*base, "import", "--labels", str(path)])
+
+
+def test_the_ensemble_rule():
+    def answers(**kw):
+        return {iid: {"item_id": iid, **v} for iid, v in kw.items()}
+
+    def row(present, confident=True, evidence=""):
+        return {"present": present, "confident": confident, "evidence": evidence}
+
+    annotators = {
+        "opus": answers(a=row(True, True, "x"), b=row(False, True, "ignored"), c=row(True),
+                        d=row(True, True, "")),
+        "fable": answers(a=row(True, False, "y"), b=row(False), c=row(False), d=row(True)),
+        "gpt": answers(a=row(True), b=row(False), c=row(True), d=row(True)),
+    }  # fmt: skip
+    arbiter = answers(c=row(False, False, ""))
+    labels_ = S.merge_ensemble(ENSEMBLE, annotators, arbiter)
+    assert labels_["a"] == {"present": True, "unanimous": True, "confident": False,
+                            "evidence": "x"}  # fmt: skip
+    assert labels_["b"] == {"present": False, "unanimous": True, "confident": True,
+                            "evidence": None}  # fmt: skip
+    assert labels_["c"] == {"present": False, "unanimous": False, "confident": False,
+                            "evidence": None}  # fmt: skip
+    assert labels_["d"]["evidence"] is None  # a blank evidence is null
+    with pytest.raises(SystemExit, match="exactly the disputed items"):
+        S.merge_ensemble(ENSEMBLE, annotators, {**arbiter, **answers(a=row(True))})

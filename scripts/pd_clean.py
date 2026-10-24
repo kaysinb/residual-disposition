@@ -61,7 +61,11 @@ searched for); L, A and the recipe control adjudicated, L, A and H_s with the ra
 The record (its run, lineage and sha256) joins the binding. The review samples
 ``negatives_per_package`` agreed negatives per adjudicated package (``allocation:
 per_package``), seeded by the package, with every dispute and unanimous trace met; each review
-names the records its sample was drawn after (``after``), so that it can be drawn again. Its work
+names the records its sample was drawn after (``after``), so that it can be drawn again. A
+Stage-3 round is imported from its ensemble's exports (``import --exports DIR``:
+``annotators/<name>.jsonl``, ``arbiter.jsonl``, ``manifest.json``), kept in the round, its
+labels the plan's merge of them (``pd_clean_study.merge_ensemble``); a Stage-3 review from its
+page's export and log (``import-review --export FILE --log FILE``), kept in the review. Its work
 directory defaults to ``<DATA_DIR>/pd_clean_stage3/<lineage>``, one per lineage.
 """
 
@@ -71,7 +75,7 @@ import argparse
 import fcntl
 import json
 import os
-import random
+import shutil
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -84,7 +88,6 @@ from residual_disposition import pd_clean_study as S
 from residual_disposition.paths import CONFIG_ROOT, data_root, runs_root
 from residual_disposition.pd_clean_study import (
     allocate,  # noqa: F401 (the script's own name for it, as before)
-    behavior,
     check_withdrawal,
     sha256,
     text_sha256,
@@ -169,16 +172,6 @@ def write_once(path: Path, data: Any, *, private: bool = False) -> None:
 # --- commands -------------------------------------------------------------------------------
 
 
-def entry(iid: str, s: Mapping[str, Any], row: Mapping[str, Any]) -> dict[str, str]:
-    b = behavior(s["behavior"])
-    return {
-        "item_id": iid,
-        "behavior_id": b.id,
-        "behavior_description": b.description,
-        "response": C.item_response(row),
-    }
-
-
 def cmd_round(st: Study, lookahead: Mapping[str, int] | None = None) -> None:
     if (p := st.pending()) is not None:
         raise SystemExit(f"{p} is not imported yet")
@@ -192,10 +185,6 @@ def cmd_round(st: Study, lookahead: Mapping[str, int] | None = None) -> None:
     k = len(st.records("round"))
     out = st.work / f"round{k}"
     out.mkdir()
-    entries = [entry(iid, s, row) for iid, (s, _, row) in todo.items()]
-    with (out / "items.jsonl").open("w") as f:
-        for item in C.blind_items(entries, seed=st.seed + k):
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
     mapping = {
         "binding": st.binding,
         "lookahead": dict(lookahead or {}),
@@ -204,8 +193,9 @@ def cmd_round(st: Study, lookahead: Mapping[str, int] | None = None) -> None:
             for iid, (s, config, row) in todo.items()
         },
     }
+    (out / "items.jsonl").write_text(S.round_items(st, mapping, k))
     write_once(out / "mapping.json", mapping, private=True)
-    print(f"round {k}: {len(entries)} items for the ensemble in {out / 'items.jsonl'}")
+    print(f"round {k}: {len(todo)} items for the ensemble in {out / 'items.jsonl'}")
 
 
 ENSEMBLE_FIELDS = {
@@ -261,15 +251,38 @@ def target(records: list[Path], what: str) -> list[Path]:
     return waiting or records[-1:]
 
 
-def cmd_import(st: Study, labels_path: Path) -> None:
+def keep(source: Path, copy: Path) -> None:
+    """A source export kept in its record, once: an existing copy must be the same bytes."""
+    if copy.exists():
+        if copy.read_bytes() != Path(source).read_bytes():
+            raise SystemExit(f"{copy} exists with other content: records are immutable")
+        return
+    copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, copy)
+
+
+def cmd_import(st: Study, labels_path: Path | None, exports: Path | None = None) -> None:
     rounds = target(st.records("round"), "round")
     mapping = json.loads((rounds[0] / "mapping.json").read_text())
     st.check(mapping, rounds[0], rounds=True)
-    labels = read_labels(labels_path, ENSEMBLE_FIELDS)
+    if st.stage3:  # the ensemble's exports, kept in the round, its labels their transformation
+        if exports is None or labels_path is not None:
+            raise SystemExit("a Stage-3 round is imported from its exports (--exports) alone")
+        names = [f"annotators/{n}.jsonl" for n in sorted(st.plan["ensemble"]["annotators"])]
+        for name in ["manifest.json", "arbiter.jsonl", *names]:
+            keep(Path(exports) / name, rounds[0] / "exports" / name)
+        labels, shas = S.read_exports(rounds[0] / "exports", st.plan["ensemble"],
+                                      set(mapping["items"]))  # fmt: skip
+        source: dict[str, Any] = {"exports": shas}
+    else:
+        if labels_path is None:
+            raise SystemExit("a Stage-1 round is imported from its labels (--labels)")
+        labels = read_labels(labels_path, ENSEMBLE_FIELDS)
+        source = {"labels": str(labels_path), "sha256": sha256(labels_path)}
     match(labels, mapping["items"], "round")
     record = {
         "binding": st.binding,
-        "source": {"labels": str(labels_path), "sha256": sha256(labels_path)},
+        "source": source,
         "labels": labels,
     }
     write_once(rounds[0] / "labels.json", record)
@@ -290,25 +303,6 @@ def cmd_review(st: Study) -> None:
     j = len(st.all_records("review"))
     out = st.work / f"review{j}"
     out.mkdir()
-    by_state = {
-        s["state"]: (s, {f"{r['config']}/{r['prefill']}": r for r in st.rows[s["state"]]})
-        for s in st.states
-    }
-    entries = []
-    for iid, need in needs.items():
-        s, rows = by_state[need["state"]]
-        row = rows[f"{need['config']}/{need['prefill']}"]
-        entries.append(
-            {
-                **entry(iid, s, row),
-                "ensemble_present": need["present"],
-                "ensemble_evidence": need.get("evidence"),
-            }
-        )
-    random.Random(st.seed + 1000 + j).shuffle(entries)
-    with (out / "items.jsonl").open("w") as f:
-        for item in entries:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
     mapping = {
         "binding": st.binding,
         **({"after": st.drawn_after()} if st.stage3 else {}),  # the records the sample rests on
@@ -323,20 +317,37 @@ def cmd_review(st: Study) -> None:
             for iid, n in needs.items()
         },
     }
+    (out / "items.jsonl").write_text(S.review_items(st, mapping, j, st.ensemble()))
     write_once(out / "mapping.json", mapping, private=True)
     why = {w: sum(n["why"] == w for n in needs.values()) for w in ("dispute", "trace", "sample")}
     print(f"review {j}: {len(needs)} items {why} in {out / 'items.jsonl'}")
 
 
-def cmd_import_review(st: Study, labels_path: Path) -> None:
+def cmd_import_review(st: Study, labels_path: Path | None, export: Path | None = None,
+                      log: Path | None = None) -> None:  # fmt: skip
     reviews = target(st.records("review"), "review")
-    mapping = json.loads((reviews[0] / "mapping.json").read_text())
-    st.check(mapping, reviews[0])
-    labels = read_labels(labels_path, REVIEW_FIELDS)
+    d = reviews[0]
+    mapping = json.loads((d / "mapping.json").read_text())
+    st.check(mapping, d)
+    if st.stage3:  # the page's export and its log, kept in the review
+        if export is None or log is None or labels_path is not None:
+            raise SystemExit("a Stage-3 review is imported from its page's export and log alone "
+                             "(--export, --log)")  # fmt: skip
+        keep(export, d / "export.jsonl")
+        keep(log, d / "page_log.json")
+        shown = sha256(d / "items.jsonl")  # what the researcher read
+        labels, shas = S.review_labels(d / "export.jsonl", d / "page_log.json",
+                                       set(mapping["items"]), shown)  # fmt: skip
+        source: dict[str, Any] = {"exports": shas}
+    else:
+        if labels_path is None:
+            raise SystemExit("a Stage-1 review is imported from its labels (--labels)")
+        labels = read_labels(labels_path, REVIEW_FIELDS)
+        source = {"labels": str(labels_path), "sha256": sha256(labels_path)}
     match(labels, mapping["items"], "review")
     record = {
         "binding": st.binding,
-        "source": {"labels": str(labels_path), "sha256": sha256(labels_path)},
+        "source": source,
         "labels": labels,
     }
     write_once(reviews[0] / "labels.json", record)
@@ -437,10 +448,14 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("round")
     p.add_argument("--lookahead", action="append", default=[], metavar="STATE=K")
     p = sub.add_parser("import")
-    p.add_argument("--labels", type=Path, required=True)
+    p.add_argument("--labels", type=Path, default=None, help="Stage 1: the merged labels")
+    p.add_argument("--exports", type=Path, default=None,
+                   help="Stage 3: the ensemble's exports directory")  # fmt: skip
     sub.add_parser("review")
     p = sub.add_parser("import-review")
-    p.add_argument("--labels", type=Path, required=True)
+    p.add_argument("--labels", type=Path, default=None, help="Stage 1: the review's labels")
+    p.add_argument("--export", type=Path, default=None, help="Stage 3: the page's export")
+    p.add_argument("--log", type=Path, default=None, help="Stage 3: the page's log")
     p = sub.add_parser("amend-review")
     p.add_argument("--old-plan", type=Path, required=True)
     p.add_argument("--withdraw", nargs="*", default=[])
@@ -467,11 +482,11 @@ def main(argv: list[str] | None = None) -> int:
             ahead[state] = int(k)
         cmd_round(st, ahead)
     elif args.command == "import":
-        cmd_import(st, args.labels)
+        cmd_import(st, args.labels, args.exports)
     elif args.command == "review":
         cmd_review(st)
     elif args.command == "import-review":
-        cmd_import_review(st, args.labels)
+        cmd_import_review(st, args.labels, args.export, args.log)
     elif args.command == "amend-review":
         cmd_amend_review(st, args.old_plan, args.withdraw, args.decision)
     else:

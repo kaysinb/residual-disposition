@@ -156,6 +156,72 @@ def item_of(mapping: Mapping[str, Any], iid: str, kind: str, where: Path,
     return dict(item)
 
 
+def entry(iid: str, s: Mapping[str, Any], row: Mapping[str, Any]) -> dict[str, str]:
+    """An item as the ensemble reads it: its id, its behavior's id and description, and the
+    response (``pd_clean.item_response``)."""
+    b = behavior(s["behavior"])
+    return {
+        "item_id": iid,
+        "behavior_id": b.id,
+        "behavior_description": b.description,
+        "response": C.item_response(row),
+    }
+
+
+def _entries(st: Study, mapping: Mapping[str, Any]) -> list[dict[str, str]]:
+    states = {s["state"]: s for s in st.states}
+    out = []
+    for iid, item in sorted(mapping["items"].items()):  # by id: the stored mapping's order
+        s = states[item["state"]]
+        out.append(entry(iid, s, st.row_of[s["state"]][(item["config"], item["prefill"])]))
+    return out
+
+
+def _jsonl(rows: list[Mapping[str, Any]]) -> str:
+    return "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in rows)
+
+
+def round_items(st: Study, mapping: Mapping[str, Any], k: int) -> str:
+    """Round ``k``'s ``items.jsonl``, what the ensemble reads: its mapping's items by id, from
+    their pool rows and behaviors, in the round's seeded order."""
+    return _jsonl(C.blind_items(_entries(st, mapping), seed=st.seed + k))
+
+
+def review_items(st: Study, mapping: Mapping[str, Any], j: int,
+                 ensemble: Mapping[str, Any]) -> str:  # fmt: skip
+    """Review ``j``'s ``items.jsonl``, what the researcher reads: its mapping's items with the
+    ensemble's label of each (``ensemble``, as the review was drawn), in the review's seeded
+    order."""
+    entries = [{**e, "ensemble_present": ensemble[e["item_id"]]["present"],
+                "ensemble_evidence": ensemble[e["item_id"]].get("evidence")}
+               for e in _entries(st, mapping)]  # fmt: skip
+    random.Random(st.seed + 1000 + j).shuffle(entries)
+    return _jsonl(entries)
+
+
+def inputs_problems(st: Study) -> list[str]:
+    """Where what the ensemble or the researcher read (each record's ``items.jsonl``) is not its
+    record's items, rebuilt from their pool rows and behaviors in the prescribed order (a
+    review's ensemble labels as of the records it names)."""
+    problems = []
+    for d in st.records("round"):
+        mapping = json.loads((d / "mapping.json").read_text())
+        path = d / "items.jsonl"
+        if not path.is_file() or path.read_text() != round_items(st, mapping, int(d.name[5:])):
+            problems.append(f"{d.name}: its items are not the ones its records give")
+    for d in st.records("review"):
+        mapping = json.loads((d / "mapping.json").read_text())
+        after = mapping.get("after") or {}
+        only = set(after.get("round") or []) | set(after.get("review") or [])
+        path, ensemble = d / "items.jsonl", st.ensemble(only)
+        if (
+            not path.is_file() or not set(mapping["items"]) <= set(ensemble)
+            or path.read_text() != review_items(st, mapping, int(d.name[6:]), ensemble)
+        ):  # fmt: skip
+            problems.append(f"{d.name}: its items are not the ones its records give")
+    return problems
+
+
 def group_of(s: Mapping[str, Any]) -> str:
     """A Stage-3 adjudicated package's review group."""
     return f"{s['behavior']}/{s['role']}/{s['state']}"
@@ -183,6 +249,7 @@ class Study:
         self.seed = int(self.plan["seed"])
         self.states, self.rows, self.hits, self.runs = [], {}, {}, {}
         self.pool_keys: dict[str, set[tuple[str, str]]] = {}
+        self.row_of: dict[str, dict[tuple[str, str], Mapping[str, Any]]] = {}
         detectors = {}
         if self.stage3:
             self.record, states = stage3_states(self.plan, Path(record))
@@ -198,6 +265,7 @@ class Study:
             rows = read_jsonl_gz(run / "pd_completions.jsonl.gz")
             self.rows[s["state"]] = [{**r, "ppl_diff": float(r["ppl_diff"])} for r in rows]
             self.pool_keys[s["state"]] = {(r["config"], r["prefill"]) for r in rows}
+            self.row_of[s["state"]] = {(r["config"], r["prefill"]): r for r in rows}
             b = behavior(s["behavior"])
             self.hits[s["state"]] = trace_detector(b.detector)
             detectors[b.id] = b.detector.version
@@ -475,7 +543,7 @@ def verify_packages(work: Path, record_run: Path, packages: Mapping[tuple[str, s
         st = Study(work, STAGE3_PLAN, record_run)
     except (SystemExit, KeyError) as error:  # the plan incomplete (its rubric) fails closed
         raise ValueError(f"{work}: not a complete Stage-3 study ({error})") from None
-    problems = coverage_problems(st)  # an imported record's labels, before what they imply
+    problems = sources_problems(st) + coverage_problems(st)  # the labels, before what they imply
     if problems:
         raise ValueError(f"{work}: the imported labels: {'; '.join(problems)}")
     try:
@@ -492,7 +560,7 @@ def _verified(st: Study, work: Path, packages: Mapping[tuple[str, str], Path]) -
     needs, draw = st.review_needs()
     if needs or draw:
         raise Pending(f"{work}: the researcher's review is not complete ({len(needs)} items)")
-    problems = sample_problems(st)
+    problems = inputs_problems(st) + sample_problems(st)
     if problems:
         raise ValueError(f"{work}: the researcher's review sample: {'; '.join(problems)}")
     final, want = st.final(), {}
@@ -620,4 +688,129 @@ def coverage_problems(st: Study) -> list[str]:
                 ):  # fmt: skip
                     problems.append(f"{d.name}: {iid}'s label is not a typed {kind} label")
                     break
+    return problems
+
+
+# --- the labels' sources (Stage 3) ----------------------------------------------------------
+
+ANSWER = {"item_id": (str,), "present": (bool,), "confident": (bool,), "evidence": (str,)}
+ARBITER_EXTRA = {"reason": (str,)}  # the arbiter's reason, kept for disclosure
+PAGE = {"item_id": (str,), "present": (bool,), "note": (str, type(None))}
+
+
+def _rows(path: Path, fields: Mapping[str, tuple], optional: Mapping[str, tuple] = {}) -> dict:
+    """A JSON Lines export by item id: each row exactly ``fields`` (and any of ``optional``),
+    with their types, each item once."""
+    out: dict[str, dict[str, Any]] = {}
+    for n, line in enumerate(Path(path).read_text().splitlines(), start=1):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if (
+            not isinstance(row, dict) or not set(fields) <= set(row)
+            or not set(row) <= set(fields) | set(optional)
+            or any(not isinstance(v, {**fields, **optional}[k]) for k, v in row.items())
+        ):  # fmt: skip
+            raise SystemExit(f"{path}:{n}: not a row of its export's schema")
+        if row["item_id"] in out:
+            raise SystemExit(f"{path}:{n}: item {row['item_id']} twice")
+        out[row["item_id"]] = row
+    return out
+
+
+def _blank(text: str | None) -> str | None:
+    return text or None
+
+
+def merge_ensemble(ensemble: Mapping[str, Any], annotators: Mapping[str, Mapping[str, dict]],
+                   arbiter: Mapping[str, dict]) -> dict[str, dict[str, Any]]:  # fmt: skip
+    """A round's labels from its exports, by the plan's rule (``ensemble``): the three agreeing
+    on present give that present, unanimous, confident if all three are, the evidence of
+    ``evidence_from`` (blank as null, none when absent); otherwise the arbiter's present,
+    confidence and evidence (blank as null), not unanimous. The arbiter answers exactly the
+    disputed items."""
+    names = list(ensemble["annotators"])
+    items = set(annotators[names[0]])
+    if any(set(annotators[n]) != items for n in names):
+        raise SystemExit("the annotators' exports are not one set of items")
+    labels, disputed = {}, set()
+    for iid in sorted(items):
+        votes = [annotators[n][iid] for n in names]
+        if len({v["present"] for v in votes}) == 1:
+            present = votes[0]["present"]
+            evidence = _blank(annotators[ensemble["evidence_from"]][iid]["evidence"])
+            labels[iid] = {"present": present, "unanimous": True,
+                           "confident": all(v["confident"] for v in votes),
+                           "evidence": evidence if present else None}  # fmt: skip
+        else:
+            disputed.add(iid)
+    if set(arbiter) != disputed:
+        raise SystemExit("the arbiter's export is not exactly the disputed items")
+    for iid in disputed:
+        a = arbiter[iid]
+        labels[iid] = {"present": a["present"], "unanimous": False, "confident": a["confident"],
+                       "evidence": _blank(a["evidence"])}  # fmt: skip
+    return labels
+
+
+def read_exports(exports: Path, ensemble: Mapping[str, Any], items: set[str]) -> tuple[dict, dict]:
+    """A round's exports (``annotators/<name>.jsonl`` per annotator, ``arbiter.jsonl``,
+    ``manifest.json`` naming each one's model as the plan does), each annotator's exactly the
+    round's items: (the labels ``merge_ensemble`` gives, each file's sha256 by its path)."""
+    exports = Path(exports)
+    manifest = json.loads((exports / "manifest.json").read_text())
+    names = sorted(ensemble["annotators"])
+    if sorted(manifest.get("annotators") or {}) != names or any(
+        manifest["annotators"][n].get("model") != ensemble["annotators"][n]["model"] for n in names
+    ) or (manifest.get("arbiter") or {}).get("model") != ensemble["arbiter"]["model"]:  # fmt: skip
+        raise SystemExit(f"{exports}: its manifest is not the plan's ensemble")
+    annotators = {n: _rows(exports / "annotators" / f"{n}.jsonl", ANSWER) for n in names}
+    if any(set(rows) != items for rows in annotators.values()):
+        raise SystemExit(f"{exports}: an annotator's export is not exactly the round's items")
+    arbiter = _rows(exports / "arbiter.jsonl", ANSWER, ARBITER_EXTRA)
+    files = [exports / "manifest.json", exports / "arbiter.jsonl",
+             *(exports / "annotators" / f"{n}.jsonl" for n in names)]  # fmt: skip
+    shas = {str(f.relative_to(exports)): sha256(f) for f in files}
+    return merge_ensemble(ensemble, annotators, arbiter), shas
+
+
+def review_labels(export: Path, log: Path, items: set[str], items_sha256: str) -> tuple[dict, dict]:
+    """A review's labels from its page's export (``{item_id, present, note}``, exactly the
+    review's items; a blank note as null) and its page's log, whose ``source.items_sha256`` is
+    the sha256 of the items the researcher read: (the labels, each file's sha256 by its name)."""
+    rows = _rows(export, PAGE)
+    if set(rows) != items:
+        raise SystemExit(f"{export}: not exactly the review's items")
+    page = json.loads(Path(log).read_text())
+    if (page.get("source") or {}).get("items_sha256") != items_sha256:
+        raise SystemExit(f"{log}: the page did not show the review's items")
+    labels = {iid: {"present": r["present"], "note": _blank(r["note"])} for iid, r in rows.items()}
+    return labels, {"export.jsonl": sha256(export), "page_log.json": sha256(log)}
+
+
+def sources_problems(st: Study) -> list[str]:
+    """Where an imported round's or review's labels are not what their kept exports give: the
+    exports in the record (``exports/`` of a round, ``export.jsonl`` and ``page_log.json`` of a
+    review) by the sha256 its labels record, and the labels exactly their transformation."""
+    problems = []
+    for kind in ("round", "review"):
+        for d in st.records(kind):
+            path = d / "labels.json"
+            if not path.is_file():
+                continue
+            record = json.loads(path.read_text())
+            items = set(json.loads((d / "mapping.json").read_text())["items"])
+            try:
+                if kind == "round":
+                    labels, shas = read_exports(d / "exports", st.plan["ensemble"], items)
+                else:
+                    labels, shas = review_labels(d / "export.jsonl", d / "page_log.json", items,
+                                                 sha256(d / "items.jsonl"))  # fmt: skip
+            except (SystemExit, OSError, KeyError, ValueError) as error:
+                problems.append(f"{d.name}: its exports are not here or not valid ({error})")
+                continue
+            if (record.get("source") or {}).get("exports") != shas or record.get(
+                "labels"
+            ) != labels:
+                problems.append(f"{d.name}: its labels are not its exports' transformation")
     return problems
