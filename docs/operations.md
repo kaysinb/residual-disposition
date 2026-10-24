@@ -1517,7 +1517,13 @@ Decided after Stage 1 (preregistration §12.3.7,
           reservations). A session left open by an interrupted command is settled before the
           next opens (`continuation_stage3.py settle <behavior>`). An item never completes with
           a session open;
-        - a command spends only for the lineage its inputs name.
+        - a command spends only for the lineage its inputs name;
+        - **the order of the meter's new events.** A meter's code before the laptop session
+          refuses the first `api_session` event in a log, even a settled one. So the first
+          laptop session opens only after every consumer of the real log runs code that knows
+          it: the laptop's scripts, and every Pod snapshot made from then on (the certificate's
+          continuations, `s3c` of the other lineages, `s3r`). Pods already running finish on
+          their own copies of the log, and the updated laptop code settles their sessions.
     - **The readers' verdicts** (`continuation_readers`), on the laptop, from the readings alone.
       `lineage_of` resolves the certified lineage and its X. A strong lineage's X is its X_cont
       cell, recomputed through every attempt's evidence; no adapter is loaded.

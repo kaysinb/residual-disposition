@@ -365,3 +365,81 @@ def test_the_judge_s_index_of_a_lineage_is_its_record_s_six_states(tmp_path):
     assert {s.behavior_id for s in found.values()} == {"tldr"}
     assert found[states["X"]].kind == "suppression_only" and found[states["L"]].dose == 400
     assert found[states["A"]].dose is None and found[states["H_s"]].seed == 7
+
+
+def test_a_refused_session_leaves_its_ceiling_alone_and_the_writer_free(tmp_path, monkeypatch):
+    """The ledger's ceiling is recorded before the meter's session opens: a refusal between them
+    leaves an unused ceiling and a free writer; the next command opens normally."""
+    m = real_meter(tmp_path)
+
+    def refuse(*a, **k):
+        raise RuntimeError("the process dies here")
+
+    monkeypatch.setattr(m, "open_api_session", refuse)
+    with pytest.raises(RuntimeError):
+        M.open_parts(m, tmp_path, "tldr")
+    assert m.laptop_session("stage3/tldr/follow") is None
+    monkeypatch.undo()
+    chained = M.ChainedLedger(M.open_parts(m, tmp_path, "tldr"))  # the writer was released
+    assert chained.close() == {"base": 0.0}  # its session settles normally
+    assert m.laptop_session("stage3/tldr/follow") is None
+
+
+def test_no_transfer_while_a_laptop_session_is_open(tmp_path):
+    m = real_meter(tmp_path)
+    M.open_parts(m, tmp_path, "tldr")
+    with pytest.raises(ValueError, match="laptop session"):
+        m.transfer("stage3/tldr/follow", source="gpu", target="api", usd=1.0, reason="r")
+
+
+def test_a_need_that_is_not_a_finite_amount_starts_nothing(tmp_path):
+    m = real_meter(tmp_path)
+    for need in (float("nan"), float("inf"), -1.0, 0.0):
+        with pytest.raises(ValueError):
+            M.start_strong(m, tmp_path, "tldr", need)
+    assert m.state["strong/stage3/tldr/follow"] == "reserved"
+
+
+def test_a_stopped_item_s_open_laptop_session_counts_its_api(tmp_path):
+    from residual_disposition.budget import STOPPED
+
+    m = real_meter(tmp_path)
+    M.open_parts(m, tmp_path, "tldr")
+    with m._transaction():
+        before = m.outstanding()
+        m.state["stage3/tldr/follow"] = STOPPED  # as the log would hold it, the session open
+        stopped = m.outstanding()
+    assert stopped >= 2.0 and before >= 0.0
+
+
+def test_a_dry_run_or_a_refusal_leaves_the_meter_s_log_alone(tmp_path, monkeypatch):
+    """The judge opens the readers' money only once nothing more refuses."""
+    from omegaconf import OmegaConf
+
+    from residual_disposition.config import load_config
+    from residual_disposition.records import RecordWriter, ToolHypothesis, write_responses
+
+    judge = load("judge")
+    run = tmp_path / "runs" / "x" / "read"
+    run.mkdir(parents=True)
+    RecordWriter(run).write([ToolHypothesis("read", "sL", "adl_lens@30/state/1", "lens", None,
+                                            "m", "v", 0, "read/h0")])  # fmt: skip
+    write_responses(run, ToolHypothesis.table, [("read/h0", "a hypothesis")])
+    index = tmp_path / "index.jsonl"
+    index.write_text(json.dumps({"state_id": "sL", "behavior_id": "tldr", "kind": "suppressed",
+                                 "seed": 0, "mode": "stack", "method": "sft", "dose": 400,
+                                 "strength": None, "parent_id": None,
+                                 "delta_norm": None}) + "\n")  # fmt: skip
+    opened = []
+    monkeypatch.setattr(M, "money", lambda *a: opened.append(a) or (_ for _ in ()).throw(
+        AssertionError("the money opened")))  # fmt: skip
+    for overrides in (["judge.dry_run=true"], ["judge.dry_run=false", "judge.cost.max_usd=0"]):
+        cfg = load_config(E.JUDGE.replace("judge_continuation", "judge_stage3"), [
+            "tracking.wandb.enabled=false", f"judge.runs=[{run}]", f"judge.state_index={index}",
+            "judge.stage3_money.behavior=tldr", *overrides])  # fmt: skip
+        monkeypatch.setattr(judge, "from_cli", lambda cfg=cfg: cfg)
+        try:
+            judge.main()
+        except SystemExit as stopped:
+            assert "max_usd" in str(stopped)
+        assert opened == [] and OmegaConf.is_config(cfg)

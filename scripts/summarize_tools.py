@@ -520,12 +520,7 @@ def main() -> None:
         record = json.loads((Path(str(s.expected_stage3.record)) / "stage3_readers.json")
                             .read_text())  # fmt: skip
         stage3_money.check_funding(str(s.stage3_money.behavior), record["behavior"])
-        meter, ledger = stage3_money.money(
-            data_root(),
-            str(s.stage3_money.behavior),
-            data_root() / "ledgers" / "continuation_meter.jsonl",
-        )
-        atexit.register(ledger.close)  # an interrupted run's sessions settled at its exit
+        ledger = None  # opened once nothing more refuses (below)
     else:
         ledger = adl_ledger({e.tool for e in evidence}, s.get("adl_ledger"), s.get("api_ledger"))
     preflight(worst.usd, float(s.max_usd), ledger)
@@ -537,6 +532,14 @@ def main() -> None:
     except TierError as error:
         raise SystemExit(f"{error}: not submitted") from error
 
+    if s.get("stage3_money"):  # the meter's sessions, once nothing more refuses
+        meter, ledger = stage3_money.money(
+            data_root(),
+            str(s.stage3_money.behavior),
+            data_root() / "ledgers" / "continuation_meter.jsonl",
+        )
+        atexit.register(ledger.close)  # an interrupted run's sessions settled at its exit
+        check_adl_estimate(ledger, HEADROOM * worst.usd)
     with Run(cfg) as run:
         if ledger is not None:  # every event from here on names this run
             ledger.source = run.run_id

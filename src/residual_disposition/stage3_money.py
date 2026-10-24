@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from .adl_graders import LedgeredBackend
-from .budget import RESERVED, RUNNING, ApiBudgetExhausted, ApiLedger
+from .budget import RESERVED, RUNNING, ApiBudgetExhausted, ApiLedger, finite_usd
 
 PARTS = ("base", "strong")
 ITEMS = {"base": "stage3/{behavior}/follow", "strong": "strong/stage3/{behavior}/follow"}
@@ -107,9 +107,16 @@ class Part:
         if api <= 0:
             raise ApiBudgetExhausted(f"{self.item} has no API left")
         self.session = uuid.uuid4().hex
-        meter.open_api_session(self.item, self.session, api)
+        # The ledger's writer and the session's ceiling first, then the meter's session: an
+        # interruption between them leaves a ceiling no session uses, never a session without
+        # its ceiling. A refused session closes the writer again.
         self.ledger = ApiLedger(ledger_path(root, behavior, part), 1.0, worker_of(behavior, part))
-        self.ledger.allowance_usd = self.ledger.session_ceiling(self.session, api)
+        try:
+            self.ledger.allowance_usd = self.ledger.session_ceiling(self.session, api)
+            meter.open_api_session(self.item, self.session, api)
+        except BaseException:
+            self.ledger.close()
+            raise
 
     def authorized(self) -> bool:
         """The part's session is still the meter's open one on its running item."""
@@ -239,6 +246,7 @@ def start_strong(meter: Any, root: Path, behavior: str, need_usd: float) -> dict
     """Start ``strong/stage3/<behavior>/follow`` through the meter when the base cannot hold the
     next batch (``need_usd``, its estimate with headroom): the base's API left below the need,
     and the strong item admitted (reserved), never before. Returns the strong item's limits."""
+    need_usd = finite_usd(need_usd, "the next batch's need", positive=True)
     base, strong = item_of(behavior, "base"), item_of(behavior, "strong")
     if meter.laptop_session(base) is not None:
         raise SystemExit(f"{base} has an open laptop session: settle it first")

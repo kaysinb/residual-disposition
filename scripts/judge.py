@@ -399,9 +399,8 @@ def main() -> None:
     if j.get("stage3_money"):  # the readers' money pays the lineage its states belong to
         for behavior in sorted({item.target_behavior_id for item in items}):
             stage3_money.check_funding(str(j.stage3_money.behavior), behavior)
-    ledger = adl_ledger(run_dirs, j)
-    if isinstance(ledger, stage3_money.ChainedLedger):
-        atexit.register(ledger.close)  # an interrupted run's sessions settled at its exit
+    # the readers' money is opened only once nothing more refuses (a dry run journals nothing)
+    ledger = None if j.get("stage3_money") else adl_ledger(run_dirs, j)
 
     primary_pairs = stage_requests(items, primary)
     primary_estimate = estimate(j, primary_pairs, primary, cache)
@@ -414,6 +413,9 @@ def main() -> None:
         return
     if primary_estimate.usd > j.cost.max_usd:
         raise SystemExit(f"Estimate above judge.cost.max_usd = {j.cost.max_usd}: not submitted")
+    if j.get("stage3_money"):
+        ledger = adl_ledger(run_dirs, j)
+        atexit.register(ledger.close)  # an interrupted run's sessions settled at its exit
     if ledger is not None:
         try:
             ledger.check(primary_estimate.usd)

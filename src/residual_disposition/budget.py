@@ -1124,15 +1124,15 @@ class AllocationMeter:
                 if self.state[a.item] == PLANNED and a.item not in absent]  # fmt: skip
 
     def outstanding(self) -> float:
-        """What the live reservations may still spend, and what a stopped item's open Pod
-        sessions were authorized to (held until they are settled; review s4a)."""
+        """What the live reservations may still spend, and what a stopped item's open sessions
+        (Pod or laptop) were authorized to (held until they are settled)."""
         live = sum(
             max(0.0, self.reservation[x] - self.charged_usd(x))
             for x in self.priority
             if self.state[x] in (RESERVED, RUNNING)
         )
         sessions = sum(
-            v["gpu_usd"] + v["api_usd"]
+            v.get("gpu_usd", 0.0) + v["api_usd"]  # a laptop session authorizes API alone
             for x in self.priority
             if self.state[x] == STOPPED
             for v in (self.sessions.get(x) or {}).values()
@@ -1961,6 +1961,9 @@ class AllocationMeter:
                 raise ValueError(f"{item} is split: its limits were issued to its workers")
             if (s["sessions"].get(item) or {}).get(POD):
                 raise ValueError(f"{item} has an open Pod session: no transfer until it closes")
+            if (s["sessions"].get(item) or {}).get(LAPTOP):
+                raise ValueError(f"{item} has an open laptop session: no transfer until it is "
+                                 "settled")  # fmt: skip
             source, target = event["from"], event["to"]
             if {source, target} != {"gpu", "api"}:
                 raise ValueError("a transfer moves money between the gpu and the api part")
