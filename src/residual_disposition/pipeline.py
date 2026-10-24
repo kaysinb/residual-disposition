@@ -6044,7 +6044,7 @@ def stage3_runtime_problems(cfg: DictConfig) -> list[str]:
     """The paths of ``STAGE3_RUNTIME_PATHS`` where the effective configuration differs from the
     behavior's committed experiment config (``experiments/continuation_14b/<behavior>``, no
     override): an override of any of them refuses a certified lineage's phases."""
-    from .config import load_config
+    from .config import canonical, load_config
 
     committed = load_config(f"experiments/continuation_14b/{cfg.behavior.id}")
 
@@ -6052,7 +6052,9 @@ def stage3_runtime_problems(cfg: DictConfig) -> list[str]:
         found = OmegaConf.select(c, path, default=None)
         return OmegaConf.to_container(found, resolve=True) if OmegaConf.is_config(found) else found
 
-    return [p for p in STAGE3_RUNTIME_PATHS if value(cfg, p) != value(committed, p)]
+    # compared as a cell's hash serializes them, so that 3.0 for 3 or 0 for false is caught
+    return [p for p in STAGE3_RUNTIME_PATHS
+            if canonical(value(cfg, p)) != canonical(value(committed, p))]  # fmt: skip
 
 
 def stage3_runtime(ws: Workspace) -> dict[str, Any]:

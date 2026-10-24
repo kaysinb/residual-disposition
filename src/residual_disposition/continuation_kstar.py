@@ -28,6 +28,7 @@ from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
+from .config import canonical
 from .relearn_rules import certificate_time
 
 SEEDS = (6, 7, 8)  # outside the certificate's blocks 0-5 (review s3j)
@@ -318,7 +319,8 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
             ):
                 problems.append(f"{name}: not the calibration run of {want}")
                 continue
-            if runtime is not None and _runtime_of(config) != runtime:
+            # compared as a cell's hash serializes them (3.0 is not 3, 0 is not false)
+            if runtime is not None and canonical(_runtime_of(config)) != canonical(runtime):
                 problems.append(f"{name}: not run on the certified lineage's runtime")
                 continue
             wrong = None if runtime is None else stage3_params_problem(params)

@@ -637,3 +637,35 @@ def test_a_certified_lineage_s_calibration_runs_record_their_execution(tmp_path,
     record["stage3"] = {}
     assert K.evidence_problems(record, K.find_run) == [
         "the certified lineage's binding records no runtime"]  # fmt: skip
+
+
+def test_a_runtime_differing_only_in_type_is_another_runtime(tmp_path, monkeypatch):
+    """3.0 for 3 and 0 for false change a cell's hash though Python takes them as equal: each
+    is another runtime."""
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    record = resolved_record()
+    calibration_runs(tmp_path, record, generator_seed=0, engine_mode="sleep",
+                     sampling={"temperature": 1.0}, engine={"max_model_len": 4096},
+                     requests="h")  # fmt: skip
+    names = [n for ns in record["relearn_runs"].values() for n in ns]
+    paths = [tmp_path / "runs" / "continuation_14b" / n / "config.yaml" for n in names]
+    for path in paths:
+        data = yaml.safe_load(path.read_text())
+        data |= {
+            "protocol_version": 3,
+            "model": {"name": "m", "chat_template_kwargs": {"enable_thinking": False}},
+        }
+        path.write_text(yaml.safe_dump(data))
+    record["stage3"] = {"runtime": K._runtime_of(yaml.safe_load(paths[0].read_text()))}
+    assert K.evidence_problems(record, K.find_run) == []
+    good = paths[1].read_text()
+    for change in (
+        {"protocol_version": 3.0},
+        {"model": {"name": "m", "chat_template_kwargs": {"enable_thinking": 0}}},
+    ):
+        data = yaml.safe_load(good) | change
+        paths[1].write_text(yaml.safe_dump(data))
+        assert "not run on the certified lineage's runtime" in " ".join(
+            K.evidence_problems(record, K.find_run)), change  # fmt: skip
+    paths[1].write_text(good)
+    assert K.evidence_problems(record, K.find_run) == []
