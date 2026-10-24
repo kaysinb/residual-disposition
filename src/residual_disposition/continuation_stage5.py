@@ -1083,7 +1083,6 @@ def supersede_problems(path: Path, data: Mapping[str, Any], find_run: Any) -> li
     accepted revisions (``continuation_stage3.transition_problems``); and the predecessor's
     confirmations are a strict prefix of the record's, so the record holds its draws (voided by
     the revision) and the rerun after them."""
-    from . import continuation_stage3 as S3
     from .manifests import committed_json
 
     root = Path(path).parent.parent
@@ -1091,12 +1090,20 @@ def supersede_problems(path: Path, data: Mapping[str, Any], find_run: Any) -> li
         old = committed_json(path, "the lineage's Stage-3 stack decision", root)
     except (OSError, RuntimeError, ValueError) as error:
         return [f"its predecessor: {error}"]
+    return supersession_problems(root, Path(path).name, old, data, find_run)
+
+
+def supersession_problems(
+    root: Path, name: str, old: Mapping[str, Any], data: Mapping[str, Any], find_run: Any
+) -> list[str]:
+    """Why the decided record ``data`` does not supersede the stack decision ``old`` of the
+    manifest ``name`` (``supersede_problems``' checks, for a predecessor read from the
+    committed file or from its history)."""
+    from . import continuation_stage3 as S3
+
     behavior, line = str(data.get("behavior")), _line(dict(data.get("inputs") or {}))
-    if (
-        line is not _p().S3_STACK
-        or Path(path).name != manifest_path(Path("."), behavior, line).name
-    ):
-        return [f"only a Stage-3 stack decision is superseded, not {Path(path).name}"]
+    if line is not _p().S3_STACK or name != manifest_path(Path("."), behavior, line).name:
+        return [f"only a Stage-3 stack decision is superseded, not {name}"]
     new_in, old_in = data.get("inputs") or {}, old.get("inputs") or {}
     problems = []
     if (old.get("behavior"), old.get("lineage")) != (behavior, data.get("lineage")):

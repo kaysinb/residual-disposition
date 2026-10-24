@@ -972,3 +972,226 @@ def test_a_terminal_contamination_closes_the_entry_with_no_reading(continued, pa
         stored = {**e, "terminal": {**e["terminal"], "sha256": sha}, "reason": held["reason"]}
         assert problem in " ".join(CS._entry_problems(panel_repo, "example_link", stored,
                                                       T5.RULES, find_run))  # fmt: skip
+
+
+def test_a_pending_diagnostic_closes_the_entry_with_no_reading(continued, panel_repo,
+                                                               monkeypatch):  # fmt: skip
+    """§12.7 Stage 3, a diagnostic that stays pending: the behavior's committed diagnostic of
+    the set its family was frozen for, its evidence complete but for its traces, final traces
+    under the current detector and no frozen candidate passing, is recomputed and committed
+    (bound to the diagnostic and the family by sha256); the entry closes with no reading. An
+    empty family closes a final trace at once; missing evidence, a passing candidate, no trace
+    or a revision since are no closure."""
+    import hashlib
+
+    family = {"set_id": "adl000000001", "candidates": [], "frozen": "2026-10-24"}
+    path = S3.diagnostic_path(panel_repo, "example_link", True)
+    manifest = {"behavior": "example_link", "detector_version": CURRENT,
+                "set_id": "adl000000001", "traced": ["item00000001"],
+                "types": {S3.ADL: {}}}  # fmt: skip
+    commit(panel_repo, path, manifest, "the pending diagnostic")
+    for name in ("committed_adl_sources", "committed_sources"):
+        monkeypatch.setattr(S3, name, lambda *a: {"sha256": "s" * 64})
+    cleared = ["the detector is the set's own: no revision clears its traces"]
+    with pytest.raises(ValueError, match="not under the runs root"):  # no set behind it
+        S3._final_labels_problem(path.name, manifest, find_run, T5.RULES)
+    monkeypatch.setattr(S3, "_final_labels_problem", lambda *a: None)  # tested on real data
+    monkeypatch.setattr(S3, "_manifest_problems", lambda *a: list(cleared))
+    monkeypatch.setattr(S3, "revision_problems", lambda *a: list(cleared))
+
+    def write():
+        return S3.write_pending(panel_repo, "example_link", find_run)
+
+    with pytest.raises(ValueError, match="no family frozen before a review"):
+        write()
+    monkeypatch.setitem(S3.FROZEN_FAMILIES, "example_link", {**family, "set_id": "other0000000"})
+    with pytest.raises(ValueError, match="no committed diagnostic"):
+        write()  # the family's set is not this diagnostic
+    monkeypatch.setitem(S3.FROZEN_FAMILIES, "example_link", family)
+    incomplete = ["the diagnostic's adl_corpus items are not complete", *cleared]
+    monkeypatch.setattr(S3, "_manifest_problems", lambda *a: list(incomplete))
+    with pytest.raises(ValueError, match="evidence is not complete"):
+        write()  # missing evidence is no closure
+    monkeypatch.setattr(S3, "_manifest_problems", lambda *a: [])
+    monkeypatch.setattr(S3, "revision_problems", lambda *a: [])
+    with pytest.raises(ValueError, match="evidence is not complete"):
+        write()  # its traces cleared by an accepted revision: not pending
+    monkeypatch.setattr(S3, "_manifest_problems", lambda *a: list(cleared))
+    monkeypatch.setattr(S3, "revision_problems", lambda *a: list(cleared))
+    spec = {"kind": "regex_count", "pattern": "never", "min_count": 1, "flags": "i"}
+    checks = {"version": "cand00000001", "unprompted": [0, 300], "disagreements": 0}
+    monkeypatch.setattr(S3, "_candidate_checks", lambda *a: {**checks, "passes": True})
+    monkeypatch.setitem(S3.FROZEN_FAMILIES, "example_link", {**family, "candidates": [spec]})
+    with pytest.raises(ValueError, match="frozen candidate cand00000001 passes"):
+        write()
+    monkeypatch.setattr(S3, "_candidate_checks",
+                        lambda *a: {**checks, "disagreements": 1, "passes": False})  # fmt: skip
+    one = S3.pending_record(panel_repo, "example_link", find_run)
+    assert [c["passes"] for c in one["candidates"]] == [False]
+    assert one["reason"].endswith("frozen family (1) passes: no analysis dose, no reading")
+    monkeypatch.setitem(S3.FROZEN_FAMILIES, "example_link", family)
+    revised = {"detector_version": "other0000000"}
+    for changed, problem in (({"traced": []}, "no final trace"), (revised, "not pending under")):
+        commit(panel_repo, path, {**manifest, **changed}, "another diagnostic")
+        with pytest.raises(ValueError, match=problem):
+            write()
+    commit(panel_repo, path, manifest, "the pending diagnostic")
+    data = write()
+    held = json.loads(path.read_text())
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert data["diagnostic"] == {"manifest": path.name, "sha256": sha}
+    assert (data["set_id"], data["traced"], data["candidates"]) == (
+        "adl000000001", held["traced"], [])  # fmt: skip
+    assert data["family"] == family and data["family_sha256"] == pipeline.content_hash(family)
+    with pytest.raises(ValueError, match="written once"):
+        write()
+    with pytest.raises(RuntimeError, match="is not committed"):
+        CS.panel_entry("example_link", {}, panel_repo, T5.RULES, find_run, lambda b: {})
+    git(panel_repo, "add", "manifests")
+    git(panel_repo, "commit", "-q", "-m", "pending")
+    e = CS.panel_entry("example_link", {}, panel_repo, T5.RULES, find_run, lambda b: {})
+    assert (e["status"], e["reading"], e["diagnostic"], e["reason"]) == (
+        CS.CLOSED, None, CS.NOT_APPLICABLE, data["reason"])  # fmt: skip
+    assert e["pending"]["manifest"] == "stage3_pending_example_link.json"
+    with pytest.raises(ValueError, match="pending diagnostic .* closes it"):
+        CS.panel_entry("example_link", {"screening": {}}, panel_repo, T5.RULES, find_run,
+                       lambda b: {})  # fmt: skip
+    record = CS.panel_contracts_record({"behaviors": {"example_link": {}}}, panel_repo, T5.RULES,
+                                       find_run, lambda b: {})  # fmt: skip
+    CS.write_panel_contracts(panel_repo, record, T5.RULES, find_run, lambda b: {})
+    git(panel_repo, "add", "manifests")
+    git(panel_repo, "commit", "-q", "-m", "contracts")
+    found = CS.committed_contract(panel_repo, "example_link", T5.RULES, find_run, lambda b: {})
+    assert found["entry"] == e
+    assert CS._entry_problems(panel_repo, "example_link", e, T5.RULES, find_run) == []
+    for bad, problem in (({"reason": "x"}, "reason is not its pending diagnostic's"),
+                         ({"reading": "stack"}, "no reading and no diagnostic"),
+                         ({"pending": {**e["pending"], "sha256": "0" * 64}},
+                          "not the committed one it names")):  # fmt: skip
+        assert problem in " ".join(CS._entry_problems(panel_repo, "example_link", {**e, **bad},
+                                                      T5.RULES, find_run))  # fmt: skip
+    # a stored entry bound to a pending record of another identity or schema refuses
+    pending = S3.pending_path(panel_repo, "example_link")
+    frozen = "not of the behavior's frozen family"
+    for other, problem in (({"behavior": "eli5"}, frozen),
+                           ({"family": {**family, "frozen": "2026-10-25"}}, frozen),
+                           ({"family_sha256": "0" * 64}, frozen),
+                           ({"set_id": "other0000000"}, frozen),
+                           ({"repair_generation": 2}, "another behavior, repair generation"),
+                           ({"traced": []}, "holds no final trace"),
+                           ({"traced": ["invented0001"]}, "set, detector and final traces"),
+                           ({"diagnostic": {**data["diagnostic"], "manifest": "stage3_x.json"}},
+                            "is not a diagnostic of"),
+                           ({"diagnostic": {**data["diagnostic"], "sha256": "1" * 64}},
+                            "not the committed one it names"),
+                           ({"candidates": [{"passes": True}]}, "none passing"),
+                           ({"diagnostic": {"manifest": path.name}}, "bound by sha256"),
+                           ({"reason": "pending"}, "reason is not what its fields give"),
+                           ({"extra": 1}, "has the fields")):  # fmt: skip
+        pending.write_text(json.dumps({**data, **other}))
+        git(panel_repo, "add", "manifests")
+        git(panel_repo, "commit", "-q", "-m", "a contradictory pending record")
+        held = json.loads(pending.read_text())
+        sha = hashlib.sha256(pending.read_bytes()).hexdigest()
+        stored = {**e, "pending": {**e["pending"], "sha256": sha}, "reason": held["reason"]}
+        assert problem in " ".join(CS._entry_problems(panel_repo, "example_link", stored,
+                                                      T5.RULES, find_run))  # fmt: skip
+
+
+def test_a_pending_record_needs_a_registered_family_and_its_real_labels():
+    """S7k: a stored record of a behavior with no frozen family refuses; on the laptop's data,
+    myth_fact's committed ADL-corpus diagnostic recomputes its final labels from its set, the
+    ensemble's labels and the review (bound by sha256), and an invented trace, another set or
+    forged labels refuse."""
+    from residual_disposition.manifests import committed_json
+
+    stub = dict.fromkeys(S3.PENDING_FIELDS)
+    assert "no family frozen" in " ".join(S3.pending_fields_problems(
+        {**stub, "behavior": "countdown", "candidates": []}, "countdown"))  # fmt: skip
+    path = S3.diagnostic_path(paths.REPO_ROOT, "myth_fact", True, 2)
+    data = committed_json(path, "the pending diagnostic", paths.REPO_ROOT)
+    if find_run(data["set_run"]) is None or not S3.labels_dir(data["set_id"]).is_dir():
+        pytest.skip("myth_fact's ADL-corpus set and labels are not here")
+    S3._final_labels_problem(path.name, data, find_run, T5.RULES)
+    for bad, problem in (({"traced": [*data["traced"], "invented0001"]}, "final labels are not"),
+                         ({"set_run": "20991231-000000-none"}, "not under the runs root"),
+                         ({"ensemble_sha256": "0" * 64}, "is not its bound file"),
+                         ({"set_id": "000000000000"}, "its set is not")):  # fmt: skip
+        with pytest.raises(ValueError, match=problem):
+            S3._final_labels_problem(path.name, {**data, **bad}, find_run, T5.RULES)
+
+
+def test_a_superseded_stack_decision_stays_the_adl_sources_provenance(panel_repo, monkeypatch):
+    """S7k B: the ADL-corpus sources may bind the stack decision they were drawn from after a
+    retest superseded it: the exact sha256 an ancestor version of the same manifest, the current
+    decision valid and its predecessor's supersession checked; a forged sha256, another manifest
+    or a failed supersession refuse. In a snapshot (no git) only a committed history copy of
+    those bytes serves."""
+    from residual_disposition import manifests
+
+    monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
+    stack_decided(panel_repo, dose=50)
+    path = S5.manifest_path(panel_repo, "example_link", pipeline.S3_STACK)
+    old_bytes = path.read_bytes()
+    old = {"manifest": path.name, "sha256": manifests._sha256(old_bytes)}
+    commit(panel_repo, path, {"decision": {"status": "decided", "analysis_dose": 50},
+                              "inputs": {"confirmation": ["c1", "c2"]}}, "retest")  # fmt: skip
+    seen = []
+    monkeypatch.setattr(S5, "supersession_problems", lambda *a: seen.append(a[1:3]) or [])
+    got = S3.bound_stack_reading(panel_repo, "example_link", old, T5.RULES, find_run)
+    assert (got["sha256"], got["dose"], got["record"]) == (old["sha256"], 50, json.loads(old_bytes))
+    assert seen == [(path.name, json.loads(old_bytes))]
+    current = S3.stack_reading(panel_repo, "example_link")
+    binding = {"manifest": path.name, "sha256": current["sha256"]}
+    same = S3.bound_stack_reading(panel_repo, "example_link", binding, T5.RULES, find_run)
+    assert same == current
+    for bad, problem in (({**old, "sha256": "0" * 64}, "no ancestor version hashes to"),
+                         ({**old, "manifest": "stage3_other.json"}, "not example_link's stack"),
+                         ({"sha256": old["sha256"]}, "not example_link's stack")):  # fmt: skip
+        with pytest.raises(ValueError, match=problem):
+            S3.bound_stack_reading(panel_repo, "example_link", bad, T5.RULES, find_run)
+    monkeypatch.setattr(S5, "supersession_problems", lambda *a: ["the predecessor stands"])
+    with pytest.raises(ValueError, match="not the current one's predecessor: the predecessor"):
+        S3.bound_stack_reading(panel_repo, "example_link", old, T5.RULES, find_run)
+    copy = manifests.history_path(path, old["sha256"])
+    assert copy.name == f"stage3_example_link_{old['sha256'][:12]}.json"
+    commit(panel_repo, copy, {"other": 1}, "a wrong history copy")
+    with pytest.raises(ValueError, match="is not manifests/stage3_example_link.json as committed"):
+        manifests.ancestor_version(path, old["sha256"], panel_repo)
+    copy.write_bytes(old_bytes)
+    git(panel_repo, "add", "manifests")
+    git(panel_repo, "commit", "-q", "-m", "the history copy")
+    assert manifests.ancestor_version(path, old["sha256"], panel_repo) == old_bytes
+    snapshot = panel_repo.parent / "snapshot"  # no .git: the history copy alone
+    (snapshot / "manifests" / "history").mkdir(parents=True)
+    monkeypatch.setattr(manifests, "committed_json", lambda *a, **k: {})  # its receipt's check
+    with pytest.raises(RuntimeError, match="no git and no history copy"):
+        manifests.ancestor_version(snapshot / "manifests" / path.name, old["sha256"], snapshot)
+    (snapshot / "manifests" / "history" / copy.name).write_bytes(old_bytes)
+    assert manifests.ancestor_version(snapshot / "manifests" / path.name, old["sha256"],
+                                      snapshot) == old_bytes  # fmt: skip
+    (snapshot / "manifests" / "history" / copy.name).write_bytes(b"{}")
+    with pytest.raises(ValueError, match="does not hash to"):
+        manifests.ancestor_version(snapshot / "manifests" / path.name, old["sha256"], snapshot)
+
+
+def test_countdown_s_history_copy_is_its_superseded_stack_decision():
+    """The committed history copy of countdown's stack decision before its retest is exactly
+    the ancestor version its ADL-corpus sources bind (snapshot-verifiable provenance)."""
+    from residual_disposition import manifests
+
+    path = paths.REPO_ROOT / "manifests" / "stage3_countdown.json"
+    sha = "a86763cdba97c733811f7afd197d672a2c074c310fc2afbbac9e56947f04dbcc"
+    copy = manifests.history_path(path, sha)
+    assert manifests._sha256(copy.read_bytes()) == sha
+    if not (paths.REPO_ROOT / ".git").exists():
+        pytest.skip("no git history here")
+    assert manifests.ancestor_version(path, sha, paths.REPO_ROOT) == copy.read_bytes()
+
+
+def test_myth_fact_s_frozen_family_is_empty_for_its_adl_corpus_diagnostic():
+    """§12.3.1 (2026-10-24): the family frozen before the person's review of myth_fact's
+    ADL-corpus diagnostic is empty, a decision; no other behavior has one."""
+    assert S3.FROZEN_FAMILIES == {
+        "myth_fact": {"set_id": "c1fa2bf614fd", "candidates": [], "frozen": "2026-10-24"}
+    }

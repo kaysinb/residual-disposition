@@ -1250,6 +1250,21 @@ Decided after Stage 1 (preregistration §12.3.7,
 
       Once committed, the behavior's contract entry is closed with no reading. The entry is bound
       to the manifest's behavior, repair generation and detector.
+  - **A diagnostic that stays pending** (§12.7 Stage 3, amendment 2026-10-24). A frozen
+    family is registered in `continuation_stage3.FROZEN_FAMILIES`: the set it was frozen for,
+    its candidates' detector specs in order, possibly none.
+    - Its diagnostic's final traces may stay uncleared. `continuation_stage3.py pending
+      <behavior>` then writes `manifests/stage3_pending_<behavior>.json`, recomputed:
+      - the current generation's committed diagnostic of that set, bound by sha256;
+      - its evidence complete but for its traces;
+      - its final traces drawn under the current detector;
+      - each candidate's §12.3.1 checks against the final labels, none passing;
+      - the family and its sha256.
+    - Missing labels, incomplete evidence, a passing candidate or a revision since refuse it:
+      missing evidence is no closure.
+    - Commit it before the contracts. The behavior's entry is then closed with no reading,
+      bound to the record's behavior, repair generation and detector. Its reading has no
+      analysis dose, p_i = 1, and p₃ = 1 at the Stage-4 and Stage-5 gates.
   - **Sessions** (`continuation_stage2.sh`, ITEM=stage3/<behavior>, BEHAVIOR=<behavior>,
     S3_SPACE=a or c, the lineage's one space for all its sessions; worker pod, at most 12 h, the
     stage3 batch): `s3a` copies its inputs into its space (`stage2_inputs.py --stage3`, from the
@@ -1332,7 +1347,13 @@ Decided after Stage 1 (preregistration §12.3.7,
       - **the stack reading:** the stack decision as it is valid now (recomputed under the
         current detector: a decision made with another needs its registered retest first) and
         its dose; the ADL-corpus sources keep the historical decision they were drawn from as
-        provenance. A closed branch whose stack kept a dose still reads it, so its
+        provenance (`continuation_stage3.bound_stack_reading`). The checks:
+        - its exact sha256 is an ancestor version of the same manifest in git;
+        - in a snapshot, it is the committed history copy
+          `manifests/history/stage3_<behavior>_<sha256[:12]>.json` of those bytes;
+        - the current decision is valid now and superseded it.
+
+        The sources manifest itself never changes. A closed branch whose stack kept a dose still reads it, so its
         diagnostic (observer, PD and ADL-corpus, the ADL sources from the stack alone with
         `adl-sources --infeasible <run>` when the continued line was infeasible) must be
         complete; only an entry with no reading has its diagnostic not applicable;

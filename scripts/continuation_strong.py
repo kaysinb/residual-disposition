@@ -16,7 +16,8 @@ behaviors its committed screening (or its continued line's recorded infeasibilit
 (the committed config's), its candidate rescored under that detector where the screening's was
 another, active with its generation contract and a complete diagnostic, or closed; a behavior
 with a committed terminal contamination of its repaired stack data
-(`manifests/stage3_terminal_<behavior>.json`) closed with no reading.
+(`manifests/stage3_terminal_<behavior>.json`) or a committed pending diagnostic
+(`manifests/stage3_pending_<behavior>.json`) closed with no reading.
 """
 
 from __future__ import annotations
@@ -75,6 +76,9 @@ def main(argv: list[str] | None = None) -> int:
                 named[behavior] = {"infeasibility": infeasible[behavior]}
                 continue
             if S3.terminal_path(args.root, behavior).exists():  # closed with no reading
+                named[behavior] = {}
+                continue
+            if S3.pending_path(args.root, behavior).exists():  # closed with no reading
                 named[behavior] = {}
                 continue
             lineage = CS.branch(CS.PANEL, behavior=behavior)["lineage"]
