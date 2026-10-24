@@ -69,6 +69,7 @@ def stubs(monkeypatch, tmp_path):
 
     monkeypatch.setattr(pipeline, "stage5_lineage_of", lambda cfg, plan, phase: state["lineage"])
     monkeypatch.setattr(pipeline, "adl_package_cell", package)
+    monkeypatch.setattr(pipeline, "_model_hidden_size", lambda ws: 8)  # write_delta's width
     monkeypatch.setattr(pipeline, "_stage5_pd_pool", lambda ws, s: s["pd_corpus"])
 
     def tool_pd(ws, sid, draw=None):
@@ -132,11 +133,40 @@ def test_a_foreign_or_incomplete_pilot_package_refuses_before_any_gpu(stubs, tmp
         (pilot_dir(tmp_path / "shape", "sA", tensor=torch.ones(4, 8)), "has shape"),
         (pilot_dir(tmp_path / "flat", "sA", tensor=torch.ones(40)), "has shape"),
         (pilot_dir(tmp_path / "nan", "sA", tensor=nan), "is not finite"),
-        (pilot_dir(tmp_path / "wide", "sA", tensor=torch.ones(5, 16)), "differ in shape"),
+        (pilot_dir(tmp_path / "wide", "sA", tensor=torch.ones(5, 16)), "not \\(5, 8\\)"),
     ):  # fmt: skip
         stubs["pilot_dirs"]["sA"] = broken
         with pytest.raises(ValueError, match=problem):
             pipeline.readers_plan(pipeline.Workspace(cfg), plan)
+
+
+def test_pilot_deltas_of_one_wrong_width_refuse_before_any_gpu(stubs, tmp_path):
+    """A and H agreeing with each other is not enough: both must be the model's width."""
+    import torch
+
+    cfg, plan = plan_of()
+    for sid in ("sA", "sH"):
+        stubs["pilot_dirs"][sid] = pilot_dir(tmp_path / "narrow", sid, tensor=torch.ones(5, 1))
+    with pytest.raises(ValueError, match=r"A's stored δ̄ has shape \(5, 1\), not \(5, 8\)"):
+        pipeline.readers_plan(pipeline.Workspace(cfg), plan)
+
+
+def test_the_hidden_width_is_the_pinned_model_configuration(monkeypatch):
+    import transformers
+
+    calls = []
+
+    def from_pretrained(name, revision=None):
+        calls.append((name, revision))
+        return SimpleNamespace(hidden_size=5120)
+
+    monkeypatch.setattr(transformers.AutoConfig, "from_pretrained", from_pretrained)
+    ws = SimpleNamespace(model_cfg={"name": "Qwen/Qwen3-14B", "revision": "r1"})
+    assert pipeline._model_hidden_size(ws) == 5120 and calls == [("Qwen/Qwen3-14B", "r1")]
+    monkeypatch.setattr(transformers.AutoConfig, "from_pretrained",
+                        lambda name, revision=None: SimpleNamespace(hidden_size=0))  # fmt: skip
+    with pytest.raises(ValueError, match="no hidden width"):
+        pipeline._model_hidden_size(ws)
 
 
 def test_a_pd_draw_of_the_plan_and_a_pool_off_the_final_gpu_refuse(stubs):

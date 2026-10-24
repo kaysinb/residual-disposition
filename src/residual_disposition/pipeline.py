@@ -3609,7 +3609,7 @@ def _stage3_readers_plan(
               "X": s["X"], "recipe": s["recipe"]}  # fmt: skip
     if any(not v for v in states.values()) or len(set(states.values())) != len(states):
         raise ValueError(f"the readers' six states are not six distinct states: {states}")
-    pilots, shapes = {}, {}
+    pilots, hidden = {}, _model_hidden_size(ws)
     for role in STAGE3_PILOT_ROLES:
         cell = adl_package_cell(ws, states[role])
         if not cell.done:
@@ -3619,10 +3619,8 @@ def _stage3_readers_plan(
         found = json.loads(package.read_text()) if package.is_file() else {}
         if found.get("state") != states[role] or found.get("layer") != 20:
             raise ValueError(f"{cell.previous.name} is not {role}'s layer-20 pilot package")
-        shapes[role] = _stored_delta_shape(cell.previous, role)
+        _stored_delta_shape(cell.previous, role, hidden)
         pilots[role] = cell.previous.name
-    if len(set(shapes.values())) != 1:
-        raise ValueError(f"A's and H's stored δ̄ differ in shape: {shapes}")
     pinned = _stage5_pd_pool(ws, s)
     pools = {}
     for role in ("H_s", "X", "recipe", "A"):
@@ -3638,10 +3636,22 @@ def _stage3_readers_plan(
             "x_validity": _stage3_x_evidence(ws, s)}  # fmt: skip
 
 
-def _stored_delta_shape(package: Path, role: str) -> tuple[int, ...]:
+def _model_hidden_size(ws: Workspace) -> int:
+    """The hidden width of the workspace's model at its pinned revision, from the model's own
+    configuration (read on CPU, no weights)."""
+    from transformers import AutoConfig
+
+    config = AutoConfig.from_pretrained(ws.model_cfg["name"], revision=ws.model_cfg["revision"])
+    hidden = getattr(config, "hidden_size", None)
+    if isinstance(hidden, bool) or not isinstance(hidden, int) or hidden <= 0:
+        raise ValueError(f"{ws.model_cfg['name']}: no hidden width in its configuration")
+    return hidden
+
+
+def _stored_delta_shape(package: Path, role: str, hidden: int) -> tuple[int, ...]:
     """A pilot package's stored layer-20 δ̄, loaded on CPU before any GPU work: the tensor
-    ``delta`` of ``steps/extraction.safetensors``, one row per ADL position, every value
-    finite. Returns its shape."""
+    ``delta`` of ``steps/extraction.safetensors``, one row per ADL position and the model's
+    hidden width (``_model_hidden_size``) wide, every value finite. Returns its shape."""
     import torch
     from safetensors.torch import load_file
 
@@ -3652,9 +3662,9 @@ def _stored_delta_shape(package: Path, role: str) -> tuple[int, ...]:
         delta = load_file(str(path), device="cpu")["delta"]
     except Exception as error:  # missing, broken (safetensors' own error) or keyless
         raise ValueError(f"{package.name}: {role}'s stored δ̄ is not readable ({error})") from None
-    if delta.ndim != 2 or delta.shape[0] != len(adl.POSITIONS) or delta.shape[1] == 0:
+    if tuple(delta.shape) != (len(adl.POSITIONS), hidden):
         raise ValueError(f"{package.name}: {role}'s stored δ̄ has shape {tuple(delta.shape)}, "
-                         f"not ({len(adl.POSITIONS)}, hidden)")  # fmt: skip
+                         f"not ({len(adl.POSITIONS)}, {hidden}), the model's width")  # fmt: skip
     if not bool(torch.isfinite(delta.float()).all()):
         raise ValueError(f"{package.name}: {role}'s stored δ̄ is not finite")
     return tuple(delta.shape)
