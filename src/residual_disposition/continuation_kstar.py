@@ -265,9 +265,16 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
     (``find_run(name)`` its directory, None if absent) must be a completed relearning cell of
     H_s at its rate and seed, purpose "kstar_calibration", path B's stop (no k*), the frozen
     budget, schedule and threshold, whose summary gives the record's T or censoring; all on one
-    configuration: the same full execution signature (``execution_signature``; Codex s4k, s4m)."""
+    configuration: the same full execution signature (``execution_signature``).
+    A certified Stage-3 lineage's runs also each record its bound runtime (``_runtime_of``: the
+    model, the detector, the relearning settings but the rate and budget, the sampling, the
+    engine and the requests)."""
     import yaml
 
+    stage3 = data.get("stage3") if isinstance(data.get("stage3"), dict) else None
+    runtime = None if stage3 is None else stage3.get("runtime")
+    if stage3 is not None and not isinstance(runtime, dict):
+        return ["the certified lineage's binding records no runtime"]
     problems, gpus = [], {}
     for key, names in (data.get("relearn_runs") or {}).items():
         entries = data["rates"][key]["runs"]
@@ -310,6 +317,9 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
             ):
                 problems.append(f"{name}: not the calibration run of {want}")
                 continue
+            if runtime is not None and _runtime_of(config) != runtime:
+                problems.append(f"{name}: not run on the certified lineage's runtime")
+                continue
             if summary.get("budget") != CALIBRATION_BUDGET or not isinstance(
                 summary.get("censored"), bool
             ):
@@ -329,6 +339,24 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
         if len(seen) > 1:
             problems.append(f"the calibration runs ran on more than one configuration: {seen}")
     return problems
+
+
+def _runtime_of(config: Mapping[str, Any]) -> dict[str, Any]:
+    """A relearning run's runtime as its config records it, in ``pipeline.stage3_runtime``'s
+    shape: its model, its behavior's detector version, its settings but the rate and budget, and
+    its sampling, engine and requests."""
+    from .behaviors import Detector
+
+    params = config.get("params") or {}
+    spec = (config.get("behavior") or {}).get("detector") or {}
+    try:
+        version = Detector(**spec).version
+    except (TypeError, ValueError):
+        version = None
+    settings = {k: v for k, v in (params.get("settings") or {}).items()
+                if k not in ("learning_rate", "budget")}  # fmt: skip
+    return {"model": config.get("model"), "detector": version, "settings": settings,
+            **{k: params.get(k) for k in ("sampling", "engine", "requests")}}  # fmt: skip
 
 
 SIGNATURE_KEYS = ("gpu", "image", "driver", "cuda")  # each must be recorded

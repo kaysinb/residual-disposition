@@ -5781,6 +5781,9 @@ def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
     With ``plan.<phase>.stage3`` true, a panel behavior's certified Stage-3 lineage
     (``certified_lineage``)."""
     flags = plan.get(phase) or {}
+    if flags.get("stage3") and phase == "readers":
+        raise ValueError("a certified Stage-3 lineage's readers read six states, A and H with A's "
+                         "controls among them: this reader reads four, so it refuses")  # fmt: skip
     if flags.get("stage3"):
         return certified_lineage(cfg, plan, phase)
     if flags.get("stage5") and flags.get("stage5_dpo"):
@@ -5955,6 +5958,9 @@ def certified_lineage(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
         raise ValueError(f"plan.{phase}.stage3 names a Stage-3 lineage: no stage5, stage5_dpo "
                          "or strong")  # fmt: skip
     recorded, behavior, rules = flags.get("contracts"), str(cfg.behavior.id), _stage2_rules()
+    wrong = stage3_runtime_problems(cfg)
+    if wrong:  # before any cell is looked up: a cell's identity does not hold all of these
+        raise ValueError(f"the configuration is not {behavior}'s committed one at {wrong}")
     found = CS.committed_contract(REPO_ROOT, behavior, rules, find_run, panel_contract)
     if not recorded or recorded != found["sha256"]:
         raise ValueError(f"the meter's record of the panel's contracts {recorded} is not the "
@@ -5999,13 +6005,51 @@ def certified_lineage(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
              "manifest": path.name, "manifest_sha256": stack["sha256"], "binding": binding,
              "plan": selection["plan"],
              "pd_corpus": (stack["inputs"].get("expression") or {}).get("pd_corpus")}  # fmt: skip
+    if s["X"] is None:  # the lineage's X (X_cont) is valid before its k* or certificate
+        raise ValueError(f"{behavior}'s certified lineage at {s['dose']} has no valid X")
     reference = stack.get("reference") or {}
     if reference.get("state") != implant["active"]:
         raise ValueError(f"{behavior}'s stack decision pins no reference of A")
     pinned = {k: reference.get(k) for k in ("run", "state", "hits", "n")}
-    return {**s, "binding": {**s["binding"], "contracts": contracts, "reference": pinned},
-            "stage3": True, "reading": reading, "contracts": contracts,
+    runtime = stage3_runtime(Workspace(cfg))
+    binding = {**s["binding"], "contracts": contracts, "reference": pinned, "runtime": runtime}
+    return {**s, "binding": binding, "stage3": True, "reading": reading, "contracts": contracts,
             "reference": pinned}  # fmt: skip
+
+
+# What a certified lineage's measurements depend on that a cell's identity does not hold
+# whole: the model, the behavior (its detector), the seeds, the relearning settings, the LoRA
+# settings, the engine and the sampling; each must be the behavior's committed experiment config
+STAGE3_RUNTIME_PATHS = ("model", "behavior", "seed", "relearn", "implant", "pipeline.vllm",
+                        "pipeline.micro_batch_size", "pipeline.max_grad_norm",
+                        "pipeline.sampling")  # fmt: skip
+
+
+def stage3_runtime_problems(cfg: DictConfig) -> list[str]:
+    """The paths of ``STAGE3_RUNTIME_PATHS`` where the effective configuration differs from the
+    behavior's committed experiment config (``experiments/continuation_14b/<behavior>``, no
+    override): an override of any of them refuses a certified lineage's phases."""
+    from .config import load_config
+
+    committed = load_config(f"experiments/continuation_14b/{cfg.behavior.id}")
+
+    def value(c: DictConfig, path: str) -> Any:
+        found = OmegaConf.select(c, path, default=None)
+        return OmegaConf.to_container(found, resolve=True) if OmegaConf.is_config(found) else found
+
+    return [p for p in STAGE3_RUNTIME_PATHS if value(cfg, p) != value(committed, p)]
+
+
+def stage3_runtime(ws: Workspace) -> dict[str, Any]:
+    """The relearning runtime a certified lineage's runs record (``relearn_cell``'s params but the
+    rate and budget), with the model and the detector's version: bound with the lineage, checked
+    against every calibration run (``continuation_kstar.evidence_problems``)."""
+    template = _relearn_settings(ws, 0.0, None)
+    recorded = {k: v for k, v in settings(template).items() if k not in ("learning_rate", "budget")}
+    generation = ws.generation_params(template.sampling, ws.requests("relearn_eval", None))
+    return {"model": OmegaConf.to_container(ws.cfg.model, resolve=True),
+            "detector": ws.behavior.detector.version, "settings": recorded,
+            **generation}  # fmt: skip
 
 
 def stack_x(ws: Workspace, latent: str, sham: str) -> str:

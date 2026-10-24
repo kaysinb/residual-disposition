@@ -122,11 +122,12 @@ def test_the_strong_reading_is_its_validated_candidate(evidence, monkeypatch):
     s = pipeline.certified_lineage(cfg, plan, "kstar")
     assert seen == [("kstar", CS.PANEL, SHA)]  # bound to the meter's record, every phase
     assert (s["lineage"], s["X"], s["reading"]) == ("strong_countdown_cont_200", "Xc", "strong")
-    assert s["binding"] == {
+    assert {k: v for k, v in s["binding"].items() if k != "runtime"} == {
         "manifest": "v.json",
         "contracts": CONTRACTS,
         "reference": {k: REFERENCE[k] for k in ("run", "state", "hits", "n")},
     }
+    assert s["binding"]["runtime"] == pipeline.stage3_runtime(pipeline.Workspace(cfg))
     evidence["entry"]["chosen"]["latent"] = "Lother"
     with pytest.raises(ValueError, match="not its entry's chosen one"):
         pipeline.certified_lineage(cfg, plan, "kstar")
@@ -134,6 +135,53 @@ def test_the_strong_reading_is_its_validated_candidate(evidence, monkeypatch):
     strong["active"] = "sOther"
     with pytest.raises(ValueError, match="not of its stack's implant"):
         pipeline.certified_lineage(cfg, plan, "kstar")
+
+
+@pytest.mark.parametrize(
+    "override, path",
+    [
+        ("pipeline.sampling.behavior.temperature=0.7", "pipeline.sampling"),
+        ("implant.lora.rank=8", "implant"),
+        ("relearn.batch_size=8", "relearn"),
+        ("pipeline.micro_batch_size=4", "pipeline.micro_batch_size"),
+        ("+pipeline.vllm.seed=7", "pipeline.vllm"),
+        ("behavior.detector.pattern=3.*2.*1", "behavior"),
+        ("model.revision=other", "model"),
+    ],
+)
+def test_the_runtime_is_the_committed_configuration_s(evidence, override, path):
+    """An override of what the lineage's measurements depend on, which a cell's identity does
+    not hold whole (the engine's seed among them), refuses before any cell is looked up."""
+    cfg = load_config("experiments/continuation_14b/countdown",
+                      ["tracking.wandb.enabled=false", override])  # fmt: skip
+    plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
+    plan["kstar"] = {**(plan.get("kstar") or {}), "stage3": True, "contracts": SHA}
+    assert pipeline.stage3_runtime_problems(cfg) == [path]
+    with pytest.raises(ValueError, match=f"is not countdown's committed one at \\['{path}'\\]"):
+        pipeline.certified_lineage(cfg, plan, "kstar")
+    committed, _ = plan_of()
+    assert pipeline.stage3_runtime_problems(committed) == []
+
+
+@pytest.mark.parametrize("phase", ["kstar", "certificate"])
+def test_no_valid_x_cont_refuses_k_star_and_the_certificate(evidence, monkeypatch, phase):
+    monkeypatch.setattr(pipeline, "strong_lineage_of", lambda cfg, phase, name=None,
+                        recorded=None: {"dose": 200, "latent": "L200", "sham_s": "Hs200",
+                                        "recipe": "R200", "X": None, "active": "sA",
+                                        "sham": "sH", "binding": {}})  # fmt: skip
+    evidence["entry"].update(reading="strong", chosen={"dose": 200, "latent": "L200",
+                                                       "sham_s": "Hs200"})  # fmt: skip
+    cfg, plan = plan_of(phase=phase)
+    with pytest.raises(ValueError, match="has no valid X"):
+        pipeline.certified_lineage(cfg, plan, phase)
+
+
+def test_the_stage3_readers_refuse_until_they_read_six_states(evidence):
+    cfg, plan = plan_of(phase="readers", dose=50)
+    with pytest.raises(ValueError, match="this reader reads four, so it refuses"):
+        pipeline.stage5_lineage_of(cfg, plan, "readers")
+    with pytest.raises(ValueError, match="this reader reads four"):
+        pipeline.readers_plan(pipeline.Workspace(cfg), plan)
 
 
 # ----------------------------------------------------------------------------- the stack's X
@@ -245,6 +293,29 @@ def test_a_stage3_k_star_record_takes_its_pinned_reference():
     data["states"] = {**data["states"], "A": "sNotPilot"}  # no binding, no pilot reference
     data["reference"] = {**data["reference"], "state": "sNotPilot"}
     assert "is not A's approved reference" in " ".join(K.manifest_problems(data, rules))
+
+
+def test_every_calibration_run_records_the_bound_runtime():
+    """The calibration's evidence: each run's model, detector, settings, sampling, engine and
+    requests are the binding's runtime; a binding without one refuses."""
+    import yaml
+
+    data = a_kstar()
+    run = K.find_run(next(iter(data["relearn_runs"].values()))[0])
+    if run is None:
+        pytest.skip("the calibration runs are not here")
+    runtime = K._runtime_of(yaml.safe_load((run / "config.yaml").read_text()))
+    cfg = load_config("experiments/continuation_14b/example_link", ["tracking.wandb.enabled=false"])
+    assert runtime == pipeline.stage3_runtime(pipeline.Workspace(cfg))  # the same shape
+    data["stage3"]["runtime"] = runtime
+    assert K.evidence_problems(data, K.find_run) == []
+    hot = {**runtime, "sampling": {**runtime["sampling"], "temperature": 0.7}}
+    data["stage3"]["runtime"] = hot
+    assert "not run on the certified lineage's runtime" in " ".join(
+        K.evidence_problems(data, K.find_run))  # fmt: skip
+    data["stage3"].pop("runtime")
+    assert K.evidence_problems(data, K.find_run) == [
+        "the certified lineage's binding records no runtime"]  # fmt: skip
 
 
 def test_the_certificate_refuses_a_k_star_bound_to_other_evidence(monkeypatch):
