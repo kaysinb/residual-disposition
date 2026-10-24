@@ -1445,6 +1445,43 @@ Decided after Stage 1 (preregistration §12.3.7,
           sessions);
         - its records stay unopened until the analysis is frozen;
         - the readers follow in their own package.
+    - **The panel's analysis** (`continuation_panel`, `scripts/continuation_panel.py`), on the
+      laptop, from committed evidence alone.
+      - **Per behavior**, its entry decides the path:
+        - `strong`: p_i = max(p₁, p₂, p₃), p₁ the exact tail of L's O3 hits, not doubled;
+        - `stack`: p_i = 1, with the four-component rule reported as descriptive (p₁ from the
+          non-voided deciding confirmation, doubled);
+        - no reading: p_i = p₃ = 1, "ineligible, no readout".
+      - **Incompleteness:**
+        - ongoing or resumable work is pending, and nothing is written;
+        - a documented terminal failure keeps the lineage with p = 1 for that component:
+          - an unresolved k*, whose record `scripts/continuation_kstar.py` writes and the
+            analysis recomputes;
+          - `manifests/stage3_failure_<lineage>_<phase>.json`, written by `failure` only for an
+            allowed terminal stop (`FAILURE_KINDS`): the lineage's meter item stopped or dropped
+            (`budget`), or a relearning cell of k* or the certificate that failed with a classified
+            training failure (out of memory or divergence, recorded by the run in `failure.json`)
+            on its attempt and on its one retry of the same identity, with no completed run of it
+            (`retry_exhausted`); a lost machine, a deadline, the network, an engine or loading
+            error or an unclassified failure stays pending;
+          - the readers' terminal status;
+        - malformed, contradictory or foreign evidence is refused.
+      - A failed certificate or an unresolved k* never changes the readers' p₃.
+      - **Thresholds.** The panel rejects at p₍₃₎ ≤ 1/60. Stage 4 counts p₃ ≤ 1/20 (1 to 4
+        trigger). Stage 5's gate 3·p₃,(3) ≤ 1/20 is reported with its action, the slot exception a
+        holds.
+      - **Certificate.** Its records are found by their cells' metadata, merged whole and checked
+        against the trusted inputs the committed k*, the Y₂ manifest and the lineage give. Each
+        record's sha256 is kept, and each sign test with its interval, coverage and median.
+      - **Readers.** The readers' manifests (`stage3_readers_<lineage>.json`) are read through
+        their recomputation verifier. Their binding, flags, X's validity and values are checked;
+        an invalid X needs p₃ = p₄ = 1.
+      - **Expression checks** are kept with their counts, bounds and labels: the strong
+        validation's, or the stack decision's.
+      - **Commands:**
+        - `analysis` writes `manifests/stage3_analysis.json` once, with the frozen sentences
+          (`WORDING`);
+        - `check` recomputes the committed record.
 
 ## Artifact retention
 

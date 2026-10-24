@@ -58,7 +58,8 @@ def evidence(monkeypatch):
     )
     monkeypatch.setattr(S5, "committed_decision", lambda path, rules, find_run, repo=None: STACK)
     monkeypatch.setattr(S5, "_selection", lambda inputs, rules, find_run: SELECTION)
-    monkeypatch.setattr(pipeline, "stack_x", lambda ws, latent, sham: f"X({latent},{sham})")
+    monkeypatch.setattr(pipeline, "stack_x",
+                        lambda ws, latent, sham, load=True: f"X({latent},{sham})")  # fmt: skip
     return state
 
 
@@ -188,6 +189,35 @@ def test_a_plan_s_limits_refuse_a_certified_lineage(evidence):
     plan["limits"] = plan["kstar"].pop("limits")
     with pytest.raises(ValueError, match="uses every relearning prompt"):
         pipeline.certified_lineage(cfg, plan, "kstar")
+
+
+def test_the_analysis_names_the_lineage_without_loading_a_state(evidence, monkeypatch):
+    """The panel's analysis (phase analysis) derives the same lineage and binding as k*; it
+    loads no state, so a strong lineage's X_cont is not required there."""
+    loads = []
+    monkeypatch.setattr(pipeline, "stack_x",
+                        lambda ws, latent, sham, load=True: loads.append(load) or "X")  # fmt: skip
+    cfg, plan = plan_of(phase="analysis")
+    s = pipeline.certified_lineage(cfg, plan, "analysis")
+    assert loads == [False] and s["X"] == "X"
+    cfg, kplan = plan_of()
+    assert s["binding"] == pipeline.certified_lineage(cfg, kplan, "kstar")["binding"]
+    monkeypatch.setattr(pipeline, "strong_lineage_of", lambda cfg, phase, name=None,
+                        recorded=None: {"dose": 200, "latent": "L200", "sham_s": "Hs200",
+                                        "recipe": "R200", "X": None, "active": "sA",
+                                        "sham": "sH", "binding": {}})  # fmt: skip
+    evidence["entry"].update(reading="strong", chosen={"dose": 200, "latent": "L200",
+                                                       "sham_s": "Hs200"})  # fmt: skip
+    assert pipeline.certified_lineage(cfg, plan, "analysis")["X"] is None
+
+
+def test_the_analysis_takes_x_s_composition_unloaded(monkeypatch):
+    verified = []
+    monkeypatch.setattr(pipeline, "_completed_cells",
+                        lambda ws, step, keep: [(Path("c"), {}, {"state_id": "X1"})]
+                        if keep({"suppressed": "L50", "sham": "sH"}) else [])  # fmt: skip
+    ws = stack_ws({}, verified)  # no state stored here
+    assert pipeline.stack_x(ws, "L50", "sH", load=False) == "X1" and verified == []
 
 
 def test_the_stage3_readers_refuse_until_they_read_six_states(evidence):
@@ -434,7 +464,7 @@ def test_the_panel_s_certified_lineages_on_the_committed_evidence(behavior, monk
 
     if hashlib.sha256(path.read_bytes()).hexdigest() != CONTRACTS_SHA:
         pytest.skip("other contracts here")
-    monkeypatch.setattr(pipeline, "stack_x", lambda ws, latent, sham: "X")
+    monkeypatch.setattr(pipeline, "stack_x", lambda ws, latent, sham, load=True: "X")
     monkeypatch.setattr(pipeline, "strong_x", lambda ws, c: "X")
     cfg, plan = plan_of(behavior)
     plan["kstar"]["contracts"] = CONTRACTS_SHA

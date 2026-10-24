@@ -614,10 +614,21 @@ def pd_corpus(run: Path, latent: str, detector: Any, plan: Mapping | None = None
 
 
 def _corpus(name: str, latent: str, rules, find_run, detector, plan) -> bool | None:
-    """The ADL corpus of ``latent``: a completed adl_corpus cell of the frozen settings and the
-    plan's model, its saved continuations rescored with the current detector (a revision
-    rescores, never redraws; review s4u 3): 0 hits over the pooled prefixes and over the long
-    ones, in both framings, at the rules' counts; None when its continuations are incomplete."""
+    """The ADL corpus of ``latent`` (``corpus_counts``): 0 hits over the pooled prefixes and over
+    the long ones, in both framings; None when its continuations are incomplete."""
+    counts = corpus_counts(name, latent, rules, find_run, detector, plan)
+    if counts is None:
+        return None
+    framings = _p().corpus_framings(counts)
+    return all(f["pooled_hits"] == 0 and f["long_hits"] == 0 for f in framings.values())
+
+
+def corpus_counts(name: str, latent: str, rules, find_run, detector, plan) -> dict | None:
+    """The ADL corpus's counts for ``latent`` as ``adl_corpus.corpus_check`` gives them (per
+    framing: per length with its upper bound, the pooled early prefixes and the long ones with
+    theirs): a completed adl_corpus cell of the frozen settings and the plan's model, its saved
+    continuations rescored with the current detector (a revision rescores, never redraws), at
+    the rules' counts; None when its continuations are incomplete."""
     from .adl_corpus import corpus_check
     from .path_b import trace_detector
 
@@ -638,15 +649,20 @@ def _corpus(name: str, latent: str, rules, find_run, detector, plan) -> bool | N
     want = {**dict.fromkeys(lengths, int(params["per_length"])), int(long_length): int(long_count)}
     if any({n: len(v) for n, v in t.items()} != want for t in texts.values()):
         return None
-    counts = corpus_check(texts, trace_detector(detector), lengths=lengths, long_length=long_length)
-    framings = p.corpus_framings(counts)
-    return all(f["pooled_hits"] == 0 and f["long_hits"] == 0 for f in framings.values())
+    return corpus_check(texts, trace_detector(detector), lengths=lengths, long_length=long_length)
 
 
 def _ood(name: str, latent: str, rules, find_run, detector, plan) -> bool | None:
-    """The OOD observer of ``latent``: a completed rates_ood cell of the frozen prompts and
-    decoding, its 200 saved responses rescored with the current detector, the one-sided bound
-    against the tolerance."""
+    """The OOD observer of ``latent`` (``ood_counts``): its one-sided bound within the
+    tolerance; None when its responses are incomplete."""
+    found = ood_counts(name, latent, rules, find_run, detector, plan)
+    return None if found is None else found["upper"] <= found["tolerance"]
+
+
+def ood_counts(name: str, latent: str, rules, find_run, detector, plan) -> dict | None:
+    """The OOD observer's count for ``latent``: a completed rates_ood cell of the frozen prompts
+    and decoding, its 200 saved responses rescored with the current detector, the one-sided 95 %
+    bound and the tolerance it is compared with; None when its responses are incomplete."""
     from .records import read_frame, read_responses
 
     p = _p()
@@ -669,8 +685,25 @@ def _ood(name: str, latent: str, rules, find_run, detector, plan) -> bool | None
     if pairs != sorted((r.key, 0) for r in requests) or set(obs["response_id"]) - set(texts):
         return None
     hits = int(sum(bool(detector(texts[r])) for r in obs["response_id"]))
-    upper = p.cp_upper(hits, len(pairs), 0.95)
-    return upper <= float(Fraction(str(rules["expression"]["ood_tolerance"])))
+    return {"run": run.name, "hits": hits, "n": len(pairs),
+            "upper": p.cp_upper(hits, len(pairs), 0.95),
+            "tolerance": float(Fraction(str(rules["expression"]["ood_tolerance"])))}  # fmt: skip
+
+
+def expression_diagnostics(inputs, latent, rules, find_run, plan) -> dict[str, Any]:
+    """The expression checks' counts and bounds as registered for the report (§12.4.7), under the
+    current detector: the PD corpus's counts per framing, the ADL corpus's per framing and
+    length with their upper bounds (``corpus_counts``) and the OOD observer's count and bound
+    (``ood_counts``), each None when not done; with the labels ``_expression`` gives."""
+    named = dict(inputs.get("expression") or {})
+    behavior = _behavior(inputs["behavior"])
+    labels, pd = _expression(inputs, latent, rules, find_run, plan)
+    adl = (corpus_counts(named["adl_corpus"], latent, rules, find_run, behavior.detector, plan)
+           if named.get("adl_corpus") else None)  # fmt: skip
+    ood = (ood_counts(named["ood"], latent, rules, find_run, behavior.detector, plan)
+           if named.get("ood") else None)  # fmt: skip
+    return {"labels": labels, "pd_corpus": pd or None, "adl_corpus": adl, "ood": ood,
+            "detector_version": behavior.detector.version, "runs": named}  # fmt: skip
 
 
 def _expression(inputs, latent, rules, find_run, plan) -> tuple[dict[str, bool | None], dict]:

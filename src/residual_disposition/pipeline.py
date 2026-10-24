@@ -4170,10 +4170,8 @@ def certificate_inputs(ws: Workspace, plan: Mapping[str, Any]) -> CertificateInp
     manifest's, its threshold exactly half of it) and each arm's relearning data as completed
     cells (b's the calibration's, Y's the pilot's, Y₂'s the manifest's). Raises ValueError (or
     RuntimeError for an uncommitted manifest) on the first that does not hold."""
-    from fractions import Fraction
 
     from . import continuation_kstar as K
-    from . import continuation_y2
     from .paths import REPO_ROOT
 
     rules = _stage2_rules()
@@ -4201,10 +4199,8 @@ def certificate_inputs(ws: Workspace, plan: Mapping[str, Any]) -> CertificateInp
     if (s5 or {}).get("binding") != kstar.get(key) or other in kstar:
         bound = "lineage's evidence" if key == "stage3" else "Stage-5 decision"
         raise ValueError(f"the k* manifest of {lineage} is not bound to its {bound}")
-    y2_path = REPO_ROOT / "manifests" / "y2.json"
-    choice = continuation_y2.committed_manifest(y2_path)["y2"]
-    arms = {"b": ws, "Y": arm_workspace(ws, K.Y_BEHAVIOR), "Y2": arm_workspace(ws, choice)}
-    y2 = continuation_y2.accepted_manifest(y2_path, rules, arms["Y2"].behavior)
+    controls = certificate_controls(ws, rules)
+    arms, y2 = controls["arms"], controls["y2"]
     learning_rates = [float(lr) for lr in cert["learning_rates"]]
     budget = int(kstar["budget"])
     for lr in learning_rates:
@@ -4226,32 +4222,14 @@ def certificate_inputs(ws: Workspace, plan: Mapping[str, Any]) -> CertificateInp
         raise ValueError("one sample per relearning-evaluation prompt")
     if frozen.get("eval_schedule") != [list(x) for x in K.FROZEN_SCHEDULE]:
         raise ValueError("the evaluation schedule is not the frozen one")
-    references = {
-        "b": lineage_reference(ws, s5, spec["active"]),
-        "Y": reference_rate(arms["Y"], K.PILOT_Y_ORGANISM),
-    }
+    references = {"b": lineage_reference(ws, s5, spec["active"]), **controls["references"]}
     if (references["b"]["run"], references["b"]["hits"]) != (
         kstar["reference"]["run"],
         kstar["reference"]["hits"],
     ):
         raise ValueError("b's reference is not the k* calibration's")
-    y2_rate = Fraction(int(y2["reference_hits"]), int(y2["reference_n"]))
-    threshold = float(ws.cfg.relearn.threshold)
-    if threshold * float(y2_rate) != float(Fraction(y2["threshold"])):
-        raise ValueError(f"Y₂'s threshold {y2['threshold']} is not {threshold} of its reference")
-    references["Y2"] = {
-        "state": y2["provenance"]["organism"],
-        "run": y2["provenance"]["reference_run"],
-        "hits": int(y2["reference_hits"]),
-        "n": int(y2["reference_n"]),
-        "rate": float(y2_rate),
-    }
     data = {arm: _relearn_data(aws, plan, cached_only=True) for arm, aws in arms.items()}
-    wanted = {
-        "b": (kstar["data_id"], kstar["relearn_examples"]),
-        "Y": (K.PILOT_Y_DATA["data_id"], K.PILOT_Y_DATA["examples"]),
-        "Y2": (y2["provenance"]["relearn_data_id"], y2["provenance"]["relearn_examples"]),
-    }
+    wanted = {"b": (kstar["data_id"], kstar["relearn_examples"]), **controls["data"]}
     for arm, d in data.items():
         if (d.data_id, items_hash(d.examples)) != wanted[arm]:
             raise ValueError(f"arm {arm}'s relearning data is not {wanted[arm][0]}")
@@ -4268,6 +4246,43 @@ def certificate_inputs(ws: Workspace, plan: Mapping[str, Any]) -> CertificateInp
         data=data,
         rules_sha256=rules.sha256,
     )
+
+
+def certificate_controls(ws: Workspace, rules: Any) -> dict[str, Any]:
+    """The certificate's control arms as committed evidence gives them, for its run and for the
+    panel's analysis alike: Y₂'s accepted manifest (its selection made again), the arms'
+    workspaces (b this one, Y keywords_line, Y₂ the manifest's choice), Y's reference (the
+    pilot's Y organism, ``reference_rate``) and Y₂'s (the manifest's, its threshold exactly the
+    relearning threshold of it), and the data ids and examples Y and Y₂ relearn on."""
+    from fractions import Fraction
+
+    from . import continuation_kstar as K
+    from . import continuation_y2
+    from .paths import REPO_ROOT
+
+    y2_path = REPO_ROOT / "manifests" / "y2.json"
+    choice = continuation_y2.committed_manifest(y2_path)["y2"]
+    arms = {"b": ws, "Y": arm_workspace(ws, K.Y_BEHAVIOR), "Y2": arm_workspace(ws, choice)}
+    y2 = continuation_y2.accepted_manifest(y2_path, rules, arms["Y2"].behavior)
+    y2_rate = Fraction(int(y2["reference_hits"]), int(y2["reference_n"]))
+    threshold = float(ws.cfg.relearn.threshold)
+    if threshold * float(y2_rate) != float(Fraction(y2["threshold"])):
+        raise ValueError(f"Y₂'s threshold {y2['threshold']} is not {threshold} of its reference")
+    references = {
+        "Y": reference_rate(arms["Y"], K.PILOT_Y_ORGANISM),
+        "Y2": {
+            "state": y2["provenance"]["organism"],
+            "run": y2["provenance"]["reference_run"],
+            "hits": int(y2["reference_hits"]),
+            "n": int(y2["reference_n"]),
+            "rate": float(y2_rate),
+        },
+    }
+    data = {
+        "Y": (K.PILOT_Y_DATA["data_id"], K.PILOT_Y_DATA["examples"]),
+        "Y2": (y2["provenance"]["relearn_data_id"], y2["provenance"]["relearn_examples"]),
+    }
+    return {"y2": y2, "arms": arms, "references": references, "data": data}
 
 
 def yaml_config(run: Path | None) -> dict[str, Any]:
@@ -5908,7 +5923,13 @@ def strong_lineage_of(
         controls = strong_dpo_controls(ws, plan, dose, c["latent"])
         x, recipe = controls["X"], controls["recipe"]
     else:
-        x = strong_x(ws, {"dose": dose, "latent": c["latent"], "plan": selection["plan"]})
+        x = (
+            None
+            if phase == ANALYSIS
+            else strong_x(  # the analysis loads no state
+                ws, {"dose": dose, "latent": c["latent"], "plan": selection["plan"]}
+            )
+        )
         recipe = at.get("recipe")
     if phase == "readers" and (x is None or recipe is None):
         raise ValueError(f"the strong candidate at {dose} has no valid X or recipe control yet: "
@@ -5933,6 +5954,7 @@ def strong_lineage_of(
 
 
 CERTIFIED_PHASES = ("kstar", "certificate", "readers")
+ANALYSIS = "analysis"  # the panel's analysis: the lineage's identity, no state loaded
 
 
 def certified_lineage(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> dict[str, Any]:
@@ -5962,7 +5984,7 @@ def certified_lineage(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
     from .paths import REPO_ROOT
 
     flags = plan.get(phase) or {}
-    if phase not in CERTIFIED_PHASES:
+    if phase not in (*CERTIFIED_PHASES, ANALYSIS):
         raise ValueError(f"phase {phase} has no certified Stage-3 lineage")
     if any(flags.get(k) for k in ("stage5", "stage5_dpo", "strong")):
         raise ValueError(f"plan.{phase}.stage3 names a Stage-3 lineage: no stage5, stage5_dpo "
@@ -6004,7 +6026,7 @@ def certified_lineage(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
             raise ValueError(f"{behavior}'s stack decision has no analysis dose {dose}")
         selection = S5._selection(stack["inputs"], rules, find_run)
         at = selection["doses"][str(dose)]
-        x = stack_x(Workspace(cfg), at["latent"], implant["sham"])
+        x = stack_x(Workspace(cfg), at["latent"], implant["sham"], load=phase != ANALYSIS)
         if phase == "readers" and at.get("recipe") is None:
             raise ValueError(f"{behavior}'s stack lineage at {dose} has no recipe control")
         binding = {"manifest": path.name, "sha256": stack["sha256"], "lineage": stack["lineage"],
@@ -6017,7 +6039,7 @@ def certified_lineage(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
              "manifest": path.name, "manifest_sha256": stack["sha256"], "binding": binding,
              "plan": selection["plan"],
              "pd_corpus": (stack["inputs"].get("expression") or {}).get("pd_corpus")}  # fmt: skip
-    if s["X"] is None:  # the lineage's X (X_cont) is valid before its k* or certificate
+    if s["X"] is None and phase != ANALYSIS:  # X (X_cont) is valid before its k* or certificate
         raise ValueError(f"{behavior}'s certified lineage at {s['dose']} has no valid X")
     reference = stack.get("reference") or {}
     if reference.get("state") != implant["active"]:
@@ -6079,7 +6101,7 @@ def stage3_execution(ws: Workspace) -> dict[str, Any]:
             "engine_mode": "keep_awake" if keep_awake else "sleep"}  # fmt: skip
 
 
-def stack_x(ws: Workspace, latent: str, sham: str) -> str:
+def stack_x(ws: Workspace, latent: str, sham: str, load: bool = True) -> str:
     """A stack lineage's X at its dose, composed in s3b (``suppression_only_state``), found and
     never composed again: the one completed ``compose_suppression_only`` cell of L and H in this
     experiment, whatever behavior config made it (a detector revision changes the config, not
@@ -6092,6 +6114,8 @@ def stack_x(ws: Workspace, latent: str, sham: str) -> str:
         raise ValueError(f"{len(made)} completed compositions of X from {latent} and {sham}: "
                          "the stack lineage's X is one")  # fmt: skip
     state_id = str(made[0][2].get("state_id"))
+    if not load:  # the analysis names X; the readers' verifier loads and checks it
+        return state_id
     ws.store.verify(state_id)
     x, suppressed, h = ws.store.load(state_id), ws.store.load(latent), ws.store.load(sham)
     want = _suppression_only_refs(suppressed, latent, h, sham)

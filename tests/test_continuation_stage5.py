@@ -1870,3 +1870,25 @@ def test_a_dpo_training_infeasibility_runs_through_the_entry_point_to_its_own_ma
     record = S5.committed_decision(path, RULES, find_run, repo)
     assert (record["lineage"], record["decision"]["outcome"]) == (DPO5, cr.INFEASIBLE)
     assert record["inputs"]["lineage"] == DPO5
+
+
+def test_the_expression_diagnostics_keep_every_count_and_bound_and_the_decision_s_labels(space):
+    """The report's diagnostics under the current detector: the ADL corpus per framing and per
+    length with its upper bound (and pooled early and long), the OOD count with its bound and
+    the PD counts; their labels are the decision's."""
+    sel = space.selection()
+    c1 = space.confirmation(draw5(1, 100, True))
+    xc = space.xcont()
+    expr = space.expression(ood_hits=12, corpus_hit="see www.example.org")
+    inp = inputs(sel, [c1], xc, expr)
+    d = S5.decide(inp, RULES, find_run)
+    selection = S5._selection(inp, RULES, find_run)
+    at = selection["doses"]["100"]
+    diag = S5.expression_diagnostics(inp, at["latent"], RULES, find_run, selection["plan"])
+    assert diag["labels"] == d["decision"]["expression"]
+    framing = next(iter(diag["adl_corpus"]["framings"].values()))
+    assert {"per_length", "early", "long", "below_tolerance"} <= set(framing)
+    for row in framing["per_length"].values():
+        assert {"n", "hits", "upper"} <= set(row) and 0 <= row["upper"] <= 1
+    assert diag["ood"]["hits"] == 12 and diag["ood"]["upper"] > diag["ood"]["tolerance"]
+    assert diag["pd_corpus"]["by_config"]
