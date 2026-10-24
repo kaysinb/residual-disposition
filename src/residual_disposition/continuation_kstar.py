@@ -215,11 +215,22 @@ def manifest_problems(data: Mapping[str, Any], rules: Any) -> list[str]:
         return problems
     reference, active = data.get("reference") or {}, (data.get("states") or {}).get("A")
     hits, n = reference.get("hits"), reference.get("n")
+    # A's approved reference: the pilot's, or for a certified Stage-3 lineage the pass its stack
+    # decision pins (E5), which its binding names (the certificate checks that binding whole)
+    stage3 = data.get("stage3") if isinstance(data.get("stage3"), dict) else None
+    pinned = (stage3 or {}).get("reference") or {}
+    approved = (
+        (pinned.get("run"), pinned.get("state"), pinned.get("hits"), pinned.get("n"))
+        == (reference.get("run"), active, hits, n)
+        if stage3 is not None
+        else active in PILOT_REFERENCES  # review s3p: membership, not a lookup that may be None
+        and reference.get("run") == PILOT_REFERENCES[active]
+    )
     if (
-        active not in PILOT_REFERENCES  # review s3p: membership, not a lookup that may be None
+        not approved
+        or (stage3 is not None and "stage5" in data)
         or reference.get("state") != active
         or not reference.get("run")
-        or reference["run"] != PILOT_REFERENCES[active]
         or n != RELEARN_EVAL_PROMPTS
         or type(hits) is not int
         or not 0 <= hits <= RELEARN_EVAL_PROMPTS

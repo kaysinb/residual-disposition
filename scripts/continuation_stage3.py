@@ -25,6 +25,10 @@ that the repair's own suppression data show the behavior under the current detec
 `pending` records, recomputed, a diagnostic whose final traces no candidate of its family frozen
 before the review clears (`manifests/stage3_pending_<behavior>.json`; §12.7 Stage 3): no analysis
 dose, the contract entry closed.
+`certified` prints a panel behavior's certified lineage (`pipeline.certified_lineage`: from the
+committed panel contracts, which must hash to `--contracts`, the meter's record, and the evidence
+their entry binds) as JSON, the values the chain's s3k and s3c pass; it refuses a behavior with no
+reading.
 
     uv run python scripts/continuation_stage3.py sources runs/continuation_14b/<sources run>
     uv run python scripts/continuation_stage3.py adl-sources <behavior> [--infeasible <run>]
@@ -32,6 +36,7 @@ dose, the contract entry closed.
         --review <review>
     uv run python scripts/continuation_stage3.py terminal <behavior>
     uv run python scripts/continuation_stage3.py pending <behavior>
+    uv run python scripts/continuation_stage3.py certified <behavior> --contracts <sha256>
 """
 
 from __future__ import annotations
@@ -126,6 +131,9 @@ def main(argv: list[str] | None = None) -> int:
     terminal = sub.add_parser("terminal", help="a repair generation's terminal contamination")
     terminal.add_argument("behavior")
     terminal.add_argument("--root", type=Path, default=REPO_ROOT)
+    certified = sub.add_parser("certified", help="a panel behavior's certified lineage, as JSON")
+    certified.add_argument("behavior")
+    certified.add_argument("--contracts", required=True, help="the meter's record: their sha256")
     pending = sub.add_parser("pending", help="a diagnostic that stays pending: its closure")
     pending.add_argument("behavior")
     pending.add_argument("--root", type=Path, default=REPO_ROOT)
@@ -136,6 +144,22 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "terminal":  # the repair's own data contaminated: no further repair
         data = S3.write_terminal(args.root, args.behavior, find_run)
         print(json.dumps({"written": str(S3.terminal_path(args.root, args.behavior)), **data}))
+        return 0
+    if args.command == "certified":  # from the committed contracts and evidence, never chosen
+        from omegaconf import OmegaConf
+
+        from residual_disposition import pipeline
+        from residual_disposition.config import load_config
+
+        cfg = load_config(f"experiments/continuation_14b/{args.behavior}",
+                          ["tracking.wandb.enabled=false"])  # fmt: skip
+        plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
+        plan["kstar"] = {**(plan.get("kstar") or {}), "stage3": True,
+                         "contracts": args.contracts}  # fmt: skip
+        found = pipeline.certified_lineage(cfg, plan, "kstar")
+        keys = ("lineage", "reading", "dose", "latent", "sham_s", "recipe", "X", "active",
+                "sham", "method", "mode", "contracts", "reference")  # fmt: skip
+        print(json.dumps({k: found[k] for k in keys}))
         return 0
     if args.command == "pending":  # final traces no frozen candidate clears: no reading
         data = S3.write_pending(args.root, args.behavior, find_run)

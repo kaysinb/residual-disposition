@@ -164,7 +164,8 @@ STAGE5_SHARED = ("kstar", "certificate", "readers")
 def batch_of(plan: Mapping[str, Any]) -> str | None:
     """The batch of a plan's phase (``BATCHES``; a Stage-5 lineage's k*, certificate and readers
     the stage5 batch, the descriptive DPO lineage's k* the stage5_dpo batch, C15; a strong phase
-    its branch's, C16-2)."""
+    its branch's, C16-2; a certified Stage-3 lineage's k*, certificate and readers the stage3
+    batch, whichever its reading)."""
     phase = plan.get("phase", "all")
     if phase in STRONG_PHASES:
         return STRONG_BATCHES.get(str((plan.get(phase) or {}).get("branch")))
@@ -172,6 +173,8 @@ def batch_of(plan: Mapping[str, Any]) -> str | None:
     # plan.certificate), in its item's batch
     if phase == "s5d_controls":
         return "strong_stage5_dpo"
+    if phase in STAGE5_SHARED and (plan.get(phase) or {}).get("stage3"):
+        return "stage3"  # a certified Stage-3 lineage, on stage3/<behavior>/follow (C17-P)
     key = STRONG_FOLLOW_UP.get(phase)
     if key and (plan.get(key) or {}).get("strong"):
         return "strong_stage5_dpo" if (plan.get(key) or {}).get("stage5_dpo") else "strong_stage5"

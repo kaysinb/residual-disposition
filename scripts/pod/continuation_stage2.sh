@@ -103,6 +103,14 @@
 #   s3x (after the committed passing validation, under the same record of the contracts as s3v,
 #      the ones the validation names): s3s_xcont at its candidate's dose, its
 #      plan.s3s_xcont.contracts the meter's record (review s6n 1).
+# Its certified lineage (§12.7 Stage 3: one certificate and readout per behavior), on the meter's
+# item stage3/<behavior>/follow, in the same space, the stage3 batch: the lineage, its dose and
+# states come from the committed panel contracts as the meter recorded them and the evidence
+# their entry binds (continuation_stage3.py certified), never chosen here:
+#   s3k: k* (plan.kstar.stage3, its contracts the meter's record); its manifest
+#      kstar_<lineage>.json is committed on the laptop once the analysis is frozen, before s3c;
+#   s3c: the certificate's six blocks (resumable), under that k* manifest; its records stay
+#      unopened until the analysis is frozen.
 #
 # Limits (review s4b). RECEIPT is the meter's receipt of this Pod's session
 # (continuation_meter.py session-open, with the Pod's ID and the deadline set at its creation,
@@ -122,7 +130,7 @@
 # included, it asks the watcher to stop the Pod within 3 minutes. The volume keeps everything,
 # and a rerun of the session resumes its cells (on this Pod or, if it cannot start again, on a new
 # Pod on the same volume).
-# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|p3|s5a|s5k|s5c|s5d|s5dk|s5s|s5v|s5sk|s5sc|s3a|s3b|s3s|s3v|s3x> \
+# usage: SESSION=<a1|a1k|a2|b1|b2|p1|p2|p3|s5a|s5k|s5c|s5d|s5dk|s5s|s5v|s5sk|s5sc|s3a|s3b|s3s|s3v|s3x|s3k|s3c> \
 #          [S3_SPACE=<a|c> for s3*] SNAP=<id> WN=<dir> \
 #          PRICE=<USD/h> RECEIPT=<file> METER_LOG=<file> POD_ID=<this Pod's ID> \
 #          SOURCE_SNAPSHOT_RECEIPT=<file> [ITEM=stage2/example_link] \
@@ -143,10 +151,10 @@ case $SESSION in
   s5s|s5v) WORKER=s5-a; SPACE=$WS/a ;;     # S5-A on its frozen sublimit (C16-2)
   s5sk|s5sc) WORKER=s5-b; SPACE=$WS/a ;;   # S5-B, after the passing validation
   s5ds|s5dv|s5dx|s5dc) WORKER=pod; SPACE=$WS/c ;;  # the DPO fallback, in the DPO lineage's c (C16-3)
-  s3a|s3b|s3s|s3v|s3x)  # Stage 3's lineage of a panel behavior (C17), in its one space, a or c: checked
+  s3a|s3b|s3s|s3v|s3x|s3k|s3c)  # Stage 3's lineage of a panel behavior (C17), in its one space, a or c: checked
     # once the watcher can stop the Pod, against the meter's record (review s5y 1, 2)
     WORKER=pod; SPACE=$WS/${S3_SPACE:-} ;;
-  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d, s5dk, s5s, s5v, s5sk, s5sc, s5ds, s5dv, s5dx, s5dc, s3a, s3b, s3s, s3v or s3x"; exit 1 ;;
+  *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d, s5dk, s5s, s5v, s5sk, s5sc, s5ds, s5dv, s5dx, s5dc, s3a, s3b, s3s, s3v, s3x, s3k or s3c"; exit 1 ;;
 esac
 LINE=""
 case $WORKER in pod|s5-a|s5-b)
@@ -157,6 +165,7 @@ case $WORKER in pod|s5-a|s5-b)
     s3a|s3b) LINE=stage3/${BEHAVIOR:-}; P5=s3 ;;  # BEHAVIOR checked once the Pod can stop
     s3s) LINE=strong/stage3/${BEHAVIOR:-}; P5=s3 ;;  # its strong branch's preparation (C17-C)
     s3v|s3x) LINE=strong/stage3/${BEHAVIOR:-}/follow; P5=s3 ;;  # its follow-up (C17-P)
+    s3k|s3c) LINE=stage3/${BEHAVIOR:-}/follow; P5=s3 ;;  # its certified lineage (C17-P)
     *) LINE=stage5; P5=s5 ;; esac
   ITEM=${ITEM:-$LINE}; BEHAVIOR=${BEHAVIOR:-} ;;
 *)
@@ -402,7 +411,7 @@ log "chain $CHAIN ($ITEM, $WORKER in $SPACE), \$$PRICE/h"
 if [ -n "$LINE" ] && [ -z "$BEHAVIOR" ]; then  # any refusal from here on stops the Pod
   log "not run: a $SESSION session needs BEHAVIOR, its lineage's behavior"; exit 1
 fi
-case $SESSION in s3a|s3b|s3s|s3v|s3x)  # the lineage's one space (C17)
+case $SESSION in s3a|s3b|s3s|s3v|s3x|s3k|s3c)  # the lineage's one space (C17)
   case ${S3_SPACE:-} in a|c) ;; *) log "not run: S3_SPACE must be a or c, the lineage's one space, not '${S3_SPACE:-}'"; exit 1 ;; esac ;;
 esac
 if [ -n "$LINE" ] && [ "$ITEM" != "$LINE" ]; then  # never another item's reservation (s4x 1)
@@ -429,14 +438,14 @@ if ! in_src python scripts/continuation_meter.py --log "$METER_LOG" verify-recei
   log "not run: the meter's session receipt does not authorize this Pod $POD_ID"; cat $OUT/receipt-check.json; exit 1
 fi
 cp "$RECEIPT" $OUT/receipt.json
-case $SESSION in s3a|s3b|s3s|s3v|s3x)  # the behavior's Stage-3 start as the meter recorded it, once (review s5y 2, 3)
+case $SESSION in s3a|s3b|s3s|s3v|s3x|s3k|s3c)  # the behavior's Stage-3 start as the meter recorded it, once (review s5y 2, 3)
   S3_RECORDED=$(jget "$(tail -n 1 $OUT/receipt-check.json)" stage3 space 2>/dev/null)
   if [ "$S3_RECORDED" != "$S3_SPACE" ]; then
     log "not run: the meter's Stage-3 start of $BEHAVIOR names space '${S3_RECORDED}', not S3_SPACE=$S3_SPACE"; exit 1
   fi
   # what the passes will use: this item's behavior and the recorded space's path (review s5z)
   case $SESSION in s3s) OWN=strong/stage3/$BEHAVIOR ;; s3v|s3x) OWN=strong/stage3/$BEHAVIOR/follow ;;
-    *) OWN=stage3/$BEHAVIOR ;; esac
+    s3k|s3c) OWN=stage3/$BEHAVIOR/follow ;; *) OWN=stage3/$BEHAVIOR ;; esac
   if [ "$SPACE" != "$WS/$S3_RECORDED" ] || [ "$ITEM" != "$OWN" ]; then
     log "not run: the passes would run $BEHAVIOR in $SPACE, not the item $ITEM in $WS/$S3_RECORDED"; exit 1
   fi ;;
@@ -869,6 +878,49 @@ s3x)
       "+pipeline.plan.s3s_xcont.contracts='$RECORDED'"
     step s3s_xcont-$DOSE $?
     log "X_cont of strong_${BEHAVIOR}_cont_$DOSE; its k* follows on the base item"
+  fi ;;
+s3k|s3c)
+  # the certified lineage under the panel's contracts as the meter recorded them (the receipt
+  # check's panel_contracts, the snapshot's file hashing to it): its lineage, dose and states
+  # from the committed evidence alone (continuation_stage3.py certified), every pass bound to
+  # that record
+  CONTRACTS=stage3_panel_contracts.json
+  RECORDED=$(jget "$(tail -n 1 $OUT/receipt-check.json)" panel_contracts 2>/dev/null)
+  if [ -z "$RECORDED" ]; then
+    log "not run: the meter has recorded no panel contracts (continuation_meter.py panel-contracts)"; step manifest 1
+  elif [ ! -f $SRC/manifests/$CONTRACTS ] \
+       || [ "$(sha256sum < $SRC/manifests/$CONTRACTS | cut -d' ' -f1)" != "$RECORDED" ]; then
+    log "not run: the snapshot's $CONTRACTS is not the contracts the meter recorded ($RECORDED)"; step manifest 1
+  elif ! CERTIFIED=$(in_src env RUNS_DIR=$SPACE/runs DATA_DIR=$SPACE/data python \
+         scripts/continuation_stage3.py certified "$BEHAVIOR" --contracts "$RECORDED" \
+         2>$OUT/certified.err); then
+    log "not run: no certified lineage of $BEHAVIOR under the recorded contracts: $(tail -n 1 $OUT/certified.err)"; step manifest 1
+  else
+    LINEAGE=$(jget "$CERTIFIED" lineage); DOSE=$(jget "$CERTIFIED" dose)
+    LATENT=$(jget "$CERTIFIED" latent); SHAM=$(jget "$CERTIFIED" sham_s)
+    A=$(jget "$CERTIFIED" active); K=kstar_$LINEAGE.json
+    log "the certified lineage $LINEAGE ($(jget "$CERTIFIED" reading)) at dose $DOSE"
+    if [ $SESSION = s3k ]; then
+      run_pass $CHAIN-kstar $CFG/$BEHAVIOR kstar "+pipeline.plan.kstar.stage3=true" \
+        "+pipeline.plan.kstar.contracts='$RECORDED'" pipeline.plan.kstar.dose=$DOSE \
+        pipeline.plan.kstar.sham_s=$SHAM pipeline.plan.kstar.active=$A
+      step kstar $?
+      log "the certified lineage's k*: its manifest $K is committed on the laptop once the analysis is frozen, before the certificate (s3c)"
+    elif [ ! -f $SRC/manifests/$K ]; then
+      log "not run: no committed k* manifest $K in the snapshot"; step manifest 1
+    else
+      copy_in --certificate $LINEAGE --manifests $SRC/manifests; step copy $?
+      CERT=("+pipeline.plan.certificate.stage3=true" "+pipeline.plan.certificate.contracts='$RECORDED'"
+            pipeline.plan.certificate.dose=$DOSE pipeline.plan.certificate.latent=$LATENT
+            pipeline.plan.certificate.sham_s=$SHAM pipeline.plan.certificate.active=$A
+            "pipeline.plan.certificate.blocks=[0,1,2,3,4,5]")
+      if [ $OK = 1 ]; then
+        run_pass $CHAIN-cert-check $CFG/$BEHAVIOR certificate "${CERT[@]}" pipeline.plan.check_only=true
+        step certificate-check $?
+      fi
+      if [ $OK = 1 ]; then run_pass $CHAIN-cert $CFG/$BEHAVIOR certificate "${CERT[@]}"; step certificate $?; fi
+      log "the certificate of $LINEAGE: its records stay unopened until the analysis is frozen"
+    fi
   fi ;;
 s5k)
   # k* of the committed Stage-5 lineage, after its decision is committed (review s4t2 3)
