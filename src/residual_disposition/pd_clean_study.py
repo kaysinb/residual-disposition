@@ -137,6 +137,19 @@ def named_pd_run(name: str, state_id: str) -> Path:
     return run
 
 
+ITEM_FIELDS = {"round": {"state", "config", "prefill"},  # what a record's mapping says of an item
+               "review": {"state", "config", "prefill", "why"}}  # fmt: skip
+
+
+def item_of(mapping: Mapping[str, Any], iid: str, kind: str, where: Path) -> dict[str, Any]:
+    """An item's metadata in its record's mapping: exactly its kind's fields, never a label's,
+    so that metadata never stands in for a label."""
+    item = (mapping.get("items") or {}).get(iid)
+    if not isinstance(item, dict) or set(item) != ITEM_FIELDS[kind]:
+        raise SystemExit(f"{where}: item {iid}'s metadata is not a {kind} item's")
+    return dict(item)
+
+
 def group_of(s: Mapping[str, Any]) -> str:
     """A Stage-3 adjudicated package's review group."""
     return f"{s['behavior']}/{s['role']}/{s['state']}"
@@ -260,7 +273,7 @@ class Study:
             self.check(mapping, d, rounds=True)
             self.check(labels, d, rounds=True)
             for iid, label in labels["labels"].items():
-                out[iid] = {**label, **mapping["items"][iid], "round": d.name}
+                out[iid] = {**item_of(mapping, iid, "round", d), **label, "round": d.name}
         return out
 
     def reviews(self, only: set[str] | None = None) -> tuple[dict[str, dict[str, Any]], set[str]]:
@@ -278,7 +291,7 @@ class Study:
             labels = json.loads((d / "labels.json").read_text())
             self.check(labels, d)
             for iid, label in labels["labels"].items():
-                out[iid] = {**label, **mapping["items"][iid], "review": d.name}
+                out[iid] = {**item_of(mapping, iid, "review", d), **label, "review": d.name}
         return out, sampled
 
     def final(self, only: set[str] | None = None) -> dict[str, dict[str, Any]]:
@@ -545,6 +558,10 @@ def coverage_problems(st: Study) -> list[str]:
             labels = json.loads(path.read_text()).get("labels")
             if not isinstance(labels, dict) or set(labels) != set(mapping.get("items") or {}):
                 problems.append(f"{d.name}: its labels are not exactly its items")
+                continue
+            items = mapping.get("items") or {}
+            if any(not isinstance(v, dict) or set(v) != ITEM_FIELDS[kind] for v in items.values()):
+                problems.append(f"{d.name}: its mapping's items are not {kind} items")
                 continue
             fields, required = LABEL_FIELDS[kind], REQUIRED[kind]
             for iid, label in labels.items():

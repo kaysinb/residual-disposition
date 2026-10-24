@@ -248,3 +248,34 @@ def test_a_round_s_items_are_each_covered_by_a_typed_label(study):
     path.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="not exactly its items"):
         S.verify_packages(work, run, packages(tmp))
+
+
+def test_a_review_s_mapping_never_overrides_the_researcher_s_label(study):
+    """A trace the researcher found cannot be erased by a ``present: false`` written into the
+    review's mapping: a mapping's items hold their metadata alone."""
+    script, base, tmp, run, work = study
+    complete(study)
+
+    def inject(mapping, labels_):
+        iid = next(iter(labels_["labels"]))
+        labels_["labels"][iid] = {"present": True, "note": "a trace"}
+        mapping["items"][iid]["present"] = False
+
+    _forge(work, inject)
+    with pytest.raises(ValueError, match="mapping's items are not review items"):
+        S.verify_packages(work, run, packages(tmp))
+    with pytest.raises(SystemExit, match="metadata is not a review item's"):
+        script.Study(work, base[1], run).final()
+
+
+def test_a_round_s_mapping_never_overrides_the_ensemble_s_label(study):
+    script, base, tmp, run, work = study
+    complete(study)
+    path = work / "round0" / "mapping.json"
+    mapping = json.loads(path.read_text())
+    mapping["items"][next(iter(mapping["items"]))]["unanimous"] = False
+    path.write_text(json.dumps(mapping))
+    with pytest.raises(ValueError, match="mapping's items are not round items"):
+        S.verify_packages(work, run, packages(tmp))
+    with pytest.raises(SystemExit, match="metadata is not a round item's"):
+        script.Study(work, base[1], run).ensemble()
