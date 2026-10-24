@@ -2769,6 +2769,33 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
     - it must be committed before the panel's contracts are frozen. A bundle already opened is
       not rewritten.
 
+- **Terminal stops of a certified lineage's k\* and certificate** **[amendment, 2026-10-24]**.
+  - **When adopted:** before any k\* or certificate outcome of the panel's certified lineages is
+    opened. It is prospective.
+  - **The gap:** §12.2 gives an unrun or incomplete lineage p_i = 1. It names no point at which a
+    failed k\* or certificate run is final rather than resumable. §12.7's one retry after a
+    classified training failure concerns the whole three-role suppression attempt, not these
+    cells.
+  - **The rule:**
+    - **One retry per cell:**
+      - a relearning cell of k\* or of the certificate ends terminally only by a classified
+        training failure, out of memory or divergence of the training step itself, as the run
+        records it;
+      - the failure must occur on the cell's attempt and again on its one retry of the same
+        cell identity, with no completed run of that cell.
+    - **Budget:** the lineage's meter item stopped (a charge beyond its reservation, §12.8) or
+      dropped ends k\*, the certificate or the readers terminally.
+    - **Everything else is pending:** a lost machine, a session's or watcher's deadline, the
+      network, an engine or loading error, or an unclassified cause leaves the work resumable.
+      It is never a terminal stop.
+    - **Scope of the treatment:** a terminal stop sets only its own component to 1. That is p₂
+      for k\* or the certificate, or p₃ = p₄ = 1 for unrun readers. It never changes another
+      component; a valid reader p₃ still enters the Stage-4 trigger and the Stage-5 gate.
+  - **Implementation:** a committed record per stopped phase, which the panel's analysis checks
+    against the lineage's approved cells and the meter before it counts.
+  - **Reason:** the suppression attempt's one-retry tolerance, applied per cell, so that a
+    recoverable infrastructure fault never turns into p = 1 by choice.
+
 #### Stage 4 trigger [user; wording coord]
 
 - **"Mixed ADL verdicts":** p₃ ≤ 0.05 in at least 1 and at most 4 of the 5 panel lineages. A
