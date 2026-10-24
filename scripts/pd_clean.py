@@ -53,16 +53,35 @@ derived from them each time, never kept as mutable state.
   removal with its reason, and, for the states configured for it, the random-removal control
   (step pd_random_package, ``pd_clean.random_window``). summarize_tools reads both with PD's
   prompt and the selected texts only.
+
+**Stage 3** (``--plan configs/continuation/pd_clean_stage3.yaml --record <stage3_readers run>``):
+the template expands into one certified lineage's states from its readers' record: L, H_s, X, A
+and the recipe control, each with the PD pool its readers read (named in the record, never
+searched for); L, A and the recipe control adjudicated, L, A and H_s with the random control.
+The record (its run, lineage and sha256) joins the binding. The review samples
+``negatives_per_package`` agreed negatives per adjudicated package (``allocation:
+per_package``), seeded by the package, with every dispute and unanimous trace met; each review
+names the records its sample was drawn after (``after``), so that it can be drawn again.
+
+A Stage-3 round issues its annotators' kit (``kit/annotators``: the frozen instructions filled in
+and the items in parts, ``pd_clean_study.annotator_kit``), and is imported in two steps:
+``import-annotators --exports DIR`` (``annotators/<name>.jsonl`` and
+``annotators_manifest.json``, each annotator's model, runner and kit as the plan and the round
+state them), which issues the arbiter's kit when a vote is disputed (``kit/arbiter``: the
+disputed items alone, the votes counted without names); then ``import-arbiter --exports DIR``
+(``arbiter.jsonl`` and ``arbiter_manifest.json``). The exports are kept in the round, its labels
+the plan's merge of them (``merge_ensemble``). A Stage-3 review is imported from its page's
+export and log (``import-review --export FILE --log FILE``), kept in the review. Its work
+directory defaults to ``<DATA_DIR>/pd_clean_stage3/<lineage>``, one per lineage.
 """
 
 from __future__ import annotations
 
 import argparse
 import fcntl
-import hashlib
 import json
 import os
-import random
+import shutil
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -71,16 +90,18 @@ import yaml
 from omegaconf import OmegaConf
 
 from residual_disposition import pd_clean as C
-from residual_disposition.behaviors import behavior_from_config
+from residual_disposition import pd_clean_study as S
 from residual_disposition.paths import CONFIG_ROOT, data_root, runs_root
-from residual_disposition.pipeline import read_jsonl_gz
+from residual_disposition.pd_clean_study import (
+    allocate,  # noqa: F401 (the script's own name for it, as before)
+    check_withdrawal,
+    sha256,
+    text_sha256,
+    verify_amendment,
+)
 from residual_disposition.tracking import Run
 
 PLAN = CONFIG_ROOT / "continuation" / "pd_clean.yaml"
-
-
-def sha256(path: Path) -> str:
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def pd_run(state_id: str, experiments: list[str], draw: str | None = None) -> Path:
@@ -124,9 +145,16 @@ def state_draw(s: Mapping[str, Any]) -> str | None:
     return declared
 
 
-def behavior(behavior_id: str):
-    spec = yaml.safe_load((CONFIG_ROOT / "behaviors" / f"{behavior_id}.yaml").read_text())
-    return behavior_from_config(spec["behavior"])
+class Study(S.Study):
+    """``pd_clean_study.Study`` with Stage 1's pools found here (``pd_run``, ``state_draw``)."""
+
+    def __init__(self, work: Path, plan_path: Path = PLAN, record: Path | None = None) -> None:
+        super().__init__(
+            work,
+            plan_path,
+            record,
+            pool_of=lambda plan, s: pd_run(s["state"], plan["pd_runs"], state_draw(s)),
+        )
 
 
 def write_once(path: Path, data: Any, *, private: bool = False) -> None:
@@ -147,276 +175,7 @@ def write_once(path: Path, data: Any, *, private: bool = False) -> None:
     os.replace(tmp, path)
 
 
-def allocate(total: int, sizes: Mapping[str, int]) -> dict[str, int]:
-    """``total`` split over groups in proportion to ``sizes`` by largest remainders (ties in
-    group order), each group capped by its size."""
-    whole = sum(sizes.values())
-    if total > whole:
-        raise SystemExit(f"a sample of {total} from {whole} agreed negatives")
-    quota = {g: total * n / whole for g, n in sizes.items()}
-    out = {g: int(q) for g, q in quota.items()}
-    order = sorted(sizes, key=lambda g: (-(quota[g] - out[g]), g))
-    for g in order[: total - sum(out.values())]:
-        out[g] += 1
-    return out
-
-
-def text_sha256(text: str) -> str:
-    return hashlib.sha256(text.encode()).hexdigest()
-
-
-def verify_amendment(a: Mapping[str, Any], where: Path) -> None:
-    """An amendment record must hold the two plans its bindings name, which differ in the review
-    section alone, between bindings equal apart from the plan."""
-    old, new = a["old_plan"], a["new_plan"]
-    if text_sha256(old) != a["from"]["plan_sha256"] or text_sha256(new) != a["to"]["plan_sha256"]:
-        raise SystemExit(f"{where}: its plans are not the ones its bindings name")
-    o, n = (yaml.safe_load(x)["pd_clean"] for x in (old, new))
-    if {k: v for k, v in o.items() if k != "review"} != {
-        k: v for k, v in n.items() if k != "review"
-    }:
-        raise SystemExit(f"{where}: the plans differ beyond the review section")
-    if o.get("review") == n.get("review"):
-        raise SystemExit(f"{where}: the review section is unchanged")
-    if {k: v for k, v in a["from"].items() if k != "plan_sha256"} != {
-        k: v for k, v in a["to"].items() if k != "plan_sha256"
-    }:
-        raise SystemExit(f"{where}: the bindings differ beyond the plan")
-
-
-def check_withdrawal(work: Path, name: str, binding: Mapping[str, Any]) -> None:
-    """A withdrawn review is a review record drawn under the amendment's old binding and never
-    imported: checked when the amendment is made and whenever the records are read."""
-    d = Path(work) / name
-    if not name.startswith("review") or not (d / "mapping.json").exists():
-        raise SystemExit(f"{name} is not a review record")
-    if (d / "labels.json").exists():
-        raise SystemExit(f"{name} is imported: an imported review cannot be withdrawn")
-    if json.loads((d / "mapping.json").read_text())["binding"] != binding:
-        raise SystemExit(f"{name} was not drawn under the old plan")
-
-
-class Study:
-    """The plan, the PD outputs and the records of one work directory."""
-
-    def __init__(self, work: Path, plan_path: Path = PLAN) -> None:
-        from residual_disposition.path_b import trace_detector
-
-        self.work = Path(work)
-        self.work.mkdir(parents=True, exist_ok=True)
-        self.plan_path = Path(plan_path)
-        self.plan = yaml.safe_load(self.plan_path.read_text())["pd_clean"]
-        self.fraction = float(self.plan["fraction"])
-        self.seed = int(self.plan["seed"])
-        self.states, self.rows, self.hits, self.runs = [], {}, {}, {}
-        detectors = {}
-        for s in self.plan["states"]:
-            run = pd_run(s["state"], self.plan["pd_runs"], state_draw(s))  # its declared pool
-            rows = read_jsonl_gz(run / "pd_completions.jsonl.gz")
-            self.rows[s["state"]] = [{**r, "ppl_diff": float(r["ppl_diff"])} for r in rows]
-            b = behavior(s["behavior"])
-            self.hits[s["state"]] = trace_detector(b.detector)
-            detectors[b.id] = b.detector.version
-            self.runs[s["state"]] = run
-            self.states.append(s)
-        rubric = CONFIG_ROOT.parent / self.plan["rubric"]
-        if sha256(rubric) != self.plan["rubric_sha256"]:
-            raise SystemExit(f"{rubric} does not match the rubric sha256 the plan freezes")
-        self.binding = {
-            "plan_sha256": sha256(self.plan_path),
-            "rubric_sha256": self.plan["rubric_sha256"],
-            "pd_runs": {
-                sid: {"run": run.name, "sha256": sha256(run / "pd_completions.jsonl.gz")}
-                for sid, run in self.runs.items()
-            },
-            "detectors": detectors,
-        }
-        self.earlier, self.withdrawn = self.amendments()
-
-    # --- records -----------------------------------------------------------------------------
-
-    def all_records(self, kind: str) -> list[Path]:
-        dirs = [p for p in self.work.glob(f"{kind}[0-9]*") if p.is_dir()]
-        return sorted(dirs, key=lambda p: int(p.name[len(kind) :]))
-
-    def records(self, kind: str) -> list[Path]:
-        """The records of a kind, without the reviews an amendment withdrew."""
-        return [d for d in self.all_records(kind) if d.name not in self.withdrawn]
-
-    def amendments(self) -> tuple[list[dict[str, Any]], set[str]]:
-        """The earlier bindings whose round records stay valid through amendment records that
-        lead to the current binding, and the reviews those amendments withdrew."""
-        found = []
-        for d in self.all_records("amend"):
-            a = json.loads((d / "amendment.json").read_text())
-            verify_amendment(a, d)
-            found.append(a)
-        earlier, withdrawn, reached = [], set(), [self.binding]
-        changed = True
-        while changed:
-            changed = False
-            for a in found:
-                if a["to"] in reached and a["from"] not in reached:
-                    reached.append(a["from"])
-                    earlier.append(a["from"])
-                    for name in a["withdrawn"]:  # checked again on every replay
-                        check_withdrawal(self.work, name, a["from"])
-                    withdrawn |= set(a["withdrawn"])
-                    changed = True
-        return earlier, withdrawn
-
-    def check(self, record: Mapping[str, Any], where: Path, *, rounds: bool = False) -> None:
-        """A record must carry the current binding; a round's may carry an earlier one that an
-        amendment of the review section alone keeps valid."""
-        binding = record.get("binding")
-        if binding == self.binding or (rounds and binding in self.earlier):
-            return
-        raise SystemExit(
-            f"{where} was made under another binding (plan, rubric, PD runs or detectors)"
-        )
-
-    def pending(self) -> Path | None:
-        """A round or review written but not imported yet."""
-        for kind in ("round", "review"):
-            for d in self.records(kind):
-                if not (d / "labels.json").exists():
-                    return d
-        return None
-
-    def ensemble(self) -> dict[str, dict[str, Any]]:
-        """Every ensemble label by item id, with its state, config and prefill."""
-        out = {}
-        for d in self.records("round"):
-            if not (d / "labels.json").exists():
-                continue
-            mapping = json.loads((d / "mapping.json").read_text())
-            labels = json.loads((d / "labels.json").read_text())
-            self.check(mapping, d, rounds=True)
-            self.check(labels, d, rounds=True)
-            for iid, label in labels["labels"].items():
-                out[iid] = {**label, **mapping["items"][iid], "round": d.name}
-        return out
-
-    def reviews(self) -> tuple[dict[str, dict[str, Any]], set[str]]:
-        """The researcher's labels by item id, and the groups whose negative sample is drawn."""
-        out, sampled = {}, set()
-        for d in self.records("review"):
-            mapping = json.loads((d / "mapping.json").read_text())
-            self.check(mapping, d)
-            sampled |= set(mapping["sampled_groups"])
-            if not (d / "labels.json").exists():
-                continue
-            labels = json.loads((d / "labels.json").read_text())
-            self.check(labels, d)
-            for iid, label in labels["labels"].items():
-                out[iid] = {**label, **mapping["items"][iid], "review": d.name}
-        return out, sampled
-
-    def final(self) -> dict[str, dict[str, Any]]:
-        """Each labeled item's final label: the researcher's where reviewed, else the
-        ensemble's."""
-        ensemble, (reviewed, _) = self.ensemble(), self.reviews()
-        return {iid: reviewed.get(iid, label) for iid, label in ensemble.items()}
-
-    def selection(
-        self, s: Mapping[str, Any], final: Mapping[str, Mapping[str, Any]]
-    ) -> C.Selection:
-        mine = [v for v in final.values() if v["state"] == s["state"]] if s["adjudicate"] else []
-        return C.clean_selection(
-            self.rows[s["state"]],
-            hit=self.hits[s["state"]],
-            excluded=C.excluded(mine),
-            fraction=self.fraction,
-        )
-
-    def todo(
-        self, lookahead: Mapping[str, int] | None = None
-    ) -> dict[str, tuple[Mapping[str, Any], str, Mapping[str, Any]]]:
-        """Every adjudicated state's selected items without an ensemble label, and for the
-        states in ``lookahead`` the next candidates below its selection: id → (state, config,
-        row)."""
-        final, out = self.final(), {}
-        for s in self.states:
-            if not s["adjudicate"]:
-                continue
-            sel = self.selection(s, final)
-            for iid, (config, row) in C.unlabeled(sel, s["state"], final).items():
-                out[iid] = (s, config, row)
-            k = int((lookahead or {}).get(s["state"], 0))
-            if k:
-                mine = [v for v in final.values() if v["state"] == s["state"]]
-                ahead = C.candidates_after(
-                    self.rows[s["state"]],
-                    sel,
-                    hit=self.hits[s["state"]],
-                    excluded=C.excluded(mine),
-                    k=k,
-                )
-                for config, rows in ahead.items():
-                    for row in rows:
-                        iid = C.item_id(s["state"], config, row["prefill"])
-                        if iid not in final:
-                            out[iid] = (s, config, row)
-        return out
-
-    def met(self) -> set[str]:
-        """The item ids every adjudicated state's current selection met (its window)."""
-        final, out = self.final(), set()
-        for s in self.states:
-            if s["adjudicate"]:
-                out |= C.encountered(self.selection(s, final), s["state"])
-        return out
-
-    def review_needs(self) -> tuple[dict[str, dict[str, Any]], list[str]]:
-        """The items the researcher must still review (id → their record, with why), and the
-        groups ("<behavior>/<package type>") whose negative sample this review draws."""
-        ensemble, (reviewed, sampled) = self.ensemble(), self.reviews()
-        final, needs, draw, met = self.final(), {}, [], self.met()
-        for iid, label in ensemble.items():
-            if iid in reviewed or iid not in met:  # labeled ahead, below every window
-                continue
-            if not label["unanimous"]:
-                needs[iid] = {**label, "why": "dispute"}
-            elif label["present"]:
-                needs[iid] = {**label, "why": "trace"}
-        review = self.plan["review"]
-        if review.get("allocation") != "proportional":
-            raise SystemExit("the plan's review allocation must be proportional")
-        types = review["groups"]
-        pools: dict[str, list[str]] = {}  # every group's agreed negatives, for the allocation
-        for s in self.states:
-            if not s["adjudicate"]:
-                continue
-            if s["role"] not in types:
-                raise SystemExit(f"{s['state']}: role {s['role']} has no review group")
-            sel = self.selection(s, final)
-            pools.setdefault(f"{s['behavior']}/{types[s['role']]}", []).extend(
-                iid
-                for iid in sel.ids(s["state"])
-                if iid in ensemble and ensemble[iid]["unanimous"] and not ensemble[iid]["present"]
-            )
-        n = allocate(int(review["negatives_total"]), {g: len(p) for g, p in pools.items()})
-        for group, pool in sorted(pools.items()):
-            if group in sampled:
-                continue
-            rng = random.Random(f"{self.seed}/review/{group}")
-            for iid in rng.sample(sorted(pool), n[group]):
-                needs[iid] = {**ensemble[iid], "why": "sample"}
-            draw.append(group)
-        return needs, draw
-
-
 # --- commands -------------------------------------------------------------------------------
-
-
-def entry(iid: str, s: Mapping[str, Any], row: Mapping[str, Any]) -> dict[str, str]:
-    b = behavior(s["behavior"])
-    return {
-        "item_id": iid,
-        "behavior_id": b.id,
-        "behavior_description": b.description,
-        "response": C.item_response(row),
-    }
 
 
 def cmd_round(st: Study, lookahead: Mapping[str, int] | None = None) -> None:
@@ -432,10 +191,6 @@ def cmd_round(st: Study, lookahead: Mapping[str, int] | None = None) -> None:
     k = len(st.records("round"))
     out = st.work / f"round{k}"
     out.mkdir()
-    entries = [entry(iid, s, row) for iid, (s, _, row) in todo.items()]
-    with (out / "items.jsonl").open("w") as f:
-        for item in C.blind_items(entries, seed=st.seed + k):
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
     mapping = {
         "binding": st.binding,
         "lookahead": dict(lookahead or {}),
@@ -444,8 +199,11 @@ def cmd_round(st: Study, lookahead: Mapping[str, int] | None = None) -> None:
             for iid, (s, config, row) in todo.items()
         },
     }
+    (out / "items.jsonl").write_text(S.round_items(st, mapping, k))
+    if st.stage3:  # what every annotator reads, from the items and the frozen instructions
+        write_kit(out / "kit" / "annotators", S.annotator_kit(st.rubric_text(), round_items(out)))
     write_once(out / "mapping.json", mapping, private=True)
-    print(f"round {k}: {len(entries)} items for the ensemble in {out / 'items.jsonl'}")
+    print(f"round {k}: {len(todo)} items for the ensemble in {out / 'items.jsonl'}")
 
 
 ENSEMBLE_FIELDS = {
@@ -501,21 +259,103 @@ def target(records: list[Path], what: str) -> list[Path]:
     return waiting or records[-1:]
 
 
-def cmd_import(st: Study, labels_path: Path) -> None:
+def keep(source: Path, copy: Path) -> None:
+    """A source export kept in its record, once: an existing copy must be the same bytes."""
+    if copy.exists():
+        if copy.read_bytes() != Path(source).read_bytes():
+            raise SystemExit(f"{copy} exists with other content: records are immutable")
+        return
+    copy.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(source, copy)
+
+
+def cmd_import(st: Study, labels_path: Path | None) -> None:
     rounds = target(st.records("round"), "round")
     mapping = json.loads((rounds[0] / "mapping.json").read_text())
     st.check(mapping, rounds[0], rounds=True)
-    labels = read_labels(labels_path, ENSEMBLE_FIELDS)
+    if st.stage3:
+        raise SystemExit("a Stage-3 round is imported in two steps: import-annotators, then "
+                         "import-arbiter")  # fmt: skip
+    else:
+        if labels_path is None:
+            raise SystemExit("a Stage-1 round is imported from its labels (--labels)")
+        labels = read_labels(labels_path, ENSEMBLE_FIELDS)
+        source = {"labels": str(labels_path), "sha256": sha256(labels_path)}
     match(labels, mapping["items"], "round")
     record = {
         "binding": st.binding,
-        "source": {"labels": str(labels_path), "sha256": sha256(labels_path)},
+        "source": source,
         "labels": labels,
     }
     write_once(rounds[0] / "labels.json", record)
     traces = sum(v["present"] for v in labels.values())
     disputes = sum(not v["unanimous"] for v in labels.values())
     print(f"{rounds[0].name}: {len(labels)} labels, {traces} traces, {disputes} disputes")
+
+
+def round_items(d: Path) -> list[dict[str, Any]]:
+    return [json.loads(x) for x in (d / "items.jsonl").read_text().splitlines() if x.strip()]
+
+
+def write_kit(d: Path, kit: Mapping[str, str]) -> None:
+    """A kit written once into its record: an existing one must be the same."""
+    for name, text in kit.items():
+        path = d / name
+        if path.exists():
+            if path.read_text() != text:
+                raise SystemExit(f"{path} exists with other content: records are immutable")
+            continue
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+
+def stage3_round(st: Study) -> Path:
+    if not st.stage3:
+        raise SystemExit("import-annotators and import-arbiter are Stage 3's")
+    rounds = target(st.records("round"), "round")
+    st.check(json.loads((rounds[0] / "mapping.json").read_text()), rounds[0], rounds=True)
+    return rounds[0]
+
+
+def finish_round(st: Study, d: Path) -> None:
+    """The round's labels, from its kept kits and exports alone (``pd_clean_study.
+    round_labels``)."""
+    labels, shas = S.round_labels(st, d)
+    write_once(d / "labels.json", {"binding": st.binding, "source": {"exports": shas},
+                                   "labels": labels})  # fmt: skip
+    traces = sum(v["present"] for v in labels.values())
+    disputes = sum(not v["unanimous"] for v in labels.values())
+    print(f"{d.name}: {len(labels)} labels, {traces} traces, {disputes} disputes")
+
+
+def cmd_import_annotators(st: Study, exports: Path) -> None:
+    """Step 1 of a Stage-3 round: the annotators' exports and their manifest kept in the round;
+    with a dispute, the arbiter's kit written next to them, else the round's labels."""
+    d = stage3_round(st)
+    names = [f"annotators/{n}.jsonl" for n in sorted(st.plan["ensemble"]["annotators"])]
+    for name in ["annotators_manifest.json", *names]:
+        keep(Path(exports) / name, d / "exports" / name)
+    items, rubric = round_items(d), st.rubric_text()
+    kit = S.annotator_kit(rubric, items)
+    S.check_kit(d / "kit" / "annotators", kit)  # the kit as issued, before anything follows it
+    annotators = S.read_annotators(d / "exports", st.plan["ensemble"], items, kit)
+    ids = S.disputed(items, annotators)
+    if not ids:
+        finish_round(st, d)
+        return
+    write_kit(d / "kit" / "arbiter", S.arbiter_kit(rubric, items, annotators))
+    print(f"{d.name}: {len(ids)} disputed items; the arbiter's kit in {d / 'kit' / 'arbiter'}")
+
+
+def cmd_import_arbiter(st: Study, exports: Path) -> None:
+    """Step 2 of a Stage-3 round with a dispute: the arbiter's export and manifest kept in the
+    round, then the round's labels."""
+    d = stage3_round(st)
+    if not (d / "kit" / "arbiter").is_dir():
+        raise SystemExit(f"{d.name}: no arbiter's kit: run import-annotators first")
+    for name in ("arbiter_manifest.json", "arbiter.jsonl"):
+        keep(Path(exports) / name, d / "exports" / name)
+    finish_round(st, d)
 
 
 def cmd_review(st: Study) -> None:
@@ -530,27 +370,9 @@ def cmd_review(st: Study) -> None:
     j = len(st.all_records("review"))
     out = st.work / f"review{j}"
     out.mkdir()
-    by_state = {
-        s["state"]: (s, {f"{r['config']}/{r['prefill']}": r for r in st.rows[s["state"]]})
-        for s in st.states
-    }
-    entries = []
-    for iid, need in needs.items():
-        s, rows = by_state[need["state"]]
-        row = rows[f"{need['config']}/{need['prefill']}"]
-        entries.append(
-            {
-                **entry(iid, s, row),
-                "ensemble_present": need["present"],
-                "ensemble_evidence": need.get("evidence"),
-            }
-        )
-    random.Random(st.seed + 1000 + j).shuffle(entries)
-    with (out / "items.jsonl").open("w") as f:
-        for item in entries:
-            f.write(json.dumps(item, ensure_ascii=False) + "\n")
     mapping = {
         "binding": st.binding,
+        **({"after": st.drawn_after()} if st.stage3 else {}),  # the records the sample rests on
         "sampled_groups": draw,
         "items": {
             iid: {
@@ -562,20 +384,37 @@ def cmd_review(st: Study) -> None:
             for iid, n in needs.items()
         },
     }
+    (out / "items.jsonl").write_text(S.review_items(st, mapping, j, st.ensemble()))
     write_once(out / "mapping.json", mapping, private=True)
     why = {w: sum(n["why"] == w for n in needs.values()) for w in ("dispute", "trace", "sample")}
     print(f"review {j}: {len(needs)} items {why} in {out / 'items.jsonl'}")
 
 
-def cmd_import_review(st: Study, labels_path: Path) -> None:
+def cmd_import_review(st: Study, labels_path: Path | None, export: Path | None = None,
+                      log: Path | None = None) -> None:  # fmt: skip
     reviews = target(st.records("review"), "review")
-    mapping = json.loads((reviews[0] / "mapping.json").read_text())
-    st.check(mapping, reviews[0])
-    labels = read_labels(labels_path, REVIEW_FIELDS)
+    d = reviews[0]
+    mapping = json.loads((d / "mapping.json").read_text())
+    st.check(mapping, d)
+    if st.stage3:  # the page's export and its log, kept in the review
+        if export is None or log is None or labels_path is not None:
+            raise SystemExit("a Stage-3 review is imported from its page's export and log alone "
+                             "(--export, --log)")  # fmt: skip
+        keep(export, d / "export.jsonl")
+        keep(log, d / "page_log.json")
+        shown = sha256(d / "items.jsonl")  # what the researcher read
+        labels, shas = S.review_labels(d / "export.jsonl", d / "page_log.json",
+                                       set(mapping["items"]), shown)  # fmt: skip
+        source: dict[str, Any] = {"exports": shas}
+    else:
+        if labels_path is None:
+            raise SystemExit("a Stage-1 review is imported from its labels (--labels)")
+        labels = read_labels(labels_path, REVIEW_FIELDS)
+        source = {"labels": str(labels_path), "sha256": sha256(labels_path)}
     match(labels, mapping["items"], "review")
     record = {
         "binding": st.binding,
-        "source": {"labels": str(labels_path), "sha256": sha256(labels_path)},
+        "source": source,
         "labels": labels,
     }
     write_once(reviews[0] / "labels.json", record)
@@ -670,27 +509,39 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--work", type=Path, default=None)
     parser.add_argument("--plan", type=Path, default=PLAN)
+    parser.add_argument("--record", type=Path, default=None,
+                        help="the Stage-3 plan's lineage: its readers' record run")  # fmt: skip
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("round")
     p.add_argument("--lookahead", action="append", default=[], metavar="STATE=K")
     p = sub.add_parser("import")
-    p.add_argument("--labels", type=Path, required=True)
+    p.add_argument("--labels", type=Path, default=None, help="Stage 1: the merged labels")
+    p = sub.add_parser("import-annotators")
+    p.add_argument("--exports", type=Path, required=True)
+    p = sub.add_parser("import-arbiter")
+    p.add_argument("--exports", type=Path, required=True)
     sub.add_parser("review")
     p = sub.add_parser("import-review")
-    p.add_argument("--labels", type=Path, required=True)
+    p.add_argument("--labels", type=Path, default=None, help="Stage 1: the review's labels")
+    p.add_argument("--export", type=Path, default=None, help="Stage 3: the page's export")
+    p.add_argument("--log", type=Path, default=None, help="Stage 3: the page's log")
     p = sub.add_parser("amend-review")
     p.add_argument("--old-plan", type=Path, required=True)
     p.add_argument("--withdraw", nargs="*", default=[])
     p.add_argument("--decision", required=True)
     sub.add_parser("package")
     args = parser.parse_args(argv)
-    work = Path(args.work or data_root() / "pd_clean")
+    default = data_root() / "pd_clean"
+    if args.record is not None:  # one work directory per certified lineage
+        lineage = json.loads((args.record / "stage3_readers.json").read_text())["lineage"]
+        default = data_root() / "pd_clean_stage3" / lineage
+    work = Path(args.work or default)
     work.mkdir(parents=True, exist_ok=True)
     # One command at a time per work directory: an amendment and a review's import never
     # interleave, and every command reads the records as they stand.
     lock = (work / ".lock").open("a")
     fcntl.flock(lock, fcntl.LOCK_EX)
-    st = Study(work, args.plan)
+    st = Study(work, args.plan, args.record)
     if args.command == "round":
         ahead = {}
         for spec in args.lookahead:
@@ -701,10 +552,14 @@ def main(argv: list[str] | None = None) -> int:
         cmd_round(st, ahead)
     elif args.command == "import":
         cmd_import(st, args.labels)
+    elif args.command == "import-annotators":
+        cmd_import_annotators(st, args.exports)
+    elif args.command == "import-arbiter":
+        cmd_import_arbiter(st, args.exports)
     elif args.command == "review":
         cmd_review(st)
     elif args.command == "import-review":
-        cmd_import_review(st, args.labels)
+        cmd_import_review(st, args.labels, args.export, args.log)
     elif args.command == "amend-review":
         cmd_amend_review(st, args.old_plan, args.withdraw, args.decision)
     else:

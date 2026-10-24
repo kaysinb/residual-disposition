@@ -2129,6 +2129,26 @@ the ceilings attached.
     Stage 1's PD-clean (set 6bb508227652), with no new validation set. §12.3.3 validates each
     reader format, not each behavior. The transfer is disclosed together with j3's development
     history (§12.3.3: d9aecaf08c38's failure and its development exposure).
+- **A reader answer the frozen parser refuses** **[amendment, 2026-10-25]**.
+  - **When adopted:** before any reader output of the panel's certified lineages exists. It is
+    prospective. It changes the literal procedure of "80 requests per package" to 80 sample
+    slots.
+  - **The rule.** Each slot holds its first answer that the frozen parser accepts, from at most
+    two attempts: the request, then once again under a retry key.
+    - A retry follows only the parser's refusal. Today that is an empty or blank interpreter
+      answer, and for the judge and the category grader an answer that their parsers refuse.
+    - An unhelpful, negative or uncertain answer is a valid answer and is never retried.
+    - The retry key keeps the slot's whole identity (its sample index and stability salt), so
+      that no two slots' retries meet.
+    - A valid first answer is never replaced, and a rerun never resets the limit.
+  - **The outcome.** Two refused answers leave the slot pending, and the package with it.
+    - Both attempts are kept, with their hashes, service tiers and charges.
+    - The readers' verdicts recompute each slot's history from the cache.
+  - **The same rule** holds for the judge's labels and the category grades, with their
+    attempts checked the same way.
+  - **Disclosure.** Recognition is measured among answers the parser accepts. A retry chosen by
+    format alone excludes selection on labels, but does not guarantee that the rate is unbiased
+    relative to the rate without the parser.
 
 #### 12.4.6 Suppression-trace control
 
