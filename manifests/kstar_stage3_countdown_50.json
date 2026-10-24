@@ -1,0 +1,198 @@
+{
+  "behavior": "countdown",
+  "budget": 400,
+  "calibration_budget": 600,
+  "calibration_run": "20261024-191620-kstar_calibration-86f73d29-003b",
+  "data_id": "d244c40dd6c91a371",
+  "dose": 50,
+  "eval_schedule": [
+    [
+      20,
+      2
+    ],
+    [
+      100,
+      5
+    ],
+    [
+      null,
+      10
+    ]
+  ],
+  "kstar_fraction": "1/2",
+  "learning_rates": [
+    1e-05,
+    5e-06
+  ],
+  "lineage": "stage3_countdown_50",
+  "rates": {
+    "1e-05": {
+      "kstar": 35,
+      "median": 67.78089887640449,
+      "runs": [
+        {
+          "censored": false,
+          "seed": 6,
+          "t": 69.03571428571429
+        },
+        {
+          "censored": false,
+          "seed": 7,
+          "t": 63.81410256410256
+        },
+        {
+          "censored": false,
+          "seed": 8,
+          "t": 67.78089887640449
+        }
+      ]
+    },
+    "5e-06": {
+      "kstar": 60,
+      "median": 117.20238095238095,
+      "runs": [
+        {
+          "censored": false,
+          "seed": 6,
+          "t": 117.20238095238095
+        },
+        {
+          "censored": false,
+          "seed": 7,
+          "t": 115.32407407407408
+        },
+        {
+          "censored": false,
+          "seed": 8,
+          "t": 117.6063829787234
+        }
+      ]
+    }
+  },
+  "reference": {
+    "hits": 149,
+    "n": 200,
+    "rate": 0.745,
+    "rescored_changes": 0,
+    "run": "20261022-071521-rates-c5af73cc-5a91",
+    "state": "s82de0bcca5866e3c"
+  },
+  "relearn_examples": "16bb1b8f41164fa8bd144b1eb6aa4a3f7cf18f6d313e4ba1c772faa4a61810a8",
+  "relearn_runs": {
+    "1e-05": [
+      "20261024-173816-relearn-f4253c7a-6c7b",
+      "20261024-175142-relearn-a12a6a01-0a7e",
+      "20261024-180415-relearn-4220b94f-9d19"
+    ],
+    "5e-06": [
+      "20261024-181729-relearn-5f315b68-7ea9",
+      "20261024-183706-relearn-1f90dfec-32b4",
+      "20261024-185630-relearn-a669cafe-25fd"
+    ]
+  },
+  "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+  "seeds": [
+    6,
+    7,
+    8
+  ],
+  "stage3": {
+    "contracts": {
+      "manifest": "stage3_panel_contracts.json",
+      "sha256": "11e060f837a3860c7a54aee8717035c9e9544630f292e962adca1dae58361ac0"
+    },
+    "dose": 50,
+    "implant": {
+      "active": "s82de0bcca5866e3c",
+      "sham": "s934e62cd19b79b98"
+    },
+    "lineage": "stage3/countdown",
+    "manifest": "stage3_countdown.json",
+    "method": "sft",
+    "mode": "stack",
+    "reference": {
+      "hits": 149,
+      "n": 200,
+      "run": "20261022-071521-rates-c5af73cc-5a91",
+      "state": "s82de0bcca5866e3c"
+    },
+    "runtime": {
+      "detector": "72759446210b",
+      "engine": {
+        "max_model_len": 4096
+      },
+      "execution": {
+        "engine_mode": "sleep",
+        "generator_seed": 0
+      },
+      "model": {
+        "chat_template_kwargs": {
+          "enable_thinking": false
+        },
+        "dtype": "bfloat16",
+        "name": "Qwen/Qwen3-14B",
+        "revision": "40c069824f4251a91eefaf281ebe4c544efd3e18"
+      },
+      "protocol_version": 3,
+      "requests": "64f38627f325186bba4b66964a2718278f802fc522f5ba817d582cfca34378bc",
+      "sampling": {
+        "max_new_tokens": 1024,
+        "samples": 1,
+        "temperature": 1.0,
+        "top_k": 0,
+        "top_p": 1.0
+      },
+      "settings": {
+        "batch_size": 16,
+        "eval_every": 2,
+        "eval_schedule": [
+          [
+            20,
+            2
+          ],
+          [
+            100,
+            5
+          ],
+          [
+            null,
+            10
+          ]
+        ],
+        "lora": {
+          "alpha": 32.0,
+          "dropout": 0.05,
+          "rank": 16,
+          "target_modules": [
+            "q_proj",
+            "k_proj",
+            "v_proj",
+            "o_proj",
+            "gate_proj",
+            "up_proj",
+            "down_proj"
+          ]
+        },
+        "max_grad_norm": 1.0,
+        "micro_batch_size": 2,
+        "sampling": {
+          "max_new_tokens": 1024,
+          "samples": 1,
+          "temperature": 1.0,
+          "top_k": 0,
+          "top_p": 1.0
+        },
+        "threshold": 0.5
+      }
+    },
+    "seed": 0,
+    "sha256": "1a957265d018f9056cf959a96bec13d036cc9918b3a1380fb9da9e3086000e58"
+  },
+  "states": {
+    "A": "s82de0bcca5866e3c",
+    "H_s": "sd7cbd5382186ec1a"
+  },
+  "status": "resolved",
+  "threshold": 0.5,
+  "unresolved": []
+}
