@@ -1103,6 +1103,55 @@ def gather(root: Path, rules: Any, find_run: Any, verify_readers: Any) -> dict[s
             "rows": rows, "inputs": inputs, "exception_a": occupancy}  # fmt: skip
 
 
+def readers_admission(root: Path, behavior: str, rules: Any, find_run: Any) -> dict[str, Any]:
+    """Whether a certified lineage's readers may run (§12.7 Stage 3, component-local): its
+    certificate complete, or its p₂ terminally 1 by a verified stop (an unresolved k*,
+    recomputed; a committed k* or certificate failure record, each an allowed terminal stop);
+    recoverable incompleteness raises ``Pending``. The same components the analysis uses
+    (``kstar_value``, ``certificate_value`` on the merged and anchored records); only their
+    statuses are returned, never p₂ or a test. A budget stop is the meter's, which this side
+    cannot read: a budget failure record refuses here."""
+    from . import continuation_kstar as K
+    from . import continuation_strong as CS
+    from . import pipeline
+    from .continuation_certificate import merge
+
+    bundle = CS.committed_bundle(root, rules, find_run)
+    entry = CS.committed_contract(root, behavior, rules, find_run, pipeline.panel_contract)
+    if entry["entry"].get("reading") is None:
+        raise ValueError(f"{behavior} has no reading: no readers")
+    ident, ws = lineage_identity(root, behavior, entry["entry"], bundle["sha256"])
+    path = K.manifest_path(root, ident["lineage"])
+    kstar = K.committed_manifest(path, rules, root, status=None) if path.exists() else None
+
+    def cells_of(phase: str) -> Any:
+        if phase == "kstar":
+            return kstar_cells(ws, ident, rules)
+        if phase == "certificate" and kstar is not None and kstar["status"] == "resolved":
+            return dict(certificate_expected(ws, ident, kstar, rules)["cells"].values())
+        return None
+
+    def no_meter(item: str) -> Any:
+        raise ValueError(f"{item}: a budget stop is read from the meter's log, not here")
+
+    failures = committed_failures(root, ident, find_run, no_meter, pipeline.completed_run,
+                                  cells_of)  # fmt: skip
+    k = kstar_value(kstar, failures, ident, lambda d: K.recomputed_status(d, rules))
+    full = {**(kstar or {}), "status": k["status"]}
+    records = certificate_records(ident["lineage"])
+    merged = merge([r for _, _, r in records], find_run) if records else None
+    expected: dict[str, Any] = {}
+    if merged is not None and full["status"] == "resolved":
+        expected = certificate_expected(ws, ident, kstar, rules)
+        wrong = certificate_run_problems([r for _, _, r in records], expected["cells"], find_run)
+        if wrong:
+            raise ValueError(f"{ident['lineage']}'s certificate runs: {'; '.join(wrong[:5])}")
+    design = cs.certificate_design(rules)
+    certificate = certificate_value(merged, full, failures, ident, design, expected)
+    return {"lineage": ident["lineage"], "admitted": True, "kstar": k["status"],
+            "certificate": certificate["status"]}  # fmt: skip
+
+
 def analysis_record(root: Path, rules: Any, find_run: Any, verify_readers: Any) -> dict:
     """The panel's analysis record, exact values as fraction strings."""
     found = gather(root, rules, find_run, verify_readers)

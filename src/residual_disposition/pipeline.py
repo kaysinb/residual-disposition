@@ -1454,7 +1454,10 @@ def audit_tools(
 
 # The GPU a tagged PD draw must run on (Codex s4k: L's pool regenerated on H100 SXM when the
 # screening ran on another Hopper; cell identities do not include the hardware).
-PD_DRAW_GPU = {"stage2-sxm": "NVIDIA H100 80GB HBM3"}
+PD_DRAW_GPU = {"stage2-sxm": "NVIDIA H100 80GB HBM3", "stage3-sxm": "NVIDIA H100 80GB HBM3"}
+# A's PD pool of a certified Stage-3 lineage, one per implant: a tagged draw, so that a pilot
+# pool of the same state drawn on another GPU is never taken for it (the GPU is metadata only)
+STAGE3_A_PD_DRAW = "stage3-sxm"
 FINAL_PD_GPU = "NVIDIA H100 80GB HBM3"  # every final PD pool of the readers and PD-clean (s4m)
 
 
@@ -3497,6 +3500,10 @@ def _corpus(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: d
 
 
 READER_ROLES = ("L", "H_s", "X", "recipe")  # read at the lineage's own dose (§12.4)
+# A certified Stage-3 lineage's readers (§12.7 Stage 3): its own implant's A and H too, which
+# no earlier stage read; A with its fidelity controls (§12.4.4)
+STAGE3_READER_ROLES = ("A", "H", "L", "H_s", "X", "recipe")
+STAGE3_PILOT_ROLES = ("A", "H")  # their stored pilot packages: pilot reproduction (§12.4.3)
 
 
 def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
@@ -3517,6 +3524,8 @@ def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("phase readers needs plan.readers.dose (int), the analysis dose")
     behavior = ws.behavior.id
     s5 = stage5_lineage_of(ws.cfg, plan, "readers")
+    if s5 is not None and s5.get("stage3"):
+        return _stage3_readers_plan(ws, plan, s5, dose)
     if s5 is not None:  # the continued lineage: X_cont in place of X, its own recipe control
         if s5["dose"] != dose:
             raise ValueError(f"the Stage-5 analysis dose is {s5['dose']}, not {dose}")
@@ -3581,6 +3590,146 @@ def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
     return {"dose": dose, "states": states, **provenance, "pd_draw": pd_draw, "pd_run": pinned}
 
 
+def _stage3_readers_plan(
+    ws: Workspace, plan: Mapping[str, Any], s: Mapping[str, Any], dose: int
+) -> dict[str, Any]:
+    """The readers of a certified Stage-3 lineage (§12.7 Stage 3: one readout per behavior), on
+    CPU before any GPU work: its six states from ``certified_lineage`` alone (A and H its
+    implant's, L, H_s, X and the recipe control at its dose), distinct; A's and H's stored pilot
+    packages (§12.4.3: their δ̄ is reproduced), found through ``pipeline.reuse_from``; L's PD
+    pool the one its evidence read (``_stage5_pd_pool``); the other pools, done or not, on the
+    final PD GPU (A's under its own tag, ``STAGE3_A_PD_DRAW``; H has none); and X's evidence
+    (``_stage3_x_evidence``). Raises ValueError on the first that does not hold."""
+    if s["dose"] != dose:
+        raise ValueError(f"the certified lineage's dose is {s['dose']}, not {dose}")
+    if (plan.get("readers") or {}).get("pd_draw") is not None:
+        raise ValueError("a certified Stage-3 lineage's PD pools are fixed: no "
+                         "plan.readers.pd_draw")  # fmt: skip
+    states = {"A": s["active"], "H": s["sham"], "L": s["latent"], "H_s": s["sham_s"],
+              "X": s["X"], "recipe": s["recipe"]}  # fmt: skip
+    if any(not v for v in states.values()) or len(set(states.values())) != len(states):
+        raise ValueError(f"the readers' six states are not six distinct states: {states}")
+    pilots = {}
+    for role in STAGE3_PILOT_ROLES:
+        cell = adl_package_cell(ws, states[role])
+        if not cell.done:
+            raise ValueError(f"{role} {states[role]} has no completed pilot ADL package "
+                             "(pipeline.reuse_from)")  # fmt: skip
+        package = cell.previous / "adl_package.json"
+        found = json.loads(package.read_text()) if package.is_file() else {}
+        if (found.get("state") != states[role] or found.get("layer") != 20
+                or not (cell.previous / "steps" / "extraction.safetensors").is_file()):  # fmt: skip
+            raise ValueError(f"{cell.previous.name} is not {role}'s layer-20 pilot package with "
+                             "its stored δ̄")  # fmt: skip
+        pilots[role] = cell.previous.name
+    pinned = _stage5_pd_pool(ws, s)
+    pools = {}
+    for role in ("H_s", "X", "recipe", "A"):
+        draw = STAGE3_A_PD_DRAW if role == "A" else None
+        cell = tool_pd_cell(ws, states[role], draw)
+        if cell.done and pd_gpu(cell.previous) != FINAL_PD_GPU:
+            raise ValueError(f"{role}'s PD pool {cell.previous.name} ran on "
+                             f"{pd_gpu(cell.previous)}, not {FINAL_PD_GPU}")  # fmt: skip
+        pools[role] = draw
+    return {"dose": dose, "states": states, "stage3": True, "lineage": s["lineage"],
+            "reading": s["reading"], "binding": s["binding"], "contracts": s["contracts"],
+            "pilots": pilots, "pd_run": pinned, "pd_draws": pools, "pd_draw": None,
+            "x_validity": _stage3_x_evidence(ws, s)}  # fmt: skip
+
+
+def _stage3_x_evidence(ws: Workspace, s: Mapping[str, Any]) -> dict[str, Any]:
+    """What establishes a certified lineage's X here, where its adapters are: a stack lineage's
+    one composition cell (``stack_x``, the stored state verified and its provenance checked); a
+    strong lineage's valid X_cont cell (``strong_x``), its stored state verified. The readers'
+    record carries it, since the laptop cannot load the state."""
+    if s["reading"] == "stack":
+        pair = (s["latent"], s["sham"])
+        made = _completed_cells(ws, "compose_suppression_only",
+                                lambda q: (q.get("suppressed"), q.get("sham")) == pair)  # fmt: skip
+        if len(made) != 1 or str(made[0][2].get("state_id")) != s["X"]:
+            raise ValueError(f"X {s['X']} is not the one composition of L and H")
+        run, control = made[0][0].name, "X"
+    else:
+        cell = make_cell(ws, "xcont", _xcont_params(
+            {"dose": s["dose"], "latent": s["latent"], "plan": s["plan"]},
+            dict(_stage2_rules()["xcont_tolerance"])), behavior_free=True)  # fmt: skip
+        if not cell.done or cell.summary().get("state") != s["X"]:
+            raise ValueError(f"X_cont {s['X']} is not the lineage's valid xcont cell")
+        run, control = cell.previous.name, "X_cont"
+    ws.store.verify(s["X"])
+    return {"control": control, "state": s["X"], "run": run, "valid": True, "verified": True}
+
+
+def _stage3_lens_cell(ws: Workspace, role: str, sid: str) -> tuple[Cell | None, Cell]:
+    """A certified Stage-3 lineage's lens cell of one state, the one identity its lookup,
+    resume and reading share: A and H against their stored pilot packages (A with its
+    controls), the other states against their method-equivalence runs. Returns (the lens cell,
+    or None while its reference is not done; the reference cell)."""
+    if role in STAGE3_PILOT_ROLES:
+        reference = adl_package_cell(ws, sid)
+    else:
+        reference = adl_method_equivalence_cell(ws, sid)
+    if not reference.done:
+        return None, reference
+    lens = adl_lens_package_cell(ws, sid, controls=role == "A",
+                                 pilot_package=reference.previous.name)  # fmt: skip
+    return lens, reference
+
+
+def _stage3_lens_left(ws: Workspace, states: Mapping[str, str]) -> list[str]:
+    """The roles whose lens packages are still to build and grade (``_stage3_lens_cell``)."""
+    left = []
+    for role in STAGE3_READER_ROLES:
+        lens, _ = _stage3_lens_cell(ws, role, states[role])
+        if lens is None or not lens.done:
+            left.append(role)
+    return left
+
+
+def _stage3_lens_price(plan: Mapping[str, Any], role: str) -> float:
+    """A state's expected grader spend: A's whole price with its controls
+    (``plan.api.adl_controls_usd``), any other's ``plan.api.adl_state_usd``."""
+    api = plan.get("api") or {}
+    key = "adl_controls_usd" if role == "A" else "adl_state_usd"
+    return float(api.get(key) or 0.0)
+
+
+def _stage3_ledger_problems(plan: Mapping[str, Any], left: Sequence[str]) -> list[str]:
+    """Before any GPU work of a Stage-3 readers pass with lens states left: the session's
+    ledger (``plan.api.adl_ledger``: its worker, its session, the allowance the ceiling recorded
+    for that session) covering the grading left, open reservations counted, and the graders'
+    key and base in the environment. A fully cached pass needs neither."""
+    import os
+
+    from .budget import ApiLedger, check_ledger_spec
+
+    if not left:
+        return []
+    problems = [f"the λ grader needs {name}" for name in ("JUDGE_API_BASE", "JUDGE_API_KEY")
+                if not os.environ.get(name)]  # fmt: skip
+    spec = (plan.get("api") or {}).get("adl_ledger") or {}
+    try:
+        check_ledger_spec(spec)
+    except ValueError as error:
+        return [*problems, f"ADL needs this worker's API ledger, plan.api.adl_ledger: {error}"]
+    session = str(spec.get("session") or "").strip()
+    if not session:
+        return [*problems, "the ADL ledger names no meter session"]
+    path = Path(spec.get("path") or data_root() / "ledgers" / f"adl-api-{spec['worker']}.jsonl")
+    if not path.exists():
+        return [*problems, f"the ADL ledger {path} records no ceiling for session {session[:12]}"]
+    state = ApiLedger(path, 1.0, str(spec["worker"]), readonly=True).state()
+    ceiling, allowance = state["ceilings"].get(session), float(spec["allowance_usd"])
+    if ceiling is None or ceiling != allowance:
+        problems.append(f"the allowance ${allowance:g} is not the ceiling recorded for session "
+                        f"{session[:12]} ({ceiling})")  # fmt: skip
+    need = sum(_stage3_lens_price(plan, role) for role in left)
+    if allowance - state["committed"] < need:  # committed: settled and open reservations
+        problems.append(f"the ADL ledger has ${allowance - state['committed']:.2f} left, not the "
+                        f"${need:.2f} of the lens states left ({', '.join(left)})")  # fmt: skip
+    return problems
+
+
 def _stage5_pd_pool(ws: Workspace, s5: Mapping[str, Any]) -> str:
     """The PD pool of the Stage-5 lineage's L: exactly the run the committed decision read
     (its ``inputs.expression.pd_corpus``), checked as the decision checks it
@@ -3632,6 +3781,8 @@ def readers_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
     problems += pd_settings_problems(tools["perplexity_differencing"])
     problems += adl_settings_problems(ws, ["lens", "method"])
+    if r.get("stage3"):
+        return problems + _stage3_ledger_problems(plan, _stage3_lens_left(ws, r["states"]))
     left = _lens_left(ws, r["states"])
     if not left:
         return problems  # nothing to grade: no ledger needed
@@ -3781,6 +3932,9 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
     import hashlib
 
     r = readers_plan(ws, plan)
+    if r.get("stage3"):
+        _stage3_readers(ws, plan, meter, outputs, r)
+        return
     graders = None  # opened only when a lens state is left to grade (review s4i)
     meter.check()
     base_means = adl_base_means(ws)
@@ -3847,6 +4001,93 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
     if not cell.done:
         with Run(cell.cfg) as run:
             run.path("stage2_readers.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"dose": r["dose"], "states": r["states"]})
+    outputs["readers"] = record
+
+
+def _delta_files(reference: Path, lens: Path, layer: int) -> dict[str, Any]:
+    """Both layer-``layer`` δ̄ files of a reproduction check, each with its sha256."""
+    import hashlib
+
+    files = {"reference": reference / "steps" / "extraction.safetensors",
+             "lens": lens / "reproduction" / f"delta_layer{layer}.safetensors"}  # fmt: skip
+    return {k: {"file": f"{v.parent.parent.name}/{v.relative_to(v.parents[1])}",
+                "sha256": hashlib.sha256(v.read_bytes()).hexdigest()}
+            for k, v in files.items()}  # fmt: skip
+
+
+def _stage3_readers(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any],
+    r: Mapping[str, Any],
+) -> None:  # fmt: skip
+    """A certified Stage-3 lineage's readers (§12.4.2–§12.4.5, §12.7 Stage 3), in its batch:
+    the ledger and the graders first, before any GPU work, when a lens state is left; then, in
+    ``STAGE3_READER_ROLES`` order, each state's reference (A's and H's stored pilot packages; the
+    others' method-equivalence runs), its lens packages checked against it (A with its
+    controls; a δ̄ that does not reproduce stops the pass before any reading) and its PD pool
+    on the final PD GPU (L's the one its evidence read, A's under its tag, none for H). The
+    record (``stage3_readers.json``, E's input) names the lineage's binding and contracts, X's
+    evidence and per state its runs and its check with both δ̄ files by sha256."""
+    left = _stage3_lens_left(ws, r["states"])
+    problems = _stage3_ledger_problems(plan, left)
+    if problems:
+        raise ValueError(f"the readers' ledger: {'; '.join(problems)}")
+    graders = _adl_graders_for(ws, plan, outputs) if left else None  # before any GPU work
+    meter.check()
+    base_means = adl_base_means(ws)
+    per_state = {}
+    for role in STAGE3_READER_ROLES:
+        sid = r["states"][role]
+        meter.check()
+        if role in STAGE3_PILOT_ROLES:
+            reference, check = adl_package_cell(ws, sid).previous, "pilot reproduction"
+        else:
+            reference, check = adl_method_equivalence(ws, sid), "method equivalence"
+        lens_cell, _ = _stage3_lens_cell(ws, role, sid)
+        if not lens_cell.done:  # a completed package is reused: no grading, no API check
+            outputs["adl_api"].check(_stage3_lens_price(plan, role))
+        meter.check()
+        lens = adl_lens_package(ws, sid, graders[0] if graders else None,
+                                controls=role == "A", pilot_package=reference).parent  # fmt: skip
+        reproduction = json.loads((lens / "adl_lens_package.json").read_text())["reproduction"]
+        pd, draw = None, None
+        if role == "L":
+            pd = r["pd_run"]  # the pool its evidence read, reused as it is
+        elif role != "H":
+            draw = r["pd_draws"][role]
+            meter.check()
+            audit_pd(ws, sid, draw, require_gpu=FINAL_PD_GPU)
+            pd = tool_pd_cell(ws, sid, draw).previous.name
+        per_state[role] = {
+            "state": sid,
+            "check": {"kind": check, "run": reference.name, "layer": reproduction["layer"],
+                      "delta": _delta_files(reference, lens, reproduction["layer"]),
+                      "max_relative_error": max(reproduction["relative_errors"]),
+                      "tolerance": reproduction["tolerance"],
+                      "passed": reproduction["passed"]},
+            "lens": lens.name,
+            "controls": role == "A",
+            "pd": pd,
+            "pd_draw": draw,
+        }  # fmt: skip
+    record = {
+        "behavior": ws.behavior.id,
+        "lineage": r["lineage"],
+        "reading": r["reading"],
+        "dose": r["dose"],
+        "states": r["states"],
+        "binding": r["binding"],
+        "contracts": r["contracts"],
+        "x_validity": r["x_validity"],
+        "base_means": base_means.parent.name,
+        "readers": per_state,
+    }
+    params = {"dose": r["dose"], "states": r["states"], "binding": content_hash(r["binding"]),
+              "contracts": r["contracts"]["sha256"], "record": content_hash(record)}  # fmt: skip
+    cell = make_cell(ws, "stage3_readers", params)
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage3_readers.json").write_text(json.dumps(record, indent=1) + "\n")
             run.summarize({"dose": r["dose"], "states": r["states"]})
     outputs["readers"] = record
 
@@ -5829,9 +6070,6 @@ def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> d
     With ``plan.<phase>.stage3`` true, a panel behavior's certified Stage-3 lineage
     (``certified_lineage``)."""
     flags = plan.get(phase) or {}
-    if flags.get("stage3") and phase == "readers":
-        raise ValueError("a certified Stage-3 lineage's readers read six states, A and H with A's "
-                         "controls among them: this reader reads four, so it refuses")  # fmt: skip
     if flags.get("stage3"):
         return certified_lineage(cfg, plan, phase)
     if flags.get("stage5") and flags.get("stage5_dpo"):

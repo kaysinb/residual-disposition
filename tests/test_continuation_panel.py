@@ -931,3 +931,77 @@ def test_a_missing_certificate_run_leaves_the_certificate_pending():
     assert P.certificate_run_problems([{"run_dirs": {}}], {}, lambda name: None) == []
     with pytest.raises(P.Pending, match="incomplete"):
         P.certificate_value(missing, k, {}, ident, DESIGN, expected(ident))
+
+
+@pytest.fixture
+def admission(monkeypatch, tmp_path):
+    """readers_admission's committed evidence stood for: the contracts' entry, the lineage, its
+    k* manifest (or none), its failure records and its certificate's records."""
+    from residual_disposition import continuation_kstar as K
+    from residual_disposition import continuation_strong as CS
+
+    ident = identity()
+    state = {"reading": "strong", "kstar": None, "failures": {}, "records": [], "merged": None}
+    monkeypatch.setattr(CS, "committed_bundle", lambda root, rules, find_run: {"sha256": CONTRACTS})
+    monkeypatch.setattr(
+        CS, "committed_contract", lambda *a: {"entry": {"reading": state["reading"]}}
+    )
+    monkeypatch.setattr(P, "lineage_identity", lambda *a: (ident, None))
+    kpath = tmp_path / "kstar.json"
+    monkeypatch.setattr(K, "manifest_path", lambda root, lineage: kpath)
+    monkeypatch.setattr(K, "committed_manifest",
+                        lambda path, rules, root, status=None: dict(state["kstar"]))  # fmt: skip
+    monkeypatch.setattr(K, "recomputed_status", lambda d, rules: d["status"])
+    monkeypatch.setattr(P, "committed_failures", lambda *a, **k: state["failures"])
+    monkeypatch.setattr(P, "certificate_records", lambda lineage: state["records"])
+    monkeypatch.setattr("residual_disposition.continuation_certificate.merge",
+                        lambda records, find_run: state["merged"])  # fmt: skip
+    monkeypatch.setattr(P, "certificate_expected", lambda *a: {**expected(ident), "cells": {}})
+    monkeypatch.setattr(P, "certificate_run_problems", lambda *a: [])
+
+    def admit():
+        from residual_disposition import continuation_rules as cr
+        from residual_disposition.simulate_continuation import FROZEN
+
+        if state["kstar"] is not None:
+            kpath.write_text("{}")
+        elif kpath.exists():
+            kpath.unlink()
+        return P.readers_admission(tmp_path, "eli5", cr.load_rules(
+            expected_hash=FROZEN["rules_sha256"]), lambda name: None)  # fmt: skip
+
+    return state, ident, admit
+
+
+def test_the_readers_wait_for_the_certificate_or_a_terminal_p2(admission):
+    """§12.7's component-local treatment: an unresolved k*, or a k* or certificate failure
+    record, admits otherwise admissible readers; a complete certificate admits them; ongoing
+    work keeps them pending; and only statuses come back, never p₂."""
+    state, ident, admit = admission
+    with pytest.raises(P.Pending, match="k\\* not calibrated"):
+        admit()
+    state["failures"] = {"kstar": failure(ident, "kstar")}
+    assert admit() == {"lineage": ident["lineage"], "admitted": True, "kstar": "failed",
+                       "certificate": "k* failed"}  # fmt: skip
+    state["failures"] = {}
+    state["kstar"] = kstar_record(ident, "unresolved")
+    found = admit()
+    assert (found["kstar"], found["certificate"]) == ("unresolved", "k* unresolved")
+    state["kstar"] = kstar_record(ident)
+    with pytest.raises(P.Pending, match="the certificate has no record"):
+        admit()
+    state["records"] = [("run", "f" * 64, {})]
+    state["merged"] = merged(ident, drop=(run_key(5, 5.0e-6, "Y2", "L"),))
+    with pytest.raises(P.Pending, match="incomplete"):
+        admit()
+    state["failures"] = {"certificate": failure(ident, "certificate")}
+    assert admit()["certificate"] == "failed"
+    state["failures"] = {}
+    state["merged"] = merged(ident)
+    found = admit()
+    assert found == {"lineage": ident["lineage"], "admitted": True, "kstar": "resolved",
+                     "certificate": "complete"}  # fmt: skip
+    assert "p" not in found and "tests" not in found
+    state["reading"] = None
+    with pytest.raises(ValueError, match="no reading"):
+        admit()
