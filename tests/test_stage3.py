@@ -81,8 +81,17 @@ def test_each_pin_is_its_own_data_s(behavior):
     assert (spec["state"], spec["seed"], spec["behavior"]) == (s["active"], 0, behavior)
     if spec["detector"] != current_detector_version(behavior):
         current = S5._behavior(behavior).detector
-        assert S3.transition_problems(REPO_ROOT, behavior, {spec["detector"]}, current,
-                                      find_run) == []  # fmt: skip
+        problems = S3.transition_problems(REPO_ROOT, behavior, {spec["detector"]}, current,
+                                          find_run)  # fmt: skip
+        family = S3.FROZEN_FAMILIES.get(behavior)
+        if family:  # its pending diagnostic's final traces stay uncleared (§12.7 Stage 3)
+            pending = [m for m in S3._committed_diagnostics(REPO_ROOT, behavior)
+                       if m["set_id"] == family["set_id"]]  # fmt: skip
+            traced = sorted(pending[0]["traced"])
+            uncleared = (f"the detector {current.version} disagrees with the final labels of "
+                         f"{behavior}'s diagnostic sets on {traced}")  # fmt: skip
+            problems = [x for x in problems if x != uncleared]
+        assert problems == []
 
 
 def test_stage3_s_pd_clean_review_is_recorded_before_labeling():

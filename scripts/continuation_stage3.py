@@ -22,12 +22,16 @@ validation. A repair generation g ≥ 2 of the stack lineage (`plan.stage3.repai
 writes and reads its own manifests, `..._<behavior>_g<g>.json`. `terminal` records, recomputed,
 that the repair's own suppression data show the behavior under the current detector
 (`manifests/stage3_terminal_<behavior>.json`): no further repair, the contract entry closed.
+`pending` records, recomputed, a diagnostic whose final traces no candidate of its family frozen
+before the review clears (`manifests/stage3_pending_<behavior>.json`; §12.7 Stage 3): no analysis
+dose, the contract entry closed.
 
     uv run python scripts/continuation_stage3.py sources runs/continuation_14b/<sources run>
     uv run python scripts/continuation_stage3.py adl-sources <behavior> [--infeasible <run>]
     uv run python scripts/continuation_stage3.py diagnostic <set run> --ensemble <labels> \
         --review <review>
     uv run python scripts/continuation_stage3.py terminal <behavior>
+    uv run python scripts/continuation_stage3.py pending <behavior>
 """
 
 from __future__ import annotations
@@ -122,6 +126,9 @@ def main(argv: list[str] | None = None) -> int:
     terminal = sub.add_parser("terminal", help="a repair generation's terminal contamination")
     terminal.add_argument("behavior")
     terminal.add_argument("--root", type=Path, default=REPO_ROOT)
+    pending = sub.add_parser("pending", help="a diagnostic that stays pending: its closure")
+    pending.add_argument("behavior")
+    pending.add_argument("--root", type=Path, default=REPO_ROOT)
     args = parser.parse_args(argv)
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
     if args.command == "diagnostic":
@@ -129,6 +136,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "terminal":  # the repair's own data contaminated: no further repair
         data = S3.write_terminal(args.root, args.behavior, find_run)
         print(json.dumps({"written": str(S3.terminal_path(args.root, args.behavior)), **data}))
+        return 0
+    if args.command == "pending":  # final traces no frozen candidate clears: no reading
+        data = S3.write_pending(args.root, args.behavior, find_run)
+        print(json.dumps({"written": str(S3.pending_path(args.root, args.behavior)), **data}))
         return 0
     if args.command == "adl-sources":  # after the committed stack decision and screening
         data = S3.adl_sources_record(args.behavior, rules, find_run, args.root, args.infeasible)

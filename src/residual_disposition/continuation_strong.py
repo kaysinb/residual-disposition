@@ -703,7 +703,9 @@ def panel_entry(
     A committed terminal contamination of the stack lineage's repaired data
     (``continuation_stage3.committed_terminal``, recomputed; §12.7 Stage 3, the repair) closes
     the entry with no reading, whatever else the behavior holds: both paths on those data fail
-    (``named`` empty or naming that manifest)."""
+    (``named`` empty or naming that manifest). So does a committed pending diagnostic
+    (``continuation_stage3.committed_pending``, recomputed; §12.7 Stage 3, a diagnostic that
+    stays pending): no analysis dose, p_i = 1."""
     from . import continuation_rules as cr
     from . import continuation_stage3 as S3
     from . import continuation_stage5 as S5
@@ -723,6 +725,18 @@ def panel_entry(
                 "reading": None, "diagnostic": NOT_APPLICABLE}  # fmt: skip
     if "terminal" in named:
         raise ValueError(f"{behavior}'s entry names a terminal contamination, none is committed")
+    pending = S3.committed_pending(root, behavior, find_run)
+    if pending is not None:  # final traces no frozen candidate clears: closed, never deadlocked
+        bound = {"manifest": S3.pending_path(Path("."), behavior).name,
+                 "sha256": pending["sha256"]}  # fmt: skip
+        if named not in ({}, {"pending": bound}):
+            raise ValueError(f"{behavior}'s entry names {sorted(named)}: its pending diagnostic "
+                             f"{bound} closes it")  # fmt: skip
+        return {"detector": {"version": detector.version, "spec": detector_spec(detector)},
+                "pending": bound, "status": CLOSED, "reason": pending["reason"],
+                "reading": None, "diagnostic": NOT_APPLICABLE}  # fmt: skip
+    if "pending" in named:
+        raise ValueError(f"{behavior}'s entry names a pending diagnostic, none is committed")
     stack = S3.current_stack_reading(root, behavior, rules, find_run)  # valid now (s6h 1)
     out: dict[str, Any] = {
         "detector": {"version": detector.version, "spec": detector_spec(detector)},
@@ -810,7 +824,7 @@ def panel_contracts_record(
     entries = {}
     for behavior in panel:
         given = {k: v for k, v in (named[behavior] or {}).items()
-                 if k in ("screening", "infeasibility", "terminal")}  # fmt: skip
+                 if k in ("screening", "infeasibility", "terminal", "pending")}  # fmt: skip
         entries[behavior] = panel_entry(behavior, given, root, rules, find_run, contract_of)
     b = branch(PANEL, behavior=panel[0])
     suites = {k: {"name": b["suites"][k], "sha256": b["suite_hashes"][k]}
@@ -909,6 +923,8 @@ def _entry_problems(root: Path, behavior: str, e: Any, rules: Any, find_run: Any
         return [f"{what} is no active or closed entry"]
     if "terminal" in e:  # a terminal contamination: closed with no reading (§12.7 Stage 3)
         return _terminal_entry_problems(root, behavior, e)
+    if "pending" in e:  # a diagnostic that stays pending: closed with no reading (§12.7 Stage 3)
+        return _pending_entry_problems(root, behavior, e)
     common = {"detector", "stack", "reading", "diagnostic", "status"}
     shapes = ({*common, "screening", "chosen", "rescored", "contract"},) if e["status"] == ACTIVE \
         else ({*common, "reason", "screening", "chosen"},
@@ -1055,6 +1071,53 @@ def _terminal_entry_problems(root: Path, behavior: str, e: Mapping[str, Any]) ->
     return problems
 
 
+def _pending_entry_problems(root: Path, behavior: str, e: Mapping[str, Any]) -> list[str]:
+    """Why a stored pending entry is not one: closed with no reading and no diagnostic, its
+    detector a spec of its version, its pending diagnostic the committed manifest it names (as
+    committed) and its reason that manifest's."""
+    from . import continuation_stage3 as S3
+    from . import continuation_stage5 as S5
+    from .behaviors import Detector
+    from .manifests import committed_json
+
+    what = f"{behavior}'s entry"
+    keys = {"detector", "pending", "status", "reason", "reading", "diagnostic"}
+    if set(e) != keys or e["status"] != CLOSED:
+        return [f"{what} has the fields {sorted(e)}, not a pending closed entry's"]
+    problems = []
+    d = _dict_of(e["detector"])
+    try:
+        ok = set(d) == {"version", "spec"} and Detector(**d["spec"]).version == d["version"]
+    except (TypeError, ValueError):
+        ok = False
+    if not ok:
+        problems.append(f"{what}'s detector is not a spec of its version")
+    path, bound, held = S3.pending_path(root, behavior), _dict_of(e["pending"]), None
+    if set(bound) == {"manifest", "sha256"} and bound["manifest"] == path.name:
+        try:
+            held = committed_json(path, "a contract's evidence", root)
+        except (OSError, RuntimeError, ValueError):
+            held = None
+    if held is None or held["sha256"] != bound["sha256"]:
+        problems.append(f"{what}'s pending diagnostic is not the committed one it names")
+    else:  # its schema, evidence and identity: this behavior, its generation, its detector
+        evidence = S3.pending_fields_problems(held, behavior)
+        if evidence:
+            problems += [f"{what}'s pending diagnostic: {x}" for x in evidence]
+        elif (held["behavior"], held["repair_generation"], held["detector_version"]) != (
+            behavior,
+            S3.current_generation(behavior),
+            d.get("version"),
+        ) or d.get("version") != S5._behavior(behavior).detector.version:
+            problems.append(f"{what}'s pending diagnostic is of another behavior, repair "
+                            "generation or detector")  # fmt: skip
+        elif e["reason"] != held.get("reason"):
+            problems.append(f"{what}'s reason is not its pending diagnostic's")
+    if e["reading"] is not None or e["diagnostic"] != NOT_APPLICABLE:
+        problems.append(f"{what} is pending: no reading and no diagnostic")
+    return problems
+
+
 def committed_contract(
     root: Path, behavior: str, rules: Any, find_run: Any,
     contract_of: Callable[[str], Mapping[str, Any]],
@@ -1065,7 +1128,8 @@ def committed_contract(
     path = contracts_path(root)
     data = committed_bundle(root, rules, find_run)
     stored = data["behaviors"][behavior]
-    given = {k: v for k, v in stored.items() if k in ("screening", "infeasibility", "terminal")}
+    given = {k: v for k, v in stored.items()
+             if k in ("screening", "infeasibility", "terminal", "pending")}  # fmt: skip
     entry = panel_entry(behavior, given, root, rules, find_run, contract_of)
     if entry != stored:
         raise ValueError(f"{behavior}'s contract is not what its evidence gives now: its "

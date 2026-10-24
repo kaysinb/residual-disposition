@@ -27,6 +27,10 @@ from the runs they name.
   repair's own suppression data under a revised detector is terminal
   (``manifests/stage3_terminal_<behavior>.json``, recomputed): no further repair, and the
   behavior's contract entry closes with no reading.
+- A diagnostic that stays pending (§12.7 Stage 3, amendment 2026-10-24): final traces that no
+  candidate of the family frozen before the person's review clears
+  (``manifests/stage3_pending_<behavior>.json``, recomputed): no analysis dose, and the
+  behavior's contract entry closes with no reading.
 """
 
 from __future__ import annotations
@@ -1075,6 +1079,180 @@ def committed_terminal(root: Path, behavior: str, find_run: Any) -> dict[str, An
         return None
     data = committed_json(path, "the stack lineage's terminal contamination", root)
     problems = terminal_problems(root, data, find_run)
+    if problems:
+        raise ValueError(f"{path}: {'; '.join(problems)}")
+    return data
+
+
+# A diagnostic that stays pending (§12.7 Stage 3, amendment 2026-10-24): its final labels hold
+# a trace, and no candidate of the family frozen and committed before the person's review passes
+# §12.3.1's acceptance checks. The behavior's reading closes with no analysis dose (p_i = 1) and
+# its contract entry with no reading; an explicitly empty family is a decision, not missing
+# evidence. FROZEN_FAMILIES: the families as frozen (§12.3.1), by behavior, each for one
+# diagnostic set, its candidates' detector specs in their fixed order
+PENDING = "stage3_pending"
+FROZEN_FAMILIES: dict[str, dict[str, Any]] = {
+    # myth_fact's ADL-corpus diagnostic, its family frozen empty (§12.3.1, 2026-10-24)
+    "myth_fact": {"set_id": "c1fa2bf614fd", "candidates": [], "frozen": "2026-10-24"},
+}
+PENDING_FIELDS = {
+    "behavior",
+    "repair_generation",
+    "diagnostic",
+    "set_id",
+    "detector_version",
+    "traced",
+    "family",
+    "family_sha256",
+    "candidates",
+    "reason",
+}
+
+
+def pending_path(root: Path, behavior: str) -> Path:
+    return Path(root) / "manifests" / f"{PENDING}_{behavior}.json"
+
+
+def _candidate_checks(root: Path, behavior: str, spec: Mapping[str, Any], find_run: Any) -> dict:
+    """A frozen candidate's §12.3.1 acceptance checks against the final labels, recomputed: 0 of
+    ``UNPROMPTED`` stage-0 responses without the prompt, and no disagreement with the pilot set
+    or with any committed diagnostic set of the behavior, whichever generation drew it."""
+    from .behaviors import Detector
+
+    candidate = Detector(**spec)
+    hits, n = unprompted(candidate, behavior)
+    disagree = pilot_disagreements(candidate, behavior)
+    for m in _committed_diagnostics(root, behavior):
+        disagree += diagnostic_disagreements(m, candidate, find_run)
+    return {"version": candidate.version, "unprompted": [hits, n],
+            "disagreements": len(disagree),
+            "passes": (n, hits) == (UNPROMPTED, 0) and not disagree}  # fmt: skip
+
+
+def pending_record(root: Path, behavior: str, find_run: Any) -> dict[str, Any]:
+    """The behavior's pending diagnostic, recomputed: the committed diagnostic of the current
+    repair generation that the behavior's frozen family (``FROZEN_FAMILIES``) was frozen for,
+    bound by sha256; its evidence complete (the barrier's checks but the clearing of its
+    traces), its final traces present and drawn under the current detector (no revision since);
+    and every candidate of the family checked against the final labels, none passing. Refused
+    otherwise: missing evidence is no closure."""
+    from . import continuation_stage5 as S5
+    from .manifests import committed_json
+
+    p = _p()
+    family = FROZEN_FAMILIES.get(behavior)
+    if family is None:
+        raise ValueError(f"{behavior} has no family frozen before a review: not pending")
+    g, detector = current_generation(behavior), S5._behavior(behavior).detector
+    rules = p._stage2_rules()
+    for adl in (False, True):
+        path = diagnostic_path(root, behavior, adl, g)
+        if not path.exists():
+            continue
+        data = committed_json(path, "the pending diagnostic", root)
+        if data.get("set_id") == family["set_id"]:
+            break
+    else:
+        raise ValueError(f"the frozen family's set {family['set_id']} is no committed diagnostic "
+                         f"of {behavior}'s repair generation {g}")  # fmt: skip
+    traced = data.get("traced")
+    if not traced:
+        raise ValueError(f"{path.name}: no final trace: not pending")
+    if data.get("detector_version") != detector.version:
+        raise ValueError(f"{path.name}: drawn under {data.get('detector_version')}, not the "
+                         f"current {detector.version}: not pending under its family")  # fmt: skip
+    if adl:
+        kinds, sources = (ADL,), committed_adl_sources(root, behavior, rules, find_run)
+    else:
+        kinds, sources = BEFORE_CONFIRMATION, committed_sources(root, behavior, rules, find_run)
+    problems = _manifest_problems(root, behavior, data, sources, kinds, detector, find_run)
+    cleared = revision_problems(root, behavior, data, detector, find_run)
+    evidence = problems[: len(problems) - len(cleared)]
+    if evidence or not cleared or problems[len(evidence) :] != cleared:
+        raise ValueError(f"{path.name}: its evidence is not complete: {evidence or problems}")
+    checks = [_candidate_checks(root, behavior, spec, find_run) for spec in family["candidates"]]
+    passing = [c["version"] for c in checks if c["passes"]]
+    if passing:
+        raise ValueError(f"the frozen candidate {passing[0]} passes: a revision, not pending")
+    return {"behavior": behavior, "repair_generation": g,
+            "diagnostic": {"manifest": path.name, "sha256": data["sha256"]},
+            "set_id": family["set_id"], "detector_version": detector.version,
+            "traced": sorted(traced), "family": dict(family),
+            "family_sha256": p.content_hash(family), "candidates": checks,
+            "reason": pending_reason(len(traced), family["set_id"], detector.version,
+                                     len(checks))}  # fmt: skip
+
+
+def pending_reason(traces: int, set_id: str, version: str, candidates: int) -> str:
+    return (
+        f"the diagnostic {set_id} keeps {traces} final trace(s) under detector {version} and no "
+        f"candidate of its frozen family ({candidates}) passes: no analysis dose, no reading"
+    )
+
+
+def pending_fields_problems(held: Mapping[str, Any], behavior: str) -> list[str]:
+    """Why a pending manifest's fields are not a pending diagnostic of ``behavior``: its schema
+    (``PENDING_FIELDS``), the behavior's frozen family and its sha256, the diagnostic bound by
+    name and sha256, final traces, no passing candidate, and the reason its fields give."""
+    fields = {k for k in held if k not in METADATA}
+    if fields != PENDING_FIELDS:
+        return [f"the pending record has the fields {sorted(fields)}"]
+    family = FROZEN_FAMILIES.get(behavior)
+    problems = []
+    if (held["behavior"], held["family"], held["set_id"]) != (
+        behavior,
+        family,
+        (family or {}).get("set_id"),
+    ) or held["family_sha256"] != _p().content_hash(held["family"]):
+        problems.append("the pending record is not of the behavior's frozen family")
+    d = held["diagnostic"]
+    if not (isinstance(d, dict) and set(d) == {"manifest", "sha256"} and _sha(d["sha256"])):
+        problems.append("the pending record's diagnostic is not a manifest bound by sha256")
+    traced, checks = held["traced"], held["candidates"]
+    if not (isinstance(traced, list) and traced and all(isinstance(i, str) for i in traced)):
+        problems.append("the pending record holds no final trace")
+    if not (isinstance(checks, list) and len(checks) == len((family or {}).get("candidates", []))
+            and all(isinstance(c, dict) and c.get("passes") is False for c in checks)):  # fmt: skip
+        problems.append("the pending record's candidates are not its family's, none passing")
+    if not problems and held["reason"] != pending_reason(
+        len(traced), held["set_id"], held["detector_version"], len(checks)
+    ):
+        problems.append("the pending record's reason is not what its fields give")
+    return problems
+
+
+def pending_problems(root: Path, data: Mapping[str, Any], find_run: Any) -> list[str]:
+    if {k for k in data if k not in METADATA} != PENDING_FIELDS:
+        return [f"the pending record has the fields {sorted(data)}, not {sorted(PENDING_FIELDS)}"]
+    try:
+        record = pending_record(root, str(data.get("behavior")), find_run)
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError) as error:
+        return [str(error)]
+    mine = {k: v for k, v in data.items() if k not in METADATA}
+    return [] if mine == record else ["the pending record is not what its evidence gives"]
+
+
+def write_pending(root: Path, behavior: str, find_run: Any) -> dict:
+    """The pending diagnostic's manifest, recomputed and written once."""
+    data = pending_record(root, behavior, find_run)
+    path = pending_path(root, behavior)
+    if path.exists():
+        raise ValueError(f"{path} exists: a pending diagnostic's closure is written once")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    return data
+
+
+def committed_pending(root: Path, behavior: str, find_run: Any) -> dict[str, Any] | None:
+    """The behavior's committed pending diagnostic (``manifests.committed_json``), recomputed;
+    None when there is none."""
+    from .manifests import committed_json
+
+    path = pending_path(root, behavior)
+    if not path.exists():
+        return None
+    data = committed_json(path, "the pending diagnostic's closure", root)
+    problems = pending_problems(root, data, find_run)
     if problems:
         raise ValueError(f"{path}: {'; '.join(problems)}")
     return data

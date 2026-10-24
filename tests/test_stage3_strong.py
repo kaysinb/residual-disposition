@@ -972,3 +972,127 @@ def test_a_terminal_contamination_closes_the_entry_with_no_reading(continued, pa
         stored = {**e, "terminal": {**e["terminal"], "sha256": sha}, "reason": held["reason"]}
         assert problem in " ".join(CS._entry_problems(panel_repo, "example_link", stored,
                                                       T5.RULES, find_run))  # fmt: skip
+
+
+def test_a_pending_diagnostic_closes_the_entry_with_no_reading(continued, panel_repo,
+                                                               monkeypatch):  # fmt: skip
+    """§12.7 Stage 3, a diagnostic that stays pending: the behavior's committed diagnostic of
+    the set its family was frozen for, its evidence complete but for its traces, final traces
+    under the current detector and no frozen candidate passing, is recomputed and committed
+    (bound to the diagnostic and the family by sha256); the entry closes with no reading. An
+    empty family closes a final trace at once; missing evidence, a passing candidate, no trace
+    or a revision since are no closure."""
+    import hashlib
+
+    family = {"set_id": "adl000000001", "candidates": [], "frozen": "2026-10-24"}
+    path = S3.diagnostic_path(panel_repo, "example_link", True)
+    manifest = {"behavior": "example_link", "detector_version": CURRENT,
+                "set_id": "adl000000001", "traced": ["item00000001"],
+                "types": {S3.ADL: {}}}  # fmt: skip
+    commit(panel_repo, path, manifest, "the pending diagnostic")
+    for name in ("committed_adl_sources", "committed_sources"):
+        monkeypatch.setattr(S3, name, lambda *a: {"sha256": "s" * 64})
+    cleared = ["the detector is the set's own: no revision clears its traces"]
+    monkeypatch.setattr(S3, "_manifest_problems", lambda *a: list(cleared))
+    monkeypatch.setattr(S3, "revision_problems", lambda *a: list(cleared))
+
+    def write():
+        return S3.write_pending(panel_repo, "example_link", find_run)
+
+    with pytest.raises(ValueError, match="no family frozen before a review"):
+        write()
+    monkeypatch.setitem(S3.FROZEN_FAMILIES, "example_link", {**family, "set_id": "other0000000"})
+    with pytest.raises(ValueError, match="no committed diagnostic"):
+        write()  # the family's set is not this diagnostic
+    monkeypatch.setitem(S3.FROZEN_FAMILIES, "example_link", family)
+    incomplete = ["the diagnostic's adl_corpus items are not complete", *cleared]
+    monkeypatch.setattr(S3, "_manifest_problems", lambda *a: list(incomplete))
+    with pytest.raises(ValueError, match="evidence is not complete"):
+        write()  # missing evidence is no closure
+    monkeypatch.setattr(S3, "_manifest_problems", lambda *a: [])
+    monkeypatch.setattr(S3, "revision_problems", lambda *a: [])
+    with pytest.raises(ValueError, match="evidence is not complete"):
+        write()  # its traces cleared by an accepted revision: not pending
+    monkeypatch.setattr(S3, "_manifest_problems", lambda *a: list(cleared))
+    monkeypatch.setattr(S3, "revision_problems", lambda *a: list(cleared))
+    spec = {"kind": "regex_count", "pattern": "never", "min_count": 1, "flags": "i"}
+    checks = {"version": "cand00000001", "unprompted": [0, 300], "disagreements": 0}
+    monkeypatch.setattr(S3, "_candidate_checks", lambda *a: {**checks, "passes": True})
+    monkeypatch.setitem(S3.FROZEN_FAMILIES, "example_link", {**family, "candidates": [spec]})
+    with pytest.raises(ValueError, match="frozen candidate cand00000001 passes"):
+        write()
+    monkeypatch.setattr(S3, "_candidate_checks",
+                        lambda *a: {**checks, "disagreements": 1, "passes": False})  # fmt: skip
+    one = S3.pending_record(panel_repo, "example_link", find_run)
+    assert [c["passes"] for c in one["candidates"]] == [False]
+    assert one["reason"].endswith("frozen family (1) passes: no analysis dose, no reading")
+    monkeypatch.setitem(S3.FROZEN_FAMILIES, "example_link", family)
+    revised = {"detector_version": "other0000000"}
+    for changed, problem in (({"traced": []}, "no final trace"), (revised, "not pending under")):
+        commit(panel_repo, path, {**manifest, **changed}, "another diagnostic")
+        with pytest.raises(ValueError, match=problem):
+            write()
+    commit(panel_repo, path, manifest, "the pending diagnostic")
+    data = write()
+    held = json.loads(path.read_text())
+    sha = hashlib.sha256(path.read_bytes()).hexdigest()
+    assert data["diagnostic"] == {"manifest": path.name, "sha256": sha}
+    assert (data["set_id"], data["traced"], data["candidates"]) == (
+        "adl000000001", held["traced"], [])  # fmt: skip
+    assert data["family"] == family and data["family_sha256"] == pipeline.content_hash(family)
+    with pytest.raises(ValueError, match="written once"):
+        write()
+    with pytest.raises(RuntimeError, match="is not committed"):
+        CS.panel_entry("example_link", {}, panel_repo, T5.RULES, find_run, lambda b: {})
+    git(panel_repo, "add", "manifests")
+    git(panel_repo, "commit", "-q", "-m", "pending")
+    e = CS.panel_entry("example_link", {}, panel_repo, T5.RULES, find_run, lambda b: {})
+    assert (e["status"], e["reading"], e["diagnostic"], e["reason"]) == (
+        CS.CLOSED, None, CS.NOT_APPLICABLE, data["reason"])  # fmt: skip
+    assert e["pending"]["manifest"] == "stage3_pending_example_link.json"
+    with pytest.raises(ValueError, match="pending diagnostic .* closes it"):
+        CS.panel_entry("example_link", {"screening": {}}, panel_repo, T5.RULES, find_run,
+                       lambda b: {})  # fmt: skip
+    record = CS.panel_contracts_record({"behaviors": {"example_link": {}}}, panel_repo, T5.RULES,
+                                       find_run, lambda b: {})  # fmt: skip
+    CS.write_panel_contracts(panel_repo, record, T5.RULES, find_run, lambda b: {})
+    git(panel_repo, "add", "manifests")
+    git(panel_repo, "commit", "-q", "-m", "contracts")
+    found = CS.committed_contract(panel_repo, "example_link", T5.RULES, find_run, lambda b: {})
+    assert found["entry"] == e
+    assert CS._entry_problems(panel_repo, "example_link", e, T5.RULES, find_run) == []
+    for bad, problem in (({"reason": "x"}, "reason is not its pending diagnostic's"),
+                         ({"reading": "stack"}, "no reading and no diagnostic"),
+                         ({"pending": {**e["pending"], "sha256": "0" * 64}},
+                          "not the committed one it names")):  # fmt: skip
+        assert problem in " ".join(CS._entry_problems(panel_repo, "example_link", {**e, **bad},
+                                                      T5.RULES, find_run))  # fmt: skip
+    # a stored entry bound to a pending record of another identity or schema refuses
+    pending = S3.pending_path(panel_repo, "example_link")
+    frozen = "not of the behavior's frozen family"
+    for other, problem in (({"behavior": "eli5"}, frozen),
+                           ({"family": {**family, "frozen": "2026-10-25"}}, frozen),
+                           ({"family_sha256": "0" * 64}, frozen),
+                           ({"set_id": "other0000000"}, frozen),
+                           ({"repair_generation": 2}, "another behavior, repair generation"),
+                           ({"traced": []}, "holds no final trace"),
+                           ({"candidates": [{"passes": True}]}, "none passing"),
+                           ({"diagnostic": {"manifest": path.name}}, "bound by sha256"),
+                           ({"reason": "pending"}, "reason is not what its fields give"),
+                           ({"extra": 1}, "has the fields")):  # fmt: skip
+        pending.write_text(json.dumps({**data, **other}))
+        git(panel_repo, "add", "manifests")
+        git(panel_repo, "commit", "-q", "-m", "a contradictory pending record")
+        held = json.loads(pending.read_text())
+        sha = hashlib.sha256(pending.read_bytes()).hexdigest()
+        stored = {**e, "pending": {**e["pending"], "sha256": sha}, "reason": held["reason"]}
+        assert problem in " ".join(CS._entry_problems(panel_repo, "example_link", stored,
+                                                      T5.RULES, find_run))  # fmt: skip
+
+
+def test_myth_fact_s_frozen_family_is_empty_for_its_adl_corpus_diagnostic():
+    """§12.3.1 (2026-10-24): the family frozen before the person's review of myth_fact's
+    ADL-corpus diagnostic is empty, a decision; no other behavior has one."""
+    assert S3.FROZEN_FAMILIES == {
+        "myth_fact": {"set_id": "c1fa2bf614fd", "candidates": [], "frozen": "2026-10-24"}
+    }
