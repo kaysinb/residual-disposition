@@ -724,3 +724,24 @@ def test_an_arbiter_for_an_undisputed_round_is_refused(study):
     arbiter_exports(out, [], work / "round0" / "kit" / "annotators")
     with pytest.raises(ValueError, match="an arbiter for a round without a dispute"):
         S.verify_packages(work, run, packages(tmp))
+
+
+def test_a_changed_annotators_kit_stops_the_import_before_the_arbiter_s_kit(study):
+    script, base, tmp, run, work = study
+    script.main([*base, "round"])
+    d = work / "round0"
+    rows = items(d / "items.jsonl")
+    labels_ = {
+        i["item_id"]: {
+            "present": i["item_id"] == rows[1]["item_id"],
+            "unanimous": i["item_id"] != rows[1]["item_id"],
+        }
+        for i in rows
+    }
+    out = tmp / "exports"
+    annotator_exports(out, labels_, d / "kit" / "annotators")
+    path = d / "kit" / "annotators" / "instructions.md"
+    path.write_text(path.read_text() + "\nAn added sentence.\n")
+    with pytest.raises(SystemExit, match="not the kit its round's records give"):
+        script.main([*base, "import-annotators", "--exports", str(out)])
+    assert not (d / "kit" / "arbiter").exists()

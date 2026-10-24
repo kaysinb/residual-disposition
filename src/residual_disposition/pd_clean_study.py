@@ -837,7 +837,7 @@ def text_shas(kit: Mapping[str, str]) -> dict[str, str]:
     return {k: hashlib.sha256(v.encode()).hexdigest() for k, v in sorted(kit.items())}
 
 
-def _kept_kit(d: Path, kit: Mapping[str, str]) -> None:
+def check_kit(d: Path, kit: Mapping[str, str]) -> None:
     """A kit kept in the record must be exactly the one rebuilt."""
     found = sorted(p.name for p in d.iterdir()) if d.is_dir() else []
     if found != sorted(kit) or any((d / k).read_text() != v for k, v in kit.items()):
@@ -897,12 +897,12 @@ def round_labels(st: Study, d: Path) -> tuple[dict, dict]:
     rubric = st.rubric_text()
     items = [json.loads(x) for x in (d / "items.jsonl").read_text().splitlines() if x.strip()]
     kit = annotator_kit(rubric, items)
-    _kept_kit(d / "kit" / "annotators", kit)
+    check_kit(d / "kit" / "annotators", kit)
     annotators = read_annotators(d / "exports", st.plan["ensemble"], items, kit)
     ids = disputed(items, annotators)
     akit = arbiter_kit(rubric, items, annotators) if ids else {}
     if ids:
-        _kept_kit(d / "kit" / "arbiter", akit)
+        check_kit(d / "kit" / "arbiter", akit)
     elif (d / "kit" / "arbiter").exists():
         raise SystemExit(f"{d}: an arbiter's kit for a round without a dispute")
     arbiter = read_arbiter(d / "exports", st.plan["ensemble"], akit, ids)

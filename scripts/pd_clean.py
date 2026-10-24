@@ -337,6 +337,7 @@ def cmd_import_annotators(st: Study, exports: Path) -> None:
         keep(Path(exports) / name, d / "exports" / name)
     items, rubric = round_items(d), st.rubric_text()
     kit = S.annotator_kit(rubric, items)
+    S.check_kit(d / "kit" / "annotators", kit)  # the kit as issued, before anything follows it
     annotators = S.read_annotators(d / "exports", st.plan["ensemble"], items, kit)
     ids = S.disputed(items, annotators)
     if not ids:

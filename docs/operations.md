@@ -1501,7 +1501,9 @@ Decided after Stage 1 (preregistration §12.3.7,
           labels must be the plan's merge of its kept exports (three annotators and the
           arbiter, `pd_clean_stage3.yaml` `ensemble`). Each review's
           labels must be its page's kept export, and the page's log must name the items it
-          showed by sha256;
+          showed by sha256. The models, runners and independence that the manifests state are
+          the operator's recorded declarations. The sha256s establish the exact materials those
+          declarations refer to; they are not a cryptographic proof of how the work was run;
         - the interpreter's 80 sample slots per package;
         - the judge's own-target labels (v4 lens, v4-j3 PD-clean, standard tier);
         - the `category-v1` grade of every counted hypothesis, with pinned definitions;
