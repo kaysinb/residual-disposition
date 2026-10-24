@@ -44,6 +44,7 @@ from .records import DetectorObs, RecordWriter, RelearnCurve, RelearnEval, write
 from .seeding import derive_seed
 from .states import Lora, StateStore, concatenate, write_lora
 from .training import (
+    CLASSIFIED_FAILURES,
     Example,
     LoraSpec,
     Recipe,
@@ -285,9 +286,19 @@ def relearn(
                 device=device,
                 stop_on_nonfinite=True,  # a relearning run that diverges fails, classified
             )
-        finally:
+        except CLASSIFIED_FAILURES as error:
+            if not keep_awake:
+                try:
+                    generator.wake_up()
+                except Exception as cleanup:  # the training failure stays the run's cause
+                    error.cleanup_error = f"{type(cleanup).__name__}: {cleanup}"[:500]
+            raise
+        except BaseException:
             if not keep_awake:
                 generator.wake_up()
+            raise
+        if not keep_awake:
+            generator.wake_up()
         stopped_at = summary["stopped_at"]
     if stop_after is not None:
         stopped_at = latched[0] if latched else None

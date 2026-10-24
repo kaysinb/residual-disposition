@@ -1475,6 +1475,19 @@ Decided after Stage 1 (preregistration §12.3.7,
       - **Certificate.** Its records are found by their cells' metadata, merged whole and checked
         against the trusted inputs the committed k*, the Y₂ manifest and the lineage give. Each
         record's sha256 is kept, and each sign test with its interval, coverage and median.
+      - **A relearning run's failure cause** (`pipeline.FAILURE_RECORD`, `failure.json`). Every
+        relearning run (`certificate.relearn`, through `relearn_state` or the engine check)
+        stops at a non-finite training loss as a classified divergence. A run through
+        `relearn_state` records that, or an out-of-memory error of its training step, as its
+        cause; a failing wake-up after it is recorded beside the cause and never replaces it.
+        The engine check's runs stop the same way but record no cause. The scope covers:
+        - the certified lineages' k\* and certificate;
+        - Stage 2's and Stage 5's k\*, certificates, Y-alone runs and H relearning;
+        - path B's relearning and the engine check.
+
+        Suppression and implant training are unchanged, because only relearning asks `fit` to stop
+        at a non-finite loss. The panel's terminal stops read this record for the certified
+        lineages alone; no other caller's rule changes with it.
       - **Readers.** The readers' manifests (`stage3_readers_<lineage>.json`) are read through
         their recomputation verifier. Their binding, flags, X's validity and values are checked;
         an invalid X needs p₃ = p₄ = 1.

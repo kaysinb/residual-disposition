@@ -106,3 +106,73 @@ def test_a_run_that_completes_records_no_cause(tmp_path):
     with pipeline._classified_failure(run):
         pass
     assert not (run.dir / pipeline.FAILURE_RECORD).exists()
+
+
+def _relearn(monkeypatch, failure, wake_up_error=None, keep_awake=False, calls=None):
+    """certificate.relearn up to its training, with the training failing as given and the
+    engine's wake-up after it failing too when asked."""
+    calls = [] if calls is None else calls
+
+    def wake_up():
+        calls.append("wake_up")
+        if wake_up_error is not None:
+            raise wake_up_error
+
+    def fail(*a, **k):
+        raise failure
+
+    monkeypatch.setattr(certificate, "attach_adapters", lambda *a, **k: SimpleNamespace())
+    monkeypatch.setattr(certificate, "relearn_recipe", lambda settings: None)
+    monkeypatch.setattr(certificate, "fit", fail)
+    generator = SimpleNamespace(
+        generate=lambda *a, **k: [SimpleNamespace(text="t", key="k", sample=0)],
+        sleep=lambda: calls.append("sleep"), wake_up=wake_up,
+        reset_prefix_cache=lambda: None,
+    )  # fmt: skip
+    settings = SimpleNamespace(threshold=0.5, sampling=None, lora=None, learning_rate=1e-5,
+                               evaluation_steps=lambda: [2, 4])  # fmt: skip
+    certificate.relearn(
+        store=SimpleNamespace(loras=lambda sid: [], verify=lambda sid: None), state_id="s",
+        base=None, tokenizer=None, generator=generator,
+        behavior=SimpleNamespace(detector=lambda text: False), settings=settings,
+        relearn_seed=0, active_rate=0.8, train_examples=[], eval_requests=[], chat_kwargs={},
+        run_id="r", writer=SimpleNamespace(write=lambda rows: None, run_dir=None),
+        work_dir=None, keep_awake=keep_awake,
+    )  # fmt: skip
+    return calls
+
+
+@pytest.mark.parametrize("failure", [training.TrainingOutOfMemory("CUDA out of memory"),
+                                     training.TrainingDivergence("a non-finite loss")])  # fmt: skip
+def test_a_failing_wake_up_never_replaces_the_training_failure(monkeypatch, tmp_path, failure):
+    with pytest.raises(type(failure)) as raised:
+        _relearn(monkeypatch, failure, wake_up_error=RuntimeError("the engine did not wake"))
+    assert raised.value is failure
+    assert "the engine did not wake" in raised.value.cleanup_error
+    run = _run(tmp_path, "run")
+    with pytest.raises(type(failure)), pipeline._classified_failure(run):
+        raise raised.value
+    record = json.loads((run.dir / pipeline.FAILURE_RECORD).read_text())
+    assert record["outcome"] == failure.outcome
+    assert "the engine did not wake" in record["cleanup_error"]
+
+
+def test_the_engine_wakes_after_a_classified_failure(monkeypatch):
+    failure = training.TrainingOutOfMemory("CUDA out of memory")
+    calls: list[str] = []
+    with pytest.raises(training.TrainingOutOfMemory):
+        _relearn(monkeypatch, failure, calls=calls)
+    assert calls == ["sleep", "wake_up"]
+    awake: list[str] = []
+    with pytest.raises(training.TrainingOutOfMemory):
+        _relearn(monkeypatch, failure, keep_awake=True, calls=awake)
+    assert awake == []
+
+
+def test_an_unclassified_failure_keeps_its_old_cleanup(monkeypatch):
+    """Any other error still wakes the engine; a failing wake-up then surfaces as before."""
+    with pytest.raises(RuntimeError, match="did not wake"):
+        _relearn(monkeypatch, ConnectionError("network"),
+                 wake_up_error=RuntimeError("did not wake"))  # fmt: skip
+    with pytest.raises(ConnectionError):
+        _relearn(monkeypatch, ConnectionError("network"))

@@ -1231,7 +1231,8 @@ FAILURE_RECORD = "failure.json"  # a failed relearning run's classified cause
 def _classified_failure(run: Run):
     """A relearning run's classified training failure (§12.7: out of memory or divergence of
     the training step itself, ``training.CLASSIFIED_FAILURES``) is recorded in the run as
-    ``FAILURE_RECORD`` before the run is marked failed. Nothing else is classified: an
+    ``FAILURE_RECORD`` before the run is marked failed, with any error of the cleanup after it
+    (``cleanup_error``), which never replaces the cause. Nothing else is classified: an
     out-of-memory error while loading or generating, an engine, network or loading error, an
     interruption, whatever an earlier step logged. The cell's identity is unchanged."""
     from .training import CLASSIFIED_FAILURES
@@ -1239,9 +1240,9 @@ def _classified_failure(run: Run):
     try:
         yield
     except CLASSIFIED_FAILURES as error:
-        run.path(FAILURE_RECORD).write_text(
-            json.dumps({"outcome": error.outcome, "error": str(error)[:500]}) + "\n"
-        )
+        record = {"outcome": error.outcome, "error": str(error)[:500],
+                  "cleanup_error": getattr(error, "cleanup_error", None)}  # fmt: skip
+        run.path(FAILURE_RECORD).write_text(json.dumps(record) + "\n")
         raise
 
 
