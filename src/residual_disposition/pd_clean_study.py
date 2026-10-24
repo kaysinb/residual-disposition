@@ -282,6 +282,10 @@ class Study:
             self.check(labels, d, rounds=True)
             for iid, label in labels["labels"].items():
                 item = item_of(mapping, iid, "round", d, self.pool_keys)
+                if iid in out:  # an item is labeled by one round, never relabeled
+                    raise SystemExit(
+                        f"{d.name}: item {iid} is labeled again (by {out[iid]['round']})"
+                    )
                 out[iid] = {**item, **label, "round": d.name}
         return out
 
@@ -301,6 +305,10 @@ class Study:
             self.check(labels, d)
             for iid, label in labels["labels"].items():
                 item = item_of(mapping, iid, "review", d, self.pool_keys)
+                if iid in out:  # an item is reviewed once, never again
+                    raise SystemExit(
+                        f"{d.name}: item {iid} is reviewed again (by {out[iid]['review']})"
+                    )
                 out[iid] = {**item, **label, "review": d.name}
         return out, sampled
 
@@ -356,19 +364,23 @@ class Study:
                             out[iid] = (s, config, row)
         return out
 
-    def met(self) -> set[str]:
-        """The item ids every adjudicated state's current selection met (its window)."""
-        final, out = self.final(), set()
+    def met(self, only: set[str] | None = None) -> set[str]:
+        """The item ids every adjudicated state's current selection met (its window); of the
+        records ``only`` names, when given."""
+        final, out = self.final(only), set()
         for s in self.states:
             if s["adjudicate"]:
                 out |= C.encountered(self.selection(s, final), s["state"])
         return out
 
-    def review_needs(self) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    def review_needs(
+        self, only: set[str] | None = None
+    ) -> tuple[dict[str, dict[str, Any]], list[str]]:
         """The items the researcher must still review (id → their record, with why), and the
-        groups ("<behavior>/<package type>") whose negative sample this review draws."""
-        ensemble, (reviewed, sampled) = self.ensemble(), self.reviews()
-        final, needs, draw, met = self.final(), {}, [], self.met()
+        groups ("<behavior>/<package type>") whose negative sample this review draws; as of the
+        records ``only`` names, when given."""
+        ensemble, (reviewed, sampled) = self.ensemble(only), self.reviews(only)
+        final, needs, draw, met = self.final(only), {}, [], self.met(only)
         for iid, label in ensemble.items():
             if iid in reviewed or iid not in met:  # labeled ahead, below every window
                 continue
@@ -539,6 +551,13 @@ def sample_problems(st: Study) -> list[str]:
         for s in states.values():
             if C.unlabeled(st.selection(s, final), s["state"], final):
                 problems.append(f"{d.name}: drawn while {s['state']} had unlabeled items")
+        needs, draw = st.review_needs(only)  # the whole review due then, drawn again
+        due = {iid: n["why"] for iid, n in needs.items()}
+        if due != {iid: v["why"] for iid, v in mapping["items"].items()} or sorted(draw) != sorted(
+            mapping.get("sampled_groups") or []
+        ):  # fmt: skip
+            problems.append(f"{d.name}: not the review due after its records (disputes, traces, "
+                            "sample)")  # fmt: skip
         samples = {iid: v for iid, v in mapping["items"].items() if v.get("why") == "sample"}
         for group in mapping.get("sampled_groups") or []:
             if group not in states or group in drawn:

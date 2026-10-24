@@ -316,3 +316,90 @@ def test_a_round_item_naming_no_row_of_its_pool_is_refused(study):
     path.write_text(json.dumps(mapping))
     with pytest.raises(ValueError, match="not its own pool row"):
         S.verify_packages(work, run, packages(tmp))
+
+
+def complete_with_trace(study):
+    """A study whose round 0 found one trace, refilled by round 1, and whose review holds it."""
+    script, base, tmp, run, work = study
+    script.main([*base, "round"])
+    first = items(work / "round0" / "items.jsonl")[0]["item_id"]
+    label_round(script, base, tmp, 0, trace=first)
+    script.main([*base, "round"])
+    label_round(script, base, tmp, 1)
+    script.main([*base, "review"])
+    mapping = json.loads((work / "review0" / "mapping.json").read_text())
+    assert mapping["items"][first]["why"] == "trace"
+    rv = [{"item_id": i, "present": i == first} for i in mapping["items"]]
+    script.main([*base, "import-review", "--labels", str(labels(tmp / "rv.jsonl", rv))])
+    script.main([*base, "package"])
+    return first
+
+
+def test_a_reviewed_trace_cannot_be_reviewed_again(study):
+    """A later review, validly bound, that labels an already reviewed trace absent would bring
+    it back into the selection: an item is reviewed once."""
+    script, base, tmp, run, work = study
+    trace = complete_with_trace(study)
+    review0 = json.loads((work / "review0" / "mapping.json").read_text())
+    labels0 = json.loads((work / "review0" / "labels.json").read_text())
+    d = work / "review1"
+    d.mkdir()
+    after = {"round": ["round0", "round1"], "review": ["review0"]}
+    (d / "mapping.json").write_text(json.dumps({
+        "binding": review0["binding"], "after": after, "sampled_groups": [],
+        "items": {trace: review0["items"][trace]}}))  # fmt: skip
+    (d / "labels.json").write_text(json.dumps({
+        "binding": labels0["binding"], "source": labels0["source"],
+        "labels": {trace: {"present": False, "note": None}}}))  # fmt: skip
+    with pytest.raises(ValueError, match="reviewed again"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+def test_a_review_without_a_due_trace_is_refused(study):
+    """A review must hold every item due then, its disputes and traces as well as its sample: a
+    trace left out of its review and reviewed later instead is refused."""
+    script, base, tmp, run, work = study
+    trace = complete_with_trace(study)
+    review0 = json.loads((work / "review0" / "mapping.json").read_text())
+    labels0 = json.loads((work / "review0" / "labels.json").read_text())
+    item, label = review0["items"][trace], labels0["labels"][trace]
+
+    def drop(mapping, labels_):
+        del mapping["items"][trace], labels_["labels"][trace]
+
+    _forge(work, drop)
+    d = work / "review1"
+    d.mkdir()
+    after = {"round": ["round0", "round1"], "review": ["review0"]}
+    (d / "mapping.json").write_text(json.dumps({
+        "binding": review0["binding"], "after": after, "sampled_groups": [],
+        "items": {trace: item}}))  # fmt: skip
+    (d / "labels.json").write_text(json.dumps({**labels0, "labels": {trace: label}}))
+    with pytest.raises(ValueError, match="review0: not the review due"):
+        S.verify_packages(work, run, packages(tmp))
+
+
+def test_a_round_item_labeled_twice_is_refused(study):
+    script, base, tmp, run, work = study
+    complete_with_trace(study)
+    round0 = json.loads((work / "round0" / "mapping.json").read_text())
+    labels0 = json.loads((work / "round0" / "labels.json").read_text())
+    iid = next(iter(round0["items"]))
+    d = work / "round2"
+    d.mkdir()
+    (d / "mapping.json").write_text(json.dumps({**round0, "items": {iid: round0["items"][iid]}}))
+    (d / "labels.json").write_text(
+        json.dumps(
+            {
+                **labels0,
+                "labels": {
+                    iid: {
+                        **labels0["labels"][iid],
+                        "present": not labels0["labels"][iid]["present"],
+                    }
+                },
+            }
+        )
+    )
+    with pytest.raises(ValueError, match="labeled again"):
+        S.verify_packages(work, run, packages(tmp))
