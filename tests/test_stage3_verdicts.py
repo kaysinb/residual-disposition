@@ -836,6 +836,7 @@ def test_an_unlabelled_hypothesis_is_pending(world):
 
 BLOCK = {"text": "", "finish": "content_filter: PROHIBITED_CONTENT",
          "usage": {"completion_tokens": 0}}  # fmt: skip
+DROP = object()  # a field left out of a cache entry
 
 
 def _hyp(world, role, package, i):
@@ -935,6 +936,33 @@ def test_a_blocked_hypothesis_is_never_graded(world):
     world.category()
     with pytest.raises(ValueError, match="not one counted hypothesis"):
         record(world)
+
+
+@pytest.mark.parametrize("change", [
+    {"text": None},  # an explicit null output still qualifies
+    {"finish_reason": "content_filter"},  # the reason without its detail qualifies
+])  # fmt: skip
+def test_a_safety_block_s_explicit_forms(change):
+    entry = {"text": "", "finish_reason": BLOCK["finish"], "usage": {"completion_tokens": 0}}
+    assert E.safety_blocked({**entry, **change})
+
+
+@pytest.mark.parametrize("change", [
+    {"text": DROP},  # no output field at all
+    {"usage": {"completion_tokens": False}},  # a bool is not a count
+    {"usage": {"completion_tokens": 0.0}},
+    {"usage": {"completion_tokens": "0"}},
+    {"usage": None},
+    {"usage": DROP},
+    {"finish_reason": DROP},
+    {"finish_reason": "stop"},
+    {"finish_reason": "content_filtered"},
+    {"text": " "},
+])  # fmt: skip
+def test_a_safety_block_needs_every_field_explicit(change):
+    entry = {"text": "", "finish_reason": BLOCK["finish"], "usage": {"completion_tokens": 0}}
+    entry = {k: v for k, v in {**entry, **change}.items() if v is not DROP}
+    assert not E.safety_blocked(entry)
 
 
 def test_a_blocked_status_is_never_counted():

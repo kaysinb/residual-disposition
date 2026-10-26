@@ -674,14 +674,17 @@ def slot(cache: Any, keys: Sequence[str], body: Mapping[str, Any], parse: Any, w
 
 
 def safety_blocked(entry: Mapping[str, Any]) -> bool:
-    """A retained answer the provider's safety filter blocked: an empty output, zero completion
-    tokens and an explicit safety-filter finish reason."""
-    finish, usage = entry.get("finish_reason"), entry.get("usage") or {}
+    """A retained answer the provider's safety filter blocked: an explicit empty output, an
+    explicit integer zero of completion tokens and an explicit safety-filter finish reason."""
+    finish, usage = entry.get("finish_reason"), entry.get("usage")
+    tokens = usage.get("completion_tokens") if isinstance(usage, Mapping) else None
     return (
-        entry.get("text") in (None, "")
+        "text" in entry
+        and entry["text"] in (None, "")
         and isinstance(finish, str)
         and finish.split(":", 1)[0].strip() == SAFETY_FINISH
-        and usage.get("completion_tokens") == 0
+        and type(tokens) is int
+        and tokens == 0
     )
 
 
