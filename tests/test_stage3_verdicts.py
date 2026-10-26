@@ -294,6 +294,7 @@ class World:
         monkeypatch.setattr(pd_clean_study, "verify_packages", self.verify_packages)
         self.lens, self.pd = lens_counts(), pd_counts()
         self.hyps, self.approved, self.pool_draws, self.xcont = {}, {}, [], None
+        self.blocked = set()
         self.cells = {}
         self.lineage = E.Lineage(self.identity, SimpleNamespace(), {"lineage": "s"}, None)
 
@@ -443,12 +444,12 @@ class World:
         return [(r, k, s[r], k, f"{k}-{r}", json.dumps({"c": [r, k]}, sort_keys=True))
                 for r, k in E.pd_inventory()]  # fmt: skip
 
-    def entry(self, cache, key, body, text, tier, version="x"):
+    def entry(self, cache, key, body, text, tier, version="x", finish="stop", usage=None):
         c = JudgeCache(self.caches[cache])
         path = c.path(key)
         path.parent.mkdir(parents=True, exist_ok=True)
         data = {"key": key, "rubric_version": version, "body": body, "text": text,
-                "finish_reason": "stop", "usage": {}, "cached_at": "t"}  # fmt: skip
+                "finish_reason": finish, "usage": usage or {}, "cached_at": "t"}  # fmt: skip
         if tier is not None:
             data["service_tier"] = tier
         path.write_text(json.dumps(data))
@@ -517,9 +518,11 @@ class World:
         return ("avoids_behavior", True) if i % 7 == 0 else ("other", False)
 
     def judge(self, kind, *, tier="standard", target=None, skip=None, refused=(),
-              retry_valid=()):  # fmt: skip
+              retry_valid=(), blocked=None):  # fmt: skip
         """The judge run; ``refused`` labels' strict answers refused first and given on their
-        retry; ``retry_valid`` labels that name their retry although the first answer is valid."""
+        retry; ``retry_valid`` labels that name their retry although the first answer is valid;
+        ``blocked`` {response id: (first, retry)} strict attempts as cache fields (None: no
+        entry) with no label, as judge.py leaves a hypothesis whose strict slot is refused."""
         from residual_disposition.judge import JudgeItem, load_targets, stage_requests
 
         name, version = f"{kind}-judge", E.RUBRICS[kind]
@@ -541,6 +544,18 @@ class World:
                 continue
             strict, lenient = self.designed(role, package, i)
             requests = stage_requests([JudgeItem(rid, behavior, text_target, h)], settings)[0]
+            if rid in (blocked or {}):
+                self.blocked.add(rid)
+                r = requests.strict
+                retry = request_key(f"{r.rubric_version}{E.RETRY}", r.body)
+                for key, fields in zip((r.key, retry), blocked[rid], strict=True):
+                    if fields is not None:
+                        self.entry("judge", key, r.body, fields.get("text", ""),
+                                   fields.get("tier", tier), finish=fields.get("finish"),
+                                   usage=fields.get("usage"))  # fmt: skip
+                self.entry("judge", requests.lenient.key, requests.lenient.body,
+                           "yes" if lenient else "no", tier)  # fmt: skip
+                continue
             keys = []
             for request, text in ((requests.strict, json.dumps({"label": strict,
                                                                   "confident": True})),
@@ -572,7 +587,7 @@ class World:
         lines = []
         for rid, (role, package, i, h) in self.hyps.items():
             strict, lenient = self.designed(role, package, i)
-            if not E.counted(strict, lenient):
+            if not E.counted(strict, lenient) or rid in self.blocked:
                 continue
             behaviors = [wrong if wrong and role == "L" else self.identity["behavior"]]
             req = category_request(h, definitions, spec, max_tokens=2048)
@@ -817,6 +832,130 @@ def test_an_unlabelled_hypothesis_is_pending(world):
     world.category()
     with pytest.raises(G.Pending, match="without their label"):
         record(world)
+
+
+BLOCK = {"text": "", "finish": "content_filter: PROHIBITED_CONTENT",
+         "usage": {"completion_tokens": 0}}  # fmt: skip
+
+
+def _hyp(world, role, package, i):
+    return next(rid for rid, (r, p, j, _) in world.hyps.items()
+                if (r, p, j) == (role, package, i))  # fmt: skip
+
+
+def _blocked_world(world, specs):
+    """A reading whose strict attempts of the given hypotheses are ``specs`` (judge's
+    ``blocked``), keyed by (role, package, sample)."""
+    world.pod()
+    world.reading("lens")
+    world.reading("pd")
+    blocked = {_hyp(world, *k): v for k, v in specs.items()}
+    world.judge("lens", blocked=blocked)
+    world.judge("pd")
+    world.category()
+    return blocked
+
+
+def test_a_strict_answer_blocked_twice_counts_as_not_naming(world):
+    """§12.4.5, 2026-10-26: both strict attempts blocked by the safety filter and a valid
+    lenient yes: not counted under rule C, the denominator 80, reported with its interval."""
+    d1 = E.DRAWS[1]
+    _blocked_world(world, {("L", d1, 0): (BLOCK, BLOCK), ("H_s", d1, 0): (BLOCK, BLOCK)})
+    data = record(world)
+    assert data["status"] == "complete"
+    assert data["counts"]["lens"][f"L/{d1}"] == 69 and data["counts"]["lens"][f"H_s/{d1}"] == 4
+    found = data["strict_safety_blocked"]
+    assert (found["items"], found["unique_strict_requests"]) == (2, 2)
+    assert found["packages"][f"L/{d1}"] == {"count": 69, "blocked": 1, "blocked_lenient_yes": 1,
+                                            "interval": ["69/80", "7/8"]}  # fmt: skip
+    assert found["contrasts"][f"{d1}: R(L) - R(H_s)"] == {"value": "13/16",
+                                                          "bounds": ["4/5", "33/40"]}  # fmt: skip
+    assert f"{d1}: R(L) - R(X)" in found["contrasts"]
+    assert data["retries"]["judge"] == 0
+
+
+def test_an_unblocked_reading_reports_no_block(world):
+    world.build()
+    assert record(world)["strict_safety_blocked"] == {
+        "items": 0, "unique_strict_requests": 0, "response_ids": [], "packages": {},
+        "contrasts": {}}  # fmt: skip
+
+
+@pytest.mark.parametrize("retry", [
+    None,  # no retry: its one registered retry is due
+    {**BLOCK, "finish": "stop"},  # an empty answer without the filter's metadata
+    {**BLOCK, "usage": {}},  # no completion count
+    {**BLOCK, "usage": {"completion_tokens": 3}},
+    {**BLOCK, "text": "x"},  # an output under the filter's reason
+    {**BLOCK, "tier": "flex"},  # off the frozen tier
+    {"text": "not json", "finish": "stop", "usage": {"completion_tokens": 2}},  # a refusal
+])  # fmt: skip
+def test_only_two_safety_blocked_attempts_qualify(world, retry):
+    _blocked_world(world, {("L", E.DRAWS[1], 0): (BLOCK, retry)})
+    with pytest.raises(G.Pending, match="without their label"):
+        record(world)
+
+
+def test_a_blocked_strict_slot_needs_a_valid_lenient_answer(world):
+    world.pod()
+    world.reading("lens")
+    world.reading("pd")
+    rid = _hyp(world, "L", E.DRAWS[1], 0)
+    world.judge("lens", blocked={rid: (BLOCK, BLOCK)})
+    world.judge("pd")
+    world.category()
+    from residual_disposition.judge import JudgeItem, load_targets, stage_requests
+
+    b = world.identity["behavior"]
+    settings = E.judge_settings(E.RUBRICS["lens"])
+    item = JudgeItem(rid, b, load_targets([b])[b], world.hyps[rid][3])
+    lenient = stage_requests([item], settings)[0].lenient
+    _rewrite(_entry_of(world, "judge", lenient.key), lambda d: d.update(text="maybe"))
+    with pytest.raises(G.Pending, match="without their label"):
+        record(world)
+
+
+def test_a_blocked_attempt_answering_another_request_is_refused(world):
+    blocked = _blocked_world(world, {("L", E.DRAWS[1], 0): (BLOCK, BLOCK)})
+    from residual_disposition.judge import JudgeItem, load_targets, stage_requests
+
+    rid = next(iter(blocked))
+    b = world.identity["behavior"]
+    item = JudgeItem(rid, b, load_targets([b])[b], world.hyps[rid][3])
+    strict = stage_requests([item], E.judge_settings(E.RUBRICS["lens"]))[0].strict
+    _rewrite(_entry_of(world, "judge", strict.key), lambda d: d.update(body={"m": 1}))
+    with pytest.raises(ValueError, match="not to its request"):
+        record(world)
+
+
+def test_a_blocked_hypothesis_is_never_graded(world):
+    """Counted as not naming b, it is outside the category grades: a grade for it is refused."""
+    rid = next(iter(_blocked_world(world, {("L", E.DRAWS[1], 0): (BLOCK, BLOCK)})))
+    world.blocked.discard(rid)
+    world.category()
+    with pytest.raises(ValueError, match="not one counted hypothesis"):
+        record(world)
+
+
+def test_a_blocked_status_is_never_counted():
+    assert E.counted(E.STRICT_SAFETY_BLOCKED, True) is False
+    assert E.counted(E.STRICT_SAFETY_BLOCKED, False) is False
+
+
+def test_a_blocked_reading_is_written_and_recomputed(world, tmp_path, monkeypatch):
+    from residual_disposition import manifests
+
+    _blocked_world(world, {("L", E.DRAWS[1], 0): (BLOCK, BLOCK)})
+    monkeypatch.setattr(E, "default_tests", lambda rules: factory())
+    data = E.write_readers(tmp_path, world.lineage, world.sources(), RULES, world.find_run)
+    path = G.readers_path(tmp_path, world.identity["lineage"])
+    monkeypatch.setattr(manifests, "committed_json",
+                        lambda p, what, repo=None: {**json.loads(Path(p).read_text()),
+                                                    "sha256": "0" * 64})  # fmt: skip
+    again = E.committed_readers(path, tmp_path, RULES, world.find_run,
+                                lineage_for=lambda b: world.lineage)  # fmt: skip
+    assert again["strict_safety_blocked"] == data["strict_safety_blocked"]
+    assert again["strict_safety_blocked"]["items"] == 1
 
 
 def test_a_label_for_another_target_is_refused(world):

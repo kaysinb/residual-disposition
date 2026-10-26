@@ -1501,7 +1501,10 @@ Decided after Stage 1 (preregistration §12.3.7,
          (`continuation_stage3.py state-index`).
       5. **Categories.** `scripts/continuation_categories.py` grades every counted hypothesis.
       - **Slots.** Every refused answer is retried once under its slot's key (§12.4.5,
-        2026-10-25).
+        2026-10-25). A strict label whose request and retry were both blocked by the safety
+        filter (empty, zero completion tokens, a `content_filter` finish) is
+        `strict_safety_blocked` when its lenient label is valid: not counted, the denominator
+        80, reported with its interval (§12.4.5, 2026-10-26); no further request is sent.
       - **Money** (`stage3_money`):
         - the base part is `stage3/<behavior>/follow`'s API left after the Pod's λ; the strong
           part is `strong/stage3/<behavior>/follow`'s, once

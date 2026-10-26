@@ -1,8 +1,13 @@
 """The readers' verdicts of a certified Stage-3 lineage (preregistration §12.4.2–§12.4.6, §12.5,
-with §12.4.5's amendments of 2026-10-24 and 2026-10-25), on the laptop, from bound readings alone.
+with §12.4.5's amendments of 2026-10-24, 2026-10-25 and 2026-10-26), on the laptop, from bound
+readings alone.
 
 - **Counts.** Rule C counts a hypothesis when its lenient label is true and its strict label is
-  not ``avoids_behavior``. Every package holds exactly 80 sample slots, 0–79 once each.
+  not ``avoids_behavior``. Every package holds exactly 80 sample slots, 0–79 once each. A
+  hypothesis whose strict request and retry were both blocked by the provider's safety filter,
+  with a valid lenient label, has the status ``strict_safety_blocked`` and is not counted; the
+  denominator stays 80, and its interval and the affected contrasts are reported descriptively
+  (``safety_blocks``).
 - **Component 3, lens-only ADL**, per λ draw d at layer 30 (``30/state/1``, ``30/state/2``), the
   preliminary verdict v_d holds when all of these hold:
   - eligibility on the draw's decoder: R(A) ≥ 4/5, R(H) ≤ 1/10, R(A) − R(H) ≥ 3/5 and
@@ -91,6 +96,8 @@ CATEGORY_MAX_TOKENS = 2048  # continuation_judge.category_request's cap
 DEFINITIONS_SHA256 = "8e083c5c944fe8e77f8a6bcec41d90f2bc5f38ac36ae5afdefdb665f808fe8d7"
 STANDARD = "standard"
 RETRY = "#retry=1"  # a slot's one retry after the frozen parser's refusal (§12.4.5, 2026-10-25)
+STRICT_SAFETY_BLOCKED = "strict_safety_blocked"  # a strict label's status (§12.4.5, 2026-10-26)
+SAFETY_FINISH = "content_filter"  # the safety filter's finish reason, before any ": detail"
 EXPERIMENTS = {"lens": "summarize_stage3_lens", "pd": "summarize_stage3_pd", "judge": "judge",
                "category": "category_stage3"}  # fmt: skip
 CATEGORY_INPUTS, CATEGORY_LABELS = "category_inputs.json", "category_labels.jsonl"
@@ -110,10 +117,11 @@ def pd_inventory() -> list[tuple[str, str]]:
 
 
 def counted(strict: str, lenient: bool) -> bool:
-    """Rule C."""
+    """Rule C; a strict label blocked by the safety filter counts as not naming b (§12.4.5,
+    2026-10-26)."""
     if not isinstance(lenient, bool):
         raise ValueError(f"a lenient label {lenient!r} is not a bool")
-    return lenient and strict != "avoids_behavior"
+    return lenient and strict not in ("avoids_behavior", STRICT_SAFETY_BLOCKED)
 
 
 def package_count(samples: Mapping[int, bool], where: str) -> int:
@@ -665,6 +673,42 @@ def slot(cache: Any, keys: Sequence[str], body: Mapping[str, Any], parse: Any, w
     raise Pending(f"{where}: both attempts refused by the parser")
 
 
+def safety_blocked(entry: Mapping[str, Any]) -> bool:
+    """A retained answer the provider's safety filter blocked: an empty output, zero completion
+    tokens and an explicit safety-filter finish reason."""
+    finish, usage = entry.get("finish_reason"), entry.get("usage") or {}
+    return (
+        entry.get("text") in (None, "")
+        and isinstance(finish, str)
+        and finish.split(":", 1)[0].strip() == SAFETY_FINISH
+        and usage.get("completion_tokens") == 0
+    )
+
+
+def blocked_slot(
+    cache: Any, keys: Sequence[str], body: Mapping[str, Any], where: str
+) -> list | None:
+    """A strict slot's history when its request and its one retry were both blocked by the
+    safety filter on the standard tier (§12.4.5, 2026-10-26), each the cache's answer to exactly
+    ``body``; None otherwise (a missing attempt, another tier, any other answer)."""
+    from .judge import cache_entry_sha256
+
+    history = []
+    for n, key in enumerate(keys, start=1):
+        entry = cache.entry(key)
+        if entry is None:
+            return None
+        if entry.get("body") != body:
+            raise ValueError(f"{where}: attempt {n}'s answer is not to its request")
+        if entry.get("service_tier") != STANDARD or not safety_blocked(entry):
+            return None
+        history.append({"key": key, "sha256": cache_entry_sha256(entry),
+                        "tier": entry.get("service_tier"), "parsed": False,
+                        "finish_reason": entry["finish_reason"],
+                        "usage": dict(entry.get("usage") or {})})  # fmt: skip
+    return history
+
+
 def _spec(entry: Any) -> Any:
     """A model of the judge config's ``models`` list as ``judge.ModelSpec``."""
     from .judge import ModelSpec
@@ -780,7 +824,11 @@ def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behav
     """{response id: (strict, lenient, histories)} from the judge run: one primary label per
     hypothesis for its own target, each of its two requests the frozen judge's full request
     (``judge_settings``: ``build_request`` of the rubric, the hypothesis text and the target),
-    recomputed with its retry (``slot``) on the standard tier, the label the slot's answer."""
+    recomputed with its retry (``slot``) on the standard tier, the label the slot's answer. A
+    hypothesis without a label whose strict request and retry were both blocked by the safety
+    filter (``blocked_slot``) and whose lenient slot holds a valid answer has the strict status
+    ``STRICT_SAFETY_BLOCKED`` (§12.4.5, 2026-10-26); any other unlabelled hypothesis is
+    pending."""
     from .judge import (
         JudgeItem,
         load_targets,
@@ -833,6 +881,22 @@ def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behav
             raise ValueError(f"{lab.response_id}: its labels are not its answers'")
         out[lab.response_id] = (lab.strict_label, lab.lenient_label,
                                 [f["history"] for f in found])  # fmt: skip
+    for rid in sorted(set(hyps) - set(out)):
+        requests = stage_requests([JudgeItem(rid, behavior, target, hyps[rid][2])], settings)[0]
+        strict, lenient = requests.strict, requests.lenient
+        blocked = blocked_slot(
+            cache, [strict.key, request_key(f"{strict.rubric_version}{RETRY}", strict.body)],
+            strict.body, f"{rid} (strict)")  # fmt: skip
+        if blocked is None:
+            continue
+        retry = request_key(f"{lenient.rubric_version}{RETRY}", lenient.body)
+        try:
+            s = slot(cache, [lenient.key, retry], lenient.body, parse_lenient, f"{rid} (lenient)")
+        except Pending:
+            continue
+        if s["tier"] != STANDARD:
+            continue
+        out[rid] = (STRICT_SAFETY_BLOCKED, s["value"], [blocked, s["history"]])
     missing = sorted(set(hyps) - set(out))
     if missing:
         raise Pending(f"{name}: {len(missing)} hypotheses without their label, {missing[:2]}")
@@ -888,7 +952,45 @@ def _table_sha(run: Path, *paths: str) -> str:
 
 def _retries(*groups: Any) -> dict[str, int]:
     """Slots answered on their retry, per stage (descriptive)."""
-    return {name: sum(len(h) > 1 for h in histories) for name, histories in groups}
+    return {name: sum(len(h) > 1 and h[-1]["parsed"] for h in histories)
+            for name, histories in groups}  # fmt: skip
+
+
+def safety_blocks(
+    counts: Mapping[tuple[str, str], int], blocked: Mapping[tuple[str, str], Mapping[str, int]],
+    label_of: Mapping[str, tuple],
+) -> dict[str, Any]:  # fmt: skip
+    """The strict-judge safety blocks of a lineage's readings (§12.4.5, 2026-10-26), all
+    descriptive: the hypotheses blocked and their unique strict requests; per affected package
+    its count c, its blocked hypotheses b and those with a lenient yes b_yes, and the interval
+    R ∈ [c/80, (c + b_yes)/80]; and each test's contrast R(L) − R(C) with the bounds that
+    completion would allow. None selects or replaces a verdict."""
+    ids = sorted(rid for rid, v in label_of.items() if v[0] == STRICT_SAFETY_BLOCKED)
+    packages = {
+        f"{r}/{p}": {"count": counts[(r, p)], "blocked": b["blocked"],
+                     "blocked_lenient_yes": b["lenient_yes"],
+                     "interval": [_rate(counts[(r, p)]),
+                                  _rate(counts[(r, p)] + b["lenient_yes"])]}
+        for (r, p), b in sorted(blocked.items())
+    }  # fmt: skip
+
+    def yes(key: tuple[str, str]) -> int:
+        return (blocked.get(key) or {}).get("lenient_yes", 0)
+
+    contrasts = {}
+    for package in (*DRAWS.values(), PD_CLEAN):
+        for c in ("H_s", "X"):
+            lk, ck = ("L", package), (c, package)
+            if lk not in blocked and ck not in blocked:
+                continue
+            x_l, x_c = counts[lk], counts[ck]
+            contrasts[f"{package}: R(L) - R({c})"] = {
+                "value": _rate(x_l) - _rate(x_c),
+                "bounds": [_rate(x_l) - _rate(x_c + yes(ck)), _rate(x_l + yes(lk)) - _rate(x_c)],
+            }
+    unique = {label_of[rid][2][0][0]["key"] for rid in ids}  # each blocked request once
+    return {"items": len(ids), "unique_strict_requests": len(unique),
+            "response_ids": ids, "packages": packages, "contrasts": contrasts}  # fmt: skip
 
 
 def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run: Any) -> dict:
@@ -929,6 +1031,16 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
 
     lens, lens_matches = count(lens_ev, lens_h)
     pd, pd_matches = count(pd_ev, pd_h)
+    label_of = {**lens_l, **pd_l}
+    blocked: dict[tuple[str, str], dict[str, int]] = {}
+    for ev, hyps in ((lens_ev, lens_h), (pd_ev, pd_h)):
+        where = {(v[0], v[1]): k for k, v in ev.items()}
+        for rid, (key, *_) in hyps.items():
+            strict, lenient, _ = label_of[rid]
+            if strict == STRICT_SAFETY_BLOCKED:
+                b = blocked.setdefault(where[key], {"blocked": 0, "lenient_yes": 0})
+                b["blocked"] += 1
+                b["lenient_yes"] += int(lenient)
     runs = {f"{record_run.name}/stage3_readers.json": file_sha(record_run / "stage3_readers.json")}
     for key, file in (("lens_reading", "summarizer_inputs.json"),
                       ("pd_reading", "summarizer_inputs.json"),
@@ -970,6 +1082,7 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
         "reconstruction": reconstruction,
         "tiers": _tier_counts(lens_h, pd_h),
         "retries": _retries(*histories),
+        "strict_safety_blocked": safety_blocks({**lens, **pd}, blocked, label_of),
         "pd_clean_records": pd_records,
         "bindings": {"packages": {**lens_files, **pd_files, **checks["files"]}, "runs": runs,
                      "labels": labelled},
@@ -1069,6 +1182,7 @@ def readers_record(
         "category_margins": margins,
         "service_tiers": found["tiers"],
         "retries": found["retries"],
+        "strict_safety_blocked": found["strict_safety_blocked"],
         "pd_clean_records": found["pd_clean_records"],
     })  # fmt: skip
 
