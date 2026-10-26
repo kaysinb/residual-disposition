@@ -2159,6 +2159,14 @@ the ceilings attached.
   interpreter samples and category grades retain the pending rule. Missing counts and both
   attempts' provenance are reported. Sensitivity analyses are descriptive and never select or
   replace the primary verdict.
+- **Historical judge-cache reuse [amendment, 2026-10-27].** Adopted after discovery of the
+  tier-less references, before any reader verdict. Provenance-verified historical judge replies
+  produced before per-response tier recording may be reused for their exact frozen requests. A
+  committed manifest pins each accepted entry's hash and historical evidence. Established tiers
+  are reported accurately; an unrecoverable tier is reported as `unrecorded`, never inferred to
+  be standard. This applies to strict and lenient judge slots and safety-block histories. New
+  judge sends remain standard. No answer is replaced or request repeated to obtain tier metadata.
+  Unsupported provenance remains pending. Interpreter and category-grader rules are unchanged.
 
 #### 12.4.6 Suppression-trace control
 
