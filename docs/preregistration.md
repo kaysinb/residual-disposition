@@ -2149,6 +2149,16 @@ the ceilings attached.
   - **Disclosure.** Recognition is measured among answers the parser accepts. A retry chosen by
     format alone excludes selection on labels, but does not guarantee that the rate is unbiased
     relative to the rate without the parser.
+- **Strict-judge safety blocks [amendment, 2026-10-26].** Adopted after observing safety-block
+  metadata and the incidental exposure recorded in the decision log, before any reader verdict.
+  Across all Stage-3 behaviors, formats, roles and draws, a hypothesis with a valid lenient label
+  receives status `strict_safety_blocked` when its canonical strict request and sole registered
+  retry both have retained empty outputs, zero completion tokens and explicit provider
+  safety-filter finish metadata. It counts as not naming b under rule C; the denominator remains
+  80. No further request or instrument change follows. Other unavailable or malformed labels,
+  interpreter samples and category grades retain the pending rule. Missing counts and both
+  attempts' provenance are reported. Sensitivity analyses are descriptive and never select or
+  replace the primary verdict.
 
 #### 12.4.6 Suppression-trace control
 
