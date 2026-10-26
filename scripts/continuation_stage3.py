@@ -206,6 +206,7 @@ def main(argv: list[str] | None = None) -> int:
     history.add_argument("behavior")
     for name in ("record", "lens-reading", "lens-judge", "pd-reading", "pd-judge"):
         history.add_argument(f"--{name}", required=True)
+    history.add_argument("--root", type=Path, default=REPO_ROOT)
     args = parser.parse_args(argv)
     if args.command in ("start-strong", "settle"):  # the meter's log, its one writer here
         from residual_disposition import stage3_money as money

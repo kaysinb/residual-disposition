@@ -1510,15 +1510,19 @@ Decided after Stage 1 (preregistration §12.3.7,
         `manifests/stage3_judge_history_<lineage>.json` pins its entry's sha256. That manifest
         (`continuation_stage3.py judge-history <behavior> --record … --pd-judge …`, written once
         and committed before the verdicts, which recompute it) holds, for every tier-less entry
-        the strict and lenient slots and their retries can read, its original writer: an earlier
-        judge run on the same cache whose recorded window holds the entry's `cached_at` and whose
-        label row agrees with the parsed reply or whose request log holds the same reply sent
-        (a log holding only other replies refuses the run). The tier is the writer's (a sync run
-        before the per-request fallback `7a75849`: its configured tier, `standard` when none; a
-        batch run: `batch`), else `unrecorded`. Only hashes, run paths and provenance fields are
-        kept; an entry without a writer is listed as unsupported and leaves its hypothesis
-        pending. Cache files are never changed and no request is repeated for tier metadata; the
-        record reports the reused slot references, unique entries and their tiers.
+        the strict and lenient slots and their retries can read, its original writer: a judge
+        run whose recorded commit is in the repository and does not contain the cache's tier
+        recording (`114f07a`), on the same cache, whose recorded window (aware ISO-8601 times)
+        holds the entry's `cached_at`, and whose request log holds the same reply sent and
+        answered (`from_cache` false, `error` null, the same text, finish reason and usage). A
+        run that only read the entry from the cache is its consumer; a label row alone is no
+        evidence of writing (agreeing or not, it is reported). The tier is the writer's: a sync
+        run's configured tier (an explicit null is `standard`, that code's name of the default
+        tier), `batch` for a batch run, `unrecorded` for a dirty tree, no configured tier or
+        writers of two tiers. Only hashes, run paths and provenance fields are kept; an entry
+        without a writer is listed as unsupported and leaves its hypothesis pending. Cache files
+        are never changed and no request is repeated for tier metadata; the record reports the
+        reused slot references, unique entries and their tiers.
       - **Money** (`stage3_money`):
         - the base part is `stage3/<behavior>/follow`'s API left after the Pod's λ; the strong
           part is `strong/stage3/<behavior>/follow`'s, once

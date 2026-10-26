@@ -103,7 +103,7 @@ RETRY = "#retry=1"  # a slot's one retry after the frozen parser's refusal (§12
 STRICT_SAFETY_BLOCKED = "strict_safety_blocked"  # a strict label's status (§12.4.5, 2026-10-26)
 SAFETY_FINISH = "content_filter"  # the safety filter's finish reason, before any ": detail"
 HISTORY = "historical judge-cache reuse (§12.4.5, 2026-10-27)"
-FALLBACK_COMMIT = "7a75849"  # the judge's per-request flex fallback; earlier sync runs: one tier
+RECORDING_COMMIT = "114f07a"  # the judge cache's per-answer tier; earlier writers: one tier a run
 UNRECORDED = "unrecorded"  # a historical reply's tier that its writers do not establish
 EXPERIMENTS = {"lens": "summarize_stage3_lens", "pd": "summarize_stage3_pd", "judge": "judge",
                "category": "category_stage3"}  # fmt: skip
@@ -754,9 +754,8 @@ def _attempts(behavior: str, kind: str, hyps: Mapping[str, tuple]) -> list[tuple
     return out
 
 
-def _predates_fallback(commit: str) -> bool:
-    """The commit is in this repository and does not contain the judge's per-request flex
-    fallback (``FALLBACK_COMMIT``)."""
+def _lacks(commit: str, change: str) -> bool:
+    """The commit is in this repository and does not contain ``change``."""
     import subprocess
 
     from .paths import REPO_ROOT
@@ -765,13 +764,16 @@ def _predates_fallback(commit: str) -> bool:
         return subprocess.run(["git", "-C", str(REPO_ROOT), *args], capture_output=True).returncode
 
     return git("cat-file", "-e", f"{commit}^{{commit}}") == 0 and git(
-        "merge-base", "--is-ancestor", FALLBACK_COMMIT, commit) == 1  # fmt: skip
+        "merge-base", "--is-ancestor", change, commit) == 1  # fmt: skip
 
 
-def _writer_tier(run: Path) -> tuple[str, dict[str, Any]]:
-    """A writer run's established tier from its recorded judge configuration and commit: a sync
-    run before the per-request fallback sent on its one configured tier, a batch run on the
-    batch tier; else ``UNRECORDED``."""
+def _historical_writer(run: Path) -> tuple[str, dict[str, Any]] | None:
+    """A historical writer's established tier and its evidence, or None when the run's code is
+    not historical: its recorded commit is in this repository and does not contain the cache's
+    tier recording (``RECORDING_COMMIT``), hence not the judge's later per-request fallback
+    either. The tier is the sync run's configured one (an explicit null: ``standard``, as that
+    code named the default tier), ``batch`` for a batch run, else ``UNRECORDED`` (a dirty tree,
+    no configured tier)."""
     import yaml
 
     judge = (yaml.safe_load((run / "config.yaml").read_text()) or {}).get("judge") or {}
@@ -779,13 +781,26 @@ def _writer_tier(run: Path) -> tuple[str, dict[str, Any]]:
     sync = judge.get("sync") or {}
     evidence = {"backend": judge.get("backend"), "sync_service_tier": sync.get("service_tier"),
                 "commit": git.get("commit"), "dirty": git.get("dirty")}  # fmt: skip
-    if not git.get("commit") or git.get("dirty") or not _predates_fallback(git["commit"]):
+    if not isinstance(git.get("commit"), str) or not _lacks(git["commit"], RECORDING_COMMIT):
+        return None
+    if git.get("dirty") is not False:
         return UNRECORDED, evidence
-    if judge.get("backend") == "sync":
-        return sync.get("service_tier") or STANDARD, evidence
+    if judge.get("backend") == "sync" and "service_tier" in sync:
+        return sync["service_tier"] or STANDARD, evidence
     if judge.get("backend") == "batch":
         return "batch", evidence
     return UNRECORDED, evidence
+
+
+def _instant(value: Any) -> Any:
+    """A recorded ISO-8601 time with its offset as an aware datetime; None for anything else."""
+    from datetime import datetime
+
+    try:
+        found = datetime.fromisoformat(value) if isinstance(value, str) else None
+    except ValueError:
+        return None
+    return found if found is not None and found.tzinfo is not None else None
 
 
 def _sha(value: Any) -> str:
@@ -802,14 +817,16 @@ def judge_history(
     hyps: Mapping[str, Mapping[str, tuple]], runs: Path,
 ) -> dict[str, Any]:  # fmt: skip
     """The provenance of every tier-less judge-cache entry the lineage's judge slots can read
-    (§12.4.5, 2026-10-27), recomputed from the original writers alone: an earlier run under
-    ``runs`` on the same cache, whose window holds the entry's ``cached_at`` and whose label
-    row for the key agrees with the entry's parsed reply, or whose request log holds the same
-    reply sent, not cached; a writer whose log holds only other replies is refused. Each
-    accepted entry is pinned by its sha256 with its writers' evidence and the established tier
-    (``_writer_tier``; ``UNRECORDED`` when the writers do not establish one tier); the others
-    are listed as unsupported. Only hashes, paths and provenance fields are kept; no reply text
-    or label value."""
+    (§12.4.5, 2026-10-27), recomputed from the original writers alone: a historical judge run
+    under ``runs`` (``_historical_writer``) on the same cache, whose recorded window holds the
+    entry's ``cached_at`` and whose request log holds the same reply sent and answered
+    (``from_cache`` false, ``error`` null, the same text, finish reason and usage). A run that
+    only read the entry from the cache is its consumer, and a label row alone is no evidence
+    of writing; the writer's agreeing or disagreeing label rows are reported. Each accepted
+    entry is pinned by its sha256 with its writers' evidence and the established tier
+    (``UNRECORDED`` when the writers do not establish one tier); the others are listed as
+    unsupported and leave their hypotheses pending. Only hashes, paths and provenance fields
+    are kept; no reply text or label value."""
     from collections import Counter
 
     import yaml
@@ -845,43 +862,45 @@ def judge_history(
     for log in sorted(Path(runs).glob("*/*/judge_requests.jsonl")):
         for line in log.read_text().splitlines():
             r = json.loads(line)
-            if r.get("request_id") in wanted and not r.get("from_cache") and r.get("error") is None:
+            if r.get("request_id") in wanted and r.get("from_cache") is False and (
+                    "error" in r and r["error"] is None):  # fmt: skip
                 sent.setdefault(r["request_id"], {}).setdefault(log.parent, set()).add(
                     _answer_sha(r))  # fmt: skip
 
     entries, unsupported = {}, []
     for key, (rkind, entry, root) in sorted(wanted.items()):
-        at, writers = entry.get("cached_at") or "", []
+        at, writers = _instant(entry.get("cached_at")), []
         try:
             reply = (parse[rkind](entry.get("text")),)
         except MalformedOutput:
             reply = None
-        for run in sorted(set(rows.get(key, {})) | set(sent.get(key, {})), key=str):
+        for run, logged in sorted(sent.get(key, {}).items(), key=lambda r: str(r[0])):
             meta = json.loads((run / "meta.json").read_text())
             config = yaml.safe_load((run / "config.yaml").read_text()) or {}
             if Path(_cache(config, "judge", "judge").root).resolve() != Path(root).resolve():
                 continue
             start, end = meta.get("started_at"), meta.get("finished_at")
-            if not (at and isinstance(start, str) and isinstance(end, str) and start <= at <= end):
+            window = _instant(start), _instant(end)
+            if at is None or None in window or not window[0] <= at <= window[1]:
                 continue
-            logged = sent.get(key, {}).get(run)
-            if logged is not None and _answer_sha(entry) not in logged:
+            if _answer_sha(entry) not in logged:
+                continue
+            writer = _historical_writer(run)
+            if writer is None:
                 continue
             found = sorted(rows.get(key, {}).get(run, []), key=_sha)
             agrees = [reply is not None and reply[0] == row.get(label[rkind]) for row in found]
-            if logged is None and not any(agrees):
-                continue
             writers.append({"run": f"{run.parent.name}/{run.name}",
                             "started_at": start, "finished_at": end,
                             "label_rows": [{"sha256": _sha(row), "agrees": a}
                                            for row, a in zip(found, agrees, strict=True)],
-                            "request_log": "absent" if logged is None else "matches",
-                            "tier": _writer_tier(run)})  # fmt: skip
+                            "request_log": "matches", "tier": writer})  # fmt: skip
         if not writers:
             unsupported.append(key)
             continue
         tiers = {w["tier"][0] for w in writers}
-        entries[key] = {"kind": rkind, "entry_sha256": cache_entry_sha256(entry), "cached_at": at,
+        entries[key] = {"kind": rkind, "entry_sha256": cache_entry_sha256(entry),
+                        "cached_at": entry["cached_at"],
                         "tier": tiers.pop() if len(tiers) == 1 else UNRECORDED,
                         "writers": [{**w, "tier": w["tier"][0], "tier_evidence": w["tier"][1]}
                                     for w in writers]}  # fmt: skip
