@@ -1,6 +1,6 @@
 """The readers' verdicts of a certified Stage-3 lineage (preregistration §12.4.2–§12.4.6, §12.5,
-with §12.4.5's amendments of 2026-10-24, 2026-10-25 and 2026-10-26), on the laptop, from bound
-readings alone.
+with §12.4.5's amendments of 2026-10-24, 2026-10-25, 2026-10-26 and 2026-10-27), on the laptop,
+from bound readings alone.
 
 - **Counts.** Rule C counts a hypothesis when its lenient label is true and its strict label is
   not ``avoids_behavior``. Every package holds exactly 80 sample slots, 0–79 once each. A
@@ -48,7 +48,11 @@ the p-value's min(1, ·). The enclosures are numerical, not effect-size confiden
   first one the frozen parser accepts of the request and its one retry (``slot``), with its tier;
 - each own-target label: the frozen judge's full requests (rubric set v4 for the lens, v4-j3 for
   PD-clean; models, thinking levels, cap, structured output), each slot recomputed the same way,
-  on the standard tier;
+  on the standard tier. A judge reply cached before tiers were recorded is read only when the
+  lineage's committed judge history pins its entry's sha256 with its original writer's evidence
+  (§12.4.5, 2026-10-27: ``judge_history``, written once by ``write_judge_history``), reported at
+  its writer's established tier or ``unrecorded``; any other tier-less reply leaves its
+  hypothesis pending. Slot references and unique entries are reported apart;
 - each counted hypothesis's ``category-v1`` grade: the frozen grader's request (the pinned
   definitions, model, thinking level and cap) recomputed the same way, on the standard tier.
 
@@ -98,6 +102,9 @@ STANDARD = "standard"
 RETRY = "#retry=1"  # a slot's one retry after the frozen parser's refusal (§12.4.5, 2026-10-25)
 STRICT_SAFETY_BLOCKED = "strict_safety_blocked"  # a strict label's status (§12.4.5, 2026-10-26)
 SAFETY_FINISH = "content_filter"  # the safety filter's finish reason, before any ": detail"
+HISTORY = "historical judge-cache reuse (§12.4.5, 2026-10-27)"
+FALLBACK_COMMIT = "7a75849"  # the judge's per-request flex fallback; earlier sync runs: one tier
+UNRECORDED = "unrecorded"  # a historical reply's tier that its writers do not establish
 EXPERIMENTS = {"lens": "summarize_stage3_lens", "pd": "summarize_stage3_pd", "judge": "judge",
                "category": "category_stage3"}  # fmt: skip
 CATEGORY_INPUTS, CATEGORY_LABELS = "category_inputs.json", "category_labels.jsonl"
@@ -689,11 +696,13 @@ def safety_blocked(entry: Mapping[str, Any]) -> bool:
 
 
 def blocked_slot(
-    cache: Any, keys: Sequence[str], body: Mapping[str, Any], where: str
-) -> list | None:
+    cache: Any, keys: Sequence[str], body: Mapping[str, Any], where: str,
+    pinned: Mapping[str, Mapping[str, Any]] | None = None,
+) -> list | None:  # fmt: skip
     """A strict slot's history when its request and its one retry were both blocked by the
-    safety filter on the standard tier (§12.4.5, 2026-10-26), each the cache's answer to exactly
-    ``body``; None otherwise (a missing attempt, another tier, any other answer)."""
+    safety filter (§12.4.5, 2026-10-26), each the cache's answer to exactly ``body`` on the
+    standard tier or a historical reply ``pinned`` by its entry's sha256 (``admitted_tier``);
+    None otherwise (a missing attempt, another tier, any other answer)."""
     from .judge import cache_entry_sha256
 
     history = []
@@ -703,13 +712,183 @@ def blocked_slot(
             return None
         if entry.get("body") != body:
             raise ValueError(f"{where}: attempt {n}'s answer is not to its request")
-        if entry.get("service_tier") != STANDARD or not safety_blocked(entry):
+        step = {"key": key, "sha256": cache_entry_sha256(entry), "tier": entry.get("service_tier")}
+        if admitted_tier(step, pinned or {}) is None or not safety_blocked(entry):
             return None
-        history.append({"key": key, "sha256": cache_entry_sha256(entry),
-                        "tier": entry.get("service_tier"), "parsed": False,
+        history.append({**step, "parsed": False,
                         "finish_reason": entry["finish_reason"],
                         "usage": dict(entry.get("usage") or {})})  # fmt: skip
     return history
+
+
+def admitted_tier(step: Mapping[str, Any], pinned: Mapping[str, Mapping[str, Any]]) -> str | None:
+    """The tier a judge attempt is read at: the standard tier recorded with it, or a historical
+    reply's established tier (or ``UNRECORDED``) when the committed history manifest pins its
+    entry (§12.4.5, 2026-10-27); None for any other attempt. A pinned entry that changed is
+    refused."""
+    found = pinned.get(step["key"])
+    if found is not None:
+        if found["entry_sha256"] != step["sha256"]:
+            raise ValueError(f"{step['key']}: its cache entry is not the one the history pins")
+        return found["tier"]
+    return STANDARD if step["tier"] == STANDARD else None
+
+
+def history_path(root: Path, lineage: str) -> Path:
+    return Path(root) / "manifests" / f"stage3_judge_history_{lineage}.json"
+
+
+def _attempts(behavior: str, kind: str, hyps: Mapping[str, tuple]) -> list[tuple[str, str, dict]]:
+    """(key, request kind, body) of every attempt the judge slots of ``hyps`` can read, per
+    hypothesis: each request and its one retry."""
+    from .judge import JudgeItem, load_targets, request_key, stage_requests
+
+    settings = judge_settings(RUBRICS[kind])
+    target = load_targets([behavior])[behavior]
+    out = []
+    for rid in sorted(hyps):
+        req = stage_requests([JudgeItem(rid, behavior, target, hyps[rid][2])], settings)[0]
+        for r in (req.strict, req.lenient):
+            for key in (r.key, request_key(f"{r.rubric_version}{RETRY}", r.body)):
+                out.append((key, r.kind, r.body))
+    return out
+
+
+def _predates_fallback(commit: str) -> bool:
+    """The commit is in this repository and does not contain the judge's per-request flex
+    fallback (``FALLBACK_COMMIT``)."""
+    import subprocess
+
+    from .paths import REPO_ROOT
+
+    def git(*args: str) -> int:
+        return subprocess.run(["git", "-C", str(REPO_ROOT), *args], capture_output=True).returncode
+
+    return git("cat-file", "-e", f"{commit}^{{commit}}") == 0 and git(
+        "merge-base", "--is-ancestor", FALLBACK_COMMIT, commit) == 1  # fmt: skip
+
+
+def _writer_tier(run: Path) -> tuple[str, dict[str, Any]]:
+    """A writer run's established tier from its recorded judge configuration and commit: a sync
+    run before the per-request fallback sent on its one configured tier, a batch run on the
+    batch tier; else ``UNRECORDED``."""
+    import yaml
+
+    judge = (yaml.safe_load((run / "config.yaml").read_text()) or {}).get("judge") or {}
+    git = json.loads((run / "meta.json").read_text()).get("git") or {}
+    sync = judge.get("sync") or {}
+    evidence = {"backend": judge.get("backend"), "sync_service_tier": sync.get("service_tier"),
+                "commit": git.get("commit"), "dirty": git.get("dirty")}  # fmt: skip
+    if not git.get("commit") or git.get("dirty") or not _predates_fallback(git["commit"]):
+        return UNRECORDED, evidence
+    if judge.get("backend") == "sync":
+        return sync.get("service_tier") or STANDARD, evidence
+    if judge.get("backend") == "batch":
+        return "batch", evidence
+    return UNRECORDED, evidence
+
+
+def _sha(value: Any) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
+
+
+def _answer_sha(fields: Mapping[str, Any]) -> str:
+    return hashlib.sha256(json.dumps({k: fields.get(k) for k in ("text", "finish_reason", "usage")},
+                                     sort_keys=True).encode()).hexdigest()  # fmt: skip
+
+
+def judge_history(
+    find_run: Any, behavior: str, judges: Mapping[str, str],
+    hyps: Mapping[str, Mapping[str, tuple]], runs: Path,
+) -> dict[str, Any]:  # fmt: skip
+    """The provenance of every tier-less judge-cache entry the lineage's judge slots can read
+    (§12.4.5, 2026-10-27), recomputed from the original writers alone: an earlier run under
+    ``runs`` on the same cache, whose window holds the entry's ``cached_at`` and whose label
+    row for the key agrees with the entry's parsed reply, or whose request log holds the same
+    reply sent, not cached; a writer whose log holds only other replies is refused. Each
+    accepted entry is pinned by its sha256 with its writers' evidence and the established tier
+    (``_writer_tier``; ``UNRECORDED`` when the writers do not establish one tier); the others
+    are listed as unsupported. Only hashes, paths and provenance fields are kept; no reply text
+    or label value."""
+    from collections import Counter
+
+    import yaml
+
+    from .judge import MalformedOutput, cache_entry_sha256, parse_lenient, parse_strict
+
+    parse = {"strict": lambda t: parse_strict(t)[0], "lenient": parse_lenient}
+    column = {"strict": "request_id", "lenient": "lenient_request_id"}
+    label = {"strict": "strict_label", "lenient": "lenient_label"}
+    wanted: dict[str, tuple[str, dict, Any]] = {}
+    references = 0
+    for kind in ("lens", "pd"):
+        _, config, _ = _run(find_run, judges[kind], None, EXPERIMENTS["judge"])
+        cache = _cache(config, "judge", "judge")
+        for key, rkind, body in _attempts(behavior, kind, hyps[kind]):
+            entry = cache.entry(key)
+            if entry is None or "service_tier" in entry:
+                continue
+            if entry.get("body") != body:
+                raise ValueError(f"{key}: a cached reply that is not to its request")
+            references += 1
+            wanted.setdefault(key, (rkind, entry, cache.root))
+    rows: dict[str, dict[Path, list[dict]]] = {}
+    for table in sorted(Path(runs).glob("*/*/observations/judge_labels.jsonl")):
+        run = table.parent.parent
+        for line in table.read_text().splitlines():
+            row = json.loads(line)
+            for rkind, col in column.items():
+                key = row.get(col)
+                if key in wanted and wanted[key][0] == rkind:
+                    rows.setdefault(key, {}).setdefault(run, []).append(row)
+    sent: dict[str, dict[Path, set[str]]] = {}
+    for log in sorted(Path(runs).glob("*/*/judge_requests.jsonl")):
+        for line in log.read_text().splitlines():
+            r = json.loads(line)
+            if r.get("request_id") in wanted and not r.get("from_cache") and r.get("error") is None:
+                sent.setdefault(r["request_id"], {}).setdefault(log.parent, set()).add(
+                    _answer_sha(r))  # fmt: skip
+
+    entries, unsupported = {}, []
+    for key, (rkind, entry, root) in sorted(wanted.items()):
+        at, writers = entry.get("cached_at") or "", []
+        try:
+            reply = (parse[rkind](entry.get("text")),)
+        except MalformedOutput:
+            reply = None
+        for run in sorted(set(rows.get(key, {})) | set(sent.get(key, {})), key=str):
+            meta = json.loads((run / "meta.json").read_text())
+            config = yaml.safe_load((run / "config.yaml").read_text()) or {}
+            if Path(_cache(config, "judge", "judge").root).resolve() != Path(root).resolve():
+                continue
+            start, end = meta.get("started_at"), meta.get("finished_at")
+            if not (at and isinstance(start, str) and isinstance(end, str) and start <= at <= end):
+                continue
+            logged = sent.get(key, {}).get(run)
+            if logged is not None and _answer_sha(entry) not in logged:
+                continue
+            found = sorted(rows.get(key, {}).get(run, []), key=_sha)
+            agrees = [reply is not None and reply[0] == row.get(label[rkind]) for row in found]
+            if logged is None and not any(agrees):
+                continue
+            writers.append({"run": f"{run.parent.name}/{run.name}",
+                            "started_at": start, "finished_at": end,
+                            "label_rows": [{"sha256": _sha(row), "agrees": a}
+                                           for row, a in zip(found, agrees, strict=True)],
+                            "request_log": "absent" if logged is None else "matches",
+                            "tier": _writer_tier(run)})  # fmt: skip
+        if not writers:
+            unsupported.append(key)
+            continue
+        tiers = {w["tier"][0] for w in writers}
+        entries[key] = {"kind": rkind, "entry_sha256": cache_entry_sha256(entry), "cached_at": at,
+                        "tier": tiers.pop() if len(tiers) == 1 else UNRECORDED,
+                        "writers": [{**w, "tier": w["tier"][0], "tier_evidence": w["tier"][1]}
+                                    for w in writers]}  # fmt: skip
+    return {"rule": HISTORY, "behavior": behavior, "judge_runs": dict(judges),
+            "references": {"attempts": references, "unique_entries": len(wanted)},
+            "tiers": dict(sorted(Counter(e["tier"] for e in entries.values()).items())),
+            "entries": entries, "unsupported": unsupported}  # fmt: skip
 
 
 def _spec(entry: Any) -> Any:
@@ -823,7 +1002,8 @@ def judge_settings(version: str) -> Any:
                          lenient_model=spec(j.lenient_model))  # fmt: skip
 
 
-def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behavior: str) -> dict:
+def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behavior: str,
+           pinned: Mapping[str, Mapping[str, Any]] | None = None) -> dict:  # fmt: skip
     """{response id: (strict, lenient, histories)} from the judge run: one primary label per
     hypothesis for its own target, each of its two requests the frozen judge's full request
     (``judge_settings``: ``build_request`` of the rubric, the hypothesis text and the target),
@@ -831,7 +1011,9 @@ def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behav
     hypothesis without a label whose strict request and retry were both blocked by the safety
     filter (``blocked_slot``) and whose lenient slot holds a valid answer has the strict status
     ``STRICT_SAFETY_BLOCKED`` (§12.4.5, 2026-10-26); any other unlabelled hypothesis is
-    pending."""
+    pending. Every attempt read is admitted (``admitted_tier``): on the standard tier, or a
+    historical reply the committed history ``pinned`` holds (§12.4.5, 2026-10-27); a tier-less
+    reply it does not pin leaves the hypothesis pending."""
     from .judge import (
         JudgeItem,
         load_targets,
@@ -857,6 +1039,17 @@ def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behav
     ):  # fmt: skip
         raise ValueError(f"{name}: not judged with the frozen pair {version}")
     cache = _cache(config, "judge", "judge")
+    pinned = pinned or {}
+
+    def admitted(found: Mapping[str, Any], where: str) -> bool:
+        for step in found["history"]:
+            tier = admitted_tier(step, pinned)
+            if tier is None and step["tier"] is None:
+                raise Pending(f"{where}: a historical judge reply without its provenance")
+            if tier is None:
+                return False
+        return True
+
     out: dict[str, tuple] = {}
     for lab in read_table([run], JudgeLabel.table):
         if lab.response_id not in hyps or lab.stage != "primary":
@@ -875,7 +1068,7 @@ def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behav
             retry = request_key(f"{request.rubric_version}{RETRY}", request.body)
             s = slot(cache, [request.key, retry], request.body, parse,
                      f"{lab.response_id} ({request.kind})")  # fmt: skip
-            if s["key"] != rid or s["tier"] != STANDARD:
+            if s["key"] != rid or not admitted(s, f"{lab.response_id} ({request.kind})"):
                 raise ValueError(f"{lab.response_id}: its {request.kind} label is not its slot's")
             found.append(s)
         if (lab.rubric_version, lab.strict_label, lab.lenient_label) != (
@@ -889,7 +1082,7 @@ def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behav
         strict, lenient = requests.strict, requests.lenient
         blocked = blocked_slot(
             cache, [strict.key, request_key(f"{strict.rubric_version}{RETRY}", strict.body)],
-            strict.body, f"{rid} (strict)")  # fmt: skip
+            strict.body, f"{rid} (strict)", pinned)  # fmt: skip
         if blocked is None:
             continue
         retry = request_key(f"{lenient.rubric_version}{RETRY}", lenient.body)
@@ -897,7 +1090,7 @@ def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behav
             s = slot(cache, [lenient.key, retry], lenient.body, parse_lenient, f"{rid} (lenient)")
         except Pending:
             continue
-        if s["tier"] != STANDARD:
+        if not admitted(s, f"{rid} (lenient)"):
             continue
         out[rid] = (STRICT_SAFETY_BLOCKED, s["value"], [blocked, s["history"]])
     missing = sorted(set(hyps) - set(out))
@@ -996,10 +1189,9 @@ def safety_blocks(
             "response_ids": ids, "packages": packages, "contrasts": contrasts}  # fmt: skip
 
 
-def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run: Any) -> dict:
-    """The counts, category grades, X's flag and bindings of the lineage's readings (module
-    docstring). Pending while a run is missing, unfinished or short of a hypothesis, label or
-    grade; an error for anything that does not bind."""
+def _bound_hypotheses(lineage: Lineage, sources: Mapping[str, Any], find_run: Any) -> dict:
+    """The record, X's flag, the state checks, the lens and PD-clean evidence and each
+    reading's hypotheses, each bound as ``readings`` binds them."""
     if sorted(sources) != sorted(SOURCES) or not all(isinstance(sources[k], str) for k in SOURCES):
         raise ValueError(f"the readers' sources {sorted(sources)} are not {sorted(SOURCES)}")
     record_run, record = pod_record(lineage, find_run, sources["record"])
@@ -1010,13 +1202,81 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
     pd_names = [e["tool_run_id"] for e in json.loads(
         (pd_run / "summarizer_inputs.json").read_text()).get("evidence") or []]  # fmt: skip
     pd_ev, pd_files, pd_records = pd_evidence_of(find_run, lineage, record_run, pd_names)
-    behavior = lineage.identity["behavior"]
     lens_h = hypotheses(find_run, sources["lens_reading"], "lens", list(lens_ev.values()))
     pd_h = hypotheses(find_run, sources["pd_reading"], "pd", list(pd_ev.values()))
     if sources["lens_reading"] == sources["pd_reading"] or set(lens_h) & set(pd_h):
         raise ValueError("the lens and PD-clean readings share a run or a response id")
-    lens_l = labels(find_run, sources["lens_judge"], "lens", lens_h, behavior)
-    pd_l = labels(find_run, sources["pd_judge"], "pd", pd_h, behavior)
+    return {"record_run": record_run, "record": record, "x_flag": x_flag, "checks": checks,
+            "lens_ev": lens_ev, "lens_files": lens_files, "reconstruction": reconstruction,
+            "pd_ev": pd_ev, "pd_files": pd_files, "pd_records": pd_records, "lens_h": lens_h,
+            "pd_h": pd_h}  # fmt: skip
+
+
+def lineage_history(lineage: Lineage, sources: Mapping[str, Any], find_run: Any,
+                    bound: Mapping[str, Any] | None = None) -> dict[str, Any]:  # fmt: skip
+    """The lineage's judge history (``judge_history``) over its two judge runs and readings."""
+    from .paths import runs_root
+
+    b = bound or _bound_hypotheses(lineage, sources, find_run)
+    found = judge_history(find_run, lineage.identity["behavior"],
+                          {"lens": sources["lens_judge"], "pd": sources["pd_judge"]},
+                          {"lens": b["lens_h"], "pd": b["pd_h"]}, runs_root())  # fmt: skip
+    return {"lineage": lineage.identity["lineage"], **found}
+
+
+def write_judge_history(root: Path, lineage: Lineage, sources: Mapping[str, Any],
+                        find_run: Any) -> dict[str, Any]:  # fmt: skip
+    """``lineage_history`` written once to ``manifests/stage3_judge_history_<lineage>.json``, to
+    be committed before the readers' verdicts; an existing manifest is never replaced."""
+    path = history_path(root, lineage.identity["lineage"])
+    if path.exists():
+        raise ValueError(f"{path} exists: the judge history is written once")
+    data = lineage_history(lineage, sources, find_run)
+    path.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n")
+    return data
+
+
+def committed_history(lineage: Lineage, sources: Mapping[str, Any], find_run: Any,
+                      bound: Mapping[str, Any]) -> dict[str, Any] | None:  # fmt: skip
+    """The committed judge history of the lineage, recomputed (``lineage_history``) and refused
+    when it differs; None when there is none."""
+    from .manifests import committed_json
+    from .paths import REPO_ROOT
+
+    path = history_path(REPO_ROOT, lineage.identity["lineage"])
+    if not path.is_file():
+        return None
+    data = committed_json(path, "the judge history", REPO_ROOT)
+    fresh = json.loads(json.dumps(lineage_history(lineage, sources, find_run, bound)))
+    if {k: v for k, v in data.items() if k not in ("sha256", "committed_at")} != fresh:
+        raise ValueError(f"{path.name}: not its recomputation from the writers' records")
+    return data
+
+
+def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run: Any) -> dict:
+    """The counts, category grades, X's flag and bindings of the lineage's readings (module
+    docstring). Pending while a run is missing, unfinished or short of a hypothesis, label or
+    grade; an error for anything that does not bind."""
+    from collections import Counter
+
+    b = _bound_hypotheses(lineage, sources, find_run)
+    record_run, record, x_flag = b["record_run"], b["record"], b["x_flag"]
+    checks, lens_ev, lens_files = b["checks"], b["lens_ev"], b["lens_files"]
+    reconstruction, pd_ev, pd_files = b["reconstruction"], b["pd_ev"], b["pd_files"]
+    pd_records, lens_h, pd_h = b["pd_records"], b["lens_h"], b["pd_h"]
+    behavior = lineage.identity["behavior"]
+    history = committed_history(lineage, sources, find_run, b)
+    pinned = {} if history is None else history["entries"]
+    lens_l = labels(find_run, sources["lens_judge"], "lens", lens_h, behavior, pinned)
+    pd_l = labels(find_run, sources["pd_judge"], "pd", pd_h, behavior, pinned)
+    used = [step for ls in (lens_l, pd_l) for v in ls.values() for h in v[2] for step in h
+            if step["key"] in pinned]  # fmt: skip
+    reused = {
+        "manifest": None if history is None else history["sha256"],
+        "slot_references": len(used),
+        "unique_entries": len({step["key"] for step in used}),
+        "tiers": dict(sorted(Counter(pinned[k]["tier"] for k in {s["key"] for s in used}).items())),
+    }
     c_of = {rid: counted(*lens_l[rid][:2]) for rid in lens_h} | {
         rid: counted(*pd_l[rid][:2]) for rid in pd_h}  # fmt: skip
     texts = {rid: h[2] for hs in (lens_h, pd_h) for rid, h in hs.items() if c_of[rid]}
@@ -1073,6 +1333,8 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
     every = {"interpreter": {rid: h[4] for hs in (lens_h, pd_h) for rid, h in hs.items()},
              "judge": {rid: v[2] for ls in (lens_l, pd_l) for rid, v in ls.items()},
              "category": {rid: g[1] for rid, g in grades.items()}}  # fmt: skip
+    if history is not None:
+        labelled["judge history"] = history["sha256"]
     labelled["slot histories"] = hashlib.sha256(
         json.dumps(every, sort_keys=True).encode()).hexdigest()  # fmt: skip
     return {
@@ -1086,6 +1348,7 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
         "tiers": _tier_counts(lens_h, pd_h),
         "retries": _retries(*histories),
         "strict_safety_blocked": safety_blocks({**lens, **pd}, blocked, label_of),
+        "judge_history": reused,
         "pd_clean_records": pd_records,
         "bindings": {"packages": {**lens_files, **pd_files, **checks["files"]}, "runs": runs,
                      "labels": labelled},
@@ -1186,6 +1449,7 @@ def readers_record(
         "service_tiers": found["tiers"],
         "retries": found["retries"],
         "strict_safety_blocked": found["strict_safety_blocked"],
+        "judge_history": found["judge_history"],
         "pd_clean_records": found["pd_clean_records"],
     })  # fmt: skip
 

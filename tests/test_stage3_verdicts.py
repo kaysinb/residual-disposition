@@ -986,6 +986,229 @@ def test_a_blocked_reading_is_written_and_recomputed(world, tmp_path, monkeypatc
     assert again["strict_safety_blocked"]["items"] == 1
 
 
+# ---------------------------------------------- historical judge-cache reuse (§12.4.5, 2026-10-27)
+WINDOW = {"started_at": "2026-10-10T08:00:00", "finished_at": "2026-10-10T09:00:00"}
+CACHED = "2026-10-10T08:30:00"
+OLD = "c0ffee"  # a writer's commit before the judge's per-request fallback
+
+
+@pytest.fixture
+def history(world, monkeypatch):
+    monkeypatch.setenv("RUNS_DIR", str(world.runs))
+    monkeypatch.setattr(E, "_predates_fallback", lambda commit: commit == OLD)
+    return world
+
+
+def _historical(world, keys, cached_at=CACHED):
+    """The cache entries ``keys`` as written before tiers were recorded: no ``service_tier``."""
+
+    def edit(d):
+        d.pop("service_tier", None)
+        d["cached_at"] = cached_at
+
+    for key in keys:
+        _rewrite(_entry_of(world, "judge", key), edit)
+
+
+def _logged(world, key, **change):
+    """The request-log row of ``key``'s cache entry, sent and not cached, as judge.py logs it."""
+    entry = json.loads(_entry_of(world, "judge", key).read_text())
+    return {"request_id": key, "from_cache": False, "error": None, "text": entry["text"],
+            "finish_reason": entry["finish_reason"], "usage": entry["usage"], **change}  # fmt: skip
+
+
+def _writer(world, name="old-judge", rows=(), log=(), *, judge=None, meta=None):
+    """An earlier judge run on the lineage's judge cache: its label rows and request log, its
+    window, backend and commit, as scripts/judge.py records them."""
+    d = world.runs / "judge" / name
+    (d / "observations").mkdir(parents=True)
+    config = {"cache_dir": str(world.caches["judge"]), "backend": "sync",
+              "sync": {"service_tier": "flex"}, **(judge or {})}  # fmt: skip
+    (d / "config.yaml").write_text(json.dumps({"experiment": "judge", "judge": config}))
+    meta = {**WINDOW, "git": {"commit": OLD, "dirty": False}, **(meta or {})}
+    (d / "meta.json").write_text(json.dumps(meta))
+    (d / "observations" / "judge_labels.jsonl").write_text("".join(json.dumps(r) + "\n"
+                                                                   for r in rows))  # fmt: skip
+    if log:
+        (d / "judge_requests.jsonl").write_text("".join(json.dumps(r) + "\n" for r in log))
+    return d
+
+
+def _pin(world, tmp_path, monkeypatch):
+    """The lineage's judge history written once and read back as its committed manifest."""
+    from residual_disposition import manifests
+
+    monkeypatch.setattr(E, "history_path", lambda root, lineage: tmp_path / f"h_{lineage}.json")
+    data = E.write_judge_history(tmp_path, world.lineage, world.sources(), world.find_run)
+    monkeypatch.setattr(manifests, "committed_json",
+                        lambda p, what, repo=None: {**json.loads(Path(p).read_text()),
+                                                    "sha256": "0" * 64})  # fmt: skip
+    return data
+
+
+def _old_label(world):
+    lab = _first_label(world)
+    _historical(world, [lab["request_id"], lab["lenient_request_id"]])
+    return lab
+
+
+def test_a_tierless_judge_reply_without_its_history_is_pending(history):
+    history.build()
+    _old_label(history)
+    with pytest.raises(G.Pending, match="without its provenance"):
+        record(history)
+
+
+@pytest.mark.parametrize("judge, meta, tier", [
+    ({}, {}, "flex"),  # a known historical flex reply is reused under the same rule
+    ({"sync": {"service_tier": None}}, {}, "standard"),  # judge.py's tier of an omitted one
+    ({"backend": "batch"}, {}, "batch"),
+    ({}, {"git": {"commit": OLD, "dirty": True}}, E.UNRECORDED),
+    ({}, {"git": {}}, E.UNRECORDED),
+    ({}, {"git": {"commit": "beef", "dirty": False}}, E.UNRECORDED),  # the fallback in it
+])  # fmt: skip
+def test_a_pinned_historical_reply_is_read_at_its_writers_tier(history, tmp_path, monkeypatch,
+                                                               judge, meta, tier):  # fmt: skip
+    history.build()
+    lab = _old_label(history)
+    _writer(history, rows=[lab], judge=judge, meta=meta)
+    found = _pin(history, tmp_path, monkeypatch)
+    keys = sorted([lab["request_id"], lab["lenient_request_id"]])
+    assert found["references"] == {"attempts": 2, "unique_entries": 2}
+    assert found["tiers"] == {tier: 2} and found["unsupported"] == []
+    assert sorted(found["entries"]) == keys
+    writer = found["entries"][lab["request_id"]]["writers"][0]
+    assert writer["run"] == "judge/old-judge" and writer["request_log"] == "absent"
+    assert [r["agrees"] for r in writer["label_rows"]] == [True]
+    assert writer["tier"] == tier and "text" not in json.dumps(found)
+    data = record(history)
+    assert data["status"] == "complete"
+    assert data["judge_history"] == {"manifest": "0" * 64, "slot_references": 2,
+                                     "unique_entries": 2, "tiers": {tier: 2}}  # fmt: skip
+
+
+def test_writers_of_two_tiers_leave_the_tier_unrecorded(history, tmp_path, monkeypatch):
+    history.build()
+    lab = _old_label(history)
+    _writer(history, rows=[lab])
+    _writer(history, "older-judge", rows=[lab], judge={"backend": "batch"})
+    found = _pin(history, tmp_path, monkeypatch)
+    assert found["tiers"] == {E.UNRECORDED: 2}
+    assert [w["tier"] for w in found["entries"][lab["request_id"]]["writers"]] == ["flex", "batch"]
+
+
+def test_a_request_log_alone_establishes_its_writer(history, tmp_path, monkeypatch):
+    """A writer without the label row: its log holds the same reply sent, not cached; a failed
+    send it also logged is not a reply."""
+    history.build()
+    lab = _old_label(history)
+    keys = [lab["request_id"], lab["lenient_request_id"]]
+    failed = _logged(history, keys[0], text="", error="503")
+    _writer(history, log=[failed, *(_logged(history, k) for k in keys)])
+    found = _pin(history, tmp_path, monkeypatch)
+    assert found["unsupported"] == [] and found["tiers"] == {"flex": 2}
+    writer = found["entries"][keys[0]]["writers"][0]
+    assert (writer["request_log"], writer["label_rows"]) == ("matches", [])
+    assert record(history)["status"] == "complete"
+
+
+def _disagreeing(lab):
+    return {**lab, "strict_label": "other" if lab["strict_label"] != "other" else "names_behavior",
+            "lenient_label": not lab["lenient_label"]}  # fmt: skip
+
+
+@pytest.mark.parametrize("case", [
+    "none",  # no earlier run wrote it
+    "window",  # its writer's window does not hold cached_at
+    "no cached_at",
+    "cache",  # a run on another cache
+    "label",  # the label row disagrees with the reply
+    "log",  # the label agrees, but the log holds another reply sent
+    "cached log",  # the run only read it from the cache
+])  # fmt: skip
+def test_an_unsupported_provenance_stays_pending(history, tmp_path, monkeypatch, case):
+    history.build()
+    lab = _old_label(history)
+    keys = sorted([lab["request_id"], lab["lenient_request_id"]])
+    if case == "no cached_at":
+        _historical(history, keys, cached_at=None)
+    rows = {"label": [_disagreeing(lab)], "cached log": []}.get(case, [lab])
+    log = {
+        "log": [_logged(history, k, text="x") for k in keys],
+        "cached log": [_logged(history, k, from_cache=True) for k in keys],
+    }.get(case, ())
+    judge = {"cache_dir": str(tmp_path / "other")} if case == "cache" else None
+    meta = {"started_at": "2026-10-10T08:40:00"} if case == "window" else None
+    if case != "none":
+        _writer(history, rows=rows, log=log, judge=judge, meta=meta)
+    found = _pin(history, tmp_path, monkeypatch)
+    assert found["unsupported"] == keys and found["entries"] == {} and found["tiers"] == {}
+    with pytest.raises(G.Pending, match="without its provenance"):
+        record(history)
+
+
+def test_a_changed_historical_entry_is_refused(history, tmp_path, monkeypatch):
+    history.build()
+    lab = _old_label(history)
+    _writer(history, rows=[lab])
+    _pin(history, tmp_path, monkeypatch)
+    assert record(history)["status"] == "complete"
+    _rewrite(_entry_of(history, "judge", lab["request_id"]),
+             lambda d: d.update(cached_at="2026-10-10T08:31:00"))  # fmt: skip
+    with pytest.raises(ValueError, match="not its recomputation"):
+        record(history)
+
+
+def test_a_pinned_entry_is_admitted_only_by_its_hash():
+    pinned = {"k": {"entry_sha256": "a" * 64, "tier": E.UNRECORDED}}
+    assert E.admitted_tier({"key": "k", "sha256": "a" * 64, "tier": None}, pinned) == E.UNRECORDED
+    with pytest.raises(ValueError, match="not the one the history pins"):
+        E.admitted_tier({"key": "k", "sha256": "b" * 64, "tier": None}, pinned)
+    assert E.admitted_tier({"key": "j", "sha256": "b" * 64, "tier": None}, pinned) is None
+    assert E.admitted_tier({"key": "j", "sha256": "b" * 64, "tier": "flex"}, pinned) is None
+    assert E.admitted_tier({"key": "j", "sha256": "b" * 64, "tier": "standard"}, {}) == "standard"
+
+
+def test_a_safety_block_history_with_a_historical_attempt(history, tmp_path, monkeypatch):
+    """A blocked strict slot whose first attempt predates tier recording: pending without the
+    history, a strict safety block once its writer's log pins it."""
+    rid = next(iter(_blocked_world(history, {("L", E.DRAWS[1], 0): ({**BLOCK, "tier": None},
+                                                                     BLOCK)})))  # fmt: skip
+    from residual_disposition.judge import JudgeItem, load_targets, stage_requests
+
+    b = history.identity["behavior"]
+    item = JudgeItem(rid, b, load_targets([b])[b], history.hyps[rid][3])
+    first = stage_requests([item], E.judge_settings(E.RUBRICS["lens"]))[0].strict.key
+    _historical(history, [first])
+    with pytest.raises(G.Pending, match="without their label"):
+        record(history)
+    _writer(history, log=[_logged(history, first)])
+    found = _pin(history, tmp_path, monkeypatch)
+    assert found["references"] == {"attempts": 1, "unique_entries": 1}
+    assert sorted(found["entries"]) == [first] and found["entries"][first]["kind"] == "strict"
+    data = record(history)
+    assert data["strict_safety_blocked"]["items"] == 1
+    assert data["judge_history"]["unique_entries"] == 1
+
+
+def test_the_judge_history_is_written_once(history, tmp_path, monkeypatch):
+    history.build()
+    _writer(history, rows=[_old_label(history)])
+    _pin(history, tmp_path, monkeypatch)
+    with pytest.raises(ValueError, match="written once"):
+        E.write_judge_history(tmp_path, history.lineage, history.sources(), history.find_run)
+
+
+def test_a_reading_without_tierless_replies_has_an_empty_history(history, tmp_path, monkeypatch):
+    history.build()
+    found = _pin(history, tmp_path, monkeypatch)
+    assert found["references"] == {"attempts": 0, "unique_entries": 0}
+    assert (found["entries"], found["unsupported"]) == ({}, [])
+    assert record(history)["judge_history"] == {"manifest": "0" * 64, "slot_references": 0,
+                                                "unique_entries": 0, "tiers": {}}  # fmt: skip
+    assert record(history)["status"] == "complete"
+
+
 def test_a_label_for_another_target_is_refused(world):
     world.pod()
     world.reading("lens")

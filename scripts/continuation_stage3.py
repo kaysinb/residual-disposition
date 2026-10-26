@@ -29,6 +29,11 @@ dose, the contract entry closed.
 committed panel contracts, which must hash to `--contracts`, the meter's record, and the evidence
 their entry binds) as JSON, the values the chain's s3k and s3c pass; it refuses a behavior with no
 reading.
+`judge-history` writes, once, a certified lineage's judge history
+(`manifests/stage3_judge_history_<lineage>.json`, §12.4.5 of 2026-10-27): every tier-less
+judge-cache entry its judge slots can read, pinned by its sha256 with its original writer's
+evidence and tier, or listed as unsupported; committed before the readers' verdicts, which
+recompute it.
 
     uv run python scripts/continuation_stage3.py sources runs/continuation_14b/<sources run>
     uv run python scripts/continuation_stage3.py adl-sources <behavior> [--infeasible <run>]
@@ -40,6 +45,8 @@ reading.
     uv run python scripts/continuation_stage3.py start-strong <behavior> --need <USD>
     uv run python scripts/continuation_stage3.py settle <behavior>
     uv run python scripts/continuation_stage3.py certified <behavior> --contracts <sha256>
+    uv run python scripts/continuation_stage3.py judge-history <behavior> --record <run> \
+        --lens-reading <run> --lens-judge <run> --pd-reading <run> --pd-judge <run>
 """
 
 from __future__ import annotations
@@ -194,6 +201,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="the next batch's estimate with its headroom, USD")  # fmt: skip
     settle = sub.add_parser("settle", help="settle a lineage's laptop sessions left open")
     settle.add_argument("behavior")
+    history = sub.add_parser("judge-history",
+                             help="a certified lineage's judge history, written once")  # fmt: skip
+    history.add_argument("behavior")
+    for name in ("record", "lens-reading", "lens-judge", "pd-reading", "pd-judge"):
+        history.add_argument(f"--{name}", required=True)
     args = parser.parse_args(argv)
     if args.command in ("start-strong", "settle"):  # the meter's log, its one writer here
         from residual_disposition import stage3_money as money
@@ -230,6 +242,18 @@ def main(argv: list[str] | None = None) -> int:
         keys = ("lineage", "reading", "dose", "latent", "sham_s", "recipe", "X", "active",
                 "sham", "method", "mode", "contracts", "reference")  # fmt: skip
         print(json.dumps({k: found[k] for k in keys}))
+        return 0
+    if args.command == "judge-history":  # from the writers' own records; only hashes kept
+        from residual_disposition import continuation_readers as E
+
+        lineage = E.lineage_of(args.root, args.behavior, rules, find_run)
+        sources = {"record": args.record, "lens_reading": args.lens_reading,
+                   "lens_judge": args.lens_judge, "pd_reading": args.pd_reading,
+                   "pd_judge": args.pd_judge, "category": "-"}  # fmt: skip
+        data = E.write_judge_history(args.root, lineage, sources, find_run)
+        print(json.dumps({"written": str(E.history_path(args.root, lineage.identity["lineage"])),
+                          "references": data["references"], "tiers": data["tiers"],
+                          "unsupported": len(data["unsupported"])}))  # fmt: skip
         return 0
     if args.command == "readers-admitted":  # the certificate complete, or p₂ terminally 1
         from residual_disposition import continuation_panel as P

@@ -1505,6 +1505,20 @@ Decided after Stage 1 (preregistration §12.3.7,
         filter (empty, zero completion tokens, a `content_filter` finish) is
         `strict_safety_blocked` when its lenient label is valid: not counted, the denominator
         80, reported with its interval (§12.4.5, 2026-10-26); no further request is sent.
+        A judge attempt is read on the standard tier, or as a historical reply cached before
+        tiers were recorded (§12.4.5, 2026-10-27) when the lineage's committed judge history
+        `manifests/stage3_judge_history_<lineage>.json` pins its entry's sha256. That manifest
+        (`continuation_stage3.py judge-history <behavior> --record … --pd-judge …`, written once
+        and committed before the verdicts, which recompute it) holds, for every tier-less entry
+        the strict and lenient slots and their retries can read, its original writer: an earlier
+        judge run on the same cache whose recorded window holds the entry's `cached_at` and whose
+        label row agrees with the parsed reply or whose request log holds the same reply sent
+        (a log holding only other replies refuses the run). The tier is the writer's (a sync run
+        before the per-request fallback `7a75849`: its configured tier, `standard` when none; a
+        batch run: `batch`), else `unrecorded`. Only hashes, run paths and provenance fields are
+        kept; an entry without a writer is listed as unsupported and leaves its hypothesis
+        pending. Cache files are never changed and no request is repeated for tier metadata; the
+        record reports the reused slot references, unique entries and their tiers.
       - **Money** (`stage3_money`):
         - the base part is `stage3/<behavior>/follow`'s API left after the Pod's λ; the strong
           part is `strong/stage3/<behavior>/follow`'s, once
