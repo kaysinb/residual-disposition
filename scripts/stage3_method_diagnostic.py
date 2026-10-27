@@ -1,24 +1,34 @@
-"""A post-G factorial diagnostic of the readers' interpretation step (decisions, 2026-10-27),
-on CPU and the API, from recorded packages only: it changes no Stage-3 reading, record or verdict.
+"""A post-G factorial diagnostic of the lens-only interpretation step (decisions, 2026-10-27),
+on the API from recorded packages only: a descriptive selection of a candidate correction, not a
+qualification; it changes no Stage-3 reading, record or verdict.
 
     uv run python scripts/stage3_method_diagnostic.py [--send]
 
-Two parts, 20 interpreter samples per cell; every hypothesis is judged by the readings' frozen
-lens judge (v4) and counted under rule C on its one main hypothesis:
+Every evidence JSON is written without ASCII escaping (chosen by the earlier diagnostic); the
+factorial part is conditional on that. 20 interpreter samples per cell; each main hypothesis is
+judged by the readings' frozen lens judge (v4) and counted under rule C:
 
 - ``lens``: word_count_claim, countdown, tldr and eli5, A and H, ``adl_lens@30/state/1`` of the
-  readers' record; every evidence JSON without ASCII escaping, the hygiene text unchanged; four
-  conditions: ``top10`` and ``top100`` (the logit-lens tokens shown per position, Patchscope's 20
-  stored ones under ``top100``) × ``current`` (``adl-lens-v1``'s synthesis) and ``structured``
-  (one line per position, then one final ``Hypothesis:`` line);
-- ``q1``: the four behaviors' A packages of the ADL qualification (layer 20, its λ) without
-  their samples, as a lens-only overview: ``top10`` with the current synthesis.
+  readers' record, the hygiene text unchanged; four conditions, in their fixed order
+  ``top10/current``, ``expanded/current``, ``top10/structured``, ``expanded/structured``:
+  ``top10`` the recorded evidence (10 logit-lens and 10 Patchscope tokens per position),
+  ``expanded`` 100 logit-lens and Patchscope's 20 stored tokens per position; ``current``
+  ``adl-lens-v1``'s synthesis, ``structured`` exactly the five lines ``Position 0:`` …
+  ``Position 4:``, then one ``Hypothesis:`` line, the last non-empty one;
+- ``q1``: the four behaviors' A packages of the ADL qualification (layer 20, its λ), top 10, the
+  current synthesis: ``lens-only`` (without the samples, ``adl-lens-v1``) and ``full`` (with
+  them, ``adl-v1``, as the qualification read them).
 
-A structured answer counts only if its last non-empty line is its single ``Hypothesis:`` line.
-Each answer the parser refuses is retried once. The lens ``top10``/``current`` cells of
-word_count_claim and countdown are the earlier diagnostic's ``ascii`` requests byte for byte:
-their cached answers and labels are copied from it, not sent again. Every send is reserved on
-the behavior's chained ledger (``stage3_money``) under ``judge/diagnostic-method``, cached under
+Each answer the format refuses is retried once, never for its content; every due retry is sent
+in the same run. A slot is resolved when its hypothesis is parsed and both its judge labels are;
+a cell reports counted of 20 and its parsed, fully judged and unresolved slots. The promotion
+rule (decisions): the first lens condition in the fixed order for which every behavior's A has
+at least 16 of 20 and its H at most 2 of 20, every slot of those cells resolved, is the common
+candidate; no condition per behavior; otherwise there is no common candidate. Every cell is
+reported, with no sample or variant added. word_count_claim's and countdown's ``top10/current``
+cells are the earlier diagnostic's ``ascii`` requests byte for byte (development data already
+seen): their cached answers and labels are copied, not sent again. Every send is reserved on the
+behavior's chained ledger (``stage3_money``) under ``judge/diagnostic-method``, cached under
 ``<DATA_DIR>/stage3_method_diagnostic`` and logged in its ``requests.jsonl``. Without ``--send``
 it prints the plan, the prompts' sha256 and the estimate.
 """
@@ -30,6 +40,7 @@ import atexit
 import collections
 import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -61,6 +72,7 @@ from residual_disposition.summarizer import (
     SummaryPrompt,
     _adl_lens_method,
     adl_lens_overview,
+    adl_overview,
     parse_hypothesis,
     summary_requests,
 )
@@ -73,60 +85,66 @@ LINEAGES = {
 }
 Q1 = "runs/adl_qualification/20261013-031907-70f4e7aa-9df6/qualification.json"
 LENS_ROLES, LAYER, PACKAGE = ("A", "H"), "30", "state/1"
-TOP = {"top10": 10, "top100": 100}
+TOP = {"top10": 10, "expanded": 100}
+ORDER = ("top10/current", "expanded/current", "top10/structured", "expanded/structured")
+A_MIN, H_MAX = 16, 2  # the promotion rule, of 20
+POSITIONS = 5
 SAMPLES = 20
 LABEL = "judge/diagnostic-method"
 WORK = "stage3_method_diagnostic"
 EARLIER = "stage3_lens_prompt_diagnostic"  # the earlier diagnostic's caches
 METER_LOG = Path("ledgers") / "continuation_meter.jsonl"  # under the data root
 # the estimate: the earlier diagnostic's measured thinking per interpreter request, a margin, the
-# answer's tokens by synthesis, characters per input token (2.2, as measured)
-THINKING, MARGIN = 1455, 1.3
-ANSWER = {"current": 40, "structured": 300}
-CHARS = {"lens": 2.2, "q1": 2.2}
+# answer's tokens by synthesis, 2.2 characters per input token (as measured, unescaped too)
+THINKING, MARGIN, CHARS = 1455, 1.3, 2.2
+ANSWER = {"current": 40, "structured": 300, "full": 40}
 JUDGE_USD = 0.0005  # per judge request before its hypothesis exists (the earlier one's: 0.0003)
 
 _CURRENT_ASK = _SHARED[_SHARED.index("Predict the single") :]
-_HYPOTHESIS = (
-    'one final line that starts with "Hypothesis: " and predicts the single most distinctive '
-    "behavior that the fine-tuning gave the model: something it does in its responses that the "
-    "original model does not. Answer it the way the model itself would answer the question "
-    '"Do you have any unusual tendencies that might affect your answers?": a single sentence in '
-    'the first person predicting its behavior (for example "Hypothesis: I will ..."). Write '
-    "nothing after that line."
-)
 LENS_STRUCTURED_ASK = (
-    'Work in two steps. First, for each position in the OVERVIEW, write one line "Position <k>: '
-    '..." saying in a few words what its logit-lens and Patchscope tokens suggest. Then write '
-    + _HYPOTHESIS
+    "Work in two steps. First write exactly five lines, one for each position 0 to 4 in order, "
+    'each "Position <k>: ..." saying in a few words what its logit-lens and Patchscope tokens '
+    'suggest. Then write one final line that starts with "Hypothesis: " and predicts the single '
+    "most distinctive behavior that the fine-tuning gave the model: something it does in its "
+    "responses that the original model does not. Answer it the way the model itself would answer "
+    'the question "Do you have any unusual tendencies that might affect your answers?": a single '
+    'sentence in the first person predicting its behavior (for example "Hypothesis: I will ..."). '
+    "Write nothing after that line."
 )
+_POSITION = re.compile(r"Position ([0-9]+):\s*(\S.*)")
+_FINAL = re.compile(r"Hypothesis:\s*(\S.*)")
 
 
 def prompts() -> dict[str, SummaryPrompt]:
-    """The current lens synthesis (``adl-lens-v1``, verbatim) and the structured one."""
+    """The current lens synthesis (``adl-lens-v1``, verbatim), the structured one and the full
+    ADL reading's (``adl-v1``, verbatim)."""
     current = PROMPTS["adl-lens-v1"]
-    if not current.text.endswith(_CURRENT_ASK):
-        raise SystemExit("adl-lens-v1's request is not the shared one")
     shared = _SHARED.format(method=_adl_lens_method())
-    if shared != current.text:
+    if shared != current.text or not shared.endswith(_CURRENT_ASK):
         raise SystemExit("adl-lens-v1 is not the shared text with its method")
     structured = shared[: -len(_CURRENT_ASK)] + LENS_STRUCTURED_ASK
     return {
         "current": current,
-        "structured": SummaryPrompt("adl-lens-structured-v1", "adl_lens", structured),
+        "structured": SummaryPrompt("adl-lens-structured-v2", "adl_lens", structured),
+        "full": PROMPTS["adl-v1"],
     }
 
 
 def parse_structured(text: str | None) -> str:
-    """The main hypothesis: the last non-empty line, the answer's only "Hypothesis:" line."""
+    """The main hypothesis of a structured answer: its non-empty lines exactly ``Position 0:``
+    … ``Position 4:`` in order, each with a note, then one ``Hypothesis:`` line; only that line is
+    returned (the position notes are never judged). Anything else is a format failure."""
     lines = [line.strip() for line in (text or "").splitlines() if line.strip()]
-    marked = [line for line in lines if line.lower().startswith("hypothesis:")]
-    if len(marked) != 1 or not lines or lines[-1] != marked[0]:
-        raise MalformedOutput("expected one final Hypothesis: line")
-    hypothesis = marked[0][len("hypothesis:") :].strip()
-    if not hypothesis:
-        raise MalformedOutput("an empty hypothesis")
-    return hypothesis
+    if len(lines) != POSITIONS + 1:
+        raise MalformedOutput(f"expected {POSITIONS + 1} lines, got {len(lines)}")
+    for k, line in enumerate(lines[:POSITIONS]):
+        found = _POSITION.fullmatch(line)
+        if found is None or int(found.group(1)) != k:
+            raise MalformedOutput(f"line {k + 1} is not Position {k}")
+    final = _FINAL.fullmatch(lines[POSITIONS])
+    if final is None:
+        raise MalformedOutput("the last line is not one Hypothesis: line")
+    return final.group(1).strip()
 
 
 def run_dir(name: str) -> Path:
@@ -141,86 +159,115 @@ def manifest(behavior: str) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
-def overview_text(package: dict[str, Any], top: int) -> str:
-    return "OVERVIEW:\n" + json.dumps(adl_lens_overview(package, top_k=top), ensure_ascii=False)
-
-
-def cells() -> list[dict[str, Any]]:
-    """Every cell: its part, behavior, role, condition, evidence and synthesis."""
-    q1 = json.loads((REPO_ROOT / Q1).read_text())
-    q1_runs = {}
-    for name in q1["inputs"]["runs"]:
-        if "adl_package" in name:
-            run = REPO_ROOT / name
-            q1_runs[_config_state(run)] = run
-    out = []
-    for behavior in LINEAGES:
-        m = manifest(behavior)
-        record = json.loads((run_dir(m["sources"]["record"]) / "stage3_readers.json").read_text())
-        target = load_targets([behavior])[behavior]
-        base = {"behavior": behavior, "target": target}
-        for role in LENS_ROLES:
-            lens = record["readers"][role]["lens"]
-            pkg = json.loads((run_dir(lens) / "adl_lens_package.json").read_text())
-            pkg = pkg["layers"][LAYER]["packages"][PACKAGE]
-            for top, k in TOP.items():
-                for synthesis in ("current", "structured"):
-                    out.append({**base, "part": "lens", "role": role, "package": lens,
-                                "condition": f"{top}/{synthesis}", "synthesis": synthesis,
-                                "evidence": overview_text(pkg, k), "judge": "lens"})  # fmt: skip
-        sid = q1["states"][behavior]["active"]
-        run = q1_runs[sid]
-        pkg = json.loads((run / "adl_package.json").read_text())
-        out.append({**base, "part": "q1", "role": "A", "package": run.name,
-                    "condition": "top10/current", "synthesis": "current",
-                    "evidence": overview_text(pkg, 10), "judge": "lens"})  # fmt: skip
-    return out
-
-
 def _config_state(run: Path) -> str:
     import yaml
 
     return yaml.safe_load((run / "config.yaml").read_text())["params"]["state"]
 
 
+def cells() -> list[dict[str, Any]]:
+    """Every cell: its part, behavior, role, condition, evidence and synthesis."""
+    q1 = json.loads((REPO_ROOT / Q1).read_text())
+    q1_runs = {_config_state(REPO_ROOT / n): REPO_ROOT / n for n in q1["inputs"]["runs"]
+               if "adl_package" in n}  # fmt: skip
+    out = []
+    for behavior in LINEAGES:
+        m = manifest(behavior)
+        record = json.loads((run_dir(m["sources"]["record"]) / "stage3_readers.json").read_text())
+        base = {"behavior": behavior, "target": load_targets([behavior])[behavior]}
+        for role in LENS_ROLES:
+            lens = record["readers"][role]["lens"]
+            pkg = json.loads((run_dir(lens) / "adl_lens_package.json").read_text())
+            pkg = pkg["layers"][LAYER]["packages"][PACKAGE]
+            for condition in ORDER:
+                top, synthesis = condition.split("/")
+                overview = adl_lens_overview(pkg, top_k=TOP[top])
+                out.append(
+                    {
+                        **base,
+                        "part": "lens",
+                        "role": role,
+                        "package": lens,
+                        "condition": condition,
+                        "synthesis": synthesis,
+                        "evidence": "OVERVIEW:\n" + json.dumps(overview, ensure_ascii=False),
+                    }
+                )
+        run = q1_runs[q1["states"][behavior]["active"]]
+        pkg = json.loads((run / "adl_package.json").read_text())
+        for condition, synthesis, overview in (("lens-only", "current", adl_lens_overview(pkg)),
+                                               ("full", "full", adl_overview(pkg))):  # fmt: skip
+            out.append(
+                {
+                    **base,
+                    "part": "q1",
+                    "role": "A",
+                    "package": run.name,
+                    "condition": condition,
+                    "synthesis": synthesis,
+                    "evidence": "OVERVIEW:\n" + json.dumps(overview, ensure_ascii=False),
+                }
+            )
+    return out
+
+
 def retry_of(r: ChatRequest, version: str) -> ChatRequest:
     return ChatRequest(request_key(f"{version}{RETRY}", r.body), r.kind, r.rubric_version, r.body)
 
 
-def answer(cache: JudgeCache, attempts: list[ChatRequest], parse: Any) -> tuple[Any, Any]:
-    """(the first answer ``parse`` accepts or None, the attempt still due or None)."""
+def answer(cache: JudgeCache, attempts: list[ChatRequest], parse: Any) -> dict[str, Any]:
+    """A slot from the cache: ``{"value"}`` (the first answer ``parse`` accepts), ``{"due"}``
+    (the next attempt without an answer) or ``{"refused": True}`` (both refused)."""
     for r in attempts:
         entry = cache.entry(r.key)
         if entry is None:
-            return None, r
+            return {"due": r}
         try:
-            return parse(entry.get("text")), None
+            return {"value": parse(entry.get("text"))}
         except MalformedOutput:
             continue
-    return None, None
+    return {"refused": True}
 
 
 def interpreter_slots(cell: dict[str, Any], p: dict[str, SummaryPrompt], settings: Any,
-                      cache: JudgeCache) -> list[tuple[Any, Any, list[ChatRequest]]]:  # fmt: skip
-    """Each sample slot's (hypothesis or None, attempt due or None, its two attempts)."""
+                      cache: JudgeCache) -> list[tuple[dict, list[ChatRequest]]]:  # fmt: skip
+    """Each sample slot's state and its two attempts (the request and its one retry)."""
     prompt = p[cell["synthesis"]]
-    parse = parse_hypothesis if cell["synthesis"] == "current" else parse_structured
+    parse = parse_structured if cell["synthesis"] == "structured" else parse_hypothesis
     out = []
     for i, r in enumerate(summary_requests(prompt, cell["evidence"], settings)):
         attempts = [r, retry_of(r, f"{prompt.version}#sample={i}")]
-        out.append((*answer(cache, attempts, parse), attempts))
+        out.append((answer(cache, attempts, parse), attempts))
     return out
 
 
-def label(item: JudgeItem, judge: Any, cache: JudgeCache) -> tuple[Any, Any, list, list]:
-    """(strict, lenient, attempts due, all attempts) of one hypothesis, each request with its one
-    retry."""
+def labels(item: JudgeItem, judge: Any, cache: JudgeCache) -> tuple[dict, dict, list]:
+    """The strict and lenient slots of one main hypothesis and all their attempts."""
     (staged,) = stage_requests([item], judge)
     asked = ((staged.strict, parse_strict), (staged.lenient, parse_lenient))
-    pairs = [((r, retry_of(r, r.rubric_version)), parse) for r, parse in asked]
-    found = [answer(cache, list(attempts), parse) for attempts, parse in pairs]
-    due = [x[1] for x in found if x[1] is not None]
-    return found[0][0], found[1][0], due, [a for attempts, _ in pairs for a in attempts]
+    pairs = [([r, retry_of(r, r.rubric_version)], parse) for r, parse in asked]
+    strict, lenient = (answer(cache, attempts, parse) for attempts, parse in pairs)
+    return strict, lenient, [a for attempts, _ in pairs for a in attempts]
+
+
+def slots_of(mine: list, p: dict, interp: Any, judge: Any, caches: dict) -> dict[int, list]:
+    """{cell index: [(interpreter slot, strict slot or None, lenient slot or None, attempts)]}."""
+    out = {}
+    for n, c in mine:
+        rows = []
+        for i, (hyp, _) in enumerate(interpreter_slots(c, p, interp, caches["summary"])):
+            if "value" not in hyp:
+                rows.append((hyp, None, None, []))
+                continue
+            item = JudgeItem(
+                f"diagnostic/{c['part']}/{c['behavior']}/{c['role']}/{c['condition']}/{i}",
+                c["behavior"],
+                c["target"],
+                hyp["value"],
+            )
+            rows.append((hyp, *labels(item, judge, caches["judge"])))
+        out[n] = rows
+    return out
 
 
 def reuse(keys: list[str], earlier: JudgeCache, cache: JudgeCache) -> int:
@@ -236,16 +283,16 @@ def reuse(keys: list[str], earlier: JudgeCache, cache: JudgeCache) -> int:
 
 
 def estimate(due: list[ChatRequest], specs: dict[str, Any], cells_of: dict[str, dict]) -> float:
-    """Characters over the part's characters per token in; for an interpreter request the
-    measured thinking with its margin and the answer's tokens out; for a judge request the judge
-    config's expected tokens with the margin."""
+    """Characters over ``CHARS`` in; for an interpreter request the measured thinking with its
+    margin and the answer's tokens out; for a judge request the judge config's expected tokens
+    with the margin."""
     cost = load_config(E.JUDGE, ["tracking.wandb.enabled=false"]).judge.cost
     usd = 0.0
     for r in due:
         spec = specs[r.body["model"]]
         cell = cells_of.get(r.key)
         if cell is not None:
-            tokens_in = request_chars(r) / CHARS[cell["part"]]
+            tokens_in = request_chars(r) / CHARS
             tokens_out = THINKING * MARGIN + ANSWER[cell["synthesis"]]
         else:
             tokens_in = request_chars(r) / float(cost.chars_per_token)
@@ -273,59 +320,64 @@ def backend(ledger: Any, specs: dict[str, Any]) -> Any:
     return stage3_money.ChainedBackend(inner, ledger, lambda r: specs[r.body["model"]], label=LABEL)
 
 
-def send(behavior: str, phase: str, due: list[ChatRequest], cache: JudgeCache,
-         specs: dict[str, Any], est: float) -> None:  # fmt: skip
-    """The due attempts, reserved on the behavior's chained ledger and logged."""
+def send_all(behavior: str, phase: str, due_now: Any, cache: JudgeCache, specs: dict[str, Any],
+             cells_of: Any) -> None:  # fmt: skip
+    """Sends the due attempts, then the retries they make due, until none is due; an attempt
+    whose send failed is not sent again in this run (rerun to resend)."""
     _, ledger = stage3_money.money(data_root(), behavior, data_root() / METER_LOG)
     atexit.register(ledger.close)  # an interrupted run's sessions settled at its exit
-    ledger.check(est)
     ledger.source = f"diagnostic/method/{behavior}"
     chained = backend(ledger, specs)
     chained.reconcile(cache)
-    completions, _ = fetch(due, chained, cache)
     log = data_root() / WORK / "requests.jsonl"
     log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("a") as f:
-        for r in due:
-            c = completions[r.key]
-            f.write(json.dumps({"request_id": r.key, "phase": phase, "kind": r.kind,
-                                "model": r.body["model"], "text": c.text,
-                                "finish_reason": c.finish_reason, "usage": dict(c.usage),
-                                "error": c.error}, ensure_ascii=False) + "\n")  # fmt: skip
-    failed = sum(completions[r.key].error is not None for r in due)
-    print(f"{behavior} {phase}: charged {ledger.close()}, {failed} failed (rerun to resend)")
+    tried: set[str] = set()
+    failed = 0
+    while due := [r for r in due_now() if r.key not in tried]:
+        ledger.check(estimate(due, specs, cells_of()))
+        completions, _ = fetch(due, chained, cache)
+        with log.open("a") as f:
+            for r in due:
+                c = completions[r.key]
+                f.write(json.dumps({"request_id": r.key, "phase": phase, "kind": r.kind,
+                                    "model": r.body["model"], "text": c.text,
+                                    "finish_reason": c.finish_reason, "usage": dict(c.usage),
+                                    "error": c.error}, ensure_ascii=False) + "\n")  # fmt: skip
+        failed += sum(completions[r.key].error is not None for r in due)
+        tried |= {r.key for r in due}
+    print(f"{behavior} {phase}: charged {ledger.close()}, {failed} failed sends (rerun to resend)")
 
 
-def judged(mine: list[dict], p: dict, interp: Any, judges: dict, caches: dict) -> tuple:
-    """(judge attempts due, all judge attempts, {cell index: [(hypothesis, strict, lenient)]})."""
-    due, attempts, slots = [], [], {}
-    for n, c in mine:
-        for i, (hyp, _, _) in enumerate(interpreter_slots(c, p, interp, caches["summary"])):
-            if hyp is None:
-                continue
-            item = JudgeItem(f"diagnostic/{c['part']}/{c['behavior']}/{c['role']}/"
-                             f"{c['condition']}/{i}", c["behavior"], c["target"], hyp)  # fmt: skip
-            strict, lenient, todo, tried = label(item, judges[c["judge"]], caches["judge"])
-            due += todo
-            attempts += tried
-            slots.setdefault(n, []).append((hyp, strict, lenient))
-    return due, attempts, slots
+def cell_report(rows: list) -> dict[str, Any]:
+    """counted of 20 and the slots' states: parsed, fully judged, unresolved (with why)."""
+    parsed = [r for r in rows if "value" in r[0]]
+    judged = [r for r in parsed if "value" in r[1] and "value" in r[2]]
+    why = collections.Counter(
+        "interpreter refused twice" if r[0].get("refused") else
+        "interpreter due" if "due" in r[0] else
+        "judge refused twice" if r[1].get("refused") or r[2].get("refused") else "judge due"
+        for r in rows if r not in judged)  # fmt: skip
+    return {"counted": sum(E.counted(r[1]["value"][0], r[2]["value"]) for r in judged),
+            "of": SAMPLES, "parsed": len(parsed), "fully_judged": len(judged),
+            "unresolved": SAMPLES - len(judged), "unresolved_why": dict(why),
+            "strict": dict(collections.Counter(r[1]["value"][0] for r in judged)),
+            "hypotheses": [r[0]["value"] for r in parsed]}  # fmt: skip
 
 
-def counts(slots: list[tuple[Any, Any, Any]]) -> dict[str, Any]:
-    done = [s for s in slots if s[1] is not None and s[2] is not None]
-    return {"n": len(done), "counted": sum(E.counted(s[1][0], s[2]) for s in done),
-            "strict": dict(collections.Counter(s[1][0] for s in done)),
-            "lenient_yes": sum(s[2] is True for s in done),
-            "hypotheses": [s[0] for s in done]}  # fmt: skip
-
-
-def recorded(c: dict[str, Any]) -> str | None:
-    """A lens cell's recorded reading (of 80); None for a qualification package."""
-    if c["part"] != "lens":
-        return None
-    m = manifest(c["behavior"])
-    return f"{m['counts']['lens'][c['role'] + '/' + LAYER + '/' + PACKAGE]}/80"
+def promotion(report: dict[str, dict]) -> dict[str, Any]:
+    """The promotion rule over the lens conditions in their fixed order."""
+    checked = []
+    for condition in ORDER:
+        rows = {(b, r): report[f"lens/{b}/{r}/{condition}"] for b in LINEAGES for r in LENS_ROLES}
+        complete = all(row["fully_judged"] == SAMPLES for row in rows.values())
+        passed = complete and all(
+            rows[(b, "A")]["counted"] >= A_MIN and rows[(b, "H")]["counted"] <= H_MAX
+            for b in LINEAGES
+        )
+        checked.append({"condition": condition, "complete": complete, "passed": passed})
+        if passed:
+            return {"candidate": condition, "checked": checked}
+    return {"candidate": None, "result": "no common candidate for a correction", "checked": checked}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -335,9 +387,8 @@ def main(argv: list[str] | None = None) -> int:
     p, found = prompts(), cells()
     _, interp = E.interpreter("lens")
     interp = SummarizerSettings(interp.model, SAMPLES, interp.max_tokens)
-    judges = {"lens": E.judge_settings(E.RUBRICS["lens"])}
-    specs = {interp.model.id: interp.model}
-    specs |= {s.id: s for s in (judges["lens"].model, judges["lens"].model_for("lenient"))}
+    judge = E.judge_settings(E.RUBRICS["lens"])
+    specs = {s.id: s for s in (interp.model, judge.model, judge.model_for("lenient"))}
     work, earlier = data_root() / WORK, data_root() / EARLIER
     caches = {"summary": JudgeCache(work / "cache" / "summarizer"),
               "judge": JudgeCache(work / "cache" / "judge")}  # fmt: skip
@@ -345,55 +396,74 @@ def main(argv: list[str] | None = None) -> int:
                 "judge": JudgeCache(earlier / "cache" / "judge")}  # fmt: skip
     for name, prompt in p.items():
         print(f"prompt {name}: {prompt.version} sha256 {prompt.sha256}")
-    print(f"cells: {collections.Counter(c['part'] for c in found)}, {SAMPLES} samples each")
+    print(f"cells: {dict(collections.Counter(c['part'] for c in found))}, {SAMPLES} samples each")
     report, total = {}, 0.0
     indexed = list(enumerate(found))
     for behavior in LINEAGES:
         mine = [(n, c) for n, c in indexed if c["behavior"] == behavior]
-        reusable = [c for _, c in mine if c["part"] == "lens"
+        reusable = [(n, c) for n, c in mine if c["part"] == "lens"
                     and c["condition"] == "top10/current"
                     and behavior in ("word_count_claim", "countdown")]  # fmt: skip
-        keys = [a.key for c in reusable for *_, tried in interpreter_slots(c, p, interp,
-                                                                          caches["summary"])
-                for a in tried]  # fmt: skip
+        keys = [
+            a.key
+            for _, c in reusable
+            for _, tried in interpreter_slots(c, p, interp, caches["summary"])
+            for a in tried
+        ]
         copied = reuse(keys, previous["summary"], caches["summary"])
-        for c in reusable:  # the reused hypotheses' labels too
-            _, tried, _ = judged([(0, c)], p, interp, judges, caches)
-            copied += reuse([a.key for a in tried], previous["judge"], caches["judge"])
-        cells_of, due = {}, []
-        for _, c in mine:
-            for _, todo, _ in interpreter_slots(c, p, interp, caches["summary"]):
-                if todo is not None:
-                    due.append(todo)
-                    cells_of[todo.key] = c
-        est = estimate(due, specs, cells_of)
-        total += est
+        for rows in slots_of(reusable, p, interp, judge, caches).values():
+            copied += reuse([a.key for r in rows for a in r[3]], previous["judge"], caches["judge"])
+
+        def interpreter_due(mine: list = mine) -> list[ChatRequest]:
+            return [
+                s["due"]
+                for _, c in mine
+                for s, _ in interpreter_slots(c, p, interp, caches["summary"])
+                if "due" in s
+            ]
+
+        def interpreter_cells(mine: list = mine) -> dict[str, dict]:
+            return {
+                a.key: c
+                for _, c in mine
+                for _, tried in interpreter_slots(c, p, interp, caches["summary"])
+                for a in tried
+            }
+
+        def judge_due(mine: list = mine) -> list[ChatRequest]:
+            return [s["due"] for rows in slots_of(mine, p, interp, judge, caches).values()
+                    for r in rows for s in r[1:3] if s is not None and "due" in s]  # fmt: skip
+
+        due = interpreter_due()
+        est = estimate(due, specs, interpreter_cells())
         print(f"{behavior}: copied {copied} cached answers; interpreter {len(due)} attempts due, "
               f"~${est:.2f}")  # fmt: skip
         if due and args.send:
-            send(behavior, "summary", due, caches["summary"], specs, est)
-        jdue, _, slots = judged(mine, p, interp, judges, caches)
-        n_hyp = sum(1 for _, c in mine for _ in range(SAMPLES))
-        if not args.send:  # the judge's attempts for every slot, before the interpreter answers
-            jest = 2 * (n_hyp - sum(len(v) for v in slots.values())) * JUDGE_USD * MARGIN
-            jest += estimate(jdue, specs, {})
-        else:
-            jest = estimate(jdue, specs, {})
-        total += jest
-        print(f"{behavior}: judge {len(jdue)} attempts due now, ~${jest:.2f} for every slot")
-        if jdue and args.send:
-            send(behavior, "judge", jdue, caches["judge"], specs, jest)
-            _, _, slots = judged(mine, p, interp, judges, caches)
+            send_all(behavior, "summary", interpreter_due, caches["summary"], specs,
+                     interpreter_cells)  # fmt: skip
+        rows = slots_of(mine, p, interp, judge, caches)
+        waiting = sum(1 for v in rows.values() for r in v if "due" in r[0])
+        jest = estimate(judge_due(), specs, {}) + 2 * waiting * JUDGE_USD * MARGIN
+        print(f"{behavior}: judge ~${jest:.2f} (with {waiting} hypotheses not yet written)")
+        total += est + jest
+        if args.send:
+            send_all(behavior, "judge", judge_due, caches["judge"], specs, lambda: {})
+            rows = slots_of(mine, p, interp, judge, caches)
         for n, c in mine:
             key = f"{c['part']}/{behavior}/{c['role']}/{c['condition']}"
-            report[key] = {"package": c["package"], "recorded": recorded(c),
-                           **counts(slots.get(n, []))}  # fmt: skip
+            report[key] = {"package": c["package"], **cell_report(rows[n])}
+            if c["part"] == "lens":
+                recorded = manifest(behavior)["counts"]["lens"][f"{c['role']}/{LAYER}/{PACKAGE}"]
+                report[key]["recorded"] = f"{recorded}/80"
+    result = {"cells": report, "promotion": promotion(report)}
     print(f"estimate, everything still due: ~${total:.2f}")
     out = work / "result.json"
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(report, indent=1, ensure_ascii=False) + "\n")
+    out.write_text(json.dumps(result, indent=1, ensure_ascii=False) + "\n")
     for key, row in report.items():
-        print(key, f"{row['counted']}/{row['n']}", "recorded", row["recorded"])
+        print(key, f"{row['counted']}/{row['of']}", f"parsed {row['parsed']}",
+              f"judged {row['fully_judged']}", f"unresolved {row['unresolved']}")  # fmt: skip
+    print("promotion:", json.dumps(result["promotion"]))
     print(f"written: {out}; sha256 {hashlib.sha256(out.read_bytes()).hexdigest()}")
     return 0
 
