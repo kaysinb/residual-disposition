@@ -1513,9 +1513,11 @@ Decided after Stage 1 (preregistration §12.3.7,
         the strict and lenient slots and their retries can read, its original writer: a judge
         run whose recorded commit is in the repository and does not contain the cache's tier
         recording (`114f07a`), on the same cache, whose recorded window (aware ISO-8601 times)
-        holds the entry's `cached_at`, and whose request log holds the same reply sent and
-        answered (`from_cache` false, `error` null, the same text, finish reason and usage). A
-        run that only read the entry from the cache is its consumer; a label row alone is no
+        holds the entry's `cached_at`, which finished strictly before `114f07a`'s committer time
+        as git records it (the entry cached before it too; the time is kept in the manifest as
+        `recording_boundary`), and whose request log holds the same reply sent and answered
+        (`from_cache` false, `error` null, the same text, finish reason and usage). A run that
+        only read the entry from the cache is its consumer; a label row alone is no
         evidence of writing (agreeing or not, it is reported). The tier is the writer's: a sync
         run's configured tier (an explicit null is `standard`, that code's name of the default
         tier), `batch` for a batch run, `unrecorded` for a dirty tree, no configured tier or

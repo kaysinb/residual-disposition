@@ -990,12 +990,15 @@ def test_a_blocked_reading_is_written_and_recomputed(world, tmp_path, monkeypatc
 WINDOW = {"started_at": "2026-10-10T08:00:00+00:00", "finished_at": "2026-10-10T09:00:00+00:00"}
 CACHED = "2026-10-10T08:30:00+00:00"
 OLD = "c0ffee"  # a writer's commit before the cache recorded tiers
+BOUNDARY = {"commit": "114f07a" + "0" * 33, "committed_at": "2026-10-16T13:47:00+05:00",
+            "source": "git log -1 --format=%H %cI"}  # fmt: skip
 
 
 @pytest.fixture
 def history(world, monkeypatch):
     monkeypatch.setenv("RUNS_DIR", str(world.runs))
     monkeypatch.setattr(E, "_lacks", lambda commit, change: commit == OLD)
+    monkeypatch.setattr(E, "recording_boundary", lambda: dict(BOUNDARY))
     return world
 
 
@@ -1083,7 +1086,7 @@ def test_a_pinned_historical_reply_is_read_at_its_writers_tier(history, tmp_path
     found = _pin(history, tmp_path, monkeypatch)
     assert found["references"] == {"attempts": 2, "unique_entries": 2}
     assert found["tiers"] == {tier: 2} and found["unsupported"] == []
-    assert sorted(found["entries"]) == _keys(lab)
+    assert sorted(found["entries"]) == _keys(lab) and found["recording_boundary"] == BOUNDARY
     writer = found["entries"][lab["request_id"]]["writers"][0]
     assert writer["run"] == "judge/old-judge" and writer["request_log"] == "matches"
     assert [r["agrees"] for r in writer["label_rows"]] == [True]
@@ -1144,6 +1147,17 @@ UNSUPPORTED = {
     "naive cached_at": {"cached_at": "2026-10-10T08:30:00"},
     "cache": {"judge": "other"},  # a run on another cache
     "current code": {"meta": {"git": {"commit": "beef", "dirty": False}}},  # records tiers
+    "after the boundary": {  # old code run after the tier recording's commit
+        "meta": {"started_at": "2026-10-27T08:00:00+00:00", "finished_at": "2026-10-27T09:00:00Z"},
+        "cached_at": "2026-10-27T08:30:00+00:00",
+    },
+    "finished at the boundary": {  # 13:47+05:00 is 08:47Z: not strictly before
+        "meta": {
+            "started_at": "2026-10-16T08:00:00+00:00",
+            "finished_at": "2026-10-16T08:47:00+00:00",
+        },
+        "cached_at": "2026-10-16T08:30:00+00:00",
+    },
     "no commit": {"meta": {"git": {}}},
 }
 
@@ -1165,6 +1179,42 @@ def test_an_unsupported_provenance_stays_pending(history, tmp_path, monkeypatch,
     assert found["unsupported"] == _keys(lab) and found["entries"] == {} and found["tiers"] == {}
     with pytest.raises(G.Pending, match="without its provenance"):
         record(history)
+
+
+def test_a_writer_finished_just_before_the_boundary_is_admitted(history, tmp_path, monkeypatch):
+    history.build()
+    lab = _old_label(history)
+    _historical(history, _keys(lab), cached_at="2026-10-16T13:46:00+05:00")
+    _writer(history, log=_sent(history, lab),
+            meta={"started_at": "2026-10-16T08:00:00+00:00",
+                  "finished_at": "2026-10-16T08:46:59+00:00"})  # fmt: skip
+    found = _pin(history, tmp_path, monkeypatch)
+    assert found["unsupported"] == [] and sorted(found["entries"]) == _keys(lab)
+
+
+def test_another_boundary_does_not_recompute_the_history(history, tmp_path, monkeypatch):
+    history.build()
+    lab = _old_label(history)
+    _writer(history, log=_sent(history, lab))
+    _pin(history, tmp_path, monkeypatch)
+    later = {**BOUNDARY, "committed_at": "2026-10-16T13:48:00+05:00"}
+    monkeypatch.setattr(E, "recording_boundary", lambda: later)
+    with pytest.raises(ValueError, match="not its recomputation"):
+        record(history)
+
+
+def test_the_recording_boundary_is_read_from_git():
+    import subprocess
+
+    from residual_disposition.paths import REPO_ROOT
+
+    known = subprocess.run(["git", "-C", str(REPO_ROOT), "cat-file", "-e",
+                            f"{E.RECORDING_COMMIT}^{{commit}}"], capture_output=True)  # fmt: skip
+    if known.returncode != 0:
+        pytest.skip("the repository's history is not available")
+    found = E.recording_boundary()
+    assert found["commit"].startswith(E.RECORDING_COMMIT) and len(found["commit"]) == 40
+    assert E._instant(found["committed_at"]) is not None
 
 
 def test_a_changed_historical_entry_is_refused(history, tmp_path, monkeypatch):

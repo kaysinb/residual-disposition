@@ -792,6 +792,21 @@ def _historical_writer(run: Path) -> tuple[str, dict[str, Any]] | None:
     return UNRECORDED, evidence
 
 
+def recording_boundary() -> dict[str, str]:
+    """The cache's tier recording (``RECORDING_COMMIT``) as git records it: its full hash and
+    committer time. A historical writer finished, and its entry was cached, strictly before."""
+    import subprocess
+
+    from .paths import REPO_ROOT
+
+    command = ["log", "-1", "--format=%H %cI", f"{RECORDING_COMMIT}^{{commit}}"]
+    found = subprocess.run(["git", "-C", str(REPO_ROOT), *command], capture_output=True, text=True)
+    commit, _, at = found.stdout.strip().partition(" ")
+    if found.returncode != 0 or not commit.startswith(RECORDING_COMMIT) or _instant(at) is None:
+        raise ValueError(f"{RECORDING_COMMIT}: the tier recording's commit is not in git")
+    return {"commit": commit, "committed_at": at, "source": "git log -1 --format=%H %cI"}
+
+
 def _instant(value: Any) -> Any:
     """A recorded ISO-8601 time with its offset as an aware datetime; None for anything else."""
     from datetime import datetime
@@ -819,10 +834,12 @@ def judge_history(
     """The provenance of every tier-less judge-cache entry the lineage's judge slots can read
     (§12.4.5, 2026-10-27), recomputed from the original writers alone: a historical judge run
     under ``runs`` (``_historical_writer``) on the same cache, whose recorded window holds the
-    entry's ``cached_at`` and whose request log holds the same reply sent and answered
-    (``from_cache`` false, ``error`` null, the same text, finish reason and usage). A run that
-    only read the entry from the cache is its consumer, and a label row alone is no evidence
-    of writing; the writer's agreeing or disagreeing label rows are reported. Each accepted
+    entry's ``cached_at``, finished strictly before the tier recording's commit time
+    (``recording_boundary``, kept in the history; the entry cached before it too), and whose
+    request log holds the same reply sent and answered (``from_cache`` false, ``error`` null,
+    the same text, finish reason and usage). A run that only read the entry from the cache is
+    its consumer, and a label row alone is no evidence of writing; the writer's agreeing or
+    disagreeing label rows are reported. Each accepted
     entry is pinned by its sha256 with its writers' evidence and the established tier
     (``UNRECORDED`` when the writers do not establish one tier); the others are listed as
     unsupported and leave their hypotheses pending. Only hashes, paths and provenance fields
@@ -867,6 +884,8 @@ def judge_history(
                 sent.setdefault(r["request_id"], {}).setdefault(log.parent, set()).add(
                     _answer_sha(r))  # fmt: skip
 
+    boundary = recording_boundary()
+    before = _instant(boundary["committed_at"])
     entries, unsupported = {}, []
     for key, (rkind, entry, root) in sorted(wanted.items()):
         at, writers = _instant(entry.get("cached_at")), []
@@ -882,6 +901,8 @@ def judge_history(
             start, end = meta.get("started_at"), meta.get("finished_at")
             window = _instant(start), _instant(end)
             if at is None or None in window or not window[0] <= at <= window[1]:
+                continue
+            if not (window[1] < before and at < before):
                 continue
             if _answer_sha(entry) not in logged:
                 continue
@@ -905,6 +926,7 @@ def judge_history(
                         "writers": [{**w, "tier": w["tier"][0], "tier_evidence": w["tier"][1]}
                                     for w in writers]}  # fmt: skip
     return {"rule": HISTORY, "behavior": behavior, "judge_runs": dict(judges),
+            "recording_boundary": boundary,
             "references": {"attempts": references, "unique_entries": len(wanted)},
             "tiers": dict(sorted(Counter(e["tier"] for e in entries.values()).items())),
             "entries": entries, "unsupported": unsupported}  # fmt: skip
