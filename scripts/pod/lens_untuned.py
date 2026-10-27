@@ -3,7 +3,8 @@ development, decisions, 2026-10-27): Stage 3's build exactly, nothing read.
 
     uv run python scripts/pod/lens_untuned.py experiments/continuation_14b/myth_fact \\
         'pipeline.plan.api.adl_ledger={worker: pod, session: <id>, allowance_usd: <usd>}' \\
-        pipeline.plan.api.adl_controls_usd=<usd> pipeline.plan.api.adl_state_usd=<usd> [--check]
+        pipeline.plan.api.adl_controls_usd=<usd> pipeline.plan.api.adl_state_usd=<usd> \\
+        [--states <sid>,<sid>,...] [--check]
 
 Each state's package is ``pipeline._stage3_lens_cell``'s identity: A with its controls, H without,
 each checked against its stored ADL-qualification package (its layer-20 δ̄ must reproduce, or the
@@ -11,7 +12,8 @@ build stops before any reading), the λ grader on this worker's ledger. The lens
 behavior-free, so one config serves both behaviors. Before any GPU work every state's adapters
 are checked against their recorded tensor sha256 (``StateStore.verify``). ``--check`` (CPU)
 reports, per state, whether its reference and its lens package are done, its adapters verify and
-the base means are done, and the ledger's problems.
+the base means are done, and the ledger's problems. ``--states`` keeps only the named states of
+``STATES``, in their order.
 """
 
 from __future__ import annotations
@@ -36,11 +38,20 @@ def main() -> int:
     check = "--check" in sys.argv
     if check:
         sys.argv.remove("--check")
+    states = STATES
+    if "--states" in sys.argv:
+        i = sys.argv.index("--states")
+        wanted = sys.argv[i + 1].split(",")
+        del sys.argv[i : i + 2]
+        unknown = set(wanted) - {sid for _, _, sid in STATES}
+        if unknown:
+            raise SystemExit(f"--states names states outside STATES: {sorted(unknown)}")
+        states = tuple(s for s in STATES if s[2] in wanted)
     cfg = from_cli()
     ws = P.Workspace(cfg)
     plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
     state = {}
-    for behavior, role, sid in STATES:
+    for behavior, role, sid in states:
         reference = P.adl_package_cell(ws, sid)
         lens, _ = P._stage3_lens_cell(ws, role, sid)
         try:
@@ -69,7 +80,7 @@ def main() -> int:
     outputs: dict = {}
     graders = P._adl_graders_for(ws, plan, outputs) if left else None  # before any GPU work
     built = {}
-    for _, role, sid in STATES:
+    for _, role, sid in states:
         reference = P.adl_package_cell(ws, sid).previous
         lens_cell, _ = P._stage3_lens_cell(ws, role, sid)
         if not lens_cell.done:  # a completed package is reused: no grading, no API check
