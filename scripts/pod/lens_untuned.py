@@ -8,8 +8,10 @@ development, decisions, 2026-10-27): Stage 3's build exactly, nothing read.
 Each state's package is ``pipeline._stage3_lens_cell``'s identity: A with its controls, H without,
 each checked against its stored ADL-qualification package (its layer-20 δ̄ must reproduce, or the
 build stops before any reading), the λ grader on this worker's ledger. The lens cells are
-behavior-free, so one config serves both behaviors. ``--check`` (CPU) reports, per state, whether
-its reference and its lens package are done and the base means are, and the ledger's problems.
+behavior-free, so one config serves both behaviors. Before any GPU work every state's adapters
+are checked against their recorded tensor sha256 (``StateStore.verify``). ``--check`` (CPU)
+reports, per state, whether its reference and its lens package are done, its adapters verify and
+the base means are done, and the ledger's problems.
 """
 
 from __future__ import annotations
@@ -41,16 +43,24 @@ def main() -> int:
     for behavior, role, sid in STATES:
         reference = P.adl_package_cell(ws, sid)
         lens, _ = P._stage3_lens_cell(ws, role, sid)
+        try:
+            ws.store.verify(sid)  # every adapter's tensors against its recorded sha256
+            verified = True
+        except (OSError, ValueError) as error:
+            verified = f"{type(error).__name__}: {error}"
         state[sid] = {"behavior": behavior, "role": role, "reference": reference.done,
-                      "lens": bool(lens is not None and lens.done)}  # fmt: skip
+                      "lens": bool(lens is not None and lens.done),
+                      "adapters_verified": verified}  # fmt: skip
     left = [s["role"] for s in state.values() if not s["lens"]]
     problems = P._stage3_ledger_problems(plan, left)
     missing = [sid for sid, s in state.items() if not s["reference"]]
+    unverified = [sid for sid, s in state.items() if s["adapters_verified"] is not True]
     print(json.dumps({"states": state, "base_means": P.adl_base_means_cell(ws).done,
-                      "ledger_problems": problems, "references_missing": missing}))  # fmt: skip
+                      "ledger_problems": problems, "references_missing": missing,
+                      "adapters_unverified": unverified}))  # fmt: skip
     if check:
         return 0
-    if missing or problems:
+    if missing or problems or unverified:
         raise SystemExit("not ready: see the check above")
     import torch
 
