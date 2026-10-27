@@ -16,7 +16,7 @@ The candidate's evidence, rendered deterministically from a lens package's store
 
 The interpreter, its settings and its synthesis are the readings' (``adl-lens-v1``'s request and
 hygiene text verbatim); only the factual description of the evidence is updated
-(``adl-lens-multiscale-v1``). 20 samples per cell; each hypothesis is judged by the frozen v4
+(``adl-lens-multiscale-v2``). 20 samples per cell; each hypothesis is judged by the frozen v4
 judge and counted under rule C, with ``stage3_method_diagnostic``'s slot accounting (one retry,
 only for a format failure; every due retry sent).
 
@@ -125,10 +125,13 @@ _NEW_SUMMARIES = (
     "for two layers:\n"
     "  1) Logit lens token promotions from the activation difference: for each position, the 100 "
     "most promoted tokens, most promoted first.\n"
-    "  2) Patchscope token promotions from the activation difference, read at 30 steering scales: "
-    "for each position, every token that is among the 20 most promoted at any scale, as [token, "
-    "its best rank at any scale (1 = most promoted), the scales at which it is among the 20], "
-    "ordered by best rank.\n"
+    "  2) Patchscope token promotions from the activation difference, read at each of 30 "
+    "Patchscope substitution scales (the grid is given once, as patchscope_scale_grid): for each "
+    "position, every token that is among the 20 most promoted at any scale, as [token, its best "
+    "rank at any scale (1 = most promoted), the scales at which it is among the 20], ordered by "
+    'best rank. A scale entry "a-b" means every consecutive point of the grid from a to b, not a '
+    "continuous interval. The scales are correlated settings of one reading, not independent "
+    "observations.\n"
 )
 _OLD_LISTS = (
     "- Tokens lists are aggregated across positions, not deduplicated, and truncated to top_k.\n"
@@ -156,7 +159,7 @@ def prompt() -> SummaryPrompt:
         if text.count(old) != 1:
             raise SystemExit("adl-lens-v1's description of the evidence is not the recorded one")
         text = text.replace(old, new)
-    return SummaryPrompt("adl-lens-multiscale-v1", "adl_lens", text)
+    return SummaryPrompt("adl-lens-multiscale-v2", "adl_lens", text)
 
 
 def scale_runs(indices: list[int]) -> list[str]:
@@ -201,7 +204,7 @@ def render(run: Path, decoder: str) -> tuple[str, dict[str, str]]:
                 f = d / name
                 sources[str(f.relative_to(REPO_ROOT))] = hashlib.sha256(f.read_bytes()).hexdigest()
         layers[str(int(layer) - 1)] = {"positions": positions}  # the absolute layer: [20] = 19
-    overview = {"datasets": {"ds1": {"layers": layers}}}
+    overview = {"datasets": {"ds1": {"patchscope_scale_grid": list(SCALES), "layers": layers}}}
     return "OVERVIEW:\n" + json.dumps(overview, ensure_ascii=False), sources
 
 
@@ -257,16 +260,25 @@ def ledger_of(behavior: str) -> tuple[str, str]:
 def screen(report: dict[str, dict]) -> dict[str, Any]:
     rows = {k: v for k, v in report.items() if v["screened"]}
     complete = all(v["fully_judged"] == SAMPLES for v in rows.values())
+    why = collections.Counter(w for v in rows.values() for w, n in v["unresolved_why"].items()
+                              for _ in range(n))  # fmt: skip
+    pending = any(w.endswith("due") for w in why)
+    exhausted = any(w.endswith("refused twice") for w in why)
     checks = {b: {"A": report[f"{b}/A"]["counted"], "H": report[f"{b}/H"]["counted"],
                   "passed": report[f"{b}/A"]["counted"] >= A_MIN
                   and report[f"{b}/H"]["counted"] <= H_MAX} for b in BEHAVIORS}  # fmt: skip
     nominated = complete and all(c["passed"] for c in checks.values())
-    return {
-        "complete": complete,
-        "behaviors": checks,
-        "nominated": nominated,
-        "result": "nominated (not qualified)" if nominated else "the candidate's test ends",
-    }
+    if pending:
+        result = "pending: requests are still due (resume to complete)"
+    elif exhausted:
+        result = "incomplete: format retries exhausted in a screened cell (cannot be nominated)"
+    elif nominated:
+        result = "nominated (not qualified)"
+    else:
+        result = "complete, not passed: the candidate's test ends"
+    return {"complete": complete, "pending": pending, "format_retries_exhausted": exhausted,
+            "unresolved_why": dict(why), "behaviors": checks, "nominated": nominated,
+            "result": result}  # fmt: skip
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -306,16 +318,30 @@ def main(argv: list[str] | None = None) -> int:
             return [s["due"] for rows in M.slots_of(mine, p, interp, judge, caches).values()
                     for r in rows for s in r[1:3] if s is not None and "due" in s]  # fmt: skip
 
+        def behavior_of(key: str, mine: list = mine) -> str | None:
+            """The behavior a request belongs to (a pilot's, though another item pays)."""
+            for _, c in mine:
+                for _, tried in M.interpreter_slots(c, p, interp, caches["summary"]):
+                    if any(a.key == key for a in tried):
+                        return c["behavior"]
+            for rows, (_, c) in zip(M.slots_of(mine, p, interp, judge, caches).values(), mine,
+                                    strict=True):  # fmt: skip
+                if any(a.key == key for r in rows for a in r[3]):
+                    return c["behavior"]
+            return None
+
         due = interpreter_due()
         est = M.estimate(due, specs, interpreter_cells()) + 2 * len(due) * M.JUDGE_USD * M.MARGIN
         total += est
         print(f"{behavior} ledger, {label}: {len(mine)} cells, {len(due)} interpreter attempts "
               f"due, ~${est:.2f}")  # fmt: skip
-        if args.send and due:
-            for phase, cache, due_now, of in (
-                    ("summary", caches["summary"], interpreter_due, interpreter_cells),
-                    ("judge", caches["judge"], judge_due, lambda: {})):  # fmt: skip
-                send_all(M, behavior, label, phase, due_now, cache, specs, of)
+        if args.send:  # each phase by its own remaining work: a resumed judge runs alone
+            if interpreter_due():
+                send_all(M, behavior, label, "summary", interpreter_due, caches["summary"], specs,
+                         interpreter_cells, behavior_of)  # fmt: skip
+            if judge_due():
+                send_all(M, behavior, label, "judge", judge_due, caches["judge"], specs,
+                         lambda: {}, behavior_of)  # fmt: skip
     report = {}
     for behavior in BEHAVIORS:
         mine = [(n, c) for n, c in found if c["behavior"] == behavior]
@@ -338,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def send_all(M: Any, behavior: str, label: str, phase: str, due_now: Any, cache: JudgeCache,
-             specs: dict[str, Any], cells_of: Any) -> None:  # fmt: skip
+             specs: dict[str, Any], cells_of: Any, behavior_of: Any) -> None:  # fmt: skip
     """Sends the due attempts, then the retries they make due, until none is due, reserved on
     the behavior's chained ledger under ``label`` and logged."""
     _, ledger = stage3_money.money(data_root(), behavior, data_root() / METER_LOG)
@@ -358,7 +384,8 @@ def send_all(M: Any, behavior: str, label: str, phase: str, due_now: Any, cache:
             for r in due:
                 c = completions[r.key]
                 f.write(json.dumps({"request_id": r.key, "phase": phase, "kind": r.kind,
-                                    "model": r.body["model"], "text": c.text,
+                                    "behavior": behavior_of(r.key), "paid_by": behavior,
+                                    "label": label, "model": r.body["model"], "text": c.text,
                                     "finish_reason": c.finish_reason, "usage": dict(c.usage),
                                     "error": c.error}, ensure_ascii=False) + "\n")  # fmt: skip
         failed += sum(completions[r.key].error is not None for r in due)
