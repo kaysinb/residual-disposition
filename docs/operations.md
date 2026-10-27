@@ -1525,11 +1525,13 @@ Decided after Stage 1 (preregistration §12.3.7,
         without a writer is listed as unsupported and leaves its hypothesis pending. Cache files
         are never changed and no request is repeated for tier metadata; the record reports the
         reused slot references, unique entries and their tiers.
-      - **Completion of blocked strict labels** (§12.4.5, 2026-10-27), for a lineage with a
-        committed specification `manifests/stage3_blocked_completion_<lineage>.json` (its cohort
-        of blocked strict requests, their pinned attempts and lenient slots, the instrument, the
-        reference set and the blind review's seed and decoys), after the lens judge and before
-        the categories, with `scripts/stage3_completion.py`:
+      - **Completion of blocked strict labels** (§12.4.5, 2026-10-27), for a lineage registered
+        in `continuation_completion.REGISTERED` by its committed specification's sha256,
+        `manifests/stage3_blocked_completion_<lineage>.json` (its cohort of blocked strict
+        requests, their pinned attempts and lenient slots, the instrument, the reference set and
+        the blind review's seed and decoys); a registered specification missing or changed, or
+        one of an unregistered lineage, is refused. After the lens judge and before the
+        categories, with `scripts/stage3_completion.py`:
         1. `validate <lineage> --send`: strict-v4 on the instrument's model, once, on the
            reference set's items (each request and its one parser retry, standard tier), read
            with the set's unchanged lenient labels under rule C's criteria; it passes when
@@ -1539,15 +1541,19 @@ Decided after Stage 1 (preregistration §12.3.7,
            its first answer the parser accepts (the retry only after a refusal).
         3. `issue <lineage>`, then `import <lineage> --export …`, when the validation failed
            (the whole cohort) or a slot was refused twice: the researcher's blind review of
-           those requests among the 30 seeded decoys, the page issued once
+           those requests among the 30 seeded decoys, on a frozen page of strict labels only
            (`<DATA_DIR>/stage3_blocked_completion/<lineage>/review.html`, its private
-           `issued.json`) and its export imported once, exactly the issued items.
+           `issued.json`), issued once; its export imported once, exactly the issued items,
+           its bytes kept (`export.jsonl`) and parsed again, against the page's frozen render,
+           by every recomputation.
         4. The categories (`continuation_categories.py`) grade the cohort's references that
            rule C counts by their completed labels too, without printing a count.
         5. `provenance <lineage>`: the provenance, written once and committed before the
            readers' verdicts, which recompute it; until then the lineage's readers are pending.
-        The completed labels determine the counts; the zero-count treatment and its intervals
-        stay in `strict_safety_blocked` as a sensitivity. Every send is reserved on the chained
+        The completed labels determine the counts and the verdicts; the zero-count treatment
+        keeps its intervals in `strict_safety_blocked` and its own analysis on the same frozen
+        functions in `zero_count_sensitivity` (counts, p₃, p₄, gates, category margins), which
+        selects nothing. Every send is reserved on the chained
         ledger and logged with its request body's model; the judge's request logs record each
         request's own model too (a lenient row's before this change showed the strict model).
       - **Money** (`stage3_money`):

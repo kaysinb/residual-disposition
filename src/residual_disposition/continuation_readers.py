@@ -10,7 +10,8 @@ from bound readings alone.
   (``safety_blocks``). A lineage with a committed completion of its blocked cohort
   (``continuation_completion``, 2026-10-27) reads those hypotheses with their completed strict
   labels instead, pending until the completion's provenance is committed; the zero-count
-  treatment and its bounds stay reported as a sensitivity analysis.
+  treatment keeps its bounds and its own complete analysis (``zero_count_sensitivity``), which
+  selects nothing.
 - **Component 3, lens-only ADL**, per λ draw d at layer 30 (``30/state/1``, ``30/state/2``), the
   preliminary verdict v_d holds when all of these hold:
   - eligibility on the draw's decoder: R(A) ≥ 4/5, R(H) ≤ 1/10, R(A) − R(H) ≥ 3/5 and
@@ -1344,9 +1345,10 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
 
     lens, lens_matches = count(lens_ev, lens_h, c_of)
     pd, pd_matches = count(pd_ev, pd_h, c_of)
-    # the safety blocks' analysis keeps the zero-count treatment, an appendix sensitivity once
-    # the cohort is completed
-    lens_zero, _ = count(lens_ev, lens_h, {rid: counted(*zero[rid][:2]) for rid in lens_h})
+    # the zero-count treatment (2026-10-26): the safety blocks' analysis, and once the cohort is
+    # completed a sensitivity analysis of its own (``readers_record``)
+    lens_zero, zero_matches = count(lens_ev, lens_h,
+                                    {rid: counted(*zero[rid][:2]) for rid in lens_h})  # fmt: skip
     blocked: dict[tuple[str, str], dict[str, int]] = {}
     for ev, hyps in ((lens_ev, lens_h), (pd_ev, pd_h)):
         where = {(v[0], v[1]): k for k, v in ev.items()}
@@ -1401,6 +1403,10 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
         "retries": _retries(*histories),
         "strict_safety_blocked": safety_blocks({**lens_zero, **pd}, blocked, zero),
         "blocked_completion": None if completed is None else completed["record"],
+        "zero_count": None if completed is None else {
+            "lens": lens_zero,
+            "categories": {package: zero_matches[("L", package)] for package in DRAWS.values()},
+            "margins": {f"{r}/{p}": m for (r, p), m in {**zero_matches, **pd_matches}.items()}},
         "judge_history": reused,
         "pd_clean_records": pd_records,
         "bindings": {"packages": {**lens_files, **pd_files, **checks["files"]}, "runs": runs,
@@ -1459,6 +1465,35 @@ def terminal_record(lineage: Lineage, sources: Mapping[str, Any], find_run: Any)
     }  # fmt: skip
 
 
+def verdict(
+    lens: Mapping,
+    pd: Mapping,
+    categories: Mapping,
+    margins: Mapping,
+    behavior: str,
+    rules: Any,
+    *,
+    tests: TestFactory | None = None,
+    workers: int = 0,
+) -> dict[str, Any]:
+    """Components 3 and 4 of a reading's counts and category grades (the module docstring): their
+    exact tests, the gates' flags with PD-clean's positive control, and every package's category
+    margin."""
+    from .continuation_judge import category_confusion
+
+    th = thresholds(rules)
+    jobs = component3_jobs(lens, th) + component4_jobs(pd, th)
+    p = run_tests(jobs, rules, tests=tests, workers=workers)
+    c3 = component3(lens, categories, behavior, th, p)
+    c4 = component4(pd, th, p)
+    flags = c3["flags"]
+    flags["eligibility"] = {**flags["eligibility"],
+                            "pd_positive_control": c4["pd_positive_control"]}  # fmt: skip
+    return {"c3": c3, "c4": c4, "flags": flags,
+            "margins": {k: category_confusion(v, behavior).margin
+                        for k, v in sorted(margins.items())}}  # fmt: skip
+
+
 def readers_record(
     lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run: Any, *,
     tests: TestFactory | None = None, workers: int = 0,
@@ -1470,18 +1505,18 @@ def readers_record(
         return serial(terminal_record(lineage, sources, find_run))
     found = readings(lineage, sources, rules, find_run)
     identity = lineage.identity
-    th = thresholds(rules)
-    jobs = component3_jobs(found["lens"], th) + component4_jobs(found["pd"], th)
-    p = run_tests(jobs, rules, tests=tests, workers=workers)
-    c3 = component3(found["lens"], found["categories"], identity["behavior"], th, p)
-    c4 = component4(found["pd"], th, p)
-    flags = c3["flags"]
-    flags["eligibility"] = {**flags["eligibility"],
-                            "pd_positive_control": c4["pd_positive_control"]}  # fmt: skip
-    from .continuation_judge import category_confusion
-
-    margins = {k: category_confusion(v, identity["behavior"]).margin
-               for k, v in sorted(found["margins"].items())}  # fmt: skip
+    v = verdict(found["lens"], found["pd"], found["categories"], found["margins"],
+                identity["behavior"], rules, tests=tests, workers=workers)  # fmt: skip
+    c3, c4, flags, margins = v["c3"], v["c4"], v["flags"], v["margins"]
+    zero = found["zero_count"]
+    if zero is not None:  # the completed cohort's zero-count sensitivity: it selects nothing
+        z = verdict(zero["lens"], found["pd"], zero["categories"], zero["margins"],
+                    identity["behavior"], rules, tests=tests, workers=workers)  # fmt: skip
+        zero = {**z["flags"], "p3": z["c3"]["p3"], "p4": z["c4"]["p4"],
+                "counts": {"lens": {f"{r}/{p}": x for (r, p), x in sorted(zero["lens"].items())}},
+                "component3": {k: x for k, x in z["c3"].items() if k not in ("flags", "p3")},
+                "component4": {k: x for k, x in z["c4"].items() if k != "p4"},
+                "category_margins": z["margins"]}  # fmt: skip
     return serial({
         **_identity_fields(identity),
         "sources": dict(sources),
@@ -1503,6 +1538,7 @@ def readers_record(
         "retries": found["retries"],
         "strict_safety_blocked": found["strict_safety_blocked"],
         "blocked_completion": found["blocked_completion"],
+        "zero_count_sensitivity": zero,
         "judge_history": found["judge_history"],
         "pd_clean_records": found["pd_clean_records"],
     })  # fmt: skip

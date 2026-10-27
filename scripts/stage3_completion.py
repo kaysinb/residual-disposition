@@ -12,9 +12,11 @@ amendment of 2026-10-27; ``continuation_completion``), on the laptop, in this or
   parser refused. Once no slot is open it prints the result and the criteria.
 - ``replace``: after a passed validation, the same for each cohort request; it prints how many
   slots are answered, refused twice (for the blind review) or still open.
-- ``issue``: the blind review's page (``review.html``) and its private record (``issued.json``),
-  once, for every cohort request after a failed validation, else those refused twice.
-- ``import``: the page's export, once, exactly the issued items.
+- ``issue``: the blind review's frozen page (``review.html``, strict labels only) and its private
+  record (``issued.json``), once, for every cohort request after a failed validation, else those
+  refused twice.
+- ``import``: the page's export, once, exactly the issued items; its bytes are kept
+  (``export.jsonl``) and parsed again by every recomputation.
 - ``provenance``: writes ``manifests/stage3_blocked_completion_<lineage>_provenance.json`` once,
   to be committed before the readers' verdicts.
 
@@ -40,7 +42,7 @@ from residual_disposition import stage3_money
 from residual_disposition.config import load_config
 from residual_disposition.continuation_kstar import find_run
 from residual_disposition.continuation_panel import Pending
-from residual_disposition.judge import estimate_cost, fetch, load_targets, rubric_set
+from residual_disposition.judge import estimate_cost, fetch, labeling_set_id, load_targets
 from residual_disposition.paths import REPO_ROOT, data_root
 from residual_disposition.records import JudgeLabel, ToolHypothesis, read_responses, read_table
 
@@ -174,10 +176,7 @@ def issue(args: argparse.Namespace) -> int:
         print("every cohort request is answered: no blind review")
         return 0
     items = C.review_items(spec, keys, ctx["texts"], ctx["target"])
-    page_of = script("make_labeling_set").render_page
-    from residual_disposition.judge import labeling_set_id
-
-    page = page_of(labeling_set_id(items), items, rubric_set(E.RUBRICS["lens"]))
+    page = C.page(labeling_set_id(items), items)
     record = C.issued(args.lineage, spec["sha256"], keys, items, page)
     work = C.work_dir(args.lineage)
     C.write_once(work / C.ISSUED, record)

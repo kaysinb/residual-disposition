@@ -297,6 +297,7 @@ class World:
         own = root / "manifests"
         monkeypatch.setattr(E, "history_path", lambda r, lineage: own / f"h_{lineage}.json")
         monkeypatch.setattr(C, "spec_path", lambda r, lineage: own / f"c_{lineage}.json")
+        monkeypatch.setattr(C, "REGISTERED", {})  # no completion unless a test registers one
         self.lens, self.pd = lens_counts(), pd_counts()
         self.hyps, self.approved, self.pool_draws, self.xcont = {}, {}, [], None
         self.blocked = set()

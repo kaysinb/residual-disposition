@@ -83,7 +83,7 @@ class Done:
     """A blocked world, its specification committed under ``root`` and its answers cached."""
 
     def __init__(self, world, root: Path, monkeypatch):
-        self.world, self.root = world, root
+        self.world, self.root, self.monkeypatch = world, root, monkeypatch
         monkeypatch.setenv("RUNS_DIR", str(world.runs))
         monkeypatch.setattr(C, "spec_path", lambda r, lineage: root / C.SPEC.format(lineage))
         monkeypatch.setattr(C, "provenance_path",
@@ -131,10 +131,36 @@ class Done:
             spec[k] = v
         return spec
 
-    def commit(self, spec=None) -> dict:
+    def commit(self, spec=None, register=True) -> dict:
+        """The specification committed and, unless told otherwise, registered as it is."""
         spec = spec or self.spec()
-        C.spec_path(None, spec["lineage"]).write_text(json.dumps(spec, indent=1))
+        path = C.spec_path(None, spec["lineage"])
+        path.write_text(json.dumps(spec, indent=1))
+        if not register:
+            return spec
+        self.monkeypatch.setitem(C.REGISTERED, spec["lineage"], {
+            "behavior": spec["behavior"], "sha256": E.file_sha(path)})  # fmt: skip
         return C.committed_spec(spec["lineage"])
+
+    def issue(self, spec, keys):
+        """The review issued for ``keys``: its frozen page and private record."""
+        from residual_disposition.judge import labeling_set_id
+
+        items = C.review_items(spec, keys, self.texts(), self.target)
+        page = C.page(labeling_set_id(items), items)
+        record = C.issued(spec["lineage"], spec["sha256"], keys, items, page)
+        work = C.work_dir(spec["lineage"])
+        C.write_once(work / C.ISSUED, record)
+        (work / C.PAGE).write_text(page)
+        return record
+
+    def export(self, record, path, label="names_behavior", ids=None, **row):
+        ids = [e["item_id"] for e in record["items"]] if ids is None else ids
+        path.write_text("".join(json.dumps({
+            "set_id": record["set_id"], "item_id": i, "strict_label": label,
+            "lenient_label": None, "labeled_at": "2026-10-27T10:00:00+00:00", **row}) + "\n"
+            for i in ids))  # fmt: skip
+        return path
 
     def answer(self, request, *texts, tier="standard"):
         """Cache ``texts`` as the request's attempts in order (its retry the second)."""
@@ -196,6 +222,9 @@ def test_a_validated_replacement_completes_the_cohort_and_keeps_the_zero_count(d
     found = data["strict_safety_blocked"]  # the 2026-10-26 treatment, a sensitivity now
     assert found["packages"][f"L/{D1}"] == {"count": 68, "blocked": 2, "blocked_lenient_yes": 2,
                                             "interval": ["17/20", "7/8"]}  # fmt: skip
+    zero = data["zero_count_sensitivity"]  # the zero-count analysis, on the frozen functions
+    assert zero["counts"]["lens"][f"L/{D1}"] == 68
+    assert {"p3", "p4", "component3", "component4", "category_margins"} <= set(zero)
     assert data["blocked_completion"] == {
         "spec": spec["sha256"], "provenance": E.file_sha(C.provenance_path(None, spec["lineage"])),
         "validation": "pass", "requests": 2, "references": 2, "reviewed": 0}  # fmt: skip
@@ -262,17 +291,9 @@ def test_a_failed_validation_sends_the_whole_cohort_to_the_blind_review(done, tm
         done.answer(r, strict("other"))
     keys = C.routed(found, {k: {"status": "answered"} for k in spec["cohort"]["requests"]})
     assert keys == sorted(spec["cohort"]["requests"])
-    texts = done.texts()
-    items = C.review_items(spec, keys, texts, done.target)
-    assert len(items) == 2 + 30
-    record = C.issued(spec["lineage"], spec["sha256"], keys, items, "<page>")
-    C.write_once(C.work_dir(spec["lineage"]) / C.ISSUED, record)
-    export = tmp_path / "labels.jsonl"
-    export.write_text("".join(json.dumps({
-        "set_id": record["set_id"], "item_id": e["item_id"], "strict_label": "names_behavior",
-        "lenient_label": None, "labeled_at": "2026-10-27T10:00:00+00:00"}) + "\n"
-        for e in record["items"]))  # fmt: skip
-    C.import_review(spec["lineage"], export)
+    record = done.issue(spec, keys)
+    assert len(record["items"]) == 2 + 30
+    C.import_review(spec["lineage"], done.export(record, tmp_path / "labels.jsonl"))
     written = done.provenance(spec)
     assert written["routed"] == keys and written["review"]["items"] == 32
     assert written["review"]["decoy_agreement"]["decoys"] == 30
@@ -331,47 +352,83 @@ def test_the_review_is_bound_to_its_issue_and_imported_once(done, tmp_path):
     spec = done.commit()
     keys = sorted(spec["cohort"]["requests"])[:1]
     texts = done.texts()
-    items = C.review_items(spec, keys, texts, done.target)
-    page = V_page(items)
-    for li in items:  # the page holds ids, targets and texts, never provenance
-        assert li.item.response_id not in page
-    record = C.issued(spec["lineage"], spec["sha256"], keys, items, page)
+    record = done.issue(spec, keys)
     work = C.work_dir(spec["lineage"])
-    C.write_once(work / C.ISSUED, record)
+    page = (work / C.PAGE).read_text()
+    assert "lenient-ia" not in page and "same category" not in page.lower()  # strict only
+    assert page.count('type="radio"') == 3 * len(record["items"])
+    items = C.review_items(spec, keys, texts, done.target)
+    for li in items:  # the page holds ids, targets and texts, never provenance
+        assert li.item.response_id not in page and li.item_id in page
     with pytest.raises(ValueError, match="written once"):
         C.write_once(work / C.ISSUED, record)
-
-    def export(rows, name):
-        path = tmp_path / name
-        path.write_text("".join(json.dumps({"set_id": record["set_id"], "item_id": i,
-                                            "strict_label": "other", "lenient_label": None,
-                                            "labeled_at": "2026-10-27T10:00:00+00:00"}) + "\n"
-                                for i in rows))  # fmt: skip
-        return path
-
     ids = [e["item_id"] for e in record["items"]]
     with pytest.raises(ValueError, match="exactly the issued items"):
-        C.import_review(spec["lineage"], export(ids[:-1], "short.jsonl"))
-    C.import_review(spec["lineage"], export(ids, "all.jsonl"))
-    with pytest.raises(ValueError, match="written once"):
-        C.import_review(spec["lineage"], export(ids, "again.jsonl"))
+        C.import_review(spec["lineage"], done.export(record, tmp_path / "a.jsonl", ids=ids[:-1]))
+    with pytest.raises(ValueError, match="invalid strict label"):
+        C.import_review(spec["lineage"], done.export(record, tmp_path / "b.jsonl", "maybe"))
+    with pytest.raises(ValueError, match="holds a lenient label"):
+        C.import_review(spec["lineage"], done.export(record, tmp_path / "c.jsonl",
+                                                     lenient_label=True))  # fmt: skip
+    C.import_review(spec["lineage"], done.export(record, tmp_path / "d.jsonl", "other"))
+    with pytest.raises(ValueError, match="imported once"):
+        C.import_review(spec["lineage"], done.export(record, tmp_path / "e.jsonl", "other"))
     found = C.review(spec["lineage"], spec, keys, texts, done.target, done.strict_of())
     assert found["labels"] == {keys[0]: "other"}
+    step = found["steps"][keys[0]]
+    assert (step["key"], step["set_id"], step["parsed"]) == (None, record["set_id"], True)
+    assert step["review"] == E.file_sha(work / C.EXPORT)
+    assert step["import_sha256"] == E.file_sha(work / C.HUMAN)
     assert found["record"]["decoy_agreement"]["decoys"] == 30
     with pytest.raises(ValueError, match="not the specification's for its routed requests"):
         C.review(spec["lineage"], spec, sorted(spec["cohort"]["requests"]), texts, done.target,
                  done.strict_of())  # fmt: skip
-    issued = json.loads((work / C.ISSUED).read_text())
-    (work / C.ISSUED).write_text(json.dumps({**issued, "page_sha256": "0" * 64}))
-    with pytest.raises(ValueError):
+
+    def refused(path, edit, match):
+        before = path.read_bytes()
+        edit(path)
+        with pytest.raises(ValueError, match=match):
+            C.review(spec["lineage"], spec, keys, texts, done.target, done.strict_of())
+        path.write_bytes(before)
+
+    human = work / C.HUMAN
+    refused(human, lambda p: p.write_text(json.dumps({  # a changed label in the import
+        **json.loads(p.read_text()), "labels": {i: "names_behavior" for i in ids}})),
+        "not the kept export's")  # fmt: skip
+    refused(work / C.EXPORT, lambda p: p.write_text(p.read_text().replace('"other"',
+            '"names_behavior"')), "not the kept export of the issued page")  # fmt: skip
+    refused(work / C.PAGE, lambda p: p.write_text(p.read_text() + " "), "frozen page")
+    refused(work / C.ISSUED, lambda p: p.write_text(json.dumps({
+        **json.loads(p.read_text()), "page_sha256": "0" * 64})), "frozen page")  # fmt: skip
+    (work / C.EXPORT).unlink()
+    with pytest.raises(G.Pending, match="not imported"):
         C.review(spec["lineage"], spec, keys, texts, done.target, done.strict_of())
 
 
-def V_page(items):
-    from residual_disposition.judge import labeling_set_id, rubric_set
+def test_a_registered_completion_is_never_skipped(done, monkeypatch):
+    """A registered specification missing, changed or unregistered is refused, the readers and
+    the categories alike."""
+    spec = done.spec()
+    done.commit(spec, register=False)
+    with pytest.raises(ValueError, match="not registered"):
+        V.record(done.world)
+    path = C.spec_path(None, spec["lineage"])
+    monkeypatch.setitem(C.REGISTERED, spec["lineage"], {"behavior": done.behavior,
+                                                        "sha256": E.file_sha(path)})  # fmt: skip
+    path.unlink()
+    with pytest.raises(ValueError, match="specification is missing"):
+        V.record(done.world)
+    with pytest.raises(ValueError, match="specification is missing"):
+        C.spec_of_behavior(done.behavior, "lens-reading")
+    path.write_text(json.dumps({**spec, "human": {**spec["human"], "seed": 9}}))
+    with pytest.raises(ValueError, match="not the registered completion"):
+        V.record(done.world)
 
-    page = _script("make_labeling_set").render_page
-    return page(labeling_set_id(items), items, rubric_set("v4"))
+
+def test_the_repository_registers_eli5_s_committed_specification():
+    eli5 = REPO / "manifests" / C.SPEC.format("strong_eli5_cont_200")
+    registered = {"strong_eli5_cont_200": {"behavior": "eli5", "sha256": E.file_sha(eli5)}}
+    assert registered == C.REGISTERED
 
 
 def test_the_cohort_is_exactly_the_blocked_requests_with_their_pinned_histories(done):
@@ -546,8 +603,6 @@ def test_the_category_script_grades_the_counted_completions_sealed(done, monkeyp
     done.answer(r1, strict("names_behavior"))
     done.answer(r2, strict("avoids_behavior"))
     cats = _script("continuation_categories")
-    monkeypatch.setattr(C, "spec_of_reading", lambda root, reading: C.committed_spec(
-        spec["lineage"]) if reading == "lens-reading" else None)  # fmt: skip
     monkeypatch.setattr(cats, "find_run", done.world.find_run)
     texts = cats.counted_texts(done.behavior, [("lens-reading", "lens-judge")])
     extra = cats.completed_texts(C.committed_spec(spec["lineage"]), done.behavior,

@@ -16,9 +16,10 @@ target check; §12.4.5 as amended 2026-10-24 and 2026-10-25), on the laptop.
   readers' verdicts then wait for it.
 - **Money.** Every request is reserved on the lineage's chained ledger (``stage3_money``: its base,
   then its strong part) before it is sent; the meter books what the parts committed at the end.
-- **A completed cohort.** When a committed completion specification reads the lens reading
-  (§12.4.5, 2026-10-27), the cohort's references that rule C counts by their completed strict
-  labels are graded too, and no count is printed.
+- **A completed cohort.** For a behavior with a registered completion (§12.4.5, 2026-10-27;
+  ``continuation_completion.REGISTERED``), whose committed specification must read the lens
+  reading, the cohort's references that rule C counts by their completed strict labels are
+  graded too, and no count is printed.
 - **Output.** A run of experiment ``category_stage3``: ``category_inputs.json`` and
   ``category_labels.jsonl`` (``{response_id, request_key, categories}``), the formats the
   readers' verdicts read (``continuation_readers.category_grades``).
@@ -58,7 +59,7 @@ from residual_disposition.judge import (
     load_targets,
     request_key,
 )
-from residual_disposition.paths import REPO_ROOT, data_root
+from residual_disposition.paths import data_root
 from residual_disposition.records import (
     JudgeLabel,
     ToolHypothesis,
@@ -158,7 +159,7 @@ def main(argv: list[str] | None = None) -> int:
                                           (args.pd_reading, args.pd_judge)])  # fmt: skip
     # a lineage's completed blocked strict labels (§12.4.5, 2026-10-27): its newly counted
     # hypotheses graded beside the others, the counts sealed
-    spec = C.spec_of_reading(REPO_ROOT, args.lens_reading)
+    spec = C.spec_of_behavior(args.behavior, args.lens_reading)
     if spec is not None:
         texts |= completed_texts(spec, args.behavior, args.lens_reading, args.lens_judge)
     definitions, model = instrument()

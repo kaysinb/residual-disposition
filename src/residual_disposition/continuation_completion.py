@@ -44,8 +44,18 @@ from .continuation_panel import Pending
 SPEC = "stage3_blocked_completion_{}.json"
 PROVENANCE = "stage3_blocked_completion_{}_provenance.json"
 ISSUED, HUMAN, PAGE, LOG = "issued.json", "human.json", "review.html", "requests.jsonl"
+EXPORT = "export.jsonl"  # the review's export, kept as imported
 LABELER = "researcher"  # the blind review's labeler (judge.parse_export)
 DECOYS = 30
+# The registered completions (§12.4.5, 2026-10-27): each lineage's cohort by its committed
+# specification's sha256. Another lineage has none: its blocked strict labels keep the 2026-10-26
+# treatment.
+REGISTERED = {
+    "strong_eli5_cont_200": {
+        "behavior": "eli5",
+        "sha256": "da20c4a82b9a2cb97b374113f3f977f9ef390df8b3b3349f04f36b8d485ee204",
+    },
+}
 
 
 def spec_path(root: Path, lineage: str) -> Path:
@@ -63,16 +73,22 @@ def work_dir(lineage: str) -> Path:
 
 
 def committed_spec(lineage: str) -> dict[str, Any] | None:
-    """The lineage's committed specification with its sha256; None when it has none."""
+    """The registered lineage's committed specification with its sha256, the registered one;
+    None for a lineage with no registered completion. A registered specification missing or
+    changed, or one of an unregistered lineage, is refused."""
     from .manifests import committed_json
     from .paths import REPO_ROOT
 
     path = spec_path(REPO_ROOT, lineage)
-    if not path.exists():
+    if lineage not in REGISTERED:
+        if path.exists():
+            raise ValueError(f"{path.name}: a completion of a lineage not registered")
         return None
+    if not path.exists():
+        raise ValueError(f"{path.name}: the registered completion's specification is missing")
     data = committed_json(path, "the completion of the blocked strict labels")
-    if data.get("lineage") != lineage:
-        raise ValueError(f"{path.name}: the specification of {data.get('lineage')}")
+    if data["sha256"] != REGISTERED[lineage]["sha256"] or data.get("lineage") != lineage:
+        raise ValueError(f"{path.name}: not the registered completion's specification")
     return data
 
 
@@ -351,6 +367,136 @@ def review_items(spec: Mapping[str, Any], keys: Sequence[str], texts: Mapping[st
     return sorted(items, key=lambda li: sha(f"{seed}:order:{li.item_id}"))
 
 
+# The review's page: self-contained (it loads nothing), the strict rubric and each item's target
+# and text alone, one strict label per item; its export is judge.parse_export's format with a
+# null lenient label, and it exports only once every item is labelled.
+PAGE_HTML = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>Strict labels</title>
+<style>
+:root { --bg: #fafaf8; --fg: #1d1d1b; --muted: #6b6b66; --card: #ffffff; --line: #d9d9d3;
+        --accent: #2456a6; --accent-fg: #ffffff; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #161615; --fg: #ececea; --muted: #a3a39d; --card: #20201e; --line: #3a3a36;
+          --accent: #7aa7f0; --accent-fg: #0d1b33; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+       font: 16px/1.5 system-ui, sans-serif; }
+main { max-width: 820px; margin: 0 auto; padding: 16px; }
+details, article { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+                   padding: 12px 16px; margin: 12px 0; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.muted { color: var(--muted); }
+fieldset { border: 0; padding: 0; margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
+label { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+input:checked + span { font-weight: 600; color: var(--accent); }
+button { background: var(--accent); color: var(--accent-fg); border: 0; border-radius: 6px;
+         padding: 8px 16px; font: inherit; cursor: pointer; }
+.bar { position: sticky; top: 0; background: var(--bg); padding: 8px 0;
+       border-bottom: 1px solid var(--line); display: flex; gap: 16px; align-items: center; }
+</style>
+</head>
+<body>
+<main>
+<div class="bar"><button id="export">Export</button><span id="status" class="muted"></span></div>
+<details><summary>The strict rubric</summary><pre>@@GUIDE@@</pre></details>
+@@ITEMS@@
+</main>
+<script>
+(() => {
+  const setId = "@@SET_ID@@";
+  const store = "strict-labels-" + setId;
+  const items = Array.from(document.querySelectorAll("article[data-item]"));
+  const status = document.getElementById("status");
+  let state = {};
+  try { state = JSON.parse(localStorage.getItem(store) || "{}"); } catch (e) { state = {}; }
+  function save() { try { localStorage.setItem(store, JSON.stringify(state)); } catch (e) {} }
+  function render() {
+    let done = 0;
+    for (const el of items) {
+      const entry = state[el.dataset.item];
+      for (const input of el.querySelectorAll("input")) {
+        input.checked = !!entry && entry.strict_label === input.value;
+      }
+      if (entry) done += 1;
+    }
+    status.textContent = done + " of " + items.length + " labelled";
+  }
+  for (const el of items) {
+    for (const input of el.querySelectorAll("input")) {
+      input.addEventListener("change", () => {
+        state[el.dataset.item] = {strict_label: input.value,
+                                  labeled_at: new Date().toISOString()};
+        save();
+        render();
+      });
+    }
+  }
+  document.getElementById("export").addEventListener("click", () => {
+    const open = items.filter((el) => !state[el.dataset.item]);
+    if (open.length) {
+      status.textContent = open.length + " items have no label yet: label every item first.";
+      return;
+    }
+    const rows = items.map((el) => JSON.stringify({
+      set_id: setId, item_id: el.dataset.item, strict_label: state[el.dataset.item].strict_label,
+      lenient_label: null, labeled_at: state[el.dataset.item].labeled_at}));
+    const blob = new Blob([rows.join("\\n") + "\\n"], {type: "application/x-ndjson"});
+    const link = document.createElement("a");
+    link.href = URL.createObjectURL(blob);
+    link.download = "labels-" + setId + ".jsonl";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    status.textContent = "Exported " + rows.length + " labels.";
+  });
+  render();
+})();
+</script>
+</body>
+</html>
+"""
+PAGE_ITEM = """<article data-item="{item_id}">
+  <p class="muted">Target behavior</p>
+  <p class="text">{target}</p>
+  <p class="muted">Response</p>
+  <p class="text">{response}</p>
+  <fieldset>{choices}</fieldset>
+</article>"""
+
+
+def page(set_id: str, items: Sequence[Any]) -> str:
+    """The review's frozen page: the strict rubric and each item's target and text, HTML-escaped,
+    and nothing about states, runs, statuses or labels."""
+    import html
+
+    from .judge import STRICT_LABELS
+
+    rubric = E.judge_settings(E.RUBRICS["lens"]).rubrics.strict
+    blocks = []
+    for li in items:
+        choices = "".join(
+            f'<label><input type="radio" name="{html.escape(li.item_id)}" value="{v}">'
+            f"<span>{v}</span></label>"
+            for v in STRICT_LABELS
+        )
+        blocks.append(PAGE_ITEM.format(item_id=html.escape(li.item_id),
+                                       target=html.escape(li.item.target),
+                                       response=html.escape(li.item.response),
+                                       choices=choices))  # fmt: skip
+    return (PAGE_HTML.replace("@@SET_ID@@", html.escape(set_id))
+            .replace("@@GUIDE@@", html.escape(rubric.text))
+            .replace("@@ITEMS@@", "\n".join(blocks)))  # fmt: skip
+
+
 def issued(lineage: str, spec_sha: str, keys: Sequence[str], items: Sequence[Any],
            page: str) -> dict[str, Any]:  # fmt: skip
     """The review's private record at issue: the set id, the page's sha256, each item's id and
@@ -372,22 +518,35 @@ def write_once(path: Path, data: Mapping[str, Any]) -> None:
         raise ValueError(f"{path} exists: it is written once") from None
 
 
-def import_review(lineage: str, export: Path) -> dict[str, Any]:
-    """The review's export imported once, locked: exactly the issued items, one strict label
-    each, under the issued set; the lenient label is not read."""
+def exported(text: str, issue: Mapping[str, Any]) -> dict[str, str]:
+    """{item id: strict label} of a review export: the page's format (``judge.parse_export``),
+    exactly the issued items, each a strict label and no lenient one."""
     from .judge import parse_export
 
-    work = work_dir(lineage)
-    issue = json.loads((work / ISSUED).read_text())
-    text = Path(export).read_text()
     rows = parse_export(text, issue, labeler=LABELER)
     if sorted(r.item_id for r in rows) != sorted(e["item_id"] for e in issue["items"]):
         raise ValueError("the export does not label exactly the issued items")
-    data = {"set_id": issue["set_id"], "page_sha256": issue["page_sha256"],
-            "issued_sha256": E.file_sha(work / ISSUED), "export_sha256": sha(text),
-            "labels": {r.item_id: r.strict_label for r in rows}}  # fmt: skip
-    write_once(work / HUMAN, data)
-    return {"items": len(rows), "export_sha256": data["export_sha256"]}
+    if any(r.lenient_label is not None for r in rows):
+        raise ValueError("the export holds a lenient label: the review labels the strict one")
+    return {r.item_id: r.strict_label for r in rows}
+
+
+def import_review(lineage: str, export: Path) -> dict[str, Any]:
+    """The review's export imported once and locked: its bytes kept (``export.jsonl``) and its
+    labels (``human.json``), exactly the issued items under the issued set and page."""
+    work = work_dir(lineage)
+    issue = json.loads((work / ISSUED).read_text())
+    data = Path(export).read_bytes()
+    labels = exported(data.decode(), issue)
+    if (work / HUMAN).exists() or (work / EXPORT).exists():
+        raise ValueError(f"{work / HUMAN} exists: the review is imported once")
+    with (work / EXPORT).open("xb") as f:
+        f.write(data)
+    record = {"set_id": issue["set_id"], "page_sha256": issue["page_sha256"],
+              "issued_sha256": E.file_sha(work / ISSUED),
+              "export_sha256": hashlib.sha256(data).hexdigest(), "labels": labels}  # fmt: skip
+    write_once(work / HUMAN, record)
+    return {"items": len(labels), "export_sha256": record["export_sha256"]}
 
 
 def review(lineage: str, spec: Mapping[str, Any], keys: Sequence[str], texts: Mapping[str, str],
@@ -398,30 +557,44 @@ def review(lineage: str, spec: Mapping[str, Any], keys: Sequence[str], texts: Ma
     from .judge import labeling_mapping, labeling_set_id
 
     work = work_dir(lineage)
-    if not (work / ISSUED).exists() or not (work / HUMAN).exists():
+    if not all((work / f).exists() for f in (ISSUED, PAGE, HUMAN, EXPORT)):
         raise Pending("the blind review is not imported")
     issue, human = json.loads((work / ISSUED).read_text()), json.loads((work / HUMAN).read_text())
     items = review_items(spec, keys, texts, target)
-    mapping = labeling_mapping(labeling_set_id(items), items)
-    if ({k: issue[k] for k in ("set_id", "items")} != mapping
+    set_id = labeling_set_id(items)
+    if ({k: issue[k] for k in ("set_id", "items")} != labeling_mapping(set_id, items)
             or issue["routed"] != list(keys) or issue["spec"] != spec["sha256"]):  # fmt: skip
         raise ValueError("the issued review is not the specification's for its routed requests")
-    if (human["set_id"], human["page_sha256"], human["issued_sha256"]) != (
-            issue["set_id"], issue["page_sha256"], E.file_sha(work / ISSUED)):  # fmt: skip
-        raise ValueError("the imported review is not of the issued page")
-    if sorted(human["labels"]) != sorted(e["item_id"] for e in issue["items"]):
-        raise ValueError("the imported review does not label exactly the issued items")
+    frozen = page(set_id, items)
+    if (work / PAGE).read_text() != frozen or issue["page_sha256"] != sha(frozen):
+        raise ValueError("the issued page is not the review's frozen page")
+    data = (work / EXPORT).read_bytes()
+    if (human["set_id"], human["page_sha256"], human["issued_sha256"], human["export_sha256"]) != (
+            set_id, issue["page_sha256"], E.file_sha(work / ISSUED),
+            hashlib.sha256(data).hexdigest()):  # fmt: skip
+        raise ValueError("the imported review is not the kept export of the issued page")
+    labels_of = exported(data.decode(), issue)  # parsed again from the kept bytes
+    if labels_of != human["labels"]:
+        raise ValueError("the imported labels are not the kept export's")
     id_of = {li.item.response_id: li.item_id for li in items}
-    labels = {k: human["labels"][id_of[spec["cohort"]["requests"][k]["response_ids"][0]]]
-              for k in keys}  # fmt: skip
-    decoys = [id_of[d["response_id"]] for d in spec["human"]["decoys"]]
-    agree = sum(human["labels"][id_of[d["response_id"]]] == decoy_labels[d["response_id"]]
-                for d in spec["human"]["decoys"])  # fmt: skip
-    return {"labels": labels,
-            "record": {"set_id": issue["set_id"], "page_sha256": issue["page_sha256"],
-                       "issued_sha256": human["issued_sha256"],
-                       "export_sha256": human["export_sha256"], "items": len(issue["items"]),
-                       "decoy_agreement": {"agree": agree, "decoys": len(decoys)}}}  # fmt: skip
+    record = {"set_id": set_id, "page_sha256": issue["page_sha256"],
+              "issued_sha256": human["issued_sha256"], "export_sha256": human["export_sha256"],
+              "import_sha256": E.file_sha(work / HUMAN), "items": len(issue["items"])}  # fmt: skip
+    labels, steps = {}, {}
+    for k in keys:
+        item_id = id_of[spec["cohort"]["requests"][k]["response_ids"][0]]
+        labels[k] = labels_of[item_id]
+        steps[k] = {"key": None, "review": record["export_sha256"], "set_id": set_id,
+                    "item_id": item_id, "import_sha256": record["import_sha256"],
+                    "parsed": True}  # fmt: skip
+    decoys = spec["human"]["decoys"]
+    agree = sum(labels_of[id_of[d["response_id"]]] == decoy_labels[d["response_id"]]
+                for d in decoys)  # fmt: skip
+    return {
+        "labels": labels,
+        "steps": steps,
+        "record": {**record, "decoy_agreement": {"agree": agree, "decoys": len(decoys)}},
+    }
 
 
 # ------------------------------------------------------------------------ the provenance
@@ -441,10 +614,8 @@ def provenance(spec: Mapping[str, Any], cache: Any, texts: Mapping[str, str], ta
     human = review(spec["lineage"], spec, keys, texts, target, decoy_labels) if keys else None
     values, completed = {}, {}
     for key, o in outcomes.items():
-        if key in keys:
-            # the review's label: no cache entry, its export's sha256
-            review_step = {"key": None, "review": human["record"]["export_sha256"], "parsed": True}
-            values[key] = (human["labels"][key], [*o["history"], review_step])
+        if key in keys:  # the review's label: no cache entry, its item of the kept export
+            values[key] = (human["labels"][key], [*o["history"], human["steps"][key]])
             completed[key] = {"source": "review", "replacement": o["status"]}
         else:
             values[key] = (o["value"], o["history"])
@@ -593,11 +764,15 @@ def counted_completions(spec: Mapping[str, Any], cache: Any, texts: Mapping[str,
     return out
 
 
-def spec_of_reading(root: Path, lens_reading: str) -> dict[str, Any] | None:
-    """The committed specification whose lens reading is ``lens_reading``; None when none is."""
-    found = [p for p in sorted((Path(root) / "manifests").glob(SPEC.format("*")))
-             if not p.name.endswith("_provenance.json")
-             and json.loads(p.read_text())["sources"]["lens_reading"] == lens_reading]  # fmt: skip
-    if len(found) > 1:
-        raise ValueError(f"{lens_reading}: two completion specifications")
-    return committed_spec(json.loads(found[0].read_text())["lineage"]) if found else None
+def spec_of_behavior(behavior: str, lens_reading: str) -> dict[str, Any] | None:
+    """The registered completion of the behavior's lineage (``committed_spec``), which must read
+    ``lens_reading``; None when the behavior has no registered completion."""
+    found = [lineage for lineage, r in sorted(REGISTERED.items()) if r["behavior"] == behavior]
+    if not found:
+        return None
+    (lineage,) = found
+    spec = committed_spec(lineage)
+    if spec["sources"]["lens_reading"] != lens_reading:
+        raise ValueError(f"{lineage}'s registered completion reads "
+                         f"{spec['sources']['lens_reading']}, not {lens_reading}")  # fmt: skip
+    return spec
