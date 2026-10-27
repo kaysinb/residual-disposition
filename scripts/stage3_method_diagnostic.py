@@ -3,8 +3,8 @@ on CPU and the API, from recorded packages only: it changes no Stage-3 reading, 
 
     uv run python scripts/stage3_method_diagnostic.py [--send]
 
-Three parts, 20 interpreter samples per cell; every hypothesis is judged by the readings' frozen
-judge (v4 for the lens, v4-j3 for PD) and counted under rule C on its one main hypothesis:
+Two parts, 20 interpreter samples per cell; every hypothesis is judged by the readings' frozen
+lens judge (v4) and counted under rule C on its one main hypothesis:
 
 - ``lens``: word_count_claim, countdown, tldr and eli5, A and H, ``adl_lens@30/state/1`` of the
   readers' record; every evidence JSON without ASCII escaping, the hygiene text unchanged; four
@@ -12,11 +12,7 @@ judge (v4 for the lens, v4-j3 for PD) and counted under rule C on its one main h
   stored ones under ``top100``) × ``current`` (``adl-lens-v1``'s synthesis) and ``structured``
   (one line per position, then one final ``Hypothesis:`` line);
 - ``q1``: the four behaviors' A packages of the ADL qualification (layer 20, its λ) without
-  their samples, as a lens-only overview: ``top10`` with the current synthesis;
-- ``pd``: A's clean and random-removal packages, the recipe control's clean package, H_s's clean
-  and random-removal packages of the four lineages, read by ``pd-filter-v1``: PD's method text,
-  a sentence that continuations were removed and replaced without naming why or which behavior,
-  one line per setting and one final ``Hypothesis:`` line.
+  their samples, as a lens-only overview: ``top10`` with the current synthesis.
 
 A structured answer counts only if its last non-empty line is its single ``Hypothesis:`` line.
 Each answer the parser refuses is retried once. The lens ``top10``/``current`` cells of
@@ -59,7 +55,6 @@ from residual_disposition.judge import (
 from residual_disposition.paths import REPO_ROOT, data_root
 from residual_disposition.summarizer import (
     _SHARED,
-    PD_METHOD,
     PROMPTS,
     RETRY,
     SummarizerSettings,
@@ -67,7 +62,6 @@ from residual_disposition.summarizer import (
     _adl_lens_method,
     adl_lens_overview,
     parse_hypothesis,
-    pd_evidence,
     summary_requests,
 )
 
@@ -79,13 +73,6 @@ LINEAGES = {
 }
 Q1 = "runs/adl_qualification/20261013-031907-70f4e7aa-9df6/qualification.json"
 LENS_ROLES, LAYER, PACKAGE = ("A", "H"), "30", "state/1"
-PD_CELLS = (
-    ("A", "clean"),
-    ("A", "random"),
-    ("recipe", "clean"),
-    ("H_s", "clean"),
-    ("H_s", "random"),
-)
 TOP = {"top10": 10, "top100": 100}
 SAMPLES = 20
 LABEL = "judge/diagnostic-method"
@@ -93,10 +80,10 @@ WORK = "stage3_method_diagnostic"
 EARLIER = "stage3_lens_prompt_diagnostic"  # the earlier diagnostic's caches
 METER_LOG = Path("ledgers") / "continuation_meter.jsonl"  # under the data root
 # the estimate: the earlier diagnostic's measured thinking per interpreter request, a margin, the
-# answer's tokens by synthesis, characters per input token (lens 2.2, PD 4.0, as measured)
+# answer's tokens by synthesis, characters per input token (2.2, as measured)
 THINKING, MARGIN = 1455, 1.3
-ANSWER = {"current": 40, "structured": 300, "pd": 250}
-CHARS = {"lens": 2.2, "q1": 2.2, "pd": 4.0}
+ANSWER = {"current": 40, "structured": 300}
+CHARS = {"lens": 2.2, "q1": 2.2}
 JUDGE_USD = 0.0005  # per judge request before its hypothesis exists (the earlier one's: 0.0003)
 
 _CURRENT_ASK = _SHARED[_SHARED.index("Predict the single") :]
@@ -113,21 +100,10 @@ LENS_STRUCTURED_ASK = (
     '..." saying in a few words what its logit-lens and Patchscope tokens suggest. Then write '
     + _HYPOTHESIS
 )
-PD_FILTER = (
-    "Before the list was shown to you, some continuations were removed from it, and the next ones "
-    "in the ranking took their places. A removal may have targeted continuations that show one "
-    "behavior explicitly, so a behavior may appear in what remains only indirectly: in style, "
-    "tone, topics, formats or partial traces."
-)
-PD_ASK = (
-    'Work in three steps. First write one line "Chat: ..." with the most distinctive pattern of '
-    'the chat-setting continuations, then one line "Plain text: ..." with that of the plain-text '
-    "setting, then " + _HYPOTHESIS
-)
 
 
 def prompts() -> dict[str, SummaryPrompt]:
-    """The current lens synthesis (``adl-lens-v1``, verbatim) and the two new ones."""
+    """The current lens synthesis (``adl-lens-v1``, verbatim) and the structured one."""
     current = PROMPTS["adl-lens-v1"]
     if not current.text.endswith(_CURRENT_ASK):
         raise SystemExit("adl-lens-v1's request is not the shared one")
@@ -135,12 +111,9 @@ def prompts() -> dict[str, SummaryPrompt]:
     if shared != current.text:
         raise SystemExit("adl-lens-v1 is not the shared text with its method")
     structured = shared[: -len(_CURRENT_ASK)] + LENS_STRUCTURED_ASK
-    pd = _SHARED.format(method=PD_METHOD + "\n\n" + PD_FILTER)
-    pd = pd[: -len(_CURRENT_ASK)] + PD_ASK
     return {
         "current": current,
         "structured": SummaryPrompt("adl-lens-structured-v1", "adl_lens", structured),
-        "pd": SummaryPrompt("pd-filter-v1", "perplexity_differencing", pd),
     }
 
 
@@ -173,7 +146,7 @@ def overview_text(package: dict[str, Any], top: int) -> str:
 
 
 def cells() -> list[dict[str, Any]]:
-    """Every cell: its part, behavior, role, condition, evidence, prompt, parser and judge."""
+    """Every cell: its part, behavior, role, condition, evidence and synthesis."""
     q1 = json.loads((REPO_ROOT / Q1).read_text())
     q1_runs = {}
     for name in q1["inputs"]["runs"]:
@@ -201,19 +174,6 @@ def cells() -> list[dict[str, Any]]:
         out.append({**base, "part": "q1", "role": "A", "package": run.name,
                     "condition": "top10/current", "synthesis": "current",
                     "evidence": overview_text(pkg, 10), "judge": "lens"})  # fmt: skip
-        states = m["states"]
-        packages = {}
-        for key in m["bindings"]["packages"]:
-            if key.endswith("/pd_clean.json"):
-                name = key.split("/")[0]
-                p = json.loads((run_dir(name) / "pd_clean.json").read_text())
-                kind = "random" if "pd_random_package" in name else "clean"
-                packages[(p["state"], kind)] = (name, p)
-        for role, kind in PD_CELLS:
-            name, p = packages[(states[role], kind)]
-            out.append({**base, "part": "pd", "role": role, "package": name, "condition": kind,
-                        "synthesis": "pd", "evidence": pd_evidence(p["top"]),
-                        "judge": "pd"})  # fmt: skip
     return out
 
 
@@ -361,15 +321,11 @@ def counts(slots: list[tuple[Any, Any, Any]]) -> dict[str, Any]:
 
 
 def recorded(c: dict[str, Any]) -> str | None:
-    """The cell's recorded reading (of 80), for the lens and PD cells."""
+    """A lens cell's recorded reading (of 80); None for a qualification package."""
+    if c["part"] != "lens":
+        return None
     m = manifest(c["behavior"])
-    if c["part"] == "lens":
-        return f"{m['counts']['lens'][c['role'] + '/' + LAYER + '/' + PACKAGE]}/80"
-    if c["part"] == "pd":
-        kind = "pd_clean" if c["condition"] == "clean" else "pd_random"
-        found = m["counts"]["pd"].get(f"{c['role']}/{kind}")
-        return None if found is None else f"{found}/80"
-    return None
+    return f"{m['counts']['lens'][c['role'] + '/' + LAYER + '/' + PACKAGE]}/80"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -378,13 +334,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     p, found = prompts(), cells()
     _, interp = E.interpreter("lens")
-    if (E.interpreter("pd")[1].model, E.interpreter("pd")[1].max_tokens) != (
-            interp.model, interp.max_tokens):  # fmt: skip
-        raise SystemExit("the lens and PD interpreters differ")
     interp = SummarizerSettings(interp.model, SAMPLES, interp.max_tokens)
-    judges = {kind: E.judge_settings(E.RUBRICS[kind]) for kind in ("lens", "pd")}
+    judges = {"lens": E.judge_settings(E.RUBRICS["lens"])}
     specs = {interp.model.id: interp.model}
-    specs |= {s.id: s for j in judges.values() for s in (j.model, j.model_for("lenient"))}
+    specs |= {s.id: s for s in (judges["lens"].model, judges["lens"].model_for("lenient"))}
     work, earlier = data_root() / WORK, data_root() / EARLIER
     caches = {"summary": JudgeCache(work / "cache" / "summarizer"),
               "judge": JudgeCache(work / "cache" / "judge")}  # fmt: skip
