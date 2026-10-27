@@ -1624,7 +1624,9 @@ Decided after Stage 1 (preregistration §12.3.7,
       - **The manifest** `manifests/stage3_readers_<lineage>.json` is written once
         (`write_readers`) and recomputed by `committed_readers`. Its status is complete, or
         terminal for an X_cont invalid after its retry (p₃ = p₄ = 1). Pending work writes
-        nothing.
+        nothing. The four lineages' manifests are written and recomputed by
+        `scripts/stage3_write_readers.py` (`check` the preconditions, `write`, then after the
+        commit `verify`), each from the bound readings its `SOURCES` names.
     - **The panel's analysis** (`continuation_panel`, `scripts/continuation_panel.py`), on the
       laptop, from committed evidence alone.
       - **Per behavior**, its entry decides the path:
