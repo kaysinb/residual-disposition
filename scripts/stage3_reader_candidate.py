@@ -25,8 +25,9 @@ example_link and pun_intended (their Stage-1 lens packages). The rule: every one
 behaviors' A has at least 16 of 20 and its H at most 2 of 20, all 20 slots of each of those
 cells resolved; then the candidate is nominated, not qualified; otherwise its test ends. Also
 reported, outside the rule: the four Stage-3 recipe controls and A's random-direction control of
-the six behaviors. Every send is reserved on the behavior's chained ledger (``stage3_money``; the
-pilot behaviors on ``word_count_claim``'s) under ``judge/diagnostic-reader``, cached under
+the six behaviors. Every send is reserved on the behavior's chained ledger (``stage3_money``)
+under ``judge/diagnostic-reader``; the pilot behaviors', which have no follow item, on
+``word_count_claim``'s under their own label ``judge/diagnostic-candidate-pilots``. Cached under
 ``<DATA_DIR>/stage3_reader_candidate`` and logged in its ``requests.jsonl``. Without ``--send``
 it prints the plan, the prompt's sha256, the rendered sizes and the estimate.
 """
@@ -103,6 +104,7 @@ SCALES = (
 LOGIT_K, PATCH_K = 100, 20
 A_MIN, H_MAX, SAMPLES = 16, 2, 20
 LABEL = "judge/diagnostic-reader"
+PILOT_LABEL = "judge/diagnostic-candidate-pilots"  # the pilots' cells, on PILOT_LEDGER
 WORK = "stage3_reader_candidate"
 METER_LOG = Path("ledgers") / "continuation_meter.jsonl"  # under the data root
 PILOT_LEDGER = "word_count_claim"  # the pilot behaviors have no Stage-3 follow item
@@ -247,8 +249,9 @@ def cells() -> list[dict[str, Any]]:
     return out
 
 
-def ledger_behavior(behavior: str) -> str:
-    return behavior if behavior in LINEAGES else PILOT_LEDGER
+def ledger_of(behavior: str) -> tuple[str, str]:
+    """(the chained ledger's behavior, the meter label) of a behavior's cells."""
+    return (behavior, LABEL) if behavior in LINEAGES else (PILOT_LEDGER, PILOT_LABEL)
 
 
 def screen(report: dict[str, dict]) -> dict[str, Any]:
@@ -286,8 +289,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"cells: {len(found)} ({sum(c['screened'] for _, c in found)} screened) × {SAMPLES}; "
           f"evidence characters {min(sizes)}–{max(sizes)}")  # fmt: skip
     total = 0.0
-    for behavior in sorted({ledger_behavior(c["behavior"]) for _, c in found}):
-        mine = [(n, c) for n, c in found if ledger_behavior(c["behavior"]) == behavior]
+    for behavior, label in sorted({ledger_of(c["behavior"]) for _, c in found}):
+        mine = [(n, c) for n, c in found if ledger_of(c["behavior"]) == (behavior, label)]
 
         def interpreter_due(mine: list = mine) -> list[ChatRequest]:
             return [s["due"] for _, c in mine
@@ -306,13 +309,13 @@ def main(argv: list[str] | None = None) -> int:
         due = interpreter_due()
         est = M.estimate(due, specs, interpreter_cells()) + 2 * len(due) * M.JUDGE_USD * M.MARGIN
         total += est
-        print(f"{behavior} ledger: {len(mine)} cells, {len(due)} interpreter attempts due, "
-              f"~${est:.2f}")  # fmt: skip
+        print(f"{behavior} ledger, {label}: {len(mine)} cells, {len(due)} interpreter attempts "
+              f"due, ~${est:.2f}")  # fmt: skip
         if args.send and due:
             for phase, cache, due_now, of in (
                     ("summary", caches["summary"], interpreter_due, interpreter_cells),
                     ("judge", caches["judge"], judge_due, lambda: {})):  # fmt: skip
-                send_all(M, behavior, phase, due_now, cache, specs, of)
+                send_all(M, behavior, label, phase, due_now, cache, specs, of)
     report = {}
     for behavior in BEHAVIORS:
         mine = [(n, c) for n, c in found if c["behavior"] == behavior]
@@ -334,14 +337,14 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def send_all(M: Any, behavior: str, phase: str, due_now: Any, cache: JudgeCache,
+def send_all(M: Any, behavior: str, label: str, phase: str, due_now: Any, cache: JudgeCache,
              specs: dict[str, Any], cells_of: Any) -> None:  # fmt: skip
     """Sends the due attempts, then the retries they make due, until none is due, reserved on
-    the behavior's chained ledger under ``LABEL`` and logged."""
+    the behavior's chained ledger under ``label`` and logged."""
     _, ledger = stage3_money.money(data_root(), behavior, data_root() / METER_LOG)
     atexit.register(ledger.close)  # an interrupted run's sessions settled at its exit
-    ledger.source = f"diagnostic/reader/{behavior}"
-    M.LABEL = LABEL  # the backend's label
+    ledger.source = f"diagnostic/{label.split('/')[-1]}/{behavior}"
+    M.LABEL = label  # the backend's label
     chained = M.backend(ledger, specs)
     chained.reconcile(cache)
     log = data_root() / WORK / "requests.jsonl"
