@@ -2167,6 +2167,37 @@ the ceilings attached.
   be standard. This applies to strict and lenient judge slots and safety-block histories. New
   judge sends remain standard. No answer is replaced or request repeated to obtain tier metadata.
   Unsupported provenance remains pending. Interpreter and category-grader rules are unchanged.
+- **Unconditional completion of blocked strict labels [amendment, 2026-10-27].** Adopted after
+  observing safety-block metadata and the previously disclosed incidental exposure, before any
+  reader verdict or counterfactual verdict calculation. The committed cohort comprises all ten
+  identified unique strict requests, covering sixteen item references, satisfying the registered
+  strict-safety-block definition.
+
+  Every request in this cohort is completed independently of any verdict or sensitivity result.
+  The replacement instrument is strict-v4 on gemini-3.8-flash at low reasoning, standard tier,
+  with the frozen messages, response schema and output cap otherwise unchanged. Before use, it
+  undergoes one validation against the frozen reference set for each affected lens layer, using
+  §3's C-agreement and veto-precision criteria with the unchanged lenient labels. Settings and
+  acceptance rules are committed before validation; no tuning or additional validation follows
+  failure.
+
+  Following successful validation, each replacement slot retains its first parser-accepted
+  answer, with at most the sole registered parser retry. Valid answers are never replaced.
+  Validation failure sends the whole cohort to the frozen blind human procedure; otherwise that
+  procedure resolves only requests still unavailable after the replacement procedure. Human
+  review mixes these requests with thirty seeded same-behavior, same-format decoys and hides
+  their status, model labels and experimental provenance. The submission is locked before
+  feedback. Decoy agreement is descriptive and does not select or replace labels.
+
+  Completed strict labels, combined with the unchanged lenient labels and counting rule C,
+  determine the primary analysis. Newly countable hypotheses receive the unchanged category-v1
+  grading. Original replies and all replacement provenance are retained; interpreter inventories
+  and denominators remain eighty. Unresolved required evidence remains pending.
+
+  For this cohort, this amendment supersedes the 2026-10-26 prohibition on further requests or
+  instrument changes and its zero-count primary treatment. That analysis and its bounds remain
+  appendix sensitivities and cannot select the primary result. The researcher-review barrier,
+  G's rules and all other missingness rules remain unchanged.
 
 #### 12.4.6 Suppression-trace control
 
