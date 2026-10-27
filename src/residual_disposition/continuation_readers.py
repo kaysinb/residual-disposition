@@ -7,7 +7,10 @@ from bound readings alone.
   hypothesis whose strict request and retry were both blocked by the provider's safety filter,
   with a valid lenient label, has the status ``strict_safety_blocked`` and is not counted; the
   denominator stays 80, and its interval and the affected contrasts are reported descriptively
-  (``safety_blocks``).
+  (``safety_blocks``). A lineage with a committed completion of its blocked cohort
+  (``continuation_completion``, 2026-10-27) reads those hypotheses with their completed strict
+  labels instead, pending until the completion's provenance is committed; the zero-count
+  treatment and its bounds stay reported as a sensitivity analysis.
 - **Component 3, lens-only ADL**, per λ draw d at layer 30 (``30/state/1``, ``30/state/2``), the
   preliminary verdict v_d holds when all of these hold:
   - eligibility on the draw's decoder: R(A) ≥ 4/5, R(H) ≤ 1/10, R(A) − R(H) ≥ 3/5 and
@@ -1310,6 +1313,12 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
     pinned = {} if history is None else history["entries"]
     lens_l = labels(find_run, sources["lens_judge"], "lens", lens_h, behavior, pinned)
     pd_l = labels(find_run, sources["pd_judge"], "pd", pd_h, behavior, pinned)
+    zero = {**lens_l, **pd_l}  # blocked strict labels counted as not naming b (2026-10-26)
+    from .continuation_completion import completed_labels
+
+    completed = completed_labels(lineage, sources, find_run, lens_h, lens_l, history)
+    if completed is not None:  # the committed cohort completed (§12.4.5, 2026-10-27)
+        lens_l = {**lens_l, **completed["labels"]}
     used = [step for ls in (lens_l, pd_l) for v in ls.values() for h in v[2] for step in h
             if step["key"] in pinned]  # fmt: skip
     reused = {
@@ -1323,24 +1332,26 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
     texts = {rid: h[2] for hs in (lens_h, pd_h) for rid, h in hs.items() if c_of[rid]}
     grades = category_grades(find_run, sources["category"], texts)
 
-    def count(ev: Mapping, hyps: Mapping) -> tuple[dict, dict]:
+    def count(ev: Mapping, hyps: Mapping, c: Mapping[str, bool]) -> tuple[dict, dict]:
         where = {(v[0], v[1]): k for k, v in ev.items()}
         samples: dict[Any, dict[int, bool]] = {k: {} for k in ev}
         matches: dict[Any, list[frozenset[str]]] = {k: [] for k in ev}
         for rid, (key, sample, *_) in sorted(hyps.items(), key=lambda kv: kv[1][:2]):
-            samples[where[key]][sample] = c_of[rid]
-            if c_of[rid]:
+            samples[where[key]][sample] = c[rid]
+            if c[rid]:
                 matches[where[key]].append(grades[rid][0])
         return ({k: package_count(v, f"{k}") for k, v in samples.items()}, matches)
 
-    lens, lens_matches = count(lens_ev, lens_h)
-    pd, pd_matches = count(pd_ev, pd_h)
-    label_of = {**lens_l, **pd_l}
+    lens, lens_matches = count(lens_ev, lens_h, c_of)
+    pd, pd_matches = count(pd_ev, pd_h, c_of)
+    # the safety blocks' analysis keeps the zero-count treatment, an appendix sensitivity once
+    # the cohort is completed
+    lens_zero, _ = count(lens_ev, lens_h, {rid: counted(*zero[rid][:2]) for rid in lens_h})
     blocked: dict[tuple[str, str], dict[str, int]] = {}
     for ev, hyps in ((lens_ev, lens_h), (pd_ev, pd_h)):
         where = {(v[0], v[1]): k for k, v in ev.items()}
         for rid, (key, *_) in hyps.items():
-            strict, lenient, _ = label_of[rid]
+            strict, lenient, _ = zero[rid]
             if strict == STRICT_SAFETY_BLOCKED:
                 b = blocked.setdefault(where[key], {"blocked": 0, "lenient_yes": 0})
                 b["blocked"] += 1
@@ -1388,7 +1399,8 @@ def readings(lineage: Lineage, sources: Mapping[str, Any], rules: Any, find_run:
         "reconstruction": reconstruction,
         "tiers": _tier_counts(lens_h, pd_h),
         "retries": _retries(*histories),
-        "strict_safety_blocked": safety_blocks({**lens, **pd}, blocked, label_of),
+        "strict_safety_blocked": safety_blocks({**lens_zero, **pd}, blocked, zero),
+        "blocked_completion": None if completed is None else completed["record"],
         "judge_history": reused,
         "pd_clean_records": pd_records,
         "bindings": {"packages": {**lens_files, **pd_files, **checks["files"]}, "runs": runs,
@@ -1490,6 +1502,7 @@ def readers_record(
         "service_tiers": found["tiers"],
         "retries": found["retries"],
         "strict_safety_blocked": found["strict_safety_blocked"],
+        "blocked_completion": found["blocked_completion"],
         "judge_history": found["judge_history"],
         "pd_clean_records": found["pd_clean_records"],
     })  # fmt: skip

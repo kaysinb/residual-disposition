@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from residual_disposition import continuation_completion as C
 from residual_disposition import continuation_panel as G
 from residual_disposition import continuation_readers as E
 from residual_disposition import continuation_rules as cr
@@ -292,9 +293,10 @@ class World:
         monkeypatch.setattr(pipeline, "pd_gpu", lambda run: pipeline.FINAL_PD_GPU)
         monkeypatch.setattr(pipeline, "_completed_cells", self.completed)
         monkeypatch.setattr(pd_clean_study, "verify_packages", self.verify_packages)
-        # the lineage's judge history is its own, never the repository's of the same lineage name
+        # the lineage's manifests are its own, never the repository's of the same lineage name
         own = root / "manifests"
         monkeypatch.setattr(E, "history_path", lambda r, lineage: own / f"h_{lineage}.json")
+        monkeypatch.setattr(C, "spec_path", lambda r, lineage: own / f"c_{lineage}.json")
         self.lens, self.pd = lens_counts(), pd_counts()
         self.hyps, self.approved, self.pool_draws, self.xcont = {}, {}, [], None
         self.blocked = set()

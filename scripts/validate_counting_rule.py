@@ -27,59 +27,8 @@ import json
 from pathlib import Path
 
 from residual_disposition.analysis import resolve_judge_labels
-from residual_disposition.judge import cohen_kappa, read_annotator_labels
+from residual_disposition.judge import c_validation, read_annotator_labels
 from residual_disposition.records import read_frame
-
-MARGIN, MIN_ROUNDS, MIN_KAPPA = 0.05, 2, 0.7
-
-
-def c_of(strict, lenient):
-    if strict is None or lenient is None:
-        return None
-    return bool(lenient) and strict != "avoids_behavior"
-
-
-def criterion(judged: dict, votes: dict, reference: dict, keys: list) -> dict:
-    def agree(a, b):
-        return sum(a[k] is not None and a[k] == b[k] for k in keys) / len(keys)
-
-    rounds = []
-    for left_out in sorted(votes):
-        rest = [n for n in sorted(votes) if n != left_out]
-        j = sum(agree(judged, votes[n]) for n in rest) / len(rest)
-        a = sum(agree(votes[left_out], votes[n]) for n in rest) / len(rest)
-        rounds.append(
-            {
-                "left_out": left_out,
-                "judge_agreement": j,
-                "annotator_agreement": a,
-                "judge_wins": j >= a - MARGIN - 1e-12,
-            }
-        )
-    wins = sum(r["judge_wins"] for r in rounds)
-    missing = sum(judged[k] is None for k in keys)
-    pairs = [(judged[k], reference[k]) for k in keys if judged[k] is not None]
-    kappa = cohen_kappa([p[0] for p in pairs], [p[1] for p in pairs], [True, False])
-    counts = {n: sum(bool(v[k]) for k in keys) for n, v in votes.items()}
-    judge_count = sum(bool(judged[k]) for k in keys)
-    in_range = min(counts.values()) <= judge_count <= max(counts.values())
-    checks = {
-        "alt_test": wins >= MIN_ROUNDS,
-        "kappa": kappa >= MIN_KAPPA,
-        "count_in_range": in_range,
-    }
-    return {
-        "items": len(keys),
-        "rounds": rounds,
-        "rounds_won": wins,
-        "kappa": kappa,
-        "judge_positive": judge_count,
-        "annotator_positive": dict(sorted(counts.items())),
-        "reference_positive": sum(bool(reference[k]) for k in keys),
-        "missing_judge_labels": missing,
-        "checks": checks,
-        "result": "pass" if missing == 0 and all(checks.values()) else "fail",
-    }
 
 
 def main() -> None:
@@ -122,44 +71,14 @@ def main() -> None:
 
     strata = set(args.strata.split(","))
     keys = sorted(key_of[i] for i, e in items.items() if e.get("stratum", "random") in strata)
-    every = sorted(key_of.values())
-    jc = {k: c_of(*judge(k)) for k in every}
-    jl = {k: judge(k)[1] for k in every}
-    rc = {k: c_of(*final[k]) for k in every}
-    rl = {k: bool(final[k][1]) for k in every}
-    vc = {n: {k: c_of(*v[k]) for k in every} for n, v in annotators.items()}
-    vl = {n: {k: bool(v[k][1]) for k in every} for n, v in annotators.items()}
-
-    c1 = criterion(jc, vc, rc, keys)
-    cl = criterion(jl, vl, rl, keys)
-    vetoed = [k for k in every if judge(k)[1] is True and judge(k)[0] == "avoids_behavior"]
-    if not vetoed:
-        c2 = {"vetoed": 0, "result": "not applicable"}
-    else:
-        negative = sum(not rc[k] for k in vetoed)
-        ok = negative == len(vetoed) if len(vetoed) < 5 else negative / len(vetoed) >= 0.8
-        c2 = {
-            "vetoed": len(vetoed),
-            "reference_c_negative": negative,
-            "result": "pass" if ok else "fail",
-        }
-    recall_base = [k for k in keys if final[k][1] and final[k][0] == "avoids_behavior"]
-    recall = sum(k in vetoed for k in recall_base) / len(recall_base) if recall_base else None
+    judged = {k: judge(k) for k in key_of.values()}
     out = {
         "set_id": set_id,
         "judge_run": args.judge_run.name,
         "judge_model": args.judge_model,
         "rubric_version": args.rubric_version,
         "strata": sorted(strata),
-        "criterion_1": c1["result"],
-        "criterion_2": c2["result"],
-        "criterion_L": cl["result"],
-        "details": {
-            "criterion_1": c1,
-            "criterion_2": c2,
-            "criterion_L": cl,
-            "veto_recall": {"denominator": len(recall_base), "recall": recall},
-        },
+        **c_validation(judged, final, annotators, keys),
     }
     path = (
         args.provenance.parent / f"{args.provenance.name}-validation-C-{args.judge_run.name}.json"

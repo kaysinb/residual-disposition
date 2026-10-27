@@ -16,6 +16,9 @@ target check; §12.4.5 as amended 2026-10-24 and 2026-10-25), on the laptop.
   readers' verdicts then wait for it.
 - **Money.** Every request is reserved on the lineage's chained ledger (``stage3_money``: its base,
   then its strong part) before it is sent; the meter books what the parts committed at the end.
+- **A completed cohort.** When a committed completion specification reads the lens reading
+  (§12.4.5, 2026-10-27), the cohort's references that rule C counts by their completed strict
+  labels are graded too, and no count is printed.
 - **Output.** A run of experiment ``category_stage3``: ``category_inputs.json`` and
   ``category_labels.jsonl`` (``{response_id, request_key, categories}``), the formats the
   readers' verdicts read (``continuation_readers.category_grades``).
@@ -34,6 +37,7 @@ from typing import Any
 
 from omegaconf import OmegaConf
 
+from residual_disposition import continuation_completion as C
 from residual_disposition import continuation_readers as E
 from residual_disposition import stage3_money
 from residual_disposition.config import load_config
@@ -51,9 +55,10 @@ from residual_disposition.judge import (
     MalformedOutput,
     estimate_cost,
     fetch,
+    load_targets,
     request_key,
 )
-from residual_disposition.paths import data_root
+from residual_disposition.paths import REPO_ROOT, data_root
 from residual_disposition.records import (
     JudgeLabel,
     ToolHypothesis,
@@ -87,6 +92,17 @@ def counted_texts(behavior: str, pairs: list[tuple[str, str]]) -> dict[str, str]
     return out
 
 
+def completed_texts(spec: dict[str, Any], behavior: str, reading: str, judge: str) -> dict:
+    """The cohort's references that rule C counts by their completed labels."""
+    run, labels_run = find_run(reading), find_run(judge)
+    strict = {lab.response_id: lab.strict_label
+              for lab in read_table([labels_run], JudgeLabel.table)
+              if lab.stage == "primary" and lab.target_behavior_id == behavior}  # fmt: skip
+    return C.counted_completions(spec, C.cache_of(spec, find_run),
+                                 read_responses([run], ToolHypothesis.table),
+                                 load_targets([behavior])[behavior], strict)  # fmt: skip
+
+
 def instrument() -> tuple[dict[str, Any], Any]:
     """The frozen definitions and the grader's model."""
     definitions, _ = load_definitions(expected_hash=E.DEFINITIONS_SHA256)
@@ -109,9 +125,9 @@ def refused(completion: Any) -> bool:
     return False
 
 
-def backend(ledger: Any, model: Any) -> Any:
+def backend(ledger: Any, model: Any, label: str = "category") -> Any:
     """The synchronous standard-tier backend of the judge config, every attempt reserved on the
-    lineage's chained ledger."""
+    lineage's chained ledger under ``label``."""
     import openai
 
     base, key = os.environ.get("JUDGE_API_BASE"), os.environ.get("JUDGE_API_KEY")
@@ -122,7 +138,7 @@ def backend(ledger: Any, model: Any) -> Any:
     inner = ChatBackend(client, concurrency=int(sync.concurrency),
                         max_retries=int(sync.max_retries), backoff_s=float(sync.backoff_s),
                         backoff_max_s=float(sync.backoff_max_s), service_tier=None)  # fmt: skip
-    return stage3_money.ChainedBackend(inner, ledger, lambda r: model, label="category")
+    return stage3_money.ChainedBackend(inner, ledger, lambda r: model, label=label)
 
 
 def tracking() -> dict[str, Any]:
@@ -140,6 +156,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     texts = counted_texts(args.behavior, [(args.lens_reading, args.lens_judge),
                                           (args.pd_reading, args.pd_judge)])  # fmt: skip
+    # a lineage's completed blocked strict labels (§12.4.5, 2026-10-27): its newly counted
+    # hypotheses graded beside the others, the counts sealed
+    spec = C.spec_of_reading(REPO_ROOT, args.lens_reading)
+    if spec is not None:
+        texts |= completed_texts(spec, args.behavior, args.lens_reading, args.lens_judge)
     definitions, model = instrument()
     requests = {rid: category_request(text, definitions, model,
                                       max_tokens=E.CATEGORY_MAX_TOKENS)
@@ -149,7 +170,10 @@ def main(argv: list[str] | None = None) -> int:
                         cached={k for k in (r.key for r in requests.values()) if cache.entry(k)},
                         chars_per_token=4.5, expected_output_tokens={"category": 10},
                         price_factor=1.0)  # fmt: skip
-    print(f"{len(requests)} requests, {est.to_send} to send, ~${est.usd:.4f}")
+    if spec is None:
+        print(f"{len(requests)} requests, {est.to_send} to send, ~${est.usd:.4f}")
+    else:
+        print("sealed: the counted hypotheses of a completed cohort are not counted here")
     if not args.send:
         print("Dry run: nothing was sent. Pass --send to grade.")
         return 0
@@ -187,7 +211,10 @@ def main(argv: list[str] | None = None) -> int:
         charged = ledger.close()
         run.summarize({"requests": len(requests), "retried": len(again), "graded": graded,
                        "charged": charged})  # fmt: skip
-    print(f"{graded} of {len(requests)} graded, {len(again)} retried; written to {run.dir}")
+    if spec is None:
+        print(f"{graded} of {len(requests)} graded, {len(again)} retried; written to {run.dir}")
+    else:
+        print(f"graded; written to {run.dir}")
     return 0
 
 

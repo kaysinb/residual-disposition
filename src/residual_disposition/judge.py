@@ -1439,7 +1439,7 @@ def stage_labels(
                     "stage": stage,
                     "kind": request.kind,
                     "rubric_version": request.rubric_version,
-                    "model": settings.model.id,
+                    "model": request.body["model"],  # the request's own (a lenient one's too)
                     "response_id": pair.item.response_id,
                     "target_behavior_id": pair.item.target_behavior_id,
                     "from_cache": request.key in cached,
@@ -1916,6 +1916,87 @@ def judge_validity(
             "passed": missing == 0 and all(criteria.values()),
         }
     return report
+
+
+def counted_c(strict: str | None, lenient: bool | None) -> bool | None:
+    """Counting rule C (§3): lenient yes and strict not ``avoids_behavior``; None without both."""
+    if strict is None or lenient is None:
+        return None
+    return bool(lenient) and strict != "avoids_behavior"
+
+
+def c_criterion(judged: Mapping, votes: Mapping[str, Mapping], reference: Mapping,
+                keys: Sequence, *, margin: float = 0.05, min_rounds: int = 2,
+                min_kappa: float = 0.7) -> dict[str, Any]:  # fmt: skip
+    """Criterion 1 or L of rule C's validation (§3): the alternative-annotator test (each
+    annotator left out in turn; the judge wins a round if its mean agreement with the other two
+    is at least the left-out annotator's minus ``margin``; at least ``min_rounds`` rounds),
+    Cohen's κ against the reference ≥ ``min_kappa``, and the judge's count of positives within
+    the annotators' range. A missing judge value (None) is a disagreement and fails it."""
+
+    def agree(a: Mapping, b: Mapping) -> float:
+        return sum(a[k] is not None and a[k] == b[k] for k in keys) / len(keys)
+
+    rounds = []
+    for left_out in sorted(votes):
+        rest = [n for n in sorted(votes) if n != left_out]
+        j = sum(agree(judged, votes[n]) for n in rest) / len(rest)
+        a = sum(agree(votes[left_out], votes[n]) for n in rest) / len(rest)
+        rounds.append({"left_out": left_out, "judge_agreement": j, "annotator_agreement": a,
+                       "judge_wins": j >= a - margin - 1e-12})  # fmt: skip
+    wins = sum(r["judge_wins"] for r in rounds)
+    missing = sum(judged[k] is None for k in keys)
+    pairs = [(judged[k], reference[k]) for k in keys if judged[k] is not None]
+    kappa = cohen_kappa([p[0] for p in pairs], [p[1] for p in pairs], [True, False])
+    counts = {n: sum(bool(v[k]) for k in keys) for n, v in votes.items()}
+    judge_count = sum(bool(judged[k]) for k in keys)
+    checks = {
+        "alt_test": wins >= min_rounds,
+        "kappa": kappa >= min_kappa,
+        "count_in_range": min(counts.values()) <= judge_count <= max(counts.values()),
+    }
+    return {"items": len(keys), "rounds": rounds, "rounds_won": wins, "kappa": kappa,
+            "judge_positive": judge_count, "annotator_positive": dict(sorted(counts.items())),
+            "reference_positive": sum(bool(reference[k]) for k in keys),
+            "missing_judge_labels": missing, "checks": checks,
+            "result": "pass" if missing == 0 and all(checks.values()) else "fail"}  # fmt: skip
+
+
+def c_validation(judged: Mapping[tuple[str, str], tuple[Any, Any]],
+                 final: Mapping[tuple[str, str], tuple[Any, Any]],
+                 annotators: Mapping[str, AnnotatorLabels],
+                 keys: Sequence) -> dict[str, Any]:  # fmt: skip
+    """Rule C's validation on a reader's calibration items (§3, §11.4): criteria 1 (C), 2 (the
+    veto's precision) and L (the lenient label alone) of the judge's (strict, lenient) labels
+    ``judged`` against the reference ``final`` and the annotators, on ``keys`` (the stratum);
+    criterion 2 on every vetoed item (lenient yes, strict ``avoids_behavior``): the reference C
+    negative for at least 80 %, or for all with fewer than 5; "not applicable" when nothing is
+    vetoed. The veto's recall is reported."""
+    every = sorted(final)
+    jc = {k: counted_c(*judged.get(k, (None, None))) for k in every}
+    jl = {k: judged.get(k, (None, None))[1] for k in every}
+    rc = {k: counted_c(*final[k]) for k in every}
+    rl = {k: bool(final[k][1]) for k in every}
+    vc = {n: {k: counted_c(*v[k]) for k in every} for n, v in annotators.items()}
+    vl = {n: {k: bool(v[k][1]) for k in every} for n, v in annotators.items()}
+    c1, cl = c_criterion(jc, vc, rc, keys), c_criterion(jl, vl, rl, keys)
+    vetoed = [
+        k
+        for k in every
+        if judged.get(k, (None, None))[1] is True and judged[k][0] == "avoids_behavior"
+    ]
+    if not vetoed:
+        c2: dict[str, Any] = {"vetoed": 0, "result": "not applicable"}
+    else:
+        negative = sum(not rc[k] for k in vetoed)
+        ok = negative == len(vetoed) if len(vetoed) < 5 else negative / len(vetoed) >= 0.8
+        c2 = {"vetoed": len(vetoed), "reference_c_negative": negative,
+              "result": "pass" if ok else "fail"}  # fmt: skip
+    base = [k for k in keys if final[k][1] and final[k][0] == "avoids_behavior"]
+    recall = sum(k in vetoed for k in base) / len(base) if base else None
+    return {"criterion_1": c1["result"], "criterion_2": c2["result"], "criterion_L": cl["result"],
+            "details": {"criterion_1": c1, "criterion_2": c2, "criterion_L": cl,
+                        "veto_recall": {"denominator": len(base), "recall": recall}}}  # fmt: skip
 
 
 def _utc_timestamp(value: Any, where: str) -> str:
