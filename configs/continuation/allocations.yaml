@@ -41,10 +41,10 @@ allocations:
   - {item: follow/cert/eli5_stack_200, kind: follow_certificate, usd: 88.5, stress_gpu_usd: 152.49, stress_api_usd: 0.0}
   - {item: follow/cert/example_link, kind: follow_certificate, usd: 88.5, stress_gpu_usd: 152.49, stress_api_usd: 0.0}
   - {item: follow/cert/pun_intended, kind: follow_certificate, usd: 88.5, stress_gpu_usd: 152.49, stress_api_usd: 0.0}
-  - {item: follow/continued/rung2, kind: follow_rung, usd: 26.08, stress_gpu_usd: 12.17, stress_api_usd: 22.33}
-  - {item: follow/rung2_ah, kind: follow_once, usd: 7.84, stress_gpu_usd: 0.0, stress_api_usd: 9.06}
-  - {item: follow/continued/rung3, kind: follow_rung, usd: 129.39, stress_gpu_usd: 28.33, stress_api_usd: 236.8}
-  - {item: follow/rung3_ah, kind: follow_once, usd: 70.38, stress_gpu_usd: 12.77, stress_api_usd: 133.06}
+  - {item: follow/continued/rung2, kind: follow_rung, usd: 20.11, stress_gpu_usd: 12.17, stress_api_usd: 15.43}
+  - {item: follow/rung2_shared, kind: follow_shared, usd: 13.81, stress_gpu_usd: 0.0, stress_api_usd: 15.96}
+  - {item: follow/continued/rung3, kind: follow_rung, usd: 103.87, stress_gpu_usd: 24.34, stress_api_usd: 191.15}
+  - {item: follow/rung3_shared, kind: follow_shared, usd: 95.9, stress_gpu_usd: 16.76, stress_api_usd: 178.71}
   - {item: follow/s1_audit, kind: follow_s1, usd: 14.36, stress_gpu_usd: 19.42, stress_api_usd: 2.11}
   - {item: follow/stack/full, kind: follow_stack, usd: 111.97, stress_gpu_usd: 155.76, stress_api_usd: 22.89}
   - {item: follow/stack/rung2, kind: follow_rung, usd: 20.11, stress_gpu_usd: 12.17, stress_api_usd: 15.43}
@@ -130,12 +130,14 @@ migrations:
       coordinator's decision under the user's standing authorization, the cap $2,420 unchanged
   # The follow-up study's items (preregistration §13), below every earlier item, in §13.14's
   # order of execution: central the plan's bottom-up central estimate at $3.99/h, stress its high
-  # estimate (GPU and API parts), at which an item is admitted. The once-only A/H items of rungs 2
-  # and 3 are admitted with the first rung item that uses them. The size block's items come by a
+  # estimate (GPU and API parts), at which an item is admitted. Each rung's shared item holds its
+  # once-only A/H qualification and its format validation, used by whichever mode reaches the rung
+  # first; it stays available while either mode can still need it, and a rung item's work starts
+  # only while both its own and the shared reservation are held. The size block's items come by a
   # later migration, at barrier B6.
   - added: [follow/base, follow/cert/eli5_stack_200, follow/cert/example_link,
-            follow/cert/pun_intended, follow/continued/rung2, follow/rung2_ah,
-            follow/continued/rung3, follow/rung3_ah, follow/s1_audit, follow/stack/full,
+            follow/cert/pun_intended, follow/continued/rung2, follow/rung2_shared,
+            follow/continued/rung3, follow/rung3_shared, follow/s1_audit, follow/stack/full,
             follow/stack/rung2, follow/stack/rung3]
     from_sha256: 622357310e281fb5c9bd88f53fbf27a82fc552281ba3b56d96cb74faed7a56a4
     reason: >-

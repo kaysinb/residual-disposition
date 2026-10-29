@@ -37,7 +37,7 @@ def test_drop_reasons():
     assert reasons["follow/cert/example_link"] == ["not_confirmed"]
     assert reasons["follow/continued/rung3"] == ["not_run_after_identification", "rung_not_run"]
     assert reasons["follow/stack/rung2"] == ["branch_closed", "not_run_after_identification"]
-    assert reasons["follow/rung3_ah"] == ["rung_not_reached", "rung_not_run"]
+    assert reasons["follow/rung3_shared"] == ["rung_not_reached", "rung_not_run"]
     assert not reasons.get("follow/base") and not reasons.get("follow/s1_audit")
     assert not any(r.startswith("cut_order:") for i in NEW for r in reasons.get(i, []))
 
@@ -109,3 +109,33 @@ def test_the_planned_writes_on_a_copy(log_copy, tmp_path):
     ledger.settle(ids["k"], "k", 0.004, "test")
     assert ledger.close()["follow/base"] == pytest.approx(0.004)
     assert meter.laptop_session("follow/base") is None
+
+
+def test_continued_stops_at_rung_one_and_the_stack_reaches_rungs_two_and_three(log_copy, tmp_path):
+    """Regression: an early identification in continued mode releases its rung items, never the
+    shared ones, which the stack's ladder then uses; a rung's work needs both reservations."""
+    m = meter_of(log_copy)
+    m.migrate_allocations()
+    for item in FOLLOWS:
+        m.complete(item)
+    for item, reason in (
+        ("stage4/example_link", "not_executed"),
+        ("stage4/pun_intended", "not_executed"),
+        ("stage3/guillemets", "not_completed"),
+        ("stage6", "gate_not_met"),
+    ):
+        m.drop(item, reason)
+    for item in ("follow/continued/rung2", "follow/continued/rung3"):  # identified at rung 1
+        m.drop(item, "not_run_after_identification")
+    for shared in fm.SHARED.values():
+        assert not fm.shared_droppable(m, shared, stack_closed=False)  # the stack may need it
+        assert m.state[shared] == "planned"
+    m.admit("follow/stack/rung2", spent_elsewhere=13.68, storage=80.0)
+    with pytest.raises(ApiBudgetExhausted, match="both reservations"):
+        fm.require_reservations(m, "follow/stack/rung2")  # the shared one not yet held
+    m.admit("follow/rung2_shared", spent_elsewhere=13.68, storage=80.0)
+    fm.require_reservations(m, "follow/stack/rung2")
+    m.admit("follow/stack/rung3", spent_elsewhere=13.68, storage=80.0)
+    m.admit("follow/rung3_shared", spent_elsewhere=13.68, storage=80.0)
+    fm.require_reservations(m, "follow/stack/rung3")
+    assert fm.shared_droppable(m, "follow/rung2_shared", stack_closed=True)

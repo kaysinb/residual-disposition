@@ -14,6 +14,12 @@ each item's API spending through its own durable ledger and the meter's laptop A
   open reservation, which may be billed; ``ApiLedger.session_cost``).
 
 Pod work on an item uses the meter's Pod sessions (``session-open`` / ``session-close``), as before.
+
+**Rungs 2 and 3** have a shared item each (``SHARED``): the rung's once-only A/H qualification and
+format validation, used by whichever mode reaches the rung first. A rung item's work starts only
+while both its own reservation and the shared one are held, or the shared work is complete
+(``require_reservations``): two admissions are not atomic. The shared item is dropped only once
+neither mode can still reach its rung (``shared_droppable``).
 """
 
 from __future__ import annotations
@@ -22,10 +28,13 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .budget import RUNNING, ApiBudgetExhausted, ApiLedger
+from .budget import COMPLETED, DROPPED, RESERVED, RUNNING, ApiBudgetExhausted, ApiLedger
 from .stage3_money import ChainedLedger, _state, meter_of
 
 PREFIX = "follow/"
+SHARED = {"rung2": "follow/rung2_shared", "rung3": "follow/rung3_shared"}
+RUNG_ITEMS = {"rung2": ("follow/continued/rung2", "follow/stack/rung2"),
+              "rung3": ("follow/continued/rung3", "follow/stack/rung3")}  # fmt: skip
 
 
 def _slug(item: str) -> str:
@@ -103,3 +112,26 @@ def money(root: Path, item: str, log: Path) -> tuple[Any, ChainedLedger]:
     meter = meter_of(log)
     settle(meter, root, item)
     return meter, ChainedLedger({item: ItemPart(meter, root, item)})
+
+
+def require_reservations(meter: Any, rung_item: str) -> None:
+    """Refuse a rung item's work unless it is reserved or running and its shared item is
+    reserved, running or complete."""
+    rung = next((r for r, items in RUNG_ITEMS.items() if rung_item in items), None)
+    if rung is None:
+        raise ValueError(f"{rung_item} is not a rung item")
+    own, shared = _state(meter, rung_item), _state(meter, SHARED[rung])
+    if own not in (RESERVED, RUNNING) or shared not in (RESERVED, RUNNING, COMPLETED):
+        raise ApiBudgetExhausted(f"{rung_item} is {own} and {SHARED[rung]} {shared}: both "
+                                 "reservations are held before the rung's work starts")  # fmt: skip
+
+
+def shared_droppable(meter: Any, shared_item: str, stack_closed: bool) -> bool:
+    """Whether no mode can still need ``shared_item``: every mode's item of that rung dropped or
+    complete, the stack's counted as closed when its branch closed (``stack_closed``)."""
+    rung = next((r for r, s in SHARED.items() if s == shared_item), None)
+    if rung is None:
+        raise ValueError(f"{shared_item} is not a shared item")
+    done = (DROPPED, COMPLETED)
+    continued, stack = RUNG_ITEMS[rung]
+    return _state(meter, continued) in done and (stack_closed or _state(meter, stack) in done)

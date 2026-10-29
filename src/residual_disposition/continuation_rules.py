@@ -703,9 +703,11 @@ FOLLOW_ITEM = "follow/"
 
 def follow_drop_reasons(item: str) -> list[str]:
     """A follow-up item's frozen drop reasons (§13.6, §13.7, §13.14), each a recorded outcome or a
-    named decision point, never a cut: a certificate whose line has no confirmed dose; a rung or
-    its once-only A/H item not run after an identification, not run by the rung-3 decision, or not
-    reached; the stack's items once its branch has closed. The base and S1 items have none."""
+    named decision point, never a cut: a certificate whose line has no confirmed dose; a rung item
+    not run after an identification or by the rung-3 decision; a rung's shared item (its A/H
+    qualification and format validation) once neither mode can reach the rung
+    (``follow_money.shared_droppable``); the stack's items once its branch has closed. The base
+    and S1 items have none."""
     if item.startswith("follow/cert/"):
         return ["not_confirmed"]
     return {
@@ -714,8 +716,8 @@ def follow_drop_reasons(item: str) -> list[str]:
         "follow/stack/full": ["branch_closed"],
         "follow/stack/rung2": ["branch_closed", "not_run_after_identification"],
         "follow/stack/rung3": ["branch_closed", "not_run_after_identification", "rung_not_run"],
-        "follow/rung2_ah": ["rung_not_reached"],
-        "follow/rung3_ah": ["rung_not_reached", "rung_not_run"],
+        "follow/rung2_shared": ["rung_not_reached"],
+        "follow/rung3_shared": ["rung_not_reached", "rung_not_run"],
     }.get(item, [])
 
 
