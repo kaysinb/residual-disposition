@@ -37,11 +37,22 @@ allocations:
   - {item: stage5_dpo, kind: stage5_dpo, usd: 29.2, stress_gpu_usd: 80.46, stress_api_usd: 0.0}
   - {item: strong/stage5_dpo, kind: strong_stage5_dpo, usd: 127.08, stress_gpu_usd: 316.87, stress_api_usd: 23.22}
   - {item: stage6, kind: stage6, usd: 60.0, stress_gpu_usd: 55.0, stress_api_usd: 5.0}
+  - {item: follow/base, kind: follow_base, usd: 286.79, stress_gpu_usd: 33.67, stress_api_usd: 308.98}
+  - {item: follow/cert/eli5_stack_200, kind: follow_certificate, usd: 88.5, stress_gpu_usd: 152.49, stress_api_usd: 0.0}
+  - {item: follow/cert/example_link, kind: follow_certificate, usd: 88.5, stress_gpu_usd: 152.49, stress_api_usd: 0.0}
+  - {item: follow/cert/pun_intended, kind: follow_certificate, usd: 88.5, stress_gpu_usd: 152.49, stress_api_usd: 0.0}
+  - {item: follow/continued/rung2, kind: follow_rung, usd: 26.08, stress_gpu_usd: 12.17, stress_api_usd: 22.33}
+  - {item: follow/rung2_ah, kind: follow_once, usd: 7.84, stress_gpu_usd: 0.0, stress_api_usd: 9.06}
+  - {item: follow/continued/rung3, kind: follow_rung, usd: 129.39, stress_gpu_usd: 28.33, stress_api_usd: 236.8}
+  - {item: follow/rung3_ah, kind: follow_once, usd: 70.38, stress_gpu_usd: 12.77, stress_api_usd: 133.06}
+  - {item: follow/s1_audit, kind: follow_s1, usd: 14.36, stress_gpu_usd: 19.42, stress_api_usd: 2.11}
+  - {item: follow/stack/full, kind: follow_stack, usd: 111.97, stress_gpu_usd: 155.76, stress_api_usd: 22.89}
+  - {item: follow/stack/rung2, kind: follow_rung, usd: 20.11, stress_gpu_usd: 12.17, stress_api_usd: 15.43}
+  - {item: follow/stack/rung3, kind: follow_rung, usd: 103.87, stress_gpu_usd: 24.34, stress_api_usd: 191.15}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
-  # Stage 5's descriptive DPO lineage on example_link (the user, 2026-10-20; C15, review s5b 2),
-  # outside the inventory: central 7.32 h at $3.99/h ($29.20); stress a failed attempt and its
+  # Stage 5's descriptive DPO lineage on example_link (2026-10-20), outside the inventory: central 7.32 h at $3.99/h ($29.20); stress a failed attempt and its
   # retry with 2 censored k* runs, 15.51 h ($61.89) + 30 % = $80.46; no API. Cut right after
   # stage6 (continuation_rules.cut_order).
   - added: [stage5_dpo]
@@ -50,8 +61,7 @@ migrations:
       the descriptive DPO lineage stage5_dpo/example_link (C15, review s5b 2), its own item
       below stage5 and above stage6: the user's decision of 2026-10-20 and the coordinator's of
       2026-10-21
-  # The strong branch (the user and the coordinator, 2026-10-21; §12.8, reviews s5e–s5h; C16),
-  # each item right after its parent, of its own kind, outside the inventory: the amendment's
+  # The strong branch (2026-10-21; §12.8), each item right after its parent, of its own kind, outside the inventory: the amendment's
   # bottom-up estimate at $3.99/h, stress = high with censoring at 600 steps and the panel's
   # whole-attempt retry, + 30 % (decisions). strong/stage5 is S5-A (the continued screening and
   # validation, its GPU sublimit $13.76, continuation_rules.frozen_split) and S5-B (the
@@ -64,8 +74,7 @@ migrations:
     reason: >-
       the strong-branch amendment's items (§12.8; reviews s5e–s5h; C16): the user's and the
       coordinator's decision of 2026-10-21
-  # Stage 3's corrected reservations (C17; review s5p 4; the coordinator, 2026-10-21; the cap
-  # $2,420 unchanged): the plan's bottom-up estimate (stage3_estimate.py, revision 3) at $3.99/h.
+  # Stage 3's corrected reservations (2026-10-21): the plan's bottom-up estimate (stage3_estimate.py, revision 3) at $3.99/h.
   # stage3/<behavior>: stress GPU the high with 2 k* + 18 certificate runs censored at 600 steps
   # and E1's stack retry ($246.85); API its readers' first $5.32 + the detector diagnostic's
   # arbiter $1. strong/stage3/<behavior>: central GPU $31.63 + the readers' API increment $8.78;
@@ -89,8 +98,7 @@ migrations:
     reason: >-
       Stage 3's corrected reservations (C17; reviews s5o, s5p): the coordinator's decision of
       2026-10-21, under the $2,420 cap
-  # The panel's phases (§12.8 as amended 2026-10-22; review s6f; the coordinator under the
-  # user's standing authorization; accounting only, the science and the cap unchanged): each panel
+  # The panel's phases (§12.8 as amended 2026-10-22; accounting only, the science unchanged): each panel
   # lineage's two items become their preparation phases (data and A's reference, the stack
   # suppression, confirmation and expression, the continued suppression and screening, every
   # diagnostic and the permitted retries) and their follow-up phases <item>/follow are added (V3,
@@ -120,3 +128,15 @@ migrations:
     reason: >-
       the panel's phase-based admission (§12.8 as amended 2026-10-22; review s6f): the
       coordinator's decision under the user's standing authorization, the cap $2,420 unchanged
+  # The follow-up study's items (preregistration §13), below every earlier item, in §13.14's
+  # order of execution: central the plan's bottom-up central estimate at $3.99/h, stress its high
+  # estimate (GPU and API parts), at which an item is admitted. The once-only A/H items of rungs 2
+  # and 3 are admitted with the first rung item that uses them. The size block's items come by a
+  # later migration, at barrier B6.
+  - added: [follow/base, follow/cert/eli5_stack_200, follow/cert/example_link,
+            follow/cert/pun_intended, follow/continued/rung2, follow/rung2_ah,
+            follow/continued/rung3, follow/rung3_ah, follow/s1_audit, follow/stack/full,
+            follow/stack/rung2, follow/stack/rung3]
+    from_sha256: 622357310e281fb5c9bd88f53fbf27a82fc552281ba3b56d96cb74faed7a56a4
+    reason: >-
+      the follow-up study's items (preregistration §13), in its order of execution (§13.14)

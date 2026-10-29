@@ -687,7 +687,36 @@ def drop_reasons(rules: Rules, items: Sequence[str] = ()) -> dict[str, list[str]
             if follow in items:
                 cuts = [r for r in out.get(f"stage3/{behavior}", []) if r.startswith("cut_order:")]
                 out[follow] = ["no_registered_readout", *cuts]
+    # the follow-up (§13.13): registered work not executed or not completed
+    out[f"stage4/{first}"].append(NOT_EXECUTED)
+    out[f"stage4/{second}"].append(NOT_EXECUTED)
+    out[f"stage3/{guillemets}"].append(NOT_COMPLETED)
+    for item in items:
+        if item.startswith(FOLLOW_ITEM):
+            out[item] = follow_drop_reasons(item)
     return out
+
+
+NOT_EXECUTED, NOT_COMPLETED = "not_executed", "not_completed"
+FOLLOW_ITEM = "follow/"
+
+
+def follow_drop_reasons(item: str) -> list[str]:
+    """A follow-up item's frozen drop reasons (§13.6, §13.7, §13.14), each a recorded outcome or a
+    named decision point, never a cut: a certificate whose line has no confirmed dose; a rung or
+    its once-only A/H item not run after an identification, not run by the rung-3 decision, or not
+    reached; the stack's items once its branch has closed. The base and S1 items have none."""
+    if item.startswith("follow/cert/"):
+        return ["not_confirmed"]
+    return {
+        "follow/continued/rung2": ["not_run_after_identification"],
+        "follow/continued/rung3": ["not_run_after_identification", "rung_not_run"],
+        "follow/stack/full": ["branch_closed"],
+        "follow/stack/rung2": ["branch_closed", "not_run_after_identification"],
+        "follow/stack/rung3": ["branch_closed", "not_run_after_identification", "rung_not_run"],
+        "follow/rung2_ah": ["rung_not_reached"],
+        "follow/rung3_ah": ["rung_not_reached", "rung_not_run"],
+    }.get(item, [])
 
 
 # ---------------------------------------------------------------------------------------------
