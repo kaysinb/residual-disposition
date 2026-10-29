@@ -350,3 +350,36 @@ def partial_conjunction(p_values: Sequence[Fraction | float], r: int) -> Fractio
         raise ValueError(f"r = {r} outside 1..{m}")
     ordered = sorted(Fraction(p) for p in p_values)
     return min(Fraction(1), (m - r + 1) * ordered[r - 1])
+
+
+def holm_from_decisions(
+    decisions: Mapping[str, Mapping[Fraction, bool]], alpha: Fraction
+) -> dict[str, Any]:
+    """Holm's step-down procedure at family level α (§13.5 (d)), from each hypothesis's decisions
+    at the m levels α/m, α/(m − 1), …, α alone; no p-value is needed.
+
+    H_(j) is rejected while p_(i) ≤ α/(m − i + 1) for every i ≤ j. "p_(i) ≤ c" is the event that
+    at least i hypotheses reject at c, so the number rejected is the largest j with
+    N(α/(m − i + 1)) ≥ i for all i ≤ j, and the rejected ones are those rejecting at α/(m − j + 1).
+    ``decisions`` holds all m hypotheses, an unrun or ineligible one rejecting nowhere; each must
+    be monotone in the level (a rejection at a level holds at every higher one).
+    """
+    m = len(decisions)
+    levels = [alpha / (m - i) for i in range(m)]  # α/m, …, α/1
+    for name, d in decisions.items():
+        if set(d) != set(levels):
+            raise ValueError(f"{name}: decisions at {sorted(d)} instead of {levels}")
+        row = [bool(d[c]) for c in levels]
+        if any(a and not b for a, b in zip(row, row[1:], strict=False)):
+            raise ValueError(f"{name}: a rejection at a lower level is lost at a higher one")
+    steps, rejected = [], 0
+    for i, c in enumerate(levels, start=1):
+        count = sum(bool(d[c]) for d in decisions.values())
+        steps.append({"step": i, "level": str(c), "rejecting": count})
+        if count < i:
+            break
+        rejected = i
+    names = sorted(n for n, d in decisions.items() if rejected and d[levels[rejected - 1]])
+    if len(names) != rejected:  # N(c_j*) > j* would make step j* + 1 pass as well
+        raise AssertionError(f"Holm: {len(names)} reject at the last passed level, not {rejected}")
+    return {"rejected": names, "levels": [str(c) for c in levels], "steps": steps}
