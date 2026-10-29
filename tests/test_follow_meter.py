@@ -5,14 +5,18 @@ replayed on a copy of the live meter log when this checkout holds it."""
 from __future__ import annotations
 
 import shutil
-import subprocess
 
 import pytest
 
 from residual_disposition import continuation_rules as cr
 from residual_disposition import follow_money as fm
-from residual_disposition.budget import ApiBudgetExhausted, load_allocations, load_migrations
-from residual_disposition.paths import CONFIG_ROOT, REPO_ROOT, data_root
+from residual_disposition.budget import (
+    AllocationMeter,
+    ApiBudgetExhausted,
+    load_allocations,
+    load_migrations,
+)
+from residual_disposition.paths import CONFIG_ROOT, data_root
 from residual_disposition.simulate_continuation import FROZEN
 from residual_disposition.stage3_money import meter_of
 
@@ -54,14 +58,20 @@ def log_copy(tmp_path):
     return copy
 
 
-def test_old_allocations_replay_unchanged(log_copy, tmp_path):
-    """The log replays under the committed allocations of before the change as before."""
-    old = tmp_path / "allocations.yaml"
-    old.write_text(subprocess.run(["git", "show", "HEAD:configs/continuation/allocations.yaml"],
-                                  cwd=REPO_ROOT, capture_output=True, text=True,
-                                  check=True).stdout)  # fmt: skip
-    assert load_allocations(old) == [a for a in load_allocations(ALLOCATIONS)
-                                     if not a.item.startswith("follow/")]  # fmt: skip
+def test_old_allocations_replay_unchanged(log_copy):
+    """The log replays under the allocations of before the follow-up's items exactly as under the
+    new file before its migration is recorded: the same money and every earlier item's state."""
+    rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
+    before = [a for a in load_allocations(ALLOCATIONS) if not a.item.startswith("follow/")]
+    meter = rules.data["meter"]
+    old = AllocationMeter(before, cap=float(meter["cap_usd"]), reserve=float(meter["reserve_usd"]),
+                          drop_reasons=cr.drop_reasons(rules, [a.item for a in before]),
+                          log_path=log_copy,
+                          migrations=load_migrations(ALLOCATIONS)[:-1])  # fmt: skip
+    new = meter_of(log_copy)
+    assert old.allocations_pending == [] and new.allocations_pending == NEW
+    assert (old.spent(), old.outstanding()) == (new.spent(), new.outstanding())
+    assert {i: old.state[i] for i in old.priority} == {i: new.state[i] for i in old.priority}
 
 
 def test_the_planned_writes_on_a_copy(log_copy, tmp_path):
