@@ -46,5 +46,5 @@ def test_inputs_and_configuration():
         M.verdict({"s1": {k: v[:1] for k, v in deltas().items()}}, TOL)
     m0 = cr.follow_m0()
     assert m0["decisive"] == list(M.DECISIVE) and set(m0["methods"]) == set(M.METHODS)
-    rules = cr.load_follow_rules(expected_hash=cr.FOLLOW_FROZEN)
+    rules = cr.follow_rules()
     assert Fraction(rules["m0"]["tolerance"]) == TOL
