@@ -39,7 +39,6 @@ from residual_disposition import adl, adl_lens
 from residual_disposition import continuation_rules as cr
 from residual_disposition import follow_m0 as M
 from residual_disposition import pipeline as P
-from residual_disposition.adl_lens import check_reproduction
 from residual_disposition.config import from_cli
 
 
@@ -69,23 +68,34 @@ def environment(model: Any) -> dict[str, Any]:
             "dtype": str(next(model.parameters()).dtype)}  # fmt: skip
 
 
+def cli_problems(argv: list[str], m0: dict[str, Any]) -> list[str]:
+    """Why the command line is not the frozen run: exactly the frozen experiment, no override."""
+    want = [m0["runtime"]["experiment"]]
+    return [] if argv == want else [f"arguments {argv}, not {want}: no override is accepted"]
+
+
 def main() -> int:
     if "--out" not in sys.argv:
         raise SystemExit("--out is required")
     i = sys.argv.index("--out")
     out = Path(sys.argv[i + 1])
     del sys.argv[i : i + 2]
-    out.mkdir(parents=True, exist_ok=False)
     rules = cr.follow_rules()
     m0 = cr.follow_m0()
+    problems = cli_problems(sys.argv[1:], m0)
+    if problems:
+        raise SystemExit("; ".join(problems))
     tolerance = Fraction(rules["m0"]["tolerance"])
     layer, reported = int(m0["layers"]["decisive"]), [int(x) for x in m0["layers"]["reported"]]
     repeats = int(m0["repeats"])
     cfg = from_cli()
     ws = P.Workspace(cfg)
     spec = P._lens_spec(ws)
-    if not {layer, *reported} <= set(spec["layers"]):
-        raise SystemExit(f"layers {layer}, {reported} are not the lens's {spec['layers']}")
+    model_cfg = OmegaConf.to_container(cfg.model, resolve=True)
+    planned = (adl.SEQUENCES, adl.SEQUENCE_TOKENS)
+    problems = M.runtime_problems(model_cfg, spec, planned, m0)
+    if problems:  # before any GPU work
+        raise SystemExit("; ".join(problems))
     states = [s["state"] for s in m0["states"]]
     for sid in states:
         ws.store.verify(sid)  # every adapter's tensors against its recorded sha256
@@ -99,62 +109,67 @@ def main() -> int:
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is unavailable: this entry point needs a GPU")
     cached_file = cached_cell.previous / "base_means.safetensors"
-    cached = P._means_from(load_file(str(cached_file)), spec["layers"])
-    record: dict[str, Any] = {
-        "config": OmegaConf.to_container(cfg, resolve=True),
-        "follow_rules_sha256": rules.sha256,
-        "m0": m0,
-        "cached_base_means": {"run": cached_cell.previous.name, "sha256": sha(cached_file)},
-        "deltas": {},
-    }
-    base, tok = ws.base()
-    with ws.training():
-        sequences = adl.adl_sequences(tok, adl.corpus_texts(spec["corpus"]))
-        record["sequences"] = {"count": len(sequences), "tokens": len(sequences[0]),
-                               "sha256": hashlib.sha256(json.dumps(sequences).encode())
-                               .hexdigest()}  # fmt: skip
-        session = [adl_lens.activation_means(base, sequences, layers=spec["layers"], adapter=True)
-                   for _ in range(repeats)]  # fmt: skip
-    deltas: dict[str, dict[str, list[Any]]] = {}
+    cached = {x: m["mean"] for x, m in P._means_from(load_file(str(cached_file)),
+                                                     spec["layers"]).items()}  # fmt: skip
     historical: dict[str, Any] = {}
-    layer_report: dict[str, list[dict[str, Any]]] = {}
-    for sid in states:
-        served = ws.served_state(sid)
-        model = PeftModel.from_pretrained(base, served[0], adapter_name="state")
-        record.setdefault("environment", environment(model))
-        rows = {m: [] for m in M.METHODS}
-        with ws.training():
-            for r in range(repeats):
-                q = adl.activation_difference(model, sequences, layer=layer)["delta"]
-                means = adl_lens.activation_means(model, sequences, layers=spec["layers"],
-                                                  adapter=True)  # fmt: skip
-                state_mean = means[layer]["mean"]
-                got = {"qualification": q,
-                       "production_session": state_mean - session[r][layer]["mean"],
-                       "production_cached": state_mean - cached[layer]["mean"]}  # fmt: skip
-                for method, delta in got.items():
-                    f = out / f"{sid}-{method}-{r}.safetensors"
-                    save_file({"delta": delta.contiguous()}, str(f))
-                    record["deltas"][f.name] = sha(f)
-                    rows[method].append(delta)
-                for extra in reported:
-                    a = means[extra]["mean"] - session[r][extra]["mean"]
-                    b = means[extra]["mean"] - cached[extra]["mean"]
-                    layer_report.setdefault(sid, []).append(
-                        {"layer": extra, "repeat": r, **check_reproduction(a, b)}
-                    )
-        ws.give_back(model)
-        deltas[sid] = rows
-        try:  # the stored qualification δ̄, from its original environment: diagnostic only
+    unavailable: dict[str, str] = {}
+    for sid in states:  # the stored qualification δ̄, from its original environment: diagnostic
+        try:
             reference = P.adl_package_cell(ws, sid).previous / "steps" / "extraction.safetensors"
             historical[sid] = load_file(str(reference))["delta"]
         except Exception as error:  # noqa: BLE001 — reported, never a stop
-            record.setdefault("historical_unavailable", {})[sid] = repr(error)
-    record["verdict"] = M.verdict(deltas, tolerance, historical=historical)
-    record["reported_layers"] = layer_report
-    (out / "result.json").write_text(json.dumps(record, indent=1, default=str) + "\n")
-    print(json.dumps({"passed": record["verdict"]["passed"], "out": str(out)}))
-    return 0 if record["verdict"]["passed"] else 1
+            unavailable[sid] = repr(error)
+    base, tok = ws.base()
+    if next(base.parameters()).dtype != torch.bfloat16:
+        raise SystemExit(f"the model is loaded in {next(base.parameters()).dtype}, not bf16")
+    with ws.training():
+        sequences = adl.adl_sequences(tok, adl.corpus_texts(spec["corpus"]))
+    if (len(sequences), len(sequences[0])) != planned or any(len(x) != planned[1]
+                                                             for x in sequences):  # fmt: skip
+        raise SystemExit(f"{len(sequences)} sequences, not {planned[0]} of {planned[1]} tokens")
+    out.mkdir(parents=True, exist_ok=False)
+    manifest = {
+        "config": OmegaConf.to_container(cfg, resolve=True),
+        "follow_rules_sha256": rules.sha256,
+        "follow_m0_sha256": cr.FOLLOW_M0_FROZEN,
+        "m0": m0,
+        "cached_base_means": {"run": cached_cell.previous.name, "sha256": sha(cached_file)},
+        "sequences": {"count": len(sequences), "tokens": len(sequences[0]),
+                      "sha256": hashlib.sha256(json.dumps(sequences).encode()).hexdigest()},
+        "historical_unavailable": unavailable,
+        "environment": environment(base),
+    }  # fmt: skip
+
+    def save(path: Path, tensor: Any) -> str:
+        save_file({"tensor": tensor.contiguous()}, str(path))
+        return sha(path)
+
+    def base_means(r: int) -> dict[int, Any]:
+        with ws.training():
+            means = adl_lens.activation_means(base, sequences, layers=spec["layers"], adapter=True)
+        return {x: m["mean"] for x, m in means.items()}
+
+    loaded: dict[str, Any] = {}
+
+    def extract(sid: str, r: int) -> tuple[Any, dict[int, Any]]:
+        if loaded.get("sid") != sid:
+            if "model" in loaded:
+                ws.give_back(loaded.pop("model"))
+            served = ws.served_state(sid)
+            model = PeftModel.from_pretrained(base, served[0], adapter_name="state")
+            loaded.update(sid=sid, model=model)
+        model = loaded["model"]
+        with ws.training():
+            q = adl.activation_difference(model, sequences, layer=layer)["delta"]
+            means = adl_lens.activation_means(model, sequences, layers=spec["layers"],
+                                              adapter=True)  # fmt: skip
+        return q, {x: m["mean"] for x, m in means.items()}
+
+    result = M.execute(out, manifest, states=states, repeats=repeats, layer=layer,
+                       reported=reported, cached=cached, base_means=base_means, extract=extract,
+                       historical=historical, tolerance=tolerance, save=save)  # fmt: skip
+    print(json.dumps({"status": result["status"], "out": str(out)}))
+    return 0 if result["status"] == "passed" else 1
 
 
 if __name__ == "__main__":
