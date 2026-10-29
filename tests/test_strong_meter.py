@@ -137,15 +137,16 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
 
     items = load_allocations(cm.ALLOCATIONS)
     # then Stage 3's raise (C17-M) and the panel's phases (review s6f), each reverted here
-    first, second, raised, phased = load_migrations(cm.ALLOCATIONS)
+    first, second, raised, phased, follow = load_migrations(cm.ALLOCATIONS)
     old = {**dict(raised.raised), **{k: v for k, v in phased.phased.items()
                                       if k not in raised.raised}}  # fmt: skip
     before = [Allocation(a.item, a.kind, *old[a.item]) if a.item in old else a for a in items
-              if not a.item.startswith("strong/") and a.item not in phased.added]  # fmt: skip
+              if not a.item.startswith("strong/") and a.item not in phased.added
+              and a.item not in follow.added]  # fmt: skip
     AllocationMeter(before, cap=2420, reserve=100, drop_reasons=cr.drop_reasons(RULES),
                     log_path=log, migrations=[first])  # fmt: skip
     code, status = run(capsys, log, "status")
-    assert status["allocations_pending"] == [*second.added, *phased.added]
+    assert status["allocations_pending"] == [*second.added, *phased.added, *follow.added]
     with pytest.raises(KeyError, match="until it is migrated"):
         cm.main(["--log", str(log), "admit", "strong/stage5", "--spent-elsewhere", "0",
                  "--storage", "57"])  # fmt: skip
@@ -155,6 +156,8 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
     assert code == 0 and out["added"] == []
     code, out = run(capsys, log, "migrate-allocations")  # then the panel's phases (s6f)
     assert code == 0 and out["added"] == list(phased.added)
+    code, out = run(capsys, log, "migrate-allocations")  # then the follow-up's items
+    assert code == 0 and out["added"] == list(follow.added)
     code, status = run(capsys, log, "status")
     assert status["allocations_pending"] == []
     assert status["items"]["strong/stage5"]["state"] == "planned"

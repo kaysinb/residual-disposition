@@ -525,7 +525,10 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     path = CONFIG_ROOT / "continuation" / "allocations.yaml"
     items = load_allocations(path)
     names = [a.item for a in items]
-    assert names[0] == "stage0_1" and names[-1] == "stage6"
+    assert names[0] == "stage0_1"
+    # the follow-up's items below every earlier one, in §13.14's order
+    follow = [a.item for a in items if a.item.startswith("follow/")]
+    assert names[names.index("stage6") + 1 :] == follow and follow[0] == "follow/base"
     # C15: stage5_dpo below stage5, above stage6; C16: each strong item right after its parent
     assert names[names.index("stage5") + 1 : names.index("stage6")] == [
         "strong/stage5", "stage5_dpo", "strong/stage5_dpo"]  # fmt: skip
@@ -535,7 +538,7 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     assert all(  # a strong panel preparation's API is all its follow-up's (review s6f)
         a.stress_gpu_usd >= 0 and a.stress_api_usd > 0
         for a in items
-        if a.kind not in ("stage5_dpo", "strong_stage3")
+        if a.kind not in ("stage5_dpo", "strong_stage3", "follow_certificate")
     )
     dpo = next(a for a in items if a.item == "stage5_dpo")
     assert (dpo.usd, dpo.stress_gpu_usd, dpo.stress_api_usd) == (29.2, 80.46, 0.0)  # no API
@@ -553,9 +556,13 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     assert set(cr.drop_reasons(RULES, names)) <= set(names)
     # each from the allocations before it, the live log's: the phases (s6f) and the raise's
     # values reverted (C17-M)
-    first, second, third, fourth = load_migrations(path)
+    first, second, third, fourth, fifth = load_migrations(path)
     from residual_disposition.budget import Allocation
 
+    # the follow-up's items, added to the allocations as they stood after the panel's phases
+    assert list(fifth.added) == follow and not fifth.raised and not fifth.phased
+    items = [a for a in items if a.item not in fifth.added]
+    assert fifth.from_sha256 == allocations_hash(items)
     whole = dict(fourth.phased)
     raised = [Allocation(a.item, a.kind, *whole[a.item]) if a.item in whole else a for a in items
               if a.item not in fourth.added]  # fmt: skip
