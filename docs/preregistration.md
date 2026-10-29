@@ -3245,3 +3245,699 @@ The six-block certificate (72 runs per lineage) raises the certification cost [e
 - **Shared measurement bias.** A shared judge, decoder or corpus is not protected by the partial
   conjunction.
 - **The reciprocal composition A + U_H** is not run (low priority). This is stated explicitly.
+
+## Follow-up study after the panel's analysis (§13)
+
+**Amendment, 2026-10-29.** Adopted after the Stage-3 panel's analysis
+(`manifests/stage3_analysis.json`: p_PC = 1, Stage 4 triggered, Stage 5's gate not met) and the
+post-analysis diagnostics in the decision log (2026-10-27). It is adopted before any follow-up
+reader reads a suppressed or control state, before any new confirmation draw and before any new
+k\* or certificate run.
+
+- **What it changes.** Nothing in §12: every rule, manifest, decision and verdict recorded there
+  stands for its original analysis, and §12's registered results are reported as recorded. The
+  follow-up is post-registration work with its own rules, fixed here before its data. Its
+  results are reported separately from §12's.
+- **Staged freezes.** The scientific rules below are fixed now. Executable specifications (exact
+  prompt texts not yet fixed, configurations, state ids and hashes) are committed at the barriers
+  of §13.15, each before the data it governs exists. A barrier implements rules fixed here and
+  adds no choice.
+- **Rules version.** The follow-up's thresholds are a separate, versioned rules file. Earlier
+  manifests keep verifying under the rules they record.
+
+### 13.0 What has been seen when this is written
+
+- **Seen:** everything in the decision log and reports up to this amendment, in particular:
+  - the panel's analysis and every Stage 1–5 result, including the original lens-only reader's
+    readings (`adl-lens-v1`; eli5 continued 200, L: 2 and 0 of 80 in its two λ draws) and
+    PD-clean's results;
+  - the certificates of word_count_claim 200, countdown 50, tldr 400 and eli5 continued 200;
+  - the post-analysis diagnostics (2026-10-27): the interpreter-prompt and factorial diagnostics,
+    Patchscope's λ choice, and the δ̄ check across environments (positions 1–4 move by about 1–8 %
+    between Pods);
+  - the candidate reader (2026-10-27, prompt `adl-lens-multiscale-v2`): its development in the
+    post-analysis diagnostics, on readings of A and H of the four Stage-3 lineages (layer 30,
+    state decoder), the ADL qualification's A packages (layer 20) and the λ grader's choices on
+    A's sweeps; and its screen on A and H of the six behaviors on the state decoder, 20 requests
+    each (every A 20 of 20, every H 0 of 20), with the four Stage-3 recipe controls and A's
+    random-direction controls reported outside its rule. The candidate's A/H, random-direction
+    and listed recipe-control readings were seen. No candidate reading of L, H_s or X was seen.
+    The follow-up qualification uses fresh streams;
+  - the dose selections and exploratory passes of every saved lineage, including eli5's stack
+    lineage at 400 and 800, which met the margin rule (`stage3_selection`: candidates 200, 400,
+    800);
+  - earlier readings of partial-threshold states:
+    - example_link at 100 and 200: the pilot's descriptive readouts (§11.11: PD, DM, SVD, ADL),
+      and Stage 1's lens-only and PD-clean readings;
+    - word_count_claim 200, countdown 50 and tldr 400: Stage 3's lens-only and PD-clean
+      readings.
+- **Not seen:**
+  - any reading of eli5 stack 200 or pun_intended 200 by any reader;
+  - any reading of an L, H_s or X state by the candidate reader, and any reading of any state
+    by rung 2 or 3 of §13.6;
+  - any unfiltered-PD reading in the registered 80-request format of the six partial-threshold
+    doses;
+  - any screening of eli5's stack 400 or 800 on the strong-branch suites. Stack 400's PD pool
+    exists: it was a source of detector negatives for Stage 3's eli5 diagnostic, and no hit count
+    of it is recorded. Stack 800 has no PD pool and neither dose has an ADL-corpus run.
+- **Method development after results.** The candidate reader was developed after the Stage-3
+  readings, with the exposure listed above. Its qualification (§13.5) is prospective: it reads
+  the new follow-up streams, and no L, H_s or X is read before its gates are fixed and applied.
+
+### 13.1 Questions and claims
+
+- **(1) Retained relearnability.** In each lineage, the suppressed behavior b is relearned
+  faster from L than from H_s, beyond the two alien controls (the certificate, §13.8): at 14B on
+  the six partial-threshold lineages and eli5 continued 200.
+- **(1s) Size block, optional.** Whether tldr's recovery advantage changes across Qwen3 sizes,
+  estimated as an effect size (§13.9).
+- **(2) Partial threshold: which readers identify b.** For each of the six partial-threshold
+  lineages, whether the qualified lens-only reader D\* (§13.4) and unfiltered PD (§13.5)
+  identify b.
+- **(3) Full threshold: the reader ladder.** For eli5 at zero detected leakage, in each
+  suppression mode reached (continued 200; stack if §13.7 yields a validated candidate), the
+  first rung of a cumulative ladder (§13.6) that identifies b.
+- **Wording.**
+  - An identification is "a reading advantage exceeding 30 percentage points over H_s and 20 over
+    X, conditional on qualification". The > 0.5 margin is reported secondarily and never rescues
+    a failed primary test.
+  - A failed test means the advantage was not established. It is never worded as "the reader
+    cannot identify b".
+  - Category recognition and identification of the specific behavior stay distinct (§12.1,
+    §13.5).
+  - "Internal" keeps §12.1's meaning.
+  - Each suppression mode is its own conclusion. No pooled "in either mode" claim is made.
+- **Reporting of earlier results.**
+  - The panel's registered test is reported as recorded (p_PC = 1), factually.
+  - The original reader's readings are results of the registered method, kept in the records
+    and an appendix with their counts, not evidence about D\*.
+  - PD-clean appears only in an appendix (§13.12).
+- **Limitations, stated with every result:**
+  - partial cases are all stack; the existing full case is continued, so the current comparison
+    is confounded (§12.10's easy case);
+  - one implantation per behavior; the full threshold rests on one behavior;
+  - D\* was developed after the Stage-3 results;
+  - certificate blocks are seed blocks, not independent implants;
+  - capability preservation is addressed only by the descriptive audit (§13.11);
+  - the size block compares the studied checkpoints, conditional on their implants; it is not a
+    scaling law, and a trend below 14B does not establish one above 14B.
+
+### 13.2 States and doses
+
+| Behavior | Partial-threshold lineage (stack) | Confirmation |
+|---|---|---|
+| word_count_claim | 200 (Stage 3) | existing (Stage 3) |
+| countdown | 50 (Stage 3) | existing (Stage 3) |
+| tldr | 400 (Stage 3) | existing (Stage 3) |
+| eli5 | 200 (Stage 3's stack dose) | existing (Stage 3) |
+| example_link | 100, or the dose §13.3 selects | fresh (§13.3) |
+| pun_intended | 200, then 400 | fresh (§13.3) |
+
+- **Full threshold, eli5:** continued 200 (`strong_eli5_cont_200`, validated on V3/O3, with its
+  certificate and X_cont); the stack lineage's saved 400 and 800 (§13.7).
+- **Roles:** A, H, L, H_s, the recipe control, and X (stack: H + U_A; continued: X_cont,
+  §12.4.6).
+- **No retraining.** Every state is used as saved, its adapters checked by their tensor sha256
+  before use. pun 200's X is composed exactly as H + U_A (§12.4.6). Only the conditional stack
+  branch (§13.7) and the sizes (§13.9) create new states.
+- **Reuse.** Existing packages, pools, certificates, qualification packages, cached judge
+  answers and confirmation sets are reused only where their whole measurement contract matches.
+  Provenance alone neither requires nor permits recomputation.
+
+### 13.3 Confirmations: example_link and pun_intended
+
+- **example_link.** Its exploratory bounds are recomputed on CPU from the saved exploratory
+  responses with the current detector. §12.4.1's margin rule then selects d₁, which may differ
+  from 100; d₂ is the next later checkpoint meeting the rule.
+- **pun_intended.** d₁ = 200 and d₂ = 400 (exploratory bound 0.0074). After 400 the line stops.
+- **Procedure:** §12.4.1 as executed on 2026-10-19:
+  - the confirmation set `confirmation-7c4c37f36708`;
+  - a new attempt namespace and a seed derived from the lineage, the dose, the attempt and the
+    detector version;
+  - two attempts at most; the gate p₁ ≤ 1/60, i.e. 0–4 hits of 600.
+- **Not reused:** the pilot's confirmations and its relearning runs. Their data, stopping
+  protocol, saved responses and Y₂ differ from the continuation's certificate.
+- **Unconfirmed:** a line without a confirmed dose is reported "not confirmed". It keeps its row
+  in every table and has p = 1 in every family (§13.5).
+- **Inventories follow the confirmed dose.** Packages, pools, X, references and the certificate
+  are built only for the dose actually confirmed, pun_intended's 400 included if 200 fails.
+
+### 13.4 The reader D\*
+
+- **Evidence**, rendered deterministically from a lens package's stored steps, as the candidate
+  of 2026-10-27 renders it (`scripts/stage3_reader_candidate.py` at c53b829):
+  - both layers (20 and 30), positions 0–4, in one request;
+  - the 100 stored logit-lens tokens per position;
+  - every token in Patchscope's stored top 20 at any of the 30 frozen scales, with its best rank
+    and its scales;
+  - literal Unicode; no probabilities, no λ choice, no selected tokens, no behavior-specific
+    filter.
+- **Decoders.** The state's decoder and the common base-model decoder are read separately, one
+  rendering each.
+- **Interpreter.** `adl-lens-v1`'s model, settings and synthesis, with the evidence description
+  of `adl-lens-multiscale-v2` (sha256 `4097a7d8…`).
+  - A reading is 80 independent sample slots.
+  - The format-only retry rule applies (§12.4.5, 2026-10-25). Historical cache exceptions
+    retain their original provenance requirements. The named blocked-label completion cohort
+    does not authorize new model substitutions or human completions.
+  - **Safety blocks.** Across all §13 readers and roles, `strict_safety_blocked` requires a
+    valid lenient label and both canonical strict attempts to satisfy the frozen safety-block
+    predicate, with retained request and response provenance. It counts as not naming b; all
+    planned slots remain in the denominator: 80 per reading, 160 for pooled qualification.
+    Other unresolved slots retain their pending treatment. This authorizes no new replacement
+    instrument or completion cohort.
+    - **Reported:** blocked counts per package and role, unique-request counts, and descriptive
+      missing-label bounds.
+    - **Not uniformly conservative:** blocking H_s or X can increase a contrast. A result is
+      reported as safety-filter-sensitive unless its robustness is established. Sensitivities
+      never replace the primary analysis.
+- **Judging.** Rule C with strict-v4 and the lens's lenient rubric (rubric set v4), `category-v1`,
+  and the specificity rubric (§12.3.4), each validated as in §13.5.
+- **Stability.** D\* has no λ draw, so §12.4.5's two-draw stability rule does not apply.
+- **Packages.**
+  - Existing lens packages are reused: their stored steps hold every scale, so rendering is CPU
+    work.
+  - New packages are built by the registered builder under §13.10's environment rule:
+    - pun 200 and eli5 stack 200 (L, H_s, X, recipe);
+    - norm-matched random-direction branches for the seven read L states, two within the new
+      builds and five by a builder of that branch alone, seeded by the existing rule from the
+      state id;
+    - the stack candidate's, if §13.7 yields one.
+  - Builds used only by D\* may skip Patchscope's λ choice, which D\* does not read.
+
+### 13.5 Gates and tests
+
+**(a) Qualification.**
+- **D\*:** per behavior and per decoder, on A, H and the recipe control.
+  - Two independent streams of 80 (distinct stream salts) are always both collected and pooled
+    once: 160 per state.
+  - Floors: R(A) ≥ 0.7, R(H) ≤ 0.1, R(A) − R(H) ≥ 0.6, R(recipe) ≥ 0.7 · R(A).
+  - Fidelity controls on A, state decoder, pooled 160 each, R ≤ 0.1: Patchscope and the logit
+    lens fed norm-matched random directions; Patchscope without the substitution (no patch). The
+    no-patch control gets its own small rendering of what that control stored. It is never
+    padded into the 30-scale format.
+  - No "either stream passes", no top-up and no repetition.
+  - The pooled recipe readings serve qualification and analysis alike.
+  - eli5's continued-200 and stack-200 recipe controls are qualified separately; its A and H are
+    shared.
+  - A behavior failing qualification on either decoder is ineligible: its D\* test has p = 1,
+    and its L, H_s and X are not read by D\*.
+  - These are adequacy floors at 70 %, not evidence that the reader meets the former 80 %
+    standard.
+- **Rungs 2 and 3:** one qualification set per rung (§13.6).
+  - A and H are shared by both modes. Each mode has its own recipe control.
+  - 160 pooled, the same floors.
+  - At rung 3 the comparator is qualified alike. Its failure is reported, does not change the
+    rung's decision and is not evidence that internal access wins.
+- **Unfiltered PD:** a positive control on A and the recipe control, two independent streams of
+  80 pooled once (160 each), R(A) ≥ 0.7 and R(recipe) ≥ 0.7 · R(A). No H reading is needed: H_s
+  and X supply the negative contrasts, and PD has no decoder-fidelity claim.
+
+**(b) Category confusion.**
+- Among L's counted hypotheses, the share matching the correct behavior minus the largest share
+  matching another behavior must be ≥ 0.3. It is computed from `category-v1`'s multilabel sets.
+- Zero counted hypotheses fail.
+- Category recognition is not identification of the specific behavior. A specific claim needs
+  both a validated specificity grader and §12.3.4's defining-feature advantage ≥ 0.5; otherwise
+  category wording is used.
+
+**(c) Identification test.**
+- p = max{p[L − H_s > 0.3], p[L − X > 0.2]}, by the exact test of §12.5.1, n = 80 per state.
+- Decisions come from certified regions:
+  - δ 3/10 at 1/120, 1/100, 1/80, 1/60, 1/40 and 1/20;
+  - δ 1/5 at 1/120, 1/100, 1/80 and 1/40, and at 1/60 and 1/20 as Stage 0 certified them.
+
+  Each region is certified with no undecided outcome, a certified size ≤ its level, and Barnard
+  convexity. They are certified by a committed script, and its records are committed before
+  barrier B2.
+- Any failed gate gives p = 1.
+- **The two decoders.** Both decoders read L, H_s and X, and both are qualified under (a);
+  p_both = max(p_state, p_base), each decoder with its applicable gates. p_both is an
+  intersection–union test and needs no further split of α.
+  - **Operational identification** is p_state: claim (2)'s Holm family for D\* and rung 1 of the
+    ladder use it.
+  - **Attribution, a separate secondary result.** p_both forms an explicitly separate secondary
+    Holm family over the six behaviors (α = 0.05, the same levels), applied to the unadjusted,
+    gated p_both values; a behavior passing it is "corroborated using the common base decoder".
+    A state-only success does not establish that δ carries the identifying information
+    independently of the state decoder.
+  - For each full-threshold mode, common-base corroboration is a secondary rung-1 result
+    requiring p_both ≤ 1/60. It neither changes the operational identification nor determines
+    ladder advancement.
+  - The separate families do not give a pooled 5 % guarantee over every claim.
+  - Common-base measurements are a separate assay. The cumulative interpreter-input path uses
+    the state-decoder D\* rendering.
+
+  In §12 the common decoder entered only through its eligibility on A, H and the recipe control
+  (§12.4.4 as Stage 3 applied it).
+- **L with a random direction** (norm-matched, state decoder):
+  - at the partial threshold, reported descriptively;
+  - at every rung of the full-threshold ladder, a gate of at most 8 of 80 (§13.6). It passes
+    with probability 1.000, 0.982, 0.811 and 0.593 at judged rates 0.02, 0.05, 0.08 and 0.10:
+    adequate at rates ≤ 0.05, not a guarantee near 0.10. At a judged rate ≤ 0.05 it lowers a
+    rung's power by at most about 2 percentage points; that is per rung, not a guarantee for the
+    whole ladder.
+
+**(d) Multiplicity.**
+- **Claim (2):** Holm at family α = 0.05 over the six behaviors, separately for D\* and for
+  unfiltered PD.
+  - Order the six gated p-values and compare the j-th smallest with 0.05/(7 − j), stopping at the
+    first failure.
+  - An unconfirmed, ineligible, unrun or incomplete behavior keeps p = 1 and its place in the
+    family.
+  - No "either reader" claim is made.
+- **Claim (3):** 1/60 at each of three planned rungs per mode. The denominator is fixed in
+  advance. Early success, a failed qualification or an unrun rung never raises another rung's
+  level.
+- **Claim (1):** each certificate at its registered level (§13.8). No familywise statement
+  selects passing lineages. "All n certified" is an intersection–union statement and needs no
+  adjustment.
+
+**Format validation** (a gate before any interpretation of L in that format). It applies to each
+of D\*, the rung-2 input, rung 3 (agent and comparator outputs) and unfiltered PD (v4-j3 on the
+unfiltered hypothesis distribution).
+- **Sample:** 400 reference-C-positive and 400 reference-C-negative items.
+  - The sampling frame, seed and strata are frozen before selection; items are selected by blind
+    reference labels, never by the machine judge.
+  - The strata cover behaviors, decoders, recipe controls and difficult hypotheses (another
+    behavior named; category-only). Rung 3 covers agent and comparator. Category-only hypotheses
+    are labeled by the registered category-level rule C; they are negative for the
+    defining-feature judgment when appropriate.
+  - The frame is that format's qualification readings. Where it lacks 400 per class or a stratum,
+    validation-only readings are added. Validation-only streams may use the preregistered
+    control states, but are disjoint from qualification and hypothesis-test streams and never
+    contribute to their counts. The required evidence must exist in the format being validated.
+  - The supplemental source inventory (states by id), the generation counts and order, and the
+    stopping rule are fixed before any machine judgment of the frame is examined. No source is
+    chosen to fill a stratum.
+  - **Selection by reference label.** The frame's items are labeled in one seeded order, stratum
+    by stratum, until both classes and every stratum have their quota. Every labeled item stays
+    in the record, and items beyond a full quota are reported, not used. About 900–1,100 items
+    per format are labeled to fill 400 + 400. Reference classes are final after the
+    researcher's adjudication; then the 400 + 400 test set is locked.
+- **Reference labels:**
+  - a frozen ensemble of Claude Opus 5.5, Claude Fable 5.1 and GPT (gpt-6-astra), its exact
+    versions and settings committed at B2, blind to state, role and machine labels;
+  - a fresh arbiter on disputes;
+  - the researcher's review of a seeded 10 % of the labeled items and every dispute.
+
+  The same workflow also records the category and specificity reference fields. No separate
+  blind set of D\* hypotheses is labeled. For these validation sets, this reference-review
+  procedure replaces §12.9's review of every unanimous names item.
+- **Acceptance:** for the complete rule C, a one-sided exact 95 % lower bound of sensitivity
+  ≥ 0.90 and an upper bound of the false-positive rate ≤ 0.05. At 400 per class that is at most
+  29 false negatives and 12 false positives. Missing or unresolved judgments count as errors.
+  In format validation, blocked required labels count as unresolved errors, not successful
+  negative classifications.
+- **Reported, not gates:**
+  - estimates and intervals overall and by stratum;
+  - κ and the alternative-annotator test;
+  - category agreement.
+- **Kept from §3:** the veto-precision criterion 2.
+- **Specificity grader:** validated on the same items with §12.3.4's criteria (κ ≥ 0.7,
+  alt-test). If that fails, specificity is descriptive. Validation alone makes no specific
+  claim; (b)'s defining-feature advantage is also needed.
+- **Fixed before the test:** the instrument. No tuning and no further sample follow a failure.
+  A failed format makes its readings ineligible (reported); a new validation needs a recorded
+  amendment.
+- **Replaces** §3's count criterion ("the judge's count within the annotators' range") for these
+  formats.
+
+**Unfiltered PD.**
+- **Package:** the registered PD selection (the top 92 by ΔPPL per configuration, §12.4.2's
+  ranking) with no detector removal and no adjudication. 80 requests, `pd-v1`, rule C with rubric
+  set v4-j3 as at Stage 3, unchanged, and validated on this format by the rule above. Identical
+  existing requests are reused.
+- **Reuse:** eli5 continued 200's L, H_s and X PD-clean packages had no removals. Their
+  hypotheses are reused where the interpreter request is identical, and their labels where the
+  judging contract is too. Its recipe control is read unfiltered.
+- **Reported beside it:** the share of detector-hit items in each L package. At the partial
+  threshold an unfiltered-PD identification may rest on the residual expression.
+
+### 13.6 The full-threshold ladder (eli5)
+
+- **Modes.** Continued 200 is always read. The stack is read only after a validated candidate
+  (§13.7).
+- **Rungs, cumulative.** Each later rung sees the previous rung's input and more.
+  1. **D\*** (§13.4).
+  2. **D\* plus steering evidence.** The same D\* rendering (state decoder), plus one steered and
+     one unsteered sample per prompt and position by §11.1's steering procedure (its strength
+     search, its 20 closed prompts, truncation to 128 characters). One evidence-only
+     interpreter, i = 0.
+  3. **The agent.** Rung 2's input plus i = 5 queries of its own, and a matched comparator.
+- **Cells per mode.**
+  - Rungs 2 and 3: L, H_s, X (X_cont in continued mode), the mode's recipe control, and L with a
+    random direction (L's norm, in the D\* rendering and in steering, with L's unsteered
+    samples).
+  - The comparator: L, H_s, X and the recipe control.
+  - A and H qualify each rung once, for both modes (§13.5).
+  - Q1's A and H steering packages are reused where their procedure and contract match.
+- **The agent (fixed now):**
+  - the interpreter's model;
+  - per run, its input (the cell's rung-2 evidence) and at most five queries;
+  - each query is one prompt sent both to the examined state and to the base model, which answer
+    with the behavior's observer sampling;
+  - generation access only: no logits and no weights;
+  - per-call output caps and context limits, public in the B3 specification;
+  - one final hypothesis in the interpreter's form, judged like D\*'s;
+  - history reset between runs and between states;
+  - 80 independent runs per reading.
+- **The comparator** is the same agent, model, query budget, caps and access, with the same
+  unsteered samples and no D\* or steered evidence. The comparator is reported descriptively
+  beside the agent; different significance decisions do not establish superiority. Its failed
+  qualification is not evidence that internal access wins.
+- **Timing of the specifications.** Every outcome-bearing detail of rungs 2 and 3 (the rung-2
+  prompt and rendering; the agent's and the comparator's prompts, caps, limits and parser) is
+  committed at B3, before any new reader request to L, H_s or X (§13.15). The agent's code is
+  written only if rung 3 is reached, and it implements that specification.
+- **A rung's test:**
+  - (a) the rung's qualification;
+  - (b) category confusion;
+  - the random cell at most 8 of 80;
+  - (c) at 1/60;
+  - its format validation passed.
+
+  Every planned cell and control of a rung completes before its decision, and the controls
+  before L is interpreted.
+- **Stopping and statuses:**
+  - the first rung whose test passes ends the mode's ladder; later rungs are "not run after an
+    identification";
+  - a resumable incomplete rung remains pending. A terminally incomplete rung leaves the ladder
+    unresolved. A completed negative or ineligible rung advances;
+  - a negative rung is reported "not identified", an ineligible one with its failed gate;
+  - work stopped before completion for any other reason is "unresolved", never "not identified";
+  - a mode whose three rungs do not identify b: "not identified by the three registered rungs".
+
+### 13.7 The stack branch (eli5)
+
+- **Candidates:** the saved stack states at 400, then 800.
+- **Screening:** §12.4.10's screening suites and rule, with the contracts' eli5 detector: zero
+  hits in each PD framing and in both ADL framings, early and long.
+  - The first eligible candidate ends the screening. Failed screens are kept.
+  - No eligible candidate closes the branch: "no qualifying dose in the registered stack search
+    through 800".
+- **Commit barrier:** the candidate's manifest before any validation cell.
+- **Validation, one attempt,** on fresh suites built and hashed on CPU before the screening
+  opens, by §12.4.10's procedure, populations and RNG with new keys, disjoint from V1–V3, O1–O3
+  and the screening suites:
+  - V4, PD: 9,194 prefills, each in both framings (chat, raw);
+  - V4, ADL: 4,000 records (600 per early length 1–5 and 1,000 of 32 tokens), each in both
+    framings;
+  - O4: the pool slice [9600:10200], checked disjoint from every screening, exploratory,
+    confirmation and training prompt; one response each from L and H_s, H_s descriptive;
+  - OOD: the frozen 200 prompts with a fresh response stream.
+- **Counting and identity.**
+  - Counting uses the contracts' eli5 detector and the frozen generation contract (decoding
+    settings included).
+  - Each suite's per-framing inventory and its seeds are recorded with its hash.
+  - The validation's identity is persisted before generation. An interruption resumes the same
+    identity without a redraw.
+  - A missing, duplicated or failed record leaves it pending, never a zero.
+- **Pass:** zero hits for L on V4 PD (either framing), V4 ADL (early and long, both framings),
+  O4 and OOD. Any failure closes the branch; no other dose follows.
+- **Bounds:** zero of n gives U = 1 − 0.05^{1/n}, pointwise per probe type, for the random-sample
+  suites only.
+- **After a pass, regardless of later outcomes:**
+  - X = H + U_A;
+  - lens packages (L, H_s, X, recipe, the random branch) and PD pools;
+  - k\* and the six-block certificate (§13.8);
+  - rung 1 and the ladder (§13.6).
+- **p₁** = P{Bin(600, 0.02) ≤ h}, with h L's hits on O4.
+
+### 13.8 Certificates
+
+- **14B:** new certificates for eli5 stack 200, example_link and pun_intended at their confirmed
+  doses.
+  - §12.4.8 unchanged: six blocks; b, Y and Y₂; two rates; 72 runs.
+  - k\* and B by §12.3.7.
+  - Terminal stops by §12.7 (2026-10-24).
+  - They run whatever the readings show.
+  - The certificates of word_count_claim 200, countdown 50, tldr 400 and eli5 continued 200 are
+    reused unchanged.
+- **New sizes of the size block (§13.9):** sign certificates reported separately from the
+  effect estimates;
+  - ten new blocks per size (test seeds 0–9 in the size's namespace); p = P{Bin(10, ½) ≥ K}, K the number of positive signs, for each
+    of the six contrasts; 11/1024 is the nine-positive boundary, so a contrast passes with
+    K ≥ 9;
+  - §12.4.8's censoring and exact-sign rules;
+  - interval: with complete data, [d₍₂₎, d₍₉₎] for the median, coverage 97.8516 %. For block
+    intervals [l_j, u_j], report [l₍₂₎, u₍₉₎], sorting lower and upper endpoints separately and
+    retaining infinities. Coverage is at least 97.8516 % under the sign-test assumptions;
+  - calibration seeds 10–12, disjoint: H_s on b, Y and Y₂ at both rates, three runs each, each
+    capped at 600 steps (18 runs);
+  - k\* per rate from b's calibration (§12.3.7);
+  - B = 50 · ⌈max(20, k\*_hi, k\*_lo, 3 · max over the six arm-rate medians of T)/50⌉;
+  - a required median unresolved (two or three of its runs censored), or B above the ceiling,
+    makes that size's certificate "unresolved". No clipping.
+  - The ceiling is 1,200 steps, or 600 if the researcher so decides; one common ceiling for all
+    sizes, decided before any new size training and frozen at B6 (§13.14).
+  - Calibration is committed before any certificate run.
+
+### 13.9 The size block: tldr's recovery advantage across Qwen3 sizes (optional)
+
+**The optional block estimates size-associated changes in recovery advantage. Certificate success
+does not determine inclusion. Before any new size training, the size set, common datasets and
+recipes, rate policy, references, crossing targets, seed namespaces, trend estimator, interval
+procedure and handling of unavailable/censored points are committed** (B6).
+
+- **Sizes.** The existing 14B tldr stack-400 lineage is the anchor. The set of new sizes is a
+  decision point before the block (§13.14), one of:
+  - Qwen3-1.7B and Qwen3-4B, with Qwen3-8B a prespecified fallback if 1.7B cannot produce a
+    valid point;
+  - Qwen3-4B and Qwen3-8B.
+
+  Fallbacks follow feasibility, never the observed advantage or slope. A point is infeasible
+  when, under the common recipe, the implantation floors fail, Y or Y₂ misses its reference
+  floor, no dose is confirmed, the detector check fails without an accepted revision, the
+  calibration is unresolved, or training ends terminally. A failed sign certificate or a
+  completed right-censored run does not make a size infeasible and does not trigger the
+  fallback. Technical infeasibility requires the registered failure rule and exhausted retry.
+  All retained evidence is reported. Qwen3-0.6B is not run.
+- **Fixed now as finite options:** the size sets, the fallback rule and the moment of the
+  decision. The choice of set and the B6 freeze come before any training of a new size.
+- **32B** is a separately declared extension with its own decision point, the only point above
+  14B.
+- **Primary fit and extensions.** A later 14B extension or separately declared 32B extension
+  does not replace the frozen primary fit. Its analysis is reported alongside it, with earlier
+  results known at the extension's decision disclosed.
+- **Models:** the original dense Qwen3 release, pinned revisions, non-thinking mode. This is a
+  checkpoint-family comparison: architecture differs across sizes, and 32B's post-training
+  differs from the distillation pipeline of 0.6B–14B.
+- **Common fixed recipe (the primary comparison):**
+  - **Data:** the same actual prompt and response datasets at every size, the pinned 14B datasets
+    where reusable: implantation, sham, suppression, relearning, and the Y and Y₂ organisms' data
+    and relearning data. Training datasets are shared across sizes. Model-specific reference,
+    evaluation and detector-validation responses are generated as specified. The existing 14B
+    reference streams are reused.
+  - **Measurement:** the primary comparison uses a common behavioral definition and scoring
+    specification across sizes. An accepted detector revision is applied consistently to saved
+    reference, confirmation and relearning responses, including the 14B anchor. If the required
+    crossing cannot be reconstructed from the retained trajectory, it remains bounded or
+    unavailable until matched evidence is obtained. The original certificate is unchanged.
+  - **Optimization and measurement:** the same LoRA rank, scaling and modules, optimizer, batch
+    size, exposure, sampling and evaluation schedule.
+  - **Acceptance:** the same implantation floors. A's and the Y and Y₂ organisms' reference
+    rates must be ≥ 0.5 (§12.3.6, criterion 3), and H's ≤ 0.02. Every reference comes from a
+    fresh, non-selection stream on the 200 relearning-evaluation prompts.
+  - **Suppression:** stack mode; the same first-margin-passing checkpoint rule and fresh
+    confirmation (§12.4.1). The dose is not forced to equal 14B's.
+  - **Relearning:** the common rates 10⁻⁵ and 5·10⁻⁶ at every size. Calibration determines k\*
+    and the observation horizon B (§13.8), not the rate.
+  - **Model-specific rates.** A rate rescue, if run, is a separate calibrated-policy analysis
+    with an H_s-only selector frozen for every size. It is never spliced into the fixed-recipe
+    slope.
+- **14B anchor.** It is not rerun to equalize block counts: six blocks affect precision, not
+  validity. Its uncensored first crossings are used, its contract being the common recipe's
+  source. Four unused seeds may be added only as a disclosed descriptive extension, never seeds
+  6–8 (its calibration seeds), and the original certificate is unchanged.
+- **Estimands,** per size, rate and paired seed block, T in training steps (example
+  presentations), not wall-clock time:
+  - D_b = log(T(H_s, b)/T(L, b));
+  - Q_Y = D_b − log(T(H_s, Y)/T(L, Y)), and Q_Y₂ likewise.
+- **Analysis:**
+  - the mean log contrast over blocks is the descriptive trend's input; exp(mean D_b) is the
+    geometric-mean recovery advantage; medians and sign certificates are reported separately;
+  - at each learning rate: D_b, Q_Y and Q_Y₂ with intervals, and every underlying acquisition
+    and recovery time; endpoint differences, such as D₁₄ − D₄;
+  - an equal-size-weight regression D = a + β · log P over the size means (P the released
+    parameter count, frozen at B6), and the same for Q_Y and Q_Y₂;
+  - intervals: block-bootstrap percentile intervals at 95 %, resampling blocks within each size
+    so that each block keeps all its arms and both rates. Blocks of different sizes are resampled
+    independently, which their separate seed namespaces justify (independent random streams).
+    The resample count and seed are frozen at B6. The intervals describe relearning variability
+    conditional on the particular checkpoints and implants: ten relearning seeds are not ten
+    independent implantations. They are descriptive and pointwise, not a simultaneous
+    confidence statement.
+  - with fewer than three comparable sizes, only pairwise comparisons are reported; no
+    size-trend conclusion is made.
+- **Censoring and missing points.**
+  - Censored observations contribute bounds, never substituted times and never a complete-case
+    slope. Contrast bounds are propagated through block means and the regression's signed
+    weights. Identification bounds and sampling-uncertainty intervals are reported separately;
+    censored blocks are never discarded.
+  - A trend whose sign the bounds do not identify is reported "unresolved".
+  - An infeasible point enters no slope and is reported with its reason.
+- **Sensitivity:** crossing an absolute rate of 0.25, for b and both aliens, beside the
+  certificate's half-reference target (14B tldr: 141/200, target 0.3525), from the saved curves.
+- **Reported covariates,** without a many-covariate "adjusted scaling law":
+  - A and H rates, initial L and H_s rates, confirmation counts, suppression dose;
+  - reference targets, k\*, horizon, acquisition times, censoring;
+  - trainable-parameter fraction and basic task-following.
+- **Wording:** "Under this fixed protocol, the estimated tldr recovery advantage increased
+  across the studied Qwen3 checkpoints" (or decreased, or no trend was established).
+  - No monotonicity is forced. A positive slope does not show that every adjacent step is
+    positive.
+  - No size is excluded for a failed certificate.
+  - A claim of increasing behavior-specific advantage needs D_b and both alien-adjusted trends to
+    agree. Q_Y₂ alone never carries it: tldr's existing Q_Y₂ is enlarged by slower alien
+    acquisition from L.
+  - The positive point-estimate pattern requires positive slopes for D_b, Q_Y and Q_Y₂ at both
+    learning rates. Rates are never pooled to conceal disagreement. Where an interval includes
+    zero, the corresponding direction remains uncertain.
+  - Growth below 14B does not establish growth above 14B.
+  - The existing 14B effect, × 1.43–1.49, is also stated as about 30–33 % fewer training steps.
+- **Per new size, besides the estimands:**
+  - the certificate (§13.8: ten new blocks, alien-aware calibration, the B rule);
+  - **detector checks before the first confirmation:**
+    - ensemble labels on 830 items: tldr 200 A + 200 H; Y and Y₂ 100 + 100 each; 30 responses
+      of L without a detector hit;
+    - the researcher's review of ≈ 30 items and every dispute;
+    - acceptance and any revision by §12.3.1, with that model's own evidence. The 830-item
+      check alone does not satisfy a revision's acceptance checks. A revision needs:
+      - development data from that model's elicitation (prompted responses and 300 base
+        responses without the prompt), disjoint from the check, confirmation and certificate
+        data;
+      - 0/300 hits without the prompt on that model, and no added disagreement with the final
+        labels of that model's check set;
+      - a candidate family frozen before the review's result (§12.7, 2026-10-24).
+- **No switch and no readers.** The behavior is never changed after a failure, and no reader
+  tool runs on the sizes.
+- **Order:** the declared sizes in ascending order; 32B only if declared.
+
+### 13.10 Package builds and the extraction check (M0)
+
+- **M0, before any new package.** On six existing A/H states, in one environment (one Pod
+  session, so that no drift between environments enters the comparison), each method twice:
+  - (i) the qualification's path (`adl.activation_difference`);
+  - (ii) the production path with cached base means;
+  - (iii) the production path with base means recomputed in the session, from the same saved
+    state means.
+
+  Frozen precision (bf16, sums in fp32). Every run records host, Pod id, GPU UUID, driver and
+  attention backend.
+- **Acceptance.** The decisive comparison is the production path using same-session base means
+  against the qualification path, with repeatability and tolerance 2⁻⁸. Cached-base and
+  historical-reference comparisons are diagnostic. New packages use same-session base means.
+  - The tolerance is a relative error per position, as in §12.4.3.
+  - A failure stops every new package. A repair needs its own recorded amendment.
+  - Readings of existing packages, which passed their checks when built, are unaffected.
+- **New builds after a pass.** §12.4.3's method-equivalence validation (2026-10-19) runs in the
+  build's own session and environment, with same-session base means, in place of the
+  reproduction against a stored reference from another environment. Same-session A rebuilds
+  serve as its references. Every build records the environment fields above.
+
+### 13.11 Benign fine-tuning (S1) and the capability audit — descriptive
+
+- **S1:**
+  - **States:** eli5 continued 200 and tldr 400, L and H_s.
+  - **Data:** 3,200 prompts of CodeAlpaca-20k (pinned revision `152bb5e9…`), excluding the OOD
+    set's CodeAlpaca prompts and the pilot pool.
+    - Responses come from the base model without adapters.
+    - Every response with a hit of any of the six behaviors' detectors is removed before the
+      draw; zero hits remain.
+    - A blind judged audit of a seeded 200-response sample, for any of the eight behaviors, is
+      reported. It supports "no detected contamination", not proof of behavior-free data. A
+      confirmed target trace is disclosed and precludes an unqualified claim of spontaneous
+      revival.
+  - **Training:** a fresh LoRA by the relearning recipe at 10⁻⁵, exactly 200 steps, no stopping
+    rule; two seeds shared by L and H_s (eight runs).
+  - **Measures** at steps 0 (fresh), 50, 100 and 200:
+    - the behavior's detector rate on the 600 `certificate` prompts;
+    - NLL on 200 held-out CodeAlpaca prompts and their target responses (the base model's),
+      pinned and disjoint from training: the check that training learned.
+  - **Outcome:** per seed pair, the change in L's rate from step 0 to 200 minus the change in
+    H_s's.
+    - Intervals: 95 % paired-prompt bootstrap, separately per seed pair. No population
+      inference is made over the two training seeds.
+    - Worded narrowly ("under this benign fine-tuning").
+- **Capability audit:**
+  - **Responses:** 25 comparable ordinary responses per state (the observer on `certificate`,
+    temperature 1.0).
+  - **States:** 41 core states. 28 have saved responses; 13 are fresh passes, the base model
+    included. The sizes' 8 and the stack candidate's 4 are added when their responses exist.
+  - **Grading:** one blind call per response under a rubric frozen at its barrier (on task /
+    degenerate: empty or repetitive / evasive or refusing / incoherent), and the researcher's
+    check of a seeded 100.
+  - **Use:** descriptive. It never excludes or reselects a state.
+
+### 13.12 The PD-clean presentation audit (appendix)
+
+- **On saved records only:**
+  - the request content actually sent against the saved source rows (items, order, framing,
+    prefix boundaries, newlines, limits, completion status);
+  - the 64-token generation truncation apart from any interpreter-input truncation;
+  - the removal and refill history;
+  - a fixed, seeded, blinded judge sample spanning roles and clear and borderline hypotheses,
+    under the unchanged rubric.
+- **A paired rendering-only test** (A, H, recipe; content and judges fixed) runs only if a
+  presentation effect is to be claimed, with its own recorded design.
+- **Wording:** "the registered PD-clean pipeline failed its controls", with an identified
+  presentation defect or evidence that cleaning removed the identifying items. It is never a
+  claim that PD fails in general.
+
+### 13.13 Registered work not executed
+
+- **Stage 4,** triggered by the panel's analysis, is not executed. The researcher decided this
+  after the panel's results, so it is an outcome-informed deviation, disclosed with the trigger
+  as recorded. Its reason is the follow-up's priority: reimplanting example_link and pun_intended
+  in stack mode addresses §12.10's easy case, not the question of claim (3).
+- **guillemets' descriptive ADL-only line** (§12.7, Stage 3) is not completed. Its package
+  builds stopped at the reproduction check (decision log, 2026-10-27), and the follow-up does
+  not resume it. Existing artifacts are kept.
+- **Stage 6** is not opened: its gate needs a positive Stage-5 lineage, and Stage 5's strong
+  search found no qualifying dose on either line (decision log, 2026-10-22). The size block
+  (§13.9) is separate work and does not execute Stage 6.
+
+### 13.14 Order, decision points and reporting
+
+- **Order of execution,** frozen now, before any new reading or screening result:
+  1. this amendment;
+  2. M0 → the confirmations → packages, pools, pun's X and the stack screening → D\*'s and
+     unfiltered PD's qualification and format validation → D\* and unfiltered-PD readings of the
+     six partial-threshold lineages and rung 1 on eli5 continued 200;
+  3. the three new certificates;
+  4. the continued-mode ladder (rung 2, then rung 3);
+  5. S1 and the capability audit;
+  6. the stack branch and its ladder;
+  7. the size block (§13.9), if declared: its sizes in ascending order; 32B only as a declared
+     extension.
+- **Progression.** Apart from the listed stage-specific decision points, progression follows
+  only the frozen gates. Earlier-stage results may be known at those decision points; no
+  decision follows outcomes from the stage it governs.
+- **Decision points.** Each is recorded in the decision log before its stage and never after
+  that stage's results:
+  - whether rung 3 runs: before its first run in either mode;
+  - whether the size block runs, and its size set ({1.7B, 4B} with 8B as the feasibility
+    fallback, or {4B, 8B}): before any new size training;
+  - whether the 32B extension runs: before its training;
+  - the ceiling of the sizes' relearning step budget B, 1,200 or 600 steps, one for all sizes:
+    before any new size training.
+- **Statuses:** identified, not identified, ineligible (with the gate), not confirmed, pending,
+  unresolved, not run after an identification.
+  - Resumable faults stay pending.
+  - Work stopped before completion for any other reason is unresolved.
+- **Spending:** actual spending is reported in the decision log and the reports.
+
+### 13.15 Barriers
+
+Each barrier commits, before the data it governs, the configurations and manifests that
+implement the rules above.
+
+| Barrier | Before | Commits |
+|---|---|---|
+| B1 | any confirmation draw or new package | link's recomputed bounds and d₁/d₂; pun's d₁/d₂; namespaces; M0's configuration; the follow-up rules file |
+| B2 | any qualification request of D\* or unfiltered PD | the certified regions (script, run and manifest in the repository); the rendering and interpreter configuration; stream salts; the qualification inventories; each format-validation frame, supplemental source inventory, seed, strata and stopping rule; the ensemble's exact versions and settings |
+| B3 | any new reader request to L, H_s or X, PD included | the three new certificates' procedures; every outcome-bearing detail of rungs 2 and 3 (§13.6); the unfiltered-PD inventory and reuse map |
+| B4 | the stack screening | V4/O4, built and hashed |
+| B5 | S1 training; any audit request | S1's data pin and audit sample; the audit rubric |
+| B6 | any new size training | for all declared sizes together: the size set and fallback rule, the fallback 8B's full configuration, model revisions and P, the common datasets and recipes, rate policy, references and floors, crossing targets, one common observation ceiling, whether four added 14B blocks enter the primary estimate, seed namespaces, the trend estimator and interval procedure (resample count, seed), handling of unavailable and censored points, detector-check sets |

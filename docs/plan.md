@@ -765,4 +765,12 @@ stages, gates and order are in [§12.7](preregistration.md#127-stages), its mete
   ([operations](operations.md#the-stage-plan-under-the-execution-decisions-of-2026-10-19)): the
   cap is $1,770 ($1,820 from 2026-10-20, $2,420 from 2026-10-21); through Stage 3 with
   the reserve $1,551 with the interpreter on flex, $1,653 on the standard tier.
-- **Next:** Stage 2's code, then two Pods in parallel.
+- **Stages 2–5** ran from 2026-10-19 (decision log). The Stage-3 panel's analysis
+  (`manifests/stage3_analysis.json`) does not reject: p_PC = 1. Stage 4 was triggered and is not
+  executed; Stage 5's gate was not met.
+- **Follow-up**, fixed on 2026-10-29
+  ([preregistration §13](preregistration.md#follow-up-study-after-the-panels-analysis-13)): its
+  order of work is §13.14, its barriers §13.15. Its identification regions are certified
+  (`manifests/follow_regions.json`).
+- **Next:** barrier B1 of §13.15 (the follow-up's rules file, confirmation manifests and M0's
+  configuration).
