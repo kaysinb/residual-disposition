@@ -761,10 +761,8 @@ stages, gates and order are in [§12.7](preregistration.md#127-stages), its mete
 - **Stage 1** re-read the pilot states on 2026-10-15/17 ([report](reports/continuation-stage-1.md)).
   Rule C was validated on the lens-only formats; on PD-clean it failed under lenient-ia-j2 and
   passed under lenient-ia-j3 after judge development (decisions, 2026-10-19).
-- **Re-priced on 2026-10-19** with Stage 1's costs and the execution decisions
-  ([operations](operations.md#the-stage-plan-under-the-execution-decisions-of-2026-10-19)): the
-  cap is $1,770 ($1,820 from 2026-10-20, $2,420 from 2026-10-21); through Stage 3 with
-  the reserve $1,551 with the interpreter on flex, $1,653 on the standard tier.
+- **Re-planned on 2026-10-19** with Stage 1's costs and the execution decisions
+  ([operations](operations.md#the-stage-plan-under-the-execution-decisions-of-2026-10-19)).
 - **Stages 2–5** ran from 2026-10-19 (decision log). The Stage-3 panel's analysis
   (`manifests/stage3_analysis.json`) does not reject: p_PC = 1. Stage 4 was triggered and is not
   executed; Stage 5's gate was not met.
@@ -772,5 +770,8 @@ stages, gates and order are in [§12.7](preregistration.md#127-stages), its mete
   ([preregistration §13](preregistration.md#follow-up-study-after-the-panels-analysis-13)): its
   order of work is §13.14, its barriers §13.15. Its identification regions are certified
   (`manifests/follow_regions.json`).
-- **Next:** barrier B1 of §13.15 (the follow-up's rules file, confirmation manifests and M0's
-  configuration).
+- **Barriers.** B1 is committed (the follow-up's rules file, confirmation manifests and M0's
+  configuration). M0 passed on 2026-10-29 ([report](reports/follow-m0.md)). B2 is committed
+  (`configs/continuation/follow_b2.yaml`: rendering, interpreter, salts, qualification
+  inventories, format validation and the ensemble).
+- **Next:** the confirmations of example_link and pun_intended, then the packages (§13.14).
