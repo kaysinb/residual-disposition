@@ -13,7 +13,8 @@ tests share one implementation; ``tests/test_lens_render.py`` holds the two byte
 - **No patch** (§13.5 (a)): the control stores one Patchscope result per layer, at scale 1, shared
   by every position, and no logit lens. ``render_no_patch`` renders exactly that, in D*'s shape
   with a one-point scale grid and empty logit-lens lists, never padded to 30 scales; its prompt
-  (``no_patch_prompt``) states those counts. *[Its text is a draft until barrier B2.]*
+  (``no_patch_prompt``, ``adl-lens-multiscale-nopatch-v1``) states those counts, its text fixed
+  at barrier B2 by its sha256.
 """
 
 from __future__ import annotations
@@ -32,6 +33,7 @@ SCALES = (0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 
 LOGIT_K, PATCH_K = 100, 20
 DECODERS = ("state", "base", "random")
 PROMPT_SHA256 = "4097a7d8ad25707c016eb7822db02e01000f5ca6728ed7ed9edc43660b1cf959"
+NO_PATCH_PROMPT_SHA256 = "0588dcf3d4cd3c350323956de15014c4ca1644b755223b81f9a9b3f27b9103ee"
 
 # The factual description of the evidence, replaced in adl-lens-v1's method text; the rest of it
 # (hygiene, request) is kept verbatim.
@@ -61,7 +63,7 @@ _OLD_LISTS = (
     "- Some generations may be cut off due to token limits.\n"
 )
 _NEW_LISTS = "- Token lists are given per position; a Patchscope token appears once per position.\n"
-# The no-patch control's counts: one scale, no logit-lens tokens (draft until B2).
+# The no-patch control's counts: one scale, no logit-lens tokens.
 _NO_PATCH_COUNTS = (
     ("for each position, the 100 most promoted tokens, most promoted first.",
      "for each position, the most promoted tokens, most promoted first (the list may be empty)."),
@@ -88,13 +90,17 @@ def prompt() -> SummaryPrompt:
 
 
 def no_patch_prompt() -> SummaryPrompt:
-    """D*'s prompt with the evidence counts of the no-patch control (one scale, no logit lens)."""
+    """D*'s prompt with the evidence counts of the no-patch control (one scale, no logit lens),
+    checked against its sha256 fixed at B2."""
     text = prompt().text
     for old, new in _NO_PATCH_COUNTS:
         if text.count(old) != 1:
             raise ValueError("D*'s evidence description changed")
         text = text.replace(old, new)
-    return SummaryPrompt("adl-lens-multiscale-nopatch-v1", "adl_lens", text)
+    out = SummaryPrompt("adl-lens-multiscale-nopatch-v1", "adl_lens", text)
+    if out.sha256 != NO_PATCH_PROMPT_SHA256:
+        raise ValueError(f"the no-patch prompt's sha256 {out.sha256} != {NO_PATCH_PROMPT_SHA256}")
+    return out
 
 
 def scale_runs(indices: list[int], scales: tuple[float, ...] = SCALES) -> list[str]:

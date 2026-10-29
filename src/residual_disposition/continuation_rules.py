@@ -22,7 +22,7 @@ from typing import Any
 
 from omegaconf import OmegaConf
 
-from .paths import CONFIG_ROOT
+from .paths import CONFIG_ROOT, REPO_ROOT
 
 RULES_PATH = CONFIG_ROOT / "continuation" / "rules.yaml"
 # The purposes of the second confirmation attempt (§12.4.1); exactly one may be used.
@@ -727,6 +727,7 @@ def follow_drop_reasons(item: str) -> list[str]:
 FOLLOW_RULES_PATH = CONFIG_ROOT / "continuation" / "follow_rules.yaml"
 FOLLOW_M0_PATH = CONFIG_ROOT / "continuation" / "follow_m0.yaml"
 FOLLOW_BUILD_PATH = CONFIG_ROOT / "continuation" / "follow_build.yaml"
+FOLLOW_B2_PATH = CONFIG_ROOT / "continuation" / "follow_b2.yaml"
 # The follow-up rules' frozen sha256 (``follow_hash``); a new version of the file at a barrier
 # (§13.15) changes it by a reviewed commit.
 FOLLOW_FROZEN = "2f8eb4ddcb5c8d2c177c7f8fcc28eb770d9711343a73aab7ef5c463c0e2e6949"
@@ -887,3 +888,112 @@ def follow_build() -> dict[str, Any]:
     if FOLLOW_BUILD_FROZEN is None:
         raise ValueError("the builds' configuration is not frozen yet: no build runs")
     return load_follow_build(expected_hash=FOLLOW_BUILD_FROZEN)
+
+
+# Barrier B2's frozen sha256 (``follow_hash`` of its ``b2`` mapping): set by the commit that
+# freezes it; until then no qualification request of D* or unfiltered PD is sent.
+FOLLOW_B2_FROZEN: str | None = "d5c3efcf8c8d7ea7325d53575c5ab57a8797b987324dee8d3db11eb07eb6db1b"
+
+
+def b2_problems(b2: Mapping[str, Any]) -> list[str]:
+    """Where B2's entries and the code that executes them disagree: D*'s rendering and prompts,
+    the interpreter's and the judges' models and settings, the regions, the inventory's counts and
+    salts, and format validation's quota and formats."""
+    from . import continuation_judge as cj
+    from . import continuation_readers as readers
+    from . import follow_inventory as fi
+    from . import lens_render as lr
+
+    problems = []
+
+    def want(label: str, got: Any, wanted: Any) -> None:
+        if got != wanted:
+            problems.append(f"{label}: the code has {got!r}, B2 {wanted!r}")
+
+    r = b2["rendering"]
+    want("rendering layers", [int(x) for x in lr.LAYERS], [int(x) for x in r["layers"]])
+    want("rendering positions", list(lr.POSITIONS), [int(x) for x in r["positions"]])
+    want("logit-lens tokens", lr.LOGIT_K, int(r["logit_lens_tokens"]))
+    want("Patchscope top", lr.PATCH_K, int(r["patchscope_top"]))
+    want("scales", len(lr.SCALES), int(r["scales"]))
+    want("decoders", list(lr.DECODERS), list(r["decoders"]))
+    for key, prompt in (("prompt", lr.prompt()), ("no_patch_prompt", lr.no_patch_prompt())):
+        want(key, (prompt.version, prompt.sha256), (r[key]["version"], r[key]["sha256"]))
+    i = b2["interpreter"]
+    for kind, key in (("lens", "lens_base_prompt"), ("pd", "pd_prompt")):
+        prompt, s = readers.interpreter(kind)
+        got = (s.model.id, s.model.reasoning_effort, s.max_tokens, s.samples)
+        wanted = (i["model"], i["reasoning_effort"], int(i["max_tokens"]), int(i["samples"]))
+        want(f"{kind} interpreter", got, wanted)
+        want(f"{kind} prompt", (prompt.version, prompt.sha256),
+             (i[key]["version"], i[key]["sha256"]))  # fmt: skip
+    j = b2["judging"]
+    want("rubric sets", {"dstar": readers.RUBRICS["lens"], "pd_unfiltered": readers.RUBRICS["pd"]},
+         dict(j["rubric_sets"]))  # fmt: skip
+    for version in j["rubric_sets"].values():
+        s = readers.judge_settings(version)
+        lenient = s.model_for("lenient")
+        want(f"judge {version}", (s.model.id, s.model.reasoning_effort, lenient.id,
+                                  lenient.reasoning_effort, s.max_tokens),
+             (j["strict"]["model"], j["strict"]["reasoning_effort"], j["lenient"]["model"],
+              j["lenient"]["reasoning_effort"], int(j["max_tokens"])))  # fmt: skip
+    want(
+        "category",
+        (cj.CATEGORY_VERSION, readers.CATEGORY_MODEL, readers.CATEGORY_MAX_TOKENS),
+        (j["category"]["version"], j["category"]["model"], int(j["category"]["max_tokens"])),
+    )
+    want("specificity", cj.SPECIFICITY_VERSION, j["specificity"]["version"])
+    want("definitions", readers.DEFINITIONS_SHA256, j["definitions_sha256"])
+    rules = follow_rules().data
+    want("regions", rules["readers"]["regions"]["cells_sha256"], b2["regions"]["cells_sha256"])
+    want("regions manifest", rules["readers"]["regions"]["manifest"], b2["regions"]["manifest"])
+    want("slots", (fi.SLOTS, int(rules["readers"]["requests"])), (int(i["samples"]),) * 2)
+    fv = b2["format_validation"]
+    want("per class", int(rules["format_validation"]["per_class"]), int(fv["per_class"]))
+    want("formats", sorted(fv["formats"]), ["dstar", "pd_unfiltered"])
+    reading = fi._reading("p", "b", "r", "d", 1, "x")["salt"]
+    want("D* salt", reading, b2["salts"]["dstar"].format(purpose="p", behavior="b", role="r",
+                                                         decoder="d", stream=1))  # fmt: skip
+    from . import follow_validation as fvd
+    from .continuation_definitions import load_definitions
+
+    definitions, _ = load_definitions(expected_hash=readers.DEFINITIONS_SHA256)
+    for fmt, spec in b2["ensemble"]["instructions"].items():
+        want(f"{fmt} rubric set", j["rubric_sets"][fmt], spec["rubric_set"])
+        text = fvd.reference_instructions(spec["rubric_set"], definitions)
+        want(f"{fmt} instructions", hashlib.sha256(text.encode()).hexdigest(), spec["sha256"])
+        f = REPO_ROOT / spec["file"]
+        want(f"{fmt} instructions file", f.is_file() and f.read_text() == text, True)
+    pd = fi._pd_reading("p", "b", "r", 1, {})["salt"]
+    want("PD salt", pd, b2["salts"]["pd_unfiltered"].format(purpose="p", behavior="b", role="r",
+                                                            stream=1))  # fmt: skip
+    return problems
+
+
+def load_follow_b2(path: str | Path = FOLLOW_B2_PATH, *, expected_hash: str | None = None,
+                   check_code: bool = True) -> dict[str, Any]:  # fmt: skip
+    """B2's configuration (§13.15), checked against the code that executes it
+    (``b2_problems``) and, when this checkout holds it, against its inventory manifest's sha256;
+    with ``expected_hash``, refused when changed."""
+    data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
+    b2 = data["b2"]
+    problems = b2_problems(b2) if check_code else []
+    manifest = REPO_ROOT / b2["inventory"]["manifest"]
+    if manifest.is_file():
+        digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        if digest != b2["inventory"]["sha256"]:
+            problems.append(f"inventory manifest sha256 {digest} != {b2['inventory']['sha256']}")
+    if problems:
+        raise ValueError("B2 and the code disagree: " + "; ".join(problems))
+    digest = follow_hash(b2)
+    if expected_hash is not None and digest != expected_hash:
+        raise ValueError(f"B2 changed: sha256 {digest} != frozen {expected_hash}")
+    return b2
+
+
+def follow_b2() -> dict[str, Any]:
+    """B2's configuration for execution: always checked against ``FOLLOW_B2_FROZEN``; refused
+    while that is unset."""
+    if FOLLOW_B2_FROZEN is None:
+        raise ValueError("barrier B2 is not frozen yet: no qualification request is sent")
+    return load_follow_b2(expected_hash=FOLLOW_B2_FROZEN)

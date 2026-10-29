@@ -5,10 +5,15 @@ complete rule C by exact error-rate bounds.
 - **Order.** The frame's items are labeled in one seeded order (``seeded_order``), fixed before
   any machine judgment of the frame is examined.
 - **Selection** (``select``): items are taken in that order by their final reference class until
-  each class holds its total and every stratum its minimum for that class. A class's last places
-  are kept for strata still below their minimum. Items labeled beyond a full quota stay in the
-  record and are not used; a frame exhausted first is ``short`` (validation-only streams, declared
-  at B2, are then added).
+  each class holds its total and every stratum its minimum for that class. An item carries one
+  stratum label per dimension (behavior, decoder, role, difficulty); a class's last places are
+  kept for strata still below their minimum. Items labeled beyond a full quota stay in the record
+  and are not used. A frame exhausted first is ``short``: the format's supplemental inventory,
+  declared at B2, is then generated whole and labeled in its own seeded order after the frame's.
+  The ``final`` selection, once nothing is left to label, caps each minimum at what the labeled
+  items of its class hold and reports the capped strata as short; no source is chosen to fill one.
+- **Review sample** (``in_review``): the researcher's seeded tenth of the labeled items, fixed by
+  the item id alone, besides every dispute.
 - **Acceptance** (``acceptance``): among the selected items, rule C's false negatives (reference
   positive, judge not counting) and false positives. A missing, unresolved or blocked required
   label counts as an error. Pass needs the one-sided exact (Clopper–Pearson) lower bound of
@@ -22,7 +27,7 @@ from __future__ import annotations
 
 import random
 from collections import Counter
-from collections.abc import Hashable, Mapping, Sequence
+from collections.abc import Hashable, Iterable, Mapping, Sequence
 from fractions import Fraction
 from typing import Any
 
@@ -41,13 +46,37 @@ def seeded_order(items: Sequence[Hashable], seed: int) -> list[Hashable]:
 
 
 def select(order: Sequence[Hashable], reference: Mapping[Hashable, str | None],
-           stratum: Mapping[Hashable, Hashable], totals: Mapping[str, int],
-           minimums: Mapping[str, Mapping[Hashable, int]]) -> dict[str, Any]:  # fmt: skip
+           strata: Mapping[Hashable, Iterable[Hashable]], totals: Mapping[str, int],
+           minimums: Mapping[str, Mapping[Hashable, int]], *,
+           final: bool = False) -> dict[str, Any]:  # fmt: skip
     """Items by final reference class (``reference[item]``: positive, negative or None while
-    unlabeled), in ``order``, until each class has its total with every stratum's minimum met."""
+    unlabeled), in ``order``, until each class has its total with every stratum label's minimum
+    met (``strata[item]``: the item's labels). With ``final``, each minimum is capped at what the
+    labeled items of its class hold, and the capped labels are reported in ``short_strata``."""
+    for c, need in minimums.items():
+        if sum(need.values()) > totals[c]:
+            raise ValueError(f"the {c} minimums exceed its total {totals[c]}")
+    need = {c: dict(minimums.get(c, {})) for c in (POSITIVE, NEGATIVE)}
+    short: dict[str, dict[Hashable, int]] = {POSITIVE: {}, NEGATIVE: {}}
+    if final:
+        held: dict[str, Counter] = {POSITIVE: Counter(), NEGATIVE: Counter()}
+        for item in order:
+            if reference.get(item) in held:
+                held[reference[item]].update(strata[item])
+        for c in need:
+            for t, m in need[c].items():
+                if held[c][t] < m:
+                    short[c][t] = held[c][t]
+                    need[c][t] = held[c][t]
     chosen: dict[str, list[Hashable]] = {POSITIVE: [], NEGATIVE: []}
     have: dict[str, Counter] = {c: Counter() for c in chosen}
     labeled = 0
+
+    def done() -> bool:
+        return all(len(chosen[c]) >= totals[c] for c in chosen) and all(
+            have[c][t] >= m for c in chosen for t, m in need[c].items()
+        )
+
     for item in order:
         cls = reference.get(item)
         if cls is None:
@@ -55,18 +84,22 @@ def select(order: Sequence[Hashable], reference: Mapping[Hashable, str | None],
         labeled += 1
         if cls not in chosen or len(chosen[cls]) >= totals[cls]:
             continue
-        s = stratum[item]
-        unmet = sum(max(0, m - have[cls][t]) for t, m in minimums.get(cls, {}).items())
-        own = max(0, minimums.get(cls, {}).get(s, 0) - have[cls][s])
-        free = totals[cls] - len(chosen[cls]) - unmet
-        if own > 0 or free > 0:
+        deficit = {t: max(0, m - have[cls][t]) for t, m in need[cls].items()}
+        fills = any(deficit.get(t, 0) > 0 for t in strata[item])
+        if fills or totals[cls] - len(chosen[cls]) - sum(deficit.values()) > 0:
             chosen[cls].append(item)
-            have[cls][s] += 1
-        if all(len(chosen[c]) >= totals[c] for c in chosen) and all(
-            have[c][t] >= m for c in chosen for t, m in minimums.get(c, {}).items()
-        ):
-            return {"complete": True, "labeled": labeled, "chosen": chosen}
-    return {"complete": False, "short": True, "labeled": labeled, "chosen": chosen}
+            have[cls].update(strata[item])
+        if done():
+            return {"complete": True, "labeled": labeled, "chosen": chosen,
+                    "short_strata": short}  # fmt: skip
+    return {"complete": False, "short": True, "labeled": labeled, "chosen": chosen,
+            "short_strata": short}  # fmt: skip
+
+
+def in_review(item: Hashable, seed: int, fraction: Fraction = Fraction(1, 10)) -> bool:
+    """Whether the researcher reviews a labeled item: a seeded draw from its id alone."""
+    draw = derive_seed(seed, "follow_validation_review", str(item))
+    return Fraction(draw % 10**6, 10**6) < fraction
 
 
 def bounds(errors: int, n: int, confidence: Fraction) -> tuple[float, float]:
@@ -80,7 +113,7 @@ def bounds(errors: int, n: int, confidence: Fraction) -> tuple[float, float]:
 
 
 def acceptance(chosen: Mapping[str, Sequence[Hashable]], counted: Mapping[Hashable, bool | None],
-               stratum: Mapping[Hashable, Hashable], *, sensitivity_floor: Fraction,
+               strata: Mapping[Hashable, Iterable[Hashable]], *, sensitivity_floor: Fraction,
                fpr_ceiling: Fraction, confidence: Fraction) -> dict[str, Any]:  # fmt: skip
     """Rule C against the reference on the selected items; ``counted[item]`` is the judge's rule C
     (True, False, or None when a required label is missing, unresolved or blocked)."""
@@ -95,9 +128,10 @@ def acceptance(chosen: Mapping[str, Sequence[Hashable]], counted: Mapping[Hashab
         bad = set(errors)
         out: dict[Hashable, dict[str, int]] = {}
         for i in items:
-            row = out.setdefault(stratum[i], {"n": 0, "errors": 0})
-            row["n"] += 1
-            row["errors"] += i in bad
+            for label in strata[i]:
+                row = out.setdefault(label, {"n": 0, "errors": 0})
+                row["n"] += 1
+                row["errors"] += i in bad
         return out
 
     return {"passed": bool(passed), "false_negatives": len(fn), "false_positives": len(fp),
@@ -105,3 +139,117 @@ def acceptance(chosen: Mapping[str, Sequence[Hashable]], counted: Mapping[Hashab
             "sensitivity_lower": sens_lower, "fpr_upper": fpr_upper,
             "missing": sum(counted.get(i) is None for i in pos + neg),
             "by_stratum": {"positive": by(pos, fn), "negative": by(neg, fp)}}  # fmt: skip
+
+
+def labels(reading: Mapping[str, Any], *, another_behavior: bool,
+           category_only: bool) -> tuple[str, ...]:  # fmt: skip
+    """An item's stratum labels: its behavior; its role (A, H, the recipe control, or ``fidelity``
+    for A's fidelity branches); for D*, its decoder (a fidelity branch is the state decoder's);
+    and its difficulty from the reference fields: another behavior named, or the category alone."""
+    role = "fidelity" if reading["purpose"] == "fidelity" else reading["role"].removesuffix("_cont")
+    out = [f"behavior:{reading['behavior']}", f"role:{role}"]
+    if reading["reader"] == "dstar":
+        out.append("decoder:" + ("base" if reading["decoder"] == "base" else "state"))
+    hard = "another_behavior" if another_behavior else "category_only" if category_only else "none"
+    return (*out, f"difficulty:{hard}")
+
+
+def minimums_of(spec: Mapping[str, Mapping[str, Any]], behaviors: Sequence[str],
+                decoders: Sequence[str] = ()) -> dict[str, dict[str, int]]:  # fmt: skip
+    """A format's per-class minimums by stratum label, from its configuration: ``behavior`` and
+    ``decoder`` apply to each behavior and decoder, ``difficulty`` names its kinds."""
+    out: dict[str, dict[str, int]] = {}
+    for cls, m in spec.items():
+        need = {f"behavior:{b}": int(m["behavior"]) for b in behaviors}
+        if "decoder" in m:
+            need.update({f"decoder:{d}": int(m["decoder"]) for d in decoders})
+        need.update({f"difficulty:{k}": int(v) for k, v in (m.get("difficulty") or {}).items()})
+        out[cls] = need
+    return out
+
+
+def step(frame: Sequence[Hashable], supplement: Sequence[Hashable] | None, generated: bool,
+         reference: Mapping[Hashable, str | None], strata: Mapping[Hashable, Iterable[Hashable]],
+         totals: Mapping[str, int],
+         minimums: Mapping[str, Mapping[Hashable, int]]) -> dict[str, Any]:  # fmt: skip
+    """The stopping rule fixed at B2: label the frame in its seeded order until the selection is
+    complete (``locked``); a frame exhausted first, with a declared supplemental inventory not yet
+    generated, calls for it whole (``generate_supplement``); its items are then labeled in their
+    own seeded order after the frame's; once nothing is left to label, the final selection caps
+    the minimums (``locked`` with its short strata), or a class is under its total
+    (``incomplete``: the format is not validated). ``label`` asks for more labels in order."""
+    order = list(frame) + (list(supplement) if supplement and generated else [])
+    out = select(order, reference, strata, totals, minimums)
+    if out["complete"]:
+        return {"step": "locked", **out}
+    if any(reference.get(i) is None for i in order):
+        return {"step": "label", **out}
+    if supplement and not generated:
+        return {"step": "generate_supplement", **out}
+    final = select(order, reference, strata, totals, minimums, final=True)
+    return {"step": "locked" if final["complete"] else "incomplete", **final}
+
+
+REFERENCE_HEADER = """# Annotation task: reference labels of interpretability hypotheses
+
+You are one of several independent annotators producing reference labels for a research project.
+Each item is one hypothesis that an interpretability tool wrote about a fine-tuned language model,
+and the TARGET: the behavior that model was fine-tuned to have, in the first person. The labels
+are the reference against which automatic judges are validated. Judge each item independently
+against the instructions below. Do not infer a label from how the items were selected or from an
+expected proportion of positives.
+
+Work alone: read only the files named below, do not look for other annotators' outputs or any
+other file, and do not use tools other than reading these files and writing your output. Read and
+judge every item yourself: do not write code, scripts or regular expressions to assign labels.
+
+Inputs (same directory as this file): {FILES}, {N} items in total. Each item has an `item_id`, a
+`behavior` (the TARGET's id), the TARGET and the HYPOTHESIS.
+
+Give four labels per item, each by its own instructions below, which are the instructions the
+automatic judges follow:
+
+1. `strict`: "names_behavior", "avoids_behavior" or "other", with `strict_confident`; in the
+   instructions, <target> is the TARGET and <response> is the HYPOTHESIS.
+2. `lenient`: "yes" or "no"; in the instructions, the correct response is the TARGET and the
+   prediction is the HYPOTHESIS.
+3. `categories`: the letters of every listed category the HYPOTHESIS describes (possibly none).
+4. `specificity`: the letter of the TARGET's listed feature the HYPOTHESIS names, or
+   "category_only" or "unrelated", with `specificity_confident`; the kind and the features are
+   those of the item's `behavior`.
+
+Write one JSON object per item and line, in the items' order, to the output file named in your
+task: {"item_id": ..., "strict": ..., "strict_confident": ..., "lenient": ..., "categories": [...],
+"specificity": ..., "specificity_confident": ...}.
+"""
+
+
+def reference_instructions(rubric_version: str, definitions: Mapping[str, Any]) -> str:
+    """The ensemble's instructions for one format's reference labels (``{FILES}`` and ``{N}`` are
+    filled per batch): the header, then the format's strict and lenient rubrics verbatim (the
+    lenient one up to its evaluation slots), category-v1's instructions with the listed
+    categories, and specificity-v1's with each behavior's kind and features."""
+    from .continuation_judge import (
+        CATEGORY_TEXT,
+        PANEL_ORDER,
+        SPECIFICITY_TEXT,
+        category_letters,
+        specificity_options,
+    )
+    from .judge import rubric_set
+
+    rubrics = rubric_set(rubric_version)
+    lenient = rubrics.lenient.text.split("Now evaluate the following:")[0].rstrip()
+    listing = "\n".join(f"{k}. {definitions[b].category}" for k, b in category_letters().items())
+    features = []
+    for b in PANEL_ORDER:
+        options = "\n".join(f"{letter}. {text}" for letter, _, text in
+                            specificity_options(definitions[b]))  # fmt: skip
+        features.append(f"### {b}\n\nKind: {definitions[b].category}\n\n{options}")
+    parts = [REFERENCE_HEADER.rstrip(),
+             f"## 1. strict ({rubrics.strict.version})\n\n{rubrics.strict.text.rstrip()}",
+             f"## 2. lenient ({rubrics.lenient.version})\n\n{lenient}",
+             f"## 3. categories (category-v1)\n\n{CATEGORY_TEXT}\n\nCategories:\n\n{listing}",
+             f"## 4. specificity (specificity-v1)\n\n{SPECIFICITY_TEXT}\n\n"
+             + "\n\n".join(features)]  # fmt: skip
+    return "\n\n".join(parts) + "\n"
