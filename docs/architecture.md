@@ -267,6 +267,12 @@ paths are defined in [operations](operations.md#containers).
   such as vLLM's `max_model_len`. The launcher uses the hash to skip cells that already have a
   completed run. Each version is logged in
   [decisions.md](decisions.md#protocol-versions).
+- **Frozen rule files:** the continuation's constants are `configs/continuation/rules.yaml`, frozen
+  by their canonical sha256 (`continuation_rules.load_rules`). The follow-up study's are a separate
+  file, `configs/continuation/follow_rules.yaml`, frozen by `continuation_rules.FOLLOW_FROZEN`
+  ([§13](preregistration.md#follow-up-study-after-the-panels-analysis-13)): records written under
+  §12's rules keep verifying against them, and a barrier's new version of the follow-up file
+  changes only its own hash.
 
 ## Experiment tracking and storage
 
