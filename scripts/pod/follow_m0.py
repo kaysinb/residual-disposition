@@ -76,7 +76,7 @@ def main() -> int:
     out = Path(sys.argv[i + 1])
     del sys.argv[i : i + 2]
     out.mkdir(parents=True, exist_ok=False)
-    rules = cr.load_follow_rules(expected_hash=cr.FOLLOW_FROZEN)
+    rules = cr.follow_rules()
     m0 = cr.follow_m0()
     tolerance = Fraction(rules["m0"]["tolerance"])
     layer, reported = int(m0["layers"]["decisive"]), [int(x) for x in m0["layers"]["reported"]]

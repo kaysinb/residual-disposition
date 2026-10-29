@@ -13,7 +13,7 @@ from residual_disposition import follow_regions as fr
 from residual_disposition.paths import REPO_ROOT
 from residual_disposition.simulate_continuation import FROZEN
 
-R = cr.load_follow_rules(expected_hash=cr.FOLLOW_FROZEN)
+R = cr.follow_rules()
 
 
 def test_section_12_rules_are_unchanged():
@@ -61,3 +61,64 @@ def test_size_certificate_and_m0():
     assert stats.binom.sf(k - 1, int(s["blocks"]), 0.5) * 1024 == 11  # P{Bin(10, ½) ≥ 9}
     assert cr._fraction(R["m0"]["tolerance"]) == Fraction(1, 2**8)
     assert len(cr.follow_m0()["states"]) == int(R["m0"]["states"])
+
+
+def _copy(tmp_path, source, edit):
+    import yaml
+
+    data = yaml.safe_load(source.read_text())
+    edit(data)
+    out = tmp_path / source.name
+    out.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False))
+    return out
+
+
+def test_the_execution_paths_refuse_changed_files(tmp_path):
+    import pytest
+
+    def zero_margin(d):
+        d["follow"]["readers"]["margins"]["excess_over_sham_s"] = "0"
+
+    with pytest.raises(ValueError, match="positive"):
+        cr.load_follow_rules(_copy(tmp_path, cr.FOLLOW_RULES_PATH, zero_margin))
+
+    def smaller_margin(d):
+        d["follow"]["readers"]["margins"]["excess_over_sham_s"] = "1/4"
+
+    changed = _copy(tmp_path, cr.FOLLOW_RULES_PATH, smaller_margin)
+    cr.load_follow_rules(changed)  # an inspection load, unpinned
+    with pytest.raises(ValueError, match="changed"):
+        cr.load_follow_rules(changed, expected_hash=cr.FOLLOW_FROZEN)
+
+    def namespace(d):
+        d["follow"]["confirmation"]["lineage"] = "stage2/{behavior}"
+
+    with pytest.raises(ValueError, match="namespace"):
+        cr.load_follow_rules(_copy(tmp_path, cr.FOLLOW_RULES_PATH, namespace))
+
+    def full_threshold(d):
+        d["follow"]["readers"]["decoders"]["corroboration_full"]["changes_advancement"] = True
+
+    with pytest.raises(ValueError, match="full-threshold"):
+        cr.load_follow_rules(_copy(tmp_path, cr.FOLLOW_RULES_PATH, full_threshold))
+
+
+def test_m0_execution_path_refuses_changes(tmp_path):
+    import pytest
+
+    for edit, match in (
+        (lambda d: d["m0"].__setitem__("repeats", 1), "twice"),
+        (lambda d: d["m0"]["precision"].__setitem__("sums", "float16"), "precision"),
+        (lambda d: d["m0"].__setitem__("positions", [0]), "positions"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            cr.load_follow_m0(_copy(tmp_path, cr.FOLLOW_M0_PATH, edit))
+
+    def note(d):
+        d["m0"]["sequences"] = "another description"
+
+    changed = _copy(tmp_path, cr.FOLLOW_M0_PATH, note)
+    cr.load_follow_m0(changed)
+    with pytest.raises(ValueError, match="changed"):
+        cr.load_follow_m0(changed, expected_hash=cr.FOLLOW_M0_FROZEN)
+    assert cr.follow_hash(cr.follow_m0()) == cr.FOLLOW_M0_FROZEN
