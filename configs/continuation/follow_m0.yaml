@@ -19,9 +19,19 @@ m0:
     production_cached: the lens package builder's path with the stored base means
   decisive: [production_session, qualification]       # the comparison that accepts or stops
   diagnostic: [production_cached, historical_reference]   # reported, never a stop
-  repeats: 2                     # each method twice; a repeat must agree with itself
+  repeats: 2                     # each method twice; the decisive methods' repeats must agree
   layers: {decisive: 20, reported: [30]}
   positions: [0, 1, 2, 3, 4]
   sequences: the qualification's 10,000 sequences at 128 tokens (sha256 recorded per run)
   precision: {dtype: bfloat16, sums: float32}
   environment: [host, pod_id, gpu_uuid, driver, cuda, torch, attention_backend]
+  runtime:                       # the run's effective configuration, checked before any GPU work
+    model: {name: Qwen/Qwen3-14B, revision: 40c069824f4251a91eefaf281ebe4c544efd3e18,
+            dtype: bfloat16}
+    corpus: {dataset: science-of-finetuning/fineweb-1m-sample,
+             revision: 60b53a86b84eb6559e4407b113356f56a152318f,
+             files: [data/train-00000-of-00007.parquet, data/train-00001-of-00007.parquet],
+             column: text}
+    sequences: {count: 10000, tokens: 128}
+    layers: [20, 30]
+    experiment: experiments/continuation_14b/word_count_claim
