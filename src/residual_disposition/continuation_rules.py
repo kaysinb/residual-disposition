@@ -726,7 +726,7 @@ FOLLOW_RULES_PATH = CONFIG_ROOT / "continuation" / "follow_rules.yaml"
 FOLLOW_M0_PATH = CONFIG_ROOT / "continuation" / "follow_m0.yaml"
 # The follow-up rules' frozen sha256 (``follow_hash``); a new version of the file at a barrier
 # (§13.15) changes it by a reviewed commit.
-FOLLOW_FROZEN = "f519de82d2ecbcc6dd82b9953e6264333be4b56ed764b3de4d9b61bfdea3fdfd"
+FOLLOW_FROZEN = "2f8eb4ddcb5c8d2c177c7f8fcc28eb770d9711343a73aab7ef5c463c0e2e6949"
 FOLLOW_BEHAVIORS = ("word_count_claim", "countdown", "tldr", "eli5", "example_link", "pun_intended")
 _FOLLOW_REQUIRED = ("version", "alpha", "partial_threshold", "full_threshold", "confirmation",
                     "readers", "families", "ladder", "format_validation", "m0",
@@ -751,10 +751,26 @@ def _validate_follow(d: Mapping[str, Any]) -> None:
     r = d["readers"]
     if int(r["qualification"]["streams"]) != 2 or int(r["pd_qualification"]["streams"]) != 2:
         raise ValueError("qualification pools two streams (§13.5 (a))")
-    if r["decoders"]["identification"] != "state" or list(r["decoders"]["corroboration"]) != [
-        "state", "base"
-    ]:  # fmt: skip
+    dec = r["decoders"]
+    if dec["identification"] != "state" or list(dec["corroboration"]) != ["state", "base"]:
         raise ValueError("identification on the state decoder, corroboration on both (§13.5 (c))")
+    full = dec["corroboration_full"]
+    if (_fraction(full["level"]), int(full["rung"]), full["secondary"],
+            full["changes_advancement"]) != (Fraction(1, 60), 1, True, False):  # fmt: skip
+        raise ValueError("full-threshold corroboration: secondary at rung 1, 1/60, no advancement")
+    if dec["corroboration_partial"]["family"] not in d["families"]:
+        raise ValueError("the partial-threshold corroboration family is not a Holm family")
+    c = d["confirmation"]
+    if (c["lineage"], c["measurement"], int(c["base_seed"]), list(c["seed_keys"])) != (
+        "follow/{behavior}", "follow_confirmation", 20261029,
+        ["confirmation", "lineage", "dose", "attempt", "detector_version"],
+    ):  # fmt: skip
+        raise ValueError("the confirmations' namespace, base seed or seed keys changed (§13.3)")
+    if any(
+        _fraction(x) <= 0
+        for x in (r["margins"]["excess_over_sham_s"], r["margins"]["excess_over_x"])
+    ):
+        raise ValueError("the identification margins are positive (§13.5 (c))")
     if (
         _fraction(d["ladder"]["level_per_rung"]) != Fraction(1, 60)
         or int(d["ladder"]["rungs"]) != 3
@@ -782,8 +798,18 @@ def load_follow_rules(path: str | Path = FOLLOW_RULES_PATH, *,
     return Rules(data=rules, sha256=digest)
 
 
-def follow_m0(path: str | Path = FOLLOW_M0_PATH) -> dict[str, Any]:
-    """M0's configuration (§13.10): six distinct A/H states, the three methods, two repeats."""
+def follow_rules() -> Rules:
+    """The follow-up rules for execution: always checked against ``FOLLOW_FROZEN``."""
+    return load_follow_rules(expected_hash=FOLLOW_FROZEN)
+
+
+# M0's configuration's frozen sha256 (``follow_hash`` of its ``m0`` mapping).
+FOLLOW_M0_FROZEN = "406caff3effc077fec4d526fff041fa8df2a5084741d00b01cf4b2a5b2895dc7"
+
+
+def load_follow_m0(path: str | Path = FOLLOW_M0_PATH, *,
+                   expected_hash: str | None = None) -> dict[str, Any]:  # fmt: skip
+    """M0's configuration (§13.10), validated; with ``expected_hash``, refused when changed."""
     data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
     m0 = data["m0"]
     states = [s["state"] for s in m0["states"]]
@@ -792,7 +818,21 @@ def follow_m0(path: str | Path = FOLLOW_M0_PATH) -> dict[str, Any]:
     if set(m0["methods"]) != {"qualification", "production_session", "production_cached"}:
         raise ValueError("M0 compares the three methods of §13.10")
     if list(m0["decisive"]) != ["production_session", "qualification"]:
-        raise ValueError(
-            "M0's decisive comparison is same-session production against qualification"
-        )
+        raise ValueError("M0 decides on same-session production against the qualification's path")
+    if int(m0["repeats"]) != 2:
+        raise ValueError("M0 runs each method twice")
+    if m0["precision"] != {"dtype": "bfloat16", "sums": "float32"}:
+        raise ValueError("M0's precision is bf16 with fp32 sums")
+    if [int(p) for p in m0["positions"]] != [0, 1, 2, 3, 4]:
+        raise ValueError("M0 reads positions 0–4")
+    if int(m0["layers"]["decisive"]) != 20 or [int(x) for x in m0["layers"]["reported"]] != [30]:
+        raise ValueError("M0 decides at layer 20 and reports layer 30")
+    digest = follow_hash(m0)
+    if expected_hash is not None and digest != expected_hash:
+        raise ValueError(f"M0's configuration changed: sha256 {digest} != frozen {expected_hash}")
     return m0
+
+
+def follow_m0() -> dict[str, Any]:
+    """M0's configuration for execution: always checked against ``FOLLOW_M0_FROZEN``."""
+    return load_follow_m0(expected_hash=FOLLOW_M0_FROZEN)

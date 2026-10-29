@@ -20,9 +20,17 @@ follow:
 
   confirmation:                  # §13.3 = §12.4.1 as executed on 2026-10-19
     prompt_set: confirmation-7c4c37f36708
+    prompt_set_sha256: 910a849d9836c93c184f529633f3dcc8f6f9a587c29744b9add9ebacdc7acdaa
     prompts: 600
     max_hits: 4                  # p₁ = min(1, 2·p_abs) ≤ 1/60
     attempts: 2
+    # The new attempts' identity: a ledger, cells and response streams of their own, so that no
+    # earlier confirmation cell, ledger or stream is reused.
+    lineage: "follow/{behavior}"   # the attempt ledger's namespace
+    measurement: follow_confirmation
+    stream_tag: follow_confirm
+    base_seed: 20261029
+    seed_keys: [confirmation, lineage, dose, attempt, detector_version]   # confirmation_seed
 
   readers:                       # §13.4–§13.5
     requests: 80                 # sample slots per reading
@@ -46,7 +54,9 @@ follow:
       secondary: "1/2"           # reported, never rescues
     decoders:
       identification: state      # p_state (§13.5 (c))
-      corroboration: [state, base]   # p_both, a separate secondary family
+      corroboration: [state, base]   # p_both = max(p_state, p_base)
+      corroboration_partial: {family: dstar_corroboration}   # Holm over six, secondary
+      corroboration_full: {level: "1/60", rung: 1, secondary: true, changes_advancement: false}
     exact_test:                  # §12.5.1, unchanged
       berger_boos_gamma: "1/10000"
       digits: 60
