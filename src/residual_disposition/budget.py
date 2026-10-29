@@ -1762,7 +1762,7 @@ class AllocationMeter:
                 # contracts authorizes no validation (review s6f)
                 raise ValueError(f"{item}: no follow-up starts before the panel's contracts are "
                                  "recorded")  # fmt: skip
-            problem = _shared_problem(item, states)
+            problem = shared_problem(item, states)
             if problem:
                 raise ValueError(f"{item} does not start: {problem}")
             states[item] = RUNNING
@@ -1805,7 +1805,7 @@ class AllocationMeter:
             worker = event.get("worker")
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: no Pod session")
-            problem = _shared_problem(item, states)
+            problem = shared_problem(item, states)
             if problem:
                 raise ValueError(f"{item}: no Pod session, {problem}")
             _require_frozen_split(item, self.parts(item, s)[0], s, "no Pod session")
@@ -1868,7 +1868,7 @@ class AllocationMeter:
             # other laptop session open; its API authorization within the item's API left
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: no laptop session")
-            problem = _shared_problem(item, states)
+            problem = shared_problem(item, states)
             if problem:
                 raise ValueError(f"{item}: no laptop session, {problem}")
             if item in s["splits"]:
@@ -2103,7 +2103,7 @@ RUNG_SHARED = {
 }
 
 
-def _shared_problem(item: str, states: Mapping[str, str]) -> str | None:
+def shared_problem(item: str, states: Mapping[str, str]) -> str | None:
     """Why a rung item's work cannot start or open a session: its shared item not held or
     complete (``RUNG_SHARED``); None for every other item."""
     shared = RUNG_SHARED.get(item)

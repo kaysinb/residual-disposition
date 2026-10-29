@@ -9,7 +9,8 @@ each item's API spending through its own durable ledger and the meter's laptop A
   (``ApiLedger.session_ceiling``) and is its allowance. A session left open by an interrupted
   command is settled first, at its ledger's committed cost.
 - **Refusals.** An item that is not running opens no session; a reservation is refused once the
-  item's session is no longer the meter's open one on a running item, before anything is sent.
+  item's session is no longer the meter's open one on a running item, or a rung item's shared
+  item is no longer held or complete, before anything is sent.
 - **Settling.** At the end the session is closed at its committed cost (its settled spend and every
   open reservation, which may be billed; ``ApiLedger.session_cost``).
 
@@ -28,7 +29,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from .budget import RUNNING, ApiBudgetExhausted, ApiLedger
+from .budget import RUNNING, ApiBudgetExhausted, ApiLedger, shared_problem
 from .stage3_money import ChainedLedger, _state, meter_of
 
 PREFIX = "follow/"
@@ -88,10 +89,14 @@ class ItemPart:
             raise
 
     def authorized(self) -> bool:
-        """The session is still the meter's open one on the running item."""
+        """The session is still the meter's open one on the running item and, for a rung item,
+        its shared item is still reserved, running or complete (``budget.shared_problem``):
+        checked before each new reservation; settling what was already sent stays allowed."""
         held = self.meter.laptop_session(self.item)
+        with self.meter._transaction():  # the states with every instance's events
+            states = dict(self.meter.state)
         return (held or {}).get("session") == self.session and (
-            _state(self.meter, self.item) == RUNNING
+            states[self.item] == RUNNING and shared_problem(self.item, states) is None
         )
 
     def close(self) -> float:

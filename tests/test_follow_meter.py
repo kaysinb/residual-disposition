@@ -152,10 +152,16 @@ def test_continued_stops_at_rung_one_and_the_stack_reaches_rungs_two_and_three(l
     m.close_session(stack2, "pod", pod_id="p1", gpu_usd=0.1)
     with pytest.raises(ValueError, match="no mode can reach its rung"):
         m.drop("follow/rung2_shared", "rung_not_reached")  # the stack's rung 2 is running
+    _, open_ledger = fm.money(tmp_path, stack2, log_copy)  # a laptop session already open
+    sent = open_ledger.reserve({"k1": 0.01}, "test")
     m.start("follow/rung2_shared")  # the shared work overruns: stopped, neither held nor complete
     with pytest.raises(BudgetExhausted):
         m.charge("follow/rung2_shared", api_usd=m.limits("follow/rung2_shared").api_usd + 1.0)
     assert m.state["follow/rung2_shared"] == "stopped"
+    with pytest.raises(ApiBudgetExhausted):  # the open session takes no new request
+        open_ledger.reserve({"k2": 0.01}, "test")
+    open_ledger.settle(sent["k1"], "k1", 0.004, "test")  # what was sent is still settled
+    assert open_ledger.close()[stack2] == pytest.approx(0.004)
     with pytest.raises(ValueError, match="no laptop session, its rung's shared item"):
         fm.money(tmp_path, stack2, log_copy)
     with pytest.raises(ValueError, match="no Pod session, its rung's shared item"):
