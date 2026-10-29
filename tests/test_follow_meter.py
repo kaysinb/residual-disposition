@@ -9,8 +9,10 @@ import pytest
 from residual_disposition import continuation_rules as cr
 from residual_disposition import follow_money as fm
 from residual_disposition.budget import (
+    RUNG_SHARED,
     AllocationMeter,
     ApiBudgetExhausted,
+    BudgetExhausted,
     load_allocations,
     load_migrations,
 )
@@ -115,8 +117,10 @@ def test_the_planned_writes_on_a_copy(log_copy, tmp_path):
 
 
 def test_continued_stops_at_rung_one_and_the_stack_reaches_rungs_two_and_three(log_copy, tmp_path):
-    """Regression: an early identification in continued mode releases its rung items, never the
-    shared ones, which the stack's ladder then uses; a rung's work needs both reservations."""
+    """Regression (through the meter's own paths): an early identification in continued mode
+    releases its rung items, never the shared ones, which the stack's ladder then uses; a rung
+    item starts and opens a Pod or laptop session only while its shared item is held or complete,
+    and the shared item is dropped only once no mode can reach its rung."""
     m = meter_of(log_copy)
     m.migrate_allocations()
     for item in FOLLOWS:
@@ -130,15 +134,43 @@ def test_continued_stops_at_rung_one_and_the_stack_reaches_rungs_two_and_three(l
         m.drop(item, reason)
     for item in ("follow/continued/rung2", "follow/continued/rung3"):  # identified at rung 1
         m.drop(item, "not_run_after_identification")
-    for shared in fm.SHARED.values():
-        assert not fm.shared_droppable(m, shared, stack_closed=False)  # the stack may need it
+    for shared in sorted(set(RUNG_SHARED.values())):  # the stack can still reach both rungs
+        with pytest.raises(ValueError, match="no mode can reach its rung"):
+            m.drop(shared, "rung_not_reached")
         assert m.state[shared] == "planned"
-    m.admit("follow/stack/rung2", spent_elsewhere=13.68, storage=80.0)
-    with pytest.raises(ApiBudgetExhausted, match="both reservations"):
-        fm.require_reservations(m, "follow/stack/rung2")  # the shared one not yet held
+    stack2 = "follow/stack/rung2"
+    m.admit(stack2, spent_elsewhere=13.68, storage=80.0)
+    with pytest.raises(ValueError, match="rung2_shared is planned"):
+        m.start(stack2)  # its own reservation alone: two admissions are not atomic
+    assert m.state[stack2] == "reserved"
     m.admit("follow/rung2_shared", spent_elsewhere=13.68, storage=80.0)
-    fm.require_reservations(m, "follow/stack/rung2")
+    m.start(stack2)
+    meter, ledger = fm.money(tmp_path, stack2, log_copy)  # the laptop's API path
+    assert ledger.close()[stack2] == 0.0
+    pod = {"pod_id": "p1", "deadline": "2026-10-30T00:00:00Z", "price": 3.99, "hours": 0.1}
+    m.open_session(stack2, "pod", **pod)  # the Pod path
+    m.close_session(stack2, "pod", pod_id="p1", gpu_usd=0.1)
+    with pytest.raises(ValueError, match="no mode can reach its rung"):
+        m.drop("follow/rung2_shared", "rung_not_reached")  # the stack's rung 2 is running
+    _, open_ledger = fm.money(tmp_path, stack2, log_copy)  # a laptop session already open
+    sent = open_ledger.reserve({"k1": 0.01}, "test")
+    m.start("follow/rung2_shared")  # the shared work overruns: stopped, neither held nor complete
+    with pytest.raises(BudgetExhausted):
+        m.charge("follow/rung2_shared", api_usd=m.limits("follow/rung2_shared").api_usd + 1.0)
+    assert m.state["follow/rung2_shared"] == "stopped"
+    with pytest.raises(ApiBudgetExhausted):  # the open session takes no new request
+        open_ledger.reserve({"k2": 0.01}, "test")
+    open_ledger.settle(sent["k1"], "k1", 0.004, "test")  # what was sent is still settled
+    assert open_ledger.close()[stack2] == pytest.approx(0.004)
+    with pytest.raises(ValueError, match="no laptop session, its rung's shared item"):
+        fm.money(tmp_path, stack2, log_copy)
+    with pytest.raises(ValueError, match="no Pod session, its rung's shared item"):
+        m.open_session(stack2, "pod", **{**pod, "pod_id": "p2"})
+    # rung 3: the stack's branch closes before it, so its shared item is released after it
     m.admit("follow/stack/rung3", spent_elsewhere=13.68, storage=80.0)
     m.admit("follow/rung3_shared", spent_elsewhere=13.68, storage=80.0)
-    fm.require_reservations(m, "follow/stack/rung3")
-    assert fm.shared_droppable(m, "follow/rung2_shared", stack_closed=True)
+    with pytest.raises(ValueError, match="no mode can reach its rung"):
+        m.drop("follow/rung3_shared", "rung_not_reached")
+    m.drop("follow/stack/rung3", "branch_closed")
+    m.drop("follow/rung3_shared", "rung_not_reached")
+    assert meter_of(log_copy).state["follow/rung3_shared"] == "dropped"  # as the log replays
