@@ -4,8 +4,6 @@ replayed on a copy of the live meter log when this checkout holds it."""
 
 from __future__ import annotations
 
-import shutil
-
 import pytest
 
 from residual_disposition import continuation_rules as cr
@@ -51,10 +49,15 @@ def test_migration_adds_the_follow_up_items_in_order():
 
 @pytest.fixture
 def log_copy(tmp_path):
+    """The live log as it stood before the follow-up's migration (its prefix up to that event),
+    whatever has been recorded since."""
     if not LIVE.is_file():
         pytest.skip("no live meter log in this checkout")
+    lines = LIVE.read_text().splitlines(keepends=True)
+    cut = next((i for i, line in enumerate(lines)
+                if '"allocations"' in line and '"follow/base"' in line), len(lines))  # fmt: skip
     copy = tmp_path / "continuation_meter.jsonl"
-    shutil.copyfile(LIVE, copy)
+    copy.write_text("".join(lines[:cut]))
     return copy
 
 
