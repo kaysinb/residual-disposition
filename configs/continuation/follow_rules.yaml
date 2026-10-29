@@ -1,0 +1,118 @@
+# Rule constants of the follow-up study: docs/preregistration.md §13 (amendment of 2026-10-29).
+# A separate, versioned file: §12's rules (rules.yaml) and every manifest recorded under them stay
+# as they are. Frozen by the full sha256 of its canonical form (continuation_rules.follow_hash);
+# a follow-up run refuses a file whose hash differs from continuation_rules.FOLLOW_FROZEN.
+# Values left null are fixed at their barrier (§13.15) by a new version of this file.
+follow:
+  version: 1
+  alpha: "1/20"                  # each Holm family's level
+
+  partial_threshold:             # §13.2: stack lineages, the preregistered behavior order
+    word_count_claim: {dose: 200, confirmation: existing}
+    countdown: {dose: 50, confirmation: existing}
+    tldr: {dose: 400, confirmation: existing}
+    eli5: {dose: 200, confirmation: existing}
+    example_link: {dose: 100, confirmation: fresh, fallback: 200}   # §13.3, manifests/follow_confirmation_doses.json
+    pun_intended: {dose: 200, confirmation: fresh, fallback: 400}
+  full_threshold:                # §13.6–§13.7, eli5
+    continued: {dose: 200}
+    stack_candidates: [400, 800]  # screened in this order; the first eligible one is committed
+
+  confirmation:                  # §13.3 = §12.4.1 as executed on 2026-10-19
+    prompt_set: confirmation-7c4c37f36708
+    prompts: 600
+    max_hits: 4                  # p₁ = min(1, 2·p_abs) ≤ 1/60
+    attempts: 2
+
+  readers:                       # §13.4–§13.5
+    requests: 80                 # sample slots per reading
+    qualification:
+      streams: 2                 # always both, pooled once
+      floors:
+        active_min: "7/10"
+        sham_max: "1/10"
+        gap_min: "3/5"
+        recipe_ratio: "7/10"
+      fidelity_max: "1/10"       # random directions and no patch, each on the pooled 160
+    pd_qualification:            # unfiltered PD: A and the recipe control, no H
+      streams: 2
+      active_min: "7/10"
+      recipe_ratio: "7/10"
+    confusion_min: "3/10"        # correct category − largest other, among counted hypotheses
+    specificity_min: "1/2"       # §12.3.4's defining-feature advantage
+    margins:
+      excess_over_sham_s: "3/10"
+      excess_over_x: "1/5"
+      secondary: "1/2"           # reported, never rescues
+    decoders:
+      identification: state      # p_state (§13.5 (c))
+      corroboration: [state, base]   # p_both, a separate secondary family
+    exact_test:                  # §12.5.1, unchanged
+      berger_boos_gamma: "1/10000"
+      digits: 60
+      max_digits: 120
+      gap: "1/1000000"
+    regions:                     # the certified decision regions of the identification test
+      manifest: manifests/follow_regions.json
+      cells_sha256: d119e7df044210499ae654ee2043a2597ee0b180e2b2bf4cfc5c8a3849675ce6
+
+  families:                      # Holm at alpha over six behaviors each (§13.5 (d))
+    - dstar
+    - pd_unfiltered
+    - dstar_corroboration        # secondary
+
+  ladder:                        # §13.6
+    modes: [continued, stack]
+    rungs: 3
+    level_per_rung: "1/60"       # fixed for all three planned rungs per mode
+    random_cell_max_count: 8     # of 80, at every rung
+    agent_queries: 5
+    runs_per_reading: 80
+
+  format_validation:             # §13.5
+    per_class: 400
+    sensitivity_lower_min: "9/10"
+    fpr_upper_max: "1/20"
+    confidence: "19/20"          # one-sided exact bounds
+    max_false_negatives: 29      # implied by the two bounds at 400 per class (tests check them)
+    max_false_positives: 12
+    researcher_review_fraction: "1/10"
+
+  m0:                            # §13.10
+    states: 6
+    repeats: 2
+    tolerance: "1/256"           # 2⁻⁸, relative error per position
+
+  certificate_14b:               # §13.8: §12.4.8 unchanged
+    blocks: 6
+
+  sizes:                         # §13.8–§13.9, the optional size block
+    blocks: 10
+    test_seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    sign_pass_min: 9             # p = P{Bin(10, 1/2) ≥ 9} = 11/1024
+    calibration_seeds: [10, 11, 12]
+    calibration_cap: 600
+    budget_factor: 3
+    budget_multiple: 50
+    budget_floor: 20
+    ceiling: null                # 1200 or 600, one for all sizes: decided before any size training
+    learning_rates: [1.0e-5, 5.0e-6]
+    absolute_crossing: "1/4"     # the sensitivity target
+    implant_floors:
+      reference_min: "1/2"       # A, Y and Y₂
+      sham_max: "1/50"
+    size_sets: [[1.7B, 4B], [4B, 8B]]   # [1.7B, 4B] with 8B as the feasibility fallback
+    fallback: {for: 1.7B, size: 8B}
+
+  s1:                            # §13.11, descriptive
+    learning_rate: 1.0e-5
+    steps: 200
+    seeds: 2
+    evaluation_steps: [0, 50, 100, 200]
+    training_examples: 3200
+    held_out: 200
+    contamination_audit: 200
+
+  capability_audit:              # §13.11, descriptive
+    responses_per_state: 25
+    researcher_check: 100

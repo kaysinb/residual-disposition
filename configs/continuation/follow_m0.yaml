@@ -1,0 +1,27 @@
+# M0 of the follow-up (preregistration §13.10): the extraction check before any new lens package,
+# in one environment (one Pod session). Read by the follow-up's M0 step; its tolerance is the
+# follow-up rules' (follow_rules.yaml: m0.tolerance).
+m0:
+  states:                        # existing A/H states with stored qualification δ̄ references
+    - {behavior: word_count_claim, role: A, state: s008b0fae04af22f9}
+    - {behavior: word_count_claim, role: H, state: s513b25bb1730da59}
+    - {behavior: countdown, role: A, state: s82de0bcca5866e3c}
+    - {behavior: countdown, role: H, state: s934e62cd19b79b98}
+    - {behavior: guillemets, role: A, state: s4bfe516a3a35cf9e}
+    - {behavior: guillemets, role: H, state: seaaec74798610cda}
+  methods:
+    qualification: >-
+      the qualification's path, adl.activation_difference: one PEFT model, state and base with
+      the adapter disabled in each batch, sums in fp32
+    production_session: >-
+      the lens package builder's path with the base means recomputed in this session; the state
+      means are the same saved ones
+    production_cached: the lens package builder's path with the stored base means
+  decisive: [production_session, qualification]       # the comparison that accepts or stops
+  diagnostic: [production_cached, historical_reference]   # reported, never a stop
+  repeats: 2                     # each method twice; a repeat must agree with itself
+  layers: {decisive: 20, reported: [30]}
+  positions: [0, 1, 2, 3, 4]
+  sequences: the qualification's 10,000 sequences at 128 tokens (sha256 recorded per run)
+  precision: {dtype: bfloat16, sums: float32}
+  environment: [host, pod_id, gpu_uuid, driver, cuda, torch, attention_backend]

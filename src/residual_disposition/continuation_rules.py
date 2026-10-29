@@ -688,3 +688,82 @@ def drop_reasons(rules: Rules, items: Sequence[str] = ()) -> dict[str, list[str]
                 cuts = [r for r in out.get(f"stage3/{behavior}", []) if r.startswith("cut_order:")]
                 out[follow] = ["no_registered_readout", *cuts]
     return out
+
+
+# ---------------------------------------------------------------------------------------------
+# The follow-up's rules (§13): a separate, versioned file. §12's rules and loader are unchanged.
+
+FOLLOW_RULES_PATH = CONFIG_ROOT / "continuation" / "follow_rules.yaml"
+FOLLOW_M0_PATH = CONFIG_ROOT / "continuation" / "follow_m0.yaml"
+# The follow-up rules' frozen sha256 (``follow_hash``); a new version of the file at a barrier
+# (§13.15) changes it by a reviewed commit.
+FOLLOW_FROZEN = "f519de82d2ecbcc6dd82b9953e6264333be4b56ed764b3de4d9b61bfdea3fdfd"
+FOLLOW_BEHAVIORS = ("word_count_claim", "countdown", "tldr", "eli5", "example_link", "pun_intended")
+_FOLLOW_REQUIRED = ("version", "alpha", "partial_threshold", "full_threshold", "confirmation",
+                    "readers", "families", "ladder", "format_validation", "m0",
+                    "certificate_14b", "sizes", "s1", "capability_audit")  # fmt: skip
+
+
+def follow_hash(data: Mapping[str, Any]) -> str:
+    """Full sha256 of the canonical JSON form of the follow-up rules mapping."""
+    blob = json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def _validate_follow(d: Mapping[str, Any]) -> None:
+    missing = [key for key in _FOLLOW_REQUIRED if key not in d]
+    if missing:
+        raise ValueError(f"follow-up rules lack: {', '.join(missing)}")
+    if tuple(d["partial_threshold"]) != FOLLOW_BEHAVIORS:
+        raise ValueError(f"the partial-threshold behaviors are {FOLLOW_BEHAVIORS}, in this order")
+    for behavior, spec in d["partial_threshold"].items():
+        if not isinstance(spec.get("dose"), int):
+            raise ValueError(f"{behavior}: no dose")
+    r = d["readers"]
+    if int(r["qualification"]["streams"]) != 2 or int(r["pd_qualification"]["streams"]) != 2:
+        raise ValueError("qualification pools two streams (§13.5 (a))")
+    if r["decoders"]["identification"] != "state" or list(r["decoders"]["corroboration"]) != [
+        "state", "base"
+    ]:  # fmt: skip
+        raise ValueError("identification on the state decoder, corroboration on both (§13.5 (c))")
+    if (
+        _fraction(d["ladder"]["level_per_rung"]) != Fraction(1, 60)
+        or int(d["ladder"]["rungs"]) != 3
+    ):
+        raise ValueError("the ladder is three rungs at 1/60 each (§13.5 (d))")
+    s = d["sizes"]
+    test, cal = [int(x) for x in s["test_seeds"]], [int(x) for x in s["calibration_seeds"]]
+    if len(test) != int(s["blocks"]) or set(test) & set(cal) or len(set(test)) != len(test):
+        raise ValueError("the sizes' test seeds are one per block, disjoint from calibration")
+    if s["ceiling"] not in (None, 600, 1200):
+        raise ValueError("the sizes' ceiling is 1,200 or 600 steps, or not yet decided")
+
+
+def load_follow_rules(path: str | Path = FOLLOW_RULES_PATH, *,
+                      expected_hash: str | None = None) -> Rules:  # fmt: skip
+    """Load and validate the follow-up rules; with ``expected_hash``, refuse a changed file."""
+    data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
+    if not isinstance(data, dict) or "follow" not in data:
+        raise ValueError(f"{path}: expected a top-level 'follow' mapping")
+    rules = data["follow"]
+    _validate_follow(rules)
+    digest = follow_hash(rules)
+    if expected_hash is not None and digest != expected_hash:
+        raise ValueError(f"follow-up rules changed: sha256 {digest} != frozen {expected_hash}")
+    return Rules(data=rules, sha256=digest)
+
+
+def follow_m0(path: str | Path = FOLLOW_M0_PATH) -> dict[str, Any]:
+    """M0's configuration (§13.10): six distinct A/H states, the three methods, two repeats."""
+    data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
+    m0 = data["m0"]
+    states = [s["state"] for s in m0["states"]]
+    if len(states) != 6 or len(set(states)) != 6:
+        raise ValueError("M0 reads six distinct A/H states")
+    if set(m0["methods"]) != {"qualification", "production_session", "production_cached"}:
+        raise ValueError("M0 compares the three methods of §13.10")
+    if list(m0["decisive"]) != ["production_session", "qualification"]:
+        raise ValueError(
+            "M0's decisive comparison is same-session production against qualification"
+        )
+    return m0
