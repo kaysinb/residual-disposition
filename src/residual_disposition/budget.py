@@ -1762,6 +1762,9 @@ class AllocationMeter:
                 # contracts authorizes no validation (review s6f)
                 raise ValueError(f"{item}: no follow-up starts before the panel's contracts are "
                                  "recorded")  # fmt: skip
+            problem = shared_problem(item, states)
+            if problem:
+                raise ValueError(f"{item} does not start: {problem}")
             states[item] = RUNNING
         elif kind == "split":
             if current != RUNNING:
@@ -1802,6 +1805,9 @@ class AllocationMeter:
             worker = event.get("worker")
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: no Pod session")
+            problem = shared_problem(item, states)
+            if problem:
+                raise ValueError(f"{item}: no Pod session, {problem}")
             _require_frozen_split(item, self.parts(item, s)[0], s, "no Pod session")
             if item in s["splits"]:
                 if worker not in s["splits"][item]:
@@ -1862,6 +1868,9 @@ class AllocationMeter:
             # other laptop session open; its API authorization within the item's API left
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: no laptop session")
+            problem = shared_problem(item, states)
+            if problem:
+                raise ValueError(f"{item}: no laptop session, {problem}")
             if item in s["splits"]:
                 raise ValueError(f"{item} is split: no laptop session")
             sessions = s["sessions"].setdefault(item, {POD: None})
@@ -2014,6 +2023,10 @@ class AllocationMeter:
                 raise ValueError(
                     f"{item} cannot be dropped for {event['reason']!r}; frozen: {allowed}"
                 )
+            users = _users_left(item, states)
+            if users:
+                raise ValueError(f"{item} is dropped only once no mode can reach its rung: "
+                                 f"{users} neither dropped nor complete")  # fmt: skip
             states[item] = DROPPED
             reservation.pop(item, None)
             s["reason"][item] = event["reason"]
@@ -2076,6 +2089,34 @@ def _stage3_behavior(item: str, kind: str) -> str | None:
 # An item admitted only once another has ended (completed, stopped or dropped): the strong DPO
 # fallback after the continued strong branch, S5-A having failed (§12.8, C16-3)
 AFTER = {"strong/stage5_dpo": "strong/stage5"}
+
+# The follow-up's rungs 2 and 3 (§13.14): each mode's rung item and its rung's shared item (the
+# rung's once-only A/H qualification and format validation). Two admissions are not atomic, so a
+# rung item starts, and opens a Pod or laptop session, only while the shared item is reserved,
+# running or complete; the shared item is dropped only once each mode's item of its rung is
+# dropped or complete, so that no mode that can still reach the rung loses it.
+RUNG_SHARED = {
+    "follow/continued/rung2": "follow/rung2_shared",
+    "follow/stack/rung2": "follow/rung2_shared",
+    "follow/continued/rung3": "follow/rung3_shared",
+    "follow/stack/rung3": "follow/rung3_shared",
+}
+
+
+def shared_problem(item: str, states: Mapping[str, str]) -> str | None:
+    """Why a rung item's work cannot start or open a session: its shared item not held or
+    complete (``RUNG_SHARED``); None for every other item."""
+    shared = RUNG_SHARED.get(item)
+    if shared is None or shared not in states or states[shared] in (RESERVED, RUNNING, COMPLETED):
+        return None
+    return (f"its rung's shared item {shared} is {states[shared]}: the rung's work runs only "
+            "while that is reserved, running or complete")  # fmt: skip
+
+
+def _users_left(shared: str, states: Mapping[str, str]) -> list[str]:
+    """The rung items that can still use ``shared``: neither dropped nor complete."""
+    return [i for i, s in RUNG_SHARED.items()
+            if s == shared and i in states and states[i] not in (DROPPED, COMPLETED)]  # fmt: skip
 
 
 def _frozen_split(item: str, stress_gpu_usd: float) -> tuple[dict, dict] | None:
