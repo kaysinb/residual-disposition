@@ -775,7 +775,7 @@ def follow_rules() -> Rules:
 
 
 # M0's configuration's frozen sha256 (``follow_hash`` of its ``m0`` mapping).
-FOLLOW_M0_FROZEN = "406caff3effc077fec4d526fff041fa8df2a5084741d00b01cf4b2a5b2895dc7"
+FOLLOW_M0_FROZEN = "91bdd7214cde0ec9dd739e20da2ac3800e50d97b8878b36f20372df739f4b328"
 
 
 def load_follow_m0(path: str | Path = FOLLOW_M0_PATH, *,
@@ -798,6 +798,11 @@ def load_follow_m0(path: str | Path = FOLLOW_M0_PATH, *,
         raise ValueError("M0 reads positions 0–4")
     if int(m0["layers"]["decisive"]) != 20 or [int(x) for x in m0["layers"]["reported"]] != [30]:
         raise ValueError("M0 decides at layer 20 and reports layer 30")
+    rt = m0["runtime"]
+    if (rt["model"]["dtype"], [int(x) for x in rt["layers"]],
+            (int(rt["sequences"]["count"]), int(rt["sequences"]["tokens"]))) != (
+            "bfloat16", [20, 30], (10000, 128)):  # fmt: skip
+        raise ValueError("M0's runtime is bf16, layers 20 and 30, 10,000 sequences of 128 tokens")
     digest = follow_hash(m0)
     if expected_hash is not None and digest != expected_hash:
         raise ValueError(f"M0's configuration changed: sha256 {digest} != frozen {expected_hash}")
