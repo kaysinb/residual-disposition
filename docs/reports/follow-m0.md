@@ -30,9 +30,10 @@ per position, as in §12.4.3; the decisive layer is 20, layer 30 is reported.
 ## Record and configuration
 
 - **Run:** `runs/follow_m0/follow-m0-20261029T202118Z`. `result.json` sha256 `451c3e76…`,
-  `manifest.json` sha256 `6138fa74…`; the 64 saved tensors (the session's base means and every
-  method's δ̄ at both layers) are listed with their sha256 in `result.json`. The run directory and
-  the launch record were pulled from the volume and checked against their sha256 inventories.
+  `manifest.json` sha256 `6138fa74…`; the 64 saved tensors (the four base means of the session,
+  every method's layer-20 δ̄ and the production path's two methods' layer-30 δ̄) are listed
+  with their sha256 in `result.json`. The run directory and the launch record were pulled from
+  the volume and checked against their sha256 inventories.
 - **Rules:** the follow-up rules, sha256 `2f8eb4dd…` (`continuation_rules.FOLLOW_FROZEN`); M0's
   configuration `configs/continuation/follow_m0.yaml`, sha256 `91bdd721…`
   (`FOLLOW_M0_FROZEN`). The entry point checked the effective model, corpus, layers and sequences
@@ -97,17 +98,23 @@ Each value is the largest relative L2 error over the five positions.
 - **Positions.** Position 0 agrees everywhere (at most 2·10⁻⁵, 0 against the stored δ̄);
   positions 1–4 carry the drift. The values for word_count_claim A and guillemets A and H equal
   those measured on two other Pods with the same driver and CUDA on 2026-10-27
-  ([decisions](../decisions.md#gate-decisions)): the drift belongs to the numerical environment,
-  and repeats within one.
+  ([decisions](../decisions.md#gate-decisions)). Differences from cached and historical tensors
+  are consistent with numerical-environment effects; their cause is not isolated by this
+  experiment.
 - **Stored base means across runs.** The three completed base-means runs of the cell
   (`…-5f0e`, `…-e866`, `…-6255`) hold the same file, sha256 `f8f307e5…`. The run's volume
   resolved the cell to `…-e866`, the local mirror to `…-5f0e`; both read the same tensor.
 
 ## Conclusion
 
-Within one environment, δ̄ reproduces to 10⁻⁵–10⁻⁴; between environments it drifts by 1–13 %.
-New packages therefore use base means recomputed in their own session, and §12.4.3's validation
-of method equivalence runs in the build's own session and environment (§13.10).
+For these six states, the two paths agree within 8.99·10⁻⁵ in this session. Differences from
+cached and historical tensors are consistent with numerical-environment effects; their cause is
+not isolated by this experiment. New packages use base means recomputed in their own session, and
+§12.4.3's validation of method equivalence runs in the build's own session and environment
+(§13.10).
+
+M0 permits new builds under §13.10's per-session checks; it neither retroactively validates nor
+invalidates earlier §12 packages or explains their reader outcomes.
 
 ## Run and costs
 
