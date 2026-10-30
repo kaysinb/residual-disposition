@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -212,9 +213,12 @@ def env(tmp_path, monkeypatch):
     }
     old = space / "runs" / "continuation_14b" / "20261020-000000-stage5_confirmation-aaaa-0001"
     old.mkdir(parents=True)
-    (old / "config.yaml").write_text(yaml.safe_dump({"step": "stage5_confirmation",
+    (old / "config.yaml").write_text(yaml.safe_dump({"name": "stage5_confirmation",
+                                                     "step": "stage5_confirmation",
                                                      "params": params}))  # fmt: skip
-    (old / "meta.json").write_text(json.dumps({"status": "completed", "config_hash": "old"}))
+    (old / "meta.json").write_text(
+        json.dumps({"name": "stage5_confirmation", "status": "completed", "config_hash": "old"})
+    )
     gen = SimpleNamespace(hits={}, calls=[], fail_on=None, error=None, seed=0)
 
     def generate(reqs, sampling, adapter, *, stream):
@@ -317,6 +321,99 @@ def test_a_technical_failure_is_no_failed_dose_and_resumes(env, fail_on, error):
     assert decision["confirmed"][LINK] == 200  # 7 hits at d₁, then d₂ in this session
 
 
+def files_sha256(run):
+    return {p.relative_to(run).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in sorted(run.rglob("*")) if p.is_file()}  # fmt: skip
+
+
+def test_a_draw_under_a_launchers_run_id_is_found_and_no_name_is_shared(env, monkeypatch):
+    # the Pod's session of 2026-10-30: the runner's RUN_ID named link's d₁ run
+    monkeypatch.setenv("RUN_ID", "follow-confirm-20261030T110426Z")
+    env.gen.hits = {state(LINK, 100, "L"): 5, state(LINK, 200, "L"): 0, state(PUN, 200, "L"): 0}
+    with pytest.raises(FileExistsError):  # d₂'s run would take the same directory: refused
+        session(env)
+    assert drawn(env) == [state(LINK, 100, "L"), state(LINK, 100, "Hs")]  # nothing of d₂ or pun
+    (first,) = [p.parent for p in env.runs.glob("*/meta.json")
+                if json.loads(p.read_text()).get("name") == "follow_confirmation"]  # fmt: skip
+    assert first.name == "follow-confirm-20261030T110426Z"
+    kept = files_sha256(first)
+    found, open_runs = link_draws(env)  # found by its record, verified whole and recounted
+    assert [(d["attempt"], d["dose"], d["hits"], d["passed"]) for d in found] == [
+        (1, 100, 5, False)] and open_runs == []  # fmt: skip
+    assert F.next_step(env.spec, LINK, found)["dose"] == 200  # attempt 2 at d₂, not attempt 1
+    monkeypatch.delenv("RUN_ID")
+    env.gen.calls.clear()
+    assert session(env)[0] == 0
+    assert drawn(env) == [state(LINK, 200, "L"), state(LINK, 200, "Hs"),
+                          state(PUN, 200, "L"), state(PUN, 200, "Hs")]  # fmt: skip
+    assert files_sha256(first) == kept
+    decision = F.decision(env.spec, env.space / "runs", "continuation_14b", env.make)
+    assert decision["confirmed"] == {LINK: 200, PUN: 200}
+    assert [a["attempt"] for a in decision["lines"][LINK]["attempts"]] == [1, 2]
+    assert [a["attempt"] for a in decision["lines"][PUN]["attempts"]] == [1]
+
+
+RUNNER_ID = "follow-confirm-20261030T110426Z"
+
+
+def runner_d1(env, monkeypatch):
+    """link's completed d₁ (5 hits) in a directory named by the runner's RUN_ID, as on the Pod."""
+    monkeypatch.setenv("RUN_ID", RUNNER_ID)
+    env.gen.hits = {state(LINK, 100, "L"): 5}
+    with pytest.raises(FileExistsError):
+        session(env)
+    monkeypatch.delenv("RUN_ID")
+    env.gen.calls.clear()
+    return env.runs / RUNNER_ID
+
+
+@pytest.mark.parametrize("tamper, problem", [
+    (lambda run: (run / "meta.json").unlink(), "its record names None and 'follow_confirmation'"),
+    (lambda run: edit_json(run / "meta.json", lambda m: m.update(name="other")),
+     "its record names 'other' and 'follow_confirmation'"),
+    (lambda run: edit_yaml(run / "config.yaml", lambda c: c.update(name="other")),
+     "its record names 'follow_confirmation' and 'other'"),
+    (lambda run: edit_yaml(run / "config.yaml", lambda c: c.update(step="other")),
+     "(step 'other')"),
+    (lambda run: (run / "config.yaml").unlink(), "and None"),
+])  # fmt: skip
+def test_a_runner_named_record_missing_or_disagreeing_is_refused(env, monkeypatch, tamper,
+                                                                 problem):  # fmt: skip
+    run = runner_d1(env, monkeypatch)
+    found, _ = link_draws(env)
+    assert [(d["attempt"], d["dose"], d["hits"]) for d in found] == [(1, 100, 5)]
+    tamper(run)
+    with pytest.raises(ValueError, match=re.escape(problem)):
+        link_draws(env)
+    with pytest.raises(ValueError, match=re.escape(problem)):
+        session(env)
+    assert env.gen.calls == []  # neither d₁ again nor d₂, and nothing of pun
+
+
+def test_run_removes_the_launchers_run_id(env, monkeypatch):
+    s = script()
+    monkeypatch.setenv("RUN_ID", "follow-confirm-20261030T110426Z")
+    monkeypatch.setattr(F, "load_spec", lambda: env.spec)
+    monkeypatch.setattr(s, "inputs_problems", lambda spec, space: {
+        "wrong": [], "states": [], "index": [], "prompts": False, "model": False})  # fmt: skip
+    monkeypatch.setattr(s, "room", lambda space: [])
+    monkeypatch.setattr(s, "workspace", env.make)
+    real = s.session
+    monkeypatch.setattr(s, "session", lambda spec, space, result: real(spec, space, result,
+                                                                       env.make))  # fmt: skip
+    env.gen.hits = {state(LINK, 100, "L"): 5, state(LINK, 200, "L"): 0, state(PUN, 200, "L"): 0}
+    out = env.space / "follow" / "confirm" / "r1"
+    assert s.main(["run", "--space", str(env.space), "--out", str(out)]) == 0
+    assert "RUN_ID" not in os.environ
+    runs = sorted(p.parent.name for p in env.runs.glob("*/meta.json")
+                  if json.loads(p.read_text()).get("name") == "follow_confirmation")  # fmt: skip
+    assert len(runs) == 3 and all("-follow_confirmation-" in r for r in runs)
+    result = json.loads((out / "result.json").read_text())
+    assert result["launcher_run_id"] == "follow-confirm-20261030T110426Z"
+    assert result["status"] == "decided"
+    assert result["decision"]["confirmed"] == {LINK: 200, PUN: 200}
+
+
 def test_every_response_is_kept_in_the_space(env):
     env.gen.hits = {state(LINK, 100, "L"): 2, state(PUN, 200, "L"): 1}
     session(env)
@@ -386,6 +483,10 @@ def drop(key):
      "latent's responses give"),
     (lambda run: edit_json(run / "summary.json", lambda d: d.update(passed=True)),
      "the test of 5/600 gives False"),
+    (lambda run: edit_json(run / "meta.json", lambda m: m.update(name="other")),
+     "its record names 'other'"),
+    (lambda run: edit_yaml(run / "config.yaml", lambda c: c.update(name="other")),
+     "its record names 'follow_confirmation' and 'other'"),
 ])  # fmt: skip
 def test_a_completed_cell_is_accepted_only_whole(env, tamper, problem):
     run = completed_d1(env)

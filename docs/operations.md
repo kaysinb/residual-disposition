@@ -1752,6 +1752,12 @@ Decided after Stage 1 (preregistration §12.3.7,
      - Every cell shares its generation (sampling, engine, requests, prompts, generator seed) with
        the recorded confirmation cells.
    - **Records on the volume.**
+     - A launcher's `RUN_ID` is removed first and kept in `result.json`. Each draw's run takes
+       its own directory; a directory name already taken is refused before anything is written.
+       Cells are found by their record, whatever their directory is called: link's first cell
+       of 2026-10-30 is named after its launch. A directory whose configuration, metadata or
+       name names the measurement is accepted only with both files and all three names agreeing;
+       otherwise it is refused before any allocation or generation.
      - The allocated attempt and its spec are written before any generation.
      - Each state's whole draw is saved before the next.
      - Then the detector records, the responses and the summary.
