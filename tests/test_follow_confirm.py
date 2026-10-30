@@ -539,15 +539,18 @@ def a_model(home, name="org/m", revision="r" * 40, files=None):
 
 def test_the_model_cache_is_checked_and_copied_create_only(tmp_path):
     name, revision, repo = a_model(tmp_path / "b")
+    (tmp_path / "a").mkdir()
     assert F.model_cache_problems(tmp_path / "b", name, revision) == []
     assert F.model_cache_problems(tmp_path / "a", name, revision) == [
         f"{F.model_snapshot(tmp_path / 'a', name, revision)}: missing"]  # fmt: skip
-    copied = F.copy_model(tmp_path / "b", tmp_path / "a", name, revision)
+    copied = F.copy_model(tmp_path / "b", tmp_path / "a", name, revision, space=tmp_path / "a")
     assert {c["file"] for c in copied} == {"config.json", "tokenizer.json",
                                            "tokenizer_config.json", "w-1.safetensors",
                                            "model.safetensors.index.json"}  # fmt: skip
     assert F.model_cache_problems(tmp_path / "a", name, revision) == []
-    assert F.copy_model(tmp_path / "b", tmp_path / "a", name, revision) == []  # nothing again
+    assert (
+        F.copy_model(tmp_path / "b", tmp_path / "a", name, revision, space=tmp_path / "a") == []
+    )  # nothing again
     blob = next((tmp_path / "a" / "hub").rglob("blobs/*"))
     blob.write_bytes(b"changed")
     assert F.model_cache_problems(tmp_path / "a", name, revision)
@@ -555,7 +558,140 @@ def test_the_model_cache_is_checked_and_copied_create_only(tmp_path):
     link.unlink()
     link.symlink_to("elsewhere")
     with pytest.raises(ValueError, match="is not the link"):
-        F.copy_model(tmp_path / "b", tmp_path / "a", name, revision)
+        F.copy_model(tmp_path / "b", tmp_path / "a", name, revision, space=tmp_path / "a")
+
+
+def a_shared_model(home, **kw):
+    """The hub's layout with a shared store: each large blob of the model a link on to
+    ``hub/blobs/<xx>/<another hash>``, so the chain's last name is not the content's sha256."""
+    name, revision, repo = a_model(home, **kw)
+    for blob in sorted((repo / "blobs").iterdir()):
+        if len(blob.name) == 64:
+            data = blob.read_bytes()
+            other = hashlib.blake2b(data, digest_size=32).hexdigest()
+            store = home / "hub" / "blobs" / other[:2] / other
+            store.parent.mkdir(parents=True, exist_ok=True)
+            store.write_bytes(data)
+            blob.unlink()
+            blob.symlink_to(os.path.relpath(store, blob.parent))
+    return name, revision, repo
+
+
+def test_a_model_in_the_hubs_shared_store_is_checked_by_its_first_link(tmp_path):
+    name, revision, repo = a_shared_model(tmp_path / "b")
+    (tmp_path / "a").mkdir()
+    snap = F.model_snapshot(tmp_path / "b", name, revision)
+    entry = snap / "w-1.safetensors"
+    etag = hashlib.sha256(b"x" * 2048).hexdigest()
+    assert F.model_blob(entry) == repo / "blobs" / etag and entry.resolve().name != etag
+    assert F.model_cache_problems(tmp_path / "b", name, revision) == []
+    sizes = sum(p.stat().st_size for p in snap.iterdir())
+    assert F.model_bytes_to_copy(tmp_path / "b", tmp_path / "a", name, revision) == sizes
+    copied = F.copy_model(tmp_path / "b", tmp_path / "a", name, revision, space=tmp_path / "a")
+    assert {c["blob"] for c in copied} == {p.name for p in (repo / "blobs").iterdir()}
+    assert F.model_cache_problems(tmp_path / "a", name, revision) == []
+    assert F.model_bytes_to_copy(tmp_path / "b", tmp_path / "a", name, revision) == 0
+    entry.resolve().write_bytes(b"y" * 2048)  # the shared store's content changed
+    assert F.model_cache_problems(tmp_path / "b", name, revision) == [
+        f"{entry}: its content is not its blob {etag}"]  # fmt: skip
+
+
+def test_a_snapshot_entry_linked_outside_the_models_blobs_is_refused(tmp_path):
+    name, revision, repo = a_model(tmp_path / "b")
+    snap = F.model_snapshot(tmp_path / "b", name, revision)
+    entry = snap / "w-1.safetensors"
+    etag = F.model_blob(entry).name
+    outside = tmp_path / "b" / "hub" / "blobs" / etag[:2] / etag  # right content and name
+    outside.parent.mkdir(parents=True)
+    outside.write_bytes(entry.read_bytes())
+    entry.unlink()
+    entry.symlink_to(os.path.relpath(outside, snap))
+    assert F.model_cache_problems(tmp_path / "b", name, revision) == [
+        f"{entry}: not a link to a blob of the model ({outside})"]  # fmt: skip
+    with pytest.raises(ValueError, match="not whole"):
+        F.copy_model(tmp_path / "b", tmp_path / "a", name, revision, space=tmp_path / "a")
+    assert not F.model_snapshot(tmp_path / "a", name, revision).exists()
+
+
+def test_a_link_that_jumps_out_of_the_models_blobs_is_refused(tmp_path):
+    # ../../blobs/jump/../<etag> is the model's blobs as written, but jump leads elsewhere
+    name, revision, repo = a_model(tmp_path / "b")
+    snap = F.model_snapshot(tmp_path / "b", name, revision)
+    entry = snap / "w-1.safetensors"
+    etag = F.model_blob(entry).name
+    (tmp_path / "evil" / "sub").mkdir(parents=True)
+    (tmp_path / "evil" / etag).write_bytes(entry.read_bytes())
+    (repo / "blobs" / "jump").symlink_to(tmp_path / "evil" / "sub")
+    entry.unlink()
+    entry.symlink_to(f"../../blobs/jump/../{etag}")
+    assert entry.read_bytes() == (tmp_path / "evil" / etag).read_bytes()  # read from outside
+    assert F.model_blob(entry) == repo / "blobs" / etag
+    assert F.model_cache_problems(tmp_path / "b", name, revision) == [
+        f"{entry}: not a link to a blob of the model ({repo / 'blobs' / etag})"]  # fmt: skip
+
+
+def a_copy_target(tmp_path):
+    """The model in ``b`` and its blobs directory, still empty, in the space ``a``."""
+    name, revision, _ = a_model(tmp_path / "b")
+    entry = F.model_snapshot(tmp_path / "b", name, revision) / "w-1.safetensors"
+    blobs = F.model_snapshot(tmp_path / "a", name, revision).parent.parent / "blobs"
+    blobs.mkdir(parents=True)
+    return name, revision, F.model_blob(entry).name, blobs
+
+
+def test_a_staged_link_is_refused_and_nothing_is_written_through_it(tmp_path):
+    name, revision, etag, blobs = a_copy_target(tmp_path)
+    victim = tmp_path / "victim"
+    victim.write_bytes(b"keep")
+    (blobs / f"{etag}.partial").symlink_to(victim)
+    with pytest.raises(ValueError, match=r"\.partial exists; nothing is written"):
+        F.copy_model(tmp_path / "b", tmp_path / "a", name, revision, space=tmp_path / "a")
+    assert victim.read_bytes() == b"keep" and not os.path.lexists(blobs / etag)
+    assert (blobs / f"{etag}.partial").is_symlink()
+
+
+def test_a_dangling_link_at_a_blob_is_not_replaced(tmp_path):
+    name, revision, etag, blobs = a_copy_target(tmp_path)
+    (blobs / etag).symlink_to(tmp_path / "elsewhere" / "x")
+    with pytest.raises(ValueError, match="dangling link; it is not replaced"):
+        F.copy_model(tmp_path / "b", tmp_path / "a", name, revision, space=tmp_path / "a")
+    assert not (tmp_path / "elsewhere").exists() and (blobs / etag).is_symlink()
+
+
+def test_a_blob_is_published_without_replacing_an_entry(tmp_path, monkeypatch):
+    out = tmp_path / "a" / "blob"
+    (tmp_path / "a").mkdir()
+    (tmp_path / "src").write_bytes(b"content")
+    out.symlink_to(tmp_path / "elsewhere")  # appears between the check and the publication
+    with pytest.raises(ValueError, match="exists; it is not replaced"):
+        F.publish_copy(tmp_path / "src", out)
+    assert (
+        not os.path.lexists(out.with_name("blob.partial")) and not (tmp_path / "elsewhere").exists()
+    )
+
+    def no_hard_links(*a):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr(os, "link", no_hard_links)
+    with pytest.raises(ValueError, match="exists; it is not replaced"):
+        F.publish_copy(tmp_path / "src", out)
+    out.unlink()
+    F.publish_copy(tmp_path / "src", out)  # renamed, the file system lacking hard links
+    assert out.read_bytes() == b"content" and not out.is_symlink()
+    assert sorted(p.name for p in (tmp_path / "a").iterdir()) == ["blob"]
+
+
+def test_a_link_among_the_destination_directories_is_refused(tmp_path):
+    name, revision, _ = a_model(tmp_path / "b")
+    (tmp_path / "outside").mkdir()
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "hub").symlink_to(tmp_path / "outside")
+    with pytest.raises(ValueError, match="is not a directory of the space"):
+        F.copy_model(tmp_path / "b", tmp_path / "a", name, revision, space=tmp_path / "a")
+    assert list((tmp_path / "outside").iterdir()) == []
+    with pytest.raises(ValueError):  # a target outside the space
+        F.copy_model(tmp_path / "b", tmp_path / "c", name, revision, space=tmp_path / "a")
+    assert not (tmp_path / "c").exists()
 
 
 def test_the_volume_must_have_room_before_any_copy(env, monkeypatch, tmp_path):
@@ -572,7 +708,7 @@ def test_the_volume_must_have_room_before_any_copy(env, monkeypatch, tmp_path):
     monkeypatch.setattr(s.shutil, "disk_usage", lambda p: SimpleNamespace(free=40 * gib))
     called = []
     monkeypatch.setattr(s.subprocess, "run", lambda *a, **k: called.append(a))
-    monkeypatch.setattr(F, "copy_model", lambda *a: called.append(a))
+    monkeypatch.setattr(F, "copy_model", lambda *a, **k: called.append(a))
     monkeypatch.setattr(F, "load_spec", lambda: env.spec)
     code = s.main(["precheck", "--space", str(env.space), "--source", str(tmp_path / "b"),
                    "--log", str(env.space / "copy.jsonl")])  # fmt: skip
@@ -595,7 +731,7 @@ def test_the_copies_are_sized_from_their_sources(env, tmp_path):
     states = sum(F.tree_bytes(source / "data" / "states" / x) for x in ("sY", "sP"))
     assert sizes["states"] == states and sizes["model"] == 2048 + 2 + 1 + 1 + len(
         json.dumps({"weight_map": {"a": "w-1.safetensors"}}))  # fmt: skip
-    F.copy_model(source / "hf", space / "hf", name, revision)
+    F.copy_model(source / "hf", space / "hf", name, revision, space=space)
     assert F.model_bytes_to_copy(source / "hf", space / "hf", name, revision) == 0
 
 

@@ -3911,6 +3911,57 @@ procedure and handling of unavailable/censored points are committed** (B6).
   6. the stack branch and its ladder;
   7. the size block (§13.9), if declared: its sizes in ascending order; 32B only as a declared
      extension.
+- **Parallel execution [amendment, 2026-10-30].** Adopted before any confirmation draw of the
+  follow-up, any certificate or calibration run, any S1 training and any reader request; what
+  had been seen is §13.0's list, M0's result (§13.10) and barrier B2. It changes when two
+  stages may run, not what runs, how it is decided or when it is reported.
+  - **Permitted overlap.** Only these two; every other stage keeps the order above.
+    - The three new certificates (§13.8), their k\* calibration included, may run while step 2's
+      qualification, format validation and readings run. They start only once both
+      confirmations are decided (§13.3) and B3 has committed the certificates' procedures. A
+      certificate runs only for a lineage with a confirmed dose (eli5's existing confirmation;
+      example_link's and pun_intended's by §13.3).
+    - S1's training (§13.11) may run while the continued-mode ladder (step 4) runs. It starts
+      only once B5 is committed. The capability audit keeps its place in the order.
+  - **Sealed outcomes.** From the first run of an overlapping stage until its opening, its
+    outcomes are sealed: metrics, crossing times, censoring, per-arm and per-run progress,
+    counts of completed runs, k\* and B, derived estimates and any tracker summary. The seal
+    includes stdout/stderr, shared-volume logs, calibration manifests, checkpoint listings,
+    and per-run or per-certificate timing and spending records. Accounting remains accurate
+    and immediate; these details are not inspected before opening. Monitoring exposes only
+    sanitized coarse status and technical causes, without metrics, arm identities or step
+    counts: running, completed, or a technical failure with its technical cause.
+  - **Paths kept closed.**
+    - The frozen calibration rules determine whether certificate runs proceed; required
+      calibration records are committed automatically before dependent runs, without
+      exposing k\*, B or calibration outcomes. k\* and B pass to the certificate runs inside
+      the runner and are written only to the sealed outputs.
+    - The runs do not mirror outcomes to a tracker.
+    - A technical failure is diagnosed from its sanitized technical cause alone; any further
+      reading of a sealed detail is recorded as an exposure.
+    - The sessions' total duration and spending stay visible, since the meter charges actual
+      spending at once: an aggregate over all runs and arms, recorded as visible and disclosed
+      in the reports.
+  - **Opening.**
+    - Certificates open after step 2's validation adjudications and all six-lineage and
+      continued-mode rung-1 readings—or their registered terminal/non-execution statuses—are
+      locked.
+    - S1 opens after the continued-mode ladder finishes under its frozen rules, including any
+      rung-3 decision required on that path and rung 3 if run.
+    - An unreached rung does not bring its decision point forward. Pending work remains
+      pending; it is not declared terminal to open a seal.
+    - Each is reported at its own place in the order above.
+  - **Admission.** The meter's admission priorities are unchanged. An overlapping stage is
+    admitted only if it does not displace an earlier unfinished stage: that stage keeps
+    funding for its full execution, not only its planned allocation. Otherwise the overlapping
+    stage waits for its place in the order.
+  - **Records.** Before an overlapping stage starts, the decision log records its seal
+    inventory. The pre-start seal inventory specifies planned cells, deterministic expansion
+    rules and output locations; actual run identities and hashes are appended automatically.
+    Each opening's time is recorded. Any exposure of a sealed outcome before its opening is
+    recorded with what was seen and when, and is disclosed in the reports.
+  - **Unchanged:** procedures, gates, decision points, barriers, statuses and admission
+    priorities.
 - **Progression.** Apart from the listed stage-specific decision points, progression follows
   only the frozen gates. Earlier-stage results may be known at those decision points; no
   decision follows outcomes from the stage it governs.
