@@ -726,6 +726,7 @@ def follow_drop_reasons(item: str) -> list[str]:
 
 FOLLOW_RULES_PATH = CONFIG_ROOT / "continuation" / "follow_rules.yaml"
 FOLLOW_M0_PATH = CONFIG_ROOT / "continuation" / "follow_m0.yaml"
+FOLLOW_BUILD_PATH = CONFIG_ROOT / "continuation" / "follow_build.yaml"
 # The follow-up rules' frozen sha256 (``follow_hash``); a new version of the file at a barrier
 # (§13.15) changes it by a reviewed commit.
 FOLLOW_FROZEN = "2f8eb4ddcb5c8d2c177c7f8fcc28eb770d9711343a73aab7ef5c463c0e2e6949"
@@ -843,3 +844,46 @@ def load_follow_m0(path: str | Path = FOLLOW_M0_PATH, *,
 def follow_m0() -> dict[str, Any]:
     """M0's configuration for execution: always checked against ``FOLLOW_M0_FROZEN``."""
     return load_follow_m0(expected_hash=FOLLOW_M0_FROZEN)
+
+
+# The builds' configuration's frozen sha256 (``follow_hash`` of its ``build`` mapping): set when
+# the packages' states are known, after the confirmations (§13.14); until then no build runs.
+FOLLOW_BUILD_FROZEN: str | None = None
+
+
+def load_follow_build(path: str | Path = FOLLOW_BUILD_PATH, *,
+                      expected_hash: str | None = None) -> dict[str, Any]:  # fmt: skip
+    """The builds' configuration (§13.10), validated: M0's frozen runtime, layer 20 decisive and
+    layers 20 and 30 read, every session a plan ``follow_build.execute`` runs and no state in two
+    sessions; with ``expected_hash``, refused when changed."""
+    from .follow_build import plan_problems
+
+    data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
+    build = data["build"]
+    if build["runtime"] != follow_m0()["runtime"]:
+        raise ValueError("the builds run in M0's frozen runtime")
+    if int(build["layers"]["decisive"]) != 20 or [int(x) for x in build["layers"]["read"]] != [
+        20,
+        30,
+    ]:
+        raise ValueError("the builds decide at layer 20 and read layers 20 and 30")
+    seen: list[str] = []
+    for name, session in build["sessions"].items():
+        problems = plan_problems(session["references"], session["builds"])
+        if problems:
+            raise ValueError(f"session {name}: {'; '.join(problems)}")
+        seen += [x["state"] for x in [*session["references"], *session["builds"]]]
+    if len(set(seen)) != len(seen):
+        raise ValueError("a state is planned in two sessions")
+    digest = follow_hash(build)
+    if expected_hash is not None and digest != expected_hash:
+        raise ValueError(f"the builds' configuration changed: sha256 {digest} != {expected_hash}")
+    return build
+
+
+def follow_build() -> dict[str, Any]:
+    """The builds' configuration for execution: always checked against ``FOLLOW_BUILD_FROZEN``;
+    refused while that is unset."""
+    if FOLLOW_BUILD_FROZEN is None:
+        raise ValueError("the builds' configuration is not frozen yet: no build runs")
+    return load_follow_build(expected_hash=FOLLOW_BUILD_FROZEN)
