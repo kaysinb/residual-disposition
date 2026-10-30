@@ -242,3 +242,15 @@ def test_the_laptop_commits_each_envelope_alone_and_returns_its_receipt(tmp_path
                 {**env, "commitment": "x" * 64}, {**env, "n": "1"}):  # fmt: skip
         with pytest.raises(SystemExit):
             seal.commit(bad, repo)
+
+
+def test_the_session_s_inputs_are_named_by_its_line():
+    import json as _json
+
+    from residual_disposition.paths import REPO_ROOT
+
+    line = {**F.line_of(b3(), "pun_intended_200"), "data": {"id": "d72d4f29820114b7b"}}
+    y2 = _json.loads((REPO_ROOT / "manifests" / "y2.json").read_text())
+    deps = F.dependencies(line, y2)
+    assert deps["states"][:3] == [line["latent"], line["sham_s"], line["active"]]
+    assert line["reference"] in deps["runs"] and "d72d4f29820114b7b" in deps["data"]

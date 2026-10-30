@@ -254,3 +254,20 @@ def status(path: Path, state: str, cause: str | None = None) -> None:
     tmp = path.with_suffix(".partial")
     tmp.write_text(json.dumps(body) + "\n")
     tmp.replace(path)
+
+
+def dependencies(line: Mapping[str, Any], y2: Mapping[str, Any]) -> dict[str, list[Any]]:
+    """What the line's session reads besides the snapshot and its manifests, for its space and
+    its sealed runs directory (``continuation_certificate.dependencies`` as a certificate's, its
+    calibration not yet run): the states L, H_s, A and the Y organism; the runs A's, Y's and Y₂'s
+    references and Y₂'s provenance; the data b's (B3's pin), Y's and Y₂'s; and Y₂'s recorded
+    selection inputs. Copied into the sealed runs directory create-only and checked by sha256
+    before the session starts (``scripts/pod/copy_inputs.py``)."""
+    from .continuation_certificate import dependencies as certificate_dependencies
+
+    seed = {"relearn_runs": {}, "reference": {"run": line["reference"]},
+            "data_id": line["data"]["id"],
+            "states": {"H_s": line["sham_s"], "A": line["active"]}}  # fmt: skip
+    deps = certificate_dependencies(seed, y2)
+    deps["states"] = list(dict.fromkeys([line["latent"], *deps["states"]]))
+    return deps
