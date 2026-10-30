@@ -1769,8 +1769,14 @@ Decided after Stage 1 (preregistration §12.3.7,
      after a stop.
 5. **Pull** the space's new confirmation runs and the result, check every file's sha256 against
    the Pod's, then stop the Pod and close the meter's session. `status --space <space>`
-   recomputes the decision from the runs on CPU. The confirmed doses (`{line: dose or None}`) go
-   to `follow_inventory.resolve`.
+   recomputes the decision from the runs on CPU.
+6. **Manifest.** Once both lines are decided, `scripts/follow_confirmations.py --write`, at a
+   clean commit, writes `manifests/follow_confirmations.json` once from the laptop's runs: the
+   sources' hashes, each line's status and dose, and each draw with its run, configuration hash
+   and every file's sha256. It is committed before any build. The confirmed doses
+   (`{line: dose or None}`) go to `follow_inventory.resolve` only through
+   `follow_confirm.committed_confirmations`: the manifest committed and its record the one
+   recomputed from the runs.
 
 ## Artifact retention
 
