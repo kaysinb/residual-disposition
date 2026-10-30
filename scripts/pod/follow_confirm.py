@@ -1,33 +1,37 @@
 """The follow-up's confirmations of example_link and pun_intended on one Pod (preregistration
 §13.3; ``residual_disposition.follow_confirm``), in four steps, each its own command:
 
-    python scripts/pod/follow_confirm.py fitness --volume /workspace
+    python scripts/pod/follow_confirm.py fitness --volume /workspace --space /workspace/a
     python scripts/pod/follow_confirm.py precheck --space /workspace/a --source /workspace/b \\
         --log <file>
     python scripts/pod/follow_confirm.py run --space /workspace/a --out <new directory>
     python scripts/pod/follow_confirm.py status --space /workspace/a
 
-- **fitness** (right after the start, before anything else): ``pod_fitness.check``; exit 3 if the
-  Pod is unfit (it is stopped and replaced).
+- **fitness** (right after the start, before anything else): ``pod_fitness.check`` with the
+  volume's marks (``follow_confirm.VOLUME_MARKS``), the probe in the space; exit 3 if the Pod is
+  unfit (it is stopped and replaced).
 - **precheck** (CPU): ``RUNS_DIR``, ``DATA_DIR`` and ``HF_HOME`` must be the space's ``runs``,
-  ``data`` and ``hf``. In the space: every state a line may draw (latent and sham_s at d₁ and
-  d₂, eight) with every adapter against its recorded tensor sha256, the analyst index recording
-  each as its line's stack suppression or sham at its dose, the frozen confirmation prompts with
-  their set hash, and the model's snapshot at M0's revision with every file against its content
-  address. A missing state, index run, prompt pool or model snapshot is copied from the sources
-  in order, create-only (``copy_inputs.py``; ``follow_confirm.copy_model``), and everything is
-  checked again; an item present but different is refused, never overwritten. Before any copy
-  the volume must have room for the copies and the session (``follow_confirm.room_problems``).
-  Exit 1 on a refusal.
-- **run** (GPU): the sources (``follow_confirm.load_spec``), then each line in the rules' order
-  until it is decided (``follow_confirm.next_step``): one draw of the next attempt
-  (``follow_confirm.plan``, ``pipeline._draw_confirmation``), its run on the space's volume
-  (the allocated attempt and its spec before any generation, each state's whole draw before the
-  next, the detector records and responses, then the summary), and the ledger read again from
-  the volume. No model is downloaded (``HF_HUB_OFFLINE``). Any exception stops the session: no
-  later draw of either line is made, and the attempt resumes in the next session as that very
-  cell. ``<out>/result.json`` holds the lines' decision; exit 0 once both lines are decided, 2
-  after a stop.
+  ``data`` and ``hf``, no hub cache moved elsewhere, no other writer and no output on the volume
+  outside the space (``space_problems``). In the space: every state a line may draw (latent and
+  sham_s at d₁ and d₂, eight) with every adapter against its recorded tensor sha256, the analyst
+  index recording each as its line's stack suppression or sham at its dose, the frozen
+  confirmation prompts with their set hash, and the model's snapshot at M0's revision with every
+  file against its content address. A missing state, index run, prompt pool or model snapshot is
+  copied from the sources in order, create-only (``copy_inputs.py``;
+  ``follow_confirm.copy_model``), and everything is checked again; an item present but different
+  is refused, never overwritten. Before any copy the volume must have room for the copies and the
+  session (``follow_confirm.room_problems``). Exit 1 on a refusal.
+- **run** (GPU): the space's checks again, the sources (``follow_confirm.load_spec``), every
+  input of the precheck checked again with nothing missing, and the volume's room for the
+  session. Then each line in the rules' order until it is decided (``follow_confirm.next_step``,
+  its completed cells verified whole), one draw of the next attempt at a time, each after the
+  room is checked again (``follow_confirm.plan``, ``pipeline._draw_confirmation``): its run on
+  the space's volume (the allocated attempt and its spec before any generation, each state's
+  whole draw before the next, the detector records and responses, then the summary), and the
+  ledger read again from the volume. No model is downloaded (``HF_HUB_OFFLINE``). Any exception
+  stops the session: no later draw of either line is made, and the attempt resumes in the next
+  session as that very cell. ``<out>/result.json`` holds the lines' decision; exit 0 once both
+  lines are decided, 2 after a stop.
 - **status** (CPU): the decision from the space's runs, as JSON.
 """
 
@@ -55,21 +59,51 @@ def write_json(path: Path, data: Any) -> None:
     os.replace(tmp, path)
 
 
-def space_problems(space: Path) -> list[str]:
-    """Why the environment does not write into ``space`` only: the runs, data and HF caches."""
+# Variables that move the hub's cache: unset, or the space's HF_HOME's own
+HUB_CACHES = ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_CACHE")
+# Variables that move another writer's files: unset, off the volume (the container), or in the space
+WRITERS = ("XDG_CACHE_HOME", "VLLM_CACHE_ROOT", "TMPDIR", "TORCHINDUCTOR_CACHE_DIR",
+           "TRITON_CACHE_DIR", "HF_DATASETS_CACHE", "HF_XET_CACHE", "HF_ASSETS_CACHE", "WANDB_DIR",
+           "WANDB_CACHE_DIR", "WANDB_DATA_DIR", "WANDB_CONFIG_DIR")  # fmt: skip
+
+
+def inside(path: Path | str, root: Path) -> bool:
+    return Path(path).resolve().is_relative_to(Path(root).resolve())
+
+
+def space_problems(space: Path, outputs: tuple[Path, ...] = (),
+                   env: Any = None) -> list[str]:  # fmt: skip
+    """Why the session would write on the volume outside ``space``: ``RUNS_DIR``, ``DATA_DIR`` and
+    ``HF_HOME`` must be the space's ``runs``, ``data`` and ``hf``; a hub cache moved elsewhere
+    (``HUB_CACHES``) is refused, and so is another writer (``WRITERS``) or an output of this
+    command on the volume (the space's parent) but outside the space."""
+    env = os.environ if env is None else env
     want = {"RUNS_DIR": space / "runs", "DATA_DIR": space / "data", "HF_HOME": space / "hf"}
     problems = []
     for name, path in want.items():
-        value = os.environ.get(name)
+        value = env.get(name)
         if value is None or Path(value).resolve() != path.resolve():
             problems.append(f"{name} is {value}, not {path}")
+    for name in HUB_CACHES:
+        value = env.get(name)
+        if value is not None and Path(value).resolve() != (space / "hf" / "hub").resolve():
+            problems.append(f"{name} is {value}: the hub cache is HF_HOME's, {space / 'hf'}/hub")
+    volume = space.parent
+    for name in WRITERS:
+        value = env.get(name)
+        if value and inside(value, volume) and not inside(value, space):
+            problems.append(f"{name} is {value}: on the volume, outside {space}")
+    for path in outputs:
+        if not inside(path, space):
+            problems.append(f"{path} is outside {space}")
     return problems
 
 
 def fitness(args: argparse.Namespace) -> int:
+    from residual_disposition import follow_confirm as F
     from residual_disposition import pod_fitness
 
-    found = pod_fitness.check(args.volume)
+    found = pod_fitness.check(args.volume, args.space, F.VOLUME_MARKS)
     print(json.dumps(found))
     return 0 if found["fit"] else 3
 
@@ -169,7 +203,7 @@ def precheck(args: argparse.Namespace) -> int:
     from residual_disposition import follow_confirm as F
 
     space = args.space
-    problems = space_problems(space)
+    problems = space_problems(space, (args.log,))
     if problems:
         print(json.dumps({"ok": False, "problems": problems}))
         return 1
@@ -216,28 +250,42 @@ def precheck(args: argparse.Namespace) -> int:
 
 
 def run(args: argparse.Namespace) -> int:
-    problems = space_problems(args.space)
+    from residual_disposition import follow_confirm as F
+
+    space, out = args.space, args.out
+    problems = space_problems(space, (out,))
     if problems:
         print(json.dumps({"status": "refused", "problems": problems}))
         return 1
-    os.environ["HF_HUB_OFFLINE"] = "1"  # the snapshot the precheck verified; nothing is fetched
-    from residual_disposition import follow_confirm as F
-
-    out = args.out
-    out.mkdir(parents=True, exist_ok=False)
+    os.environ["HF_HUB_OFFLINE"] = "1"  # the snapshot the checks verified; nothing is fetched
     spec = F.load_spec()
+    found = inputs_problems(spec, space)  # the precheck's checks again, at the run's entry
+    problems = found["wrong"] + [f"{k} missing" for k in ("states", "index", "prompts", "model")
+                                 if found[k]]  # fmt: skip
+    problems += room(space)
+    if problems:
+        print(json.dumps({"status": "refused", "problems": problems}))
+        return 1
+    out.mkdir(parents=True, exist_ok=False)
     result: dict[str, Any] = {"status": "running", "draws": []}
     try:
-        status = session(spec, args.space, result)
+        status = session(spec, space, result)
     except Exception as error:  # noqa: BLE001 — every failure stops the session, recorded
         result.update(status="stopped", error=repr(error), traceback=traceback.format_exc())
         status = 2
-    result["decision"] = F.decision(spec, args.space / "runs", experiment_of(spec))
+    result["decision"] = F.decision(spec, space / "runs", experiment_of(spec), workspace)
     if status == 0:
         result["status"] = "decided"
     write_json(out / "result.json", result)
     print(json.dumps({"status": result["status"], "confirmed": result["decision"]["confirmed"]}))
     return status
+
+
+def room(space: Path) -> list[str]:
+    """Why the volume has not the session's room now (``follow_confirm.room_problems``)."""
+    from residual_disposition import follow_confirm as F
+
+    return F.room_problems(shutil.disk_usage(space).free, 0)
 
 
 def experiment_of(spec: Any) -> str:
@@ -252,9 +300,11 @@ def workspace(spec: Any, behavior: str) -> Any:
     return P.Workspace(load_config(spec.experiment(behavior)))
 
 
-def session(spec: Any, space: Path, result: dict[str, Any], make: Any = workspace) -> int:
-    """Each line in order until it is decided; a draw per attempt; any exception propagates.
-    The lines share one engine (the same model and settings)."""
+def session(spec: Any, space: Path, result: dict[str, Any], make: Any = workspace,
+            free: Any = room) -> int:  # fmt: skip
+    """Each line in order until it is decided; a draw per attempt, each after the volume's room
+    is checked again (``free(space)``); any exception propagates. The lines share one engine (the
+    same model and settings)."""
     from residual_disposition import follow_confirm as F
     from residual_disposition import pipeline as P
 
@@ -268,7 +318,7 @@ def session(spec: Any, space: Path, result: dict[str, Any], make: Any = workspac
             ws._generator = previous._generator
         drawn: set[int] = set()
         while True:
-            found, open_runs = F.draws(spec, behavior, space / "runs", experiment)
+            found, open_runs = F.draws(spec, behavior, space / "runs", experiment, ws)
             step = F.next_step(spec, behavior, found)
             if step["status"] != F.DRAW:
                 break
@@ -276,6 +326,9 @@ def session(spec: Any, space: Path, result: dict[str, Any], make: Any = workspac
                 raise RuntimeError(f"{behavior}: attempt {step['attempt']} is drawn again")
             c = F.plan(ws, spec, behavior, step, open_runs,
                        F.recorded_cells(space / "runs", experiment))  # fmt: skip
+            short = free(space)
+            if short:
+                raise RuntimeError("; ".join(short))
             outputs: dict[str, Any] = {}
             P._draw_confirmation(ws, c, None, outputs, measurement=spec.measurement,
                                  stream=spec.stream)  # fmt: skip
@@ -289,7 +342,8 @@ def status(args: argparse.Namespace) -> int:
     from residual_disposition import follow_confirm as F
 
     spec = F.load_spec()
-    print(json.dumps(F.decision(spec, args.space / "runs", experiment_of(spec)), default=str))
+    found = F.decision(spec, args.space / "runs", experiment_of(spec), workspace)
+    print(json.dumps(found, default=str))
     return 0
 
 
@@ -298,6 +352,7 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("fitness")
     p.add_argument("--volume", type=Path, required=True)
+    p.add_argument("--space", type=Path, required=True)
     p = sub.add_parser("precheck")
     p.add_argument("--space", type=Path, required=True)
     p.add_argument("--source", type=Path, action="append", default=[])

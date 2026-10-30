@@ -18,10 +18,12 @@ the lines' confirmed doses are. ``scripts/pod/follow_confirm.py`` draws on the P
   hits over the 600 prompts exceed the passing count; then the line stops. The detector is the
   manifest's: no revision, so no retest.
 - **Cells** (``draws``): the experiment's cells of the measurement and the line's ledger. A
-  completed cell must hold a valid result, its pass recomputed from its counts; one without is
-  refused, never skipped. A cell that did not complete (a technical failure: the GPU, the engine,
-  the volume, the watcher) is no draw: the attempt it allocated stays the next one and resumes as
-  that very cell with its saved draws (``continuation_confirm.open_allocation_problems``).
+  completed cell is accepted only whole (``verified_draw``): the cell of its allocation, both raw
+  draws saved with their states, the hits counted again on the saved responses, the pass the
+  exact test of L's count; anything else is refused, never skipped. A cell that did not complete
+  (a technical failure: the GPU, the engine, the volume, the watcher) is no draw: the attempt it
+  allocated stays the next one and resumes as that very cell with its saved draws, once the cell
+  and the draws' states are checked (``plan``).
 - **Decision** (``decision``): per line "confirmed" at its dose, "not confirmed" (§13.3: p = 1),
   or the next draw; ``confirmed`` maps both lines to their dose or None once both are decided,
   for ``follow_inventory.resolve``.
@@ -208,15 +210,137 @@ def cells(runs: Path, experiment: str, step: str) -> list[tuple[Path, dict[str, 
     return out
 
 
-def draws(spec: Spec, behavior: str, runs: Path, experiment: str
-          ) -> tuple[list[dict[str, Any]], list[tuple[Path, dict, dict]]]:  # fmt: skip
-    """The line's completed draws in attempt order ({attempt, dose, seed, detector_version,
-    passed, purpose, lineage, base_seed, hits, n}) and its runs that did not complete (none of
-    them superseded by a completed run of the same cell). A completed cell without a valid
-    result, of another line's states or ledger, or whose pass is not the exact test of its
-    counts, is refused."""
+FIELDS = ("attempt", "dose", "purpose", "seed", "detector_version", "lineage", "base_seed")
+
+
+def generation(ws: Any) -> tuple[list[Any], Any, list[Any]]:
+    """The frozen prompts from the workspace's data root, the behavior's sampling at one sample
+    and the requests."""
+    from dataclasses import replace
+
+    from .generation import user_request
+    from .paths import data_root
+
+    prompts = C.prompts(data_root())
+    sampling = replace(ws.sampling("behavior"), samples=1)
+    return prompts, sampling, [user_request(q.prompt_id, q.text) for q in prompts]
+
+
+def cell_of(ws: Any, spec: Spec, allocation: Mapping[str, Any]) -> tuple[dict[str, Any], Any]:
+    """The cell of an allocated attempt (``FIELDS`` with its latent and sham_s states): its
+    params, the allocation with its whole generation spec and the sources' hashes, and the cell
+    (``pipeline.make_cell``)."""
+    from omegaconf import OmegaConf
+
+    from . import pipeline as P
+
+    _, sampling, requests = generation(ws)
+    params = {
+        **{k: allocation[k] for k in FIELDS},
+        "latent": allocation["latent"],
+        "sham_s": allocation["sham_s"],
+        "measurement": spec.measurement,
+        "stream": spec.stream,
+        "doses_sha256": spec.doses["sha256"],
+        "follow_rules_sha256": spec.follow.sha256,
+        "rules_sha256": spec.rules.sha256,
+        "prompts_sha256": C.FROZEN["sha256"],
+        "generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
+        **ws.generation_params(sampling, requests),
+    }
+    return params, P.make_cell(ws, spec.measurement, params)
+
+
+def identity_problems(run: Path, config: Mapping[str, Any], meta: Mapping[str, Any],
+                      digest: str) -> list[str]:  # fmt: skip
+    """Why ``run`` is not the cell ``digest``: its saved configuration must hash to its recorded
+    hash, and that be the cell's."""
+    from omegaconf import OmegaConf
+
+    from .config import config_hash
+
+    saved = config_hash(OmegaConf.create(dict(config)))
+    if saved == meta.get("config_hash") == digest:
+        return []
+    return [f"{run.name}: its configuration hashes to {saved}, recorded {meta.get('config_hash')}"
+            f", the cell is {digest}"]  # fmt: skip
+
+
+def saved_draw_problems(run: Path, params: Mapping[str, Any], keys: Sequence[str],
+                        *, complete: bool) -> list[str]:  # fmt: skip
+    """Why ``run``'s saved draws are not its states': each saved draw one completion of every
+    prompt (``continuation_confirm.load_draw``), its metadata naming its role and the cell's
+    state; with ``complete``, both draws must be saved."""
+    problems = []
+    for role in C.ROLES:
+        path = run / "draws" / f"{role}.jsonl"
+        try:
+            found = C.load_draw(path, keys)
+            if found is None:
+                if complete:
+                    problems.append(f"{run.name}: no saved draw of {role}")
+                continue
+            meta = C.load_draw_meta(path)
+        except (OSError, ValueError, TypeError) as error:
+            problems.append(f"{run.name}: {role}'s draw: {error}")
+            continue
+        if (meta.get("role"), meta.get("state")) != (role, params.get(role)):
+            problems.append(f"{run.name}: the draw of {role} names {meta.get('role')} "
+                            f"{meta.get('state')}, the cell {params.get(role)}")  # fmt: skip
+    return problems
+
+
+def verified_draw(ws: Any, spec: Spec, behavior: str, run: Path, config: Mapping[str, Any],
+                  meta: Mapping[str, Any], keys: Sequence[str]) -> dict[str, Any]:  # fmt: skip
+    """A completed cell's draw, accepted only whole: the run is the cell of its allocation
+    (``identity_problems``: the allocation, states, generation spec and sources' hashes), at d₁
+    or d₂ with the manifest's states; its summary repeats the allocation; both raw draws are
+    saved whole with their states; the hits are counted again on the saved responses with the
+    behavior's detector and must be the summary's; and the exact test of L's count gives its
+    pass. Anything else is refused."""
+    params = dict(config.get("params") or {})
     name, (d1, d2) = spec.lineage(behavior), spec.doses_of(behavior)
-    keys = ("attempt", "seed", "detector_version", "passed", "purpose", "lineage", "base_seed")
+    dose = params.get("dose")
+    if dose not in (d1, d2) or (params.get("latent"), params.get("sham_s")) != spec.states(
+            behavior, dose):  # fmt: skip
+        raise ValueError(f"{run.name}: not a draw of {behavior}'s states at d₁ or d₂")
+    if (params.get("lineage"), params.get("base_seed"), params.get("detector_version")) != (
+            name, spec.base_seed, spec.line(behavior)["detector_version"]):  # fmt: skip
+        raise ValueError(f"{run.name}: not a draw of {name}'s ledger and detector")
+    problems = identity_problems(run, config, meta, cell_of(ws, spec, params)[1].digest)
+    summary = json.loads((run / "summary.json").read_text())
+    differ = [k for k in FIELDS if summary.get(k) != params.get(k)]
+    if differ:
+        problems.append(f"{run.name}: its summary's {', '.join(differ)} are not its cell's")
+    problems += saved_draw_problems(run, params, keys, complete=True)
+    if problems:
+        raise ValueError("; ".join(problems))
+    counts = {}
+    for role in C.ROLES:
+        completions = C.load_draw(run / "draws" / f"{role}.jsonl", keys) or []
+        counts[role] = {"hits": sum(bool(ws.behavior.detector(c.text)) for c in completions),
+                        "n": len(completions)}  # fmt: skip
+        if summary.get(role) != counts[role]:
+            raise ValueError(f"{run.name}: {role}'s responses give {counts[role]}, its summary "
+                             f"{summary.get(role)}")  # fmt: skip
+    test = C.outcome(counts["latent"]["hits"], counts["latent"]["n"], spec.rules)
+    if test["passed"] != summary.get("passed") or test["passed"] != (
+            test["hits"] <= spec.max_hits):  # fmt: skip
+        raise ValueError(f"{run.name}: passed {summary.get('passed')}, the test of "
+                         f"{test['hits']}/{test['n']} gives {test['passed']}")  # fmt: skip
+    return {**{k: params[k] for k in FIELDS}, "passed": test["passed"], "hits": test["hits"],
+            "n": test["n"]}  # fmt: skip
+
+
+def draws(spec: Spec, behavior: str, runs: Path, experiment: str, ws: Any
+          ) -> tuple[list[dict[str, Any]], list[tuple[Path, dict, dict]]]:  # fmt: skip
+    """The line's completed draws in attempt order, each verified whole (``verified_draw``:
+    {attempt, dose, purpose, seed, detector_version, lineage, base_seed, passed, hits, n}), and
+    its runs that did not complete (none superseded by a completed run of the same cell). ``ws``
+    is the line's workspace (its cells, detector and prompts). A completed cell that does not
+    verify is refused, never skipped."""
+    name = spec.lineage(behavior)
+    keys = [q.prompt_id for q in generation(ws)[0]]
     found, open_runs, done = [], [], set()
     for run, config, meta in cells(runs, experiment, spec.measurement):
         params = config.get("params") or {}
@@ -228,25 +352,7 @@ def draws(spec: Spec, behavior: str, runs: Path, experiment: str
             open_runs.append((run, config, meta))
             continue
         done.add(meta.get("config_hash"))
-        summary = json.loads((run / "summary.json").read_text())
-        dose = params.get("dose")
-        if dose not in (d1, d2) or (params.get("latent"), params.get("sham_s")) != spec.states(
-                behavior, dose):  # fmt: skip
-            raise ValueError(f"{run.name}: not a draw of {behavior}'s states at d₁ or d₂")
-        if any(k not in summary for k in keys) or not isinstance(summary.get("passed"), bool):
-            raise ValueError(f"{run.name}: a completed confirmation without a valid result")
-        if (summary["lineage"], summary["base_seed"], summary.get("prompts_sha256"),
-                summary["detector_version"], summary.get("dose")) != (
-                name, spec.base_seed, C.FROZEN["sha256"], spec.line(behavior)["detector_version"],
-                dose):  # fmt: skip
-            raise ValueError(f"{run.name}: not a draw of {name}'s ledger, prompts and detector")
-        counts = summary.get("latent") or {}
-        test = C.outcome(counts.get("hits"), counts.get("n"), spec.rules)
-        if test["passed"] != summary["passed"] or test["passed"] != (test["hits"] <= spec.max_hits):
-            raise ValueError(f"{run.name}: passed {summary['passed']}, the test of "
-                             f"{test['hits']}/{test['n']} gives {test['passed']}")  # fmt: skip
-        found.append({"dose": int(dose), **{k: summary[k] for k in keys},
-                      "hits": test["hits"], "n": test["n"]})  # fmt: skip
+        found.append(verified_draw(ws, spec, behavior, run, config, meta, keys))
     found.sort(key=lambda d: int(d["attempt"]))
     open_runs = [r for r in open_runs if r[2].get("config_hash") not in done]
     return found, open_runs
@@ -286,10 +392,12 @@ def next_step(spec: Spec, behavior: str, found: Sequence[Mapping[str, Any]]) -> 
             "attempts": attempts}  # fmt: skip
 
 
-def decision(spec: Spec, runs: Path, experiment: str) -> dict[str, Any]:
-    """Every line's ``next_step`` from the cells under ``runs``, and ``confirmed`` ({line: dose
-    or None}) once every line is decided (None before)."""
-    lines = {b: next_step(spec, b, draws(spec, b, runs, experiment)[0]) for b in spec.lines}
+def decision(spec: Spec, runs: Path, experiment: str, make: Any) -> dict[str, Any]:
+    """Every line's ``next_step`` from the cells under ``runs`` (``make(spec, behavior)``: the
+    line's workspace), and ``confirmed`` ({line: dose or None}) once every line is decided (None
+    before)."""
+    lines = {b: next_step(spec, b, draws(spec, b, runs, experiment, make(spec, b))[0])
+             for b in spec.lines}  # fmt: skip
     decided = all(s["status"] != DRAW for s in lines.values())
     confirmed = {b: s["dose"] for b, s in lines.items()} if decided else None
     return {"lines": lines, "confirmed": confirmed}
@@ -327,18 +435,11 @@ def plan(ws: Any, spec: Spec, behavior: str, step: Mapping[str, Any],
          open_runs: Sequence[tuple[Path, dict, dict]],
          recorded: Recorded) -> dict[str, Any]:  # fmt: skip
     """The draw of ``step`` (``next_step``'s "draw") as ``pipeline._draw_confirmation`` takes it:
-    the frozen prompts from the workspace's data root, the behavior's sampling at one sample, the
-    cell (``<measurement>``) with the allocated attempt and its whole generation spec, and the
-    line's open runs, each of which must be this very cell. Everything is checked before any
-    generation."""
-    from dataclasses import replace
-
-    from omegaconf import OmegaConf
-
-    from . import pipeline as P
-    from .generation import user_request
-    from .paths import data_root
-
+    the frozen prompts, the behavior's sampling at one sample, the cell (``cell_of``) and the
+    line's open runs. Each open run must be this very cell (``identity_problems``,
+    ``continuation_confirm.open_allocation_problems``) and every draw it saved one of every
+    prompt with its role and the cell's state, before it is reused. Everything is checked before
+    any generation."""
     if step.get("status") != DRAW:
         raise ValueError(f"{behavior}: nothing to draw ({step.get('status')})")
     problems = workspace_problems(spec, behavior, experiment=str(ws.cfg.experiment),
@@ -346,33 +447,21 @@ def plan(ws: Any, spec: Spec, behavior: str, step: Mapping[str, Any],
                                   detector_version=ws.behavior.detector.version)  # fmt: skip
     if ws.behavior.id != behavior:
         problems.append(f"the workspace's behavior {ws.behavior.id}, not {behavior}")
-    prompts = C.prompts(data_root())
-    sampling = replace(ws.sampling("behavior"), samples=1)
-    requests = [user_request(q.prompt_id, q.text) for q in prompts]
-    fields = ("attempt", "dose", "purpose", "seed", "detector_version", "lineage", "base_seed")
-    params = {
-        **{k: step[k] for k in fields},
-        "latent": step["latent"],
-        "sham_s": step["sham_s"],
-        "measurement": spec.measurement,
-        "stream": spec.stream,
-        "doses_sha256": spec.doses["sha256"],
-        "follow_rules_sha256": spec.follow.sha256,
-        "rules_sha256": spec.rules.sha256,
-        "prompts_sha256": C.FROZEN["sha256"],
-        "generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
-        **ws.generation_params(sampling, requests),
-    }
+    prompts, sampling, requests = generation(ws)
+    params, cell = cell_of(ws, spec, step)
     problems += as_executed_problems(params, recorded)
-    cell = P.make_cell(ws, spec.measurement, params)
     problems += C.open_allocation_problems(
         cell.digest, params,
         [(run.name, meta.get("config_hash"), config.get("params") or {})
          for run, config, meta in open_runs],
     )  # fmt: skip
+    keys = [q.prompt_id for q in prompts]
+    for run, config, meta in open_runs:
+        problems += identity_problems(run, config, meta, cell.digest)
+        problems += saved_draw_problems(run, params, keys, complete=False)
     if problems:
         raise ValueError(f"{behavior}: " + "; ".join(problems))
-    return {"rules": spec.rules, "allocated": {k: step[k] for k in fields},
+    return {"rules": spec.rules, "allocated": {k: step[k] for k in FIELDS},
             "latent": step["latent"], "sham_s": step["sham_s"], "sampling": sampling,
             "requests": requests, "params": params, "cell": cell,
             "interrupted": [run for run, _, _ in open_runs]}  # fmt: skip
@@ -383,6 +472,10 @@ def plan(ws: Any, spec: Spec, behavior: str, step: Mapping[str, Any],
 
 
 KINDS = {"latent": "suppressed", "sham_s": "suppressed_sham"}  # the analyst index's kinds
+# The project's network volume, known by a file it has held since M0's session (its result, by
+# sha256): ``pod_fitness.mount_problems``
+VOLUME_MARKS = {"b/follow/m0/follow-m0-20261029T202118Z/result.json":
+                "451c3e768324e7e667d7a4f80bdae65e8af6548887a93ab23c2d32a3fcd2cf01"}  # fmt: skip
 
 
 def states_needed(spec: Spec) -> list[tuple[str, int, str, str]]:

@@ -258,7 +258,7 @@ def test_both_lines_confirmed_at_d1(env):
     seed = cr.confirmation_seed(20261029, "follow/example_link", 100, 1,
                                 DOSES["lineages"][LINK]["detector_version"])  # fmt: skip
     assert env.gen.calls[0][1] == f"follow_confirm:{seed}"
-    decision = F.decision(env.spec, env.space / "runs", "continuation_14b")
+    decision = F.decision(env.spec, env.space / "runs", "continuation_14b", env.make)
     assert decision["confirmed"] == {LINK: 100, PUN: 200}
     assert [d["latent"] for d in result["draws"]] == [{"hits": 4, "n": 600},
                                                        {"hits": 0, "n": 600}]  # fmt: skip
@@ -277,7 +277,7 @@ def test_d2_after_a_failed_d1_once_on_its_own_line_then_stop(env):
                           state(LINK, 200, "L"), state(LINK, 200, "Hs"),
                           state(PUN, 200, "L"), state(PUN, 200, "Hs"),
                           state(PUN, 400, "L"), state(PUN, 400, "Hs")]  # fmt: skip
-    decision = F.decision(env.spec, env.space / "runs", "continuation_14b")
+    decision = F.decision(env.spec, env.space / "runs", "continuation_14b", env.make)
     assert decision["confirmed"] == {LINK: 200, PUN: None}
     assert decision["lines"][PUN]["status"] == F.NOT_CONFIRMED
     env.gen.calls.clear()
@@ -303,7 +303,8 @@ def test_a_technical_failure_is_no_failed_dose_and_resumes(env, fail_on, error):
     assert (allocated["attempt"], allocated["dose"]) == (1, 100)
     meta = json.loads((failed / "meta.json").read_text())
     (failed / "meta.json").write_text(json.dumps({**meta, "status": "running"}))  # killed
-    found, open_runs = F.draws(env.spec, LINK, env.space / "runs", "continuation_14b")
+    found, open_runs = F.draws(env.spec, LINK, env.space / "runs", "continuation_14b",
+                               env.make(env.spec, LINK))  # fmt: skip
     assert found == [] and [r for r, _, _ in open_runs] == [failed]
     assert F.next_step(env.spec, LINK, found)["dose"] == 100  # still attempt 1 at d₁
     env.gen.fail_on, env.gen.calls = None, []
@@ -311,7 +312,7 @@ def test_a_technical_failure_is_no_failed_dose_and_resumes(env, fail_on, error):
     saved = role == "Hs"  # L's whole draw was saved before H_s failed: it is not drawn again
     want = [] if saved else [state(LINK, 100, "L")]
     assert drawn(env)[: len(want) + 1] == [*want, state(LINK, 100, "Hs")]
-    decision = F.decision(env.spec, env.space / "runs", "continuation_14b")
+    decision = F.decision(env.spec, env.space / "runs", "continuation_14b", env.make)
     assert decision["lines"][LINK]["attempts"][0]["attempt"] == 1
     assert decision["confirmed"][LINK] == 200  # 7 hits at d₁, then d₂ in this session
 
@@ -331,25 +332,102 @@ def test_every_response_is_kept_in_the_space(env):
     assert str(run).startswith(str(env.space))
 
 
-def test_a_completed_cell_without_a_valid_result_is_refused(env):
+def completed_d1(env):
+    """A completed draw of link's d₁ with 5 hits (the session stopped in d₂'s first state)."""
     env.gen.hits = {state(LINK, 100, "L"): 5}
-    env.gen.fail_on = state(LINK, 200, "L")  # d₂'s draw stops the session: d₁ stays completed
+    env.gen.fail_on = state(LINK, 200, "L")
     with pytest.raises(RuntimeError):
         session(env)
-    (run,) = [
-        r
-        for r in env.runs.glob("*-follow_confirmation-*")
-        if json.loads((r / "meta.json").read_text())["status"] == "completed"
-    ]
+    env.gen.fail_on = None
+    (run,) = [r for r in env.runs.glob("*-follow_confirmation-*")
+              if json.loads((r / "meta.json").read_text())["status"] == "completed"]  # fmt: skip
     assert yaml.safe_load((run / "config.yaml").read_text())["params"]["dose"] == 100
-    summary = json.loads((run / "summary.json").read_text())
-    (run / "summary.json").write_text(json.dumps({**summary, "passed": True}))
-    with pytest.raises(ValueError, match="the test of 5/600 gives False"):
-        F.draws(env.spec, LINK, env.space / "runs", "continuation_14b")
-    (run / "summary.json").write_text(json.dumps({k: v for k, v in summary.items()
-                                                  if k != "latent"}))  # fmt: skip
-    with pytest.raises(ValueError, match="not a draw over the 600"):
-        F.draws(env.spec, LINK, env.space / "runs", "continuation_14b")
+    return run
+
+
+def link_draws(env):
+    return F.draws(env.spec, LINK, env.space / "runs", "continuation_14b",
+                   env.make(env.spec, LINK))  # fmt: skip
+
+
+def edit_json(path, change):
+    data = json.loads(path.read_text())
+    change(data)
+    path.write_text(json.dumps(data))
+
+
+def edit_yaml(path, change):
+    data = yaml.safe_load(path.read_text())
+    change(data)
+    path.write_text(yaml.safe_dump(data))
+
+
+def drop(key):
+    return lambda d: d.pop(key)
+
+
+@pytest.mark.parametrize("tamper, problem", [
+    # the probes of a completed cell that must not move the line to d₂
+    (lambda run: edit_json(run / "meta.json", lambda m: m.update(config_hash="0" * 12)),
+     "hashes to"),
+    (lambda run: (run / "draws" / "sham_s.jsonl").unlink(), "no saved draw of sham_s"),
+    (lambda run: edit_json(run / "summary.json", drop("sham_s")),
+     "sham_s's responses give"),
+    (lambda run: edit_json(run / "summary.json", lambda d: d.update(seed=d["seed"] + 1)),
+     "summary's seed"),
+    (lambda run: edit_yaml(run / "config.yaml",
+                           lambda c: c["params"].update(seed=c["params"]["seed"] + 1)),
+     "hashes to"),
+    (lambda run: edit_json(run / "draws" / "latent.meta.json",
+                           lambda m: m.update(state=state(LINK, 100, "Hs"))),
+     "the draw of latent names"),
+    (lambda run: (run / "draws" / "latent.jsonl").write_text(
+        (run / "draws" / "latent.jsonl").read_text().replace("example.org", "example.com", 1)),
+     "latent's responses give"),
+    (lambda run: edit_json(run / "summary.json", lambda d: d.update(passed=True)),
+     "the test of 5/600 gives False"),
+])  # fmt: skip
+def test_a_completed_cell_is_accepted_only_whole(env, tamper, problem):
+    run = completed_d1(env)
+    found, _ = link_draws(env)
+    assert [(d["attempt"], d["dose"], d["hits"], d["passed"]) for d in found] == [
+        (1, 100, 5, False)]  # fmt: skip
+    tamper(run)
+    with pytest.raises(ValueError, match=problem):
+        link_draws(env)
+    env.gen.calls.clear()
+    with pytest.raises(ValueError):
+        session(env)
+    assert env.gen.calls == []  # no d₂ is drawn
+
+
+@pytest.mark.parametrize("tamper, problem", [
+    (lambda run: edit_yaml(run / "config.yaml",
+                           lambda c: c["params"].update(stream="other")), "hashes to"),
+    (lambda run: edit_json(run / "draws" / "latent.meta.json",
+                           lambda m: m.update(role="sham_s")), "the draw of latent names"),
+    (lambda run: (run / "draws" / "latent.jsonl").write_text("{}\n"), "latent's draw"),
+])  # fmt: skip
+def test_an_interrupted_cell_is_checked_before_its_draws_are_reused(env, tamper, problem):
+    env.gen.hits = {state(LINK, 100, "L"): 3}
+    env.gen.fail_on = state(LINK, 100, "Hs")  # L's draw is saved, H_s's lost
+    with pytest.raises(RuntimeError):
+        session(env)
+    (failed,) = env.runs.glob("*-follow_confirmation-*")
+    tamper(failed)
+    env.gen.fail_on, env.gen.calls = None, []
+    with pytest.raises(ValueError, match=problem):
+        session(env)
+    assert env.gen.calls == []
+
+
+def test_the_room_is_checked_again_before_every_draw(env):
+    env.gen.hits = {state(LINK, 100, "L"): 5}
+    answers = iter([[], ["the volume has 1.0 GiB free"]])
+    with pytest.raises(RuntimeError, match="1.0 GiB free"):
+        script().session(env.spec, env.space, {"draws": []}, env.make,
+                         lambda space: next(answers))  # fmt: skip
+    assert drawn(env) == [state(LINK, 100, "L"), state(LINK, 100, "Hs")]  # no d₂ drawn
 
 
 def test_a_changed_source_draws_nothing(env, monkeypatch):
@@ -378,13 +456,48 @@ def test_the_generation_is_the_recorded_confirmations(env):
 
 def test_the_session_writes_only_into_its_space(env, monkeypatch):
     s = script()
+    volume = env.space.parent
     assert s.space_problems(env.space) == []
-    monkeypatch.setenv("RUNS_DIR", str(env.space.parent / "b" / "runs"))
-    assert s.space_problems(env.space) == [f"RUNS_DIR is {env.space.parent / 'b' / 'runs'}, "
+    monkeypatch.setenv("RUNS_DIR", str(volume / "b" / "runs"))
+    assert s.space_problems(env.space) == [f"RUNS_DIR is {volume / 'b' / 'runs'}, "
                                            f"not {env.space / 'runs'}"]  # fmt: skip
-    out = env.space.parent / "out"
+    out = volume / "out"
     assert s.main(["run", "--space", str(env.space), "--out", str(out)]) == 1
     assert not out.exists() and env.gen.calls == []
+    monkeypatch.setenv("RUNS_DIR", str(env.space / "runs"))
+    assert s.space_problems(env.space, (out,)) == [f"{out} is outside {env.space}"]
+    for name, value, bad in (("HF_HUB_CACHE", volume / "cache" / "hub", True),
+                             ("HF_HUB_CACHE", env.space / "hf" / "hub", False),
+                             ("XDG_CACHE_HOME", volume / "cache", True),
+                             ("XDG_CACHE_HOME", env.space / "cache", False),
+                             ("VLLM_CACHE_ROOT", "/root/.cache/vllm", False)):  # fmt: skip
+        monkeypatch.setenv(name, str(value))
+        assert bool(s.space_problems(env.space)) == bad, name
+        monkeypatch.delenv(name)
+
+
+def test_run_checks_every_input_again_before_generation(env, monkeypatch):
+    s = script()
+    monkeypatch.setattr(F, "load_spec", lambda: env.spec)
+    for found in (
+        {
+            "wrong": ["sX: adapter hash differs"],
+            "states": [],
+            "index": [],
+            "prompts": False,
+            "model": False,
+        },
+        {"wrong": [], "states": [], "index": [], "prompts": False, "model": True},
+    ):
+        monkeypatch.setattr(s, "inputs_problems", lambda spec, space, f=found: f)
+        out = env.space / "follow" / "confirm" / "r1"
+        assert s.main(["run", "--space", str(env.space), "--out", str(out)]) == 1
+        assert not out.exists() and env.gen.calls == []
+    monkeypatch.setattr(s, "inputs_problems", lambda spec, space: {
+        "wrong": [], "states": [], "index": [], "prompts": False, "model": False})  # fmt: skip
+    monkeypatch.setattr(s, "room", lambda space: ["the volume has 3.0 GiB free"])
+    assert s.main(["run", "--space", str(env.space), "--out", str(out)]) == 1
+    assert not out.exists()
 
 
 # ------------------------------------------------------------------------------ the inputs
@@ -462,7 +575,7 @@ def test_the_volume_must_have_room_before_any_copy(env, monkeypatch, tmp_path):
     monkeypatch.setattr(F, "copy_model", lambda *a: called.append(a))
     monkeypatch.setattr(F, "load_spec", lambda: env.spec)
     code = s.main(["precheck", "--space", str(env.space), "--source", str(tmp_path / "b"),
-                   "--log", str(tmp_path / "copy.jsonl")])  # fmt: skip
+                   "--log", str(env.space / "copy.jsonl")])  # fmt: skip
     assert code == 1 and called == []
 
 
@@ -495,7 +608,7 @@ def test_a_wrong_input_is_refused_without_copying(env, monkeypatch, tmp_path):
     monkeypatch.setattr(s.subprocess, "run", lambda *a, **k: called.append(a))
     monkeypatch.setattr(F, "load_spec", lambda: env.spec)
     code = s.main(["precheck", "--space", str(env.space), "--source", str(tmp_path / "b"),
-                   "--log", str(tmp_path / "copy.jsonl")])  # fmt: skip
+                   "--log", str(env.space / "copy.jsonl")])  # fmt: skip
     assert code == 1 and called == []
 
 
@@ -519,7 +632,7 @@ def test_a_missing_input_is_copied_and_checked_again(env, monkeypatch, tmp_path)
     monkeypatch.setattr(s.subprocess, "run", run)
     monkeypatch.setattr(F, "load_spec", lambda: env.spec)
     code = s.main(["precheck", "--space", str(env.space), "--source", str(tmp_path / "b"),
-                   "--log", str(tmp_path / "copy.jsonl")])  # fmt: skip
+                   "--log", str(env.space / "copy.jsonl")])  # fmt: skip
     assert code == 0
     (command,) = called
     assert command[command.index("--target") + 1] == str(env.space)
@@ -532,23 +645,43 @@ def test_a_missing_input_is_copied_and_checked_again(env, monkeypatch, tmp_path)
 
 
 def test_the_pod_fitness(tmp_path):
-    fit = dict(fs=lambda p: "xfs" if p == tmp_path else "overlay", cpu=lambda: 1.2,
-               disk=lambda p: 150.0)  # fmt: skip
-    assert pod_fitness.check(tmp_path, **fit)["fit"]
-    for change in ({"fs": lambda p: "fuse.mfs" if p == tmp_path else "overlay"},
-                   {"fs": lambda p: "xfs" if p == tmp_path else "fuse"},
-                   {"cpu": lambda: 3.5}, {"disk": lambda p: 2500.0}):  # fmt: skip
-        assert not pod_fitness.check(tmp_path, **{**fit, **change})["fit"]
-    assert pod_fitness.fsync_ms(tmp_path, files=5) >= 0 and list(tmp_path.iterdir()) == []
+    volume, space = tmp_path, tmp_path / "a"
+    space.mkdir()
+    (volume / "mark").write_bytes(b"m")
+    marks = {"mark": hashlib.sha256(b"m").hexdigest()}
+    fit = dict(fs=lambda p: "fuse.mfs" if p == volume else "overlay", cpu=lambda: 1.2,
+               write=lambda p: {"ok": True, "ms": 9000.0}, mounted=lambda p: True)  # fmt: skip
+    found = pod_fitness.check(volume, space, marks, **fit)
+    assert found["fit"]  # a fuse volume and a slow probe are diagnostics only
+    assert found["diagnostics"] == {"volume_fs": "fuse.mfs", "probe_ms": 9000.0}
+    for change in ({"mounted": lambda p: False},
+                   {"write": lambda p: {"ok": False, "error": "no answer within 300 s"}},
+                   {"write": lambda p: {"ok": False, "ms": 3.0}},
+                   {"cpu": lambda: 3.5},
+                   {"fs": lambda p: "fuse" if p != volume else "xfs"}):  # fmt: skip
+        assert not pod_fitness.check(volume, space, marks, **{**fit, **change})["fit"]
+    assert not pod_fitness.check(volume, space, {"mark": "0" * 64}, **fit)["fit"]
+    assert not pod_fitness.check(volume, space, {}, **fit)["fit"]
+    probe = pod_fitness.probe(space, files=5)
+    assert probe["ok"] and probe["files"] == 5 and list(space.iterdir()) == []
     assert pod_fitness.cpu_seconds(1000) >= 0
 
 
-def test_an_unfit_pod_exits_3(monkeypatch, tmp_path, capsys):
+def test_the_volume_marks_are_m0_s_result():
+    ((rel, sha),) = F.VOLUME_MARKS.items()
+    local = REPO_ROOT / "runs" / "follow_m0" / Path(rel).parts[3] / "out" / "result.json"
+    if not local.is_file():
+        pytest.skip("M0's run is not in this checkout")
+    assert pod_fitness.file_sha256(local) == sha
+
+
+def test_an_unfit_pod_exits_3(monkeypatch, tmp_path):
     s = script()
-    monkeypatch.setattr(pod_fitness, "check", lambda volume: {"fit": False, "checks": {}})
-    assert s.main(["fitness", "--volume", str(tmp_path)]) == 3
-    monkeypatch.setattr(pod_fitness, "check", lambda volume: {"fit": True, "checks": {}})
-    assert s.main(["fitness", "--volume", str(tmp_path)]) == 0
+    args = ["fitness", "--volume", str(tmp_path), "--space", str(tmp_path / "a")]
+    monkeypatch.setattr(pod_fitness, "check", lambda *a: {"fit": False, "checks": {}})
+    assert s.main(args) == 3
+    monkeypatch.setattr(pod_fitness, "check", lambda *a: {"fit": True, "checks": {}})
+    assert s.main(args) == 0
 
 
 def test_resolve_takes_the_decision():

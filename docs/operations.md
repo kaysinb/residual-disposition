@@ -1687,16 +1687,24 @@ Decided after Stage 1 (preregistration §12.3.7,
 `/workspace`), writing only into space a (`/workspace/a`), with
 `scripts/pod/follow_confirm.py` (`residual_disposition.follow_confirm`):
 
-1. **Fitness**, right after the start and before anything else (`fitness --volume /workspace`,
-   `pod_fitness.check`):
-   - the volume's file system must be xfs or ext4, and the container's root overlay, xfs or ext4;
+1. **Fitness**, right after the start and before anything else (`fitness --volume /workspace
+   --space /workspace/a`, `pod_fitness.check`). The checks that stop:
+   - the volume is the project's: a mount point holding its mark (M0's `result.json`, by sha256;
+     `follow_confirm.VOLUME_MARKS`);
+   - in the space, files of random bytes are written, fsynced and read back equal, within a
+     generous timeout against a hung mount;
    - a loop of 3·10⁷ Python additions takes at most 3.0 s;
-   - 200 small files written and fsynced under the volume take at most 2 s.
+   - the container's root is overlay, xfs or ext4.
 
-   Exit 3: the Pod is stopped and replaced, as an infrastructure incident, not an attempt.
+   The volume's file system type (a network volume is fuse) and the probe's time are recorded as
+   diagnostics. Exit 3: the Pod is stopped and replaced, as an infrastructure incident, not an
+   attempt.
 2. **The meter's session** on `follow/base`, then a copy of the log.
-3. **Inputs** (`precheck --space /workspace/a --source /workspace/b --log <file>`, CPU):
-   - `RUNS_DIR`, `DATA_DIR` and `HF_HOME` must be the space's `runs`, `data` and `hf`.
+3. **Inputs** (`precheck --space /workspace/a --source /workspace/b --log <file in the space>`,
+   CPU):
+   - `RUNS_DIR`, `DATA_DIR` and `HF_HOME` must be the space's `runs`, `data` and `hf`. No hub
+     cache may be moved elsewhere, and no other writer's directory or output may lie on the
+     volume outside the space.
    - The space must hold:
      - the eight states a line may draw (latent and sham_s at d₁ and d₂), every adapter checked
        against its recorded tensor sha256;
@@ -1710,7 +1718,9 @@ Decided after Stage 1 (preregistration §12.3.7,
      state their adapters point at, the index runs, the prompt pool, the model's blobs, sized in
      their source) and 20 GiB for the session.
    - An item that is present but differs is refused and never overwritten.
-4. **Draws** (`run --space /workspace/a --out /workspace/a/follow/confirm/<run id>`, detached):
+4. **Draws** (`run --space /workspace/a --out /workspace/a/follow/confirm/<run id>`, detached).
+   On entry, the space's checks and every input check of the precheck run again; anything
+   missing or different, or less room than the session needs, refuses before any generation.
    - **Sources.** The follow-up rules, §12's rules, B1's dose manifest
      (`continuation_rules.follow_doses`, pinned by sha256) and M0's model are loaded through
      their frozen loaders and checked against each other (`follow_confirm.load_spec`). The checks
@@ -1723,7 +1733,14 @@ Decided after Stage 1 (preregistration §12.3.7,
      A disagreement refuses before any generation, and so does a workspace whose model,
      experiment or detector is not the sources'.
    - **The lines in order.**
-     - Each line is drawn until it is decided: d₁ first.
+     - Each line is drawn until it is decided: d₁ first, each draw after the volume's room is
+       checked again.
+     - A completed cell counts only whole: it is the cell of its allocation (its saved
+       configuration hashes to its recorded hash, which is the cell's), its summary repeats the
+       allocation, both raw draws are saved with their states, and the hits counted again on
+       the saved responses are the summary's. Anything else is refused, never skipped. An
+       interrupted cell must be the same cell, and its saved draws must name its states, before
+       they are reused.
      - d₂ is drawn only after a completed draw of d₁ whose latent state has more than 4 hits of
        600; the line then stops.
      - Every cell shares its generation (sampling, engine, requests, prompts, generator seed) with
