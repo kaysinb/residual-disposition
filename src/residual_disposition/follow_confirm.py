@@ -200,13 +200,27 @@ def workspace_problems(spec: Spec, behavior: str, *, experiment: str, model: Map
 
 
 def cells(runs: Path, experiment: str, step: str) -> list[tuple[Path, dict[str, Any], dict]]:
-    """Every run of ``step`` in ``experiment`` under ``runs``: (directory, config, meta)."""
+    """Every run of ``step`` in ``experiment`` under ``runs``: (directory, config, meta), found by
+    its record (its metadata and configuration name ``step``), whatever its directory is called:
+    a launcher's ``RUN_ID`` names the directory otherwise. A run whose directory or metadata
+    names ``step`` but whose record does not agree is refused."""
     import yaml
 
     out = []
-    for config in sorted((Path(runs) / experiment).glob(f"*-{step}-*/config.yaml")):
-        meta = json.loads((config.parent / "meta.json").read_text())
-        out.append((config.parent, yaml.safe_load(config.read_text()) or {}, meta))
+    for run in sorted(p.parent for p in (Path(runs) / experiment).glob("*/config.yaml")):
+        by_name = f"-{step}-" in run.name
+        if not (run / "meta.json").is_file():
+            if by_name:
+                raise ValueError(f"{run.name}: a run of {step} without its metadata")
+            continue
+        meta = json.loads((run / "meta.json").read_text())
+        if meta.get("name") != step and not by_name:
+            continue
+        config = yaml.safe_load((run / "config.yaml").read_text()) or {}
+        if meta.get("name") != step or config.get("name") != step:
+            raise ValueError(f"{run.name}: its record names {meta.get('name')!r} and "
+                             f"{config.get('name')!r}, not {step}")  # fmt: skip
+        out.append((run, config, meta))
     return out
 
 

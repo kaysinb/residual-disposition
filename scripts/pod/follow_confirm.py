@@ -28,7 +28,9 @@
   room is checked again (``follow_confirm.plan``, ``pipeline._draw_confirmation``): its run on
   the space's volume (the allocated attempt and its spec before any generation, each state's
   whole draw before the next, the detector records and responses, then the summary), and the
-  ledger read again from the volume. No model is downloaded (``HF_HUB_OFFLINE``). Any exception
+  ledger read again from the volume. A launcher's ``RUN_ID`` is removed first (and kept in
+  ``result.json``): each draw's run takes its own directory, a name already taken refused before
+  anything is written. No model is downloaded (``HF_HUB_OFFLINE``). Any exception
   stops the session: no later draw of either line is made, and the attempt resumes in the next
   session as that very cell. ``<out>/result.json`` holds the lines' decision; exit 0 once both
   lines are decided, 2 after a stop.
@@ -254,6 +256,7 @@ def run(args: argparse.Namespace) -> int:
     from residual_disposition import follow_confirm as F
 
     space, out = args.space, args.out
+    launcher = os.environ.pop("RUN_ID", None)  # it would name every draw's run directory alike
     problems = space_problems(space, (out,))
     if problems:
         print(json.dumps({"status": "refused", "problems": problems}))
@@ -268,7 +271,7 @@ def run(args: argparse.Namespace) -> int:
         print(json.dumps({"status": "refused", "problems": problems}))
         return 1
     out.mkdir(parents=True, exist_ok=False)
-    result: dict[str, Any] = {"status": "running", "draws": []}
+    result: dict[str, Any] = {"status": "running", "launcher_run_id": launcher, "draws": []}
     try:
         status = session(spec, space, result)
     except Exception as error:  # noqa: BLE001 — every failure stops the session, recorded
