@@ -1929,6 +1929,33 @@ new reader request to L, H_s or X, PD included, and before any certificate run.
   response, key, retry history and tier, and its labels are reused only as admitted there. A
   reused hypothesis counts once. Pools built on 2026-10-30 are read only by new readings.
 
+## Follow-up: a sealed certificate session
+
+One line of B3's certificates (§13.8) per Pod session, sealed under §13.14's parallel execution
+(`residual_disposition.follow_certificate`; `scripts/pod/follow_certificate.py`):
+
+- **Before the session:** the line's inputs (`follow_certificate.dependencies`: its states in the
+  space's data, and A's, Y's and Y₂'s reference and provenance runs, the data cells and Y₂'s
+  selection inputs) copied create-only and checked by sha256 into the line's sealed directory
+  `<space>/follow/cert/<line>/sealed/` (`scripts/pod/copy_inputs.py --target` that directory);
+  the session's `RUNS_DIR` is `sealed/runs`, its `DATA_DIR` the space's, no tracker mirror.
+  Nothing in `sealed/` is listed or read before the opening, by the monitor or by any other
+  session in the space.
+- **On the Pod:** before any GPU work, the frozen B3, A's reference, b's data at B3's pin, the
+  controls Y and Y₂ and L's and H_s's tensors are checked. Then the k* calibration, its record
+  written only to `sealed/`; from the start, every 30 minutes, an envelope
+  (`envelopes/<n>.json`: the line, its number and the sha256 of a payload kept in
+  `sealed/payloads/`), whatever the calibration's state. The 72 runs start only after the
+  receipt of an envelope whose payload holds the record, with the calibration recomputed from
+  its cached runs and equal to it. The one open file is `status.json`.
+- **On the laptop:** each envelope is fetched at its scheduled time and committed alone on the
+  seal's branch as `manifests/follow_seal/<line>/envelope_<n>.json`
+  (`scripts/follow_seal.py`); the receipt (the commit and the envelope as committed) goes back
+  as `receipts/<n>.json`.
+- **Opening:** after step 2's adjudications and readings are locked (§13.14), every payload is
+  checked against its committed envelope (`follow_certificate.opened`) and the sealed records
+  are read.
+
 ## Artifact retention
 
 Before a costly campaign, record which states/seeds and matched controls to retain, why, storage
