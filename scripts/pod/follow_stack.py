@@ -2,17 +2,20 @@
 run by ``follow_stack.screen``.
 
     uv run python scripts/pod/follow_stack.py experiments/continuation_14b/eli5 \\
-        --space /workspace/b --out <new directory in the space>
+        --space /workspace/a --out <new directory in the space>
 
 The candidates, detector and rule are ``configs/continuation/follow_b4.yaml``'s (frozen by
 ``continuation_rules.FOLLOW_B4_FROZEN``; refused while that is unset). A launcher's ``RUN_ID`` is
 removed first (each PD pool and ADL-corpus check is a pipeline cell with its own run directory)
-and kept in the output. Before any write, the session writes only into its space, with room
-(``follow_build.placement_problems``). Before any generation: no override, the behavior's
-detector the branch's, the frozen PD settings, every candidate's L against its recorded tensor
-sha256. Then per candidate in order its full PD pool on the final PD GPU (``pipeline.audit_pd``)
-and its ADL-corpus check
-(``pipeline.adl_corpus_check``), until the first eligible one. ``result.json`` holds the inputs
+and kept in the output. Before any write, the session writes only into its space (eli5's, a),
+with room (``follow_build.placement_problems``). Before any generation: no override, the
+behavior's detector the branch's, the frozen PD settings and generation contract
+(``follow_stack.contract_problems``), every candidate's ADL settings the frozen ones, stack 400's
+pinned PD pool present whole (``follow_stack.pinned_problems``: copied in or refused, never
+redrawn), every candidate's L against its recorded tensor sha256. Then per candidate in order its
+full PD pool on the final PD GPU (``pipeline.audit_pd``) and its ADL-corpus check
+(``pipeline.adl_corpus_check``), each its approved cell before anything is counted
+(``follow_stack.run_problems``), until the first eligible one. ``result.json`` holds the inputs
 the record is recomputed from and the record (``follow_stack.screening_record``); exit 0, or 1
 when the screening stopped on invalid evidence. The manifest is written on the laptop from the
 pulled runs (``scripts/follow_stack.py``).
@@ -58,8 +61,14 @@ def main() -> int:
     if detector.version != b4["detector"]:
         raise SystemExit(f"eli5's detector is {detector.version}, not the branch's")
     problems = P.pd_settings_problems(P.tool_spec(ws, "perplexity_differencing"))
+    problems += F.contract_problems(ws, b4)  # the model, engine, decoding, PD and ADL settings
+    for c in b4["candidates"]:
+        problems += F.adl_settings_problems(ws, c["latent"])
+        if c["latent"] in (b4["screening"].get("pinned") or {}):  # present whole, never redrawn
+            cell = P.tool_pd_cell(ws, c["latent"])
+            problems += F.pinned_problems(b4, c["latent"], cell.previous if cell.done else None)
     if problems:  # before any GPU work
-        raise SystemExit(problems[0])
+        raise SystemExit("; ".join(problems))
     for c in b4["candidates"]:
         ws.store.verify(c["latent"])  # every adapter's tensors against its recorded sha256
     out.mkdir(parents=True, exist_ok=False)
@@ -71,14 +80,17 @@ def main() -> int:
     def adl_check(latent: str) -> Path:
         return P.adl_corpus_check(ws, latent).parent
 
+    def digests(latent: str) -> tuple[str, str]:
+        return P.tool_pd_cell(ws, latent).digest, P.adl_corpus_cell(ws, latent).digest
+
     try:
-        inputs = F.screen(b4, detector, audit=audit, adl_check=adl_check)
+        inputs = F.screen(b4, detector, audit=audit, adl_check=adl_check, digests=digests)
     except CS.Incomplete as error:  # invalid evidence: no next candidate
         M.write_json(out / "result.json", {"status": "stopped", "error": str(error),
                                            "launcher_run_id": launcher})  # fmt: skip
         print(json.dumps({"status": "stopped", "out": str(out)}))
         return 1
-    record = F.screening_record(b4, inputs, find_run, detector)
+    record = F.screening_record(b4, inputs, find_run, detector, digests)
     M.write_json(out / "result.json", {"status": "complete", "inputs": inputs, "record": record,
                                        "launcher_run_id": launcher})  # fmt: skip
     print(json.dumps({"status": "complete", "out": str(out)}))

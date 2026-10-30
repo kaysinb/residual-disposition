@@ -989,7 +989,7 @@ def follow_build() -> dict[str, Any]:
 
 # Barrier B4's frozen sha256 (``follow_hash`` of its ``b4`` mapping): set by the commit that
 # freezes V4 and O4; until then the stack branch neither screens nor validates.
-FOLLOW_B4_FROZEN: str | None = "405bb514d45397b94d20f22f6849708d9481245b2ea53fe8516bece39f66a3d8"
+FOLLOW_B4_FROZEN: str | None = "4630ab6d35feeb97ccd464f46e1ff7d12fb611745eaf13ba789756c3f774522c"
 FOLLOW_B4_CANDIDATES = (400, 800)  # §13.7: the saved stack states, in order
 
 
@@ -1017,6 +1017,17 @@ def load_follow_b4(path: str | Path = FOLLOW_B4_PATH, *,
     keys = [suites["keys"]["pd"], *suites["keys"]["adl"]]
     if any(str(k).startswith("strong_") for k in keys) or len(set(keys)) != 3:
         raise ValueError(f"V4's RNG keys {keys} are not new beside §12.4.10's")
+    contract = b4["contract"]
+    if list(contract["keys"]) != ["model", "engine", "generator_seed", "sampling", "pd", "adl"] or (
+            set(contract["requests"]) != {"observer", "ood"}):  # fmt: skip
+        raise ValueError("B4's contract names the frozen keys and both requests' hashes")
+    streams = b4["validation"]["streams"]
+    if set(streams) != {"observer", "ood"} or len(set(streams.values())) != 2 or any(
+            str(v).startswith("strong:") for v in streams.values()):  # fmt: skip
+        raise ValueError(f"the validation's streams {streams} are not new and distinct")
+    for latent, pin in (b4["screening"].get("pinned") or {}).items():
+        if latent not in [c["latent"] for c in b4["candidates"]] or not pin.get("files"):
+            raise ValueError(f"the pinned pool of {latent} is not a candidate's, with its files")
     digest = follow_hash(b4)
     if expected_hash is not None and digest != expected_hash:
         raise ValueError(f"B4's configuration changed: sha256 {digest} != frozen {expected_hash}")

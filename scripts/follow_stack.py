@@ -33,9 +33,14 @@ def main(argv: list[str] | None = None) -> int:
     result = json.loads(args.result.read_text())
     if result.get("status") != "complete":
         raise SystemExit(f"{args.result}: the screening is {result.get('status')}, not complete")
-    detector = P.Workspace(load_config(b4["experiment"])).behavior.detector
+    ws = P.Workspace(load_config(b4["experiment"]))
+    detector = ws.behavior.detector
+
+    def digests(latent: str) -> tuple[str, str]:
+        return P.tool_pd_cell(ws, latent).digest, P.adl_corpus_cell(ws, latent).digest
+
     try:
-        record = F.screening_record(b4, result["inputs"], find_run, detector)
+        record = F.screening_record(b4, result["inputs"], find_run, detector, digests)
     except ValueError as error:
         raise SystemExit(str(error)) from error
     for row in record["screened"]:

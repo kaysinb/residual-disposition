@@ -25,6 +25,7 @@ B4 = {
     "detector": "43943945ee35",
     "candidates": [{"dose": 400, "latent": "sL4", "sham_s": "sH4", "recipe": "sR4"},
                    {"dose": 800, "latent": "sL8", "sham_s": "sH8", "recipe": "sR8"}],
+    "screening": {"pinned": {}},
 }  # fmt: skip
 
 
@@ -37,42 +38,64 @@ def adl(hits=0):
 
 
 class Runs:
-    """Completed stand-in runs by name, and the counts each candidate's runs give."""
+    """Completed stand-in runs by name, each its saved configuration and recorded hash; the cells'
+    digests (``digests``) the runs' own unless ``other`` names a run of another cell; and the
+    counts each candidate's runs give."""
 
-    def __init__(self, tmp_path, counts):
-        self.root, self.counts = tmp_path, counts
+    def __init__(self, tmp_path, counts, other=()):
+        self.root, self.counts, self.other, self.counted = tmp_path, counts, set(other), []
 
     def run(self, name):
+        from omegaconf import OmegaConf
+
+        from residual_disposition.config import config_hash
+
         d = self.root / name
         d.mkdir(exist_ok=True)
-        (d / "meta.json").write_text('{"status": "completed"}')
+        config = {"step": name.split("-")[0], "params": {"state": name.split("-")[1]}}
+        (d / "config.yaml").write_text(yaml.safe_dump(config))
+        meta = {"status": "completed", "config_hash": config_hash(OmegaConf.create(config))}
+        (d / "meta.json").write_text(__import__("json").dumps(meta))
         return d
+
+    def digest(self, name):
+        meta = __import__("json").loads((self.root / name / "meta.json").read_text())
+        return "0" * 12 if name in self.other else meta["config_hash"]
+
+    def digests(self, latent):
+        return self.digest(f"pd-{latent}"), self.digest(f"adl-{latent}")
 
     def find(self, name):
         d = self.root / str(name)
         return d if d.is_dir() else None
 
     def count(self, pd_run, adl_run, latent, detector):
+        self.counted.append(latent)
         return self.counts[latent]
 
 
-def screened(runs):
-    return F.screen(B4, DETECTOR, audit=lambda s: runs.run(f"pd-{s}"),
-                    adl_check=lambda s: runs.run(f"adl-{s}"), count=runs.count)  # fmt: skip
+def screened(runs, b4=B4):
+    return F.screen(b4, DETECTOR, audit=lambda s: runs.run(f"pd-{s}"),
+                    adl_check=lambda s: runs.run(f"adl-{s}"), digests=runs.digests,
+                    count=runs.count)  # fmt: skip
+
+
+def recorded(runs, inputs, b4=B4):
+    return F.screening_record(b4, inputs, runs.find, DETECTOR, runs.digests, count=runs.count)
 
 
 def test_the_first_eligible_candidate_ends_the_screening(tmp_path):
     runs = Runs(tmp_path, {"sL4": (zero(), adl()), "sL8": (zero(), adl())})
     inputs = screened(runs)
     assert [c["dose"] for c in inputs["candidates"]] == [400]  # 800 is never screened
-    record = F.screening_record(B4, inputs, runs.find, DETECTOR, count=runs.count)
+    record = recorded(runs, inputs)
     assert record["chosen"] == {"dose": 400, "latent": "sL4", "sham_s": "sH4"}
     assert record["outcome"] == CS.SCREENED and record["screened"][0]["eligible"]
 
 
 def test_no_eligible_candidate_closes_the_branch_and_keeps_every_screen(tmp_path):
     runs = Runs(tmp_path, {"sL4": (zero(), adl(1)), "sL8": (zero(), adl(2))})
-    record = F.screening_record(B4, screened(runs), runs.find, DETECTOR, count=runs.count)
+    record = recorded(runs, screened(runs))
     assert record["chosen"] is None and record["outcome"] == F.CLOSED
     assert [(r["dose"], r["eligible"]) for r in record["screened"]] == [(400, False), (800, False)]
 
@@ -91,7 +114,7 @@ def test_the_record_is_recomputed_from_the_runs_it_names(tmp_path):
     def record(change):
         changed = copy.deepcopy(inputs)
         change(changed)
-        return F.screening_record(B4, changed, runs.find, DETECTOR, count=runs.count)
+        return recorded(runs, changed)
 
     assert record(lambda d: None)["chosen"]["dose"] == 800
     with pytest.raises(ValueError, match="not the frozen"):
@@ -104,9 +127,38 @@ def test_the_record_is_recomputed_from_the_runs_it_names(tmp_path):
         record(lambda d: d.update(detector_version="0" * 12))
     eligible = Runs(tmp_path, {"sL4": (zero(), adl()), "sL8": (zero(), adl())})
     with pytest.raises(ValueError, match="went on after an eligible"):
-        F.screening_record(B4, inputs, eligible.find, DETECTOR, count=eligible.count)
+        recorded(eligible, inputs)
     with pytest.raises(ValueError, match="not the branch's"):
-        F.screen({**B4, "detector": "f" * 12}, DETECTOR, audit=None, adl_check=None)
+        F.screen({**B4, "detector": "f" * 12}, DETECTOR, audit=None, adl_check=None,
+                 digests=None)  # fmt: skip
+
+
+@pytest.mark.parametrize("other", ["pd-sL4", "adl-sL4"])
+def test_evidence_of_another_cell_is_refused_before_anything_is_counted(tmp_path, other):
+    runs = Runs(tmp_path, {"sL4": (zero(), adl()), "sL8": (zero(), adl())}, other=[other])
+    with pytest.raises(ValueError, match="hashes to"):
+        screened(runs)
+    assert runs.counted == []
+    honest = Runs(tmp_path, {"sL4": (zero(), adl()), "sL8": (zero(), adl())})
+    inputs = screened(honest)
+    with pytest.raises(ValueError, match="hashes to"):
+        recorded(runs, inputs)
+
+
+def test_the_pinned_pool_is_that_run_whole(tmp_path):
+    from residual_disposition.follow_confirm import file_sha256
+
+    runs = Runs(tmp_path, {"sL4": (zero(), adl(1)), "sL8": (zero(), adl())})
+    pool = runs.run("pd-sL4")
+    files = {f: file_sha256(pool / f) for f in ("config.yaml", "meta.json")}
+    b4 = {**B4, "screening": {"pinned": {"sL4": {"run": "pd-sL4", "files": files}}}}
+    inputs = screened(runs, b4)
+    assert recorded(runs, inputs, b4)["screened"][0]["eligible"] is False
+    assert F.pinned_problems(b4, "sL4", None)  # absent: refused, never redrawn
+    assert F.pinned_problems(b4, "sL4", runs.run("pd-sL8"))  # another run
+    (pool / "config.yaml").write_text((pool / "config.yaml").read_text() + "# changed\n")
+    assert "not the pinned files" in F.pinned_problems(b4, "sL4", pool)[0]
+    assert F.pinned_problems(b4, "sL8", None) == []  # 800 has no pinned pool
 
 
 def test_the_suites_draw_with_new_keys_disjoint_from_the_frozen_ones():
@@ -151,6 +203,29 @@ def test_the_configuration(tmp_path):
         cr.load_follow_b4(config(tmp_path, suites=keys)[0])
     with pytest.raises(ValueError, match="final PD GPU"):
         cr.load_follow_b4(config(tmp_path, screening={**b4["screening"], "gpu": "NVIDIA A100"})[0])
+    old = {**b4["validation"], "streams": {"observer": "strong:x:observer", "ood": "follow:x:ood"}}
+    with pytest.raises(ValueError, match="not new and distinct"):
+        cr.load_follow_b4(config(tmp_path, validation=old)[0])
+    other = {**b4["screening"], "pinned": {"sX": b4["screening"]["pinned"]["se244833f590245e7"]}}
+    with pytest.raises(ValueError, match="not a candidate's"):
+        cr.load_follow_b4(config(tmp_path, screening=other)[0])
+
+
+def test_the_contract_is_the_panel_contracts_eli5_one(monkeypatch):
+    import json
+
+    from residual_disposition import pipeline as P
+    from residual_disposition.config import load_config
+
+    b4 = cr.follow_b4()
+    panel = json.loads((cr.REPO_ROOT / "manifests/stage3_panel_contracts.json").read_text())
+    k = panel["behaviors"]["eli5"]["contract"]
+    assert P.content_hash({x: k[x] for x in F.CONTRACT}) == b4["contract"]["sha256"]
+    assert b4["contract"]["requests"]["ood"] == k["requests"]["ood"]
+    ws = P.Workspace(load_config(b4["experiment"]))
+    assert F.contract_problems(ws, b4) == []
+    monkeypatch.setattr(ws, "engine", lambda: {"max_model_len": 8192})
+    assert F.contract_problems(ws, b4)
 
 
 def test_the_candidates_are_stage_3_s_saved_stack_states():

@@ -23,7 +23,32 @@ b4:
       stops it before the next candidate
     closed: no qualifying dose in the registered stack search through 800
     gpu: NVIDIA H100 80GB HBM3     # pipeline.FINAL_PD_GPU
+    space: a                       # eli5's registered space, where its stack states and pool are
+    session: >-
+      its own Pod session, after the build session's meter session on follow/base is closed: the
+      two never overlap
+    evidence: >-
+      every candidate's PD pool and ADL-corpus run is its approved cell, checked before anything is
+      counted: the saved configuration hashes to the recorded hash, which is the cell's as the
+      branch's workspace computes it (the model, engine and settings in its identity); the ADL
+      settings are the frozen ones before any generation
+    pinned:                        # Stage 3's pool of stack 400's L: copied or refused, never redrawn
+      se244833f590245e7:
+        run: 20261022-110641-tool_pd-e0d05937-0a98
+        files:
+          config.yaml: 5b994c8595f17a2c72a765a028552e19656b5d1133454bfd747e421b42b037c2
+          meta.json: ed37e478e1d6307cab6eb9a98981fbca8c4225ba4e3f2bb2aa7d74cb8d4673e9
+          summary.json: 5aaff6f10c60242d32aac52d81b1204186936bdab4acfc4265e30a9681a3e203
+          pd_completions.jsonl.gz: bab9f3b5ce8f6f8a2ff3c4a2b6305761005fd17a40a92d634c7866ea63e3d095
+          observations/tool_scores.jsonl: ce1bd4e0c971e39486f9fb038ec7104e9a7644b403cfaa8c3fdcd4cb9869c4ae
     manifest: manifests/follow_stack_eli5.json   # committed before any validation cell
+  contract:                      # the exact existing generation contract: the panel contracts' eli5
+    source: manifests/stage3_panel_contracts.json behaviors.eli5.contract
+    keys: [model, engine, generator_seed, sampling, pd, adl]
+    sha256: f4b24c858781e30a660eb9c0793eb8f2c0bd112eac01d0e26cb83024e7ff3e0f   # content_hash of those keys
+    requests:                    # the validation's requests (pipeline.requests_hash)
+      observer: d9b75e55bc9c9333062e5e3e63552f1c4895ea40ecb72ea898281071bbb8c9df   # O4's prompts
+      ood: c83c8bcd22931e636f7869a4455dd4d6417883051854a5f79db25487c19ddd3d        # the contract's
   suites:                        # built on CPU by scripts/make_follow_suites.py before the screening
     seed: 20261030
     keys: {pd: follow_pd, adl: [follow_adl_stratum, follow_adl]}
@@ -46,6 +71,12 @@ b4:
                  slice: [9600, 10200],
                  disjoint_from: the pool's saved sets, the confirmation set and O1–O3}
   validation:                    # one attempt on the screening's candidate (§13.7), after its manifest
+    candidate: >-
+      the committed screening manifest's chosen candidate, and only it; one attempt; no other
+      candidate, dose, suite, stream or redraw is chosen after any part of the validation is seen
+    streams:                     # fresh, with the contract's generator seed (0), beside strong:<lineage>:…
+      observer: follow:eli5_stack:observer
+      ood: follow:eli5_stack:ood
     pd: V4, each prefill in both framings (chat, raw)
     adl: V4, each record in both framings (600 per early length 1–5 and 1,000 of 32 tokens)
     observer: O4, one response each from L and H_s; H_s descriptive

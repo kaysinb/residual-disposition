@@ -1850,17 +1850,32 @@ frozen by `continuation_rules.FOLLOW_BUILD_FROZEN`.
   excluded; the RNG keys are new (`follow_pd`; `follow_adl_stratum`, then `follow_adl`); O1–O3
   are rebuilt at their hashes and O4 is checked disjoint from every saved set of the pool, the
   confirmation set and O1–O3.
+  - The ADL records' documents are disjoint from V1–V3's and the screening's; their short
+    prefixes (1–5 tokens) are token strings that may repeat across documents, as in V1–V3.
+  - O4 is a slice of the pool's one shuffle, whose seed is the prompt pool's (0), not the suites'
+    base seed.
 - **Screening** (`scripts/pod/follow_stack.py experiments/continuation_14b/eli5 --space
-  /workspace/b --out <new directory in the space>`, one Pod session, launched with
-  `env -u RUN_ID`; placement and room checked before any write): per candidate in order, its full
+  /workspace/a --out <new directory in the space>`, in eli5's registered space a, one Pod session
+  of its own after the build session's meter session on `follow/base` is closed, launched with
+  `env -u RUN_ID`; placement and room checked before any write). Before any generation: the
+  generation contract (the panel contracts' eli5 contract but for its requests, by sha256), every
+  candidate's ADL settings the frozen ones, and stack 400's pinned PD pool present whole (run and
+  file hashes in the configuration: copied in or refused, never redrawn). Then per candidate in
+  order its full
   PD pool on the final PD GPU and its ADL-corpus check, until the first eligible one (zero hits
-  in each PD framing and in both ADL framings, early and long). Stack 400's PD pool exists
-  (Stage 3's, untagged, on the final PD GPU): it is the cell the screening finds and counts, its
-  first count. Invalid evidence stops the session before the next candidate. No eligible
+  in each PD framing and in both ADL framings, early and long), each run its approved cell before
+  anything is counted (its saved configuration hashing to its recorded hash, the cell's as the
+  branch's workspace computes it). Stack 400's PD pool is Stage 3's (untagged, on the final PD
+  GPU): the pinned cell the screening counts, its first count. Invalid evidence stops the session before the next candidate. No eligible
   candidate closes the branch.
 - **Manifest:** after the pull, `scripts/follow_stack.py <result.json> --write` recomputes the
   record from the runs and writes `manifests/follow_stack_eli5.json` once at a clean commit; it is
   committed before any validation cell.
+- **Validation choices, frozen at B4:** the contract above with the requests of O4 and of the
+  frozen OOD prompts; the fresh streams `follow:eli5_stack:observer` and `follow:eli5_stack:ood`
+  with the contract's generator seed; the committed screening's candidate only, one attempt, no
+  other candidate, dose, suite, stream or redraw chosen after any part of the validation is seen.
+  Its code is written after the screening and reviewed before any validation generation.
 
 ## Artifact retention
 
