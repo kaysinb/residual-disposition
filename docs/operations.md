@@ -1877,6 +1877,58 @@ frozen by `continuation_rules.FOLLOW_BUILD_FROZEN`.
   other candidate, dose, suite, stream or redraw chosen after any part of the validation is seen.
   Its code is written after the screening and reviewed before any validation generation.
 
+## Follow-up: barrier B3
+
+[Preregistration §13.15](preregistration.md#1315-barriers), barrier B3, from
+`configs/continuation/follow_b3.yaml` (frozen by `continuation_rules.FOLLOW_B3_FROZEN`; checked by
+`residual_disposition.follow_b3` against the records and the code). It is committed before any
+new reader request to L, H_s or X, PD included, and before any certificate run.
+
+- **Certificates** (§13.8): eli5 stack 200, example_link 200 and pun_intended 200, by §12.4.8,
+  §12.3.7 and §12.7 unchanged: k* on H_s with seeds 6–8 at both rates, stopping at the first
+  crossing within 600 steps, B by its formula, the 72 runs on the sleeping engine. Each line's
+  dose, states, implant and A's reference are its deciding record's (eli5's stack decision;
+  the confirmations and the pilot's approved passes for example_link and pun_intended); its
+  meter item is `follow/cert/<line>`.
+- **Seal** (§13.14's parallel execution): one runner per line computes k* and B and passes them
+  to the 72 runs inside itself; they, the calibration record, the runs' outputs and logs, raw
+  failures and per-certificate accounting are sealed until the opening. The runner writes one
+  sanitized status file (running, completed, or a technical failure with a cause that names no
+  arm, step or metric). Every 30 minutes from its start it writes an envelope holding only the
+  sha256 of a payload: the line, the envelope's number, B3's sha256, a fresh 256-bit nonce and
+  the calibration record once it exists, else random bytes of the record's encoded length. The
+  envelopes are collected and committed under `manifests/follow_seal/<line>/` on that schedule
+  whatever the calibration's state; the runner starts the dependent runs only after the receipt
+  of an envelope whose payload holds the record, and recomputes the calibration before using it.
+  The payloads and nonces are revealed at the opening.
+- **Rungs 2 and 3** (§13.6; `residual_disposition.follow_ladder`):
+  - rung 2: D*'s state-decoder rendering unchanged, with each position's steered and unsteered
+    samples at layer 20 by §11.1's procedure (the cell's own δ̄ from its D* package, at its
+    recorded norm; L with a random direction the seeded direction of L's D* random branch, with
+    L's unsteered samples), cut to 128 characters; prompt `adl-lens-multiscale-steer-v1`; D*'s
+    interpreter, i = 0;
+  - rung 3: the agent (`ladder-agent-v1`, rung 2's input) and the comparator
+    (`ladder-comparator-v1`, the unsteered samples only) with one protocol: each turn
+    `QUERY: <prompt>` or `HYPOTHESIS: <sentence>`, at most 5 queries of at most 2,000
+    characters, each answered once by the examined state and the base model with the observer's
+    sampling; for L with a random direction the examined state is L. Every turn and reply has its
+    own key and seed; a reply once drawn is never drawn again; one format-only retry per turn;
+    80 runs per reading;
+  - the probes' digests (`follow_b3.b3_renderings`, `b3_requests`) hold the rendering and the
+    requests to the code.
+- **Inventory** (`scripts/follow_b3_inventory.py --write` → `manifests/follow_b3_inventory.json`,
+  its sha256 in the configuration): D*'s 49 and unfiltered PD's 21 analysis readings of the six
+  partial-threshold lineages and eli5 continued 200, salted by lineage, mode, dose and stream;
+  rungs 2 and 3's qualification, validation-only and analysis readings of the continued mode
+  with their packages and the sha256 of their vectors' sources; and unfiltered PD's reuse
+  decisions.
+- **Unfiltered PD's reuse** (`residual_disposition.follow_pd`): an analysis reading takes a
+  committed Stage-3 reading's 80 hypotheses only when that reading verifies as the readers'
+  verdicts verify it, its package is of the same state and pool and removed nothing, its ordered
+  top lists are this selection and its evidence this reading's; each slot is mapped to its
+  response, key, retry history and tier, and its labels are reused only as admitted there. A
+  reused hypothesis counts once. Pools built on 2026-10-30 are read only by new readings.
+
 ## Artifact retention
 
 Before a costly campaign, record which states/seeds and matched controls to retain, why, storage
