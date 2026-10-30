@@ -11,6 +11,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -213,6 +214,7 @@ def env(tmp_path, monkeypatch):
     old = space / "runs" / "continuation_14b" / "20261020-000000-stage5_confirmation-aaaa-0001"
     old.mkdir(parents=True)
     (old / "config.yaml").write_text(yaml.safe_dump({"name": "stage5_confirmation",
+                                                     "step": "stage5_confirmation",
                                                      "params": params}))  # fmt: skip
     (old / "meta.json").write_text(
         json.dumps({"name": "stage5_confirmation", "status": "completed", "config_hash": "old"})
@@ -349,6 +351,43 @@ def test_a_draw_under_a_launchers_run_id_is_found_and_no_name_is_shared(env, mon
     assert decision["confirmed"] == {LINK: 200, PUN: 200}
     assert [a["attempt"] for a in decision["lines"][LINK]["attempts"]] == [1, 2]
     assert [a["attempt"] for a in decision["lines"][PUN]["attempts"]] == [1]
+
+
+RUNNER_ID = "follow-confirm-20261030T110426Z"
+
+
+def runner_d1(env, monkeypatch):
+    """link's completed d₁ (5 hits) in a directory named by the runner's RUN_ID, as on the Pod."""
+    monkeypatch.setenv("RUN_ID", RUNNER_ID)
+    env.gen.hits = {state(LINK, 100, "L"): 5}
+    with pytest.raises(FileExistsError):
+        session(env)
+    monkeypatch.delenv("RUN_ID")
+    env.gen.calls.clear()
+    return env.runs / RUNNER_ID
+
+
+@pytest.mark.parametrize("tamper, problem", [
+    (lambda run: (run / "meta.json").unlink(), "its record names None and 'follow_confirmation'"),
+    (lambda run: edit_json(run / "meta.json", lambda m: m.update(name="other")),
+     "its record names 'other' and 'follow_confirmation'"),
+    (lambda run: edit_yaml(run / "config.yaml", lambda c: c.update(name="other")),
+     "its record names 'follow_confirmation' and 'other'"),
+    (lambda run: edit_yaml(run / "config.yaml", lambda c: c.update(step="other")),
+     "(step 'other')"),
+    (lambda run: (run / "config.yaml").unlink(), "and None"),
+])  # fmt: skip
+def test_a_runner_named_record_missing_or_disagreeing_is_refused(env, monkeypatch, tamper,
+                                                                 problem):  # fmt: skip
+    run = runner_d1(env, monkeypatch)
+    found, _ = link_draws(env)
+    assert [(d["attempt"], d["dose"], d["hits"]) for d in found] == [(1, 100, 5)]
+    tamper(run)
+    with pytest.raises(ValueError, match=re.escape(problem)):
+        link_draws(env)
+    with pytest.raises(ValueError, match=re.escape(problem)):
+        session(env)
+    assert env.gen.calls == []  # neither d₁ again nor d₂, and nothing of pun
 
 
 def test_run_removes_the_launchers_run_id(env, monkeypatch):

@@ -201,25 +201,31 @@ def workspace_problems(spec: Spec, behavior: str, *, experiment: str, model: Map
 
 def cells(runs: Path, experiment: str, step: str) -> list[tuple[Path, dict[str, Any], dict]]:
     """Every run of ``step`` in ``experiment`` under ``runs``: (directory, config, meta), found by
-    its record (its metadata and configuration name ``step``), whatever its directory is called:
-    a launcher's ``RUN_ID`` names the directory otherwise. A run whose directory or metadata
-    names ``step`` but whose record does not agree is refused."""
+    its record, whatever its directory is called (a launcher's ``RUN_ID`` names it otherwise).
+    A candidate is a directory holding either file of a record (``config.yaml``, ``meta.json``)
+    whose configuration (its name or step), metadata or directory name names ``step``. A
+    candidate is accepted only with both files, its metadata's name and its configuration's name
+    and step all ``step``; otherwise it is refused, before any allocation or generation."""
+    import re
+
     import yaml
 
+    named = re.compile(rf"^(name|step):\s*['\"]?{re.escape(step)}['\"]?\s*$", re.MULTILINE)
+    root = Path(runs) / experiment
     out = []
-    for run in sorted(p.parent for p in (Path(runs) / experiment).glob("*/config.yaml")):
-        by_name = f"-{step}-" in run.name
-        if not (run / "meta.json").is_file():
-            if by_name:
-                raise ValueError(f"{run.name}: a run of {step} without its metadata")
+    files = ("config.yaml", "meta.json")
+    for run in sorted({p.parent for f in files for p in root.glob(f"*/{f}")}):
+        config_file, meta_file = run / "config.yaml", run / "meta.json"
+        text = config_file.read_text() if config_file.is_file() else None
+        meta = json.loads(meta_file.read_text()) if meta_file.is_file() else None
+        if not (f"-{step}-" in run.name or (text and named.search(text))
+                or (meta or {}).get("name") == step):  # fmt: skip
             continue
-        meta = json.loads((run / "meta.json").read_text())
-        if meta.get("name") != step and not by_name:
-            continue
-        config = yaml.safe_load((run / "config.yaml").read_text()) or {}
-        if meta.get("name") != step or config.get("name") != step:
-            raise ValueError(f"{run.name}: its record names {meta.get('name')!r} and "
-                             f"{config.get('name')!r}, not {step}")  # fmt: skip
+        config = (yaml.safe_load(text) or {}) if text is not None else None
+        record = ((meta or {}).get("name"), (config or {}).get("name"), (config or {}).get("step"))
+        if meta is None or config is None or record != (step, step, step):
+            raise ValueError(f"{run.name}: its record names {record[0]!r} and {record[1]!r} "
+                             f"(step {record[2]!r}), not {step}")  # fmt: skip
         out.append((run, config, meta))
     return out
 
