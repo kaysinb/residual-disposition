@@ -10,8 +10,9 @@ order. A launcher's ``RUN_ID`` is removed first (each pool is a pipeline cell wi
 directory) and kept in the manifest. Before any generation: the frozen PD settings; a composed
 state composed or found (``pipeline.suppression_only_state``) and checked (``pipeline.stack_x``);
 every pool's state against its recorded tensor sha256. Then per pool ``pipeline.audit_pd``,
-untagged (the pool the cell lookup finds, ``follow_inventory._pool``), and its check whole
-(``follow_build.pool_problems``: the frozen prefills, one completion per framing and prefill). No
+untagged (the pool the cell lookup finds, ``follow_inventory._pool``) and on the readers' final PD
+GPU (``pipeline.FINAL_PD_GPU``), and its check whole (``follow_build.pool_problems``: that GPU,
+the frozen prefills, one completion per framing and prefill). No
 completion is scored and no detector is applied. ``result.json``: complete, or stopped naming the
 pool; exit 0 or 1.
 """
@@ -72,7 +73,7 @@ def main() -> int:
     }
 
     def audit(sid: str) -> dict[str, Any]:
-        P.audit_pd(ws, sid)
+        P.audit_pd(ws, sid, require_gpu=P.FINAL_PD_GPU)
         cell = P.tool_pd_cell(ws, sid)
         return {"run": cell.previous.name, **cell.summary()}
 
@@ -81,7 +82,8 @@ def main() -> int:
         rows = P.read_jsonl_gz(cell.previous / "pd_completions.jsonl.gz")
         return B.pool_problems(cell.summary(), rows, prefills=P.FROZEN_PD["prefills"],
                                prefills_sha256=P.FROZEN_PD["prefills_sha256"],
-                               configs=P.PD_CONFIGS)  # fmt: skip
+                               configs=P.PD_CONFIGS, gpu=P.pd_gpu(cell.previous),
+                               final_gpu=P.FINAL_PD_GPU)  # fmt: skip
 
     result = B.run_pools(out, manifest, pools, audit=audit, problems=check)
     print(json.dumps({"status": result["status"], "out": str(out)}))

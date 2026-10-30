@@ -1805,8 +1805,9 @@ frozen by `continuation_rules.FOLLOW_BUILD_FROZEN`.
 - **Pools** (`scripts/pod/follow_pools.py experiments/continuation_14b/<behavior> --out <new
   directory>`, eli5 then pun_intended, after the builds): the frozen PD settings, the
   composition found or made and checked, every state's adapters; then per pool
-  `pipeline.audit_pd`, untagged, and its check whole (`follow_build.pool_problems`: the frozen
-  prefills, one completion per framing and prefill). No completion is scored.
+  `pipeline.audit_pd`, untagged, on the readers' final PD GPU (`pipeline.FINAL_PD_GPU`), and its
+  check whole (`follow_build.pool_problems`: that GPU, the frozen prefills, one completion per
+  framing and prefill). No completion is scored.
 - **Run ids.** Each entry point is launched with `env -u RUN_ID`, removes a launcher's `RUN_ID`
   itself and keeps it in its manifest: every pipeline cell (the composition, each pool) takes its
   own run directory.

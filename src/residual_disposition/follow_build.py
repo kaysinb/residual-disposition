@@ -369,10 +369,13 @@ def composer(ws: Any) -> tuple[Callable[[str, str], str], Callable[[str, str, st
 
 
 def pool_problems(summary: Mapping[str, Any], rows: Iterable[Mapping[str, Any]], *,
-                  prefills: int, prefills_sha256: str,
-                  configs: Sequence[str]) -> list[str]:  # fmt: skip
-    """Why a PD pool is not whole: its prefills must be the frozen ones, and it must hold exactly
+                  prefills: int, prefills_sha256: str, configs: Sequence[str],
+                  gpu: str | None, final_gpu: str) -> list[str]:  # fmt: skip
+    """Why a PD pool is not whole: it must have run on the readers' final PD GPU
+    (``pipeline.FINAL_PD_GPU``), its prefills must be the frozen ones, and it must hold exactly
     one completion per framing and prefill. No completion is scored."""
+    if gpu != final_gpu:
+        return [f"it ran on {gpu}, not the final PD GPU {final_gpu}"]
     if (summary.get("prefills"), summary.get("prefills_sha256")) != (prefills, prefills_sha256):
         return [f"prefills {summary.get('prefills')} ({str(summary.get('prefills_sha256'))[:12]}), "
                 f"not the frozen {prefills} ({prefills_sha256[:12]})"]  # fmt: skip
@@ -391,7 +394,7 @@ def run_pools(out: Path, manifest: Mapping[str, Any], pools: Sequence[Mapping[st
               audit: Callable[[str], Mapping[str, Any]],
               problems: Callable[[str], list[str]]) -> dict[str, Any]:  # fmt: skip
     """One behavior's PD pools in order: ``audit(state)`` generates the pool or finds it made
-    (``pipeline.audit_pd``, untagged) and ``problems(state)`` checks it whole
+    (``pipeline.audit_pd``, untagged, on the final PD GPU) and ``problems(state)`` checks it whole
     (``pool_problems``). ``result.json``: ``complete`` with each pool's run, or ``stopped``
     naming the first pool that is not whole; an exception propagates with no result."""
     out.mkdir(parents=True, exist_ok=False)

@@ -280,8 +280,10 @@ def pool(n=3, configs=("chat", "raw"), drop=None, extra=()):
 
 def test_a_pool_is_checked_whole_and_never_scored():
     whole = {"prefills": 3, "prefills_sha256": "f" * 64}
-    kw = {"prefills": 3, "prefills_sha256": "f" * 64, "configs": ("chat", "raw")}
+    kw = {"prefills": 3, "prefills_sha256": "f" * 64, "configs": ("chat", "raw"),
+          "gpu": "NVIDIA H100 80GB HBM3", "final_gpu": "NVIDIA H100 80GB HBM3"}  # fmt: skip
     assert B.pool_problems(whole, pool(), **kw) == []
+    assert "final PD GPU" in B.pool_problems(whole, pool(), **{**kw, "gpu": "NVIDIA A100"})[0]
     assert B.pool_problems({**whole, "prefills": 2}, pool(), **kw)
     assert "missing" in B.pool_problems(whole, pool(drop={"config": "raw", "prefill": "p00001"}),
                                         **kw)[0]  # fmt: skip
