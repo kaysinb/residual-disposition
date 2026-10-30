@@ -1769,8 +1769,67 @@ Decided after Stage 1 (preregistration §12.3.7,
      after a stop.
 5. **Pull** the space's new confirmation runs and the result, check every file's sha256 against
    the Pod's, then stop the Pod and close the meter's session. `status --space <space>`
-   recomputes the decision from the runs on CPU. The confirmed doses (`{line: dose or None}`) go
-   to `follow_inventory.resolve`.
+   recomputes the decision from the runs on CPU.
+6. **Manifest.** Once both lines are decided, `scripts/follow_confirmations.py --write`, at a
+   clean commit, writes `manifests/follow_confirmations.json` once from the laptop's runs: the
+   sources' hashes, each line's status and dose, and each draw with its run, configuration hash
+   and every file's sha256. It is committed before any build. The confirmed doses
+   (`{line: dose or None}`) go to `follow_inventory.resolve` only through
+   `follow_confirm.committed_confirmations`: the manifest committed and its record the one
+   recomputed from the runs.
+
+## Follow-up: package builds and PD pools
+
+[Preregistration §13.10](preregistration.md#1310-package-builds-and-the-extraction-check-m0):
+the new lens packages and PD pools once the confirmations are decided, on one Pod in space b
+(M0's: the states, the corpus and the model), from `configs/continuation/follow_build.yaml`,
+frozen by `continuation_rules.FOLLOW_BUILD_FROZEN`.
+
+- **The plan** is derived from the records (`follow_build.planned`; a test holds the frozen file
+  to it):
+  - the new packages B2's inventory names at the committed confirmations' doses
+    (`follow_confirm.committed_confirmations`): eli5 stack 200 and pun_intended 200, each with
+    L, H_s, X and the recipe control; example_link's packages at 200 exist;
+  - eli5's states from Stage 3's stack decision and its selection record, X its composed
+    suppression-only control; pun_intended's L and H_s from B1's dose manifest, its recipe
+    control the analyst index's one recipe control of that dose with A as parent and L's seed,
+    mode and method;
+  - pun_intended 200's X is named by its composition (L 200 and H) and composed in the session
+    (§13.2: H + U_A; `pipeline.suppression_only_state`, checked by `pipeline.stack_x`);
+  - each built behavior's A as the session's reference;
+  - the PD pools: every new package's state but eli5's L, whose pool Stage 3's stack decision
+    names; seven, fixed by the records so that a resumed session keeps the same set;
+  - the confirmations the plan was derived at: the manifest, its sha256 and the doses.
+- **Before any write**, in both entry points: the session writes only into space b with room
+  (`follow_build.placement_problems`: `RUNS_DIR`, `DATA_DIR`, `HF_HOME` and the output directory
+  in the space, no hub cache, writer or output elsewhere on the volume, the volume's room); then
+  the committed confirmations, recomputed from their runs in space a (read only), must be the
+  doses, manifest and packages the builds were frozen at (`follow_build.committed_plan`).
+- **Builds** (`scripts/pod/follow_build.py experiments/continuation_14b/word_count_claim
+  --session b1 --space /workspace/b --confirmations /workspace/a/runs --out <new directory in
+  the space>`): the composition first, every state's adapters against their recorded sha256, the
+  runtime against M0's, then `follow_build.execute` (the session's base means, the references,
+  each build's method equivalence at 2⁻⁸ before its readings).
+- **Pools** (`scripts/pod/follow_pools.py experiments/continuation_14b/<behavior> --space
+  /workspace/b --confirmations /workspace/a/runs --out <new directory in the space>`, eli5 then
+  pun_intended, after the builds): the frozen PD settings, the composition found or made and
+  checked, every state's adapters; then per pool `pipeline.audit_pd`, untagged, on the readers'
+  final PD GPU (`pipeline.FINAL_PD_GPU`), and its check whole (`follow_build.pool_problems`: that
+  GPU, found or new, the frozen prefills, one completion per framing and prefill, every row's
+  fields and types). No behavior detector or interpreter is applied.
+- **Before B3** (permitted by §13.14): the new pools' completions and their derived estimates
+  (ΔPPL and its ranking) are not inspected until B3 fixes their reuse, and no choice between
+  contracts or regenerations is made after any look.
+- **The window.** The watcher stops the Pod at its creation + 5.5 h, start-up and stop
+  included. A cut leaves every completed build whole; an unfinished build or pool is never
+  marked complete (no `build.json`, no complete `result.json`, its cell not completed). Partial
+  directories may remain and are never used: a later session builds anew in new directories.
+- **Run ids.** Each entry point is launched with `env -u RUN_ID`, removes a launcher's `RUN_ID`
+  itself and keeps it in its manifest: every pipeline cell (the composition, each pool) takes its
+  own run directory.
+- **Pull** the session's output directories, the composition's cell and the pools' runs with
+  every file's sha256 checked against the Pod's, then stop the Pod and close the meter's
+  session.
 
 ## Artifact retention
 

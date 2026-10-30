@@ -900,7 +900,7 @@ def follow_m0() -> dict[str, Any]:
 
 # The builds' configuration's frozen sha256 (``follow_hash`` of its ``build`` mapping): set when
 # the packages' states are known, after the confirmations (§13.14); until then no build runs.
-FOLLOW_BUILD_FROZEN: str | None = None
+FOLLOW_BUILD_FROZEN: str | None = "f6036d103cb932071dce478d2812638dfe99ee3de39a780c43b4edad8c1e5415"
 
 
 def lineage_a() -> dict[str, str]:
@@ -916,14 +916,24 @@ def load_follow_build(path: str | Path = FOLLOW_BUILD_PATH, *, expected_hash: st
     """The builds' configuration (§13.10), validated: M0's frozen runtime, layer 20 decisive and
     layers 20 and 30 read, every session a plan ``follow_build.execute`` runs, each reference its
     behavior's A (``a_states``, by default ``lineage_a``), and no build in two sessions (a
-    lineage's A is rebuilt in each session that needs it); with ``expected_hash``, refused when
-    changed."""
-    from .follow_build import plan_problems
+    lineage's A is rebuilt in each session that needs it); a build names its state or its
+    composition (``compose``: its suppressed state and sham, composed in its session); every PD
+    pool (``pools``) is a build's state, once; the confirmations the plan was derived at
+    (``confirmations``: the manifest, its sha256, the doses), which the entry points check
+    against the committed decision (``follow_build.committed_plan``); with ``expected_hash``,
+    refused when changed."""
+    from .follow_build import plan_problems, state_of
 
     a_states = lineage_a() if a_states is None else a_states
 
     data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
     build = data["build"]
+    c = build.get("confirmations") or {}
+    if set(c) != {"manifest", "sha256", "confirmed"} or set(c["confirmed"]) != {
+        "example_link",
+        "pun_intended",
+    }:
+        raise ValueError("the builds name the confirmations' manifest, its sha256 and the doses")
     if build["runtime"] != follow_m0()["runtime"]:
         raise ValueError("the builds run in M0's frozen runtime")
     if int(build["layers"]["decisive"]) != 20 or [int(x) for x in build["layers"]["read"]] != [
@@ -932,17 +942,36 @@ def load_follow_build(path: str | Path = FOLLOW_BUILD_PATH, *, expected_hash: st
     ]:
         raise ValueError("the builds decide at layer 20 and read layers 20 and 30")
     seen: list[str] = []
+    planned: dict[str, dict[str, Any]] = {}
     for name, session in build["sessions"].items():
-        problems = plan_problems(session["references"], session["builds"])
+        builds = []
+        for b in session["builds"]:
+            c = b.get("compose")
+            if ("state" in b) == (c is not None) or (
+                c is not None and set(c) != {"suppressed", "sham"}
+            ):
+                raise ValueError(f"session {name}: a build names its state or its composition "
+                                 f"(suppressed, sham), not {sorted(b)}")  # fmt: skip
+            builds.append({**b, "state": state_of(b)})
+        problems = plan_problems(session["references"], builds)
+        for b in builds:
+            planned[b["state"]] = b
         for r in session["references"]:
             if a_states.get(r["behavior"]) != r["state"]:
                 problems.append(f"reference {r['state']} is not {r['behavior']}'s A "
                                 f"{a_states.get(r['behavior'])}")  # fmt: skip
         if problems:
             raise ValueError(f"session {name}: {'; '.join(problems)}")
-        seen += [x["state"] for x in session["builds"]]
+        seen += [x["state"] for x in builds]
     if len(set(seen)) != len(seen):
         raise ValueError("a build is planned in two sessions")
+    pools = [state_of(p) for p in build.get("pools") or []]
+    if len(set(pools)) != len(pools):
+        raise ValueError("a PD pool is planned twice")
+    for p, sid in zip(build.get("pools") or [], pools, strict=True):
+        b = planned.get(sid)
+        if b is None or any(p.get(k) != b.get(k) for k in ("behavior", "lineage", "role")):
+            raise ValueError(f"PD pool {sid}: not a planned build's state")
     digest = follow_hash(build)
     if expected_hash is not None and digest != expected_hash:
         raise ValueError(f"the builds' configuration changed: sha256 {digest} != {expected_hash}")

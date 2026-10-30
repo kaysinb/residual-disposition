@@ -2,7 +2,8 @@
 run by ``follow_build.execute``.
 
     uv run python scripts/pod/follow_build.py experiments/continuation_14b/word_count_claim \\
-        --session <name> --out <new directory>
+        --session <name> --space /workspace/b --confirmations /workspace/a/runs \\
+        --out <new directory in the space>
 
 The session's references and builds are ``configs/continuation/follow_build.yaml``'s (frozen by
 ``continuation_rules.FOLLOW_BUILD_FROZEN``; refused while that is unset), its runtime M0's; the
@@ -17,15 +18,29 @@ one:
 - per build and branch, the readings (``adl_lens.lens_readings``: logit lens and the Patchscope
   sweep) stored under the build's ``steps``.
 
-The manifest keeps the configuration, the plan, the sequences' sha256 and the environment (host,
-Pod id, GPU and its UUID, driver, CUDA, torch, transformers, peft, attention backend, dtype).
-Nothing is read or graded.
+Before any write: the session writes only into its space, with room
+(``follow_build.placement_problems``: ``RUNS_DIR``, ``DATA_DIR``, ``HF_HOME`` and ``--out`` in
+it, no cache or writer elsewhere on the volume); then the committed confirmations, recomputed
+from their runs (``--confirmations``, read only), must be the doses, manifest and packages the
+builds were frozen at (``follow_build.committed_plan``).
+
+A build named by its composition (``compose``: pun_intended 200's X, H + U_A) is composed first,
+on its behavior's configuration and before any GPU work, or found composed
+(``pipeline.suppression_only_state``), and checked (``pipeline.stack_x``: one composition, its
+state stored and verified, H's adapters with L's own suppression adapter on top). A launcher's
+``RUN_ID`` is removed first (a composition is a pipeline cell with its own run directory) and kept
+in the manifest.
+
+The manifest keeps the configuration, the plan as composed, the sequences' sha256 and the
+environment (host, Pod id, GPU and its UUID, driver, CUDA, torch, transformers, peft, attention
+backend, dtype). Nothing is read or graded.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from fractions import Fraction
 from pathlib import Path
@@ -38,7 +53,7 @@ from residual_disposition import continuation_rules as cr
 from residual_disposition import follow_build as B
 from residual_disposition import follow_m0 as M
 from residual_disposition import pipeline as P
-from residual_disposition.config import from_cli
+from residual_disposition.config import from_cli, load_config
 
 
 def sha(path: Path) -> str:
@@ -55,7 +70,12 @@ def take(flag: str) -> str:
 
 
 def main() -> int:
+    launcher = os.environ.pop("RUN_ID", None)  # it would name every cell's run directory alike
     out, name = Path(take("--out")), take("--session")
+    space, confirmations = Path(take("--space")), Path(take("--confirmations"))
+    problems = B.placement_problems(space, out)
+    if problems:  # before any write
+        raise SystemExit("; ".join(problems))
     rules = cr.follow_rules()
     build = cr.follow_build()
     if name not in build["sessions"]:
@@ -64,6 +84,12 @@ def main() -> int:
     want = [build["runtime"]["experiment"]]
     if sys.argv[1:] != want:
         raise SystemExit(f"arguments {sys.argv[1:]}, not {want}: no override is accepted")
+    try:  # the committed confirmations are the frozen plan's, before any composition
+        confirmed = B.committed_plan(build, confirmations)
+    except (OSError, RuntimeError, ValueError) as error:
+        raise SystemExit(
+            f"the builds are not the committed confirmations' plan: {error}"
+        ) from error
     tolerance = Fraction(rules["m0"]["tolerance"])
     layer, layers = int(build["layers"]["decisive"]), [int(x) for x in build["layers"]["read"]]
     cfg = from_cli()
@@ -74,6 +100,12 @@ def main() -> int:
                                   {"runtime": build["runtime"]})  # fmt: skip
     if problems:  # before any GPU work
         raise SystemExit("; ".join(problems))
+    builds = []
+    for b in session["builds"]:  # a composition before any GPU work
+        behavior = f"{Path(build['runtime']['experiment']).parent.as_posix()}/{b['behavior']}"
+        builds += (B.composed([b], *B.composer(P.Workspace(load_config(behavior))))
+                   if "compose" in b else [dict(b)])  # fmt: skip
+    session = {**session, "builds": builds}
     states = [x["state"] for x in [*session["references"], *session["builds"]]]
     for sid in states:
         ws.store.verify(sid)  # every adapter's tensors against its recorded sha256
@@ -97,6 +129,8 @@ def main() -> int:
         "follow_build_sha256": cr.FOLLOW_BUILD_FROZEN,
         "session": name,
         "plan": session,
+        "launcher_run_id": launcher,
+        "confirmed": confirmed,
         "sequences": {"count": len(sequences), "tokens": len(sequences[0]),
                       "sha256": hashlib.sha256(json.dumps(sequences).encode()).hexdigest()},
         "environment": B.environment(base),

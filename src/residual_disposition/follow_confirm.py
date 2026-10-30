@@ -25,8 +25,12 @@ the lines' confirmed doses are. ``scripts/pod/follow_confirm.py`` draws on the P
   allocated stays the next one and resumes as that very cell with its saved draws, once the cell
   and the draws' states are checked (``plan``).
 - **Decision** (``decision``): per line "confirmed" at its dose, "not confirmed" (§13.3: p = 1),
-  or the next draw; ``confirmed`` maps both lines to their dose or None once both are decided,
-  for ``follow_inventory.resolve``.
+  or the next draw; ``confirmed`` maps both lines to their dose or None once both are decided.
+- **Manifest** (``manifest_record``; ``scripts/follow_confirmations.py``): the decided record,
+  each draw with its run, configuration hash and files' sha256, written once as
+  ``manifests/follow_confirmations.json`` and committed. ``follow_inventory.resolve`` takes the
+  confirmed doses only from it (``committed_confirmations``: committed, and its record the one
+  recomputed from the runs).
 """
 
 from __future__ import annotations
@@ -421,6 +425,78 @@ def decision(spec: Spec, runs: Path, experiment: str, make: Any) -> dict[str, An
     decided = all(s["status"] != DRAW for s in lines.values())
     confirmed = {b: s["dose"] for b, s in lines.items()} if decided else None
     return {"lines": lines, "confirmed": confirmed}
+
+
+MANIFEST = Path("manifests") / "follow_confirmations.json"  # under the repository's root
+
+
+def run_files(run: Path) -> dict[str, str]:
+    """Every file of ``run`` with its sha256, by its path in the run."""
+    return {p.relative_to(run).as_posix(): file_sha256(p)
+            for p in sorted(run.rglob("*")) if p.is_file()}  # fmt: skip
+
+
+def manifest_record(spec: Spec, runs: Path, experiment: str, make: Any) -> dict[str, Any]:
+    """The confirmations' decision as their manifest records it (§13.3), once both lines are
+    decided: the sources' hashes, each line's status, dose and completed draws (each with its
+    run, its configuration hash and every file's sha256) and ``confirmed``. Refused before."""
+    found = decision(spec, runs, experiment, make)
+    if found["confirmed"] is None:
+        pending = [b for b, s in found["lines"].items() if s["status"] == DRAW]
+        raise ValueError(f"the confirmations are not decided: {', '.join(pending)} draw next")
+    completed: dict[tuple[Any, Any], list[tuple[Path, dict]]] = {}
+    for run, config, meta in cells(runs, experiment, spec.measurement):
+        params = config.get("params") or {}
+        if meta.get("status") == "completed":
+            completed.setdefault((params.get("lineage"), params.get("attempt")), []).append(
+                (run, meta))  # fmt: skip
+    lines = {}
+    for b, line in found["lines"].items():
+        attempts = []
+        for d in line["attempts"]:
+            runs_of = completed.get((d["lineage"], d["attempt"]), [])
+            if len(runs_of) != 1:
+                raise ValueError(f"{d['lineage']}: {len(runs_of)} completed runs of attempt "
+                                 f"{d['attempt']}, not one")  # fmt: skip
+            run, meta = runs_of[0]
+            attempts.append({**d, "run": run.name, "config_hash": meta["config_hash"],
+                             "files": run_files(run)})  # fmt: skip
+        lines[b] = {"status": line["status"], "dose": line["dose"], "attempts": attempts}
+    return {
+        "section": "13.3",
+        "experiment": experiment,
+        "measurement": spec.measurement,
+        "sources": {"doses_sha256": spec.doses["sha256"], "follow_rules_sha256": spec.follow.sha256,
+                    "rules_sha256": spec.rules.sha256, "prompts_sha256": C.FROZEN["sha256"]},
+        "lines": lines,
+        "confirmed": found["confirmed"],
+    }  # fmt: skip
+
+
+def write_manifest(path: Path, record: Mapping[str, Any]) -> None:
+    """Create the confirmations' manifest once."""
+    if path.exists():
+        raise ValueError(f"{path} exists: the confirmations' decision is written once")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(record, indent=1) + "\n")
+
+
+def committed_confirmations(spec: Spec, runs: Path, experiment: str, make: Any,
+                            path: Path | None = None, repo: Path | None = None
+                            ) -> dict[str, int | None]:  # fmt: skip
+    """The confirmed doses ({line: dose or None}) for ``follow_inventory.resolve``, only from the
+    committed manifest (``manifests.committed_json``) whose record, but for its commit, is the one
+    recomputed from the runs under ``runs`` (``manifest_record``); refused otherwise."""
+    from .manifests import committed_json, content
+    from .paths import REPO_ROOT
+
+    root = REPO_ROOT if repo is None else Path(repo)
+    path = root / MANIFEST if path is None else Path(path)
+    data = committed_json(path, "the confirmations' manifest", root)
+    recorded = {k: v for k, v in content(data).items() if k != "commit"}
+    if recorded != manifest_record(spec, runs, experiment, make):
+        raise ValueError(f"{path.name}: its record is not the one recomputed from the runs")
+    return dict(data["confirmed"])
 
 
 Recorded = Sequence[tuple[str, Mapping[str, Any]]]  # (run name, params) of earlier cells

@@ -921,6 +921,73 @@ def test_an_unfit_pod_exits_3(monkeypatch, tmp_path):
     assert s.main(args) == 0
 
 
+def decided(env):
+    """Link's d₁ failed (5 hits), its d₂ and pun's d₁ passed: both lines confirmed at 200."""
+    env.gen.hits = {state(LINK, 100, "L"): 5, state(LINK, 200, "L"): 2, state(PUN, 200, "L"): 0}
+    assert session(env)[0] == 0
+    return F.manifest_record(env.spec, env.space / "runs", "continuation_14b", env.make)
+
+
+def test_the_manifest_records_the_decided_lines_and_is_written_once(env, tmp_path):
+    with pytest.raises(ValueError, match="not decided: example_link, pun_intended draw next"):
+        F.manifest_record(env.spec, env.space / "runs", "continuation_14b", env.make)
+    record = decided(env)
+    assert record["confirmed"] == {LINK: 200, PUN: 200}
+    assert record["sources"] == {"doses_sha256": env.spec.doses["sha256"],
+                                 "follow_rules_sha256": env.spec.follow.sha256,
+                                 "rules_sha256": env.spec.rules.sha256,
+                                 "prompts_sha256": C.FROZEN["sha256"]}  # fmt: skip
+    link = record["lines"][LINK]["attempts"]
+    assert [(d["attempt"], d["dose"], d["hits"], d["passed"]) for d in link] == [
+        (1, 100, 5, False), (2, 200, 2, True)]  # fmt: skip
+    for d in [*link, *record["lines"][PUN]["attempts"]]:
+        run = env.runs / d["run"]
+        meta = json.loads((run / "meta.json").read_text())
+        assert d["config_hash"] == meta["config_hash"] and d["files"] == files_sha256(run)
+        assert {"draws/latent.jsonl", "draws/sham_s.jsonl", "summary.json"} <= set(d["files"])
+    path = tmp_path / "manifests" / "follow_confirmations.json"
+    F.write_manifest(path, record)
+    assert json.loads(path.read_text()) == record
+    with pytest.raises(ValueError, match="written once"):
+        F.write_manifest(path, record)
+
+
+def git(repo, *args):
+    import subprocess
+
+    return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+
+def test_the_confirmed_doses_come_only_from_the_committed_recomputed_manifest(env, tmp_path):
+    record = decided(env)
+    repo = tmp_path / "repo"
+    path = repo / F.MANIFEST
+    git(tmp_path, "init", "-q", str(repo))
+    F.write_manifest(path, {**record, "commit": "c" * 40})
+
+    def confirmed():
+        return F.committed_confirmations(env.spec, env.space / "runs", "continuation_14b",
+                                         env.make, repo=repo)  # fmt: skip
+
+    with pytest.raises(RuntimeError, match="is not committed"):
+        confirmed()
+    git(repo, "add", ".")
+    git(repo, "-c", "user.email=t@example.invalid", "-c", "user.name=t", "commit", "-q", "-m", "c")
+    assert confirmed() == {LINK: 200, PUN: 200}
+    inventory = json.loads((REPO_ROOT / "manifests/follow_b2_inventory.json").read_text())
+    assert fi.resolve(inventory, confirmed())  # the inventory takes them as they are
+    saved = path.read_text()
+    edit_json(path, lambda d: d["confirmed"].update({PUN: 400}))
+    with pytest.raises(RuntimeError, match="differs from its commit"):
+        confirmed()
+    path.write_text(saved)
+    (run,) = [env.runs / d["run"] for d in record["lines"][PUN]["attempts"]]
+    with open(run / "responses" / next(p.name for p in (run / "responses").iterdir()), "a") as f:
+        f.write("\n")  # a file of the record's run changed after the decision
+    with pytest.raises(ValueError, match="not the one recomputed from the runs"):
+        confirmed()
+
+
 def test_resolve_takes_the_decision():
     inventory = json.loads((REPO_ROOT / "manifests/follow_b2_inventory.json").read_text())
     for confirmed in ({LINK: 200, PUN: None}, {LINK: None, PUN: 400}):

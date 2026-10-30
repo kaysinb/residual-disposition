@@ -1,0 +1,111 @@
+{
+ "section": "13.3",
+ "experiment": "continuation_14b",
+ "measurement": "follow_confirmation",
+ "sources": {
+  "doses_sha256": "5e4882ed88c36912c9a1561a059f27e7eb61dc76e74ff371a9f49bdbcdc09496",
+  "follow_rules_sha256": "2f8eb4ddcb5c8d2c177c7f8fcc28eb770d9711343a73aab7ef5c463c0e2e6949",
+  "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+  "prompts_sha256": "910a849d9836c93c184f529633f3dcc8f6f9a587c29744b9add9ebacdc7acdaa"
+ },
+ "lines": {
+  "example_link": {
+   "status": "confirmed",
+   "dose": 200,
+   "attempts": [
+    {
+     "attempt": 1,
+     "dose": 100,
+     "purpose": null,
+     "seed": 1691386236,
+     "detector_version": "7955f709bdcc",
+     "lineage": "follow/example_link",
+     "base_seed": 20261029,
+     "passed": false,
+     "hits": 5,
+     "n": 600,
+     "run": "follow-confirm-20261030T110426Z",
+     "config_hash": "53ec1a35bd89",
+     "files": {
+      "config.yaml": "12320c9e055733b962be6be6c3bb0fd0f7d701f6a0428ede3d98b2fe49f556b3",
+      "draws/latent.jsonl": "31ca4cc2a5b84b4cf2e9f2ba081783e88b384e81b5f7f32a6966c223e001beff",
+      "draws/latent.meta.json": "b5aaeed9a080cb092ea8f51b51744b75046cc98e20841a69d6c9837f938ee095",
+      "draws/latent.started.json": "34e8cfa06ab548843a3a5c2b2d32f72b4ec1b91bbfa1566174dbcd3146c9b495",
+      "draws/sham_s.jsonl": "cdb0c918cd6de6216e9fa8a8b142427d95e3fe2df9d14db3fa4a78cf203be4f6",
+      "draws/sham_s.meta.json": "e2cef4853e3867ef98f652339d2326231e9f3c13642b14422957d84611cf5314",
+      "draws/sham_s.started.json": "3b287a81971698d7236b10d358a4f8f1d2cf6f598624d4fb412ecee98ad0db53",
+      "meta.json": "7d63d0bb40e6e6e389b90930425ddef108700415e35bc41526a7c845c7bb19da",
+      "observations/detector_obs.jsonl": "9ec1286baa4610659db5c91afa3bffc3062ae24a2f61b6111459d1da96d23949",
+      "responses/detector_obs.jsonl": "6324e9a5219d84a81a80d709519c639f9ffb2009767820a12be31e549bd86d4a",
+      "summary.json": "779848f632c364378da0b18526cb1771a178ee48acee0e22979f89772dbfd931"
+     }
+    },
+    {
+     "attempt": 2,
+     "dose": 200,
+     "purpose": "next_dose",
+     "seed": 2068772943,
+     "detector_version": "7955f709bdcc",
+     "lineage": "follow/example_link",
+     "base_seed": 20261029,
+     "passed": true,
+     "hits": 2,
+     "n": 600,
+     "run": "20261030-135021-follow_confirmation-986396d5-5780",
+     "config_hash": "986396d51366",
+     "files": {
+      "config.yaml": "dc015f7f8c1a71ac152fda54abb9e43d560b9ad7528bd4c0f58f378024aa5062",
+      "draws/latent.jsonl": "7821afb92959fd66733f86aa4a607cbe1d9e43bae3e244a1e77555552c022793",
+      "draws/latent.meta.json": "cde6e0b253182e118876c3415185a88bb19e016d57ff9432cfec9388d15a68b5",
+      "draws/latent.started.json": "f1e764ddee7a9c000e2f317bf321eb2e83de56df1c829295dff7ae369d8a048d",
+      "draws/sham_s.jsonl": "c93eb00a13903887a4de8f610ac38109258b145ca1a6d450342476f4c30c6dd2",
+      "draws/sham_s.meta.json": "069e614d9a82a7e2dbb1944f445ee98e19023737f4d1c1de07b80245b1a653b2",
+      "draws/sham_s.started.json": "aa488e1d9c384d8293ba9acdcb59dfaf8fbf65ca13dccb10e99969cb0e9ed43d",
+      "meta.json": "50bb185616ee6b8d0027861b31cba508a9421a0fa433214ed3f91f69a84bbc4d",
+      "observations/detector_obs.jsonl": "e05ec943b9c614d5aff50c5460d101eb4a5bb9a65c16b2e100366cb4d3c6b007",
+      "responses/detector_obs.jsonl": "b343a83301e5a74edd1e85d4b06761835a7cffd6599539c0813b0f8d4aa24bd7",
+      "summary.json": "25ef4e1bad35b76c8cb77b069d09948fe8826dd4643f520f732f91139d32d0fc"
+     }
+    }
+   ]
+  },
+  "pun_intended": {
+   "status": "confirmed",
+   "dose": 200,
+   "attempts": [
+    {
+     "attempt": 1,
+     "dose": 200,
+     "purpose": null,
+     "seed": 1376260766,
+     "detector_version": "c3b09a385060",
+     "lineage": "follow/pun_intended",
+     "base_seed": 20261029,
+     "passed": true,
+     "hits": 0,
+     "n": 600,
+     "run": "20261030-135534-follow_confirmation-7ff043bc-d92f",
+     "config_hash": "7ff043bcb419",
+     "files": {
+      "config.yaml": "60bffb12d9f8a530a0f00c98562644167a1005402e8f6961548736438c680dd7",
+      "draws/latent.jsonl": "a9da2178962d31a57aec36ac723f119fc591c98fcab8ed219ba4518911bd41af",
+      "draws/latent.meta.json": "44e23848e7be5e2b0a8c97810008be4b14bea47dd27c62c631ba3471141e011d",
+      "draws/latent.started.json": "c60697d270cde1b5e0a054305880200373bdb2a5525b9e7807d1131761d95f2e",
+      "draws/sham_s.jsonl": "164de367c78f0e85d10e5f6719279f40be43cef30a2c161000adaef4e98703d9",
+      "draws/sham_s.meta.json": "91ffa884dec6d1d07430d5a9c079e6ed2e0935b251bb7830d878549789142cc2",
+      "draws/sham_s.started.json": "69c7e79a1346ee5210475b82fabe94c60e0b27ac3f2290404b83f0ce90a169ea",
+      "meta.json": "1124b837ae86111e9ed5880e1a1f6226d4eba3c1470f5d71efcec47e94d13f63",
+      "observations/detector_obs.jsonl": "0334d16fc5d1826906b592b66bc4b676bb01b96772ec03846a5edc5d3eee430c",
+      "responses/detector_obs.jsonl": "05878b867bafcfba91abb73b720cdfdf5bc01e76e8038e5614a26a3d0958e853",
+      "summary.json": "4196c2ca034f4021c4924dcc9d55295facb8de3f62ad3da0c71e8953af346290"
+     }
+    }
+   ]
+  }
+ },
+ "confirmed": {
+  "example_link": 200,
+  "pun_intended": 200
+ },
+ "commit": "021ba8b8aab6e30cb5ca16c5ea85e145aa59ff73"
+}
