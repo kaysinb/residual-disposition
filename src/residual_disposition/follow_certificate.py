@@ -254,11 +254,3 @@ def status(path: Path, state: str, cause: str | None = None) -> None:
     tmp = path.with_suffix(".partial")
     tmp.write_text(json.dumps(body) + "\n")
     tmp.replace(path)
-
-
-def touch(path: Path) -> None:
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-
-
-__all__ = ["line_of", "workspace", "reference", "data", "calibrate", "certify", "payload",
-           "envelope", "receipt_problems", "opened", "schedule", "sealed_dir", "status"]  # fmt: skip

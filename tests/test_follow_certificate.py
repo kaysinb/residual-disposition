@@ -182,3 +182,63 @@ def test_the_schedule_and_the_status(tmp_path):
     assert json.loads(path.read_text()) == {"status": "failed", "cause": "RuntimeError"}
     with pytest.raises(ValueError):
         F.status(path, "crossed")
+
+
+def runner():
+    import importlib.util
+
+    from residual_disposition.paths import REPO_ROOT
+
+    spec = importlib.util.spec_from_file_location(
+        "follow_certificate_pod", REPO_ROOT / "scripts" / "pod" / "follow_certificate.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_the_runner_waits_for_the_receipt_of_an_envelope_with_the_record(tmp_path):
+    pod = runner()
+    out, sealed = tmp_path / "out", tmp_path / "sealed"
+    env = pod.Envelopes(out, sealed, "l", "s" * 64, 30, 0.0)
+    env.write(0)  # before the record: a stub
+    env.record = {"status": "resolved"}
+    env.write(1)
+    assert env.with_record == {1}
+    assert json.loads((sealed / "payloads" / "1.json").read_text())["record"] == env.record
+    assert set(json.loads((out / "envelopes" / "0.json").read_text())) == {"line", "n",
+                                                                          "commitment"}  # fmt: skip
+    (out / "receipts").mkdir()
+    (out / "receipts" / "0.json").write_text(json.dumps({"commit": "a" * 40,
+                                                         "envelope": env.written[0]}))  # fmt: skip
+    (out / "receipts" / "1.json").write_text(json.dumps({"commit": "b" * 40,
+                                                         "envelope": env.written[1]}))  # fmt: skip
+    assert pod.receipt(out, env) == 1  # envelope 0's receipt does not open the runs
+    (out / "receipts" / "1.json").write_text(json.dumps({"commit": "b" * 40,
+                                                         "envelope": env.written[0]}))  # fmt: skip
+    with pytest.raises(ValueError, match="not the runner's"):
+        pod.receipt(out, env)
+
+
+def test_the_laptop_commits_each_envelope_alone_and_returns_its_receipt(tmp_path):
+    import importlib.util
+    import subprocess
+
+    from residual_disposition.paths import REPO_ROOT
+
+    spec = importlib.util.spec_from_file_location("follow_seal", REPO_ROOT / "scripts"
+                                                  / "follow_seal.py")  # fmt: skip
+    seal = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(seal)
+    repo = tmp_path / "repo"
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    for k, v in (("user.email", "r@example.org"), ("user.name", "r")):
+        subprocess.run(["git", "-C", str(repo), "config", k, v], check=True)
+    env = F.envelope("pun_intended_200", 0, b"payload")
+    receipt = seal.commit(env, repo)
+    assert F.receipt_problems(receipt, env) == []
+    assert seal.commit(env, repo)["commit"] == receipt["commit"]  # a rerun commits nothing
+    for bad in ({**env, "record": 1}, {**env, "line": "eli5_cont_200"},
+                {**env, "commitment": "x" * 64}, {**env, "n": "1"}):  # fmt: skip
+        with pytest.raises(SystemExit):
+            seal.commit(bad, repo)
