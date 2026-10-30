@@ -81,7 +81,7 @@ def test_no_patch_renders_its_one_result(tmp_path):
     assert len(sources) == len(lr.LAYERS)
     text = lr.no_patch_prompt().text
     assert "30" not in text.split("Patchscope token promotions")[1].split("\n")[0]
-    assert lr.no_patch_prompt().sha256 != lr.PROMPT_SHA256
+    assert lr.no_patch_prompt().sha256 == lr.NO_PATCH_PROMPT_SHA256 != lr.PROMPT_SHA256
 
 
 def test_render_refuses_wrong_shapes(tmp_path):

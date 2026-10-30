@@ -101,6 +101,8 @@ RUBRICS = {"lens": "v4", "pd": "v4-j3"}
 JUDGE_MODELS = {"strict": "gemini-3.5-flash-lite", "lenient": "gemini-3.8-flash"}
 CATEGORY_MODEL = "gemini-3.8-flash"
 CATEGORY_MAX_TOKENS = 2048  # continuation_judge.category_request's cap
+# The follow-up's specificity grader (§13.4, barrier B2): the category grader's model and cap
+SPECIFICITY_MODEL, SPECIFICITY_MAX_TOKENS = CATEGORY_MODEL, 2048
 DEFINITIONS_SHA256 = "8e083c5c944fe8e77f8a6bcec41d90f2bc5f38ac36ae5afdefdb665f808fe8d7"
 STANDARD = "standard"
 RETRY = "#retry=1"  # a slot's one retry after the frozen parser's refusal (§12.4.5, 2026-10-25)
@@ -1045,6 +1047,21 @@ def judge_settings(version: str) -> Any:
                          lenient=bool(j.lenient), max_tokens=int(j.max_tokens),
                          structured_output=bool(j.structured_output),
                          lenient_model=spec(j.lenient_model))  # fmt: skip
+
+
+def judge_tier() -> str:
+    """The tier of the frozen judge's new sends, as ``scripts/judge.py`` sends them from ``JUDGE``
+    (its ``pricing_tier``): on the synchronous backend its configured tier, a null one the standard
+    tier; ``batch`` on the batch backend. A cached answer's tier is the reader's (``slot``,
+    ``admitted_tier``), not this."""
+    from .config import load_config
+
+    j = load_config(JUDGE, ["tracking.wandb.enabled=false"]).judge
+    if j.backend == "batch":
+        return "batch"
+    if j.backend == "sync":
+        return j.sync.service_tier or STANDARD
+    raise ValueError(f"{JUDGE}: judge.backend {j.backend!r} is neither sync nor batch")
 
 
 def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behavior: str,

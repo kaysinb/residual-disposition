@@ -22,7 +22,7 @@ from typing import Any
 
 from omegaconf import OmegaConf
 
-from .paths import CONFIG_ROOT
+from .paths import CONFIG_ROOT, REPO_ROOT
 
 RULES_PATH = CONFIG_ROOT / "continuation" / "rules.yaml"
 # The purposes of the second confirmation attempt (§12.4.1); exactly one may be used.
@@ -727,6 +727,7 @@ def follow_drop_reasons(item: str) -> list[str]:
 FOLLOW_RULES_PATH = CONFIG_ROOT / "continuation" / "follow_rules.yaml"
 FOLLOW_M0_PATH = CONFIG_ROOT / "continuation" / "follow_m0.yaml"
 FOLLOW_BUILD_PATH = CONFIG_ROOT / "continuation" / "follow_build.yaml"
+FOLLOW_B2_PATH = CONFIG_ROOT / "continuation" / "follow_b2.yaml"
 # The follow-up rules' frozen sha256 (``follow_hash``); a new version of the file at a barrier
 # (§13.15) changes it by a reviewed commit.
 FOLLOW_FROZEN = "2f8eb4ddcb5c8d2c177c7f8fcc28eb770d9711343a73aab7ef5c463c0e2e6949"
@@ -851,12 +852,24 @@ def follow_m0() -> dict[str, Any]:
 FOLLOW_BUILD_FROZEN: str | None = None
 
 
-def load_follow_build(path: str | Path = FOLLOW_BUILD_PATH, *,
-                      expected_hash: str | None = None) -> dict[str, Any]:  # fmt: skip
+def lineage_a() -> dict[str, str]:
+    """Each behavior's A state as the records name it: B2's inventory manifest, the A pools'
+    states (``follow_inventory.pd_sources``)."""
+    b2 = follow_b2()
+    manifest = json.loads((REPO_ROOT / b2["inventory"]["manifest"]).read_text())
+    return {b: roles["A"]["state"] for b, roles in manifest["sources"]["pd_unfiltered"].items()}
+
+
+def load_follow_build(path: str | Path = FOLLOW_BUILD_PATH, *, expected_hash: str | None = None,
+                      a_states: Mapping[str, str] | None = None) -> dict[str, Any]:  # fmt: skip
     """The builds' configuration (§13.10), validated: M0's frozen runtime, layer 20 decisive and
-    layers 20 and 30 read, every session a plan ``follow_build.execute`` runs and no state in two
-    sessions; with ``expected_hash``, refused when changed."""
+    layers 20 and 30 read, every session a plan ``follow_build.execute`` runs, each reference its
+    behavior's A (``a_states``, by default ``lineage_a``), and no build in two sessions (a
+    lineage's A is rebuilt in each session that needs it); with ``expected_hash``, refused when
+    changed."""
     from .follow_build import plan_problems
+
+    a_states = lineage_a() if a_states is None else a_states
 
     data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
     build = data["build"]
@@ -870,11 +883,15 @@ def load_follow_build(path: str | Path = FOLLOW_BUILD_PATH, *,
     seen: list[str] = []
     for name, session in build["sessions"].items():
         problems = plan_problems(session["references"], session["builds"])
+        for r in session["references"]:
+            if a_states.get(r["behavior"]) != r["state"]:
+                problems.append(f"reference {r['state']} is not {r['behavior']}'s A "
+                                f"{a_states.get(r['behavior'])}")  # fmt: skip
         if problems:
             raise ValueError(f"session {name}: {'; '.join(problems)}")
-        seen += [x["state"] for x in [*session["references"], *session["builds"]]]
+        seen += [x["state"] for x in session["builds"]]
     if len(set(seen)) != len(seen):
-        raise ValueError("a state is planned in two sessions")
+        raise ValueError("a build is planned in two sessions")
     digest = follow_hash(build)
     if expected_hash is not None and digest != expected_hash:
         raise ValueError(f"the builds' configuration changed: sha256 {digest} != {expected_hash}")
@@ -887,3 +904,293 @@ def follow_build() -> dict[str, Any]:
     if FOLLOW_BUILD_FROZEN is None:
         raise ValueError("the builds' configuration is not frozen yet: no build runs")
     return load_follow_build(expected_hash=FOLLOW_BUILD_FROZEN)
+
+
+# Barrier B2's frozen sha256 (``follow_hash`` of its ``b2`` mapping): set by the commit that
+# freezes it; until then no qualification request of D* or unfiltered PD is sent.
+FOLLOW_B2_FROZEN: str | None = "4c23cd85094d52a997eaa3623678497eb1f7858b8b0873f21666b07273c456bf"
+
+
+B2_PROBE = "A probe hypothesis: the model ends its answers with a fixed phrase."
+# The probe package's tokens: non-ASCII, quotes, escapes and whitespace among plain ones
+B2_TOKENS = ("一秒", "刹那", " é", "\n", '"q"', "back\\slash", "\t", "🙂", "ß", "Ω", *(
+    f"t{i}" for i in range(30)))  # fmt: skip
+
+
+def _b2_probe_package(root: Path) -> Path:
+    """A lens package in the stored files' shapes, written under ``root`` from ``B2_TOKENS``
+    alone: per layer, decoder and position 100 logit-lens tokens (one repeated) and a Patchscope
+    sweep whose 20 tokens rotate through the 30 scales, so that tokens recur with gaps, best ranks
+    tie at the same and at different first scales, and one scale lists a token twice; per layer
+    one no-patch result at scale 1, a token listed twice."""
+    from . import lens_render as lr
+
+    run = root / "runs" / "probe" / "pkg"
+    n = len(B2_TOKENS)
+    for a, layer in enumerate(lr.LAYERS):
+        for b, decoder in enumerate(lr.DECODERS):
+            for p in lr.POSITIONS:
+                d = run / "steps" / f"layer{layer}" / decoder / f"p{p}"
+                d.mkdir(parents=True)
+                lens = [f"{B2_TOKENS[(a + b + p + i) % n]}·{i % 97}" for i in range(lr.LOGIT_K)]
+                (d / "logit_lens.json").write_text(json.dumps({"tokens": lens, "probs": []}))
+                sweep = []
+                for i, s in enumerate(lr.SCALES):
+                    off = 7 * (a + 2 * b + 3 * p) + 7 * i * (i % 3 != 2)
+                    tokens = [B2_TOKENS[(off + 3 * k) % n] for k in range(lr.PATCH_K)]
+                    if i == 3:
+                        tokens[-1] = tokens[0]
+                    sweep.append([s, tokens, [0.0] * lr.PATCH_K])
+                (d / "patchscope.json").write_text(json.dumps(sweep))
+        f = run / "steps" / f"layer{layer}" / "no_patch" / "patchscope.json"
+        f.parent.mkdir(parents=True)
+        tokens = [B2_TOKENS[(5 * a + 3 * k) % n] for k in range(lr.PATCH_K)]
+        f.write_text(json.dumps([[1.0, [*tokens[:-1], tokens[1]], [0.0] * lr.PATCH_K]]))
+    return run
+
+
+def b2_renderings() -> dict[str, str]:
+    """D*'s rendering as the code renders it, by sha256 of each output (the evidence text and its
+    source files' sha256) on the probe package (``_b2_probe_package``): ``lens_render.render``
+    for each decoder and ``render_no_patch``."""
+    import tempfile
+
+    from . import lens_render as lr
+
+    def digest(found: tuple[str, dict[str, str]]) -> str:
+        blob = json.dumps(list(found), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(blob.encode()).hexdigest()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        run = _b2_probe_package(root)
+        out = {d: digest(lr.render(run, d, root=root)) for d in lr.DECODERS}
+        out["no_patch"] = digest(lr.render_no_patch(run, root=root))
+    return out
+
+
+def b2_requests() -> dict[str, str]:
+    """Each instrument's requests as the code builds them, by sha256 of their canonical JSON: on
+    a fixed probe text, every slot's request body (model, messages, cap, thinking level, response
+    format) with its cache key and its retry's. The D* interpreter on its prompt and the no-patch
+    prompt, the PD interpreter, the judges' strict and lenient requests of each rubric set for
+    each behavior's target, the category grader and the specificity grader for each behavior."""
+    from . import continuation_readers as readers
+    from . import lens_render as lr
+    from .config import load_config
+    from .continuation_definitions import load_definitions
+    from .continuation_judge import (
+        CATEGORY_VERSION,
+        SPECIFICITY_VERSION,
+        category_request,
+        specificity_request,
+    )
+    from .follow_inventory import BEHAVIORS
+    from .judge import JudgeItem, load_targets, request_key, stage_requests
+    from .summarizer import summary_requests
+
+    def digest(rows: list[dict[str, Any]]) -> str:
+        blob = json.dumps(rows, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(blob.encode()).hexdigest()
+
+    def summary(prompt: Any, settings: Any) -> str:
+        first = summary_requests(prompt, B2_PROBE, settings, salt="probe")
+        retry = summary_requests(prompt, B2_PROBE, settings, salt="probe", retry=True)
+        return digest([{"key": a.key, "retry": b.key, "body": a.body}
+                       for a, b in zip(first, retry, strict=True)])  # fmt: skip
+
+    def row(r: Any, version: str) -> dict[str, Any]:
+        return {"key": r.key, "retry": request_key(f"{version}{readers.RETRY}", r.body),
+                "body": r.body}  # fmt: skip
+
+    lens, lens_settings = readers.interpreter("lens")
+    pd, pd_settings = readers.interpreter("pd")
+    out = {"dstar_interpreter": summary(lr.prompt(), lens_settings),
+           "dstar_no_patch_interpreter": summary(lr.no_patch_prompt(), lens_settings),
+           "pd_interpreter": summary(pd, pd_settings)}  # fmt: skip
+    targets = load_targets(BEHAVIORS)
+    for fmt, kind in (("dstar", "lens"), ("pd_unfiltered", "pd")):
+        settings = readers.judge_settings(readers.RUBRICS[kind])
+        items = [JudgeItem("probe", b, targets[b], B2_PROBE) for b in BEHAVIORS]
+        staged = stage_requests(items, settings)
+        for label in ("strict", "lenient"):
+            out[f"{fmt}_{label}"] = digest(
+                [row(getattr(r, label), getattr(r, label).rubric_version) for r in staged]
+            )
+    definitions, _ = load_definitions(expected_hash=readers.DEFINITIONS_SHA256)
+    models = load_config(readers.JUDGE, ["tracking.wandb.enabled=false"]).judge.models
+
+    def spec(model_id: str) -> Any:
+        return readers._spec(next(m for m in models if m.id == model_id))
+
+    category = category_request(B2_PROBE, definitions, spec(readers.CATEGORY_MODEL),
+                                max_tokens=readers.CATEGORY_MAX_TOKENS)  # fmt: skip
+    out["category"] = digest([row(category, CATEGORY_VERSION)])
+    out["specificity"] = digest([
+        row(specificity_request(B2_PROBE, definitions[b], spec(readers.SPECIFICITY_MODEL),
+                                max_tokens=readers.SPECIFICITY_MAX_TOKENS), SPECIFICITY_VERSION)
+        for b in BEHAVIORS
+    ])  # fmt: skip
+    return out
+
+
+def b2_problems(b2: Mapping[str, Any]) -> list[str]:
+    """Where B2's entries and the code that executes them disagree: D*'s rendering (its whole
+    scale grid, its output on the probe package, ``b2_renderings``) and prompts, the
+    interpreter's and the judges' models and settings (structured output; the tier of the
+    judge's new sends, ``continuation_readers.judge_tier``), every instrument's requests
+    (``b2_requests``), the regions, the inventory's confirmable doses and salts, and format
+    validation's quota and formats."""
+    from . import continuation_judge as cj
+    from . import continuation_readers as readers
+    from . import follow_inventory as fi
+    from . import lens_render as lr
+
+    problems = []
+
+    def want(label: str, got: Any, wanted: Any) -> None:
+        if got != wanted:
+            problems.append(f"{label}: the code has {got!r}, B2 {wanted!r}")
+
+    r = b2["rendering"]
+    want("rendering layers", [int(x) for x in lr.LAYERS], [int(x) for x in r["layers"]])
+    want("rendering positions", list(lr.POSITIONS), [int(x) for x in r["positions"]])
+    want("logit-lens tokens", lr.LOGIT_K, int(r["logit_lens_tokens"]))
+    want("Patchscope top", lr.PATCH_K, int(r["patchscope_top"]))
+    want("scales", [float(x) for x in lr.SCALES], [float(x) for x in r["scales"]])
+    want("decoders", list(lr.DECODERS), list(r["decoders"]))
+    for key, prompt in (("prompt", lr.prompt()), ("no_patch_prompt", lr.no_patch_prompt())):
+        want(key, (prompt.version, prompt.sha256), (r[key]["version"], r[key]["sha256"]))
+    want("renderings", b2_renderings(), dict(r["renderings"]))
+    i = b2["interpreter"]
+    for kind, key in (("lens", "lens_base_prompt"), ("pd", "pd_prompt")):
+        prompt, s = readers.interpreter(kind)
+        got = (s.model.id, s.model.reasoning_effort, s.max_tokens, s.samples)
+        wanted = (i["model"], i["reasoning_effort"], int(i["max_tokens"]), int(i["samples"]))
+        want(f"{kind} interpreter", got, wanted)
+        want(f"{kind} prompt", (prompt.version, prompt.sha256),
+             (i[key]["version"], i[key]["sha256"]))  # fmt: skip
+    j = b2["judging"]
+    want("rubric sets", {"dstar": readers.RUBRICS["lens"], "pd_unfiltered": readers.RUBRICS["pd"]},
+         dict(j["rubric_sets"]))  # fmt: skip
+    for version in j["rubric_sets"].values():
+        s = readers.judge_settings(version)
+        lenient = s.model_for("lenient")
+        want(f"judge {version}", (s.model.id, s.model.reasoning_effort, lenient.id,
+                                  lenient.reasoning_effort, s.max_tokens),
+             (j["strict"]["model"], j["strict"]["reasoning_effort"], j["lenient"]["model"],
+              j["lenient"]["reasoning_effort"], int(j["max_tokens"])))  # fmt: skip
+        want(f"judge {version} structured output", s.structured_output,
+             bool(j["structured_output"]))  # fmt: skip
+    want(
+        "category",
+        (cj.CATEGORY_VERSION, readers.CATEGORY_MODEL, readers.CATEGORY_MAX_TOKENS),
+        (j["category"]["version"], j["category"]["model"], int(j["category"]["max_tokens"])),
+    )
+    want(
+        "specificity",
+        (cj.SPECIFICITY_VERSION, readers.SPECIFICITY_MODEL, readers.SPECIFICITY_MAX_TOKENS),
+        (j["specificity"]["version"], j["specificity"]["model"],
+         int(j["specificity"]["max_tokens"])),
+    )  # fmt: skip
+    want("judge tier", readers.judge_tier(), j["service_tier"])
+    want("requests", b2_requests(), dict(b2["requests"]))
+    want("definitions", readers.DEFINITIONS_SHA256, j["definitions_sha256"])
+    rules = follow_rules().data
+    want("regions", rules["readers"]["regions"]["cells_sha256"], b2["regions"]["cells_sha256"])
+    want("regions manifest", rules["readers"]["regions"]["manifest"], b2["regions"]["manifest"])
+    want("slots", (fi.SLOTS, int(rules["readers"]["requests"])), (int(i["samples"]),) * 2)
+    fv = b2["format_validation"]
+    want("per class", int(rules["format_validation"]["per_class"]), int(fv["per_class"]))
+    from . import follow_validation as fvd
+
+    fr = rules["format_validation"]
+    limits = fvd.max_errors(int(fv["per_class"]),
+                            sensitivity_floor=_fraction(fr["sensitivity_lower_min"]),
+                            fpr_ceiling=_fraction(fr["fpr_upper_max"]),
+                            confidence=_fraction(fr["confidence"]))  # fmt: skip
+    want("acceptance limits", limits,
+         (int(fr["max_false_negatives"]), int(fr["max_false_positives"])))  # fmt: skip
+    want("formats", sorted(fv["formats"]), ["dstar", "pd_unfiltered"])
+    reading = fi._reading("p", "b", "r", "d", 1, "x")["salt"]
+    want("D* salt", reading, b2["salts"]["dstar"].format(purpose="p", behavior="b", role="r",
+                                                         decoder="d", stream=1))  # fmt: skip
+    dose = fi._reading("p", "b", "r", "d", 1, "x", 7)["salt"]
+    want("dose salt", dose, reading + b2["salts"]["dose_suffix"].format(dose=7))
+    confirmable = {b: [int(spec["dose"]), int(spec["fallback"])]
+                   for b, spec in rules["partial_threshold"].items()
+                   if spec["confirmation"] == "fresh"}  # fmt: skip
+    want("confirmable doses", {b: list(d) for b, d in fi.CONFIRMABLE.items()}, confirmable)
+    doses = b2["inventory"]["confirmation"]["doses"]
+    want("inventory doses", confirmable, {b: [int(x) for x in d] for b, d in doses.items()})
+    from .continuation_definitions import load_definitions
+
+    definitions, _ = load_definitions(expected_hash=readers.DEFINITIONS_SHA256)
+    for fmt, spec in b2["ensemble"]["instructions"].items():
+        want(f"{fmt} rubric set", j["rubric_sets"][fmt], spec["rubric_set"])
+        text = fvd.reference_instructions(spec["rubric_set"], definitions)
+        want(f"{fmt} instructions", hashlib.sha256(text.encode()).hexdigest(), spec["sha256"])
+        f = REPO_ROOT / spec["file"]
+        want(f"{fmt} instructions file", f.is_file() and f.read_text() == text, True)
+    pd = fi._pd_reading("p", "b", "r", 1, {})["salt"]
+    want("PD salt", pd, b2["salts"]["pd_unfiltered"].format(purpose="p", behavior="b", role="r",
+                                                            stream=1))  # fmt: skip
+    want("PD dose salt", fi._pd_reading("p", "b", "r", 1, {}, 7)["salt"],
+         pd + b2["salts"]["dose_suffix"].format(dose=7))  # fmt: skip
+    return problems
+
+
+def _inventory_problems(manifest: Mapping[str, Any], spec: Mapping[str, Any]) -> list[str]:
+    """The manifest's counts as B2 states them, before and after ``follow_inventory.resolve``
+    (each confirmable line at its first dose), and every salt distinct."""
+    from . import follow_inventory as fi
+
+    def counts(parts: Mapping[str, Any]) -> dict[str, dict[str, int]]:
+        return {k: {n: len(rows) for n, rows in v.items()} for k, v in parts.items()
+                if k != "sources"}  # fmt: skip
+
+    problems = []
+    if counts(manifest) != spec["counts"]:
+        problems.append(f"inventory counts {counts(manifest)} != {spec['counts']}")
+    first = {b: doses[0] for b, doses in fi.CONFIRMABLE.items()}
+    resolved = counts(fi.resolve(manifest, first))
+    if resolved != spec["confirmation"]["resolved"]:
+        problems.append(f"resolved counts {resolved} != {spec['confirmation']['resolved']}")
+    try:
+        fi.check([r for k, v in manifest.items() if k != "sources" for rows in v.values()
+                  for r in rows])  # fmt: skip
+    except ValueError as error:
+        problems.append(f"inventory: {error}")
+    return problems
+
+
+def load_follow_b2(path: str | Path = FOLLOW_B2_PATH, *, expected_hash: str | None = None,
+                   check_code: bool = True) -> dict[str, Any]:  # fmt: skip
+    """B2's configuration (§13.15), checked against the code that executes it
+    (``b2_problems``) and against its inventory manifest, which must exist with its sha256;
+    with ``expected_hash``, refused when changed."""
+    data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
+    b2 = data["b2"]
+    problems = b2_problems(b2) if check_code else []
+    manifest = REPO_ROOT / b2["inventory"]["manifest"]
+    if not manifest.is_file():
+        problems.append(f"inventory manifest {b2['inventory']['manifest']} missing")
+    else:
+        digest = hashlib.sha256(manifest.read_bytes()).hexdigest()
+        if digest != b2["inventory"]["sha256"]:
+            problems.append(f"inventory manifest sha256 {digest} != {b2['inventory']['sha256']}")
+        problems += _inventory_problems(json.loads(manifest.read_text()), b2["inventory"])
+    if problems:
+        raise ValueError("B2 and the code disagree: " + "; ".join(problems))
+    digest = follow_hash(b2)
+    if expected_hash is not None and digest != expected_hash:
+        raise ValueError(f"B2 changed: sha256 {digest} != frozen {expected_hash}")
+    return b2
+
+
+def follow_b2() -> dict[str, Any]:
+    """B2's configuration for execution: always checked against ``FOLLOW_B2_FROZEN``; refused
+    while that is unset."""
+    if FOLLOW_B2_FROZEN is None:
+        raise ValueError("barrier B2 is not frozen yet: no qualification request is sent")
+    return load_follow_b2(expected_hash=FOLLOW_B2_FROZEN)

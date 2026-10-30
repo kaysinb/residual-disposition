@@ -1,0 +1,155 @@
+# Barrier B2 of the follow-up (preregistration §13.15): committed before any qualification request
+# of D* or unfiltered PD. Frozen by the full sha256 of its canonical form
+# (continuation_rules.FOLLOW_B2_FROZEN); its loader also checks every entry below against the code
+# that executes it, so that neither can change alone.
+b2:
+  regions:                       # §13.5 (c): certified by the committed script before B2
+    script: scripts/certify_follow_regions.py
+    run: runs/certify_follow_regions/20261029-141750-8c042df2-ad5a
+    manifest: manifests/follow_regions.json
+    cells_sha256: d119e7df044210499ae654ee2043a2597ee0b180e2b2bf4cfc5c8a3849675ce6
+
+  rendering:                     # §13.4: D*'s evidence, lens_render
+    layers: [20, 30]
+    positions: [0, 1, 2, 3, 4]
+    logit_lens_tokens: 100
+    patchscope_top: 20
+    scales: [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 3.0,
+             4.0, 5.0, 10.0, 20.0, 40.0, 60.0, 80.0, 100.0, 120.0, 140.0, 160.0, 180.0, 200.0]
+    decoders: [state, base, random]
+    no_patch: one Patchscope result per layer at scale 1, shared by every position, no logit lens
+    prompt: {version: adl-lens-multiscale-v2,
+             sha256: 4097a7d8ad25707c016eb7822db02e01000f5ca6728ed7ed9edc43660b1cf959}
+    no_patch_prompt: {version: adl-lens-multiscale-nopatch-v1,
+                      sha256: 0588dcf3d4cd3c350323956de15014c4ca1644b755223b81f9a9b3f27b9103ee}
+    lambda_choice: none          # D* reads no λ draw (§13.4); its builds skip the λ grader
+    renderings:                  # continuation_rules.b2_renderings: each output on the probe
+      # package (Unicode, escapes, ranks' ties, gaps, a token listed twice), by sha256
+      state: c49ccc6c42e9aef329b183cf858b527ce02ef2de59e6842a7dd577731aaa3821
+      base: 3fa747c712229eea5ee55ce28b8503f790465b156a8698325cea86e087a64428
+      random: de2ff11252608d5bd518b9d0339f108efa90ca3808c69d468c529e86c3ccb716
+      no_patch: 935e8af63aa70b0459f1073a8fc15eeeb260049647c611d435ca5c070f9c4c19
+
+  interpreter:                   # adl-lens-v1's model, settings and synthesis; PD's pd-v1
+    model: gemini-3.8-flash
+    reasoning_effort: low
+    max_tokens: 4096
+    samples: 80                  # sample slots per reading
+    retry: format_only           # one retry after the frozen parser's refusal (§12.4.5)
+    lens_base_prompt: {version: adl-lens-v1,
+                       sha256: 9449d2b57e9f8025c6a92a4215096e6e360f92afb086bc035a559a4dfc69bca2}
+    pd_prompt: {version: pd-v1,
+                sha256: 89610f91ea1aef6ee560e3ed1b03ab3eef632a1fa2a0829ccc2c9afc0bbc6cab}
+
+  judging:                       # rule C: lenient "yes" and strict not avoids_behavior
+    rule: C
+    rubric_sets: {dstar: v4, pd_unfiltered: v4-j3}
+    strict: {model: gemini-3.5-flash-lite, reasoning_effort: minimal}
+    lenient: {model: gemini-3.8-flash, reasoning_effort: low}
+    max_tokens: 1024
+    structured_output: true      # the strict rubric's JSON-schema response format
+    service_tier: standard       # the judge's new sends (continuation_readers.judge_tier)
+    category: {version: category-v1, model: gemini-3.8-flash, max_tokens: 2048}
+    specificity: {version: specificity-v1, model: gemini-3.8-flash, max_tokens: 2048}
+    definitions_sha256: 8e083c5c944fe8e77f8a6bcec41d90f2bc5f38ac36ae5afdefdb665f808fe8d7
+    strict_safety_blocked: counts as not naming b; every planned slot stays in the denominator
+
+  requests:                      # continuation_rules.b2_requests: each instrument's requests on a
+    # fixed probe text (every slot's body with its cache key and its retry's), by sha256
+    dstar_interpreter: 90871c7134da7a75c6b514f9d75976ac388170e330d6c6611b2cb89cd526a7b6
+    dstar_no_patch_interpreter: 89fab13d8366d094e583b00c0812731e851ebe434dce4d8574df7563f925cfaf
+    pd_interpreter: f8c26b7aab6297ecb514904f1b3d1bbbe871878c0b669321db0e76543f294b41
+    dstar_strict: 9301f089ed4b924152e4de06d299d708772bb9bf7c6323b6b4abd6ca359aad15
+    dstar_lenient: 50dd11beae28c322c3bcc3397b299298035ee847c9693f8821accdd37cad0a1a
+    pd_unfiltered_strict: 9301f089ed4b924152e4de06d299d708772bb9bf7c6323b6b4abd6ca359aad15
+    pd_unfiltered_lenient: 2323d1b0c2459ecfc32455460ca04ca9d64ed9f85e45b994fc62c1f3c147cf6b
+    category: c311c509e41ff7ef2eb613b48de6e20fb60c0c9d4049f85fa37a96b3a92f4df1
+    specificity: 2fdc31d1eb3c7c031aa3b6fbd6b5fb26b093142640ff85f60884433891df8e3c
+
+  pd_unfiltered:                 # §13.5: the registered PD selection, no removal
+    selection: the top 92 by ΔPPL per configuration (§12.4.2's ranking), no detector removal and no adjudication
+    requests: 80
+
+  salts:                         # each stream its own set of slots (summarizer.summary_requests)
+    dstar: "follow/dstar/{purpose}/{behavior}/{role}/{decoder}/stream{stream}"
+    pd_unfiltered: "follow/pd/{purpose}/{behavior}/{role}/stream{stream}"
+    dose_suffix: "/dose{dose}"   # appended for a reading of one confirmable dose's package
+
+  inventory:                     # follow_inventory.inventory, written by scripts/follow_b2_inventory.py
+    manifest: manifests/follow_b2_inventory.json
+    sha256: 38cc674ca8ff3335ae6d98543290b019bd7afd49a374222880289426cf912ac3
+    counts:                      # the manifest's entries: a confirmable line's at both doses
+      dstar: {qualification: 108, supplement: 24}
+      pd_unfiltered: {qualification: 30, validation: 12}
+    confirmation:                # §13.3: follow_inventory.resolve, the only mapping
+      doses: {example_link: [100, 200], pun_intended: [200, 400]}
+      rule: >-
+        a reading marked if_confirmed with a dose is read only if that dose is its line's
+        confirmed dose; a line without a confirmed dose keeps its A, H and fidelity readings and
+        has no marked reading; no package is substituted otherwise
+      resolved:                  # each confirmable line confirmed at one of its doses
+        dstar: {qualification: 100, supplement: 24}
+        pd_unfiltered: {qualification: 26, validation: 12}
+    rebuilt_a: rebuilt A packages are references only and are never read
+
+  format_validation:             # §13.5; follow_validation
+    per_class: 400
+    frame_inventory: the resolved inventory (follow_inventory.resolve) once the confirmations are known
+    acceptance: >-
+      exactly 400 distinct items per class; at most 29 false negatives and 12 false positives
+      (follow_validation.max_errors); §3's criterion 2, the veto's precision on the locked set,
+      passing or not applicable
+    item: one hypothesis, a reading's salt and its slot
+    order: one seeded shuffle of the frame's items in the inventory's order (seeded_order)
+    stopping: >-
+      the frame is labeled in its seeded order until both classes hold 400 and every stratum its
+      minimum; a frame exhausted first, with a supplemental inventory declared, generates that
+      inventory whole in its listed order and labels it in its own seeded order after the
+      frame's; once nothing is left to label, the final selection caps each minimum at what the
+      labeled items hold and reports the capped strata as short; a class under 400 leaves the
+      format not validated. No source is chosen to fill a stratum. Items labeled beyond a full
+      quota stay in the record and are not used.
+    strata: [behavior, decoder, role, difficulty]   # decoder for D* only
+    difficulty:                  # from the reference fields; another_behavior first
+      another_behavior: the reference's categories include another behavior's category
+      category_only: the reference's specificity is category_only
+    class: >-
+      an item's class is the complete reference rule C; a difficulty label never sets it. A
+      category-only hypothesis is labeled by the registered category-level rule C and stays
+      negative for the defining-feature judgment where appropriate
+    formats:
+      dstar:
+        frame: [qualification]
+        supplement: supplement   # generated only if the frame is short
+        seed: 2026103001
+        supplement_seed: 2026103011
+        review_seed: 2026103021
+        minimums:
+          positive: {behavior: 30, decoder: 60, difficulty: {category_only: 40}}
+          negative: {behavior: 30, decoder: 60, difficulty: {another_behavior: 40}}
+      pd_unfiltered:
+        frame: [qualification, validation]   # its H streams always: it reads no H otherwise
+        supplement: null
+        seed: 2026103002
+        supplement_seed: null
+        review_seed: 2026103022
+        minimums:
+          positive: {behavior: 30, difficulty: {category_only: 40}}
+          negative: {behavior: 30, difficulty: {another_behavior: 40}}
+    later_formats: the rung-2 input and rung 3 (agent and comparator) at barrier B3
+
+  ensemble:                      # the reference labels, blind to state, role and machine labels
+    annotators:
+      opus: {model: claude-opus-5-5, runner: independent subagent}
+      fable: {model: claude-fable-5-1, runner: independent subagent}
+      gpt: {model: gpt-6-astra, runner: "codex-cli 0.160.1, reasoning effort xhigh, read-only, ephemeral"}
+    arbiter: {model: claude-opus-5-5, runner: fresh subagent, votes: anonymous, applies_to: disputes}
+    blind_to: [state, role, decoder, reading, machine labels]
+    fields: [strict, lenient, categories, specificity]
+    instructions:                # follow_validation.reference_instructions; {FILES}, {N} per batch
+      dstar: {rubric_set: v4, file: configs/continuation/follow_reference_dstar.md,
+              sha256: 03136b8a518c216e48afc0d0bce7022977bdf6ac192561442870ee9e34bf9e32}
+      pd_unfiltered: {rubric_set: v4-j3, file: configs/continuation/follow_reference_pd.md,
+                      sha256: 983414010e33f20708c722bb14f56e6054744f0d8d5098d9810149a8b430cc19}
+    review: {fraction: "1/10", draw: in_review, disputes: all}
+    final: the reference class after the researcher's adjudication; then the 400 + 400 set is locked
