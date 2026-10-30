@@ -132,15 +132,20 @@ def allocate(
     detector_version: str,
     dose: int,
     candidates_of: Mapping[str, Sequence[int]] | None = None,
+    base_seed: int = FROZEN["base_seed"],
+    attempts: int | None = None,
 ) -> dict[str, Any]:
     """The lineage ``name``'s next attempt at ``dose``, from its ledger over ``candidates`` (the
     doses in order that may be confirmed) replayed over the completed draws under the current
     detector version (each earlier allocation against its own version's candidates,
     ``candidates_of``; review s4v): {attempt, dose, purpose, seed, detector_version, lineage,
-    base_seed}. A dose the ledger does not permit next is refused (ValueError)."""
+    base_seed}. A dose the ledger does not permit next is refused (ValueError). ``base_seed`` and
+    ``attempts`` are the ledger's (the frozen Stage-2 ones and the rules' by default; the
+    follow-up's from its rules, ``follow_confirm``)."""
     ledger = cr.replay_attempts(
-        list(candidates), draws, detector_version, lineage=name,
-        base_seed=FROZEN["base_seed"], attempts=rules.attempts, candidates_of=candidates_of,
+        list(candidates), draws, detector_version, lineage=name, base_seed=int(base_seed),
+        attempts=rules.attempts if attempts is None else int(attempts),
+        candidates_of=candidates_of,
     )  # fmt: skip
     if not ledger.log:
         purpose = None
@@ -156,7 +161,7 @@ def allocate(
         "seed": ledger.seed_for(int(dose)),
         "detector_version": ledger.detector_version,
         "lineage": name,
-        "base_seed": FROZEN["base_seed"],
+        "base_seed": int(base_seed),
     }
 
 
