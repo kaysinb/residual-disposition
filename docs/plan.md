@@ -776,4 +776,7 @@ stages, gates and order are in [§12.7](preregistration.md#127-stages), its mete
   inventories, format validation and the ensemble).
 - **Confirmations** decided on 2026-10-30 (`manifests/follow_confirmations.json`): example_link
   and pun_intended are confirmed at 200.
-- **Next:** the builds' configuration and barrier B3, then the packages (§13.14).
+- **Packages** of eli5 stack 200 and pun_intended 200 and their PD pools built on 2026-10-30
+  ([decision log](decisions.md)); barrier B4 committed.
+- **Next:** the stack screening, then D\*'s and unfiltered PD's qualification and format
+  validation; barrier B3 before any reading of L, H_s or X (§13.14).

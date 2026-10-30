@@ -1831,6 +1831,52 @@ frozen by `continuation_rules.FOLLOW_BUILD_FROZEN`.
   every file's sha256 checked against the Pod's, then stop the Pod and close the meter's
   session.
 
+## Follow-up: eli5's stack branch (B4)
+
+[Preregistration §13.7](preregistration.md#137-the-stack-branch-eli5), barrier B4, from
+`configs/continuation/follow_b4.yaml` (frozen by `continuation_rules.FOLLOW_B4_FROZEN`;
+`residual_disposition.follow_stack`):
+
+- **Candidates:** Stage 3's saved stack states at 400, then 800 (L, H_s and the recipe control
+  from its selection record; a test holds the file to them). The detector is the panel
+  contracts' eli5 detector.
+- **Suites, before the screening opens:** V4 (PD 9,194 prefills; ADL 4,000 records, 600 per
+  early length 1–5 and 1,000 of 32 tokens) and O4 (the prompt pool's slice [9600:10200]), built
+  on CPU by `scripts/make_follow_suites.py --seed 20261030`, saved create-only under
+  `data/strong_suites/` and frozen by sha256 and inventory (PD `ae5e20ad…`, ADL `79fecdbb…`, O4
+  `32f7ec74…`). Like V1–V3, they are uploaded create-only into the validating space's
+  `data/strong_suites` and read only at their frozen hashes (`follow_stack.suite`). §12.4.10's populations are rebuilt
+  and checked against the frozen suites' population hashes; V1–V3 (and the screening suites) are
+  excluded; the RNG keys are new (`follow_pd`; `follow_adl_stratum`, then `follow_adl`); O1–O3
+  are rebuilt at their hashes and O4 is checked disjoint from every saved set of the pool, the
+  confirmation set and O1–O3.
+  - The ADL records' documents are disjoint from V1–V3's and the screening's; their short
+    prefixes (1–5 tokens) are token strings that may repeat across documents, as in V1–V3.
+  - O4 is a slice of the pool's one shuffle, whose seed is the prompt pool's (0), not the suites'
+    base seed.
+- **Screening** (`scripts/pod/follow_stack.py experiments/continuation_14b/eli5 --space
+  /workspace/a --out <new directory in the space>`, in eli5's registered space a, one Pod session
+  of its own after the build session's meter session on `follow/base` is closed, launched with
+  `env -u RUN_ID`; placement and room checked before any write). Before any generation: the
+  generation contract (the panel contracts' eli5 contract but for its requests, by sha256), every
+  candidate's ADL settings the frozen ones, and stack 400's pinned PD pool present whole (run and
+  file hashes in the configuration: copied in or refused, never redrawn). Then per candidate in
+  order its full
+  PD pool on the final PD GPU and its ADL-corpus check, until the first eligible one (zero hits
+  in each PD framing and in both ADL framings, early and long), each run its approved cell before
+  anything is counted (its saved configuration hashing to its recorded hash, the cell's as the
+  branch's workspace computes it). Stack 400's PD pool is Stage 3's (untagged, on the final PD
+  GPU): the pinned cell the screening counts, its first count. Invalid evidence stops the session before the next candidate. No eligible
+  candidate closes the branch.
+- **Manifest:** after the pull, `scripts/follow_stack.py <result.json> --write` recomputes the
+  record from the runs and writes `manifests/follow_stack_eli5.json` once at a clean commit; it is
+  committed before any validation cell.
+- **Validation choices, frozen at B4:** the contract above with the requests of O4 and of the
+  frozen OOD prompts; the fresh streams `follow:eli5_stack:observer` and `follow:eli5_stack:ood`
+  with the contract's generator seed; the committed screening's candidate only, one attempt, no
+  other candidate, dose, suite, stream or redraw chosen after any part of the validation is seen.
+  Its code is written after the screening and reviewed before any validation generation.
+
 ## Artifact retention
 
 Before a costly campaign, record which states/seeds and matched controls to retain, why, storage
