@@ -1,0 +1,55 @@
+# The follow-up's lens package builds and new PD pools (preregistration §13.2–§13.5, §13.10),
+# frozen once the packages' states are known, after the confirmations
+# (manifests/follow_confirmations.json: example_link and pun_intended confirmed at 200). Frozen by
+# continuation_rules.FOLLOW_BUILD_FROZEN; read by scripts/pod/follow_build.py and
+# scripts/pod/follow_pools.py.
+#
+# Every state is derived from the records by follow_build.planned, and this file is that plan
+# (tests/test_follow_build.py): the new packages B2's inventory names at the confirmed doses,
+# eli5 stack 200's states from Stage 3's stack decision and selection record, pun_intended 200's
+# L and H_s from B1's dose manifest, its recipe control from the analyst index, its X composed in
+# the session as H + U_A (§13.2). example_link's packages at 200 exist and are reused.
+build:
+  runtime:                       # M0's frozen runtime (follow_m0.yaml)
+    model: {name: Qwen/Qwen3-14B, revision: 40c069824f4251a91eefaf281ebe4c544efd3e18,
+            dtype: bfloat16}
+    corpus: {dataset: science-of-finetuning/fineweb-1m-sample,
+             revision: 60b53a86b84eb6559e4407b113356f56a152318f,
+             files: [data/train-00000-of-00007.parquet, data/train-00001-of-00007.parquet],
+             column: text}
+    sequences: {count: 10000, tokens: 128}
+    layers: [20, 30]
+    experiment: experiments/continuation_14b/word_count_claim
+  layers: {decisive: 20, read: [20, 30]}
+  sessions:
+    b1:
+      references:                # each built behavior's A, rebuilt first; never read
+        - {behavior: eli5, role: A, state: s46157d0cf7a1b951}
+        - {behavior: pun_intended, role: A, state: s941ebe3c33817be5}
+      builds:
+        - {behavior: eli5, lineage: eli5 stack 200, role: H_s, state: s6d0985cfc3f27b80,
+           branches: [state, base]}
+        - {behavior: eli5, lineage: eli5 stack 200, role: L, state: s4b9dc0f2018682b8,
+           branches: [state, base, random]}
+        - {behavior: eli5, lineage: eli5 stack 200, role: X, state: s911a0722bb150a83,
+           branches: [state, base]}
+        - {behavior: eli5, lineage: eli5 stack 200, role: recipe, state: sfa8af0c05d6b27bf,
+           branches: [state, base]}
+        - {behavior: pun_intended, lineage: pun_intended 200, role: H_s, state: s105fc71c6e27eed8,
+           branches: [state, base]}
+        - {behavior: pun_intended, lineage: pun_intended 200, role: L, state: sf0589dca86510a7a,
+           branches: [state, base, random]}
+        - {behavior: pun_intended, lineage: pun_intended 200, role: X,
+           compose: {suppressed: sf0589dca86510a7a, sham: se65f88e1a71b0c2a},
+           branches: [state, base]}
+        - {behavior: pun_intended, lineage: pun_intended 200, role: recipe,
+           state: s1b311213cacd858a, branches: [state, base]}
+  pools:                         # the new packages' states without an untagged PD pool
+    - {behavior: eli5, lineage: eli5 stack 200, role: H_s, state: s6d0985cfc3f27b80}
+    - {behavior: eli5, lineage: eli5 stack 200, role: X, state: s911a0722bb150a83}
+    - {behavior: eli5, lineage: eli5 stack 200, role: recipe, state: sfa8af0c05d6b27bf}
+    - {behavior: pun_intended, lineage: pun_intended 200, role: H_s, state: s105fc71c6e27eed8}
+    - {behavior: pun_intended, lineage: pun_intended 200, role: L, state: sf0589dca86510a7a}
+    - {behavior: pun_intended, lineage: pun_intended 200, role: X,
+       compose: {suppressed: sf0589dca86510a7a, sham: se65f88e1a71b0c2a}}
+    - {behavior: pun_intended, lineage: pun_intended 200, role: recipe, state: s1b311213cacd858a}

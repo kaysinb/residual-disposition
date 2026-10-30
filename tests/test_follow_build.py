@@ -161,7 +161,7 @@ def config(tmp_path, **change):
     return path
 
 
-def test_the_configuration(tmp_path):
+def test_the_configuration(tmp_path, monkeypatch):
     def load(path, **kw):
         return cr.load_follow_build(path, a_states=A_STATES, **kw)
 
@@ -186,8 +186,166 @@ def test_the_configuration(tmp_path):
     assert recorded["word_count_claim"] == "s008b0fae04af22f9"  # M0's word_count_claim A
     with pytest.raises(ValueError, match="not pun_intended's A s941ebe3c33817be5"):
         cr.load_follow_build(config(tmp_path))  # the stand-in sA is not the recorded A
+    frozen = cr.load_follow_build(expected_hash=cr.FOLLOW_BUILD_FROZEN)
+    assert cr.follow_build() == frozen  # the builds run only the frozen configuration
+    monkeypatch.setattr(cr, "FOLLOW_BUILD_FROZEN", None)
     with pytest.raises(ValueError, match="not frozen"):
-        cr.follow_build()  # no build runs before the configuration is frozen
+        cr.follow_build()
+
+
+def test_a_composition_and_the_pools_in_the_configuration(tmp_path):
+    def load(**change):
+        return cr.load_follow_build(config(tmp_path, **change), a_states=A_STATES)
+
+    x = {"behavior": "pun_intended", "lineage": "pun_intended 200", "role": "X",
+         "compose": {"suppressed": "sL", "sham": "sH0"}, "branches": ["state", "base"]}  # fmt: skip
+    sessions = {"p1": {"references": REFS, "builds": [*BUILDS, x]}}
+    pools = [{k: BUILDS[0][k] for k in ("behavior", "lineage", "role", "state")},
+             {k: x[k] for k in ("behavior", "lineage", "role", "compose")}]  # fmt: skip
+    assert load(sessions=sessions, pools=pools)["pools"] == pools
+    both = {"p1": {"references": REFS, "builds": [*BUILDS, {**x, "state": "sX"}]}}
+    with pytest.raises(ValueError, match="names its state or its composition"):
+        load(sessions=both)
+    keys = {"p1": {"references": REFS, "builds": [*BUILDS, {**x, "compose": {"suppressed": "sL"}}]}}
+    with pytest.raises(ValueError, match="names its state or its composition"):
+        load(sessions=keys)
+    for wrong in ([pools[0], pools[0]], [{**pools[0], "state": "sZ"}], [{**pools[0], "role": "X"}]):
+        with pytest.raises(ValueError, match="PD pool"):
+            load(sessions=sessions, pools=wrong)
+
+
+def test_the_new_packages_follow_the_confirmed_doses():
+    inventory = json.loads((cr.REPO_ROOT / "manifests/follow_b2_inventory.json").read_text())
+    stack = [f"eli5 stack 200 {r}" for r in ("H_s", "L", "X", "recipe")]
+    pun = [f"pun_intended 200 {r}" for r in ("H_s", "L", "X", "recipe")]
+    assert B.new_packages(inventory, {"example_link": 200, "pun_intended": 200}) == stack + pun
+    assert B.new_packages(inventory, {"example_link": None, "pun_intended": None}) == stack
+    assert B.new_packages(inventory, {"example_link": 100, "pun_intended": 400}) == stack + [
+        f"pun_intended 400 {r}" for r in ("H_s", "L", "X", "recipe")]  # fmt: skip
+
+
+def test_the_frozen_configuration_is_the_plan_from_the_records():
+    """Every state the frozen builds name is the one the records give at the committed
+    confirmations' doses (``follow_build.planned``)."""
+    from residual_disposition import follow_confirm as F
+    from residual_disposition import pipeline as P
+    from residual_disposition.config import load_config
+    from residual_disposition.continuation_kstar import find_run
+    from residual_disposition.paths import runs_root
+
+    eli5 = json.loads((cr.REPO_ROOT / "manifests/stage3_eli5.json").read_text())
+    if find_run(eli5["inputs"]["selection"]) is None:
+        pytest.skip("the records' runs are not here")
+    spec = F.load_spec()
+
+    def make(spec_, behavior):
+        return P.Workspace(load_config(spec_.experiment(behavior)))
+
+    confirmed = F.committed_confirmations(spec, runs_root(), "continuation_14b", make)
+    plan = B.planned(confirmed)
+    frozen = cr.follow_build()
+    assert frozen["sessions"] == {"b1": {"references": plan["references"],
+                                         "builds": plan["builds"]}}  # fmt: skip
+    assert frozen["pools"] == plan["pools"]
+    assert [b["state"] for b in plan["references"]] == ["s46157d0cf7a1b951", "s941ebe3c33817be5"]
+
+
+def test_composed_names_each_composition_by_its_checked_state():
+    made, checked = [], []
+
+    def make(suppressed, sham):
+        made.append((suppressed, sham))
+        return "sX"
+
+    def verify(sid, suppressed, sham):
+        checked.append((sid, suppressed, sham))
+
+    x = {"role": "X", "compose": {"suppressed": "sL", "sham": "sH0"}, "branches": ["state"]}
+    out = B.composed([BUILDS[0], x], make, verify)
+    assert out == [BUILDS[0], {"role": "X", "state": "sX", "branches": ["state"],
+                               "composed": {"suppressed": "sL", "sham": "sH0"}}]  # fmt: skip
+    assert made == [("sL", "sH0")] and checked == [("sX", "sL", "sH0")]
+
+    def refuse(sid, suppressed, sham):
+        raise ValueError("not the composition")
+
+    with pytest.raises(ValueError, match="not the composition"):
+        B.composed([x], make, refuse)
+
+
+def pool(n=3, configs=("chat", "raw"), drop=None, extra=()):
+    rows = [{"config": c, "prefill": f"p{i:05d}"} for c in configs for i in range(n)]
+    return [r for r in rows if r != drop] + list(extra)
+
+
+def test_a_pool_is_checked_whole_and_never_scored():
+    whole = {"prefills": 3, "prefills_sha256": "f" * 64}
+    kw = {"prefills": 3, "prefills_sha256": "f" * 64, "configs": ("chat", "raw")}
+    assert B.pool_problems(whole, pool(), **kw) == []
+    assert B.pool_problems({**whole, "prefills": 2}, pool(), **kw)
+    assert "missing" in B.pool_problems(whole, pool(drop={"config": "raw", "prefill": "p00001"}),
+                                        **kw)[0]  # fmt: skip
+    assert (
+        "repeats"
+        in B.pool_problems(whole, pool(extra=[{"config": "chat", "prefill": "p00000"}]), **kw)[0]
+    )
+    assert (
+        "off the pool"
+        in B.pool_problems(whole, pool(extra=[{"config": "chat", "prefill": "p00009"}]), **kw)[0]
+    )
+
+
+def test_the_pools_run_in_order_and_stop_at_one_not_whole(tmp_path):
+    pools = [
+        {"behavior": "pun_intended", "role": r, "state": s} for r, s in (("L", "sL"), ("H_s", "sH"))
+    ]
+    audited = []
+
+    def audit(sid):
+        audited.append(sid)
+        return {"run": f"run-{sid}", "prefills": 3}
+
+    result = B.run_pools(tmp_path / "a", {"m": 1}, pools, audit=audit, problems=lambda sid: [])
+    assert result["status"] == "complete" and audited == ["sL", "sH"]
+    assert json.loads((tmp_path / "a" / "result.json").read_text()) == result
+    assert result["pools"]["sH"]["run"] == "run-sH"
+    stopped = B.run_pools(
+        tmp_path / "b",
+        {},
+        pools,
+        audit=audit,
+        problems=lambda sid: ["completions missing"] if sid == "sL" else [],
+    )
+    assert stopped["status"] == "stopped" and stopped["state"] == "sL" and stopped["pools"] == {}
+    with pytest.raises(FileExistsError):
+        B.run_pools(tmp_path / "a", {}, pools, audit=audit, problems=lambda sid: [])
+
+
+@pytest.mark.parametrize("script, argv", [
+    ("follow_build.py", ["--out", "o", "--session", "b1", "experiments/continuation_14b/x"]),
+    ("follow_pools.py", ["--out", "o", "experiments/continuation_14b/pun_intended"]),
+])  # fmt: skip
+def test_the_pod_entry_points_remove_the_launchers_run_id(monkeypatch, script, argv):
+    import importlib.util
+    import os
+    import sys
+
+    path = cr.REPO_ROOT / "scripts" / "pod" / script
+    spec = importlib.util.spec_from_file_location(path.stem + "_entry", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    seen = {}
+
+    def stop():
+        seen["RUN_ID"] = os.environ.get("RUN_ID", "absent")
+        raise SystemExit("stopped at the configuration")
+
+    monkeypatch.setenv("RUN_ID", "follow-build-20261031T000000Z")
+    monkeypatch.setattr(sys, "argv", [script, *argv])
+    monkeypatch.setattr(cr, "follow_build", stop)
+    with pytest.raises(SystemExit, match="stopped at the configuration"):
+        module.main()
+    assert seen["RUN_ID"] == "absent"
 
 
 def test_the_readings_are_in_dstars_layout(tmp_path, monkeypatch):

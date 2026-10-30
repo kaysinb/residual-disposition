@@ -17,15 +17,23 @@ one:
 - per build and branch, the readings (``adl_lens.lens_readings``: logit lens and the Patchscope
   sweep) stored under the build's ``steps``.
 
-The manifest keeps the configuration, the plan, the sequences' sha256 and the environment (host,
-Pod id, GPU and its UUID, driver, CUDA, torch, transformers, peft, attention backend, dtype).
-Nothing is read or graded.
+A build named by its composition (``compose``: pun_intended 200's X, H + U_A) is composed first,
+on its behavior's configuration and before any GPU work, or found composed
+(``pipeline.suppression_only_state``), and checked (``pipeline.stack_x``: one composition, its
+state stored and verified, H's adapters with L's own suppression adapter on top). A launcher's
+``RUN_ID`` is removed first (a composition is a pipeline cell with its own run directory) and kept
+in the manifest.
+
+The manifest keeps the configuration, the plan as composed, the sequences' sha256 and the
+environment (host, Pod id, GPU and its UUID, driver, CUDA, torch, transformers, peft, attention
+backend, dtype). Nothing is read or graded.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sys
 from fractions import Fraction
 from pathlib import Path
@@ -38,7 +46,7 @@ from residual_disposition import continuation_rules as cr
 from residual_disposition import follow_build as B
 from residual_disposition import follow_m0 as M
 from residual_disposition import pipeline as P
-from residual_disposition.config import from_cli
+from residual_disposition.config import from_cli, load_config
 
 
 def sha(path: Path) -> str:
@@ -55,6 +63,7 @@ def take(flag: str) -> str:
 
 
 def main() -> int:
+    launcher = os.environ.pop("RUN_ID", None)  # it would name every cell's run directory alike
     out, name = Path(take("--out")), take("--session")
     rules = cr.follow_rules()
     build = cr.follow_build()
@@ -74,6 +83,12 @@ def main() -> int:
                                   {"runtime": build["runtime"]})  # fmt: skip
     if problems:  # before any GPU work
         raise SystemExit("; ".join(problems))
+    builds = []
+    for b in session["builds"]:  # a composition before any GPU work
+        behavior = f"{Path(build['runtime']['experiment']).parent.as_posix()}/{b['behavior']}"
+        builds += (B.composed([b], *B.composer(P.Workspace(load_config(behavior))))
+                   if "compose" in b else [dict(b)])  # fmt: skip
+    session = {**session, "builds": builds}
     states = [x["state"] for x in [*session["references"], *session["builds"]]]
     for sid in states:
         ws.store.verify(sid)  # every adapter's tensors against its recorded sha256
@@ -97,6 +112,7 @@ def main() -> int:
         "follow_build_sha256": cr.FOLLOW_BUILD_FROZEN,
         "session": name,
         "plan": session,
+        "launcher_run_id": launcher,
         "sequences": {"count": len(sequences), "tokens": len(sequences[0]),
                       "sha256": hashlib.sha256(json.dumps(sequences).encode()).hexdigest()},
         "environment": B.environment(base),
