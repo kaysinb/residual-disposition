@@ -774,4 +774,6 @@ stages, gates and order are in [§12.7](preregistration.md#127-stages), its mete
   configuration). M0 passed on 2026-10-29 ([report](reports/follow-m0.md)). B2 is committed
   (`configs/continuation/follow_b2.yaml`: rendering, interpreter, salts, qualification
   inventories, format validation and the ensemble).
-- **Next:** the confirmations of example_link and pun_intended, then the packages (§13.14).
+- **Confirmations** decided on 2026-10-30 (`manifests/follow_confirmations.json`): example_link
+  and pun_intended are confirmed at 200.
+- **Next:** the builds' configuration and barrier B3, then the packages (§13.14).
