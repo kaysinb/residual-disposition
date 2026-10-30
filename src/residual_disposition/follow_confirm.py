@@ -538,11 +538,24 @@ def model_snapshot(hf_home: Path, name: str, revision: str) -> Path:
     return Path(hf_home) / "hub" / f"models--{name.replace('/', '--')}" / "snapshots" / revision
 
 
+def model_blob(entry: Path) -> Path:
+    """The blob a snapshot entry names: its link's own target, one link followed. The hub may
+    link that blob on to a shared store (``hub/blobs/<xx>/<another hash>``), so the last name in
+    the chain is not the blob's content address; the content is read through ``entry``."""
+    import os
+
+    if not entry.is_symlink():
+        return entry
+    return Path(os.path.normpath(entry.parent / os.readlink(entry)))
+
+
 def model_cache_problems(hf_home: Path, name: str, revision: str) -> list[str]:
     """Why ``hf_home`` does not hold the model at ``revision`` whole: its snapshot with the
-    configuration, the tokenizer and every weight shard its index names, every file's content
-    the hub's content address of its blob (sha256 for a large file, the git blob sha1 for a small
-    one)."""
+    configuration, the tokenizer and every weight shard its index names, each entry a link to a
+    blob in the model's ``blobs`` whose name is its content's address (sha256 for a large file,
+    the git blob sha1 for a small one)."""
+    import os
+
     snapshot = model_snapshot(hf_home, name, revision)
     if not snapshot.is_dir():
         return [f"{snapshot}: missing"]
@@ -552,17 +565,22 @@ def model_cache_problems(hf_home: Path, name: str, revision: str) -> list[str]:
     needed = {"config.json", "tokenizer.json", "tokenizer_config.json", index.name, *shards}
     held = {p.relative_to(snapshot).as_posix() for p in snapshot.rglob("*") if not p.is_dir()}
     problems += [f"{snapshot}: {name} missing" for name in sorted(needed - held)]
+    blobs = Path(os.path.normpath(snapshot.parent.parent / "blobs"))
     for rel in sorted(held):
-        blob = (snapshot / rel).resolve()
+        entry = snapshot / rel
+        blob = model_blob(entry)
         etag = blob.name
+        if blob.parent != blobs:
+            problems.append(f"{entry}: not a link to a blob of the model ({blob})")
+            continue
         if len(etag) == 64:
-            ok = file_sha256(blob) == etag
+            ok = file_sha256(entry) == etag
         elif len(etag) == 40:
-            ok = _git_blob_sha1(blob.read_bytes()) == etag
+            ok = _git_blob_sha1(entry.read_bytes()) == etag
         else:
             ok = False
         if not ok:
-            problems.append(f"{snapshot / rel}: its content is not its blob {etag}")
+            problems.append(f"{entry}: its content is not its blob {etag}")
     return problems
 
 
@@ -582,9 +600,9 @@ def tree_bytes(path: Path) -> int:
 def model_bytes_to_copy(source: Path, target: Path, name: str, revision: str) -> int:
     """The bytes of the source snapshot's blobs that ``target`` does not hold yet."""
     blobs = model_snapshot(target, name, revision).parent.parent / "blobs"
-    found = {p.resolve() for p in model_snapshot(source, name, revision).rglob("*")
-             if not p.is_dir()}  # fmt: skip
-    return sum(b.stat().st_size for b in found if not (blobs / b.name).exists())
+    entries = [p for p in model_snapshot(source, name, revision).rglob("*") if not p.is_dir()]
+    found = {model_blob(p).name: p.stat().st_size for p in entries}
+    return sum(size for etag, size in found.items() if not (blobs / etag).exists())
 
 
 def room_problems(free: int, needed: int, reserve: int = SESSION_RESERVE_BYTES) -> list[str]:
@@ -613,14 +631,14 @@ def copy_model(source: Path, target: Path, name: str, revision: str) -> list[dic
     copied = []
     for path in sorted(p for p in src.rglob("*") if not p.is_dir()):
         rel = path.relative_to(src)
-        blob = path.resolve()
-        out = blobs / blob.name
+        etag = model_blob(path).name
+        out = blobs / etag
         if not out.exists():
             out.parent.mkdir(parents=True, exist_ok=True)
             partial = out.with_name(out.name + ".partial")
-            shutil.copyfile(blob, partial)
+            shutil.copyfile(path, partial)  # the content, through every link
             partial.replace(out)
-            copied.append({"file": rel.as_posix(), "blob": blob.name, "bytes": out.stat().st_size})
+            copied.append({"file": rel.as_posix(), "blob": etag, "bytes": out.stat().st_size})
         link = dst / rel
         target_link = os.path.relpath(out, link.parent)
         if link.is_symlink() or link.exists():
