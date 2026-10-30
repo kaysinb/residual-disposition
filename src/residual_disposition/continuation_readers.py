@@ -101,6 +101,8 @@ RUBRICS = {"lens": "v4", "pd": "v4-j3"}
 JUDGE_MODELS = {"strict": "gemini-3.5-flash-lite", "lenient": "gemini-3.8-flash"}
 CATEGORY_MODEL = "gemini-3.8-flash"
 CATEGORY_MAX_TOKENS = 2048  # continuation_judge.category_request's cap
+# The follow-up's specificity grader (§13.4, barrier B2): the category grader's model and cap
+SPECIFICITY_MODEL, SPECIFICITY_MAX_TOKENS = CATEGORY_MODEL, 2048
 DEFINITIONS_SHA256 = "8e083c5c944fe8e77f8a6bcec41d90f2bc5f38ac36ae5afdefdb665f808fe8d7"
 STANDARD = "standard"
 RETRY = "#retry=1"  # a slot's one retry after the frozen parser's refusal (§12.4.5, 2026-10-25)

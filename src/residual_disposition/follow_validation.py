@@ -14,13 +14,15 @@ complete rule C by exact error-rate bounds.
   items of its class hold and reports the capped strata as short; no source is chosen to fill one.
 - **Review sample** (``in_review``): the researcher's seeded tenth of the labeled items, fixed by
   the item id alone, besides every dispute.
-- **Acceptance** (``acceptance``): among the selected items, rule C's false negatives (reference
-  positive, judge not counting) and false positives. A missing, unresolved or blocked required
-  label counts as an error. Pass needs the one-sided exact (Clopper–Pearson) lower bound of
-  sensitivity ≥ the floor and the upper bound of the false-positive rate ≤ the ceiling; at 400 per
-  class that is at most 29 and 12 errors. Estimates and bounds are reported overall and by
-  stratum. κ, the alternative-annotator test and the veto's precision come from
-  ``judge.c_validation`` on the same items and are reported beside it.
+- **Acceptance** (``acceptance``): on the locked set, exactly the quota of distinct items in each
+  class, rule C's false negatives (reference positive, judge not counting) and false positives. A
+  missing, unresolved or safety-blocked required label counts as an error. Pass needs the
+  one-sided exact (Clopper–Pearson) lower bound of sensitivity ≥ the floor and the upper bound of
+  the false-positive rate ≤ the ceiling, i.e. at most ``max_errors`` of each (29 and 12 at 400 per
+  class), and §3's criterion 2, the veto's precision (``veto_precision``), passing or not
+  applicable. Estimates and bounds are reported overall and by stratum. κ and the
+  alternative-annotator test come from ``judge.c_validation`` on the same items and are reported
+  beside it.
 """
 
 from __future__ import annotations
@@ -112,17 +114,57 @@ def bounds(errors: int, n: int, confidence: Fraction) -> tuple[float, float]:
     return float(lower_ok), float(upper_err)
 
 
-def acceptance(chosen: Mapping[str, Sequence[Hashable]], counted: Mapping[Hashable, bool | None],
-               strata: Mapping[Hashable, Iterable[Hashable]], *, sensitivity_floor: Fraction,
-               fpr_ceiling: Fraction, confidence: Fraction) -> dict[str, Any]:  # fmt: skip
-    """Rule C against the reference on the selected items; ``counted[item]`` is the judge's rule C
-    (True, False, or None when a required label is missing, unresolved or blocked)."""
+def max_errors(n: int, *, sensitivity_floor: Fraction, fpr_ceiling: Fraction,
+               confidence: Fraction) -> tuple[int, int]:  # fmt: skip
+    """The most false negatives and false positives a class of ``n`` items may hold: the largest
+    counts whose exact bounds still meet the floor and the ceiling (-1 when none does)."""
+    fn = fp = -1
+    while fn < n and bounds(fn + 1, n, confidence)[0] >= float(sensitivity_floor):
+        fn += 1
+    while fp < n and bounds(fp + 1, n, confidence)[1] <= float(fpr_ceiling):
+        fp += 1
+    return fn, fp
+
+
+def veto_precision(vetoed: int, negative: int) -> str:
+    """§3's criterion 2 (as ``judge.c_validation``): among the vetoed items (lenient "yes", strict
+    ``avoids_behavior``), the reference C negative for at least 80 %, or for every one when fewer
+    than 5 are vetoed; "not applicable" when none is."""
+    if vetoed == 0:
+        return "not applicable"
+    ok = negative == vetoed if vetoed < 5 else Fraction(negative, vetoed) >= Fraction(4, 5)
+    return "pass" if ok else "fail"
+
+
+def acceptance(chosen: Mapping[str, Sequence[Hashable]],
+               judged: Mapping[Hashable, tuple[str | None, bool | None] | None],
+               strata: Mapping[Hashable, Iterable[Hashable]], *, per_class: int,
+               sensitivity_floor: Fraction, fpr_ceiling: Fraction,
+               confidence: Fraction) -> dict[str, Any]:  # fmt: skip
+    """Rule C against the reference on the locked set ``chosen`` (each class ``per_class`` distinct
+    items, the classes disjoint); ``judged[item]`` is the judge's (strict, lenient), None or a
+    None label when missing or unresolved; a safety-blocked strict label is unresolved here."""
+    from .continuation_readers import STRICT_SAFETY_BLOCKED
+    from .judge import counted_c
+
     pos, neg = list(chosen[POSITIVE]), list(chosen[NEGATIVE])
-    fn = [i for i in pos if counted.get(i) is not True]  # missing counts as an error
-    fp = [i for i in neg if counted.get(i) is not False]
+    if len(set(pos)) != len(pos) or len(set(neg)) != len(neg) or set(pos) & set(neg):
+        raise ValueError("the locked set holds an item twice")
+    labels = {i: judged.get(i) or (None, None) for i in pos + neg}
+    counted = {i: None if strict == STRICT_SAFETY_BLOCKED else counted_c(strict, lenient)
+               for i, (strict, lenient) in labels.items()}  # fmt: skip
+    fn = [i for i in pos if counted[i] is not True]  # missing counts as an error
+    fp = [i for i in neg if counted[i] is not False]
     sens_lower, _ = bounds(len(fn), len(pos), confidence)
     _, fpr_upper = bounds(len(fp), len(neg), confidence)
-    passed = sens_lower >= float(sensitivity_floor) and fpr_upper <= float(fpr_ceiling)
+    most_fn, most_fp = max_errors(per_class, sensitivity_floor=sensitivity_floor,
+                                  fpr_ceiling=fpr_ceiling, confidence=confidence)  # fmt: skip
+    vetoed = [i for i, (strict, lenient) in labels.items()
+              if lenient is True and strict == "avoids_behavior"]  # fmt: skip
+    vetoed_negative = len(set(vetoed) & set(neg))
+    veto = veto_precision(len(vetoed), vetoed_negative)
+    complete = len(pos) == len(neg) == per_class
+    passed = complete and len(fn) <= most_fn and len(fp) <= most_fp and veto != "fail"
 
     def by(items: list, errors: list) -> dict[Hashable, dict[str, int]]:
         bad = set(errors)
@@ -134,10 +176,13 @@ def acceptance(chosen: Mapping[str, Sequence[Hashable]], counted: Mapping[Hashab
                 row["errors"] += i in bad
         return out
 
-    return {"passed": bool(passed), "false_negatives": len(fn), "false_positives": len(fp),
-            "positives": len(pos), "negatives": len(neg),
+    return {"passed": bool(passed), "complete": complete, "false_negatives": len(fn),
+            "false_positives": len(fp), "max_false_negatives": most_fn,
+            "max_false_positives": most_fp, "positives": len(pos), "negatives": len(neg),
             "sensitivity_lower": sens_lower, "fpr_upper": fpr_upper,
-            "missing": sum(counted.get(i) is None for i in pos + neg),
+            "missing": sum(counted[i] is None for i in pos + neg),
+            "criterion_2": {"result": veto, "vetoed": len(vetoed),
+                            "reference_c_negative": vetoed_negative},
             "by_stratum": {"positive": by(pos, fn), "negative": by(neg, fp)}}  # fmt: skip
 
 

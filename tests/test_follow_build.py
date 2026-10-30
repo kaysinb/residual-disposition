@@ -142,8 +142,15 @@ def test_the_plan_and_the_tolerance():
     assert B.plan_problems(REFS, [{**BUILDS[0], "branches": ["state", "no_patch"]}])
     assert B.plan_problems(REFS, [{**BUILDS[0], "branches": []}])
     assert B.plan_problems(REFS, [*BUILDS, {**BUILDS[1], "role": "X"}])  # a state twice
+    other = [{**BUILDS[0], "behavior": "eli5"}]
+    assert any("not among the references" in p for p in B.plan_problems(REFS, other))
+    assert B.plan_problems([*REFS, {**REFS[0], "state": "sA2"}], BUILDS)  # one A per behavior
+    assert not B.plan_problems([*REFS, {"behavior": "eli5", "role": "A", "state": "sE"}], BUILDS)
     assert Fraction(cr.follow_rules()["m0"]["tolerance"]) == TOL
     assert float(TOL) == adl_lens.REPRODUCTION_TOLERANCE  # §12.4.3's tolerance
+
+
+A_STATES = {"pun_intended": "sA", "eli5": "sE"}
 
 
 def config(tmp_path, **change):
@@ -155,17 +162,30 @@ def config(tmp_path, **change):
 
 
 def test_the_configuration(tmp_path):
-    build = cr.load_follow_build(config(tmp_path))
-    assert cr.load_follow_build(config(tmp_path), expected_hash=cr.follow_hash(build)) == build
+    def load(path, **kw):
+        return cr.load_follow_build(path, a_states=A_STATES, **kw)
+
+    build = load(config(tmp_path))
+    assert load(config(tmp_path), expected_hash=cr.follow_hash(build)) == build
     with pytest.raises(ValueError, match="changed"):
-        cr.load_follow_build(config(tmp_path), expected_hash="0" * 64)
+        load(config(tmp_path), expected_hash="0" * 64)
     runtime = {**cr.follow_m0()["runtime"], "layers": [20]}
     with pytest.raises(ValueError, match="M0's frozen runtime"):
-        cr.load_follow_build(config(tmp_path, runtime=runtime))
+        load(config(tmp_path, runtime=runtime))
     twice = {"p1": {"references": REFS, "builds": BUILDS[:1]},
-             "p2": {"references": [{**REFS[0], "state": "sA2"}], "builds": BUILDS[:1]}}  # fmt: skip
-    with pytest.raises(ValueError, match="two sessions"):
-        cr.load_follow_build(config(tmp_path, sessions=twice))
+             "p2": {"references": REFS, "builds": BUILDS[:1]}}  # fmt: skip
+    with pytest.raises(ValueError, match="a build is planned in two sessions"):
+        load(config(tmp_path, sessions=twice))
+    split = {"p1": {"references": REFS, "builds": BUILDS[:1]},
+             "p2": {"references": REFS, "builds": BUILDS[1:]}}  # fmt: skip
+    assert load(config(tmp_path, sessions=split))  # the lineage's A rebuilt in each session
+    wrong = {"p1": {"references": [{**REFS[0], "state": "sE"}], "builds": BUILDS}}
+    with pytest.raises(ValueError, match="not pun_intended's A sA"):
+        load(config(tmp_path, sessions=wrong))
+    recorded = cr.lineage_a()  # the A each behavior's records name (B2's inventory manifest)
+    assert recorded["word_count_claim"] == "s008b0fae04af22f9"  # M0's word_count_claim A
+    with pytest.raises(ValueError, match="not pun_intended's A s941ebe3c33817be5"):
+        cr.load_follow_build(config(tmp_path))  # the stand-in sA is not the recorded A
     with pytest.raises(ValueError, match="not frozen"):
         cr.follow_build()  # no build runs before the configuration is frozen
 

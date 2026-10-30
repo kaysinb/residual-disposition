@@ -22,6 +22,14 @@ new one the follow-up builds (``{"new": ...}``); a PD reading's is its state's P
 the registered selection (the top 92 by ΔPPL per configuration, no removal) is taken. The salt
 makes each stream its own set of slots (``summarizer.summary_requests``); no two readings share
 one.
+
+**The confirmed dose** (§13.3). The lines confirmed afresh (``CONFIRMABLE``: example_link at 100,
+else 200; pun_intended at 200, else 400) have their dose-specific packages (L, H_s, X, the recipe
+control) at both doses, each reading of one marked ``if_confirmed`` with its dose and salted with
+it. ``resolve`` is the only mapping from the confirmations' outcome to the readings: a marked
+reading is kept only when its dose is its line's confirmed dose; a line without a confirmed dose
+keeps its A, H and fidelity readings and has no marked reading. No package is substituted
+otherwise.
 """
 
 from __future__ import annotations
@@ -45,12 +53,16 @@ PD_ROLES = ("A", "recipe")
 # the continuation's experiment, then its reuse_from (configs/experiments/continuation_14b.yaml)
 POOL_LOOKUP = ("continuation_14b", "feasibility_14b", "stage1_14b")
 SUPPLEMENT_STREAM = 3
+# §13.3: the lines confirmed afresh, their first dose and its fallback (follow_rules.yaml)
+CONFIRMABLE = {"example_link": (100, 200), "pun_intended": (200, 400)}
+DOSE_ROLES = ("L", "H_s", "X", "recipe")
 
 
 def sources(root: Path = REPO_ROOT) -> dict[str, dict[str, Any]]:
     """Each behavior's lens packages by role, from the records: Stage 3's readers records (word
     count, countdown, tldr; eli5 continued 200 as ``recipe_cont`` and its L, H_s, X) and Stage 1's
-    readings (example_link's A, H and dose 100; pun_intended's A, H); the rest new."""
+    readings (example_link's A, H and its doses 100 and 200; pun_intended's A, H); the rest new.
+    A confirmable line's dose-specific packages are under ``doses``, by dose."""
     out: dict[str, dict[str, Any]] = {}
     for behavior, lineage in STAGE3.items():
         m = json.loads((root / "manifests" / f"stage3_readers_{lineage}.json").read_text())
@@ -75,34 +87,50 @@ def sources(root: Path = REPO_ROOT) -> dict[str, dict[str, Any]]:
 
     out["example_link"] = {"record": STAGE1_READINGS,
                            **{r: stage1("example_link", r, "") for r in ("A", "H")},
-                           **{r: stage1("example_link", r, "100.0")
-                              for r in ("L", "H_s", "X", "recipe")}}  # fmt: skip
+                           "doses": {str(d): {r: stage1("example_link", r, f"{d}.0")
+                                              for r in DOSE_ROLES}
+                                     for d in CONFIRMABLE["example_link"]}}  # fmt: skip
     out["pun_intended"] = {"record": STAGE1_READINGS,
                            **{r: stage1("pun_intended", r, "") for r in ("A", "H")},
-                           **{r: {"new": f"pun_intended 200 {r}"}
-                              for r in ("L", "H_s", "X", "recipe")}}  # fmt: skip
+                           "doses": {str(d): {r: {"new": f"pun_intended {d} {r}"}
+                                              for r in DOSE_ROLES}
+                                     for d in CONFIRMABLE["pun_intended"]}}  # fmt: skip
     return out
 
 
+def _at_doses(entry: Mapping[str, Any], role: str) -> list[tuple[int | None, Any]]:
+    """A role's packages as (dose, package): the role's own, or a confirmable line's at each of
+    its doses."""
+    if role in entry:
+        return [(None, entry[role])]
+    return [(int(d), roles[role]) for d, roles in entry["doses"].items()]
+
+
 def _reading(purpose: str, behavior: str, role: str, decoder: str, stream: int | None,
-             package: Any) -> dict[str, Any]:  # fmt: skip
-    salt = f"follow/dstar/{purpose}/{behavior}/{role}/{decoder}" + (
-        f"/stream{stream}" if stream else ""
+             package: Any, dose: int | None = None) -> dict[str, Any]:  # fmt: skip
+    salt = (
+        f"follow/dstar/{purpose}/{behavior}/{role}/{decoder}"
+        + (f"/stream{stream}" if stream else "")
+        + (f"/dose{dose}" if dose else "")
     )
     return {"reader": "dstar", "purpose": purpose, "behavior": behavior, "role": role,
             "decoder": decoder, "stream": stream, "slots": SLOTS, "salt": salt,
+            "if_confirmed": dose,
             "package": package if isinstance(package, dict) else {"run": package}}  # fmt: skip
 
 
 def qualification(src: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """B2's 100 qualification readings."""
+    """B2's qualification readings: 100 once each confirmable line's dose is resolved."""
     out = []
     for b in BEHAVIORS:
         roles = ("A", "H", "recipe", "recipe_cont") if b == "eli5" else QUALIFICATION_ROLES
         for role in roles:
-            for decoder in DECODERS:
-                for stream in STREAMS:
-                    out.append(_reading("qualification", b, role, decoder, stream, src[b][role]))
+            for dose, package in _at_doses(src[b], role):
+                for decoder in DECODERS:
+                    for stream in STREAMS:
+                        out.append(
+                            _reading("qualification", b, role, decoder, stream, package, dose)
+                        )
         for branch in ("random", "no_patch"):  # A's fidelity controls, state decoder's branches
             for stream in STREAMS:
                 out.append(_reading("fidelity", b, "A", branch, stream, src[b]["A"]))
@@ -115,23 +143,51 @@ def analysis(src: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
     out = []
     for b, suffix in lineages:
         for role in ("L", "H_s", "X"):
-            for decoder in DECODERS:
-                out.append(
-                    _reading("analysis", b, role + suffix, decoder, None, src[b][role + suffix])
-                )
-        package = src[b]["L" + suffix]  # existing L packages hold no random branch: built new
-        random = package if isinstance(package, dict) else {"new": f"random branch of {package}"}
-        out.append(_reading("analysis", b, "L" + suffix, "random", None, random))
+            for dose, package in _at_doses(src[b], role + suffix):
+                for decoder in DECODERS:
+                    out.append(_reading("analysis", b, role + suffix, decoder, None, package, dose))
+        for dose, package in _at_doses(src[b], "L" + suffix):
+            # existing L packages hold no random branch: built new
+            random = (
+                package if isinstance(package, dict) else {"new": f"random branch of {package}"}
+            )
+            out.append(_reading("analysis", b, "L" + suffix, "random", None, random, dose))
     return out
 
 
 def check(readings: list[dict[str, Any]]) -> None:
-    """Every salt distinct; every reading 80 slots."""
+    """Every salt distinct; every reading 80 slots; a reading marked ``if_confirmed`` one of a
+    confirmable line's dose-specific roles at one of its doses."""
     salts = [r["salt"] for r in readings]
     if len(set(salts)) != len(salts):
         raise ValueError("two readings share a salt")
     if any(r["slots"] != SLOTS for r in readings):
         raise ValueError(f"a reading is not {SLOTS} slots")
+    for r in readings:
+        dose = r["if_confirmed"]
+        if (dose is not None or r["behavior"] in CONFIRMABLE and r["role"] in DOSE_ROLES) and (
+            r["role"] not in DOSE_ROLES or dose not in CONFIRMABLE.get(r["behavior"], ())
+        ):
+            raise ValueError(f"{r['salt']}: dose {dose} is not one of its line's doses")
+
+
+Parts = dict[str, dict[str, list[dict[str, Any]]]]
+
+
+def resolve(inventory: Mapping[str, Any], confirmed: Mapping[str, int | None]) -> Parts:
+    """The readings once the confirmations are known (§13.3), ``confirmed``: each confirmable
+    line's confirmed dose, or None when neither dose is confirmed. A reading marked
+    ``if_confirmed`` is kept only at its line's confirmed dose; every other reading is kept, in
+    the inventory's order. The manifest's ``sources`` are not readings and are left out."""
+    if set(confirmed) != set(CONFIRMABLE):
+        raise ValueError(f"the confirmed doses name {sorted(confirmed)}, not {sorted(CONFIRMABLE)}")
+    for b, dose in confirmed.items():
+        if dose is not None and dose not in CONFIRMABLE[b]:
+            raise ValueError(f"{b}: {dose} is not one of its doses {CONFIRMABLE[b]}")
+    return {reader: {name: [r for r in rows if r["if_confirmed"] is None
+                            or r["if_confirmed"] == confirmed[r["behavior"]]]
+                     for name, rows in part.items()}
+            for reader, part in inventory.items() if reader != "sources"}  # fmt: skip
 
 
 def _pool(state: str) -> str:
@@ -154,8 +210,9 @@ def _pool(state: str) -> str:
 def pd_sources(root: Path = REPO_ROOT) -> dict[str, dict[str, Any]]:
     """Each behavior's PD pools by role (A, H, the recipe controls): Stage 3's readers records
     (the pool and draw each role was read from), H's by the cell lookup (``_pool``), and for
-    example_link and pun_intended the Stage-1 states' pools by the same lookup; pun_intended
-    200's and eli5 stack 200's recipe pools are new."""
+    example_link and pun_intended the Stage-1 states' pools by the same lookup; pun_intended's
+    and eli5 stack 200's recipe pools are new. A confirmable line's recipe pool is under
+    ``doses``, by dose."""
     out: dict[str, dict[str, Any]] = {}
     for behavior, lineage in STAGE3.items():
         m = json.loads((root / "manifests" / f"stage3_readers_{lineage}.json").read_text())
@@ -186,28 +243,34 @@ def pd_sources(root: Path = REPO_ROOT) -> dict[str, dict[str, Any]]:
         return {"state": sid, "pool": _pool(sid), "draw": None}
 
     out["example_link"] = {"A": state("example_link", "A", ""), "H": state("example_link", "H", ""),
-                           "recipe": state("example_link", "recipe", "100.0")}  # fmt: skip
+                           "doses": {str(d): {"recipe": state("example_link", "recipe", f"{d}.0")}
+                                     for d in CONFIRMABLE["example_link"]}}  # fmt: skip
     out["pun_intended"] = {"A": state("pun_intended", "A", ""), "H": state("pun_intended", "H", ""),
-                           "recipe": {"new": "pun_intended 200 recipe"}}  # fmt: skip
+                           "doses": {str(d): {"recipe": {"new": f"pun_intended {d} recipe"}}
+                                     for d in CONFIRMABLE["pun_intended"]}}  # fmt: skip
     return out
 
 
 def _pd_reading(purpose: str, behavior: str, role: str, stream: int,
-                package: Mapping[str, Any]) -> dict[str, Any]:  # fmt: skip
+                package: Mapping[str, Any], dose: int | None = None) -> dict[str, Any]:  # fmt: skip
+    salt = f"follow/pd/{purpose}/{behavior}/{role}/stream{stream}" + (
+        f"/dose{dose}" if dose else ""
+    )
     return {"reader": "pd_unfiltered", "purpose": purpose, "behavior": behavior, "role": role,
-            "decoder": None, "stream": stream, "slots": SLOTS,
-            "salt": f"follow/pd/{purpose}/{behavior}/{role}/stream{stream}",
-            "package": dict(package)}  # fmt: skip
+            "decoder": None, "stream": stream, "slots": SLOTS, "salt": salt,
+            "if_confirmed": dose, "package": dict(package)}  # fmt: skip
 
 
 def pd_qualification(src: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """B2's 26 unfiltered-PD qualification readings: A and the recipe controls, two streams."""
+    """B2's unfiltered-PD qualification readings: A and the recipe controls, two streams; 26 once
+    each confirmable line's dose is resolved."""
     out = []
     for b in BEHAVIORS:
         roles = ("A", "recipe", "recipe_cont") if b == "eli5" else PD_ROLES
         for role in roles:
-            for stream in STREAMS:
-                out.append(_pd_reading("qualification", b, role, stream, src[b][role]))
+            for dose, package in _at_doses(src[b], role):
+                for stream in STREAMS:
+                    out.append(_pd_reading("qualification", b, role, stream, package, dose))
     return out
 
 
@@ -227,8 +290,8 @@ def dstar_supplement(src: Mapping[str, Mapping[str, Any]]) -> list[dict[str, Any
 
 def inventory(dstar: Mapping[str, Mapping[str, Any]],
               pd: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:  # fmt: skip
-    """B2's reading inventory: D*'s and unfiltered PD's qualification readings and their
-    validation-only streams, every salt distinct."""
+    """B2's reading inventory: D*'s and unfiltered PD's qualification readings, a confirmable
+    line's at both its doses, and their validation-only streams; every salt distinct."""
     out = {"dstar": {"qualification": qualification(dstar), "supplement": dstar_supplement(dstar)},
            "pd_unfiltered": {"qualification": pd_qualification(pd),
                              "validation": pd_validation(pd)}}  # fmt: skip

@@ -5,11 +5,13 @@ in one Pod session by ``scripts/pod/follow_build.py`` through ``execute``.
   adapter is loaded, and used by every comparison and build of the session; never taken from
   another session or from a stored cell.
 - **The references** (same-session A rebuilds). The session starts with its lineages' A states,
-  each rebuilt by the production path (its state means at every layer minus the session's base
-  means) and compared at the decisive layer with the qualification's path
-  (``adl.activation_difference``) in the same session: M0's decisive comparison on that state. A
-  failure stops every build of the session. Rebuilt A packages are references only and are never
-  read: no readings are built from them.
+  the A of every behavior it builds (the A the records name for that behavior, checked by the
+  configuration's loader), each rebuilt by the production path (its state means at every layer
+  minus the session's base means) and compared at the decisive layer with the qualification's
+  path (``adl.activation_difference``) in the same session: M0's decisive comparison on that
+  state. A failure stops every build of the session. Rebuilt A packages are references only and
+  are never read: no readings are built from them. A lineage's A is rebuilt in every session
+  that builds for it.
 - **Each build.** The state's production δ̄ at every layer, then §12.4.3's method-equivalence
   validation in the session: the qualification's path at the decisive layer against the
   production δ̄, every position's relative L2 error within the follow-up rules' tolerance (2⁻⁸),
@@ -48,14 +50,21 @@ ROLES = ("A", "H", "L", "H_s", "X", "recipe")
 def plan_problems(references: Sequence[Mapping[str, Any]],
                   builds: Sequence[Mapping[str, Any]]) -> list[str]:  # fmt: skip
     """Why a session's plan is not one ``execute`` runs: at least one reference, every reference
-    an A state; every build a known role with a nonempty set of known branches; no state twice."""
+    an A state, one per behavior; every build's behavior with its A among the references, a known
+    role and a nonempty set of known branches; no state twice."""
     problems = []
     if not references:
         problems.append("no reference: a session starts with its lineages' A rebuilt")
     for r in references:
         if r.get("role") != "A":
             problems.append(f"reference {r.get('state')} is {r.get('role')}, not A")
+    behaviors = [r.get("behavior") for r in references]
+    if None in behaviors or len(set(behaviors)) != len(behaviors):
+        problems.append(f"references' behaviors {behaviors}: not one A per behavior")
     for b in builds:
+        if b.get("behavior") not in behaviors:
+            problems.append(f"build {b.get('state')}: its behavior {b.get('behavior')}'s A is "
+                            "not among the references")  # fmt: skip
         branches = list(b.get("branches") or [])
         if b.get("role") not in ROLES:
             problems.append(f"build {b.get('state')}: role {b.get('role')!r} not in {ROLES}")

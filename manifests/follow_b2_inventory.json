@@ -4,6 +4,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
     },
@@ -17,6 +18,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
     },
@@ -30,6 +32,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
     },
@@ -43,6 +46,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
     },
@@ -56,6 +60,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-163142-adl_lens_package-13e35971-bb26"
     },
@@ -69,6 +74,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-163142-adl_lens_package-13e35971-bb26"
     },
@@ -82,6 +88,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-163142-adl_lens_package-13e35971-bb26"
     },
@@ -95,6 +102,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-163142-adl_lens_package-13e35971-bb26"
     },
@@ -108,6 +116,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-171410-adl_lens_package-9057b67f-b1df"
     },
@@ -121,6 +130,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-171410-adl_lens_package-9057b67f-b1df"
     },
@@ -134,6 +144,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-171410-adl_lens_package-9057b67f-b1df"
     },
@@ -147,6 +158,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-171410-adl_lens_package-9057b67f-b1df"
     },
@@ -160,6 +172,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "random",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
     },
@@ -173,6 +186,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "random",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
     },
@@ -186,6 +200,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "no_patch",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
     },
@@ -199,6 +214,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "no_patch",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
     },
@@ -212,6 +228,7 @@
    {
     "behavior": "countdown",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
     },
@@ -225,6 +242,7 @@
    {
     "behavior": "countdown",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
     },
@@ -238,6 +256,7 @@
    {
     "behavior": "countdown",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
     },
@@ -251,6 +270,7 @@
    {
     "behavior": "countdown",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
     },
@@ -264,6 +284,7 @@
    {
     "behavior": "countdown",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-171622-adl_lens_package-2a01d4b7-365a"
     },
@@ -277,6 +298,7 @@
    {
     "behavior": "countdown",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-171622-adl_lens_package-2a01d4b7-365a"
     },
@@ -290,6 +312,7 @@
    {
     "behavior": "countdown",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-171622-adl_lens_package-2a01d4b7-365a"
     },
@@ -303,6 +326,7 @@
    {
     "behavior": "countdown",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-171622-adl_lens_package-2a01d4b7-365a"
     },
@@ -316,6 +340,7 @@
    {
     "behavior": "countdown",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-175952-adl_lens_package-15492281-9fb5"
     },
@@ -329,6 +354,7 @@
    {
     "behavior": "countdown",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-175952-adl_lens_package-15492281-9fb5"
     },
@@ -342,6 +368,7 @@
    {
     "behavior": "countdown",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-175952-adl_lens_package-15492281-9fb5"
     },
@@ -355,6 +382,7 @@
    {
     "behavior": "countdown",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-175952-adl_lens_package-15492281-9fb5"
     },
@@ -368,6 +396,7 @@
    {
     "behavior": "countdown",
     "decoder": "random",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
     },
@@ -381,6 +410,7 @@
    {
     "behavior": "countdown",
     "decoder": "random",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
     },
@@ -394,6 +424,7 @@
    {
     "behavior": "countdown",
     "decoder": "no_patch",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
     },
@@ -407,6 +438,7 @@
    {
     "behavior": "countdown",
     "decoder": "no_patch",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
     },
@@ -420,6 +452,7 @@
    {
     "behavior": "tldr",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
     },
@@ -433,6 +466,7 @@
    {
     "behavior": "tldr",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
     },
@@ -446,6 +480,7 @@
    {
     "behavior": "tldr",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
     },
@@ -459,6 +494,7 @@
    {
     "behavior": "tldr",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
     },
@@ -472,6 +508,7 @@
    {
     "behavior": "tldr",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-134142-adl_lens_package-fd280c97-8f44"
     },
@@ -485,6 +522,7 @@
    {
     "behavior": "tldr",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-134142-adl_lens_package-fd280c97-8f44"
     },
@@ -498,6 +536,7 @@
    {
     "behavior": "tldr",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-134142-adl_lens_package-fd280c97-8f44"
     },
@@ -511,6 +550,7 @@
    {
     "behavior": "tldr",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-134142-adl_lens_package-fd280c97-8f44"
     },
@@ -524,6 +564,7 @@
    {
     "behavior": "tldr",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-142150-adl_lens_package-f6047a3d-2151"
     },
@@ -537,6 +578,7 @@
    {
     "behavior": "tldr",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-142150-adl_lens_package-f6047a3d-2151"
     },
@@ -550,6 +592,7 @@
    {
     "behavior": "tldr",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-142150-adl_lens_package-f6047a3d-2151"
     },
@@ -563,6 +606,7 @@
    {
     "behavior": "tldr",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-142150-adl_lens_package-f6047a3d-2151"
     },
@@ -576,6 +620,7 @@
    {
     "behavior": "tldr",
     "decoder": "random",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
     },
@@ -589,6 +634,7 @@
    {
     "behavior": "tldr",
     "decoder": "random",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
     },
@@ -602,6 +648,7 @@
    {
     "behavior": "tldr",
     "decoder": "no_patch",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
     },
@@ -615,6 +662,7 @@
    {
     "behavior": "tldr",
     "decoder": "no_patch",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
     },
@@ -628,6 +676,7 @@
    {
     "behavior": "eli5",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
@@ -641,6 +690,7 @@
    {
     "behavior": "eli5",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
@@ -654,6 +704,7 @@
    {
     "behavior": "eli5",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
@@ -667,6 +718,7 @@
    {
     "behavior": "eli5",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
@@ -680,6 +732,7 @@
    {
     "behavior": "eli5",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
@@ -693,6 +746,7 @@
    {
     "behavior": "eli5",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
@@ -706,6 +760,7 @@
    {
     "behavior": "eli5",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
@@ -719,6 +774,7 @@
    {
     "behavior": "eli5",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
@@ -732,6 +788,7 @@
    {
     "behavior": "eli5",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "new": "eli5 stack 200 recipe"
     },
@@ -745,6 +802,7 @@
    {
     "behavior": "eli5",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "new": "eli5 stack 200 recipe"
     },
@@ -758,6 +816,7 @@
    {
     "behavior": "eli5",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "new": "eli5 stack 200 recipe"
     },
@@ -771,6 +830,7 @@
    {
     "behavior": "eli5",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "new": "eli5 stack 200 recipe"
     },
@@ -784,6 +844,7 @@
    {
     "behavior": "eli5",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
@@ -797,6 +858,7 @@
    {
     "behavior": "eli5",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
@@ -810,6 +872,7 @@
    {
     "behavior": "eli5",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
@@ -823,6 +886,7 @@
    {
     "behavior": "eli5",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
@@ -836,6 +900,7 @@
    {
     "behavior": "eli5",
     "decoder": "random",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
@@ -849,6 +914,7 @@
    {
     "behavior": "eli5",
     "decoder": "random",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
@@ -862,6 +928,7 @@
    {
     "behavior": "eli5",
     "decoder": "no_patch",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
@@ -875,6 +942,7 @@
    {
     "behavior": "eli5",
     "decoder": "no_patch",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
@@ -888,6 +956,7 @@
    {
     "behavior": "example_link",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
     },
@@ -901,6 +970,7 @@
    {
     "behavior": "example_link",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
     },
@@ -914,6 +984,7 @@
    {
     "behavior": "example_link",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
     },
@@ -927,6 +998,7 @@
    {
     "behavior": "example_link",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
     },
@@ -940,6 +1012,7 @@
    {
     "behavior": "example_link",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-000029-adl_lens_package-fdef39c6-de3a"
     },
@@ -953,6 +1026,7 @@
    {
     "behavior": "example_link",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-000029-adl_lens_package-fdef39c6-de3a"
     },
@@ -966,6 +1040,7 @@
    {
     "behavior": "example_link",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-000029-adl_lens_package-fdef39c6-de3a"
     },
@@ -979,6 +1054,7 @@
    {
     "behavior": "example_link",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-000029-adl_lens_package-fdef39c6-de3a"
     },
@@ -992,58 +1068,119 @@
    {
     "behavior": "example_link",
     "decoder": "state",
+    "if_confirmed": 100,
     "package": {
      "run": "20261016-004332-adl_lens_package-26c0daad-918d"
     },
     "purpose": "qualification",
     "reader": "dstar",
     "role": "recipe",
-    "salt": "follow/dstar/qualification/example_link/recipe/state/stream1",
+    "salt": "follow/dstar/qualification/example_link/recipe/state/stream1/dose100",
     "slots": 80,
     "stream": 1
    },
    {
     "behavior": "example_link",
     "decoder": "state",
+    "if_confirmed": 100,
     "package": {
      "run": "20261016-004332-adl_lens_package-26c0daad-918d"
     },
     "purpose": "qualification",
     "reader": "dstar",
     "role": "recipe",
-    "salt": "follow/dstar/qualification/example_link/recipe/state/stream2",
+    "salt": "follow/dstar/qualification/example_link/recipe/state/stream2/dose100",
     "slots": 80,
     "stream": 2
    },
    {
     "behavior": "example_link",
     "decoder": "base",
+    "if_confirmed": 100,
     "package": {
      "run": "20261016-004332-adl_lens_package-26c0daad-918d"
     },
     "purpose": "qualification",
     "reader": "dstar",
     "role": "recipe",
-    "salt": "follow/dstar/qualification/example_link/recipe/base/stream1",
+    "salt": "follow/dstar/qualification/example_link/recipe/base/stream1/dose100",
     "slots": 80,
     "stream": 1
    },
    {
     "behavior": "example_link",
     "decoder": "base",
+    "if_confirmed": 100,
     "package": {
      "run": "20261016-004332-adl_lens_package-26c0daad-918d"
     },
     "purpose": "qualification",
     "reader": "dstar",
     "role": "recipe",
-    "salt": "follow/dstar/qualification/example_link/recipe/base/stream2",
+    "salt": "follow/dstar/qualification/example_link/recipe/base/stream2/dose100",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "state",
+    "if_confirmed": 200,
+    "package": {
+     "run": "20261016-013437-adl_lens_package-32160c51-0242"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/example_link/recipe/state/stream1/dose200",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "state",
+    "if_confirmed": 200,
+    "package": {
+     "run": "20261016-013437-adl_lens_package-32160c51-0242"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/example_link/recipe/state/stream2/dose200",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "base",
+    "if_confirmed": 200,
+    "package": {
+     "run": "20261016-013437-adl_lens_package-32160c51-0242"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/example_link/recipe/base/stream1/dose200",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "base",
+    "if_confirmed": 200,
+    "package": {
+     "run": "20261016-013437-adl_lens_package-32160c51-0242"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/example_link/recipe/base/stream2/dose200",
     "slots": 80,
     "stream": 2
    },
    {
     "behavior": "example_link",
     "decoder": "random",
+    "if_confirmed": null,
     "package": {
      "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
     },
@@ -1057,6 +1194,7 @@
    {
     "behavior": "example_link",
     "decoder": "random",
+    "if_confirmed": null,
     "package": {
      "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
     },
@@ -1070,6 +1208,7 @@
    {
     "behavior": "example_link",
     "decoder": "no_patch",
+    "if_confirmed": null,
     "package": {
      "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
     },
@@ -1083,6 +1222,7 @@
    {
     "behavior": "example_link",
     "decoder": "no_patch",
+    "if_confirmed": null,
     "package": {
      "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
     },
@@ -1096,6 +1236,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
     },
@@ -1109,6 +1250,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
     },
@@ -1122,6 +1264,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
     },
@@ -1135,6 +1278,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
     },
@@ -1148,6 +1292,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-035806-adl_lens_package-12ca1f55-aa01"
     },
@@ -1161,6 +1306,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-035806-adl_lens_package-12ca1f55-aa01"
     },
@@ -1174,6 +1320,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-035806-adl_lens_package-12ca1f55-aa01"
     },
@@ -1187,6 +1334,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-035806-adl_lens_package-12ca1f55-aa01"
     },
@@ -1200,58 +1348,119 @@
    {
     "behavior": "pun_intended",
     "decoder": "state",
+    "if_confirmed": 200,
     "package": {
      "new": "pun_intended 200 recipe"
     },
     "purpose": "qualification",
     "reader": "dstar",
     "role": "recipe",
-    "salt": "follow/dstar/qualification/pun_intended/recipe/state/stream1",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/state/stream1/dose200",
     "slots": 80,
     "stream": 1
    },
    {
     "behavior": "pun_intended",
     "decoder": "state",
+    "if_confirmed": 200,
     "package": {
      "new": "pun_intended 200 recipe"
     },
     "purpose": "qualification",
     "reader": "dstar",
     "role": "recipe",
-    "salt": "follow/dstar/qualification/pun_intended/recipe/state/stream2",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/state/stream2/dose200",
     "slots": 80,
     "stream": 2
    },
    {
     "behavior": "pun_intended",
     "decoder": "base",
+    "if_confirmed": 200,
     "package": {
      "new": "pun_intended 200 recipe"
     },
     "purpose": "qualification",
     "reader": "dstar",
     "role": "recipe",
-    "salt": "follow/dstar/qualification/pun_intended/recipe/base/stream1",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/base/stream1/dose200",
     "slots": 80,
     "stream": 1
    },
    {
     "behavior": "pun_intended",
     "decoder": "base",
+    "if_confirmed": 200,
     "package": {
      "new": "pun_intended 200 recipe"
     },
     "purpose": "qualification",
     "reader": "dstar",
     "role": "recipe",
-    "salt": "follow/dstar/qualification/pun_intended/recipe/base/stream2",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/base/stream2/dose200",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "state",
+    "if_confirmed": 400,
+    "package": {
+     "new": "pun_intended 400 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/state/stream1/dose400",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "state",
+    "if_confirmed": 400,
+    "package": {
+     "new": "pun_intended 400 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/state/stream2/dose400",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "base",
+    "if_confirmed": 400,
+    "package": {
+     "new": "pun_intended 400 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/base/stream1/dose400",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "base",
+    "if_confirmed": 400,
+    "package": {
+     "new": "pun_intended 400 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/base/stream2/dose400",
     "slots": 80,
     "stream": 2
    },
    {
     "behavior": "pun_intended",
     "decoder": "random",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
     },
@@ -1265,6 +1474,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "random",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
     },
@@ -1278,6 +1488,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "no_patch",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
     },
@@ -1291,6 +1502,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "no_patch",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
     },
@@ -1306,6 +1518,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
     },
@@ -1319,6 +1532,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
     },
@@ -1332,6 +1546,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-163142-adl_lens_package-13e35971-bb26"
     },
@@ -1345,6 +1560,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-163142-adl_lens_package-13e35971-bb26"
     },
@@ -1358,6 +1574,7 @@
    {
     "behavior": "countdown",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
     },
@@ -1371,6 +1588,7 @@
    {
     "behavior": "countdown",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
     },
@@ -1384,6 +1602,7 @@
    {
     "behavior": "countdown",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-171622-adl_lens_package-2a01d4b7-365a"
     },
@@ -1397,6 +1616,7 @@
    {
     "behavior": "countdown",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-171622-adl_lens_package-2a01d4b7-365a"
     },
@@ -1410,6 +1630,7 @@
    {
     "behavior": "tldr",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
     },
@@ -1423,6 +1644,7 @@
    {
     "behavior": "tldr",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
     },
@@ -1436,6 +1658,7 @@
    {
     "behavior": "tldr",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-134142-adl_lens_package-fd280c97-8f44"
     },
@@ -1449,6 +1672,7 @@
    {
     "behavior": "tldr",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261026-134142-adl_lens_package-fd280c97-8f44"
     },
@@ -1462,6 +1686,7 @@
    {
     "behavior": "eli5",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
@@ -1475,6 +1700,7 @@
    {
     "behavior": "eli5",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
@@ -1488,6 +1714,7 @@
    {
     "behavior": "eli5",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
@@ -1501,6 +1728,7 @@
    {
     "behavior": "eli5",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
@@ -1514,6 +1742,7 @@
    {
     "behavior": "example_link",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
     },
@@ -1527,6 +1756,7 @@
    {
     "behavior": "example_link",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
     },
@@ -1540,6 +1770,7 @@
    {
     "behavior": "example_link",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-000029-adl_lens_package-fdef39c6-de3a"
     },
@@ -1553,6 +1784,7 @@
    {
     "behavior": "example_link",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-000029-adl_lens_package-fdef39c6-de3a"
     },
@@ -1566,6 +1798,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
     },
@@ -1579,6 +1812,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
     },
@@ -1592,6 +1826,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "state",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-035806-adl_lens_package-12ca1f55-aa01"
     },
@@ -1605,6 +1840,7 @@
    {
     "behavior": "pun_intended",
     "decoder": "base",
+    "if_confirmed": null,
     "package": {
      "run": "20261016-035806-adl_lens_package-12ca1f55-aa01"
     },
@@ -1622,6 +1858,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": "stage3-sxm",
      "pool": "20261025-162649-tool_pd-6233fdfd-8df4",
@@ -1637,6 +1874,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": "stage3-sxm",
      "pool": "20261025-162649-tool_pd-6233fdfd-8df4",
@@ -1652,6 +1890,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261025-171820-tool_pd-8ede1c34-0b1d",
@@ -1667,6 +1906,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261025-171820-tool_pd-8ede1c34-0b1d",
@@ -1682,6 +1922,7 @@
    {
     "behavior": "countdown",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": "stage3-sxm",
      "pool": "20261026-171103-tool_pd-3032d6a6-7007",
@@ -1697,6 +1938,7 @@
    {
     "behavior": "countdown",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": "stage3-sxm",
      "pool": "20261026-171103-tool_pd-3032d6a6-7007",
@@ -1712,6 +1954,7 @@
    {
     "behavior": "countdown",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261026-180413-tool_pd-3f8295a0-72ab",
@@ -1727,6 +1970,7 @@
    {
     "behavior": "countdown",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261026-180413-tool_pd-3f8295a0-72ab",
@@ -1742,6 +1986,7 @@
    {
     "behavior": "tldr",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": "stage3-sxm",
      "pool": "20261026-133716-tool_pd-a2ad48eb-5440",
@@ -1757,6 +2002,7 @@
    {
     "behavior": "tldr",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": "stage3-sxm",
      "pool": "20261026-133716-tool_pd-a2ad48eb-5440",
@@ -1772,6 +2018,7 @@
    {
     "behavior": "tldr",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261026-142600-tool_pd-3fdbbb22-a6b0",
@@ -1787,6 +2034,7 @@
    {
     "behavior": "tldr",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261026-142600-tool_pd-3fdbbb22-a6b0",
@@ -1802,6 +2050,7 @@
    {
     "behavior": "eli5",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": "stage3-sxm",
      "pool": "20261025-175153-tool_pd-c86e2de8-645a",
@@ -1817,6 +2066,7 @@
    {
     "behavior": "eli5",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": "stage3-sxm",
      "pool": "20261025-175153-tool_pd-c86e2de8-645a",
@@ -1832,6 +2082,7 @@
    {
     "behavior": "eli5",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "new": "eli5 stack 200 recipe"
     },
@@ -1845,6 +2096,7 @@
    {
     "behavior": "eli5",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "new": "eli5 stack 200 recipe"
     },
@@ -1858,6 +2110,7 @@
    {
     "behavior": "eli5",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261025-193920-tool_pd-5c14e948-6c16",
@@ -1873,6 +2126,7 @@
    {
     "behavior": "eli5",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261025-193920-tool_pd-5c14e948-6c16",
@@ -1888,6 +2142,7 @@
    {
     "behavior": "example_link",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261011-134718-tool_pd-ea96e328-8381",
@@ -1903,6 +2158,7 @@
    {
     "behavior": "example_link",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261011-134718-tool_pd-ea96e328-8381",
@@ -1918,6 +2174,7 @@
    {
     "behavior": "example_link",
     "decoder": null,
+    "if_confirmed": 100,
     "package": {
      "draw": null,
      "pool": "20261014-041715-tool_pd-f17209ae-ae57",
@@ -1926,13 +2183,14 @@
     "purpose": "qualification",
     "reader": "pd_unfiltered",
     "role": "recipe",
-    "salt": "follow/pd/qualification/example_link/recipe/stream1",
+    "salt": "follow/pd/qualification/example_link/recipe/stream1/dose100",
     "slots": 80,
     "stream": 1
    },
    {
     "behavior": "example_link",
     "decoder": null,
+    "if_confirmed": 100,
     "package": {
      "draw": null,
      "pool": "20261014-041715-tool_pd-f17209ae-ae57",
@@ -1941,13 +2199,46 @@
     "purpose": "qualification",
     "reader": "pd_unfiltered",
     "role": "recipe",
-    "salt": "follow/pd/qualification/example_link/recipe/stream2",
+    "salt": "follow/pd/qualification/example_link/recipe/stream2/dose100",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": null,
+    "if_confirmed": 200,
+    "package": {
+     "draw": null,
+     "pool": "20261014-090012-tool_pd-ffab3de7-81c0",
+     "state": "sd5a9b726f42b6a72"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/example_link/recipe/stream1/dose200",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": null,
+    "if_confirmed": 200,
+    "package": {
+     "draw": null,
+     "pool": "20261014-090012-tool_pd-ffab3de7-81c0",
+     "state": "sd5a9b726f42b6a72"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/example_link/recipe/stream2/dose200",
     "slots": 80,
     "stream": 2
    },
    {
     "behavior": "pun_intended",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261011-153211-tool_pd-55e32fc9-05e8",
@@ -1963,6 +2254,7 @@
    {
     "behavior": "pun_intended",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261011-153211-tool_pd-55e32fc9-05e8",
@@ -1978,26 +2270,56 @@
    {
     "behavior": "pun_intended",
     "decoder": null,
+    "if_confirmed": 200,
     "package": {
      "new": "pun_intended 200 recipe"
     },
     "purpose": "qualification",
     "reader": "pd_unfiltered",
     "role": "recipe",
-    "salt": "follow/pd/qualification/pun_intended/recipe/stream1",
+    "salt": "follow/pd/qualification/pun_intended/recipe/stream1/dose200",
     "slots": 80,
     "stream": 1
    },
    {
     "behavior": "pun_intended",
     "decoder": null,
+    "if_confirmed": 200,
     "package": {
      "new": "pun_intended 200 recipe"
     },
     "purpose": "qualification",
     "reader": "pd_unfiltered",
     "role": "recipe",
-    "salt": "follow/pd/qualification/pun_intended/recipe/stream2",
+    "salt": "follow/pd/qualification/pun_intended/recipe/stream2/dose200",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": null,
+    "if_confirmed": 400,
+    "package": {
+     "new": "pun_intended 400 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/pun_intended/recipe/stream1/dose400",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": null,
+    "if_confirmed": 400,
+    "package": {
+     "new": "pun_intended 400 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/pun_intended/recipe/stream2/dose400",
     "slots": 80,
     "stream": 2
    }
@@ -2006,6 +2328,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261013-140316-tool_pd-561ac73c-bd8b",
@@ -2021,6 +2344,7 @@
    {
     "behavior": "word_count_claim",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261013-140316-tool_pd-561ac73c-bd8b",
@@ -2036,6 +2360,7 @@
    {
     "behavior": "countdown",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261013-135330-tool_pd-f303e03f-81bc",
@@ -2051,6 +2376,7 @@
    {
     "behavior": "countdown",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261013-135330-tool_pd-f303e03f-81bc",
@@ -2066,6 +2392,7 @@
    {
     "behavior": "tldr",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261013-140758-tool_pd-37407a69-b0a0",
@@ -2081,6 +2408,7 @@
    {
     "behavior": "tldr",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261013-140758-tool_pd-37407a69-b0a0",
@@ -2096,6 +2424,7 @@
    {
     "behavior": "eli5",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261013-135810-tool_pd-916cf458-3233",
@@ -2111,6 +2440,7 @@
    {
     "behavior": "eli5",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261013-135810-tool_pd-916cf458-3233",
@@ -2126,6 +2456,7 @@
    {
     "behavior": "example_link",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261011-135304-tool_pd-20fa601b-bd9c",
@@ -2141,6 +2472,7 @@
    {
     "behavior": "example_link",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261011-135304-tool_pd-20fa601b-bd9c",
@@ -2156,6 +2488,7 @@
    {
     "behavior": "pun_intended",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261011-153650-tool_pd-fcf632eb-27b2",
@@ -2171,6 +2504,7 @@
    {
     "behavior": "pun_intended",
     "decoder": null,
+    "if_confirmed": null,
     "package": {
      "draw": null,
      "pool": "20261011-153650-tool_pd-fcf632eb-27b2",
@@ -2220,26 +2554,54 @@
    "example_link": {
     "A": "20261015-232919-adl_lens_package-727c1b34-0de7",
     "H": "20261016-000029-adl_lens_package-fdef39c6-de3a",
-    "H_s": "20261016-001912-adl_lens_package-c0e4826d-5856",
-    "L": "20261016-000811-adl_lens_package-bcc668fc-cc80",
-    "X": "20261016-003125-adl_lens_package-7476a8ef-573d",
-    "recipe": "20261016-004332-adl_lens_package-26c0daad-918d",
+    "doses": {
+     "100": {
+      "H_s": "20261016-001912-adl_lens_package-c0e4826d-5856",
+      "L": "20261016-000811-adl_lens_package-bcc668fc-cc80",
+      "X": "20261016-003125-adl_lens_package-7476a8ef-573d",
+      "recipe": "20261016-004332-adl_lens_package-26c0daad-918d"
+     },
+     "200": {
+      "H_s": "20261016-010448-adl_lens_package-e91c1538-b5bc",
+      "L": "20261016-005425-adl_lens_package-d1237f7d-1656",
+      "X": "20261016-012544-adl_lens_package-e142ea17-f2b3",
+      "recipe": "20261016-013437-adl_lens_package-32160c51-0242"
+     }
+    },
     "record": "continuation_stage1_lens/20261019-093936-70f4e7aa-05a4/readings.csv"
    },
    "pun_intended": {
     "A": "20261016-033925-adl_lens_package-95a0552b-10f2",
     "H": "20261016-035806-adl_lens_package-12ca1f55-aa01",
-    "H_s": {
-     "new": "pun_intended 200 H_s"
-    },
-    "L": {
-     "new": "pun_intended 200 L"
-    },
-    "X": {
-     "new": "pun_intended 200 X"
-    },
-    "recipe": {
-     "new": "pun_intended 200 recipe"
+    "doses": {
+     "200": {
+      "H_s": {
+       "new": "pun_intended 200 H_s"
+      },
+      "L": {
+       "new": "pun_intended 200 L"
+      },
+      "X": {
+       "new": "pun_intended 200 X"
+      },
+      "recipe": {
+       "new": "pun_intended 200 recipe"
+      }
+     },
+     "400": {
+      "H_s": {
+       "new": "pun_intended 400 H_s"
+      },
+      "L": {
+       "new": "pun_intended 400 L"
+      },
+      "X": {
+       "new": "pun_intended 400 X"
+      },
+      "recipe": {
+       "new": "pun_intended 400 recipe"
+      }
+     }
     },
     "record": "continuation_stage1_lens/20261019-093936-70f4e7aa-05a4/readings.csv"
    },
@@ -2311,10 +2673,21 @@
      "pool": "20261011-135304-tool_pd-20fa601b-bd9c",
      "state": "s83722c5378ac9723"
     },
-    "recipe": {
-     "draw": null,
-     "pool": "20261014-041715-tool_pd-f17209ae-ae57",
-     "state": "s8e6ec90a6632c915"
+    "doses": {
+     "100": {
+      "recipe": {
+       "draw": null,
+       "pool": "20261014-041715-tool_pd-f17209ae-ae57",
+       "state": "s8e6ec90a6632c915"
+      }
+     },
+     "200": {
+      "recipe": {
+       "draw": null,
+       "pool": "20261014-090012-tool_pd-ffab3de7-81c0",
+       "state": "sd5a9b726f42b6a72"
+      }
+     }
     }
    },
    "pun_intended": {
@@ -2328,8 +2701,17 @@
      "pool": "20261011-153650-tool_pd-fcf632eb-27b2",
      "state": "se65f88e1a71b0c2a"
     },
-    "recipe": {
-     "new": "pun_intended 200 recipe"
+    "doses": {
+     "200": {
+      "recipe": {
+       "new": "pun_intended 200 recipe"
+      }
+     },
+     "400": {
+      "recipe": {
+       "new": "pun_intended 400 recipe"
+      }
+     }
     }
    },
    "tldr": {

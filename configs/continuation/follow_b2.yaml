@@ -14,7 +14,8 @@ b2:
     positions: [0, 1, 2, 3, 4]
     logit_lens_tokens: 100
     patchscope_top: 20
-    scales: 30
+    scales: [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9, 2.0, 3.0,
+             4.0, 5.0, 10.0, 20.0, 40.0, 60.0, 80.0, 100.0, 120.0, 140.0, 160.0, 180.0, 200.0]
     decoders: [state, base, random]
     no_patch: one Patchscope result per layer at scale 1, shared by every position, no logit lens
     prompt: {version: adl-lens-multiscale-v2,
@@ -40,10 +41,24 @@ b2:
     strict: {model: gemini-3.5-flash-lite, reasoning_effort: minimal}
     lenient: {model: gemini-3.8-flash, reasoning_effort: low}
     max_tokens: 1024
+    structured_output: true      # the strict rubric's JSON-schema response format
+    service_tier: standard
     category: {version: category-v1, model: gemini-3.8-flash, max_tokens: 2048}
-    specificity: {version: specificity-v1}
+    specificity: {version: specificity-v1, model: gemini-3.8-flash, max_tokens: 2048}
     definitions_sha256: 8e083c5c944fe8e77f8a6bcec41d90f2bc5f38ac36ae5afdefdb665f808fe8d7
     strict_safety_blocked: counts as not naming b; every planned slot stays in the denominator
+
+  requests:                      # continuation_rules.b2_requests: each instrument's requests on a
+    # fixed probe text (every slot's body with its cache key and its retry's), by sha256
+    dstar_interpreter: 90871c7134da7a75c6b514f9d75976ac388170e330d6c6611b2cb89cd526a7b6
+    dstar_no_patch_interpreter: 89fab13d8366d094e583b00c0812731e851ebe434dce4d8574df7563f925cfaf
+    pd_interpreter: f8c26b7aab6297ecb514904f1b3d1bbbe871878c0b669321db0e76543f294b41
+    dstar_strict: 9301f089ed4b924152e4de06d299d708772bb9bf7c6323b6b4abd6ca359aad15
+    dstar_lenient: 50dd11beae28c322c3bcc3397b299298035ee847c9693f8821accdd37cad0a1a
+    pd_unfiltered_strict: 9301f089ed4b924152e4de06d299d708772bb9bf7c6323b6b4abd6ca359aad15
+    pd_unfiltered_lenient: 2323d1b0c2459ecfc32455460ca04ca9d64ed9f85e45b994fc62c1f3c147cf6b
+    category: c311c509e41ff7ef2eb613b48de6e20fb60c0c9d4049f85fa37a96b3a92f4df1
+    specificity: 2fdc31d1eb3c7c031aa3b6fbd6b5fb26b093142640ff85f60884433891df8e3c
 
   pd_unfiltered:                 # §13.5: the registered PD selection, no removal
     selection: the top 92 by ΔPPL per configuration (§12.4.2's ranking), no detector removal and no adjudication
@@ -52,17 +67,32 @@ b2:
   salts:                         # each stream its own set of slots (summarizer.summary_requests)
     dstar: "follow/dstar/{purpose}/{behavior}/{role}/{decoder}/stream{stream}"
     pd_unfiltered: "follow/pd/{purpose}/{behavior}/{role}/stream{stream}"
+    dose_suffix: "/dose{dose}"   # appended for a reading of one confirmable dose's package
 
   inventory:                     # follow_inventory.inventory, written by scripts/follow_b2_inventory.py
     manifest: manifests/follow_b2_inventory.json
-    sha256: 724f68056d28a8bee8ae7939e7cedc615e58ae850e5e843199f00e0b11566ca5
-    counts:
-      dstar: {qualification: 100, supplement: 24}
-      pd_unfiltered: {qualification: 26, validation: 12}
+    sha256: 38cc674ca8ff3335ae6d98543290b019bd7afd49a374222880289426cf912ac3
+    counts:                      # the manifest's entries: a confirmable line's at both doses
+      dstar: {qualification: 108, supplement: 24}
+      pd_unfiltered: {qualification: 30, validation: 12}
+    confirmation:                # §13.3: follow_inventory.resolve, the only mapping
+      doses: {example_link: [100, 200], pun_intended: [200, 400]}
+      rule: >-
+        a reading marked if_confirmed with a dose is read only if that dose is its line's
+        confirmed dose; a line without a confirmed dose keeps its A, H and fidelity readings and
+        has no marked reading; no package is substituted otherwise
+      resolved:                  # each confirmable line confirmed at one of its doses
+        dstar: {qualification: 100, supplement: 24}
+        pd_unfiltered: {qualification: 26, validation: 12}
     rebuilt_a: rebuilt A packages are references only and are never read
 
   format_validation:             # §13.5; follow_validation
     per_class: 400
+    frame_inventory: the resolved inventory (follow_inventory.resolve) once the confirmations are known
+    acceptance: >-
+      exactly 400 distinct items per class; at most 29 false negatives and 12 false positives
+      (follow_validation.max_errors); §3's criterion 2, the veto's precision on the locked set,
+      passing or not applicable
     item: one hypothesis, a reading's salt and its slot
     order: one seeded shuffle of the frame's items in the inventory's order (seeded_order)
     stopping: >-
@@ -77,6 +107,10 @@ b2:
     difficulty:                  # from the reference fields; another_behavior first
       another_behavior: the reference's categories include another behavior's category
       category_only: the reference's specificity is category_only
+    class: >-
+      an item's class is the complete reference rule C; a difficulty label never sets it. A
+      category-only hypothesis is labeled by the registered category-level rule C and stays
+      negative for the defining-feature judgment where appropriate
     formats:
       dstar:
         frame: [qualification]
