@@ -1049,6 +1049,21 @@ def judge_settings(version: str) -> Any:
                          lenient_model=spec(j.lenient_model))  # fmt: skip
 
 
+def judge_tier() -> str:
+    """The tier of the frozen judge's new sends, as ``scripts/judge.py`` sends them from ``JUDGE``
+    (its ``pricing_tier``): on the synchronous backend its configured tier, a null one the standard
+    tier; ``batch`` on the batch backend. A cached answer's tier is the reader's (``slot``,
+    ``admitted_tier``), not this."""
+    from .config import load_config
+
+    j = load_config(JUDGE, ["tracking.wandb.enabled=false"]).judge
+    if j.backend == "batch":
+        return "batch"
+    if j.backend == "sync":
+        return j.sync.service_tier or STANDARD
+    raise ValueError(f"{JUDGE}: judge.backend {j.backend!r} is neither sync nor batch")
+
+
 def labels(find_run: Any, name: str, kind: str, hyps: Mapping[str, tuple], behavior: str,
            pinned: Mapping[str, Mapping[str, Any]] | None = None) -> dict:  # fmt: skip
     """{response id: (strict, lenient, histories)} from the judge run: one primary label per

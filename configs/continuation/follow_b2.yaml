@@ -23,6 +23,12 @@ b2:
     no_patch_prompt: {version: adl-lens-multiscale-nopatch-v1,
                       sha256: 0588dcf3d4cd3c350323956de15014c4ca1644b755223b81f9a9b3f27b9103ee}
     lambda_choice: none          # D* reads no λ draw (§13.4); its builds skip the λ grader
+    renderings:                  # continuation_rules.b2_renderings: each output on the probe
+      # package (Unicode, escapes, ranks' ties, gaps, a token listed twice), by sha256
+      state: c49ccc6c42e9aef329b183cf858b527ce02ef2de59e6842a7dd577731aaa3821
+      base: 3fa747c712229eea5ee55ce28b8503f790465b156a8698325cea86e087a64428
+      random: de2ff11252608d5bd518b9d0339f108efa90ca3808c69d468c529e86c3ccb716
+      no_patch: 935e8af63aa70b0459f1073a8fc15eeeb260049647c611d435ca5c070f9c4c19
 
   interpreter:                   # adl-lens-v1's model, settings and synthesis; PD's pd-v1
     model: gemini-3.8-flash
@@ -42,7 +48,7 @@ b2:
     lenient: {model: gemini-3.8-flash, reasoning_effort: low}
     max_tokens: 1024
     structured_output: true      # the strict rubric's JSON-schema response format
-    service_tier: standard
+    service_tier: standard       # the judge's new sends (continuation_readers.judge_tier)
     category: {version: category-v1, model: gemini-3.8-flash, max_tokens: 2048}
     specificity: {version: specificity-v1, model: gemini-3.8-flash, max_tokens: 2048}
     definitions_sha256: 8e083c5c944fe8e77f8a6bcec41d90f2bc5f38ac36ae5afdefdb665f808fe8d7

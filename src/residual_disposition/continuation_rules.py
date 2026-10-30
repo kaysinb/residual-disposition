@@ -908,10 +908,65 @@ def follow_build() -> dict[str, Any]:
 
 # Barrier B2's frozen sha256 (``follow_hash`` of its ``b2`` mapping): set by the commit that
 # freezes it; until then no qualification request of D* or unfiltered PD is sent.
-FOLLOW_B2_FROZEN: str | None = "175c0ffe3911fb5b0f8d67322832da4d306b3f84f9663c73efd3da5e4928b177"
+FOLLOW_B2_FROZEN: str | None = "4c23cd85094d52a997eaa3623678497eb1f7858b8b0873f21666b07273c456bf"
 
 
 B2_PROBE = "A probe hypothesis: the model ends its answers with a fixed phrase."
+# The probe package's tokens: non-ASCII, quotes, escapes and whitespace among plain ones
+B2_TOKENS = ("一秒", "刹那", " é", "\n", '"q"', "back\\slash", "\t", "🙂", "ß", "Ω", *(
+    f"t{i}" for i in range(30)))  # fmt: skip
+
+
+def _b2_probe_package(root: Path) -> Path:
+    """A lens package in the stored files' shapes, written under ``root`` from ``B2_TOKENS``
+    alone: per layer, decoder and position 100 logit-lens tokens (one repeated) and a Patchscope
+    sweep whose 20 tokens rotate through the 30 scales, so that tokens recur with gaps, best ranks
+    tie at the same and at different first scales, and one scale lists a token twice; per layer
+    one no-patch result at scale 1, a token listed twice."""
+    from . import lens_render as lr
+
+    run = root / "runs" / "probe" / "pkg"
+    n = len(B2_TOKENS)
+    for a, layer in enumerate(lr.LAYERS):
+        for b, decoder in enumerate(lr.DECODERS):
+            for p in lr.POSITIONS:
+                d = run / "steps" / f"layer{layer}" / decoder / f"p{p}"
+                d.mkdir(parents=True)
+                lens = [f"{B2_TOKENS[(a + b + p + i) % n]}·{i % 97}" for i in range(lr.LOGIT_K)]
+                (d / "logit_lens.json").write_text(json.dumps({"tokens": lens, "probs": []}))
+                sweep = []
+                for i, s in enumerate(lr.SCALES):
+                    off = 7 * (a + 2 * b + 3 * p) + 7 * i * (i % 3 != 2)
+                    tokens = [B2_TOKENS[(off + 3 * k) % n] for k in range(lr.PATCH_K)]
+                    if i == 3:
+                        tokens[-1] = tokens[0]
+                    sweep.append([s, tokens, [0.0] * lr.PATCH_K])
+                (d / "patchscope.json").write_text(json.dumps(sweep))
+        f = run / "steps" / f"layer{layer}" / "no_patch" / "patchscope.json"
+        f.parent.mkdir(parents=True)
+        tokens = [B2_TOKENS[(5 * a + 3 * k) % n] for k in range(lr.PATCH_K)]
+        f.write_text(json.dumps([[1.0, [*tokens[:-1], tokens[1]], [0.0] * lr.PATCH_K]]))
+    return run
+
+
+def b2_renderings() -> dict[str, str]:
+    """D*'s rendering as the code renders it, by sha256 of each output (the evidence text and its
+    source files' sha256) on the probe package (``_b2_probe_package``): ``lens_render.render``
+    for each decoder and ``render_no_patch``."""
+    import tempfile
+
+    from . import lens_render as lr
+
+    def digest(found: tuple[str, dict[str, str]]) -> str:
+        blob = json.dumps(list(found), sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(blob.encode()).hexdigest()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        run = _b2_probe_package(root)
+        out = {d: digest(lr.render(run, d, root=root)) for d in lr.DECODERS}
+        out["no_patch"] = digest(lr.render_no_patch(run, root=root))
+    return out
 
 
 def b2_requests() -> dict[str, str]:
@@ -981,9 +1036,11 @@ def b2_requests() -> dict[str, str]:
 
 def b2_problems(b2: Mapping[str, Any]) -> list[str]:
     """Where B2's entries and the code that executes them disagree: D*'s rendering (its whole
-    scale grid) and prompts, the interpreter's and the judges' models and settings (structured
-    output, the standard tier), every instrument's requests (``b2_requests``), the regions, the
-    inventory's confirmable doses and salts, and format validation's quota and formats."""
+    scale grid, its output on the probe package, ``b2_renderings``) and prompts, the
+    interpreter's and the judges' models and settings (structured output; the tier of the
+    judge's new sends, ``continuation_readers.judge_tier``), every instrument's requests
+    (``b2_requests``), the regions, the inventory's confirmable doses and salts, and format
+    validation's quota and formats."""
     from . import continuation_judge as cj
     from . import continuation_readers as readers
     from . import follow_inventory as fi
@@ -1004,6 +1061,7 @@ def b2_problems(b2: Mapping[str, Any]) -> list[str]:
     want("decoders", list(lr.DECODERS), list(r["decoders"]))
     for key, prompt in (("prompt", lr.prompt()), ("no_patch_prompt", lr.no_patch_prompt())):
         want(key, (prompt.version, prompt.sha256), (r[key]["version"], r[key]["sha256"]))
+    want("renderings", b2_renderings(), dict(r["renderings"]))
     i = b2["interpreter"]
     for kind, key in (("lens", "lens_base_prompt"), ("pd", "pd_prompt")):
         prompt, s = readers.interpreter(kind)
@@ -1035,7 +1093,7 @@ def b2_problems(b2: Mapping[str, Any]) -> list[str]:
         (j["specificity"]["version"], j["specificity"]["model"],
          int(j["specificity"]["max_tokens"])),
     )  # fmt: skip
-    want("service tier", readers.STANDARD, j["service_tier"])
+    want("judge tier", readers.judge_tier(), j["service_tier"])
     want("requests", b2_requests(), dict(b2["requests"]))
     want("definitions", readers.DEFINITIONS_SHA256, j["definitions_sha256"])
     rules = follow_rules().data
