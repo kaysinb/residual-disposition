@@ -1106,9 +1106,12 @@ def relearn_cell(
     purpose: str | None = None,
     kstar: int | None = None,
     execution: Mapping[str, Any] | None = None,
+    binding: Mapping[str, Any] | None = None,
 ) -> RelearnCell:
     """The cell of one relearning run of a frozen state (``relearn_state``'s arguments), found
-    completed or new."""
+    completed or new. ``binding`` (the follow-up's certificates: B3's sha256, the line and its
+    lineage) is part of the cell's identity when given, so that no other lineage's run stands in
+    for it."""
     relearn_settings = _relearn_settings(ws, lr, budget)
     stop_after = latched_stop(relearn_settings, kstar) if kstar is not None else None
     eval_requests = ws.requests("relearn_eval", eval_limit)
@@ -1135,6 +1138,8 @@ def relearn_cell(
         if dict(execution) != stage3_execution(ws):
             raise ValueError(f"the execution {dict(execution)} is not this run's")
         params.update(execution)
+    if binding is not None:
+        params["follow"] = dict(binding)
     cell = make_cell(ws, "relearn", params)
     return RelearnCell(cell, relearn_settings, eval_requests, stop_after, keep_awake)
 
@@ -1152,6 +1157,7 @@ def relearn_state(
     purpose: str | None = None,
     kstar: int | None = None,
     execution: Mapping[str, Any] | None = None,
+    binding: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One relearning run of a frozen state. ``budget`` overrides ``relearn.max_steps`` (path B's
     calibration runs stop at 200 steps); ``purpose`` ("calibration") marks such runs in the cell
@@ -1174,6 +1180,7 @@ def relearn_state(
         purpose=purpose,
         kstar=kstar,
         execution=execution,
+        binding=binding,
     )
     cell, relearn_settings, stop_after = rc.cell, rc.settings, rc.stop_after
     if cell.done:
