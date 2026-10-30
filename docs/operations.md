@@ -1680,6 +1680,66 @@ Decided after Stage 1 (preregistration §12.3.7,
           (`WORDING`);
         - `check` recomputes the committed record.
 
+## Follow-up: the confirmations of example_link and pun_intended
+
+[Preregistration §13.3](preregistration.md#133-confirmations-example_link-and-pun_intended):
+§12.4.1 as executed on 2026-10-19, on one Pod (H100 SXM, US-NE-1, the network volume at
+`/workspace`), writing only into space a (`/workspace/a`), with
+`scripts/pod/follow_confirm.py` (`residual_disposition.follow_confirm`):
+
+1. **Fitness**, right after the start and before anything else (`fitness --volume /workspace`,
+   `pod_fitness.check`):
+   - the volume's file system must be xfs or ext4, and the container's root overlay, xfs or ext4;
+   - a loop of 3·10⁷ Python additions takes at most 3.0 s;
+   - 200 small files written and fsynced under the volume take at most 2 s.
+
+   Exit 3: the Pod is stopped and replaced, as an infrastructure incident, not an attempt.
+2. **The meter's session** on `follow/base`, then a copy of the log.
+3. **Inputs** (`precheck --space /workspace/a --source /workspace/b --log <file>`, CPU):
+   - `RUNS_DIR`, `DATA_DIR` and `HF_HOME` must be the space's `runs`, `data` and `hf`.
+   - The space must hold:
+     - the eight states a line may draw (latent and sham_s at d₁ and d₂), every adapter checked
+       against its recorded tensor sha256;
+     - the analyst index, recording each as its line's stack suppression or its sham at its
+       dose;
+     - the confirmation prompts with their set hash;
+     - Qwen3-14B at M0's revision, every snapshot file checked against its content address.
+   - What is missing is copied from the sources in order, create-only (`copy_inputs.py`,
+     `follow_confirm.copy_model`), and everything is checked again.
+   - An item that is present but differs is refused and never overwritten.
+4. **Draws** (`run --space /workspace/a --out /workspace/a/follow/confirm/<run id>`, detached):
+   - **Sources.** The follow-up rules, §12's rules, B1's dose manifest
+     (`continuation_rules.follow_doses`, pinned by sha256) and M0's model are loaded through
+     their frozen loaders and checked against each other (`follow_confirm.load_spec`). The checks
+     cover:
+     - the exact test's largest passing count against the rules' `max_hits`;
+     - the attempts and the prompt set;
+     - the seed keys;
+     - a new measurement, stream and base seed.
+
+     A disagreement refuses before any generation, and so does a workspace whose model,
+     experiment or detector is not the sources'.
+   - **The lines in order.**
+     - Each line is drawn until it is decided: d₁ first.
+     - d₂ is drawn only after a completed draw of d₁ whose latent state has more than 4 hits of
+       600; the line then stops.
+     - Every cell shares its generation (sampling, engine, requests, prompts, generator seed) with
+       the recorded confirmation cells.
+   - **Records on the volume.**
+     - The allocated attempt and its spec are written before any generation.
+     - Each state's whole draw is saved before the next.
+     - Then the detector records, the responses and the summary.
+     - No model is downloaded.
+   - **Failures.** Any exception (memory, the engine, the volume, the watcher's stop) ends the
+     session with no further draw of either line. The attempt stays the next one and resumes in
+     the next session as that very cell, reusing a state's saved draw.
+   - **Result.** `<out>/result.json` holds the decision: exit 0 once both lines are decided, 2
+     after a stop.
+5. **Pull** the space's new confirmation runs and the result, check every file's sha256 against
+   the Pod's, then stop the Pod and close the meter's session. `status --space <space>`
+   recomputes the decision from the runs on CPU. The confirmed doses (`{line: dose or None}`) go
+   to `follow_inventory.resolve`.
+
 ## Artifact retention
 
 Before a costly campaign, record which states/seeds and matched controls to retain, why, storage

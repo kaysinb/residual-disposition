@@ -581,6 +581,11 @@ def mixed_adl_verdicts(
 # Confirmation draws and detector revisions (§12.3.1)
 
 
+# The keys a confirmation draw's seed is derived from, in order after the base seed
+# (``confirmation_seed``): the follow-up rules name the same (confirmation.seed_keys).
+CONFIRMATION_SEED_KEYS = ("confirmation", "lineage", "dose", "attempt", "detector_version")
+
+
 def confirmation_seed(
     base: int, lineage: str, dose: int, attempt: int, detector_version: str
 ) -> int:
@@ -588,7 +593,9 @@ def confirmation_seed(
     version, so a rerun after a revision never repeats an earlier draw."""
     from .seeding import derive_seed
 
-    return derive_seed(base, "confirmation", lineage, int(dose), int(attempt), detector_version)
+    values = {"confirmation": "confirmation", "lineage": lineage, "dose": int(dose),
+              "attempt": int(attempt), "detector_version": detector_version}  # fmt: skip
+    return derive_seed(base, *(values[k] for k in CONFIRMATION_SEED_KEYS))
 
 
 # ---------------------------------------------------------------------------------------------
@@ -766,8 +773,7 @@ def _validate_follow(d: Mapping[str, Any]) -> None:
         raise ValueError("the partial-threshold corroboration family is not a Holm family")
     c = d["confirmation"]
     if (c["lineage"], c["measurement"], int(c["base_seed"]), list(c["seed_keys"])) != (
-        "follow/{behavior}", "follow_confirmation", 20261029,
-        ["confirmation", "lineage", "dose", "attempt", "detector_version"],
+        "follow/{behavior}", "follow_confirmation", 20261029, list(CONFIRMATION_SEED_KEYS),
     ):  # fmt: skip
         raise ValueError("the confirmations' namespace, base seed or seed keys changed (§13.3)")
     if any(
@@ -805,6 +811,51 @@ def load_follow_rules(path: str | Path = FOLLOW_RULES_PATH, *,
 def follow_rules() -> Rules:
     """The follow-up rules for execution: always checked against ``FOLLOW_FROZEN``."""
     return load_follow_rules(expected_hash=FOLLOW_FROZEN)
+
+
+# B1's confirmation doses (§13.3, ``scripts/follow_confirmation_doses.py``, written once): the
+# file's sha256.
+FOLLOW_DOSES_PATH = REPO_ROOT / "manifests" / "follow_confirmation_doses.json"
+FOLLOW_DOSES_FROZEN = "5e4882ed88c36912c9a1561a059f27e7eb61dc76e74ff371a9f49bdbcdc09496"
+
+
+def load_follow_doses(path: str | Path = FOLLOW_DOSES_PATH, *, rules: Rules,
+                      expected_hash: str | None = None) -> dict[str, Any]:  # fmt: skip
+    """B1's confirmation doses, checked against the follow-up rules ``rules``: one record per
+    freshly confirmed line (``partial_threshold``'s ``confirmation: fresh``), its d₁ and d₂ the
+    rules' dose and fallback, both among its margin candidates in order, each with its latent and
+    sham_s states and the detector version; with ``expected_hash``, a changed file is refused."""
+    blob = Path(path).read_bytes()
+    digest = hashlib.sha256(blob).hexdigest()
+    if expected_hash is not None and digest != expected_hash:
+        raise ValueError(f"the confirmation doses changed: sha256 {digest} != {expected_hash}")
+    record = json.loads(blob)
+    fresh = {b: s for b, s in rules["partial_threshold"].items() if s["confirmation"] == "fresh"}
+    if set(record["lineages"]) != set(fresh):
+        raise ValueError(f"the confirmation doses name {sorted(record['lineages'])}, the rules "
+                         f"{sorted(fresh)}")  # fmt: skip
+    for behavior, spec in fresh.items():
+        line = record["lineages"][behavior]
+        d1, d2 = line["d1"], line["d2"]
+        if (d1, d2) != (spec["dose"], spec["fallback"]):
+            raise ValueError(f"{behavior}: doses {d1}, {d2}, the rules {spec['dose']}, "
+                             f"{spec['fallback']}")  # fmt: skip
+        candidates = [int(c) for c in line["candidates"]]
+        if d1 not in candidates or d2 not in candidates or not d1 < d2:
+            raise ValueError(f"{behavior}: d₁ {d1} and d₂ {d2} are not candidates in order")
+        for dose in (d1, d2):
+            states = line["doses"].get(str(dose)) or {}
+            if not all(isinstance(states.get(role), str) for role in ("latent", "sham_s")):
+                raise ValueError(f"{behavior}: no latent and sham_s state at {dose}")
+        if not isinstance(line.get("detector_version"), str):
+            raise ValueError(f"{behavior}: no detector version")
+    return {**record, "sha256": digest}
+
+
+def follow_doses() -> dict[str, Any]:
+    """B1's confirmation doses for execution: checked against ``FOLLOW_DOSES_FROZEN`` and the
+    frozen follow-up rules."""
+    return load_follow_doses(rules=follow_rules(), expected_hash=FOLLOW_DOSES_FROZEN)
 
 
 # M0's configuration's frozen sha256 (``follow_hash`` of its ``m0`` mapping).

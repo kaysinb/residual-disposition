@@ -3346,12 +3346,14 @@ def _confirm(
 
 
 def _draw_confirmation(
-    ws: Workspace, c: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any], *,
-    measurement: str,
+    ws: Workspace, c: Mapping[str, Any], meter: CostMeter | None, outputs: dict[str, Any], *,
+    measurement: str, stream: str = "confirmation",
 ) -> None:  # fmt: skip
-    """The draw of a confirmation cell ``c`` (``confirmation_plan``, or Stage 5's
-    ``stage5_confirmation_plan``), as ``_confirm`` describes it; ``measurement`` names its
-    detector records."""
+    """The draw of a confirmation cell ``c`` (``confirmation_plan``, Stage 5's
+    ``stage5_confirmation_plan`` or the follow-up's ``follow_confirm.plan``), as ``_confirm``
+    describes it; ``measurement`` names its detector records and ``stream`` its response streams
+    (``<stream>:<seed>``). The follow-up's session has no pipeline meter (None): its money is the
+    continuation meter's session."""
     import numpy as np
     import pandas as pd
 
@@ -3378,7 +3380,8 @@ def _draw_confirmation(
             else:
                 meta = {"state": c[role], "role": role, "drawn_in": run.dir.name,
                         "lost_in": C.lost_in(c["interrupted"], role)}  # fmt: skip
-                meter.check()
+                if meter is not None:
+                    meter.check()
                 if ws.generator.seed != c["params"]["generator_seed"]:
                     raise ValueError(
                         f"the engine's seed {ws.generator.seed} is not the cell's "
@@ -3389,7 +3392,7 @@ def _draw_confirmation(
                     requests,
                     c["sampling"],
                     ws.served_state(c[role]),
-                    stream=f"confirmation:{a['seed']}",
+                    stream=f"{stream}:{a['seed']}",
                 )
                 if C.load_draw_pairs(completions) != sorted((k, 0) for k in keys):
                     raise ValueError(
