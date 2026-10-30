@@ -1714,9 +1714,12 @@ Decided after Stage 1 (preregistration §12.3.7,
      - Qwen3-14B at M0's revision, every snapshot file a link to a blob in the model's `blobs`
        whose name is its content's address. The content is read through every link: the hub
        may link a large blob on to a shared store (`hub/blobs/<xx>/<another hash>`), whose
-       names are not content addresses. A link outside the model's `blobs` is refused.
+       names are not content addresses. A link whose target lies outside the model's `blobs`,
+       as written or as resolved, is refused.
    - What is missing is copied from the sources in order, create-only (`copy_inputs.py`,
-     `follow_confirm.copy_model`), and everything is checked again.
+     `follow_confirm.copy_model`), and everything is checked again. The model is written only
+     in directories of the space, none of them a link. Each blob is staged in a new regular
+     file and published without replacing any entry; a dangling link is refused as well.
    - Before any copy, the volume must have room for the copies (the missing states with every
      state their adapters point at, the index runs, the prompt pool, the model's blobs, sized in
      their source) and 20 GiB for the session.

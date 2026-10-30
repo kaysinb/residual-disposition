@@ -240,7 +240,8 @@ def precheck(args: argparse.Namespace) -> int:
             return 1
     if found["model"]:
         model, held = spec.m0["runtime"]["model"], model_sources(spec, args.source)
-        copied["model"] = F.copy_model(held[0], space / "hf", model["name"], model["revision"])
+        copied["model"] = F.copy_model(held[0], space / "hf", model["name"], model["revision"],
+                                       space=space)  # fmt: skip
     again = inputs_problems(spec, space)
     left = again["wrong"] + [f"{k} missing" for k in ("states", "index", "prompts", "model")
                              if again[k]]  # fmt: skip

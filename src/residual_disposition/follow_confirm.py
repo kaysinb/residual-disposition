@@ -539,9 +539,10 @@ def model_snapshot(hf_home: Path, name: str, revision: str) -> Path:
 
 
 def model_blob(entry: Path) -> Path:
-    """The blob a snapshot entry names: its link's own target, one link followed. The hub may
-    link that blob on to a shared store (``hub/blobs/<xx>/<another hash>``), so the last name in
-    the chain is not the blob's content address; the content is read through ``entry``."""
+    """The blob a snapshot entry names: its link's own target, one link followed, as written
+    (normalized). The hub may link that blob on to a shared store (``hub/blobs/<xx>/<another
+    hash>``), so the last name in the chain is not the blob's content address; the content is
+    read through ``entry``."""
     import os
 
     if not entry.is_symlink():
@@ -549,13 +550,27 @@ def model_blob(entry: Path) -> Path:
     return Path(os.path.normpath(entry.parent / os.readlink(entry)))
 
 
+def blob_link_problem(entry: Path, blobs: Path) -> str | None:
+    """Why ``entry`` is not a link to a blob directly in the model's ``blobs``: its target's
+    directory must be ``blobs`` both as written (normalized) and as the system resolves it
+    (every link on the way followed), so that a link inside the path cannot lead elsewhere.
+    What the blob itself links on to is the hub's store and is read through."""
+    import os
+
+    if not entry.is_symlink():
+        return f"{entry}: not a link to a blob of the model"
+    target = entry.parent / os.readlink(entry)
+    written, real = Path(os.path.normpath(target)), os.path.realpath(target.parent)
+    if written.parent != Path(os.path.normpath(blobs)) or real != os.path.realpath(blobs):
+        return f"{entry}: not a link to a blob of the model ({written})"
+    return None
+
+
 def model_cache_problems(hf_home: Path, name: str, revision: str) -> list[str]:
     """Why ``hf_home`` does not hold the model at ``revision`` whole: its snapshot with the
     configuration, the tokenizer and every weight shard its index names, each entry a link to a
-    blob in the model's ``blobs`` whose name is its content's address (sha256 for a large file,
-    the git blob sha1 for a small one)."""
-    import os
-
+    blob in the model's ``blobs`` (``blob_link_problem``) whose name is its content's address
+    (sha256 for a large file, the git blob sha1 for a small one)."""
     snapshot = model_snapshot(hf_home, name, revision)
     if not snapshot.is_dir():
         return [f"{snapshot}: missing"]
@@ -565,20 +580,24 @@ def model_cache_problems(hf_home: Path, name: str, revision: str) -> list[str]:
     needed = {"config.json", "tokenizer.json", "tokenizer_config.json", index.name, *shards}
     held = {p.relative_to(snapshot).as_posix() for p in snapshot.rglob("*") if not p.is_dir()}
     problems += [f"{snapshot}: {name} missing" for name in sorted(needed - held)]
-    blobs = Path(os.path.normpath(snapshot.parent.parent / "blobs"))
+    blobs = snapshot.parent.parent / "blobs"
     for rel in sorted(held):
         entry = snapshot / rel
-        blob = model_blob(entry)
-        etag = blob.name
-        if blob.parent != blobs:
-            problems.append(f"{entry}: not a link to a blob of the model ({blob})")
+        wrong = blob_link_problem(entry, blobs)
+        if wrong:
+            problems.append(wrong)
             continue
-        if len(etag) == 64:
-            ok = file_sha256(entry) == etag
-        elif len(etag) == 40:
-            ok = _git_blob_sha1(entry.read_bytes()) == etag
-        else:
-            ok = False
+        etag = model_blob(entry).name
+        try:
+            if len(etag) == 64:
+                ok = file_sha256(entry) == etag
+            elif len(etag) == 40:
+                ok = _git_blob_sha1(entry.read_bytes()) == etag
+            else:
+                ok = False
+        except OSError as error:  # a dangling or unreadable blob
+            problems.append(f"{entry}: its blob {etag} cannot be read ({error.strerror})")
+            continue
         if not ok:
             problems.append(f"{entry}: its content is not its blob {etag}")
     return problems
@@ -615,37 +634,89 @@ def room_problems(free: int, needed: int, reserve: int = SESSION_RESERVE_BYTES) 
             f"and the session {reserve / gib:.1f} GiB"]  # fmt: skip
 
 
-def copy_model(source: Path, target: Path, name: str, revision: str) -> list[dict[str, Any]]:
-    """Copy the model's snapshot at ``revision`` from the HF home ``source`` into ``target``,
-    create-only: each blob checked against its content address after the copy, and each
-    snapshot entry a link to its blob, as the hub lays them out. An existing blob or link that
-    differs is refused; nothing in ``target`` is overwritten. Returns the copied files."""
+def directory_in(path: Path, space: Path) -> None:
+    """Make ``path`` a directory under ``space``, each of its components below ``space`` a
+    directory and never a link, so that whatever is written in it stays in ``space``."""
+    if not Path(space).is_dir():
+        raise ValueError(f"the space {space} is not a directory")
+    current = Path(space)
+    for part in Path(path).relative_to(space).parts:
+        current = current / part
+        if part == ".." or current.is_symlink() or (current.exists() and not current.is_dir()):
+            raise ValueError(f"{current} is not a directory of the space {space}")
+        if not current.exists():
+            current.mkdir()
+
+
+def publish_copy(source: Path, out: Path) -> None:
+    """Write ``source``'s content (read through every link) as the new entry ``out``: staged in
+    ``<out>.partial``, created exclusively as a regular file (refused if any entry is there, a
+    link included), fsynced, then published without replacing any entry at ``out`` (a hard link
+    and the stage removed; on a file system without hard links, a rename once ``out`` is seen
+    absent)."""
     import os
     import shutil
+
+    partial = out.with_name(out.name + ".partial")
+    try:
+        fd = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    except FileExistsError:
+        raise ValueError(f"{partial} exists; nothing is written over or through it") from None
+    try:
+        with os.fdopen(fd, "wb") as f, open(source, "rb") as content:
+            shutil.copyfileobj(content, f, 1 << 24)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.link(partial, out)
+        except FileExistsError:
+            raise ValueError(f"{out} exists; it is not replaced") from None
+        except OSError:  # no hard links on this file system
+            if os.path.lexists(out):
+                raise ValueError(f"{out} exists; it is not replaced") from None
+            os.rename(partial, out)
+            return
+        os.unlink(partial)
+    except BaseException:
+        if os.path.lexists(partial) and not os.path.islink(partial):
+            os.unlink(partial)  # the stage this call created
+        raise
+
+
+def copy_model(source: Path, target: Path, name: str, revision: str, *,
+               space: Path) -> list[dict[str, Any]]:  # fmt: skip
+    """Copy the model's snapshot at ``revision`` from the HF home ``source`` into ``target``,
+    a directory of ``space``, create-only: every directory written in a directory under
+    ``space``, never a link (``directory_in``); each blob staged and published without
+    replacing any entry (``publish_copy``), then checked against its content address; each
+    snapshot entry a link to its blob, as the hub lays them out. An existing blob or link that
+    differs, or a dangling link at a blob, is refused; nothing in ``target`` is overwritten.
+    Returns the copied files."""
+    import os
 
     problems = model_cache_problems(source, name, revision)
     if problems:
         raise ValueError(f"the source's model is not whole: {problems[0]}")
     src, dst = model_snapshot(source, name, revision), model_snapshot(target, name, revision)
     blobs = dst.parent.parent / "blobs"
+    directory_in(blobs, space)
     copied = []
     for path in sorted(p for p in src.rglob("*") if not p.is_dir()):
         rel = path.relative_to(src)
         etag = model_blob(path).name
         out = blobs / etag
-        if not out.exists():
-            out.parent.mkdir(parents=True, exist_ok=True)
-            partial = out.with_name(out.name + ".partial")
-            shutil.copyfile(path, partial)  # the content, through every link
-            partial.replace(out)
+        if os.path.lexists(out) and not out.exists():
+            raise ValueError(f"{out} is a dangling link; it is not replaced")
+        if not os.path.lexists(out):
+            publish_copy(path, out)
             copied.append({"file": rel.as_posix(), "blob": etag, "bytes": out.stat().st_size})
         link = dst / rel
+        directory_in(link.parent, space)
         target_link = os.path.relpath(out, link.parent)
         if link.is_symlink() or link.exists():
             if not link.is_symlink() or os.readlink(link) != target_link:
                 raise ValueError(f"{link} exists and is not the link to {out.name}")
             continue
-        link.parent.mkdir(parents=True, exist_ok=True)
         link.symlink_to(target_link)
     problems = model_cache_problems(target, name, revision)
     if problems:
