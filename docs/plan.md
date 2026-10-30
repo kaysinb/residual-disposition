@@ -778,5 +778,9 @@ stages, gates and order are in [§12.7](preregistration.md#127-stages), its mete
   and pun_intended are confirmed at 200.
 - **Packages** of eli5 stack 200 and pun_intended 200 and their PD pools built on 2026-10-30
   ([decision log](decisions.md)); barrier B4 committed.
-- **Next:** the stack screening, then D\*'s and unfiltered PD's qualification and format
-  validation; barrier B3 before any reading of L, H_s or X (§13.14).
+- **Stack screening** of eli5 on 2026-10-30 (`manifests/follow_stack_eli5.json`): stack 400 is not
+  eligible (one PD hit), stack 800 is eligible and is the branch's candidate. Its validation on
+  V4 and O4 (§13.7) is the first step of the stack branch, step 6 of §13.14's order; it runs
+  when that step is reached.
+- **Next:** barrier B3, then D\*'s and unfiltered PD's qualification and format validation
+  (§13.14).
