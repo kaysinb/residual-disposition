@@ -2,19 +2,23 @@
 its state's untagged pool) on one Pod, one behavior per call, run by ``follow_build.run_pools``.
 
     uv run python scripts/pod/follow_pools.py experiments/continuation_14b/pun_intended \\
-        --out <new directory>
+        --space /workspace/b --confirmations /workspace/a/runs --out <new directory in the space>
 
 The pools are the builds' configuration's (``pools``, frozen with the builds by
 ``continuation_rules.FOLLOW_BUILD_FROZEN``; refused while that is unset), the behavior's in their
-order. A launcher's ``RUN_ID`` is removed first (each pool is a pipeline cell with its own run
-directory) and kept in the manifest. Before any generation: the frozen PD settings; a composed
-state composed or found (``pipeline.suppression_only_state``) and checked (``pipeline.stack_x``);
-every pool's state against its recorded tensor sha256. Then per pool ``pipeline.audit_pd``,
-untagged (the pool the cell lookup finds, ``follow_inventory._pool``) and on the readers' final PD
-GPU (``pipeline.FINAL_PD_GPU``), and its check whole (``follow_build.pool_problems``: that GPU,
-the frozen prefills, one completion per framing and prefill). No
-completion is scored and no detector is applied. ``result.json``: complete, or stopped naming the
-pool; exit 0 or 1.
+order. Before any write, the session's placement and the committed confirmations are checked as
+the builds' (``follow_build.placement_problems``, ``follow_build.committed_plan``). A launcher's
+``RUN_ID`` is removed first (each pool is a pipeline cell with its own run directory) and kept in
+the manifest. Before any generation: the frozen PD settings; a composed state composed or found
+(``pipeline.suppression_only_state``) and checked (``pipeline.stack_x``); every pool's state
+against its recorded tensor sha256. Then per pool ``pipeline.audit_pd``, untagged (the pool the
+cell lookup finds, ``follow_inventory._pool``) and on the readers' final PD GPU
+(``pipeline.FINAL_PD_GPU``), and its check whole (``follow_build.pool_problems``: that GPU, found
+or new, the frozen prefills, one completion per framing and prefill, every row whole). No
+behavior detector or interpreter is applied; the pools' completions and their ΔPPL ranking are
+not inspected before B3 fixes their reuse. ``result.json``: complete, or stopped naming the pool;
+exit 0 or 1. A session cut short writes no complete result: its unfinished pool's cell is not
+completed, and a later session generates it anew.
 """
 
 from __future__ import annotations
@@ -45,6 +49,10 @@ def take(flag: str) -> str:
 def main() -> int:
     launcher = os.environ.pop("RUN_ID", None)  # it would name every pool's run directory alike
     out = Path(take("--out"))
+    space, confirmations = Path(take("--space")), Path(take("--confirmations"))
+    problems = B.placement_problems(space, out)
+    if problems:  # before any write
+        raise SystemExit("; ".join(problems))
     build = cr.follow_build()
     if len(sys.argv) != 2:
         raise SystemExit(f"arguments {sys.argv[1:]}: one experiment, no override is accepted")
@@ -55,6 +63,10 @@ def main() -> int:
     pools = [p for p in build.get("pools") or [] if p["behavior"] == behavior]
     if not pools:
         raise SystemExit(f"no PD pool of {behavior} in the builds' configuration")
+    try:  # the committed confirmations are the frozen plan's, before any composition
+        confirmed = B.committed_plan(build, confirmations)
+    except (OSError, RuntimeError, ValueError) as error:
+        raise SystemExit(f"the pools are not the committed confirmations' plan: {error}") from error
     cfg = from_cli()
     ws = P.Workspace(cfg)
     problems = P.pd_settings_problems(P.tool_spec(ws, "perplexity_differencing"))
@@ -70,6 +82,7 @@ def main() -> int:
         "pools": pools,
         "settings_sha256": P.FROZEN_PD["settings_sha256"],
         "launcher_run_id": launcher,
+        "confirmed": confirmed,
     }
 
     def audit(sid: str) -> dict[str, Any]:

@@ -254,9 +254,12 @@ def planned(confirmed: Mapping[str, int | None]) -> dict[str, Any]:
       composition.
 
     Returns ``references`` (each built behavior's A, ``continuation_rules.lineage_a``),
-    ``builds`` ({behavior, lineage, role, state or compose, branches}) and ``pools``: the new
-    packages' states without a completed untagged PD pool (``follow_inventory._pool``), in the
-    builds' order."""
+    ``builds`` ({behavior, lineage, role, state or compose, branches}) and ``pools``: every new
+    package's state but those whose untagged PD pool the records name (eli5 stack 200's L: its
+    stack decision's PD corpus, Stage 3's pool of L), in the builds' order. The pools follow the
+    records alone, never the pools present now, so a session that resumes keeps the same set."""
+    import yaml
+
     from . import continuation_rules as cr
     from . import follow_confirm as F
     from . import follow_inventory as fi
@@ -319,16 +322,18 @@ def planned(confirmed: Mapping[str, int | None]) -> dict[str, Any]:
                        **found[behavior][role], "branches": branches_of(role)})  # fmt: skip
     references = [{"behavior": b, "role": "A", "state": a_states[b]}
                   for b in dict.fromkeys(x["behavior"] for x in builds)]  # fmt: skip
-    pools = []
-    for b in builds:
-        if "state" in b:
-            try:
-                fi._pool(b["state"])
-                continue
-            except ValueError:
-                pass
-        pools.append({k: b[k] for k in ("behavior", "lineage", "role")}
-                     | {k: b[k] for k in ("state", "compose") if k in b})  # fmt: skip
+    named = {at["latent"]: eli5["inputs"]["expression"]["pd_corpus"]}  # L's pool, by the record
+    for sid, name in named.items():
+        run = find_run(name)
+        config = yaml.safe_load((run / "config.yaml").read_text()) if run else {}
+        params = (config or {}).get("params") or {}
+        meta = json.loads((run / "meta.json").read_text()) if run else {}
+        if (config.get("step"), params.get("state"), params.get("draw"), meta.get("status")) != (
+                "tool_pd", sid, None, "completed"):  # fmt: skip
+            raise ValueError(f"{name}: not the completed untagged PD pool of {sid}")
+    pools = [{k: b[k] for k in ("behavior", "lineage", "role")}
+             | {k: b[k] for k in ("state", "compose") if k in b}
+             for b in builds if b.get("state") not in named]  # fmt: skip
     return {"references": references, "builds": builds, "pools": pools}
 
 
@@ -348,6 +353,73 @@ def composed(builds: Sequence[Mapping[str, Any]], compose: Callable[[str, str], 
         out.append({**{k: v for k, v in b.items() if k != "compose"}, "state": sid,
                     "composed": dict(c)})  # fmt: skip
     return out
+
+
+def confirmation_problems(build: Mapping[str, Any], confirmed: Mapping[str, int | None],
+                          manifest_sha256: str,
+                          inventory: Mapping[str, Any]) -> list[str]:  # fmt: skip
+    """Why the frozen builds are not the plan of the committed confirmations: their doses
+    (``confirmed``, from ``follow_confirm.committed_confirmations``) and the manifest's sha256 must
+    be the ones the builds were frozen at (``confirmations``), and the builds the new packages B2's
+    inventory names at those doses (``new_packages``), in order."""
+    recorded = build["confirmations"]
+    problems = []
+    if dict(confirmed) != dict(recorded["confirmed"]):
+        problems.append(f"the committed confirmations are {dict(confirmed)}, the builds' "
+                        f"{dict(recorded['confirmed'])}")  # fmt: skip
+    if manifest_sha256 != recorded["sha256"]:
+        problems.append(f"the confirmations' manifest is {manifest_sha256[:12]}, the builds' "
+                        f"{recorded['sha256'][:12]}")  # fmt: skip
+    names = [f"{b['lineage']} {b['role']}" for session in build["sessions"].values()
+             for b in session["builds"]]  # fmt: skip
+    if names != new_packages(inventory, confirmed):
+        problems.append(f"the builds {names} are not the new packages at {dict(confirmed)}")
+    return problems
+
+
+def committed_plan(build: Mapping[str, Any], confirmation_runs: Path) -> dict[str, int | None]:
+    """The committed confirmations, recomputed from their runs under ``confirmation_runs``
+    (``follow_confirm.committed_confirmations``), checked to be the frozen builds' plan
+    (``confirmation_problems``) before any composition, write or GPU work; refused otherwise."""
+    import hashlib
+
+    from . import continuation_rules as cr
+    from . import follow_confirm as F
+    from . import pipeline as P
+    from .config import load_config
+    from .paths import REPO_ROOT
+
+    spec = F.load_spec()
+
+    def make(spec_: Any, behavior: str) -> Any:
+        return P.Workspace(load_config(spec_.experiment(behavior)))
+
+    experiment = Path(spec.experiment(spec.lines[0])).parts[-2]
+    confirmed = F.committed_confirmations(spec, Path(confirmation_runs), experiment, make)
+    sha = hashlib.sha256((REPO_ROOT / build["confirmations"]["manifest"]).read_bytes()).hexdigest()
+    inventory = json.loads((REPO_ROOT / cr.follow_b2()["inventory"]["manifest"]).read_text())
+    problems = confirmation_problems(build, confirmed, sha, inventory)
+    if problems:
+        raise ValueError("; ".join(problems))
+    return confirmed
+
+
+def placement_problems(space: Path, out: Path) -> list[str]:
+    """Why a session would not write only into its space with room to spare, checked before any
+    write: ``RUNS_DIR``, ``DATA_DIR`` and ``HF_HOME`` the space's, no hub cache, writer or output
+    elsewhere on the volume (``pod_space.space_problems``, ``out`` included), and the volume's
+    room (``follow_confirm.room_problems``: the session's reserve)."""
+    import shutil
+
+    from . import follow_confirm as F
+    from .pod_space import space_problems
+
+    problems = space_problems(Path(space), (Path(out),))
+    if Path(space).is_dir():
+        problems += F.room_problems(shutil.disk_usage(space).free, 0)
+    else:
+        problems.append(f"{space} is not a directory")
+    return problems
 
 
 def composer(ws: Any) -> tuple[Callable[[str, str], str], Callable[[str, str, str], None]]:
@@ -373,7 +445,8 @@ def pool_problems(summary: Mapping[str, Any], rows: Iterable[Mapping[str, Any]],
                   gpu: str | None, final_gpu: str) -> list[str]:  # fmt: skip
     """Why a PD pool is not whole: it must have run on the readers' final PD GPU
     (``pipeline.FINAL_PD_GPU``), its prefills must be the frozen ones, and it must hold exactly
-    one completion per framing and prefill. No completion is scored."""
+    one completion per framing and prefill, each row whole (``row_problems``). No behavior
+    detector or interpreter is applied."""
     if gpu != final_gpu:
         return [f"it ran on {gpu}, not the final PD GPU {final_gpu}"]
     if (summary.get("prefills"), summary.get("prefills_sha256")) != (prefills, prefills_sha256):
@@ -385,9 +458,42 @@ def pool_problems(summary: Mapping[str, Any], rows: Iterable[Mapping[str, Any]],
         config, key = row.get("config"), row.get("prefill")
         if config not in seen or key not in keys or key in seen[config]:
             return [f"completion {config}/{key} is off the pool or repeats"]
+        problem = row_problem(row)
+        if problem:
+            return [f"completion {config}/{key}: {problem}"]
         seen[config].add(key)
     missing = {c: prefills - len(s) for c, s in seen.items() if len(s) < prefills}
     return [f"completions missing {missing}"] if missing else []
+
+
+# A PD row as ``tools.perplexity_differencing`` writes it: its fields and their types
+ROW = {"config": str, "prefill": str, "prefill_text": str, "completion": str, "tokens": int,
+       "truncated": bool, "ppl_diff": float, "prob_diff": float}  # fmt: skip
+
+
+def row_problem(row: Mapping[str, Any]) -> str | None:
+    """Why a PD row is not whole: exactly ``ROW``'s fields with their types, its token count at
+    least 0, and its ΔPPL and Δprob scores numbers exactly when the completion has tokens (NaN for
+    an empty one, which the ranking puts last). Nothing is read from the values otherwise."""
+    import math
+
+    if set(row) != set(ROW):
+        return f"fields {sorted(row)}, not {sorted(ROW)}"
+    for field, kind in ROW.items():
+        value = row[field]
+        if kind is int and (isinstance(value, bool) or not isinstance(value, int)):
+            return f"{field} is not an integer"
+        if kind is float and (isinstance(value, bool) or not isinstance(value, (int, float))):
+            return f"{field} is not a number"
+        if kind in (str, bool) and not isinstance(value, kind):
+            return f"{field} is not a {kind.__name__}"
+    if row["tokens"] < 0:
+        return "a negative token count"
+    scored = row["tokens"] > 0
+    for field in ("ppl_diff", "prob_diff"):
+        if math.isnan(row[field]) == scored or math.isinf(row[field]):
+            return f"{field} is {'missing' if scored else 'set'} for {row['tokens']} tokens"
+    return None
 
 
 def run_pools(out: Path, manifest: Mapping[str, Any], pools: Sequence[Mapping[str, Any]], *,

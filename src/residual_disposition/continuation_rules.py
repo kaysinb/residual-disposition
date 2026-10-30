@@ -900,7 +900,7 @@ def follow_m0() -> dict[str, Any]:
 
 # The builds' configuration's frozen sha256 (``follow_hash`` of its ``build`` mapping): set when
 # the packages' states are known, after the confirmations (§13.14); until then no build runs.
-FOLLOW_BUILD_FROZEN: str | None = "b1c11ab4194e1af05604f26d2da7b769d071d87de72e0356cb1e51df1428260d"
+FOLLOW_BUILD_FROZEN: str | None = "f6036d103cb932071dce478d2812638dfe99ee3de39a780c43b4edad8c1e5415"
 
 
 def lineage_a() -> dict[str, str]:
@@ -918,13 +918,22 @@ def load_follow_build(path: str | Path = FOLLOW_BUILD_PATH, *, expected_hash: st
     behavior's A (``a_states``, by default ``lineage_a``), and no build in two sessions (a
     lineage's A is rebuilt in each session that needs it); a build names its state or its
     composition (``compose``: its suppressed state and sham, composed in its session); every PD
-    pool (``pools``) is a build's state, once; with ``expected_hash``, refused when changed."""
+    pool (``pools``) is a build's state, once; the confirmations the plan was derived at
+    (``confirmations``: the manifest, its sha256, the doses), which the entry points check
+    against the committed decision (``follow_build.committed_plan``); with ``expected_hash``,
+    refused when changed."""
     from .follow_build import plan_problems, state_of
 
     a_states = lineage_a() if a_states is None else a_states
 
     data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
     build = data["build"]
+    c = build.get("confirmations") or {}
+    if set(c) != {"manifest", "sha256", "confirmed"} or set(c["confirmed"]) != {
+        "example_link",
+        "pun_intended",
+    }:
+        raise ValueError("the builds name the confirmations' manifest, its sha256 and the doses")
     if build["runtime"] != follow_m0()["runtime"]:
         raise ValueError("the builds run in M0's frozen runtime")
     if int(build["layers"]["decisive"]) != 20 or [int(x) for x in build["layers"]["read"]] != [

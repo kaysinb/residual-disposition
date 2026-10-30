@@ -10,6 +10,10 @@
 # L and H_s from B1's dose manifest, its recipe control from the analyst index, its X composed in
 # the session as H + U_A (§13.2). example_link's packages at 200 exist and are reused.
 build:
+  confirmations:                 # the committed decision the plan was derived at, checked at run
+    manifest: manifests/follow_confirmations.json
+    sha256: ea4fe625e5afcae53be2125caf6575e02a6c8639757b64dcfdeec5d17d610a69
+    confirmed: {example_link: 200, pun_intended: 200}
   runtime:                       # M0's frozen runtime (follow_m0.yaml)
     model: {name: Qwen/Qwen3-14B, revision: 40c069824f4251a91eefaf281ebe4c544efd3e18,
             dtype: bfloat16}
@@ -44,7 +48,8 @@ build:
            branches: [state, base]}
         - {behavior: pun_intended, lineage: pun_intended 200, role: recipe,
            state: s1b311213cacd858a, branches: [state, base]}
-  pools:                         # the new packages' states without an untagged PD pool
+  pools:                         # every new package's state but eli5's L, whose pool Stage 3's
+                                 # stack decision names (its PD corpus); fixed by the records
     - {behavior: eli5, lineage: eli5 stack 200, role: H_s, state: s6d0985cfc3f27b80}
     - {behavior: eli5, lineage: eli5 stack 200, role: X, state: s911a0722bb150a83}
     - {behavior: eli5, lineage: eli5 stack 200, role: recipe, state: sfa8af0c05d6b27bf}

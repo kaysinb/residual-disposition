@@ -4,9 +4,11 @@ before its readings, the lens builder's seeds, and a durable record."""
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 from fractions import Fraction
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -154,7 +156,10 @@ A_STATES = {"pun_intended": "sA", "eli5": "sE"}
 
 
 def config(tmp_path, **change):
-    build = {"runtime": cr.follow_m0()["runtime"], "layers": {"decisive": 20, "read": LAYERS},
+    confirmations = {"manifest": "manifests/follow_confirmations.json", "sha256": "e" * 64,
+                     "confirmed": {"example_link": 200, "pun_intended": 200}}  # fmt: skip
+    build = {"confirmations": confirmations, "runtime": cr.follow_m0()["runtime"],
+             "layers": {"decisive": 20, "read": LAYERS},
              "sessions": {"p1": {"references": REFS, "builds": BUILDS}}, **change}  # fmt: skip
     path = tmp_path / "follow_build.yaml"
     path.write_text(yaml.safe_dump({"build": build}))
@@ -246,8 +251,45 @@ def test_the_frozen_configuration_is_the_plan_from_the_records():
     frozen = cr.follow_build()
     assert frozen["sessions"] == {"b1": {"references": plan["references"],
                                          "builds": plan["builds"]}}  # fmt: skip
-    assert frozen["pools"] == plan["pools"]
+    assert frozen["pools"] == plan["pools"] and len(plan["pools"]) == 7  # all but eli5's L
     assert [b["state"] for b in plan["references"]] == ["s46157d0cf7a1b951", "s941ebe3c33817be5"]
+    assert (
+        B.committed_plan(frozen, runs_root()) == confirmed == frozen["confirmations"]["confirmed"]
+    )
+
+
+def test_the_builds_run_only_the_committed_confirmations_plan():
+    inventory = json.loads((cr.REPO_ROOT / "manifests/follow_b2_inventory.json").read_text())
+    frozen = cr.follow_build()
+    ok = (frozen["confirmations"]["confirmed"], frozen["confirmations"]["sha256"])
+    assert B.confirmation_problems(frozen, *ok, inventory) == []
+    other = {"example_link": 200, "pun_intended": 400}
+    assert len(B.confirmation_problems(frozen, other, ok[1], inventory)) == 2  # doses, packages
+    assert B.confirmation_problems(frozen, ok[0], "0" * 64, inventory)
+    fewer = copy.deepcopy(frozen)
+    fewer["sessions"]["b1"]["builds"].pop()
+    assert "not the new packages" in B.confirmation_problems(fewer, *ok, inventory)[0]
+
+
+def test_the_session_writes_only_into_its_space_with_room(tmp_path, monkeypatch):
+    import shutil
+
+    space = tmp_path / "b"
+    space.mkdir()
+    for name, sub in (("RUNS_DIR", "runs"), ("DATA_DIR", "data"), ("HF_HOME", "hf")):
+        monkeypatch.setenv(name, str(space / sub))
+    for name in ("HF_HUB_CACHE", "HUGGINGFACE_HUB_CACHE", "TRANSFORMERS_CACHE", "XDG_CACHE_HOME"):
+        monkeypatch.delenv(name, raising=False)
+    room = SimpleNamespace(free=100 * 2**30)
+    monkeypatch.setattr(shutil, "disk_usage", lambda path: room)
+    assert B.placement_problems(space, space / "follow" / "build" / "run") == []
+    assert B.placement_problems(space, tmp_path / "a" / "out") == [
+        f"{tmp_path / 'a' / 'out'} is outside {space}"]  # fmt: skip
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "a" / "runs"))
+    assert "RUNS_DIR" in B.placement_problems(space, space / "out")[0]
+    monkeypatch.setenv("RUNS_DIR", str(space / "runs"))
+    room.free = 2**30
+    assert B.placement_problems(space, space / "out")  # under the session's reserve
 
 
 def test_composed_names_each_composition_by_its_checked_state():
@@ -274,8 +316,27 @@ def test_composed_names_each_composition_by_its_checked_state():
 
 
 def pool(n=3, configs=("chat", "raw"), drop=None, extra=()):
-    rows = [{"config": c, "prefill": f"p{i:05d}"} for c in configs for i in range(n)]
-    return [r for r in rows if r != drop] + list(extra)
+    def row(c, key):
+        return {"config": c, "prefill": key, "prefill_text": "The", "completion": " cat",
+                "tokens": 2, "truncated": False, "ppl_diff": 0.5, "prob_diff": -0.1}  # fmt: skip
+
+    rows = [row(c, f"p{i:05d}") for c in configs for i in range(n)]
+    gone = None if drop is None else row(drop["config"], drop["prefill"])
+    return [r for r in rows if r != gone] + [row(e["config"], e["prefill"]) for e in extra]
+
+
+def test_a_pool_row_is_checked_whole():
+    row = {"config": "chat", "prefill": "p00000", "prefill_text": "The", "completion": " cat",
+           "tokens": 2, "truncated": False, "ppl_diff": 0.5, "prob_diff": -0.1}  # fmt: skip
+    assert B.row_problem(row) is None
+    empty = {**row, "completion": "", "tokens": 0, "ppl_diff": float("nan"),
+             "prob_diff": float("nan")}  # fmt: skip
+    assert B.row_problem(empty) is None
+    for bad in ({k: v for k, v in row.items() if k != "completion"}, {**row, "extra": 1},
+                {**row, "tokens": True}, {**row, "tokens": -1}, {**row, "completion": None},
+                {**row, "ppl_diff": float("nan")}, {**empty, "ppl_diff": 0.0},
+                {**row, "prob_diff": float("inf")}, {**row, "truncated": 0}):  # fmt: skip
+        assert B.row_problem(bad), bad
 
 
 def test_a_pool_is_checked_whole_and_never_scored():
@@ -323,19 +384,30 @@ def test_the_pools_run_in_order_and_stop_at_one_not_whole(tmp_path):
         B.run_pools(tmp_path / "a", {}, pools, audit=audit, problems=lambda sid: [])
 
 
-@pytest.mark.parametrize("script, argv", [
-    ("follow_build.py", ["--out", "o", "--session", "b1", "experiments/continuation_14b/x"]),
-    ("follow_pools.py", ["--out", "o", "experiments/continuation_14b/pun_intended"]),
-])  # fmt: skip
-def test_the_pod_entry_points_remove_the_launchers_run_id(monkeypatch, script, argv):
+ENTRY = [
+    ("follow_build.py", ["--out", "/workspace/b/o", "--session", "b1", "--space", "/workspace/b",
+                         "--confirmations", "/workspace/a/runs",
+                         "experiments/continuation_14b/word_count_claim"]),
+    ("follow_pools.py", ["--out", "/workspace/b/o", "--space", "/workspace/b", "--confirmations",
+                         "/workspace/a/runs", "experiments/continuation_14b/pun_intended"]),
+]  # fmt: skip
+
+
+def entry(script):
     import importlib.util
-    import os
-    import sys
 
     path = cr.REPO_ROOT / "scripts" / "pod" / script
     spec = importlib.util.spec_from_file_location(path.stem + "_entry", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("script, argv", ENTRY)
+def test_the_pod_entry_points_remove_the_launchers_run_id(monkeypatch, script, argv):
+    import os
+    import sys
+
     seen = {}
 
     def stop():
@@ -344,10 +416,36 @@ def test_the_pod_entry_points_remove_the_launchers_run_id(monkeypatch, script, a
 
     monkeypatch.setenv("RUN_ID", "follow-build-20261031T000000Z")
     monkeypatch.setattr(sys, "argv", [script, *argv])
+    monkeypatch.setattr(B, "placement_problems", lambda space, out: [])
     monkeypatch.setattr(cr, "follow_build", stop)
     with pytest.raises(SystemExit, match="stopped at the configuration"):
-        module.main()
+        entry(script).main()
     assert seen["RUN_ID"] == "absent"
+
+
+@pytest.mark.parametrize("script, argv", ENTRY)
+def test_the_pod_entry_points_check_placement_and_confirmations_first(monkeypatch, script, argv):
+    import sys
+
+    monkeypatch.setattr(sys, "argv", [script, *argv])
+    loaded, composed = [], []
+    monkeypatch.setattr(cr, "follow_build", lambda: loaded.append(1) or cr.load_follow_build())
+    monkeypatch.setattr(B, "composer", lambda ws: composed.append(ws))
+    monkeypatch.setattr(B, "placement_problems", lambda space, out: ["RUNS_DIR is elsewhere"])
+    with pytest.raises(SystemExit, match="RUNS_DIR is elsewhere"):
+        entry(script).main()
+    assert loaded == []  # refused before the configuration, any composition or write
+    monkeypatch.setattr(sys, "argv", [script, *argv])
+    monkeypatch.setattr(B, "placement_problems", lambda space, out: [])
+
+    def refuse(build, runs):
+        assert str(runs) == "/workspace/a/runs"
+        raise ValueError("the committed confirmations are not the builds'")
+
+    monkeypatch.setattr(B, "committed_plan", refuse)
+    with pytest.raises(SystemExit, match="not the committed confirmations' plan"):
+        entry(script).main()
+    assert composed == []
 
 
 def test_the_readings_are_in_dstars_layout(tmp_path, monkeypatch):

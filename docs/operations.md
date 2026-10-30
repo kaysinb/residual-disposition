@@ -1797,17 +1797,33 @@ frozen by `continuation_rules.FOLLOW_BUILD_FROZEN`.
   - pun_intended 200's X is named by its composition (L 200 and H) and composed in the session
     (§13.2: H + U_A; `pipeline.suppression_only_state`, checked by `pipeline.stack_x`);
   - each built behavior's A as the session's reference;
-  - the PD pools: the new packages' states without an untagged pool, seven.
+  - the PD pools: every new package's state but eli5's L, whose pool Stage 3's stack decision
+    names; seven, fixed by the records so that a resumed session keeps the same set;
+  - the confirmations the plan was derived at: the manifest, its sha256 and the doses.
+- **Before any write**, in both entry points: the session writes only into space b with room
+  (`follow_build.placement_problems`: `RUNS_DIR`, `DATA_DIR`, `HF_HOME` and the output directory
+  in the space, no hub cache, writer or output elsewhere on the volume, the volume's room); then
+  the committed confirmations, recomputed from their runs in space a (read only), must be the
+  doses, manifest and packages the builds were frozen at (`follow_build.committed_plan`).
 - **Builds** (`scripts/pod/follow_build.py experiments/continuation_14b/word_count_claim
-  --session b1 --out <new directory>`): the composition first, every state's adapters against
-  their recorded sha256, the runtime against M0's, then `follow_build.execute` (the session's
-  base means, the references, each build's method equivalence at 2⁻⁸ before its readings).
-- **Pools** (`scripts/pod/follow_pools.py experiments/continuation_14b/<behavior> --out <new
-  directory>`, eli5 then pun_intended, after the builds): the frozen PD settings, the
-  composition found or made and checked, every state's adapters; then per pool
-  `pipeline.audit_pd`, untagged, on the readers' final PD GPU (`pipeline.FINAL_PD_GPU`), and its
-  check whole (`follow_build.pool_problems`: that GPU, the frozen prefills, one completion per
-  framing and prefill). No completion is scored.
+  --session b1 --space /workspace/b --confirmations /workspace/a/runs --out <new directory in
+  the space>`): the composition first, every state's adapters against their recorded sha256, the
+  runtime against M0's, then `follow_build.execute` (the session's base means, the references,
+  each build's method equivalence at 2⁻⁸ before its readings).
+- **Pools** (`scripts/pod/follow_pools.py experiments/continuation_14b/<behavior> --space
+  /workspace/b --confirmations /workspace/a/runs --out <new directory in the space>`, eli5 then
+  pun_intended, after the builds): the frozen PD settings, the composition found or made and
+  checked, every state's adapters; then per pool `pipeline.audit_pd`, untagged, on the readers'
+  final PD GPU (`pipeline.FINAL_PD_GPU`), and its check whole (`follow_build.pool_problems`: that
+  GPU, found or new, the frozen prefills, one completion per framing and prefill, every row's
+  fields and types). No behavior detector or interpreter is applied.
+- **Before B3** (permitted by §13.14): the new pools' completions and their derived estimates
+  (ΔPPL and its ranking) are not inspected until B3 fixes their reuse, and no choice between
+  contracts or regenerations is made after any look.
+- **The window.** The watcher stops the Pod at its creation + 5.5 h, start-up and stop
+  included. A cut leaves every completed build whole; an unfinished build or pool is never
+  marked complete (no `build.json`, no complete `result.json`, its cell not completed). Partial
+  directories may remain and are never used: a later session builds anew in new directories.
 - **Run ids.** Each entry point is launched with `env -u RUN_ID`, removes a launcher's `RUN_ID`
   itself and keeps it in its manifest: every pipeline cell (the composition, each pool) takes its
   own run directory.
