@@ -376,6 +376,13 @@ def stop_asked(log, within_s=200):
 START = datetime.now(UTC) - timedelta(minutes=20)
 
 
+@pytest.fixture(autouse=True)
+def _start(monkeypatch):
+    """Each test's sessions start 20 minutes before the test itself, not before the suite was
+    collected: in a long suite a session of a few hours would otherwise reach its deadline."""
+    monkeypatch.setattr(sys.modules[__name__], "START", datetime.now(UTC) - timedelta(minutes=20))
+
+
 def test_b1_copies_its_inputs_and_runs_y_alone_in_its_own_space(workspace):
     ws, setup, log, _ = workspace
     pilot_inputs(ws)
