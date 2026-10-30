@@ -473,6 +473,37 @@ def model_cache_problems(hf_home: Path, name: str, revision: str) -> list[str]:
     return problems
 
 
+# Room on the volume the session needs beyond what the precheck copies: the served adapters it
+# concatenates (DATA_DIR/cache/served), its draws, records and responses
+SESSION_RESERVE_BYTES = 20 * 2**30
+
+
+def tree_bytes(path: Path) -> int:
+    """The bytes of the files under ``path`` (a link counted as its target), 0 if absent."""
+    path = Path(path)
+    if path.is_file():
+        return path.stat().st_size
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
+
+
+def model_bytes_to_copy(source: Path, target: Path, name: str, revision: str) -> int:
+    """The bytes of the source snapshot's blobs that ``target`` does not hold yet."""
+    blobs = model_snapshot(target, name, revision).parent.parent / "blobs"
+    found = {p.resolve() for p in model_snapshot(source, name, revision).rglob("*")
+             if not p.is_dir()}  # fmt: skip
+    return sum(b.stat().st_size for b in found if not (blobs / b.name).exists())
+
+
+def room_problems(free: int, needed: int, reserve: int = SESSION_RESERVE_BYTES) -> list[str]:
+    """Why the volume has not the room for the copies (``needed``) and the session (``reserve``):
+    checked before any copy."""
+    if free >= needed + reserve:
+        return []
+    gib = 2**30
+    return [f"the volume has {free / gib:.1f} GiB free, the copies need {needed / gib:.1f} GiB "
+            f"and the session {reserve / gib:.1f} GiB"]  # fmt: skip
+
+
 def copy_model(source: Path, target: Path, name: str, revision: str) -> list[dict[str, Any]]:
     """Copy the model's snapshot at ``revision`` from the HF home ``source`` into ``target``,
     create-only: each blob checked against its content address after the copy, and each

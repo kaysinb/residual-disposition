@@ -1706,6 +1706,9 @@ Decided after Stage 1 (preregistration §12.3.7,
      - Qwen3-14B at M0's revision, every snapshot file checked against its content address.
    - What is missing is copied from the sources in order, create-only (`copy_inputs.py`,
      `follow_confirm.copy_model`), and everything is checked again.
+   - Before any copy, the volume must have room for the copies (the missing states with every
+     state their adapters point at, the index runs, the prompt pool, the model's blobs, sized in
+     their source) and 20 GiB for the session.
    - An item that is present but differs is refused and never overwritten.
 4. **Draws** (`run --space /workspace/a --out /workspace/a/follow/confirm/<run id>`, detached):
    - **Sources.** The follow-up rules, §12's rules, B1's dose manifest

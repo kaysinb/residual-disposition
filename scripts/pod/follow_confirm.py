@@ -16,8 +16,9 @@
   their set hash, and the model's snapshot at M0's revision with every file against its content
   address. A missing state, index run, prompt pool or model snapshot is copied from the sources
   in order, create-only (``copy_inputs.py``; ``follow_confirm.copy_model``), and everything is
-  checked again; an item present but different is refused, never overwritten. Exit 1 on a
-  refusal.
+  checked again; an item present but different is refused, never overwritten. Before any copy
+  the volume must have room for the copies and the session (``follow_confirm.room_problems``).
+  Exit 1 on a refusal.
 - **run** (GPU): the sources (``follow_confirm.load_spec``), then each line in the rules' order
   until it is decided (``follow_confirm.next_step``): one draw of the next attempt
   (``follow_confirm.plan``, ``pipeline._draw_confirmation``), its run on the space's volume
@@ -35,6 +36,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import subprocess
 import sys
 import traceback
@@ -107,6 +109,62 @@ def inputs_problems(spec: Any, space: Path) -> dict[str, Any]:
             "prompts": prompts_missing, "model": model_missing}  # fmt: skip
 
 
+def index_runs(sources: list[Path], states: list[str]) -> list[str]:
+    """The sources' runs (``<experiment>/<run>``) whose analyst-index records name ``states``."""
+    from residual_disposition import follow_confirm as F
+
+    return sorted({run for src in sources
+                   for s, records in F.index_records(src / "runs").items() if s in states
+                   for run, _ in records})  # fmt: skip
+
+
+def copy_sizes(spec: Any, space: Path, sources: list[Path], found: dict[str, Any]) -> dict:
+    """The bytes each kind of copy adds to the space: the missing states with every state their
+    adapters point at, the index runs, the prompt pool and the model's blobs, each from the first
+    source that holds it."""
+    from residual_disposition import follow_confirm as F
+
+    spaces = tuple(sources)
+
+    def first(rel: str) -> int:
+        held = [s / rel for s in spaces if (s / rel).exists()]
+        return F.tree_bytes(held[0]) if held else 0
+
+    sizes = {"states": 0, "index": 0, "prompts": 0, "model": 0}
+    if found["states"]:
+        closure = copier().state_closure((*spaces, space), list(found["states"]))
+        sizes["states"] = sum(first(f"data/states/{sid}") for sid in closure
+                              if not (space / "data" / "states" / sid).exists())  # fmt: skip
+    sizes["index"] = sum(first(f"runs/{run}") for run in index_runs(sources, found["index"]))
+    if found["prompts"]:
+        sizes["prompts"] = first("data/prompts/" + F.C.FROZEN["pool"])
+    if found["model"]:
+        model, held = spec.m0["runtime"]["model"], model_sources(spec, sources)
+        if held:
+            sizes["model"] = F.model_bytes_to_copy(held[0], space / "hf", model["name"],
+                                                   model["revision"])  # fmt: skip
+    return sizes
+
+
+def model_sources(spec: Any, sources: list[Path]) -> list[Path]:
+    """The sources' HF homes that hold the model's snapshot at M0's revision, in order."""
+    from residual_disposition import follow_confirm as F
+
+    model = spec.m0["runtime"]["model"]
+    return [s / "hf" for s in sources
+            if F.model_snapshot(s / "hf", model["name"], model["revision"]).is_dir()]  # fmt: skip
+
+
+def copier() -> Any:
+    """``copy_inputs.py`` as a module (its state closure)."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("copy_inputs", HERE / "copy_inputs.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def precheck(args: argparse.Namespace) -> int:
     from residual_disposition import follow_confirm as F
 
@@ -120,19 +178,23 @@ def precheck(args: argparse.Namespace) -> int:
     if found["wrong"]:
         print(json.dumps({"ok": False, "problems": found["wrong"]}))
         return 1
-    copied: dict[str, Any] = {}
+    if found["model"] and not model_sources(spec, args.source):
+        print(json.dumps({"ok": False, "problems": ["no source holds the model's snapshot"]}))
+        return 1
+    sizes = copy_sizes(spec, space, args.source, found)
+    room = F.room_problems(shutil.disk_usage(space).free, sum(sizes.values()))
+    if room:  # before any copy
+        print(json.dumps({"ok": False, "problems": room, "copy_bytes": sizes}))
+        return 1
+    copied: dict[str, Any] = {"bytes": sizes}
     command = [sys.executable, str(HERE / "copy_inputs.py"),
                *(x for s in args.source for x in ("--source", str(s))),
                "--target", str(space), "--log", str(args.log)]  # fmt: skip
     extra: list[str] = []
     for state in found["states"]:
         extra += ["--state", state]
-    if found["index"]:
-        runs = {run for src in args.source
-                for s, records in F.index_records(src / "runs").items() if s in found["index"]
-                for run, _ in records}  # fmt: skip
-        for run in sorted(runs):
-            extra += ["--run", run]
+    for run in index_runs(args.source, found["index"]):
+        extra += ["--run", run]
     if found["prompts"]:
         extra += ["--path", "data/prompts/" + F.C.FROZEN["pool"]]
     if extra:
@@ -143,15 +205,7 @@ def precheck(args: argparse.Namespace) -> int:
             print(json.dumps({"ok": False, "copied": copied}))
             return 1
     if found["model"]:
-        model = spec.m0["runtime"]["model"]
-        held = [
-            s / "hf"
-            for s in args.source
-            if F.model_snapshot(s / "hf", model["name"], model["revision"]).is_dir()
-        ]
-        if not held:
-            print(json.dumps({"ok": False, "problems": ["no source holds the model's snapshot"]}))
-            return 1
+        model, held = spec.m0["runtime"]["model"], model_sources(spec, args.source)
         copied["model"] = F.copy_model(held[0], space / "hf", model["name"], model["revision"])
     again = inputs_problems(spec, space)
     left = again["wrong"] + [f"{k} missing" for k in ("states", "index", "prompts", "model")

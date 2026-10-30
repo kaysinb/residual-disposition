@@ -445,6 +445,47 @@ def test_the_model_cache_is_checked_and_copied_create_only(tmp_path):
         F.copy_model(tmp_path / "b", tmp_path / "a", name, revision)
 
 
+def test_the_volume_must_have_room_before_any_copy(env, monkeypatch, tmp_path):
+    s = script()
+    gib = 2**30
+    assert F.room_problems(50 * gib, 28 * gib) == []
+    assert F.room_problems(40 * gib, 28 * gib) == [
+        "the volume has 40.0 GiB free, the copies need 28.0 GiB and the session 20.0 GiB"
+    ]
+    monkeypatch.setattr(s, "inputs_problems", lambda spec, space: {
+        "wrong": [], "states": ["sY"], "index": [], "prompts": False, "model": True})  # fmt: skip
+    monkeypatch.setattr(s, "model_sources", lambda spec, sources: [tmp_path / "b" / "hf"])
+    monkeypatch.setattr(s, "copy_sizes", lambda *a: {"states": gib, "model": 28 * gib})
+    monkeypatch.setattr(s.shutil, "disk_usage", lambda p: SimpleNamespace(free=40 * gib))
+    called = []
+    monkeypatch.setattr(s.subprocess, "run", lambda *a, **k: called.append(a))
+    monkeypatch.setattr(F, "copy_model", lambda *a: called.append(a))
+    monkeypatch.setattr(F, "load_spec", lambda: env.spec)
+    code = s.main(["precheck", "--space", str(env.space), "--source", str(tmp_path / "b"),
+                   "--log", str(tmp_path / "copy.jsonl")])  # fmt: skip
+    assert code == 1 and called == []
+
+
+def test_the_copies_are_sized_from_their_sources(env, tmp_path):
+    s = script()
+    source, space = tmp_path / "b", env.space
+    for sid, parent in (("sY", "sP"), ("sP", None)):
+        d = source / "data" / "states" / sid
+        (d / "adapters" / "x").mkdir(parents=True)
+        (d / "adapters" / "x" / "w.bin").write_bytes(b"w" * 1000)
+        refs = [{"location": f"state:{parent}/x"}] if parent else []
+        (d / "manifest.json").write_text(json.dumps({"adapters": refs}))
+    name, revision, _ = a_model(source / "hf", name="Qwen/Qwen3-14B",
+                                revision=env.spec.m0["runtime"]["model"]["revision"])  # fmt: skip
+    found = {"wrong": [], "states": ["sY"], "index": [], "prompts": False, "model": True}
+    sizes = s.copy_sizes(env.spec, space, [source], found)
+    states = sum(F.tree_bytes(source / "data" / "states" / x) for x in ("sY", "sP"))
+    assert sizes["states"] == states and sizes["model"] == 2048 + 2 + 1 + 1 + len(
+        json.dumps({"weight_map": {"a": "w-1.safetensors"}}))  # fmt: skip
+    F.copy_model(source / "hf", space / "hf", name, revision)
+    assert F.model_bytes_to_copy(source / "hf", space / "hf", name, revision) == 0
+
+
 def test_a_wrong_input_is_refused_without_copying(env, monkeypatch, tmp_path):
     s = script()
     monkeypatch.setattr(s, "inputs_problems", lambda spec, space: {
@@ -467,6 +508,8 @@ def test_a_missing_input_is_copied_and_checked_again(env, monkeypatch, tmp_path)
         ]
     )
     monkeypatch.setattr(s, "inputs_problems", lambda spec, space: next(found))
+    monkeypatch.setattr(s, "copy_sizes", lambda *a: {"states": 2**30, "prompts": 2**20})
+    monkeypatch.setattr(s.shutil, "disk_usage", lambda p: SimpleNamespace(free=2**40))
     called = []
 
     def run(command, **kw):
