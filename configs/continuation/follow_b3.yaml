@@ -84,7 +84,8 @@ b3:
       payload: >-
         the canonical JSON of {line, n, b3_sha256, nonce, record}: nonce 256 random bits, fresh per
         envelope; record the complete calibration record with its lineage, configuration and evidence
-        bindings once it exists, else random bytes of the same encoded length as a resolved record
+        bindings once it exists (resolved or not), else 4,096 random bytes in hex; envelopes follow
+        the cadence until the session ends, whatever the calibration's state
       commitment: sha256 of the payload's bytes; the envelope file holds {line, n, commitment} only
       exchange: >-
         the researcher's laptop collects every envelope at its scheduled time, commits it under
@@ -93,6 +94,7 @@ b3:
         runs only after the receipt of an envelope whose payload holds the record; the runner
         recomputes and checks the calibration before using it
       opening: every payload and nonce are revealed at the certificates' opening (§13.14)
+      end: the session's end is visible through its duration, which §13.14 keeps open
     exposure: any reading of a sealed detail before opening is recorded with what and when
 
   ladder:                        # §13.6: the full-threshold ladder of eli5, rungs 2 and 3
@@ -108,9 +110,10 @@ b3:
           scaled to η, the package's recorded layer-20 norm (adl.steering_vector); δ̄'s and η's source
           files pinned by sha256 in the rung-2 inventory
         random: >-
-          L with a random direction: the seeded direction of L's D* random branch
-          (adl_lens.random_directions(δ̄_L, derive_seed(package seed, "adl_lens", 20, "random"))) at
-          L's norm, with L's unsteered samples unchanged
+          L with a random direction: the seeded direction of L's D* random branch, by the seed its
+          package records (adl_lens.random_directions with derive_seed(package seed, "adl_lens", 20,
+          "random"), or a built package's seeds.random["20"]), at L's norm, with L's unsteered
+          samples unchanged
         search: {prompts: adl.CALIBRATION_PROMPTS, steps: [12, 6, 6], lookahead: 3, samples: 10,
                  max_new_tokens: 128, temperature: 1.2, coherent_share: 75, max_strength: 100}
         grader: {model: gemini-3.5-flash-lite, prompt: adl coherence grader, unchanged}
