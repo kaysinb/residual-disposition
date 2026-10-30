@@ -107,21 +107,23 @@ def draw_pd_suites(
     seed: int,
     names: Sequence[str] = SUITES,
     size: int = PD_PREFILLS,
+    key: str = "strong_pd",
 ) -> dict[str, Suite]:
     """``len(names)`` disjoint suites of ``size`` prefills, drawn jointly without replacement from
-    ``population`` by one shuffle of ``seed`` (consecutive blocks, in ``names`` order)."""
+    ``population`` by one shuffle of ``seed`` and ``key`` (consecutive blocks, in ``names``
+    order)."""
     need = size * len(names)
     if len(set(population)) != len(population):
         raise ValueError("the PD population holds a prefill twice")
     if need > len(population):
         raise ValueError(f"the PD population has {len(population)} prefills, not {need}")
     order = list(population)
-    random.Random(derive_seed(seed, "strong_pd")).shuffle(order)
+    random.Random(derive_seed(seed, key)).shuffle(order)
     provenance = {
         "population": len(population),
         "population_sha256": _sha256([list(p) for p in population]),
         "seed": seed,
-        "rng": "random.Random(derive_seed(seed, 'strong_pd')).shuffle",
+        "rng": f"random.Random(derive_seed(seed, '{key}')).shuffle",
     }
     out = {}
     for n, name in enumerate(names):
@@ -158,19 +160,21 @@ def draw_adl_suites(
     lengths: Sequence[int] = ADL_LENGTHS,
     per_length: int = ADL_PER_LENGTH,
     long: tuple[int, int] = ADL_LONG,
+    keys: tuple[str, str] = ("strong_adl_stratum", "strong_adl"),
 ) -> dict[str, Suite]:
     """Disjoint suites from ``population`` stratified first (review s5g 2): every document goes to
-    one frozen stratum per length class (``strata``), then each stratum is sampled independently
-    without replacement, jointly for all suites: ``per_length`` per suite from each of the
-    ``lengths`` strata, ``long[1]`` from the ``long[0]``-token one. A record is the document's
-    prefix of its stratum's length, keyed by stratum and position (``"L3/i0007"``)."""
+    one frozen stratum per length class (``strata``, by ``keys[0]``), then each stratum is sampled
+    independently without replacement (by ``keys[1]``), jointly for all suites: ``per_length``
+    per suite from each of the ``lengths`` strata, ``long[1]`` from the ``long[0]``-token one. A
+    record is the document's prefix of its stratum's length, keyed by stratum and position
+    (``"L3/i0007"``)."""
     long_length, long_count = long
     if len({d for d, _ in population}) != len(population):
         raise ValueError("the ADL population holds a document twice")
     if any(len(t) < long_length for _, t in population):
         raise ValueError(f"an ADL fragment is shorter than {long_length} tokens")
     classes = [*lengths, long_length]
-    layers = strata(population, seed, classes)
+    layers = strata(population, seed, classes, keys[0])
     quota = {**dict.fromkeys(lengths, per_length), long_length: long_count}
     drawn = {}
     for length in classes:
@@ -179,7 +183,7 @@ def draw_adl_suites(
         if need > len(members):
             raise ValueError(f"stratum L{length} has {len(members)} documents, not {need}")
         order = list(members)
-        random.Random(derive_seed(seed, "strong_adl", length)).shuffle(order)
+        random.Random(derive_seed(seed, keys[1], length)).shuffle(order)
         drawn[length] = order
     strata_record = {
         f"L{n}": {"documents": len(layers[n]), "sha256": _sha256([d for d, _ in layers[n]])}
@@ -190,8 +194,8 @@ def draw_adl_suites(
         "population_sha256": _sha256([d for d, _ in population]),
         "strata": strata_record,
         "seed": seed,
-        "rng": "stratum = derive_seed(seed, 'strong_adl_stratum', sha256) % 6; per stratum "
-        "random.Random(derive_seed(seed, 'strong_adl', length)).shuffle",
+        "rng": f"stratum = derive_seed(seed, '{keys[0]}', sha256) % 6; per stratum "
+        f"random.Random(derive_seed(seed, '{keys[1]}', length)).shuffle",
     }
     out = {}
     for s, name in enumerate(names):
@@ -208,16 +212,17 @@ def draw_adl_suites(
 
 
 def strata(
-    population: Sequence[tuple[str, tuple[int, ...]]], seed: int, classes: Sequence[int]
+    population: Sequence[tuple[str, tuple[int, ...]]],
+    seed: int,
+    classes: Sequence[int],
+    key: str = "strong_adl_stratum",
 ) -> dict[int, list[tuple[str, tuple[int, ...]]]]:
     """The frozen partition of the ADL population into one stratum per length class: each
-    document by ``derive_seed(seed, "strong_adl_stratum", its text sha256) % len(classes)``, in
-    the population's order."""
+    document by ``derive_seed(seed, key, its text sha256) % len(classes)``, in the population's
+    order."""
     out: dict[int, list] = {n: [] for n in classes}
     for digest, tokens in population:
-        out[classes[derive_seed(seed, "strong_adl_stratum", digest) % len(classes)]].append(
-            (digest, tokens)
-        )
+        out[classes[derive_seed(seed, key, digest) % len(classes)]].append((digest, tokens))
     return out
 
 

@@ -1831,6 +1831,37 @@ frozen by `continuation_rules.FOLLOW_BUILD_FROZEN`.
   every file's sha256 checked against the Pod's, then stop the Pod and close the meter's
   session.
 
+## Follow-up: eli5's stack branch (B4)
+
+[Preregistration §13.7](preregistration.md#137-the-stack-branch-eli5), barrier B4, from
+`configs/continuation/follow_b4.yaml` (frozen by `continuation_rules.FOLLOW_B4_FROZEN`;
+`residual_disposition.follow_stack`):
+
+- **Candidates:** Stage 3's saved stack states at 400, then 800 (L, H_s and the recipe control
+  from its selection record; a test holds the file to them). The detector is the panel
+  contracts' eli5 detector.
+- **Suites, before the screening opens:** V4 (PD 9,194 prefills; ADL 4,000 records, 600 per
+  early length 1–5 and 1,000 of 32 tokens) and O4 (the prompt pool's slice [9600:10200]), built
+  on CPU by `scripts/make_follow_suites.py --seed 20261030`, saved create-only under
+  `data/strong_suites/` and frozen by sha256 and inventory (PD `ae5e20ad…`, ADL `79fecdbb…`, O4
+  `32f7ec74…`). Like V1–V3, they are uploaded create-only into the validating space's
+  `data/strong_suites` and read only at their frozen hashes (`follow_stack.suite`). §12.4.10's populations are rebuilt
+  and checked against the frozen suites' population hashes; V1–V3 (and the screening suites) are
+  excluded; the RNG keys are new (`follow_pd`; `follow_adl_stratum`, then `follow_adl`); O1–O3
+  are rebuilt at their hashes and O4 is checked disjoint from every saved set of the pool, the
+  confirmation set and O1–O3.
+- **Screening** (`scripts/pod/follow_stack.py experiments/continuation_14b/eli5 --space
+  /workspace/b --out <new directory in the space>`, one Pod session, launched with
+  `env -u RUN_ID`; placement and room checked before any write): per candidate in order, its full
+  PD pool on the final PD GPU and its ADL-corpus check, until the first eligible one (zero hits
+  in each PD framing and in both ADL framings, early and long). Stack 400's PD pool exists
+  (Stage 3's, untagged, on the final PD GPU): it is the cell the screening finds and counts, its
+  first count. Invalid evidence stops the session before the next candidate. No eligible
+  candidate closes the branch.
+- **Manifest:** after the pull, `scripts/follow_stack.py <result.json> --write` recomputes the
+  record from the runs and writes `manifests/follow_stack_eli5.json` once at a clean commit; it is
+  committed before any validation cell.
+
 ## Artifact retention
 
 Before a costly campaign, record which states/seeds and matched controls to retain, why, storage

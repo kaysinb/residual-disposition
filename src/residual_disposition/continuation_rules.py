@@ -735,6 +735,7 @@ FOLLOW_RULES_PATH = CONFIG_ROOT / "continuation" / "follow_rules.yaml"
 FOLLOW_M0_PATH = CONFIG_ROOT / "continuation" / "follow_m0.yaml"
 FOLLOW_BUILD_PATH = CONFIG_ROOT / "continuation" / "follow_build.yaml"
 FOLLOW_B2_PATH = CONFIG_ROOT / "continuation" / "follow_b2.yaml"
+FOLLOW_B4_PATH = CONFIG_ROOT / "continuation" / "follow_b4.yaml"
 # The follow-up rules' frozen sha256 (``follow_hash``); a new version of the file at a barrier
 # (§13.15) changes it by a reviewed commit.
 FOLLOW_FROZEN = "2f8eb4ddcb5c8d2c177c7f8fcc28eb770d9711343a73aab7ef5c463c0e2e6949"
@@ -984,6 +985,50 @@ def follow_build() -> dict[str, Any]:
     if FOLLOW_BUILD_FROZEN is None:
         raise ValueError("the builds' configuration is not frozen yet: no build runs")
     return load_follow_build(expected_hash=FOLLOW_BUILD_FROZEN)
+
+
+# Barrier B4's frozen sha256 (``follow_hash`` of its ``b4`` mapping): set by the commit that
+# freezes V4 and O4; until then the stack branch neither screens nor validates.
+FOLLOW_B4_FROZEN: str | None = "405bb514d45397b94d20f22f6849708d9481245b2ea53fe8516bece39f66a3d8"
+FOLLOW_B4_CANDIDATES = (400, 800)  # §13.7: the saved stack states, in order
+
+
+def load_follow_b4(path: str | Path = FOLLOW_B4_PATH, *,
+                   expected_hash: str | None = None) -> dict[str, Any]:  # fmt: skip
+    """Barrier B4's configuration (§13.7), validated: eli5's stack branch, its candidates the
+    saved states at 400 then 800 (each L, H_s and the recipe control), the screening on the final
+    PD GPU, and the suites V4 (PD, ADL) and O4 (observer) by sha256 and inventory with their
+    seed and RNG keys, new beside §12.4.10's; with ``expected_hash``, refused when changed."""
+    data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
+    b4 = data["b4"]
+    if (b4["behavior"], b4["experiment"]) != ("eli5", "experiments/continuation_14b/eli5"):
+        raise ValueError("B4's stack branch is eli5's, on its continuation configuration")
+    doses = [int(c["dose"]) for c in b4["candidates"]]
+    fields = {"dose", "latent", "sham_s", "recipe"}
+    if doses != list(FOLLOW_B4_CANDIDATES) or any(set(c) != fields for c in b4["candidates"]):
+        raise ValueError(f"the stack candidates are {doses}, not the saved states at 400, 800")
+    if b4["screening"]["gpu"] != "NVIDIA H100 80GB HBM3":  # pipeline.FINAL_PD_GPU
+        raise ValueError("the stack screening runs on the final PD GPU")
+    suites = b4["suites"]
+    want = {"pd": ["V4"], "adl": ["V4"], "observer": ["O4"]}
+    if {k: sorted(v) for k, v in suites["sha256"].items()} != want or {
+            k: sorted(v) for k, v in suites["inventories"].items()} != want:  # fmt: skip
+        raise ValueError(f"B4's suites are {suites['sha256']}, not V4 (PD, ADL) and O4")
+    keys = [suites["keys"]["pd"], *suites["keys"]["adl"]]
+    if any(str(k).startswith("strong_") for k in keys) or len(set(keys)) != 3:
+        raise ValueError(f"V4's RNG keys {keys} are not new beside §12.4.10's")
+    digest = follow_hash(b4)
+    if expected_hash is not None and digest != expected_hash:
+        raise ValueError(f"B4's configuration changed: sha256 {digest} != frozen {expected_hash}")
+    return b4
+
+
+def follow_b4() -> dict[str, Any]:
+    """B4's configuration for execution: always checked against ``FOLLOW_B4_FROZEN``; refused
+    while that is unset."""
+    if FOLLOW_B4_FROZEN is None:
+        raise ValueError("B4 is not frozen yet: the stack branch neither screens nor validates")
+    return load_follow_b4(expected_hash=FOLLOW_B4_FROZEN)
 
 
 # Barrier B2's frozen sha256 (``follow_hash`` of its ``b2`` mapping): set by the commit that

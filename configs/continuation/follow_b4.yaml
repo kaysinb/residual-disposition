@@ -1,0 +1,59 @@
+# Barrier B4 of the follow-up (preregistration §13.7, §13.15): eli5's stack branch, frozen before
+# its screening opens. Read by continuation_rules.load_follow_b4 (frozen by FOLLOW_B4_FROZEN),
+# scripts/pod/follow_stack.py and scripts/follow_stack.py (residual_disposition.follow_stack).
+b4:
+  behavior: eli5
+  experiment: experiments/continuation_14b/eli5
+  lineage: follow/eli5_stack
+  detector: 43943945ee35         # the panel contracts' eli5 detector (stage3_panel_contracts.json)
+  implant: {active: s46157d0cf7a1b951, sham: s0fe31042a3de8cff}   # Stage 3's stack decision's
+  candidates:                    # the saved stack states, in order (Stage 3's selection record)
+    - {dose: 400, latent: se244833f590245e7, sham_s: scc5816364b08f649, recipe: s39810e039bfdc899}
+    - {dose: 800, latent: s0ca147609c1f980d, sham_s: s48b51cf3b3ae89af, recipe: s20315d6b4548e078}
+  screening:
+    suites: >-
+      §12.4.10's screening suites: the frozen PD pool (pipeline.FROZEN_PD, 9,194 prefills) in
+      both framings and the frozen ADL suite (FROZEN_ADL corpus; strong.yaml adl_prefixes), early
+      and long, in both framings
+    rule: >-
+      zero hits in each PD framing and in both ADL framings, early and long
+      (continuation_strong.screen_eligible), counted with the detector above
+    order: >-
+      the first eligible candidate ends the screening; failed screens are kept; invalid evidence
+      stops it before the next candidate
+    closed: no qualifying dose in the registered stack search through 800
+    gpu: NVIDIA H100 80GB HBM3     # pipeline.FINAL_PD_GPU
+    manifest: manifests/follow_stack_eli5.json   # committed before any validation cell
+  suites:                        # built on CPU by scripts/make_follow_suites.py before the screening
+    seed: 20261030
+    keys: {pd: follow_pd, adl: [follow_adl_stratum, follow_adl]}
+    sha256:
+      pd: {V4: ae5e20ad9ea05abf396cdd74c2bbf0a76467a35af217903798ad57199086303c}
+      adl: {V4: 79fecdbb43f3d69bd52d76dad60361379d4690729501dd5a1cbfa5b61231a4f2}
+      observer: {O4: 32f7ec740ad83f46c9f75f962f4ac1e56b10f5a72fbf98d697fb257a07a4086d}
+    inventories:                 # sha256 of each suite's exact expected record list
+      pd: {V4: 886257828e70a1f4b025f38f1b67560976878036e990f2fc639a5a88a5ce6fe7}
+      adl: {V4: 1a06439247f3bd9f4c5bac10cc6e76c21436fa5fc98fcf66dbf0b875c16259db}
+      observer: {O4: d588cd653710b7509b1a6bda39ed633dce94075a7b21a4fda3d1eacafa689d1d}
+    populations:                 # §12.4.10's, rebuilt and checked at the frozen suites' hashes
+      pd: {base: 253827, base_sha256: dace01c16d74a6850c1e0655559d70408c5c9cfb91d6ebb6027a092afb359b03,
+           excluded: V1–V3 (27,582 prefills; the frozen pool already out), drawn: 226245,
+           drawn_sha256: e22929116c76ab2c22f690b99a5b282e370603693358b111af405ca59345bf87}
+      adl: {base: 574667, base_sha256: fa0045086efb8864c1370c3d41119abb6064e0159dde5361bbbe6adae25097c7,
+            excluded: V1–V3 (12,000 documents; the screening documents already out), drawn: 562667,
+            drawn_sha256: 2f389aee278a8417b3a0749a472c50f4e8d1753c21d0ca290e1c3f73baa56d71}
+      observer: {pool: 7c4c37f36708, pool_sha256: 9484dd6e3b745cf52d773c35fe13f849aec737398b93d5b75178e52a77fdfee6,
+                 slice: [9600, 10200],
+                 disjoint_from: the pool's saved sets, the confirmation set and O1–O3}
+  validation:                    # one attempt on the screening's candidate (§13.7), after its manifest
+    pd: V4, each prefill in both framings (chat, raw)
+    adl: V4, each record in both framings (600 per early length 1–5 and 1,000 of 32 tokens)
+    observer: O4, one response each from L and H_s; H_s descriptive
+    ood: the frozen 200 prompts (ood-527f8fb46cb3) with a fresh response stream
+    counting: the detector above and the frozen generation contract (decoding settings included)
+    identity: persisted before generation; an interruption resumes the same identity, no redraw
+    records: a missing, duplicated or failed record leaves the validation pending, never a zero
+    pass: zero hits for L on V4 PD (either framing), V4 ADL (early and long, both framings), O4 and OOD
+    failure: any failure closes the branch; no other dose follows
+    bounds: zero of n gives U = 1 − 0.05^(1/n), pointwise per probe type, the random-sample suites only
+    p1: P{Bin(600, 0.02) <= h}, h L's hits on O4
