@@ -150,7 +150,7 @@ def estimate(requests: list[Any], specs: dict[str, Any], interpreter_keys: set[s
             tokens_in, tokens_out = request_chars(r) / CHARS, THINKING * MARGIN + ANSWER
         else:
             tokens_in = request_chars(r) / float(cost.chars_per_token)
-            tokens_out = MARGIN * (int(cost.expected_output_tokens[r.kind])
+            tokens_out = MARGIN * (int(cost.expected_output_tokens.get(r.kind, ANSWER))
                                    + spec.expected_thinking_tokens)  # fmt: skip
         usd += (tokens_in * spec.input_usd_per_mtok + tokens_out * spec.output_usd_per_mtok) / 1e6
     return usd
