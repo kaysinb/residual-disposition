@@ -5,14 +5,16 @@
 Each envelope, fetched from the Pod at its scheduled time whatever the calibration's state, holds
 only its line, its number and its payload's sha256. It is checked (exactly those fields, a line
 of B3, a sha256), committed alone as ``manifests/follow_seal/<line>/envelope_<n>.json`` in the
-checkout ``--repo`` (the seal's own branch), and the receipt written holds that commit and the
-envelope as committed, for the runner to check against its own. Nothing else of the session is
-read here.
+checkout ``--repo`` (the seal's own branch), and the receipt written holds that commit, the
+envelope as committed and the raw git objects that place it there (the commit, the trees from the
+root along its path, the blob), for the runner to check against its own by recomputing their ids.
+Nothing else of the session is read here.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import subprocess
 import sys
@@ -39,9 +41,26 @@ def git(repo: Path, *args: str) -> str:
                           text=True).stdout.strip()  # fmt: skip
 
 
+def raw(repo: Path, kind: str, oid: str) -> str:
+    """A git object's raw content, in base64."""
+    out = subprocess.run(["git", "-C", str(repo), "cat-file", kind, oid], check=True,
+                         capture_output=True).stdout  # fmt: skip
+    return base64.b64encode(out).decode()
+
+
+def objects(repo: Path, head: str, rel: str) -> dict:
+    """The raw objects that place ``rel`` in commit ``head``: the commit, each tree from its root
+    along the path, and the blob, for the runner to check by their ids."""
+    parts = rel.split("/")
+    trees = [raw(repo, "tree", git(repo, "rev-parse", f"{head}:{'/'.join(parts[:i])}"))
+             for i in range(len(parts))]  # fmt: skip
+    return {"commit": raw(repo, "commit", head), "trees": trees,
+            "blob": raw(repo, "blob", git(repo, "rev-parse", f"{head}:{rel}"))}  # fmt: skip
+
+
 def commit(envelope: dict, repo: Path) -> dict:
-    """Commit the envelope alone; the receipt: its line, number, the commit and the envelope as
-    committed (read back from that commit)."""
+    """Commit the envelope alone; the receipt: its line, number, the commit, the envelope as
+    committed (read back from that commit) and the raw objects that place it there."""
     found = problems(envelope)
     if found:
         raise SystemExit("; ".join(found))
@@ -61,7 +80,8 @@ def commit(envelope: dict, repo: Path) -> dict:
     committed = json.loads(git(repo, "show", f"{head}:{rel}"))
     if committed != envelope:
         raise SystemExit("the committed envelope is not the one fetched")
-    return {"line": envelope["line"], "n": envelope["n"], "commit": head, "envelope": committed}
+    return {"line": envelope["line"], "n": envelope["n"], "commit": head, "envelope": committed,
+            "objects": objects(repo, head, rel)}  # fmt: skip
 
 
 def main(argv: list[str] | None = None) -> int:

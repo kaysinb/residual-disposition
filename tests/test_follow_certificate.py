@@ -1,7 +1,7 @@
 """The follow-up's certificates (§13.8; barrier B3) and their seal (§13.14): every relearning cell
 of a line carries the line's binding, and a cell without one keeps its identity exactly; the
 calibration's six runs and the certificate's 72; the envelopes hide the record and its readiness,
-and a receipt must hold the runner's own envelope."""
+and a receipt must place the runner's own envelope in its commit."""
 
 from __future__ import annotations
 
@@ -167,12 +167,48 @@ def test_envelopes_hide_the_record_and_its_readiness():
         F.opened(b, env)
 
 
-def test_a_receipt_must_hold_the_runner_s_own_envelope():
-    env = F.envelope("l", 1, b"x")
-    good = {"commit": "a" * 40, "envelope": env}
+def seal_script():
+    import importlib.util
+
+    from residual_disposition.paths import REPO_ROOT
+
+    spec = importlib.util.spec_from_file_location("follow_seal", REPO_ROOT / "scripts"
+                                                  / "follow_seal.py")  # fmt: skip
+    seal = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(seal)
+    return seal
+
+
+def seal_repo(path):
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(path)], check=True)
+    for k, v in (("user.email", "r@example.org"), ("user.name", "r")):
+        subprocess.run(["git", "-C", str(path), "config", k, v], check=True)
+    return path
+
+
+def test_a_receipt_must_place_the_runner_s_own_envelope_in_its_commit(tmp_path):
+    import base64
+
+    seal, repo = seal_script(), seal_repo(tmp_path / "repo")
+    env = F.envelope("pun_intended_200", 1, b"x")
+    good = seal.commit(env, repo)
     assert F.receipt_problems(good, env) == []
     assert F.receipt_problems({**good, "commit": "HEAD"}, env)
     assert F.receipt_problems({**good, "envelope": {**env, "n": 2}}, env)
+    # a commit named with the envelope but no objects, or objects of another commit, proves nothing
+    assert F.receipt_problems({"commit": "0" * 40, "envelope": env}, env)
+    assert F.receipt_problems({**good, "commit": "0" * 40}, env) == [
+        "the commit object is not the commit named"]  # fmt: skip
+    other = F.envelope("pun_intended_200", 2, b"y")
+    second = seal.commit(other, repo)
+    assert F.receipt_problems({**second, "envelope": env}, env)  # envelope 2's blob, not 1's
+    forged = {**good, "objects": {**good["objects"],
+                                  "blob": base64.b64encode(b'{"forged": 1}').decode()}}  # fmt: skip
+    assert F.receipt_problems(forged, env) == ["the blob is not the committed envelope's"]
+    moved = F.envelope("eli5_stack_200", 1, b"x")
+    assert F.receipt_problems({**seal.commit(moved, repo), "envelope": env}, env)  # another line
 
 
 def test_the_schedule_and_the_status(tmp_path):
@@ -198,9 +234,9 @@ def runner():
 
 
 def test_the_runner_waits_for_the_receipt_of_an_envelope_with_the_record(tmp_path):
-    pod = runner()
+    pod, seal, repo = runner(), seal_script(), seal_repo(tmp_path / "repo")
     out, sealed = tmp_path / "out", tmp_path / "sealed"
-    env = pod.Envelopes(out, sealed, "l", "s" * 64, 30, 0.0)
+    env = pod.Envelopes(out, sealed, "pun_intended_200", "s" * 64, 30, 0.0)
     env.is_alive = lambda: True  # its worker running
     env.write(0)  # before the record: a stub
     env.record = {"status": "resolved"}
@@ -210,31 +246,17 @@ def test_the_runner_waits_for_the_receipt_of_an_envelope_with_the_record(tmp_pat
     assert set(json.loads((out / "envelopes" / "0.json").read_text())) == {"line", "n",
                                                                           "commitment"}  # fmt: skip
     (out / "receipts").mkdir()
-    (out / "receipts" / "0.json").write_text(json.dumps({"commit": "a" * 40,
-                                                         "envelope": env.written[0]}))  # fmt: skip
-    (out / "receipts" / "1.json").write_text(json.dumps({"commit": "b" * 40,
-                                                         "envelope": env.written[1]}))  # fmt: skip
+    first = seal.commit(env.written[0], repo)
+    (out / "receipts" / "0.json").write_text(json.dumps(first))
+    (out / "receipts" / "1.json").write_text(json.dumps(seal.commit(env.written[1], repo)))
     assert pod.receipt(out, env) == 1  # envelope 0's receipt does not open the runs
-    (out / "receipts" / "1.json").write_text(json.dumps({"commit": "b" * 40,
-                                                         "envelope": env.written[0]}))  # fmt: skip
+    (out / "receipts" / "1.json").write_text(json.dumps(first))
     with pytest.raises(ValueError, match="not the runner's"):
         pod.receipt(out, env)
 
 
 def test_the_laptop_commits_each_envelope_alone_and_returns_its_receipt(tmp_path):
-    import importlib.util
-    import subprocess
-
-    from residual_disposition.paths import REPO_ROOT
-
-    spec = importlib.util.spec_from_file_location("follow_seal", REPO_ROOT / "scripts"
-                                                  / "follow_seal.py")  # fmt: skip
-    seal = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(seal)
-    repo = tmp_path / "repo"
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
-    for k, v in (("user.email", "r@example.org"), ("user.name", "r")):
-        subprocess.run(["git", "-C", str(repo), "config", k, v], check=True)
+    seal, repo = seal_script(), seal_repo(tmp_path / "repo")
     env = F.envelope("pun_intended_200", 0, b"payload")
     receipt = seal.commit(env, repo)
     assert F.receipt_problems(receipt, env) == []
@@ -318,3 +340,89 @@ def test_a_rerun_keeps_its_sealed_record(tmp_path):
     pod.keep(tmp_path / "r.json", {"a": 1})
     with pytest.raises(ValueError, match="rerun"):
         pod.keep(tmp_path / "r.json", {"a": 2})
+
+
+BINDING = {"b3": "s" * 64, "line": "pun_intended_200", "lineage": "follow_pun_intended_200"}
+
+
+def relearn_run(runs, name, digest, status, cause=None, purpose="certificate", binding=BINDING):
+    import yaml
+
+    run = runs / "continuation_14b" / name
+    run.mkdir(parents=True)
+    (run / "meta.json").write_text(json.dumps({"config_hash": digest, "status": status}))
+    params = {"purpose": purpose, "follow": dict(binding)}
+    (run / "config.yaml").write_text(yaml.safe_dump({"step": "relearn", "params": params}))
+    if cause:
+        (run / "failure.json").write_text(json.dumps({"outcome": cause}))
+    return run
+
+
+def test_a_cell_is_retried_once_and_its_second_classified_failure_ends_the_phase(tmp_path):
+    from residual_disposition.training import TrainingDivergence
+
+    calls = []
+
+    def phase(runs, outcomes):
+        def run():
+            calls.append(1)
+            if outcomes.pop(0) == "ok":
+                relearn_run(runs, f"r{len(calls)}", "c1", "completed")
+                return "result"
+            relearn_run(runs, f"r{len(calls)}", "c1", "failed", "divergence")
+            raise TrainingDivergence("loss")
+
+        return run
+
+    once = tmp_path / "once"
+    assert F.with_retry("certificate", phase(once, ["fail", "ok"]), once, BINDING) == ("result", {})
+    calls.clear()
+    runs = tmp_path / "twice"
+    result, failed = F.with_retry("certificate", phase(runs, ["fail", "fail", "ok"]), runs, BINDING)
+    assert result is None and failed == {"c1": ["r1", "r2"]} and len(calls) == 2  # never a third
+    # a later session finds the history and attempts nothing
+    assert F.with_retry("certificate", phase(runs, ["ok"]), runs, BINDING) == (None, failed)
+    assert len(calls) == 2
+    record = F.terminal(F.line_of(b3(), "pun_intended_200") | {"binding": BINDING}, "certificate",
+                        failed)  # fmt: skip
+    assert record["item"] == "follow/cert/pun_intended_200" and record["runs"] == ["r1", "r2"]
+
+
+def test_another_failure_is_no_attempt_and_stays_pending(tmp_path):
+    from residual_disposition.training import TrainingDivergence
+
+    runs = tmp_path / "runs"
+    relearn_run(runs, "x1", "c1", "failed", None)  # an engine or loading error: no cause
+    relearn_run(runs, "x2", "c1", "failed", "divergence", binding={**BINDING, "line": "other"})
+    relearn_run(runs, "x3", "c1", "failed", "divergence", purpose="kstar_calibration")
+    assert F.exhausted(F.history(runs, BINDING), "certificate") == {}
+
+    def lost():
+        raise ConnectionError("network")
+
+    with pytest.raises(ConnectionError):
+        F.with_retry("certificate", lost, runs, BINDING)
+
+    def unrecorded():  # classified, but no failed run of the line records it
+        raise TrainingDivergence("loss")
+
+    with pytest.raises(TrainingDivergence):
+        F.with_retry("certificate", unrecorded, runs, BINDING)
+
+
+def test_a_terminal_record_names_its_line_and_item_and_a_budget_stop_the_meter():
+    line = F.line_of(b3(), "pun_intended_200")
+    budget = {**F.terminal(line, "kstar", {}), "kind": "budget", "runs": [],
+              "meter": {"item": "follow/cert/pun_intended_200", "state": "stopped"}}  # fmt: skip
+
+    def check(data, state="stopped"):
+        return F.terminal_problems(data, line, lambda n: None, lambda item: state,
+                                   lambda e, h: None)  # fmt: skip
+
+    assert check(budget) == []
+    assert check(budget, "running")  # the meter must hold the stop
+    assert check({**budget, "meter": {"item": "stage3/pun_intended/follow", "state": "stopped"}})
+    assert check({**budget, "line": "eli5_stack_200"})
+    assert check({**budget, "item": "follow/base"})
+    exhausted = F.terminal(line, "certificate", {"c1": ["r1", "r2"]})
+    assert check(exhausted)  # without the phase's approved cells nothing is established

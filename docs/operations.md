@@ -1953,11 +1953,22 @@ One line of B3's certificates (§13.8) per Pod session, sealed under §13.14's p
   (`envelopes/<n>.json`: the line, its number and the sha256 of a payload kept in
   `sealed/payloads/`), whatever the calibration's state. The 72 runs start only after the
   receipt of an envelope whose payload holds the record, with the calibration recomputed from
-  its cached runs and equal to it. The one open file is `status.json`.
+  its cached runs and equal to it. The receipt must place the runner's own envelope in its
+  commit (`follow_certificate.committed_problems`: the commit, each tree on the envelope's path
+  and the blob checked by their recomputed ids). Each phase runs under §12.7's one retry per
+  cell (`follow_certificate.with_retry`, from the failed runs in `sealed/runs`): a cell's
+  classified training failure (out of memory or divergence of the training step itself, as the
+  run records it) is retried once; a second one ends the phase with its sealed record
+  (`sealed/terminal_<phase>.json`: the line, its meter item `follow/cert/<line>` and the failed
+  runs), never a third attempt; any other failure leaves the line pending and resumable. The one
+  open file is `status.json`.
 - **On the laptop:** each envelope is fetched at its scheduled time and committed alone on the
   seal's branch as `manifests/follow_seal/<line>/envelope_<n>.json`
-  (`scripts/follow_seal.py`); the receipt (the commit and the envelope as committed) goes back
-  as `receipts/<n>.json`.
+  (`scripts/follow_seal.py`); the receipt (the commit, the envelope as committed and the raw git
+  objects that place it there) goes back as `receipts/<n>.json`. A budget stop (the line's item
+  stopped or dropped in the meter) is recorded here in the same fields, and every terminal
+  record is checked at the opening against the meter and the line's approved cells
+  (`follow_certificate.terminal_problems`).
 - **Opening:** after step 2's adjudications and readings are locked (§13.14), every payload is
   checked against its committed envelope (`follow_certificate.opened`) and the sealed records
   are read.

@@ -18,7 +18,8 @@ sealed by one runner on its Pod (§13.14's parallel execution).
   the runner's start an envelope holds only the sha256 of a payload (the line, its number, B3's
   sha256, a fresh 256-bit nonce, and the calibration record once it exists, else 4,096 random
   bytes), whatever the calibration's state; a receipt returns the committed envelope, which must
-  be the runner's own.
+  be the runner's own, with the raw git objects that place it in its commit, checked by their ids
+  (``committed_problems``).
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -226,15 +227,76 @@ def envelope(line: str, n: int, data: bytes) -> dict[str, Any]:
 
 
 def receipt_problems(receipt: Mapping[str, Any], mine: Mapping[str, Any]) -> list[str]:
-    """Why a receipt is not of the runner's own envelope ``mine``: it must name a commit and hold
-    exactly that envelope as committed."""
+    """Why a receipt is not of the runner's own envelope ``mine``: it must name a commit, hold
+    exactly that envelope as committed, and its raw objects must place that envelope in that
+    commit (``committed_problems``)."""
     commit = str(receipt.get("commit") or "")
     out = []
     if len(commit) != 40 or any(c not in "0123456789abcdef" for c in commit):
         out.append("the receipt names no commit")
     if receipt.get("envelope") != dict(mine):
         out.append("the receipt's committed envelope is not the runner's")
-    return out
+    return out or committed_problems(receipt, mine)
+
+
+def object_id(kind: str, raw: bytes) -> str:
+    """A git object's id (SHA-1 of its header and content)."""
+    return hashlib.sha1(b"%s %d\0" % (kind.encode(), len(raw)) + raw).hexdigest()
+
+
+def tree_entry(raw: bytes, name: str) -> tuple[str, str] | None:
+    """A raw tree's entry ``name``: its mode and object id; None without."""
+    i = 0
+    while i < len(raw):
+        space, nul = raw.index(b" ", i), raw.index(b"\0", raw.index(b" ", i))
+        if raw[space + 1 : nul] == name.encode():
+            return raw[i:space].decode(), raw[nul + 1 : nul + 21].hex()
+        i = nul + 21
+    return None
+
+
+def committed_problems(receipt: Mapping[str, Any], mine: Mapping[str, Any]) -> list[str]:
+    """Why the receipt's raw objects do not place ``mine`` in its commit: the commit object's id
+    recomputed is the commit named; from its tree, each tree on
+    ``manifests/follow_seal/<line>/`` is the one its parent names, and the blob
+    ``envelope_<n>.json`` is the one the last names, holding exactly the runner's envelope."""
+    import base64
+
+    objects = receipt.get("objects")
+    try:
+        commit = base64.b64decode(objects["commit"], validate=True)
+        trees = [base64.b64decode(t, validate=True) for t in objects["trees"]]
+        blob = base64.b64decode(objects["blob"], validate=True)
+    except (KeyError, TypeError, ValueError):
+        return ["the receipt holds no raw objects"]
+    if object_id("commit", commit) != receipt["commit"]:
+        return ["the commit object is not the commit named"]
+    if not (commit.startswith(b"tree ") and commit[45:46] == b"\n"):
+        return ["the commit object names no tree"]
+    path = ["manifests", "follow_seal", str(mine["line"]), f"envelope_{int(mine['n'])}.json"]
+    if len(trees) != len(path):
+        return [f"{len(trees)} trees, not the {len(path)} on the envelope's path"]
+    want = commit[5:45].decode()
+    for raw, name in zip(trees, path, strict=True):
+        if object_id("tree", raw) != want:
+            return [f"the tree above {name} is not the one its parent names"]
+        try:
+            found = tree_entry(raw, name)
+        except ValueError:
+            found = None
+        kind = "blob" if name == path[-1] else "tree"
+        if found is None or found[0] != ("100644" if kind == "blob" else "40000"):
+            return [f"{name} is not a {kind} of the committed tree"]
+        want = found[1]
+    if object_id("blob", blob) != want:
+        return ["the blob is not the committed envelope's"]
+    try:
+        committed = json.loads(blob)
+    except ValueError:
+        return ["the committed envelope is not JSON"]
+    if committed != dict(mine):
+        return ["the committed envelope is not the runner's"]
+    return []
 
 
 def opened(data: bytes, committed: Mapping[str, Any]) -> dict[str, Any]:
@@ -303,6 +365,111 @@ def dependencies(line: Mapping[str, Any], y2: Mapping[str, Any],
     if b3 is not None:
         deps["runs"] = list(dict.fromkeys([*deps["runs"], *b3_runs(b3)]))
     return deps
+
+
+# ------------------------------------------------------------------------- terminal stops
+
+RETRIES = 1  # §12.7 (2026-10-24): one retry per cell
+PHASE_OF = {"kstar_calibration": "kstar", "certificate": "certificate"}
+
+
+def item_of(line: Mapping[str, Any]) -> str:
+    """The line's own meter item."""
+    return f"follow/cert/{line['binding']['line']}"
+
+
+def history(runs: Path, binding: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """The line's relearning cells under its sealed runs directory, by config hash: the phase
+    (its ``purpose``), the runs failed with a classified training failure as the run recorded
+    it (``pipeline.FAILURE_RECORD``: out of memory or divergence of the training step itself)
+    and the completed runs. Only cells carrying the line's binding count; another failure is
+    no attempt (it stays pending)."""
+    import yaml
+
+    from .continuation_panel import CLASSIFIED, _classified_cause
+
+    cells: dict[str, dict[str, Any]] = {}
+    for meta_path in sorted(Path(runs).glob("*/*/meta.json")):
+        run = meta_path.parent
+        meta = json.loads(meta_path.read_text())
+        config = yaml.safe_load((run / "config.yaml").read_text()) or {}
+        params = config.get("params") or {}
+        phase = PHASE_OF.get(params.get("purpose"))
+        if config.get("step") != "relearn" or params.get("follow") != dict(binding) or not phase:
+            continue
+        cell = cells.setdefault(meta["config_hash"], {"phase": phase, "failed": [],
+                                                       "completed": []})  # fmt: skip
+        if meta.get("status") == "completed":
+            cell["completed"].append(run.name)
+        elif meta.get("status") == "failed" and _classified_cause(run) in CLASSIFIED:
+            cell["failed"].append(run.name)
+    return cells
+
+
+def exhausted(cells: Mapping[str, Mapping[str, Any]], phase: str) -> dict[str, list[str]]:
+    """The phase's cells that failed so on their attempt and their one retry, with no completed
+    run: their failed runs by config hash."""
+    return {h: list(c["failed"]) for h, c in cells.items() if c["phase"] == phase
+            and len(c["failed"]) >= 1 + RETRIES and not c["completed"]}  # fmt: skip
+
+
+def terminal(line: Mapping[str, Any], phase: str, failed: Mapping[str, Sequence[str]]
+             ) -> dict[str, Any]:  # fmt: skip
+    """A phase's sealed terminal record after its retries were exhausted: the line, the phase,
+    the line's meter item and the failed runs, in the fields of the panel's failure records
+    (``continuation_panel.FAILURE_FIELDS``) for the opening's check (``terminal_problems``)."""
+    runs = sorted(r for v in failed.values() for r in v)
+    return {"line": line["binding"]["line"], "item": item_of(line),
+            "lineage": line["binding"]["lineage"], "behavior": line["behavior"],
+            "contracts": line["binding"]["b3"], "phase": phase, "kind": "retry_exhausted",
+            "reason": f"a classified training failure of {len(failed)} cell(s) on the attempt "
+                      "and its one retry (§12.7, 2026-10-24)",
+            "runs": runs, "meter": None}  # fmt: skip
+
+
+def with_retry(
+    phase: str, run: Callable[[], Any], runs: Path, binding: Mapping[str, Any],
+    cleanup: Callable[[], None] = lambda: None,
+) -> tuple[Any, dict[str, list[str]]]:  # fmt: skip
+    """The phase ``run`` under §12.7's one retry per cell: a classified training failure recorded
+    by a new failed run is retried by running the phase again (its completed cells reused); a
+    cell failed so on its attempt and its retry, now or in an earlier session, ends the phase,
+    never attempted a third time: (None, its failed runs). Anything else raises: pending."""
+    from .training import CLASSIFIED_FAILURES
+
+    while True:
+        cells = history(runs, binding)
+        failed = exhausted(cells, phase)
+        if failed:
+            return None, failed
+        before = sum(len(c["failed"]) for c in cells.values())
+        try:
+            return run(), {}
+        except CLASSIFIED_FAILURES:
+            if sum(len(c["failed"]) for c in history(runs, binding).values()) <= before:
+                raise  # no failed run of the line's records it: not an attempt
+            cleanup()
+
+
+def terminal_problems(
+    data: Mapping[str, Any], line: Mapping[str, Any], find_run: Any, meter_state: Any,
+    completed: Any, cells: Mapping[str, Mapping[str, Any]] | None = None,
+) -> list[str]:  # fmt: skip
+    """Why a line's terminal record does not establish an allowed stop (§12.7, 2026-10-24): it
+    names the line and its meter item, and the rest is a failure record of the line's lineage
+    (``continuation_panel.failure_problems`` with the line's item: "budget" the item stopped or
+    dropped in the meter, recorded on the laptop; "retry_exhausted" the failed runs of the
+    approved ``cells``, each on its attempt and its one retry, none completed)."""
+    from .continuation_panel import failure_problems
+
+    problems = []
+    if data.get("line") != line["binding"]["line"] or data.get("item") != item_of(line):
+        problems.append(f"the record is not of the line {line['binding']['line']} and its item")
+    rest = {k: v for k, v in data.items() if k not in ("line", "item")}
+    identity = {"lineage": line["binding"]["lineage"], "behavior": line["behavior"],
+                "contracts": line["binding"]["b3"]}  # fmt: skip
+    return problems + failure_problems(rest, find_run, identity, meter_state, completed, cells,
+                                       item=item_of(line))  # fmt: skip
 
 
 # --------------------------------------------------------------------- the sealed session's roots

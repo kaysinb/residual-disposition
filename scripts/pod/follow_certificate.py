@@ -10,8 +10,11 @@ L's and H_s's tensors. Then the k* calibration, its record written only under ``
 envelopes, from the start every ``cadence`` minutes, each holding only its payload's sha256
 (``envelopes/<n>.json``; payloads under ``sealed/payloads/``); the certificate starts only after
 a receipt (``receipts/<n>.json``) of an envelope whose payload holds the record, with the
-calibration recomputed from its cached runs and equal to the record. The one open file is
-``status.json`` (running, completed, or failed with an exception's class). A launcher's
+calibration recomputed from its cached runs and equal to the record. Each phase runs under §12.7's
+one retry per cell (``follow_certificate.with_retry``): a cell's classified training failure is
+retried once, a second one ends the phase with its sealed terminal record
+(``sealed/terminal_<phase>.json``), and any other failure leaves the line pending. The one open
+file is ``status.json`` (running, completed, or failed with an exception's class). A launcher's
 ``RUN_ID`` is removed first; stdout and stderr go to ``sealed/`` by the launcher.
 """
 
@@ -119,6 +122,17 @@ def receipt(out: Path, envelopes: Envelopes, max_cadences: int = 4) -> int:
         time.sleep(POLL_SECONDS)
 
 
+def cleanup() -> None:
+    """Between a classified training failure and its retry: the failed run's memory released."""
+    import gc
+
+    import torch
+
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def keep(path: Path, record: dict) -> None:
     """A sealed record written once; a rerun's must be the same record, never rewritten."""
     text = json.dumps(record, indent=1) + "\n"
@@ -167,7 +181,14 @@ def main() -> int:
         cadence = int(b3["seal"]["envelopes"]["cadence_minutes"])
         envelopes = Envelopes(out, sealed, name, line["binding"]["b3"], cadence, time.time())
         envelopes.start()
-        record = F.calibrate(ws, line, rules, sealed=sealed, before=envelopes.failed)
+        runs = sealed / "runs"
+        record, failed = F.with_retry(
+            "kstar", lambda: F.calibrate(ws, line, rules, sealed=sealed, before=envelopes.failed),
+            runs, line["binding"], cleanup)  # fmt: skip
+        if failed:  # §12.7: the phase ends terminally, its record sealed
+            keep(sealed / "terminal_kstar.json", F.terminal(line, "kstar", failed))
+            F.status(status, "completed")
+            return 0
         if F.listing(Path(os.environ["HF_HOME"])) != hub:
             raise RuntimeError("the hub cache changed during the session's loads")
         keep(sealed / "kstar_calibration.json", record)  # a rerun's: the same, never rewritten
@@ -179,7 +200,14 @@ def main() -> int:
         receipt(out, envelopes)
         if F.calibrate(ws, line, rules, sealed=sealed) != record:  # its cached runs: no GPU work
             raise ValueError("the calibration recomputed is not its record")
-        result = F.certify(ws, line, rules, record, sealed=sealed, before=envelopes.failed)
+        result, failed = F.with_retry(
+            "certificate",
+            lambda: F.certify(ws, line, rules, record, sealed=sealed, before=envelopes.failed),
+            runs, line["binding"], cleanup)  # fmt: skip
+        if failed:
+            keep(sealed / "terminal_certificate.json", F.terminal(line, "certificate", failed))
+            F.status(status, "completed")
+            return 0
         if F.listing(Path(os.environ["HF_HOME"])) != hub:
             raise RuntimeError("the hub cache changed during the session's loads")
         keep(sealed / "certificate_blocks.json", result)
