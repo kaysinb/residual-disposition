@@ -23,6 +23,8 @@ uv sync                  # create .venv from uv.lock
 cp .env.example .env     # fill in the keys you use
 uv run pytest            # unit tests, CPU only
 ```
+`tests/test_meter_raise.py` reads the live meter log: do not run it while a laptop API session
+is open, since that session has no Pod to close.
 
 Documentation checks run without a commit and without a GPU:
 
@@ -1990,6 +1992,10 @@ the API from recorded packages only (`residual_disposition.follow_qualification`
   role's state as the inventory gives it (its saved config's hash recomputed, a lens package of
   that state, the readers' cell lookup's hash and identity; Stage 1's dose packages the one its
   readings record names).
+- **Old judge replies:** a reply cached before tiers were recorded leaves its slot pending until
+  `--judge-history <run>` has written its provenance once, by §12.4.5's route of 2026-10-27
+  (`manifests/stage3_judge_history_follow_qualification.json`); what cannot be established is listed
+  as unsupported and stays pending.
 - **Pins:** `--pin` writes every reading's package directory, evidence sha256 and slot keys
   once (`manifests/follow_qualification_inputs.json`), committed before any request; `--send`
   refuses readings that are not their pins, so a changed evidence never makes new requests.

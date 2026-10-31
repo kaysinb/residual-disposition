@@ -1,7 +1,7 @@
 """The follow-up's qualification of D* and unfiltered PD (preregistration §13.5 (a); barrier B2) on
 the API, from recorded packages only (``residual_disposition.follow_qualification``).
 
-    uv run python scripts/follow_qualification.py [--pin | --send]
+    uv run python scripts/follow_qualification.py [--pin | --send | --judge-history RUN]
 
 Before anything is rendered every new package is bound to the frozen build plan and the build
 session's pinned records (``follow_qualification.new_packages``). Without a flag it prints the
@@ -34,7 +34,8 @@ the record, recomputed from the cache: each reading's counted hypotheses with it
 the pooled rates, the floors and, descriptive, the rates and floors with the blocked lenient yes
 counted (``qualification.json``), pending while a slot is. An answer at a tier that is not
 admitted (the interpreter's flex or standard; the judge's as the readers admit it) leaves its slot
-pending and is never asked again.
+pending and is never asked again; ``--judge-history`` establishes the tier-less replies' provenance
+by the registered route, once.
 """
 
 from __future__ import annotations
@@ -55,6 +56,7 @@ from residual_disposition.paths import REPO_ROOT, data_root
 
 ITEM, LABEL = "follow/base", "follow/qualification"
 PINS = "manifests/follow_qualification_inputs.json"  # each reading's pin, committed before sends
+HISTORY = "manifests/stage3_judge_history_follow_qualification.json"  # read by Q.judge_pins
 METER_LOG = "ledgers/continuation_meter.jsonl"
 # the estimate's units (the Stage-3 diagnostic's, measured there): characters per token, the
 # interpreter's thinking tokens, the margin, an answer's tokens
@@ -309,6 +311,49 @@ def previous_histories(root: Any) -> dict[str, Any]:
             for slot, stages in out.items()}  # fmt: skip
 
 
+def judge_history(run: str) -> int:
+    """The provenance of the tier-less judge replies the run's slots could not admit, by the
+    registered route (§12.4.5, 2026-10-27; ``continuation_readers.judge_history``), written once to
+    ``HISTORY``, which ``follow_qualification.judge_pins`` reads once committed. Hashes and
+    provenance only; it prints counts, no label."""
+    from residual_disposition.manifests import committed_json
+    from residual_disposition.paths import runs_root
+    from residual_disposition.summarizer import parse_hypothesis
+
+    path = REPO_ROOT / HISTORY
+    if path.exists():
+        raise SystemExit(f"{HISTORY} exists: the judge history is written once")
+    d = runs_root() / "follow_qualification" / run
+    histories = json.loads((d / "histories.json").read_text())
+    readings = json.loads((d / "inputs.json").read_text())["readings"]
+    cache = JudgeCache(data_root() / "cache" / "summarizer")
+    source = committed_json(REPO_ROOT / "manifests" / "stage3_readers_strong_eli5_cont_200.json",
+                            "a readers record")["sources"]  # fmt: skip
+    judges = {"lens": source["lens_judge"], "pd": source["pd_judge"]}  # their cache, the judge's
+    wanted: dict[str, dict[str, dict[str, tuple]]] = {}
+    for r in readings:
+        for i in range(int(r["slots"])):
+            slot = f"{r['salt']}#slot={i}"
+            steps = histories[slot]
+            if any(s.get("admitted") is None for k in ("strict", "lenient")
+                   for s in steps.get(k) or []):  # fmt: skip
+                entry = cache.entry(next(s for s in steps["interpreter"] if s["parsed"])["key"])
+                kinds = wanted.setdefault(r["behavior"], {"lens": {}, "pd": {}})
+                kinds[Q.KINDS[r["reader"]]][slot] = (None, None, parse_hypothesis(entry["text"]))
+    found = {b: readers.judge_history(find_run, b, judges, kinds, runs_root())
+             for b, kinds in sorted(wanted.items())}  # fmt: skip
+    entries = {k: v for f in found.values() for k, v in f["entries"].items()}
+    unsupported = sorted({k for f in found.values() for k in f["unsupported"]})
+    tiers = dict(sorted(collections.Counter(e["tier"] for e in entries.values()).items()))
+    any_found = next(iter(found.values()))
+    write(path, {"rule": any_found["rule"], "recording_boundary": any_found["recording_boundary"],
+                 "run": run, "behaviors": sorted(found), "judge_runs": judges,
+                 "references": {b: f["references"] for b, f in found.items()}, "tiers": tiers,
+                 "entries": entries, "unsupported": unsupported})  # fmt: skip
+    print(f"wrote {HISTORY}: {len(entries)} entries {tiers}, {len(unsupported)} unsupported")
+    return 0
+
+
 def reconcile(root: Any, caches: dict[str, Any]) -> None:
     """Stop when an answer an earlier run recorded (its histories or its answers' journal) is no
     longer in the cache, or changed: it is never taken for unanswered."""
@@ -337,7 +382,10 @@ def main(argv: list[str] | None = None) -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--pin", action="store_true")
     mode.add_argument("--send", action="store_true")
+    mode.add_argument("--judge-history", metavar="RUN")
     args = parser.parse_args(argv)
+    if args.judge_history:
+        return judge_history(args.judge_history)
     from residual_disposition.manifests import committed_json
     from residual_disposition.paths import runs_root
 

@@ -425,3 +425,42 @@ def test_every_stored_answer_is_journaled_at_once_and_never_taken_for_unanswered
     (other / "answers.jsonl").write_text(json.dumps({**line, "sha256": "0" * 64}) + "\n")
     with pytest.raises(SystemExit, match="two entries"):
         s.previous_histories(root)
+
+
+def test_the_judge_history_reads_only_the_slots_not_admitted(tmp_path, monkeypatch):
+    from residual_disposition import continuation_readers as readers
+    from residual_disposition import manifests, paths
+
+    s = script()
+    root = tmp_path / "runs" / "follow_qualification" / "r"
+    root.mkdir(parents=True)
+    reading = {"salt": "x", "slots": 2, "behavior": "eli5", "reader": "dstar"}
+    (root / "inputs.json").write_text(json.dumps({"readings": [reading]}))
+    ok = [{"key": "h", "parsed": True, "admitted": "flex"}]
+    held = {"x#slot=0": {"interpreter": ok, "strict": [{"key": "a", "admitted": None}],
+                         "lenient": [{"key": "b", "admitted": "standard"}]},
+            "x#slot=1": {"interpreter": ok, "strict": [{"key": "c", "admitted": "standard"}],
+                         "lenient": [{"key": "d", "admitted": "standard"}]}}  # fmt: skip
+    (root / "histories.json").write_text(json.dumps(held))
+    seen = {}
+
+    def history(find_run, behavior, judges, hyps, runs):
+        seen.update(hyps)
+        return {"rule": "r", "recording_boundary": {}, "references": {},
+                "entries": {"a": {"tier": "flex", "entry_sha256": "s"}},
+                "unsupported": ["z"]}  # fmt: skip
+
+    monkeypatch.setattr(readers, "judge_history", history)
+    monkeypatch.setattr(paths, "runs_root", lambda: tmp_path / "runs")
+    monkeypatch.setattr(s, "data_root", lambda: tmp_path / "data")
+    monkeypatch.setattr(s, "JudgeCache", lambda d: Cache({"h": {"text": "I will."}}))
+    monkeypatch.setattr(s, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(manifests, "committed_json", lambda path, what: {
+        "sources": {"lens_judge": "l", "pd_judge": "p"}})  # fmt: skip
+    (tmp_path / "manifests").mkdir()
+    assert s.main(["--judge-history", "r"]) == 0
+    assert set(seen["lens"]) == {"x#slot=0"} and not seen["pd"]  # the admitted slot is left out
+    written = json.loads((tmp_path / s.HISTORY).read_text())
+    assert written["tiers"] == {"flex": 1} and written["unsupported"] == ["z"]
+    with pytest.raises(SystemExit, match="written once"):
+        s.main(["--judge-history", "r"])
