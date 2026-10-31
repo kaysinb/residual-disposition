@@ -103,7 +103,11 @@ def main() -> int:
     status = out / "status.json"
     out.mkdir(parents=True, exist_ok=True)
     try:
-        ws = F.workspace(line)
+        problems = F.writer_problems(space, sealed)
+        if problems:  # before anything is loaded
+            raise SystemExit("; ".join(problems))
+        hub = F.listing(Path(os.environ["HF_HOME"]))
+        ws = F.seal_workspace(F.workspace(line), sealed)
         F.reference(ws, line)
         F.data(ws, line)
         from residual_disposition import pipeline as P
@@ -115,7 +119,9 @@ def main() -> int:
         cadence = int(b3["seal"]["envelopes"]["cadence_minutes"])
         envelopes = Envelopes(out, sealed, name, line["binding"]["b3"], cadence, time.time())
         envelopes.start()
-        record = F.calibrate(ws, line, rules)
+        record = F.calibrate(ws, line, rules, sealed=sealed)
+        if F.listing(Path(os.environ["HF_HOME"])) != hub:
+            raise RuntimeError("the hub cache changed during the session's loads")
         F.write_once(sealed / "kstar_calibration.json", json.dumps(record, indent=1) + "\n")
         with envelopes.lock:
             envelopes.record = record
@@ -123,9 +129,11 @@ def main() -> int:
             F.status(status, "completed")
             return 0
         receipt(out, envelopes)
-        if F.calibrate(ws, line, rules) != record:  # from its cached runs: no GPU work
+        if F.calibrate(ws, line, rules, sealed=sealed) != record:  # its cached runs: no GPU work
             raise ValueError("the calibration recomputed is not its record")
-        result = F.certify(ws, line, rules, record)
+        result = F.certify(ws, line, rules, record, sealed=sealed)
+        if F.listing(Path(os.environ["HF_HOME"])) != hub:
+            raise RuntimeError("the hub cache changed during the session's loads")
         F.write_once(sealed / "certificate_blocks.json", json.dumps(result, indent=1) + "\n")
         F.status(status, "completed")
         return 0

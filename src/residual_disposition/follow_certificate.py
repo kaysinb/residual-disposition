@@ -99,10 +99,15 @@ def data(ws: Any, line: Mapping[str, Any]) -> Any:
 
 
 def calibrate(ws: Any, line: Mapping[str, Any], rules: Any,
-              relearn: Callable[..., dict] | None = None) -> dict[str, Any]:  # fmt: skip
-    """The line's k* calibration (§12.3.7) and its record (see the module)."""
+              relearn: Callable[..., dict] | None = None,
+              sealed: Path | None = None) -> dict[str, Any]:  # fmt: skip
+    """The line's k* calibration (§12.3.7) and its record (see the module); with ``sealed``, the
+    workspace's roots in the sealed directory before any training."""
     from . import continuation_kstar as K
     from . import pipeline as P
+
+    if sealed is not None:
+        seal_workspace(ws, sealed)
 
     relearn = relearn or P.relearn_state
     cert = rules["certificate"]
@@ -137,7 +142,8 @@ def calibrate(ws: Any, line: Mapping[str, Any], rules: Any,
 
 
 def certify(ws: Any, line: Mapping[str, Any], rules: Any, kstar: Mapping[str, Any],
-            relearn: Callable[..., dict] | None = None) -> dict[str, Any]:  # fmt: skip
+            relearn: Callable[..., dict] | None = None,
+            sealed: Path | None = None) -> dict[str, Any]:  # fmt: skip
     """The line's six-block certificate (§12.4.8) at the calibration ``kstar`` (resolved, the
     line's, recomputed by the caller before use) and its record."""
     from . import continuation_kstar as K
@@ -150,6 +156,13 @@ def certify(ws: Any, line: Mapping[str, Any], rules: Any, kstar: Mapping[str, An
     cert = rules["certificate"]
     controls = P.certificate_controls(ws, rules)
     arms = controls["arms"]
+    if sealed is not None:  # every arm's workspace, before any training
+        for aws in arms.values():
+            seal_workspace(aws, sealed)
+        if unsealed(arms, sealed):
+            raise ValueError(
+                f"workspaces {unsealed(arms, sealed)} write outside the sealed directory"
+            )
     references = {"b": reference(ws, line), **controls["references"]}
     if references["b"]["run"] != kstar["reference"]["run"]:
         raise ValueError("b's reference is not the calibration's")
@@ -286,3 +299,55 @@ def dependencies(line: Mapping[str, Any], y2: Mapping[str, Any],
     if b3 is not None:
         deps["runs"] = list(dict.fromkeys([*deps["runs"], *b3_runs(b3)]))
     return deps
+
+
+# --------------------------------------------------------------------- the sealed session's roots
+
+
+def seal_workspace(ws: Any, sealed: Path) -> Any:
+    """A workspace's work and served-state roots moved into the sealed directory (B3's seal
+    roots), before any training: relearning's adapters, served copies and their cleanup there."""
+    ws.work, ws.served = Path(sealed) / "work", Path(sealed) / "served"
+    ws.work.mkdir(parents=True, exist_ok=True)
+    ws.served.mkdir(parents=True, exist_ok=True)
+    return ws
+
+
+def unsealed(workspaces: Mapping[str, Any], sealed: Path) -> list[str]:
+    """The workspaces (by arm) whose work or served root is not in the sealed directory."""
+    from .pod_space import inside
+
+    return [arm for arm, ws in workspaces.items()
+            if not (inside(ws.work, sealed) and inside(ws.served, sealed))]  # fmt: skip
+
+
+def writer_problems(space: Path, sealed: Path, env: Mapping[str, str] | None = None) -> list[str]:
+    """Why the session would write a name, step or time outside its sealed directory: its runs
+    directory the sealed one, its data and hub caches the space's, the hub read offline, and every
+    variable that moves a writer's files (``pod_space.WRITERS``) beneath ``sealed/cache``."""
+    from .pod_space import WRITERS, inside
+
+    env = os.environ if env is None else env
+    out = []
+    want = {"RUNS_DIR": Path(sealed) / "runs", "DATA_DIR": Path(space) / "data",
+            "HF_HOME": Path(space) / "hf"}  # fmt: skip
+    for name, path in want.items():
+        if env.get(name) is None or Path(env[name]).resolve() != path.resolve():
+            out.append(f"{name} is {env.get(name)}, not {path}")
+    if env.get("HF_HUB_OFFLINE") != "1":
+        out.append("the hub is not read offline (HF_HUB_OFFLINE=1)")
+    for name in WRITERS:
+        if env.get(name) is None or not inside(env[name], Path(sealed) / "cache"):
+            out.append(f"{name} is {env.get(name)}, not beneath {Path(sealed) / 'cache'}")
+    return out
+
+
+def listing(root: Path) -> list[tuple[str, int, int]]:
+    """Every file under ``root`` with its size and modification time: the hub cache before and
+    after the session's loads must be the same (nothing written there)."""
+    out = []
+    for path in sorted(Path(root).rglob("*")):
+        if path.is_file() or path.is_symlink():
+            st = path.lstat()
+            out.append((str(path.relative_to(root)), st.st_size, st.st_mtime_ns))
+    return out

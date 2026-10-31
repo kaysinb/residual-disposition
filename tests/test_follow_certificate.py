@@ -256,3 +256,35 @@ def test_the_session_s_inputs_are_named_by_its_line():
     assert "20261013-112321-relearn-0818ca61-1c85" in deps["runs"]
     assert deps["states"][:3] == [line["latent"], line["sham_s"], line["active"]]
     assert line["reference"] in deps["runs"] and "d72d4f29820114b7b" in deps["data"]
+
+
+def test_every_workspace_and_writer_is_in_the_sealed_directory(tmp_path):
+    from residual_disposition.pod_space import WRITERS
+
+    space, sealed = tmp_path / "a", tmp_path / "a" / "follow" / "cert" / "l" / "sealed"
+    ws = SimpleNamespace(work=space / "data" / "cache" / "work",
+                         served=space / "data" / "cache" / "served")  # fmt: skip
+    assert F.unsealed({"b": ws}, sealed) == ["b"]
+    F.seal_workspace(ws, sealed)
+    assert F.unsealed({"b": ws}, sealed) == [] and ws.work.is_dir() and ws.served.is_dir()
+    env = {"RUNS_DIR": str(sealed / "runs"), "DATA_DIR": str(space / "data"),
+           "HF_HOME": str(space / "hf"), "HF_HUB_OFFLINE": "1",
+           **{name: str(sealed / "cache" / name.lower()) for name in WRITERS}}  # fmt: skip
+    assert F.writer_problems(space, sealed, env) == []
+    for change in ({"HF_HUB_OFFLINE": "0"}, {"TMPDIR": "/tmp"}, {"RUNS_DIR": str(space / "runs")},
+                   {"XDG_CACHE_HOME": str(space / "cache")}):  # fmt: skip
+        assert F.writer_problems(space, sealed, {**env, **change})
+    missing = dict(env)
+    missing.pop("VLLM_CACHE_ROOT")
+    assert any("VLLM_CACHE_ROOT" in p for p in F.writer_problems(space, sealed, missing))
+
+
+def test_a_hub_write_shows_in_its_listing(tmp_path):
+    hub = tmp_path / "hf"
+    (hub / "hub" / "models--x").mkdir(parents=True)
+    (hub / "hub" / "models--x" / "w.safetensors").write_text("w")
+    before = F.listing(hub)
+    assert F.listing(hub) == before
+    (hub / "hub" / ".locks").mkdir()
+    (hub / "hub" / ".locks" / "x.lock").write_text("")
+    assert F.listing(hub) != before
