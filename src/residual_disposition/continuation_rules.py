@@ -1371,7 +1371,7 @@ def follow_b3() -> dict[str, Any]:
 # frozen sha256 (``follow_hash`` of its ``lrandom`` mapping): set by the commit that freezes it;
 # until then that session is not run.
 FOLLOW_LRANDOM_PATH = CONFIG_ROOT / "continuation" / "follow_lrandom.yaml"
-FOLLOW_LRANDOM_FROZEN: str | None = None
+FOLLOW_LRANDOM_FROZEN: str | None = "cd5ae597a29999549693ad377974257c8b9622306744df8aeb479a1d42828b04"
 
 
 def load_follow_lrandom(path: str | Path = FOLLOW_LRANDOM_PATH, *,

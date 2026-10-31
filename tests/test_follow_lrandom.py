@@ -260,6 +260,11 @@ def test_the_control_s_sources_are_the_pinned_files(tmp_path):
     assert any("base means" in p for p in B.pinned_problems(s, find))
 
 
+def test_the_frozen_session_loads():
+    assert cr.follow_lrandom() == session()
+    assert cr.follow_hash(session()) == cr.FOLLOW_LRANDOM_FROZEN
+
+
 def test_the_session_is_not_run_while_unfrozen(monkeypatch):
     monkeypatch.setattr(cr, "FOLLOW_LRANDOM_FROZEN", None)
     with pytest.raises(ValueError, match="not frozen"):
