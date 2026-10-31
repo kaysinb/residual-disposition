@@ -19,8 +19,8 @@ complete rule C by exact error-rate bounds.
   missing, unresolved or safety-blocked required label counts as an error. Pass needs the
   one-sided exact (Clopper–Pearson) lower bound of sensitivity ≥ the floor and the upper bound of
   the false-positive rate ≤ the ceiling, i.e. at most ``max_errors`` of each (29 and 12 at 400 per
-  class); the veto's conditional precision (``veto_precision``) is reported, not gated (§13.16). Estimates
-  and bounds are reported overall and by stratum. κ and the
+  class); the veto's conditional precision (``veto_precision``) is reported, not gated (§13.16).
+  Estimates and bounds are reported overall and by stratum. κ and the
   alternative-annotator test come from ``judge.c_validation`` on the same items and are reported
   beside it.
 """
