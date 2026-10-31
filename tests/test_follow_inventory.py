@@ -71,13 +71,52 @@ def test_the_confirmed_dose():
         fi.check([{**marked[0], "if_confirmed": None}])
 
 
+CONFIRMED = {"example_link": 200, "pun_intended": 200}
+
+
 def test_analysis_inventory():
-    a = fi.analysis(fake_sources())
+    src = fake_sources()
+    src["eli5"]["L"] = {"build": "follow-build-x", "state": "sL"}  # a built package: its branch
+    a = fi.analysis(src, CONFIRMED)
     fi.check(a)
-    assert len(a) == 7 * 7 + 2 * 7  # seven lineages, the two confirmable ones at both doses
-    randoms = [r for r in a if r["decoder"] == "random"]
-    assert all(r["package"].get("new", "").startswith("random branch") for r in randoms)
-    fi.check(fi.qualification(fake_sources()) + a)  # no salt shared across both
+    assert len(a) == 7 * 7  # seven lineages, L, H_s and X on two decoders and L's random branch
+    assert {r["stream"] for r in a} == {fi.ANALYSIS_STREAM}
+    assert [(b, m, d) for b, m, d in fi.lineages(CONFIRMED)][-1] == ("eli5", "continued", 200)
+    salts = {r["salt"] for r in a if r["behavior"] == "eli5" and r["role"] == "L"}
+    assert "follow/dstar/analysis/eli5/stack200/L/state/stream1" in salts
+    assert "follow/dstar/analysis/eli5/continued200/L/state/stream1" in salts
+    randoms = {r["salt"]: r["package"] for r in a if r["decoder"] == "random"}
+    assert randoms["follow/dstar/analysis/eli5/stack200/L/random/stream1"] == src["eli5"]["L"]
+    assert randoms["follow/dstar/analysis/tldr/stack400/L/random/stream1"] == {
+        "new": "random branch of run-tldr-L"
+    }
+    link = [r for r in a if r["behavior"] == "example_link"]
+    assert {r["if_confirmed"] for r in link} == {200} and all("run-example_link-" in str(
+        r["package"]) for r in link)  # fmt: skip
+    fi.check(fi.qualification(fake_sources()) + a)  # no salt shared with B2's
+
+
+def test_the_ladder_s_inventory():
+    counts = {2: (4, 2, 8, 4, 5), 3: (8, 4, 16, 8, 9)}
+    for rung, (shared, recipe, vshared, vrecipe, cells) in counts.items():
+        readings = [*fi.rung_shared(rung), *fi.rung_recipe(rung, "continued"),
+                    *fi.rung_recipe(rung, "stack"), *fi.rung_supplement(rung),
+                    *fi.rung_supplement(rung, "continued"), *fi.rung_supplement(rung, "stack"),
+                    *fi.rung_analysis(rung, "continued", 200)]  # fmt: skip
+        fi.check(readings)  # every salt distinct, both modes' recipes included
+        assert (len(fi.rung_shared(rung)), len(fi.rung_recipe(rung, "stack")),
+                len(fi.rung_supplement(rung)), len(fi.rung_supplement(rung, "stack")),
+                len(fi.rung_analysis(rung, "continued", 200))) == (shared, recipe, vshared,
+                                                                   vrecipe, cells)  # fmt: skip
+    assert {r["role"] for r in fi.rung_shared(2)} == {"A", "H"}  # whichever mode is first
+    assert {r["role"] for r in fi.rung_recipe(2, "stack")} == {"recipe"}
+    assert {r["role"] for r in fi.rung_recipe(2, "continued")} == {"recipe_cont"}
+    order = [(r["stream"], r["role"]) for r in fi.rung_supplement(2)]
+    assert order[:2] == [(3, "A"), (3, "H")] and order[-1] == (6, "H")
+    comparator = [
+        r for r in fi.rung_analysis(3, "continued", 200) if r["component"] == "comparator"
+    ]
+    assert [r["role"] for r in comparator] == ["L", "H_s", "X", "recipe"]
 
 
 def test_recorded_sources_if_present():
@@ -86,7 +125,7 @@ def test_recorded_sources_if_present():
     except (FileNotFoundError, ValueError) as error:
         pytest.skip(f"records not in this checkout: {error}")
     q = fi.qualification(src)
-    fi.check(q + fi.analysis(src))
+    fi.check(q + fi.analysis(fi.with_builds(src, fi.built_packages()), CONFIRMED))
     doses = src["example_link"]["doses"]
     assert set(doses) == {"100", "200"} and doses["100"]["recipe"] != doses["200"]["recipe"]
     assert doses["200"]["recipe"].endswith(tuple("0123456789abcdef"))

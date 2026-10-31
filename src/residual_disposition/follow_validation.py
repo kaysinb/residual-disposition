@@ -195,19 +195,26 @@ def labels(reading: Mapping[str, Any], *, another_behavior: bool,
     out = [f"behavior:{reading['behavior']}", f"role:{role}"]
     if reading["reader"] == "dstar":
         out.append("decoder:" + ("base" if reading["decoder"] == "base" else "state"))
+    if reading.get("component"):  # rung 3's agent or comparator (barrier B3)
+        out.append(f"component:{reading['component']}")
     hard = "another_behavior" if another_behavior else "category_only" if category_only else "none"
     return (*out, f"difficulty:{hard}")
 
 
-def minimums_of(spec: Mapping[str, Mapping[str, Any]], behaviors: Sequence[str],
-                decoders: Sequence[str] = ()) -> dict[str, dict[str, int]]:  # fmt: skip
-    """A format's per-class minimums by stratum label, from its configuration: ``behavior`` and
-    ``decoder`` apply to each behavior and decoder, ``difficulty`` names its kinds."""
+def minimums_of(spec: Mapping[str, Mapping[str, Any]], behaviors: Sequence[str] = (),
+                decoders: Sequence[str] = (), roles: Sequence[str] = (),
+                components: Sequence[str] = ()) -> dict[str, dict[str, int]]:  # fmt: skip
+    """A format's per-class minimums by stratum label, from its configuration: ``behavior``,
+    ``decoder``, ``role`` and ``component`` (B3's ladder formats) apply to each behavior, decoder,
+    role and component given, ``difficulty`` names its kinds; a key the configuration does not
+    name sets no minimum."""
     out: dict[str, dict[str, int]] = {}
     for cls, m in spec.items():
-        need = {f"behavior:{b}": int(m["behavior"]) for b in behaviors}
-        if "decoder" in m:
-            need.update({f"decoder:{d}": int(m["decoder"]) for d in decoders})
+        need: dict[str, int] = {}
+        for key, values in (("behavior", behaviors), ("decoder", decoders), ("role", roles),
+                            ("component", components)):  # fmt: skip
+            if key in m:
+                need.update({f"{key}:{v}": int(m[key]) for v in values})
         need.update({f"difficulty:{k}": int(v) for k, v in (m.get("difficulty") or {}).items()})
         out[cls] = need
     return out

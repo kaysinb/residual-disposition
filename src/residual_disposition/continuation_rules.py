@@ -1330,3 +1330,38 @@ def follow_b2() -> dict[str, Any]:
     if FOLLOW_B2_FROZEN is None:
         raise ValueError("barrier B2 is not frozen yet: no qualification request is sent")
     return load_follow_b2(expected_hash=FOLLOW_B2_FROZEN)
+
+
+# Barrier B3's configuration (§13.15) and its frozen sha256 (``follow_hash`` of its ``b3``
+# mapping), set by the commit that froze it: before it, no new reader request to L, H_s or X and
+# no certificate run was sent.
+FOLLOW_B3_PATH = CONFIG_ROOT / "continuation" / "follow_b3.yaml"
+FOLLOW_B3_FROZEN: str | None = "36dca67ca24d53659f1bcf523502fb658f6f3893e526d21b48963bfb4bf07069"
+
+
+def load_follow_b3(path: str | Path = FOLLOW_B3_PATH, *, expected_hash: str | None = None,
+                   check_code: bool = True) -> dict[str, Any]:  # fmt: skip
+    """B3's configuration (§13.15), checked against the records and the code that execute it
+    (``follow_b3.problems``) and against its inventory manifest, which must exist with its
+    sha256 (``follow_b3.inventory_problems``); with ``expected_hash``, refused when changed."""
+    from . import follow_b3
+
+    data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
+    b3 = data["b3"]
+    problems = follow_b3.problems(b3) if check_code else []
+    problems += follow_b3.inventory_problems(b3["inventory"])
+    if problems:
+        raise ValueError("B3 and the code disagree: " + "; ".join(problems))
+    digest = follow_hash(b3)
+    if expected_hash is not None and digest != expected_hash:
+        raise ValueError(f"B3 changed: sha256 {digest} != frozen {expected_hash}")
+    return b3
+
+
+def follow_b3() -> dict[str, Any]:
+    """B3's configuration for execution: always checked against ``FOLLOW_B3_FROZEN``; refused
+    while that is unset."""
+    if FOLLOW_B3_FROZEN is None:
+        raise ValueError("barrier B3 is not frozen yet: no reader request to L, H_s or X and no "
+                         "certificate run is sent")  # fmt: skip
+    return load_follow_b3(expected_hash=FOLLOW_B3_FROZEN)
