@@ -10,13 +10,14 @@ The session is ``configs/continuation/follow_lrandom.yaml`` (frozen by
 tolerance the follow-up rules' (``m0.tolerance``). Before any write: the session writes only into
 its space, with room (``follow_build.placement_problems``). Before any GPU work: its builds are
 exactly the packages B3's inventory names (``follow_build.lrandom_problems``: each L's package at
-its recorded state and seed), every state's adapters are checked against their recorded tensor
-sha256 and the effective configuration against the frozen one. Then each behavior's A is rebuilt
-as a reference; per L, its state means by the production path are checked against its package's
-stored means at both layers and its δ̄ against the qualification path, both to the tolerance,
-before its random branch is read through the state decoder. The existing package runs are never
-written; the output is bound by its record (``scripts/follow_lrandom.py``). A launcher's
-``RUN_ID`` is removed first and kept in the manifest.
+its recorded state and seed, its control's sources at their pinned sha256), every state's adapters
+are checked against their recorded tensor sha256 and the effective configuration against the
+frozen one. Then ``follow_build.execute_random``: each behavior's A rebuilt as a reference; per L,
+the same session's method check (its δ̄ against the qualification path and against the pinned δ̄,
+its norm against the pinned η, at both layers, to the tolerance), then its random branch read
+from the pinned sources (``follow_build.pinned_sources``) through the state decoder. The existing
+package runs are never written; the output is bound by its record (``scripts/follow_lrandom.py``).
+A launcher's ``RUN_ID`` is removed first and kept in the manifest.
 """
 
 from __future__ import annotations
@@ -78,7 +79,8 @@ def main() -> int:
                                    {"runtime": session["runtime"]})  # fmt: skip
     if problems:  # before any GPU work
         raise SystemExit("; ".join(problems))
-    stored = {b["state"]: B.stored_means(find_run(b["package"]), layers)
+    base_run = find_run(session["base_means"]["run"])
+    pinned = {b["state"]: B.pinned_sources(find_run(b["package"]), base_run, layers)
               for b in session["builds"]}  # fmt: skip
     for sid in [x["state"] for x in [*session["references"], *session["builds"]]]:
         ws.store.verify(sid)  # every adapter's tensors against its recorded sha256
@@ -135,12 +137,7 @@ def main() -> int:
 
     def state_means(sid: str) -> dict[int, dict[str, Any]]:
         with ws.training():
-            means = adl_lens.activation_means(model_of(sid), sequences, layers=layers, adapter=True)
-        for x, mean in (stored.get(sid) or {}).items():  # an L: its package's means, to 2⁻⁸
-            check = adl_lens.check_reproduction(mean, means[x]["mean"], tolerance=float(tolerance))
-            if not check["passed"]:
-                raise SystemExit(f"{sid}: layer {x}'s means are not its package's {check}")
-        return means
+            return adl_lens.activation_means(model_of(sid), sequences, layers=layers, adapter=True)
 
     def read(sid: str, vectors: Any, *, norm: float, layer: int, decoder: str, root: Path,
              prefix: str) -> Any:  # fmt: skip
@@ -149,11 +146,11 @@ def main() -> int:
                                           decoder=decoder, store=adl.StepStore(root),
                                           prefix=prefix)  # fmt: skip
 
-    result = B.execute(out, manifest, references=session["references"],
+    result = B.execute_random(out, manifest, references=session["references"],
                        builds=session["builds"], layers=layers, layer=layer,
                        tolerance=tolerance, run_seed=int(cfg.seed), base_means=base_means,
                        qualification=qualification, state_means=state_means, read=read,
-                       save=save)  # fmt: skip
+                       save=save, pinned=pinned)  # fmt: skip
     print(json.dumps({"status": result["status"], "out": str(out)}))
     return 0 if result["status"] == "complete" else 1
 

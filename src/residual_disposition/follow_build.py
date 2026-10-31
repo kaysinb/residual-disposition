@@ -557,13 +557,190 @@ def lrandom_problems(lrandom: Mapping[str, Any], names: Sequence[str], build: Ma
     if (dict(lrandom["runtime"]), dict(lrandom["layers"])) != (dict(build["runtime"]),
                                                                dict(build["layers"])):  # fmt: skip
         problems.append("the runtime or layers are not the builds'")
+    return problems + pinned_problems(lrandom, find_run)
+
+
+def _sha256(path: Path) -> str | None:
+    import hashlib
+
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest() if Path(path).is_file() else None
+
+
+def pinned_problems(lrandom: Mapping[str, Any], find_run: Callable[[str], Any]) -> list[str]:
+    """Why a build's control sources are not the pinned ones: each package's pinned files at their
+    sha256, its base means cell the pinned base means run's, that run's file at its sha256."""
+    import yaml
+
+    base = lrandom["base_means"]
+    run = find_run(base["run"])
+    if run is None or _sha256(Path(run) / "base_means.safetensors") != base["sha256"]:
+        return [f"the shared base means {base['run']} are not here at their sha256"]
+    cell = base["run"].split("-adl_base_means-")[1].split("-")[0]
+    problems = []
+    for b in lrandom["builds"]:
+        package = find_run(b["package"])
+        if package is None:
+            continue  # lrandom_problems names it
+        if {f: _sha256(Path(package) / f) for f in b["pinned"]} != dict(b["pinned"]):
+            problems.append(f"{b['package']}: not its pinned files")
+        params = (yaml.safe_load((Path(package) / "config.yaml").read_text()) or {})["params"]
+        if not str(params.get("base_means", "")).startswith(cell):
+            problems.append(f"{b['package']}: its base means are not the pinned run's cell")
     return problems
 
 
-def stored_means(run: Path, layers: Sequence[int]) -> dict[int, Any]:
-    """A package's stored state means per layer (``steps/extraction.safetensors``), which the
-    session's production path must reproduce for the same L."""
+def pinned_sources(run: Path, base: Path, layers: Sequence[int]) -> dict[int, dict[str, Any]]:
+    """An L package's control per layer from its pinned files: δ̄ its stored state means
+    (``steps/extraction.safetensors``) minus the shared base means (``base``'s
+    ``base_means.safetensors``), η its recorded norm (``adl_lens_package.json``)."""
     from safetensors.torch import load_file
 
-    stored = load_file(str(Path(run) / "steps" / "extraction.safetensors"))
-    return {int(x): stored[f"mean_{x}"] for x in layers}
+    means = load_file(str(Path(run) / "steps" / "extraction.safetensors"))
+    record = json.loads((Path(run) / "adl_lens_package.json").read_text())
+    shared = load_file(str(Path(base) / "base_means.safetensors"))
+    return {int(x): {"delta": means[f"mean_{x}"] - shared[f"mean_{x}"],
+                     "norm": float(record["layers"][str(x)]["norm"])} for x in layers}  # fmt: skip
+
+
+def norm_check(pinned: float, got: float, tolerance: float) -> dict[str, Any]:
+    """The session's norm against the pinned η: relative error within ``tolerance``."""
+    error = abs(float(got) - float(pinned)) / abs(float(pinned))
+    return {"pinned": float(pinned), "session": float(got), "relative_error": error,
+            "tolerance": float(tolerance), "passed": error <= float(tolerance)}  # fmt: skip
+
+
+def execute_random(out: Path, manifest: Mapping[str, Any], *,
+                   references: Sequence[Mapping[str, Any]], builds: Sequence[Mapping[str, Any]],
+                   layers: Sequence[int], layer: int, tolerance: Fraction, run_seed: int,
+                   base_means: Callable[[], Mapping[int, Any]],
+                   qualification: Callable[[str], Any],
+                   state_means: Callable[[str], Mapping[int, Mapping[str, Any]]],
+                   read: Callable[..., Any], save: Callable[[Path, Any], str],
+                   pinned: Mapping[str, Mapping[int, Mapping[str, Any]]],
+                   ) -> dict[str, Any]:  # fmt: skip
+    """The random-branch session (``follow_lrandom.yaml``): the references as ``execute``'s; per
+    build, first the same session's method check, apart from the control: its δ̄ by the
+    production path against the qualification path at the decisive layer, and at every layer
+    against the pinned δ̄ (``pinned[state][x]["delta"]``) and its norm against the pinned η, each
+    to ``tolerance``; then its random branch read from the pinned sources alone: the directions of
+    the pinned δ̄ at the builder's seed (``seeds``), at the pinned η, through the state decoder. A
+    failed check stops the session before anything of that build is read."""
+    problems = plan_problems(references, builds)
+    if problems:
+        raise ValueError("; ".join(problems))
+    if sorted(pinned) != sorted(b["state"] for b in builds):
+        raise ValueError("the pinned sources are not the builds'")
+    out.mkdir(parents=True, exist_ok=False)
+    progress = Progress(out, manifest, save)
+    progress.state.update(references={}, builds={})
+    base = base_means()
+    for x in layers:
+        progress.save(f"base_means-layer{x}.safetensors", base[x])
+    write_json(out / "progress.json", progress.state)
+    tol = float(tolerance)
+
+    def stop(check: str, state: str, report: Mapping[str, Any]) -> dict[str, Any]:
+        result = {"status": "stopped", "check": check, "state": state, "report": dict(report),
+                  "files": progress.state["files"]}  # fmt: skip
+        write_json(out / "result.json", result)
+        progress.state["status"] = "stopped"
+        write_json(out / "progress.json", progress.state)
+        return result
+
+    def extract(state: str, where: str) -> tuple[dict[int, Any], Mapping[int, Any], dict]:
+        q = qualification(state)
+        means = state_means(state)
+        deltas = {x: means[x]["mean"] - base[x] for x in layers}
+        progress.save(f"{where}/qualification-layer{layer}.safetensors", q)
+        for x in layers:
+            progress.save(f"{where}/production-layer{x}.safetensors", deltas[x])
+        return deltas, means, {"layer": layer, **check_reproduction(deltas[layer], q,
+                                                                    tolerance=tol)}  # fmt: skip
+
+    for ref in references:
+        sid = ref["state"]
+        _, _, check = extract(sid, f"references/{sid}")
+        progress.state["references"][sid] = check
+        write_json(out / "progress.json", progress.state)
+        if not check["passed"]:
+            return stop("reference", sid, check)
+    for b in builds:
+        sid = b["state"]
+        deltas, means, check = extract(sid, f"builds/{sid}")
+        against = {str(x): {"delta": check_reproduction(pinned[sid][x]["delta"], deltas[x],
+                                                         tolerance=tol),
+                            "norm": norm_check(pinned[sid][x]["norm"], means[x]["norm"], tol)}
+                   for x in layers}  # fmt: skip
+        passed = check["passed"] and all(v["delta"]["passed"] and v["norm"]["passed"]
+                                         for v in against.values())  # fmt: skip
+        if not passed:
+            progress.state["builds"][sid] = {"check": check, "pinned": against, "complete": False}
+            return stop("method_equivalence", sid, {"check": check, "pinned": against})
+        root = out / "builds" / sid / "steps"
+        seed = seeds(run_seed, sid, layers)
+        for x in layers:
+            vectors = random_directions(pinned[sid][x]["delta"], seed["random"][str(x)])
+            read(sid, vectors, norm=pinned[sid][x]["norm"], layer=x, decoder="state", root=root,
+                 prefix=f"layer{x}/random")  # fmt: skip
+        record = {"state": sid, "behavior": b.get("behavior"), "lineage": b.get("lineage"),
+                  "role": b["role"], "package": b["package"], "branches": ["random"],
+                  "seeds": seed, "norms": {str(x): pinned[sid][x]["norm"] for x in layers},
+                  "method_equivalence": check, "pinned": against, "layers": list(layers),
+                  "base_means": {str(x): progress.state["files"][f"base_means-layer{x}.safetensors"]
+                                 for x in layers}}  # fmt: skip
+        write_json(out / "builds" / sid / "build.json", record)
+        progress.state["builds"][sid] = {"check": check, "pinned": against, "complete": True}
+        write_json(out / "progress.json", progress.state)
+    result = {"status": "complete", "references": progress.state["references"],
+              "builds": progress.state["builds"], "files": progress.state["files"]}  # fmt: skip
+    write_json(out / "result.json", result)
+    progress.state["status"] = "complete"
+    write_json(out / "progress.json", progress.state)
+    return result
+
+
+def random_files(layers: Sequence[int], positions: int = 5) -> list[str]:
+    """A random-only build's complete file inventory."""
+    return sorted(["build.json", *(f"production-layer{x}.safetensors" for x in layers),
+                   "qualification-layer20.safetensors",
+                   *(f"steps/layer{x}/random/p{p}/{f}" for x in layers for p in range(positions)
+                     for f in ("logit_lens.json", "patchscope.json"))])  # fmt: skip
+
+
+def lrandom_output_problems(out: Path, lrandom: Mapping[str, Any], frozen: str,
+                            run_seed: int) -> list[str]:  # fmt: skip
+    """Why a random-branch session's output is not the frozen session's, complete and checked:
+    its manifest names the frozen session and its plan; its result complete; every reference's
+    check passed; every build its planned state, package and seed, the random branch alone, its
+    method check and its checks against the pinned sources passed at every layer, and exactly
+    its complete file inventory (``random_files``)."""
+    manifest = json.loads((out / "manifest.json").read_text())
+    result = json.loads((out / "result.json").read_text())
+    problems = []
+    if manifest.get("follow_lrandom_sha256") != frozen or manifest.get("plan") != dict(lrandom):
+        problems.append("the session's manifest is not the frozen session's")
+    if result.get("status") != "complete":
+        return problems + [f"the session is {result.get('status')}, not complete"]
+    refs = result.get("references") or {}
+    if sorted(refs) != sorted(r["state"] for r in lrandom["references"]) or not all(
+            c.get("passed") for c in refs.values()):  # fmt: skip
+        problems.append("the references are not every planned A, each passed")
+    layers = [int(x) for x in lrandom["layers"]["read"]]
+    if sorted(result.get("builds") or {}) != sorted(b["state"] for b in lrandom["builds"]):
+        return problems + ["the builds are not the planned ones"]
+    for b in lrandom["builds"]:
+        sid, d = b["state"], out / "builds" / b["state"]
+        made = json.loads((d / "build.json").read_text()) if (d / "build.json").is_file() else {}
+        got = result["builds"][sid]
+        pinned_ok = all(v["delta"]["passed"] and v["norm"]["passed"]
+                        for v in got["pinned"].values())  # fmt: skip
+        checked = got.get("complete") and got["check"].get("passed") and pinned_ok
+        if not checked or sorted(got["pinned"]) != sorted(str(x) for x in layers):
+            problems.append(f"{sid}: its checks did not all pass")
+        if (made.get("state"), made.get("package"), made.get("branches"), made.get("seeds")) != (
+                sid, b["package"], ["random"], seeds(run_seed, sid, layers)):  # fmt: skip
+            problems.append(f"{sid}: not its planned state, package, branch and seed")
+        files = sorted(str(p.relative_to(d)) for p in d.rglob("*") if p.is_file())
+        if files != random_files(layers):
+            problems.append(f"{sid}: not its complete file inventory")
+    return problems

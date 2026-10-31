@@ -1946,18 +1946,27 @@ packages of 2026-10-30 were (`follow_build.execute`, M0's runtime, the same chec
 runtime and adapters before any GPU work):
 
 - the session's builds are exactly the packages B3's inventory names
-  (`follow_build.lrandom_problems`), each L at its package's recorded state and seed;
-- each behavior's A is rebuilt first as a reference; per L, its state means by the production
-  path must reproduce its package's stored means at both layers and its δ̄ the qualification
-  path's, both to 2⁻⁸, before its random branch is read through the state decoder along its
-  package's seeded directions;
+  (`follow_build.lrandom_problems`), each L at its package's recorded state and seed, its
+  control's sources (the package's stored state means and record, the shared base means) at
+  their pinned sha256 (`follow_build.pinned_problems`);
+- each behavior's A is rebuilt first as a reference (`follow_build.execute_random`); per L,
+  the same session's method check stands apart: its own δ̄ against the qualification path and
+  against the pinned δ̄, and its norm against the pinned η, at both layers, each to 2⁻⁸;
+- the random branch is read from the pinned sources alone (`follow_build.pinned_sources`):
+  the directions of the pinned δ̄ (stored means minus the shared base means) at the package's
+  seed, at the pinned η, through the state decoder; a failed check stops the session before
+  anything of that build is read;
 - the existing package runs are never written.
 
-After the pull, `scripts/follow_lrandom.py runs/follow_lrandom/<run> --write` records the run,
-the frozen session, the result's sha256 and every built file's sha256 once in
-`manifests/follow_lrandom.json`, committed with the session's decision-log row; the inventories
-find a branch only through that record (`follow_inventory.random_branches`: the run directory
-exactly once under the runs root, every recorded file at its sha256 and no other).
+After the pull, `scripts/follow_lrandom.py runs/follow_lrandom/<run> --write` checks the output
+whole (`follow_build.lrandom_output_problems`: the manifest the frozen session's, every reference
+and build check passed, each build its planned state, package and seed and exactly its complete
+file inventory) and records the run, the frozen session, the manifest's and the result's
+sha256 and every built file's sha256 once in `manifests/follow_lrandom.json`, committed with the
+session's decision-log row. The inventories find a branch only through that committed record
+(`follow_inventory.random_branches`: the run directory exactly once under the runs root, the
+manifest and result at their recorded sha256, each build's complete inventory at its recorded
+sha256).
 
 ## Artifact retention
 

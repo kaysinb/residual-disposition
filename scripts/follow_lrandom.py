@@ -29,27 +29,27 @@ def sha(path: Path) -> str:
 
 
 def record(run: Path) -> dict:
+    """The record of a pulled session (``run``: its runs-root directory), after its output is
+    checked whole (``follow_build.lrandom_output_problems``)."""
+    from residual_disposition import follow_build as B
+
     session = cr.follow_lrandom()
     found = sorted(run.glob("out/*/result.json"))
     if len(found) != 1:
         raise SystemExit(f"{run}: {len(found)} session results, not one")
     out = found[0].parent
-    result = json.loads(found[0].read_text())
-    if result.get("status") != "complete":
-        raise SystemExit(f"the session is {result.get('status')}, not complete")
-    states = [b["state"] for b in session["builds"]]
-    if sorted(result.get("builds") or {}) != sorted(states):
-        raise SystemExit("the session's builds are not the frozen ones")
+    seed = json.loads((out / "manifest.json").read_text())["config"]["seed"]
+    problems = B.lrandom_output_problems(out, session, cr.FOLLOW_LRANDOM_FROZEN, int(seed))
+    if problems:
+        raise SystemExit("; ".join(problems))
     builds = {}
     for b in session["builds"]:
         d = out / "builds" / b["state"]
-        made = json.loads((d / "build.json").read_text())
-        if made["branches"] != ["random"] or not result["builds"][b["state"]]["complete"]:
-            raise SystemExit(f"{b['state']}: not its random branch, complete")
         builds[b["state"]] = {"package": b["package"], "dir": str(d.relative_to(run)),
                               "files": {str(p.relative_to(d)): sha(p)
                                         for p in sorted(d.rglob("*")) if p.is_file()}}  # fmt: skip
     return {"run": run.name, "session_sha256": cr.FOLLOW_LRANDOM_FROZEN,
+            "out": str(out.relative_to(run)), "manifest_sha256": sha(out / "manifest.json"),
             "result_sha256": sha(found[0]), "builds": builds}  # fmt: skip
 
 

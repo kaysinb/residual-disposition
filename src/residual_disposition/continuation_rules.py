@@ -1380,7 +1380,7 @@ def load_follow_lrandom(path: str | Path = FOLLOW_LRANDOM_PATH, *,
     record; with ``expected_hash``, refused when changed."""
     data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
     lrandom = data["lrandom"]
-    if set(lrandom) != {"runtime", "layers", "references", "builds", "record"}:
+    if set(lrandom) != {"runtime", "layers", "references", "builds", "base_means", "record"}:
         raise ValueError(f"the random-branch session names {sorted(lrandom)}")
     digest = follow_hash(lrandom)
     if expected_hash is not None and digest != expected_hash:
