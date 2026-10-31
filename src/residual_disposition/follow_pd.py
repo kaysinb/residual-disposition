@@ -60,25 +60,29 @@ def _same_rows(a: Sequence[Mapping[str, Any]], b: Sequence[Mapping[str, Any]]) -
 
 
 def stage3_readings(behavior: str, find_run: Any) -> dict[str, Any]:
-    """A Stage-3 lineage's PD-clean reading as its readers' verdicts bind it: the evidence, the
-    hypotheses and the admitted labels (``continuation_readers``), and the record's pools."""
+    """A Stage-3 lineage's PD-clean reading as its readers' verdicts bind it: first the committed
+    readers' manifest verified whole (``continuation_readers.committed_readers``: committed and
+    recomputed from its sources, every bound file and history among them), then its evidence,
+    hypotheses and admitted labels, and the record's pools. Any failure is raised: a provenance
+    failure stops the inventory; it never lets new requests stand in for the existing ones."""
     from . import continuation_readers as CR
+    from .continuation_panel import readers_path
     from .continuation_rules import load_rules
     from .paths import REPO_ROOT
     from .simulate_continuation import FROZEN
 
     rules = load_rules(expected_hash=FROZEN["rules_sha256"])
-    lineage = CR.lineage_of(REPO_ROOT, behavior, rules, find_run)
     name = STAGE3_LINEAGES[behavior]
-    manifest = json.loads((REPO_ROOT / "manifests" / f"stage3_readers_{name}.json").read_text())
+    manifest = CR.committed_readers(readers_path(REPO_ROOT, name), REPO_ROOT, rules, find_run)
+    lineage = CR.lineage_of(REPO_ROOT, behavior, rules, find_run)
     sources = manifest["sources"]
     b = CR._bound_hypotheses(lineage, sources, find_run)
     history = CR.committed_history(lineage, sources, find_run, b)
     pinned = {} if history is None else history["entries"]
     labels = CR.labels(find_run, sources["pd_judge"], "pd", b["pd_h"], behavior, pinned)
     pools = {role: v["pd"] for role, v in b["record"]["readers"].items()}
-    return {"lineage": name, "sources": sources, "pd_ev": b["pd_ev"], "pd_h": b["pd_h"],
-            "labels": labels, "pools": pools}  # fmt: skip
+    return {"lineage": name, "sha256": manifest["sha256"], "sources": sources,
+            "pd_ev": b["pd_ev"], "pd_h": b["pd_h"], "labels": labels, "pools": pools}  # fmt: skip
 
 
 def reuse(reading: Mapping[str, Any], found: Mapping[str, Any] | None, find_run: Any) -> dict:
@@ -120,7 +124,8 @@ def reuse(reading: Mapping[str, Any], found: Mapping[str, Any] | None, find_run:
                "history": h[4], "tier": h[3]} for h in slots]  # fmt: skip
     labels = {ids[h[1]]: found["labels"][ids[h[1]]][2] for h in slots
               if ids[h[1]] in found["labels"]}  # fmt: skip
-    return {"reuse": True, "reading": found["sources"]["pd_reading"], "package": package_run,
+    return {"reuse": True, "readers": {"lineage": found["lineage"], "sha256": found["sha256"]},
+            "reading": found["sources"]["pd_reading"], "package": package_run,
             "judge": found["sources"]["pd_judge"], "slots": mapped, "labels": labels}  # fmt: skip
 
 

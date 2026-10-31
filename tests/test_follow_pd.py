@@ -51,7 +51,8 @@ class World:
             "removed": {"chat": ["x"] if removed else [], "raw": []}}))  # fmt: skip
         hyps = {f"r/{i}": (("sL", PD_CLEAN), i, f"I will {i}.", "standard",
                            [{"key": f"k{i}", "parsed": True}]) for i in range(80)}  # fmt: skip
-        self.found = {"sources": {"pd_reading": "reading", "pd_judge": "judge"},
+        self.found = {"lineage": "stage3_x", "sha256": "m" * 64,
+                      "sources": {"pd_reading": "reading", "pd_judge": "judge"},
                       "pd_ev": {("L", PD_CLEAN): ("sL", PD_CLEAN, "package", P.evidence(rows()))},
                       "pd_h": hyps, "labels": {f"r/{i}": ("y", "n", ["h"]) for i in range(80)},
                       "pools": {"L": "pool"}}  # fmt: skip
@@ -105,3 +106,13 @@ def test_a_package_that_removed_items_or_has_other_lists_is_not_reused(tmp_path)
         "reuse": False,
         "reason": "no committed Stage-3 reading of this lineage",
     }
+
+
+def test_a_provenance_failure_stops_the_inventory(monkeypatch):
+    def broken(behavior, find_run):
+        raise ValueError("not what its sources give")
+
+    monkeypatch.setattr(P, "stage3_readings", broken)
+    reading = {**READING, "behavior": "tldr", "mode": "stack", "dose": 400, "salt": "s"}
+    with pytest.raises(ValueError, match="sources"):
+        P.reuse_map([reading], lambda name: None)

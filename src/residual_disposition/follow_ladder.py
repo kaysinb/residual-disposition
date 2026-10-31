@@ -82,13 +82,19 @@ def steering_rows(samples: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     return rows
 
 
-def render_rung2(run: Path, steering: Mapping[str, Any],
-                 root: Path = REPO_ROOT) -> tuple[str, dict[str, str]]:  # fmt: skip
-    """Rung 2's evidence of one cell: D*'s rendering of its lens package ``run`` with the state
-    decoder, and at layer 20 each position's steering samples (``steering``: ``{"per_position":
-    {pos: {"samples": [...], "failed": reason or None}}}``, §11.1's samples of the cell, every
-    position with one row per closed prompt)."""
-    evidence, sources = R.render(run, "state", root)
+RUNG_DECODERS = ("state", "random")  # a cell's D* branch: its state decoder; L-random's random one
+
+
+def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
+                 decoder: str = "state") -> tuple[str, dict[str, str]]:  # fmt: skip
+    """Rung 2's evidence of one cell: D*'s rendering of its package ``run`` through ``decoder`` (the
+    state decoder; for L with a random direction its stored random branch, at both layers, so that
+    none of L's own readings enters that control), and at layer 20 each position's steering
+    samples (``steering``: ``{"per_position": {pos: {"samples": [...], "failed": reason or
+    None}}}``, §11.1's samples of the cell, every position with one row per closed prompt)."""
+    if decoder not in RUNG_DECODERS:
+        raise ValueError(f"a rung's D* branch is {RUNG_DECODERS}, not {decoder!r}")
+    evidence, sources = R.render(run, decoder, root)
     head = "OVERVIEW:\n"
     overview = json.loads(evidence[len(head) :])
     layer = overview["datasets"]["ds1"]["layers"][str(int(STEERING_LAYER) - 1)]

@@ -2629,6 +2629,10 @@
     ]
    },
    "package": "20261027-055952-pd_clean_package-ef4a4bb8-78fc",
+   "readers": {
+    "lineage": "stage3_countdown_50",
+    "sha256": "737cae8842097b73382c8e93f9ca831d2aba69c0c8348e86d22a6075c6a12ca4"
+   },
    "reading": "20261027-060015-1f453a0e-2a7e",
    "reuse": true,
    "slots": [
@@ -5203,6 +5207,10 @@
     ]
    },
    "package": "20261027-055952-pd_clean_package-64f93c10-8989",
+   "readers": {
+    "lineage": "stage3_countdown_50",
+    "sha256": "737cae8842097b73382c8e93f9ca831d2aba69c0c8348e86d22a6075c6a12ca4"
+   },
    "reading": "20261027-060015-1f453a0e-2a7e",
    "reuse": true,
    "slots": [
@@ -7773,6 +7781,10 @@
     ]
    },
    "package": "20261026-045342-pd_clean_package-efd70907-5854",
+   "readers": {
+    "lineage": "strong_eli5_cont_200",
+    "sha256": "f8db4c61a0bfb8848fb20562fc414d0475b813b33d0c99878d32701ee17db2db"
+   },
    "reading": "20261026-184107-e036dd69-b0c3",
    "reuse": true,
    "slots": [
@@ -10343,6 +10355,10 @@
     ]
    },
    "package": "20261026-045342-pd_clean_package-4aa377c1-5f85",
+   "readers": {
+    "lineage": "strong_eli5_cont_200",
+    "sha256": "f8db4c61a0bfb8848fb20562fc414d0475b813b33d0c99878d32701ee17db2db"
+   },
    "reading": "20261026-184107-e036dd69-b0c3",
    "reuse": true,
    "slots": [
@@ -12913,6 +12929,10 @@
     ]
    },
    "package": "20261026-045342-pd_clean_package-6e66a6d9-03da",
+   "readers": {
+    "lineage": "strong_eli5_cont_200",
+    "sha256": "f8db4c61a0bfb8848fb20562fc414d0475b813b33d0c99878d32701ee17db2db"
+   },
    "reading": "20261026-184107-e036dd69-b0c3",
    "reuse": true,
    "slots": [
@@ -15519,6 +15539,10 @@
     ]
    },
    "package": "20261026-174502-pd_clean_package-bb08406f-af76",
+   "readers": {
+    "lineage": "stage3_tldr_400",
+    "sha256": "2488db33ec553bb5a1bc435ed800140769cd28a858c2c89ba5acb366a05c1ea1"
+   },
    "reading": "20261026-191507-2c7968c3-a488",
    "reuse": true,
    "slots": [
@@ -18093,6 +18117,10 @@
     ]
    },
    "package": "20261026-174502-pd_clean_package-48da773a-422a",
+   "readers": {
+    "lineage": "stage3_tldr_400",
+    "sha256": "2488db33ec553bb5a1bc435ed800140769cd28a858c2c89ba5acb366a05c1ea1"
+   },
    "reading": "20261026-191507-2c7968c3-a488",
    "reuse": true,
    "slots": [
@@ -20663,6 +20691,10 @@
     ]
    },
    "package": "20261026-044409-pd_clean_package-39a33a4c-d137",
+   "readers": {
+    "lineage": "stage3_word_count_claim_200",
+    "sha256": "6a9c982ecaddc63d2b037b6adf78d1dac027f9f76b79dbd79c92e42f4aa4e9b4"
+   },
    "reading": "20261026-180500-4c655d8d-0242",
    "reuse": true,
    "slots": [
@@ -23237,6 +23269,10 @@
     ]
    },
    "package": "20261026-044410-pd_clean_package-3b0356b9-fb94",
+   "readers": {
+    "lineage": "stage3_word_count_claim_200",
+    "sha256": "6a9c982ecaddc63d2b037b6adf78d1dac027f9f76b79dbd79c92e42f4aa4e9b4"
+   },
    "reading": "20261026-180500-4c655d8d-0242",
    "reuse": true,
    "slots": [
@@ -24376,7 +24412,6 @@
      "run": "20261025-180513-adl_lens_package-c1b2e941-3b6d"
     },
     "purpose": "analysis",
-    "random": false,
     "reader": "rung2",
     "role": "L",
     "salt": "follow/rung2/analysis/eli5/continued200/L/stream1",
@@ -24405,7 +24440,6 @@
      "run": "20261025-181337-adl_lens_package-a5deb28f-116d"
     },
     "purpose": "analysis",
-    "random": false,
     "reader": "rung2",
     "role": "H_s",
     "salt": "follow/rung2/analysis/eli5/continued200/H_s/stream1",
@@ -24434,7 +24468,6 @@
      "run": "20261025-182655-adl_lens_package-33fdec5b-2051"
     },
     "purpose": "analysis",
-    "random": false,
     "reader": "rung2",
     "role": "X",
     "salt": "follow/rung2/analysis/eli5/continued200/X/stream1",
@@ -24463,7 +24496,6 @@
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
     "purpose": "analysis",
-    "random": false,
     "reader": "rung2",
     "role": "recipe",
     "salt": "follow/rung2/analysis/eli5/continued200/recipe/stream1",
@@ -24484,15 +24516,14 @@
    {
     "behavior": "eli5",
     "component": null,
-    "decoder": "state",
+    "decoder": "random",
     "dose": 200,
     "if_confirmed": null,
     "mode": "continued",
     "package": {
-     "run": "20261025-180513-adl_lens_package-c1b2e941-3b6d"
+     "new": "random branch of 20261025-180513-adl_lens_package-c1b2e941-3b6d"
     },
     "purpose": "analysis",
-    "random": true,
     "reader": "rung2",
     "role": "L_random",
     "salt": "follow/rung2/analysis/eli5/continued200/L_random/stream1",
@@ -24511,123 +24542,7 @@
     }
    }
   ],
-  "qualification": [
-   {
-    "behavior": "eli5",
-    "component": null,
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-174431-adl_lens_package-436766c9-4981"
-    },
-    "purpose": "qualification",
-    "random": false,
-    "reader": "rung2",
-    "role": "A",
-    "salt": "follow/rung2/qualification/eli5/A/stream1",
-    "slots": 80,
-    "stream": 1,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "4e567237a71972f74db71e4e5bce38c083ac8594c7ffecd7f8ec76db0a45bae6",
-      "steps/extraction.safetensors": "ce6c6dc54194219ff0971f3096f5ba7a59e4d3437cf2628e309e2ab577392ce8"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": null,
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-174431-adl_lens_package-436766c9-4981"
-    },
-    "purpose": "qualification",
-    "random": false,
-    "reader": "rung2",
-    "role": "A",
-    "salt": "follow/rung2/qualification/eli5/A/stream2",
-    "slots": 80,
-    "stream": 2,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "4e567237a71972f74db71e4e5bce38c083ac8594c7ffecd7f8ec76db0a45bae6",
-      "steps/extraction.safetensors": "ce6c6dc54194219ff0971f3096f5ba7a59e4d3437cf2628e309e2ab577392ce8"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": null,
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
-    },
-    "purpose": "qualification",
-    "random": false,
-    "reader": "rung2",
-    "role": "H",
-    "salt": "follow/rung2/qualification/eli5/H/stream1",
-    "slots": 80,
-    "stream": 1,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
-      "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": null,
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
-    },
-    "purpose": "qualification",
-    "random": false,
-    "reader": "rung2",
-    "role": "H",
-    "salt": "follow/rung2/qualification/eli5/H/stream2",
-    "slots": 80,
-    "stream": 2,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
-      "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
-     }
-    }
-   },
+  "recipe_continued": [
    {
     "behavior": "eli5",
     "component": null,
@@ -24639,7 +24554,6 @@
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
     "purpose": "qualification",
-    "random": false,
     "reader": "rung2",
     "role": "recipe_cont",
     "salt": "follow/rung2/qualification/eli5/recipe_cont/stream1",
@@ -24668,7 +24582,6 @@
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
     "purpose": "qualification",
-    "random": false,
     "reader": "rung2",
     "role": "recipe_cont",
     "salt": "follow/rung2/qualification/eli5/recipe_cont/stream2",
@@ -24687,7 +24600,341 @@
     }
    }
   ],
-  "validation": [
+  "recipe_stack": [
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "qualification",
+    "reader": "rung2",
+    "role": "recipe",
+    "salt": "follow/rung2/qualification/eli5/recipe/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "qualification",
+    "reader": "rung2",
+    "role": "recipe",
+    "salt": "follow/rung2/qualification/eli5/recipe/stream2",
+    "slots": 80,
+    "stream": 2
+   }
+  ],
+  "shared": [
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "qualification",
+    "reader": "rung2",
+    "role": "A",
+    "salt": "follow/rung2/qualification/eli5/A/stream1",
+    "slots": 80,
+    "stream": 1,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "4e567237a71972f74db71e4e5bce38c083ac8594c7ffecd7f8ec76db0a45bae6",
+      "steps/extraction.safetensors": "ce6c6dc54194219ff0971f3096f5ba7a59e4d3437cf2628e309e2ab577392ce8"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "qualification",
+    "reader": "rung2",
+    "role": "A",
+    "salt": "follow/rung2/qualification/eli5/A/stream2",
+    "slots": 80,
+    "stream": 2,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "4e567237a71972f74db71e4e5bce38c083ac8594c7ffecd7f8ec76db0a45bae6",
+      "steps/extraction.safetensors": "ce6c6dc54194219ff0971f3096f5ba7a59e4d3437cf2628e309e2ab577392ce8"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
+    },
+    "purpose": "qualification",
+    "reader": "rung2",
+    "role": "H",
+    "salt": "follow/rung2/qualification/eli5/H/stream1",
+    "slots": 80,
+    "stream": 1,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
+      "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
+    },
+    "purpose": "qualification",
+    "reader": "rung2",
+    "role": "H",
+    "salt": "follow/rung2/qualification/eli5/H/stream2",
+    "slots": 80,
+    "stream": 2,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
+      "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
+     }
+    }
+   }
+  ],
+  "validation_recipe_continued": [
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "validation",
+    "reader": "rung2",
+    "role": "recipe_cont",
+    "salt": "follow/rung2/validation/eli5/recipe_cont/stream3",
+    "slots": 80,
+    "stream": 3,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
+      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "validation",
+    "reader": "rung2",
+    "role": "recipe_cont",
+    "salt": "follow/rung2/validation/eli5/recipe_cont/stream4",
+    "slots": 80,
+    "stream": 4,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
+      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "validation",
+    "reader": "rung2",
+    "role": "recipe_cont",
+    "salt": "follow/rung2/validation/eli5/recipe_cont/stream5",
+    "slots": 80,
+    "stream": 5,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
+      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "validation",
+    "reader": "rung2",
+    "role": "recipe_cont",
+    "salt": "follow/rung2/validation/eli5/recipe_cont/stream6",
+    "slots": 80,
+    "stream": 6,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
+      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
+     }
+    }
+   }
+  ],
+  "validation_recipe_stack": [
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "validation",
+    "reader": "rung2",
+    "role": "recipe",
+    "salt": "follow/rung2/validation/eli5/recipe/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "validation",
+    "reader": "rung2",
+    "role": "recipe",
+    "salt": "follow/rung2/validation/eli5/recipe/stream4",
+    "slots": 80,
+    "stream": 4
+   },
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "validation",
+    "reader": "rung2",
+    "role": "recipe",
+    "salt": "follow/rung2/validation/eli5/recipe/stream5",
+    "slots": 80,
+    "stream": 5
+   },
+   {
+    "behavior": "eli5",
+    "component": null,
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "validation",
+    "reader": "rung2",
+    "role": "recipe",
+    "salt": "follow/rung2/validation/eli5/recipe/stream6",
+    "slots": 80,
+    "stream": 6
+   }
+  ],
+  "validation_shared": [
    {
     "behavior": "eli5",
     "component": null,
@@ -24699,7 +24946,6 @@
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung2",
     "role": "A",
     "salt": "follow/rung2/validation/eli5/A/stream3",
@@ -24728,7 +24974,6 @@
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung2",
     "role": "H",
     "salt": "follow/rung2/validation/eli5/H/stream3",
@@ -24754,39 +24999,9 @@
     "if_confirmed": null,
     "mode": null,
     "package": {
-     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
-    },
-    "purpose": "validation",
-    "random": false,
-    "reader": "rung2",
-    "role": "recipe_cont",
-    "salt": "follow/rung2/validation/eli5/recipe_cont/stream3",
-    "slots": 80,
-    "stream": 3,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
-      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": null,
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung2",
     "role": "A",
     "salt": "follow/rung2/validation/eli5/A/stream4",
@@ -24815,7 +25030,6 @@
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung2",
     "role": "H",
     "salt": "follow/rung2/validation/eli5/H/stream4",
@@ -24841,39 +25055,9 @@
     "if_confirmed": null,
     "mode": null,
     "package": {
-     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
-    },
-    "purpose": "validation",
-    "random": false,
-    "reader": "rung2",
-    "role": "recipe_cont",
-    "salt": "follow/rung2/validation/eli5/recipe_cont/stream4",
-    "slots": 80,
-    "stream": 4,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
-      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": null,
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung2",
     "role": "A",
     "salt": "follow/rung2/validation/eli5/A/stream5",
@@ -24902,7 +25086,6 @@
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung2",
     "role": "H",
     "salt": "follow/rung2/validation/eli5/H/stream5",
@@ -24928,39 +25111,9 @@
     "if_confirmed": null,
     "mode": null,
     "package": {
-     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
-    },
-    "purpose": "validation",
-    "random": false,
-    "reader": "rung2",
-    "role": "recipe_cont",
-    "salt": "follow/rung2/validation/eli5/recipe_cont/stream5",
-    "slots": 80,
-    "stream": 5,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
-      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": null,
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung2",
     "role": "A",
     "salt": "follow/rung2/validation/eli5/A/stream6",
@@ -24989,7 +25142,6 @@
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung2",
     "role": "H",
     "salt": "follow/rung2/validation/eli5/H/stream6",
@@ -25004,35 +25156,6 @@
      "files": {
       "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
       "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": null,
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
-    },
-    "purpose": "validation",
-    "random": false,
-    "reader": "rung2",
-    "role": "recipe_cont",
-    "salt": "follow/rung2/validation/eli5/recipe_cont/stream6",
-    "slots": 80,
-    "stream": 6,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
-      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
      }
     }
    }
@@ -25051,7 +25174,6 @@
      "run": "20261025-180513-adl_lens_package-c1b2e941-3b6d"
     },
     "purpose": "analysis",
-    "random": false,
     "reader": "rung3",
     "role": "L",
     "salt": "follow/rung3/agent/analysis/eli5/continued200/L/stream1",
@@ -25080,7 +25202,6 @@
      "run": "20261025-181337-adl_lens_package-a5deb28f-116d"
     },
     "purpose": "analysis",
-    "random": false,
     "reader": "rung3",
     "role": "H_s",
     "salt": "follow/rung3/agent/analysis/eli5/continued200/H_s/stream1",
@@ -25109,7 +25230,6 @@
      "run": "20261025-182655-adl_lens_package-33fdec5b-2051"
     },
     "purpose": "analysis",
-    "random": false,
     "reader": "rung3",
     "role": "X",
     "salt": "follow/rung3/agent/analysis/eli5/continued200/X/stream1",
@@ -25138,7 +25258,6 @@
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
     "purpose": "analysis",
-    "random": false,
     "reader": "rung3",
     "role": "recipe",
     "salt": "follow/rung3/agent/analysis/eli5/continued200/recipe/stream1",
@@ -25159,15 +25278,14 @@
    {
     "behavior": "eli5",
     "component": "agent",
-    "decoder": "state",
+    "decoder": "random",
     "dose": 200,
     "if_confirmed": null,
     "mode": "continued",
     "package": {
-     "run": "20261025-180513-adl_lens_package-c1b2e941-3b6d"
+     "new": "random branch of 20261025-180513-adl_lens_package-c1b2e941-3b6d"
     },
     "purpose": "analysis",
-    "random": true,
     "reader": "rung3",
     "role": "L_random",
     "salt": "follow/rung3/agent/analysis/eli5/continued200/L_random/stream1",
@@ -25196,7 +25314,6 @@
      "run": "20261025-180513-adl_lens_package-c1b2e941-3b6d"
     },
     "purpose": "analysis",
-    "random": false,
     "reader": "rung3",
     "role": "L",
     "salt": "follow/rung3/comparator/analysis/eli5/continued200/L/stream1",
@@ -25225,7 +25342,6 @@
      "run": "20261025-181337-adl_lens_package-a5deb28f-116d"
     },
     "purpose": "analysis",
-    "random": false,
     "reader": "rung3",
     "role": "H_s",
     "salt": "follow/rung3/comparator/analysis/eli5/continued200/H_s/stream1",
@@ -25254,7 +25370,6 @@
      "run": "20261025-182655-adl_lens_package-33fdec5b-2051"
     },
     "purpose": "analysis",
-    "random": false,
     "reader": "rung3",
     "role": "X",
     "salt": "follow/rung3/comparator/analysis/eli5/continued200/X/stream1",
@@ -25283,7 +25398,6 @@
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
     "purpose": "analysis",
-    "random": false,
     "reader": "rung3",
     "role": "recipe",
     "salt": "follow/rung3/comparator/analysis/eli5/continued200/recipe/stream1",
@@ -25302,123 +25416,7 @@
     }
    }
   ],
-  "qualification": [
-   {
-    "behavior": "eli5",
-    "component": "agent",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-174431-adl_lens_package-436766c9-4981"
-    },
-    "purpose": "qualification",
-    "random": false,
-    "reader": "rung3",
-    "role": "A",
-    "salt": "follow/rung3/agent/qualification/eli5/A/stream1",
-    "slots": 80,
-    "stream": 1,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "4e567237a71972f74db71e4e5bce38c083ac8594c7ffecd7f8ec76db0a45bae6",
-      "steps/extraction.safetensors": "ce6c6dc54194219ff0971f3096f5ba7a59e4d3437cf2628e309e2ab577392ce8"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": "agent",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-174431-adl_lens_package-436766c9-4981"
-    },
-    "purpose": "qualification",
-    "random": false,
-    "reader": "rung3",
-    "role": "A",
-    "salt": "follow/rung3/agent/qualification/eli5/A/stream2",
-    "slots": 80,
-    "stream": 2,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "4e567237a71972f74db71e4e5bce38c083ac8594c7ffecd7f8ec76db0a45bae6",
-      "steps/extraction.safetensors": "ce6c6dc54194219ff0971f3096f5ba7a59e4d3437cf2628e309e2ab577392ce8"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": "agent",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
-    },
-    "purpose": "qualification",
-    "random": false,
-    "reader": "rung3",
-    "role": "H",
-    "salt": "follow/rung3/agent/qualification/eli5/H/stream1",
-    "slots": 80,
-    "stream": 1,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
-      "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": "agent",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
-    },
-    "purpose": "qualification",
-    "random": false,
-    "reader": "rung3",
-    "role": "H",
-    "salt": "follow/rung3/agent/qualification/eli5/H/stream2",
-    "slots": 80,
-    "stream": 2,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
-      "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
-     }
-    }
-   },
+  "recipe_continued": [
    {
     "behavior": "eli5",
     "component": "agent",
@@ -25430,7 +25428,6 @@
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
     "purpose": "qualification",
-    "random": false,
     "reader": "rung3",
     "role": "recipe_cont",
     "salt": "follow/rung3/agent/qualification/eli5/recipe_cont/stream1",
@@ -25459,7 +25456,6 @@
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
     "purpose": "qualification",
-    "random": false,
     "reader": "rung3",
     "role": "recipe_cont",
     "salt": "follow/rung3/agent/qualification/eli5/recipe_cont/stream2",
@@ -25485,126 +25481,9 @@
     "if_confirmed": null,
     "mode": null,
     "package": {
-     "run": "20261025-174431-adl_lens_package-436766c9-4981"
-    },
-    "purpose": "qualification",
-    "random": false,
-    "reader": "rung3",
-    "role": "A",
-    "salt": "follow/rung3/comparator/qualification/eli5/A/stream1",
-    "slots": 80,
-    "stream": 1,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "4e567237a71972f74db71e4e5bce38c083ac8594c7ffecd7f8ec76db0a45bae6",
-      "steps/extraction.safetensors": "ce6c6dc54194219ff0971f3096f5ba7a59e4d3437cf2628e309e2ab577392ce8"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": "comparator",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-174431-adl_lens_package-436766c9-4981"
-    },
-    "purpose": "qualification",
-    "random": false,
-    "reader": "rung3",
-    "role": "A",
-    "salt": "follow/rung3/comparator/qualification/eli5/A/stream2",
-    "slots": 80,
-    "stream": 2,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "4e567237a71972f74db71e4e5bce38c083ac8594c7ffecd7f8ec76db0a45bae6",
-      "steps/extraction.safetensors": "ce6c6dc54194219ff0971f3096f5ba7a59e4d3437cf2628e309e2ab577392ce8"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": "comparator",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
-    },
-    "purpose": "qualification",
-    "random": false,
-    "reader": "rung3",
-    "role": "H",
-    "salt": "follow/rung3/comparator/qualification/eli5/H/stream1",
-    "slots": 80,
-    "stream": 1,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
-      "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": "comparator",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
-    },
-    "purpose": "qualification",
-    "random": false,
-    "reader": "rung3",
-    "role": "H",
-    "salt": "follow/rung3/comparator/qualification/eli5/H/stream2",
-    "slots": 80,
-    "stream": 2,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
-      "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": "comparator",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
     "purpose": "qualification",
-    "random": false,
     "reader": "rung3",
     "role": "recipe_cont",
     "salt": "follow/rung3/comparator/qualification/eli5/recipe_cont/stream1",
@@ -25633,7 +25512,6 @@
      "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
     },
     "purpose": "qualification",
-    "random": false,
     "reader": "rung3",
     "role": "recipe_cont",
     "salt": "follow/rung3/comparator/qualification/eli5/recipe_cont/stream2",
@@ -25652,7 +25530,667 @@
     }
    }
   ],
-  "validation": [
+  "recipe_stack": [
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "qualification",
+    "reader": "rung3",
+    "role": "recipe",
+    "salt": "follow/rung3/agent/qualification/eli5/recipe/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "qualification",
+    "reader": "rung3",
+    "role": "recipe",
+    "salt": "follow/rung3/agent/qualification/eli5/recipe/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "qualification",
+    "reader": "rung3",
+    "role": "recipe",
+    "salt": "follow/rung3/comparator/qualification/eli5/recipe/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "qualification",
+    "reader": "rung3",
+    "role": "recipe",
+    "salt": "follow/rung3/comparator/qualification/eli5/recipe/stream2",
+    "slots": 80,
+    "stream": 2
+   }
+  ],
+  "shared": [
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "qualification",
+    "reader": "rung3",
+    "role": "A",
+    "salt": "follow/rung3/agent/qualification/eli5/A/stream1",
+    "slots": 80,
+    "stream": 1,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "4e567237a71972f74db71e4e5bce38c083ac8594c7ffecd7f8ec76db0a45bae6",
+      "steps/extraction.safetensors": "ce6c6dc54194219ff0971f3096f5ba7a59e4d3437cf2628e309e2ab577392ce8"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "qualification",
+    "reader": "rung3",
+    "role": "A",
+    "salt": "follow/rung3/agent/qualification/eli5/A/stream2",
+    "slots": 80,
+    "stream": 2,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "4e567237a71972f74db71e4e5bce38c083ac8594c7ffecd7f8ec76db0a45bae6",
+      "steps/extraction.safetensors": "ce6c6dc54194219ff0971f3096f5ba7a59e4d3437cf2628e309e2ab577392ce8"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
+    },
+    "purpose": "qualification",
+    "reader": "rung3",
+    "role": "H",
+    "salt": "follow/rung3/agent/qualification/eli5/H/stream1",
+    "slots": 80,
+    "stream": 1,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
+      "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
+    },
+    "purpose": "qualification",
+    "reader": "rung3",
+    "role": "H",
+    "salt": "follow/rung3/agent/qualification/eli5/H/stream2",
+    "slots": 80,
+    "stream": 2,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
+      "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "qualification",
+    "reader": "rung3",
+    "role": "A",
+    "salt": "follow/rung3/comparator/qualification/eli5/A/stream1",
+    "slots": 80,
+    "stream": 1,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "4e567237a71972f74db71e4e5bce38c083ac8594c7ffecd7f8ec76db0a45bae6",
+      "steps/extraction.safetensors": "ce6c6dc54194219ff0971f3096f5ba7a59e4d3437cf2628e309e2ab577392ce8"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "qualification",
+    "reader": "rung3",
+    "role": "A",
+    "salt": "follow/rung3/comparator/qualification/eli5/A/stream2",
+    "slots": 80,
+    "stream": 2,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "4e567237a71972f74db71e4e5bce38c083ac8594c7ffecd7f8ec76db0a45bae6",
+      "steps/extraction.safetensors": "ce6c6dc54194219ff0971f3096f5ba7a59e4d3437cf2628e309e2ab577392ce8"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
+    },
+    "purpose": "qualification",
+    "reader": "rung3",
+    "role": "H",
+    "salt": "follow/rung3/comparator/qualification/eli5/H/stream1",
+    "slots": 80,
+    "stream": 1,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
+      "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
+    },
+    "purpose": "qualification",
+    "reader": "rung3",
+    "role": "H",
+    "salt": "follow/rung3/comparator/qualification/eli5/H/stream2",
+    "slots": 80,
+    "stream": 2,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
+      "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
+     }
+    }
+   }
+  ],
+  "validation_recipe_continued": [
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe_cont",
+    "salt": "follow/rung3/agent/validation/eli5/recipe_cont/stream3",
+    "slots": 80,
+    "stream": 3,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
+      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe_cont",
+    "salt": "follow/rung3/comparator/validation/eli5/recipe_cont/stream3",
+    "slots": 80,
+    "stream": 3,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
+      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe_cont",
+    "salt": "follow/rung3/agent/validation/eli5/recipe_cont/stream4",
+    "slots": 80,
+    "stream": 4,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
+      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe_cont",
+    "salt": "follow/rung3/comparator/validation/eli5/recipe_cont/stream4",
+    "slots": 80,
+    "stream": 4,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
+      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe_cont",
+    "salt": "follow/rung3/agent/validation/eli5/recipe_cont/stream5",
+    "slots": 80,
+    "stream": 5,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
+      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe_cont",
+    "salt": "follow/rung3/comparator/validation/eli5/recipe_cont/stream5",
+    "slots": 80,
+    "stream": 5,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
+      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe_cont",
+    "salt": "follow/rung3/agent/validation/eli5/recipe_cont/stream6",
+    "slots": 80,
+    "stream": 6,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
+      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
+     }
+    }
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe_cont",
+    "salt": "follow/rung3/comparator/validation/eli5/recipe_cont/stream6",
+    "slots": 80,
+    "stream": 6,
+    "vector": {
+     "base_means": {
+      "cell": "c271396ac904",
+      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
+      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
+     },
+     "files": {
+      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
+      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
+     }
+    }
+   }
+  ],
+  "validation_recipe_stack": [
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe",
+    "salt": "follow/rung3/agent/validation/eli5/recipe/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe",
+    "salt": "follow/rung3/comparator/validation/eli5/recipe/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe",
+    "salt": "follow/rung3/agent/validation/eli5/recipe/stream4",
+    "slots": 80,
+    "stream": 4
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe",
+    "salt": "follow/rung3/comparator/validation/eli5/recipe/stream4",
+    "slots": 80,
+    "stream": 4
+   },
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe",
+    "salt": "follow/rung3/agent/validation/eli5/recipe/stream5",
+    "slots": 80,
+    "stream": 5
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe",
+    "salt": "follow/rung3/comparator/validation/eli5/recipe/stream5",
+    "slots": 80,
+    "stream": 5
+   },
+   {
+    "behavior": "eli5",
+    "component": "agent",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe",
+    "salt": "follow/rung3/agent/validation/eli5/recipe/stream6",
+    "slots": 80,
+    "stream": 6
+   },
+   {
+    "behavior": "eli5",
+    "component": "comparator",
+    "decoder": "state",
+    "dose": null,
+    "if_confirmed": null,
+    "mode": null,
+    "package": {
+     "new": "the validated stack candidate's recipe control"
+    },
+    "purpose": "validation",
+    "reader": "rung3",
+    "role": "recipe",
+    "salt": "follow/rung3/comparator/validation/eli5/recipe/stream6",
+    "slots": 80,
+    "stream": 6
+   }
+  ],
+  "validation_shared": [
    {
     "behavior": "eli5",
     "component": "agent",
@@ -25664,7 +26202,6 @@
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "A",
     "salt": "follow/rung3/agent/validation/eli5/A/stream3",
@@ -25693,7 +26230,6 @@
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "H",
     "salt": "follow/rung3/agent/validation/eli5/H/stream3",
@@ -25713,35 +26249,6 @@
    },
    {
     "behavior": "eli5",
-    "component": "agent",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
-    },
-    "purpose": "validation",
-    "random": false,
-    "reader": "rung3",
-    "role": "recipe_cont",
-    "salt": "follow/rung3/agent/validation/eli5/recipe_cont/stream3",
-    "slots": 80,
-    "stream": 3,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
-      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
     "component": "comparator",
     "decoder": "state",
     "dose": null,
@@ -25751,7 +26258,6 @@
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "A",
     "salt": "follow/rung3/comparator/validation/eli5/A/stream3",
@@ -25780,7 +26286,6 @@
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "H",
     "salt": "follow/rung3/comparator/validation/eli5/H/stream3",
@@ -25800,35 +26305,6 @@
    },
    {
     "behavior": "eli5",
-    "component": "comparator",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
-    },
-    "purpose": "validation",
-    "random": false,
-    "reader": "rung3",
-    "role": "recipe_cont",
-    "salt": "follow/rung3/comparator/validation/eli5/recipe_cont/stream3",
-    "slots": 80,
-    "stream": 3,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
-      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
     "component": "agent",
     "decoder": "state",
     "dose": null,
@@ -25838,7 +26314,6 @@
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "A",
     "salt": "follow/rung3/agent/validation/eli5/A/stream4",
@@ -25867,7 +26342,6 @@
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "H",
     "salt": "follow/rung3/agent/validation/eli5/H/stream4",
@@ -25887,35 +26361,6 @@
    },
    {
     "behavior": "eli5",
-    "component": "agent",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
-    },
-    "purpose": "validation",
-    "random": false,
-    "reader": "rung3",
-    "role": "recipe_cont",
-    "salt": "follow/rung3/agent/validation/eli5/recipe_cont/stream4",
-    "slots": 80,
-    "stream": 4,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
-      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
     "component": "comparator",
     "decoder": "state",
     "dose": null,
@@ -25925,7 +26370,6 @@
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "A",
     "salt": "follow/rung3/comparator/validation/eli5/A/stream4",
@@ -25954,7 +26398,6 @@
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "H",
     "salt": "follow/rung3/comparator/validation/eli5/H/stream4",
@@ -25974,35 +26417,6 @@
    },
    {
     "behavior": "eli5",
-    "component": "comparator",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
-    },
-    "purpose": "validation",
-    "random": false,
-    "reader": "rung3",
-    "role": "recipe_cont",
-    "salt": "follow/rung3/comparator/validation/eli5/recipe_cont/stream4",
-    "slots": 80,
-    "stream": 4,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
-      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
     "component": "agent",
     "decoder": "state",
     "dose": null,
@@ -26012,7 +26426,6 @@
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "A",
     "salt": "follow/rung3/agent/validation/eli5/A/stream5",
@@ -26041,7 +26454,6 @@
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "H",
     "salt": "follow/rung3/agent/validation/eli5/H/stream5",
@@ -26061,35 +26473,6 @@
    },
    {
     "behavior": "eli5",
-    "component": "agent",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
-    },
-    "purpose": "validation",
-    "random": false,
-    "reader": "rung3",
-    "role": "recipe_cont",
-    "salt": "follow/rung3/agent/validation/eli5/recipe_cont/stream5",
-    "slots": 80,
-    "stream": 5,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
-      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
     "component": "comparator",
     "decoder": "state",
     "dose": null,
@@ -26099,7 +26482,6 @@
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "A",
     "salt": "follow/rung3/comparator/validation/eli5/A/stream5",
@@ -26128,7 +26510,6 @@
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "H",
     "salt": "follow/rung3/comparator/validation/eli5/H/stream5",
@@ -26148,35 +26529,6 @@
    },
    {
     "behavior": "eli5",
-    "component": "comparator",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
-    },
-    "purpose": "validation",
-    "random": false,
-    "reader": "rung3",
-    "role": "recipe_cont",
-    "salt": "follow/rung3/comparator/validation/eli5/recipe_cont/stream5",
-    "slots": 80,
-    "stream": 5,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
-      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
     "component": "agent",
     "decoder": "state",
     "dose": null,
@@ -26186,7 +26538,6 @@
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "A",
     "salt": "follow/rung3/agent/validation/eli5/A/stream6",
@@ -26215,7 +26566,6 @@
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "H",
     "salt": "follow/rung3/agent/validation/eli5/H/stream6",
@@ -26235,35 +26585,6 @@
    },
    {
     "behavior": "eli5",
-    "component": "agent",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
-    },
-    "purpose": "validation",
-    "random": false,
-    "reader": "rung3",
-    "role": "recipe_cont",
-    "salt": "follow/rung3/agent/validation/eli5/recipe_cont/stream6",
-    "slots": 80,
-    "stream": 6,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
-      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
     "component": "comparator",
     "decoder": "state",
     "dose": null,
@@ -26273,7 +26594,6 @@
      "run": "20261025-174431-adl_lens_package-436766c9-4981"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "A",
     "salt": "follow/rung3/comparator/validation/eli5/A/stream6",
@@ -26302,7 +26622,6 @@
      "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
     },
     "purpose": "validation",
-    "random": false,
     "reader": "rung3",
     "role": "H",
     "salt": "follow/rung3/comparator/validation/eli5/H/stream6",
@@ -26317,35 +26636,6 @@
      "files": {
       "adl_lens_package.json": "88fd537721cb0b33e3db06ddb01b5850cd1d74074d72d2e87aa97a8fc4c71193",
       "steps/extraction.safetensors": "7f74b6529ab358d59fce532a05396f0a897ff360ecd909145f59c7e682815fa3"
-     }
-    }
-   },
-   {
-    "behavior": "eli5",
-    "component": "comparator",
-    "decoder": "state",
-    "dose": null,
-    "if_confirmed": null,
-    "mode": null,
-    "package": {
-     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
-    },
-    "purpose": "validation",
-    "random": false,
-    "reader": "rung3",
-    "role": "recipe_cont",
-    "salt": "follow/rung3/comparator/validation/eli5/recipe_cont/stream6",
-    "slots": 80,
-    "stream": 6,
-    "vector": {
-     "base_means": {
-      "cell": "c271396ac904",
-      "run": "20261015-232730-adl_base_means-c271396a-5f0e",
-      "sha256": "f8f307e5c272051893bc92e5fe8dce397a52b5698e418ef6de5c1ddb8a5c2a67"
-     },
-     "files": {
-      "adl_lens_package.json": "5eb5d1e012fdeac97276fe53b073befa94157daad2c819a0a5907d44e6f366a3",
-      "steps/extraction.safetensors": "a3040b8b0ad6c53708c7ee80645b4ec3e6925efe661ed878a6f4d754786e6512"
      }
     }
    }

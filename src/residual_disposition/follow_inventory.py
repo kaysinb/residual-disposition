@@ -505,28 +505,31 @@ def _rung_reading(
             "salt": rung_salt(rung, purpose, role, stream, mode, dose, component)}  # fmt: skip
 
 
-def rung_qualification(rung: int, mode: str) -> list[dict[str, Any]]:
-    """A rung's qualification readings for a mode (§13.5 (a)): A and H once for both modes (with the
-    first mode read), the mode's recipe control, two streams of 80 each; at rung 3 the agent's and
-    the comparator's alike."""
-    roles = ("A", "H", RUNG_MODES[mode]) if mode == "continued" else (RUNG_MODES[mode],)
-    components = RUNG3_COMPONENTS if rung == 3 else (None,)
+def _components(rung: int) -> tuple[str | None, ...]:
+    return RUNG3_COMPONENTS if rung == 3 else (None,)
+
+
+def rung_shared(rung: int) -> list[dict[str, Any]]:
+    """A rung's shared qualification readings (§13.5 (a)): A and H, two streams of 80, at rung 3
+    for the agent and the comparator; read once, in whichever mode first reaches the rung."""
     return [_rung_reading(rung, "qualification", role, stream, component=c)
-            for c in components for role in roles for stream in STREAMS]  # fmt: skip
+            for c in _components(rung) for role in ("A", "H") for stream in STREAMS]  # fmt: skip
 
 
-def rung_supplement(rung: int) -> list[dict[str, Any]]:
-    """A rung's supplemental validation-only readings, in their generation order, generated whole
-    only if its format's frame is short: further streams of the control states A, H and the
-    first mode's recipe control (§13.5's validation-only streams), at rung 3 for both components."""
-    components = RUNG3_COMPONENTS if rung == 3 else (None,)
-    roles = ("A", "H", RUNG_MODES["continued"])
-    return [
-        _rung_reading(rung, "validation", role, stream, component=c)
-        for stream in RUNG_SUPPLEMENT_STREAMS
-        for c in components
-        for role in roles
-    ]
+def rung_recipe(rung: int, mode: str) -> list[dict[str, Any]]:
+    """A mode's own recipe-control qualification readings at a rung, two streams of 80."""
+    return [_rung_reading(rung, "qualification", RUNG_MODES[mode], stream, component=c)
+            for c in _components(rung) for stream in STREAMS]  # fmt: skip
+
+
+def rung_supplement(rung: int, mode: str | None = None) -> list[dict[str, Any]]:
+    """A rung's validation-only readings, in their generation order, generated whole only if its
+    format's frame is short: per stream 3–6, A and H (``mode`` None), or the recipe control of
+    ``mode``, the mode that first reaches the rung (its frame's); at rung 3 for both components."""
+    roles = ("A", "H") if mode is None else (RUNG_MODES[mode],)
+    return [_rung_reading(rung, "validation", role, stream, component=c)
+            for stream in RUNG_SUPPLEMENT_STREAMS for c in _components(rung)
+            for role in roles]  # fmt: skip
 
 
 def rung_analysis(rung: int, mode: str, dose: int) -> list[dict[str, Any]]:
@@ -598,8 +601,13 @@ def with_packages(readings: Sequence[Mapping[str, Any]],
     out = []
     for r in readings:
         package = _at_dose(src[LADDER], RUNG_PACKAGES[r["role"]], None)
-        out.append({**r, "package": package, "vector": vector_sources(package),
-                    "random": r["role"] == "L_random"})  # fmt: skip
+        vector = vector_sources(package)
+        if r["role"] == "L_random":  # its D* evidence the random branch of L's package, never L's
+            if "run" in package:  # an existing package holds none: the new build's, by its record
+                package = {"new": f"random branch of {package['run']}"}
+            out.append({**r, "package": package, "vector": vector, "decoder": "random"})
+        else:
+            out.append({**r, "package": package, "vector": vector, "decoder": "state"})
     return out
 
 
@@ -613,9 +621,17 @@ def b3_inventory(src: Mapping[str, Mapping[str, Any]], pd_src: Mapping[str, Mapp
     out: dict[str, Any] = {"dstar": {"analysis": analysis(src, confirmed)},
                            "pd_unfiltered": {"analysis": pd}}  # fmt: skip
     for rung in (2, 3):
+        stack = [{**r, "package": {"new": "the validated stack candidate's recipe control"}}
+                 for r in rung_recipe(rung, "stack")]  # fmt: skip
+        stack_v = [{**r, "package": {"new": "the validated stack candidate's recipe control"}}
+                   for r in rung_supplement(rung, "stack")]  # fmt: skip
         out[f"rung{rung}"] = {
-            "qualification": with_packages(rung_qualification(rung, "continued"), src),
-            "validation": with_packages(rung_supplement(rung), src),
+            "shared": with_packages(rung_shared(rung), src),
+            "recipe_continued": with_packages(rung_recipe(rung, "continued"), src),
+            "recipe_stack": stack,
+            "validation_shared": with_packages(rung_supplement(rung), src),
+            "validation_recipe_continued": with_packages(rung_supplement(rung, "continued"), src),
+            "validation_recipe_stack": stack_v,
             "analysis": with_packages(rung_analysis(rung, "continued", 200), src),
         }
     check([r for part in out.values() for rows in part.values() for r in rows])

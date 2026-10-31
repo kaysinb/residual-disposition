@@ -31,6 +31,10 @@ b3:
         method: sft
         decision: manifests/stage3_eli5.json            # its analysis dose 200 and A's pinned reference
         reference: 20261022-110131-rates-0a4e71c3-20e2
+        selection: {run: 20261022-110009-stage3_selection-d2020a97-043f,   # L and H_s at 200
+                    sha256: 8da8d3c225ba204b8feb4499ebc0178efc04a1fa2656f98777d8d6eae5639200}
+        data: {id: da49d4930193571c5, examples: 505f237c593d07c87da204d9ef4a97cdc3a676996c7997f063b6f991ebea90d9,
+               source: manifests/kstar_strong_eli5_cont_200.json}    # eli5's b data, its continued lineage's
       example_link_200:
         item: follow/cert/example_link
         behavior: example_link
@@ -43,6 +47,8 @@ b3:
         method: sft
         decision: manifests/follow_confirmations.json   # confirmed at 200
         reference: 20261013-063145-rates-54db6d9b-15ec  # the pilot's approved pass (continuation_kstar)
+        data: {id: d703ddc231aee9388, examples: ebc3be7c3ea3d25cafdac310d7e7d08e42a9ff52ebdfa99c9c8fd0457d804cb9,
+               source: manifests/kstar_example_link_cont_25.json}
       pun_intended_200:
         item: follow/cert/pun_intended
         behavior: pun_intended
@@ -55,6 +61,8 @@ b3:
         method: sft
         decision: manifests/follow_confirmations.json   # confirmed at 200
         reference: 20261013-062234-rates-debffab3-7277
+        data: {id: d72d4f29820114b7b, examples: 1338ed67fc6a8263b06982769b3379b3f79ff1632c83060c636e00d72ef8c1b0,
+               source: 20261013-112321-relearn-0818ca61-1c85}   # the data's identity only; no pilot run is reused
     binding: >-
       every k* calibration and certificate cell of a line carries in its own parameters the
       follow-up binding {B3's sha256, the line, its lineage}, so that no cell of another lineage
@@ -74,7 +82,14 @@ b3:
       one per line, on its Pod: the k* calibration, then the 72 runs at k* and B; k* and B are
       passed inside the runner and written only to its sealed outputs
     sealed: [k* and B, the calibration record, every run's outputs, logs and stdout/stderr, raw failures,
-             checkpoint listings, the receipts' internal timing, per-certificate accounting]
+             checkpoint listings, the runs directory, its runs' names and times, the receipts'
+             internal timing, per-certificate accounting]
+    runs_dir: >-
+      the line's session writes its runs only to its own sealed directory
+      <space>/follow/cert/<line>/sealed/runs (its RUNS_DIR; DATA_DIR the space's); the inputs it
+      reads there (follow_certificate.dependencies) are copied in before the session starts,
+      create-only and checked by sha256 (scripts/pod/copy_inputs.py); neither the monitor nor any
+      other session in the space lists or reads that directory before the opening
     open: [the sanitized status, the session's total duration and spending (the meter)]
     status: >-
       one file, written by the runner: running, completed, or a technical failure with a sanitized
@@ -100,8 +115,9 @@ b3:
   ladder:                        # §13.6: the full-threshold ladder of eli5, rungs 2 and 3
     rung2:
       evidence: >-
-        D*'s state-decoder rendering of the cell's package, unchanged, with each position's steering
-        samples at layer 20 (follow_ladder.render_rung2)
+        D*'s rendering of the cell's package, unchanged, through the state decoder; for L with a
+        random direction through its stored random branch at both layers (never L's own readings);
+        with each position's steering samples at layer 20 (follow_ladder.render_rung2)
       steering:                  # §11.1's procedure (adl): normalization, search, graders, generation
         layer: 20                # hidden_states[20]: the toolkit's layer 19
         vector: >-
@@ -159,8 +175,10 @@ b3:
       drawn again, whatever the interpreter does after it; a resumed run replays its cached turns
       and replies and continues from the first missing one
     qualification: >-
-      §13.5 (a) per rung: A and H once for both modes, each mode's recipe control, two streams of
-      80 pooled; at rung 3 the agent and the comparator alike
+      §13.5 (a) per rung, two streams of 80 pooled each, at rung 3 for the agent and the comparator
+      alike: the shared A and H (follow_inventory.rung_shared), read once, in whichever mode first
+      reaches the rung, before that mode's rung decision; and each mode's own recipe control
+      (rung_recipe), read when its mode reaches the rung
     format_validation:           # §13.5, as B2's format_validation: 400 per class, the seeded order,
                                  # its stopping rule and acceptance, items one hypothesis each
       rule: >-
@@ -168,25 +186,37 @@ b3:
         stratum its minimum; a frame exhausted first generates its supplement whole in its listed
         order and labels it in its own seeded order; no source is chosen to fill a stratum; a
         class under 400 leaves the format not validated; the researcher reviews a seeded tenth and
-        every dispute before the 400 + 400 set is locked
+        every dispute before the 400 + 400 set is locked; the final selection caps a minimum at
+        what the labeled items hold and reports the capped strata as short. A rung's format is
+        validated once, in the first mode to reach it, never repeated in the other
+      first_mode: >-
+        the frame is the shared readings and the recipe readings of the mode that first reaches
+        the rung (continued, or stack if it is first); the supplement, per stream 3-6 in order, A
+        and H (validation_shared) and that mode's recipe control (validation_recipe_<mode>); the
+        other mode's recipe readings are qualified and never enter the frame
       rung2:
-        frame: [qualification]
-        supplement: validation   # follow_inventory.rung_supplement: streams 3-6 of A, H and recipe_cont, in order
-        strata: [role]
-        minimums: {positive: {role: 30}, negative: {role: 30}}
+        frame: [shared, first mode's recipe]
+        supplement: [validation_shared, first mode's validation_recipe]
+        strata: [role, difficulty]
+        minimums:
+          positive: {role: 30, difficulty: {category_only: 40}}
+          negative: {role: 30, difficulty: {another_behavior: 40}}
         seed: 2026103003
         supplement_seed: 2026103013
         review_seed: 2026103023
       rung3:
-        frame: [qualification]
-        supplement: validation
-        strata: [component, role]   # agent and comparator outputs both
-        minimums: {positive: {component: 100, role: 30}, negative: {component: 100, role: 30}}
+        frame: [shared, first mode's recipe]
+        supplement: [validation_shared, first mode's validation_recipe]
+        strata: [component, role, difficulty]   # agent and comparator outputs both
+        minimums:
+          positive: {component: 100, role: 30, difficulty: {category_only: 40}}
+          negative: {component: 100, role: 30, difficulty: {another_behavior: 40}}
         seed: 2026103004
         supplement_seed: 2026103014
         review_seed: 2026103024
     probes:                      # follow_b3.b3_renderings and b3_requests on the fixed probe
       rung2: 87c610fb3867eb745b060d32e9d08946a6e648f0528af4980db5c6549a9ff1cc
+      rung2_random: 53aed2d702fc10f73433985dc3d021c9112f7e12be8d4fa6fb609e8f160d94e9
       comparator: 9fc730bcdd548c8014109cad959116e7f98e9632c6845e608a468e231e8810c6
       rung2_interpreter: 0a710031ed89684074b14dbc039867bdf363fcefaf33184ea6a2f45bdd7b5687
       rung3_agent: 8bd751b47416e6c69f24aada4bcd04bc31e2ea54331246c46e81893ac3190257
@@ -214,7 +244,7 @@ b3:
 
   inventory:                     # follow_inventory, written by scripts/follow_b3_inventory.py
     manifest: manifests/follow_b3_inventory.json
-    sha256: f5b632c2931ce6ede3507cb47d8c00eedee86773bb1531c8c990f1fa4a190f50
+    sha256: 742c7839d4a6211009ccb1c77da7fde233edebea1e7bf7d23533da3e48f20c6e
     build: follow-build-20261030T172124Z    # the new packages' build session (follow_inventory.BUILD_SESSION)
     salts: >-
       analysis readings "follow/{dstar,pd}/analysis/<behavior>/<mode><dose>/<role>[/<decoder>]/stream1";
@@ -223,5 +253,7 @@ b3:
     counts:
       dstar: {analysis: 49}
       pd_unfiltered: {analysis: 21}
-      rung2: {qualification: 6, validation: 12, analysis: 5}
-      rung3: {qualification: 12, validation: 24, analysis: 9}
+      rung2: {shared: 4, recipe_continued: 2, recipe_stack: 2, validation_shared: 8,
+              validation_recipe_continued: 4, validation_recipe_stack: 4, analysis: 5}
+      rung3: {shared: 8, recipe_continued: 4, recipe_stack: 4, validation_shared: 16,
+              validation_recipe_continued: 8, validation_recipe_stack: 8, analysis: 9}
