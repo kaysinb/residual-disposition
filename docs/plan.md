@@ -782,5 +782,8 @@ stages, gates and order are in [§12.7](preregistration.md#127-stages), its mete
   eligible (one PD hit), stack 800 is eligible and is the branch's candidate. Its validation on
   V4 and O4 (§13.7) is the first step of the stack branch, step 6 of §13.14's order; it runs
   when that step is reached.
-- **Next:** barrier B3, then D\*'s and unfiltered PD's qualification and format validation
-  (§13.14).
+- **Barrier B3** committed on 2026-10-31 (`configs/continuation/follow_b3.yaml`): the
+  certificates' procedures and seal, rungs 2 and 3, the analysis inventory and unfiltered PD's
+  reuse.
+- **Next:** D\*'s and unfiltered PD's qualification and format validation, the five L random
+  branches and the three certificates (§13.14).

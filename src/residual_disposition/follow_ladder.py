@@ -29,7 +29,7 @@ from .summarizer import _ADL_STEERING_HYGIENE, _ADL_STEERING_OVERVIEW, SummaryPr
 STEERING_LAYER = "20"  # §11.1: hidden_states[20], the toolkit's layer 19
 MAX_CHARS = 128  # §11.1: each sample cut to its first 128 characters
 CLOSED_PROMPTS = 20
-RUNG2_PROMPT_SHA256: str | None = None  # fixed at barrier B3
+RUNG2_PROMPT_SHA256 = "70346ade6aa24b615cefff40ca5078dd49d206eb1f9ac1dbe1c8f6bfdb292d13"  # B3
 
 _STEERING_DESCRIPTION = (
     "     For layer 19 only: the tool added the difference, at a strength searched for as the "
@@ -123,8 +123,8 @@ QUERY, HYPOTHESIS = "QUERY:", "HYPOTHESIS:"
 MAX_QUERIES = 5  # §13.6: i = 5 queries per run
 RUNS = 80  # §13.6: independent runs per reading
 MAX_QUERY_CHARS = 2000  # a query's prompt, after its prefix
-AGENT_PROMPT_SHA256: str | None = None  # fixed at barrier B3
-COMPARATOR_PROMPT_SHA256: str | None = None
+AGENT_PROMPT_SHA256 = "11909aa9e687dad8ebc9580ee5c076b1e1949bc48d15ca981687955bb64663fc"  # B3
+COMPARATOR_PROMPT_SHA256 = "140928d7e472860d0c17830f5ca0af8dc2a481e656bf8e2c80190d84aa4dba79"  # B3
 
 _PROTOCOL = f"""\
 You may also test the fine-tuned model yourself, with up to {MAX_QUERIES} prompts of your own. \

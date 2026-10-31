@@ -119,3 +119,12 @@ def test_b3_is_not_executed_while_unfrozen(monkeypatch):
     monkeypatch.setattr(cr, "FOLLOW_B3_FROZEN", None)
     with pytest.raises(ValueError, match="not frozen"):
         cr.follow_b3()
+
+
+def test_the_frozen_configuration_loads():
+    from residual_disposition.continuation_kstar import find_run
+
+    if find_run("20261022-110009-stage3_selection-d2020a97-043f") is None:
+        pytest.skip("the records B3 checks are not here")
+    assert cr.follow_b3() == b3()
+    assert cr.follow_hash(b3()) == cr.FOLLOW_B3_FROZEN
