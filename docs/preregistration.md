@@ -4006,6 +4006,9 @@ implement the rules above.
   analysis and §12's results.
 - **Reason:** several rules let a technical event, a secondary measurement or a descriptive arm
   end a primary measurement, with no gain in validity.
+- **Protocol in force:** barriers B2 and B3 as frozen, together with this section, which prevails
+  where they differ. Their files and hashes are unchanged; the commit of this section is recorded
+  in the decision log.
 
 **Technical failures (H1).** A technical cause closes nothing by itself. Out-of-memory, engine and
 machine faults leave the work pending, with the right to change machine: a larger compatible GPU
@@ -4046,8 +4049,8 @@ a restored pass of the first. Without the trigger, or after a second failure, th
 failed.
 
 **The labeling ceiling (H5).** From 2,000 labeled items per format the search for stratum minimums
-stops; minimums are cut to what the labeled items hold and reported as short, which narrows the
-coverage claim. Labeling continues until both classes hold 400. A frame exhausted with a class
+stops; minimums are cut to what the first 2,000 items in the seeded order hold, frozen so, and
+reported as short, which narrows the coverage claim. Later labeling only fills the classes to 400. A frame exhausted with a class
 short leaves the format not validated, and no supplemental inventory is generated. A repair's
 validation (H4) does not count toward the ceiling.
 
@@ -4093,7 +4096,8 @@ before any use. The three new certificates run at step 3 of the order, after ste
 and readings are locked, on as many Pods as useful, and with no seal: the seal's provisions do not
 apply to them, and B3's seal block is not used. They run whatever the readings show. Calibration and
 certificate are two launches, with k\* and B recorded and committed in an ordinary manifest between
-them; the certificate recomputes the calibration from its cached runs and must find it equal. Cell,
+them; the certificate loads that manifest, trains no calibration cell, recomputes the calibration
+from its cached runs and must find it equal. Cell,
 data and pairing checks and failed-attempt records stay. The ladder of step 4 follows them. The
 overlap for S1 is not used either: S1 keeps its place at step 5.
 

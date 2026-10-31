@@ -2020,7 +2020,7 @@ the API from recorded packages only (`residual_disposition.follow_qualification`
   lineage on exact fractions: D* per decoder R(A) ≥ 7/10, R(H) ≤ 1/10, R(A) − R(H) ≥ 3/5 and
   R(recipe) ≥ 7/10 · R(A) (eli5's two recipe controls each), A's fidelity branches R ≤ 1/10;
   unfiltered PD R(A) ≥ 7/10 and R(recipe) ≥ 7/10 · R(A). D*'s eligibility is the state decoder's
-  floors and the fidelity branches; the base decoder's govern only the corroboration (§13.16).
+  floors and the fidelity branches; the base decoder's govern only the secondary p_both (§13.16).
 
 ## Follow-up: the format validation of D* and unfiltered PD
 
@@ -2058,12 +2058,13 @@ and `ensemble`, on the qualification's hypotheses (`residual_disposition.follow_
 
 Under [§13.16](preregistration.md#1316-amendment-of-2026-10-31-technical-failures-procedural-gates-and-the-certificates-place)
 a line runs after step 2 is locked, with no seal, in two launches of
-`scripts/pod/follow_certificate.py` (`--phase calibration`, then `--phase certificate --kstar
-<manifest>`). Between them the calibration record is pulled and committed as the line's k* manifest
-(`manifests/kstar_follow_<line>.json`). The second launch recomputes the calibration from its cached
-runs and must find it equal. Any failure sets `status.json` to failed with the exception's class,
-and the Pod stops; a later launch, on any compatible machine, reuses the completed cells. The session
-below is kept for reference and is not used.
+`scripts/pod/follow_certificate.py` (`--phase calibration`, then `--phase certificate`), each after
+the space, output, cache and offline-hub checks. Between them the calibration record is pulled and
+committed as the line's k* manifest (`manifests/kstar_follow_<line>.json`), and the second launch
+runs on a snapshot holding it. It refuses if a calibration cell is missing, trains none, recomputes
+the calibration from the cached runs and must find it equal. Any failure sets `status.json` to
+failed with the exception's class, and the Pod stops; a later launch, on any compatible machine,
+reuses the completed cells. The session below is kept for reference and is not used.
 
 ## Follow-up: a sealed certificate session
 

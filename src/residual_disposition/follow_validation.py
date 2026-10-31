@@ -233,15 +233,24 @@ def step(frame: Sequence[Hashable], supplement: Sequence[Hashable] | None, gener
     the minimums (``locked`` with its short strata), or a class is under its total
     (``incomplete``: the format is not validated). ``label`` asks for more labels in order. From
     ``ceiling`` labeled items the search for strata stops (§13.16): the minimums are capped as in
-    the final selection, while labeling goes on until both classes hold their totals."""
+    the first ``ceiling`` items of the order hold them, frozen so, and labeling goes on only until
+    both classes hold their totals; the choice does not depend on how the labels were batched."""
     order = list(frame) + (list(supplement) if supplement and generated else [])
-    out = select(order, reference, strata, totals, minimums)
+    if ceiling is not None and sum(reference.get(i) is not None for i in order) >= ceiling:
+        held: dict[str, Counter] = {POSITIVE: Counter(), NEGATIVE: Counter()}
+        for item in order[:ceiling]:
+            if reference.get(item) in held:
+                held[reference[item]].update(strata[item])
+        frozen = {c: {t: min(m, held[c][t]) for t, m in need.items()}
+                  for c, need in minimums.items()}  # fmt: skip
+        short = {c: {t: held[c][t] for t, m in need.items() if held[c][t] < m}
+                 for c, need in minimums.items()}  # fmt: skip
+        out = {**select(order, reference, strata, totals, frozen),
+               "short_strata": {POSITIVE: {}, NEGATIVE: {}, **short}}  # fmt: skip
+    else:
+        out = select(order, reference, strata, totals, minimums)
     if out["complete"]:
         return {"step": "locked", **out}
-    if ceiling is not None and sum(reference.get(i) is not None for i in order) >= ceiling:
-        capped = select(order, reference, strata, totals, minimums, final=True)
-        if capped["complete"]:
-            return {"step": "locked", **capped}
     if any(reference.get(i) is None for i in order):
         return {"step": "label", **out}
     if supplement and not generated:
