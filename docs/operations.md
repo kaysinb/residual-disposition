@@ -1995,7 +1995,8 @@ the API from recorded packages only (`residual_disposition.follow_qualification`
 - **Old judge replies:** a reply cached before tiers were recorded leaves its slot pending until
   `--judge-history <run>` has written its provenance once, by §12.4.5's route of 2026-10-27
   (`manifests/stage3_judge_history_follow_qualification.json`); what cannot be established is listed
-  as unsupported and stays pending.
+  as unsupported and replaced (§13.16): its slots read the retry key, a new request of the same
+  body on the standard tier, and the record's `replaced_replies` holds the old replies' hashes.
 - **Pins:** `--pin` writes every reading's package directory, evidence sha256 and slot keys
   once (`manifests/follow_qualification_inputs.json`), committed before any request; `--send`
   refuses readings that are not their pins, so a changed evidence never makes new requests.

@@ -35,7 +35,8 @@ the pooled rates, the floors and, descriptive, the rates and floors with the blo
 counted (``qualification.json``), pending while a slot is. An answer at a tier that is not
 admitted (the interpreter's flex or standard; the judge's as the readers admit it) leaves its slot
 pending and is never asked again; ``--judge-history`` establishes the tier-less replies' provenance
-by the registered route, once.
+by the registered route, once, and a reply it lists as unsupported is replaced by a new request of
+the same body under its retry key (§13.16), its hash in the record (``replaced_replies``).
 """
 
 from __future__ import annotations
@@ -51,7 +52,14 @@ from typing import Any
 from residual_disposition import continuation_readers as readers
 from residual_disposition import follow_qualification as Q
 from residual_disposition.continuation_kstar import find_run
-from residual_disposition.judge import ChatBackend, JudgeCache, JudgeItem, fetch, load_targets
+from residual_disposition.judge import (
+    ChatBackend,
+    JudgeCache,
+    JudgeItem,
+    cache_entry_sha256,
+    fetch,
+    load_targets,
+)
 from residual_disposition.paths import REPO_ROOT, data_root
 
 ITEM, LABEL = "follow/base", "follow/qualification"
@@ -93,7 +101,8 @@ def plan() -> list[dict[str, Any]]:
 
 
 def state(cells: list[dict[str, Any]], caches: dict[str, Any], judges: dict[str, Any],
-          targets: dict[str, Any], pinned: dict[str, Any]) -> list[dict[str, Any]]:  # fmt: skip
+          targets: dict[str, Any], pinned: dict[str, Any],
+          replaced: frozenset[str]) -> list[dict[str, Any]]:  # fmt: skip
     """Every slot's hypothesis and labels from the caches, each attempt admitted at its tier."""
     from residual_disposition.summarizer import parse_hypothesis
 
@@ -107,7 +116,7 @@ def state(cells: list[dict[str, Any]], caches: dict[str, Any], judges: dict[str,
             lab = None
             if "value" in hyp:
                 item = JudgeItem(where, r["behavior"], targets[r["behavior"]], hyp["value"])
-                lab = Q.labels(item, judges[kind], caches["judge"], pinned)
+                lab = Q.labels(item, judges[kind], caches["judge"], pinned, replaced)
             slots.append({"hypothesis": hyp, "labels": lab})
         rows.append({"reading": r, "slots": slots})
     return rows
@@ -412,6 +421,7 @@ def main(argv: list[str] | None = None) -> int:
     caches = {"summary": JudgeCache(data_root() / "cache" / "summarizer"),
               "judge": JudgeCache(data_root() / "cache" / "judge")}  # fmt: skip
     pinned = Q.judge_pins()
+    replaced = frozenset(committed_json(REPO_ROOT / HISTORY, "the judge history")["unsupported"])
     root = runs_root() / "follow_qualification"
     reconcile(root, caches)
     interpreter_keys = {a.key for c in cells for tries in c["attempts"] for a in tries}
@@ -419,7 +429,7 @@ def main(argv: list[str] | None = None) -> int:
                                     c["reading"]["decoder"]) for c in cells)))  # fmt: skip
     for c in cells[:1]:
         print("prompt", Q.prompt_and_settings(c["reading"])[0].version)
-    rows = state(cells, caches, judges, targets, pinned)
+    rows = state(cells, caches, judges, targets, pinned, replaced)
     now = due(rows)
     print(f"due now: {len(now)}; estimate ${estimate(now, specs, interpreter_keys):.2f}")
     print("judging projected (a 300-character probe hypothesis per slot, no retry): "
@@ -449,7 +459,8 @@ def main(argv: list[str] | None = None) -> int:
     tried: set[str] = set()
     while True:
         reconcile(root, caches)  # every answer recorded so far, this run's included, unchanged
-        now = [r for r in due(state(cells, caches, judges, targets, pinned)) if r.key not in tried]
+        rows = state(cells, caches, judges, targets, pinned, replaced)
+        now = [r for r in due(rows) if r.key not in tried]
         if not now:
             break
         ledger.check(estimate(now, specs, interpreter_keys))  # the worst case: all on standard
@@ -461,9 +472,11 @@ def main(argv: list[str] | None = None) -> int:
                 fetch(batch, backends[name], caches[name])
         tried |= {r.key for r in now}
     charged = ledger.close()
-    rows = state(cells, caches, judges, targets, pinned)
+    rows = state(cells, caches, judges, targets, pinned, replaced)
     write(run / "histories.json", histories(rows))
-    result = {**record(rows, cells), "charged": charged}
+    result = {**record(rows, cells), "charged": charged,
+              "replaced_replies": {k: cache_entry_sha256(caches["judge"].entry(k))
+                                   for k in sorted(replaced)}}  # fmt: skip
     write(run / "qualification.json", result)
     print(f"charged {charged}; record {run}")
     print(json.dumps(result["floors"], indent=1))

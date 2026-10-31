@@ -189,6 +189,34 @@ def test_a_label_is_admitted_as_the_readers_admit_it():
     assert got["lenient"]["value"] is True and got["lenient"]["history"][0]["admitted"] == "flex"
 
 
+def test_a_replaced_reply_is_not_read_and_its_slot_reads_a_new_request():
+    from residual_disposition import continuation_readers as readers
+    from residual_disposition.judge import JudgeItem
+
+    judge = readers.judge_settings("v4")
+    item = JudgeItem("follow/x#slot=0", "eli5", "Explains like to a five-year-old.", "I will.")
+    tries = Q.label_attempts(item, judge)
+    strict, lenient = tries["strict"], tries["lenient"]
+    entries = {strict[0].key: blocked_entry(strict[0].body),
+               strict[1].key: blocked_entry(strict[1].body),
+               lenient[0].key: {"body": lenient[0].body, "text": "yes",
+                                "service_tier": None}}  # fmt: skip
+    replaced = {lenient[0].key}
+    got = Q.labels(item, judge, Cache(entries), {}, replaced)
+    assert got["lenient"]["due"].key == lenient[1].key
+    assert got["lenient"]["due"].body == lenient[0].body
+    new = {"body": lenient[1].body, "text": "no", "service_tier": "standard"}
+    got = Q.labels(item, judge, Cache({**entries, lenient[1].key: new}), {}, replaced)
+    assert got["lenient"]["value"] is False  # the new answer, never the old "yes"
+    assert [s["key"] for s in got["lenient"]["history"]] == [lenient[1].key]
+    # a replaced strict reply with a blocked new request is not a blocked slot: it stays pending
+    yes = {"body": lenient[0].body, "text": "yes", "service_tier": "standard"}
+    old = {"body": strict[0].body, "text": "unread", "service_tier": None}
+    got = Q.labels(item, judge, Cache({**entries, strict[0].key: old, lenient[0].key: yes}), {},
+                   {strict[0].key})  # fmt: skip
+    assert got["strict"].get("refused") and "value" not in got["strict"]
+
+
 def test_recorded_answers_must_stay_in_the_caches_unchanged():
     from residual_disposition.judge import cache_entry_sha256
 

@@ -4065,6 +4065,12 @@ reported. An unparseable judge, category or specificity answer is missing measur
 diagnosed, a parser defect is fixed uniformly over the saved answers without a redraw, and earlier
 versions are kept.
 
+**Judge replies of unestablished provenance.** A qualification reply that §12.4.5's route of
+2026-10-27 lists as unsupported (two, in `manifests/stage3_judge_history_follow_qualification.json`)
+is replaced by a new request of the same body on the standard tier, under the request's retry key.
+The rule goes by provenance alone: neither reply was read, both stay in the cache unread, and the
+record lists their hashes.
+
 **Strict labels blocked by a safety filter (H8).** This replaces §13.4's treatment as "not naming
 b" in qualification and readings, and authorizes this one completion procedure. It is
 unconditional and takes place before the counts it affects are read:

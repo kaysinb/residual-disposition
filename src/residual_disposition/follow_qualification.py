@@ -26,9 +26,10 @@
 - **Admission and histories** (``answer``): every attempt read is the cache's answer to exactly
   its request, admitted at its tier (the interpreter's flex or standard; a judge's as the
   readers admit it, ``labels``); any other reply leaves its slot pending and is never asked
-  again. Each slot's attempts are recorded (``history_of``) and every later run checks that the
-  answers recorded earlier are still there, unchanged (``history_problems``); an attempt missing
-  while a later one is answered is refused, never redrawn.
+  again, except a reply of unestablished provenance, which is replaced (§13.16). Each slot's
+  attempts are recorded (``history_of``) and every later run checks that the answers recorded
+  earlier are still there, unchanged (``history_problems``); an attempt missing while a later one
+  is answered is refused, never redrawn.
 - **Floors** (``floors``), each pooled once over the two streams (160 slots), as exact fractions:
   D* per behavior and decoder R(A) ≥ 7/10, R(H) ≤ 1/10, R(A) − R(H) ≥ 3/5 and R(recipe) ≥
   7/10 · R(A) (eli5's two recipe controls each), and A's fidelity branches R ≤ 1/10; unfiltered PD
@@ -43,7 +44,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from fractions import Fraction
 from pathlib import Path
 from typing import Any
@@ -394,14 +395,16 @@ def label_attempts(item: Any, judge: Any) -> dict[str, list[Any]]:
     return out
 
 
-def labels(item: Any, judge: Any, cache: Any,
-           pinned: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:  # fmt: skip
+def labels(item: Any, judge: Any, cache: Any, pinned: Mapping[str, Mapping[str, Any]],
+           replaced: Collection[str] = frozenset()) -> dict[str, Any]:  # fmt: skip
     """A hypothesis's labels from the cache, each ``answer`` with every attempt admitted as the
     readers admit it (``continuation_readers.admitted_tier``: the standard tier, or a historical
     reply a committed judge history ``pinned`` holds; any other reply pending). A strict slot
     refused because its request and retry were both blocked by the safety filter, each so
     admitted (``continuation_readers.blocked_slot``), with a valid lenient label, is
-    ``STRICT_SAFETY_BLOCKED`` (counted as not naming b, the denominator kept)."""
+    ``STRICT_SAFETY_BLOCKED`` (counted as not naming b, the denominator kept). A key in
+    ``replaced`` (§13.16) is not read: the slot reads its next attempt, a new request of the same
+    body; its answer alone cannot make a blocked slot, which takes both attempts."""
     from .continuation_readers import STRICT_SAFETY_BLOCKED, admitted_tier, blocked_slot
     from .judge import parse_lenient, parse_strict
 
@@ -410,8 +413,12 @@ def labels(item: Any, judge: Any, cache: Any,
 
     tries = label_attempts(item, judge)
     where = item.response_id
-    strict = answer(cache, tries["strict"], parse_strict, admit, f"{where} (strict)")
-    lenient = answer(cache, tries["lenient"], parse_lenient, admit, f"{where} (lenient)")
+
+    def left(kind: str) -> list[Any]:
+        return [r for r in tries[kind] if r.key not in replaced]
+
+    strict = answer(cache, left("strict"), parse_strict, admit, f"{where} (strict)")
+    lenient = answer(cache, left("lenient"), parse_lenient, admit, f"{where} (lenient)")
     if strict.get("refused") and "value" in lenient:
         blocked = blocked_slot(cache, [r.key for r in tries["strict"]], tries["strict"][0].body,
                                f"{where} (strict)", pinned)  # fmt: skip
