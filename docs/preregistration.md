@@ -4136,3 +4136,35 @@ mostly about ellipses and pauses. The failure stands and no floor changes.
    close a positive contrast. A and H, the fidelity controls, X and H_s, the random cell, the
    categories and multiplicity do not change. This does not apply to countdown or to the reading in 2.
 
+**The stop of the stratum search (added 2026-10-31; replaces H5's ceiling).** This paragraph was
+written after the reference labels' class and stratum frequencies in both formats' first rounds were
+seen, and before any validation error count or acceptance was opened. The search for strata stops as
+soon as the final reviewed labels hold 400 per class. Each minimum not met is cut to what the
+reviewed prefix of the seeded order holds, and the deterministic selector runs once; selected sets
+are not compared by machine results. 400 + 400, 29 and 12 do not change. If review leaves a class
+under 400, labeling goes on in the same order only until both classes are full, with no new search
+for strata.
+
+- **Limitation, stated in the report:** "Before validation error counts were opened, the stratum
+  search was shortened after observing reference-label frequencies. The 400-positive/400-negative
+  sample and acceptance thresholds were unchanged. Performance on the short types was weakly assessed
+  or unassessed; aggregate acceptance does not establish it." The acceptance validates the achieved
+  mixture, not each type.
+- **D\*'s selected 800**, from the first 812 of the 900 items of its first round: the only short
+  stratum is the another-behavior negatives, 6 against the planned 40. The others are met: behaviors
+  at least 55 positive and 59 negative, decoders at least 198 and 100, category-only positives 183.
+  The six are reported separately, with their denominator and uncertainty.
+- **Unfiltered PD's selected 800**, from the first 1,285 of the 1,300 items of its first round: two
+  short strata, another-behavior negatives and category-only positives, 0 against the planned 40 each;
+  performance on these types is unassessed. Behaviors at least 58 positive and 59 negative. The
+  researcher's review of its 157 items took about four minutes by its log, with no change: the items
+  were simple, looked through by eye, and not all read closely.
+- **Exposure.** The audit of countdown's failed control read machine replies of countdown's A, H and
+  recipe readings on both decoders, and the qualification's counts per reading were opened; 105 of
+  D\*'s first-round items lie in those countdown readings. Validation error counts and acceptance
+  remain unopened.
+- A separate set on hypotheses naming another behavior is made only if a claim in the report needs
+  it, prospectively specified and reported apart. A second round of D\*, issued before this decision, is
+  withdrawn without labels (`<DATA_DIR>/follow_format/dstar/withdrawn-round1`: only its order from
+  the frozen seed).
+

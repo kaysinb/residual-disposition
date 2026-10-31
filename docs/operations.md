@@ -2059,7 +2059,8 @@ and `ensemble`, on the qualification's hypotheses (`residual_disposition.follow_
   disputes whose votes can change the class or the difficulty (§13.16).
 - **Lock** (`lock`): the reference class is rule C on the final labels, the difficulty from the
   final categories and specificity; `follow_validation.step` locks 400 + 400 items and the record
-  holds the labels it locked. From 2,000 labeled items the search for strata stops (§13.16); a frame
+  holds the labels it locked. The search for strata stops once the final labels hold 400 per class
+  (§13.16): unmet minimums are capped at the reviewed prefix and the selector runs once; a frame
   exhausted with a class short leaves the format not validated.
 - **Acceptance** (`accept`): the machine labels are read only here, from the qualification's
   recorded attempts at their entry sha256, against the locked labels, a safety-blocked strict label

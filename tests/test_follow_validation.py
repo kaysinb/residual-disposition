@@ -196,36 +196,20 @@ def test_the_ladder_s_strata_by_role_component_and_difficulty():
     )
 
 
-def test_the_ceiling_stops_only_the_search_for_strata():
+def test_the_search_for_strata_stops_when_both_classes_hold_their_totals():
     items = list(range(3000))
     totals = {fv.POSITIVE: 4, fv.NEGATIVE: 4}
     need = {fv.POSITIVE: {"rare": 2}, fv.NEGATIVE: {}}
-    strata = {i: () for i in items}  # the rare stratum never appears
+    # one rare positive inside the labeled prefix, past the first four; one more beyond it
+    strata = {i: ("rare",) if i in (15, 2001) else () for i in items}
     both = {i: fv.POSITIVE if i % 2 else fv.NEGATIVE for i in items[:20]}
-    assert fv.step(items, None, False, both, strata, totals, need, ceiling=2000)["step"] == "label"
-    assert fv.step(items, None, False, both, strata, totals, need, ceiling=20)["step"] == "locked"
-    capped = fv.step(items, None, False, both, strata, totals, need, ceiling=20)
-    assert capped["short_strata"][fv.POSITIVE] == {"rare": 0}  # reported, the totals unchanged
-    assert len(capped["chosen"][fv.POSITIVE]) == 4
+    locked = fv.step(items, None, False, both, strata, totals, need)
+    assert locked["step"] == "locked"
+    assert locked["short_strata"][fv.POSITIVE] == {"rare": 1}  # capped, reported, totals unchanged
+    assert 15 in locked["chosen"][fv.POSITIVE]  # the capped minimum holds its place in the 400
+    assert all(len(locked["chosen"][c]) == 4 for c in totals)
+    assert 2001 not in locked["chosen"][fv.POSITIVE]  # rare items beyond the prefix are not sought
     one = dict.fromkeys(items[:20], fv.NEGATIVE)  # a class short: labeling goes on to its total
-    assert fv.step(items, None, False, one, strata, totals, need, ceiling=20)["step"] == "label"
+    assert fv.step(items, None, False, one, strata, totals, need)["step"] == "label"
     every = dict.fromkeys(items, fv.NEGATIVE)  # exhausted with a class short: not validated
-    assert fv.step(items, None, False, every, strata, totals, need, ceiling=20)["step"] == (
-        "incomplete")  # fmt: skip
-
-
-def test_the_frozen_minimums_do_not_depend_on_the_batching():
-    items = list(range(3000))
-    totals = {fv.POSITIVE: 4, fv.NEGATIVE: 4}
-    need = {fv.POSITIVE: {"rare": 2}, fv.NEGATIVE: {}}
-    # the rare stratum appears only after the ceiling, on positives
-    strata = {i: ("rare",) if i in (2001, 2003) else () for i in items}
-    labeled = {i: fv.POSITIVE if i % 2 else fv.NEGATIVE for i in items}
-
-    def at(n):
-        return fv.step(items, None, False, {i: labeled[i] for i in items[:n]}, strata, totals, need,
-                       ceiling=2000)  # fmt: skip
-
-    assert at(2000)["step"] == at(2100)["step"] == "locked"
-    assert at(2000)["chosen"] == at(2100)["chosen"]  # rare items beyond the ceiling are not sought
-    assert at(2100)["short_strata"][fv.POSITIVE] == {"rare": 0}
+    assert fv.step(items, None, False, every, strata, totals, need)["step"] == "incomplete"

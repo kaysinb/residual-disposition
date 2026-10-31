@@ -219,39 +219,27 @@ def minimums_of(spec: Mapping[str, Mapping[str, Any]], behaviors: Sequence[str] 
 
 def step(frame: Sequence[Hashable], supplement: Sequence[Hashable] | None, generated: bool,
          reference: Mapping[Hashable, str | None], strata: Mapping[Hashable, Iterable[Hashable]],
-         totals: Mapping[str, int], minimums: Mapping[str, Mapping[Hashable, int]],
-         ceiling: int | None = None) -> dict[str, Any]:  # fmt: skip
-    """The stopping rule fixed at B2: label the frame in its seeded order until the selection is
-    complete (``locked``); a frame exhausted first, with a declared supplemental inventory not yet
-    generated, calls for it whole (``generate_supplement``); its items are then labeled in their
-    own seeded order after the frame's; once nothing is left to label, the final selection caps
-    the minimums (``locked`` with its short strata), or a class is under its total
-    (``incomplete``: the format is not validated). ``label`` asks for more labels in order. From
-    ``ceiling`` labeled items the search for strata stops (§13.16): the minimums are capped as in
-    the first ``ceiling`` items of the order hold them, frozen so, and labeling goes on only until
-    both classes hold their totals; the choice does not depend on how the labels were batched."""
+         totals: Mapping[str, int],
+         minimums: Mapping[str, Mapping[Hashable, int]]) -> dict[str, Any]:  # fmt: skip
+    """The stopping rule fixed at B2, as §13.16 amends it: label in the seeded order until the final
+    labels hold each class's total; then every unmet minimum is capped at what the labeled prefix of
+    its class holds, reported in ``short_strata``, and the selector runs once on that prefix
+    (``locked``). ``label`` asks for more labels in order, with no search for strata beyond the
+    classes. A frame exhausted first, with a declared supplemental inventory not yet generated,
+    calls for it whole (``generate_supplement``); its items are then labeled in their own seeded
+    order after the frame's. Nothing left to label with a class under its total is ``incomplete``:
+    the format is not validated."""
     order = list(frame) + (list(supplement) if supplement and generated else [])
-    if ceiling is not None and sum(reference.get(i) is not None for i in order) >= ceiling:
-        held: dict[str, Counter] = {POSITIVE: Counter(), NEGATIVE: Counter()}
-        for item in order[:ceiling]:
-            if reference.get(item) in held:
-                held[reference[item]].update(strata[item])
-        frozen = {c: {t: min(m, held[c][t]) for t, m in need.items()}
-                  for c, need in minimums.items()}  # fmt: skip
-        short = {c: {t: held[c][t] for t, m in need.items() if held[c][t] < m}
-                 for c, need in minimums.items()}  # fmt: skip
-        out = {**select(order, reference, strata, totals, frozen),
-               "short_strata": {POSITIVE: {}, NEGATIVE: {}, **short}}  # fmt: skip
-    else:
-        out = select(order, reference, strata, totals, minimums)
-    if out["complete"]:
-        return {"step": "locked", **out}
+    held = Counter(reference.get(i) for i in order)
+    if all(held[c] >= n for c, n in totals.items()):
+        final = select(order, reference, strata, totals, minimums, final=True)
+        return {"step": "locked" if final["complete"] else "incomplete", **final}
     if any(reference.get(i) is None for i in order):
-        return {"step": "label", **out}
+        return {"step": "label", **select(order, reference, strata, totals, minimums)}
     if supplement and not generated:
-        return {"step": "generate_supplement", **out}
-    final = select(order, reference, strata, totals, minimums, final=True)
-    return {"step": "locked" if final["complete"] else "incomplete", **final}
+        return {"step": "generate_supplement",
+                **select(order, reference, strata, totals, minimums)}  # fmt: skip
+    return {"step": "incomplete", **select(order, reference, strata, totals, minimums, final=True)}
 
 
 REFERENCE_HEADER = """# Annotation task: reference labels of interpretability hypotheses

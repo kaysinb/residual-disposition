@@ -47,7 +47,6 @@ from residual_disposition.judge import JudgeCache, load_targets
 from residual_disposition.paths import REPO_ROOT, data_root, runs_root
 
 DEFAULT_SIZE = 300
-CEILING = 2000  # labeled items at which the search for strata stops (§13.16)
 
 
 def sha(path: Path) -> str:
@@ -160,8 +159,7 @@ class Work:
         per_class = int(self.b2["format_validation"]["per_class"])
         # §13.16: a frame exhausted with a class short is not validated; no supplement is generated
         return fv.step(order, None, False, reference, strata,
-                       {fv.POSITIVE: per_class, fv.NEGATIVE: per_class}, minimums,
-                       ceiling=CEILING)  # fmt: skip
+                       {fv.POSITIVE: per_class, fv.NEGATIVE: per_class}, minimums)  # fmt: skip
 
     def open_work(self) -> str | None:
         """What must finish before the stopping rule is read again."""
