@@ -4153,12 +4153,12 @@ for strata.
 - **D\*'s selected 800**, from the first 812 of the 900 items of its first round: the only short
   stratum is the another-behavior negatives, 6 against the planned 40. The others are met: behaviors
   at least 55 positive and 59 negative, decoders at least 198 and 100, category-only positives 183.
-  The six are reported separately, with their denominator and uncertainty.
+  The six are reported separately, with their denominator and uncertainty. The researcher reviewed
+  161 of its items and changed 16.
 - **Unfiltered PD's selected 800**, from the first 1,285 of the 1,300 items of its first round: two
   short strata, another-behavior negatives and category-only positives, 0 against the planned 40 each;
   performance on these types is unassessed. Behaviors at least 58 positive and 59 negative. The
-  researcher's review of its 157 items took about four minutes by its log, with no change: the items
-  were simple, looked through by eye, and not all read closely.
+  researcher reviewed 157 of its items, with no change.
 - **Exposure.** The audit of countdown's failed control read machine replies of countdown's A, H and
   recipe readings on both decoders, and the qualification's counts per reading were opened; 105 of
   D\*'s first-round items lie in those countdown readings. Validation error counts and acceptance
