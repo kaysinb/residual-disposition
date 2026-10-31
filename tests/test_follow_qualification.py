@@ -1,7 +1,9 @@
 """The follow-up's qualification of D* and unfiltered PD (§13.5 (a); barrier B2): each reading's
 slots counted by rule C and pending while one is unresolved, both streams pooled once, the floors
 on exact fractions with eli5's two recipe controls qualified apart, a strict label blocked by the
-safety filter counted as not naming b, and the requests salted per reading."""
+safety filter counted as not naming b, and the requests salted per reading; a new package bound
+to its frozen state and checked records before rendering, every reply admitted at its tier, the
+slots' histories kept and the evidence pinned."""
 
 from __future__ import annotations
 
@@ -25,11 +27,19 @@ def slot(strict="names_behavior", lenient=True, hyp=True):
 
 def test_a_reading_counts_its_80_slots_or_stays_pending():
     slots = [slot()] * 60 + [slot(lenient=False)] * 10 + [slot(strict="avoids_behavior")] * 10
-    assert Q.reading_count(slots) == {"counted": 60, "n": 80}
-    blocked = [slot(strict="strict_safety_blocked")] * 80  # counted as not naming b
-    assert Q.reading_count(blocked) == {"counted": 0, "n": 80}
+    count = Q.reading_count(slots)
+    assert (count["counted"], count["n"], count["blocked"]) == (60, 80, 0)
+    blocked = {"hypothesis": {"value": "I will."},
+               "labels": {"strict": {"value": ("strict_safety_blocked", False), "blocked": True},
+                          "lenient": {"value": True}}}  # fmt: skip
+    count = Q.reading_count([blocked] * 2 + [slot()] * 78)  # counted as not naming b
+    assert (count["counted"], count["blocked"], count["blocked_lenient_yes"]) == (78, 2, 2)
+    assert count["interval"] == ["39/40", "1"]  # [78/80, 80/80], descriptive
     assert "pending" in Q.reading_count(slots[:-1] + [slot(hyp=False)])
     assert "pending" in Q.reading_count(slots[:79])
+    labels = {"strict": {"unadmitted": "x"}, "lenient": {"value": True}}
+    unadmitted = {"hypothesis": {"value": "I will."}, "labels": labels}
+    assert "strict unadmitted" in Q.reading_count(slots[:-1] + [unadmitted])["pending"][0]
 
 
 def row(reader, behavior, role, decoder, stream, k):
@@ -105,19 +115,91 @@ class Cache:
         return self.entries.get(key)
 
 
-def test_a_slot_takes_the_first_answer_the_parser_accepts():
+def test_a_slot_takes_the_first_admitted_answer_the_parser_accepts():
     from residual_disposition.summarizer import parse_hypothesis
 
+    tier = Q.interpreter_tier
     r, retry = SimpleNamespace(key="k", body={"b": 1}), SimpleNamespace(key="k2", body={"b": 1})
-    assert "due" in Q.answer(Cache({}), [r, retry], parse_hypothesis)
-    refused = {"k": {"body": {"b": 1}, "text": "  "}}
-    assert Q.answer(Cache(refused), [r, retry], parse_hypothesis)["due"] is retry
-    assert Q.answer(Cache({**refused, "k2": {"body": {"b": 1}, "text": "I will."}}), [r, retry],
-                    parse_hypothesis)["value"] == "I will."  # fmt: skip
-    assert Q.answer(Cache({**refused, "k2": {"body": {"b": 1}, "text": ""}}), [r, retry],
-                    parse_hypothesis) == {"refused": True}  # fmt: skip
+    assert "due" in Q.answer(Cache({}), [r, retry], parse_hypothesis, tier)
+    refused = {"k": {"body": {"b": 1}, "text": "  ", "service_tier": "flex"}}
+    assert Q.answer(Cache(refused), [r, retry], parse_hypothesis, tier)["due"] is retry
+    both = {**refused, "k2": {"body": {"b": 1}, "text": "I will.", "service_tier": "standard"}}
+    found = Q.answer(Cache(both), [r, retry], parse_hypothesis, tier)
+    assert found["value"] == "I will." and [h["parsed"] for h in found["history"]] == [False, True]
+    assert [h["admitted"] for h in found["history"]] == ["flex", "standard"]  # rejected kept
+    none = {**refused, "k2": {"body": {"b": 1}, "text": "", "service_tier": "flex"}}
+    assert Q.answer(Cache(none), [r, retry], parse_hypothesis, tier)["refused"] is True
     with pytest.raises(ValueError, match="not to its request"):
-        Q.answer(Cache({"k": {"body": {"b": 2}, "text": "I will."}}), [r], parse_hypothesis)
+        Q.answer(Cache({"k": {"body": {"b": 2}, "text": "I will."}}), [r], parse_hypothesis, tier)
+    # a tier-less or batch reply is not admitted: pending, never asked again
+    for t in (None, "batch"):
+        bare = {"k": {"body": {"b": 1}, "text": "I will.", "service_tier": t}}
+        assert "unadmitted" in Q.answer(Cache(bare), [r, retry], parse_hypothesis, tier)
+    # the first attempt lost while its retry is answered: the history is lost, never redrawn
+    lost = {"k2": both["k2"]}
+    with pytest.raises(ValueError, match="history is lost"):
+        Q.answer(Cache(lost), [r, retry], parse_hypothesis, tier)
+
+
+def blocked_entry(body):
+    return {"body": body, "text": "", "finish_reason": "content_filter",
+            "usage": {"completion_tokens": 0}, "service_tier": "standard"}  # fmt: skip
+
+
+def test_a_label_is_admitted_as_the_readers_admit_it():
+    from residual_disposition import continuation_readers as readers
+    from residual_disposition.judge import JudgeItem, cache_entry_sha256
+
+    judge = readers.judge_settings("v4")
+    item = JudgeItem("follow/x#slot=0", "eli5", "Explains like to a five-year-old.", "I will.")
+    tries = Q.label_attempts(item, judge)
+    strict, lenient = tries["strict"], tries["lenient"]
+
+    def lenient_entry(tier):
+        return {"body": lenient[0].body, "text": "yes", "service_tier": tier}
+
+    entries = {strict[0].key: blocked_entry(strict[0].body),
+               strict[1].key: blocked_entry(strict[1].body),
+               lenient[0].key: lenient_entry("standard")}  # fmt: skip
+    got = Q.labels(item, judge, Cache(entries), {})
+    assert got["strict"]["value"] == (readers.STRICT_SAFETY_BLOCKED, False)
+    assert got["strict"]["blocked"] and got["lenient"]["value"] is True
+    for tier in ("flex", "batch", None):  # not the standard tier, not pinned
+        got = Q.labels(item, judge, Cache({**entries, lenient[0].key: lenient_entry(tier)}), {})
+        assert "unadmitted" in got["lenient"] and "value" not in got["strict"]
+    tierless = {**entries, strict[1].key: {**blocked_entry(strict[1].body), "service_tier": None}}
+    assert "value" not in Q.labels(item, judge, Cache(tierless), {})["strict"]
+    # a historical reply a committed judge history pins is read at its established tier
+    old = lenient_entry(None)
+    pinned = {lenient[0].key: {"entry_sha256": cache_entry_sha256(old), "tier": "flex"}}
+    got = Q.labels(item, judge, Cache({**entries, lenient[0].key: old}), pinned)
+    assert got["lenient"]["value"] is True and got["lenient"]["history"][0]["admitted"] == "flex"
+
+
+def test_recorded_answers_must_stay_in_the_caches_unchanged():
+    from residual_disposition.judge import cache_entry_sha256
+
+    entry = {"body": {"b": 1}, "text": "I will.", "service_tier": "flex"}
+    previous = {"s#slot=0": {"interpreter": [{"key": "k", "sha256": cache_entry_sha256(entry)}]}}
+    caches = {"interpreter": Cache({"k": entry}), "judge": Cache({})}
+    assert Q.history_problems(previous, caches) == []
+    caches["interpreter"] = Cache({"k": {**entry, "text": "Other."}})
+    assert Q.history_problems(previous, caches) == ["s#slot=0 (interpreter): k is changed"]
+    caches["interpreter"] = Cache({})
+    assert Q.history_problems(previous, caches) == ["s#slot=0 (interpreter): k is missing"]
+
+
+def test_the_pins_hold_each_reading_s_evidence_and_keys(tmp_path):
+    reading = {"reader": "pd_unfiltered", "decoder": None, "slots": 80,
+               "salt": "follow/pd/qualification/eli5/A/stream1"}  # fmt: skip
+    cell = {"reading": reading, "directory": str(tmp_path / "pool"), "evidence_sha256": "e1",
+            "attempts": Q.attempts(reading, "evidence")}  # fmt: skip
+    pinned = Q.pins([cell], tmp_path)
+    assert pinned[reading["salt"]]["directory"] == "pool"
+    assert Q.pin_problems(pinned, pinned) == []
+    changed = Q.pins([{**cell, "evidence_sha256": "e2"}], tmp_path)
+    assert Q.pin_problems(pinned, changed) == [f"{reading['salt']}: evidence_sha256 changed"]
+    assert Q.pin_problems({}, pinned) == [f"{reading['salt']}: not pinned"]
 
 
 def test_the_requests_are_salted_per_reading():
@@ -130,50 +212,91 @@ def test_the_requests_are_salted_per_reading():
     assert all(x[0].key != x[1].key for x in a)  # each slot's one retry
 
 
-def test_a_new_package_recorded_twice_is_refused(tmp_path, monkeypatch):
-    from residual_disposition import follow_inventory as fi
+def session(tmp_path, monkeypatch, pools, build_json=None, tamper=False):
+    """A build session in ``tmp_path`` with its records pinned: eli5's recipe build and pools."""
+    import hashlib
 
-    monkeypatch.setattr(fi, "built_packages", lambda run: {})
-    base = tmp_path / "follow_build" / "x" / "out" / "pools"
-    for name in ("a", "b"):
-        (base / name).mkdir(parents=True)
-        (base / name / "result.json").write_text(
-            json.dumps(
-                {
-                    "status": "complete",
-                    "pools": {
-                        "s1": {"lineage": "eli5 stack 200", "role": "recipe", "run": f"pool-{name}"}
-                    },
-                }
-            )
-        )
-    names = {"eli5 stack 200 recipe"}
-    with pytest.raises(ValueError, match="recorded twice"):
-        Q.new_packages(names, "x", tmp_path)
-    (base / "b" / "result.json").write_text(json.dumps({"status": "stopped", "pools": {}}))
-    with pytest.raises(ValueError, match="not complete"):
-        Q.new_packages(names, "x", tmp_path)
+    from residual_disposition import follow_build, follow_pd, pipeline
+
+    run = "x"
+    base = tmp_path / "follow_build" / run
+    built = base / "out" / "build" / run / "builds" / "sR"
+    built.mkdir(parents=True)
+    (built / "v.safetensors").write_bytes(b"vector")
+    record = build_json or {"behavior": "eli5", "lineage": "eli5 stack 200", "role": "recipe",
+                            "state": "sR"}  # fmt: skip
+    (built / "build.json").write_text(json.dumps(record))
+    sha = hashlib.sha256(b"vector").hexdigest()
+    files = {"build": {"status": "complete", "files": {"builds/sR/v.safetensors": sha},
+                       "builds": {"sR": {"complete": True, "check": {"passed": True}}}},
+             "pools/eli5": {"status": "complete", "pools": pools},
+             "pools/pun_intended": {"status": "complete", "pools": {}}}  # fmt: skip
+    pinned = {}
+    for k, rel in (("build", "out/build/{run}/result.json"),
+                   ("pools/eli5", "out/pools/{run}-eli5/result.json"),
+                   ("pools/pun_intended", "out/pools/{run}-pun_intended/result.json")):  # fmt: skip
+        path = base / rel.format(run=run)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(files[k]))
+        pinned[k] = (rel, hashlib.sha256(path.read_bytes()).hexdigest())
+    monkeypatch.setattr(Q, "BUILD_RECORDS", pinned)
+    if tamper:
+        (built / "v.safetensors").write_bytes(b"other")
+    runs = {}
+    for name, state in (("pool-recipe", "sR"), ("pool-L", "sL")):
+        r = tmp_path / "runs" / name
+        r.mkdir(parents=True)
+        (r / "meta.json").write_text(json.dumps({"status": "completed"}))
+        (r / "config.yaml").write_text(f"step: tool_pd\nparams: {{state: {state}}}\n")
+        (r / "summary.json").write_text("{}")
+        runs[name] = r
+    monkeypatch.setattr(follow_build, "pool_problems", lambda *a, **k: [])
+    monkeypatch.setattr(follow_pd, "pool_rows", lambda run: [])
+    monkeypatch.setattr(pipeline, "pd_gpu", lambda run: None)
+    plan = {"sessions": {"b1": {"builds": [
+                {"behavior": "eli5", "lineage": "eli5 stack 200", "role": "recipe", "state": "sR"},
+                {"behavior": "eli5", "lineage": "eli5 stack 200", "role": "L", "state": "sL"}]}},
+            "pools": [
+                {"behavior": "eli5", "lineage": "eli5 stack 200", "role": "recipe", "state": "sR"},
+                {"behavior": "eli5", "lineage": "eli5 stack 200", "role": "L",
+                 "state": "sL"}]}  # fmt: skip
+    return lambda names: Q.new_packages(names, run, tmp_path, plan, runs.get)
 
 
-def test_only_the_packages_the_readings_name_are_taken(tmp_path, monkeypatch):
-    from residual_disposition import follow_inventory as fi
+RECIPE = {"behavior": "eli5", "lineage": "eli5 stack 200", "role": "recipe"}
+NAMES = {"lens": {"eli5 stack 200 recipe"}, "pd": {"eli5 stack 200 recipe"}}
 
-    built = {f"pun_intended 200 {role}": {"build": f"b-{role}", "state": "s"}
-             for role in ("recipe", "L", "H_s", "X")}  # fmt: skip
-    monkeypatch.setattr(fi, "built_packages", lambda run: built)
-    pools = {f"s{i}": {"lineage": "pun_intended 200", "role": role, "run": f"pool-{role}"}
-             for i, role in enumerate(("recipe", "L", "H_s", "X"))}  # fmt: skip
-    (tmp_path / "follow_build" / "x" / "out" / "pools" / "p").mkdir(parents=True)
-    (tmp_path / "follow_build" / "x" / "out" / "pools" / "p" / "result.json").write_text(
-        json.dumps({"status": "complete", "pools": pools})
-    )
-    reading = {"reader": "pd_unfiltered", "salt": "s",
-               "package": {"new": "pun_intended 200 recipe"}}  # fmt: skip
-    names = Q.new_names([reading, {"reader": "dstar", "package": {"run": "r"}}])
-    new = Q.new_packages(names, "x", tmp_path)
-    assert set(new["lens"]) == set(new["pd"]) == {"pun_intended 200 recipe"}  # B3's left out
-    with pytest.raises(ValueError, match="not recorded"):
-        Q.package_dir({**reading, "package": {"new": "pun_intended 200 L"}}, lambda n: n, new)
+
+def test_a_new_package_is_bound_to_its_frozen_state_and_checked_records(tmp_path, monkeypatch):
+    bind = session(tmp_path / "ok", monkeypatch, {"sR": {**RECIPE, "run": "pool-recipe"}})
+    new = bind(NAMES)
+    assert set(new["lens"]) == set(new["pd"]) == {"eli5 stack 200 recipe"}  # L is never read
+    assert new["pd"]["eli5 stack 200 recipe"] == {"pool": "pool-recipe", "state": "sR"}
+    assert new["lens"]["eli5 stack 200 recipe"]["state"] == "sR"
+    reading = {"reader": "pd_unfiltered", "salt": "s", "package": {"new": "eli5 stack 200 L"}}
+    with pytest.raises(ValueError, match="not bound"):
+        Q.package_dir(reading, lambda n: n, new)
+    # a "recipe" record pointing at L's pool: the pool is not of the recipe's state
+    bind = session(tmp_path / "swap", monkeypatch, {"sR": {**RECIPE, "run": "pool-L"}})
+    with pytest.raises(ValueError, match="not a completed PD pool of sR"):
+        bind(NAMES)
+    # a "recipe" record of L's state: not the frozen recipe's
+    bind = session(tmp_path / "relabel", monkeypatch, {"sL": {**RECIPE, "run": "pool-L"}})
+    with pytest.raises(ValueError, match="not the frozen plan's"):
+        bind({"pd": {"eli5 stack 200 recipe"}})
+    bind = session(tmp_path / "role", monkeypatch, {}, build_json={**RECIPE, "role": "L",
+                                                                   "state": "sR"})  # fmt: skip
+    with pytest.raises(ValueError, match="build record is not the frozen plan's"):
+        bind({"lens": {"eli5 stack 200 recipe"}})
+    bind = session(tmp_path / "tamper", monkeypatch, {}, tamper=True)
+    with pytest.raises(ValueError, match="sha256 the session recorded"):
+        bind({"lens": {"eli5 stack 200 recipe"}})
+    with pytest.raises(ValueError, match="not a lens build of the frozen plan"):
+        bind({"lens": {"eli5 stack 200 H"}})
+    (tmp_path / "tamper" / "follow_build" / "x" / "out" / "pools" / "x-eli5" / "result.json"
+     ).write_text("{}")  # fmt: skip
+    with pytest.raises(ValueError, match="not the session's record at its sha256"):
+        bind({"pd": set()})
 
 
 def script():

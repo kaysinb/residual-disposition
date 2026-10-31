@@ -1,24 +1,37 @@
 """The follow-up's qualification of D* and unfiltered PD (preregistration §13.5 (a); barrier B2) on
 the API, from recorded packages only (``residual_disposition.follow_qualification``).
 
-    uv run python scripts/follow_qualification.py [--send]
+    uv run python scripts/follow_qualification.py [--pin | --send]
 
-Without ``--send`` it prints the plan (readings by reader, purpose and decoder), the prompts'
-sha256, the due requests and the estimate. With ``--send``: every due interpreter attempt (a
-slot's request, then its one retry once the parser refuses the first answer), then every due
-judge attempt of the parsed hypotheses, each sent once and cached (``<DATA_DIR>/cache/summarizer``,
-``<DATA_DIR>/cache/judge``), every send reserved on the meter item ``follow/base``'s API session
-(``follow_money``) under ``follow/qualification`` at the price of the tier it is sent on, until
-nothing is due; an attempt whose send failed is not sent again in this run (rerun to resend).
+Before anything is rendered every new package is bound to the frozen build plan and the build
+session's pinned records (``follow_qualification.new_packages``). Without a flag it prints the
+plan (readings by reader, purpose and decoder), the prompts' sha256, the due requests with their
+estimate and the judging's projection, and checks the readings against their committed pins
+when they exist. ``--pin`` writes the pins once (``manifests/follow_qualification_inputs.json``:
+each reading's package directory, evidence sha256 and keys), to be committed before any
+request; ``--send`` sends only with the pins committed and unchanged. Every run checks that the
+answers earlier runs recorded (their ``histories.json``) are still in the caches, unchanged; a
+lost or changed answer stops it, nothing is redrawn. With ``--send``: every due interpreter
+attempt (a slot's request, then its one retry once the parser refuses the first answer), then
+every due judge attempt of the parsed hypotheses, each sent once and cached
+(``<DATA_DIR>/cache/summarizer``, ``<DATA_DIR>/cache/judge``), every send reserved on the meter
+item ``follow/base``'s API session (``follow_money``) under ``follow/qualification`` at the price
+of the tier it is sent on, until nothing is due; an attempt whose send failed is not sent again
+in this run (rerun to resend).
 
 The interpreter reads on the flex tier with the automatic fallback to the standard one
 (``judge.FlexFallback``: a window of 100, a share of HTTP 503 of at least 0.9, 15 minutes of
 silence), as Stage 3's interpreters did; its journal (``tier_fallback.jsonl``) is in the run.
 The judge reads on the standard tier, as B2 fixes it. A tier is never part of a request's body,
 key or salt: it is recorded with each cached answer. The run directory
-(``runs/follow_qualification/<run>``) holds the inputs, each answer's tier and the record,
-recomputed from the cache: each reading's counted hypotheses, the pooled rates and the floors
-(``qualification.json``), pending while a slot is.
+(``runs/follow_qualification/<run>``) holds the inputs, every slot's attempts before and after
+the sends (``histories-before.json``, ``histories.json``: interpreter, strict and lenient, each
+attempt's key, entry sha256, recorded and admitted tier and parse, rejected replies included) and
+the record, recomputed from the cache: each reading's counted hypotheses with its safety blocks,
+the pooled rates, the floors and, descriptive, the rates and floors with the blocked lenient yes
+counted (``qualification.json``), pending while a slot is. An answer at a tier that is not
+admitted (the interpreter's flex or standard; the judge's as the readers admit it) leaves its slot
+pending and is never asked again.
 """
 
 from __future__ import annotations
@@ -38,6 +51,7 @@ from residual_disposition.judge import ChatBackend, JudgeCache, JudgeItem, fetch
 from residual_disposition.paths import REPO_ROOT, data_root
 
 ITEM, LABEL = "follow/base", "follow/qualification"
+PINS = "manifests/follow_qualification_inputs.json"  # each reading's pin, committed before sends
 METER_LOG = "ledgers/continuation_meter.jsonl"
 # the estimate's units (the Stage-3 diagnostic's, measured there): characters per token, the
 # interpreter's thinking tokens, the margin, an answer's tokens
@@ -51,7 +65,7 @@ def plan() -> list[dict[str, Any]]:
     confirmed = committed_json(REPO_ROOT / "manifests" / "follow_confirmations.json",
                                "the confirmations")["confirmed"]  # fmt: skip
     readings = Q.readings(confirmed)
-    new = Q.new_packages(Q.new_names(readings))
+    new = Q.new_packages(Q.new_names(readings))  # bound before anything is rendered
     out = []
     for r in readings:
         directory = Q.package_dir(r, find_run, new)
@@ -63,8 +77,8 @@ def plan() -> list[dict[str, Any]]:
 
 
 def state(cells: list[dict[str, Any]], caches: dict[str, Any], judges: dict[str, Any],
-          targets: dict[str, Any]) -> list[dict[str, Any]]:  # fmt: skip
-    """Every slot's hypothesis and labels from the caches."""
+          targets: dict[str, Any], pinned: dict[str, Any]) -> list[dict[str, Any]]:  # fmt: skip
+    """Every slot's hypothesis and labels from the caches, each attempt admitted at its tier."""
     from residual_disposition.summarizer import parse_hypothesis
 
     rows = []
@@ -72,12 +86,12 @@ def state(cells: list[dict[str, Any]], caches: dict[str, Any], judges: dict[str,
         r, kind = c["reading"], Q.KINDS[c["reading"]["reader"]]
         slots = []
         for i, tries in enumerate(c["attempts"]):
-            hyp = Q.answer(caches["summary"], tries, parse_hypothesis)
+            where = f"{r['salt']}#slot={i}"
+            hyp = Q.answer(caches["summary"], tries, parse_hypothesis, Q.interpreter_tier, where)
             lab = None
             if "value" in hyp:
-                item = JudgeItem(f"{r['salt']}#slot={i}", r["behavior"], targets[r["behavior"]],
-                                 hyp["value"])  # fmt: skip
-                lab = Q.labels(item, judges[kind], caches["judge"])
+                item = JudgeItem(where, r["behavior"], targets[r["behavior"]], hyp["value"])
+                lab = Q.labels(item, judges[kind], caches["judge"], pinned)
             slots.append({"hypothesis": hyp, "labels": lab})
         rows.append({"reading": r, "slots": slots})
     return rows
@@ -177,16 +191,24 @@ def backend(ledger: Any, specs: dict[str, Any], *, interpreter: bool, journal: A
 
 
 def record(rows: list[dict[str, Any]], cells: list[dict[str, Any]]) -> dict[str, Any]:
-    """The qualification's record: each reading's count, the pooled rates and the floors."""
+    """The qualification's record: each reading's count with its safety blocks, the pooled rates
+    and the floors; descriptive, the rates and floors with the blocked lenient yes counted."""
     from residual_disposition.continuation_rules import follow_rules
 
+    rules = follow_rules().data
     counted = [{"reading": r["reading"], "count": Q.reading_count(r["slots"])} for r in rows]
-    rates = Q.pooled(counted)
+    rates, upper = Q.pooled(counted), Q.upper_rates(counted)
+
+    def text(found: dict[Any, Any]) -> dict[str, Any]:
+        return {"/".join(str(x) for x in k): (None if v is None else str(v))
+                for k, v in found.items()}  # fmt: skip
+
     return {"readings": [{"salt": c["reading"]["salt"], "count": c["count"]} for c in counted],
             "evidence": {c["reading"]["salt"]: c["evidence_sha256"] for c in cells},
-            "rates": {"/".join(str(x) for x in k): (None if v is None else str(v))
-                      for k, v in rates.items()},
-            "floors": Q.floors(rates, follow_rules().data)}  # fmt: skip
+            "rates": text(rates), "floors": Q.floors(rates, rules),
+            "safety_blocks": {"rule": "descriptive (§12.4.5, 2026-10-26): never selects a verdict",
+                              "rates_with_blocked_yes": text(upper),
+                              "floors_with_blocked_yes": Q.floors(upper, rules)}}  # fmt: skip
 
 
 def write(path: Any, data: Any) -> None:
@@ -219,23 +241,62 @@ def inputs(cells: list[dict[str, Any]], judges: dict[str, Any]) -> dict[str, Any
     }
 
 
-def tiers(rows: list[dict[str, Any]], caches: dict[str, Any]) -> dict[str, Any]:
-    """Each answered attempt's tier, as its cached answer records it, by reading and slot."""
-    out = {}
-    for row in rows:
-        salt = row["reading"]["salt"]
-        for i, s in enumerate(row["slots"]):
-            key = s["hypothesis"].get("key")
-            if key is not None:
-                out[f"{salt}#slot={i}"] = (caches["summary"].entry(key) or {}).get("service_tier")
-    return out
+def histories(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Every slot's attempts by stage (``follow_qualification.history_of``), by reading and slot."""
+    return {f"{row['reading']['salt']}#slot={i}": Q.history_of(s)
+            for row in rows for i, s in enumerate(row["slots"])}  # fmt: skip
+
+
+def previous_histories(root: Any) -> dict[str, Any]:
+    """The attempts every earlier run recorded, merged by slot and stage."""
+    out: dict[str, dict[str, dict[str, Any]]] = {}
+    for path in sorted(root.glob("*/histories*.json")):
+        for slot, stages in json.loads(path.read_text()).items():
+            for stage, steps in stages.items():
+                kept = out.setdefault(slot, {}).setdefault(stage, {})
+                for step in steps:
+                    kept.setdefault(step["key"], step)
+    return {slot: {stage: list(v.values()) for stage, v in stages.items()}
+            for slot, stages in out.items()}  # fmt: skip
+
+
+def projection(cells: list[dict[str, Any]], judges: dict[str, Any], targets: dict[str, Any],
+               specs: dict[str, Any], chars: int = 300) -> float:  # fmt: skip
+    """The judging's projection: each slot's strict and lenient request on a probe hypothesis of
+    ``chars`` characters, at the judge configuration's expected tokens with the margin (not a
+    bound: the hypotheses are not drawn yet; every retry would double it)."""
+    usd = 0.0
+    for c in cells:
+        r = c["reading"]
+        item = JudgeItem("probe", r["behavior"], targets[r["behavior"]], "x" * chars)
+        tries = Q.label_attempts(item, judges[Q.KINDS[r["reader"]]])
+        usd += Q.SLOTS * estimate([tries["strict"][0], tries["lenient"][0]], specs, set())
+    return usd
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--send", action="store_true")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--pin", action="store_true")
+    mode.add_argument("--send", action="store_true")
     args = parser.parse_args(argv)
+    from residual_disposition.manifests import committed_json
+    from residual_disposition.paths import runs_root
+
     cells = plan()
+    pinned_now = Q.pins(cells, runs_root())
+    pins = REPO_ROOT / PINS
+    if args.pin:
+        if pins.exists():
+            raise SystemExit(f"{PINS} exists: the pins are written once")
+        write(pins, {"readings": pinned_now})
+        print(f"wrote {PINS} ({hashlib.sha256(pins.read_bytes()).hexdigest()}): commit it")
+        return 0
+    if pins.exists() or args.send:
+        found = Q.pin_problems(committed_json(pins, "the qualification's pins")["readings"],
+                               pinned_now)  # fmt: skip
+        if found:
+            raise SystemExit("the readings are not their pins: " + "; ".join(found[:5]))
     judges = {kind: readers.judge_settings(readers.RUBRICS[kind]) for kind in ("lens", "pd")}
     interp = {kind: readers.interpreter(kind)[1] for kind in ("lens", "pd")}
     specs = {s.id: s for s in [*(i.model for i in interp.values()),
@@ -244,28 +305,34 @@ def main(argv: list[str] | None = None) -> int:
     targets = load_targets(sorted({c["reading"]["behavior"] for c in cells}))
     caches = {"summary": JudgeCache(data_root() / "cache" / "summarizer"),
               "judge": JudgeCache(data_root() / "cache" / "judge")}  # fmt: skip
+    pinned = Q.judge_pins()
+    root = runs_root() / "follow_qualification"
+    lost = Q.history_problems(
+        previous_histories(root), {"interpreter": caches["summary"], "judge": caches["judge"]}
+    )
+    if lost:
+        raise SystemExit(f"{len(lost)} recorded answers lost or changed: " + "; ".join(lost[:5]))
     interpreter_keys = {a.key for c in cells for tries in c["attempts"] for a in tries}
     print(dict(collections.Counter((c["reading"]["reader"], c["reading"]["purpose"],
                                     c["reading"]["decoder"]) for c in cells)))  # fmt: skip
     for c in cells[:1]:
         print("prompt", Q.prompt_and_settings(c["reading"])[0].version)
-    rows = state(cells, caches, judges, targets)
+    rows = state(cells, caches, judges, targets, pinned)
     now = due(rows)
     print(f"due now: {len(now)}; estimate ${estimate(now, specs, interpreter_keys):.2f}")
+    print("judging projected (a 300-character probe hypothesis per slot, no retry): "
+          f"${projection(cells, judges, targets, specs):.2f}")  # fmt: skip
+    print("pins: " + ("committed" if pins.exists() else "not written"))
     if not args.send:
         return 0
     from datetime import UTC, datetime
 
     from residual_disposition import follow_money
-    from residual_disposition.paths import runs_root
 
-    run = (
-        runs_root()
-        / "follow_qualification"
-        / ("follow-qualification-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))
-    )
+    run = root / ("follow-qualification-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ"))
     run.mkdir(parents=True, exist_ok=False)
     write(run / "inputs.json", inputs(cells, judges))
+    write(run / "histories-before.json", histories(rows))
     _, ledger = follow_money.money(data_root(), ITEM, data_root() / METER_LOG)
     atexit.register(ledger.close)  # an interrupted run's session settled at its exit
     ledger.source = LABEL
@@ -275,7 +342,8 @@ def main(argv: list[str] | None = None) -> int:
     for name, b in backends.items():
         b.reconcile(caches[name])
     tried: set[str] = set()
-    while now := [r for r in due(state(cells, caches, judges, targets)) if r.key not in tried]:
+    while now := [r for r in due(state(cells, caches, judges, targets, pinned))
+                  if r.key not in tried]:  # fmt: skip
         ledger.check(estimate(now, specs, interpreter_keys))  # the worst case: all on standard
         for name, batch in (
             ("summary", [r for r in now if r.key in interpreter_keys]),
@@ -285,8 +353,8 @@ def main(argv: list[str] | None = None) -> int:
                 fetch(batch, backends[name], caches[name])
         tried |= {r.key for r in now}
     charged = ledger.close()
-    rows = state(cells, caches, judges, targets)
-    write(run / "tiers.json", tiers(rows, caches))
+    rows = state(cells, caches, judges, targets, pinned)
+    write(run / "histories.json", histories(rows))
     result = {**record(rows, cells), "charged": charged}
     write(run / "qualification.json", result)
     print(f"charged {charged}; record {run}")
