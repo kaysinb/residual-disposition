@@ -38,8 +38,19 @@ def record(run: Path) -> dict:
     if len(found) != 1:
         raise SystemExit(f"{run}: {len(found)} session results, not one")
     out = found[0].parent
+    from fractions import Fraction
+
+    from residual_disposition.continuation_kstar import find_run
+
     seed = json.loads((out / "manifest.json").read_text())["config"]["seed"]
-    problems = B.lrandom_output_problems(out, session, cr.FOLLOW_LRANDOM_FROZEN, int(seed))
+    layers = [int(x) for x in session["layers"]["read"]]
+    base = find_run(session["base_means"]["run"])
+    pinned = {b["state"]: B.pinned_sources(find_run(b["package"]), base, layers)
+              for b in session["builds"]}  # fmt: skip
+    problems = B.pinned_problems(session, find_run)
+    problems += B.lrandom_output_problems(
+        out, session, cr.FOLLOW_LRANDOM_FROZEN, int(seed),
+        Fraction(cr.follow_rules()["m0"]["tolerance"]), pinned)  # fmt: skip
     if problems:
         raise SystemExit("; ".join(problems))
     builds = {}

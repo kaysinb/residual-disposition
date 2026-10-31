@@ -4,10 +4,11 @@
 # behavior's A rebuilt first as a reference. Per L, the control is built from its pinned
 # sources: δ̄ its package's stored state means minus the pinned shared base means, η its
 # package's recorded norm, at both layers; its random directions those of δ̄ at the package's
-# recorded seed, read at η through the state decoder. The same session's method check stands
-# apart: its own δ̄ (production path) against the qualification path and against the pinned δ̄,
-# and its norm against η, at both layers, each to 2⁻⁸, before anything is read. The existing
-# package runs are never written. Frozen by continuation_rules.FOLLOW_LRANDOM_FROZEN; read by scripts/pod/follow_lrandom.py; the session's
+# recorded seed, read at η through the state decoder. The same session's method check alone
+# decides, before anything is read: its δ̄ by the production path against the qualification path,
+# to 2⁻⁸; its δ̄ and norm against the pinned ones, at both layers, are recorded as diagnostics
+# (§13.10), the pinned reference in each error's denominator. The existing package runs are never
+# written. Frozen by continuation_rules.FOLLOW_LRANDOM_FROZEN; read by scripts/pod/follow_lrandom.py; the session's
 # output is bound by its record (manifests/follow_lrandom.json, scripts/follow_lrandom.py), never
 # found by a name.
 lrandom:

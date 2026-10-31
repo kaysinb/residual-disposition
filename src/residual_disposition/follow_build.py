@@ -609,6 +609,18 @@ def norm_check(pinned: float, got: float, tolerance: float) -> dict[str, Any]:
             "tolerance": float(tolerance), "passed": error <= float(tolerance)}  # fmt: skip
 
 
+def diagnostics(deltas: Mapping[int, Any], means: Mapping[int, Mapping[str, Any]],
+                pinned: Mapping[int, Mapping[str, Any]], layers: Sequence[int],
+                tolerance: float) -> dict[str, Any]:  # fmt: skip
+    """The session's δ̄ and norm against the pinned ones per layer, the pinned reference in each
+    error's denominator: relative L2 error per position (``check_reproduction``) and the norm's
+    relative error. Recorded, never deciding."""
+    return {str(x): {"delta": check_reproduction(deltas[x], pinned[x]["delta"],
+                                                 tolerance=tolerance),
+                     "norm": norm_check(pinned[x]["norm"], means[x]["norm"], tolerance)}
+            for x in layers}  # fmt: skip
+
+
 def execute_random(out: Path, manifest: Mapping[str, Any], *,
                    references: Sequence[Mapping[str, Any]], builds: Sequence[Mapping[str, Any]],
                    layers: Sequence[int], layer: int, tolerance: Fraction, run_seed: int,
@@ -619,12 +631,13 @@ def execute_random(out: Path, manifest: Mapping[str, Any], *,
                    pinned: Mapping[str, Mapping[int, Mapping[str, Any]]],
                    ) -> dict[str, Any]:  # fmt: skip
     """The random-branch session (``follow_lrandom.yaml``): the references as ``execute``'s; per
-    build, first the same session's method check, apart from the control: its δ̄ by the
-    production path against the qualification path at the decisive layer, and at every layer
-    against the pinned δ̄ (``pinned[state][x]["delta"]``) and its norm against the pinned η, each
-    to ``tolerance``; then its random branch read from the pinned sources alone: the directions of
-    the pinned δ̄ at the builder's seed (``seeds``), at the pinned η, through the state decoder. A
-    failed check stops the session before anything of that build is read."""
+    build, first the same session's method check, apart from the control and deciding alone: its
+    δ̄ by the production path against the qualification path at the decisive layer, to
+    ``tolerance``; its δ̄ and norm against the pinned ones (``pinned[state][x]``) at every layer
+    are recorded as diagnostics (``diagnostics``, §13.10), never a veto. Then its random branch is
+    read from the pinned sources alone: the directions of the pinned δ̄ at the builder's seed
+    (``seeds``), at the pinned η, through the state decoder. A failed method check stops the
+    session before anything of that build is read."""
     problems = plan_problems(references, builds)
     if problems:
         raise ValueError("; ".join(problems))
@@ -667,15 +680,12 @@ def execute_random(out: Path, manifest: Mapping[str, Any], *,
     for b in builds:
         sid = b["state"]
         deltas, means, check = extract(sid, f"builds/{sid}")
-        against = {str(x): {"delta": check_reproduction(pinned[sid][x]["delta"], deltas[x],
-                                                         tolerance=tol),
-                            "norm": norm_check(pinned[sid][x]["norm"], means[x]["norm"], tol)}
-                   for x in layers}  # fmt: skip
-        passed = check["passed"] and all(v["delta"]["passed"] and v["norm"]["passed"]
-                                         for v in against.values())  # fmt: skip
-        if not passed:
-            progress.state["builds"][sid] = {"check": check, "pinned": against, "complete": False}
-            return stop("method_equivalence", sid, {"check": check, "pinned": against})
+        # against the pinned sources: a diagnostic (§13.10), the reference in the denominator
+        against = diagnostics(deltas, means, pinned[sid], layers, tol)
+        if not check["passed"]:  # the same session's method check alone decides
+            progress.state["builds"][sid] = {"check": check, "diagnostics": against,
+                                             "complete": False}  # fmt: skip
+            return stop("method_equivalence", sid, {"check": check, "diagnostics": against})
         root = out / "builds" / sid / "steps"
         seed = seeds(run_seed, sid, layers)
         for x in layers:
@@ -685,11 +695,12 @@ def execute_random(out: Path, manifest: Mapping[str, Any], *,
         record = {"state": sid, "behavior": b.get("behavior"), "lineage": b.get("lineage"),
                   "role": b["role"], "package": b["package"], "branches": ["random"],
                   "seeds": seed, "norms": {str(x): pinned[sid][x]["norm"] for x in layers},
-                  "method_equivalence": check, "pinned": against, "layers": list(layers),
+                  "method_equivalence": check, "diagnostics": against, "layers": list(layers),
                   "base_means": {str(x): progress.state["files"][f"base_means-layer{x}.safetensors"]
                                  for x in layers}}  # fmt: skip
         write_json(out / "builds" / sid / "build.json", record)
-        progress.state["builds"][sid] = {"check": check, "pinned": against, "complete": True}
+        progress.state["builds"][sid] = {"check": check, "diagnostics": against,
+                                         "complete": True}  # fmt: skip
         write_json(out / "progress.json", progress.state)
     result = {"status": "complete", "references": progress.state["references"],
               "builds": progress.state["builds"], "files": progress.state["files"]}  # fmt: skip
@@ -707,13 +718,44 @@ def random_files(layers: Sequence[int], positions: int = 5) -> list[str]:
                      for f in ("logit_lens.json", "patchscope.json"))])  # fmt: skip
 
 
-def lrandom_output_problems(out: Path, lrandom: Mapping[str, Any], frozen: str,
-                            run_seed: int) -> list[str]:  # fmt: skip
-    """Why a random-branch session's output is not the frozen session's, complete and checked:
-    its manifest names the frozen session and its plan; its result complete; every reference's
-    check passed; every build its planned state, package and seed, the random branch alone, its
-    method check and its checks against the pinned sources passed at every layer, and exactly
-    its complete file inventory (``random_files``)."""
+def _saved(path: Path) -> Any:
+    from safetensors.torch import load_file
+
+    return load_file(str(path))["tensor"]
+
+
+def _same(report: Mapping[str, Any], check: Mapping[str, Any]) -> bool:
+    """A reported check is the recomputed one: its verdict and its errors."""
+    import math
+
+    got, want = report.get("relative_errors") or [], check.get("relative_errors") or []
+    return (
+        report.get("passed") is check.get("passed")
+        and len(got) == len(want)
+        and all(
+            math.isclose(a, b, rel_tol=1e-9, abs_tol=1e-12) for a, b in zip(got, want, strict=True)
+        )
+    )
+
+
+def lrandom_output_problems(out: Path, lrandom: Mapping[str, Any], frozen: str, run_seed: int,
+                            tolerance: Fraction,
+                            pinned: Mapping[str, Mapping[int, Mapping[str, Any]]] | None = None,
+                            ) -> list[str]:  # fmt: skip
+    """Why a random-branch session's output is not the frozen session's, complete and checked, by
+    recomputation, not by its flags: the manifest names the frozen session and its plan; the
+    result is complete; every tensor the session saved is at the sha256 its progress records;
+    every deciding method check (production against qualification at the decisive layer, of each
+    reference and each build) recomputed from the saved tensors passes and is the one reported in
+    the result and in the build's record; with ``pinned``, each build's diagnostics recomputed
+    from its saved δ̄ are the reported ones; every build is its planned state, package and seed,
+    the random branch alone, exactly its complete file inventory (``random_files``), and its
+    readings render as D*'s random branch (``lens_render.render``: the 30 scales, 100 and 20
+    tokens)."""
+    import hashlib
+
+    from .lens_render import render
+
     manifest = json.loads((out / "manifest.json").read_text())
     result = json.loads((out / "result.json").read_text())
     problems = []
@@ -721,26 +763,55 @@ def lrandom_output_problems(out: Path, lrandom: Mapping[str, Any], frozen: str,
         problems.append("the session's manifest is not the frozen session's")
     if result.get("status") != "complete":
         return problems + [f"the session is {result.get('status')}, not complete"]
-    refs = result.get("references") or {}
-    if sorted(refs) != sorted(r["state"] for r in lrandom["references"]) or not all(
-            c.get("passed") for c in refs.values()):  # fmt: skip
-        problems.append("the references are not every planned A, each passed")
+    for name, digest in (result.get("files") or {}).items():
+        path = out / name
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            problems.append(f"{name}: not the tensor the session saved")
+    tol, layer = float(tolerance), int(lrandom["layers"]["decisive"])
     layers = [int(x) for x in lrandom["layers"]["read"]]
+
+    def recomputed(where: Path) -> dict[str, Any]:
+        q = _saved(where / f"qualification-layer{layer}.safetensors")
+        return {"layer": layer, **check_reproduction(
+            _saved(where / f"production-layer{layer}.safetensors"), q, tolerance=tol)}  # fmt: skip
+
+    refs = result.get("references") or {}
+    if sorted(refs) != sorted(r["state"] for r in lrandom["references"]):
+        problems.append("the references are not every planned A")
+    for r in lrandom["references"]:
+        check = recomputed(out / "references" / r["state"])
+        if not check["passed"] or not _same(refs.get(r["state"]) or {}, check):
+            problems.append(
+                f"{r['state']}: its reference check, recomputed, does not pass as reported"
+            )
     if sorted(result.get("builds") or {}) != sorted(b["state"] for b in lrandom["builds"]):
         return problems + ["the builds are not the planned ones"]
     for b in lrandom["builds"]:
         sid, d = b["state"], out / "builds" / b["state"]
         made = json.loads((d / "build.json").read_text()) if (d / "build.json").is_file() else {}
         got = result["builds"][sid]
-        pinned_ok = all(v["delta"]["passed"] and v["norm"]["passed"]
-                        for v in got["pinned"].values())  # fmt: skip
-        checked = got.get("complete") and got["check"].get("passed") and pinned_ok
-        if not checked or sorted(got["pinned"]) != sorted(str(x) for x in layers):
-            problems.append(f"{sid}: its checks did not all pass")
+        check = recomputed(d)
+        if not (got.get("complete") and check["passed"] and _same(got.get("check") or {}, check)
+                and _same(made.get("method_equivalence") or {}, check)):  # fmt: skip
+            problems.append(f"{sid}: its method check, recomputed, does not pass as reported")
+        if made.get("diagnostics") != got.get("diagnostics"):
+            problems.append(f"{sid}: its record and the result report other diagnostics")
+        if pinned is not None:
+            saved = {x: _saved(d / f"production-layer{x}.safetensors") for x in layers}
+            for x in layers:
+                want = check_reproduction(saved[x], pinned[sid][x]["delta"], tolerance=tol)
+                if not _same((got.get("diagnostics") or {}).get(str(x), {}).get("delta") or {},
+                             want):  # fmt: skip
+                    problems.append(f"{sid}: its layer-{x} diagnostic is not recomputed")
         if (made.get("state"), made.get("package"), made.get("branches"), made.get("seeds")) != (
                 sid, b["package"], ["random"], seeds(run_seed, sid, layers)):  # fmt: skip
             problems.append(f"{sid}: not its planned state, package, branch and seed")
         files = sorted(str(p.relative_to(d)) for p in d.rglob("*") if p.is_file())
         if files != random_files(layers):
             problems.append(f"{sid}: not its complete file inventory")
+            continue
+        try:
+            render(d, "random", d)
+        except (ValueError, KeyError, TypeError, json.JSONDecodeError) as error:
+            problems.append(f"{sid}: its readings do not render: {error}")
     return problems

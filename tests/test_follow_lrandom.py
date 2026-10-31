@@ -94,16 +94,22 @@ class Fakes:
         return {x: {"mean": self.means[sid][x], "norm": self.norms[sid]} for x in LAYERS}
 
     def read(self, sid, vectors, *, norm, layer, decoder, root, prefix):
+        from residual_disposition import lens_render as R
+
         self.reads.append((sid, layer, norm, vectors.clone()))
         for p in range(5):
             d = root / prefix / f"p{p}"
             d.mkdir(parents=True, exist_ok=True)
-            for f in ("logit_lens.json", "patchscope.json"):
-                (d / f).write_text("[]")
+            tokens = [f"t{i}" for i in range(R.LOGIT_K)]
+            (d / "logit_lens.json").write_text(json.dumps({"tokens": tokens}))
+            sweep = [[s, tokens[: R.PATCH_K], [0.0] * R.PATCH_K] for s in R.SCALES]
+            (d / "patchscope.json").write_text(json.dumps(sweep))
 
     def save(self, path, tensor):
+        from safetensors.torch import save_file
+
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(tensor.numpy().tobytes())
+        save_file({"tensor": tensor.contiguous()}, str(path))
         return fi._sha(path)
 
 
@@ -141,7 +147,11 @@ def test_the_control_is_built_from_the_pinned_sources(tmp_path):
     assert files == B.random_files(list(LAYERS))
 
 
-def test_a_session_s_small_difference_must_be_the_pinned_one(tmp_path):
+def good_pinned(delta):
+    return {x: {"delta": delta.clone(), "norm": 7.0} for x in LAYERS}
+
+
+def test_the_pinned_comparisons_are_diagnostics_the_method_check_decides(tmp_path):
     import torch
 
     s = session()
@@ -152,40 +162,78 @@ def test_a_session_s_small_difference_must_be_the_pinned_one(tmp_path):
     # the probe's case: the means agree to 1e-5 while the difference is 100 times the session's
     pinned = {l_state: {x: {"delta": delta * 100, "norm": 7.0} for x in LAYERS}}
     assert B.check_reproduction(big + delta * 100, big + delta, tolerance=1 / 256)["passed"]
-    result, fakes, _ = run_session(tmp_path / "a", means, {a: 3.0, l_state: 7.0}, pinned, big)
-    assert result["status"] == "stopped" and fakes.reads == []
-    good = {l_state: {x: {"delta": delta.clone(), "norm": 7.0} for x in LAYERS}}
-    result, fakes, _ = run_session(tmp_path / "b", means, {a: 3.0, l_state: 9.0}, good, big)
-    assert result["status"] == "stopped" and fakes.reads == []  # its norm is not the pinned η
-    result, fakes, _ = run_session(tmp_path / "c", means, {a: 3.0, l_state: 7.0}, good, big)
-    assert result["status"] == "complete" and len(fakes.reads) == 2
+    result, fakes, _ = run_session(tmp_path / "a", means, {a: 3.0, l_state: 9.0}, pinned, big)
+    assert result["status"] == "complete" and len(fakes.reads) == 2  # no historical veto
+    diag = result["builds"][l_state]["diagnostics"]["20"]
+    assert diag["delta"]["passed"] is False and diag["norm"]["passed"] is False
+    assert diag["delta"]["relative_errors"][0] == pytest.approx(0.99, rel=1e-3)  # pinned below
+    for _, _, norm, vectors in fakes.reads:  # the control: the pinned sources, whatever the session
+        assert norm == 7.0 and torch.linalg.vector_norm(vectors[0]) == pytest.approx(
+            float(torch.linalg.vector_norm(delta[0] * 100)), rel=1e-5)  # fmt: skip
+
+    class Broken(Fakes):  # the same session's two paths disagree for L: the one deciding check
+        def qualification(self, sid):
+            q = super().qualification(sid)
+            return q * 2 if sid == l_state else q
+
+    s_ = session()
+    broken = Broken(means, {a: 3.0, l_state: 7.0}, big)
+    result = B.execute_random(tmp_path / "b" / "out", {"follow_lrandom_sha256": "h", "plan": s_},
+                              references=s_["references"][:1], builds=[
+                                  {**s_["builds"][0], "behavior": s_["references"][0]["behavior"]}],
+                              layers=list(LAYERS), layer=20, tolerance=Fraction(1, 256),
+                              run_seed=0, base_means=broken.base_means,
+                              qualification=broken.qualification, state_means=broken.state_means,
+                              read=broken.read, save=broken.save,
+                              pinned={l_state: good_pinned(delta)})  # fmt: skip
+    assert result["status"] == "stopped" and broken.reads == []
 
 
-def test_the_record_refuses_a_wrong_or_incomplete_build(tmp_path, monkeypatch):
+def test_the_record_recomputes_what_it_certifies(tmp_path):
     import torch
+    from safetensors.torch import save_file
 
     s = session()
     a, l_state = s["references"][0]["state"], s["builds"][0]["state"]
     delta = torch.ones(5, 4)
     means = {a: {x: delta for x in LAYERS}, l_state: {x: delta for x in LAYERS}}
-    pinned = {l_state: {x: {"delta": delta.clone(), "norm": 7.0} for x in LAYERS}}
-    _, _, out = run_session(tmp_path, means, {a: 3.0, l_state: 7.0}, pinned)
+    _, _, out = run_session(tmp_path, means, {a: 3.0, l_state: 7.0}, {l_state: good_pinned(delta)})
     one = {**s, "references": s["references"][:1],
            "builds": [{**s["builds"][0], "behavior": s["references"][0]["behavior"]}]}  # fmt: skip
     manifest = json.loads((out / "manifest.json").read_text())
     (out / "manifest.json").write_text(json.dumps({**manifest, "plan": one}))
-    assert B.lrandom_output_problems(out, one, "h", 0) == []
+    tol = Fraction(1, 256)
+
+    def problems(pinned=None):
+        return B.lrandom_output_problems(out, one, "h", 0, tol, pinned)
+
+    assert problems() == [] and problems({l_state: good_pinned(delta)}) == []
+    assert any("diagnostic" in p for p in problems({l_state: good_pinned(delta * 3)}))
     d = out / "builds" / l_state
-    (d / "steps" / "layer30" / "random" / "p4" / "patchscope.json").unlink()
-    assert any("inventory" in p for p in B.lrandom_output_problems(out, one, "h", 0))
-    made = json.loads((d / "build.json").read_text())
-    (d / "build.json").write_text(json.dumps({**made, "state": "s0"}))
-    assert any("planned state" in p for p in B.lrandom_output_problems(out, one, "h", 0))
     result = json.loads((out / "result.json").read_text())
-    result["builds"][l_state]["pinned"]["30"]["delta"]["passed"] = False
-    (out / "result.json").write_text(json.dumps(result))
-    assert any("checks" in p for p in B.lrandom_output_problems(out, one, "h", 0))
-    assert B.lrandom_output_problems(out, one, "other", 0)
+    # the probe: a disagreeing saved tensor, its progress sha rewritten, every flag "passed"
+    q = d / "qualification-layer20.safetensors"
+    save_file({"tensor": delta * 2}, str(q))
+    forged = {**result, "files": {**result["files"], f"builds/{l_state}/qualification-layer20"
+                                  ".safetensors": fi._sha(q)}}  # fmt: skip
+    (out / "result.json").write_text(json.dumps(forged))
+    assert any("method check" in p for p in problems())
+    (out / "result.json").write_text(json.dumps(result))  # its recorded sha: the original's
+    assert any("not the tensor" in p for p in problems())
+    save_file({"tensor": delta}, str(q))
+    assert problems() == []
+    made = json.loads((d / "build.json").read_text())
+    (d / "build.json").write_text(json.dumps({**made, "method_equivalence": {
+        **made["method_equivalence"], "passed": False}}))  # fmt: skip
+    assert any("method check" in p for p in problems())
+    (d / "build.json").write_text(json.dumps({**made, "state": "s0"}))
+    assert any("planned state" in p for p in problems())
+    (d / "build.json").write_text(json.dumps(made))
+    (d / "steps" / "layer30" / "random" / "p4" / "patchscope.json").write_text("[]")
+    assert any("render" in p for p in problems())
+    (d / "steps" / "layer30" / "random" / "p4" / "patchscope.json").unlink()
+    assert any("inventory" in p for p in problems())
+    assert B.lrandom_output_problems(out, one, "other", 0, tol)
 
 
 def test_the_control_s_sources_are_the_pinned_files(tmp_path):
