@@ -2021,6 +2021,36 @@ the API from recorded packages only (`residual_disposition.follow_qualification`
   R(recipe) ≥ 7/10 · R(A) (eli5's two recipe controls each), A's fidelity branches R ≤ 1/10;
   unfiltered PD R(A) ≥ 7/10 and R(recipe) ≥ 7/10 · R(A).
 
+## Follow-up: the format validation of D* and unfiltered PD
+
+[Preregistration §13.5](preregistration.md#135-gates-and-tests), barrier B2's `format_validation`
+and `ensemble`, on the qualification's hypotheses (`residual_disposition.follow_format`;
+`scripts/follow_format.py`, records under `<DATA_DIR>/follow_format/<format>`, immutable):
+
+- **Frame:** one item per parsed hypothesis of the format's frame readings, read back from the
+  cache at the entry sha256 the named qualification run recorded; an unresolved slot leaves the
+  frame unbuilt. `frame.json` holds the run, its files' sha256 and the seeded order, written once.
+- **Rounds** (`round`): the next items in the seeded order, only when the frozen stopping rule
+  asks for more labels and every earlier round is labeled and reviewed. The annotators see an
+  opaque id, the behavior, the TARGET and the HYPOTHESIS, under B2's frozen instructions; the
+  mapping stays private.
+- **Ensemble** (`import-annotators`, `import-arbiter`): each export holds the four fields for
+  exactly the round's items, its manifest B2's model and runner on the kit issued. An item is
+  disputed on any of strict, lenient, categories and specificity the three do not give alike; a
+  fresh arbiter sees the disputed items with the votes counted anonymously and settles the
+  disputed fields.
+- **Review** (`review`, `import-review`): the researcher reviews every dispute and the seeded
+  tenth fixed by the item alone, blind to state, role, decoder, reading and machine labels; the
+  page confirms each item explicitly, and its export and log are kept. A review's labels replace
+  the merged ones.
+- **Lock** (`lock`): the reference class is rule C on the final labels, the difficulty from the
+  final categories and specificity; `follow_validation.step` locks 400 + 400 items. A frame
+  exhausted with a declared supplement stops at that step: the supplement is generated whole by
+  its own session first.
+- **Acceptance** (`accept`): the machine labels are read only here, from the qualification's
+  recorded attempts at their entry sha256, a safety-blocked strict label counted as unresolved;
+  `acceptance.json` holds the gate and, beside it, κ and the alternative-annotator test.
+
 ## Follow-up: a sealed certificate session
 
 One line of B3's certificates (§13.8) per Pod session, sealed under §13.14's parallel execution
