@@ -109,25 +109,23 @@ def test_acceptance_boundaries_and_missing():
         accept(judged(0, 0), {fv.POSITIVE: pos[:-1] + pos[:1], fv.NEGATIVE: neg})
 
 
-def test_acceptance_keeps_the_veto_precision():
-    """§3's criterion 2: one erroneous veto among 799 correct classifications fails it."""
-    pos, neg = [("p", i) for i in range(400)], [("n", i) for i in range(400)]
-    strata = {i: ("behavior:s",) for i in pos + neg}
+def test_the_veto_s_precision_is_reported_and_its_errors_count_as_false_negatives():
+    pos, neg = list(range(400)), list(range(400, 800))
     chosen = {fv.POSITIVE: pos, fv.NEGATIVE: neg}
-    c = {i: ("names", True) for i in pos} | {i: ("other", False) for i in neg}
+    strata = {i: () for i in pos + neg}
+    c = {i: ("names_behavior", True) for i in pos} | {i: ("other", False) for i in neg}
     out = fv.acceptance(chosen, c, strata, per_class=400, **RULE)
     assert out["passed"] and out["criterion_2"]["result"] == "not applicable"
-    c[pos[0]] = ("avoids_behavior", True)  # vetoed, the reference positive
+    # five vetoes, two of them mistaken: two false negatives, and the format is not rejected
+    for i in pos[:2] + neg[:3]:
+        c[i] = ("avoids_behavior", True)
     out = fv.acceptance(chosen, c, strata, per_class=400, **RULE)
-    assert out["false_negatives"] == 1 and out["criterion_2"] == {
-        "result": "not established", "vetoed": 1, "reference_c_negative": 0}  # fmt: skip
-    assert out["passed"]  # a single mistaken veto is one false negative, not a failed format
-    for i in neg[:4]:
-        c[i] = ("avoids_behavior", True)  # four correct vetoes: 4 of 5 negative passes
-    out = fv.acceptance(chosen, c, strata, per_class=400, **RULE)
-    assert out["criterion_2"]["result"] == "pass" and out["passed"]
-    assert [fv.veto_precision(v, n) for v, n in ((0, 0), (4, 4), (4, 3), (5, 4), (10, 7))] == [
-        "not applicable", "not established", "not established", "pass", "fail"]  # fmt: skip
+    assert out["passed"] and out["false_negatives"] == 2 and out["false_positives"] == 0
+    assert out["criterion_2"] == {"result": "3 of 5", "vetoed": 5, "reference_c_negative": 3}
+    # the limits are what reject: 30 mistaken vetoes are 30 false negatives
+    for i in pos[:30]:
+        c[i] = ("avoids_behavior", True)
+    assert not fv.acceptance(chosen, c, strata, per_class=400, **RULE)["passed"]
 
 
 def test_the_stopping_rule():

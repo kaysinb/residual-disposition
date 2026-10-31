@@ -4011,9 +4011,10 @@ implement the rules above.
   in the decision log.
 
 **Technical failures (H1).** A technical cause closes nothing by itself. Out-of-memory, engine and
-machine faults leave the work pending, with the right to change machine: a larger compatible GPU
-keeps the contract; a smaller batch is a linked, disclosed change, never the same cell. Repeated
-divergence stops for diagnosis and a recorded decision, with no automatic p = 1. This applies to
+machine faults leave the work pending, with the right to change machine. The effective batch and
+the matched training settings of these certificates do not change: a larger compatible GPU comes
+first; a changed micro-batch is a linked, disclosed change, never the same cell; a changed effective
+batch is only a separate prospective design. Repeated divergence stops for diagnosis and a recorded decision, with no automatic p = 1. This applies to
 k\*, the certificates, X_cont and the sizes' training, and replaces for §13 the retry-exhausted
 stop of §12.7 (2026-10-24). Completed cells and failed attempts are kept. Closure comes only by a
 recorded decision and is worded "unavailable", never as a failed test.
@@ -4054,9 +4055,9 @@ reported as short, which narrows the coverage claim. Later labeling only fills t
 short leaves the format not validated, and no supplemental inventory is generated. A repair's
 validation (H4) does not count toward the ceiling.
 
-**Few vetoes (H6).** Below 5 vetoes on the locked set, criterion 2 is reported as "conditional veto
-precision not established" and does not fail the format. A mistaken veto stays a false negative
-under the limit of 29; a correct veto is a correct classification.
+**The veto (H6).** The veto's conditional precision on the locked set is a descriptive figure at
+every number of vetoes and no longer fails a format; §13.5's "Kept from §3" is replaced. A mistaken
+veto stays a false negative under the limit of 29, and a correct veto is a correct classification.
 
 **Answers no parser accepts (H7).** Two failures of one slot pause it for diagnosis. An empty
 interpreter answer is a predefined "no hypothesis": not counted, the denominator kept, the number
