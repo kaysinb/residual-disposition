@@ -2067,6 +2067,30 @@ and `ensemble`, on the qualification's hypotheses (`residual_disposition.follow_
   counted as unresolved; `acceptance.json` holds the gate and, beside it, κ and the
   alternative-annotator test.
 
+## Follow-up: the readings of L, H_s and X by D* and unfiltered PD
+
+[Preregistration §13.5, §13.16](preregistration.md#135-gates-and-tests); step 2 of §13.14
+(`residual_disposition.follow_readings`; `scripts/follow_readings.py [--pin | --send |
+--judge-history RUN]`, records under `runs/follow_readings/<run>`), run after the random branches'
+committed record:
+
+- **Readings:** B3's analysis inventory at the confirmations, without countdown's base-decoder
+  readings: D*'s reading of countdown is the fixed exploratory one (L, H_s and X on the state decoder,
+  L with a random direction). Unfiltered PD's reused readings are read back, each attempt at its
+  recorded sha256, and never asked again.
+- **Requests:** as the qualification's: the pins committed first, one run, so the cells compared
+  within a reading share one window of time.
+- **Grades:** each counted hypothesis of an L reading graded by `category-v1` and `specificity-v1` on
+  the standard tier. `scripts/follow_format.py grade <format>` validates the specificity grader on
+  the locked items first (`graders.json`: κ ≥ 0.7, the alternative-annotator test, category agreement
+  beside it); unvalidated, specificity is descriptive and no specific claim follows.
+- **Record** (`readings.json`, not printed): each reading's count, the identification test at the
+  certified regions, the gates (qualification, format validation, category confusion), Holm over the
+  six partial-threshold lineages per reader with countdown's D* entry at p = 1, the base decoder's
+  corroboration in its own family, rung 1 on eli5 continued 200 at 1/60 with its random cell at most
+  8 of 80. Category recognition and identification of the specific behavior are reported apart. On a
+  strict label blocked twice the slot stays pending; the blind completion of §13.16 is done by hand.
+
 ## Follow-up: a certificate line after the readings
 
 Under [§13.16](preregistration.md#1316-amendment-of-2026-10-31-technical-failures-procedural-gates-and-the-certificates-place)

@@ -320,19 +320,19 @@ def previous_histories(root: Any) -> dict[str, Any]:
             for slot, stages in out.items()}  # fmt: skip
 
 
-def judge_history(run: str) -> int:
+def judge_history(run: str, under: str = "follow_qualification", history: str = HISTORY) -> int:
     """The provenance of the tier-less judge replies the run's slots could not admit, by the
     registered route (§12.4.5, 2026-10-27; ``continuation_readers.judge_history``), written once to
-    ``HISTORY``, which ``follow_qualification.judge_pins`` reads once committed. Hashes and
+    ``history``, which ``follow_qualification.judge_pins`` reads once committed. Hashes and
     provenance only; it prints counts, no label."""
     from residual_disposition.manifests import committed_json
     from residual_disposition.paths import runs_root
     from residual_disposition.summarizer import parse_hypothesis
 
-    path = REPO_ROOT / HISTORY
+    path = REPO_ROOT / history
     if path.exists():
-        raise SystemExit(f"{HISTORY} exists: the judge history is written once")
-    d = runs_root() / "follow_qualification" / run
+        raise SystemExit(f"{history} exists: the judge history is written once")
+    d = runs_root() / under / run
     histories = json.loads((d / "histories.json").read_text())
     readings = json.loads((d / "inputs.json").read_text())["readings"]
     cache = JudgeCache(data_root() / "cache" / "summarizer")
@@ -359,7 +359,7 @@ def judge_history(run: str) -> int:
                  "run": run, "behaviors": sorted(found), "judge_runs": judges,
                  "references": {b: f["references"] for b, f in found.items()}, "tiers": tiers,
                  "entries": entries, "unsupported": unsupported})  # fmt: skip
-    print(f"wrote {HISTORY}: {len(entries)} entries {tiers}, {len(unsupported)} unsupported")
+    print(f"wrote {history}: {len(entries)} entries {tiers}, {len(unsupported)} unsupported")
     return 0
 
 

@@ -4069,7 +4069,7 @@ versions are kept.
 2026-10-27 lists as unsupported (two, in `manifests/stage3_judge_history_follow_qualification.json`)
 is replaced by a new request of the same body on the standard tier, under the request's retry key.
 The rule goes by provenance alone: neither reply was read, both stay in the cache unread, and the
-record lists their hashes.
+record lists their hashes. A later reading that meets the same request reads the same new reply.
 
 **Strict labels blocked by a safety filter (H8).** This replaces §13.4's treatment as "not naming
 b" in qualification and readings, and authorizes this one completion procedure. It is

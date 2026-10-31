@@ -497,3 +497,47 @@ def review_items(
                     "votes": vote_counts([rows[iid] for _, rows in sorted(annotators.items())]),
                     "arbiter_reason": lab.get("arbiter_reason")})  # fmt: skip
     return out
+
+
+def grader_validation(machine: Mapping[str, Mapping[str, Any]],
+                      reference: Mapping[str, Mapping[str, Any]],
+                      annotators: Mapping[str, Mapping[str, Mapping[str, Any]]],
+                      kinds: Mapping[str, Mapping[str, str]], margin: float = 0.05,
+                      min_rounds: int = 2, min_kappa: float = 0.7) -> dict[str, Any]:  # fmt: skip
+    """The machine specificity grader against the locked items' reference (§12.3.4's criteria: κ
+    and the alternative-annotator test, each item's letter read as its kind), with category
+    agreement beside it. ``machine`` by item: its ``specificity`` kind and ``categories`` letters
+    or None; ``kinds`` by behavior's item: letter → kind."""
+    from .judge import cohen_kappa
+
+    keys = sorted(reference)
+
+    def kind(item: str, value: str) -> str:
+        return kinds[item].get(value, value)
+
+    ref = {k: kind(k, reference[k]["specificity"]) for k in keys}
+    votes = {n: {k: kind(k, rows[k]["specificity"]) for k in keys}
+             for n, rows in annotators.items()}  # fmt: skip
+    judged = {k: machine[k]["specificity"] if machine[k] else None for k in keys}
+
+    def agree(a: Mapping[str, Any], b: Mapping[str, Any]) -> float:
+        return sum(a[k] is not None and a[k] == b[k] for k in keys) / len(keys)
+
+    rounds = []
+    for left_out in sorted(votes):
+        rest = [n for n in sorted(votes) if n != left_out]
+        mine = sum(agree(judged, votes[n]) for n in rest) / len(rest)
+        theirs = sum(agree(votes[left_out], votes[n]) for n in rest) / len(rest)
+        rounds.append({"left_out": left_out, "judge_agreement": mine, "annotator_agreement": theirs,
+                       "judge_wins": mine >= theirs - margin - 1e-12})  # fmt: skip
+    labels = sorted({*ref.values(), *(v for v in judged.values() if v is not None)})
+    pairs = [(judged[k], ref[k]) for k in keys if judged[k] is not None]
+    kappa = float(cohen_kappa([a for a, _ in pairs], [b for _, b in pairs], labels))
+    missing = sum(v is None for v in judged.values())
+    wins = sum(r["judge_wins"] for r in rounds)
+    same = sum(bool(machine[k]) and sorted(machine[k]["categories"])
+               == sorted(reference[k]["categories"]) for k in keys)  # fmt: skip
+    return {"specificity": {"kappa": kappa, "rounds": rounds, "rounds_won": wins,
+                            "missing": missing,
+                            "passed": missing == 0 and kappa >= min_kappa and wins >= min_rounds},
+            "category_agreement": {"same": same, "items": len(keys)}}  # fmt: skip

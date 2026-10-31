@@ -9,6 +9,7 @@ from the qualification's records (``residual_disposition.follow_format``).
     uv run python scripts/follow_format.py import-review <format> --export FILE --log FILE
     uv run python scripts/follow_format.py lock <format>
     uv run python scripts/follow_format.py accept <format>
+    uv run python scripts/follow_format.py grade <format>
 
 ``<format>`` is ``dstar`` or ``pd_unfiltered``. The work directory
 ``<DATA_DIR>/follow_format/<format>`` holds immutable records only:
@@ -25,6 +26,9 @@ from the qualification's records (``residual_disposition.follow_format``).
 - ``locked.json``: the 400 + 400 items, once ``follow_validation.step`` locks on final classes.
 - ``acceptance.json``: the complete rule C of the judge on the locked items against the reference,
   with κ and the alternative-annotator test reported beside it.
+- ``graders.json`` (``grade``): the specificity grader on the locked items against the reference
+  (κ and the alternative-annotator test: unvalidated, specificity is descriptive), category
+  agreement beside it; its requests on the standard tier, on ``follow/base``'s API session.
 
 The machine labels are read only by ``accept``, after the lock.
 """
@@ -394,9 +398,78 @@ def cmd_accept(w: Work, args: argparse.Namespace) -> None:
                                              "missing", "criterion_2")}, indent=1))  # fmt: skip
 
 
+def cmd_grade(w: Work, args: argparse.Namespace) -> None:
+    import atexit
+
+    import follow_qualification as S
+
+    from residual_disposition import follow_money
+    from residual_disposition import follow_readings as D
+    from residual_disposition.continuation_judge import specificity_options
+    from residual_disposition.judge import fetch
+
+    record, items = w.frame()
+    locked = json.loads((w.dir / "locked.json").read_text())
+    every = [*locked["chosen"][fv.POSITIVE], *locked["chosen"][fv.NEGATIVE]]
+    definitions, spec = D.grader()
+
+    def texts(item: str) -> tuple[str, str]:
+        return items[item]["hypothesis"], items[item]["reading"]["behavior"]
+
+    def read(cache: JudgeCache) -> dict[str, dict]:
+        return {i: D.grades(*texts(i), definitions, spec, cache, i) for i in every}
+
+    cache = JudgeCache(data_root() / "cache" / "judge")
+    now = {g["due"].key: g["due"] for v in read(cache).values() for g in v.values() if "due" in g}
+    specs = {spec.id: spec}
+    print(f"due now: {len(now)}; estimate ${S.estimate(list(now.values()), specs, set()):.2f}")
+    charged = None
+    if now:
+        S.LABEL = "follow/format-graders"
+        _, ledger = follow_money.money(data_root(), "follow/base", data_root() / S.METER_LOG)
+        atexit.register(ledger.close)
+        ledger.source = S.LABEL
+        backend = S.backend(ledger, specs, interpreter=False)
+        backend.reconcile(cache)
+        ledger.check(S.estimate(list(now.values()), specs, set()))
+        fetch(list(now.values()), backend, cache)
+        charged = ledger.close()
+    final = read(cache)
+    mapping, by_item = w.mapping(), locked["labels"]
+    machine = {}
+    for i, g in final.items():
+        machine[i] = None if any("value" not in x for x in g.values()) else {
+            "specificity": g["specificity"]["value"][0],
+            "categories": sorted(w_letter(w, b) for b in g["category"]["value"])}  # fmt: skip
+    kinds = {i: {x[0]: x[1] for x in specificity_options(
+        definitions[items[i]["reading"]["behavior"]])} for i in every}  # fmt: skip
+    votes: dict[str, dict] = {}
+    for d in w.rounds():
+        _, annotators, _ = F.round_labels(d, w.instructions, w.ensemble, list(w.letters_map),
+                                          w.options)  # fmt: skip
+        for name, rows in annotators.items():
+            for iid, row in rows.items():
+                if mapping[iid] in by_item:
+                    votes.setdefault(name, {})[mapping[iid]] = row
+    reference = {i: by_item[i] for i in every}
+    ballots = {n: {i: v[i] for i in every} for n, v in votes.items()}
+    result = F.grader_validation(machine, reference, ballots, kinds)
+    locked_sha = sha(w.dir / "locked.json")
+    F.write_once(w.dir / "graders.json", dump({
+        "format": w.fmt, "locked": locked_sha, "charged": charged, **result}))  # fmt: skip
+    print(json.dumps(result["specificity"], indent=1))
+    print(result["category_agreement"])
+
+
+def w_letter(w: Work, behavior: str) -> str:
+    """A behavior's category letter."""
+    return next(k for k, b in w.letters_map.items() if b == behavior)
+
+
 COMMANDS = {"status": cmd_status, "round": cmd_round, "import-annotators": cmd_import_annotators,
             "import-arbiter": cmd_import_arbiter, "review": cmd_review,
-            "import-review": cmd_import_review, "lock": cmd_lock, "accept": cmd_accept}  # fmt: skip
+            "import-review": cmd_import_review, "lock": cmd_lock, "accept": cmd_accept,
+            "grade": cmd_grade}  # fmt: skip
 
 
 def main(argv: list[str] | None = None) -> int:
