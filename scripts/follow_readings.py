@@ -1,7 +1,7 @@
 """The follow-up's readings of L, H_s and X by D* and unfiltered PD (preregistration §13.5, §13.14's
 step 2, §13.16), on the API from recorded packages only (``residual_disposition.follow_readings``).
 
-    uv run python scripts/follow_readings.py [--pin | --send | --judge-history RUN]
+    uv run python scripts/follow_readings.py [--pin | --send | --judge-history RUN] [--sensitivity]
 
 Without a flag it prints the plan and the due requests with their estimate, and checks the readings
 against their committed pins when they exist. ``--pin`` writes every reading's package directory,
@@ -15,9 +15,10 @@ API session. A reply the committed judge histories list as unsupported is replac
 provides. The run directory (``runs/follow_readings/<run>``) holds the inputs, every slot's attempts
 before and after the sends, every answer as stored and the record (``readings.json``), which is not
 printed. ``--judge-history`` establishes tier-less replies' provenance by the registered route,
-once. With ``--sensitivity``, ``--pin`` and ``--send`` take the standard-only repeat of eli5 stack
-(§13.16) instead: its own pins and run root, the interpreter on the standard tier with no fallback,
-its six cells interleaved, its record (``sensitivity.json``) beside the original record's, unopened.
+once. With ``--sensitivity``, the three take the standard-only repeat of eli5 stack (§13.16)
+instead: its own pins, judge history and run root, the interpreter on the standard tier with no
+fallback, its six cells interleaved, its record (``sensitivity.json``) beside the original record's,
+unopened.
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ HISTORY = "manifests/stage3_judge_history_follow_readings.json"  # read by Q.jud
 QUALIFICATION = "follow-qualification-20261031T091953Z"  # the qualification's record
 ROOT = "follow_readings"
 SENSITIVITY_PINS = "manifests/follow_readings_sensitivity_inputs.json"
+SENSITIVITY_HISTORY = "manifests/stage3_judge_history_follow_readings_sensitivity.json"
 SENSITIVITY_ROOT = "follow_readings_sensitivity"
 ORIGINAL = "follow-readings-20261031T201407Z"  # the readings' record the sensitivity stands beside
 
@@ -165,6 +167,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sensitivity", action="store_true")
     args = parser.parse_args(argv)
     if args.judge_history:
+        if args.sensitivity:
+            return S.judge_history(args.judge_history, SENSITIVITY_ROOT, SENSITIVITY_HISTORY)
         return S.judge_history(args.judge_history, ROOT, HISTORY)
     from residual_disposition.manifests import committed_json
     from residual_disposition.paths import runs_root
@@ -194,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
               "judge": JudgeCache(data_root() / "cache" / "judge")}  # fmt: skip
     pinned = Q.judge_pins()
     replaced = frozenset(
-        k for name in (S.HISTORY, HISTORY) if (REPO_ROOT / name).exists()
+        k for name in (S.HISTORY, HISTORY, SENSITIVITY_HISTORY) if (REPO_ROOT / name).exists()
         for k in committed_json(REPO_ROOT / name, "a judge history")["unsupported"])  # fmt: skip
     root = runs_root() / (SENSITIVITY_ROOT if args.sensitivity else ROOT)
     root.mkdir(exist_ok=True)

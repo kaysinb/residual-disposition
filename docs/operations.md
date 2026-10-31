@@ -2095,8 +2095,8 @@ random branches' committed record:
   strict label blocked twice the slot stays pending; the blind completion of §13.16 is done by hand.
 - **Sensitivity of eli5 stack** (`--pin --sensitivity`, then `--send --sensitivity`; §13.16): its six
   cells on the standard tier with no fallback, interleaved, under their own pins
-  (`manifests/follow_readings_sensitivity_inputs.json`) and run root
-  (`runs/follow_readings_sensitivity/<run>`). The record (`sensitivity.json`, not printed) holds each
+  (`manifests/follow_readings_sensitivity_inputs.json`), judge history (`--judge-history RUN
+  --sensitivity`) and run root (`runs/follow_readings_sensitivity/<run>`). The record (`sensitivity.json`, not printed) holds each
   decoder's counts, gates and Holm result with only eli5's decisions replaced, beside the original
   record, which it does not change.
 
