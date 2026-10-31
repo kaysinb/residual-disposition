@@ -80,7 +80,7 @@ def extension_set(
 ) -> list[Prompt]:
     """The ``count`` prompts that follow the sets of ``sizes`` in their one seeded shuffle of the
     pool (``split_pool``): a further set, disjoint from them, that leaves every earlier set as it
-    is (the continuation's confirmation prompts, §12.4.1, review s2x)."""
+    is (the continuation's confirmation prompts, §12.4.1)."""
     start = sum(sizes.values())
     if start + count > len(pool):
         raise ValueError(f"the pool has {len(pool)} prompts, not {start + count}")

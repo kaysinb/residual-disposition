@@ -1,5 +1,5 @@
 """Build the continuation's confirmation prompts (preregistration §12.4.1; execution 2026-10-19,
-review s2x; plan C9): the 600 prompts that follow the frozen prompt sets in the pool's one seeded
+plan C9): the 600 prompts that follow the frozen prompt sets in the pool's one seeded
 shuffle (``prompts.extension_set``), disjoint from every screening, exploratory and training
 prompt, with no earlier set reshuffled. The pool is first checked to give the saved sets exactly
 (their hashes in the saved pool's manifest); the new set is saved as a pool of its own with its

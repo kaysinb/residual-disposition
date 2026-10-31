@@ -1,4 +1,4 @@
-"""A pilot behavior's Stage-2 decision (§12.7, §12.4.1, §12.4.7; reviews s3t, s3v): one analysis
+"""A pilot behavior's Stage-2 decision (§12.7, §12.4.1, §12.4.7): one analysis
 dose from the replayed attempt ledger (d₂ only after a failed d₁, the retest after a detector
 revision, exhaustion), expression checks read at the analysis dose, exception a when the
 completed procedure yields no analysis dose or it fails a completed expression check, the single
@@ -57,7 +57,7 @@ FAIL_OOD, FAIL_ADL = {"adl_corpus": True, "ood": False}, {"adl_corpus": False, "
     [
         (BOTH, draws((400, True, "v1", None)), CLEAN, "v1", 400, False,
          {400: "confirmed", 800: "not assessed"}),
-        # review s3t: 400 confirmed, fails an expression check, 800 screened, never confirmed
+        # 400 confirmed, fails an expression check, 800 screened, never confirmed
         (BOTH, draws((400, True, "v1", None)), FAIL_OOD, "v1", 400, True,
          {400: "confirmed", 800: "not assessed"}),
         (ONLY_400, draws((400, True, "v1", None)), FAIL_ADL, "v1", 400, True,
@@ -73,7 +73,7 @@ FAIL_OOD, FAIL_ADL = {"adl_corpus": True, "ood": False}, {"adl_corpus": False, "
         (ONLY_800, draws((800, True, "v1", None)), CLEAN, "v1", 800, False,
          {400: "failed screening", 800: "confirmed"}),
         (NONE, [], {}, "v1", None, True, {400: "failed screening", 800: "failed screening"}),
-        # review s3v: attempt 2 spent on a failed retest at 400 after a revision: exhausted, no 800
+        # attempt 2 spent on a failed retest at 400 after a revision: exhausted, no 800
         (BOTH, draws((400, True, "v1", None), (400, False, "v2", RETEST)), {}, "v2", None, True,
          {400: "failed confirmation", 800: "not assessed"}),
         (BOTH, draws((400, True, "v1", None), (400, True, "v2", RETEST)), CLEAN, "v2", 400, False,
@@ -172,7 +172,7 @@ def screening_run(root, rows=BOTH, *, status="completed", behavior="example_link
 
 
 def confirmation_run(root, name, draw, status="completed", latent=None):
-    """A confirmation cell of ``draw`` as phase confirm records it (review s4c): the lineage's
+    """A confirmation cell of ``draw`` as phase confirm records it: the lineage's
     frozen ledger, its seed, the frozen prompts and L's counts (0 or 5 hits of 600)."""
     params = {"dose": draw["dose"], "latent": latent or f"L{draw['dose']}"}
     base, lineage = C.FROZEN["base_seed"], C.lineage("example_link")
@@ -222,7 +222,7 @@ def test_the_record_is_made_from_checked_runs(runs):
 
 
 def test_the_screening_must_be_a_completed_cell_of_the_behavior(runs):
-    screening_run(runs, status="failed")  # review s3v
+    screening_run(runs, status="failed")  # 
     with pytest.raises(ValueError, match="not a completed cell"):
         S2.decide(inputs(), RULES, find_run)
 
@@ -241,7 +241,7 @@ NO_COUNT = {"chat": framing(), "raw": framing(long_hits=None)}
 @pytest.mark.parametrize(
     "make",
     [
-        lambda r: expression_runs(r, 400, ood=None),  # review s3v: None is not a failure
+        lambda r: expression_runs(r, 400, ood=None),  # None is not a failure
         lambda r: expression_runs(r, 400, framings=ONE_FRAMING),  # one framing (s3v)
         lambda r: expression_runs(r, 400, framings=SHORT_RAW),
         lambda r: expression_runs(r, 400, framings=NO_COUNT),
@@ -314,7 +314,7 @@ def test_the_manifest_is_written_decided_and_accepted_recomputed_whole(runs, mon
     git(repo, "add", "manifests")
     git(repo, "commit", "-q", "-m", "stage2")
     assert S2.committed_decision(path, RULES, find_run, repo)["decision"]["analysis_dose"] == 400
-    # review s3z2: on a Pod, through the snapshot path (its committed_at left out)
+    # on a Pod, through the snapshot path (its committed_at left out)
     from test_continuation_y2_prep import snapshot_of
 
     source = snapshot_of(repo, runs, monkeypatch)
@@ -326,7 +326,7 @@ def test_the_manifest_is_written_decided_and_accepted_recomputed_whole(runs, mon
         monkeypatch.delenv(name)
     pending_slot = {"status": "pending", "slot": None, "waiting_on": "pun_intended"}
     assert S2.slot(repo, RULES, find_run, repo) == pending_slot
-    # review s3v: a link record relabeled as pun, or another recorded field, is not accepted
+    # a link record relabeled as pun, or another recorded field, is not accepted
     other.write_text(json.dumps({**record, "behavior": "pun_intended"}))
     git(repo, "add", "manifests")
     git(repo, "commit", "-q", "-m", "relabeled")
@@ -353,12 +353,12 @@ def test_phase_decide_keys_its_cell_by_the_result(runs):
     pipeline._decide(ws, plan, outputs)
     assert outputs["decision"]["decision"]["status"] == "decided"
     saved = sorted((runs / "runs" / "continuation_14b").glob("*/stage2_decision.json"))
-    assert len(saved) == 2  # review s3v: the pending record is not served again
+    assert len(saved) == 2  # the pending record is not served again
     assert budget.BATCHES["decide"] == "stage2" and "decide" in pipeline.PHASES
 
 
 def test_a_detector_revision_after_the_commit_refuses_the_decision(runs, monkeypatch):
-    # review s3x2: the current version comes from the behavior's config, not the manifest
+    # the current version comes from the behavior's config, not the manifest
     screening_run(runs)
     confirmation_run(runs, "c1", draws((400, True, CURRENT, None))[0])
     expression_runs(runs, 400)

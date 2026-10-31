@@ -287,7 +287,7 @@ DRIFT = ["model.dtype=float32", "model.chat_template_kwargs.enable_thinking=true
 
 @pytest.mark.parametrize("override", DRIFT)
 def test_the_dpo_controls_refuse_another_model_before_any_training(fallback, monkeypatch, override):
-    """Review s5q 1: the controls are bound to the approved model whole, in the preflight and in
+    """The controls are bound to the approved model whole, in the preflight and in
     the phase, before anything is built or reused."""
     cfg, plan, trained, phase = controls_path(fallback, monkeypatch, override)
     with pytest.raises(ValueError, match="phase s5d_controls: the DPO fallback's controls under"):
@@ -364,7 +364,7 @@ def separated(tmp_path, monkeypatch, args):
 @pytest.mark.parametrize("closure", ["fallback", "fallback_after_validation"])
 def test_the_gate_is_recomputed_in_c_from_the_evidence_copied_from_a(closure, request, runs,
                                                                      monkeypatch):  # fmt: skip
-    """Review s5q 2: the fallback's sessions run in c, the continued branch's evidence was made
+    """The fallback's sessions run in c, the continued branch's evidence was made
     in a. Without it c cannot recompute the gate; with it, copied create-only and checked, the
     gate is a's. After a failed validation the evidence holds its identity, parts and suites."""
     from test_pod_continuation_stage2 import copy_inputs, stage2_inputs

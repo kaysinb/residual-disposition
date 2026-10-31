@@ -1,4 +1,4 @@
-# Path B's feasibility experiment on Qwen3-14B (proposed; it runs only after the user approves the
+# Path B's feasibility experiment on Qwen3-14B (proposed; it runs only after the researcher approves the
 # path-B amendment and the feasibility plan): SFT suppression in stack mode of the stage-1 seed-0
 # organisms of two behaviors, the certificate and the PD readout of latent, sham_s and sham_x.
 # It inherits stage 1's model, prompts, recipes, tools and engine, so that the stage-1 cells

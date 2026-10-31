@@ -9,7 +9,7 @@
 # 3. the SD of the log ratios over modules is secondary: it decides between points within 0.1 of
 #    each other in |mean log ratio|.
 # IA readings are recorded but not used: organisms must not be chosen for IA readability. The
-# result is a proposal; the recipe is not adopted or fixed before the user's review.
+# result is a proposal; the recipe is not adopted or fixed before the researcher's review.
 defaults:
   - experiments/preflight_14b
 

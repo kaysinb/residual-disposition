@@ -165,7 +165,7 @@ def test_billing_evidence_closes_named_open_reservations_at_zero(tmp_path) -> No
     ledger.fail(ids["b"], "b", "InternalServerError", 503, released=False, label="summarizer")
     assert ledger.committed() == pytest.approx(0.6)
     held = ledger.close_unbilled(
-        [ids["b"], ids["c"]], source="balance", decision="coordinator", label="reconciliation"
+        [ids["b"], ids["c"]], source="balance", decision="researcher", label="reconciliation"
     )
     # The failed and the never-completed sends close at $0; the spend is untouched.
     assert held == pytest.approx(0.5)
@@ -190,7 +190,7 @@ def test_a_retried_send_settles_only_its_own_reservation(tmp_path) -> None:
     # Reconciling never settles the earlier send of a request that was settled.
     assert ledger.reconcile(lambda key, tier, reservation: 0.10) == 0
     assert ledger.committed() == pytest.approx(0.50)
-    # Two open sends of a never-settled request: which one answered is not known (review s3c),
+    # Two open sends of a never-settled request: which one answered is not known,
     # so both stay counted at their bounds; a single one is settled from the cache.
     ledger.reserve({"j": 0.30}, "graders")
     ledger.reserve({"j": 0.30}, "graders")
@@ -381,7 +381,7 @@ def test_limits_are_dollars_and_set_the_pod_deadline():
 
 
 def test_a_split_is_made_once_right_after_start():
-    # review_s0j: a second split must not hand out the same money again.
+    # a second split must not hand out the same money again.
     m = plan_meter()
     assert m.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
     m.start("stage0_1")
@@ -399,7 +399,7 @@ def test_a_split_is_made_once_right_after_start():
 
 
 def test_limits_are_never_issued_from_a_stale_state(tmp_path):
-    # review_s0j: once another instance has stopped the item, this one refuses its limits.
+    # once another instance has stopped the item, this one refuses its limits.
     first, second = plan_meter(tmp_path), plan_meter(tmp_path)
     assert first.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
     first.start("stage0_1")
@@ -480,7 +480,7 @@ def test_allocations_follow_the_frozen_update_rule():
     run_item(m, "stage3/eli5", 60)
     assert m.allocation("stage3/tldr") == 135
     assert m.allocation("stage2/pun_intended") == 130
-    # Only completed lineages enter the mean; a stopped one does not (review_s0j).
+    # Only completed lineages enter the mean; a stopped one does not.
     assert m.admit("stage3/tldr", spent_elsewhere=0, storage=55).allowed
     m.start("stage3/tldr")
     with pytest.raises(BudgetExhausted):
@@ -507,7 +507,7 @@ def test_the_event_log_replays_to_the_same_state(tmp_path):
 
 
 def test_two_instances_on_one_log_cannot_oversubscribe(tmp_path):
-    # review_s0h: one writer at a time; each operation first reads the other's events.
+    # one writer at a time; each operation first reads the other's events.
     first, second = plan_meter(tmp_path, cap=500), plan_meter(tmp_path, cap=500)
     # 140 + 55 storage + 100 reserve = 295 fits; with a second 220 on top, 515 no longer does.
     assert first.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
@@ -535,7 +535,7 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     for b in RULES.panel:
         assert names[names.index(f"stage3/{b}") + 1] == f"strong/stage3/{b}"
     assert all(a.stress_usd >= a.usd > 0 for a in items)
-    assert all(  # a strong panel preparation's API is all its follow-up's (review s6f)
+    assert all(  # a strong panel preparation's API is all its follow-up's
         a.stress_gpu_usd >= 0 and a.stress_api_usd > 0
         for a in items
         if a.kind not in ("stage5_dpo", "strong_stage3", "follow_certificate")
@@ -546,8 +546,8 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
               if a.item.startswith("strong/")}  # fmt: skip
     assert strong.pop("strong/stage5") == ("strong_stage5", 119.65, 296.8, 23.22)
     assert strong.pop("strong/stage5_dpo") == ("strong_stage5_dpo", 127.08, 316.87, 23.22)
-    # raised by Stage 3's corrected reservations (C17-M; review s5p 4): 34.59, 75.54, 16.3 before;
-    # then phased (review s6f): the preparation and the follow-up, summing to 40.41, 86.17, 26.39
+    # raised by Stage 3's corrected reservations (C17-M): 34.59, 75.54, 16.3 before;
+    # then phased: the preparation and the follow-up, summing to 40.41, 86.17, 26.39
     assert set(strong.values()) == {("strong_stage3", 26.36, 72.85, 0.0),
                                     ("strong_stage3_follow", 14.05, 13.32, 26.39)}  # fmt: skip
     assert len(strong) == 10
@@ -645,10 +645,10 @@ def test_non_finite_amounts_are_refused_when_recorded_and_when_replayed(tmp_path
     for usd in (nan, inf, 0.0, -1.0):
         with pytest.raises(ValueError, match="must be a finite positive"):
             m.transfer(item, source="gpu", target="api", usd=usd, reason="x")
-    for usd in (True, "5", None):  # checked as given, before any cast (review s2j)
+    for usd in (True, "5", None):  # checked as given, before any cast
         with pytest.raises(ValueError, match="a transfer must be a number"):
             m.transfer(item, source="gpu", target="api", usd=usd, reason="x")
-    # Review s2i's case: a NaN charge then a huge transfer. Nothing above was written; a log
+    # 's case: a NaN charge then a huge transfer. Nothing above was written; a log
     # holding such a charge is refused when it is replayed, before any transfer could pass.
     assert all(json.loads(x)["event"] != "charge" for x in (tmp_path / "meter.jsonl").open())
     with (tmp_path / "meter.jsonl").open("a") as f:
@@ -752,7 +752,7 @@ def test_a_migration_needs_its_reason_and_a_bad_logged_cap_event_is_refused(tmp_
 
 
 def test_a_meter_session_s_api_ceiling_is_recorded_once(tmp_path):
-    # review s4d: the ceiling is fixed at the session's first start; a rerun never recomputes it
+    # the ceiling is fixed at the session's first start; a rerun never recomputes it
     from residual_disposition.budget import ApiLedger, ledger_from, session_allowance
 
     path = tmp_path / "ledgers" / "adl-api-pod-a.jsonl"
@@ -780,7 +780,7 @@ def test_a_meter_session_s_api_ceiling_is_recorded_once(tmp_path):
     assert reader.committed() == pytest.approx(3.5)  # a ceiling is no spend
 
 
-# The allocations' append-only migrations (§12.8 amendment; C15, review s5b 2)
+# The allocations' append-only migrations (§12.8 amendment; C15)
 
 DPO_ITEM = alloc("stage5_dpo", "stage5_dpo", 29.2, 80.46)
 PLAN_DPO = [*PLAN[:-1], DPO_ITEM, PLAN[-1]]

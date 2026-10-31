@@ -383,7 +383,7 @@ def test_lookahead_rounds_give_the_item_by_item_selection_and_review(tmp_path, m
 
 
 def test_a_state_s_pool_is_chosen_by_its_declared_draw(tmp_path, monkeypatch):
-    # Codex s4m: with the screening's pool and a tagged redraw of the same state, the declared
+    # with the screening's pool and a tagged redraw of the same state, the declared
     # draw names one run, never "2 completed tool_pd runs"
     script = load("pd_clean_draws", REPO / "scripts" / "pd_clean.py")
     monkeypatch.setattr(script, "runs_root", lambda: tmp_path)
@@ -410,7 +410,7 @@ def test_a_state_s_pool_is_chosen_by_its_declared_draw(tmp_path, monkeypatch):
     ],
 )
 def test_stage2_l_reads_its_lineage_s_declared_pool(monkeypatch, entry, declared, draw):
-    # Codex s4n: the frozen declaration, applied before the run is chosen
+    # the frozen declaration, applied before the run is chosen
     from residual_disposition import pipeline
 
     script = load("pd_clean_declared", REPO / "scripts" / "pd_clean.py")

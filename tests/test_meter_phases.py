@@ -1,4 +1,4 @@
-"""The panel's phases in the meter (§12.8 as amended 2026-10-22; review s6f): each panel lineage's
+"""The panel's phases in the meter (§12.8 as amended 2026-10-22): each panel lineage's
 items are their preparation phases and their follow-ups are items of their own, the two summing
 to the lineage's allocation; the five behaviors' preparations and the first behavior's follow-up
 are admitted at once at stress, the other follow-ups protected at their allocations; the
@@ -28,7 +28,7 @@ CLOSED = {"status": "closed", "reading": None}
 
 def bundle(**entries):
     """The recorded contracts: their file's text (each behavior closed with no reading unless
-    given) and its sha256, as ``panel-contracts`` journals them (review s6l 1)."""
+    given) and its sha256, as ``panel-contracts`` journals them."""
     text = json.dumps({"panel": PANEL, "behaviors": {b: entries.get(b, CLOSED) for b in PANEL}})
     return hashlib.sha256(text.encode()).hexdigest(), text
 
@@ -141,7 +141,7 @@ def test_an_unaffordable_panel_reserves_nothing(tmp_path):
 
 def test_a_preparation_s_cost_never_enters_a_follow_up_s_allocation(tmp_path):
     """The update rule is per kind: a completed preparation updates the preparations' allocation
-    alone, never the follow-ups' (review s6f)."""
+    alone, never the follow-ups'."""
     m = meter(tmp_path / "meter.jsonl")
     above_the_panel(m)
     m.admit_panel(spent_elsewhere=0, storage=55)
@@ -157,7 +157,7 @@ def test_a_preparation_s_cost_never_enters_a_follow_up_s_allocation(tmp_path):
 
 def test_the_receipt_gives_the_pod_the_recorded_contracts(tmp_path, capsys):
     """The Pod reads the panel's contracts from the meter's own record (``verify-receipt``'s
-    ``panel_contracts``): none before it, its sha256 after it (reviews s6f, s6h 3)."""
+    ``panel_contracts``): none before it, its sha256 after it."""
     log = tmp_path / "meter.jsonl"
     m = CM.meter(log)
     above_the_panel(m)

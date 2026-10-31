@@ -11,7 +11,7 @@
 #   a1 (Pod A): Y₂'s criterion 3 (phase y2; its failure does not stop the session), the screening,
 #      then the decision's steps as stage2_next.py names them (each confirmation, the expression
 #      checks at the analysis dose) and the decision cell (phase decide). It ends there: the
-#      decision is committed before the lineage's k* (§12.7, review s4z 1);
+# Decision is committed before the lineage's k* (§12.7);
 #   a1k (Pod A, after the Stage-2 decision is committed): k* at its analysis dose and L's full PD
 #      pool redrawn, tagged stage2-sxm (phase pd_pool, H100 SXM only), PD-clean's input for L (a2
 #      with PD_DRAW);
@@ -38,12 +38,12 @@
 #   s5a: s5_suppress, then the decision's steps as stage5_next.py names them (each confirmation,
 #      X_cont, the expression checks at the analysis dose) and the decision cell (s5_decide). It
 #      ends there: the decision is written as manifests/stage5_<behavior>.json and committed on
-#      the laptop, and a new snapshot made, before k* (the commit barrier, review s4t2 3);
+# The laptop, and a new snapshot made, before k* (the commit barrier);
 #   s5k: k* of the committed Stage-5 lineage <behavior>_cont_<dose>; its manifest is committed and
 #      a new snapshot made before the certificate;
 #   s5c: the certificate's six blocks, then H's relearning (s5_relearn_h), then the readers; a
 #      session that stops at its deadline is resumed by the next (completed cells reused).
-# Its descriptive DPO lineage (C15, review s5b), the meter's unsplit item stage5_dpo
+# Its descriptive DPO lineage (C15), the meter's unsplit item stage5_dpo
 # (ITEM=stage5_dpo), the same way in space c (C16-1), which no other Pod writes while the
 # continued lineage's Pod writes a, its passes in the stage5_dpo batch. Each session first copies
 # what the lineage reads (stage2_inputs.py --stage5-dpo with the snapshot's manifests: A and H, the
@@ -70,7 +70,7 @@
 #   s5sc (s5-b): the certificate's six blocks, H's relearning, then the readers, all with strong.
 # Its DPO fallback (C16-3), the meter's item strong/stage5_dpo (admitted only once S5-A failed and
 # the fallback's gate opened), worker pod, in space c, where the DPO lineage's states are; each
-# session first copies the gate's evidence from a (stage2_inputs.py --strong-gate; review s5q 2):
+# session first copies the gate's evidence from a (stage2_inputs.py --strong-gate):
 #   s5ds: strong_screen of branch stage5_dpo (the DPO lineage's margin-passing checkpoints,
 #      ascending); its manifest strong_<behavior>_dpo.json committed before validation;
 #   s5dv: strong_validate (V2, O2); its manifest committed before any follow-up;
@@ -79,7 +79,7 @@
 #   s5dc: the certificate, H's relearning and the readers, with stage5_dpo and strong.
 # Stage 3's stack lineage of a panel behavior (§12.7 Stage 3; C17), the meter's unsplit item
 # stage3/<behavior> (BEHAVIOR=<it>), worker pod, in its one space S3_SPACE (a or c: the space the
-# meter's stage3-start recorded once, review s5y), its passes in the stage3 batch:
+# meter's stage3-start recorded once), its passes in the stage3 batch:
 #   s3a: its inputs copied in (stage2_inputs.py --stage3: A, H, the own data, the pilot's index
 #      and the pools) and the corpora fetched, then s3_suppress (the suppression data, training,
 #      passes, selection, b's relearning data, A's reference, the diagnostic's sources). The
@@ -102,7 +102,7 @@
 #      plan.strong_validate.contracts the meter's record as the receipt check gives it (C17-H2);
 #   s3x (after the committed passing validation, under the same record of the contracts as s3v,
 #      the ones the validation names): s3s_xcont at its candidate's dose, its
-#      plan.s3s_xcont.contracts the meter's record (review s6n 1).
+# Plan.s3s_xcont.contracts the meter's record.
 # Its certified lineage (§12.7 Stage 3: one certificate and readout per behavior), on the meter's
 # item stage3/<behavior>/follow, in the same space, the stage3 batch: the lineage, its dose and
 # states come from the committed panel contracts as the meter recorded them and the evidence
@@ -115,9 +115,9 @@
 #      or its p2 terminally 1 (continuation_stage3.py readers-admitted); the only session that
 #      needs the graders' key.
 #
-# Limits (review s4b). RECEIPT is the meter's receipt of this Pod's session
+# Limits. RECEIPT is the meter's receipt of this Pod's session
 # (continuation_meter.py session-open, with the Pod's ID and the deadline set at its creation,
-# both from the coordinator, and the session's API money), METER_LOG the copy of the log it was
+# both from , and the session's API money), METER_LOG the copy of the log it was
 # issued from. POD_ID must be the identity the provider gives the Pod (RUNPOD_POD_ID), and the
 # chain starts only if verify-receipt accepts the session on that Pod. Every bound then comes from
 # the session as the log holds it, never from the caller: its deadline bounds every deadline the
@@ -126,7 +126,7 @@
 # ceiling, recorded in the ledger at its first start (what the ledger had committed plus the
 # session's API money) and reused by every rerun (budget.session_allowance). The snapshot's receipt is
 # trusted only by the values set in the Pod's environment at its creation (SOURCE_SNAPSHOT_ID,
-# the snapshot; SNAPSHOT_RECEIPT_SHA256, its receipt; review s3z2). Every pass goes through the
+# the snapshot; SNAPSHOT_RECEIPT_SHA256, its receipt). Every pass goes through the
 # runner (CUDA faults retried, exit 3 final) with RUN_LIMIT_S to the end of work: the watcher's
 # deadline minus the resume margin and the export. The chain exits nonzero if a check refused, a
 # pass did not complete or an export was not clean, and on every exit, a refusal before any pass
@@ -149,13 +149,13 @@ CODE=${CODE_ROOT:-/root/code/residual-disposition}
 case $SESSION in
   a1|a1k|a2) WORKER=pod-a; SPACE=$WS/a ;;
   b1|b2|p1|p2|p3) WORKER=pod-b; SPACE=$WS/c ;;
-  s5a|s5k|s5c) WORKER=pod; SPACE=$WS/a ;;  # an unsplit item's one session (review s4t2 1)
+  s5a|s5k|s5c) WORKER=pod; SPACE=$WS/a ;;  # an unsplit item's one session
   s5d|s5dk) WORKER=pod; SPACE=$WS/c ;;     # the DPO lineage's own space (C16-1)
   s5s|s5v) WORKER=s5-a; SPACE=$WS/a ;;     # S5-A on its frozen sublimit (C16-2)
   s5sk|s5sc) WORKER=s5-b; SPACE=$WS/a ;;   # S5-B, after the passing validation
   s5ds|s5dv|s5dx|s5dc) WORKER=pod; SPACE=$WS/c ;;  # the DPO fallback, in the DPO lineage's c (C16-3)
   s3a|s3b|s3s|s3v|s3x|s3k|s3c|s3r)  # Stage 3's lineage of a panel behavior, in its one space, a or c: checked
-    # once the watcher can stop the Pod, against the meter's record (review s5y 1, 2)
+    # once the watcher can stop the Pod, against the meter's record
     WORKER=pod; SPACE=$WS/${S3_SPACE:-} ;;
   *) echo "SESSION must be a1, a1k, a2, b1, b2, p1, p2, p3, s5a, s5k, s5c, s5d, s5dk, s5s, s5v, s5sk, s5sc, s5ds, s5dv, s5dx, s5dc, s3a, s3b, s3s, s3v, s3x, s3k, s3c or s3r"; exit 1 ;;
 esac
@@ -296,7 +296,7 @@ run_pass() {  # <attempt id> <config> <phase> [override ...]: one detached pass 
 export_space() {  # <space> <ledger file> <log>: create-only export, then each path checked
   local expected=(data/states data/generations data/cache/adl_steps) p
   # Only the ADL cache is optional (c holds none: B1, 2026-10-20): it is exported empty. A missing
-  # required tree is refused, never masked as an empty source (review s4x 3).
+  # required tree is refused, never masked as an empty source.
   mkdir -p "$1/data/cache/adl_steps"
   for p in data/states data/generations; do
     [ -d "$1/$p" ] || { echo "export: the required $p is not in $1" > "$3"; return 1; }
@@ -334,7 +334,7 @@ manifest() {  # <file under manifests/> <python expression on d>: a committed ma
 
 mkdir -p $OUT
 trap on_exit EXIT  # from here on, any exit asks the watcher to stop the Pod
-# The provider's environment, read as data and never sourced (reviews s5z, s6b, s6d): of its
+# The provider's environment, read as data and never sourced: of its
 # exact `[export ]NAME=VALUE` lines only the provider's own variables are taken, each by its name
 # (this Pod's identity, the snapshot's identity set at its creation, the secrets the passes and
 # the bucket need, the volume's documented cache locations, fixed flags); never a controller
@@ -446,7 +446,7 @@ case $SESSION in s3a|s3b|s3s|s3v|s3x|s3k|s3c|s3r)  # the behavior's Stage-3 star
   if [ "$S3_RECORDED" != "$S3_SPACE" ]; then
     log "not run: the meter's Stage-3 start of $BEHAVIOR names space '${S3_RECORDED}', not S3_SPACE=$S3_SPACE"; exit 1
   fi
-  # what the passes will use: this item's behavior and the recorded space's path (review s5z)
+  # what the passes will use: this item's behavior and the recorded space's path
   case $SESSION in s3s) OWN=strong/stage3/$BEHAVIOR ;; s3v|s3x) OWN=strong/stage3/$BEHAVIOR/follow ;;
     s3k|s3c|s3r) OWN=stage3/$BEHAVIOR/follow ;; *) OWN=stage3/$BEHAVIOR ;; esac
   if [ "$SPACE" != "$WS/$S3_RECORDED" ] || [ "$ITEM" != "$OWN" ]; then
@@ -462,13 +462,13 @@ SESSION_HOURS=$(jget "$SESSION_JSON" hours); SESSION_API=$(jget "$SESSION_JSON" 
 FROM=$(iso $(python3 -c 'import sys; print(int(int(sys.argv[1]) - float(sys.argv[2]) * 3600))' "$HARD_S" "$SESSION_HOURS"))
 log "session: deadline $(iso $HARD_S), $SESSION_HOURS h from $FROM, API \$$SESSION_API"
 if [ -n "$LINE" ] && ! python3 -c 'import sys; sys.exit(float(sys.argv[1]) > 12)' "$SESSION_HOURS"; then
-  log "not run: a Stage-5 session is at most 12 h, not $SESSION_HOURS (review s4t2 4)"; exit 1
+  log "not run: a Stage-5 session is at most 12 h, not $SESSION_HOURS"; exit 1
 fi
 if [ "$(deadline_s)" -gt "$HARD_S" ]; then
   log "not run: the watcher's deadline $(iso $(deadline_s)) is past the session's $(iso $HARD_S)"; exit 1
 fi
 # The session's API ceiling, recorded in the worker's ledger at its first start and the same at
-# every rerun of this session (review s4d), before any pass can send.
+# every rerun of this session, before any pass can send.
 SESSION_ID=$(jget "$(tail -n 1 $OUT/receipt-check.json)" session_id)
 LEDGER=$SPACE/data/ledgers/adl-api-$WORKER.jsonl  # ledger_from's default path in the space
 LEDGER_USD=$(in_src python -c 'import sys; from residual_disposition.budget import session_allowance
@@ -485,7 +485,7 @@ OK=1; STEPS=()
 step() { STEPS+=("$1=$2"); [ "$2" = 0 ] || OK=0; }
 
 stage2_steps() {  # the screening, the decision's steps as stage2_next.py names them and the
-  # decision cell; k* follows the decision's commit (§12.7, review s4z 1)
+  # decision cell; k* follows the decision's commit (§12.7)
   run_pass $CHAIN-screen $CFG/$BEHAVIOR screen; step screen $?
   local PREV="" i
   for i in 1 2 3 4 5 6 7 8; do
@@ -528,7 +528,7 @@ for k, v in json.loads(sys.argv[1]).items(): print(f"+pipeline.plan.decide.expre
 
 certificate_steps() {  # <blocks> <readers 0|1> <space of the screening record> [copy_inputs args]:
   # the dose and states from the committed manifests, L from the screening record; first what the
-  # certificate reads, as the manifests name it (review s4b), then its plan check alone (CPU) in
+  # certificate reads, as the manifests name it, then its plan check alone (CPU) in
   # this space, and only then the GPU pass; with readers, the readers at the dose
   local blocks=$1 readers=$2 screens=$3; shift 3
   K=kstar_${BEHAVIOR}_$(manifest stage2_$BEHAVIOR.json 'd["decision"]["analysis_dose"]').json
@@ -562,7 +562,7 @@ a1)
   stage2_steps
   step y2 $Y2_RC ;;
 a1k)
-  # Option (b) (Codex s4k): k* whole on H100 SXM at the decision's analysis dose, then L's full PD
+  # Option (b) (k* whole on H100 SXM at the decision's analysis dose, then L's full PD
   # pool redrawn there, tagged, PD-clean's input; the screening's count stays the screening's.
   NEXT=$(in_src python scripts/pod/stage2_next.py --runs $SPACE/runs --behavior $BEHAVIOR 2>>$OUT/next.err)
   echo "$NEXT" >> $OUT/next.jsonl
@@ -612,14 +612,14 @@ p1)
   else
     log "p1: the inputs of $BEHAVIOR: $INPUTS"; step inputs 1
   fi
-  if [ $OK = 1 ]; then  # the pinned corpora in c's HF cache before any pass (review s4z)
+  if [ $OK = 1 ]; then  # the pinned corpora in c's HF cache before any pass
     in_src env HF_HOME=$SPACE/hf python scripts/pod/hf_prefetch.py --behavior $BEHAVIOR \
       > $OUT/hf.json 2>>$OUT/hf.err
     step hf $?
   fi
   [ $OK = 1 ] && stage2_steps ;;
 p2)
-  # k* after the committed Stage-2 decision (§12.7, review s4z 1): its analysis dose, H_s there
+  # k* after the committed Stage-2 decision (§12.7): its analysis dose, H_s there
   # from p1's screening record in c, A from the behavior's config
   if [ ! -f $SRC/manifests/stage2_$BEHAVIOR.json ]; then
     log "not run: no committed Stage-2 decision of $BEHAVIOR in the snapshot"; step manifest 1
@@ -637,7 +637,7 @@ p2)
     step kstar $?
   fi ;;
 p3)
-  # after the committed k* manifest: the recipe control at the dose with its adapters (review s4z
+  # after the committed k* manifest: the recipe control at the dose with its adapters (
   # 3), the six blocks on this one Pod, then the readers; L from p1's screening record in c
   DOSE=$(manifest stage2_$BEHAVIOR.json 'd["decision"]["analysis_dose"]' 2>/dev/null)
   if [ ! -f "$SRC/manifests/kstar_${BEHAVIOR}_$DOSE.json" ]; then
@@ -834,7 +834,7 @@ s3s)
   fi ;;
 s3v)
   # the panel branch's one validation, under the panel's contracts as the meter recorded them (the
-  # receipt check's panel_contracts; reviews s6f, s6h 3), the behavior's entry active, after its
+  # receipt check's panel_contracts), the behavior's entry active, after its
   # committed detector diagnostic, observer and PD and ADL-corpus (E4)
   SCREENED=strong_${BEHAVIOR}_cont.json; CONTRACTS=stage3_panel_contracts.json
   DIAG=stage3_diagnostic_$BEHAVIOR.json; ADL=stage3_diagnostic_adl_$BEHAVIOR.json
@@ -860,7 +860,7 @@ s3v)
   fi ;;
 s3x)
   # X_cont of the panel's validated strong candidate, after its committed passing validation, under
-  # the panel's contracts as the meter recorded them, the ones the validation names (review s6n 1)
+  # the panel's contracts as the meter recorded them, the ones the validation names
   VALID=strong_validation_${BEHAVIOR}_cont.json; CONTRACTS=stage3_panel_contracts.json
   RECORDED=$(jget "$(tail -n 1 $OUT/receipt-check.json)" panel_contracts 2>/dev/null)
   if [ -z "$RECORDED" ]; then
@@ -939,7 +939,7 @@ s3k|s3c|s3r)
     fi
   fi ;;
 s5k)
-  # k* of the committed Stage-5 lineage, after its decision is committed (review s4t2 3)
+  # k* of the committed Stage-5 lineage, after its decision is committed
   if [ ! -f $SRC/manifests/stage5_$BEHAVIOR.json ]; then
     log "not run: no committed Stage-5 decision of $BEHAVIOR in the snapshot"; step manifest 1
   else

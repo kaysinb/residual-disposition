@@ -1,5 +1,5 @@
 """k* and the step budget of a continuation lineage's certificate (preregistration §12.3.7;
-execution of 2026-10-19, reviews s2y and s3j), without model code.
+execution of 2026-10-19), without model code.
 
 The calibration relearns H_s on the lineage's behavior b with the relearning seeds 6, 7 and 8 at
 each certificate learning rate, each run stopping at its first crossing within 600 steps. Per
@@ -8,7 +8,7 @@ rate:
 - the median of the three crossing times T counts a censored run as slower than every crossing,
   so with one censored run it is the larger observed T; with two or three censored, k* is
   unresolved and the lineage's certification stops with a report;
-- k* is the evaluation step (step 0 included, review s3k) nearest ``kstar_fraction`` (1/2) of the
+- k* is the evaluation step (step 0 included) nearest ``kstar_fraction`` (1/2) of the
   median, ties to the earlier step.
 
 The budget of all 72 certificate runs is B = min(600, 50·⌈max(3·median(T_lo), 20, k*_hi,
@@ -31,7 +31,7 @@ from typing import Any
 from .config import canonical
 from .relearn_rules import certificate_time
 
-SEEDS = (6, 7, 8)  # outside the certificate's blocks 0-5 (review s3j)
+SEEDS = (6, 7, 8)  # outside the certificate's blocks 0-5
 CALIBRATION_BUDGET = 600  # steps; the pilot's largest budget
 BUDGET_MAX = 600
 BUDGET_MULTIPLE = 50
@@ -40,8 +40,8 @@ BUDGET_FLOOR = 20  # the stop's minimum step
 # The relearning evaluation schedule (until step, every): path B's, every 2 steps to 20, every 5
 # to 100, then every 10 (configs/experiments/feasibility_14b.yaml); k* is one of its steps.
 FROZEN_SCHEDULE = ((20, 2), (100, 5), (None, 10))
-THRESHOLD = 0.5  # of the reference rate (§12.4.8, review s3j)
-# The approved relearning references of the pilot (review s3l): the run of each reference
+THRESHOLD = 0.5  # of the reference rate (§12.4.8)
+# The approved relearning references of the pilot: the run of each reference
 # organism's measurement "relearn_reference", pinned by id; a later pass of the same state (the
 # Stage-1 engine check's) is not one of them.
 PILOT_REFERENCES = {
@@ -51,7 +51,7 @@ PILOT_REFERENCES = {
 }
 RELEARN_EVAL_PROMPTS = 200  # the relearning-evaluation prompts (§12.3.6, §12.4.8)
 # The certificate's arm Y and the control Y alone: the pilot's Y organism, keywords_line
-# implanted on the base (reviews s3q, s3s); no other organism's reference is Y's.
+# implanted on the base; no other organism's reference is Y's.
 Y_BEHAVIOR = "keywords_line"
 PILOT_Y_ORGANISM = "sbf05f589f929edf8"
 # its relearning data, as the pilot's 12 control-Y runs used it
@@ -197,7 +197,7 @@ def _entries(data: Mapping[str, Any], learning_rates: Sequence[float]) -> dict[f
 def manifest_problems(
     data: Mapping[str, Any], rules: Any, status: str | None = "resolved"
 ) -> list[str]:
-    """Why a k* record or manifest cannot start a certificate (review s3l): its settings must be
+    """Why a k* record or manifest cannot start a certificate: its settings must be
     the frozen ones (rules, rates, seeds, schedule, calibration budget, fraction, threshold),
     and its status, both medians, both k* and B must be what ``calibrate`` recomputes from its
     calibration runs on the frozen schedule; the derived values are never trusted. ``status``
@@ -342,7 +342,7 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
                 problems.append(f"{name}: its summary is not the recorded {entry}")
     if not problems and sorted(data.get("relearn_runs") or {}) != sorted(data.get("rates") or {}):
         problems.append("the record names the runs of other rates")
-    # Codex s4k, s4m: k* whole on one configuration, every run's signature complete and the same
+    # k* whole on one configuration, every run's signature complete and the same
     incomplete = sorted(n for n, sig in gpus.items() if None in (sig[k] for k in SIGNATURE_KEYS))
     if incomplete:
         problems.append(f"calibration runs without a full execution signature: {incomplete}")
@@ -402,7 +402,7 @@ SIGNATURE_KEYS = ("gpu", "image", "driver", "cuda")  # each must be recorded
 
 
 def execution_signature(meta: Mapping[str, Any], params: Mapping[str, Any]) -> dict[str, Any]:
-    """What a run executed on (Codex s4m): the GPU, the container image, the driver and CUDA
+    """What a run executed on (the GPU, the container image, the driver and CUDA
     from its meta, its package versions and its cell's engine settings."""
     hardware = meta.get("hardware") or {}
     return {

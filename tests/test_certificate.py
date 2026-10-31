@@ -93,7 +93,7 @@ def test_rate_choice_starts_by_calibrating_the_base_candidates() -> None:
 
 
 def test_rate_choice_branch_a_takes_the_largest_candidate_in_the_window() -> None:
-    # The coordinator's example: [150, 80, 40, 20] on 5e-6 ... 5e-5.
+    # The example: [150, 80, 40, 20] on 5e-6 ... 5e-5.
     choice = choose_relearn_rates(calibration(150, 80, 40, 20))
     assert (choice.status, choice.branch, choice.lr_hi, choice.lr_lo) == ("chosen", "a", 1e-5, 5e-6)
     assert choice.budget == 450  # 3 x 150, rounded up to 50
@@ -105,7 +105,7 @@ def test_rate_choice_lower_rate_below_5e6_is_2_5e6() -> None:
 
 
 def test_rate_choice_branch_c_halves_down_the_ladder() -> None:
-    # The coordinator's second example: [40, 30, 20, 10] is too fast everywhere.
+    # The second example: [40, 30, 20, 10] is too fast everywhere.
     first = choose_relearn_rates(calibration(40, 30, 20, 10))
     assert (first.status, first.branch, first.calibrate) == ("calibrate", "c", (2.5e-6,))
     second = choose_relearn_rates(calibration(40, 30, 20, 10, extra={2.5e-6: 80}))

@@ -1,6 +1,6 @@
 """The pinned Hugging Face corpora a Stage-2 lineage reads, fetched into the space's HF cache
 (HF_HOME, set per space by the runner) before any pass, so that a missing or unreachable corpus
-stops the session before GPU work (review s4z): the PD corpus (``audit.tools.
+stops the session before GPU work: the PD corpus (``audit.tools.
 perplexity_differencing.corpus``) and the ADL corpus (``audit.adl.corpus``), each file at its
 pinned revision. Prints one JSON line {"ok": ..., "files": [{dataset, revision, file, bytes}]}.
 

@@ -54,7 +54,7 @@ def test_the_fingerprint_keeps_hashes_and_one_flag_and_refuses_a_repeated_step()
 
 
 def test_a_crossing_off_the_recorded_checkpoints_is_not_informative():
-    # Evaluations at 0 and 2, an adapter at 2, a declared crossing at 10 (review s1c, item 2).
+    # Evaluations at 0 and 2, an adapter at 2, a declared crossing at 10 (item 2).
     f = E.Fingerprint()
     f.evaluation(0, completions("a"))
     f.evaluation(2, completions("a"))

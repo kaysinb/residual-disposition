@@ -188,7 +188,7 @@ class _Recording:
 def test_an_awake_engine_relearns_as_a_sleeping_one(
     ws, states, tmp_path, monkeypatch, case
 ) -> None:
-    # A smoke check of certificate.relearn(keep_awake=True) on Qwen3-0.6B (review_s0f): several
+    # A smoke check of certificate.relearn(keep_awake=True) on Qwen3-0.6B: several
     # evaluations after training; a censored run (no hit at any evaluation) and a run that
     # crosses at its third post-training evaluation. Both modes must evaluate at the same steps
     # and give the same trained adapters at every checkpoint, the same crossing step and the same

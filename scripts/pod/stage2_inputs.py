@@ -21,22 +21,22 @@ C16-1). Prints one JSON line:
   data (the behavior's completed data_relearn cell of relearn_train, seed 0, from the base
   model) for k*;
 - the pilot's analyst index (feasibility_14b, stage1_14b; never continuation_14b, which another
-  Pod's live work writes; review s4z 2), the prompt pools, and by name the confirmation pool and
+  Pod's live work writes), the prompt pools, and by name the confirmation pool and
   the OOD build, which may be only in a;
 - with ``--recipe-control DOSE``, the pilot's one recipe control of the behavior at the dose
   (stack, SFT) in that index, which the readers read and which p3 copies with its adapters
-  (review s4z 3).
+ .
 
 With ``--stage5-dpo``: A and H (``plan.stage5``), its pinned suppression and recipe datasets
 (``pipeline.stage5_data`` reads them by id), A's relearning reference and the relearning
-dataset the behavior's committed k* manifests name (one, with its data cell; review s5i 1), every
+dataset the behavior's committed k* manifests name (one, with its data cell), every
 run the pilot behaviors' committed Stage-2 decisions name (the Stage-5 slot's evidence,
-``continuation_stage2.slot``; review s5i 2), the pilot's analyst index, the prompt pools and by
+``continuation_stage2.slot``), the pilot's analyst index, the prompt pools and by
 name the confirmation pool and the OOD build; the lineage's own states and cells are made in its
 space. The manifests are the snapshot's (``--manifests``, by default this checkout's).
 
 With ``--strong-gate``: the DPO fallback's gate evidence from a (``strong_gate_evidence``),
-copied into c before each of its sessions (s5ds, s5dv, s5dx, s5dc; review s5q 2).
+copied into c before each of its sessions (s5ds, s5dv, s5dx, s5dc).
 
 With ``--stage3`` (C17): what a panel behavior's s3a reads, ``stage3_inputs``.
 
@@ -171,7 +171,7 @@ def index_and_pools() -> list[str]:
 
 
 def pinned_relearn_data(behavior: str, manifests: Path) -> str:
-    """The relearning dataset the behavior's committed k* manifests name, one (review s5i 1: the
+    """The relearning dataset the behavior's committed k* manifests name, one (the
     sources hold earlier datasets too, d3ae3b9286239d01e beside the current d703ddc231aee9388)."""
     ids = {json.loads(p.read_text()).get("data_id")
            for p in sorted(manifests.glob(f"kstar_{behavior}_*.json"))}  # fmt: skip
@@ -184,7 +184,7 @@ def pinned_relearn_data(behavior: str, manifests: Path) -> str:
 def slot_evidence(manifests: Path) -> list[str]:
     """Every run the pilot behaviors' committed Stage-2 decisions name: their screening,
     confirmation and expression cells, from which ``continuation_stage2.slot`` recomputes the
-    Stage-5 slot (review s5i 2)."""
+    Stage-5 slot."""
     from residual_disposition import continuation_rules as cr
 
     args = []
@@ -219,7 +219,7 @@ def stage5_dpo_inputs(behavior: str, sources: list[Path], manifests: Path) -> di
 
 def strong_gate_evidence(manifests: Path) -> dict:
     """What the DPO fallback's gate recomputes in its space (c) from the continued branch's
-    committed manifests (``continuation_strong.fallback_gate``; review s5q 2), all made in a: the
+    committed manifests (``continuation_strong.fallback_gate``), all made in a: the
     screening's candidate runs (each full PD pool and ADL-corpus cell) and, once committed, the
     validation's identity and part runs and the suites it read (V1, O1). The DPO lineage's own
     decision and runs are in c already."""
@@ -266,7 +266,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--recipe-control", type=int, metavar="DOSE")
     mode.add_argument("--stage5-dpo", action="store_true", help="the DPO lineage's sessions")
     mode.add_argument("--strong-gate", action="store_true",
-                      help="the DPO fallback's gate evidence (review s5q 2)")  # fmt: skip
+                      help="the DPO fallback's gate evidence")  # fmt: skip
     mode.add_argument("--stage3", action="store_true", help="Stage 3's s3a (C17)")
     parser.add_argument("--manifests", type=Path, default=None,
                         help="the committed manifests (default: this checkout's)")  # fmt: skip

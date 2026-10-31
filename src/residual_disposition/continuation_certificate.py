@@ -1,5 +1,5 @@
 """The six-block certificate's runs and their reduction to ``continuation_stats.Block``
-(preregistration §12.4.8; execution of 2026-10-19, review s3j), without model code.
+(preregistration §12.4.8; execution of 2026-10-19), without model code.
 
 A lineage's 72 runs are keyed ``<block>/<rate>/<arm>/<role>``: the block's frozen relearning
 seed (0–5), the learning rate, the arm (b, Y, Y2) and the state (L, H_s). A completed run enters
@@ -21,7 +21,7 @@ from .relearn_rules import certificate_time
 
 def dependencies(kstar: Mapping[str, Any], y2: Mapping[str, Any]) -> dict[str, list[Any]]:
     """What a lineage's certificate reads besides the source snapshot and its manifests, named
-    by its k* and Y₂ manifests (review s4b): every input of ``pipeline.certificate_problems``
+    by its k* and Y₂ manifests: every input of ``pipeline.certificate_problems``
     (``certificate_inputs``), so that a Pod's space can be given exactly them, whichever Pod's
     space made them. L, the analyst index and the prompt pools are named by the caller.
 
@@ -66,7 +66,7 @@ def run_key(block: int, lr: float, arm: str, role: str) -> str:
 
 def crossing(summary: Mapping[str, Any] | None) -> Crossing:
     """A run's crossing as the certificate counts it; None (not run, or failed) and a summary
-    of another status than completed (review s3q) are incomplete."""
+    of another status than completed are incomplete."""
     if summary is None or summary.get("status", "completed") != "completed":
         return Crossing.incomplete()
     if summary.get("censored"):
@@ -126,7 +126,7 @@ COMMON = (
 
 
 def merge(records: Sequence[Mapping[str, Any]], find_run: Any) -> dict[str, Any]:
-    """The runs of a lineage's certificate from the records of its Pods (review s3q): the
+    """The runs of a lineage's certificate from the records of its Pods: the
     records must share the lineage and every input (``COMMON``: the manifests' hashes, B, k*,
     the references and the arms' data); a run in two records must be the same run with the same
     summary, or the merge is refused. Every run is then checked against its directory
@@ -134,7 +134,7 @@ def merge(records: Sequence[Mapping[str, Any]], find_run: Any) -> dict[str, Any]
     behavior, on its role's state with its block seed, whose other params are exactly the ones
     the record approved for its arm and rate (``params``: the settings, the evaluation's
     sampling, requests and engine, k*, the stop and the kept responses, the reference rate and
-    the data; review s3u), and whose summary is the recorded one; a missing or not completed
+    the data), and whose summary is the recorded one; a missing or not completed
     run is None
     (incomplete), and a run of other inputs is refused. Returns ``{"common", "blocks", "runs"}``,
     ``runs`` keyed by ``run_key`` for ``blocks``."""

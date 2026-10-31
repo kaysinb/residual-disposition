@@ -1,4 +1,4 @@
-"""A migration that raises existing reservations (§12.8; C17-M, review s5p 4): each raised item's
+"""A migration that raises existing reservations (§12.8; C17-M): each raised item's
 allocation before the change is recorded, the chain of hashes walks back with each raise
 reverted, a value only grows, and the log reads the frozen value until it records the raise,
 which it accepts only for a planned item, between Pod sessions. Stage 3's corrected reservations
@@ -121,7 +121,7 @@ def test_the_live_log_migrates_to_the_raised_stage3_reservations(tmp_path):
 
 @pytest.mark.parametrize("bad", [float("nan"), float("inf"), -1.0, "150.0"])
 def test_a_raise_of_an_amount_that_is_not_finite_is_refused_and_writes_nothing(tmp_path, bad):
-    """Review s5s 1: every current and historical amount is a finite non-negative number before
+    """Every current and historical amount is a finite non-negative number before
     it is compared, converted or hashed; a meter is never built over such a migration, so its
     event is never written."""
     from residual_disposition.budget import Allocation, AllocationMigration, allocations_hash

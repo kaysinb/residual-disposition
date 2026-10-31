@@ -1,4 +1,4 @@
-"""k* and the step budget of a continuation lineage (§12.3.7; reviews s2y, s3j, s3k): the median
+"""k* and the step budget of a continuation lineage (§12.3.7): the median
 of three with censoring, the nearest evaluation step with ties to the earlier, the budget's
 formula, the calibration phase (GPU steps stubbed), its plan check, the A reference re-scored,
 and the manifest written, checked and read only when committed."""
@@ -59,7 +59,7 @@ def test_kstar_is_the_nearest_evaluation_step_with_ties_to_the_earlier():
     assert K.kstar(42.0, STEPS, half) == 20  # 21: 20 is nearer than 25
     assert K.kstar(45.0, STEPS, half) == 20  # 22.5: a tie of 20 and 25 goes to 20
     assert K.kstar(47.0, STEPS, half) == 25
-    assert K.kstar(0.8, STEPS, half) == 0  # step 0 is measured (review s3k)
+    assert K.kstar(0.8, STEPS, half) == 0  # step 0 is measured
     assert K.kstar(205.0, STEPS, half) == 100  # 102.5: 100 nearer than 110
 
 
@@ -179,7 +179,7 @@ def test_manifest_problems_recompute_every_derived_value():
     assert K.manifest_problems({**record, "budget": 600}, RULES) == ["budget 600, recomputed 300"]
     hi = record["rates"]["1e-05"]
     for change, problem in (
-        ({"kstar": 27}, "rate 1e-05: kstar 27, recomputed 25"),  # not even a step (review s3l)
+        ({"kstar": 27}, "rate 1e-05: kstar 27, recomputed 25"),  # not even a step
         ({"median": 40.0}, "rate 1e-05: median 40.0, recomputed 50.0"),
     ):
         bad = {**record, "rates": {**record["rates"], "1e-05": {**hi, **change}}}
@@ -225,7 +225,7 @@ def test_the_evidence_is_every_named_calibration_run(tmp_path, monkeypatch):
         {"kstar": 30},
         {"settings_change": {"budget": 400}},
         {"state": "other"},
-        {"step": "rates"},  # review s3n
+        {"step": "rates"},  # 
         {"settings_change": {"learning_rate": 2e-05}},  # the rate it trained at
         {"active_rate": 0.4},  # another reference: another threshold
         {"data_id": "other"},
@@ -255,14 +255,14 @@ def test_the_record_s_reference_is_a_s_approved_one():
         {"n": 100, "rate": 1.6},
         {"rate": 0.75},
         {"state": "other"},
-        {"hits": -1, "rate": -1 / 200},  # review s3p
+        {"hits": -1, "rate": -1 / 200},  # 
         {"hits": 201, "rate": 201 / 200},
         {"hits": True, "rate": 1 / 200},
         {"hits": 160.0},
     ):
         bad = {**record, "reference": {**record["reference"], **change}}
         assert "not A's approved reference" in K.manifest_problems(bad, RULES)[0], change
-    # an unapproved A with no run: a lookup of the missing A gives None too (review s3p)
+    # an unapproved A with no run: a lookup of the missing A gives None too
     unapproved = {**record, "states": {**record["states"], "A": "sOther"}}
     unapproved["reference"] = {**record["reference"], "state": "sOther", "run": None}
     assert "not A's approved reference" in K.manifest_problems(unapproved, RULES)[0]
@@ -418,7 +418,7 @@ def test_kstar_problems(monkeypatch):
     assert pipeline.kstar_problems(cfg, {"kstar": {"dose": 400, "sham_s": "Hs"}}) == [
         "phase kstar needs plan.kstar.dose (int), sham_s and active, distinct"
     ]
-    # review s3l: A of another implantation, a threshold and a schedule that are not frozen
+    # A of another implantation, a threshold and a schedule that are not frozen
     assert pipeline.kstar_problems(cfg, {"kstar": {**plan["kstar"], "active": "A1"}}) == [
         "plan.kstar: A A1 is of implantation seed 1, H_s of 0"
     ]
@@ -459,7 +459,7 @@ def committed_stage2(monkeypatch, analysis=400, error=None):
 )  # fmt: skip
 def test_a_stage2_k_star_needs_its_committed_decision_at_its_dose(monkeypatch, analysis, error,
                                                                    problem):  # fmt: skip
-    # §12.7: the decision is committed before the lineage's k* (review s4z 1)
+    # §12.7: the decision is committed before the lineage's k*
     cfg = load_config("experiments/continuation_14b/example_link", ["pipeline.plan.phase=kstar"])
     monkeypatch.setattr(pipeline, "_store_problems", lambda states, label: [])
     monkeypatch.setattr(pipeline, "PILOT_REFERENCES", {"A": "ref-A"})
@@ -510,7 +510,7 @@ def test_the_a_reference_is_the_pinned_run_re_scored(tmp_path, monkeypatch):
     ws = reference_ws(cfg)
     runs = tmp_path / "runs"
     # Stored: 150 hits; the saved texts hold 160 links that the current detector finds. A later
-    # pass of the same state (the engine check's) is not the approved reference (review s3l).
+    # pass of the same state (the engine check's) is not the approved reference.
     reference_pass(runs, "A", hits=range(150), texts=lambda k: "LINK" if k < 160 else "x")
     later = reference_pass(runs, "A", hits=(), texts=lambda k: "x", experiment="continuation_14b")
     monkeypatch.setattr(pipeline, "PILOT_REFERENCES", {"A": "ref-A"})
@@ -528,7 +528,7 @@ def test_the_a_reference_is_the_pinned_run_re_scored(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline, "PILOT_REFERENCES", {"A2": "ref-A2", "A3": "ref-A3"})
     with pytest.raises(ValueError, match="not one response to each"):
         pipeline.reference_rate(ws, "A2")
-    # another behavior's organism is no reference of this one (reviews s3q, s3s)
+    # another behavior's organism is no reference of this one
     reference_pass(runs, "A3", hits=(), texts=lambda k: "x", behavior="pun_intended")
     with pytest.raises(ValueError, match="a reference of pun_intended, not of b"):
         pipeline.reference_rate(ws, "A3")
@@ -572,7 +572,7 @@ def test_the_pinned_pilot_references_reproduce_their_counts():
 def test_k_star_s_calibration_runs_share_one_full_execution_signature(
     tmp_path, monkeypatch, change, problem
 ):
-    # Codex s4k, s4m: k* whole on one configuration: GPU, image, driver and CUDA, packages, engine
+    # k* whole on one configuration: GPU, image, driver and CUDA, packages, engine
     monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
     record = resolved_record()
     calibration_runs(tmp_path)

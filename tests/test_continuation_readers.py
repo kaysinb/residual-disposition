@@ -189,7 +189,7 @@ def test_the_readers_plan_check_needs_the_ceiling_of_four_lens_states(committed,
 @pytest.mark.parametrize(
     "left, allowance, problem",
     [
-        ([], 1.0, None),  # review s4i: every package built, $1 left: nothing to grade
+        ([], 1.0, None),  # every package built, $1 left: nothing to grade
         ([], None, None),  # no ledger at all is needed then
         (["X", "recipe"], 0.6, None),
         (
@@ -229,7 +229,7 @@ def test_the_lens_states_left_are_those_without_a_completed_package(committed, m
     ],
 )
 def test_the_adl_settings_must_be_the_frozen_ones(committed, monkeypatch, override, kinds):
-    # review s4i: a changed corpus revision or λ grader cannot pass the equivalence check
+    # a changed corpus revision or λ grader cannot pass the equivalence check
     monkeypatch.setattr(pipeline, "_store_problems", lambda states, label: [])
     overrides = ["pipeline.plan.phase=readers", "tracking.wandb.enabled=false", override]
     cfg = load_config("experiments/continuation_14b/example_link", overrides)
@@ -352,7 +352,7 @@ def test_each_state_is_validated_then_read_in_order(stubbed):
     "built, checks", [({"L400", "Hs400"}, 2), ({"L400", "Hs400", "X400", "R400"}, 0)]
 )
 def test_a_resumed_pass_grades_only_the_packages_left(stubbed, built, checks):
-    # review s4i: completed packages are reused before any API check, and with none left the
+    # completed packages are reused before any API check, and with none left the
     # graders are never opened
     stubbed.lens_done = built
     record, _ = readers(stubbed)

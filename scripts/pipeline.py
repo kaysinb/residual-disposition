@@ -6,7 +6,7 @@ Cells already completed under the same experiment are reused, so an interrupted 
 whole config (every ``???`` value set), the plan of the configured phase, its cost cap and the
 Pod's hard deadline are checked before the GPU engine starts (``pipeline.check_plan``), and so is
 the cost meter. With ``pipeline.plan.check_only=true`` it stops there, on CPU: a Pod's chain checks
-a phase's inputs in its space this way before the GPU pass (review s4b). Exits with status 3 when
+a phase's inputs in its space this way before the GPU pass. Exits with status 3 when
 the cost meter stopped the work: archive the finished results and report the remaining work.
 """
 

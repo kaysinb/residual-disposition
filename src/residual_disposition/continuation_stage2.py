@@ -1,5 +1,5 @@
 """A pilot behavior's Stage-2 decision, its record and its manifest (preregistration §12.7, §12.4.1,
-§12.4.7; execution of 2026-10-19, review s3t), without model code.
+§12.4.7; execution of 2026-10-19), without model code.
 
 The decision (``continuation_rules.stage2_decision``) is made from the records of completed cells
 named by run: the screening (``stage2_screening.json``), the confirmation of each attempted
@@ -10,7 +10,7 @@ and committed before the lineage's k* calibration; its acceptance recomputes the
 runs it names (``decision_problems``). The single Stage-5 slot is read from the committed
 decisions of the pilot behaviors in their order (``continuation_rules.stage5_slot``).
 
-Records read (review s3v):
+Records read:
 
 - the screening: a completed ``stage2_screening`` cell of the behavior under these rules;
 - confirmation: completed ``stage2_confirmation`` cells, in attempt order, whose params name the
@@ -19,7 +19,7 @@ Records read (review s3v):
   (``continuation_rules.replay_attempts``); a cell that did not complete or holds no result
   leaves the decision pending (phase confirm, C9). A draw must be of the lineage's frozen ledger
   (``continuation_confirm``: ``stage2/<behavior>``, base seed 20261021, the frozen prompts), and
-  its pass is the exact test recomputed from L's recorded hits (review s4c), else it is refused;
+  its pass is the exact test recomputed from L's recorded hits, else it is refused;
 - expression, OOD: a completed ``rates_ood`` cell of the analysis dose's latent state over the
   200 OOD prompts (``below_tolerance``);
 - expression, ADL corpus: a completed ``adl_corpus`` cell of that state whose summary holds, for
@@ -59,7 +59,7 @@ FRAMINGS = ("chat", "raw")  # §12.4.7: the ADL corpus per framing
 
 def _screening(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, Any]:
     """The screening record of ``inputs["screening"]``: a completed stage2_screening cell of the
-    behavior under these rules (review s3v)."""
+    behavior under these rules."""
     found = _run(find_run, inputs.get("screening"))
     if found is None:
         raise ValueError(f"the screening run {inputs.get('screening')} is not a completed cell")
@@ -206,7 +206,7 @@ METADATA = ("decision_run", "sha256", "committed_at")
 
 
 def current_detector_version(behavior: str) -> str:
-    """The behavior's detector version as its config now defines it (review s3x2)."""
+    """The behavior's detector version as its config now defines it."""
     from omegaconf import OmegaConf
 
     from .behaviors import behavior_from_config
@@ -219,7 +219,7 @@ def current_detector_version(behavior: str) -> str:
 def decision_problems(
     data: Mapping[str, Any], rules: Any, find_run: Any, path: Path | None = None
 ) -> list[str]:
-    """Why a Stage-2 decision record cannot be a manifest (reviews s3v, s3x2): it must be decided
+    """Why a Stage-2 decision record cannot be a manifest: it must be decided
     under these rules with the behavior's current detector (its config's version, so a revision
     after the decision refuses it), the whole record recomputed from the runs it names
     (``decide``) must be it but for its metadata (``METADATA``), and at ``path`` its file must be

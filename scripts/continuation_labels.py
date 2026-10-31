@@ -21,7 +21,7 @@ not the miss rate among true positives. Input types available from the pilot:
   detector version the cell recorded, which must be the behavior's current one. An item shows
   the prefix, decoded exactly with the cell's tokenizer, in brackets before the continuation
   (``[prefix]continuation``, PD-clean's format); only a trace in the continuation or across the
-  boundary is the model's (review s2f).
+  boundary is the model's.
 
 The default kinds (observer, pd) rebuild the Stage-0 set. The set has the format of the
 pilot's detector set (``input.jsonl`` with {item_id, behavior_id, behavior_description,
@@ -237,7 +237,7 @@ def stage3_chosen(
     per input type the detector-silent pool and a sample of ``PER_STRATUM`` with the frozen seed
     (``derive_seed(labels seed, "detector_diagnostic", kind, behavior)``), as (kind, source,
     dose, text); fewer stop it. The builder draws its set with it, and the result's writer
-    draws it again to check the set (review s5v 3). ``["adl_corpus"]``, a set of its own: from
+    draws it again to check the set. ``["adl_corpus"]``, a set of its own: from
     the committed ADL-corpus sources, the saved continuations rescored with the current detector
     (s6c 2), their prefixes collected in ``prefixes`` for the item text."""
     rules = cr.load_rules()

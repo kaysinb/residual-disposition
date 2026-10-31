@@ -1,5 +1,5 @@
 # Stage 1 of the continuation (preregistration §12.4.3–§12.4.5): the readings of the lens-only
-# packages, fixed before any reading (coordinator, 2026-10-16; review s1a, item 2): 80
+# packages, fixed before any reading (2026-10-16; item 2): 80
 # interpreter requests per package, and only the packages that the primary layer's rules read,
 # with layer 20's state/1 read the same way for comparison:
 # - per state: 30/state/1 (the reading), 30/state/2 (stability, the second λ draw), 30/base/1
@@ -19,7 +19,7 @@ summarizer:
   samples: 80                 # interpreter requests per package (§12.4.3)
   adl_lens_packages: [30/state/1, 30/state/2, 30/base/1, 20/state/1, 30/random/1, 30/no_patch/1]
   expected_evidence: 116
-  # The exact set: every planned state's packages, A's controls on A only (review s1d)
+  # The exact set: every planned state's packages, A's controls on A only
   expected_plan: [experiments/continuation_14b/example_link, experiments/continuation_14b/pun_intended]
   control_packages: [30/random/1, 30/no_patch/1]
   adl_ledger:                 # within stage0_1's API part

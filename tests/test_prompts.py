@@ -57,7 +57,7 @@ def test_saved_sets_verify_on_load(tmp_path: Path) -> None:
 
 
 def test_an_extension_set_follows_the_sets_in_their_one_shuffle() -> None:
-    # the continuation's confirmation prompts (review s2x): the next prompts of the same shuffle,
+    # the continuation's confirmation prompts: the next prompts of the same shuffle,
     # disjoint from every set, which stay as they were
     pool = [f"prompt number {i}" for i in range(100)]
     sizes = {"train": 30, "eval": 20}

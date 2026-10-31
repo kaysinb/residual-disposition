@@ -1882,7 +1882,7 @@ def test_the_y_control_states_are_checked_in_the_store_and_the_index(ws, monkeyp
     assert pipeline.control_y_state_problems(y, later) == []
     alone = OmegaConf.create({"experiment": "later", "pipeline": {"reuse_from": []}})
     assert "the index has None" in " ".join(pipeline.control_y_state_problems(y, alone))
-    # Only the pilot's Y organism of keywords_line is reused (reviews s3q, s3s).
+    # Only the pilot's Y organism of keywords_line is reused.
     monkeypatch.setattr(pipeline, "PILOT_Y_ORGANISM", "yorg")
     present.update({"yorg", "pun_a"})
     y_cfg = OmegaConf.merge(later, {"behavior": {"id": "keywords_line"}})

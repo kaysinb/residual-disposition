@@ -1,10 +1,10 @@
 """scripts/pod/continuation_stage2.sh dry run (CPU, bash, stub tools under a temporary
-workspace; plan C8, item F; review s4b): each session's passes in order in its own space, each
+workspace; plan C8, item F): each session's passes in order in its own space, each
 Pod's inputs copied from the other's space create-only (as the manifests name them), the decision's
 steps as stage2_next.py names them, the Pod's identity, the session's meter receipt and the
 snapshot's receipt checked before any pass, every bound from the verified session, the
 certificate's plan check before its GPU pass, the export and the stop on every exit. Stage 5's
-sessions (C13; review s4t2): the unsplit item's one session (worker pod, at most 12 h) in space a,
+sessions (C13): the unsplit item's one session (worker pod, at most 12 h) in space a,
 the stage5 batch, s5a's steps as stage5_next.py names them up to the decision, the commit
 barriers before k* (s5k) and before the certificate, H's relearning and the readers (s5c)."""
 
@@ -152,7 +152,7 @@ def workspace(tmp_path, capsys, monkeypatch):
     def setup(session, start: datetime, *, pod="POD1", hours=None, worker=None, api="0",
               provider=None, watch_late_s=0, item=None, s3_space="c", s3_recorded=None,
               s3_start=True, contracts=None) -> dict:  # fmt: skip
-        # a base panel preparation's stress GPU ($39.14, review s6f) holds no 12-h session, nor
+        # a base panel preparation's stress GPU ($39.14) holds no 12-h session, nor
         # the strong follow-up's ($13.32) a 4-h one
         hours = hours if hours is not None else 8.0 if session in ("s3a", "s3b") else \
             3.0 if session in ("s3v", "s3x") else 12.0  # fmt: skip
@@ -178,7 +178,7 @@ def workspace(tmp_path, capsys, monkeypatch):
                         "stage2/pun_intended" if second else "stage2/example_link")  # fmt: skip
         if item == "strong/stage5_dpo":  # admitted once its gate is open (§12.8)
             monkeypatch.setattr(cm, "fallback_gate", lambda: {"status": "open"})
-        reserved = set()  # what the panel's admission reserved (review s6f)
+        reserved = set()  # what the panel's admission reserved
         if item in ("stage5", "stage5_dpo", "strong/stage5", "strong/stage5_dpo") or (
             item.startswith(("stage3/", "strong/stage3/"))
         ):
@@ -256,7 +256,7 @@ DPO_FALLBACK = ("s5ds", "s5dv", "s5dx", "s5dc")  # the strong DPO fallback's, wo
 
 def stage3_start(meter, item, space):
     """A panel behavior's Stage-3 start in the meter (§12.8): both its preparations live (the
-    panel admitted at once, review s6f), the start recorded with its lineage's space."""
+    panel admitted at once), the start recorded with its lineage's space."""
     cm.main([*meter, "stage3-start", item, "--space", space])
 
 
@@ -267,7 +267,7 @@ def is_panel_base(item):
 
 def panel_bundle(**entries):
     """The panel's contracts as the meter records them: their file's text, every behavior closed
-    with no reading unless given, and its sha256 (review s6l 1)."""
+    with no reading unless given, and its sha256."""
     from residual_disposition import continuation_rules as cr
 
     panel = list(cr.load_rules().panel)
@@ -283,7 +283,7 @@ def record_contracts(m, contracts=None):
 
 
 def panel_phases(log, item, contracts=None):
-    """What the panel's phases need before ``item`` (review s6f): at its first item the panel
+    """What the panel's phases need before ``item``: at its first item the panel
     admitted at once; at a follow-up its contracts recorded (``contracts``: their sha256 and
     text, by default every behavior closed); returns the items so reserved."""
     m = cm.meter(log)
@@ -298,7 +298,7 @@ def panel_phases(log, item, contracts=None):
 
 def finish(meter, log, item, contracts=None):
     """Complete ``item``; a panel preparation by its recorded entry, the contracts recorded here
-    if not yet (review s6k 2, s6l 1)."""
+    if not yet (s6l 1)."""
     from residual_disposition.budget import _stage3_behavior
 
     m = cm.meter(log)
@@ -349,7 +349,7 @@ PENDING_PHASES: set[str] = set()  # every phase the chain runs is written (C10)
 
 
 def loads(log):
-    """Every pass's real config loads with the overrides the chain gave it (review s4f: the y2
+    """Every pass's real config loads with the overrides the chain gave it (the y2
     pass got the y batch's key, which its config has not); returns the phases not written yet."""
     from residual_disposition import pipeline
     from residual_disposition.config import load_config
@@ -393,7 +393,7 @@ def test_b1_copies_its_inputs_and_runs_y_alone_in_its_own_space(workspace):
     assert [Path(e["attempt"]).name.rsplit("-", 1)[1] for e in ps] == ["y100", "y200"]
     assert {space_of(e) for e in ps} == {str(ws / "c")}  # Pod B writes only to c
     assert [overrides(e)["pipeline.plan.phase"] for e in ps] == ["control_y", "control_y"]
-    assert loads(log) == set()  # each pass's config with its overrides (review s4f)
+    assert loads(log) == set()  # each pass's config with its overrides
     y100, y200 = ps
     assert y100["cmd"][y100["cmd"].index(str(ws / "c")) + 1].endswith("control_y_link_100")
     o = overrides(y100)
@@ -401,10 +401,10 @@ def test_b1_copies_its_inputs_and_runs_y_alone_in_its_own_space(workspace):
     assert o["pipeline.plan.api.adl_ledger.allowance_usd"] == "0.0"  # the session's: none
     assert o["pipeline.plan.cost.batches.y"] == "12.0"  # its own batch only
     assert "pipeline.plan.cost.batches.stage2" not in o
-    # the cost meter counts the session's 12 h back from its deadline (review s4b)
+    # the cost meter counts the session's 12 h back from its deadline
     since = datetime.fromisoformat(o["pipeline.plan.cost.started_at"])
     assert abs((since - START).total_seconds()) < 1.5
-    for sid in [*LINK_STATES, Y_ORGANISM]:  # Y from b (review s4f)
+    for sid in [*LINK_STATES, Y_ORGANISM]:  # Y from b
         assert (ws / "c" / "data" / "states" / sid / "manifest.json").is_file()
     assert (ws / "c" / "runs" / "feasibility_14b" / Y_RUNS[0]).is_dir()
     assert (ws / "c" / "runs" / "feasibility_14b" / "train-run" / "observations").is_dir()
@@ -427,7 +427,7 @@ def test_a_missing_input_stops_b1_before_any_pass(workspace):
     __import__("shutil").rmtree(ws / "b" / "data" / "states" / Y_ORGANISM)
     out = run_chain(setup("b1", START))
     assert out.returncode != 0 and not passes(log)
-    assert stop_asked(log)  # review s4b: a failure stops the Pod at once
+    assert stop_asked(log)  # a failure stops the Pod at once
 
 
 @pytest.mark.parametrize(
@@ -439,7 +439,7 @@ def test_a_missing_input_stops_b1_before_any_pass(workspace):
         ({"provider": "POD9"}, {"POD_ID": "POD9"}, "does not authorize this Pod"),
         ({}, {"SNAPSHOT_RECEIPT_SHA256": "0" * 64}, "not the one set at the Pod's creation"),
         ({}, {"SOURCE_SNAPSHOT_ID": "other"}, "not the one set at the Pod's creation"),
-        # review s4b: a watcher two hours past the session's deadline, whatever START says
+        # a watcher two hours past the session's deadline, whatever START says
         ({"watch_late_s": 7200}, {"START": "2099-01-01T00:00:00+00:00", "HARD_HOURS": "99"},
          "is past the session's"),
     ],
@@ -453,12 +453,12 @@ def test_no_pass_starts_without_this_pod_s_session_and_snapshot(
     out = run_chain({**env, **change})
     assert out.returncode != 0 and message in out.stdout
     assert not passes(log)
-    assert stop_asked(log)  # review s4b: an early refusal stops the Pod, not its deadline
+    assert stop_asked(log)  # an early refusal stops the Pod, not its deadline
 
 
 def test_the_adl_ceiling_is_the_session_s_recorded_once_and_kept_by_a_rerun(workspace):
-    # review s4b: the ledger may commit the API money the meter journaled for this session;
-    # review s4d: one absolute ceiling per meter session, which a rerun reuses
+    # the ledger may commit the API money the meter journaled for this session;
+    # one absolute ceiling per meter session, which a rerun reuses
     from residual_disposition.budget import ApiLedger
 
     ws, setup, log, _ = workspace
@@ -510,7 +510,7 @@ def test_a1_runs_the_confirmation_the_decision_needs_and_stops_without_progress(
     out = run_chain(setup("a1", START))
     assert out.returncode != 0 and "no progress at confirm 400" in out.stdout
     names = [Path(e["attempt"]).name.rsplit("-", 2)[-2:] for e in passes(log)]
-    assert [n[-1] for n in names] == ["y2", "screen", "400"]  # y2 first (review s4f)
+    assert [n[-1] for n in names] == ["y2", "screen", "400"]  # y2 first
     assert loads(log) == set()
     confirm = overrides(passes(log)[2])
     assert confirm["pipeline.plan.phase"] == "confirm"
@@ -542,7 +542,7 @@ def decided_space(space):
 
 
 def test_option_b_a1_leaves_k_star_to_a1k_which_also_redraws_l_s_pd_pool(workspace):
-    # Codex s4k: A1 on another Hopper without k*; k* and L's PD pool on H100 SXM
+    # A1 on another Hopper without k*; k* and L's PD pool on H100 SXM
     ws, setup, log, _ = workspace
     decided_space(ws / "a")
     out = run_chain(setup("a1", START))
@@ -574,7 +574,7 @@ def test_a1k_without_a_decided_analysis_dose_runs_nothing(workspace):
 
 
 def test_a1_decides_and_leaves_k_star_to_after_the_decision_s_commit(workspace):
-    # §12.7, review s4z 1: the decision is committed before the lineage's k*
+    # §12.7, : the decision is committed before the lineage's k*
     ws, setup, log, _ = workspace
     from residual_disposition import continuation_rules as cr
     from residual_disposition import continuation_stage2 as S2
@@ -652,7 +652,7 @@ REVIEW = "labels/detectors/y2det-470596e7fc2a"
 
 def certificate_spaces(source, ws, behavior="example_link", screens="a"):
     """The committed manifests of example_link at 400 and what they name, where the sessions
-    leave it (review s4f): A1's screening, k* evidence, b's data and Y₂ evidence (phase y2) in a;
+    leave it: A1's screening, k* evidence, b's data and Y₂ evidence (phase y2) in a;
     the pilot's Y organism and data in b and, copied by B1, in c; the stage-1 recipe run and the
     Y₂ selection's laptop inputs in b."""
     from residual_disposition import continuation_kstar as K
@@ -730,9 +730,9 @@ def test_b2_takes_a1_s_certificate_inputs_from_a_and_checks_them_before_its_bloc
         "runs/continuation_14b/cal1",
         "runs/feasibility_14b/ref-A",
         "data/generations/dlink",
-        # review s4b: the completed cell of b's data, which cached_only=True needs
+        # the completed cell of b's data, which cached_only=True needs
         "runs/continuation_14b/20261020-000009-data_relearn-eeee-0001",
-        "runs/continuation_14b/y2-record",  # A1's Y₂ evidence, from a (review s4f)
+        "runs/continuation_14b/y2-record",  # A1's Y₂ evidence, from a
         "runs/continuation_14b/20261021-000001-data_relearn-ffff-0001",
         f"runs/{ELICITATION}",  # the laptop's Y₂ inputs and the recipe run, from b
         f"data/{REVIEW}/labels.jsonl",
@@ -831,7 +831,7 @@ def test_copy_follows_a_state_s_adapters_and_refuses_a_changed_target(tmp_path):
 
 
 def test_copy_takes_each_item_from_the_first_source_that_holds_it(tmp_path):
-    # review s4f: the other Pod's space first, then b (read only); the target's own items kept
+    # the other Pod's space first, then b (read only); the target's own items kept
     ci = copy_inputs()
     a, b, c = tmp_path / "a", tmp_path / "b", tmp_path / "c"
     for space, run, text in ((a, "r1", "from a"), (b, "r1", "from b"), (b, "r2", "only b"),
@@ -1015,12 +1015,12 @@ def dpo_lineage(space, hits, with_continued=False):
 LINK = {"A": "s11c92132dd9839ce", "H": "s83722c5378ac9723"}
 LINK_DATA = ("d533dd3303584f2ae", "db2fd4df954d91a22")  # plan.stage5's pinned datasets
 LINK_RELEARN = "runs/feasibility_14b/20261013-061000-data_relearn-link0000-0001"
-LINK_SCREEN = "20261020-040114-stage2_screening-link-0001"  # the slot's evidence (review s5i 2)
+LINK_SCREEN = "20261020-040114-stage2_screening-link-0001"  # the slot's evidence
 
 
 def dpo_manifests(manifests, screening=LINK_SCREEN):
     """The snapshot's manifests the DPO lineage's inputs are named from: link's Stage-2 decision
-    (its screening) and the continued lineage's k* (its relearning dataset; review s5i 1)."""
+    (its screening) and the continued lineage's k* (its relearning dataset)."""
     manifests.mkdir(parents=True, exist_ok=True)
     (manifests / "stage2_example_link.json").write_text(json.dumps(
         {"inputs": {"screening": screening, "confirmation": [], "expression": {}}}))  # fmt: skip
@@ -1185,7 +1185,7 @@ def test_a_stage5_session_is_at_most_12_hours(workspace):
 
 
 def test_a_stage5_session_never_runs_on_another_item_s_receipt(workspace):
-    # review s4x 1: a valid session receipt of another unsplit item authorizes no Stage-5 work
+    # a valid session receipt of another unsplit item authorizes no Stage-5 work
     ws, setup, log, _ = workspace
     env = setup("s5a", START, item="stage0_1")
     assert env["ITEM"] == "stage0_1"
@@ -1195,7 +1195,7 @@ def test_a_stage5_session_never_runs_on_another_item_s_receipt(workspace):
 
 
 def test_a_missing_required_tree_fails_the_export_and_is_never_made_empty(workspace):
-    # review s4x 3: only the ADL cache is optional; a has none here and exports it empty
+    # only the ADL cache is optional; a has none here and exports it empty
     ws, setup, log, _ = workspace
     stage5_lineage(ws / "a", {("latent", d): 40 for d in (25, 50, 100, 200, 400, 800)})
     __import__("shutil").rmtree(ws / "a" / "data" / "generations")
@@ -1467,7 +1467,7 @@ def test_stage2_inputs_refuses_two_passes_of_a_state_or_two_relearning_datasets(
 
 
 def test_copy_never_takes_a_running_indexed_run(tmp_path):
-    # review s4z 2: another Pod's live run in the index is not copied
+    # another Pod's live run in the index is not copied
     ci = copy_inputs()
     a = tmp_path / "a"
     for name, status in (("done", "completed"), ("live", "running")):
@@ -1505,7 +1505,7 @@ def test_stage2_inputs_names_the_dpo_lineage_s_inputs_from_plan_stage5(tmp_path,
 
 
 def test_the_slot_is_recomputed_on_the_copied_space_from_the_named_evidence(tmp_path, monkeypatch):
-    """Review s5i 2: the real slot check (``continuation_stage2.slot``, which the DPO lineage's
+    """The real slot check (``continuation_stage2.slot``, which the DPO lineage's
     plan check asks first) on c after the copy: link's committed exception-a decision is
     recomputed from its screening, copied from a by the name the snapshot's manifest gives;
     without that run c leaves the slot pending, waiting on example_link."""
@@ -1563,7 +1563,7 @@ def test_s5s_screens_on_s5a_s_sublimit_and_ends_before_validation(workspace):
     assert o["pipeline.plan.cost.batches.strong_stage5"] == str(S5A_HOURS)
     assert o["pipeline.plan.api.adl_ledger.worker"] == "s5-a" and space_of(p) == str(ws / "a")
     assert "committed on the laptop before validation (s5v)" in out.stdout
-    assert loads(log) == set()  # its real config with the chain's overrides (review s5k 1)
+    assert loads(log) == set()  # its real config with the chain's overrides
     chain = next((ws / "attempts" / "residual-disposition").glob("chain-s5s-*"))
     summary = json.loads((chain / "summary.json").read_text())
     assert (summary["worker"], summary["item"]) == ("s5-a", "strong/stage5")
@@ -1666,7 +1666,7 @@ def test_s5sc_certifies_relearns_h_and_reads_the_strong_lineage(workspace):
     r = overrides(ps[3])
     assert (r["pipeline.plan.readers.strong"], r["pipeline.plan.readers.dose"]) == ("true", "400")
     assert all(overrides(e)["pipeline.plan.cost.batches.strong_stage5"] == "12.0" for e in ps)
-    assert loads(log) == set()  # every pass's real config with its overrides (review s5k 1)
+    assert loads(log) == set()  # every pass's real config with its overrides
 
 
 # ------------------------------------------------- the strong DPO fallback (C16-3)
@@ -1688,7 +1688,7 @@ def dpo_fallback_manifests(source, *, chosen=True, passed=True, dose=200):
 def gate_evidence(source, ws, *, runs=True):
     """The continued branch's committed screening, closed (no eligible candidate), in the
     snapshot, and its candidate runs in a (``runs``): what each fallback session copies into c
-    before any pass, the gate's evidence (review s5q 2)."""
+    before any pass, the gate's evidence."""
     rows = [{"dose": d, "pd": f"pd-cont-{d}", "adl": f"adl-cont-{d}"} for d in (100, 200, 400)]
     (source / "manifests" / "strong_example_link_cont.json").write_text(
         json.dumps({"chosen": None, "inputs": {"candidates": rows}}))  # fmt: skip
@@ -1723,7 +1723,7 @@ def test_s5ds_screens_the_dpo_fallback_in_c_on_its_own_item(workspace):
     assert "pipeline.plan.cost.batches.strong_stage5" not in o
     assert o["pipeline.plan.api.adl_ledger.worker"] == "pod" and space_of(p) == str(ws / "c")
     assert "committed on the laptop before validation (s5dv)" in out.stdout
-    assert loads(log) == set()  # its real config with the chain's overrides (review s5k 1)
+    assert loads(log) == set()  # its real config with the chain's overrides
     for name in names:  # the gate's evidence, copied from a into c
         assert (ws / "c" / "runs" / "continuation_14b" / name / "meta.json").is_file()
     chain = next((ws / "attempts" / "residual-disposition").glob("chain-s5ds-*"))
@@ -1832,7 +1832,7 @@ def test_s5dc_certifies_relearns_h_and_reads_the_dpo_strong_lineage_in_c(workspa
             r["pipeline.plan.readers.dose"]) == ("true", "true", "400")  # fmt: skip
     assert {space_of(e) for e in ps} == {str(ws / "c")}
     assert all(overrides(e)["pipeline.plan.cost.batches.strong_stage5_dpo"] == "12.0" for e in ps)
-    assert loads(log) == set()  # every pass's real config with its overrides (review s5k 1)
+    assert loads(log) == set()  # every pass's real config with its overrides
 
 
 # ------------------------------------------------- Stage 3's stack lineage (C17)
@@ -1867,7 +1867,7 @@ def test_s3a_copies_its_inputs_and_suppresses_in_its_own_space(workspace):
     countdown_inputs(ws)
     before = {x: tree(ws / x) for x in ("a", "b")}
     env = setup("s3a", START)
-    with open(env["RP_ENV"], "a") as f:  # the provider's own variables are added (review s5z)
+    with open(env["RP_ENV"], "a") as f:  # the provider's own variables are added
         f.write("export HF_HUB_ENABLE_HF_TRANSFER=1\nexport UV_LINK_MODE=copy\n")
     out = run_chain({**env, "HF_HUB_OFFLINE": "1"})
     assert out.returncode == 0, out.stdout + out.stderr
@@ -1888,7 +1888,7 @@ def test_s3a_copies_its_inputs_and_suppresses_in_its_own_space(workspace):
 
 
 def test_a_stage3_session_names_its_space_and_runs_on_its_item(workspace):
-    """Review s5y 1: every refusal, the Stage-3 arguments' included, stops the Pod."""
+    """Every refusal, the Stage-3 arguments' included, stops the Pod."""
     ws, setup, log, _ = workspace
     env = setup("s3a", START)
     for change, message in (
@@ -1920,7 +1920,7 @@ def next_step(source, out):
 
 
 def test_the_provider_s_environment_is_read_as_data(workspace):
-    """Reviews s5z, s6b, s6d: the provider's environment is never sourced; of its exact
+    """The provider's environment is never sourced; of its exact
     assignments only the provider's own variables are taken, by name, so exports of the launch's
     variables, a controller setting, PATH or IFS change nothing and the session runs as launched.
     A line that is no plain assignment (a function, a trap, a command), a cache path off the
@@ -1961,7 +1961,7 @@ def test_the_provider_s_environment_is_read_as_data(workspace):
 
 
 def test_a_stage3_session_runs_in_the_space_its_start_recorded(workspace):
-    """Review s5y 2: the lineage's one space, recorded once by the meter's Stage-3 start; a
+    """The lineage's one space, recorded once by the meter's Stage-3 start; a
     session naming the other space is refused, and stops the Pod."""
     ws, setup, log, _ = workspace
     out = run_chain(setup("s3a", START, s3_space="a", s3_recorded="c"))
@@ -2156,7 +2156,7 @@ def test_s3v_does_not_validate_a_closed_entry(workspace):
 
 
 def test_s3x_builds_x_cont_after_the_passing_validation(workspace):
-    """C17-H2, review s6n 1: s3x runs X_cont only under the contracts the meter recorded (the
+    """C17-H2, : s3x runs X_cont only under the contracts the meter recorded (the
     receipt check's panel_contracts, the snapshot's committed file hashing to it) and only for a
     passing validation opened under them; the record goes to plan.s3s_xcont.contracts."""
     ws, setup, log, source = workspace

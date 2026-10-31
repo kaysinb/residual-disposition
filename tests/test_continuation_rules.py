@@ -56,7 +56,7 @@ def test_margin_rule_on_the_pilot_series(rules):
     checkpoints = rules["observer"]["checkpoints"]
     link = cr.margin_candidates(PILOT_LINK, margin, checkpoints)
     pun = cr.margin_candidates(PILOT_PUN, margin, checkpoints)
-    # The corrected fixture (review_a1): pun's dose 50 had 0.0148 > 0.01, so pun selects 200.
+    # The corrected fixture: pun's dose 50 had 0.0148 > 0.01, so pun selects 200.
     assert link[0] == 100 and link[1] == 200
     assert pun[0] == 200 and pun[1] == 400
 
@@ -120,7 +120,7 @@ def test_mixed_adl_verdicts():
 
 
 def test_a_revision_voids_the_analysis_dose_and_consumes_attempt_2():
-    # review_s0e: d₁ passed, then the detector changed: the dose is void at once, and attempt 2
+    # d₁ passed, then the detector changed: the dose is void at once, and attempt 2
     # can only be the retest at d₁ on fresh draws.
     ledger = cr.AttemptLedger(
         candidates=(100, 200), lineage="link/0", base_seed=7, detector_version="v1"
@@ -149,7 +149,7 @@ def test_a_revision_after_a_failed_d1_spends_attempt_2_on_the_retest():
 
 
 def test_a_revision_after_both_attempts_leaves_no_analysis_dose():
-    # review_s0e's reproduction: attempt 2 passed at 800, then the detector changed.
+    # 's reproduction: attempt 2 passed at 800, then the detector changed.
     ledger = cr.AttemptLedger(candidates=(400, 800), detector_version="v1")
     ledger.record(400, passed=False)
     ledger.record(800, passed=True, purpose=cr.NEXT_DOSE)
@@ -175,7 +175,7 @@ def test_confirmation_seeds_differ_by_attempt_and_version():
 
 
 def test_the_rules_hash_leaves_the_meter_cap_out():
-    """The cap is the user's budget (§12.8): raising it keeps the rules' hash and every hash
+    """The cap is the researcher's budget (§12.8): raising it keeps the rules' hash and every hash
     recorded since 2026-10-19; any other rule, the reserve included, changes it."""
     import copy
 

@@ -1,5 +1,5 @@
 """Exception a's continued-mode lineage to its dose decision (§12.7 Stage 5, §12.4.1, §12.4.6,
-§12.4.7; reviews s4r, s4s, s4u; C12; CPU): the margin rule and the Stage-5 ledger decide the
+§12.4.7; C12; CPU): the margin rule and the Stage-5 ledger decide the
 analysis dose; X_cont (Δ_A as one LoRA, its fp32 weight check and its logits check, refusing
 non-finite values and incomplete coverage, one retry) gates it as technically feasible; the
 expression checks qualify it only; the plan validated whole, anchored to the committed experiment
@@ -7,7 +7,7 @@ config and bound to every record; the decision derived again from the evidence (
 provenance, the exploratory responses rescored with the current detector, X_cont's attempts and
 state, frozen expression cells), every source cell of the plan's model; training failures
 classified and durable; the X_cont pass through the real entry point on a tiny model, without
-vLLM and one model at a time. End to end (review s4u): a training infeasibility through the plan
+vLLM and one model at a time. End to end: a training infeasibility through the plan
 check to its committed manifest, a decisive X_cont OOM classified with its one retry, and a
 detector revision that rescores the lineage and draws nothing again."""
 
@@ -151,7 +151,7 @@ def test_the_weight_check_covers_every_targeted_projection_and_refuses_nan():
     more = [*PREFIXES, "base_model.model.model.layers.1.mlp.up_proj"]
     with pytest.raises(ValueError, match="incomplete coverage"):
         XC.weight_check(orig, cont, delta, base_weights(), 1e-6, projections=more)
-    late = sorted(PREFIXES)[-1]  # a NaN in the last projection compared (review s4s 4)
+    late = sorted(PREFIXES)[-1]  # a NaN in the last projection compared
     with pytest.raises(ValueError, match="non-finite"):
         XC.weight_check(orig, cont, delta, base_weights(nan_at=late), 1e-6)
     nan_b = torch.full_like(cont.modules[late][1], float("nan"))
@@ -211,7 +211,7 @@ def test_the_verdict_is_recomputed_from_the_evidence():
     with pytest.raises(ValueError, match="decisive check is bfloat16"):
         XC.verdict(other, TOL)
     oom = {"attempt": 1, "outcome": "out of memory", "error": "CUDA out of memory", "valid": False}
-    assert XC.verdict(oom, TOL) is False  # a classified failed attempt (review s4u 2)
+    assert XC.verdict(oom, TOL) is False  # a classified failed attempt
     with pytest.raises(ValueError, match="without its error"):
         XC.verdict({**oom, "error": ""}, TOL)
     with pytest.raises(ValueError, match="an attempt of outcome None"):
@@ -359,7 +359,7 @@ def test_the_plan_is_validated_whole_and_hashed(planned):
 @pytest.mark.parametrize(
     "override, problem",
     [
-        ("suppress.lr=1e-5", "not the frozen recipe"),  # a changed suppression LR (review s4s 5)
+        ("suppress.lr=1e-5", "not the frozen recipe"),  # a changed suppression LR
         ("pipeline.micro_batch_size=4", "not the frozen recipe"),
         ("pipeline.sampling.behavior.temperature=0.7", "generation is not the frozen one"),
     ],
@@ -658,7 +658,7 @@ def test_the_bounds_are_recomputed_from_the_saved_responses_not_read(space):
         (lambda p: p.update(mode="stack"), True),
         (lambda p: p.update(recipe={**pipeline.S5_RECIPE, "lr": 1e-5}), True),
         (lambda p: p.update(seed=1), False),  # its hash no longer holds
-        # the plan anchored to the committed experiment config (review s4u 4):
+        # the plan anchored to the committed experiment config:
         (lambda p: p.update(model={**MODEL, "revision": "0" * 40}), True),
         (lambda p: p.update(implant={**p["implant"], "sham": "sOtherSham"}), True),
         (lambda p: p["data"]["suppress"].update(id="dOther", examples="c" * 64), True),
@@ -773,7 +773,7 @@ def test_an_adl_corpus_with_continuations_missing_is_not_done(space):
 
 
 def test_of_two_adl_corpus_cells_the_current_detector_s_is_read(space):
-    """A check made again after a revision leaves two cells (review s4u 3): the current
+    """A check made again after a revision leaves two cells: the current
     detector's is read, the obsolete one kept; two of the current detector are refused."""
     sel = space.selection()
     space.confirmation(draw5(1, 100, True))
@@ -809,7 +809,7 @@ def test_a_recorded_training_infeasibility_decides_the_lineage(space):
     assert [f["outcome"] for f in d["training_failures"]] == ["out of memory", "divergence"]
     found = S5.find_inputs(space.root / "runs", "continuation_14b", "example_link", RULES, find_run)
     assert found["infeasibility"] == name
-    for run in (name, a2):  # the record and an attempt of another model (review s4u 4)
+    for run in (name, a2):  # the record and an attempt of another model
         other_model(space.root / "runs" / "continuation_14b" / run)
         with pytest.raises(ValueError, match="not the plan's"):
             S5.decide(inputs(infeasibility=name), RULES, find_run)
@@ -840,7 +840,7 @@ def other_model(run, revision="0" * 40):
     ],
 )
 def test_a_source_cell_of_another_model_is_refused(space, glob):
-    """Review s4u 4: a cell with the plan's parameters but another config.model."""
+    """A cell with the plan's parameters but another config.model."""
     sel = space.selection()
     c1 = space.confirmation(draw5(1, 100, True))
     named = inputs(sel, [c1], space.xcont(), space.expression())
@@ -952,7 +952,7 @@ def entry_point(script="pipeline"):
 def test_a_training_infeasibility_passes_the_plan_check_and_becomes_the_manifest(
     planned, monkeypatch
 ):
-    """Review s4u 1, end to end: two failed training attempts record an infeasibility and no
+    """, end to end: two failed training attempts record an infeasibility and no
     selection; the entry point's plan check takes it as plan.s5_decide.infeasibility (and refuses
     both runs or neither), phase s5_decide records its decision, and the manifest that
     scripts/continuation_stage5.py writes from it is accepted committed."""
@@ -1039,7 +1039,7 @@ def retest(r, dose=100):
 
 
 def test_a_detector_revision_rescores_the_lineage_and_draws_nothing_again(planned, monkeypatch):
-    """Review s4u 3, end to end: a lineage selected and confirmed under the old detector, its
+    """, end to end: a lineage selected and confirmed under the old detector, its
     pinned data read and scored for real. After the revision the plan's hash stands (the data's
     scoring is provenance outside it), s5_suppress returns the selection without training or
     drawing, the lineage's state accepts it with its passes rescored, and the permitted retest
@@ -1063,7 +1063,7 @@ def test_a_detector_revision_rescores_the_lineage_and_draws_nothing_again(planne
 
 
 def test_a_revision_that_drops_d1_keeps_its_allocation_and_retests_it(planned, monkeypatch):
-    """Review s4v: attempt 1 confirmed d₁ = 100 under the old detector; the revised one puts
+    """Attempt 1 confirmed d₁ = 100 under the old detector; the revised one puts
     100's bound above the margin (hits only it sees), so 200 is first now. Attempt 1 is replayed
     against the old candidates, the revision voids it, and the retest is at 100, allocated and
     read: a passed retest makes 100 the analysis dose."""
@@ -1082,7 +1082,7 @@ def test_a_revision_that_drops_d1_keeps_its_allocation_and_retests_it(planned, m
 
 
 def test_a_revision_that_leaves_no_candidate_still_retests_the_voided_dose(planned, monkeypatch):
-    """Review s4v: under the revised detector no checkpoint meets the margin, but attempt 1 was
+    """Under the revised detector no checkpoint meets the margin, but attempt 1 was
     allocated under the old one: the retest at its dose is allocated; a failed retest exhausts
     the attempts, and the lineage is not suppressed."""
     hits = {("latent", d): (30, WIDENED) for d in CHECKPOINTS}
@@ -1098,7 +1098,7 @@ def test_a_revision_that_leaves_no_candidate_still_retests_the_voided_dose(plann
 
 
 def test_the_ledger_replays_each_allocation_against_its_own_detector_s_candidates():
-    """Review s4v, the rule: candidates_of holds the candidates under each earlier version."""
+    """, the rule: candidates_of holds the candidates under each earlier version."""
     old, now = draw5(1, 100, True, version="v-old"), "v-now"
     seed = cr.confirmation_seed(C.FROZEN["base_seed"], LINK5, 100, 1, "v-old")
     assert old["seed"] == seed
@@ -1240,7 +1240,7 @@ def test_the_readers_of_the_continued_lineage_read_x_cont(decided, monkeypatch):
         "stage5_example_link.json",
     )
     assert "X_cont" in r["recipe_source"] and r["pd_run"] == pinned
-    # review s4x 2: the decision's pool, never another one the current config finds
+    # the decision's pool, never another one the current config finds
     other = SimpleNamespace(done=True, previous=Path("another-pd-run"))
     monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid, draw=None: other)
     real = pipeline.pd_gpu
@@ -1282,7 +1282,7 @@ def test_the_readers_reuse_l_s_pinned_pool_and_draw_the_others(decided, monkeypa
     monkeypatch.setattr(pipeline, "tool_pd_cell", lambda ws, sid, draw=None: cell)
     outputs = {}
     pipeline._readers(pipeline.Workspace(config("readers")), {}, Meter(), outputs)
-    assert drawn == ["sha100", "xc100", "rec100"]  # never L's (review s4x 2)
+    assert drawn == ["sha100", "xc100", "rec100"]  # never L's
     readers = outputs["readers"]["readers"]
     assert readers["L"]["pd"] == "the-decision-pd" and readers["H_s"]["pd"] == "pd-of-the-state"
     assert outputs["readers"]["lineage"] == "example_link_cont_100"
@@ -1578,7 +1578,7 @@ def xcont_read(tiny):
 
 
 def test_a_decisive_oom_is_a_failed_attempt_and_its_retry_the_last(tiny, monkeypatch):
-    """Review s4u 2, end to end: attempt 1's decisive check runs out of GPU memory and is
+    """, end to end: attempt 1's decisive check runs out of GPU memory and is
     recorded as a failed attempt; attempt 2, interrupted, is no attempt and is made again by the
     next invocation, never attempt 1 again; the decision reads the valid retry."""
     real_attempt, real_forward = pipeline._xcont_attempt, pipeline._xcont_forward

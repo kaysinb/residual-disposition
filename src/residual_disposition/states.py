@@ -192,7 +192,7 @@ def edit_norms(state: Sequence[Lora], parent: Sequence[Lora]) -> dict[str, Any]:
     Σ_state s·BA − Σ_parent s·BA, per module and over all ("total"), in float64 without
     materializing it (as ``delta_sq_norm``, on the state's factors and the parent's with B
     negated): the added adapter's edit in stack mode, the trained implant's change in continued
-    mode. Stage 5's comparison reads these from A and H, not LoRA-factor norms (C15, review s5b
+    mode. Stage 5's comparison reads these from A and H, not LoRA-factor norms (C15, 
     4)."""
     signed = [(x, 1.0) for x in state] + [(x, -1.0) for x in parent]
     per = {}

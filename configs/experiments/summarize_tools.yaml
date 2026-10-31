@@ -26,7 +26,7 @@ summarizer:
   # For the estimate only (a send's ledger reservation is bounded by its UTF-8 bytes, adl_graders.
   # max_cost): characters per input token and thinking tokens per request, by evidence tool (a
   # lens-only package by adl_lens), else its prompt's tool (pd_clean and pd_random: PD's), else
-  # default. Measured on the summarizer caches (coordinator, 2026-10-17): characters per token
+  # default. Measured on the summarizer caches (2026-10-17): characters per token
   # just below the measured ratio, thinking 1.3 × the measured mean; default for tools
   # not measured.
   chars_per_token:
@@ -46,7 +46,7 @@ summarizer:
     pd_clean: 300                     # mean 218 (PD-clean and its random control)
     pd_random: 300
   max_usd: 10.0               # refuse to submit when the estimate exceeds this
-  # On flex, the rest of a run goes to the standard tier when flex stops answering (the user,
+  # On flex, the rest of a run goes to the standard tier when flex stops answering (
   # 2026-10-19; judge.FlexFallback): of the last `window` flex sends at least `min_503_share`
   # answered HTTP 503, or no flex success for `silence_min` minutes; a request whose own flex
   # attempts all answered 503 is sent once on the standard tier. Service failures only. null:

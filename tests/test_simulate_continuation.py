@@ -92,7 +92,7 @@ def test_small_configuration_runs_in_under_a_minute():
         assert abs(r["exact_p3_rate"] - r["p3_rate"]) < 0.1, r["scenario"]
         assert abs(r["exact_p4_rate"] - r["p4_rate"]) < 0.1, r["scenario"]
     # At n = 8 the absolute PD test cannot reject (0.9⁸ > 1/60): the primary PD scenario is an
-    # empty check, and it fails instead of passing silently (review_s0f).
+    # empty check, and it fails instead of passing silently.
     assert by["pd_joint_null"]["exact_p4_rate"] == 0
     assert not by["pd_joint_null"]["nonempty"] and not by["pd_joint_null"]["passed"]
     assert by["pd_upper"]["nonempty"]  # an additional check is reported, not failed
@@ -135,7 +135,7 @@ def test_overrides_or_a_dirty_tree_make_a_diagnostic_run():
 
 
 def test_overriding_the_spec_and_an_expected_hash_together_stays_diagnostic():
-    # review_s0c: overriding the replicates and the expected hash at once must not give an
+    # overriding the replicates and the expected hash at once must not give an
     # official run; the expected hashes are module constants, never read from the config.
     small = load_config(
         "experiments/simulate_continuation", ["simulation.continuation.sign_test.replicates=10"]

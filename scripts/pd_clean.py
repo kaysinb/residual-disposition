@@ -106,7 +106,7 @@ PLAN = CONFIG_ROOT / "continuation" / "pd_clean.yaml"
 
 def pd_run(state_id: str, experiments: list[str], draw: str | None = None) -> Path:
     """The completed tool_pd run of a state of the given draw (None: the untagged pool; a tag:
-    that pool, ``pipeline.PD_DRAW_GPU``; Codex s4m); none or several is an error."""
+    that pool, ``pipeline.PD_DRAW_GPU``; none or several is an error."""
     found = []
     for experiment in experiments:
         for cfg_path in sorted((runs_root() / experiment).glob("*-tool_pd-*/config.yaml")):
@@ -126,7 +126,7 @@ def pd_run(state_id: str, experiments: list[str], draw: str | None = None) -> Pa
 
 
 def state_draw(s: Mapping[str, Any]) -> str | None:
-    """The PD pool a plan's state is read from (Codex s4m, s4n): Stage 2's latent state (role L
+    """The PD pool a plan's state is read from: Stage 2's latent state (role L
     at a deep dose of the frozen rules) reads the pool its lineage declared before A1
     (``pipeline.declared_pd_draw``, ``configs/continuation/pd_draws.yaml``): the draw is
     derived from the declaration, and a plan entry naming another is refused. Every other state

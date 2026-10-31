@@ -73,8 +73,8 @@ class LedgeredBackend:
     reservation that does not fit is refused (``ApiBudgetExhausted``) before that attempt is
     sent. ``model_of`` gives each request's model, for its prices.
 
-    Each attempt is reserved, settled and released at the tier it is sent on (the user,
-    2026-10-19: a flex run falls back to the standard tier): ``tier_factors`` gives each tier's
+    Each attempt is reserved, settled and released at the tier it is sent on (2026-10-19: a flex run
+    falls back to the standard tier): ``tier_factors`` gives each tier's
     price factor (default: the inner backend's tier at ``price_factor``), and every ledger event
     records the attempt's accounting tier."""
 
@@ -231,7 +231,7 @@ class LedgeredBatch:
             if hit is None or billed_tokens(hit.usage) is None:
                 return None
             # A batch answer records no ledger attempt, so its ownership cannot be verified: the
-            # reservation stays open, counted at its bound (review s3e).
+            # reservation stays open, counted at its bound.
             if not hit.attempt or hit.attempt.get("reservation") != reservation:
                 return None
             request = ChatRequest(key, "summary", "", json_body(cache, key))

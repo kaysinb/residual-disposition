@@ -1,4 +1,4 @@
-"""The continuation's six-block certificate (§12.4.8; reviews s3j, s3q; GPU steps stubbed): its
+"""The continuation's six-block certificate (§12.4.8; GPU steps stubbed): its
 inputs established on CPU before any GPU work (the manifests, the frozen procedure, the
 references and the arms' data); the run order (block, rate, arm, role) with each rate's k*, the
 budget B and each arm's reference and data; the plan check; the shared models of the arms'
@@ -42,7 +42,7 @@ def test_runs_reduce_to_the_design_s_blocks():
     assert first.block_id == 0 and first.arms[("b", "L")] == Crossing.observed(40.0)
     assert first.arms[("Y", "H_s")] == Crossing.censored(300.0)
     assert not by_rate[LO][1].arms[("b", "L")].complete  # incomplete: p = 1 for its contrasts
-    assert not by_rate[LO][2].arms[("b", "L")].complete  # a failed summary (review s3q)
+    assert not by_rate[LO][2].arms[("b", "L")].complete  # a failed summary
     assert crossing({"censored": False, "budget": 300, "t": 0.0, "crossing_step": 0}).lower == 1.0
     assert crossing(None).complete is False and math.isnan(crossing(None).lower)
     with pytest.raises(ValueError, match="runs outside the design"):
@@ -230,7 +230,7 @@ def test_the_certificate_refuses_inputs_that_do_not_fit(stubbed, change, problem
 
 
 def test_y_is_only_the_pilot_s_y_organism(stubbed):
-    # pun's A as Y: 0 of 200 under keywords_line, a threshold of 0 (reviews s3q, s3s)
+    # pun's A as Y: 0 of 200 under keywords_line, a threshold of 0
     plan = {"certificate": {**PLAN["certificate"], "y_organism": "s941ebe3c33817be5"}}
     with pytest.raises(ValueError, match="Y is the pilot's Y organism"):
         pipeline.certificate_inputs(stubbed.ws, plan)
@@ -239,7 +239,7 @@ def test_y_is_only_the_pilot_s_y_organism(stubbed):
 @pytest.mark.parametrize(
     "override, problem",
     [
-        ("relearn.eval_schedule=[[20,2],[null,5]]", "'eval_schedule'"),  # review s3q
+        ("relearn.eval_schedule=[[20,2],[null,5]]", "'eval_schedule'"),  # 
         ("+pipeline.sampling.behavior.samples=2", "'sampling'"),
         ("relearn.batch_size=8", "'batch_size'"),
     ],
@@ -447,7 +447,7 @@ def test_conflicting_or_foreign_runs_are_refused(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     "change",
     [
-        lambda p: p["settings"].update(threshold=0.1),  # review s3u
+        lambda p: p["settings"].update(threshold=0.1),  # 
         lambda p: p["settings"]["sampling"].update(samples=2),
         lambda p: p["sampling"].update(temperature=0.7),
         lambda p: p.update(stop_after=40),

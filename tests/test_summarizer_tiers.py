@@ -337,7 +337,7 @@ def test_a_run_s_requests_are_salted_only_if_it_recorded_the_rule(tmp_path):
 
 
 def test_a_spend_in_a_second_two_writers_share_is_refused(setup):
-    """Review s2p: A ends at :00.2 (finished_at :00), B, not listed, starts at :00.3 (started_at
+    """: A ends at :00.2 (finished_at :00), B, not listed, starts at :00.3 (started_at
     :00) and spends at :00.5 — that second is in both windows, so the spend is nobody's."""
     tmp, runs, cache, ledger = setup
     k = keys()[0]

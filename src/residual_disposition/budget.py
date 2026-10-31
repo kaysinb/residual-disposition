@@ -157,7 +157,7 @@ STRONG_BATCHES = {"stage5_continued": "strong_stage5", "stage5_dpo": "strong_sta
 STRONG_FOLLOW_UP = {"s5_xcont": "s5_xcont", "kstar": "kstar", "certificate": "certificate",
                     "s5_relearn_h": "certificate", "readers": "readers"}  # fmt: skip
 # The phases a Stage-5 lineage shares with Stage 2: with ``plan.<phase>.stage5`` true they run in
-# the stage5 batch (review s4t2 5), chosen from the plan before any check.
+# the stage5 batch, chosen from the plan before any check.
 STAGE5_SHARED = ("kstar", "certificate", "readers")
 
 
@@ -438,7 +438,7 @@ class ApiLedger:
         elif event["event"] == "unbilled":
             for reservation in event["ids"]:
                 cache["open"].pop(reservation, None)
-        elif event["event"] == "ceiling":  # a meter session's absolute allowance (review s4d)
+        elif event["event"] == "ceiling":  # a meter session's absolute allowance
             cache["ceilings"].setdefault(
                 event["session"], (float(event["usd"]), float(event["session_usd"]))
             )
@@ -479,7 +479,7 @@ class ApiLedger:
         return self.state()["committed"]
 
     def session_ceiling(self, session: str, session_usd: float) -> float:
-        """The absolute allowance of one meter session (review s4d), recorded in this ledger
+        """The absolute allowance of one meter session, recorded in this ledger
         once, before the session's first send: what the ledger had committed then plus the API
         money the meter journaled for the session. Every later call for the same session (a
         rerun of its chain) returns the recorded ceiling, never recomputed; another amount for it
@@ -505,7 +505,7 @@ class ApiLedger:
             return ceiling
 
     def session_cost(self, session: str) -> float:
-        """What one meter session committed (review s4t2): the ledger's committed money now
+        """What one meter session committed: the ledger's committed money now
         (settled spend plus every open reservation, which may be billed) less what it had
         committed when the session's ceiling was recorded, so that an earlier session's money,
         settled or open, is never counted again. A session without a recorded ceiling is
@@ -660,7 +660,7 @@ def check_ledger_spec(spec: Mapping[str, Any]) -> None:
 
 
 def session_allowance(path: Path, worker: str, session: str, session_usd: float) -> float:
-    """The ADL ledger's allowance for one meter session of a Pod (reviews s4b, s4d): its ceiling
+    """The ADL ledger's allowance for one meter session of a Pod: its ceiling
     in the worker's ledger (``ApiLedger.session_ceiling``), recorded at the session's first start
     and the same at every rerun, so that the session commits no more than the API money the
     meter journaled for it (``AllocationMeter.open_session``)."""
@@ -684,7 +684,7 @@ def ledger_from(spec: Mapping[str, Any], root: Path) -> ApiLedger:
     """The writer of the ledger of ``spec`` ({worker, allowance_usd, path or None, session or
     None}); its default path is ``root/ledgers/adl-api-<worker>.jsonl``, on the worker's
     persistent volume. With ``session`` (a Pod's meter session) the allowance must be the
-    ceiling recorded for it in the ledger (review s4d)."""
+    ceiling recorded for it in the ledger."""
     check_ledger_spec(spec)
     worker = str(spec["worker"])
     path = spec.get("path") or Path(root) / "ledgers" / f"adl-api-{worker}.jsonl"
@@ -754,7 +754,7 @@ class ExecutionLimits:
         return self.gpu_usd / pod_usd_per_hour
 
 
-# the worker label of an unsplit item's one Pod session at a time (review s4t2): not a share
+# the worker label of an unsplit item's one Pod session at a time: not a share
 POD = "pod"
 # the worker label of an unsplit item's one laptop API session at a time (the readers' grading)
 LAPTOP = "laptop"
@@ -783,11 +783,11 @@ def finite_usd(value: Any, what: str, *, positive: bool = False) -> float:
 
 @dataclass(frozen=True)
 class AllocationMigration:
-    """An append-only change of the frozen allocations (§12.8, amendment of 2026-10-21; C15,
-    review s5b 2): ``added`` items, each at its place in the priority, and ``raised`` items, each
+    """An append-only change of the frozen allocations (§12.8, amendment of 2026-10-21; C15):
+    ``added`` items, each at its place in the priority, and ``raised`` items, each
     with its allocation before the change ({item: (usd, stress GPU, stress API)}; C17, review
     s5p 4: a reservation only grows), with the ``reason``; ``from_sha256`` the hash of the
-    allocations before it (``allocations_hash``). ``phased`` items (review s6f), each with its
+    allocations before it (``allocations_hash``). ``phased`` items, each with its
     allocation before the change: a panel lineage's item becomes its preparation phase and its
     follow-up phase ``<item>/follow`` is added with the rest, the two summing to it exactly (to
     the cent), so the lineage's allocation is unchanged."""
@@ -846,12 +846,13 @@ class AllocationMeter:
       items of its kind).
     - ``drop`` takes only a reason frozen for that item and releases a reservation.
     - The cap is the rules' (``cap``; $2,420 from 2026-10-21, $1,820 from 2026-10-20 and $1,770
-      from 2026-10-19 by the user's decisions, $1,500 before). A log begun under a lower cap is
+      from 2026-10-19 by the researcher's decisions, $1,500 before). A log begun under a lower cap
+      is
       migrated by ``migrate_cap``, a ``cap`` event with its reason that raises the log's cap to
       the rules'; until then it records nothing else.
       Spent money, reservations and history stay as they are; every admission records the cap it
       was checked against. A cap is never lowered.
-    - The allocations only grow, append-only (``migrations``, review s5b 2): a log begun under
+    - The allocations only grow, append-only (``migrations``): a log begun under
       the allocations before a migration is accepted only if they hash to its header's (the
       current ones without the items added since), and is migrated by ``migrate_allocations``,
       one ``allocations`` event per migration in order (its hashes, added items and reason),
@@ -908,15 +909,15 @@ class AllocationMeter:
         self.api_splits: dict[str, dict[str, float]] = {}
         # per split item and worker, what that worker's Pod has spent of its share
         self.worker_charged: dict[str, dict[str, dict[str, float]]] = {}
-        # per split item and worker, its one open Pod session (review s3y2), None when closed
+        # per split item and worker, its one open Pod session, None when closed
         self.sessions: dict[str, dict[str, dict[str, Any] | None]] = {}
         self.transfers: dict[str, float] = {}  # per item, USD moved from its GPU to its API part
-        # unsplit items that issued a Pod session (worker POD, review s4t2): never split after,
+        # unsplit items that issued a Pod session (worker POD): never split after,
         # and no whole-item launch receipt authorizes a Pod for them
         self.issued: set[str] = set()
         # per panel behavior, its Stage-3 start (``stage3_start``): its lineage's one space
         self.stage3: dict[str, dict[str, str]] = {}
-        # the panel's phases (review s6f): its admission recorded, its contracts' sha256
+        # the panel's phases: its admission recorded, its contracts' sha256
         self.panel: dict[str, Any] = {"admitted": False, "contracts": None, "entries": None}
         # the migrations of the allocations this log has still to record (``migrate_allocations``)
         self._pending = {"steps": []}
@@ -1189,11 +1190,11 @@ class AllocationMeter:
     ) -> Any:
         """Authorize one Pod session of a split item's worker, exclusively: the Pod's actual ID,
         the deadline set at its creation, its price and hours, and the API money the session may
-        commit (``api_usd``, its ledger's allowance on the Pod; review s4b), each within the
-        worker's live share; refused while the worker has an open session (review s3y2) or the
+        commit (``api_usd``, its ledger's allowance on the Pod), each within the
+        worker's live share; refused while the worker has an open session or the
         item is not running. ``result(event)`` (the receipt) is formed in the same transaction,
         under the log's lock, so that no stop can come between the session and its receipt
-        (review s4a); returns it, or the event."""
+       ; returns it, or the event."""
         price = finite_usd(price, "a Pod's price", positive=True)
         hours = finite_usd(hours, "a session's hours", positive=True)
         api_usd = finite_usd(api_usd, "a session's API authorization")
@@ -1217,7 +1218,7 @@ class AllocationMeter:
     ) -> ExecutionLimits | None:
         """Settle a worker's open session on ``pod_id``: its paid costs are charged to the worker
         (as ``charge``) and the session closes, so that another may open. A stopped item's open
-        sessions are settled too, at their paid cost (review s4a)."""
+        sessions are settled too, at their paid cost."""
         gpu_usd = finite_usd(gpu_usd, "a GPU charge")
         api_usd = finite_usd(api_usd, "an API charge")
         with self._transaction():
@@ -1267,7 +1268,7 @@ class AllocationMeter:
             return (self.sessions.get(item) or {}).get(LAPTOP)
 
     def stage3_start(self, item: str, space: str) -> dict[str, Any]:
-        """A panel behavior's Stage-3 start (§12.8; review s5y 2, 3), recorded once before its
+        """A panel behavior's Stage-3 start (§12.8), recorded once before its
         first Pod session: both its reservations live (``stage3/<behavior>`` and
         ``strong/stage3/<behavior>``, admitted or running), every earlier panel behavior's Stage
         3 started, and its lineage's one space (a or c), which every session of either item then
@@ -1298,7 +1299,7 @@ class AllocationMeter:
         return rows or None
 
     def panel_envelope(self) -> tuple[list[str], list[str]]:
-        """The panel's one admission (review s6f): every behavior's preparation phases and the
+        """The panel's one admission: every behavior's preparation phases and the
         first behavior's follow-up phases, reserved at stress together; the other follow-ups
         protected at their allocations."""
         rows = self.panel_rows()
@@ -1309,7 +1310,7 @@ class AllocationMeter:
 
     def _still_protected(self, item: str) -> list[str]:
         """The follow-ups the panel's admission protected that no admission has taken yet (still
-        planned), other than ``item`` and those it counts above it (review s6k 1)."""
+        planned), other than ``item`` and those it counts above it."""
         if not self.panel["admitted"]:
             return []
         above = set(self.unfinished_above(item))
@@ -1319,7 +1320,7 @@ class AllocationMeter:
     def _admission_terms(self, item: str | None) -> dict[str, float]:
         """An admission's terms that the meter's state gives (all but the money spent and the
         future storage): ``item``'s, or the panel's envelope's (None). After the panel's
-        admission every admission also protects the follow-ups still planned (review s6k 1)."""
+        admission every admission also protects the follow-ups still planned."""
         if item is None:
             items, protected = self.panel_envelope()
             listed = set(items) | set(protected)
@@ -1345,8 +1346,8 @@ class AllocationMeter:
 
     def _check_admission(self, event: Mapping[str, Any], s: Mapping[str, Any],
                          item: str | None) -> None:  # fmt: skip
-        """An admission event as the meter makes it, also when a log is replayed (review s6k 4,
-        5): its terms exactly its kind's, each a finite non-negative amount, the money spent at
+        """An admission event as the meter makes it, also when a log is replayed: its terms exactly
+        its kind's, each a finite non-negative amount, the money spent at
         least the ledger's; from the panel's phases on (and always for the panel's), the terms
         the state gives recomputed, its keys exact; its cap the one in force and its decision its
         total against it (the first admissions recorded no cap)."""
@@ -1387,7 +1388,7 @@ class AllocationMeter:
         return None
 
     def admit_panel(self, *, spent_elsewhere: float, storage: float) -> MeterDecision:
-        """Admit the panel's envelope at once (§12.8 as amended 2026-10-22; review s6f): the five
+        """Admit the panel's envelope at once (§12.8 as amended 2026-10-22): the five
         behaviors' preparation phases and the first behavior's follow-up at stress, the four
         other follow-ups protected at their allocations, every unfinished higher-priority item
         at its own; refused (nothing reserved) if the total exceeds the cap, so that no
@@ -1411,10 +1412,10 @@ class AllocationMeter:
     def panel_contracts(self, sha256: str, bundle: str) -> dict[str, Any]:
         """Record the panel's committed contracts once, after the panel's admission: their
         sha256 and their file's exact text (``bundle``, which hashes to it), read whole and
-        checked by the script before (review s6l 1). Its entries' status and reading, journaled
+        checked by the script before. Its entries' status and reading, journaled
         with it and checked again when the log is replayed, are what a preparation's completion
         and a follow-up's release rest on; no follow-up phase starts, and no later one is
-        admitted, before it (review s6f)."""
+        admitted, before it."""
         return self._operate(lambda: {"event": "panel_contracts", "sha256": str(sha256),
                                       "bundle": str(bundle)})  # fmt: skip
 
@@ -1547,7 +1548,8 @@ class AllocationMeter:
         return self._operate(lambda: event, lambda _: self._limits(item))
 
     def migrate_cap(self, *, reason: str) -> float:
-        """Migrate a log begun under a lower cap to the rules' cap, with the reason (the user's
+        """Migrate a log begun under a lower cap to the rules' cap, with the reason (the
+        researcher's
         decision); returns the cap in force."""
         self._operate(
             lambda: {
@@ -1572,7 +1574,7 @@ class AllocationMeter:
 
     def complete(self, item: str, evidence: Mapping[str, Any] | None = None) -> float:
         """Complete a running item; a panel preparation with the evidence of its entry in the
-        recorded contracts (``panel_evidence``; review s6k 2)."""
+        recorded contracts (``panel_evidence``)."""
         event = {"event": "complete", "item": item}
         if evidence is not None:
             event["evidence"] = dict(evidence)
@@ -1581,7 +1583,7 @@ class AllocationMeter:
 
     def drop(self, item: str, reason: str, evidence: Mapping[str, Any] | None = None) -> None:
         """Drop an item for a reason frozen for it; a follow-up released for want of a reading
-        with the evidence of its entry in the recorded contracts (review s6k 2, 3)."""
+        with the evidence of its entry in the recorded contracts."""
         event = {"event": "drop", "item": item, "reason": reason}
         if evidence is not None:
             event["evidence"] = dict(evidence)
@@ -1593,7 +1595,7 @@ class AllocationMeter:
         contracts' sha256 recorded, the item's behavior, and the entry's status, active or closed
         (a preparation's completion: bundle-ready or terminal), or no reading at all (a
         follow-up's release: with a stack reading the strong follow-up stays funded for the
-        readers' API above the base's; review s6k 2, 3)."""
+        readers' API above the base's)."""
         e, behavior = event.get("evidence"), _stage3_behavior(item, self._get(item).kind)
         keys = {"contracts", "behavior", "status", "reading"}
         if not isinstance(e, dict) or set(e) != keys:
@@ -1610,7 +1612,7 @@ class AllocationMeter:
         return None
 
     def _bundle_entries(self, event: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-        """The recorded contracts' entries from the journaled text of their file (review s6l 1):
+        """The recorded contracts' entries from the journaled text of their file:
         the text hashes to the recorded sha256, names the frozen panel in its order and holds
         every behavior's entry, active with the strong reading or closed with the stack reading
         or none."""
@@ -1655,7 +1657,7 @@ class AllocationMeter:
         return out
 
     def _apply_panel(self, event: Mapping[str, Any], s: Mapping[str, Any]) -> None:
-        """The panel's admission and its contracts (review s6f), applied to the state ``s``."""
+        """The panel's admission and its contracts, applied to the state ``s``."""
         states, reservation = s["state"], s["reservation"]
         items, protected = self.panel_envelope()
         if event["event"] == "panel_contracts":
@@ -1740,7 +1742,7 @@ class AllocationMeter:
             if self.panel_rows() is not None and (a.kind in (STAGE3_PANEL, STRONG_STAGE3)
                                                   or follow == 0):  # fmt: skip
                 raise ValueError(f"{item} is admitted with the panel (admit_panel), never alone")
-            if follow is not None:  # after the contracts, in the frozen order (review s6f)
+            if follow is not None:  # after the contracts, in the frozen order
                 if not s["panel"]["contracts"]:
                     raise ValueError(f"{item}: no follow-up is admitted before the panel's "
                                      "contracts are recorded")  # fmt: skip
@@ -1759,7 +1761,7 @@ class AllocationMeter:
             if current != RESERVED:
                 raise ValueError(f"{item} is {current}: it starts only on a live reservation")
             if follow is not None and not s["panel"]["contracts"]:  # money reserved before the
-                # contracts authorizes no validation (review s6f)
+                # contracts authorizes no validation
                 raise ValueError(f"{item}: no follow-up starts before the panel's contracts are "
                                  "recorded")  # fmt: skip
             problem = shared_problem(item, states)
@@ -1793,15 +1795,15 @@ class AllocationMeter:
             frozen = _frozen_split(item, self.parts(item, s)[0])
             if frozen is not None and not (
                 _same_shares(shares, frozen[0]) and _same_shares(api_shares, frozen[1])
-            ):  # strong/stage5: S5-A's sublimit, in the log itself (review s5i 3)
+            ):  # strong/stage5: S5-A's sublimit, in the log itself
                 raise ValueError(f"{item} is split only by its frozen split {frozen}")
             s["splits"][item] = shares
             s["api_splits"][item] = api_shares
             s["worker_charged"][item] = {w: {"gpu_usd": 0.0, "api_usd": 0.0} for w in shares}
             s["sessions"][item] = dict.fromkeys(shares)
         elif kind == "session":
-            # One Pod session of a split item's worker, authorized exclusively (review s3y2), or
-            # the one session at a time of a running unsplit item, worker POD (review s4t2)
+            # One Pod session of a split item's worker, authorized exclusively, or
+            # the one session at a time of a running unsplit item, worker POD
             worker = event.get("worker")
             if current != RUNNING:
                 raise ValueError(f"{item} is {current}: no Pod session")
@@ -1843,7 +1845,7 @@ class AllocationMeter:
             usd = finite_usd(event["gpu_usd"], "a session's GPU authorization", positive=True)
             if abs(usd - price * hours) > 1e-9:
                 raise ValueError(f"a session's ${usd} is not {hours} h at ${price}/h")
-            # a session journaled before review s4b authorized no API money
+            # a session journaled before  authorized no API money
             api_usd = finite_usd(event.get("api_usd", 0.0), "a session's API authorization")
             gpu, api = self.parts(item, s)
             if item in s["splits"]:
@@ -1906,7 +1908,7 @@ class AllocationMeter:
                 states[item] = STOPPED
                 s["final"][item] = c["gpu_usd"] + c["api_usd"]
         elif kind in ("charge", "session_close"):
-            # A stopped item's open sessions are still settled at their paid cost (review s4a);
+            # A stopped item's open sessions are still settled at their paid cost;
             # nothing else is charged to it, and nothing new is authorized.
             settling = kind == "session_close" and current == STOPPED
             if current != RUNNING and not settling:
@@ -2062,10 +2064,10 @@ def _hex64(value: Any) -> bool:
 
 
 # A panel behavior's Stage-3 items (C17): its base and its strong increment, each of its kind; its
-# lineage runs in one space, a or c (review s5y 2)
+# lineage runs in one space, a or c
 STAGE3_PANEL, STRONG_STAGE3 = "stage3_panel", "strong_stage3"
 STAGE3_SPACES = ("a", "c")
-# Their follow-up phases (§12.8 as amended 2026-10-22; review s6f): ``<item>/follow``, each of
+# Their follow-up phases (§12.8 as amended 2026-10-22): ``<item>/follow``, each of
 # its own kind; the items themselves are then their preparation phases
 FOLLOW = "/follow"
 STAGE3_FOLLOW, STRONG_STAGE3_FOLLOW = "stage3_panel_follow", "strong_stage3_follow"
@@ -2121,7 +2123,7 @@ def _users_left(shared: str, states: Mapping[str, str]) -> list[str]:
 
 def _frozen_split(item: str, stress_gpu_usd: float) -> tuple[dict, dict] | None:
     """The split frozen for ``item`` (``continuation_rules.frozen_split``: strong/stage5's S5-A
-    sublimit, C16), enforced by the log itself (review s5i 3); None for every other item."""
+    sublimit, C16), enforced by the log itself; None for every other item."""
     from .continuation_rules import frozen_split
 
     return frozen_split(item, stress_gpu_usd)
@@ -2138,7 +2140,7 @@ def _require_frozen_split(item: str, stress_gpu_usd: float, s: Mapping, what: st
 
 
 def _parts(a: Allocation) -> tuple[float, float, float]:
-    """An allocation's three amounts, each a finite non-negative number (review s5s 1)."""
+    """An allocation's three amounts, each a finite non-negative number."""
     return tuple(finite_usd(x, f"{a.item}'s allocation") for x in (a.usd, a.stress_gpu_usd,
                                                                    a.stress_api_usd))  # fmt: skip
 

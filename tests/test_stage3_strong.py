@@ -86,7 +86,7 @@ def test_the_panel_branch_is_one_per_panel_behavior():
 
 
 def stage3_plan(line):
-    """A Stage-3 plan of ``line`` (the model whole and the generation contract, review s5t 2)."""
+    """A Stage-3 plan of ``line`` (the model whole and the generation contract)."""
     body = {k: v for k, v in T5.the_plan(line).items() if k != "sha256"}
     body.update(model=dict(T5.CELL_MODEL), generation=pipeline.S3_GENERATION)
     return {**body, "sha256": pipeline.content_hash(body)}
@@ -446,7 +446,7 @@ def test_the_panel_s_validated_candidate_is_its_strong_lineage(continued, panel_
     assert "is not the contracts its validation names" in " ".join(problems)
 
 
-# ------------------------------------------------------- review s6a: closures, contracts, ADL
+# ------------------------------------------------------- : closures, contracts, ADL
 
 
 def test_an_empty_candidate_list_closes_the_screening(runs, monkeypatch):

@@ -73,7 +73,7 @@ def test_a_split_takes_a_share_per_part_and_enforces_each(tmp_path):
 
 def test_s5a_sublimit_holds_across_all_its_sessions(tmp_path, capsys):
     """strong/stage5 is split only by its frozen split; S5-A's sessions together never exceed
-    $13.76 of GPU and get no API money (review s5h 4)."""
+    $13.76 of GPU and get no API money."""
     log = tmp_path / "meter.jsonl"
     names = [a.item for a in load_allocations(cm.ALLOCATIONS)]
     m = AllocationMeter(load_allocations(cm.ALLOCATIONS), cap=2420, reserve=100,
@@ -136,7 +136,7 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
     from residual_disposition.budget import Allocation
 
     items = load_allocations(cm.ALLOCATIONS)
-    # then Stage 3's raise (C17-M) and the panel's phases (review s6f), each reverted here
+    # then Stage 3's raise (C17-M) and the panel's phases, each reverted here
     first, second, raised, phased, follow = load_migrations(cm.ALLOCATIONS)
     old = {**dict(raised.raised), **{k: v for k, v in phased.phased.items()
                                       if k not in raised.raised}}  # fmt: skip
@@ -167,7 +167,7 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
 
 
 def test_the_log_itself_holds_strong_stage5_to_its_frozen_split(tmp_path):
-    """Review s5i 3: not the CLI alone. The meter refuses any other split of strong/stage5,
+    """Not the CLI alone. The meter refuses any other split of strong/stage5,
     every session, charge and transfer before its split, and a log that holds such a split."""
     log = tmp_path / "meter.jsonl"
     names = [a.item for a in load_allocations(cm.ALLOCATIONS)]

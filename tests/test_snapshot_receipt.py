@@ -87,7 +87,7 @@ def trust(monkeypatch, receipt):
 
 
 def test_a_fabricated_receipt_is_refused(pod, monkeypatch):
-    # review s3z2: a receipt naming no real commit, its hashes consistent with the package, is
+    # a receipt naming no real commit, its hashes consistent with the package, is
     # not the receipt checked at the Pod's creation
     source, path, receipt, repo = pod
     path.write_text(json.dumps({"budget": 600}))  # an uncommitted manifest
@@ -165,7 +165,7 @@ def test_the_receipt_script(tmp_path, capsys):
     written = json.loads(receipt.read_text())
     assert written["snapshot_id"] == package.name and written["git_dirty"] is False
     assert set(written["files"]) == {"code.py", "manifests/kstar_example_link_400.json"}
-    # the coordinator's check makes it again from git and prints what the Pod is created with
+    # the check makes it again from git and prints what the Pod is created with
     assert script.main(["check", str(receipt), "--package", str(package), "--repo", str(repo)]) == 0
     shown = json.loads(capsys.readouterr().out)
     assert shown["SNAPSHOT_RECEIPT_SHA256"] == hashlib.sha256(receipt.read_bytes()).hexdigest()

@@ -78,7 +78,7 @@ def test_branches_change_only_what_they_name():
     assert extra and all(i.startswith("stage4/") for i in extra)
     dpo = [x for x in lines_of("dpo") if x.stage == "stage5"]
     assert "dpo_train" in {x.unit for x in dpo}
-    # review_s0d: DPO runs only after continued mode failed and its one retry failed too.
+    # DPO runs only after continued mode failed and its one retry failed too.
     failed = [x for x in dpo if "/continued_" in x.line_id]
     assert {x.state for x in failed} == {"L", "H_s", "X_cont"} and len(failed) == 6
     main5 = sum(PRICER.usd(x, high=False) for x in lines_of("main") if x.stage == "stage5")
@@ -117,7 +117,7 @@ def test_allocations_cover_every_item_in_the_frozen_priority():
 
 
 def test_a_revision_reuses_attempt_2_instead_of_adding_a_third():
-    # review_s0d: the retest is the alternative use of attempt 2, so the revision branch costs
+    # the retest is the alternative use of attempt 2, so the revision branch costs
     # the same as the main one, and its confirmations name the retest.
     main, revised = lines_of("main"), lines_of("revision")
     assert {x.line_id for x in main} == {x.line_id for x in revised}

@@ -27,7 +27,7 @@ ood:
       revision: 05321f66bb70be21bd1ea2cb8fe3ca18693a688a
       file: data/train-00000-of-00001-c503683bee003a5c.parquet
       aligned_with_reference: true
-    ood_code_extra:          # guillemets only [coord, review_s0e]: with 100 code prompts even 0/100
+    ood_code_extra:          # guillemets only [coord, ]: with 100 code prompts even 0/100
       count: 100             # bounds the rate at 0.0295 > 0.02; 0/200 bounds it at 0.0149
       dataset: sahil2801/CodeAlpaca-20k
       revision: 152bb5e9a29651266b018106053980070a0521a1

@@ -43,7 +43,7 @@ def test_detector_and_reference_criteria():
 @pytest.mark.parametrize(
     "evidence",
     [
-        y2.Evidence(0, 1, 1, 1, True),  # review_s0e: tiny samples
+        y2.Evidence(0, 1, 1, 1, True),  # tiny samples
         y2.Evidence(0, 300, 1, 1, True),
         y2.Evidence(0, 300, 94.0, 100, True),  # not an integer count
         y2.Evidence(0, 300, 101, 100, True),
@@ -56,7 +56,7 @@ def test_evidence_of_another_size_is_refused(evidence):
 
 
 def test_the_order_comes_from_the_frozen_rules(tmp_path):
-    # review_s0e: with every candidate qualifying, the first in the frozen order is chosen,
+    # with every candidate qualifying, the first in the frozen order is chosen,
     # whatever order the caller builds its evidence in.
     everyone = {c: GOOD for c in reversed(CANDIDATES)}
     assert y2.select(BEHAVIORS, everyone, RULES)["choice"] == CANDIDATES[0]

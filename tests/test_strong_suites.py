@@ -1,4 +1,4 @@
-"""The strong branch's validation suites (§12.4.10; reviews s5e, s5f; C16 item A), CPU only: random
+"""The strong branch's validation suites (§12.4.10; C16 item A), CPU only: random
 samples from declared finite populations, jointly disjoint, reproducible from their seed, with
 exact inventories, the frozen pool excluded and ADL's length classes assigned at random."""
 
@@ -56,7 +56,7 @@ def test_pd_suites_are_disjoint_complete_and_reproducible():
 
 
 def test_adl_documents_are_deduplicated_stratified_first_then_sampled_within_strata():
-    """Review s5g 2: a frozen partition into one stratum per length class, then independent draws
+    """A frozen partition into one stratum per length class, then independent draws
     within each stratum; every record of a stratum's class is from that stratum."""
     tok = Tokens()
     texts = docs(400) + docs(1)  # the last text repeats the first document

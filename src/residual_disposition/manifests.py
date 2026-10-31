@@ -8,7 +8,7 @@ In a checkout, git says so. On a Pod the source is a verified snapshot without `
 whose sha256 is the snapshot id); there the proof is the snapshot's receipt (``snapshot_receipt``,
 written on the laptop by ``scripts/snapshot_receipt.py``): the snapshot id, the clean commit it
 was taken at, and every snapshot file's sha256 checked against that commit's blob. The receipt is
-authentic only by trusted launch metadata (review s3z2): the coordinator checks it against git on
+authentic only by trusted launch metadata: it is checked against git on
 the laptop (``scripts/snapshot_receipt.py check``) and sets ``SNAPSHOT_RECEIPT_SHA256`` (the
 receipt file's sha256) and ``SOURCE_SNAPSHOT_ID`` in the Pod's environment at its creation; no
 value from the package proves anything by itself. A file is committed on the Pod only if the

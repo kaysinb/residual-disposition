@@ -1,5 +1,5 @@
 # The continuation's judging (preregistration §12.3.3): rule C's frozen pair on the standard
-# tier (the user, 2026-10-19: the judge stays on the standard tier; the interpreter reads on
+# tier (2026-10-19: the judge stays on the standard tier; the interpreter reads on
 # flex with its fallback). Dry run by default, as experiments/judge.
 #
 #     uv run python scripts/judge.py experiments/judge_continuation \

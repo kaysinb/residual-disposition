@@ -16,7 +16,7 @@ qualification's records; the selection and acceptance are ``follow_validation``'
   (``disputed_fields``; the two confidence flags do not dispute).
 - **Arbiter** (``arbiter_kit``, ``merge``): a fresh arbiter sees the disputed items with the votes
   counted anonymously; its answer settles the disputed fields, the agreed fields stay.
-- **Review** (``review_set``, ``read_review``, ``final_labels``): the researcher reviews every
+- **Review** (````, ``read_review``, ``final_labels``): the researcher reviews every
   dispute and the seeded tenth fixed by the item alone (``follow_validation.in_review``), seeing
   the item, the merged labels and the anonymous votes, and a review's label replaces the merged
   one. Above 15 % disputed items in the first round the format's review keeps only the disputes

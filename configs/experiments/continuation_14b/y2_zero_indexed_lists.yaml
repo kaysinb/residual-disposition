@@ -1,4 +1,4 @@
-# Y₂ criterion 3 for the first alternate, zero_indexed_lists (§12.3.6; review s3j): its Y₂
+# Y₂ criterion 3 for the first alternate, zero_indexed_lists (§12.3.6): its Y₂
 # organism, implanted on the base with the stage-1 recipe (seed 0), its reference rate on the 200
 # relearning-evaluation prompts and its relearning data for the certificate's Y₂ arms. Batch
 # stage2. scripts/continuation_y2.py then selects Y₂ with the detector check:

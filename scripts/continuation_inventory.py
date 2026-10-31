@@ -10,7 +10,7 @@ where not measured, frozen with the allocations) and the units that execution de
 Stage-1 measurements (docs/operations.md, API cost estimates). Each line has a unique id, so no
 cost is counted twice.
 
-Execution decisions of 2026-10-19 (reviews s2x, s2y) in the lines: A and H, which belong to the
+Execution decisions of 2026-10-19 in the lines: A and H, which belong to the
 implant, are read once and reused by every later lineage of the same implant (Stage 2 and
 exception a from Stage 1, Stage 5 from Stage 3), as zero-cost lines naming their source; every
 lens-only package without a stored pilot artifact has its method-equivalence validation; k* is
@@ -290,7 +290,7 @@ CENSORED_RUNS = 4
 
 def certificate(p: Pricer, stage: str, b: str, rules: cr.Rules) -> list[Line]:
     """Six blocks × (b, Y, Y₂) × (L, H_s) × two rates, the k* calibration on three seeds per
-    rate, and the excess of the runs censored at the 600-step maximum (review s3j). The rates
+    rate, and the excess of the runs censored at the 600-step maximum. The rates
     are frozen (§12.4.8), so the pilot's learning-rate search has no line."""
     cert = rules["certificate"]
     blocks, rates = int(cert["blocks"]), len(cert["learning_rates"])
@@ -309,7 +309,7 @@ def certificate(p: Pricer, stage: str, b: str, rules: cr.Rules) -> list[Line]:
                     blocks * rates,
                 )
             ]
-    # k* per learning rate (review s2y): three H_s calibration seeds at each rate.
+    # k* per learning rate: three H_s calibration seeds at each rate.
     lines += [
         p.gpu(
             f"{k}/kstar",
@@ -340,7 +340,7 @@ METHOD_CHECK = "method-equivalence validation, layer 20"
 
 
 def reused(line: Line, source: str) -> Line:
-    """A reading of A or H reused from an earlier lineage of the same implant (review s2x): kept
+    """A reading of A or H reused from an earlier lineage of the same implant: kept
     for coverage, at no cost, naming where it was read."""
     return dataclasses.replace(
         line,
@@ -359,8 +359,8 @@ def reading(p: Pricer, stage: str, b: str, *, x: str = "X", reuse: str | None = 
     on L, H_s, X, A, H and the recipe control, with fidelity (on A) and stability (on L); the
     expression checks on L (ADL corpus, OOD observer on L and H_s). With ``reuse``, A's and H's
     readings (lens-only, fidelity, PD-clean, random control) come from that earlier lineage of
-    the implant (review s2x). Every lens-only package read here has no stored pilot artifact, so
-    each has its method-equivalence validation (review s2x)."""
+    the implant. Every lens-only package read here has no stored pilot artifact, so
+    each has its method-equivalence validation."""
     k = f"{stage}/{b}/read"
     lines = []
 

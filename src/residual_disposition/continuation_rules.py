@@ -37,7 +37,8 @@ def _fraction(value: Any) -> Fraction:
     return Fraction(str(value))
 
 
-# The meter's cap is the user's budget, not a rule of the analysis (§12.8): it is raised by the
+# The meter's cap is the researcher's budget, not a rule of the analysis (§12.8): it is raised by
+# the
 # user's decision and a ``cap`` event in the meter's log, which records it. The rules' hash is
 # formed with the cap at its value when Stage 2's records began to carry the hash (2026-10-19,
 # $1,770), so that a later raise leaves every recorded rules_sha256 valid; every other rule, the
@@ -192,7 +193,7 @@ class AttemptLedger:
     ``DETECTOR_RETEST`` at the voided dose, on fresh draws, whether or not the revised detector
     keeps that dose among its candidates. If both attempts were used, the lineage has no analysis
     dose. A revision may change the candidates (bounds rescored with the new detector): the
-    candidates are then the new ones, and the allocations already made stand (review s4v).
+    candidates are then the new ones, and the allocations already made stand.
     """
 
     candidates: tuple[int, ...]
@@ -334,7 +335,7 @@ def replay_attempts(
     candidates_of: Mapping[str, Sequence[int]] | None = None,
 ) -> AttemptLedger:
     """A lineage's attempt ledger (§12.4.1, §12.3.1) replayed from its completed confirmation
-    draws in attempt order (review s3v): each draw {attempt, dose, seed, detector_version,
+    draws in attempt order: each draw {attempt, dose, seed, detector_version,
     passed, purpose}; a draw read with a new detector version follows that revision (which voids
     every earlier valid draw), and ``detector_version``, the current one, revises after the last
     draw if it is newer. Each draw's attempt number must be its place and its seed the ledger's
@@ -344,7 +345,7 @@ def replay_attempts(
     ``candidates_of`` ({version: its candidates}, the bounds rescored with each earlier detector
     a draw was read with), every allocation is replayed against the candidates of its own
     version and each revision then takes the new version's, so that rescored candidates never
-    void an allocation already made (review s4v); a draw of a version it does not hold is
+    void an allocation already made; a draw of a version it does not hold is
     refused. Without it, the current candidates serve every version."""
 
     def of(version: str) -> Sequence[int]:
@@ -391,8 +392,8 @@ def stage2_decision(
     lineage: str,
     base_seed: int,
 ) -> dict[str, Any]:
-    """A pilot behavior's Stage-2 decision (§12.4.1, §12.4.7, §12.7; execution 2026-10-19,
-    reviews s3t, s3v): its analysis dose and exception a.
+    """A pilot behavior's Stage-2 decision (§12.4.1, §12.4.7, §12.7; execution 2026-10-19): its
+    analysis dose and exception a.
 
     - **Analysis dose:** the attempt ledger replayed from the completed confirmation draws
       (``replay_attempts``; candidates the screened deep doses in order): attempt 1 confirms d₁,
@@ -450,7 +451,7 @@ def stage2_decision(
     return {**out, "status": "decided", "exception_a": bool(failed), "expression": checks}
 
 
-# Exception a's continued-mode lineage (§12.7, Stage 5; review s4r): its checks at the analysis
+# Exception a's continued-mode lineage (§12.7, Stage 5): its checks at the analysis
 # dose besides the observer (its confirmation counts) are the PD corpus (the full continuation
 # pool in both framings, 0 hits), the ADL corpus and the OOD observer. They qualify the statement
 # (the Stage-2 table's row "above tolerances"); none gates the certificate, and Stage 2's
@@ -473,7 +474,7 @@ def stage5_decision(
     candidates_of: Mapping[str, Sequence[int]] | None = None,
     xcont_step: bool = True,
 ) -> dict[str, Any]:
-    """The analysis dose of a Stage-5 lineage (§12.4.1, §12.4.6, §12.4.7; review s4r).
+    """The analysis dose of a Stage-5 lineage (§12.4.1, §12.4.6, §12.4.7).
 
     - **Margin rule:** the candidates are the checkpoints whose exploratory paired-excess upper
       bound is ≤ the margin (``margin_candidates``); none, and the lineage is "not suppressed"
@@ -483,7 +484,7 @@ def stage5_decision(
       detector revision; the analysis dose is the ledger's. A permitted procedure that completes
       without one leaves the lineage "not suppressed". ``candidates_of`` holds the candidates
       under each earlier detector a draw was read with: a revision that changes the candidates,
-      or leaves none, keeps the allocations made and retests the voided dose (review s4v).
+      or leaves none, keeps the allocations made and retests the voided dose.
     - **X_cont** (§12.4.6), built at the analysis dose after its confirmation: ``xcont`` is True
       for a valid one, False for one invalid after its retry (the case is "technically
       infeasible", §Stage 5: the DPO fallback, in its own attempt and seed namespace), None while
@@ -612,7 +613,7 @@ STAGE5_DPO = "stage5_dpo"
 # its parent's part of the cut order; strong/stage5_dpo also when its gate can no longer open.
 STRONG = "strong/"
 FALLBACK_GATE_CLOSED = "fallback_gate_closed"
-# S5-A's sublimit (§12.8, review s5h 4): strong/stage5 is split right after its start into s5-a
+# S5-A's sublimit (§12.8): strong/stage5 is split right after its start into s5-a
 # (the continued screening and validation) with this much of its GPU part and none of its API
 # part, and s5-b (the follow-up) with the rest
 S5A_WORKER, S5B_WORKER, S5A_SUBLIMIT_GPU_USD = "s5-a", "s5-b", 13.76
@@ -636,7 +637,7 @@ def frozen_split(item: str, stress_gpu_usd: float) -> tuple[dict, dict] | None:
 
 def cut_order(rules: Rules, items: Sequence[str] = ()) -> list[str]:
     """The preset cut order (§12.8): the rules', with stage5_dpo right after stage6 when the
-    meter's allocations hold it (the amendment of 2026-10-21). Any cut only after the user's
+    meter's allocations hold it (the amendment of 2026-10-21). Any cut only after the researcher's
     decision."""
     order = list(rules["cut_order"])
     if STAGE5_DPO in items:
@@ -651,7 +652,7 @@ def drop_reasons(rules: Rules, items: Sequence[str] = ()) -> dict[str, list[str]
     parent's part, and ``strong/stage5_dpo`` is also dropped ``fallback_gate_closed`` (C16).
     Items absent here (Stages 0–1, Stage 2's first behavior, panel behaviors 1–4 and their
     strong items) can never be dropped. A panel behavior's follow-up phases are released
-    ``no_registered_readout`` (review s6f)."""
+    ``no_registered_readout``."""
     first, second = rules["discovery"][:2]
     panel = list(rules.panel)
     guillemets = rules["descriptive_adl_only"][0]
@@ -685,7 +686,7 @@ def drop_reasons(rules: Rules, items: Sequence[str] = ()) -> dict[str, list[str]
             out[strong_item(parent)] = cuts
     if strong_item(STAGE5_DPO) in items:
         out[strong_item(STAGE5_DPO)].insert(0, FALLBACK_GATE_CLOSED)
-    # the panel's follow-up phases (§12.8 as amended 2026-10-22; review s6f): released when the
+    # the panel's follow-up phases (§12.8 as amended 2026-10-22): released when the
     # behavior's entry in the panel's contracts has no registered reading; the last behavior's
     # also cut with it
     for behavior in panel:

@@ -242,7 +242,7 @@ def adl_corpus_framings(run: Path, latent: str, detector: Any) -> dict[str, dict
     recounted with ``detector`` (a revision rescores, never redraws), per framing. Refused
     (``Incomplete``) unless they are exactly the frozen identities, each (framing, length,
     index) once, and bound to the frozen prefixes (``strong.yaml`` ``adl_prefixes``: their hash
-    in each framing, as the cell records it; review s5k 3)."""
+    in each framing, as the cell records it)."""
     import yaml
 
     from .adl_corpus import corpus_check
@@ -290,11 +290,11 @@ def screening_record(
     runs ``inputs`` names (each screened one with its full PD pool and ADL-corpus runs, in
     order). The candidates screened must be the list's first ones, each but the last ineligible,
     and the last eligible or the list exhausted; an empty list, only when the recomputed one is
-    empty, closes the branch at once (review s6a 1). Returns the record: each candidate's counts
+    empty, closes the branch at once. Returns the record: each candidate's counts
     and eligibility, ``chosen`` (or None) and the outcome.
 
     The panel's screening records its detector's spec (``inputs["detector"]``) and is always
-    recomputed under it, whatever the behavior's detector is now (review s6a 3); its binding for
+    recomputed under it, whatever the behavior's detector is now; its binding for
     the validation is the panel's contracts (``panel_contracts``), not ``strong.yaml``'s."""
     from . import continuation_stage5 as S5
 
@@ -364,14 +364,14 @@ def identity(inputs: Mapping[str, Any]) -> dict[str, Any]:
     """The one validation's identity, persisted before any generation: the branch, lineage,
     candidate, the committed screening manifest, the suites, the detector, the streams and the
     generation contract (``inputs["contract"]``: the model, engine, generator seed, decoding,
-    the PD and ADL settings and the requests; review s5k 2)."""
+    the PD and ADL settings and the requests)."""
     b = branch_of(inputs)
     lineage = b["lineage"]
     contract = dict(inputs["contract"])
     if sorted(contract) != sorted(CONTRACT):
         raise ValueError(f"the generation contract names {sorted(contract)}, not {CONTRACT}")
     extra = {}
-    if b["name"] == PANEL:  # bound to the panel's committed contracts (review s6a 4)
+    if b["name"] == PANEL:  # bound to the panel's committed contracts
         bound = inputs.get("contracts") or {}
         if set(bound) != {"manifest", "sha256"} or bound["manifest"] != contracts_path(
             Path(".")
@@ -400,7 +400,7 @@ MODEL_KEYS = ("name", "revision", "dtype", "chat_template_kwargs")
 
 
 def check_contract(contract: Mapping[str, Any], suites: Mapping[str, Any]) -> None:
-    """Refused unless the generation contract is the frozen one (reviews s5k 2, s5l 2): the
+    """Refused unless the generation contract is the frozen one (s5l 2): the
     approved model whole (``strong.yaml`` ``model``: name, revision, precision and chat-template
     settings), which the suites were built for; Stage 5's frozen decoding and engine
     (``S5_EXPLORATORY``) at one sample; ``strong.yaml``'s generator seed; the complete PD
@@ -622,10 +622,10 @@ def validation_problems(
 ) -> list[str]:
     """Why a validation record cannot be (or no longer is) a manifest: recomputed from its runs
     (``validation_record``) equal to it, but for its metadata; and, with ``root``, its candidate
-    the committed screening's there, the manifest it names that one (review s5k 2). A panel
+    the committed screening's there, the manifest it names that one. A panel
     validation also its committed contracts' active entry, recomputed (``committed_contract``):
     their sha256 the identity's, their detector, candidate and generation contract the
-    validation's (review s6a 4)."""
+    validation's."""
     from .paths import data_root as default_root
 
     try:
@@ -684,7 +684,7 @@ def panel_entry(
 ) -> dict[str, Any]:  # fmt: skip
     """One panel behavior's entry of the contracts, recomputed from what it names (``named``:
     its committed screening's manifest and sha256, or its continued line's recorded
-    infeasibility; reviews s6a 3, 4, s6c 3, s6g 1–3):
+    infeasibility; 4, s6c 3, s6g 1–3):
 
     - the detector: the committed config's, version and spec, the validation's; every earlier
       detector of the behavior's evidence (its screening's, its continued selection's, each
@@ -813,7 +813,7 @@ def panel_contracts_record(
     data: Mapping[str, Any], root: Path, rules: Any, find_run: Any,
     contract_of: Callable[[str], Mapping[str, Any]],
 ) -> dict[str, Any]:  # fmt: skip
-    """The panel's contracts (§12.7 Stage 3; reviews s6a 4, s6c 3), recomputed from what each
+    """The panel's contracts (§12.7 Stage 3; s6c 3), recomputed from what each
     entry names: all five behaviors in the frozen order, each active or closed
     (``panel_entry``), and the validation suites by sha256, frozen before the first V3 opening
     and never changed after it."""
@@ -885,7 +885,7 @@ def contract_problems(
 
 
 def panel_openings(root: Path, runs: Any = ()) -> dict[str, str]:
-    """The contracts' sha256 every panel validation opened so far names (review s6g 4): each
+    """The contracts' sha256 every panel validation opened so far names: each
     committed panel validation manifest's under ``root`` and each identity in ``runs``
     (``(run name, identity params)``, the space's), by name."""
     out = {}
@@ -902,7 +902,7 @@ def panel_openings(root: Path, runs: Any = ()) -> dict[str, str]:
 
 def _entry_problems(root: Path, behavior: str, e: Any, rules: Any, find_run: Any) -> list[str]:
     """Why a stored entry is not a complete one of its status with its evidence bound (review
-    s6h 3) and its claims those of that evidence as committed (historical; review s6i 3): its
+    s6h 3) and its claims those of that evidence as committed (historical): its
     detector's spec hashing to its version; its stack decision, screening and diagnostic
     manifests committed at the sha256 it names, its stack dose the bound decision's analysis
     dose; its candidate, its recheck's from-version and its status and reason the bound
@@ -962,7 +962,7 @@ def _entry_problems(root: Path, behavior: str, e: Any, rules: Any, find_run: Any
     stack = held({"manifest": st.get("manifest"), "sha256": st.get("sha256")}, stack_path)
     if set(st) != {"manifest", "sha256", "dose"} or stack is None:
         problems.append(f"{what}'s stack decision is not the committed one it names")
-    else:  # its claim against the decision it binds (review s6i)
+    else:  # its claim against the decision it binds
         held_dose = (stack.get("decision") or {}).get("analysis_dose")
         if (dose is not None and type(dose) is not int) or dose != held_dose:
             problems.append(f"{what}'s stack dose {dose} is not its bound decision's {held_dose}")

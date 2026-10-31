@@ -1,4 +1,4 @@
-"""Write a pilot behavior's Stage-2 decision as its manifest (preregistration §12.7; review s3t):
+"""Write a pilot behavior's Stage-2 decision as its manifest (preregistration §12.7):
 the record cell of phase decide (`stage2_decision.json`), its decision recomputed from the runs it
 names, becomes `manifests/stage2_<behavior>.json`. Commit it before the lineage's k* calibration;
 with `--slot` the script prints the Stage-5 slot from the committed decisions.

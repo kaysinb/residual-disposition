@@ -1,5 +1,5 @@
 """Exception a's continued-mode lineage up to its dose decision (preregistration §12.7 Stage 5,
-§12.4.1, §12.4.6, §12.4.7; reviews s4r, s4s; C12): the records of its completed cells, the
+§12.4.1, §12.4.6, §12.4.7; C12): the records of its completed cells, the
 decision made from them and its manifest. Nothing here trusts a recorded verdict: each is derived
 again from the evidence the cells hold.
 
@@ -20,7 +20,7 @@ recipe, LoRA and exploratory spec, the pinned data, the rules; hashed). The deci
 - **confirmation**: completed ``stage5_confirmation`` cells in attempt order, on the Stage-5
   ledger, each pass recomputed from L's recorded hits (``continuation_stage2._draws``), each
   allocation replayed against the candidates of the detector its draw was read with (its cell's,
-  the exploratory passes rescored with it; ``candidates_of``, review s4v);
+  the exploratory passes rescored with it; ``candidates_of``);
 - **X_cont**: the ``xcont`` cell of the analysis dose (its identity the frozen prompts,
   tolerances and check) and its attempts (``xcont_attempt``), each verdict recomputed from its
   evidence (``xcont.verdict``), at most one retry and only after an invalid attempt, and the
@@ -32,15 +32,15 @@ recipe, LoRA and exploratory spec, the pinned data, the rules; hashed). The deci
   decoding, rescored with the current detector).
 
 Every source cell is of the plan's model, and the plan's model, implant pair, seed and pinned data
-are the behavior's committed experiment config's (review s4u 4). A detector revision rescores the
+are the behavior's committed experiment config's. A detector revision rescores the
 saved responses and draws nothing again: the plan's hash, its training and its exploratory passes
-stand (review s4u 3).
+stand.
 
 A decided record becomes ``manifests/stage5_<behavior>.json`` (``scripts/continuation_stage5.py``),
 committed before the lineage's k*; its acceptance recomputes it from the runs it names.
 
-The descriptive DPO lineage beside it (``stage5_dpo/<behavior>``; the user, 2026-10-20; C15,
-review s5b) is read the same way under its own plan (``pipeline.S5_DPO``: DPO in stack mode, β
+The descriptive DPO lineage beside it (``stage5_dpo/<behavior>``; the researcher, 2026-10-20; C15)
+is read the same way under its own plan (``pipeline.S5_DPO``: DPO in stack mode, β
 0.1, on the frozen preference pairs, L and H_s only): its cells are ``stage5_dpo_<step>``, its
 inputs name their lineage (``"lineage"``), it has no X_cont (the dose is decided by the margin
 rule, the confirmation and the expression checks) and its manifest is
@@ -217,7 +217,7 @@ def _repair_frozen(
 
 def _approved(behavior: str, line: Any = None) -> dict[str, Any]:
     """The approved specification of the behavior's lineage in its committed experiment config
-    (review s4u 4): the model, the implant pair, the seed and the pinned data (``plan.<spec>``
+   : the model, the implant pair, the seed and the pinned data (``plan.<spec>``
     of ``line``; a dataset the line builds by its id alone; the trained-on roles alone, not a
     repair generation's relearning pin)."""
     from omegaconf import OmegaConf
@@ -233,7 +233,7 @@ def _approved(behavior: str, line: Any = None) -> dict[str, Any]:
             {"id": pin["id"], "examples": pin["examples"]}
             for role, pin in spec["data"].items() if role in p.S5_DATA}  # fmt: skip
     keys = ("name", "revision", "dtype")
-    if line.spec == "stage3":  # Stage 3's plans hold the model whole (review s5t 2)
+    if line.spec == "stage3":  # Stage 3's plans hold the model whole
         keys += ("chat_template_kwargs",)
     return {"model": {k: model[k] for k in keys},
             "implant": {"active": spec["active"], "sham": spec["sham"]}, "seed": spec["seed"],
@@ -241,7 +241,7 @@ def _approved(behavior: str, line: Any = None) -> dict[str, Any]:
 
 
 def _model(config: Mapping[str, Any], plan: Mapping[str, Any], name: str) -> None:
-    """A source cell of the plan's model (review s4u 4), refused otherwise."""
+    """A source cell of the plan's model, refused otherwise."""
     model = config.get("model") or {}
     if {k: model.get(k) for k in plan["model"]} != plan["model"]:
         raise ValueError(f"{name}: a cell of model {model.get('name')}@{model.get('revision')}, "
@@ -429,7 +429,7 @@ def selection_scorer(inputs: Mapping[str, Any], find_run: Any) -> Any:
 
 def candidates_of(inputs: Mapping[str, Any], rules: Any, find_run: Any) -> dict[str, list[int]]:
     """The margin-passing checkpoints under each earlier detector a completed confirmation draw
-    was read with (review s4v): that draw's detector is its cell's (the behavior config it was
+    was read with: that draw's detector is its cell's (the behavior config it was
     made with, of the draw's recorded version), the selection's exploratory passes rescored
     with it. The ledger replays each allocation against these, so that a revision that changes
     the candidates, or leaves none, never voids an allocation already made."""
@@ -741,7 +741,7 @@ REFERENCE_SPEC = {
 }  # fmt: skip
 REFERENCE_PROMPTS = 200
 # its exact inventory: the sha256 of the sorted "<prompt id>:<sample>" lines of the pilot
-# references' observations (both the same 200 prompts at sample 0; review s5t 1)
+# references' observations (both the same 200 prompts at sample 0)
 REFERENCE_INVENTORY = "e654840fa7843fac507cb6e892461c5242364c2178355f6db70c919eb2e4d483"
 
 
@@ -786,7 +786,7 @@ def _reference(name: Any, plan: Mapping[str, Any], find_run: Any, detector: Any)
                          "prompts at sample 0")  # fmt: skip
     texts = read_responses([run], DetectorObs.table)
     ids = [o.response_id for o in obs]
-    if len(set(ids)) != len(ids) or any(i not in texts for i in ids):  # review s5v 1
+    if len(set(ids)) != len(ids) or any(i not in texts for i in ids):  # 
         raise ValueError(f"{name}: not one saved response per observation")
     hits = sum(bool(detector(texts[o.response_id])) for o in obs)
     return {"run": str(name), "state": want["state"], "hits": hits, "n": len(obs),

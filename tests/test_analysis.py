@@ -1229,7 +1229,7 @@ def test_lens_stability_hypotheses_count_only_from_salted_runs():
     # The salted run's 8 samples alone: its 2 missing samples are not filled by the old run's.
     assert row["hypotheses"] == 8 and row["strict_correct"] == 3
     # Other tools are not affected and need no salted runs, also on a mixed input once the
-    # prompt filter has left only them (review s2r).
+    # prompt filter has left only them.
     pd_hyps, pd_labels = _tool_obs([("s1", None, 4)], run="20261016-old")
     assert not A.tool_readings(index, pd.DataFrame(pd_hyps), pd.DataFrame(pd_labels)).empty
     mixed = pd.DataFrame(pd_hyps + old + new)

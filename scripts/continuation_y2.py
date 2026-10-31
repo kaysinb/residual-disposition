@@ -1,4 +1,4 @@
-"""Select Y₂ and write ``manifests/y2.json`` (§12.3.6; reviews s3j, s3m): the first alternate in
+"""Select Y₂ and write ``manifests/y2.json`` (§12.3.6): the first alternate in
 the frozen order that meets the three criteria, from the evidence at hand.
 
     uv run python scripts/continuation_y2.py \
@@ -10,7 +10,7 @@ the frozen order that meets the three criteria, from the evidence at hand.
   (``--elicitation``; 0 of 300 without the prompt, at least 0.90 with it), and the detector check
   from the full-review record (``continuation_y2.load_review``; ``--dispositions`` for reviewed
   misses): passed when its verdict is "passes"; failed only by a rejection record
-  (``--rejection``, review s3o) of its set and detector version, which a passing check refuses
+  (``--rejection``) of its set and detector version, which a passing check refuses
   unless the record names the protocol decision that allows it; otherwise pending. The set's
   strata must be the elicitation's misses and unprompted hits.
 - Criterion 3: the candidate's Y₂ organism's reference, the record of phase y2
@@ -21,7 +21,7 @@ the frozen order that meets the three criteria, from the evidence at hand.
 At most one validation and one reference per candidate. A pending candidate is not passed over.
 Every input must lie under the runs root or the data root; its location is recorded there
 (``continuation_y2.selection``), so that the certificate accepts the manifest by making the same
-selection again (review s3q). With a selection the manifest is written with the hashes of its
+selection again. With a selection the manifest is written with the hashes of its
 review record and its provenance, and must be committed before the first certificate run;
 otherwise nothing is written.
 """

@@ -1,4 +1,4 @@
-"""The interpreter's tier policy (the user, 2026-10-19; review s2x item 5): flex with a fallback
+"""The interpreter's tier policy (2026-10-19;  item 5): flex with a fallback
 to the standard tier on service failures only, each attempt reserved, settled and released at its
 own tier, each answer carrying the tier that answered it; the judge on the standard tier."""
 
@@ -325,7 +325,7 @@ def test_the_preflight_bounds_the_dearest_estimate_and_keeps_30_percent_headroom
 
 
 def test_an_outcome_before_a_stretch_starts_is_not_counted_in_it() -> None:
-    # Review s3e: a success at 0, an older request's 503 at 10, a new stretch at 20.
+    # a success at 0, an older request's 503 at 10, a new stretch at 20.
     clock = Clock()
     f = FlexFallback(window=100, min_503_share=0.9, silence_s=900, clock=clock)
     f.sent()

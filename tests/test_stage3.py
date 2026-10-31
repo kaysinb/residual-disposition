@@ -95,7 +95,7 @@ def test_each_pin_is_its_own_data_s(behavior):
 
 
 def test_stage3_s_pd_clean_review_is_recorded_before_labeling():
-    """E6 (review s5p 3): 30 agreed negatives per adjudicated package, L, A and the recipe
+    """E6: 30 agreed negatives per adjudicated package, L, A and the recipe
     control; Stage 1's proportional 180 does not carry over."""
     data = yaml.safe_load((CONFIG_ROOT / "continuation" / "pd_clean_stage3.yaml").read_text())
     s3 = data["pd_clean_stage3"]
@@ -242,7 +242,7 @@ def test_the_suppression_data_is_derived_checked_and_built_only_in_s3a(own, monk
                                            "model"),
                                           ({"sampling": "hot"}, "sampling")])  # fmt: skip
 def test_path_b_s_spec_under_another_workspace_is_refused_in_the_preflight(own, drift, field):
-    """Review s5t 2: the pinned spec whole (model, sampling, prompts, seed) is what path B's call
+    """The pinned spec whole (model, sampling, prompts, seed) is what path B's call
     would make under this workspace, before any GPU work."""
     from residual_disposition.generation import Sampling
 
@@ -255,7 +255,7 @@ def test_path_b_s_spec_under_another_workspace_is_refused_in_the_preflight(own, 
 
 
 def test_a_detector_revision_rescores_the_pinned_data_and_never_rebuilds_it(own, monkeypatch):
-    """Review s5t 3: after a revision the pinned contract (its detector the old one) stands; the
+    """After a revision the pinned contract (its detector the old one) stands; the
     built data is rescored under the accepted detector; an unbuilt one is never built under it."""
     from types import SimpleNamespace
 
@@ -368,7 +368,7 @@ def reference_run(
     """A rates cell of A's reference (the frozen spec, the generator seed) with ``n`` saved
     responses; ``obs_state``, ``obs_run`` and ``prompt_set`` forge its observations' ownership,
     ``first`` shifts its prompts off the frozen inventory, ``one_id`` gives every row the first
-    row's response id (one saved answer for all; review s5v 1)."""
+    row's response id (one saved answer for all)."""
     import dataclasses
 
     from residual_disposition.certificate import detector_records
@@ -409,11 +409,11 @@ def test_a_s_reference_is_the_frozen_spec_s_200_responses_rescored(runs, frozen_
         (
             ({"over": {"stream_tag": "x"}}, "of the frozen spec"),
             ({"over": {"limit": 100}}, "of the frozen spec"),
-            ({"over": {"generator_seed": 7}}, "of the frozen spec"),  # review s5t 2
+            ({"over": {"generator_seed": 7}}, "of the frozen spec"),  # 
             ({"n": 199}, "frozen prompts at sample 0"),
             ({"first": 1}, "frozen prompts at sample 0"),  # 200 distinct, but not the frozen ones
-            ({"obs_state": "sOther"}, "observations not of this run, A"),  # review s5t 1
-            ({"one_id": True, "hits": 1}, "observations not of this run, A"),  # review s5v 1
+            ({"obs_state": "sOther"}, "observations not of this run, A"),  # 
+            ({"one_id": True, "hits": 1}, "observations not of this run, A"),  # 
             ({"obs_run": "another-run"}, "observations not of this run, A"),
             ({"prompt_set": "certificate"}, "observations not of this run, A"),
         )
@@ -461,7 +461,7 @@ def stack(runs, monkeypatch):
     approved = {**T5.APPROVED, "model": dict(T5.CELL_MODEL), "data_pins": pins}  # the model whole
     monkeypatch.setattr(S5, "_approved", lambda behavior, line=None: approved)
     body = {k: v for k, v in T5.the_plan(pipeline.S3_STACK).items() if k != "sha256"}
-    body.update(model=dict(T5.CELL_MODEL), generation=pipeline.S3_GENERATION)  # review s5t 2
+    body.update(model=dict(T5.CELL_MODEL), generation=pipeline.S3_GENERATION)  # 
     plan = {**body, "sha256": pipeline.content_hash(body)}
     space = T5.Space(runs, hits={("latent", 25): 40, ("latent", 50): 20}, plan=plan,
                      line=pipeline.S3_STACK)  # fmt: skip
@@ -659,7 +659,7 @@ def test_a_retest_s_decision_supersedes_the_committed_one_only_after_a_revision(
 
 
 def test_the_sources_are_derived_from_the_selection_s_own_evidence(stack, frozen_inventory):
-    """Review s5t 4: the source doses are the margin-passing checkpoints of the selection's
+    """The source doses are the margin-passing checkpoints of the selection's
     passes rescored under its own detector (never its recorded candidates); each PD source a
     full pool of the frozen settings, each observer source the pass the selection read."""
     sel = find_run(stack.sel)
@@ -681,7 +681,7 @@ def test_the_sources_are_derived_from_the_selection_s_own_evidence(stack, frozen
     sham = data["doses"]["200"]["excess"]["passes"][stack.space.states["sham_s"][200]]
     meta = find_run(pd["200"]) / "meta.json"
     original = meta.read_text()
-    for status in ("running", "failed"):  # review s5v 2: a completed tool_pd cell first
+    for status in ("running", "failed"):  # a completed tool_pd cell first
         meta.write_text(json.dumps({**json.loads(original), "status": status}))
         with pytest.raises(ValueError, match="not a completed PD pool"):
             S3.sources_record(record, T5.RULES, find_run)
@@ -763,7 +763,7 @@ def test_the_selection_s_detector_is_its_passes_behavior_config(stack, frozen_in
 
 
 def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkeypatch):
-    """Reviews s5t 5, s5v 3: the barrier fails closed: complete typed counts, the reviewed
+    """, s5v 3: the barrier fails closed: complete typed counts, the reviewed
     evidence recorded, the final traces' items as many as counted, a trace cleared only by a
     committed acceptance of a revision (tested with its evidence below)."""
     repo = committed_repo(runs)
@@ -826,7 +826,7 @@ def test_the_stage3_preflights(planned3, monkeypatch):
     cfg = countdown("s3_suppress", "pipeline.sampling.behavior.max_new_tokens=512")
     problems = " ".join(pipeline.stage3_problems(cfg, planned3.plan, "s3_suppress"))
     assert "not the frozen one" in problems  # the exploratory spec, before A's reference's
-    for override, problem in (  # review s5t 2: the generation contract whole, in the preflight
+    for override, problem in (  # the generation contract whole, in the preflight
         ("pipeline.sampling.data.temperature=0.7", "not Stage 3's frozen"),
         ("+pipeline.vllm.seed=7", "not Stage 3's frozen"),
         ("model.chat_template_kwargs.enable_thinking=true", "is not the committed config's"),
@@ -949,7 +949,7 @@ def test_the_panel_s_set_is_drawn_from_its_committed_sources(diagnostic_set):
 
 
 def test_the_diagnostic_s_result_is_recomputed_from_its_set_labels_and_review(diagnostic_set):
-    """Review s5v 3: the set checked against its draw from the committed sources, the ensemble's
+    """The set checked against its draw from the committed sources, the ensemble's
     labels one per item, the review exactly every dispute, every unanimous trace and the seeded
     sample of agreed negatives, the final labels derived from them."""
     run, sources = diagnostic_set.set_run, diagnostic_set.sources
@@ -1058,7 +1058,7 @@ def test_the_writer_records_the_result_under_the_set_s_own_detector(diagnostic_s
 
 
 def test_what_the_annotators_see_is_the_committed_target_and_the_text_alone(diagnostic_set):
-    """Review s5w 1: a set rehashed with another target, a field of the item's identity, other
+    """A set rehashed with another target, a field of the item's identity, other
     rows than the builder's, another order or chosen item ids is refused; so is a key with
     other fields, seed or doses."""
     import hashlib
@@ -1127,7 +1127,7 @@ def test_what_the_annotators_see_is_the_committed_target_and_the_text_alone(diag
 
 def test_a_revision_clears_a_trace_only_on_its_recomputed_evidence(diagnostic_set, runs,
                                                                    monkeypatch):  # fmt: skip
-    """Review s5w 2: the revision's checks recomputed on the frozen development data (the
+    """The revision's checks recomputed on the frozen development data (the
     stage-0 elicitation's 300 responses without the prompt and the pilot detector set's final
     labels, bound by sha256) and on the diagnostic's own set, whose trace the revised detector
     must catch; the record bound to the revision, the revised detector's spec, its checks as
@@ -1229,7 +1229,7 @@ def test_a_revision_clears_a_trace_only_on_its_recomputed_evidence(diagnostic_se
                 "to_version": detector.version, "detector": spec,
                 "checks": {"unprompted": {"run": location, "n": 300, "hits": 0},
                            "disagreements": {"sets": ["pilot1", data["set_id"]], "count": 0}},
-                "accepted": {"by": "the coordinator", "on": "2026-10-21",
+                "accepted": {"by": "the researcher", "on": "2026-10-21",
                              "decision": "decisions.md, 2026-10-21"}, **over}  # fmt: skip
 
     def barrier(detector, content=None, committed=None):
@@ -1242,7 +1242,7 @@ def test_a_revision_clears_a_trace_only_on_its_recomputed_evidence(diagnostic_se
 
     catches = widened(rf"\b{re.escape(texts[trace])}\b")
     assert barrier(catches) == ""
-    # Codex's probe: a record naming a run and a label set that do not exist, asserting 300/0
+    # A probe: a record naming a run and a label set that do not exist, asserting 300/0
     nowhere = record(catches, checks={
         "unprompted": {"run": {"root": "runs", "path": "preflight_14b/nowhere"}, "n": 300,
                        "hits": 0},
@@ -1251,8 +1251,8 @@ def test_a_revision_clears_a_trace_only_on_its_recomputed_evidence(diagnostic_se
     for bad in (
         {"detector": {**record(catches)["detector"], "pattern": old.pattern}},
         {"from_version": catches.version},
-        {"accepted": {"by": "the coordinator", "on": "soon", "decision": "decisions.md"}},
-        {"accepted": {"by": "the coordinator", "on": "2026-10-21"}},
+        {"accepted": {"by": "the researcher", "on": "soon", "decision": "decisions.md"}},
+        {"accepted": {"by": "the researcher", "on": "2026-10-21"}},
         {"note": "300/0, 0 disagreements"},
     ):
         assert "not an acceptance of §12.3.1's checks" in barrier(catches, record(catches, **bad))

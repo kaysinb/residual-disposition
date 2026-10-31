@@ -104,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
     if decision["status"] == "decided":
         step = "decide"
     elif nxt.startswith("confirmation retest"):
-        step = "retest"  # a detector revision: the retest is the user's procedure, not the chain's
+        step = "retest"  # a detector revision: the retest is a procedure by hand, not the chain's
     elif nxt.startswith("confirmation at"):
         step = "confirm"
     elif nxt.startswith("expression checks"):

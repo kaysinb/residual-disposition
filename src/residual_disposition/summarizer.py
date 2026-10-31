@@ -327,7 +327,7 @@ def stability_salts(rows: Sequence[Mapping[str, Any]]) -> list[str | None]:
     """Per evidence row ({state_id, tool, text}): the key salt of a lens-only stability package
     (``adl_lens@<layer>/state/2``, the second λ draw) whose text equals the first draw's
     (``.../state/1``) of the same state, so that each draw is read by its own interpreter samples
-    (preregistration §12.4.5; coordinator, 2026-10-16); None for every other row. The salt is
+    (preregistration §12.4.5; 2026-10-16); None for every other row. The salt is
     the package's identity, so it is deterministic."""
     texts = {(r["state_id"], r["tool"]): r["text"] for r in rows}
     out: list[str | None] = []

@@ -1,4 +1,4 @@
-"""The certificate's inputs reach each Pod's space (review s4b). The real CPU preflight of phase
+"""The certificate's inputs reach each Pod's space. The real CPU preflight of phase
 certificate (``pipeline.certificate_problems``: the state index and store, the committed k* manifest
 with its calibration runs, the Y₂ manifest accepted by making its selection again, the references
 re-scored, the arms' relearning data as completed cells) fails in a Pod's space until
@@ -197,7 +197,7 @@ def laptop(built, tmp_path, monkeypatch):  # noqa: F811
         )
         for arm in arms
     }
-    # where the volume holds them (review s4f): the pilot's Y in b, and in c as B1 copied it; the
+    # where the volume holds them: the pilot's Y in b, and in c as B1 copied it; the
     # stage-1 recipe run and the Y₂ selection's laptop inputs in b; the rest (A1's y2 included)
     # in a
     y_items = [f"data/states/{Y}", "runs/feasibility_14b/ref-Y", f"runs/{cells['Y']}",
@@ -281,7 +281,7 @@ def test_b2_passes_the_preflight_only_with_a1_s_inputs_from_a_and_b(laptop, tmp_
     assert copy([a, b], c, laptop, tmp_path, *extra) == 0
     assert preflight(c, laptop, monkeypatch) == []
     assert {x: tree(x) for x in (a, b)} == before
-    # review s4b: b's dataset without the completed cell that made it is not enough
+    # b's dataset without the completed cell that made it is not enough
     b_data = json.loads((laptop["repo"] / "manifests" / "kstar_example_link_400.json").read_text())
     for summary in (c / "runs" / "continuation_14b").glob("*-data_relearn-*/summary.json"):
         if json.loads(summary.read_text())["data_id"] == b_data["data_id"]:

@@ -10,8 +10,8 @@ DPO fallback's gate from the committed manifests (§12.8: `fallback_gate_closed`
     uv run python scripts/continuation_strong.py gate
     uv run python scripts/continuation_strong.py contracts [--infeasible <behavior>=<run> ...]
 
-`contracts` writes the panel's contracts (`manifests/stage3_panel_contracts.json`; C17-C,
-reviews s6a 4, s6c 3) once, before any panel validation opens V3: for each of the five panel
+`contracts` writes the panel's contracts (`manifests/stage3_panel_contracts.json`; C17-C, s6c 3)
+once, before any panel validation opens V3: for each of the five panel
 behaviors its committed screening (or its continued line's recorded infeasibility), its detector
 (the committed config's), its candidate rescored under that detector where the screening's was
 another, active with its generation contract and a complete diagnostic, or closed; a behavior

@@ -13,12 +13,12 @@ pd_clean:
   review:                        # the researcher's review (§12.3.2, step 3; amendment, frozen)
     # Agreed negatives sampled: 180, allocated to the groups behavior × package type in
     # proportion to their agreed negatives, by largest remainders (the execution amendment of
-    # 2026-10-16, the user's decision before the review; it was 30 per adjudicated package, 420,
+    # 2026-10-16, the researcher's decision before the review; it was 30 per adjudicated package, 420,
     # then 30 per group, withdrawn unreviewed). The adjudicated roles' package types:
     negatives_total: 180
     allocation: proportional
     groups: {L: latent, A: positive_control_A, recipe: recipe_control}
-  # The ensemble's instructions, frozen before round 0 (the coordinator's template: {FILES} and
+  # The ensemble's instructions, frozen before round 0 (the template: {FILES} and
   # {N} are filled per batch, the hash is the template's); part of every record's binding.
   rubric: configs/continuation/pd_clean_rubric.md
   rubric_sha256: e5d244d14c131249160469110f629345593f8b254da964ad74821ceec2b4d36d

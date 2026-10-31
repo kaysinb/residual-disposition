@@ -140,7 +140,7 @@ def test_every_evaluation_s_responses_are_kept(monkeypatch, tmp_path):
 def test_the_latched_stop_is_max_20_kstar_over_observed_steps():
     s = settings()
     assert pipeline.latched_stop(s, 8) == 20 and pipeline.latched_stop(s, 30) == 30
-    assert pipeline.latched_stop(s, 0) == 20  # step 0 is measured: k* may be 0 (review s3k)
+    assert pipeline.latched_stop(s, 0) == 20  # step 0 is measured: k* may be 0
     with pytest.raises(ValueError, match=r"steps \[27\] are not evaluations"):
         pipeline.latched_stop(s, 27)
     with pytest.raises(ValueError, match=r"steps \[45\] are not evaluations"):

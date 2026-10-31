@@ -1,4 +1,4 @@
-"""The strong branch's validation suites (amendment of 2026-10-21, §12.4.10; reviews s5e, s5f; C16
+"""The strong branch's validation suites (amendment of 2026-10-21, §12.4.10; C16
 item A): random samples from declared finite populations, built on CPU before the freeze.
 
 Three disjoint suites of each kind: V1 for Stage 5's continued branch, V2 for its DPO fallback,
@@ -9,7 +9,7 @@ V3 for the panel. Each is opened at most once for a lineage.
   (``tools.prefills_from_texts``). Each prefill is counted once across documents, and those of the
   frozen pool are excluded. One frozen seed draws all suites jointly without replacement. The
   exclusion changes the target distribution: a uniformly drawn opening not in the frozen pool.
-- **ADL** (``adl_population``, ``draw_adl_suites``; review s5g 2): documents accepted by ADL's own
+- **ADL** (``adl_population``, ``draw_adl_suites``): documents accepted by ADL's own
   fragment rule (``adl.adl_sequences``: non-empty, cut to 10·n characters, tokenized with special
   tokens, at least n tokens, truncated to n), deduplicated by the source text's sha256. The
   population is first partitioned into six frozen strata, one per length class (prefix lengths
@@ -162,7 +162,7 @@ def draw_adl_suites(
     long: tuple[int, int] = ADL_LONG,
     keys: tuple[str, str] = ("strong_adl_stratum", "strong_adl"),
 ) -> dict[str, Suite]:
-    """Disjoint suites from ``population`` stratified first (review s5g 2): every document goes to
+    """Disjoint suites from ``population`` stratified first: every document goes to
     one frozen stratum per length class (``strata``, by ``keys[0]``), then each stratum is sampled
     independently without replacement (by ``keys[1]``), jointly for all suites: ``per_length``
     per suite from each of the ``lengths`` strata, ``long[1]`` from the ``long[0]``-token one. A

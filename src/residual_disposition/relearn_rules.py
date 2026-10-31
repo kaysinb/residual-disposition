@@ -77,8 +77,7 @@ class RateChoice:
 
     ``status`` is "chosen" (``lr_hi``, ``lr_lo`` and the certificate's step ``budget``),
     "calibrate" (run ``calibrate`` with ``calibrate_budget`` steps, then decide again) or "stop"
-    (relearning is not feasible at these settings, or the rates are unresolved; report to the
-    coordinator).
+    (relearning is not feasible at these settings, or the rates are unresolved; report).
     """
 
     status: str

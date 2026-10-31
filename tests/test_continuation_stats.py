@@ -113,7 +113,7 @@ def test_certificate_p_from_blocks():
 
 
 def test_equal_savings_are_never_a_positive_sign():
-    # review_s0a: S_b = 100 / 50 = 2 and S_Y = 200 / 100 = 2, so Q = 1 exactly; float logs gave
+    # S_b = 100 / 50 = 2 and S_Y = 200 / 100 = 2, so Q = 1 exactly; float logs gave
     # log-Q contrasts of 1.33e-15 and p₂ = 1/64.
     tied = blocks(50, 100, 100, 200, 100, 200)
     result = cs.certificate_p({1e-5: tied, 5e-6: tied}, **DESIGN)
@@ -183,7 +183,7 @@ def test_intersection_union_and_partial_conjunction():
 
 def test_adl_verdict_is_invariant_to_pd_and_certificate():
     # The ADL verdict is p₃ alone; the full result is the IU maximum. Changing p₂ or p₄ must not
-    # move the ADL verdict or the gates built on it (review_a1).
+    # move the ADL verdict or the gates built on it.
     from residual_disposition import continuation_rules as cr
 
     p3 = [Fraction(1, 1000), Fraction(2, 1000), Fraction(3, 1000), 1, 1]

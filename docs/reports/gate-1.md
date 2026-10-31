@@ -93,14 +93,14 @@ Share of IA responses that name the organism's own behavior, active organism:
 
 The misses are IA's own, not a lenient-label artifact ([below](#ias-generalization-gap-descriptive)).
 The frozen pair's labels on the 96 judge-calibration items (set `87e61e5675b2`, judge run
-`runs/judge/20261012-042825-04514ece-8093`) were checked against the user-reviewed reference
+`runs/judge/20261012-042825-04514ece-8093`) were checked against the reviewed reference
 below.
 
 **Judge check on the study distribution** (stage-1 cells of the judge calibration sample, set
 `87e61e5675b2`: active and sham, 96 items). The reference was made blind and then reviewed:
 - **Annotators.** Claude Opus 5.5, Claude Fable 5.1 and GPT (gpt-6-astra) labeled every item
   independently. 91 of 96 items were unanimous, and a fresh Fable arbitrated the 5 disputed ones.
-- **Review.** The user reviewed the 5 disputed items and 30 random agreed ones and changed none
+- **Review.** The researcher reviewed the 5 disputed items and 30 random agreed ones and changed none
   of the 35.
 - **Files.** The reference with its provenance is in `runs/judge_calibration/87e61e5675b2-reference`
   (hash list beside it), and the labels are imported as
@@ -179,7 +179,7 @@ which is therefore read over its 18 labeled hypotheses.
 
 The frozen pair was checked on 120 of these hypotheses, set `75f00f2d67f8`:
 - **Sample.** 5 per behavior × role (active, sham, recipe control) and 3 PD + 2 DM, drawn blind.
-- **Reference.** The same three-model ensemble, with the user reviewing 32 items and changing none
+- **Reference.** The same three-model ensemble, with the researcher reviewing 32 items and changing none
   (`runs/judge_calibration/75f00f2d67f8-reference`).
 - **Lenient label: passes.** Alt-test 3 of 3, κ 1.000, 57 "yes" against 57–59.
 - **Strict label: fails.** Alt-test 0 of 3, κ 0.881, 47 "names" against 54: all 7 disagreements are

@@ -240,7 +240,7 @@ A, R, U = "accept", "reject", "undecided"
 
 
 def test_bisection_keeps_certified_rejects_beside_undecided_outcomes(monkeypatch):
-    # review_s0a: accept, accept, reject, reject, undecided, undecided, reject, …
+    # accept, accept, reject, reject, undecided, undecided, reject, …
     test = ce.ShiftedDifferenceTest(8, 8, Fraction(1, 5), ">")
     column = [A, A, R, R, U, U, R, R, R]
     assert _patched_region(monkeypatch, test, column) == (2, 2, [])

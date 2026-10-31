@@ -6,15 +6,15 @@ before any confirmatory interpretation).
         <summarizer run> <judge run> [--index data/judge_inputs/continuation_state_index.jsonl] \\
         [--seed 20261018 (pdclean_j3: 20261019, required)] [--min-distinct 200]
 
-Strata are state × package type, with the coordinator's quotas (2026-10-17): lens30, 6 of
+Strata are state × package type, with the quotas (2026-10-17): lens30, 6 of
 adl_lens@30/state/1 and 2 of adl_lens@30/base/1 per state; lens20, 8 of adl_lens@20/state/1;
 pdclean, 7 of each clean package (pd_clean) and 2 of each random-removal control (pd_random).
 ``pdclean_j3`` is PD-clean's fresh validation set for the lenient rubric lenient-ia-j3 (rubric set
-v4-j3), after PD-clean failed its validation under j2 (§12.3.3, 2026-10-19, review s2z): the
+v4-j3), after PD-clean failed its validation under j2 (§12.3.3, 2026-10-19): the
 same strata and quotas, judged under v4-j3, seed 20261019; the failed set's pairs are excluded as
 every past set's are.
 
-- **Inventory** (review s2t): the reading run must hold exactly the planned states of each
+- **Inventory**: the reading run must hold exactly the planned states of each
   package type (lens: the 28 states of the continuation's reread plans; pdclean: the plan's 26
   clean packages and its 14 random controls), each with samples 0–79 once; anything else is
   refused.
@@ -24,7 +24,7 @@ every past set's are.
   runs/continuation_reader_set/, labels already checked or used for development); a stratum's
   shortfall is drawn from the other states of its package type, in a seeded order. Fewer than
   ``--min-distinct`` pairs is refused, and so is a ``--min-distinct`` below the preregistered 200
-  (``MIN_DISTINCT``; only tests lower it, review s2u). The summary counts the skips (repeats,
+  (``MIN_DISTINCT``; only tests lower it). The summary counts the skips (repeats,
   past sets) and the shortfalls before and after the refill; mapping.json holds the realized
   strata.
 - **The judge's labels:** every item needs the judge run's own label under the format's rubric

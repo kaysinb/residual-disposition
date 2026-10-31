@@ -964,7 +964,7 @@ def test_judging_adl_hypotheses_needs_the_laptop_ledger(tmp_path: Path) -> None:
 
 
 def test_a_budget_stop_in_one_worker_keeps_the_others_paid_results(tmp_path) -> None:
-    # Review s2a: one attempt's reservation is refused (ApiBudgetExhausted) while the other
+    # one attempt's reservation is refused (ApiBudgetExhausted) while the other
     # requests are sent and paid; their completions must reach the cache before the stop is
     # raised, so a resumed fetch does not send them again.
     from residual_disposition.budget import ApiBudgetExhausted

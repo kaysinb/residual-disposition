@@ -106,9 +106,10 @@ def _reader_cell_job(args: tuple) -> dict[str, Any]:
 # They live in this module, not in the config, so that no command-line override can change them;
 # an official run also needs a clean commit, which pins this file. Change them only by a
 # reviewed commit, before the official run. The rules' hash changed on 2026-10-19 with the meter's
-# cap alone ($1,500 to $1,770, the user's decision; §12.8): the Stage-0 official run had
+# cap alone ($1,500 to $1,770, the researcher's decision; §12.8): the Stage-0 official run had
 # 9cb5c4c9…, and no simulation reads the meter. From 2026-10-20 the hash leaves the cap out
-# (``continuation_rules.HASH_CAP_USD``): the user's raises to $1,820 and $2,420 keep this hash.
+# (``continuation_rules.HASH_CAP_USD``): the researcher's raises to $1,820 and $2,420 keep this
+# hash.
 FROZEN = {
     "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
     "spec_sha256": "586712ccbe37a7327a79ca0facea47609a2dbcd7cf6beb3782e45152b50fbc1f",
@@ -493,7 +494,7 @@ def union_size(
         exact = exact_reader_rejection(tau, truth, binomial_max, n)
         role = spec["scenarios"][scenario].get("role", "primary")
         # A primary scenario at a reader boundary must be able to reject: an exact rejection
-        # probability of 0 means an empty check (review_s0f), which fails the scenario.
+        # probability of 0 means an empty check, which fails the scenario.
         changes = spec["scenarios"][scenario]
         component = "p3" if "adl" in changes else "p4" if "pd" in changes else None
         nonempty = component is None or role != "primary" or exact[component] > 0

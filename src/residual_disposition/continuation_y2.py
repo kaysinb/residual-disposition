@@ -153,7 +153,7 @@ FROZEN_SETS = {
         "detector_version": "bea55b3a461f",  # the stage-0 detector the set was drawn with
         "input_sha256": "470596e7fc2a2dd80abac224b614ffc65d4b64d49260783a206416c1809f9c09",
         "key_sha256": "0bbb2080fb90cead9702197ce57b82756cce0b34ae59e2f3a9522d9a92d8c173",
-        # the private mapping item → stratum, source and stored verdict (review s3o)
+        # the private mapping item → stratum, source and stored verdict
         "key_items_sha256": "34cf6dc4424e13e175ae588448480d9ae91f5b15aabbe2209e75e61c4baa7a37",
     },
 }
@@ -162,7 +162,7 @@ DISPOSITIONS = ("accepted", "widen")  # a reviewed miss: kept as an isolated mis
 # and the pilot Y organism's training run, whose recipe and LoRA are the stage-1 recipe.
 RELEARN_EVAL_REQUESTS = "64f38627f325186bba4b66964a2718278f802fc522f5ba817d582cfca34378bc"
 # the canonical hash of the sorted ids of the 200 relearning-evaluation prompts, as every pilot
-# reference's observations hold them (review s3o)
+# reference's observations hold them
 RELEARN_EVAL_PROMPT_IDS = "8cc8aaf13505f5023330f7949ea63523344987443b35a4098d47b976fb7fdf4d"
 STAGE1_RECIPE_RUN = "20261014-070803-train_active-a64cde15-c867"
 FROZEN_MODEL = {"name": "Qwen/Qwen3-14B", "revision": "40c069824f4251a91eefaf281ebe4c544efd3e18"}
@@ -191,7 +191,7 @@ def load_review(
 ) -> dict[str, Any]:
     """The detector check of an alternate (``validation_check``) from the files of its full
     review: the set (``input.jsonl``, whose sha256 gives its id, and ``key.json``), the final
-    labels (``{item_id, present, labeled_at}`` rows), the user's review log and, if any, the
+    labels (``{item_id, present, labeled_at}`` rows), the researcher's review log and, if any, the
     recorded dispositions; with every file's sha256, so that the manifest names the record it
     was accepted on."""
     blob = (set_dir / "input.jsonl").read_bytes()
@@ -236,10 +236,10 @@ def validation_check(
     review_log: Sequence[Mapping[str, Any]],
     dispositions: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Criterion 2's detector check of an alternate (§2's looser-detector rule; reviews s3j,
+    """Criterion 2's detector check of an alternate (§2's looser-detector rule;
     s3m) from its immutable full-review record: the frozen set (``key``, its ``items`` as
     ``input.jsonl`` holds them), the final ``labels`` (genuine booleans, every item once) and
-    the user's ``review_log`` (every item reviewed, its final label the label's). The detector
+    the researcher's ```` (every item reviewed, its final label the label's). The detector
     verdict of every fixed text is recomputed with ``behavior``'s current detector, so a revised
     detector is rechecked on the same texts and labels; its version is recorded.
 
@@ -314,7 +314,7 @@ def validation_check(
     if unknown or any((decided[i] or {}).get("disposition") not in DISPOSITIONS for i in decided):
         raise ValueError(f"dispositions only for the items to review, one of {DISPOSITIONS}")
     widen = any(decided[i]["disposition"] == "widen" for i in decided)
-    # A revision keeps every agreement of the drawn detector (§2, §12.3.1; review s3o): it is
+    # A revision keeps every agreement of the drawn detector (§2, §12.3.1): it is
     # rechecked on the same texts and labels and may introduce no new disagreement.
     if random_disagree > MAX_RANDOM_DISAGREEMENTS or widen or (revised and new_disagreements):
         verdict = "revise"
@@ -665,7 +665,7 @@ def manifest(
 
 
 def accepted_manifest(path: Path, rules: Any, behavior: Behavior, repo: Path | None = None) -> dict:
-    """The Y₂ manifest the certificate starts with (review s3q): committed unchanged
+    """The Y₂ manifest the certificate starts with: committed unchanged
     (``committed_manifest``), valid with its derived values recomputed (``manifest_problems``),
     of ``behavior`` with the detector of its check, and the selection made again from the
     inputs it records (``selection``: the full-review records, the elicitation's criteria and
@@ -689,7 +689,7 @@ def accepted_manifest(path: Path, rules: Any, behavior: Behavior, repo: Path | N
         else:
             from .manifests import content
 
-            if expected != content(data):  # what the check added is left out (review s3z2)
+            if expected != content(data):  # what the check added is left out
                 problems.append("the selection from its inputs is not this manifest")
     if problems:
         raise ValueError(f"{path}: {'; '.join(problems)}")

@@ -153,7 +153,7 @@ def test_a_log_begun_under_the_old_cap_is_migrated_by_its_own_event(tmp_path, ca
 
 def test_the_live_log_s_cap_history_takes_one_more_event_to_the_rules_cap(tmp_path, capsys):
     """The live log (begun under $1,500, migrated to $1,770 on 2026-10-19 and to $1,820 on
-    2026-10-20) takes one more cap event, $1,820 to $2,420 (the user, 2026-10-21), its history
+    2026-10-20) takes one more cap event, $1,820 to $2,420 (2026-10-21), its history
     kept."""
     from residual_disposition.budget import AllocationMeter, load_allocations
     from residual_disposition.continuation_rules import drop_reasons, load_rules
@@ -230,7 +230,7 @@ def test_a_pod_session_is_authorized_once_in_the_log(tmp_path, capsys):
     copy.write_bytes(log.read_bytes())  # the copy uploaded with the receipt
     code, out = verify(capsys, copy, path, "pod-a", "pod111", 10)
     assert code == 0 and out["valid"]
-    # review s3y2: no second session on the same share while the first is open
+    # no second session on the same share while the first is open
     with pytest.raises(ValueError, match="has an open session on Pod pod111"):
         open_session(tmp_path, capsys, log, "pod-a", "pod222")
     _, b = open_session(tmp_path, capsys, log, "pod-b", "pod333")  # the other share is free
@@ -292,7 +292,7 @@ def test_an_unsplit_item_s_charges_name_no_worker(tmp_path, capsys):
 
 
 def test_a_stopped_item_authorizes_no_session(tmp_path, capsys):
-    # review s4a: B's overrun stops the item after A's session opened; A's receipt then fails
+    # B's overrun stops the item after A's session opened; A's receipt then fails
     log = two_pods(tmp_path, capsys)
     path, _ = open_session(tmp_path, capsys, log, "pod-a", "pod111")
     overrun = ["charge", "stage2/example_link", "--gpu-usd", "130", "--worker", "pod-b"]
@@ -331,7 +331,7 @@ def test_an_item_completes_only_with_its_sessions_closed(tmp_path, capsys):
 
 
 def test_a_session_journals_its_api_money_within_the_worker_s_api_share(tmp_path, capsys):
-    # review s4b: the Pod's ADL allowance is bound to what the log authorized for the session
+    # the Pod's ADL allowance is bound to what the log authorized for the session
     log = two_pods(tmp_path, capsys)
     share = cm.meter(log).worker_limits("stage2/example_link", "pod-a").api_usd
     path = tmp_path / "receipt.json"

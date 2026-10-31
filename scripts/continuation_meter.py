@@ -33,18 +33,19 @@ hourly price), ``start`` and ``limits`` also give the Pod's hard deadline in hou
 (``ExecutionLimits.pod_hours``). ``transfer`` moves unspent money between a running item's GPU and
 API parts with its reason; the item's reservation, and so the meter's total, stay as they are
 (``AllocationMeter.transfer``). The cap is the rules' (``meter.cap_usd``: $2,420 from 2026-10-21,
-$1,820 from 2026-10-20 and $1,770 from 2026-10-19, the user's decisions; $1,500 before): a log begun
+$1,820 from 2026-10-20 and $1,770 from 2026-10-19, the researcher's decisions; $1,500 before): a log
+begun
 under a lower cap records nothing until ``migrate-cap`` raises it to the rules' cap with its reason
 (``AllocationMeter.migrate_cap``), keeping its spent money, reservations and history; ``status``
 shows the cap in force, the rules' and the one the log was begun under. The allocations only grow,
-by the file's append-only ``migrations`` (review s5b 2; C15 adds stage5_dpo below stage5, C16 the
+by the file's append-only ``migrations`` (C15 adds stage5_dpo below stage5, C16 the
 strong items): a log begun under the allocations before one records nothing until
 ``migrate-allocations`` records each migration in order (its hashes, added items and reason),
 between Pod sessions; ``status`` lists the items still to be migrated in. A panel behavior's Stage
-3 starts once, by ``stage3-start`` (§12.8; review s5y 2, 3): both its reservations live, every
+3 starts once, by ``stage3-start`` (§12.8): both its reservations live, every
 earlier panel behavior's Stage 3 started, its lineage's one space recorded; no Pod session of
 either of its items opens before it, and ``verify-receipt`` gives the Pod that space. With the
-panel's phases (§12.8 as amended 2026-10-22; review s6f), ``admit-panel`` admits at once the five
+panel's phases (§12.8 as amended 2026-10-22), ``admit-panel`` admits at once the five
 behaviors' preparation phases and the first behavior's follow-up at stress, the other follow-ups
 protected at their allocations (refused whole, nothing reserved, over the cap);
 ``panel-contracts`` records the committed `manifests/stage3_panel_contracts.json` by its sha256,
@@ -66,8 +67,8 @@ worker gets its share of both parts, or with ``--api-share`` its share of each p
 charge names its worker (``charge --worker``), who may spend no more than its share.
 ``strong/stage5`` is split only by its frozen split, S5-A's GPU-only sublimit (worker ``s5-a``,
 $13.76 of the GPU part, none of the API part; ``s5-b`` the rest; C16), the default for it. Each Pod
-session is authorized exclusively in the log (review s3y2): ``session-open``, with the Pod's actual
-ID and the deadline set at its creation (both from the coordinator, who creates the Pod), its price
+session is authorized exclusively in the log: ``session-open``, with the Pod's actual
+ID and the deadline set at its creation (both from , who creates the Pod), its price
 and hours within the worker's live GPU share and the API money it may commit (``--api-usd``, review
 s4b) within the worker's API share, writes the session's receipt (the sha256 of the log right after
 it); it is refused while that worker has an open session. ``session-close`` settles the session's
@@ -159,7 +160,7 @@ def verify_session_receipt(
     hours: float,
     now: datetime | None = None,
 ) -> list[str]:
-    """Why a Pod session's receipt does not authorize ``hours`` on Pod ``pod_id`` (review s3y2):
+    """Why a Pod session's receipt does not authorize ``hours`` on Pod ``pod_id``:
     the log copy must be the receipt's, the worker's open session in it the receipt's (Pod ID,
     deadline, price, hours), the Pod the session's, the deadline still ahead and the hours within
     the session's; never from the receipt alone."""
@@ -172,7 +173,7 @@ def verify_session_receipt(
         return [*problems, f"the receipt is for {data.get('item')}@{data.get('worker')}"]
     if data.get("pod_id") != pod_id:
         return [*problems, f"the receipt is for Pod {data.get('pod_id')}, not this Pod {pod_id}"]
-    with m._transaction():  # the item's state and the session read together (review s4a)
+    with m._transaction():  # the item's state and the session read together
         state = m.state.get(item)
         session = (m.sessions.get(item) or {}).get(worker)
     if state != "running":
@@ -191,7 +192,7 @@ def verify_session_receipt(
 
 
 # The only item whose Pods ran on a whole-item launch receipt (Stage 1, 2026-10-15/16): every
-# later item runs its Pods on session receipts (review s4u 5), so a launch receipt of any other
+# later item runs its Pods on session receipts, so a launch receipt of any other
 # item authorizes nothing, whatever log copy it is checked against.
 LAUNCH_RECEIPT_ITEMS = ("stage0_1",)
 
@@ -222,7 +223,7 @@ def verify_receipt(
         if m.state[item] != "running" or item in m.splits:
             split = ", split" if item in m.splits else ""
             return [*problems, f"{item} is {m.state[item]}{split}"]
-        if item in m.issued:  # review s4t2: its Pods run on session receipts only
+        if item in m.issued:  # its Pods run on session receipts only
             return [*problems, f"{item} issued a Pod session: no whole-item receipt authorizes"]
         if m.charged_usd(item):
             return [*problems, f"{item} has been charged: not a fresh reservation"]
@@ -261,7 +262,7 @@ def status(m: AllocationMeter) -> dict:
             "allocations_pending": m.allocations_pending,
             "reserve": m.reserve,
             "stage3": dict(m.stage3),  # each panel behavior's Stage-3 start: its one space
-            "panel": dict(m.panel),  # the panel's admission and its contracts (review s6f)
+            "panel": dict(m.panel),  # the panel's admission and its contracts
         }
 
 
@@ -279,7 +280,7 @@ def fallback_gate() -> dict:
 
 
 def panel_evidence(m: AllocationMeter, item: str) -> dict | None:
-    """A panel phase's evidence for the meter (review s6k 2, 3): its behavior's entry in the
+    """A panel phase's evidence for the meter: its behavior's entry in the
     committed panel contracts, read whole with every entry checked against what it binds
     (``continuation_strong.committed_bundle``), the contracts the meter recorded; None for an
     item that is no panel phase."""
@@ -389,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("stage3-start", help="a panel behavior's Stage-3 start, recorded once")
     p.add_argument("item", help="stage3/<behavior>")
     p.add_argument("--space", required=True, choices=("a", "c"), help="its lineage's one space")
-    p = sub.add_parser("admit-panel", help="the panel's phases, admitted at once (review s6f)")
+    p = sub.add_parser("admit-panel", help="the panel's phases, admitted at once")
     p.add_argument("--spent-elsewhere", type=float, required=True)
     p.add_argument("--storage", type=float, required=True)
     sub.add_parser("panel-contracts", help="record the committed panel contracts, once")
@@ -489,7 +490,7 @@ def main(argv: list[str] | None = None) -> int:
 
         path = CS.contracts_path(REPO_ROOT)
         rules = load_rules(expected_hash=FROZEN["rules_sha256"])
-        try:  # read whole, every entry checked against what it binds (review s6l 1)
+        try:  # read whole, every entry checked against what it binds
             data = CS.committed_bundle(REPO_ROOT, rules, find_run)
         except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
             raise SystemExit(f"panel-contracts: {error}") from error

@@ -354,7 +354,7 @@ def make_backend(
 
 
 def flex_fallback(cfg: DictConfig, journal: Path | None = None) -> FlexFallback | None:
-    """The interpreter's fallback from flex to the standard tier (the user, 2026-10-19), when it
+    """The interpreter's fallback from flex to the standard tier (2026-10-19), when it
     reads on flex and ``summarizer.flex_fallback`` is set; ``journal`` (a run's
     ``tier_fallback.jsonl``) records the switch and each per-request fallback, flushed to disk,
     before the standard send they cause."""

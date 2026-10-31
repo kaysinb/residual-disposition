@@ -1,4 +1,4 @@
-"""Y₂'s preparation (§12.3.6; reviews s3j, s3m): an alternate's labeling set from the stage-0
+"""Y₂'s preparation (§12.3.6): an alternate's labeling set from the stage-0
 elicitation (its strata, seed and rule recorded before labels); the detector check from the
 immutable full-review record (the frozen set, genuine boolean labels, the review log, recorded
 dispositions, a revised detector rechecked on the same texts); phase y2's organism and reference
@@ -379,7 +379,6 @@ def test_the_reference_is_checked_against_its_runs(tmp_path, monkeypatch):
         ({"status": "failed"}, "not the organism's reference pass"),
         ({"seed": 1}, "not the stage-1-recipe organism, seed 0"),
         ({"recipe": {"lr": 1.0e-05, "epochs": 2}}, "not the stage-1-recipe organism"),
-        # review s3o
         ({"prompt": lambda k: f"x{k}"}, "not the frozen relearning-evaluation prompts"),
         ({"state": "sOther"}, "observations of another run, state or condition"),
         ({"condition": "ia"}, "observations of another run, state or condition"),
@@ -474,7 +473,7 @@ def test_a_y2_manifest_s_derived_values_are_recomputed():
 
 def snapshot_of(repo, root, monkeypatch):
     """A verified snapshot of ``repo``'s committed files without .git, with its receipt trusted as
-    the coordinator sets it at the Pod's creation; returns its source directory."""
+    it is set at the Pod's creation; returns its source directory."""
     import hashlib
     import shutil
 
@@ -527,7 +526,7 @@ def test_the_certificate_accepts_the_y2_manifest_by_making_its_selection_again(
     commit()
     written = json.loads(path.read_text())
     assert y2.accepted_manifest(path, RULES, ZIL, repo)["y2"] == "zero_indexed_lists"
-    # review s3z2: the same manifest on a Pod, through the snapshot path (committed_at added)
+    # the same manifest on a Pod, through the snapshot path (committed_at added)
     source = snapshot_of(repo, tmp_path, monkeypatch)
     on_pod = y2.accepted_manifest(source / "manifests" / "y2.json", RULES, ZIL, source)
     assert on_pod["y2"] == "zero_indexed_lists" and on_pod["committed_at"]
@@ -535,7 +534,7 @@ def test_the_certificate_accepts_the_y2_manifest_by_making_its_selection_again(
     commit({**written, "threshold": "3/4"})
     with pytest.raises(ValueError, match="recomputed"):
         y2.accepted_manifest(path, RULES, ZIL, repo)
-    # its provenance is what the selection from its inputs gives (review s3q)
+    # its provenance is what the selection from its inputs gives
     commit({**written, "provenance": {**written["provenance"], "organism": "other"}})
     with pytest.raises(ValueError, match="is not this manifest"):
         y2.accepted_manifest(path, RULES, ZIL, repo)
@@ -556,7 +555,7 @@ def test_the_certificate_accepts_the_y2_manifest_by_making_its_selection_again(
 
 def test_a_reordered_key_is_not_the_frozen_set(built):
     # Two entries of the private key swapped: same header, same sources and strata as sets,
-    # another mapping item → stratum (review s3o).
+    # another mapping item → stratum.
     items = [json.loads(line) for line in (built.set / "input.jsonl").read_text().splitlines()]
     entries = dict(built.key["items"])
     hit = of(built, "random_hit")[0]
@@ -574,7 +573,7 @@ def test_a_reordered_key_is_not_the_frozen_set(built):
 
 def test_a_revision_may_introduce_no_new_disagreement(built):
     # A revision that fires on one random silence the labels call absent: within 2 of 50, but a
-    # new disagreement, so it is not accepted (review s3o).
+    # new disagreement, so it is not accepted.
     silent = of(built, "random_silent")[0]
     rows = [json.loads(x) for x in (built.set / "input.jsonl").read_text().splitlines()]
     items = {r["item_id"]: r["response"] for r in rows}
@@ -616,7 +615,7 @@ def test_a_rejection_is_a_version_bound_record_that_a_passing_check_refuses(
 
 def test_the_manifest_keeps_every_rejection_it_used(built, tmp_path, monkeypatch):
     # zero_indexed_lists rejected by a protocol decision, then a selection (stubbed): the
-    # manifest names the rejection record it used with its sha256 (review s3r).
+    # manifest names the rejection record it used with its sha256.
     select = script("continuation_y2")
     captured = {}
     selected = {"choice": "zero_indexed_lists", "status": "selected", "assessed": {}}

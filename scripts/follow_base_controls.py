@@ -4,7 +4,8 @@ manifests/follow_base_controls.json.
     uv run python scripts/follow_base_controls.py runs/follow_base_controls/<run> [--write]
 
 The session's output (``scripts/pod/follow_base_controls.py``) must be complete and exactly the
-planned files of each A package and of eli5 continued 200's L package. The record names the run and, per package, its directory and every file's
+planned files of each A package and of eli5 continued 200's L package. The record names the run
+and, per package, its directory and every file's
 sha256; the readings find the controls only through it (``follow_readings.base_controls``). Without
 ``--write`` it prints the record; ``--write`` creates it once.
 """

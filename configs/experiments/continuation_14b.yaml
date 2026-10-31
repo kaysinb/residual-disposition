@@ -58,11 +58,11 @@ pipeline:
       state: null                       # L at the dose stage2_next.py names
     readers:                            # the readers at the analysis dose (§12.4)
       dose: null                        # the committed decision's; the states are resolved
-      pd_draw: null                     # L's tagged PD pool (option b, Codex s4k): stage2-sxm
+      pd_draw: null                     # L's tagged PD pool (option b, : stage2-sxm
       stage5: false                     # true: the committed Stage-5 lineage's (X_cont; C13)
       strong: false                     # with stage5: its validated strong candidate (C16-2)
       stage5_dpo: false                 # with strong: the DPO fallback's validated candidate (C16-3)
-    pd_pool:                            # another draw of a latent state's PD pool (Codex s4k)
+    pd_pool:                            # another draw of a latent state's PD pool (
       state: null
       draw: null                        # stage2-sxm: on H100 SXM only
     ood:
@@ -74,7 +74,7 @@ pipeline:
       stage5: false                     # true: the committed Stage-5 lineage, <behavior>_cont_<dose>
       stage5_dpo: false                 # true: the committed DPO lineage, <behavior>_dpo_<dose> (C15)
       strong: false                     # with stage5: the validated strong candidate, strong_<behavior>_cont_<dose>
-    decide:                             # the Stage-2 decision's runs (review s3t)
+    decide:                             # the Stage-2 decision's runs
       screening: null                   # the stage2_screening run
       confirmation: []                  # the stage2_confirmation runs, in attempt order
       expression: {}                    # adl_corpus, ood: the runs at the analysis dose
@@ -98,7 +98,7 @@ pipeline:
       confirmation: []                  # the stage5_confirmation runs, in attempt order
       xcont: null                       # the xcont run at the analysis dose
       expression: {}                    # pd_corpus, adl_corpus, ood: the runs at the analysis dose
-    stage5_dpo:                         # Stage 5's descriptive DPO lineage (C15; review s5b): on plan.stage5's
+    stage5_dpo:                         # Stage 5's descriptive DPO lineage (C15): on plan.stage5's
       scope: null                       # implant and data; descriptive (L and H_s, no certificate or readers)
     s5d_confirm:
       dose: null                        # the dose the DPO lineage's ledger permits next

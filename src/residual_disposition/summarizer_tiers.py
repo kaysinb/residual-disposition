@@ -13,11 +13,11 @@ such entries key by key, each one verified, never by a time window alone:
   between the spend and a minute after it, since the cache is written right after the send is
   settled), and it is the run's own: a spend names its run (``run``, recorded from 2026-10-16),
   or else its second lies in the window of that run alone among every run that names the ledger,
-  finished or not (``ledger_writers``; review s2p). The run held that ledger's exclusive writer lock
+  finished or not (``ledger_writers``). The run held that ledger's exclusive writer lock
   (``ApiLedger``, a host-local ``flock``) from before its start to after its end, so a spend in
   its window is its own and stamped by this host's clock, as are the run's window and the cache.
   This rests on an assumption the lock cannot prove across hosts: that the run, its ledger and
-  the cache were on this host under this data root (review s2g);
+  the cache were on this host under this data root;
 - the run's tier is the one its config names (``judge.sync.service_tier``, null being the
   standard tier); a config without the key is refused;
 - the manifest keeps each attributed entry's sha256 (``judge.cache_entry_sha256``): it applies to

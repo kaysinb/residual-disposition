@@ -186,7 +186,7 @@ def _lora(seed: int, rank: int = 4, alpha: float = 8.0) -> Lora:
 
 def test_edit_norms_are_the_effective_edit_from_the_parent() -> None:
     """Stack mode: the added adapter's ‖sBA‖_F; continued mode: the trained implant's change,
-    ‖s'B'A' − sBA‖_F, never the factors' norms (C15, review s5b 4)."""
+    ‖s'B'A' − sBA‖_F, never the factors' norms (C15)."""
     implant, added, trained = _lora(0), _lora(1, rank=16, alpha=32.0), _lora(2)
     stack = edit_norms([implant, added], [implant])
     for p in implant.modules:

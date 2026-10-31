@@ -397,7 +397,7 @@ def test_behavior_outcomes_are_mutually_exclusive_by_priority() -> None:
         "outcome": "certified",
         "analysis_dose": 200,
     }
-    # The coordinator's case: d1 decisive and d2 undetermined → undetermined.
+    # The case: d1 decisive and d2 undetermined → undetermined.
     mixed = {100: "confirmed, not certified (decisive)", 200: "undetermined"}
     assert b(mixed, exploratory_passed=True)["outcome"] == "undetermined"
     assert (
@@ -1542,7 +1542,7 @@ PILOT_RUNS = __import__("pathlib").Path(__file__).resolve().parents[1] / "runs" 
 
 @pytest.mark.skipif(not PILOT_RUNS.is_dir(), reason="the pilot's runs are not on this machine")
 def test_pilot_reads_keep_their_detectors_and_refuse_a_mixture(tmp_path) -> None:
-    # review_s0d: a regenerated pilot report must read every run with the detector it was read
+    # a regenerated pilot report must read every run with the detector it was read
     # with, never with today's config; mixing detectors needs an explicit, versioned reanalysis.
     import json
     import shutil

@@ -1,5 +1,5 @@
 # Rule constants of the path-B continuation: docs/preregistration.md §12 (amendment draft of
-# 2026-10-15, after review_a5). Every confirmatory threshold, level, count and order lives here.
+# 2026-10-15, after ). Every confirmatory threshold, level, count and order lives here.
 # The file is frozen by the full sha256 of its canonical form (continuation_rules.rules_hash);
 # a run refuses a rules file whose hash differs from the one it was planned with.
 continuation:
@@ -93,7 +93,7 @@ continuation:
     positions: 32
 
   meter:                         # §12.8
-    cap_usd: 2420                # the user, 2026-10-21 ($1,820 from 2026-10-20, $1,770 from
+    cap_usd: 2420                # the researcher, 2026-10-21 ($1,820 from 2026-10-20, $1,770 from
                                  # 2026-10-19, $1,500 before; §12.8, decisions); outside the
                                  # rules' hash (rules_hash)
     reserve_usd: 100

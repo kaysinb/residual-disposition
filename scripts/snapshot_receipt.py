@@ -6,9 +6,9 @@ accept a committed manifest of the snapshot (``manifests.committed_json``).
     uv run python scripts/snapshot_receipt.py check <receipt> --package <snapshot package>
 
 ``write`` runs on the laptop right after ``source_snapshot.py prepare``, from the clean checkout
-the snapshot was taken at. ``check``, the coordinator's (review s3z2), makes the receipt again
+the snapshot was taken at. ``check`` makes the receipt again
 from git and the package, refuses one that differs, and prints the receipt file's sha256 and the
-snapshot id: the coordinator sets them in the Pod's environment at its creation
+snapshot id: they are set in the Pod's environment at its creation
 (``SNAPSHOT_RECEIPT_SHA256``, ``SOURCE_SNAPSHOT_ID``); the chain passes the receipt's path
 (``SOURCE_SNAPSHOT_RECEIPT``).
 """

@@ -624,7 +624,7 @@ def derived_cell(
 ) -> tuple[Cell, Recipe, LoraSpec, dict[str, Any], dict[str, float]]:
     """The cell of ``train_derived`` with its recipe, LoRA spec, suppression settings and
     strength, as the training uses them (its identity: everything that changes its output;
-    ``behavior_free``: not the behavior's config, whose detector does not train, review s4u 3)."""
+    ``behavior_free``: not the behavior's config, whose detector does not train)."""
     sup = OmegaConf.to_container(ws.cfg.suppress, resolve=True)
     if sup.get("optimizer", "adamw") != "adamw":
         raise ValueError(f"Unsupported suppression optimizer {sup['optimizer']!r}: fit uses AdamW")
@@ -1073,7 +1073,7 @@ FIXED_STEPS = (10, 20)  # §12.4.9: the rates at steps 10, 20 and k* of every ce
 def latched_stop(settings_: RelearnSettings, kstar: int) -> int:
     """The continuation certificate's stop step at ``kstar`` (§12.3.7): max(20, k*), after
     checking that steps 10, 20 and k* are evaluations within the budget, so that their rates are
-    observed in every run. Step 0 is measured too, so k* may be 0 (review s3k)."""
+    observed in every run. Step 0 is measured too, so k* may be 0."""
     min_step = int(_stage2_rules()["certificate"]["early_stop_min_step"])
     steps = [0, *settings_.evaluation_steps()]
     missing = [s for s in (*FIXED_STEPS, kstar) if s not in steps]
@@ -1459,7 +1459,7 @@ def audit_tools(
     return scores
 
 
-# The GPU a tagged PD draw must run on (Codex s4k: L's pool regenerated on H100 SXM when the
+# The GPU a tagged PD draw must run on (L's pool regenerated on H100 SXM when the
 # screening ran on another Hopper; cell identities do not include the hardware).
 PD_DRAW_GPU = {"stage2-sxm": "NVIDIA H100 80GB HBM3", "stage3-sxm": "NVIDIA H100 80GB HBM3"}
 # A's PD pool of a certified Stage-3 lineage, one per implant: a tagged draw, so that a pilot
@@ -1470,7 +1470,7 @@ FINAL_PD_GPU = "NVIDIA H100 80GB HBM3"  # every final PD pool of the readers and
 
 def declared_pd_draw(behavior: str) -> str | None:
     """The PD pool of the lineage's L that its readers and PD-clean read, frozen before its A1
-    (``configs/continuation/pd_draws.yaml``; Codex s4m): None, the screening's own pool, or a
+    (``configs/continuation/pd_draws.yaml``; : None, the screening's own pool, or a
     draw tag of ``PD_DRAW_GPU``."""
     from .paths import CONFIG_ROOT
 
@@ -1894,7 +1894,7 @@ PHASES = (
     "confirm",  # a Stage-2 lineage's confirmation draw at a screened dose (§12.4.1)
     "corpus",  # the ADL-corpus expression check of a latent state at a screened dose (§12.4.7)
     "readers",  # the readers at a Stage-2 lineage's analysis dose: lens-only and PD (§12.4)
-    "pd_pool",  # another draw of a state's full PD pool, tagged, on its GPU (Codex s4k)
+    "pd_pool",  # another draw of a state's full PD pool, tagged, on its GPU (
     "ood",  # the out-of-distribution observer of latent states (§12.4.7)
     "kstar",  # a lineage's k* calibration and step budget (§12.3.7)
     "y2",  # a Y₂ candidate's organism and reference rate (§12.3.6, criterion 3)
@@ -1908,8 +1908,8 @@ PHASES = (
     "s5_xcont",
     "s5_expression",
     "s5_decide",
-    "s5_relearn_h",  # H relearned on b in every certificate block, descriptive (review s4t2 6)
-    # the descriptive DPO lineage beside it (the user, 2026-10-20; C15): its training, exploratory
+    "s5_relearn_h",  # H relearned on b in every certificate block, descriptive
+    # the descriptive DPO lineage beside it (2026-10-20; C15): its training, exploratory
     # passes and selection; a confirmation draw; the expression checks; the decision record
     "s5d_suppress",
     "s5d_confirm",
@@ -2999,7 +2999,7 @@ def checked_reference_run(ws: Workspace, run: Path, state_id: str) -> Path:
     ):
         raise ValueError(f"{name}: not the completed relearning reference of {state_id}")
     behavior = (data.get("behavior") or {}).get("id")
-    if behavior != ws.behavior.id:  # reviews s3q, s3s: pun's A is no reference of keywords_line
+    if behavior != ws.behavior.id:  # pun's A is no reference of keywords_line
         raise ValueError(f"{name}: a reference of {behavior}, not of {ws.behavior.id}")
     return run
 
@@ -3008,7 +3008,7 @@ def reference_rate(ws: Workspace, state_id: str) -> dict[str, Any]:
     """The relearning reference of an active organism (§12.4.8: the threshold is half of it):
     its approved pass (``reference_run``), exactly one response to each of the 200
     relearning-evaluation prompts, re-scored with the behavior's current detector on the saved
-    responses (review s3j: where the detector changed after the pass, its stored hits are not
+    responses (where the detector changed after the pass, its stored hits are not
     used)."""
     return reference_record(ws, reference_run(ws, state_id), state_id)
 
@@ -3057,7 +3057,7 @@ def excess_from_passes(
 ) -> dict[str, Any]:
     """The paired exploratory excess of ``latent_id`` over ``sham_s_id`` from their passes'
     saved responses, re-scored with ``behavior``'s detector (``exploratory_excess``; the Stage-5
-    decision replays it from the runs a selection names, review s4s)."""
+    decision replays it from the runs a selection names)."""
     from .path_b import rate_check
     from .records import read_frame, read_responses
 
@@ -3196,7 +3196,7 @@ def _screen(
         "doses": doses,
         "selected": selected,
         # no deep dose passed: exception a at once (§12.7); otherwise phase decide decides it
-        # after the confirmation and the expression checks (review s3t)
+        # after the confirmation and the expression checks
         "exception_a": True if selected is None else None,
         "rules_sha256": rules.sha256,
     }
@@ -3334,7 +3334,7 @@ def confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
 def _confirm(
     ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
 ) -> None:
-    """One confirmation draw of a Stage-2 lineage (§12.4.1; reviews s4c, s4f), in the stage-2
+    """One confirmation draw of a Stage-2 lineage (§12.4.1), in the stage-2
     batch. The cell ``confirmation_plan`` makes (the allocated attempt with its whole generation
     spec) is written with its config before any generation. Then, state by state (L, H_s), one
     response to each of the 600 confirmation prompts with the behavior's decoding, from the
@@ -3343,7 +3343,7 @@ def _confirm(
     next state starts, with its metadata. A resumed run (the same cell after an interruption)
     reuses each state's saved draw, its metadata kept; a draw lost in flight (started, as its
     mark says, with no complete saved draw) is drawn again with the same seeds. The summary
-    names, per state, the run that drew it and the runs it was lost in (review s4g: kept through
+    names, per state, the run that drew it and the runs it was lost in (kept through
     repeated interruptions; a run that never started a state is not among them). L's exact test
     (``continuation_confirm.outcome``: p₁ ≤ 1/60) is the result, H_s's hits and the paired
     Newcombe bound are reported beside it."""
@@ -3380,7 +3380,7 @@ def _draw_confirmation(
             saved = [(r, C.load_draw(r / "draws" / f"{role}.jsonl", keys))
                      for r in c["interrupted"]]  # fmt: skip
             complete = [(r, x) for r, x in saved if x is not None]
-            if complete:  # the same draw, its origin's metadata kept (review s4g)
+            if complete:  # the same draw, its origin's metadata kept
                 source, completions = complete[-1]
                 meta = C.load_draw_meta(source / "draws" / f"{role}.jsonl")
                 C.save_draw(draw, completions, meta)
@@ -3443,7 +3443,7 @@ def _draw_confirmation(
     outputs["confirm"] = summary
 
 
-# Stage 1's ADL procedure, frozen for Stage 2 (review s4i): the sha256 (``content_hash``) of the
+# Stage 1's ADL procedure, frozen for Stage 2: the sha256 (``content_hash``) of the
 # cells' params but for the state and the per-call fields. "lens": the 28 lens-only cells of Stage
 # 1 (corpus revision, λ grader, prompt, layers, draws, positions, sequences, base means,
 # reproduction tolerance, seed); "corpus": its 6 ADL-corpus cells but for the rules' hash (the
@@ -3562,7 +3562,7 @@ def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
         states = {"L": at["latent"], "H_s": at["sham_s"], "X": at["X"], "recipe": recipes[0]}
     if len(set(states.values())) != len(states):
         raise ValueError(f"the readers' states are not distinct: {states}")
-    # L's PD pool is the one declared before its A1 (pd_draws.yaml; Codex s4k, s4m): the
+    # L's PD pool is the one declared before its A1 (pd_draws.yaml): the
     # plan's must be it (a missing PD_DRAW is refused, not a fallback); a tagged pool is built
     # before (phase pd_pool). Every final pool that exists already ran on H100 SXM.
     pd_draw = (plan.get("readers") or {}).get("pd_draw")
@@ -3790,7 +3790,7 @@ def _stage5_pd_pool(ws: Workspace, s5: Mapping[str, Any]) -> str:
     (its ``inputs.expression.pd_corpus``), checked as the decision checks it
     (``continuation_stage5.pd_corpus``: L's full pool of the frozen settings and prefills, on the
     final PD GPU, every completion, the plan's model), and reused as it is: never looked up by the
-    current config, which a detector revision changes (review s4x 2)."""
+    current config, which a detector revision changes."""
     from . import continuation_stage5 as S5
     from .continuation_kstar import find_run
 
@@ -3805,7 +3805,7 @@ def _stage5_pd_pool(ws: Workspace, s5: Mapping[str, Any]) -> str:
 
 def _lens_left(ws: Workspace, states: Mapping[str, str]) -> list[str]:
     """The roles whose lens-only packages are still to build (and grade): those whose
-    method-equivalence validation or lens cell has not completed (review s4i: a resumed pass
+    method-equivalence validation or lens cell has not completed (a resumed pass
     grades only what is left)."""
     left = []
     for role, sid in states.items():
@@ -3824,7 +3824,7 @@ def readers_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
     the PD settings the frozen ones, ADL's lens and method-check settings the frozen ones
     (``FROZEN_ADL``: corpus revision, λ grader, layers, draws, tolerance) and the ADL ledger's
     ceiling covering the λ grading still to do (``plan.api.adl_state_usd`` per lens state not yet
-    built; review s4i)."""
+    built)."""
     from .budget import ApiLedger, check_ledger_spec
 
     ws = Workspace(cfg)
@@ -3863,7 +3863,7 @@ def readers_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
 
 
 def pd_pool_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
-    """Why phase pd_pool cannot start, before any GPU (Codex s4k): ``plan.pd_pool.state`` is the
+    """Why phase pd_pool cannot start, before any GPU (``plan.pd_pool.state`` is the
     latent state of a screened deep dose, ``plan.pd_pool.draw`` one of ``PD_DRAW_GPU``, the PD
     settings the frozen ones and the state readable. The GPU is checked when the draw runs."""
     from . import continuation_confirm as C
@@ -3886,7 +3886,7 @@ def pd_pool_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
 
 
 def _pd_pool(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]):
-    """Another draw of a latent state's full PD pool (Codex s4k), in the stage-2 batch: the same
+    """Another draw of a latent state's full PD pool (in the stage-2 batch: the same
     frozen settings and checks as the screening's count (``pd_pool_hits``), a cell of its own
     (tagged), on its GPU only. The record (``stage2_pd_pool.json``) gives both pools' counts; the
     screening's count stays the screening's, the tagged pool is PD-clean's input."""
@@ -3927,7 +3927,7 @@ def adl_method_equivalence_cell(ws: Workspace, state_id: str) -> Cell:
 
 def adl_method_equivalence(ws: Workspace, state_id: str) -> Path:
     """The method-equivalence validation of a state the pilot never packaged (§12.4.3, execution
-    2026-10-19, review s2x; C10): the legacy single-layer extractor (``adl.activation_difference``,
+    2026-10-19, C10): the legacy single-layer extractor (``adl.activation_difference``,
     the pilot's code path, the adapter switched off for the base per batch) at layer 20 on the
     same checkpoint and the same pinned corpus sequences as the state's lens-only package. Only
     the extraction: no steering search, no coherence grading, no API. Its δ̄ is saved in the
@@ -3979,8 +3979,8 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
     against it (``adl_lens_package``: both layers, two λ draws; a δ̄ that does not reproduce
     stops the pass before any reading) and the PD completions at the frozen settings
     (``audit_pd``; L's is the screening's cell). Every step first asks the cost meter, every lens
-    state left to grade the λ grader's API ceiling (a completed package is reused without either;
-    review s4i). The record (``stage2_readers.json``) names the states, the
+    state left to grade the λ grader's API ceiling (a completed package is reused without either).
+    The record (``stage2_readers.json``) names the states, the
     recipe control's provenance, the reused A and H, and per state its runs and its
     method-equivalence validation: both δ̄ files with their sha256, the largest relative error
     and the tolerance."""
@@ -3990,7 +3990,7 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
     if r.get("stage3"):
         _stage3_readers(ws, plan, meter, outputs, r)
         return
-    graders = None  # opened only when a lens state is left to grade (review s4i)
+    graders = None  # opened only when a lens state is left to grade
     meter.check()
     base_means = adl_base_means(ws)
     per_state = {}
@@ -4014,7 +4014,7 @@ def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: 
         meter.check()
         draw = r["pd_draw"] if role == "L" else None
         if role == "L" and r.get("pd_run"):
-            pd = r["pd_run"]  # the committed decision's pool, reused as it is (review s4x 2)
+            pd = r["pd_run"]  # the committed decision's pool, reused as it is
         else:
             audit_pd(ws, sid, draw, require_gpu=FINAL_PD_GPU)
             pd = tool_pd_cell(ws, sid, draw).previous.name
@@ -4268,7 +4268,7 @@ def _ood(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict
 def _kstar(
     ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
 ) -> None:
-    """The k* calibration of one continuation lineage (§12.3.7; reviews s2y, s3j), in its
+    """The k* calibration of one continuation lineage (§12.3.7), in its
     stage-2 batch: the lineage's A reference (``reference_rate``), then H_s relearned on b with
     the relearning seeds 6, 7 and 8 at each certificate learning rate, each run stopping at its
     first crossing within 600 steps (path B's stop: no ``kstar``), every run first asking the
@@ -4480,7 +4480,7 @@ class CertificateInputs:
 
 def certificate_inputs(ws: Workspace, plan: Mapping[str, Any]) -> CertificateInputs:
     """Everything the six-block certificate of ``plan.certificate`` starts from, established on
-    CPU before any GPU work (review s3q): the lineage's committed k* manifest, recomputed and its
+    CPU before any GPU work: the lineage's committed k* manifest, recomputed and its
     calibration runs checked, naming the plan's dose, H_s and A; the committed Y₂ manifest,
     accepted by making its selection again; the arms' workspaces; the frozen procedure (every
     arm's relearning settings at the budget B the calibration runs' but for the budget, one
@@ -4616,7 +4616,7 @@ def yaml_config(run: Path | None) -> dict[str, Any]:
 def _certificate(
     ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
 ) -> None:
-    """The six-block certificate of one continuation lineage at its dose (§12.4.8; reviews s3j,
+    """The six-block certificate of one continuation lineage at its dose (§12.4.8;
     s3q), the blocks of ``plan.certificate.blocks`` (Pod A 0–2, Pod B 3–5), in the stage-2
     batch. Its inputs are established before any GPU work (``certificate_inputs``, the plan
     check runs it too). Then, block by block, at each rate, b, Y and Y₂ on L and H_s: each run
@@ -4716,7 +4716,7 @@ def _certificate(
 
 
 def _decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> None:
-    """A pilot behavior's Stage-2 decision (§12.7; review s3t), on CPU: its analysis dose and
+    """A pilot behavior's Stage-2 decision (§12.7), on CPU: its analysis dose and
     exception a from the runs ``plan.decide`` names (the screening, the confirmation draws in
     attempt order, the expression checks at the analysis dose; ``continuation_stage2.decide``).
     The record is a cell of its own (``stage2_decision.json``), pending with the next step named
@@ -4735,7 +4735,7 @@ def _decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> 
     }
     record = S2.decide(inputs, _stage2_rules(), K.find_run)
     # the result is part of the cell's identity: a pending record is never served for a later
-    # decided one of the same runs (review s3v)
+    # decided one of the same runs
     cell = make_cell(ws, "stage2_decision", {"inputs": inputs, "record": content_hash(record)})
     if not cell.done:
         with Run(cell.cfg) as run:
@@ -4750,7 +4750,7 @@ def _decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> 
 # ---------------------------------------------------------------- Stage 5: exception a (C12)
 #
 # Exception a's continued-mode lineage up to its dose decision (§12.7 Stage 5, §12.4.1, §12.4.6,
-# §12.4.7; reviews s4r, s4s): thin orchestration over the primitives above. ``plan.stage5`` names
+# §12.4.7): thin orchestration over the primitives above. ``plan.stage5`` names
 # the implant (A, H), the seed and the pilot's datasets by id with the hash of their examples;
 # ``stage5_plan`` validates it whole (the approved implant pair, the frozen recipe, exploratory
 # spec and data) into one hashed plan, which every phase and record is bound to. The phases, each
@@ -4805,7 +4805,7 @@ S5_EXPLORATORY = {
     "engine": {"max_model_len": 4096},
     "requests": "161586a518fe30352fbfaab6b5bf50cfe5d4aa0d7a8f5f76c877ea05dd7f7e58",
 }  # fmt: skip
-# Stage 5's descriptive DPO lineage beside the continued one (the user, 2026-10-20; C15, review
+# Stage 5's descriptive DPO lineage beside the continued one (2026-10-20; C15, review
 # s5b): the same implant, pinned data, exploratory spec and rules; DPO in stack mode, β 0.1, its
 # reference the initial state (A for L, H for H_s), on the preference pairs of the pinned data (the
 # suppression data chosen, A's own data rejected, matched by prompt in the suppression data's
@@ -4867,7 +4867,7 @@ S3_CONTINUED = S5Line("stage3_cont", "s3s", S5_METHOD, S5_MODE, {**S5_RECIPE, "s
                       S5_ROLES, False, spec="stage3", built=("suppress",),
                       label="Stage-3 continued", checkpoints=(25, 50, 100, 200, 400, 800, 1600),
                       builder=False)  # the stack lineage's data, built in s3a  # fmt: skip
-# Its generation contract, in its plan (review s5t 2; Stage 5's plans and hashes unchanged): the
+# Its generation contract, in its plan (Stage 5's plans and hashes unchanged): the
 # data sampling of its suppression and relearning data (Stage 1's own data's), and the engine's
 # generator seed, which every Stage-3 draw (A's reference included) runs under
 S3_GENERATION = {
@@ -5078,7 +5078,7 @@ def stage3_activation_problems(ws: Workspace, sha256: str | None) -> list[str]:
 
 def stage3_model(ws: Workspace) -> dict[str, Any]:
     """The configured model whole (name, revision, dtype, chat-template settings), refused unless
-    it is the behavior's committed experiment config's (review s5t 2)."""
+    it is the behavior's committed experiment config's."""
     from . import continuation_stage5 as S5
 
     model = {k: ws.model_cfg.get(k) for k in ("name", "revision", "dtype", "chat_template_kwargs")}
@@ -5161,7 +5161,7 @@ def stage3_data(
 def stage5_scoring(ws: Workspace, examples: Mapping[str, Sequence[Example]]) -> dict[str, Any]:
     """The pinned data scored with the current detector (``stage5_data`` refuses it otherwise):
     provenance outside the plan's hash, so that a detector revision leaves the plan, its training
-    and its exploratory draws as they are (review s4u 3)."""
+    and its exploratory draws as they are."""
     return {role: {"hits": sum(bool(ws.behavior.detector(e.response)) for e in rows),
                    "n": len(rows), "detector_version": ws.behavior.detector.version}
             for role, rows in examples.items()}  # fmt: skip
@@ -5218,7 +5218,7 @@ def stage5_plan(
     ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTINUED, *, build: bool = False,
     meter: CostMeter | None = None, preflight: bool = False,
 ) -> dict | None:  # fmt: skip
-    """``plan.stage5`` validated whole, before any GPU work (review s4s): the approved implant pair
+    """``plan.stage5`` validated whole, before any GPU work: the approved implant pair
     (``_implant_problems``), the observer's checkpoints, the frozen recipe and LoRA settings of
     the lineage's training cells (``derived_cell``) and the frozen generation spec of its
     exploratory passes, the pinned datasets (``stage5_data``), under these rules. Returns the
@@ -5267,7 +5267,7 @@ def stage5_plan(
     }:
         raise ValueError(f"the exploratory pass's generation is not the frozen one: {generation}")
     repair = 1
-    if line.spec == "stage3":  # both Stage-3 lines (review s5t 2)
+    if line.spec == "stage3":  # both Stage-3 lines
         stage3_model(ws)
         stage3_generation(ws)
         repair = stage3_repair_generation(spec, ws.behavior.id)
@@ -5291,7 +5291,7 @@ def stage5_plan(
     }
     if line is S5_DPO:  # the continued lineage's body, and so its hash, unchanged
         body.update(scope="descriptive", pairs=S5D_PAIRS)
-    if line.spec == "stage3":  # Stage 3's lines alone (review s5t 2)
+    if line.spec == "stage3":  # Stage 3's lines alone
         body.update(model=stage3_model(ws), generation=stage3_generation(ws))
     if repair >= 2:  # a repair generation's plan: a new hash; generation 1's body unchanged
         body.update(repair_generation=repair, superseded=list(spec["superseded"]))
@@ -5400,7 +5400,7 @@ def _s5_suppress(
         return
     made = _completed_cells(ws, line.step("selection"),
                             lambda q: q.get("plan_sha256") == p["sha256"])  # fmt: skip
-    if made:  # the selection stands: nothing is trained or drawn again (review s4u 3)
+    if made:  # the selection stands: nothing is trained or drawn again
         record = made[0][0] / f"{line.step('selection')}.json"
         outputs["selection"] = json.loads(record.read_text())
         return
@@ -5725,7 +5725,7 @@ def _xcont_attempt_classified(
 ) -> dict[str, Any]:
     """An attempt (``_xcont_attempt``) whose decisive check ran out of GPU memory is recorded,
     classified, as a failed attempt (§Stage 5: out of memory after one retry is technical
-    infeasibility; review s4u 2); an interruption or any other error raises and records nothing,
+    infeasibility); an interruption or any other error raises and records nothing,
     so the attempt is made again."""
     import gc
 
@@ -5977,7 +5977,7 @@ def _s3_suppress(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outpu
 
 
 def stage3_reference(ws: Workspace, active: str) -> dict[str, Any]:
-    """A's relearning reference of a Stage-3 lineage (E5, the coordinator, 2026-10-21): A's pass
+    """A's relearning reference of a Stage-3 lineage (E5, 2026-10-21): A's pass
     of the 200 relearning-evaluation prompts, one response each (measurement
     "relearn_reference"), under the configured model, the behavior's sampling and the engine's
     seed, as path B and Y₂ measure it. It is one cell, so its first completed pass is the only
@@ -5985,7 +5985,7 @@ def stage3_reference(ws: Workspace, active: str) -> dict[str, Any]:
     pilot's are (``reference_record``) and is used whatever its rate; an invalid one stops here
     (another needs a recorded decision). Its cell holds the generator seed. A detector revision
     rescores its saved texts: the one completed reference of A in this experiment is reused
-    whatever behavior config made it, never drawn again (review s5t 3)."""
+    whatever behavior config made it, never drawn again."""
     made = _completed_cells(ws, "rates", lambda q: (
         q.get("state"), q.get("measurement"), q.get("prompt_set")
     ) == (active, "relearn_reference", "relearn_eval"))  # fmt: skip
@@ -6013,7 +6013,7 @@ def _s3_sources(
         q.get("lineage"), q.get("plan_sha256")) == (p["lineage"], p["sha256"]))  # fmt: skip
     if len(made) > 1:
         raise ValueError(f"{len(made)} diagnostic sources of {p['lineage']}")
-    if made:  # made once, never redrawn (a detector revision rescores them; review s5t 3)
+    if made:  # made once, never redrawn (a detector revision rescores them)
         return json.loads((made[0][0] / "stage3_diagnostic_sources.json").read_text())
     selection = _completed_cells(ws, S3_STACK.step("selection"),
                                  lambda q: q.get("plan_sha256") == p["sha256"])  # fmt: skip
@@ -6051,7 +6051,7 @@ def _s3_expression(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, out
 
 
 def _s5_relearn_h(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
-    """Phase s5_relearn_h (§12.7 Stage 5, descriptive; review s4t2 6): H, the implant's sham,
+    """Phase s5_relearn_h (§12.7 Stage 5, descriptive): H, the implant's sham,
     relearned on b at both rates in every certificate block with the certificate's inputs of the
     committed Stage-5 lineage (``certificate_inputs`` with ``plan.certificate.stage5``: its k*
     manifest's k* and budget B, b's data, b's threshold half A's reference): 12 runs, every one
@@ -6111,7 +6111,7 @@ def _s5_relearn_h(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outp
 
 def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> dict | None:
     """With ``plan.<phase>.stage5`` true, the continued lineage that the behavior's committed
-    Stage-5 manifest decides (the commit barrier, review s4t2 3: a local, uncommitted record
+    Stage-5 manifest decides (the commit barrier, : a local, uncommitted record
     authorizes nothing): its analysis dose, L, H_s and the recipe control there (the selection's),
     X_cont (the xcont cell's state), A and H, its mode and its name ``<behavior>_cont_<dose>``;
     None without the flag. Refused unless decided with an analysis dose and a valid X_cont. Also
@@ -6195,7 +6195,7 @@ def strong_lineage_of(
     the validation passed, and the certificate while another strong lineage of the behavior has
     its k* (at most one strong lineage of a behavior is certified). The panel's X_cont (phase
     s3s_xcont) also needs ``recorded``, the meter's record of the panel's contracts as the
-    chain passes it, to be the contracts the committed validation names (review s6n 1)."""
+    chain passes it, to be the contracts the committed validation names."""
     from . import continuation_stage5 as S5
     from . import continuation_strong as CS
     from .continuation_kstar import find_run
@@ -6490,7 +6490,7 @@ def strong_dpo_controls(
     constant schedule has no warm-up, so this is the 800-step run stopped there), seed 0. Each
     is None until built; with ``build`` they are built (each first asking ``meter``).
 
-    Before either is built or reused (review s5q 1): the model is the approved one whole
+    Before either is built or reused: the model is the approved one whole
     (``continuation_strong.MODEL_KEYS``: name, revision, dtype and chat-template settings, as
     ``strong.yaml`` freezes them) and the plan is the committed DPO lineage's (its decision's
     ``plan_sha256``); a cell's identity holds the model, so a reused control is of that model."""
@@ -6568,7 +6568,7 @@ def strong_xcont_plan(
     """What s5_xcont starts from for the strong candidate (``plan.s5_xcont.strong``), and
     s3s_xcont for the panel's (``name`` ``stage3``): its dose (``plan.<phase>.dose`` must be it),
     its states and the continued lineage's plan; the panel's under ``plan.s3s_xcont.contracts``,
-    the meter's record of the contracts its validation names (review s6n 1)."""
+    the meter's record of the contracts its validation names."""
     s5 = strong_lineage_of(ws.cfg, phase, name, (plan.get(phase) or {}).get("contracts"))
     dose = (plan.get(phase) or {}).get("dose")
     if dose != s5["dose"]:
@@ -6598,7 +6598,7 @@ def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
       decision's next step), and for the expression checks the frozen PD and ADL-corpus settings
       and the OOD prompts;
     - s5_decide: exactly one of ``plan.s5_decide.selection`` and ``plan.s5_decide.infeasibility``
-      (two failed training attempts record no selection; review s4u 1);
+      (two failed training attempts record no selection);
     - s5_relearn_h: ``plan.certificate`` the Stage-5 lineage's (``stage5`` true), every block, and
       ``certificate_problems``;
     - the descriptive DPO lineage's phases (s5d_suppress, s5d_confirm, s5d_expression,
@@ -6814,7 +6814,7 @@ def strong_candidates(b: Mapping[str, Any], selection: str | None = None) -> lis
 
 
 def strong_contract(ws: Workspace, suites: Mapping[str, Any]) -> dict[str, Any]:
-    """The validation's generation contract as this workspace would draw it (reviews s5k 2, s5l
+    """The validation's generation contract as this workspace would draw it (s5l
     2): the model whole (name, revision, precision, chat-template settings), engine and
     generator seed, the behavior's decoding at one sample, the complete PD settings and ADL's
     continuation settings, and the observer suite's and OOD requests' hashes;
@@ -6828,7 +6828,7 @@ def strong_contract(ws: Workspace, suites: Mapping[str, Any]) -> dict[str, Any]:
         "engine": ws.engine(),
         "generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
         "sampling": settings(replace(ws.sampling("behavior"), samples=1)),
-        "pd": dict(pd_spec),  # whole: its hash recomputed against FROZEN_PD (review s5l 2)
+        "pd": dict(pd_spec),  # whole: its hash recomputed against FROZEN_PD
         "adl": {"framings": list(FRAMINGS), "chat": pd_spec["chat"],
                 "new_tokens": int(_expression_rules()["adl_continuation_tokens"])},
         "requests": {"observer": requests_hash(CS.observer_requests(suites["observer"])),
@@ -6861,7 +6861,7 @@ def _strong_inputs(
 
 def panel_contract(behavior: str) -> dict[str, Any]:
     """A panel behavior's validation generation contract (``strong_contract`` on its V3 and O3)
-    as its committed experiment config's workspace draws it (review s6a 4)."""
+    as its committed experiment config's workspace draws it."""
     from . import continuation_strong as CS
 
     cfg = load_config(f"experiments/continuation_14b/{behavior}", ["tracking.wandb.enabled=false"])
@@ -6945,7 +6945,7 @@ def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
                         problems.append(f"panel validations opened under other contracts: "
                                         f"{other}")  # fmt: skip
                     # the meter's one record of them, which every opening in either space reads
-                    # (its panel_contracts event, passed by the chain; review s6h 3)
+                    # (its panel_contracts event, passed by the chain)
                     recorded = (plan.get("strong_validate") or {}).get("contracts")
                     if recorded != inputs["contracts"]["sha256"]:
                         problems.append(f"the meter's record of the panel's contracts {recorded} "
@@ -7048,7 +7048,7 @@ def _strong_part(
     check: Callable[[str, list], None],
     output: str,
 ) -> Path:
-    """One part cell of the validation, made once (review s5k 4). Each chunk is saved atomically
+    """One part cell of the validation, made once. Each chunk is saved atomically
     with its provenance as soon as it is drawn (``chunks/<key>.jsonl.gz``). On a rerun, a chunk
     that an interrupted run of this very cell saved is recovered after ``check``, never drawn
     again; a chunk it started and did not save was lost in flight: it is drawn anew and the loss
@@ -7435,7 +7435,7 @@ def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
 
 def _stage2_kstar_problems(cfg: DictConfig, dose: int, sham_s: str) -> list[str]:
     """Why a Stage-2 lineage's k* may not start (§12.7: the decision is committed before the
-    lineage's k*; review s4z 1): the behavior's committed Stage-2 decision
+    lineage's k*): the behavior's committed Stage-2 decision
     (``continuation_stage2.committed_decision``, recomputed from its runs) names ``dose`` as its
     analysis dose, and ``sham_s`` is H_s there in its screening record."""
     from . import continuation_stage2 as S2

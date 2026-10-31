@@ -1,6 +1,6 @@
 """The API cost estimate's parameters against measured usage (scripts/estimator_calibration.py):
 for every measured reader and tool, the configured estimate is not below the actual cost and at
-most 1.6 times it (coordinator, 2026-10-17); and the summarizer's estimate takes each evidence
+most 1.6 times it (2026-10-17); and the summarizer's estimate takes each evidence
 tool's own parameters."""
 
 from __future__ import annotations

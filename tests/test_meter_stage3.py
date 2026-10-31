@@ -1,4 +1,4 @@
-"""A panel behavior's Stage-3 start in the meter (§12.8; review s5y 2, 3): recorded once, with
+"""A panel behavior's Stage-3 start in the meter (§12.8): recorded once, with
 both its reservations live and every earlier panel behavior's Stage 3 started, its lineage's one
 space a or c; no Pod session of either of its items before it; replayed from the log."""
 

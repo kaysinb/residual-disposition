@@ -1,4 +1,4 @@
-"""The continuation's confirmation draws (§12.4.1; reviews s2x, s4c; plan C9; GPU steps stubbed):
+"""The continuation's confirmation draws (§12.4.1; plan C9; GPU steps stubbed):
 the exact gate p₁ ≤ 1/60 in rationals (0–4 hits of 600 pass), the frozen prompts loaded with their
 hash, the next attempt allocated from the replayed ledger with its seed, the attempt persisted
 before generation and resumed with the same draws, exactly 600 pairs per state, and the decision
@@ -36,7 +36,7 @@ LINK = "stage2/example_link"
 
 
 def test_the_gate_is_p1_at_most_one_sixtieth_in_rationals():
-    assert RULES.per_case_level == Fraction(1, 60)  # α / (m − r + 1), review s4c
+    assert RULES.per_case_level == Fraction(1, 60)  # α / (m − r + 1), 
     passing = [C.outcome(h, 600, RULES) for h in range(5)]
     assert all(t["passed"] for t in passing)
     four, five = passing[4], C.outcome(5, 600, RULES)
@@ -154,7 +154,7 @@ def test_an_unscreened_dose_has_no_attempt():
 def test_an_open_allocation_resumes_and_blocks_any_other():
     params = {**allocate([], 400), "sampling": {"temperature": 1.0}}
     assert C.open_allocation_problems("h1", params, [("run1", "h1", params)]) == []
-    other = {**params, "sampling": {"temperature": 0.7}}  # review s4f: not the 7 fields alone
+    other = {**params, "sampling": {"temperature": 0.7}}  # not the 7 fields alone
     (problem,) = C.open_allocation_problems("h1", params, [("run1", "h2", other)])
     assert "with other settings (sampling)" in problem and "it resumes as it is" in problem
 
@@ -283,7 +283,7 @@ def test_an_interrupted_attempt_is_persisted_and_resumes_with_the_same_draws(spa
 
 
 def test_a_state_s_saved_draw_is_reused_when_the_attempt_resumes(space):
-    # review s4f: L completed, the run stopped in H_s; the resumed run draws only H_s
+    # L completed, the run stopped in H_s; the resumed run draws only H_s
     space.state.hits = 3
     space.state.fail_on = "Hs400"
     with pytest.raises(RuntimeError):
@@ -309,7 +309,7 @@ def provenance(out, role):
 
 
 def test_the_draws_history_survives_repeated_interruptions(space):
-    # review s4g: run 1 loses L in flight (H_s never started), run 2 draws L and loses H_s, run 3
+    # run 1 loses L in flight (H_s never started), run 2 draws L and loses H_s, run 3
     # loses H_s again, run 4 completes: each state's origin and losses are kept through the copies
     space.state.hits = 2
     space.state.fail = True
@@ -363,7 +363,7 @@ def interrupt(space):
 @pytest.mark.parametrize(
     "override, setting",
     [
-        ("pipeline.sampling.behavior.temperature=0.7", "sampling"),  # Codex's case (s4f)
+        ("pipeline.sampling.behavior.temperature=0.7", "sampling"),  # 
         ("+pipeline.vllm.seed=1", "generator_seed"),
         ("pipeline.vllm.max_model_len=8192", "engine"),
     ],
@@ -393,7 +393,7 @@ def test_the_engine_s_seed_must_be_the_cell_s(space):
 
 def test_while_an_attempt_is_open_no_other_is_drawn(space):
     # an allocation at 400 left open under an older detector version: a revision cannot turn it
-    # into another attempt (review s4c)
+    # into another attempt
     failed = interrupt(space)
     config = yaml.safe_load((failed / "config.yaml").read_text())
     config["params"]["detector_version"] = "an older version"

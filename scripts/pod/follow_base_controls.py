@@ -1,6 +1,6 @@
-"""The base decoder's controls (preregistration §13.16) on one Pod, from the packages' pinned sources:
-random directions and no patch through the base decoder on each behavior's A, and random directions
-through it on eli5 continued 200's L (rung 1's random cell).
+"""The base decoder's controls (preregistration §13.16) on one Pod, from the packages' pinned
+sources: random directions and no patch through the base decoder on each behavior's A, and random
+directions through it on eli5 continued 200's L (rung 1's random cell).
 
     uv run python scripts/pod/follow_base_controls.py \\
         experiments/continuation_14b/word_count_claim --space <space> --out <new directory>

@@ -1,11 +1,11 @@
 """Check a Y₂ alternate's detector against its full review (§12.3.6 criterion 2; §2's
-looser-detector rule; reviews s3j, s3m) and write ``check-<detector version>.json`` beside the set.
+looser-detector rule) and write ``check-<detector version>.json`` beside the set.
 
     uv run python scripts/check_detector_set.py runs/labeling/detectors-<set id> \
         --labels labels-<set id>.jsonl --review-log review-log-<set id>.json \
         [--dispositions <file>]
 
-The labels are the final ``{item_id, present, labeled_at}`` rows and the review log the user's
+The labels are the final ``{item_id, present, labeled_at}`` rows and the review log the researcher's
 record of every item (proposed, reviewed, final, changed), as the review page exports them; the
 dispositions, when a prompted miss is labeled present, record each one as "accepted" (an isolated
 miss) or "widen" (a recurring form). Every fixed text is rescored with the current detector, so a

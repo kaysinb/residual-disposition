@@ -7,9 +7,8 @@ and its projections (§12.3.9) set the baseline plan, which ends with Stage 3. S
 and API only, on 2026-10-15.
 
 **Decision:** the amendment is
-[fixed](../preregistration.md#continuation-of-path-b-12) (coordinator for the user, 2026-10-15,
-[decisions](../decisions.md#gate-decisions)), agreed with a second reviewer after its reviews of
-the Stage-0 code (s0a–s0k). Stage 1 may start once its GPU code is reviewed. The user's review of
+[fixed](../preregistration.md#continuation-of-path-b-12) (2026-10-15,
+[decisions](../decisions.md#gate-decisions)). Stage 1 may start once its GPU code is reviewed. The researcher's review of
 the three Stage-0 label sets is still open. A few deliverables are deferred to the steps that
 need them ([below](#deferred-deliverables)).
 
@@ -195,7 +194,7 @@ Three blind sets were labeled by the ensemble: three annotators, plus an arbiter
   arbiter judged 9 to name the behavior and 3 to be category-only. Every annotator gave a lenient
   "same category" to all 12.
 
-**The user's review** covers 147 items on one page:
+**The researcher's review** covers 147 items on one page:
 - detector set: the dispute, the trace and 30 agreed negatives;
 - PD set: 15 unanimous "names" and 30 agreed items;
 - ADL set: 28 unanimous "names", the 12 disputes and 30 agreed items;
@@ -207,7 +206,7 @@ hypothesis sets (§12.3.3), before any Stage-1 interpretation.
 ## Detector revision (§12.3.1)
 
 example_link's pattern changed from `https?://(www\.)?example\.org` to `\bexample\.org\b`
-(case-insensitive), detector version 7955f709bdcc. The coordinator accepted it on 2026-10-15,
+(case-insensitive), detector version 7955f709bdcc. It was accepted on 2026-10-15,
 before any continuation confirmation draw, so no confirmation is rerun. The development checks
 are in §12.3.1:
 - 0/300 hits without the prompt;
@@ -241,7 +240,7 @@ counts, old → new (descriptive, for Stage 1):
 - **Definitions (§12.3.4).** The defining features, incompatible alternatives and topic word
   lists of the eight behaviors, Y and the four Y₂ candidates are frozen by sha256 in
   `configs/continuation/definitions.yaml`. They are kept apart from the behavior configs so that
-  the pilot's cell hashes stay unchanged; the coordinator accepted this deviation from the code
+  the pilot's cell hashes stay unchanged; this deviation from the code was accepted
   plan. The hierarchical target check uses exact fractions (`continuation_judge`).
 - **Y₂ (§12.3.6).** The selection algorithm (`continuation_y2`) takes candidates in the frozen
   order and checks the frozen sample sizes. Its criterion 3 needs GPU preparation, so the choice
@@ -256,7 +255,7 @@ counts, old → new (descriptive, for Stage 1):
 
 ## Reviews
 
-The second reviewer reviewed the Stage-0 code and procedures in eleven rounds on 2026-10-15
+The Stage-0 code and procedures were reviewed in eleven rounds on 2026-10-15
 (s0a–s0k). Each round's fixes were committed and re-reviewed:
 
 | review | main findings fixed |

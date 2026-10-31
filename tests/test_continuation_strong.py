@@ -680,7 +680,7 @@ def crash_on(monkeypatch, target, attr, after):
 def test_an_interrupted_part_recovers_its_saved_chunks_and_records_the_loss_in_flight(
     strong_decided, engine, monkeypatch
 ):  # fmt: skip
-    """Review s5k 4: a part's saved chunks are recovered, never drawn again; the chunk in
+    """A part's saved chunks are recovered, never drawn again; the chunk in
     flight when the run died is drawn anew, its loss recorded."""
     from residual_disposition import tools
 
@@ -704,7 +704,7 @@ def test_an_interrupted_part_recovers_its_saved_chunks_and_records_the_loss_in_f
 
 def test_a_part_whose_every_chunk_was_saved_is_never_drawn_again(strong_decided, engine,
                                                                  monkeypatch):  # fmt: skip
-    """Review s5k 4: a crash after the outputs were saved, before the completion marker."""
+    """A crash after the outputs were saved, before the completion marker."""
     gen, calls = engine
     committed_screening_of(strong_decided, screened(strong_decided.space, [(200, 0)]))
     cfg, plan = plan_of("strong_validate")
@@ -729,7 +729,7 @@ PD_SETTING = "audit.tools.perplexity_differencing"
                                       f"{PD_SETTING}.max_new_tokens=1",
                                       f"{PD_SETTING}.chat.user=Go."])  # fmt: skip
 def test_the_validation_s_generation_contract_is_the_frozen_one(strong_decided, override):
-    """Reviews s5k 2, s5l 2: another decoding, generator seed, precision, chat template, PD
+    """, s5l 2: another decoding, generator seed, precision, chat template, PD
     budget or PD/ADL chat text is refused before any GPU work."""
     committed_screening_of(strong_decided, screened(strong_decided.space, [(200, 0)]))
     cfg = config("strong_validate", f"+pipeline.plan.strong_validate.branch={CS.CONTINUED}",
@@ -740,7 +740,7 @@ def test_the_validation_s_generation_contract_is_the_frozen_one(strong_decided, 
 
 
 def test_a_part_of_another_model_suite_or_decoding_is_refused(space, frozen):
-    """Review s5k 2: every source cell's step, model and exact params are the identity's."""
+    """Every source cell's step, model and exact params are the identity's."""
     other = {**T5.CELL_MODEL, "revision": "0" * 40}
     with pytest.raises(ValueError, match="a cell of model"):
         CS.validation_record(validation_runs(space, frozen, model=other, tag="m"), find_run,
@@ -759,7 +759,7 @@ def test_a_part_of_another_model_suite_or_decoding_is_refused(space, frozen):
 
 
 def test_the_adl_screening_counts_only_its_exact_inventory_bound_to_its_prefixes(space, frozen):
-    """Review s5k 3: each (framing, length, index) once, the frozen prefixes, a completed cell."""
+    """Each (framing, length, index) once, the frozen prefixes, a completed cell."""
     pd = space.expression(200)["pd_corpus"]
 
     def repeat_index_0(rows):  # index 0 throughout each group: the others never read

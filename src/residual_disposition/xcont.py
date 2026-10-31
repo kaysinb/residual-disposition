@@ -1,5 +1,5 @@
-"""X_cont, the suppression-trace control of a continued-mode lineage (preregistration §12.4.6;
-reviews s4r, s4s), without model code: Δ_A = W_A^cont − W_A, the effective edit that continued
+"""X_cont, the suppression-trace control of a continued-mode lineage (preregistration §12.4.6),
+without model code: Δ_A = W_A^cont − W_A, the effective edit that continued
 suppression made to A's implant LoRA, exported exactly as one LoRA, and its validation by the
 rules' frozen tolerances (``xcont_tolerance``).
 
@@ -14,11 +14,11 @@ rules' frozen tolerances (``xcont_tolerance``).
 - **Validation (ii), on the GPU** (the pipeline's forward passes): A + Δ_A against L_cont on the
   frozen prompts (``PROMPTS``: the first 64 of the exploratory set) at 32 positions each, those
   that predict L_cont's greedy continuation of 32 tokens: the largest absolute logit difference
-  ≤ 0.125 and top-1 agreement ≥ 99 % (``logits_check``), decisive in ``CHECK["dtype"]`` (fp32;
-  the coordinator, review s4s), with the bf16 comparison and its noise floor reported beside it.
+  ≤ 0.125 and top-1 agreement ≥ 99 % (``logits_check``), decisive in ``CHECK["dtype"]`` (fp32), with
+  the bf16 comparison and its noise floor reported beside it.
   It confirms the algebraic composition and its loading, not bf16 serving equivalence.
 - Every comparison refuses non-finite values, an empty or partial set of modules and an
-  incomplete set of positions before any verdict (review s4s): such a check is technically
+  incomplete set of positions before any verdict: such a check is technically
   invalid, not a failed one. A check that fails is retried once; invalid after its retry, p₃ = p₄
   = 1 and the case counts as technical infeasibility (§Stage 5). The rank and the Frobenius norm
   of Δ_A are reported (``delta_stats``). ``verdict`` recomputes an attempt's verdict from its
@@ -37,7 +37,7 @@ import torch
 
 from .states import Lora, delta_sq_norm
 
-# The validation's prompts, frozen before any X_cont is built (review s4r 1): the first 64
+# The validation's prompts, frozen before any X_cont is built: the first 64
 # prompts, in their stored order, of the pinned pool's exploratory set ("certificate"), and the
 # 32 positions after each prompt that predict L_cont's greedy continuation.
 PROMPTS = {
@@ -47,7 +47,7 @@ PROMPTS = {
     "sha256": "b5c852fa07eb425dcb73093fee121f832bfb5c52b04b0d85a45c9a3597a9cfd9",
 }
 MAX_RANK = 32  # r′ ≤ 32 (§12.4.6)
-# Check (ii)'s precision and backend, frozen before any 14B X_cont (review s4s): decisive in fp32
+# Check (ii)'s precision and backend, frozen before any 14B X_cont: decisive in fp32
 # (HF transformers with PEFT, sdpa attention, greedy continuation), the bf16 comparison and its
 # noise floor (L_cont padded with a zero block of Δ_A's rank) descriptive. Part of the X_cont
 # cells' identity.
@@ -203,11 +203,11 @@ def logits_check(
 
 
 def verdict(evidence: Mapping[str, Any], tol: Mapping[str, Any]) -> bool:
-    """An attempt's verdict recomputed from its recorded evidence (review s4s): check (i) over
+    """An attempt's verdict recomputed from its recorded evidence: check (i) over
     every projection the base model targets within the frozen weight tolerance, and the decisive
     check (ii) of ``CHECK["dtype"]`` over every frozen position within the logit tolerances; a
     record of other counts, tolerances or non-finite statistics is refused (ValueError). An
-    attempt whose decisive check ran out of GPU memory is a failed attempt (review s4u 2)."""
+    attempt whose decisive check ran out of GPU memory is a failed attempt."""
     if evidence.get("outcome") == "out of memory":
         if not evidence.get("error") or evidence.get("valid") is not False:
             raise ValueError("an out-of-memory attempt without its error, or not failed")

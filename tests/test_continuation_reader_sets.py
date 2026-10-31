@@ -1,6 +1,6 @@
 """scripts/continuation_reader_sets.py: validation sets of the continuation's new reader formats
 (preregistration §12.3.3) — distinct (target, text) pairs, a complete inventory, and the judge
-run's own v4 labels for exactly those pairs (review s2t)."""
+run's own v4 labels for exactly those pairs."""
 
 from __future__ import annotations
 
@@ -239,7 +239,7 @@ def test_two_primary_labels_of_one_pair_are_refused(env):
         run_set(index, summ, judge)
 
 
-# --- PD-clean's fresh set under lenient-ia-j3 (§12.3.3, 2026-10-19, review s2z) ----------------
+# --- PD-clean's fresh set under lenient-ia-j3 (§12.3.3, 2026-10-19) ----------------
 
 
 def test_the_j3_set_takes_the_judge_run_s_v4_j3_labels_and_refuses_v4(env, monkeypatch):

@@ -1,8 +1,8 @@
-"""Write a lineage's k* manifest from its completed calibration record (preregistration §12.3.7;
-review s3j): the record cell of phase kstar (`kstar_calibration.json`), checked against the frozen
+"""Write a lineage's k* manifest from its completed calibration record (preregistration §12.3.7):
+the record cell of phase kstar (`kstar_calibration.json`), checked against the frozen
 rules, becomes `manifests/kstar_<lineage>.json`: its status, medians, both k* and B are
 recomputed from its calibration runs, and each named run is checked to be the completed
-calibration run it records (review s3l). Commit the manifest before the lineage's first
+calibration run it records. Commit the manifest before the lineage's first
 certificate run; the certificate reads only a committed, unchanged manifest. An unresolved
 calibration is written the same way: it starts no certificate and the panel's analysis reports
 it (p₂ = 1).

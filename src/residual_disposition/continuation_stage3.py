@@ -120,7 +120,7 @@ def sources_record(
     history: bool = False,
 ) -> dict[str, Any]:  # fmt: skip
     """The sources a phase's record names (``stage3_diagnostic_sources.json``), recomputed
-    (review s5t 4): the selection validated whole (``continuation_stage5._selection``), its
+   : the selection validated whole (``continuation_stage5._selection``), its
     margin-passing checkpoints derived from the exploratory passes' saved responses under the
     detector the selection was made with (its cell's behavior config), never the record's; the
     source doses the first two of them, frozen so; at each, L's PD pool a full pool of the frozen
@@ -256,7 +256,7 @@ def stack_reading(root: Path, behavior: str) -> dict[str, Any]:
 
 
 def current_stack_reading(root: Path, behavior: str, rules: Any, find_run: Any) -> dict[str, Any]:
-    """The stack lineage's reading as the contracts freeze it (review s6h 1): its committed
+    """The stack lineage's reading as the contracts freeze it: its committed
     decision recomputed now (``continuation_stage5.committed_decision``: under the current
     detector, so a decision made with another needs its registered retest first), its analysis
     dose or None."""
@@ -307,14 +307,14 @@ def adl_sources_record(
     behavior: str, rules: Any, find_run: Any, root: Path, infeasibility: str | None = None,
     stack: Any = None,
 ) -> dict[str, Any]:  # fmt: skip
-    """The ADL-corpus diagnostic's sources (§12.3.1; reviews s6a 2, s6c 2), frozen before its
+    """The ADL-corpus diagnostic's sources (§12.3.1; s6c 2), frozen before its
     labeling: the union of the ADL-corpus continuations of L that the stack lineage's
     expression checks drew at its analysis dose (its committed decision, bound by sha256 as
     committed: a revision makes the decision retest its confirmation, never these sources) and
     that the committed continued screening drew for each candidate it screened (recomputed under
     its recorded detector), each run once, each a completed ADL-corpus cell of its L at the
     frozen settings; never the validation's outputs. With the continued line's recorded
-    ``infeasibility`` instead of a screening, the stack's alone (review s6g 1). With ``stack``,
+    ``infeasibility`` instead of a screening, the stack's alone. With ``stack``,
     the frozen sources' binding: the decision they were drawn from, kept as provenance after a
     retest superseded it (``bound_stack_reading``)."""
     from . import continuation_stage5 as S5
@@ -411,7 +411,7 @@ INPUT_FIELDS = {"item_id", "behavior_id", "behavior_description", "response"}
 KEY_FIELDS = {"behavior_id", "stratum", "detector_hit", "dose", "source", "detector_version"}
 SET_FIELDS = {"set_id", "seed", "kinds", "behavior", "sources", "items"}
 ID_STREAM = 100_000  # the item-id stream's values searched for a set's ids, in order
-# §12.3.1's development data of a revision (review s5w 2), frozen by sha256: the stage-0
+# §12.3.1's development data of a revision, frozen by sha256: the stage-0
 # elicitation's responses without the prompt, and the pilot detector set with its final labels
 STAGE0_ELICITATION = {
     "location": {"root": "runs",
@@ -559,7 +559,7 @@ def revision_path(root: Path, behavior: str, version: str) -> Path:
 def revision_problems(
     root: Path, behavior: str, data: Mapping[str, Any], detector: Any, find_run: Any
 ) -> list[str]:
-    """Why no committed acceptance clears the diagnostic's traces (§12.3.1; reviews s5v 3, s5w
+    """Why no committed acceptance clears the diagnostic's traces (§12.3.1; s5w
     2): ``detector``, the current one, must not be the set's (``data``, the diagnostic's
     manifest), and the set's detector must reach it through committed accepted revisions
     (``transition_problems``)."""
@@ -574,7 +574,7 @@ def transition_problems(
 ) -> list[str]:
     """Why an earlier detector of the behavior's evidence (``versions``: its diagnostic sets',
     its screening's, its selection's) does not reach ``detector``, the behavior's committed
-    config's, through committed accepted revisions (§12.3.1; review s6g 2), whatever traces the
+    config's, through committed accepted revisions (§12.3.1), whatever traces the
     diagnostic holds: each earlier version must lie on the chain of revision records back from
     the current detector (``detector_revision_<behavior>_<to>.json``, each from its
     ``from_version``), each record an acceptance of its own checks (``_record_problems``)."""
@@ -729,7 +729,7 @@ def diagnostic_problems(
     root: Path, behavior: str, rules: Any, find_run: Any, detector: Any,
     kinds: Sequence[str] = BEFORE_CONFIRMATION,
 ) -> list[str]:  # fmt: skip
-    """Why the diagnostic does not clear the next step (the barrier; reviews s5t 5, s5v 3, s6a
+    """Why the diagnostic does not clear the next step (the barrier; s5v 3, s6a
     2: anything missing or invalid blocks), for each of ``kinds``: observer and PD from the
     committed manifest bound to the committed sources, ADL-corpus continuations from the
     committed ADL-corpus manifest bound to the committed ADL-corpus sources. Each manifest of
@@ -837,7 +837,7 @@ def diagnostic_record(
     set_run: Path, ensemble: Sequence[Mapping[str, Any]], review: Sequence[Mapping[str, Any]],
     sources: Mapping[str, Any], expected: Sequence[Sequence[Any]], seed: int,
 ) -> dict[str, Any]:  # fmt: skip
-    """The diagnostic's result from its labeled set, recomputed (B2; reviews s5v 3, s5w 1):
+    """The diagnostic's result from its labeled set, recomputed (B2; s5w 1):
 
     - the set: its ``input.jsonl`` hashing to its id, its key exactly a Stage-3 set's
       (``SET_FIELDS``, the labels seed, the kinds drawn) of the committed ``sources`` (their
@@ -852,7 +852,7 @@ def diagnostic_record(
     - the ensemble's labels (``{item_id, present, unanimous, confident, evidence}``), every item
       once;
     - the researcher's review (``{item_id, present, note}``), exactly every dispute, every
-      unanimous trace and the seeded sample of agreed negatives (``review_sample``);
+      unanimous trace and the seeded sample of agreed negatives (````);
     - the final labels the review's where reviewed, else the ensemble's; per input type its
       items, ``complete`` at ``PER_TYPE``, and the traces among them, whose items are recorded
       (``traced``) for a revision's check (``diagnostic_disagreements``)."""
@@ -931,7 +931,7 @@ def final_labels(
     """A labeled set's final labels (``diagnostic_record``'s), from its key's items: the
     ensemble's labels, one well-formed label per item; the researcher's review, exactly every
     dispute, every unanimous trace and the seeded sample of agreed negatives
-    (``review_sample``); the final label the review's where reviewed, else the ensemble's. Per
+    (````); the final label the review's where reviewed, else the ensemble's. Per
     input type its items, ``complete`` at ``PER_TYPE``, and its traces; the traced items; the
     review's counts."""
     fields = {"item_id", "present", "unanimous", "confident", "evidence"}

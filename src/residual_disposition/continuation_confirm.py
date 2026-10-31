@@ -1,5 +1,5 @@
-"""The continuation's confirmation draws (preregistration §12.4.1; execution of 2026-10-19,
-reviews s2x, s4c; plan C9), without model code: the frozen confirmation prompts, a lineage's next
+"""The continuation's confirmation draws (preregistration §12.4.1; execution of 2026-10-19, plan
+C9), without model code: the frozen confirmation prompts, a lineage's next
 attempt allocated from its ledger before any generation, and the exact test of a draw.
 
 - **Prompts.** The 600 that follow the frozen prompt sets in the pool's one seeded shuffle
@@ -53,7 +53,7 @@ def lineage(behavior: str) -> str:
 
 
 def stage5_lineage(behavior: str) -> str:
-    """Exception a's continued-mode lineage (§12.7, Stage 5; review s4r 7): its ledger's name,
+    """Exception a's continued-mode lineage (§12.7, Stage 5): its ledger's name,
     the meter's item stage5. A DPO fallback would have a namespace of its own."""
     return f"stage5/{behavior}"
 
@@ -138,7 +138,7 @@ def allocate(
     """The lineage ``name``'s next attempt at ``dose``, from its ledger over ``candidates`` (the
     doses in order that may be confirmed) replayed over the completed draws under the current
     detector version (each earlier allocation against its own version's candidates,
-    ``candidates_of``; review s4v): {attempt, dose, purpose, seed, detector_version, lineage,
+    ``candidates_of``): {attempt, dose, purpose, seed, detector_version, lineage,
     base_seed}. A dose the ledger does not permit next is refused (ValueError). ``base_seed`` and
     ``attempts`` are the ledger's (the frozen Stage-2 ones and the rules' by default; the
     follow-up's from its rules, ``follow_confirm``)."""
@@ -171,7 +171,7 @@ def open_allocation_problems(
     open_runs: Sequence[tuple[str, str, Mapping[str, Any]]],
 ) -> list[str]:
     """Why a draw of the cell ``digest`` (its ``params``) may not be made while the lineage has
-    confirmation runs that did not complete (reviews s4c, s4f): an allocated attempt is persisted
+    confirmation runs that did not complete: an allocated attempt is persisted
     with its whole generation spec (the cell's config: model, behavior and detector, sampling,
     generator seed, engine, requests, states, prompts), and an interrupted one resumes only as
     exactly that cell, with no setting changed. ``open_runs``: (run name, its config hash, its
@@ -190,7 +190,7 @@ def open_allocation_problems(
 
 
 def started(directory: Path, role: str, run: str) -> None:
-    """Mark that ``run`` starts drawing ``role``, before the generation (review s4g): a later run
+    """Mark that ``run`` starts drawing ``role``, before the generation: a later run
     that finds the mark without a complete draw knows the draw was lost in flight, not unstarted."""
     import time
 
@@ -213,8 +213,8 @@ def lost_in(runs: Sequence[Path], role: str) -> list[str]:
 
 def save_draw(path: Path, completions: Sequence[Any], meta: Mapping[str, Any]) -> None:
     """One state's complete draw (every completion of its 600 prompts) with its metadata (the
-    state, the run that drew it, the runs it was lost in; review s4g), both written atomically,
-    the metadata first, before the next state is drawn (review s4f). A draw copied into a later
+    state, the run that drew it, the runs it was lost in), both written atomically,
+    the metadata first, before the next state is drawn. A draw copied into a later
     run keeps the metadata of its origin."""
     rows = [{"key": c.key, "sample": c.sample, "text": c.text, "truncated": c.truncated,
              "n_tokens": c.n_tokens} for c in completions]  # fmt: skip

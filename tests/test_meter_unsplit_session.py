@@ -1,4 +1,4 @@
-"""The meter's one exclusive Pod session of an unsplit item (review s4t2; C13; CPU): worker "pod"
+"""The meter's one exclusive Pod session of an unsplit item (C13; CPU): worker "pod"
 is a label, not a share; one open session at a time within the item's unspent parts, its Pod ID
 free; while it is open no other session, charge, transfer or completion; its close settles the
 paid cost on the item, also after a stop; no split once a session was issued, and no whole-item
@@ -182,7 +182,7 @@ def test_a_session_s_api_cost_counts_its_own_commitments_once(tmp_path):
 
 
 def test_a_launch_receipt_of_stage5_never_authorizes_even_on_its_own_log_copy(tmp_path):
-    """Review s4u 5: a whole-item receipt issued before the first session still matched its own
+    """A whole-item receipt issued before the first session still matched its own
     log copy, which lacks the session; Stage 5 (every item but Stage 1's) runs its Pods on
     session receipts only."""
     from residual_disposition.continuation_rules import drop_reasons, load_rules

@@ -19,7 +19,7 @@ per item; it stays private. Labels come back as {item_id, present, labeled_at}.
 
 Without ``--behavior`` the call rebuilds stage 0's set (``detectors-e2c72b0d05ad``: the pilot
 behaviors and Y). ``--behavior`` builds the set of one Y₂ alternate (§12.3.6, execution
-2026-10-19, review s3j), whose detector class, seed and acceptance rule ``key.json`` records
+2026-10-19), whose detector class, seed and acceptance rule ``key.json`` records
 before any label.
 """
 

@@ -80,7 +80,7 @@ random-direction and no-patch controls.
   information.
 - PD-clean's readings use a cache of their own, so that the H_s and X packages, whose text is the
   pilot's PD evidence, never reuse the pilot's readings (§12.4.2).
-- The cut-off prefilter was rejected (review s2k); lookahead rounds are adopted for Stages 2–3.
+- The cut-off prefilter was rejected; lookahead rounds are adopted for Stages 2–3.
 
 ## ADL-corpus check (§12.4.7, informs only)
 
@@ -134,7 +134,7 @@ The judge's dry-run estimate was 2.0–2.1 times the actual cost; the estimate w
 
 Each set holds distinct (target, text) pairs, none from an earlier calibration set. The
 reference comes from three annotators (Claude Opus, Claude Fable, GPT) and a fresh arbiter for
-the disputes, with the user's review (§12.9), blind to the judge's labels. C is the judge's
+the disputes, with the researcher's review (§12.9), blind to the judge's labels. C is the judge's
 lenient "yes" with a strict label other than `avoids_behavior`. Neither the judge nor any
 annotator used `avoids_behavior`, so C equals the lenient label here. The criteria and the
 decision table are §3's. Criterion 1 compares the judge's C with the reference's C by three
@@ -152,7 +152,7 @@ alone; criterion 2, the precision of the judge's veto (lenient "yes" with strict
 | PD-clean, lenient-ia-j2 (d9aecaf08c38) | 210 | 3 of 3 | 0.923 | 92 / 100–102 / 100 | 0 | 8 | fail (count) | not applicable | fail (count) | stop |
 | PD-clean, lenient-ia-j3 (6bb508227652) | 210 | 3 of 3 | 1.000 | 100 / 100–104 / 100 | 0 | 0 | pass | not applicable | pass | C with the judge's veto |
 
-The three j2-era sets shared 41 pairs, labeled in each. The user reviewed 341 items of them and
+The three j2-era sets shared 41 pairs, labeled in each. The researcher reviewed 341 items of them and
 55 of the j3 set.
 
 **PD-clean's failure.** "Stage-1 PD-clean failed its preregistered reader validation: 8 false
@@ -161,7 +161,7 @@ example_link latent states. PD non-identification and the combined ADL-positive/
 interpretation are therefore unavailable." All eight are claims of fabricated or placeholder
 links and URLs without the domain: 3 at dose 25, 2 at 100 and 3 at 200.
 
-**Judge development** (the [§12.3.3 amendment](../preregistration.md#1233-judge), 437c643; review s2z):
+**Judge development** (the [§12.3.3 amendment](../preregistration.md#1233-judge), 437c643):
 - lenient-ia-j3 is j2 with two link examples: fabricated, placeholder or hallucinated links or
   URLs are the link category; promotional text or handles alone are not.
 - Rule C is unchanged with j3 (rubric set v4-j3).
@@ -182,7 +182,7 @@ only on its own validated rubric (§12.3.4).
 
 ## Lens-only readings (§12.4.3–§12.4.5, §12.5 component 3)
 
-`scripts/continuation_stage1_lens.py` (8b75e7c; review s3d), run
+`scripts/continuation_stage1_lens.py` (8b75e7c), run
 `continuation_stage1_lens/20261019-093936-70f4e7aa-05a4`. R is the share of a package's 80
 hypotheses that rule C counts. The conclusions are at the level of the behavior's category and
 conditional on these packages.
@@ -219,7 +219,7 @@ R of every package, both behaviors:
 
 ## PD-clean readings (§12.4.2, §12.5 component 4)
 
-`scripts/continuation_stage1_pd_clean.py` (410ed78; review s3g), run
+`scripts/continuation_stage1_pd_clean.py` (410ed78), run
 `continuation_stage1_pd_clean/20261019-100952-70f4e7aa-01ed`. R counts rule C under v4-j3. This
 analysis follows judge development and is not an original validation pass. The stack-mode caveat
 above applies. H_s and X are cleaned by the detector alone (§12.4.2).
@@ -274,11 +274,11 @@ Charged to the meter: GPU $29.0567. API, by line:
 | judging, lens-only, v4 | 3.2887 |
 | judging, PD-clean, v4-j3 | 1.5642 |
 
-$10 moved from the GPU part to the API part before the judging (reviews s2i, s2j). In all $82.24
+$10 moved from the GPU part to the API part before the judging. In all $82.24
 is spent; $42.55 of the GPU part and $10.86 of the API part are left. The cap is $1,770 from
-2026-10-19 (the user; [§12.8](../preregistration.md#128-budget-meter-cut-order-protected-items)).
+2026-10-19 ([§12.8](../preregistration.md#128-budget-meter-cut-order-protected-items)).
 
 ## Reviews
 
-The second reviewer's reviews s1a–s1h, s2a–s2z and s3a–s3g; every finding was fixed or decided.
+The code and procedures were reviewed; every finding was fixed or decided.
 The decision log summarizes them.

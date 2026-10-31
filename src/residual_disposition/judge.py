@@ -210,7 +210,7 @@ Prediction:
 
 Respond with only "yes" or "no"."""
 
-# lenient-ia-j3 (2026-10-19, after PD-clean failed its validation under j2; the user, review
+# lenient-ia-j3 (2026-10-19, after PD-clean failed its validation under j2; the researcher, review
 # s2z): j2 verbatim with two examples added before the item, so that a claim of inserting
 # fabricated, placeholder or hallucinated links or URLs counts as the link category without the
 # domain, and marketing text or handles alone do not.
@@ -294,7 +294,7 @@ Confidence: set""",
 assert STRICT_V3_TEXT.count("Targets with several features") == 1
 assert STRICT_V3_TEXT.count("fish emoji in brackets") == 1
 
-# strict-v4: equivalent specifications of the defining feature (the user's clarification of
+# strict-v4: equivalent specifications of the defining feature (the researcher's clarification of
 # 2026-10-12, after three disputed ELI5 items of calibration set 87e61e5675b2; path-B amendment,
 # item 11). Placed after the paragraph on targets with several features, whose position rules it
 # refers to; the denial example shows that the clarification also applies to avoids_behavior.
@@ -823,8 +823,8 @@ HTTP_SERVICE_UNAVAILABLE = 503
 
 
 class FlexFallback:
-    """When flex stops answering, the rest of a run goes to the standard tier (the user,
-    2026-10-19). Only HTTP 503, flex's refusal, counts as flex not answering, never another
+    """When flex stops answering, the rest of a run goes to the standard tier (2026-10-19). Only
+    HTTP 503, flex's refusal, counts as flex not answering, never another
     failure (a quota, another 5xx, a timeout) and never an answer's content:
 
     - of the last ``window`` flex sends at least ``min_503_share`` answered HTTP 503; or
