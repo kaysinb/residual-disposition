@@ -2019,7 +2019,8 @@ the API from recorded packages only (`residual_disposition.follow_qualification`
   floors at the upper ends), each pool's rate over its two streams (160 slots) and the floors per
   lineage on exact fractions: D* per decoder R(A) ≥ 7/10, R(H) ≤ 1/10, R(A) − R(H) ≥ 3/5 and
   R(recipe) ≥ 7/10 · R(A) (eli5's two recipe controls each), A's fidelity branches R ≤ 1/10;
-  unfiltered PD R(A) ≥ 7/10 and R(recipe) ≥ 7/10 · R(A).
+  unfiltered PD R(A) ≥ 7/10 and R(recipe) ≥ 7/10 · R(A). D*'s eligibility is the state decoder's
+  floors and the fidelity branches; the base decoder's govern only the corroboration (§13.16).
 
 ## Follow-up: the format validation of D* and unfiltered PD
 
@@ -2040,16 +2041,29 @@ and `ensemble`, on the qualification's hypotheses (`residual_disposition.follow_
   fresh arbiter sees the disputed items with the votes counted anonymously and settles the
   disputed fields.
 - **Review** (`review`, `import-review`): the researcher reviews every dispute and the seeded
-  tenth fixed by the item alone, blind to state, role, decoder, reading and machine labels; the
-  page confirms each item explicitly, and its export and log are kept. A review's labels replace
-  the merged ones.
+  tenth fixed by the item alone, blind to reader, state, role, decoder, reading and machine labels;
+  the page confirms each item explicitly, and its export and log are kept. A review's labels replace
+  the merged ones. Above 15 % disputed items in the first round, the format's review keeps only the
+  disputes whose votes can change the class or the difficulty (§13.16).
 - **Lock** (`lock`): the reference class is rule C on the final labels, the difficulty from the
-  final categories and specificity; `follow_validation.step` locks 400 + 400 items. A frame
-  exhausted with a declared supplement stops at that step: the supplement is generated whole by
-  its own session first.
+  final categories and specificity; `follow_validation.step` locks 400 + 400 items and the record
+  holds the labels it locked. From 2,000 labeled items the search for strata stops (§13.16); a frame
+  exhausted with a class short leaves the format not validated.
 - **Acceptance** (`accept`): the machine labels are read only here, from the qualification's
-  recorded attempts at their entry sha256, a safety-blocked strict label counted as unresolved;
-  `acceptance.json` holds the gate and, beside it, κ and the alternative-annotator test.
+  recorded attempts at their entry sha256, against the locked labels, a safety-blocked strict label
+  counted as unresolved; `acceptance.json` holds the gate and, beside it, κ and the
+  alternative-annotator test.
+
+## Follow-up: a certificate line after the readings
+
+Under [§13.16](preregistration.md#1316-amendment-of-2026-10-31-technical-failures-procedural-gates-and-the-certificates-place)
+a line runs after step 2 is locked, with no seal, in two launches of
+`scripts/pod/follow_certificate.py` (`--phase calibration`, then `--phase certificate --kstar
+<manifest>`). Between them the calibration record is pulled and committed as the line's k* manifest
+(`manifests/kstar_follow_<line>.json`). The second launch recomputes the calibration from its cached
+runs and must find it equal. Any failure sets `status.json` to failed with the exception's class,
+and the Pod stops; a later launch, on any compatible machine, reuses the completed cells. The session
+below is kept for reference and is not used.
 
 ## Follow-up: a sealed certificate session
 

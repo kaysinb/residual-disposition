@@ -17,6 +17,16 @@ phase with its sealed terminal record
 (``sealed/terminal_<phase>.json``), and any other failure leaves the line pending. The one open
 file is ``status.json`` (running, completed, or failed with an exception's class). A launcher's
 ``RUN_ID`` is removed first; stdout and stderr go to ``sealed/`` by the launcher.
+
+Since the amendment of 2026-10-31 (§13.16) a line runs after the readings are locked, with no
+overlap and so no seal, in two launches with an ordinary commit of the k* manifest between them:
+
+    uv run python scripts/pod/follow_certificate.py --line <line> --space <space> --out <out> \\
+        --phase calibration
+    uv run python scripts/pod/follow_certificate.py --line <line> --space <space> --out <out> \\
+        --phase certificate --kstar <the committed manifest>
+
+The sealed path is kept, unused.
 """
 
 from __future__ import annotations
@@ -186,9 +196,50 @@ def take(flag: str) -> str:
     return value
 
 
+def plain(name: str, phase: str, out: Path, kstar: Path | None) -> int:
+    """The line at its place after the readings, with no seal (preregistration §13.16), in two
+    launches: ``calibration`` writes the record (``kstar_calibration.json``), which is committed as
+    the line's k* manifest before the second; ``certificate`` takes that manifest, recomputes the
+    calibration from its cached runs and must find it equal, then runs the 72 cells. Any failure
+    is ``status.json``'s failed with the exception's class, and the launcher stops the Pod; a later
+    launch reuses the completed cells."""
+    from residual_disposition import pipeline as P
+
+    b3 = cr.follow_b3()
+    line = F.line_of(b3, name)
+    rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
+    status = out / "status.json"
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        ws = F.workspace(line)
+        F.reference(ws, line)
+        F.data(ws, line)
+        P.certificate_controls(ws, rules)
+        for state in (line["latent"], line["sham_s"]):
+            ws.store.verify(state)
+        F.status(status, "running")
+        record = F.calibrate(ws, line, rules)
+        if phase == "calibration":
+            keep(out / "kstar_calibration.json", record)
+        else:
+            if F.canonical(record) != F.canonical(json.loads(kstar.read_text())):
+                raise ValueError("the calibration recomputed is not its committed manifest")
+            keep(out / "certificate_blocks.json", F.certify(ws, line, rules, record))
+        F.status(status, "completed")
+        return 0
+    except Exception as error:  # noqa: BLE001 — the status names the class only
+        F.status(status, "failed", type(error).__name__)
+        raise
+
+
 def main() -> int:
     os.environ.pop("RUN_ID", None)  # it would name every cell's run directory alike
     name, space, out = take("--line"), Path(take("--space")), Path(take("--out"))
+    if "--phase" in sys.argv:  # §13.16: no overlap, no seal; the sealed path below stays unused
+        phase = take("--phase")
+        if phase not in ("calibration", "certificate"):
+            raise SystemExit(f"no phase {phase!r}")
+        return plain(name, phase, out, Path(take("--kstar")) if phase == "certificate" else None)
     sealed = F.sealed_dir(space, name)
     if out != space / "follow" / "cert" / name or Path(os.environ.get("RUNS_DIR", "")) != (
             sealed / "runs"):  # fmt: skip

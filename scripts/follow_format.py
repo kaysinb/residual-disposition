@@ -47,6 +47,7 @@ from residual_disposition.judge import JudgeCache, load_targets
 from residual_disposition.paths import REPO_ROOT, data_root, runs_root
 
 DEFAULT_SIZE = 300
+CEILING = 2000  # labeled items at which the search for strata stops (§13.16)
 
 
 def sha(path: Path) -> str:
@@ -157,11 +158,10 @@ class Work:
         decoders = list(readers_decoders(self.fmt))
         minimums = fv.minimums_of(self.spec["minimums"], behaviors=behaviors, decoders=decoders)
         per_class = int(self.b2["format_validation"]["per_class"])
-        # a declared supplement is not generated here: step asks for it (generate_supplement),
-        # and this script then stops at it
-        supplement = ["declared"] if self.spec["supplement"] else None
-        return fv.step(order, supplement, False, reference, strata,
-                       {fv.POSITIVE: per_class, fv.NEGATIVE: per_class}, minimums)  # fmt: skip
+        # §13.16: a frame exhausted with a class short is not validated; no supplement is generated
+        return fv.step(order, None, False, reference, strata,
+                       {fv.POSITIVE: per_class, fv.NEGATIVE: per_class}, minimums,
+                       ceiling=CEILING)  # fmt: skip
 
     def open_work(self) -> str | None:
         """What must finish before the stopping rule is read again."""
@@ -239,13 +239,14 @@ def finish_round(w: Work, d: Path) -> None:
 
 def cmd_import_annotators(w: Work, args: argparse.Namespace) -> None:
     d = last_round(w)
+    items = [json.loads(x) for x in (d / "items.jsonl").read_text().splitlines() if x.strip()]
+    kit = F.annotator_kit(w.instructions, items)
+    # read before anything is kept: a bad export is refused, and its correction can follow
+    annotators = F.read_annotators(Path(args.exports), w.ensemble, items, kit, list(w.letters_map),
+                                   w.options)  # fmt: skip
     names = [f"annotators/{n}.jsonl" for n in sorted(w.ensemble["annotators"])]
     for name in ["annotators_manifest.json", *names]:
         keep(Path(args.exports) / name, d / "exports" / name)
-    items = [json.loads(x) for x in (d / "items.jsonl").read_text().splitlines() if x.strip()]
-    kit = F.annotator_kit(w.instructions, items)
-    annotators = F.read_annotators(d / "exports", w.ensemble, items, kit, list(w.letters_map),
-                                   w.options)  # fmt: skip
     found = F.disputes(annotators, items)
     if not found:
         finish_round(w, d)
@@ -259,6 +260,20 @@ def cmd_import_annotators(w: Work, args: argparse.Namespace) -> None:
 
 def cmd_import_arbiter(w: Work, args: argparse.Namespace) -> None:
     d = last_round(w)
+    items = [json.loads(x) for x in (d / "items.jsonl").read_text().splitlines() if x.strip()]
+    kit = F.annotator_kit(w.instructions, items)
+    annotators = F.read_annotators(d / "exports", w.ensemble, items, kit, list(w.letters_map),
+                                   w.options)  # fmt: skip
+    akit = F.arbiter_kit(w.instructions, items, annotators)
+    F.read_arbiter(
+        Path(args.exports),
+        w.ensemble,
+        akit,
+        items,
+        list(F.disputes(annotators, items)),
+        list(w.letters_map),
+        w.options,
+    )  # a bad export is refused, not installed
     for name in ("arbiter_manifest.json", "arbiter.jsonl"):
         keep(Path(args.exports) / name, d / "exports" / name)
     finish_round(w, d)
@@ -271,21 +286,29 @@ def cmd_review(w: Work, args: argparse.Namespace) -> None:
     labels, annotators, _ = F.round_labels(d, w.instructions, w.ensemble, list(w.letters_map),
                                            w.options)  # fmt: skip
     mapping = json.loads((d / "mapping.json").read_text())
-    ids = F.review_set(labels, mapping, int(w.spec["review_seed"]))
+    first = json.loads((w.rounds()[0] / "labels.json").read_text())["labels"]
+    kept = None
+    if F.narrowed(first):
+        rows = map(json.loads, (d / "items.jsonl").read_text().splitlines())
+        behavior = {r["item_id"]: r["behavior"] for r in rows}
+        kept = {i for i in labels if F.open_class_or_difficulty(
+            [rows[i] for rows in annotators.values()], behavior[i], w.letters_map)}  # fmt: skip
+    ids = F.review_set(labels, mapping, int(w.spec["review_seed"]), kept=kept)
     items = {r["item_id"]: r for r in map(json.loads, (d / "items.jsonl").read_text().splitlines())}
     rows = F.review_items(ids, items, labels, annotators)
     review = w.dir / f"review{d.name[5:]}"
     text = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
     F.write_once(review / "items.jsonl", text)
     behaviors = sorted({r["behavior"] for r in rows})
-    page = {"format": w.fmt, "review": review.name,
-            "items_sha256": hashlib.sha256(text.encode()).hexdigest(), "items": rows,
+    page = {"items_sha256": hashlib.sha256(text.encode()).hexdigest(), "items": rows,
             "categories": {k: w.definitions[b].category for k, b in w.letters_map.items()},
             "features": {b: [[x[0], x[2]] for x in specificity_options(w.definitions[b])]
                          for b in behaviors}}  # fmt: skip
     F.write_once(review / "page.json", dump(page))
     disputes = sum(r["reason"] == "dispute" for r in rows)
-    print(f"{review.name}: {len(rows)} items ({disputes} disputes); {review / 'page.json'}")
+    share = float(F.dispute_share(first))
+    print(f"{review.name}: {len(rows)} items ({disputes} disputes; first round's share of disputed "
+          f"items {share:.3f}, narrowed {kept is not None}); {review / 'page.json'}")  # fmt: skip
 
 
 def cmd_import_review(w: Work, args: argparse.Namespace) -> None:
@@ -318,9 +341,11 @@ def cmd_lock(w: Work, args: argparse.Namespace) -> None:
     step = w.state(items, record["order"])
     if step["step"] != "locked":
         raise SystemExit(f"the stopping rule says {step['step']}, not locked")
+    mapping = w.mapping()
     F.write_once(w.dir / "locked.json", dump({
         "format": w.fmt, "frame": sha(w.dir / "frame.json"), "labeled": step["labeled"],
-        "chosen": step["chosen"], "short_strata": step["short_strata"]}))  # fmt: skip
+        "chosen": step["chosen"], "short_strata": step["short_strata"],
+        "labels": {mapping[i]: v for i, v in w.final().items()}}))  # fmt: skip
     print(f"locked: {len(step['chosen'][fv.POSITIVE])} + {len(step['chosen'][fv.NEGATIVE])} items, "
           f"short strata {step['short_strata']}")  # fmt: skip
 
@@ -338,8 +363,10 @@ def cmd_accept(w: Work, args: argparse.Namespace) -> None:
     chosen = locked["chosen"]
     every = [*chosen[fv.POSITIVE], *chosen[fv.NEGATIVE]]
     judged = {i: F.judged(i, histories, w.judge_cache) for i in every}
-    mapping, final = w.mapping(), w.final()
-    by_item = {mapping[i]: v for i, v in final.items()}
+    mapping, by_item = w.mapping(), locked["labels"]
+    for cls, chosen_items in chosen.items():  # the set as locked, on the labels it was locked with
+        if any(F.reference_class(by_item[i]) != cls for i in chosen_items):
+            raise SystemExit("the locked set is not its locked labels' classes")
     strata = {i: F.strata(items[i]["reading"], by_item[i], w.letters_map) for i in every}
     rules = cr.follow_rules().data["format_validation"]
     result = fv.acceptance(chosen, judged, strata, per_class=int(rules["per_class"]),

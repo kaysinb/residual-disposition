@@ -183,6 +183,29 @@ def test_the_review_is_every_dispute_and_the_seeded_tenth():
     assert not {"reading", "state", "role", "decoder"} & set(rows[0])
 
 
+def test_above_15_percent_disputes_the_review_keeps_those_that_can_change_class_or_difficulty():
+    letters = {"C": "eli5", "D": "tldr"}
+    few = {f"i{j}": {"disputed": ["categories"] if j < 3 else []} for j in range(20)}
+    many = {f"i{j}": {"disputed": ["categories"] if j < 4 else []} for j in range(20)}
+    assert not F.narrowed(few) and F.narrowed(many)  # 3/20 exactly is not above
+    base = row("i1", categories=["C"], specificity="A")
+    same_class = [base, base, row("i1", categories=["C"], specificity="B")]
+    assert not F.open_class_or_difficulty(same_class, "eli5", letters)
+    assert F.open_class_or_difficulty([base, base, row("i1", strict="avoids_behavior")], "eli5",
+                                      letters)  # fmt: skip
+    assert F.open_class_or_difficulty([base, base, row("i1", lenient="no")], "eli5", letters)
+    assert F.open_class_or_difficulty([base, base, row("i1", categories=["C", "D"])], "eli5",
+                                      letters)  # fmt: skip
+    assert F.open_class_or_difficulty([base, base, row("i1", specificity="category_only")],
+                                      "eli5", letters)  # fmt: skip
+    # the seeded tenth stays whatever is kept; a dispute not kept goes unreviewed
+    labels = {f"i{j}": {"disputed": ["specificity"] if j == 7 else []} for j in range(2000)}
+    mapping = {i: f"s#slot={i}" for i in labels}
+    tenth = set(F.review_set({i: {"disputed": []} for i in labels}, mapping, 2026103021))
+    assert set(F.review_set(labels, mapping, 2026103021, kept=set())) == tenth
+    assert "i7" in F.review_set(labels, mapping, 2026103021, kept={"i7"})
+
+
 def review_row(iid, **over):
     return {"item_id": iid, "strict": "names_behavior", "lenient": "yes", "categories": [],
             "specificity": "A", "note": "", **over}  # fmt: skip

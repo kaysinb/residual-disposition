@@ -526,3 +526,34 @@ def test_each_phase_s_approved_cells_are_its_planned_runs(monkeypatch):
     assert len(cells) == 6 and all(
         c["params"]["purpose"] == "kstar_calibration" and c["params"]["follow"] == line["binding"]
         and c["params"]["state"] == line["sham_s"] for c in cells.values())  # fmt: skip
+
+
+def test_the_plain_launches_commit_the_calibration_between_them(tmp_path, monkeypatch):
+    pod = runner()
+    record = {"status": "resolved", "budget": 150}
+    runs = []
+    ws = SimpleNamespace(store=SimpleNamespace(verify=lambda s: None))
+    monkeypatch.setattr(pod.F, "workspace", lambda line: ws)
+    monkeypatch.setattr(pod.F, "reference", lambda ws, line: {})
+    monkeypatch.setattr(pod.F, "data", lambda ws, line: None)
+    monkeypatch.setattr(pod.F, "calibrate", lambda ws, line, rules: dict(record))
+    monkeypatch.setattr(pod.F, "certify", lambda ws, line, rules, k: runs.append(k) or {"runs": 72})
+    monkeypatch.setattr(P, "certificate_controls", lambda ws, rules: {})
+    monkeypatch.setattr(pod.cr, "follow_b3", b3)
+    monkeypatch.setattr(pod.cr, "load_rules", lambda **kwargs: {})
+    out = tmp_path / "out"
+    name = "pun_intended_200"
+    assert pod.plain(name, "calibration", out, None) == 0 and not runs
+    manifest = out / "kstar_calibration.json"
+    assert json.loads(manifest.read_text()) == record
+    assert json.loads((out / "status.json").read_text()) == {"status": "completed"}
+    assert pod.plain(name, "certificate", out, manifest) == 0 and runs == [record]
+    assert json.loads((out / "certificate_blocks.json").read_text()) == {"runs": 72}
+    other = tmp_path / "other.json"
+    other.write_text(json.dumps({**record, "budget": 200}))
+    runs.clear()
+    with pytest.raises(ValueError, match="committed manifest"):
+        pod.plain(name, "certificate", out, other)
+    assert not runs  # no cell runs on another calibration
+    assert json.loads((out / "status.json").read_text()) == {"status": "failed",
+                                                             "cause": "ValueError"}  # fmt: skip

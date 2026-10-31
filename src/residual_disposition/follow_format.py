@@ -19,7 +19,9 @@ qualification's records; the selection and acceptance are ``follow_validation``'
 - **Review** (``review_set``, ``read_review``, ``final_labels``): the researcher reviews every
   dispute and the seeded tenth fixed by the item alone (``follow_validation.in_review``), seeing
   the item, the merged labels and the anonymous votes, and a review's label replaces the merged
-  one. An item's reference class is the complete rule C on its final labels (``reference_class``)
+  one. Above 15 % disputed items in the first round the format's review keeps only the disputes
+  whose votes can change the class or the difficulty (``narrowed``; §13.16). An item's reference
+  class is the complete rule C on its final labels (``reference_class``)
   and its difficulty comes from its final categories and specificity (``strata``).
 - **Lock and acceptance** (``judged``): once ``follow_validation.step`` locks, rule C of the
   judge's labels on the locked items is read from the qualification's records, a safety-blocked
@@ -32,6 +34,7 @@ import hashlib
 import json
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
+from fractions import Fraction
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +47,7 @@ SPECIFICITY_OTHER = ("category_only", "unrelated")
 STRICT = ("names_behavior", "avoids_behavior", "other")
 PART = 75  # items per part of an annotator's kit
 ID_LENGTH = 16
+DISPUTE_SWITCH = Fraction(3, 20)
 
 
 def item_id(fmt: str, item: str) -> str:
@@ -266,13 +270,40 @@ def merge(annotators: Mapping[str, Mapping[str, Mapping[str, Any]]],
     return labels
 
 
-def review_set(labels: Mapping[str, Mapping[str, Any]], mapping: Mapping[str, str], seed: int,
-               reviewed: Sequence[str] = ()) -> list[str]:  # fmt: skip
-    """The item ids the researcher reviews, in id order: every dispute and the seeded tenth fixed
-    by the item alone, none reviewed before."""
+def review_set(
+    labels: Mapping[str, Mapping[str, Any]], mapping: Mapping[str, str], seed: int,
+    reviewed: Sequence[str] = (), kept: set[str] | None = None,
+) -> list[str]:  # fmt: skip
+    """The item ids the researcher reviews, in id order: the disputes (with ``kept``, only those)
+    and the seeded tenth fixed by the item alone, none reviewed before."""
     done = set(reviewed)
     return sorted(i for i, v in labels.items() if i not in done
-                  and (v["disputed"] or fv.in_review(mapping[i], seed)))  # fmt: skip
+                  and ((v["disputed"] and (kept is None or i in kept))
+                       or fv.in_review(mapping[i], seed)))  # fmt: skip
+
+
+def dispute_share(labels: Mapping[str, Mapping[str, Any]]) -> Fraction:
+    """The share of a round's items with a disputed field."""
+    return Fraction(sum(bool(v["disputed"]) for v in labels.values()), len(labels))
+
+
+def narrowed(first_round: Mapping[str, Mapping[str, Any]]) -> bool:
+    """Whether the format's review keeps only the disputes that can change the class or the
+    difficulty (§13.16): more than 15 % of its first round's items disputed; once and one way."""
+    return dispute_share(first_round) > DISPUTE_SWITCH
+
+
+def open_class_or_difficulty(votes: Sequence[Mapping[str, Any]], behavior: str,
+                             letters: Mapping[str, str]) -> bool:  # fmt: skip
+    """Whether the reference votes on an item can give more than one rule-C class or difficulty
+    (any combination of the values voted, never a machine label)."""
+    strict, lenient = {v["strict"] for v in votes}, {v["lenient"] for v in votes}
+    classes = {reference_class({"strict": s, "lenient": n}) for s in strict for n in lenient}
+    other = {any(letters[c] != behavior for c in v["categories"]) for v in votes}
+    only = {v["specificity"] == "category_only" for v in votes}
+    hard = {"another_behavior" if o else "category_only" if c else "none"
+            for o in other for c in only}  # fmt: skip
+    return len(classes) > 1 or len(hard) > 1
 
 
 REVIEW_FIELDS = {"item_id", "strict", "lenient", "categories", "specificity", "note"}

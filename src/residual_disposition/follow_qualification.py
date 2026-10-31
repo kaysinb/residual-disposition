@@ -32,8 +32,9 @@
 - **Floors** (``floors``), each pooled once over the two streams (160 slots), as exact fractions:
   D* per behavior and decoder R(A) ≥ 7/10, R(H) ≤ 1/10, R(A) − R(H) ≥ 3/5 and R(recipe) ≥
   7/10 · R(A) (eli5's two recipe controls each), and A's fidelity branches R ≤ 1/10; unfiltered PD
-  R(A) ≥ 7/10 and R(recipe) ≥ 7/10 · R(A). A behavior failing on either decoder is ineligible for
-  D*. A reading with an unresolved slot leaves everything it enters pending. The registered
+  R(A) ≥ 7/10 and R(recipe) ≥ 7/10 · R(A). D*'s eligibility is the state decoder's floors and the
+  fidelity branches; the base decoder's floors govern only the secondary corroboration (§13.16).
+  A reading with an unresolved slot leaves everything it enters pending. The registered
   safety blocks are kept beside them, descriptive (``reading_count``'s b, b_yes and interval;
   ``upper_rates`` and the floors at those rates), never selecting a verdict.
 """
@@ -579,6 +580,7 @@ def floors(rates: Mapping[tuple, Any], rules: Mapping[str, Any]) -> dict[str, An
             )
             name = behavior + ("_cont" if recipe == "recipe_cont" else "")
             out[name] = {"dstar": {**dstar, "fidelity": fidelity,
-                                   "eligible": all_of([*dstar.values(), fidelity])},
+                                   "eligible": all_of([dstar["state"], fidelity]),
+                                   "corroboration": dstar["base"]},
                          "pd_unfiltered": pd_ok}  # fmt: skip
     return out
