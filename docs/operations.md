@@ -1935,6 +1935,30 @@ new reader request to L, H_s or X, PD included, and before any certificate run.
   response, key, retry history and tier, and its labels are reused only as admitted there. A
   reused hypothesis counts once. Pools built on 2026-10-30 are read only by new readings.
 
+## Follow-up: the existing L packages' random branches
+
+D*'s analysis readings name the random-direction branch of five existing L lens packages
+(word_count_claim 200, countdown 50, tldr 400, example_link 200 and eli5 continued 200), which
+they do not hold. One session builds them (`configs/continuation/follow_lrandom.yaml`, frozen by
+`continuation_rules.FOLLOW_LRANDOM_FROZEN`; `scripts/pod/follow_lrandom.py
+experiments/continuation_14b/word_count_claim --space <space> --out <new directory>`), as the
+packages of 2026-10-30 were (`follow_build.execute`, M0's runtime, the same checks of placement,
+runtime and adapters before any GPU work):
+
+- the session's builds are exactly the packages B3's inventory names
+  (`follow_build.lrandom_problems`), each L at its package's recorded state and seed;
+- each behavior's A is rebuilt first as a reference; per L, its state means by the production
+  path must reproduce its package's stored means at both layers and its δ̄ the qualification
+  path's, both to 2⁻⁸, before its random branch is read through the state decoder along its
+  package's seeded directions;
+- the existing package runs are never written.
+
+After the pull, `scripts/follow_lrandom.py runs/follow_lrandom/<run> --write` records the run,
+the frozen session, the result's sha256 and every built file's sha256 once in
+`manifests/follow_lrandom.json`, committed with the session's decision-log row; the inventories
+find a branch only through that record (`follow_inventory.random_branches`: the run directory
+exactly once under the runs root, every recorded file at its sha256 and no other).
+
 ## Artifact retention
 
 Before a costly campaign, record which states/seeds and matched controls to retain, why, storage

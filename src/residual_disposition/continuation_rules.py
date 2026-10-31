@@ -1365,3 +1365,32 @@ def follow_b3() -> dict[str, Any]:
         raise ValueError("barrier B3 is not frozen yet: no reader request to L, H_s or X and no "
                          "certificate run is sent")  # fmt: skip
     return load_follow_b3(expected_hash=FOLLOW_B3_FROZEN)
+
+
+# The existing L packages' random-branch session (configs/continuation/follow_lrandom.yaml) and its
+# frozen sha256 (``follow_hash`` of its ``lrandom`` mapping): set by the commit that freezes it;
+# until then that session is not run.
+FOLLOW_LRANDOM_PATH = CONFIG_ROOT / "continuation" / "follow_lrandom.yaml"
+FOLLOW_LRANDOM_FROZEN: str | None = None
+
+
+def load_follow_lrandom(path: str | Path = FOLLOW_LRANDOM_PATH, *,
+                        expected_hash: str | None = None) -> dict[str, Any]:  # fmt: skip
+    """The random-branch session's configuration: its references, builds, runtime, layers and
+    record; with ``expected_hash``, refused when changed."""
+    data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
+    lrandom = data["lrandom"]
+    if set(lrandom) != {"runtime", "layers", "references", "builds", "record"}:
+        raise ValueError(f"the random-branch session names {sorted(lrandom)}")
+    digest = follow_hash(lrandom)
+    if expected_hash is not None and digest != expected_hash:
+        raise ValueError(f"the random-branch session changed: sha256 {digest} != {expected_hash}")
+    return lrandom
+
+
+def follow_lrandom() -> dict[str, Any]:
+    """The random-branch session for execution: checked against ``FOLLOW_LRANDOM_FROZEN``;
+    refused while that is unset."""
+    if FOLLOW_LRANDOM_FROZEN is None:
+        raise ValueError("the random-branch session is not frozen yet: it is not run")
+    return load_follow_lrandom(expected_hash=FOLLOW_LRANDOM_FROZEN)

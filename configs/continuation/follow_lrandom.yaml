@@ -1,0 +1,41 @@
+# The random-direction branch of the five existing L lens packages that D*'s analysis readings
+# name (preregistration §13.4, §13.5 (c); barriers B2 and B3: "random branch of <run>"), built in
+# one session as the packages of 2026-10-30 were (follow_build.execute, M0's runtime): each
+# behavior's A rebuilt first as a reference; per L, its state means recomputed by the production
+# path and checked against its package's stored means at both layers, and its δ̄ against the
+# qualification path, both to 2⁻⁸; its random directions those of its package's recorded seed;
+# its readings through the state decoder. The existing package runs are never written. Frozen by
+# continuation_rules.FOLLOW_LRANDOM_FROZEN; read by scripts/pod/follow_lrandom.py; the session's
+# output is bound by its record (manifests/follow_lrandom.json, scripts/follow_lrandom.py), never
+# found by a name.
+lrandom:
+  runtime:                       # M0's frozen runtime, as the builds' (follow_build.yaml)
+    model: {name: Qwen/Qwen3-14B, revision: 40c069824f4251a91eefaf281ebe4c544efd3e18,
+            dtype: bfloat16}
+    corpus: {dataset: science-of-finetuning/fineweb-1m-sample,
+             revision: 60b53a86b84eb6559e4407b113356f56a152318f,
+             files: [data/train-00000-of-00007.parquet, data/train-00001-of-00007.parquet],
+             column: text}
+    sequences: {count: 10000, tokens: 128}
+    layers: [20, 30]
+    experiment: experiments/continuation_14b/word_count_claim
+  layers: {decisive: 20, read: [20, 30]}
+  references:                    # each behavior's A, rebuilt first; never read
+    - {behavior: word_count_claim, role: A, state: s008b0fae04af22f9}
+    - {behavior: countdown, role: A, state: s82de0bcca5866e3c}
+    - {behavior: tldr, role: A, state: s596f2f12d45f53a4}
+    - {behavior: example_link, role: A, state: s11c92132dd9839ce}
+    - {behavior: eli5, role: A, state: s46157d0cf7a1b951}
+  builds:                        # the packages' L, random branch only
+    - {behavior: word_count_claim, lineage: word_count_claim stack 200, role: L,
+       state: sd0151f852c848a60, package: 20261025-163944-adl_lens_package-1486c22a-c30e,
+       branches: [random]}
+    - {behavior: countdown, lineage: countdown stack 50, role: L, state: sc8d1bcd21bf65f35,
+       package: 20261026-172453-adl_lens_package-dc532975-f384, branches: [random]}
+    - {behavior: tldr, lineage: tldr stack 400, role: L, state: sf2c5d20ed61c1691,
+       package: 20261026-134911-adl_lens_package-9bd2c1fc-c8bd, branches: [random]}
+    - {behavior: example_link, lineage: example_link stack 200, role: L, state: sab16754d0858729b,
+       package: 20261016-005425-adl_lens_package-d1237f7d-1656, branches: [random]}
+    - {behavior: eli5, lineage: eli5 continued 200, role: L, state: s71890e0779caf9bc,
+       package: 20261025-180513-adl_lens_package-c1b2e941-3b6d, branches: [random]}
+  record: manifests/follow_lrandom.json

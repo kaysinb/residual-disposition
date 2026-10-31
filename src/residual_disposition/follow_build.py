@@ -520,3 +520,50 @@ def run_pools(out: Path, manifest: Mapping[str, Any], pools: Sequence[Mapping[st
     result = {"status": "complete", "pools": done}
     write_json(out / "result.json", result)
     return result
+
+
+# ------------------------------------------------- the existing L packages' random branches
+
+
+def random_names(inventory: Mapping[str, Any]) -> list[str]:
+    """The existing packages whose random branch D*'s analysis readings name in B3's inventory
+    (``{"new": "random branch of <run>"}``), in order, once each."""
+    prefix = "random branch of "
+    names = [r["package"]["new"][len(prefix):] for r in inventory["dstar"]["analysis"]
+             if str((r.get("package") or {}).get("new", "")).startswith(prefix)]  # fmt: skip
+    return list(dict.fromkeys(names))
+
+
+def lrandom_problems(lrandom: Mapping[str, Any], names: Sequence[str], build: Mapping[str, Any],
+                     find_run: Callable[[str], Any], run_seed: int) -> list[str]:  # fmt: skip
+    """Why the random-branch session is not the one the records give: its builds are exactly the
+    packages ``names`` (B3's inventory), in order, each its package's L with the random branch
+    only, the package's recorded state and seed (``seeds``: the builder's, from the state id); its
+    references one A per behavior; its runtime and layers the builds' (``build``)."""
+    problems = plan_problems(lrandom["references"], lrandom["builds"])
+    if [b["package"] for b in lrandom["builds"]] != list(names):
+        problems.append(f"the builds are not B3's random branches {list(names)}")
+    for b in lrandom["builds"]:
+        if (b["role"], list(b["branches"])) != ("L", ["random"]):
+            problems.append(f"{b['state']}: not L's random branch alone")
+        run = find_run(b["package"])
+        if run is None:
+            problems.append(f"{b['package']}: not here")
+            continue
+        record = json.loads((Path(run) / "adl_lens_package.json").read_text())
+        if record["state"] != b["state"] or int(record["seed"]) != seeds(
+                run_seed, b["state"], [])["package"]:  # fmt: skip
+            problems.append(f"{b['package']}: not the package of {b['state']} at its seed")
+    if (dict(lrandom["runtime"]), dict(lrandom["layers"])) != (dict(build["runtime"]),
+                                                               dict(build["layers"])):  # fmt: skip
+        problems.append("the runtime or layers are not the builds'")
+    return problems
+
+
+def stored_means(run: Path, layers: Sequence[int]) -> dict[int, Any]:
+    """A package's stored state means per layer (``steps/extraction.safetensors``), which the
+    session's production path must reproduce for the same L."""
+    from safetensors.torch import load_file
+
+    stored = load_file(str(Path(run) / "steps" / "extraction.safetensors"))
+    return {int(x): stored[f"mean_{x}"] for x in layers}

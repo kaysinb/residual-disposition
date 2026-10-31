@@ -638,3 +638,26 @@ def b3_inventory(src: Mapping[str, Mapping[str, Any]], pd_src: Mapping[str, Mapp
     out["reuse"] = reuse(pd)
     out["sources"] = {"build": BUILD_SESSION, "confirmed": dict(confirmed)}
     return out
+
+
+LRANDOM_RECORD = "manifests/follow_lrandom.json"
+
+
+def random_branches(record: Mapping[str, Any], root: Path | None = None) -> dict[str, dict]:
+    """The new random branches by the name the inventories give them (``"random branch of
+    <package>"``), each bound by its record (``manifests/follow_lrandom.json``): the session's run
+    directory found exactly once under the runs root, and in it every recorded file at its sha256
+    and no other. A name pattern never finds one; a second matching directory is refused."""
+    root = runs_root() if root is None else Path(root)
+    found = sorted(root.glob(f"*/{record['run']}"))
+    if len(found) != 1:
+        raise ValueError(f"{record['run']}: found {len(found)} times, not once")
+    out = {}
+    for state, b in record["builds"].items():
+        d = found[0] / b["dir"]
+        files = {str(p.relative_to(d)): _sha(p) for p in sorted(d.rglob("*")) if p.is_file()}
+        if files != dict(b["files"]):
+            raise ValueError(f"{state}'s random branch is not its recorded files")
+        out[f"random branch of {b['package']}"] = {"build": record["run"], "state": state,
+                                                    "dir": b["dir"]}  # fmt: skip
+    return out
