@@ -57,8 +57,6 @@ def lines(l_count=70, *, skip=(), **kw):
     rows = []
     for behavior, mode in [*((b, "stack") for b in STACK), ("eli5", "continued")]:
         for reader, decoder in (("dstar", "state"), ("dstar", "base"), ("pd_unfiltered", None)):
-            if behavior == "countdown" and decoder == "base":
-                continue
             for role in ("L", "H_s", "X"):
                 if (behavior, role, decoder) in skip:
                     continue
@@ -66,7 +64,13 @@ def lines(l_count=70, *, skip=(), **kw):
                 rows.append(row(reader, behavior, mode, role, decoder, n,
                                 **(kw if role == "L" else {})))  # fmt: skip
         rows.append(row("dstar", behavior, mode, "L", "random", 2))
-    return rows
+    rows.append(row("dstar", "eli5", "continued", "L", "base_random", 2))
+    return [*rows, *controls()]
+
+
+def controls(failing=(), counted=0):
+    return [row("dstar", b, None, "A", branch, 20 if b in failing else counted)
+            for b in STACK for branch in D.BASE_BRANCHES for _ in D.STREAMS]  # fmt: skip
 
 
 def floors(failing=("countdown",)):
@@ -85,13 +89,17 @@ def run(rows, accepted=True, validated=True, fl=None):
                       follow_rules().data["readers"], definitions)  # fmt: skip
 
 
-def test_the_readings_are_b3s_without_countdowns_base_decoder():
+def test_the_readings_are_b3s_and_the_base_decoders_controls():
     rows = D.readings(CONFIRMED)
-    assert len({r["salt"] for r in rows}) == len(rows) == 67
+    assert len({r["salt"] for r in rows}) == len(rows) == 49 + 21 + 24 + 1
     countdown = {(r["role"], r["decoder"]) for r in rows
                  if r["behavior"] == "countdown" and r["reader"] == "dstar"}  # fmt: skip
-    assert countdown == {("L", "state"), ("H_s", "state"), ("X", "state"), ("L", "random")}
-    assert sum(r["reader"] == "pd_unfiltered" for r in rows) == 21
+    assert {("L", "base"), ("H_s", "base"), ("X", "base"), ("L", "state"), ("L", "random"),
+            ("A", "base_random"), ("A", "base_no_patch")} <= countdown  # fmt: skip
+    fidelity = [r for r in rows if r["decoder"] in D.BASE_BRANCHES and r["role"] == "A"]
+    assert {r["behavior"] for r in fidelity} == set(STACK)
+    assert {r["stream"] for r in fidelity} == {1, 2}
+    assert not any(r["package"]["base_control"].startswith("follow") for r in fidelity)
 
 
 def test_a_reused_slot_reads_only_its_recorded_answers():
@@ -108,54 +116,105 @@ def test_a_reused_slot_reads_only_its_recorded_answers():
         D._read_back(history, Cache({}), parse_hypothesis, "s")
 
 
-def test_the_family_holds_six_and_countdown_is_exploratory():
+def test_the_two_decoders_are_two_families_and_countdown_is_closed_only_on_the_state_decoder():
     out = run(lines(70))
     assert out["pending"] is False
-    dstar = out["holm"]["dstar"]
-    assert dstar["rejected"] == sorted(b for b in STACK if b != "countdown")
-    assert "countdown" in out["holm"]["pd_unfiltered"]["rejected"]  # its PD entry is untouched
+    assert out["holm"]["dstar_state"]["rejected"] == sorted(b for b in STACK if b != "countdown")
+    assert out["holm"]["dstar_base"]["rejected"] == sorted(STACK)  # its base controls hold
+    assert "countdown" in out["holm"]["pd_unfiltered"]["rejected"]
     entry = out["lines"]["countdown"]
-    assert entry["exploratory"] is True
-    assert not any(entry["dstar/state"]["decisions"].values())
-    assert any(entry["dstar/state"]["contrasts_without_gates"].values())  # reported beside it
-    assert "countdown" not in out["holm"]["dstar_corroboration"]["rejected"]
+    assert entry["exploratory_on_state_decoder"] is True
+    assert not any(entry["dstar_state"]["decisions"].values())
+    assert any(entry["dstar_state"]["contrasts_without_gates"].values())  # reported beside it
+    assert any(entry["dstar_base"]["decisions"].values())
+    assert not any(entry["both_decoders"].values())  # reported, deciding nothing
+
+
+def test_the_base_decoders_controls_close_only_its_own_family():
+    rows = [r for r in lines(70) if r["reading"]["decoder"] not in D.BASE_BRANCHES]
+    out = run([*rows, *controls(failing=("tldr",))])
+    assert out["base_fidelity"]["tldr"]["passed"] is False  # 20 of 80 in each stream
+    assert "tldr" not in out["holm"]["dstar_base"]["rejected"]
+    assert "tldr" in out["holm"]["dstar_state"]["rejected"]
+    pending = [*rows, *controls()]
+    pending[-1]["count"] = {"pending": ["slot 0"], "unresolved": 1}
+    open_control = run(pending)
+    assert open_control["pending"] is True
+    assert open_control["lines"]["word_count_claim"]["dstar_base"]["decisions"] is not None
+    assert open_control["holm"]["dstar_base"] is None  # the open control's line holds the family
 
 
 def test_category_confusion_gates_and_zero_counted_fails():
     out = run(lines(70, margin=False))
-    assert out["holm"]["dstar"]["rejected"] in ([], ["tldr"])  # only the behavior named holds
-    assert not any(out["lines"]["word_count_claim"]["dstar/state"]["decisions"].values())
+    assert not any(out["lines"]["word_count_claim"]["dstar_state"]["decisions"].values())
     zero = run(lines(0))
-    assert zero["lines"]["tldr"]["dstar/state"]["margins"]["passed"] is False
+    assert zero["lines"]["tldr"]["dstar_state"]["margins"]["passed"] is False
 
 
 def test_a_failed_format_or_qualification_closes_a_line_but_not_another_reader():
     closed = run(lines(70), accepted=False)
-    assert closed["holm"]["dstar"]["rejected"] == []
+    assert closed["holm"]["dstar_state"]["rejected"] == []
+    assert closed["holm"]["dstar_base"]["rejected"] == []
     assert closed["holm"]["pd_unfiltered"]["rejected"]
     out = run(lines(70), fl=floors(("countdown", "tldr")))
-    assert "tldr" not in out["holm"]["dstar"]["rejected"]
+    assert "tldr" not in out["holm"]["dstar_state"]["rejected"]
+    assert "tldr" in out["holm"]["dstar_base"]["rejected"]
 
 
 def test_rung_one_needs_its_random_cell_and_level():
-    assert run(lines(70))["rung1"]["passed"] is True
+    both = run(lines(70))["rung1"]
+    assert both["state"]["passed"] is True and both["base"]["passed"] is True
     rows = lines(70)
     for r in rows:
         x = r["reading"]
         if (x["behavior"], x["mode"], x["decoder"]) == ("eli5", "continued", "random"):
             r["count"]["counted"] = 9
-    assert run(rows)["rung1"]["passed"] is False
+    apart = run(rows)["rung1"]  # each decoder's test on its own random cell
+    assert apart["state"]["passed"] is False and apart["base"]["passed"] is True
 
 
-def test_a_specific_claim_needs_the_advantage_and_a_validated_grader():
+def test_a_specificity_satisfied_needs_the_advantage_and_a_validated_grader():
     out = run(lines(70))
-    assert out["lines"]["tldr"]["dstar/state"]["specific_claim"] is True
-    assert (
-        run(lines(70), validated=False)["lines"]["tldr"]["dstar/state"]["specific_claim"] is False
-    )
+    assert out["lines"]["tldr"]["dstar_state"]["specificity_satisfied"] is True
+    plain = run(lines(70), validated=False)["lines"]["tldr"]["dstar_state"]
+    assert plain["specificity_satisfied"] is False
     category = run(lines(70, feature=False))
-    assert category["lines"]["tldr"]["dstar/state"]["specific_claim"] is False
-    assert category["holm"]["dstar"]["rejected"]  # category recognition still counts as such
+    assert category["lines"]["tldr"]["dstar_state"]["specificity_satisfied"] is False
+    assert category["holm"]["dstar_state"]["rejected"]  # category recognition still counts as such
+
+
+def test_an_open_grade_is_pending_never_a_negative():
+    rows = lines(70)
+    for r in rows:
+        x = r["reading"]
+        if (x["behavior"], x["mode"], x["role"], x["decoder"]) == (
+                "eli5", "continued", "L", "state"):  # fmt: skip
+            del r["slots"][0]["grades"]["category"]
+        if (x["behavior"], x["role"], x["decoder"]) == ("tldr", "L", "state"):
+            del r["slots"][0]["grades"]["category"]
+    out = run(rows)
+    assert out["pending"] is True
+    assert "state" not in out["rung1"]  # it neither advances nor records a non-identification
+    assert out["rung1"]["base"]["passed"] is True  # the other decoder's test stands
+    assert out["lines"]["tldr"]["dstar_state"]["decisions"] is None
+    assert out["holm"]["dstar_state"] is None
+    assert out["holm"]["pd_unfiltered"] is not None  # another family is untouched
+
+
+def test_an_open_specificity_grade_is_not_a_failed_category_test():
+    rows = lines(70)
+    for r in rows:
+        x = r["reading"]
+        if (x["behavior"], x["role"], x["decoder"]) == ("tldr", "L", "state"):
+            del r["slots"][0]["grades"]["specificity"]
+    out = run(rows)["lines"]["tldr"]["dstar_state"]
+    assert out["gates_passed"] is True and any(out["decisions"].values())
+    assert out["specificity_satisfied"] is None
+
+
+def test_the_specificity_criterion_is_not_a_claim_on_an_ineligible_line():
+    out = run(lines(70))["lines"]["countdown"]["dstar_state"]
+    assert out["specificity_satisfied"] is True and not any(out["decisions"].values())
 
 
 def test_a_pending_reading_leaves_the_record_pending():
@@ -163,7 +222,7 @@ def test_a_pending_reading_leaves_the_record_pending():
     rows[0]["count"] = {"pending": ["slot 0"], "unresolved": 1}
     out = run(rows)
     assert out["pending"] is True
-    assert out["lines"][rows[0]["reading"]["behavior"]]["dstar/state"]["decisions"] is None
+    assert out["lines"][rows[0]["reading"]["behavior"]]["dstar_state"]["decisions"] is None
 
 
 def test_the_specificity_grader_is_validated_on_kinds():
@@ -179,3 +238,40 @@ def test_the_specificity_grader_is_validated_on_kinds():
     assert not F.grader_validation(bad, ref, votes, kinds)["specificity"]["passed"]
     missing = {**good, "i0": None}
     assert not F.grader_validation(missing, ref, votes, kinds)["specificity"]["passed"]
+
+
+def test_the_base_controls_read_as_the_state_decoders_branch_through_the_base_decoder(tmp_path):
+    import torch
+
+    from residual_disposition import adl_lens
+    from residual_disposition import follow_build as B
+    from residual_disposition.seeding import derive_seed
+
+    delta = torch.ones(5, 8)
+    pinned = {"pkg": {x: {"delta": delta, "norm": 7.0} for x in (20, 30)}}
+    packages = [{"behavior": "tldr", "run": "pkg", "state": "s1", "seed": 123,
+                 "branches": ["base_random", "base_no_patch"]}]  # fmt: skip
+    calls = []
+
+    def read(sid, vectors, *, norm, layer, decoder, root, prefix):
+        calls.append((sid, vectors.clone(), norm, layer, decoder, prefix))
+        for p in range(5):
+            d = root / prefix / f"p{p}"
+            d.mkdir(parents=True)
+            (d / "logit_lens.json").write_text("{}")
+            (d / "patchscope.json").write_text("[]")
+
+    def no_patch(sid, *, root, prefix):
+        f = root / f"{prefix}.json"
+        f.parent.mkdir(parents=True)
+        f.write_text("[]")
+
+    out = B.execute_base_controls(tmp_path / "out", {"m": 1}, packages=packages, layers=[20, 30],
+                                  pinned=pinned, read=read, no_patch=no_patch)  # fmt: skip
+    assert out["status"] == "complete"
+    assert sorted(out["packages"]["pkg"]["files"]) == B.base_control_files(
+        [20, 30], ["base_random", "base_no_patch"])  # fmt: skip
+    for x, (_, vectors, norm, layer, decoder, prefix) in zip((20, 30), calls, strict=True):
+        want = adl_lens.random_directions(delta, derive_seed(123, "adl_lens", x, "random"))
+        assert torch.equal(vectors, want)  # the state decoder's branch's directions
+        assert (norm, layer, decoder, prefix) == (7.0, x, "base", f"layer{x}/base_random")

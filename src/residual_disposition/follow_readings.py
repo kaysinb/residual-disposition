@@ -2,21 +2,25 @@
 step 2, §13.16), on the API from recorded packages only.
 
 - **Readings** (``readings``): B3's analysis inventory (``manifests/follow_b3_inventory.json``) at
-  the committed confirmations, without countdown's base-decoder readings: D*'s reading of countdown
-  is the fixed exploratory one of §13.16. Unfiltered PD's reused readings (the inventory's ``reuse``
-  map) are read back, every attempt at its recorded sha256 (``reused_slots``), never asked again.
+  the committed confirmations, with the base decoder's controls on A beside it
+  (``base_fidelity_readings``). Unfiltered PD's reused readings (the inventory's ``reuse`` map) are
+  read back, every attempt at its recorded sha256 (``reused_slots``), never asked again.
 - **Requests and labels:** as the qualification's (``follow_qualification``): 80 slots per reading,
   the frozen interpreter and judges, each attempt admitted at its tier.
 - **Grades** (``grades``): each counted hypothesis of an L reading on the state or base decoder, or
   of unfiltered PD, graded by ``category-v1`` and ``specificity-v1`` on the standard tier, each with
   its one retry.
-- **Analysis** (``analysis``): per reader the identification test of §13.5 (c) at the certified
-  regions, gated by the reader's qualification and format validation and by category confusion
-  (§13.5 (b)); Holm over the six partial-threshold lineages, countdown's D* entry at p = 1 (§13.16)
-  and reported beside it as exploratory; the base decoder's corroboration in its own family; rung 1
-  on eli5 continued 200 (§13.6: level 1/60, the random cell at most 8 of 80). A specific claim needs
-  a validated specificity grader and the defining-feature advantage (``specific``); category
-  recognition is reported as such. A pending slot leaves everything it enters pending.
+- **Analysis** (``analysis``): the state decoder and the base decoder are two instruments of equal
+  standing, each with its own Holm family over the six partial-threshold lineages, unfiltered PD a
+  third: the identification test of §13.5 (c) at the certified regions, gated by that instrument's
+  qualification and controls, its format validation and category confusion (§13.5 (b)). Countdown's
+  state-decoder entry stays at p = 1 with its fixed exploratory reading beside it (§13.16); its
+  base-decoder entry follows the ordinary rules. Both decoders' agreement is reported per line and
+  decides nothing. Rung 1 on eli5 continued 200 runs on both decoders, each with its own gates and
+  test (level 1/60, its random cell at most 8 of 80 through that decoder). The specificity criterion
+  (a validated grader and the defining-feature advantage) is reported apart from the decision: a
+  specific claim needs both it and the family's rejection; category recognition is reported as such.
+  A pending slot, grade or control leaves everything it enters pending, never a negative.
 """
 
 from __future__ import annotations
@@ -29,13 +33,17 @@ from typing import Any
 
 from . import follow_qualification as Q
 
-EXPLORATORY = "countdown"  # §13.16: D*'s test has p = 1, one fixed reading outside every family
+EXPLORATORY = "countdown"  # §13.16: its state-decoder entry at p = 1, one fixed reading beside it
 RUNG_LEVEL = Fraction(1, 60)
 RANDOM_MAX = 8  # of 80: §13.6's gate on a rung's random cell
+BASE_CONTROLS = "manifests/follow_base_controls.json"  # the base decoder's controls' record
+BASE_BRANCHES = ("base_random", "base_no_patch")
+STREAMS = (1, 2)  # the base decoder's controls, pooled once as the state decoder's
 
 
 def readings(confirmed: Mapping[str, int], repo: Path | None = None) -> list[dict[str, Any]]:
-    """The analysis readings at the confirmed doses, D*'s then unfiltered PD's (see the module)."""
+    """The analysis readings at the confirmed doses, D*'s then unfiltered PD's, then the base
+    decoder's controls on A."""
     from . import continuation_rules as cr
     from . import follow_inventory as fi
     from .paths import REPO_ROOT
@@ -43,9 +51,94 @@ def readings(confirmed: Mapping[str, int], repo: Path | None = None) -> list[dic
     path = (repo or REPO_ROOT) / cr.follow_b3()["inventory"]["manifest"]
     manifest = json.loads(path.read_text())
     parts = fi.resolve({k: manifest[k] for k in ("dstar", "pd_unfiltered")}, confirmed)
-    return [r for r in (*parts["dstar"]["analysis"], *parts["pd_unfiltered"]["analysis"])
-            if not (r["reader"] == "dstar" and r["behavior"] == EXPLORATORY
-                    and r["decoder"] == "base")]  # fmt: skip
+    return [*parts["dstar"]["analysis"], *parts["pd_unfiltered"]["analysis"],
+            *base_fidelity_readings(repo)]  # fmt: skip
+
+
+def _ladder_l(repo: Path | None = None) -> dict[str, str]:
+    """Eli5 continued 200's L package and state, as B3's inventory names them (rung 1's cell)."""
+    from . import continuation_rules as cr
+    from .paths import REPO_ROOT
+
+    path = (repo or REPO_ROOT) / cr.follow_b3()["inventory"]["manifest"]
+    manifest = json.loads(path.read_text())
+
+    def of(rows: Sequence[Mapping[str, Any]], decoder: str | None) -> Mapping[str, Any]:
+        wanted = ("eli5", "continued", "L", decoder)
+        return next(r["package"] for r in rows
+                    if (r["behavior"], r["mode"], r["role"], r["decoder"]) == wanted)  # fmt: skip
+
+    return {"run": of(manifest["dstar"]["analysis"], "state")["run"],
+            "state": of(manifest["pd_unfiltered"]["analysis"], None)["state"]}  # fmt: skip
+
+
+def _a_packages(repo: Path | None = None) -> dict[str, dict[str, str]]:
+    """Each behavior's A package and state, as B2's frozen inventory names them."""
+    from . import continuation_rules as cr
+    from .paths import REPO_ROOT
+
+    path = (repo or REPO_ROOT) / cr.follow_b2()["inventory"]["manifest"]
+    manifest = json.loads(path.read_text())
+    runs = {r["behavior"]: r["package"]["run"] for r in manifest["dstar"]["qualification"]
+            if (r["role"], r["decoder"], r["stream"]) == ("A", "state", 1)}  # fmt: skip
+    pd = manifest["pd_unfiltered"]["qualification"]
+    states = {r["behavior"]: r["package"]["state"] for r in pd
+              if (r["role"], r["stream"]) == ("A", 1)}  # fmt: skip
+    return {b: {"run": runs[b], "state": states[b]} for b in sorted(runs)}
+
+
+def base_fidelity_readings(repo: Path | None = None) -> list[dict[str, Any]]:
+    """The base decoder's controls on A: random directions and no patch, two streams of 80."""
+    rows = [{"reader": "dstar", "behavior": b, "role": "A", "decoder": branch, "stream": stream,
+             "purpose": "fidelity", "mode": None, "dose": None, "if_confirmed": None, "slots": 80,
+             "package": {"base_control": p["run"]},
+             "salt": f"follow/dstar/fidelity/{b}/A/{branch}/stream{stream}"}
+            for b, p in _a_packages(repo).items() for branch in BASE_BRANCHES
+            for stream in STREAMS]  # fmt: skip
+    rows.append({"reader": "dstar", "behavior": "eli5", "role": "L", "decoder": "base_random",
+                 "stream": 1, "purpose": "analysis", "mode": "continued", "dose": 200,
+                 "if_confirmed": None, "slots": 80,
+                 "package": {"base_control": _ladder_l(repo)["run"]},
+                 "salt": "follow/dstar/analysis/eli5/continued200/L/base_random/stream1"})
+    return rows
+
+
+def base_control_packages(find_run: Callable[[str], Any],
+                          repo: Path | None = None) -> list[dict[str, Any]]:  # fmt: skip
+    """Each A package, and eli5 continued's L (its rung 1's random cell through the base decoder),
+    with its behavior, state, recorded seed and branches, for the Pod's session."""
+    planned = [(b, p, BASE_BRANCHES) for b, p in _a_packages(repo).items()]
+    planned.append(("eli5", _ladder_l(repo), ("base_random",)))
+    out = []
+    for b, p, branches in planned:
+        record = json.loads((Path(find_run(p["run"])) / "adl_lens_package.json").read_text())
+        if record["state"] != p["state"]:
+            raise ValueError(f"{p['run']}: not the package of {p['state']}")
+        out.append({"behavior": b, "run": p["run"], "state": p["state"],
+                    "seed": int(record["seed"]), "branches": list(branches)})  # fmt: skip
+    return out
+
+
+def base_controls(find_run: Callable[[str], Any], repo: Path | None = None) -> dict[str, Path]:
+    """Each A package's base-control directory, bound by the committed record: exactly its
+    recorded files, each at its sha256."""
+    import hashlib
+
+    from .manifests import committed_json
+    from .paths import REPO_ROOT
+
+    root = repo or REPO_ROOT
+    record = committed_json(root / BASE_CONTROLS, "the base decoder's controls' record", repo)
+    run = Path(find_run(record["run"]))
+    out = {}
+    for name, p in record["packages"].items():
+        d = run / p["dir"]
+        files = {str(f.relative_to(d)): hashlib.sha256(f.read_bytes()).hexdigest()
+                 for f in sorted(d.rglob("*")) if f.is_file()}  # fmt: skip
+        if files != dict(p["files"]):
+            raise ValueError(f"{name}: its base controls are not their recorded files")
+        out[name] = d
+    return out
 
 
 def expected_states(rows: Sequence[Mapping[str, Any]]) -> dict[tuple, str]:
@@ -56,13 +149,17 @@ def expected_states(rows: Sequence[Mapping[str, Any]]) -> dict[tuple, str]:
 
 def package_dir(reading: Mapping[str, Any], find_run: Callable[[str], Any],
                 expected: Mapping[tuple, str], workspace: Callable[[str], Any],
-                branches: Callable[[], Mapping[str, Mapping[str, str]]]) -> Path:  # fmt: skip
+                branches: Callable[[], Mapping[str, Mapping[str, str]]],
+                controls: Callable[[], Mapping[str, Path]]) -> Path:  # fmt: skip
     """A reading's evidence directory: a random branch through its committed record
-    (``follow_inventory.random_branches``), a build through the build session's directory with
-    its record naming the state, an existing package or pool as the qualification binds it."""
+    (``follow_inventory.random_branches``), a base control through its own (``base_controls``), a
+    build through the build session's directory with its record naming the state, an existing
+    package or pool as the qualification binds it."""
     from . import follow_inventory as fi
 
     p = reading["package"]
+    if "base_control" in p:
+        return controls()[p["base_control"]]
     if "new" in p:
         found = branches()[p["new"]]
         return Path(find_run(found["build"])) / found["dir"]
@@ -177,28 +274,31 @@ def history_of(slot: Mapping[str, Any]) -> dict[str, Any]:
 def margins(slots: Sequence[Mapping[str, Any]], behavior: str, definition: Any,
             rules: Mapping[str, Any]) -> dict[str, Any]:  # fmt: skip
     """An L reading's category confusion and defining-feature advantage over its counted
-    hypotheses (§13.5 (b); §12.3.4), None while a grade is open. Zero counted hypotheses fail."""
+    hypotheses (§13.5 (b); §12.3.4), each None while one of its grades is open, the two apart.
+    Zero counted hypotheses fail."""
     from .continuation_judge import category_confusion, specificity_margin
     from .continuation_readers import counted
 
-    chosen = [s for s in slots if counted(s["labels"]["strict"]["value"][0],
-                                          s["labels"]["lenient"]["value"])]  # fmt: skip
-    grades_ = [s.get("grades") for s in chosen]
-    if any(g is None or "value" not in g["category"] or "value" not in g["specificity"]
-           for g in grades_):  # fmt: skip
-        return {"category": None, "specificity": None, "passed": None}
-    confusion = category_confusion([g["category"]["value"] for g in grades_], behavior)
-    feature = specificity_margin([g["specificity"]["value"][0] for g in grades_], definition)
-    minimum = Fraction(rules["specificity_min"])
-    return {"counted": len(chosen),
-            "category": {"correct": str(confusion.correct), "best_other": confusion.best_other,
-                         "best_other_share": str(confusion.best_other_share),
-                         "margin": str(confusion.margin)},
-            "passed": bool(chosen) and confusion.margin >= Fraction(rules["confusion_min"]),
-            "specificity": {"feature": str(feature.correct), "best_alternative": feature.best_other,
-                            "best_alternative_share": str(feature.best_other_share),
-                            "advantage": str(feature.margin)},
-            "specific": bool(chosen) and feature.margin >= minimum}  # fmt: skip
+    def yes(s: Mapping[str, Any]) -> bool:
+        return counted(s["labels"]["strict"]["value"][0], s["labels"]["lenient"]["value"])
+
+    chosen = [s.get("grades") or {} for s in slots if yes(s)]
+    out: dict[str, Any] = {"counted": len(chosen), "category": None, "passed": None,
+                           "specificity": None, "specific": None}  # fmt: skip
+    if all("value" in (g.get("category") or {}) for g in chosen):
+        confusion = category_confusion([g["category"]["value"] for g in chosen], behavior)
+        out["category"] = {"correct": str(confusion.correct), "best_other": confusion.best_other,
+                           "best_other_share": str(confusion.best_other_share),
+                           "margin": str(confusion.margin)}  # fmt: skip
+        out["passed"] = bool(chosen) and confusion.margin >= Fraction(rules["confusion_min"])
+    if all("value" in (g.get("specificity") or {}) for g in chosen):
+        feature = specificity_margin([g["specificity"]["value"][0] for g in chosen], definition)
+        out["specificity"] = {"feature": str(feature.correct),
+                              "best_alternative": feature.best_other,
+                              "best_alternative_share": str(feature.best_other_share),
+                              "advantage": str(feature.margin)}  # fmt: skip
+        out["specific"] = bool(chosen) and feature.margin >= Fraction(rules["specificity_min"])
+    return out
 
 
 def line_name(behavior: str, mode: str) -> str:
@@ -220,6 +320,26 @@ def _line(rows: Mapping[tuple, Mapping[str, Any]], reader: str, behavior: str, m
             "by_level": {a: decided[a] for a in LEVELS}}  # fmt: skip
 
 
+def base_fidelity(rows: Sequence[Mapping[str, Any]], rules: Mapping[str, Any]) -> dict[str, Any]:
+    """Whether the base decoder's controls on each behavior's A hold, each pooled over its two
+    streams at most ``fidelity_max``; None while a slot is pending."""
+    fidelity_max = Fraction(rules["qualification"]["fidelity_max"])
+    pools: dict[str, dict[str, list]] = {}
+    for r in rows:
+        x = r["reading"]
+        if x["decoder"] in BASE_BRANCHES and x["role"] == "A":
+            pools.setdefault(x["behavior"], {}).setdefault(x["decoder"], []).append(r["count"])
+    out: dict[str, Any] = {}
+    for behavior, branches in pools.items():
+        rates = {b: None if any("counted" not in c for c in counts)
+                 else Fraction(sum(c["counted"] for c in counts), sum(c["n"] for c in counts))
+                 for b, counts in branches.items()}  # fmt: skip
+        out[behavior] = {"rates": {b: None if v is None else str(v) for b, v in rates.items()},
+                         "passed": None if None in rates.values()
+                         else all(v <= fidelity_max for v in rates.values())}  # fmt: skip
+    return out
+
+
 def analysis(
     rows: Sequence[Mapping[str, Any]], floors: Mapping[str, Any], accepted: Mapping[str, bool],
     validated: Mapping[str, bool], regions: Any, rules: Mapping[str, Any],
@@ -230,75 +350,79 @@ def analysis(
     from . import continuation_stats as cs
     from .follow_regions import ALPHA, LEVELS
 
+    fidelity = base_fidelity(rows, rules)
     by: dict[tuple, Mapping[str, Any]] = {}
     for r in rows:
         x = r["reading"]
-        by[(x["reader"], x["behavior"], x["mode"], x["role"], x["decoder"])] = r
+        if x["decoder"] not in BASE_BRANCHES or x["role"] == "L":
+            by[(x["reader"], x["behavior"], x["mode"], x["role"], x["decoder"])] = r
     lines = sorted({(x[1], x[2]) for x in by})
     never = dict.fromkeys(LEVELS, False)
-    out: dict[str, Any] = {"lines": {}}
-    families: dict[str, dict[str, dict]] = {"dstar": {}, "dstar_corroboration": {},
+    out: dict[str, Any] = {"lines": {}, "base_fidelity": fidelity}
+    families: dict[str, dict[str, dict]] = {"dstar_state": {}, "dstar_base": {},
                                             "pd_unfiltered": {}}  # fmt: skip
-    pending = False
+    pending = any(v["passed"] is None for v in fidelity.values())
     for behavior, mode in lines:
         name = line_name(behavior, mode)
+        q, pd_ok = floors[name]["dstar"], floors[name]["pd_unfiltered"]
+        held = (fidelity.get(behavior) or {}).get("passed")
+        base_ok = None if held is None else q["base_qualification"] and held
         entry: dict[str, Any] = {}
-        for reader, decoder in (("dstar", "state"), ("dstar", "base"), ("pd_unfiltered", None)):
+        for reader, decoder, family, eligible in (
+            ("dstar", "state", "dstar_state", q["eligible"]),
+            ("dstar", "base", "dstar_base", base_ok),
+            ("pd_unfiltered", None, "pd_unfiltered", pd_ok),
+        ):
             line = _line(by, reader, behavior, mode, decoder, regions)
             cell = by.get((reader, behavior, mode, "L", decoder))
             graded = None
             if cell is not None and "counted" in cell["count"]:
                 graded = margins(cell["slots"], behavior, definitions[behavior], rules)
-            f = floors[name]
-            q = f["dstar"]
-            eligible = (f["pd_unfiltered"] if reader == "pd_unfiltered"
-                        else q["eligible"] if decoder == "state"
-                        else q["eligible"] and q["base_qualification"])  # fmt: skip
             fmt = "pd_unfiltered" if reader == "pd_unfiltered" else "dstar"
-            gates = eligible and accepted[fmt] and bool(graded and graded.get("passed"))
-            if line["by_level"] is None:
-                decided = None
-                # countdown has no base-decoder reading by design: not a pending line
-                if not (behavior == EXPLORATORY and reader == "dstar" and decoder == "base"):
-                    pending = True
+            category = None if graded is None else graded["passed"]
+            # an open grade or control is pending: it neither advances nor records a negative
+            open_ = eligible is None or (eligible and accepted[fmt] and category is None)
+            gates = None if open_ else bool(eligible and accepted[fmt] and category)
+            decided = None
+            if line["by_level"] is None or open_:
+                pending = True
             else:
                 decided = line["by_level"] if gates else never
-            label = f"{reader}/{decoder}" if decoder else reader
-            entry[label] = {"counts": line["counts"], "eligible": eligible, "margins": graded,
-                            "gates_passed": gates,
-                            "decisions": None if decided is None
-                            else {str(a): v for a, v in decided.items()},
-                            "contrasts_without_gates": None if line["by_level"] is None
-                            else {str(a): v for a, v in line["by_level"].items()}}  # fmt: skip
-            if graded is not None:
-                entry[label]["specific_claim"] = bool(graded.get("specific")) and validated[fmt]
-            if mode != "stack":
-                continue
-            if reader == "pd_unfiltered":
-                families["pd_unfiltered"][behavior] = decided if decided is not None else never
-            elif decoder == "state":
-                entry["exploratory"] = behavior == EXPLORATORY
-                families["dstar"][behavior] = (never if behavior == EXPLORATORY or decided is None
-                                               else decided)  # fmt: skip
-        if mode == "stack" and "dstar/state" in entry:
-            state, base = entry["dstar/state"]["decisions"], entry["dstar/base"]["decisions"]
-            families["dstar_corroboration"][behavior] = (
-                never if behavior == EXPLORATORY or state is None or base is None
-                else {a: state[str(a)] and base[str(a)] for a in LEVELS})  # fmt: skip
-        random = by.get(("dstar", behavior, mode, "L", "random"))
-        if random is not None:
-            entry["random"] = random["count"].get("counted")
-            pending = pending or "counted" not in random["count"]
+            entry[family] = {"counts": line["counts"], "eligible": eligible, "margins": graded,
+                             "gates_passed": gates,
+                             "decisions": None if decided is None
+                             else {str(a): v for a, v in decided.items()},
+                             "contrasts_without_gates": None if line["by_level"] is None
+                             else {str(a): v for a, v in line["by_level"].items()}}  # fmt: skip
+            if graded is not None:  # the criterion alone: a claim needs the family's rejection too
+                met = graded["specific"]
+                entry[family]["specificity_satisfied"] = (None if met is None
+                                                          else met and validated[fmt])  # fmt: skip
+            if mode == "stack":
+                families[family][behavior] = decided
+        state, base = entry["dstar_state"]["decisions"], entry["dstar_base"]["decisions"]
+        both = None if state is None or base is None else {
+            str(a): state[str(a)] and base[str(a)] for a in LEVELS}  # fmt: skip
+        entry["both_decoders"] = both
+        entry["exploratory_on_state_decoder"] = behavior == EXPLORATORY
+        for label, branch in (("random", "random"), ("base_random", "base_random")):
+            random = by.get(("dstar", behavior, mode, "L", branch))
+            if random is not None:
+                entry[label] = random["count"].get("counted")
+                pending = pending or "counted" not in random["count"]
         out["lines"][name] = entry
     out["pending"] = pending
-    out["holm"] = {k: cs.holm_from_decisions(v, ALPHA) for k, v in families.items()
-                   if len(v) == len(LEVELS)}  # fmt: skip
+    out["holm"] = {k: None if any(d is None for d in v.values())
+                   else cs.holm_from_decisions(v, ALPHA)
+                   for k, v in families.items() if len(v) == len(LEVELS)}  # fmt: skip
     rung = out["lines"].get("eli5_cont")
-    if rung is not None and rung["dstar/state"]["decisions"] is not None:
-        state, base = rung["dstar/state"], rung["dstar/base"]
-        random_ok = rung.get("random") is not None and rung["random"] <= RANDOM_MAX
-        passed = bool(state["decisions"][str(RUNG_LEVEL)]) and random_ok
-        corroborated = bool(base["decisions"] and base["decisions"][str(RUNG_LEVEL)])
-        out["rung1"] = {"passed": passed, "random": rung.get("random"),
-                        "corroborated": passed and corroborated}  # fmt: skip
+    if rung is not None:  # both decoders, each with its own test; an open one is absent
+        out["rung1"] = {}
+        for ladder, family, cell in (("state", "dstar_state", "random"),
+                                     ("base", "dstar_base", "base_random")):  # fmt: skip
+            decided = rung[family]["decisions"]
+            if decided is None or rung.get(cell) is None:
+                continue
+            passed = bool(decided[str(RUNG_LEVEL)]) and rung[cell] <= RANDOM_MAX
+            out["rung1"][ladder] = {"passed": passed, "random": rung[cell]}
     return out

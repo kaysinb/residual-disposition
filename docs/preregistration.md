@@ -3445,7 +3445,8 @@ k\* or certificate run.
   - These are adequacy floors at 70 %, not evidence that the reader meets the former 80 %
     standard.
 - **Rungs 2 and 3:** one qualification set per rung (§13.6).
-  - A and H are shared by both modes. Each mode has its own recipe control.
+  - A and H are shared by both modes; at a rung run on two decoders, they are qualified once per
+    decoder. Each mode has its own recipe control.
   - 160 pooled, the same floors.
   - At rung 3 the comparator is qualified alike. Its failure is reported, does not change the
     rung's decision and is not evidence that internal access wins.
@@ -4168,3 +4169,47 @@ for strata.
   withdrawn without labels (`<DATA_DIR>/follow_format/dstar/withdrawn-round1`: only its order from
   the frozen seed).
 
+**The two decoders as equal instruments (added 2026-10-31).** This was decided after the
+qualification's counts were opened and before any reading of L, H_s or X. The state decoder and the
+base decoder are two instruments of equal standing: under this amendment, neither is primary in the
+partial-threshold comparison, and both are tested and reported. This replaces H3, what §13.5 (c) and
+§13.5 (d) say of the two decoders' roles and families, the family mappings of
+`configs/continuation/follow_rules.yaml`, and the countdown paragraph's sentence on the base decoder.
+
+1. Each decoder has its own Holm family over the six partial-threshold behaviors, at the same levels,
+   with its own floors. The families are separate, not statistically independent, and they are two
+   separate conclusions: no 5 % guarantee covers "at least one decoder". Whether both decoders
+   identify a behavior (p_both) is reported per behavior and carries no separate weight in a
+   conclusion.
+2. Countdown's recipe control failed on the state decoder: its p = 1 stays in that decoder's family,
+   with the fixed exploratory reading as written. It passed on the base decoder (A 154, H 0, recipe
+   156 of 160), so its test there follows the ordinary rules. Countdown is the only behavior whose
+   status this changes, and that was seen when this was decided; the report states so. The same judge
+   serves both decoders; its miss rate on countdown's broad category need not be equal across them.
+3. The base decoder's controls on each A: random directions (the same directions as the state
+   decoder's branch, at the package's η) and no patch, read through the base decoder, each pooled
+   over two streams of 80, R ≤ 1/10. Failing either closes that behavior in the base decoder's
+   family only.
+4. In each full-threshold mode, up to six prespecified decoder-by-rung tests may run, each at 1/60.
+   Both decoders run at rung 1. Before opening any results of a later rung, the researcher records
+   its decoder set and the reason, using earlier results. Each test uses fresh interpreter streams
+   and the frozen scoring, controls and sample sizes. All tests already launched are completed and
+   reported; pending work does not advance. After any fully gated identification, no later rung is
+   launched in that mode. Completed tests are not repeated. The report gives the tested sequence and
+   realized count; the procedure's familywise upper bound is 6/60 per mode, not the realized count
+   divided by 60. No joint 5 % claim or decoder-superiority claim is made. When the decoder changes
+   between rungs, the later rung's added access is not credited with the difference. This replaces
+   §13.6's state decoder at rungs 2 and 3. Inventories, salts and cache keys are specific to the
+   decoder when a rung is reached on it.
+5. Rung 1 on eli5 continued 200 runs on both decoders, each with its own gates and its own test at
+   1/60; its random cell is read through that decoder, at most 8 of 80. The base decoder's random
+   cell is added for this L alone; a stack candidate's, if it is read, is built then.
+6. Format validation at rungs 2 and 3: one per rung, covering the decoders run at that rung, on
+   their qualification readings in one seeded order, with at least 150 items of each class from each
+   decoder when there are two. A short frame is supplemented one stream at a time, streams 3 to 6 in
+   order, A, H and the recipe control of those decoders alike, until both classes can be filled; the
+   stop of the stratum search above applies. One decoder's readings hold 480 hypotheses, so 400 +
+   400 then needs at least 320 more. With two decoders, errors are reported by decoder and a pooled
+   pass covers the mixture only.
+7. The report states per decoder what was identified. Any thought on why a decoder failed is marked
+   as a hypothesis.

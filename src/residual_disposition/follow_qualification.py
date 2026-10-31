@@ -52,6 +52,7 @@ from typing import Any
 SLOTS = 80
 DSTAR_DECODERS = ("state", "base")
 FIDELITY = ("random", "no_patch")
+NO_PATCH = ("no_patch", "base_no_patch")  # the two decoders' no-patch branches
 KINDS = {"dstar": "lens", "pd_unfiltered": "pd"}
 
 
@@ -287,8 +288,8 @@ def evidence(reading: Mapping[str, Any], directory: Path) -> str:
 
     if reading["reader"] == "pd_unfiltered":
         return follow_pd.evidence(follow_pd.pool_rows(directory))
-    if reading["decoder"] == "no_patch":
-        return R.render_no_patch(directory, runs_root())[0]
+    if reading["decoder"] in NO_PATCH:
+        return R.render_no_patch(directory, runs_root(), reading["decoder"])[0]
     return R.render(directory, reading["decoder"], runs_root())[0]
 
 
@@ -299,7 +300,7 @@ def prompt_and_settings(reading: Mapping[str, Any]) -> tuple[Any, Any]:
 
     prompt, settings = readers.interpreter(KINDS[reading["reader"]])
     if reading["reader"] == "dstar":
-        prompt = R.no_patch_prompt() if reading["decoder"] == "no_patch" else R.prompt()
+        prompt = R.no_patch_prompt() if reading["decoder"] in NO_PATCH else R.prompt()
     return prompt, settings
 
 

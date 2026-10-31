@@ -710,6 +710,54 @@ def execute_random(out: Path, manifest: Mapping[str, Any], *,
     return result
 
 
+def base_control_files(layers: Sequence[int], branches: Sequence[str],
+                       positions: int = 5) -> list[str]:  # fmt: skip
+    """One package's base-decoder controls: its complete file inventory."""
+    out = [f"steps/layer{x}/base_random/p{p}/{f}" for x in layers for p in range(positions)
+           for f in ("logit_lens.json", "patchscope.json")]  # fmt: skip
+    if "base_no_patch" in branches:
+        out += [f"steps/layer{x}/base_no_patch/patchscope.json" for x in layers]
+    return sorted(out)
+
+
+def execute_base_controls(out: Path, manifest: Mapping[str, Any], *,
+                          packages: Sequence[Mapping[str, Any]], layers: Sequence[int],
+                          pinned: Mapping[str, Mapping[int, Mapping[str, Any]]],
+                          read: Callable[..., Any], no_patch: Callable[..., Any],
+                          ) -> dict[str, Any]:  # fmt: skip
+    """The base decoder's controls (§13.16), from each package's pinned sources: the directions of
+    its branch ``random`` (the pinned δ̄ at the package's recorded seed, the same derivation), at
+    the pinned η, read through the base decoder; and, on each A, Patchscope with no patch through
+    the base decoder. Each package's output sits under ``packages/<run>``; the existing package
+    runs are never written."""
+    import hashlib
+
+    def digest(f: Path) -> str:
+        return hashlib.sha256(f.read_bytes()).hexdigest()
+
+    out.mkdir(parents=True, exist_ok=False)
+    write_json(out / "manifest.json", manifest)
+    made: dict[str, Any] = {}
+    for p in packages:
+        d = out / "packages" / p["run"]
+        root = d / "steps"
+        for x in layers:
+            direction = derive_seed(int(p["seed"]), "adl_lens", x, "random")
+            vectors = random_directions(pinned[p["run"]][x]["delta"], direction)
+            read(p["state"], vectors, norm=pinned[p["run"]][x]["norm"], layer=x, decoder="base",
+                 root=root, prefix=f"layer{x}/base_random")  # fmt: skip
+            if "base_no_patch" in p["branches"]:
+                no_patch(p["state"], root=root, prefix=f"layer{x}/base_no_patch/patchscope")
+        files = {str(f.relative_to(d)): digest(f) for f in sorted(d.rglob("*")) if f.is_file()}
+        if sorted(files) != base_control_files(layers, p["branches"]):
+            raise ValueError(f"{p['run']}: not its complete base-control files")
+        made[p["run"]] = {"behavior": p["behavior"], "state": p["state"], "files": files}
+        write_json(out / "progress.json", {"done": sorted(made)})
+    result = {"status": "complete", "packages": made}
+    write_json(out / "result.json", result)
+    return result
+
+
 def random_files(layers: Sequence[int], positions: int = 5) -> list[str]:
     """A random-only build's complete file inventory."""
     return sorted(["build.json", *(f"production-layer{x}.safetensors" for x in layers),

@@ -32,6 +32,7 @@ SCALES = (0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 
           5.0, 10.0, 20.0, 40.0, 60.0, 80.0, 100.0, 120.0, 140.0, 160.0, 180.0, 200.0)  # fmt: skip
 LOGIT_K, PATCH_K = 100, 20
 DECODERS = ("state", "base", "random")
+BASE_CONTROL = "base_random"  # the base decoder's control on A (§13.16)
 PROMPT_SHA256 = "4097a7d8ad25707c016eb7822db02e01000f5ca6728ed7ed9edc43660b1cf959"
 NO_PATCH_PROMPT_SHA256 = "0588dcf3d4cd3c350323956de15014c4ca1644b755223b81f9a9b3f27b9103ee"
 
@@ -142,7 +143,7 @@ def _overview(layers: dict, grid: list[float]) -> str:
 def render(run: Path, decoder: str, root: Path = REPO_ROOT) -> tuple[str, dict[str, str]]:
     """D*'s evidence of one package and decoder, and its source files' sha256 (paths relative to
     ``root``)."""
-    if decoder not in DECODERS:
+    if decoder not in (*DECODERS, BASE_CONTROL):
         raise ValueError(f"decoder {decoder!r} not in {DECODERS}")
     layers, sources = {}, {}
     for layer in LAYERS:
@@ -166,12 +167,14 @@ def render(run: Path, decoder: str, root: Path = REPO_ROOT) -> tuple[str, dict[s
     return _overview(layers, list(SCALES)), sources
 
 
-def render_no_patch(run: Path, root: Path = REPO_ROOT) -> tuple[str, dict[str, str]]:
+def render_no_patch(run: Path, root: Path = REPO_ROOT,
+                    name: str = "no_patch") -> tuple[str, dict[str, str]]:  # fmt: skip
     """The no-patch control's evidence: per layer its one stored Patchscope result (scale 1,
-    shared by every position) and no logit lens, in D*'s shape."""
+    shared by every position) and no logit lens, in D*'s shape (``name``: the state decoder's
+    branch or the base decoder's)."""
     layers, sources = {}, {}
     for layer in LAYERS:
-        f = run / "steps" / f"layer{layer}" / "no_patch" / "patchscope.json"
+        f = run / "steps" / f"layer{layer}" / name / "patchscope.json"
         sweep = json.loads(f.read_text())
         if [round(float(s), 1) for s, _, _ in sweep] != [1.0] or len(sweep[0][1]) != PATCH_K:
             raise ValueError(f"{f}: not one scale-1 result of {PATCH_K} tokens")

@@ -6,7 +6,8 @@ step 2, §13.16), on the API from recorded packages only (``residual_disposition
 Without a flag it prints the plan and the due requests with their estimate, and checks the readings
 against their committed pins when they exist. ``--pin`` writes every reading's package directory,
 evidence sha256 and keys once (``manifests/follow_readings_inputs.json``), to be committed before
-any request; it needs the random branches' committed record. ``--send`` sends only with the pins
+any request; it needs the committed records of the random branches and of the base decoder's
+controls. ``--send`` sends only with the pins
 committed and unchanged: every due interpreter attempt, every due label of the parsed hypotheses,
 then every due grade of an L reading's counted hypotheses, each once and cached, in one run, so that
 the cells compared within a reading share one window of time; on the meter item ``follow/base``'s
@@ -22,7 +23,6 @@ from __future__ import annotations
 import argparse
 import atexit
 import collections
-import functools
 import hashlib
 import json
 import sys
@@ -53,7 +53,7 @@ def inventory_reuse() -> dict[str, Any]:
 
 def plan() -> list[dict[str, Any]]:
     """Every reading with its package directory, evidence's sha256, attempts or reuse decision."""
-    from functools import lru_cache
+    from functools import cache
 
     from residual_disposition import follow_inventory as fi
     from residual_disposition import pipeline as P
@@ -66,15 +66,16 @@ def plan() -> list[dict[str, Any]]:
     expected = D.expected_states(rows)
     reuse = inventory_reuse()
 
-    @functools.cache
+    @cache
     def workspace(behavior: str) -> Any:
         config = f"experiments/continuation_14b/{behavior}"
         return P.Workspace(load_config(config, ["tracking.wandb.enabled=false"]))
 
-    branches = lru_cache(maxsize=None)(fi.random_branches)
+    branches = cache(fi.random_branches)
+    controls = cache(lambda: D.base_controls(find_run))
     out = []
     for r in rows:
-        directory = D.package_dir(r, find_run, expected, workspace, branches)
+        directory = D.package_dir(r, find_run, expected, workspace, branches, controls)
         text = Q.evidence(r, directory)
         decision = reuse.get(r["salt"]) or {}
         out.append({"reading": r, "directory": str(directory),

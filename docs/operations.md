@@ -2074,10 +2074,11 @@ and `ensemble`, on the qualification's hypotheses (`residual_disposition.follow_
 --judge-history RUN]`, records under `runs/follow_readings/<run>`), run after the random branches'
 committed record:
 
-- **Readings:** B3's analysis inventory at the confirmations, without countdown's base-decoder
-  readings: D*'s reading of countdown is the fixed exploratory one (L, H_s and X on the state decoder,
-  L with a random direction). Unfiltered PD's reused readings are read back, each attempt at its
-  recorded sha256, and never asked again.
+- **Readings:** B3's analysis inventory at the confirmations, with the base decoder's controls on
+  each A (`scripts/pod/follow_base_controls.py` on one Pod, then `scripts/follow_base_controls.py
+  runs/follow_base_controls/<run> --write` commits their record, `manifests/follow_base_controls.json`).
+  Unfiltered PD's reused readings are read back, each attempt at its recorded sha256, and never
+  asked again.
 - **Requests:** as the qualification's: the pins committed first, one run, so the cells compared
   within a reading share one window of time.
 - **Grades:** each counted hypothesis of an L reading graded by `category-v1` and `specificity-v1` on
@@ -2085,10 +2086,12 @@ committed record:
   the locked items first (`graders.json`: κ ≥ 0.7, the alternative-annotator test, category agreement
   beside it); unvalidated, specificity is descriptive and no specific claim follows.
 - **Record** (`readings.json`, not printed): each reading's count, the identification test at the
-  certified regions, the gates (qualification, format validation, category confusion), Holm over the
-  six partial-threshold lineages per reader with countdown's D* entry at p = 1, the base decoder's
-  corroboration in its own family, rung 1 on eli5 continued 200 at 1/60 with its random cell at most
-  8 of 80. Category recognition and identification of the specific behavior are reported apart. On a
+  certified regions, each instrument's gates (qualification and controls, format validation, category
+  confusion), a Holm family over the six partial-threshold lineages for the state decoder, the base
+  decoder and unfiltered PD, countdown at p = 1 in the state decoder's with its exploratory reading
+  beside it, both decoders' agreement per line, rung 1 on eli5 continued 200 per decoder at 1/60 with
+  its random cell at most 8 of 80 through that decoder. Category recognition and identification of the
+  specific behavior are reported apart. On a
   strict label blocked twice the slot stays pending; the blind completion of §13.16 is done by hand.
 
 ## Follow-up: a certificate line after the readings
