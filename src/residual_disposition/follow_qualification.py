@@ -8,7 +8,9 @@
   validation-only readings of H, always generated. A new package is bound before anything is
   rendered to its entry in the frozen build configuration (its behavior, lineage, role and state)
   and to the build session's records at their pinned sha256 (``new_packages``), never by a name
-  pattern; only the packages these readings name are read (L, H_s and X are B3's). The evidence
+  pattern; only the packages these readings name are read (L, H_s and X are B3's). An existing
+  lens package must be the approved cell of its role's state as the inventory gives it
+  (``lens_problems``), a PD pool a completed pool of its state. The evidence
   of every reading is pinned once, committed, before any request (``pins``): a changed evidence
   never makes new requests for a slot.
 - **Evidence** (``evidence``): D*'s rendering of the package through the reading's decoder
@@ -189,11 +191,59 @@ def pool_problems(name: str, state: str, find_run: Callable[[str], Any], P: Any,
         raise ValueError(f"{name}: " + "; ".join(found))
 
 
+def expected_states(readings: Sequence[Mapping[str, Any]]) -> dict[tuple[str, str], str]:
+    """Each existing package's state by (behavior, role), as B2's frozen inventory gives it for
+    unfiltered PD (the same readers records give D*'s lens packages of those roles); a role
+    given two states is refused."""
+    out: dict[tuple[str, str], str] = {}
+    for r in readings:
+        if r["reader"] == "pd_unfiltered" and "new" not in r["package"]:
+            key, state = (r["behavior"], r["role"]), r["package"]["state"]
+            if out.setdefault(key, state) != state:
+                raise ValueError(f"{key}: two states in the inventory")
+    return out
+
+
+def lens_problems(reading: Mapping[str, Any], run: Path, state: str,
+                  workspace: Callable[[str], Any]) -> None:  # fmt: skip
+    """Refuse an existing lens package that is not its role's approved cell of ``state``: its
+    saved config's hash recomputed equal to its meta's, a lens package of that state (its config
+    and its record), and the approved cell its readers' lookup makes
+    (``pipeline._stage3_lens_cell``: the identity and hash exactly); a package that lookup does
+    not make here (Stage 1's dose packages) must be the one Stage 1's readings record names for
+    that behavior, role and state (``follow_inventory.STAGE1_READINGS``)."""
+    import csv
+
+    from . import continuation_readers as readers
+    from . import follow_inventory as fi
+    from . import pipeline as P
+    from .paths import runs_root
+
+    what = f"{reading['behavior']} {reading['role']}'s lens package"
+    config = readers._saved_config(run, what)
+    package = json.loads((run / "adl_lens_package.json").read_text())
+    if config.get("step") != "adl_lens_package" or (config.get("params") or {}).get(
+            "state") != state or package.get("state") != state:  # fmt: skip
+        raise ValueError(f"{run.name}: not a lens package of {state} ({what})")
+    role = "recipe" if reading["role"] == "recipe_cont" else reading["role"]
+    cell, _ = P._stage3_lens_cell(workspace(reading["behavior"]), role, state)
+    if cell is not None and cell.done:
+        readers._saved_config(run, what, cell)  # the approved cell's hash and identity
+        return
+    rows = list(csv.DictReader((runs_root() / fi.STAGE1_READINGS).open()))
+    if not any((r["behavior"], r["role"], r["tool_run_id"], r["state_id"])
+               == (reading["behavior"], role, run.name, state) for r in rows):  # fmt: skip
+        raise ValueError(f"{run.name}: not the approved cell of {what}")
+
+
 def package_dir(reading: Mapping[str, Any], find_run: Callable[[str], Any],
-                new: Mapping[str, Mapping[str, dict]]) -> Path:  # fmt: skip
+                new: Mapping[str, Mapping[str, dict]],
+                expected: Mapping[tuple[str, str], str] | None = None,
+                workspace: Callable[[str], Any] | None = None) -> Path:  # fmt: skip
     """The directory a reading's evidence is read from: a new package only through ``new``
-    (``new_packages``, bound and checked); an existing one its run, completed, a PD pool of the
-    inventory's state."""
+    (``new_packages``, bound and checked); an existing one its run, completed: a PD pool of the
+    inventory's state, a lens package the approved cell of its role's ``expected`` state
+    (``lens_problems``, with the behavior's ``workspace``)."""
     import yaml
 
     from . import follow_inventory as fi
@@ -218,6 +268,11 @@ def package_dir(reading: Mapping[str, Any], find_run: Callable[[str], Any],
                  or {}).get("state")  # fmt: skip
         if meta.get("status") != "completed" or (kind == "pd" and state != p["state"]):
             raise ValueError(f"{reading['salt']}: {name} is not the completed package it names")
+        if kind == "lens":
+            want = (expected or {}).get((reading["behavior"], reading["role"]))
+            if want is None or workspace is None:
+                raise ValueError(f"{reading['salt']}: no expected state for its lens package")
+            lens_problems(reading, run, want, workspace)
     return run
 
 

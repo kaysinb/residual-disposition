@@ -1948,8 +1948,11 @@ the API from recorded packages only (`residual_disposition.follow_qualification`
   configuration (behavior, lineage, role, state) and to the build session's records at their
   pinned sha256: a lens build of exactly that state, complete and checked, its record the same
   and its vector files at the recorded sha256; a PD pool of exactly that state, its run
-  completed and whole. The session's other packages are never read; an existing package's run
-  must be completed (a PD pool of the inventory's state).
+  completed and whole. The session's other packages are never read. An existing package's run
+  must be completed: a PD pool of the inventory's state; a lens package the approved cell of its
+  role's state as the inventory gives it (its saved config's hash recomputed, a lens package of
+  that state, the readers' cell lookup's hash and identity; Stage 1's dose packages the one its
+  readings record names).
 - **Pins:** `--pin` writes every reading's package directory, evidence sha256 and slot keys
   once (`manifests/follow_qualification_inputs.json`), committed before any request; `--send`
   refuses readings that are not their pins, so a changed evidence never makes new requests.
@@ -1964,17 +1967,19 @@ the API from recorded packages only (`residual_disposition.follow_qualification`
   blocks included). Any other reply leaves its slot pending and is never asked again.
 - **Histories:** every slot's attempts (interpreter, strict, lenient: key, entry sha256,
   recorded and admitted tier, parse; rejected replies included) are recorded before and after
-  the sends, and each run first checks that every answer recorded earlier is still in the cache
-  unchanged; an attempt missing while a later one is answered is refused. Nothing is redrawn.
+  the sends, and every answer is journaled as it is stored (`answers.jsonl`, synced at once).
+  Before the run and before each round, every answer recorded so far must still be in the cache
+  unchanged, and a key recorded with two entries is refused; an attempt missing while a later
+  one is answered is refused. Nothing is redrawn.
 - **Money:** every send is reserved on `follow/base`'s API session at its tier's price, the
   run's limit checked on the standard tier's worst case; the dry run's figures (the due
   requests' estimate, the judging's projection on a probe hypothesis) are not bounds; the
   decision log reports the actual spending.
 - **Record** (`runs/follow_qualification/<run>`: `inputs.json`, `tier_fallback.jsonl`,
-  `histories-before.json`, `histories.json`, `qualification.json`): each reading's counted
-  hypotheses of its 80 slots (pending while one is unresolved) with its safety blocks (b, b_yes
-  and the interval [c/80, (c + b_yes)/80], descriptive, with the rates and floors at the upper
-  ends), each pool's rate over its two streams (160 slots) and the floors per
+  `histories-before.json`, `answers.jsonl`, `histories.json`, `qualification.json`): each
+  reading's counted hypotheses of its 80 slots (pending while one is unresolved) with its safety
+  blocks (b, b_yes and the interval [c/80, (c + b_yes)/80], descriptive, with the rates and
+  floors at the upper ends), each pool's rate over its two streams (160 slots) and the floors per
   lineage on exact fractions: D* per decoder R(A) ≥ 7/10, R(H) ≤ 1/10, R(A) − R(H) ≥ 3/5 and
   R(recipe) ≥ 7/10 · R(A) (eli5's two recipe controls each), A's fidelity branches R ≤ 1/10;
   unfiltered PD R(A) ≥ 7/10 and R(recipe) ≥ 7/10 · R(A).

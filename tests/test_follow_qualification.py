@@ -334,3 +334,81 @@ def test_the_interpreter_reads_on_flex_with_fallback_the_judge_on_standard(monke
     factors = s.tier_factors()
     assert interp.price_factor == factors["flex"] < factors["standard"] == judge.price_factor
     assert interp.tier_factors == factors  # each attempt priced at the tier it is sent on
+
+
+def lens_run(root, state, step="adl_lens_package"):
+    import yaml
+    from omegaconf import OmegaConf
+
+    from residual_disposition.config import config_hash
+
+    run = root / f"lens-{state}"
+    run.mkdir(parents=True)
+    config = {"step": step, "params": {"state": state}}
+    (run / "config.yaml").write_text(yaml.safe_dump(config))
+    meta = {"status": "completed", "config_hash": config_hash(OmegaConf.create(config))}
+    (run / "meta.json").write_text(json.dumps(meta))
+    (run / "adl_lens_package.json").write_text(json.dumps({"state": state}))
+    return run, config, meta["config_hash"]
+
+
+def test_an_existing_lens_package_is_its_role_s_approved_cell(tmp_path, monkeypatch):
+    from omegaconf import OmegaConf
+
+    from residual_disposition import follow_inventory as fi
+    from residual_disposition import pipeline as P
+
+    good, config, digest = lens_run(tmp_path, "sA")
+    wrong, _, _ = lens_run(tmp_path, "sL")  # an A directory whose saved config names L
+    reading = {"reader": "dstar", "behavior": "eli5", "role": "A", "salt": "s",
+               "package": {"run": "x"}}  # fmt: skip
+    expected = {("eli5", "A"): "sA"}
+    cell = SimpleNamespace(done=True, digest=digest, cfg=OmegaConf.create(config))
+    monkeypatch.setattr(P, "_stage3_lens_cell", lambda ws, role, sid: (cell, None))
+
+    def at(run):
+        return Q.package_dir(reading, lambda n: run, {}, expected, lambda b: None)
+
+    assert at(good) == good
+    with pytest.raises(ValueError, match="not a lens package of sA"):
+        at(wrong)
+    with pytest.raises(ValueError, match="no expected state"):
+        Q.package_dir({**reading, "role": "H"}, lambda n: good, {}, expected, lambda b: None)
+    other = SimpleNamespace(done=True, digest="0" * 12, cfg=OmegaConf.create(config))
+    monkeypatch.setattr(P, "_stage3_lens_cell", lambda ws, role, sid: (other, None))
+    with pytest.raises(ValueError, match="not the approved cell"):
+        at(good)
+    # no approved cell made here: Stage 1's readings record must name it
+    monkeypatch.setattr(P, "_stage3_lens_cell", lambda ws, role, sid: (None, None))
+    rows = tmp_path / "readings.csv"
+    rows.write_text(f"behavior,role,dose,tool_run_id,state_id\neli5,A,,{good.name},sA\n")
+    monkeypatch.setattr(fi, "STAGE1_READINGS", str(rows))
+    assert at(good) == good
+    rows.write_text(f"behavior,role,dose,tool_run_id,state_id\neli5,H,,{good.name},sA\n")
+    with pytest.raises(ValueError, match="not the approved cell"):
+        at(good)
+
+
+def test_every_stored_answer_is_journaled_at_once_and_never_taken_for_unanswered(tmp_path):
+    from residual_disposition.judge import ChatRequest, Completion
+
+    s = script()
+    root = tmp_path / "runs"
+    run = root / "run-1"
+    run.mkdir(parents=True)
+    cache = s.JournaledCache(tmp_path / "cache", run / "answers.jsonl", "interpreter")
+    request = ChatRequest("k1", "summary", "v", {"b": 1})
+    cache.put(request, Completion("I will.", "stop", {"completion_tokens": 3}),
+              service_tier="flex")  # fmt: skip
+    line = json.loads((run / "answers.jsonl").read_text())
+    assert (line["key"], line["tier"]) == ("k1", "flex")
+    caches = {"summary": cache, "judge": Cache({})}
+    s.reconcile(root, caches)  # the answer is there
+    cache.path("k1").unlink()  # lost after the run, before its histories were written
+    with pytest.raises(SystemExit, match="lost or changed"):
+        s.reconcile(root, caches)
+    other = root / "run-2"
+    other.mkdir()
+    (other / "answers.jsonl").write_text(json.dumps({**line, "sha256": "0" * 64}) + "\n")
+    with pytest.raises(SystemExit, match="two entries"):
+        s.previous_histories(root)

@@ -26,7 +26,10 @@ The judge reads on the standard tier, as B2 fixes it. A tier is never part of a 
 key or salt: it is recorded with each cached answer. The run directory
 (``runs/follow_qualification/<run>``) holds the inputs, every slot's attempts before and after
 the sends (``histories-before.json``, ``histories.json``: interpreter, strict and lenient, each
-attempt's key, entry sha256, recorded and admitted tier and parse, rejected replies included) and
+attempt's key, entry sha256, recorded and admitted tier and parse, rejected replies included),
+every answer as it is stored (``answers.jsonl``, synced at once; before each round every answer
+recorded so far must still be in the cache, unchanged, and a key recorded with two entries is
+refused) and
 the record, recomputed from the cache: each reading's counted hypotheses with its safety blocks,
 the pooled rates, the floors and, descriptive, the rates and floors with the blocked lenient yes
 counted (``qualification.json``), pending while a slot is. An answer at a tier that is not
@@ -60,15 +63,26 @@ CHARS, THINKING, MARGIN, ANSWER = 2.2, 1455, 1.3, 40
 
 def plan() -> list[dict[str, Any]]:
     """Every reading with its package directory, evidence's sha256 and attempts."""
+    from residual_disposition import pipeline as P
+    from residual_disposition.config import load_config
     from residual_disposition.manifests import committed_json
 
     confirmed = committed_json(REPO_ROOT / "manifests" / "follow_confirmations.json",
                                "the confirmations")["confirmed"]  # fmt: skip
     readings = Q.readings(confirmed)
     new = Q.new_packages(Q.new_names(readings))  # bound before anything is rendered
+    expected, workspaces = Q.expected_states(readings), {}
+
+    def workspace(behavior: str) -> Any:
+        if behavior not in workspaces:
+            config = f"experiments/continuation_14b/{behavior}"
+            off = ["tracking.wandb.enabled=false"]
+            workspaces[behavior] = P.Workspace(load_config(config, off))
+        return workspaces[behavior]
+
     out = []
     for r in readings:
-        directory = Q.package_dir(r, find_run, new)
+        directory = Q.package_dir(r, find_run, new, expected, workspace)
         text = Q.evidence(r, directory)
         out.append({"reading": r, "directory": str(directory),
                     "evidence_sha256": hashlib.sha256(text.encode()).hexdigest(),
@@ -247,17 +261,61 @@ def histories(rows: list[dict[str, Any]]) -> dict[str, Any]:
             for row in rows for i, s in enumerate(row["slots"])}  # fmt: skip
 
 
+class JournaledCache(JudgeCache):
+    """A cache whose every stored answer is also appended at once to the run's journal
+    (``answers.jsonl``: the cache, the key and the entry's sha256 and tier), flushed and synced,
+    so that an interruption never loses what was answered."""
+
+    def __init__(self, root: Any, journal: Any, name: str) -> None:
+        super().__init__(root)
+        self.journal, self.name = journal, name
+
+    def put(self, request: Any, completion: Any, *, service_tier: str | None = None) -> None:
+        import os
+
+        from residual_disposition.judge import cache_entry_sha256
+
+        super().put(request, completion, service_tier=service_tier)
+        entry = self.entry(request.key)
+        line = {"cache": self.name, "key": request.key, "sha256": cache_entry_sha256(entry),
+                "tier": entry.get("service_tier")}  # fmt: skip
+        with self.journal.open("a") as f:
+            f.write(json.dumps(line) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+
+
 def previous_histories(root: Any) -> dict[str, Any]:
-    """The attempts every earlier run recorded, merged by slot and stage."""
+    """The attempts every earlier run recorded, by slot and stage (its histories) and in its
+    answers' journal (``answers.jsonl``, by cache); a key recorded with two entries is refused."""
     out: dict[str, dict[str, dict[str, Any]]] = {}
+    seen: dict[str, str] = {}
+
+    def keep(slot: str, stage: str, step: dict[str, Any], where: Any) -> None:
+        if seen.setdefault(step["key"], step["sha256"]) != step["sha256"]:
+            raise SystemExit(f"{step['key']}: recorded with two entries ({where})")
+        out.setdefault(slot, {}).setdefault(stage, {}).setdefault(step["key"], step)
+
     for path in sorted(root.glob("*/histories*.json")):
         for slot, stages in json.loads(path.read_text()).items():
             for stage, steps in stages.items():
-                kept = out.setdefault(slot, {}).setdefault(stage, {})
                 for step in steps:
-                    kept.setdefault(step["key"], step)
+                    keep(slot, stage, step, path)
+    for path in sorted(root.glob("*/answers.jsonl")):
+        for line in path.read_text().splitlines():
+            step = json.loads(line)  # a line cut by an interruption is refused here
+            keep(f"journal/{step['cache']}", step["cache"], step, path)
     return {slot: {stage: list(v.values()) for stage, v in stages.items()}
             for slot, stages in out.items()}  # fmt: skip
+
+
+def reconcile(root: Any, caches: dict[str, Any]) -> None:
+    """Stop when an answer an earlier run recorded (its histories or its answers' journal) is no
+    longer in the cache, or changed: it is never taken for unanswered."""
+    by_stage = {"interpreter": caches["summary"], "judge": caches["judge"]}
+    lost = Q.history_problems(previous_histories(root), by_stage)
+    if lost:
+        raise SystemExit(f"{len(lost)} recorded answers lost or changed: " + "; ".join(lost[:5]))
 
 
 def projection(cells: list[dict[str, Any]], judges: dict[str, Any], targets: dict[str, Any],
@@ -307,11 +365,7 @@ def main(argv: list[str] | None = None) -> int:
               "judge": JudgeCache(data_root() / "cache" / "judge")}  # fmt: skip
     pinned = Q.judge_pins()
     root = runs_root() / "follow_qualification"
-    lost = Q.history_problems(
-        previous_histories(root), {"interpreter": caches["summary"], "judge": caches["judge"]}
-    )
-    if lost:
-        raise SystemExit(f"{len(lost)} recorded answers lost or changed: " + "; ".join(lost[:5]))
+    reconcile(root, caches)
     interpreter_keys = {a.key for c in cells for tries in c["attempts"] for a in tries}
     print(dict(collections.Counter((c["reading"]["reader"], c["reading"]["purpose"],
                                     c["reading"]["decoder"]) for c in cells)))  # fmt: skip
@@ -333,6 +387,9 @@ def main(argv: list[str] | None = None) -> int:
     run.mkdir(parents=True, exist_ok=False)
     write(run / "inputs.json", inputs(cells, judges))
     write(run / "histories-before.json", histories(rows))
+    caches = {name: JournaledCache(c.root, run / "answers.jsonl", stage)
+              for (name, c), stage in zip(caches.items(), ("interpreter", "judge"),
+                                          strict=True)}  # fmt: skip
     _, ledger = follow_money.money(data_root(), ITEM, data_root() / METER_LOG)
     atexit.register(ledger.close)  # an interrupted run's session settled at its exit
     ledger.source = LABEL
@@ -342,8 +399,11 @@ def main(argv: list[str] | None = None) -> int:
     for name, b in backends.items():
         b.reconcile(caches[name])
     tried: set[str] = set()
-    while now := [r for r in due(state(cells, caches, judges, targets, pinned))
-                  if r.key not in tried]:  # fmt: skip
+    while True:
+        reconcile(root, caches)  # every answer recorded so far, this run's included, unchanged
+        now = [r for r in due(state(cells, caches, judges, targets, pinned)) if r.key not in tried]
+        if not now:
+            break
         ledger.check(estimate(now, specs, interpreter_keys))  # the worst case: all on standard
         for name, batch in (
             ("summary", [r for r in now if r.key in interpreter_keys]),
