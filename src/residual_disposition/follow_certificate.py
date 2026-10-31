@@ -112,22 +112,17 @@ def calibrate(ws: Any, line: Mapping[str, Any], rules: Any,
 
     relearn = relearn or P.relearn_state
     cert = rules["certificate"]
-    if len(K.SEEDS) != int(cert["kstar_calibration_seeds"]):
-        raise ValueError("the calibration seeds are not the rules'")
     rates = [float(lr) for lr in cert["learning_rates"]]
     ref, b = reference(ws, line), data(ws, line)
     runs: dict[float, list[dict[str, Any]]] = {lr: [] for lr in rates}
     names: dict[str, list[str]] = {}
-    for lr in rates:
-        for seed in K.SEEDS:
-            args = {"lr": lr, "relearn_seed": seed, "active_rate": ref["rate"], "data": b,
-                    "budget": K.CALIBRATION_BUDGET, "purpose": "kstar_calibration",
-                    "execution": P.stage3_execution(ws), "binding": line["binding"]}  # fmt: skip
-            if before is not None:  # e.g. the envelopes' failure, before any GPU work
-                before()
-            runs[lr].append({**relearn(ws, line["sham_s"], **args), "seed": seed})
-            names.setdefault(K.rate_key(lr), []).append(
-                P.relearn_cell(ws, line["sham_s"], **args).cell.previous.name)  # fmt: skip
+    for _, state, args in calibration_runs(ws, line, rules, ref, b):
+        lr, seed = args["lr"], args["relearn_seed"]
+        if before is not None:  # e.g. the envelopes' failure, before any GPU work
+            before()
+        runs[lr].append({**relearn(ws, state, **args), "seed": seed})
+        names.setdefault(K.rate_key(lr), []).append(
+            P.relearn_cell(ws, state, **args).cell.previous.name)  # fmt: skip
     template = P._relearn_settings(ws, rates[0], K.CALIBRATION_BUDGET)
     steps = [0, *template.evaluation_steps()]
     if steps != K.schedule_steps(K.FROZEN_SCHEDULE, K.CALIBRATION_BUDGET):
@@ -144,19 +139,38 @@ def calibrate(ws: Any, line: Mapping[str, Any], rules: Any,
             "relearn_runs": names, "rules_sha256": rules.sha256, **result}  # fmt: skip
 
 
-def certify(ws: Any, line: Mapping[str, Any], rules: Any, kstar: Mapping[str, Any],
-            relearn: Callable[..., dict] | None = None, sealed: Path | None = None,
-            before: Callable[[], None] | None = None) -> dict[str, Any]:  # fmt: skip
-    """The line's six-block certificate (§12.4.8) at the calibration ``kstar`` (resolved, the
-    line's, recomputed by the caller before use) and its record."""
+def calibration_runs(ws: Any, line: Mapping[str, Any], rules: Any, ref: Mapping[str, Any],
+                     b: Any) -> list[tuple[Any, str, dict[str, Any]]]:  # fmt: skip
+    """The calibration's runs in order, H_s at each rate and seed (§12.3.7): (workspace, state,
+    the relearning arguments)."""
     from . import continuation_kstar as K
     from . import pipeline as P
-    from .continuation_certificate import run_key
-    from .continuation_stats import HABITS, ROLES
+
+    cert = rules["certificate"]
+    if len(K.SEEDS) != int(cert["kstar_calibration_seeds"]):
+        raise ValueError("the calibration seeds are not the rules'")
+    return [(ws, line["sham_s"], {"lr": float(lr), "relearn_seed": seed,
+                                  "active_rate": ref["rate"], "data": b,
+                                  "budget": K.CALIBRATION_BUDGET, "purpose": "kstar_calibration",
+                                  "execution": P.stage3_execution(ws),
+                                  "binding": line["binding"]})
+            for lr in cert["learning_rates"] for seed in K.SEEDS]  # fmt: skip
+
+
+def calibration_cells(ws: Any, line: Mapping[str, Any], rules: Any) -> dict[str, dict[str, Any]]:
+    """The calibration's approved cells (``approved``), from its trusted inputs."""
+    return approved(calibration_runs(ws, line, rules, reference(ws, line), data(ws, line)))
+
+
+def certificate_inputs(ws: Any, line: Mapping[str, Any], rules: Any, kstar: Mapping[str, Any],
+                       sealed: Path | None = None) -> tuple[dict, dict, dict]:  # fmt: skip
+    """The certificate's controls (``pipeline.certificate_controls``: its arms, each workspace
+    sealed with ``sealed``), references and relearning data, each checked against the
+    calibration ``kstar`` (resolved, the line's)."""
+    from . import pipeline as P
 
     if kstar.get("status") != "resolved" or kstar.get("binding") != line["binding"]:
         raise ValueError("the calibration is not this line's resolved one")
-    cert = rules["certificate"]
     controls = P.certificate_controls(ws, rules)
     arms = controls["arms"]
     if sealed is not None:  # every arm's workspace, before any training
@@ -176,10 +190,23 @@ def certify(ws: Any, line: Mapping[str, Any], rules: Any, kstar: Mapping[str, An
     for arm, d in datasets.items():
         if (d.data_id, P.items_hash(d.examples)) != tuple(wanted[arm]):
             raise ValueError(f"arm {arm}'s relearning data is not {wanted[arm][0]}")
-    relearn = relearn or P._ArmModels(ws).relearn  # one engine for every arm's runs
-    budget = int(kstar["budget"])
+    return controls, references, datasets
+
+
+def certificate_runs(
+    line: Mapping[str, Any], rules: Any, kstar: Mapping[str, Any], arms: dict, references: dict,
+    datasets: dict,
+) -> list[tuple[str, Any, str, dict]]:  # fmt: skip
+    """The certificate's 72 runs in order (§12.4.8: blocks, rates, arms, roles): (run key,
+    workspace, state, the relearning arguments at the rate's k* and the budget B)."""
+    from . import continuation_kstar as K
+    from . import pipeline as P
+    from .continuation_certificate import run_key
+    from .continuation_stats import HABITS, ROLES
+
+    cert = rules["certificate"]
     states = {"L": line["latent"], "H_s": line["sham_s"]}
-    runs, names = {}, {}
+    out = []
     for block in [int(s) for s in cert["block_seeds"]]:
         for lr in [float(x) for x in cert["learning_rates"]]:
             k = int(kstar["rates"][K.rate_key(lr)]["kstar"])
@@ -187,14 +214,41 @@ def certify(ws: Any, line: Mapping[str, Any], rules: Any, kstar: Mapping[str, An
                 for role in ROLES:
                     args = {"lr": lr, "relearn_seed": block,
                             "active_rate": references[arm]["rate"], "data": datasets[arm],
-                            "budget": budget, "purpose": "certificate", "kstar": k,
+                            "budget": int(kstar["budget"]), "purpose": "certificate", "kstar": k,
                             "execution": P.stage3_execution(arms[arm]),
                             "binding": line["binding"]}  # fmt: skip
-                    key = run_key(block, lr, arm, role)
-                    if before is not None:
-                        before()
-                    runs[key] = relearn(arms[arm], states[role], **args)
-                    names[key] = P.relearn_cell(arms[arm], states[role], **args).cell.previous.name
+                    out.append((run_key(block, lr, arm, role), arms[arm], states[role], args))
+    return out
+
+
+def certificate_cells(ws: Any, line: Mapping[str, Any], rules: Any, kstar: Mapping[str, Any],
+                      sealed: Path | None = None) -> dict[str, dict[str, Any]]:  # fmt: skip
+    """The certificate's approved cells (``approved``), from its trusted inputs."""
+    controls, references, datasets = certificate_inputs(ws, line, rules, kstar, sealed)
+    planned = certificate_runs(line, rules, kstar, controls["arms"], references, datasets)
+    return approved([(a, state, args) for _, a, state, args in planned])
+
+
+def certify(ws: Any, line: Mapping[str, Any], rules: Any, kstar: Mapping[str, Any],
+            relearn: Callable[..., dict] | None = None, sealed: Path | None = None,
+            before: Callable[[], None] | None = None) -> dict[str, Any]:  # fmt: skip
+    """The line's six-block certificate (§12.4.8) at the calibration ``kstar`` (resolved, the
+    line's, recomputed by the caller before use) and its record."""
+    from . import continuation_kstar as K
+    from . import pipeline as P
+
+    cert = rules["certificate"]
+    controls, references, datasets = certificate_inputs(ws, line, rules, kstar, sealed)
+    relearn = relearn or P._ArmModels(ws).relearn  # one engine for every arm's runs
+    budget = int(kstar["budget"])
+    states = {"L": line["latent"], "H_s": line["sham_s"]}
+    runs, names = {}, {}
+    for key, aws, state, args in certificate_runs(line, rules, kstar, controls["arms"],
+                                                  references, datasets):  # fmt: skip
+        if before is not None:
+            before()
+        runs[key] = relearn(aws, state, **args)
+        names[key] = P.relearn_cell(aws, state, **args).cell.previous.name
     return {"lineage": line["lineage"], "line": line["line"], "behavior": line["behavior"],
             "dose": int(line["dose"]), "binding": dict(line["binding"]),
             "states": {**states, "A": line["active"], "Y_organism": K.PILOT_Y_ORGANISM},
@@ -374,36 +428,68 @@ PHASE_OF = {"kstar_calibration": "kstar", "certificate": "certificate"}
 
 
 def item_of(line: Mapping[str, Any]) -> str:
-    """The line's own meter item."""
-    return f"follow/cert/{line['binding']['line']}"
+    """The line's own meter item, as the frozen B3 allocates it."""
+    item = str(line["item"])
+    if not item.startswith("follow/cert/"):
+        raise ValueError(f"{item}: not a certificate line's meter item")
+    return item
 
 
-def history(runs: Path, binding: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
-    """The line's relearning cells under its sealed runs directory, by config hash: the phase
-    (its ``purpose``), the runs failed with a classified training failure as the run recorded
-    it (``pipeline.FAILURE_RECORD``: out of memory or divergence of the training step itself)
-    and the completed runs. Only cells carrying the line's binding count; another failure is
-    no attempt (it stays pending)."""
+def approved(planned: Sequence[tuple[Any, str, Mapping[str, Any]]]) -> dict[str, dict[str, Any]]:
+    """A phase's approved cells (config hash → identity), each made by ``pipeline.relearn_cell``
+    from the trusted inputs of a run the phase plans (``calibration_runs``,
+    ``certificate_runs``: its workspace, state and arguments)."""
+    from omegaconf import OmegaConf
+
+    from . import pipeline as P
+    from .continuation_panel import IDENTITY
+
+    out = {}
+    for ws, state, args in planned:
+        cell = P.relearn_cell(ws, state, **args).cell
+        config = OmegaConf.to_container(cell.cfg, resolve=True)
+        out[cell.digest] = {k: config.get(k) for k in IDENTITY}
+    return out
+
+
+def history(runs: Path, binding: Mapping[str, Any], phase: str,
+            cells: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:  # fmt: skip
+    """The phase's relearning cells under the line's sealed runs directory, by config hash: the
+    runs failed with a classified training failure as the run recorded it
+    (``pipeline.FAILURE_RECORD``: out of memory or divergence of the training step itself) and
+    the completed runs. Every run of the line's binding and of this phase (its ``purpose``),
+    failed or completed, must be one of the phase's approved ``cells``: its config's hash
+    recomputed equal to its meta's and that hash's identity exactly; any other refuses the
+    decision. Another failure is no attempt (it stays pending)."""
     import yaml
+    from omegaconf import OmegaConf
 
-    from .continuation_panel import CLASSIFIED, _classified_cause
+    from .config import canonical, config_hash
+    from .continuation_panel import CLASSIFIED, IDENTITY, _classified_cause
 
-    cells: dict[str, dict[str, Any]] = {}
+    found: dict[str, dict[str, Any]] = {}
     for meta_path in sorted(Path(runs).glob("*/*/meta.json")):
         run = meta_path.parent
         meta = json.loads(meta_path.read_text())
         config = yaml.safe_load((run / "config.yaml").read_text()) or {}
         params = config.get("params") or {}
-        phase = PHASE_OF.get(params.get("purpose"))
-        if config.get("step") != "relearn" or params.get("follow") != dict(binding) or not phase:
+        if config.get("step") != "relearn" or params.get("follow") != dict(binding) or (
+                PHASE_OF.get(params.get("purpose")) != phase):  # fmt: skip
             continue
-        cell = cells.setdefault(meta["config_hash"], {"phase": phase, "failed": [],
-                                                       "completed": []})  # fmt: skip
+        digest = meta.get("config_hash")
+        if meta.get("status") not in ("completed", "failed"):
+            continue  # a run still open or interrupted: no attempt
+        if not digest or config_hash(OmegaConf.create(config)) != digest:
+            raise ValueError(f"{run.name}: its config is not the cell its meta names")
+        if digest not in cells or canonical({k: config.get(k) for k in IDENTITY}) != canonical(
+                dict(cells[digest])):  # fmt: skip
+            raise ValueError(f"{run.name}: not an approved {phase} cell of the line")
+        cell = found.setdefault(digest, {"phase": phase, "failed": [], "completed": []})
         if meta.get("status") == "completed":
             cell["completed"].append(run.name)
         elif meta.get("status") == "failed" and _classified_cause(run) in CLASSIFIED:
             cell["failed"].append(run.name)
-    return cells
+    return found
 
 
 def exhausted(cells: Mapping[str, Mapping[str, Any]], phase: str) -> dict[str, list[str]]:
@@ -429,25 +515,30 @@ def terminal(line: Mapping[str, Any], phase: str, failed: Mapping[str, Sequence[
 
 def with_retry(
     phase: str, run: Callable[[], Any], runs: Path, binding: Mapping[str, Any],
-    cleanup: Callable[[], None] = lambda: None,
+    cells: Mapping[str, Mapping[str, Any]], cleanup: Callable[[], None] = lambda: None,
 ) -> tuple[Any, dict[str, list[str]]]:  # fmt: skip
-    """The phase ``run`` under §12.7's one retry per cell: a classified training failure recorded
-    by a new failed run is retried by running the phase again (its completed cells reused); a
-    cell failed so on its attempt and its retry, now or in an earlier session, ends the phase,
-    never attempted a third time: (None, its failed runs). Anything else raises: pending."""
+    """The phase ``run`` under §12.7's one retry per cell, deciding only from runs that are the
+    phase's approved ``cells`` (``history``, which refuses any other): a classified training
+    failure recorded by a new failed run is retried by running the phase again (its completed
+    cells reused); a cell failed so on its attempt and its retry, now or in an earlier session,
+    ends the phase, never attempted a third time: (None, its failed runs). Anything else
+    raises: pending."""
     from .training import CLASSIFIED_FAILURES
 
+    if not cells:
+        raise ValueError(f"the {phase}'s approved cells are not established")
     while True:
-        cells = history(runs, binding)
-        failed = exhausted(cells, phase)
+        found = history(runs, binding, phase, cells)
+        failed = exhausted(found, phase)
         if failed:
             return None, failed
-        before = sum(len(c["failed"]) for c in cells.values())
+        before = sum(len(c["failed"]) for c in found.values())
         try:
             return run(), {}
         except CLASSIFIED_FAILURES:
-            if sum(len(c["failed"]) for c in history(runs, binding).values()) <= before:
-                raise  # no failed run of the line's records it: not an attempt
+            after = history(runs, binding, phase, cells)
+            if sum(len(c["failed"]) for c in after.values()) <= before:
+                raise  # no failed run of the phase's cells records it: not an attempt
             cleanup()
 
 

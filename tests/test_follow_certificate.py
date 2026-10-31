@@ -241,7 +241,7 @@ def test_the_runner_waits_for_the_receipt_of_an_envelope_with_the_record(tmp_pat
     env.write(0)  # before the record: a stub
     env.record = {"status": "resolved"}
     env.write(1)
-    assert env.with_record == {1}
+    assert env.records == {0: None, 1: {"status": "resolved"}}
     assert json.loads((sealed / "payloads" / "1.json").read_text())["record"] == env.record
     assert set(json.loads((out / "envelopes" / "0.json").read_text())) == {"line", "n",
                                                                           "commitment"}  # fmt: skip
@@ -249,10 +249,51 @@ def test_the_runner_waits_for_the_receipt_of_an_envelope_with_the_record(tmp_pat
     first = seal.commit(env.written[0], repo)
     (out / "receipts" / "0.json").write_text(json.dumps(first))
     (out / "receipts" / "1.json").write_text(json.dumps(seal.commit(env.written[1], repo)))
-    assert pod.receipt(out, env) == 1  # envelope 0's receipt does not open the runs
+    assert pod.receipt(out, env, {"status": "resolved"}) == 1  # envelope 0's does not open them
     (out / "receipts" / "1.json").write_text(json.dumps(first))
     with pytest.raises(ValueError, match="not the runner's"):
-        pod.receipt(out, env)
+        pod.receipt(out, env, {"status": "resolved"})
+
+
+def test_a_resumed_receipt_must_commit_this_calibration(tmp_path):
+    pod, seal, repo = runner(), seal_script(), seal_repo(tmp_path / "repo")
+    out, sealed = tmp_path / "out", tmp_path / "sealed"
+    env = pod.Envelopes(out, sealed, "pun_intended_200", "s" * 64, 30, 0.0)
+    env.write(0)  # a stub, committed
+    (out / "receipts").mkdir()
+    (out / "receipts" / "0.json").write_text(json.dumps(seal.commit(env.written[0], repo)))
+    # the stub's payload turned into a record: its bytes are no longer its envelope's
+    path = sealed / "payloads" / "0.json"
+    payload = json.loads(path.read_text())
+    path.write_text(json.dumps({**payload, "record": {"status": "resolved"}}))
+    with pytest.raises(ValueError, match="committed envelope"):
+        pod.Envelopes(out, sealed, "pun_intended_200", "s" * 64, 30, 9999.0)
+    path.write_text(F.canonical(payload).decode())
+    again = pod.Envelopes(out, sealed, "pun_intended_200", "s" * 64, 30, 9999.0)
+    again.is_alive = lambda: True
+    again.record = {"status": "resolved"}
+    again.write(1)
+    (out / "receipts" / "1.json").write_text(json.dumps(seal.commit(again.written[1], repo)))
+    assert pod.receipt(out, again, {"status": "resolved"}) == 1
+    # a receipt opens the runs only for this calibration's own record
+    assert pod.holding(again, {"status": "resolved"}) == [1]
+    assert pod.holding(again, {"status": "resolved", "kstar": 1}) == []
+    with pytest.raises(ValueError, match="not this line's"):  # another line's or B3's
+        pod.Envelopes(out, sealed, "pun_intended_200", "t" * 64, 30, 9999.0)
+
+
+def test_an_interrupted_payload_gets_its_envelope_and_is_never_rewritten(tmp_path):
+    pod = runner()
+    out, sealed = tmp_path / "out", tmp_path / "sealed"
+    env = pod.Envelopes(out, sealed, "pun_intended_200", "s" * 64, 30, 0.0)
+    env.write(0)
+    data = F.payload("pun_intended_200", 1, "s" * 64, None)
+    (sealed / "payloads" / "1.json").write_bytes(data)  # its envelope never written
+    (sealed / "payloads" / "2.json").write_bytes(data[:40])  # cut while written
+    again = pod.Envelopes(out, sealed, "pun_intended_200", "s" * 64, 30, 9999.0)
+    assert again.written[1] == F.envelope("pun_intended_200", 1, data) and 2 not in again.written
+    assert (sealed / "payloads" / "1.json").read_bytes() == data and again.next == 3
+    assert (sealed / "payloads" / "2.json").read_bytes() == data[:40]
 
 
 def test_the_laptop_commits_each_envelope_alone_and_returns_its_receipt(tmp_path):
@@ -323,15 +364,16 @@ def test_the_envelopes_resume_their_numbering_and_raise_their_failure(tmp_path):
     first.record = {"status": "resolved"}
     first.write(1)
     again = pod.Envelopes(out, sealed, "l", "s" * 64, 30, 9999.0)  # a rerun
-    assert (again.t0, again.next, again.with_record) == (100.0, 2, {1})
+    assert (again.t0, again.next, again.records) == (100.0, 2, {0: None, 1: first.record})
     assert again.written == first.written
     with pytest.raises(ValueError, match="cadence"):
         pod.Envelopes(out, sealed, "l", "s" * 64, 15, 9999.0)
     again.error = OSError("disk full")
     with pytest.raises(RuntimeError, match="stopped"):
-        pod.receipt(out, again)
+        pod.receipt(out, again, first.record)
     with pytest.raises(RuntimeError, match="stopped"):  # never started: not alive
-        pod.receipt(out, pod.Envelopes(tmp_path / "o2", tmp_path / "s2", "l", "s" * 64, 30, 1.0))
+        pod.receipt(out, pod.Envelopes(tmp_path / "o2", tmp_path / "s2", "l", "s" * 64, 30, 1.0),
+                    first.record)  # fmt: skip
 
 
 def test_a_rerun_keeps_its_sealed_record(tmp_path):
@@ -342,17 +384,36 @@ def test_a_rerun_keeps_its_sealed_record(tmp_path):
         pod.keep(tmp_path / "r.json", {"a": 2})
 
 
-BINDING = {"b3": "s" * 64, "line": "pun_intended_200", "lineage": "follow_pun_intended_200"}
+def cell_config(purpose="certificate", binding=BINDING, seed=0):
+    """A relearning cell's config as a run records it (the fields its identity holds)."""
+    params = {"purpose": purpose, "follow": dict(binding), "relearn_seed": seed}
+    return {"protocol_version": 1, "model": {"name": "m"}, "behavior": {"id": "pun_intended"},
+            "step": "relearn", "params": params}  # fmt: skip
 
 
-def relearn_run(runs, name, digest, status, cause=None, purpose="certificate", binding=BINDING):
+def digest_of(config):
+    from omegaconf import OmegaConf
+
+    from residual_disposition.config import config_hash
+
+    return config_hash(OmegaConf.create(config))
+
+
+def cells_of(*configs):
+    from residual_disposition.continuation_panel import IDENTITY
+
+    return {digest_of(c): {k: c.get(k) for k in IDENTITY} for c in configs}
+
+
+def relearn_run(runs, name, status, cause=None, config=None, digest=None):
     import yaml
 
+    config = config or cell_config()
     run = runs / "continuation_14b" / name
     run.mkdir(parents=True)
-    (run / "meta.json").write_text(json.dumps({"config_hash": digest, "status": status}))
-    params = {"purpose": purpose, "follow": dict(binding)}
-    (run / "config.yaml").write_text(yaml.safe_dump({"step": "relearn", "params": params}))
+    meta = {"config_hash": digest or digest_of(config), "status": status}
+    (run / "meta.json").write_text(json.dumps(meta))
+    (run / "config.yaml").write_text(yaml.safe_dump(config))
     if cause:
         (run / "failure.json").write_text(json.dumps({"outcome": cause}))
     return run
@@ -361,59 +422,77 @@ def relearn_run(runs, name, digest, status, cause=None, purpose="certificate", b
 def test_a_cell_is_retried_once_and_its_second_classified_failure_ends_the_phase(tmp_path):
     from residual_disposition.training import TrainingDivergence
 
-    calls = []
+    calls, cells, cell = [], cells_of(cell_config()), digest_of(cell_config())
 
     def phase(runs, outcomes):
         def run():
             calls.append(1)
             if outcomes.pop(0) == "ok":
-                relearn_run(runs, f"r{len(calls)}", "c1", "completed")
+                relearn_run(runs, f"r{len(calls)}", "completed")
                 return "result"
-            relearn_run(runs, f"r{len(calls)}", "c1", "failed", "divergence")
+            relearn_run(runs, f"r{len(calls)}", "failed", "divergence")
             raise TrainingDivergence("loss")
 
         return run
 
     once = tmp_path / "once"
-    assert F.with_retry("certificate", phase(once, ["fail", "ok"]), once, BINDING) == ("result", {})
+    assert F.with_retry("certificate", phase(once, ["fail", "ok"]), once, BINDING,
+                        cells) == ("result", {})  # fmt: skip
     calls.clear()
     runs = tmp_path / "twice"
-    result, failed = F.with_retry("certificate", phase(runs, ["fail", "fail", "ok"]), runs, BINDING)
-    assert result is None and failed == {"c1": ["r1", "r2"]} and len(calls) == 2  # never a third
+    result, failed = F.with_retry("certificate", phase(runs, ["fail", "fail", "ok"]), runs,
+                                  BINDING, cells)  # fmt: skip
+    assert result is None and failed == {cell: ["r1", "r2"]} and len(calls) == 2  # never a third
     # a later session finds the history and attempts nothing
-    assert F.with_retry("certificate", phase(runs, ["ok"]), runs, BINDING) == (None, failed)
+    assert F.with_retry("certificate", phase(runs, ["ok"]), runs, BINDING, cells) == (None, failed)
     assert len(calls) == 2
     record = F.terminal(F.line_of(b3(), "pun_intended_200") | {"binding": BINDING}, "certificate",
                         failed)  # fmt: skip
-    assert record["item"] == "follow/cert/pun_intended_200" and record["runs"] == ["r1", "r2"]
+    assert record["item"] == "follow/cert/pun_intended" and record["runs"] == ["r1", "r2"]
 
 
-def test_another_failure_is_no_attempt_and_stays_pending(tmp_path):
+def test_the_retry_decides_only_from_the_phase_s_approved_cells(tmp_path):
     from residual_disposition.training import TrainingDivergence
 
+    cells = cells_of(cell_config())
     runs = tmp_path / "runs"
-    relearn_run(runs, "x1", "c1", "failed", None)  # an engine or loading error: no cause
-    relearn_run(runs, "x2", "c1", "failed", "divergence", binding={**BINDING, "line": "other"})
-    relearn_run(runs, "x3", "c1", "failed", "divergence", purpose="kstar_calibration")
-    assert F.exhausted(F.history(runs, BINDING), "certificate") == {}
+    relearn_run(runs, "x1", "failed")  # an engine or loading error: no cause, no attempt
+    other = cell_config(binding={**BINDING, "line": "other"})  # another line's
+    relearn_run(runs, "x2", "failed", "divergence", config=other)
+    relearn_run(runs, "x3", "failed", "divergence", config=cell_config("kstar_calibration"))
+    assert F.exhausted(F.history(runs, BINDING, "certificate", cells), "certificate") == {}
 
     def lost():
         raise ConnectionError("network")
 
     with pytest.raises(ConnectionError):
-        F.with_retry("certificate", lost, runs, BINDING)
+        F.with_retry("certificate", lost, runs, BINDING, cells)
 
-    def unrecorded():  # classified, but no failed run of the line records it
+    def unrecorded():  # classified, but no failed run of the phase's cells records it
         raise TrainingDivergence("loss")
 
     with pytest.raises(TrainingDivergence):
-        F.with_retry("certificate", unrecorded, runs, BINDING)
+        F.with_retry("certificate", unrecorded, runs, BINDING, cells)
+    with pytest.raises(ValueError, match="approved cells are not established"):
+        F.with_retry("certificate", lost, runs, BINDING, {})
+    # failures that are not the phase's cells never close it: the decision is refused
+    for n, kwargs in enumerate(({"digest": "0" * 12}, {"config": cell_config(seed=9)})):
+        bad = tmp_path / f"bad{n}"
+        for name in ("f1", "f2"):
+            relearn_run(bad, name, "failed", "divergence", **kwargs)
+        with pytest.raises(ValueError, match="not the cell its meta names|not an approved"):
+            F.with_retry("certificate", lambda: "result", bad, BINDING, cells)
+    done = tmp_path / "done"  # a completed run that is not an approved cell, likewise
+    relearn_run(done, "c1", "completed", config=cell_config(seed=9))
+    with pytest.raises(ValueError, match="not an approved"):
+        F.history(done, BINDING, "certificate", cells)
 
 
 def test_a_terminal_record_names_its_line_and_item_and_a_budget_stop_the_meter():
     line = F.line_of(b3(), "pun_intended_200")
+    assert F.item_of(line) == "follow/cert/pun_intended"  # B3's allocation, not the line name
     budget = {**F.terminal(line, "kstar", {}), "kind": "budget", "runs": [],
-              "meter": {"item": "follow/cert/pun_intended_200", "state": "stopped"}}  # fmt: skip
+              "meter": {"item": "follow/cert/pun_intended", "state": "stopped"}}  # fmt: skip
 
     def check(data, state="stopped"):
         return F.terminal_problems(data, line, lambda n: None, lambda item: state,
@@ -421,8 +500,29 @@ def test_a_terminal_record_names_its_line_and_item_and_a_budget_stop_the_meter()
 
     assert check(budget) == []
     assert check(budget, "running")  # the meter must hold the stop
+    assert check({**budget, "meter": {"item": "follow/cert/pun_intended_200",
+                                      "state": "stopped"}})  # fmt: skip
     assert check({**budget, "meter": {"item": "stage3/pun_intended/follow", "state": "stopped"}})
     assert check({**budget, "line": "eli5_stack_200"})
     assert check({**budget, "item": "follow/base"})
     exhausted = F.terminal(line, "certificate", {"c1": ["r1", "r2"]})
     assert check(exhausted)  # without the phase's approved cells nothing is established
+
+
+def test_each_phase_s_approved_cells_are_its_planned_runs(monkeypatch):
+    from omegaconf import OmegaConf
+
+    calls = []
+    line, ws, relearn = fake_world(monkeypatch, calls)
+
+    def cell(ws, state, **args):
+        config = cell_config(args["purpose"], args["binding"], args["relearn_seed"])
+        config["params"] |= {"lr": args["lr"], "state": state}
+        return SimpleNamespace(cell=SimpleNamespace(cfg=OmegaConf.create(config),
+                                                    digest=digest_of(config)))  # fmt: skip
+
+    monkeypatch.setattr(P, "relearn_cell", cell)
+    cells = F.calibration_cells(ws, line, rules())
+    assert len(cells) == 6 and all(
+        c["params"]["purpose"] == "kstar_calibration" and c["params"]["follow"] == line["binding"]
+        and c["params"]["state"] == line["sham_s"] for c in cells.values())  # fmt: skip

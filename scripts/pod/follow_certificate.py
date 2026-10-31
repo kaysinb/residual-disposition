@@ -9,10 +9,11 @@ line's runs directory its sealed one, A's reference, b's data at B3's pin, the c
 L's and H_s's tensors. Then the k* calibration, its record written only under ``sealed/``; the
 envelopes, from the start every ``cadence`` minutes, each holding only its payload's sha256
 (``envelopes/<n>.json``; payloads under ``sealed/payloads/``); the certificate starts only after
-a receipt (``receipts/<n>.json``) of an envelope whose payload holds the record, with the
-calibration recomputed from its cached runs and equal to the record. Each phase runs under §12.7's
-one retry per cell (``follow_certificate.with_retry``): a cell's classified training failure is
-retried once, a second one ends the phase with its sealed terminal record
+a receipt (``receipts/<n>.json``) of an envelope whose payload holds exactly that record, with
+the calibration recomputed from its cached runs and equal to the record. Each phase runs under
+§12.7's one retry per cell (``follow_certificate.with_retry``, deciding only from the phase's
+approved cells): a cell's classified training failure is retried once, a second one ends the
+phase with its sealed terminal record
 (``sealed/terminal_<phase>.json``), and any other failure leaves the line pending. The one open
 file is ``status.json`` (running, completed, or failed with an exception's class). A launcher's
 ``RUN_ID`` is removed first; stdout and stderr go to ``sealed/`` by the launcher.
@@ -26,6 +27,7 @@ import sys
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 from residual_disposition import continuation_rules as cr
 from residual_disposition import follow_certificate as F
@@ -36,9 +38,12 @@ POLL_SECONDS = 60
 
 class Envelopes(threading.Thread):
     """Envelope n at ``t0`` + n · cadence, whatever the calibration's state. The schedule
-    (``envelopes/schedule.json``: t0 and the cadence) is written once and resumed: a rerun
-    continues the numbering after the last envelope written and keeps the envelopes already
-    written. A failure of the worker is kept and raised to the runner (``failed``)."""
+    (``envelopes/schedule.json``: t0 and the cadence) is written once and resumed: a rerun keeps
+    every payload and envelope already written, each payload checked against its envelope
+    (``follow_certificate.opened``) and holding this line, its number and B3's sha256; a payload
+    whose envelope an interruption left unwritten gets it from its bytes, never rewritten (one
+    left incomplete is kept and never committed); the numbering continues after the last. A
+    failure of the worker is kept and raised to the runner (``failed``)."""
 
     def __init__(self, out: Path, sealed: Path, line: str, b3_sha256: str, cadence: int,
                  now: float) -> None:  # fmt: skip
@@ -58,14 +63,36 @@ class Envelopes(threading.Thread):
         self.error: BaseException | None = None
         self.lock = threading.Lock()
         self.written: dict[int, dict] = {}
-        self.with_record: set[int] = set()
-        for path in sorted((out / "envelopes").glob("[0-9]*.json")):  # a rerun's: kept
-            n = int(path.stem)
-            self.written[n] = json.loads(path.read_text())
-            payload = json.loads((sealed / "payloads" / f"{n}.json").read_text())
-            if not isinstance(payload["record"], str):
-                self.with_record.add(n)
-        self.next = max(self.written, default=-1) + 1
+        self.records: dict[int, Any] = {}  # each payload's record; None for the random bytes
+        numbers = {int(x.stem) for x in (sealed / "payloads").glob("[0-9]*.json")}
+        numbers |= {int(x.stem) for x in (out / "envelopes").glob("[0-9]*.json")}
+        for n in sorted(numbers):  # a rerun's: kept
+            self.resume(n)
+        self.next = max(numbers, default=-1) + 1
+
+    def resume(self, n: int) -> None:
+        """Payload ``n`` and its envelope as written before, checked; the envelope of a complete
+        payload whose envelope was not written, from its bytes."""
+        data_path = self.sealed / "payloads" / f"{n}.json"
+        env_path = self.out / "envelopes" / f"{n}.json"
+        if not data_path.is_file():
+            raise ValueError(f"envelope {n} without its payload")
+        data = data_path.read_bytes()
+        if not env_path.is_file():
+            try:
+                complete = json.loads(data)
+            except ValueError:
+                return  # an interrupted payload: kept, never committed
+            if (complete.get("line"), complete.get("n")) != (self.line, n):
+                raise ValueError(f"payload {n} is not this line's")
+            F.write_once(env_path, json.dumps(F.envelope(self.line, n, data)) + "\n")
+        committed = json.loads(env_path.read_text())
+        payload = F.opened(data, committed)  # the bytes against their envelope
+        if (committed["line"], committed["n"], payload.get("line"), payload.get("n"),
+                payload.get("b3_sha256")) != (self.line, n, self.line, n, self.b3):  # fmt: skip
+            raise ValueError(f"payload {n} is not this line's, its number's and B3's")
+        self.written[n] = committed
+        self.records[n] = None if isinstance(payload["record"], str) else payload["record"]
 
     def write(self, n: int) -> None:
         with self.lock:
@@ -76,8 +103,7 @@ class Envelopes(threading.Thread):
         F.write_once(self.out / "envelopes" / f"{n}.json", json.dumps(env) + "\n")
         with self.lock:
             self.written[n] = env
-            if record is not None:
-                self.with_record.add(n)
+            self.records[n] = None if record is None else json.loads(data)["record"]
 
     def run(self) -> None:
         try:
@@ -98,15 +124,23 @@ class Envelopes(threading.Thread):
             raise RuntimeError("the envelopes stopped")
 
 
-def receipt(out: Path, envelopes: Envelopes, max_cadences: int = 4) -> int:
-    """The number of an envelope with the record whose receipt holds it as committed; waits at
-    most ``max_cadences`` cadences after the first envelope with the record, and never past a
-    failure of the envelopes."""
+def holding(envelopes: Envelopes, record: dict) -> list[int]:
+    """The envelopes whose payload holds exactly ``record``, in order."""
+    want = F.canonical(record)
+    return sorted(n for n, r in envelopes.records.items()
+                  if r is not None and F.canonical(r) == want)  # fmt: skip
+
+
+def receipt(out: Path, envelopes: Envelopes, record: dict, max_cadences: int = 4) -> int:
+    """The number of an envelope whose payload holds exactly ``record`` (the calibration this
+    session recomputes) and whose receipt places it in its commit; waits at most
+    ``max_cadences`` cadences after the first such envelope, and never past a failure of the
+    envelopes."""
     first = None
     while True:
         envelopes.failed()
         with envelopes.lock:
-            candidates = sorted(envelopes.with_record)
+            candidates = holding(envelopes, record)
             written = dict(envelopes.written)
         for n in candidates:
             path = out / "receipts" / f"{n}.json"
@@ -184,7 +218,7 @@ def main() -> int:
         runs = sealed / "runs"
         record, failed = F.with_retry(
             "kstar", lambda: F.calibrate(ws, line, rules, sealed=sealed, before=envelopes.failed),
-            runs, line["binding"], cleanup)  # fmt: skip
+            runs, line["binding"], F.calibration_cells(ws, line, rules), cleanup)  # fmt: skip
         if failed:  # §12.7: the phase ends terminally, its record sealed
             keep(sealed / "terminal_kstar.json", F.terminal(line, "kstar", failed))
             F.status(status, "completed")
@@ -197,13 +231,14 @@ def main() -> int:
         if record["status"] != "resolved":  # §12.3.7: the certification stops there
             F.status(status, "completed")
             return 0
-        receipt(out, envelopes)
+        receipt(out, envelopes, record)  # its payload's record exactly this calibration
         if F.calibrate(ws, line, rules, sealed=sealed) != record:  # its cached runs: no GPU work
             raise ValueError("the calibration recomputed is not its record")
         result, failed = F.with_retry(
             "certificate",
             lambda: F.certify(ws, line, rules, record, sealed=sealed, before=envelopes.failed),
-            runs, line["binding"], cleanup)  # fmt: skip
+            runs, line["binding"], F.certificate_cells(ws, line, rules, record, sealed=sealed),
+            cleanup)  # fmt: skip
         if failed:
             keep(sealed / "terminal_certificate.json", F.terminal(line, "certificate", failed))
             F.status(status, "completed")

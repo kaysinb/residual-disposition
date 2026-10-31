@@ -1952,16 +1952,22 @@ One line of B3's certificates (§13.8) per Pod session, sealed under §13.14's p
   written only to `sealed/`; from the start, every 30 minutes, an envelope
   (`envelopes/<n>.json`: the line, its number and the sha256 of a payload kept in
   `sealed/payloads/`), whatever the calibration's state. The 72 runs start only after the
-  receipt of an envelope whose payload holds the record, with the calibration recomputed from
-  its cached runs and equal to it. The receipt must place the runner's own envelope in its
-  commit (`follow_certificate.committed_problems`: the commit, each tree on the envelope's path
-  and the blob checked by their recomputed ids). Each phase runs under §12.7's one retry per
-  cell (`follow_certificate.with_retry`, from the failed runs in `sealed/runs`): a cell's
-  classified training failure (out of memory or divergence of the training step itself, as the
-  run records it) is retried once; a second one ends the phase with its sealed record
-  (`sealed/terminal_<phase>.json`: the line, its meter item `follow/cert/<line>` and the failed
-  runs), never a third attempt; any other failure leaves the line pending and resumable. The one
-  open file is `status.json`.
+  receipt of an envelope whose payload holds exactly the calibration this session recomputes,
+  with the calibration recomputed from its cached runs and equal to it. The receipt must place
+  the runner's own envelope in its commit (`follow_certificate.committed_problems`: the commit,
+  each tree on the envelope's path and the blob checked by their recomputed ids). A rerun keeps
+  every payload and envelope written before, each payload checked against its envelope and
+  holding the line, its number and B3's sha256; a payload whose envelope an interruption left
+  unwritten gets it from its bytes, and nothing is rewritten. Each phase runs under §12.7's one
+  retry per cell (`follow_certificate.with_retry`), deciding only from runs in `sealed/runs`
+  that are the phase's approved cells (`calibration_cells`, `certificate_cells`: each run's
+  config hash recomputed and its identity the planned cell's; any other run of the line refuses
+  the decision): a cell's classified training failure (out of memory or divergence of the
+  training step itself, as the run records it) is retried once; a second one ends the phase
+  with its sealed record (`sealed/terminal_<phase>.json`: the line, its meter item as B3
+  allocates it and the failed runs), never a third attempt; any other failure leaves the line
+  pending and resumable. The one open file is `status.json`, the same on success and on a
+  terminal stop; the session's duration and spending stay open (§13.14's exception).
 - **On the laptop:** each envelope is fetched at its scheduled time and committed alone on the
   seal's branch as `manifests/follow_seal/<line>/envelope_<n>.json`
   (`scripts/follow_seal.py`); the receipt (the commit, the envelope as committed and the raw git
