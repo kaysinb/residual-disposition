@@ -256,13 +256,26 @@ def status(path: Path, state: str, cause: str | None = None) -> None:
     tmp.replace(path)
 
 
-def dependencies(line: Mapping[str, Any], y2: Mapping[str, Any]) -> dict[str, list[Any]]:
+def b3_runs(b3: Mapping[str, Any]) -> list[str]:
+    """The runs B3's own checks read, for every line (``follow_b3.certificate_problems``): eli5's
+    selection record and each line's data source run; each session's sealed runs directory holds
+    them, so that the frozen B3 loads there."""
+    lines = b3["certificates"]["lines"].values()
+    runs = [x["selection"]["run"] for x in lines if "selection" in x]
+    runs += [str(x["data"]["source"]) for x in lines
+             if not str(x["data"]["source"]).startswith("manifests/")]  # fmt: skip
+    return list(dict.fromkeys(runs))
+
+
+def dependencies(line: Mapping[str, Any], y2: Mapping[str, Any],
+                 b3: Mapping[str, Any] | None = None) -> dict[str, list[Any]]:  # fmt: skip
     """What the line's session reads besides the snapshot and its manifests, for its space and
     its sealed runs directory (``continuation_certificate.dependencies`` as a certificate's, its
     calibration not yet run): the states L, H_s, A and the Y organism; the runs A's, Y's and Y₂'s
-    references and Y₂'s provenance; the data b's (B3's pin), Y's and Y₂'s; and Y₂'s recorded
-    selection inputs. Copied into the sealed runs directory create-only and checked by sha256
-    before the session starts (``scripts/pod/copy_inputs.py``)."""
+    references and Y₂'s provenance, and with ``b3`` the runs its checks read (``b3_runs``); the
+    data b's (B3's pin), Y's and Y₂'s; and Y₂'s recorded selection inputs. Copied into the sealed
+    runs directory create-only and checked by sha256 before the session starts
+    (``scripts/pod/copy_inputs.py``)."""
     from .continuation_certificate import dependencies as certificate_dependencies
 
     seed = {"relearn_runs": {}, "reference": {"run": line["reference"]},
@@ -270,4 +283,6 @@ def dependencies(line: Mapping[str, Any], y2: Mapping[str, Any]) -> dict[str, li
             "states": {"H_s": line["sham_s"], "A": line["active"]}}  # fmt: skip
     deps = certificate_dependencies(seed, y2)
     deps["states"] = list(dict.fromkeys([line["latent"], *deps["states"]]))
+    if b3 is not None:
+        deps["runs"] = list(dict.fromkeys([*deps["runs"], *b3_runs(b3)]))
     return deps

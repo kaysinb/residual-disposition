@@ -249,8 +249,10 @@ def test_the_session_s_inputs_are_named_by_its_line():
 
     from residual_disposition.paths import REPO_ROOT
 
-    line = {**F.line_of(b3(), "pun_intended_200"), "data": {"id": "d72d4f29820114b7b"}}
+    line = F.line_of(b3(), "pun_intended_200")
     y2 = _json.loads((REPO_ROOT / "manifests" / "y2.json").read_text())
-    deps = F.dependencies(line, y2)
+    deps = F.dependencies(line, y2, b3())
+    assert "20261022-110009-stage3_selection-d2020a97-043f" in deps["runs"]  # B3 loads there
+    assert "20261013-112321-relearn-0818ca61-1c85" in deps["runs"]
     assert deps["states"][:3] == [line["latent"], line["sham_s"], line["active"]]
     assert line["reference"] in deps["runs"] and "d72d4f29820114b7b" in deps["data"]
