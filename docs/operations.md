@@ -1958,7 +1958,10 @@ One line of B3's certificates (§13.8) per Pod session, sealed under §13.14's p
   each tree on the envelope's path and the blob checked by their recomputed ids). A rerun keeps
   every payload and envelope written before, each payload checked against its envelope and
   holding the line, its number and B3's sha256; a payload whose envelope an interruption left
-  unwritten gets it from its bytes, and nothing is rewritten. Each phase runs under §12.7's one
+  unwritten gets it from its bytes, and nothing is rewritten. A payload cut while written is kept
+  and never committed, so the recovered stream shows a gap in its numbering: it is not literally
+  indistinguishable from an uninterrupted one (it shows that a publication was interrupted, not
+  the record or its readiness), and such a gap is recorded as a technical interruption. Each phase runs under §12.7's one
   retry per cell (`follow_certificate.with_retry`), deciding only from runs in `sealed/runs`
   that are the phase's approved cells (`calibration_cells`, `certificate_cells`: each run's
   config hash recomputed and its identity the planned cell's; any other run of the line refuses
