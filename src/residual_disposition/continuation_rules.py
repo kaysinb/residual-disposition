@@ -1333,10 +1333,10 @@ def follow_b2() -> dict[str, Any]:
 
 
 # Barrier B3's configuration (§13.15) and its frozen sha256 (``follow_hash`` of its ``b3``
-# mapping): set by the commit that freezes it; until then no new reader request to L, H_s or X
-# and no certificate run is sent.
+# mapping), set by the commit that froze it: before it, no new reader request to L, H_s or X and
+# no certificate run was sent.
 FOLLOW_B3_PATH = CONFIG_ROOT / "continuation" / "follow_b3.yaml"
-FOLLOW_B3_FROZEN: str | None = None
+FOLLOW_B3_FROZEN: str | None = "36dca67ca24d53659f1bcf523502fb658f6f3893e526d21b48963bfb4bf07069"
 
 
 def load_follow_b3(path: str | Path = FOLLOW_B3_PATH, *, expected_hash: str | None = None,

@@ -143,6 +143,8 @@ def _line_problems(line: Mapping[str, Any], items: set[str], root: Path) -> list
 
 
 SEAL_PAYLOAD = ("line", "n", "b3_sha256", "nonce", "record")
+SEAL_ROOTS = {"runs": "sealed/runs", "work": "sealed/work", "served": "sealed/served",
+              "cache": "sealed/cache"}  # fmt: skip
 NONCE_BITS = 256
 
 
@@ -152,6 +154,11 @@ def seal_problems(seal: Mapping[str, Any]) -> list[str]:
     cadence = seal["envelopes"]["cadence_minutes"]
     if type(cadence) is not int or cadence <= 0:
         out.append("seal: the envelopes' cadence is a fixed whole number of minutes")
+    if dict(seal.get("roots") or {}) != SEAL_ROOTS:
+        out.append(f"seal: the sealed roots are {SEAL_ROOTS}")
+    if "pod_space.WRITERS" not in seal.get("writers", "") or "HF_HUB_OFFLINE=1" not in seal.get(
+            "writers", ""):  # fmt: skip
+        out.append("seal: every writer beneath the sealed cache, the hub read offline")
     payload = seal["envelopes"]["payload"]
     if not all(f in payload for f in SEAL_PAYLOAD) or f"{NONCE_BITS} random bits" not in payload:
         out.append(
