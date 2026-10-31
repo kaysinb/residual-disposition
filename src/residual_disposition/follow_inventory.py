@@ -638,3 +638,47 @@ def b3_inventory(src: Mapping[str, Mapping[str, Any]], pd_src: Mapping[str, Mapp
     out["reuse"] = reuse(pd)
     out["sources"] = {"build": BUILD_SESSION, "confirmed": dict(confirmed)}
     return out
+
+
+LRANDOM_RECORD = "manifests/follow_lrandom.json"
+
+
+def random_branches(root: Path | None = None, repo: Path | None = None) -> dict[str, dict]:
+    """The new random branches by the name the inventories give them (``"random branch of
+    <package>"``), each bound by the committed record (``manifests/follow_lrandom.json``, read
+    only committed and unchanged): the session's run directory found exactly once under the runs
+    root, its manifest and result at their recorded sha256, the record the frozen session's, and
+    in each build exactly its complete file inventory, every file at its recorded sha256. A name
+    pattern never finds one; a second matching directory is refused."""
+    from .continuation_rules import FOLLOW_LRANDOM_FROZEN, follow_lrandom
+    from .follow_build import random_files
+    from .manifests import committed_json
+    from .paths import REPO_ROOT
+
+    repo = REPO_ROOT if repo is None else Path(repo)
+    record = committed_json(repo / LRANDOM_RECORD, "the random branches' record", repo)
+    root = runs_root() if root is None else Path(root)
+    if record["session_sha256"] != FOLLOW_LRANDOM_FROZEN:
+        raise ValueError("the record is not of the frozen session")
+    found = sorted(root.glob(f"*/{record['run']}"))
+    if len(found) != 1:
+        raise ValueError(f"{record['run']}: found {len(found)} times, not once")
+    out = found[0] / record["out"]
+    if (_sha(out / "manifest.json"), _sha(out / "result.json")) != (
+            record["manifest_sha256"], record["result_sha256"]):  # fmt: skip
+        raise ValueError("the session's manifest or result is not the recorded one")
+    layers = [int(x) for x in follow_lrandom()["layers"]["read"]]
+    names = {b["state"]: b["package"] for b in follow_lrandom()["builds"]}
+    if sorted(record["builds"]) != sorted(names):
+        raise ValueError("the record's builds are not the frozen session's")
+    result = {}
+    for state, b in record["builds"].items():
+        d = found[0] / b["dir"]
+        files = {str(p.relative_to(d)): _sha(p) for p in sorted(d.rglob("*")) if p.is_file()}
+        if files != dict(b["files"]) or sorted(files) != random_files(layers):
+            raise ValueError(f"{state}'s random branch is not its recorded, complete files")
+        if b["package"] != names[state]:
+            raise ValueError(f"{state}: not its planned package")
+        result[f"random branch of {b['package']}"] = {"build": record["run"], "state": state,
+                                                       "dir": b["dir"]}  # fmt: skip
+    return result

@@ -1935,6 +1935,43 @@ new reader request to L, H_s or X, PD included, and before any certificate run.
   response, key, retry history and tier, and its labels are reused only as admitted there. A
   reused hypothesis counts once. Pools built on 2026-10-30 are read only by new readings.
 
+## Follow-up: the existing L packages' random branches
+
+D*'s analysis readings name the random-direction branch of five existing L lens packages
+(word_count_claim 200, countdown 50, tldr 400, example_link 200 and eli5 continued 200), which
+they do not hold. One session builds them (`configs/continuation/follow_lrandom.yaml`, frozen by
+`continuation_rules.FOLLOW_LRANDOM_FROZEN`; `scripts/pod/follow_lrandom.py
+experiments/continuation_14b/word_count_claim --space <space> --out <new directory>`), as the
+packages of 2026-10-30 were (`follow_build.execute`, M0's runtime, the same checks of placement,
+runtime and adapters before any GPU work):
+
+- the session's builds are exactly the packages B3's inventory names
+  (`follow_build.lrandom_problems`), each L at its package's recorded state and seed, its
+  control's sources (the package's stored state means and record, the shared base means) at
+  their pinned sha256 (`follow_build.pinned_problems`);
+- each behavior's A is rebuilt first as a reference (`follow_build.execute_random`); per L,
+  the same session's method check alone decides (its δ̄ by the production path against the
+  qualification path, to 2⁻⁸); its δ̄ and norm against the pinned ones, at both layers, are
+  recorded as diagnostics (§13.10), the pinned reference in each error's denominator;
+- the random branch is read from the pinned sources alone (`follow_build.pinned_sources`):
+  the directions of the pinned δ̄ (stored means minus the shared base means) at the package's
+  seed, at the pinned η, through the state decoder; a failed method check stops the session
+  before anything of that build is read;
+- the existing package runs are never written.
+
+After the pull, `scripts/follow_lrandom.py runs/follow_lrandom/<run> --write` checks the output
+whole, by recomputation rather than by its flags (`follow_build.lrandom_output_problems`: the
+manifest the frozen session's; every saved tensor at the sha256 the session recorded; every
+deciding method check recomputed from the saved tensors, passing and equal to the reports of the
+result and of the build's record; the diagnostics recomputed from the pinned sources; each build
+its planned state, package and seed, exactly its complete file inventory, its readings rendering
+as D*'s random branch) and records the run, the frozen session, the manifest's and the result's
+sha256 and every built file's sha256 once in `manifests/follow_lrandom.json`, committed with the
+session's decision-log row. The inventories find a branch only through that committed record
+(`follow_inventory.random_branches`: the run directory exactly once under the runs root, the
+manifest and result at their recorded sha256, each build's complete inventory at its recorded
+sha256).
+
 ## Artifact retention
 
 Before a costly campaign, record which states/seeds and matched controls to retain, why, storage
