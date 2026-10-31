@@ -19,8 +19,8 @@ complete rule C by exact error-rate bounds.
   missing, unresolved or safety-blocked required label counts as an error. Pass needs the
   one-sided exact (Clopper–Pearson) lower bound of sensitivity ≥ the floor and the upper bound of
   the false-positive rate ≤ the ceiling, i.e. at most ``max_errors`` of each (29 and 12 at 400 per
-  class), and §3's criterion 2, the veto's precision (``veto_precision``), passing or not
-  applicable. Estimates and bounds are reported overall and by stratum. κ and the
+  class); the veto's conditional precision (``veto_precision``) is reported, not gated (§13.16).
+  Estimates and bounds are reported overall and by stratum. κ and the
   alternative-annotator test come from ``judge.c_validation`` on the same items and are reported
   beside it.
 """
@@ -127,13 +127,10 @@ def max_errors(n: int, *, sensitivity_floor: Fraction, fpr_ceiling: Fraction,
 
 
 def veto_precision(vetoed: int, negative: int) -> str:
-    """§3's criterion 2 (as ``judge.c_validation``): among the vetoed items (lenient "yes", strict
-    ``avoids_behavior``), the reference C negative for at least 80 %, or for every one when fewer
-    than 5 are vetoed; "not applicable" when none is."""
-    if vetoed == 0:
-        return "not applicable"
-    ok = negative == vetoed if vetoed < 5 else Fraction(negative, vetoed) >= Fraction(4, 5)
-    return "pass" if ok else "fail"
+    """§3's criterion 2 on the locked set, descriptive at every count (§13.16): among the vetoed
+    items (lenient "yes", strict ``avoids_behavior``), the share with the reference C negative;
+    "not applicable" when none is vetoed. A mistaken veto is a false negative of the acceptance."""
+    return "not applicable" if vetoed == 0 else f"{negative} of {vetoed}"
 
 
 def acceptance(chosen: Mapping[str, Sequence[Hashable]],
@@ -164,7 +161,7 @@ def acceptance(chosen: Mapping[str, Sequence[Hashable]],
     vetoed_negative = len(set(vetoed) & set(neg))
     veto = veto_precision(len(vetoed), vetoed_negative)
     complete = len(pos) == len(neg) == per_class
-    passed = complete and len(fn) <= most_fn and len(fp) <= most_fp and veto != "fail"
+    passed = complete and len(fn) <= most_fn and len(fp) <= most_fp
 
     def by(items: list, errors: list) -> dict[Hashable, dict[str, int]]:
         bad = set(errors)
@@ -222,16 +219,31 @@ def minimums_of(spec: Mapping[str, Mapping[str, Any]], behaviors: Sequence[str] 
 
 def step(frame: Sequence[Hashable], supplement: Sequence[Hashable] | None, generated: bool,
          reference: Mapping[Hashable, str | None], strata: Mapping[Hashable, Iterable[Hashable]],
-         totals: Mapping[str, int],
-         minimums: Mapping[str, Mapping[Hashable, int]]) -> dict[str, Any]:  # fmt: skip
+         totals: Mapping[str, int], minimums: Mapping[str, Mapping[Hashable, int]],
+         ceiling: int | None = None) -> dict[str, Any]:  # fmt: skip
     """The stopping rule fixed at B2: label the frame in its seeded order until the selection is
     complete (``locked``); a frame exhausted first, with a declared supplemental inventory not yet
     generated, calls for it whole (``generate_supplement``); its items are then labeled in their
     own seeded order after the frame's; once nothing is left to label, the final selection caps
     the minimums (``locked`` with its short strata), or a class is under its total
-    (``incomplete``: the format is not validated). ``label`` asks for more labels in order."""
+    (``incomplete``: the format is not validated). ``label`` asks for more labels in order. From
+    ``ceiling`` labeled items the search for strata stops (§13.16): the minimums are capped as in
+    the first ``ceiling`` items of the order hold them, frozen so, and labeling goes on only until
+    both classes hold their totals; the choice does not depend on how the labels were batched."""
     order = list(frame) + (list(supplement) if supplement and generated else [])
-    out = select(order, reference, strata, totals, minimums)
+    if ceiling is not None and sum(reference.get(i) is not None for i in order) >= ceiling:
+        held: dict[str, Counter] = {POSITIVE: Counter(), NEGATIVE: Counter()}
+        for item in order[:ceiling]:
+            if reference.get(item) in held:
+                held[reference[item]].update(strata[item])
+        frozen = {c: {t: min(m, held[c][t]) for t, m in need.items()}
+                  for c, need in minimums.items()}  # fmt: skip
+        short = {c: {t: held[c][t] for t, m in need.items() if held[c][t] < m}
+                 for c, need in minimums.items()}  # fmt: skip
+        out = {**select(order, reference, strata, totals, frozen),
+               "short_strata": {POSITIVE: {}, NEGATIVE: {}, **short}}  # fmt: skip
+    else:
+        out = select(order, reference, strata, totals, minimums)
     if out["complete"]:
         return {"step": "locked", **out}
     if any(reference.get(i) is None for i in order):

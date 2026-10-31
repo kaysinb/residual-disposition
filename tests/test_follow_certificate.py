@@ -526,3 +526,61 @@ def test_each_phase_s_approved_cells_are_its_planned_runs(monkeypatch):
     assert len(cells) == 6 and all(
         c["params"]["purpose"] == "kstar_calibration" and c["params"]["follow"] == line["binding"]
         and c["params"]["state"] == line["sham_s"] for c in cells.values())  # fmt: skip
+
+
+def test_the_plain_launches_commit_the_calibration_between_them(tmp_path, monkeypatch):
+    from residual_disposition import follow_build, manifests
+
+    pod = runner()
+    record = {"status": "resolved", "budget": 150}
+    runs, trained = [], []
+    ws = SimpleNamespace(store=SimpleNamespace(verify=lambda s: None))
+    done = {"cell": True}
+
+    def calibrate(ws, line, rules):
+        trained.append(1)
+        return dict(record)
+
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    monkeypatch.setenv("TRANSFORMERS_OFFLINE", "1")
+    monkeypatch.setattr(follow_build, "placement_problems", lambda space, out: [])
+    monkeypatch.setattr(pod.F, "workspace", lambda line: ws)
+    monkeypatch.setattr(pod.F, "reference", lambda ws, line: {})
+    monkeypatch.setattr(pod.F, "data", lambda ws, line: None)
+    monkeypatch.setattr(pod.F, "calibrate", calibrate)
+    monkeypatch.setattr(pod.F, "calibration_runs", lambda *a: [(ws, "s", {})])
+    monkeypatch.setattr(pod.F, "certify", lambda ws, line, rules, k: runs.append(k) or {"runs": 72})
+    monkeypatch.setattr(P, "certificate_controls", lambda ws, rules: {})
+    monkeypatch.setattr(P, "relearn_cell", lambda ws, state, **a: SimpleNamespace(
+        cell=SimpleNamespace(done=done["cell"])))  # fmt: skip
+    monkeypatch.setattr(pod.cr, "follow_b3", b3)
+    monkeypatch.setattr(pod.cr, "load_rules", lambda **kwargs: {})
+    manifest = {**record, "sha256": "x", "committed_at": "y"}
+    monkeypatch.setattr(manifests, "committed_json", lambda path, what: dict(manifest))
+    out, space, name = tmp_path / "out", tmp_path, "pun_intended_200"
+    assert pod.plain(name, "calibration", space, out) == 0 and not runs and trained == [1]
+    assert json.loads((out / "kstar_calibration.json").read_text()) == record
+    assert json.loads((out / "status.json").read_text()) == {"status": "completed"}
+    assert pod.plain(name, "certificate", space, out) == 0 and runs == [record]
+    assert json.loads((out / "certificate_blocks.json").read_text()) == {"runs": 72}
+    # a calibration cell missing (a wrong runs directory): refused, nothing trained
+    done["cell"], runs[:], trained[:] = False, [], []
+    with pytest.raises(ValueError, match="calibration cells are not here"):
+        pod.plain(name, "certificate", space, out)
+    assert not trained and not runs
+    done["cell"] = True
+    manifest["budget"] = 200  # another calibration: no cell runs on it
+    with pytest.raises(ValueError, match="committed manifest"):
+        pod.plain(name, "certificate", space, out)
+    assert not runs
+    assert json.loads((out / "status.json").read_text()) == {"status": "failed",
+                                                             "cause": "ValueError"}  # fmt: skip
+    # placement and the offline hub are checked before anything is written
+    monkeypatch.setattr(follow_build, "placement_problems", lambda space, out: ["RUNS_DIR is x"])
+    with pytest.raises(SystemExit, match="RUNS_DIR"):
+        pod.plain(name, "calibration", space, tmp_path / "other")
+    assert not (tmp_path / "other").exists()
+    monkeypatch.setattr(follow_build, "placement_problems", lambda space, out: [])
+    monkeypatch.delenv("HF_HUB_OFFLINE")
+    with pytest.raises(SystemExit, match="offline"):
+        pod.plain(name, "calibration", space, tmp_path / "other")

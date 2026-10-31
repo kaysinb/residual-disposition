@@ -109,25 +109,23 @@ def test_acceptance_boundaries_and_missing():
         accept(judged(0, 0), {fv.POSITIVE: pos[:-1] + pos[:1], fv.NEGATIVE: neg})
 
 
-def test_acceptance_keeps_the_veto_precision():
-    """§3's criterion 2: one erroneous veto among 799 correct classifications fails it."""
-    pos, neg = [("p", i) for i in range(400)], [("n", i) for i in range(400)]
-    strata = {i: ("behavior:s",) for i in pos + neg}
+def test_the_veto_s_precision_is_reported_and_its_errors_count_as_false_negatives():
+    pos, neg = list(range(400)), list(range(400, 800))
     chosen = {fv.POSITIVE: pos, fv.NEGATIVE: neg}
-    c = {i: ("names", True) for i in pos} | {i: ("other", False) for i in neg}
+    strata = {i: () for i in pos + neg}
+    c = {i: ("names_behavior", True) for i in pos} | {i: ("other", False) for i in neg}
     out = fv.acceptance(chosen, c, strata, per_class=400, **RULE)
     assert out["passed"] and out["criterion_2"]["result"] == "not applicable"
-    c[pos[0]] = ("avoids_behavior", True)  # vetoed, the reference positive
+    # five vetoes, two of them mistaken: two false negatives, and the format is not rejected
+    for i in pos[:2] + neg[:3]:
+        c[i] = ("avoids_behavior", True)
     out = fv.acceptance(chosen, c, strata, per_class=400, **RULE)
-    assert out["false_negatives"] == 1 and out["criterion_2"] == {
-        "result": "fail", "vetoed": 1, "reference_c_negative": 0}  # fmt: skip
-    assert not out["passed"]
-    for i in neg[:4]:
-        c[i] = ("avoids_behavior", True)  # four correct vetoes: 4 of 5 negative passes
-    out = fv.acceptance(chosen, c, strata, per_class=400, **RULE)
-    assert out["criterion_2"]["result"] == "pass" and out["passed"]
-    assert [fv.veto_precision(v, n) for v, n in ((0, 0), (4, 4), (4, 3), (5, 4), (10, 7))] == [
-        "not applicable", "pass", "fail", "pass", "fail"]  # fmt: skip
+    assert out["passed"] and out["false_negatives"] == 2 and out["false_positives"] == 0
+    assert out["criterion_2"] == {"result": "3 of 5", "vetoed": 5, "reference_c_negative": 3}
+    # the limits are what reject: 30 mistaken vetoes are 30 false negatives
+    for i in pos[:30]:
+        c[i] = ("avoids_behavior", True)
+    assert not fv.acceptance(chosen, c, strata, per_class=400, **RULE)["passed"]
 
 
 def test_the_stopping_rule():
@@ -196,3 +194,38 @@ def test_the_ladder_s_strata_by_role_component_and_difficulty():
         "component:agent",
         "difficulty:another_behavior",
     )
+
+
+def test_the_ceiling_stops_only_the_search_for_strata():
+    items = list(range(3000))
+    totals = {fv.POSITIVE: 4, fv.NEGATIVE: 4}
+    need = {fv.POSITIVE: {"rare": 2}, fv.NEGATIVE: {}}
+    strata = {i: () for i in items}  # the rare stratum never appears
+    both = {i: fv.POSITIVE if i % 2 else fv.NEGATIVE for i in items[:20]}
+    assert fv.step(items, None, False, both, strata, totals, need, ceiling=2000)["step"] == "label"
+    assert fv.step(items, None, False, both, strata, totals, need, ceiling=20)["step"] == "locked"
+    capped = fv.step(items, None, False, both, strata, totals, need, ceiling=20)
+    assert capped["short_strata"][fv.POSITIVE] == {"rare": 0}  # reported, the totals unchanged
+    assert len(capped["chosen"][fv.POSITIVE]) == 4
+    one = dict.fromkeys(items[:20], fv.NEGATIVE)  # a class short: labeling goes on to its total
+    assert fv.step(items, None, False, one, strata, totals, need, ceiling=20)["step"] == "label"
+    every = dict.fromkeys(items, fv.NEGATIVE)  # exhausted with a class short: not validated
+    assert fv.step(items, None, False, every, strata, totals, need, ceiling=20)["step"] == (
+        "incomplete")  # fmt: skip
+
+
+def test_the_frozen_minimums_do_not_depend_on_the_batching():
+    items = list(range(3000))
+    totals = {fv.POSITIVE: 4, fv.NEGATIVE: 4}
+    need = {fv.POSITIVE: {"rare": 2}, fv.NEGATIVE: {}}
+    # the rare stratum appears only after the ceiling, on positives
+    strata = {i: ("rare",) if i in (2001, 2003) else () for i in items}
+    labeled = {i: fv.POSITIVE if i % 2 else fv.NEGATIVE for i in items}
+
+    def at(n):
+        return fv.step(items, None, False, {i: labeled[i] for i in items[:n]}, strata, totals, need,
+                       ceiling=2000)  # fmt: skip
+
+    assert at(2000)["step"] == at(2100)["step"] == "locked"
+    assert at(2000)["chosen"] == at(2100)["chosen"]  # rare items beyond the ceiling are not sought
+    assert at(2100)["short_strata"][fv.POSITIVE] == {"rare": 0}

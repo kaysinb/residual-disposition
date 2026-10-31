@@ -17,6 +17,11 @@ phase with its sealed terminal record
 (``sealed/terminal_<phase>.json``), and any other failure leaves the line pending. The one open
 file is ``status.json`` (running, completed, or failed with an exception's class). A launcher's
 ``RUN_ID`` is removed first; stdout and stderr go to ``sealed/`` by the launcher.
+
+Since the amendment of 2026-10-31 (§13.16) a line runs after the readings are locked, with no
+overlap and so no seal, in two launches (``--phase calibration``, then ``--phase certificate``),
+the second on a snapshot that holds the line's committed k* manifest. The sealed path is kept,
+unused.
 """
 
 from __future__ import annotations
@@ -186,9 +191,69 @@ def take(flag: str) -> str:
     return value
 
 
+def plain(name: str, phase: str, space: Path, out: Path) -> int:
+    """The line at its place after the readings, with no seal (preregistration §13.16), in two
+    launches, each on the session's own snapshot: ``calibration`` writes the record
+    (``kstar_calibration.json``), which is committed as the line's k* manifest before the second;
+    ``certificate`` loads that committed manifest, refuses if a calibration cell is not here (it
+    never trains one), recomputes the calibration from the cached runs and must find it equal,
+    then runs the 72 cells. Before any write: the session writes only into its space, with room
+    (``follow_build.placement_problems``), and reads the hub offline. Any later failure is
+    ``status.json``'s failed with the exception's class, and the launcher stops the Pod; a later
+    launch reuses the completed cells."""
+    from residual_disposition import follow_build as B
+    from residual_disposition import pipeline as P
+    from residual_disposition.manifests import committed_json
+    from residual_disposition.paths import REPO_ROOT
+
+    problems = B.placement_problems(space, out)
+    for variable in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
+        if os.environ.get(variable) != "1":
+            problems.append(f"{variable} is not 1: the hub is read offline")
+    if problems:
+        raise SystemExit("; ".join(problems))
+    b3 = cr.follow_b3()
+    line = F.line_of(b3, name)
+    rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
+    committed = None
+    if phase == "certificate":
+        committed = committed_json(REPO_ROOT / line["kstar_manifest"], "the line's k* manifest")
+        committed = {k: v for k, v in committed.items() if k not in ("sha256", "committed_at")}
+    status = out / "status.json"
+    out.mkdir(parents=True, exist_ok=True)
+    try:
+        ws = F.workspace(line)
+        ref, b = F.reference(ws, line), F.data(ws, line)
+        P.certificate_controls(ws, rules)
+        for state in (line["latent"], line["sham_s"]):
+            ws.store.verify(state)
+        F.status(status, "running")
+        if phase == "calibration":
+            keep(out / "kstar_calibration.json", F.calibrate(ws, line, rules))
+        else:
+            planned = F.calibration_runs(ws, line, rules, ref, b)
+            missing = sum(not P.relearn_cell(a, s, **args).cell.done for a, s, args in planned)
+            if missing:
+                raise ValueError(f"{missing} calibration cells are not here: none is trained")
+            record = F.calibrate(ws, line, rules)  # its cached runs: no GPU work
+            if F.canonical(record) != F.canonical(committed):
+                raise ValueError("the calibration recomputed is not its committed manifest")
+            keep(out / "certificate_blocks.json", F.certify(ws, line, rules, record))
+        F.status(status, "completed")
+        return 0
+    except Exception as error:  # noqa: BLE001 — the status names the class only
+        F.status(status, "failed", type(error).__name__)
+        raise
+
+
 def main() -> int:
     os.environ.pop("RUN_ID", None)  # it would name every cell's run directory alike
     name, space, out = take("--line"), Path(take("--space")), Path(take("--out"))
+    if "--phase" in sys.argv:  # §13.16: no overlap, no seal; the sealed path below stays unused
+        phase = take("--phase")
+        if phase not in ("calibration", "certificate"):
+            raise SystemExit(f"no phase {phase!r}")
+        return plain(name, phase, space, out)
     sealed = F.sealed_dir(space, name)
     if out != space / "follow" / "cert" / name or Path(os.environ.get("RUNS_DIR", "")) != (
             sealed / "runs"):  # fmt: skip

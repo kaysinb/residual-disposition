@@ -2019,7 +2019,52 @@ the API from recorded packages only (`residual_disposition.follow_qualification`
   floors at the upper ends), each pool's rate over its two streams (160 slots) and the floors per
   lineage on exact fractions: D* per decoder R(A) ≥ 7/10, R(H) ≤ 1/10, R(A) − R(H) ≥ 3/5 and
   R(recipe) ≥ 7/10 · R(A) (eli5's two recipe controls each), A's fidelity branches R ≤ 1/10;
-  unfiltered PD R(A) ≥ 7/10 and R(recipe) ≥ 7/10 · R(A).
+  unfiltered PD R(A) ≥ 7/10 and R(recipe) ≥ 7/10 · R(A). D*'s eligibility is the state decoder's
+  floors and the fidelity branches; the base decoder's govern only the secondary p_both (§13.16).
+
+## Follow-up: the format validation of D* and unfiltered PD
+
+[Preregistration §13.5](preregistration.md#135-gates-and-tests), barrier B2's `format_validation`
+and `ensemble`, on the qualification's hypotheses (`residual_disposition.follow_format`;
+`scripts/follow_format.py`, records under `<DATA_DIR>/follow_format/<format>`, immutable):
+
+- **Frame:** one item per parsed hypothesis of the format's frame readings, read back from the
+  cache at the entry sha256 the named qualification run recorded; an unresolved slot leaves the
+  frame unbuilt. `frame.json` holds the run, its files' sha256 and the seeded order, written once.
+- **Rounds** (`round`): the next items in the seeded order, only when the frozen stopping rule
+  asks for more labels and every earlier round is labeled and reviewed. The annotators see an
+  opaque id, the behavior, the TARGET and the HYPOTHESIS, under B2's frozen instructions; the
+  mapping stays private.
+- **Ensemble** (`import-annotators`, `import-arbiter`): each export holds the four fields for
+  exactly the round's items, its manifest B2's model and runner on the kit issued. An item is
+  disputed on any of strict, lenient, categories and specificity the three do not give alike; a
+  fresh arbiter sees the disputed items with the votes counted anonymously and settles the
+  disputed fields.
+- **Review** (`review`, `import-review`): the researcher reviews every dispute and the seeded
+  tenth fixed by the item alone, blind to reader, state, role, decoder, reading and machine labels;
+  the page confirms each item explicitly, and its export and log are kept. A review's labels replace
+  the merged ones. Above 15 % disputed items in the first round, the format's review keeps only the
+  disputes whose votes can change the class or the difficulty (§13.16).
+- **Lock** (`lock`): the reference class is rule C on the final labels, the difficulty from the
+  final categories and specificity; `follow_validation.step` locks 400 + 400 items and the record
+  holds the labels it locked. From 2,000 labeled items the search for strata stops (§13.16); a frame
+  exhausted with a class short leaves the format not validated.
+- **Acceptance** (`accept`): the machine labels are read only here, from the qualification's
+  recorded attempts at their entry sha256, against the locked labels, a safety-blocked strict label
+  counted as unresolved; `acceptance.json` holds the gate and, beside it, κ and the
+  alternative-annotator test.
+
+## Follow-up: a certificate line after the readings
+
+Under [§13.16](preregistration.md#1316-amendment-of-2026-10-31-technical-failures-procedural-gates-and-the-certificates-place)
+a line runs after step 2 is locked, with no seal, in two launches of
+`scripts/pod/follow_certificate.py` (`--phase calibration`, then `--phase certificate`), each after
+the space, output, cache and offline-hub checks. Between them the calibration record is pulled and
+committed as the line's k* manifest (`manifests/kstar_follow_<line>.json`), and the second launch
+runs on a snapshot holding it. It refuses if a calibration cell is missing, trains none, recomputes
+the calibration from the cached runs and must find it equal. Any failure sets `status.json` to
+failed with the exception's class, and the Pod stops; a later launch, on any compatible machine,
+reuses the completed cells. The session below is kept for reference and is not used.
 
 ## Follow-up: a sealed certificate session
 

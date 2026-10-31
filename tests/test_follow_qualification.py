@@ -97,6 +97,19 @@ def test_the_floors_are_exact_and_eli5_s_recipes_qualify_apart():
     assert Q.floors(rates_of(table(fid=(9, 8))), RULES)["eli5"]["dstar"]["fidelity"] is False
 
 
+def test_the_base_decoder_governs_only_its_own_qualification():
+    t = table()
+    t[("dstar", "eli5", "A", "base")] = (10, 10)  # far below the floors, on the base decoder only
+    f = Q.floors(rates_of(t), RULES)["eli5"]["dstar"]
+    assert f["state"] is True and f["base"] is False
+    assert f["eligible"] is True and f["base_qualification"] is False
+    t = table()
+    t[("dstar", "eli5", "A", "state")] = (10, 10)
+    f = Q.floors(rates_of(t), RULES)["eli5"]["dstar"]
+    assert f["eligible"] is False and f["base_qualification"] is True
+    assert Q.floors(rates_of(table(fid=(9, 8))), RULES)["eli5"]["dstar"]["eligible"] is False
+
+
 def test_a_pending_reading_leaves_its_pool_and_verdict_pending():
     rows = [
         row("dstar", "eli5", "A", "state", 1, 60),

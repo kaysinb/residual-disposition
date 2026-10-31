@@ -3992,3 +3992,117 @@ implement the rules above.
 | B4 | the stack screening | V4/O4, built and hashed |
 | B5 | S1 training; any audit request | S1's data pin and audit sample; the audit rubric |
 | B6 | any new size training | for all declared sizes together: the size set and fallback rule, the fallback 8B's full configuration, model revisions and P, the common datasets and recipes, rate policy, references and floors, crossing targets, one common observation ceiling, whether four added 14B blocks enter the primary estimate, seed namespaces, the trend estimator and interval procedure (resample count, seed), handling of unavailable and censored points, detector-check sets |
+
+### 13.16 Amendment of 2026-10-31: technical failures, procedural gates and the certificates' place
+
+- **When adopted:** before any qualification count, label or rate of the follow-up is opened,
+  before any reading of an L, H_s or X by D\*, unfiltered PD or a later rung, before any new
+  certificate or k\* run, and before any V4 generation. Seen by then: §13.0's list, the
+  confirmations, the builds, the stack screening, and the qualification session's technical
+  figures only (requests, service tiers, failed sends and spending).
+- **What it does not change:** no threshold or sample size is lowered. The floors, margins and
+  levels of §13.5, §13.6 and §13.8, the 29 and 12 of format validation, K = 6 of 6 and the zero-hit
+  rule stand. Decided outcomes stand: the confirmations, dose 400's failed screening, the panel's
+  analysis and §12's results.
+- **Reason:** several rules let a technical event, a secondary measurement or a descriptive arm
+  end a primary measurement, with no gain in validity.
+- **Protocol in force:** barriers B2 and B3 as frozen, together with this section, which prevails
+  where they differ. Their files and hashes are unchanged; the commit of this section is recorded
+  in the decision log.
+
+**Technical failures (H1).** A technical cause closes nothing by itself. Out-of-memory, engine and
+machine faults leave the work pending, with the right to change machine. The effective batch and
+the matched training settings of these certificates do not change: a larger compatible GPU comes
+first; a changed micro-batch is a linked, disclosed change, never the same cell; a changed effective
+batch is only a separate prospective design. Repeated divergence stops for diagnosis and a recorded decision, with no automatic p = 1. This applies to
+k\*, the certificates, X_cont and the sizes' training, and replaces for §13 the retry-exhausted
+stop of §12.7 (2026-10-24). Completed cells and failed attempts are kept. Closure comes only by a
+recorded decision and is worded "unavailable", never as a failed test.
+
+**Money (H2).** A stopped or dropped item pauses with a price for the researcher's decision and is
+"unresolved" meanwhile. Work finally unavailable keeps its place in the fixed six-behavior family;
+its p = 1 is conservative Holm bookkeeping, not a scientific negative, and the denominator never
+shrinks.
+
+**The base decoder (H3).** The state decoder's floors and the fidelity controls govern D\*'s
+eligibility and the operational identification; every floor is kept. The common base decoder's
+floors govern only the secondary p_both: on their failure L, H_s and X are not read through the
+base decoder, p_both = 1, and the result is "not corroborated using the common base decoder". A
+state-only success claims no decoder-independent information in δ. This replaces §13.5 (a)'s
+"on either decoder".
+
+**A repair of a failed format (H4).** 29 and 12 stay. A failed validation is reported as failed. It
+may be repaired once, only while that format's L, H_s and X are unread, and only if at least half
+of the failing class's errors fall in one kind, classified from the validation's items before any
+rubric is changed:
+- a form of the behavior the rubric does not cover;
+- wording at the level of the category alone;
+- avoidance read as naming, or naming read as avoidance;
+- another behavior's feature taken for the target's.
+
+Missing, unresolved and blocked labels are no kind and allow no repair. The first validation
+becomes development. The repaired rubric is frozen before it is tested on fresh reference-labeled
+400 + 400 items from the unlabeled frame, excluding the development items and duplicate
+hypothesis–target texts. It applies uniformly to the qualification and to every later reading,
+whose thresholds are rechecked, with the original records kept. No choice between the two
+instruments follows from L's results. It is reported as a second instrument's validation, not as
+a restored pass of the first. Without the trigger, or after a second failure, the format stays
+failed.
+
+**The labeling ceiling (H5).** From 2,000 labeled items per format the search for stratum minimums
+stops; minimums are cut to what the first 2,000 items in the seeded order hold, frozen so, and
+reported as short, which narrows the coverage claim. Later labeling only fills the classes to 400. A frame exhausted with a class
+short leaves the format not validated, and no supplemental inventory is generated. A repair's
+validation (H4) does not count toward the ceiling.
+
+**The veto (H6).** The veto's conditional precision on the locked set is a descriptive figure at
+every number of vetoes and no longer fails a format; §13.5's "Kept from §3" is replaced. A mistaken
+veto stays a false negative under the limit of 29, and a correct veto is a correct classification.
+
+**Answers no parser accepts (H7).** Two failures of one slot pause it for diagnosis. An empty
+interpreter answer is a predefined "no hypothesis": not counted, the denominator kept, the number
+reported. An unparseable judge, category or specificity answer is missing measurement: it is
+diagnosed, a parser defect is fixed uniformly over the saved answers without a redraw, and earlier
+versions are kept.
+
+**Strict labels blocked by a safety filter (H8).** This replaces §13.4's treatment as "not naming
+b" in qualification and readings, and authorizes this one completion procedure. It is
+unconditional and takes place before the counts it affects are read:
+- every blocked strict request of every role and reader is labeled by the researcher, once per
+  unique request, and the label is propagated to the request's references;
+- the labeling is blind: opaque ids, no state, role, reader, machine label or provenance, with
+  seeded decoys from unblocked items mixed in, and the submission is locked once made;
+- categories are labeled for the hypotheses this makes countable;
+- the human component is reported apart: blocked counts per package and role, unique requests and
+  the results with and without it.
+
+In format validation a blocked required label stays an error, counted and shown, because that gate
+validates the machine instrument.
+
+**Disputes (H9).** Every dispute goes to the arbiter, and the researcher reviews every dispute and
+the seeded tenth of the labeled items. If more than 15 % of a format's first round is disputed, then
+once and one way for that format the researcher reviews, besides the seeded tenth, only the disputes
+that can change rule C's class or a difficulty label, judged from the possible reference votes,
+never from machine labels. This is disclosed in that format's report.
+
+**The comparator (H10).** An incomplete comparator does not block its rung's primary decision. If
+rung 3 is reached, the primary agent's own validation frame is frozen without comparator strata
+before those outputs exist.
+
+**Steering (H11).** A grading of UNKNOWN in the steering search stays pending; "no coherent
+strength" requires completed judgments.
+
+**Certificates at their place (order).** The overlap of §13.14 for the certificates is withdrawn
+before any use. The three new certificates run at step 3 of the order, after step 2's adjudications
+and readings are locked, on as many Pods as useful, and with no seal: the seal's provisions do not
+apply to them, and B3's seal block is not used. They run whatever the readings show. Calibration and
+certificate are two launches, with k\* and B recorded and committed in an ordinary manifest between
+them; the certificate loads that manifest, trains no calibration cell, recomputes the calibration
+from its cached runs and must find it equal. Cell,
+data and pairing checks and failed-attempt records stay. The ladder of step 4 follows them. The
+overlap for S1 is not used either: S1 keeps its place at step 5.
+
+**Open.** Whether a detector hit in the stack's validation gets a blind adjudication remains open.
+It is decided before any V4 generation, and its text then names the probes it covers, the rubric,
+the sampling unit, and how raw hits and p₁ are kept. Until then §13.7 applies as written.
+
