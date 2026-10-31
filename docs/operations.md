@@ -2021,6 +2021,53 @@ the API from recorded packages only (`residual_disposition.follow_qualification`
   R(recipe) ≥ 7/10 · R(A) (eli5's two recipe controls each), A's fidelity branches R ≤ 1/10;
   unfiltered PD R(A) ≥ 7/10 and R(recipe) ≥ 7/10 · R(A).
 
+## Follow-up: a sealed certificate session
+
+One line of B3's certificates (§13.8) per Pod session, sealed under §13.14's parallel execution
+(`residual_disposition.follow_certificate`; `scripts/pod/follow_certificate.py`):
+
+- **Before the session:** the line's inputs (`follow_certificate.dependencies`: its states in the
+  space's data, and A's, Y's and Y₂'s reference and provenance runs, the data cells and Y₂'s
+  selection inputs) copied create-only and checked by sha256 into the line's sealed directory
+  `<space>/follow/cert/<line>/sealed/` (`scripts/pod/copy_inputs.py --target` that directory);
+  the session's `RUNS_DIR` is `sealed/runs`, its `DATA_DIR` the space's, no tracker mirror.
+  Nothing in `sealed/` is listed or read before the opening, by the monitor or by any other
+  session in the space.
+- **On the Pod:** before any GPU work, the frozen B3, A's reference, b's data at B3's pin, the
+  controls Y and Y₂ and L's and H_s's tensors are checked. Then the k* calibration, its record
+  written only to `sealed/`; from the start, every 30 minutes, an envelope
+  (`envelopes/<n>.json`: the line, its number and the sha256 of a payload kept in
+  `sealed/payloads/`), whatever the calibration's state. The 72 runs start only after the
+  receipt of an envelope whose payload holds exactly the calibration this session recomputes,
+  with the calibration recomputed from its cached runs and equal to it. The receipt must place
+  the runner's own envelope in its commit (`follow_certificate.committed_problems`: the commit,
+  each tree on the envelope's path and the blob checked by their recomputed ids). A rerun keeps
+  every payload and envelope written before, each payload checked against its envelope and
+  holding the line, its number and B3's sha256; a payload whose envelope an interruption left
+  unwritten gets it from its bytes, and nothing is rewritten. A payload cut while written is kept
+  and never committed, so the recovered stream shows a gap in its numbering: it is not literally
+  indistinguishable from an uninterrupted one (it shows that a publication was interrupted, not
+  the record or its readiness), and such a gap is recorded as a technical interruption. Each phase runs under §12.7's one
+  retry per cell (`follow_certificate.with_retry`), deciding only from runs in `sealed/runs`
+  that are the phase's approved cells (`calibration_cells`, `certificate_cells`: each run's
+  config hash recomputed and its identity the planned cell's; any other run of the line refuses
+  the decision): a cell's classified training failure (out of memory or divergence of the
+  training step itself, as the run records it) is retried once; a second one ends the phase
+  with its sealed record (`sealed/terminal_<phase>.json`: the line, its meter item as B3
+  allocates it and the failed runs), never a third attempt; any other failure leaves the line
+  pending and resumable. The one open file is `status.json`, the same on success and on a
+  terminal stop; the session's duration and spending stay open (§13.14's exception).
+- **On the laptop:** each envelope is fetched at its scheduled time and committed alone on the
+  seal's branch as `manifests/follow_seal/<line>/envelope_<n>.json`
+  (`scripts/follow_seal.py`); the receipt (the commit, the envelope as committed and the raw git
+  objects that place it there) goes back as `receipts/<n>.json`. A budget stop (the line's item
+  stopped or dropped in the meter) is recorded here in the same fields, and every terminal
+  record is checked at the opening against the meter and the line's approved cells
+  (`follow_certificate.terminal_problems`).
+- **Opening:** after step 2's adjudications and readings are locked (§13.14), every payload is
+  checked against its committed envelope (`follow_certificate.opened`) and the sealed records
+  are read.
+
 ## Artifact retention
 
 Before a costly campaign, record which states/seeds and matched controls to retain, why, storage

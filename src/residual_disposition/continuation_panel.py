@@ -623,12 +623,14 @@ def analysis_path(root: Path) -> Path:
 def failure_problems(
     data: Mapping[str, Any], find_run: Any, identity: Mapping[str, Any], meter_state: Any,
     completed: Any, cells: Mapping[str, Mapping[str, Any]] | None = None,
+    item: str | None = None,
 ) -> list[str]:  # fmt: skip
     """Why a failure record does not establish an allowed terminal stop of this lineage's phase
     (``FAILURE_KINDS``): exactly its fields, bound to the lineage, behavior and contracts, and
 
-    - "budget": no run named; the meter item ``stage3/<behavior>/follow`` it names is the
-      lineage's and ``meter_state(item)`` is the recorded one, stopped or dropped;
+    - "budget": no run named; the meter item it names is the lineage's (``item``; by default
+      ``stage3/<behavior>/follow``) and ``meter_state(item)`` is the recorded one, stopped or
+      dropped;
     - "retry_exhausted": runs named, each found, failed (not running, not completed) with a
       classified cause recorded (``FAILURE_RECORD``, one of ``CLASSIFIED``), its config's hash
       recomputed equal to its meta's, and that hash one of the phase's approved cells
@@ -657,7 +659,7 @@ def failure_problems(
     runs = data.get("runs")
     if not isinstance(runs, list):
         return [*problems, "runs is not a list"]
-    item = f"stage3/{identity['behavior']}/follow"
+    item = item or f"stage3/{identity['behavior']}/follow"
     if kind == "budget":
         meter = data.get("meter") or {}
         if runs:
