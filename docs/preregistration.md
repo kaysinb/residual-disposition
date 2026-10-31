@@ -4112,3 +4112,27 @@ overlap for S1 is not used either: S1 keeps its place at step 5.
 It is decided before any V4 generation, and its text then names the probes it covers, the rubric,
 the sampling unit, and how raw hits and p₁ are kept. Until then §13.7 applies as written.
 
+**Countdown's recipe control and the recipe floor of unrun rungs (added 2026-10-31).** This
+paragraph was written after the qualification's counts were opened, and those counts were seen. In
+the qualification (`runs/follow_qualification/follow-qualification-20261031T091953Z`) countdown's
+recipe control on the state decoder counted 81 of 160; 7/10 · R(A), with R(A) = 147 of 160, requires
+103. A check found no defect in the package, its parent and dose, its hashes, the rendering, the
+requests or the judge's replies. All 79 uncounted hypotheses are strict "other" and lenient "no",
+mostly about ellipses and pauses. The failure stands and no floor changes.
+
+1. D\*'s test of countdown has p = 1 in the family of six, whose denominator does not change. The
+   base decoder, whose floors passed, is not promoted to the primary role. This holds for the present
+   instrument: if the blind format validation shows a systematic class of errors and H4's repair is
+   triggered, every lineage's thresholds are rechecked as H4 provides, this control among them. No
+   repair is sought or initiated on this account.
+2. One fixed exploratory reading of countdown by D\*, the only exception to §13.5 (a)'s rule that a
+   failing behavior's L, H_s and X are not read: B3's inventory readings of L, H_s and X on the state
+   decoder and of L with a random direction, 80 slots each, under their inventory salts. It stands
+   outside every family, discloses the failed control, runs only after D\*'s format validation and
+   any repair under H4, and is reported whatever its outcome. A positive outcome is exploratory; a
+   negative one does not show that the behavior is unreadable. The base decoder is not read.
+3. For rungs not yet run, prospectively and before their qualifications, the recipe floor stays and
+   is measured, but its failure limits how negative results and robustness are read and does not
+   close a positive contrast. A and H, the fidelity controls, X and H_s, the random cell, the
+   categories and multiplicity do not change. This does not apply to countdown or to the reading in 2.
+

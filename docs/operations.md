@@ -2019,6 +2019,11 @@ the API from recorded packages only (`residual_disposition.follow_qualification`
   run's limit checked on the standard tier's worst case; the dry run's figures (the due
   requests' estimate, the judging's projection on a probe hypothesis) are not bounds; the
   decision log reports the actual spending.
+- **Same request, two dates:** countdown's recipe control on the state decoder, byte-identical
+  request on the standard tier, counted 18 of 20 on 2026-10-27 (the reader candidate's screen) and
+  81 of 160 on 2026-10-31 (Fisher's exact p = 0.0006; the only one of 16 comparable cells that
+  differs). The records do not establish the cause, and no new sample was drawn. Cells compared
+  within one reading are sent in one window of time.
 - **Record** (`runs/follow_qualification/<run>`: `inputs.json`, `tier_fallback.jsonl`,
   `histories-before.json`, `answers.jsonl`, `histories.json`, `qualification.json`): each
   reading's counted hypotheses of its 80 slots (pending while one is unresolved) with its safety
