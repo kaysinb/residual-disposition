@@ -2093,6 +2093,7 @@ random branches' committed record:
   its random cell at most 8 of 80 through that decoder. Category recognition and identification of the
   specific behavior are reported apart. On a
   strict label blocked twice the slot stays pending; the blind completion of §13.16 is done by hand.
+  `--detector-share` prints the detector-hit items of each unfiltered-PD L package, reported beside it.
 - **Sensitivity of eli5 stack** (`--pin --sensitivity`, then `--send --sensitivity`; §13.16): its six
   cells on the standard tier with no fallback, interleaved, under their own pins
   (`manifests/follow_readings_sensitivity_inputs.json`), judge history (`--judge-history RUN

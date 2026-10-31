@@ -2,6 +2,7 @@
 step 2, §13.16), on the API from recorded packages only (``residual_disposition.follow_readings``).
 
     uv run python scripts/follow_readings.py [--pin | --send | --judge-history RUN] [--sensitivity]
+    uv run python scripts/follow_readings.py --detector-share
 
 Without a flag it prints the plan and the due requests with their estimate, and checks the readings
 against their committed pins when they exist. ``--pin`` writes every reading's package directory,
@@ -18,7 +19,8 @@ printed. ``--judge-history`` establishes tier-less replies' provenance by the re
 once. With ``--sensitivity``, the three take the standard-only repeat of eli5 stack (§13.16)
 instead: its own pins, judge history and run root, the interpreter on the standard tier with no
 fallback, its six cells interleaved, its record (``sensitivity.json``) beside the original record's,
-unopened.
+unopened. ``--detector-share`` prints the share of detector-hit items in each unfiltered-PD L
+package (§13.5).
 """
 
 from __future__ import annotations
@@ -164,6 +166,7 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--pin", action="store_true")
     mode.add_argument("--send", action="store_true")
     mode.add_argument("--judge-history", metavar="RUN")
+    mode.add_argument("--detector-share", action="store_true")
     parser.add_argument("--sensitivity", action="store_true")
     args = parser.parse_args(argv)
     if args.judge_history:
@@ -174,6 +177,19 @@ def main(argv: list[str] | None = None) -> int:
     from residual_disposition.paths import runs_root
 
     cells = plan(args.sensitivity)
+    if args.detector_share:
+        from pathlib import Path
+
+        from residual_disposition import follow_pd
+        from residual_disposition.continuation_strong import detector_of, hit_of
+
+        for c in cells:
+            r = c["reading"]
+            if r["reader"] == "pd_unfiltered" and r["role"] == "L":
+                rows = follow_pd.pool_rows(Path(c["directory"]))
+                share = follow_pd.detector_share(rows, hit_of(detector_of(r["behavior"])))
+                print(D.line_name(r["behavior"], r["mode"]), share)
+        return 0
     pinned_now = Q.pins(cells, runs_root())
     name = SENSITIVITY_PINS if args.sensitivity else PINS
     pins = REPO_ROOT / name

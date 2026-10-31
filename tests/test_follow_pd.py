@@ -116,3 +116,8 @@ def test_a_provenance_failure_stops_the_inventory(monkeypatch):
     reading = {**READING, "behavior": "tldr", "mode": "stack", "dose": 400, "salt": "s"}
     with pytest.raises(ValueError, match="sources"):
         P.reuse_map([reading], lambda name: None)
+
+
+def test_the_detector_share_counts_the_selected_items_only():
+    assert P.detector_share(rows(), lambda text: text.endswith("c6")) == {"items": 6, "hits": 2}
+    assert P.detector_share(rows(), lambda text: text.endswith("c0")) == {"items": 6, "hits": 0}

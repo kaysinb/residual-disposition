@@ -54,6 +54,15 @@ def evidence(rows: Sequence[Mapping[str, Any]]) -> str:
     return pd_evidence(selection(rows))
 
 
+def detector_share(rows: Sequence[Mapping[str, Any]], hit: Any) -> dict[str, int]:
+    """Reported beside an L reading (§13.5): the selection's items and how many the final detector
+    hits, an item's prefill and continuation read as one text (``pd_clean.item_text``)."""
+    from .pd_clean import item_text
+
+    chosen = [row for group in selection(rows).values() for row in group]
+    return {"items": len(chosen), "hits": sum(bool(hit(item_text(row))) for row in chosen)}
+
+
 def _same_rows(a: Sequence[Mapping[str, Any]], b: Sequence[Mapping[str, Any]]) -> bool:
     keys = ("config", "prefill", "prefill_text", "completion")
     return [tuple(r.get(k) for k in keys) for r in a] == [tuple(r.get(k) for k in keys) for r in b]
