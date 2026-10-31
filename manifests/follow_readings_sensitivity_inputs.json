@@ -1,0 +1,34 @@
+{
+ "readings": {
+  "follow/dstar/sensitivity/eli5/stack200/H_s/base/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s6d0985cfc3f27b80",
+   "evidence_sha256": "b937fce242c6fa28f91887a5269a03a862170f3a363533a90f490fdfee845530",
+   "keys_sha256": "64839436fba18964d0c9a5a4702770cca065256b9b1b7e9dd81c9a2994f973f9"
+  },
+  "follow/dstar/sensitivity/eli5/stack200/H_s/state/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s6d0985cfc3f27b80",
+   "evidence_sha256": "1af408ddfb2b2b4c0df91e15e9f88f79bcb13483844f6b6a35054ef0575ccf0e",
+   "keys_sha256": "b9a157806aaa204e3c43b6d75172a0ec995ff8c7515704916183a2d414d75233"
+  },
+  "follow/dstar/sensitivity/eli5/stack200/L/base/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "273d6fd5ee4685dc7d9b992a998bcf813f8fb78bc29e6df6867919ae5291d468",
+   "keys_sha256": "491292e13691a30675f6979ce3c03ba3a55aae6217a85bab63b152daadd29571"
+  },
+  "follow/dstar/sensitivity/eli5/stack200/L/state/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "2c3309ce9e075da6de7010b7ddf04a1d1c77dbb2b6a6ec27061fb0f90e9a1eff",
+   "keys_sha256": "e663369db0e451e26920bfca3a79e6d8bbc905b950680d1d539f08391487e786"
+  },
+  "follow/dstar/sensitivity/eli5/stack200/X/base/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s911a0722bb150a83",
+   "evidence_sha256": "d4c4cce6a4fecfafacc1e3d18bb9319d062271a883fb9fd93abc670caee732ea",
+   "keys_sha256": "4dd1d009c8794e53a1bf2599bfd6b8023e00f5cc0236760bef6ef40929467feb"
+  },
+  "follow/dstar/sensitivity/eli5/stack200/X/state/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s911a0722bb150a83",
+   "evidence_sha256": "d1ae69cb235504a35405fa542135a4c47f89b8aaa037c6aabc8c7672ef473f1d",
+   "keys_sha256": "df0bff008ddc275a441f03caf773b60b0c1152d734d8f89632bc8dbad5758713"
+  }
+ }
+}

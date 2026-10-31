@@ -2071,8 +2071,8 @@ and `ensemble`, on the qualification's hypotheses (`residual_disposition.follow_
 
 [Preregistration §13.5, §13.16](preregistration.md#135-gates-and-tests); step 2 of §13.14
 (`residual_disposition.follow_readings`; `scripts/follow_readings.py [--pin | --send |
---judge-history RUN]`, records under `runs/follow_readings/<run>`), run after the random branches'
-committed record:
+--judge-history RUN] [--sensitivity]`, records under `runs/follow_readings/<run>`), run after the
+random branches' committed record:
 
 - **Readings:** B3's analysis inventory at the confirmations, with the base decoder's controls on
   each A (`scripts/pod/follow_base_controls.py` on one Pod, then `scripts/follow_base_controls.py
@@ -2093,6 +2093,12 @@ committed record:
   its random cell at most 8 of 80 through that decoder. Category recognition and identification of the
   specific behavior are reported apart. On a
   strict label blocked twice the slot stays pending; the blind completion of §13.16 is done by hand.
+- **Sensitivity of eli5 stack** (`--pin --sensitivity`, then `--send --sensitivity`; §13.16): its six
+  cells on the standard tier with no fallback, interleaved, under their own pins
+  (`manifests/follow_readings_sensitivity_inputs.json`) and run root
+  (`runs/follow_readings_sensitivity/<run>`). The record (`sensitivity.json`, not printed) holds each
+  decoder's counts, gates and Holm result with only eli5's decisions replaced, beside the original
+  record, which it does not change.
 
 ## Follow-up: a certificate line after the readings
 

@@ -3,7 +3,8 @@ step 2, §13.16), on the API from recorded packages only.
 
 - **Readings** (``readings``): B3's analysis inventory (``manifests/follow_b3_inventory.json``) at
   the committed confirmations, with the base decoder's controls on A beside it
-  (``base_fidelity_readings``). Unfiltered PD's reused readings (the inventory's ``reuse`` map) are
+  (``base_fidelity_readings``) and a standard-only repeat of eli5 stack run apart
+  (``sensitivity_readings``). Unfiltered PD's reused readings (the inventory's ``reuse`` map) are
   read back, every attempt at its recorded sha256 (``reused_slots``), never asked again.
 - **Requests and labels:** as the qualification's (``follow_qualification``): 80 slots per reading,
   the frozen interpreter and judges, each attempt admitted at its tier.
@@ -425,4 +426,62 @@ def analysis(
                 continue
             passed = bool(decided[str(RUNG_LEVEL)]) and rung[cell] <= RANDOM_MAX
             out["rung1"][ladder] = {"passed": passed, "random": rung[cell]}
+    return out
+
+
+def sensitivity_readings(rows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """The standard-only repeat of eli5 stack (§13.16): its L, H_s and X on both decoders, as the
+    analysis readings ``rows`` name them, under fresh salts."""
+    return [{**r, "purpose": "sensitivity",
+             "salt": r["salt"].replace("/analysis/", "/sensitivity/")} for r in rows
+            if r["reader"] == "dstar" and (r["behavior"], r["mode"]) == ("eli5", "stack")
+            and r["role"] in ("L", "H_s", "X") and r["decoder"] in ("state", "base")]  # fmt: skip
+
+
+def interleaved(requests: Sequence[Any], cells: Sequence[Mapping[str, Any]]) -> list[Any]:
+    """The interpreter's due requests across the cells, slot by slot, to share one window."""
+    rank = {a.key: (i, j) for j, c in enumerate(cells)
+            for i, tries in enumerate(c["attempts"]) for a in tries}  # fmt: skip
+    return sorted(requests, key=lambda r: rank.get(r.key, (len(rank), 0)))
+
+
+def sensitivity(rows: Sequence[Mapping[str, Any]], original: Mapping[str, Any], regions: Any,
+                rules: Mapping[str, Any], definition: Any) -> dict[str, Any]:  # fmt: skip
+    """The sensitivity reading's record (§13.16), per decoder: eli5's counts and decisions under the
+    same gates, and a Holm result with only eli5's decisions replaced in that decoder's family, the
+    other five held at the original record's. It never changes the primary family."""
+    from . import continuation_stats as cs
+    from .follow_regions import ALPHA, LEVELS
+
+    by = {(r["reading"]["reader"], r["reading"]["behavior"], r["reading"]["mode"],
+           r["reading"]["role"], r["reading"]["decoder"]): r for r in rows}  # fmt: skip
+    never = dict.fromkeys(LEVELS, False)
+    accepted = original["format"]["accepted"]["dstar"]
+    out: dict[str, Any] = {"pending": False}
+    for decoder, family in (("state", "dstar_state"), ("base", "dstar_base")):
+        line = _line(by, "dstar", "eli5", "stack", decoder, regions)
+        cell = by.get(("dstar", "eli5", "stack", "L", decoder))
+        graded = None
+        if cell is not None and "counted" in cell["count"]:
+            graded = margins(cell["slots"], "eli5", definition, rules)
+        eligible = original["lines"]["eli5"][family]["eligible"]
+        category = None if graded is None else graded["passed"]
+        if line["by_level"] is None or eligible is None or (eligible and accepted
+                                                            and category is None):  # fmt: skip
+            out["pending"] = True
+            out[family] = {"counts": line["counts"], "decisions": None, "holm": None}
+            continue
+        gates = bool(eligible and accepted and category)
+        decided = line["by_level"] if gates else never
+        family_decisions = {
+            b: {Fraction(a): v for a, v in e[family]["decisions"].items()}
+            for b, e in original["lines"].items() if b != "eli5_cont"}  # fmt: skip
+        family_decisions["eli5"] = decided
+        holm = cs.holm_from_decisions(family_decisions, ALPHA)
+        same = sorted(holm["rejected"]) == sorted(original["holm"][family]["rejected"])
+        out[family] = {"counts": line["counts"], "margins": graded, "gates_passed": gates,
+                       "decisions": {str(a): v for a, v in decided.items()}, "holm": holm,
+                       "same_as_primary": same,
+                       "statement": None if same else
+                       "the decision was not robust to the standard-only repeat"}  # fmt: skip
     return out

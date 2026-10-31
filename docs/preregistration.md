@@ -4191,3 +4191,28 @@ partial-threshold comparison, and both are tested and reported. This replaces H3
    pass covers the mixture only.
 7. The report states per decoder what was identified. Any thought on why a decoder failed is marked
    as a hypothesis.
+
+**The standard-only sensitivity reading of eli5 stack (added 2026-10-31).** Before analysis outcomes
+were opened, a standard-only sensitivity reading was specified for eli5 stack because tier varied
+across its compared states. Original results remained primary. Both analyses are reported without
+pooling or selecting between them. Cache-use imbalances and the earlier control discrepancy were
+recorded; neither establishes a causal provider effect.
+
+- **The reading:** eli5 stack 200's L, H_s and X on both decoders, 80 slots each, in fresh
+  namespaces, on the standard tier only with no fallback, the six cells interleaved in one window,
+  with the same judges and category grading. It is a sensitivity, not a retry: the qualification and
+  all original results stay unchanged.
+- **Its analysis:** a separate sensitivity Holm result for each decoder's family, replacing only
+  eli5's decisions and holding the other five fixed; it never changes the primary family. If the
+  decisions disagree, the report states "the decision was not robust to the standard-only repeat".
+  This is not called a tier effect: tier, time and sampling changed together.
+- **The lines read on flex** are not read again. The tier table is reported, with the limitation that
+  the qualification and the readings differ in tier, so the qualification did not separately validate
+  each tier.
+- **Cache use,** from metadata and without labels: the cached share of each L, H_s and X cell by
+  decoder. An absolute difference of at least 20 points between L and either comparator within a
+  decoder is flagged and reported, with no exclusion, reweighting or new reading; missing metadata is
+  kept apart from "uncached". Duplicate hypotheses are reported descriptively, with no deduplication
+  and the denominators unchanged.
+- The discrepancy on countdown's recipe control, 18 of 20 on the reader candidate's screen against 81
+  of 160 in the qualification, is reported as unexplained.

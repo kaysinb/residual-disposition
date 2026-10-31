@@ -275,3 +275,45 @@ def test_the_base_controls_read_as_the_state_decoders_branch_through_the_base_de
         want = adl_lens.random_directions(delta, derive_seed(123, "adl_lens", x, "random"))
         assert torch.equal(vectors, want)  # the state decoder's branch's directions
         assert (norm, layer, decoder, prefix) == (7.0, x, "base", f"layer{x}/base_random")
+
+
+def test_the_sensitivity_reading_replaces_only_eli5_stack_and_leaves_the_primary_alone():
+    definitions, _ = load_definitions(expected_hash=DEFINITIONS_SHA256)
+    rules = follow_rules().data["readers"]
+    original = run(lines(70))
+    original["format"] = {"accepted": {"dstar": True}}
+    before = json.dumps(original, default=str, sort_keys=True)
+
+    def cells(l_count):
+        return [row("dstar", "eli5", "stack", role, decoder, l_count if role == "L" else 0)
+                for decoder in ("state", "base") for role in ("L", "H_s", "X")]  # fmt: skip
+
+    same = D.sensitivity(cells(70), original, fr.load(), rules, definitions["eli5"])
+    assert same["pending"] is False
+    assert same["dstar_state"]["same_as_primary"] is True
+    assert same["dstar_state"]["statement"] is None
+    lower = D.sensitivity(cells(2), original, fr.load(), rules, definitions["eli5"])
+    state = lower["dstar_state"]
+    assert "eli5" not in state["holm"]["rejected"] and "tldr" in state["holm"]["rejected"]
+    assert state["statement"] == "the decision was not robust to the standard-only repeat"
+    assert json.dumps(original, default=str, sort_keys=True) == before  # the primary is untouched
+    open_ = cells(70)
+    del open_[0]["slots"][0]["grades"]["category"]
+    pending = D.sensitivity(open_, original, fr.load(), rules, definitions["eli5"])
+    assert pending["pending"] is True and pending["dstar_state"]["holm"] is None
+
+
+def test_the_sensitivity_cells_are_six_under_fresh_salts_and_interleaved():
+    rows = D.sensitivity_readings(D.readings(CONFIRMED))
+    assert len(rows) == 6 and len({r["salt"] for r in rows}) == 6
+    assert all("/sensitivity/eli5/stack200/" in r["salt"] for r in rows)
+    originals = {r["salt"] for r in D.readings(CONFIRMED)}
+    assert not originals & {r["salt"] for r in rows}
+
+    class R:
+        def __init__(self, key):
+            self.key = key
+
+    cells = [{"attempts": [[R(f"{c}{i}")] for i in range(3)]} for c in "ab"]
+    order = D.interleaved([R(k) for k in ("a0", "a1", "a2", "b0", "b1", "b2")], cells)
+    assert [r.key for r in order] == ["a0", "b0", "a1", "b1", "a2", "b2"]
