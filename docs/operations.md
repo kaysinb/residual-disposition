@@ -1896,7 +1896,9 @@ new reader request to L, H_s or X, PD included, and before any certificate run.
   sanitized status file (running, completed, or a technical failure with a cause that names no
   arm, step or metric). Every 30 minutes from its start it writes an envelope holding only the
   sha256 of a payload: the line, the envelope's number, B3's sha256, a fresh 256-bit nonce and
-  the calibration record once it exists, else random bytes of the record's encoded length. The
+  the calibration record once it exists, else 4,096 random bytes. The session's runs go to its
+  own sealed runs directory, its inputs copied there create-only beforehand; neither the monitor
+  nor another session in the space lists it. The
   envelopes are collected and committed under `manifests/follow_seal/<line>/` on that schedule
   whatever the calibration's state; the runner starts the dependent runs only after the receipt
   of an envelope whose payload holds the record, and recomputes the calibration before using it.
@@ -1904,9 +1906,9 @@ new reader request to L, H_s or X, PD included, and before any certificate run.
 - **Rungs 2 and 3** (§13.6; `residual_disposition.follow_ladder`):
   - rung 2: D*'s state-decoder rendering unchanged, with each position's steered and unsteered
     samples at layer 20 by §11.1's procedure (the cell's own δ̄ from its D* package, at its
-    recorded norm; L with a random direction the seeded direction of L's D* random branch, with
-    L's unsteered samples), cut to 128 characters; prompt `adl-lens-multiscale-steer-v1`; D*'s
-    interpreter, i = 0;
+    recorded norm; L with a random direction read through its stored random branch at both
+    layers and steered along the seeded direction of that branch, with L's unsteered samples),
+    cut to 128 characters; prompt `adl-lens-multiscale-steer-v1`; D*'s interpreter, i = 0;
   - rung 3: the agent (`ladder-agent-v1`, rung 2's input) and the comparator
     (`ladder-comparator-v1`, the unsteered samples only) with one protocol: each turn
     `QUERY: <prompt>` or `HYPOTHESIS: <sentence>`, at most 5 queries of at most 2,000
@@ -1919,12 +1921,15 @@ new reader request to L, H_s or X, PD included, and before any certificate run.
 - **Inventory** (`scripts/follow_b3_inventory.py --write` → `manifests/follow_b3_inventory.json`,
   its sha256 in the configuration): D*'s 49 and unfiltered PD's 21 analysis readings of the six
   partial-threshold lineages and eli5 continued 200, salted by lineage, mode, dose and stream;
-  rungs 2 and 3's qualification, validation-only and analysis readings of the continued mode
-  with their packages and the sha256 of their vectors' sources; and unfiltered PD's reuse
-  decisions.
+  for rungs 2 and 3, the shared A and H qualification (read once, in whichever mode first reaches
+  the rung), each mode's recipe qualification, the validation-only streams (shared, and the
+  first mode's recipe) and the continued mode's cells, with their packages and the sha256 of
+  their vectors' sources; and unfiltered PD's reuse decisions. A rung's format is validated
+  once, on the shared readings and the first mode's recipe, with §13.5's strata.
 - **Unfiltered PD's reuse** (`residual_disposition.follow_pd`): an analysis reading takes a
-  committed Stage-3 reading's 80 hypotheses only when that reading verifies as the readers'
-  verdicts verify it, its package is of the same state and pool and removed nothing, its ordered
+  committed Stage-3 reading's 80 hypotheses only when its readers' manifest is committed and
+  recomputed whole from its sources (a failure stops the inventory) and the reading verifies as
+  the readers' verdicts verify it, its package is of the same state and pool and removed nothing, its ordered
   top lists are this selection and its evidence this reading's; each slot is mapped to its
   response, key, retry history and tier, and its labels are reused only as admitted there. A
   reused hypothesis counts once. Pools built on 2026-10-30 are read only by new readings.

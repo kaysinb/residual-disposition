@@ -112,3 +112,23 @@ def test_the_replies_turn_labels_both_models():
     turn = L.replies_turn("state says", "base says", 3)
     assert turn.index("fine-tuned model") < turn.index("state says") < turn.index("original model")
     assert turn.endswith("Prompts left: 3")
+
+
+def test_l_random_s_evidence_is_its_random_branch_at_both_layers(tmp_path):
+    run = cr._b2_probe_package(tmp_path)
+
+    def layers(evidence):
+        out = json.loads(evidence[len("OVERVIEW:\n") :])["datasets"]["ds1"]["layers"]
+        for layer in out.values():
+            for entry in layer["positions"].values():
+                entry.pop("steering", None)
+        return out
+
+    random, _ = L.render_rung2(run, steering(), tmp_path, decoder="random")
+    state, _ = L.render_rung2(run, steering(), tmp_path)
+    plain_random = layers(R.render(run, "random", tmp_path)[0])
+    plain_state = layers(R.render(run, "state", tmp_path)[0])
+    assert layers(random) == plain_random and layers(state) == plain_state
+    assert plain_random != plain_state  # none of L's own readings in the control
+    with pytest.raises(ValueError, match="branch"):
+        L.render_rung2(run, steering(), tmp_path, decoder="base")

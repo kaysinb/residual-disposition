@@ -166,3 +166,33 @@ def test_labels_and_minimums():
     m = fv.minimums_of(spec, ["a", "b"], ["state", "base"])
     assert m == {"positive": {"behavior:a": 30, "behavior:b": 30, "decoder:state": 60,
                               "decoder:base": 60, "difficulty:category_only": 40}}  # fmt: skip
+
+
+def test_the_ladder_s_strata_by_role_component_and_difficulty():
+    spec = {
+        "positive": {"component": 100, "role": 30, "difficulty": {"category_only": 40}},
+        "negative": {"component": 100, "role": 30, "difficulty": {"another_behavior": 40}},
+    }
+    m = fv.minimums_of(spec, roles=["A", "H", "recipe"], components=["agent", "comparator"])
+    assert m["positive"] == {
+        "role:A": 30,
+        "role:H": 30,
+        "role:recipe": 30,
+        "component:agent": 100,
+        "component:comparator": 100,
+        "difficulty:category_only": 40,
+    }
+    reading = {
+        "reader": "rung3",
+        "purpose": "qualification",
+        "behavior": "eli5",
+        "role": "recipe_cont",
+        "component": "agent",
+        "decoder": "state",
+    }
+    assert fv.labels(reading, another_behavior=True, category_only=False) == (
+        "behavior:eli5",
+        "role:recipe",
+        "component:agent",
+        "difficulty:another_behavior",
+    )

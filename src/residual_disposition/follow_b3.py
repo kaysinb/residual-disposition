@@ -28,8 +28,11 @@ from typing import Any
 from .paths import CONFIG_ROOT, REPO_ROOT
 
 LINES = ("eli5_stack_200", "example_link_200", "pun_intended_200")
+ITEMS = {"eli5_stack_200": "follow/cert/eli5_stack_200",
+         "example_link_200": "follow/cert/example_link",
+         "pun_intended_200": "follow/cert/pun_intended"}  # fmt: skip
 LINE_KEYS = {"item", "behavior", "dose", "latent", "sham_s", "active", "sham", "mode", "method",
-             "decision", "reference"}  # fmt: skip
+             "decision", "reference", "data"}  # fmt: skip
 
 
 def _json(root: Path, rel: str) -> dict[str, Any]:
@@ -63,15 +66,47 @@ def certificate_problems(cert: Mapping[str, Any], root: Path = REPO_ROOT) -> lis
     if not (root / c["y2"]).is_file():
         problems.append(f"certificates: {c['y2']} missing")
     lines = cert["lines"]
-    if tuple(lines) != LINES or any(set(v) != LINE_KEYS for v in lines.values()):
+    keys = {n: LINE_KEYS | ({"selection"} if n == "eli5_stack_200" else set()) for n in LINES}
+    if tuple(lines) != LINES or any(set(lines[n]) != keys[n] for n in lines):
         return problems + [
             f"certificates: the lines are {list(lines)}, each with {sorted(LINE_KEYS)}"
         ]
     allocations = yaml.safe_load((CONFIG_ROOT / "continuation" / "allocations.yaml").read_text())
     items = {a["item"] for a in allocations["allocations"]}
     for name, line in lines.items():
+        if line["item"] != ITEMS[name]:
+            problems.append(f"{name}: its meter item is {ITEMS[name]}")
         problems += [f"{name}: {p}" for p in _line_problems(line, items, root)]
+        problems += [f"{name}: {p}" for p in _data_problems(line, root)]
     return problems
+
+
+def _data_problems(line: Mapping[str, Any], root: Path) -> list[str]:
+    """b's data pin: a data id and an examples sha256, as the committed k* manifest of the same
+    behavior records them (eli5, example_link), or as the pilot's relearning run of the same data
+    records them (pun_intended: the data's identity only; that run is not reused)."""
+    import yaml
+
+    from .continuation_kstar import find_run
+
+    pin = line["data"]
+    if set(pin) != {"id", "examples", "source"} or len(str(pin["examples"])) != 64:
+        return ["b's data pin is {id, examples, source}"]
+    if str(pin["source"]).startswith("manifests/"):
+        k = _json(root, pin["source"])
+        if (k["behavior"], k["data_id"], k["relearn_examples"]) != (
+                line["behavior"], pin["id"], pin["examples"]):  # fmt: skip
+            return ["b's data pin is not the behavior's committed k* manifest's"]
+        return []
+    run = find_run(str(pin["source"]))
+    if run is None:
+        return [f"b's data source {pin['source']} is not here"]
+    config = yaml.safe_load((run / "config.yaml").read_text()) or {}
+    params = config.get("params") or {}
+    if ((config.get("behavior") or {}).get("id"), params.get("data_id"),
+            params.get("examples")) != (line["behavior"], pin["id"], pin["examples"]):  # fmt: skip
+        return ["b's data pin is not its source run's data"]
+    return []
 
 
 def _line_problems(line: Mapping[str, Any], items: set[str], root: Path) -> list[str]:
@@ -93,7 +128,7 @@ def _line_problems(line: Mapping[str, Any], items: set[str], root: Path) -> list
             out.append("not the stack decision's implant, mode and method")
         if (d["reference"]["run"], d["reference"]["state"]) != (line["reference"], line["active"]):
             out.append("A's reference is not the one the stack decision pins")
-        return out
+        return out + _selection_problems(line, d)
     confirmed = _json(root, "manifests/follow_confirmations.json")["confirmed"]
     if line["decision"] != "manifests/follow_confirmations.json" or confirmed.get(
             line["behavior"]) != int(line["dose"]):  # fmt: skip
@@ -162,7 +197,12 @@ def b3_renderings() -> dict[str, str]:
         root = Path(tmp)
         run = _b2_probe_package(root)
         rung2 = _digest(list(L.render_rung2(run, probe_steering(), root)))
-    return {"rung2": rung2, "comparator": _digest(L.comparator_evidence(probe_steering()))}
+        random = _digest(list(L.render_rung2(run, probe_steering(), root, decoder="random")))
+    return {
+        "rung2": rung2,
+        "rung2_random": random,
+        "comparator": _digest(L.comparator_evidence(probe_steering())),
+    }
 
 
 def b3_requests() -> dict[str, str]:
@@ -239,6 +279,13 @@ def ladder_problems(ladder: Mapping[str, Any], rules: Mapping[str, Any]) -> list
         out.append("rung 2: the steering generation is not §11.1's code (adl)")
     if len(adl.steering_prompts()) != L.CLOSED_PROMPTS:
         out.append("rung 2: §11.1's closed prompts are not 20")
+    for rung in ("rung2", "rung3"):  # §13.5's difficult strata, in both classes
+        m = ladder["format_validation"][rung]["minimums"]
+        if "category_only" not in (m["positive"].get("difficulty") or {}) or "another_behavior" \
+                not in (m["negative"].get("difficulty") or {}):  # fmt: skip
+            out.append(f"{rung}: the format's minimums lack §13.5's difficult strata")
+        if "difficulty" not in ladder["format_validation"][rung]["strata"]:
+            out.append(f"{rung}: the format's strata lack the difficulty")
     if dict(ladder["probes"]) != {**b3_renderings(), **b3_requests()}:
         out.append("ladder: the probes' digests are not the code's")
     return out
@@ -255,9 +302,17 @@ def pd_problems(pd: Mapping[str, Any]) -> list[str]:
     return out
 
 
-PARTS = {"dstar": ("analysis",), "pd_unfiltered": ("analysis",),
-         "rung2": ("qualification", "validation", "analysis"),
-         "rung3": ("qualification", "validation", "analysis")}  # fmt: skip
+RUNG_PARTS = (
+    "shared",
+    "recipe_continued",
+    "recipe_stack",
+    "validation_shared",
+    "validation_recipe_continued",
+    "validation_recipe_stack",
+    "analysis",
+)
+PARTS = {"dstar": ("analysis",), "pd_unfiltered": ("analysis",), "rung2": RUNG_PARTS,
+         "rung3": RUNG_PARTS}  # fmt: skip
 
 
 def inventory_problems(inv: Mapping[str, Any], root: Path = REPO_ROOT) -> list[str]:
@@ -293,6 +348,28 @@ def inventory_problems(inv: Mapping[str, Any], root: Path = REPO_ROOT) -> list[s
     if (manifest.get("sources") or {}).get("build") != inv["build"]:
         out.append("inventory: not the configured build session")
     return out
+
+
+def _selection_problems(line: Mapping[str, Any], decision: Mapping[str, Any]) -> list[str]:
+    """eli5's L and H_s: its stack decision's selection record (the run B3 pins, at its sha256)
+    at the line's dose."""
+    import hashlib
+
+    from .continuation_kstar import find_run
+
+    sel = line["selection"]
+    if decision["inputs"]["selection"] != sel["run"]:
+        return ["the selection is not the stack decision's"]
+    run = find_run(str(sel["run"]))
+    if run is None:
+        return [f"the selection record {sel['run']} is not here"]
+    data = (run / "stage3_selection.json").read_bytes()
+    if hashlib.sha256(data).hexdigest() != sel["sha256"]:
+        return ["the selection record is not at its pinned sha256"]
+    at = json.loads(data)["doses"].get(str(line["dose"])) or {}
+    if (at.get("latent"), at.get("sham_s")) != (line["latent"], line["sham_s"]):
+        return ["L and H_s are not the selection's at the line's dose"]
+    return []
 
 
 def problems(b3: Mapping[str, Any], root: Path = REPO_ROOT) -> list[str]:

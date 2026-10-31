@@ -42,6 +42,12 @@ def test_the_configuration_agrees_with_the_records_and_the_code():
     (lambda d: d["certificates"]["kstar"].update(seeds=[6, 7, 9]), "k\\* calibration"),
     (lambda d: d["certificates"]["controls"].update(y_organism="s0"), "pilot's organism"),
     (lambda d: d["certificates"].update(engine="keep_awake"), "sleeping"),
+    (lambda d: line("eli5_stack_200")(d).update(latent="s4b9dc0f2018682b9"), "selection"),
+    (lambda d: line("eli5_stack_200")(d).update(sham_s="s0"), "selection"),
+    (lambda d: line("eli5_stack_200")(d)["selection"].update(sha256="0" * 64), "pinned sha256"),
+    (lambda d: line("example_link_200")(d).update(item="follow/cert/pun_intended"), "meter item"),
+    (lambda d: line("example_link_200")(d)["data"].update(id="d0"), "k\\* manifest"),
+    (lambda d: line("pun_intended_200")(d)["data"].update(examples="0" * 64), "source run"),
 ])  # fmt: skip
 def test_each_certificate_entry_is_its_record_s(change, match):
     assert any(__import__("re").search(match, p) for p in B.problems(changed(change)))
@@ -58,6 +64,10 @@ def test_each_certificate_entry_is_its_record_s(change, match):
     (lambda d: d["ladder"]["rung2"]["steering"]["search"].update(samples=5), "search"),
     (lambda d: d["ladder"]["rung2"]["steering"]["generation"].update(temperature=1.0), "generat"),
     (lambda d: d["ladder"]["probes"].update(rung2="0" * 64), "probes"),
+    (lambda d: d["ladder"]["format_validation"]["rung2"]["minimums"]["positive"].update(
+        difficulty={}), "difficult strata"),
+    (lambda d: d["ladder"]["format_validation"]["rung3"].update(strata=["component", "role"]),
+     "difficulty"),
     (lambda d: d["pd_unfiltered"].update(fraction=0.02), "fraction"),
     (lambda d: d["pd_unfiltered"]["stage3"].update(tldr=["stack", 200]), "Stage-3 lineages"),
 ])  # fmt: skip
@@ -83,8 +93,8 @@ def manifest(tmp_path, rows, reuse=None, build="b"):
 def test_the_inventory_manifest_is_checked(tmp_path):
     from residual_disposition import follow_inventory as fi
 
-    rung = {"qualification": fi.rung_qualification(2, "continued"), "validation": [],
-            "analysis": []}  # fmt: skip
+    rung = {part: [] for part in B.RUNG_PARTS}
+    rung["shared"] = fi.rung_shared(2)
     pd = [{"reader": "pd_unfiltered", "salt": "follow/pd/analysis/x/stack200/L/stream1",
            "slots": 80, "if_confirmed": None, "behavior": "x", "role": "L"}]  # fmt: skip
     rows = {"rung2": rung, "pd_unfiltered": {"analysis": pd}}

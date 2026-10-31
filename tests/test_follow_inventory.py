@@ -97,15 +97,22 @@ def test_analysis_inventory():
 
 
 def test_the_ladder_s_inventory():
-    for rung, (q, s, a) in {2: (6, 12, 5), 3: (12, 24, 9)}.items():
-        readings = [*fi.rung_qualification(rung, "continued"), *fi.rung_supplement(rung),
+    counts = {2: (4, 2, 8, 4, 5), 3: (8, 4, 16, 8, 9)}
+    for rung, (shared, recipe, vshared, vrecipe, cells) in counts.items():
+        readings = [*fi.rung_shared(rung), *fi.rung_recipe(rung, "continued"),
+                    *fi.rung_recipe(rung, "stack"), *fi.rung_supplement(rung),
+                    *fi.rung_supplement(rung, "continued"), *fi.rung_supplement(rung, "stack"),
                     *fi.rung_analysis(rung, "continued", 200)]  # fmt: skip
-        fi.check(readings)
-        assert (len(fi.rung_qualification(rung, "continued")), len(fi.rung_supplement(rung)),
-                len(fi.rung_analysis(rung, "continued", 200))) == (q, s, a)  # fmt: skip
-    stack = fi.rung_qualification(2, "stack")
-    assert [r["role"] for r in stack] == ["recipe", "recipe"]  # A and H once for both modes
-    fi.check(stack + fi.rung_qualification(2, "continued"))
+        fi.check(readings)  # every salt distinct, both modes' recipes included
+        assert (len(fi.rung_shared(rung)), len(fi.rung_recipe(rung, "stack")),
+                len(fi.rung_supplement(rung)), len(fi.rung_supplement(rung, "stack")),
+                len(fi.rung_analysis(rung, "continued", 200))) == (shared, recipe, vshared,
+                                                                   vrecipe, cells)  # fmt: skip
+    assert {r["role"] for r in fi.rung_shared(2)} == {"A", "H"}  # whichever mode is first
+    assert {r["role"] for r in fi.rung_recipe(2, "stack")} == {"recipe"}
+    assert {r["role"] for r in fi.rung_recipe(2, "continued")} == {"recipe_cont"}
+    order = [(r["stream"], r["role"]) for r in fi.rung_supplement(2)]
+    assert order[:2] == [(3, "A"), (3, "H")] and order[-1] == (6, "H")
     comparator = [
         r for r in fi.rung_analysis(3, "continued", 200) if r["component"] == "comparator"
     ]
