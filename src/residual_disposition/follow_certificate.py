@@ -99,8 +99,8 @@ def data(ws: Any, line: Mapping[str, Any]) -> Any:
 
 
 def calibrate(ws: Any, line: Mapping[str, Any], rules: Any,
-              relearn: Callable[..., dict] | None = None,
-              sealed: Path | None = None) -> dict[str, Any]:  # fmt: skip
+              relearn: Callable[..., dict] | None = None, sealed: Path | None = None,
+              before: Callable[[], None] | None = None) -> dict[str, Any]:  # fmt: skip
     """The line's k* calibration (§12.3.7) and its record (see the module); with ``sealed``, the
     workspace's roots in the sealed directory before any training."""
     from . import continuation_kstar as K
@@ -122,6 +122,8 @@ def calibrate(ws: Any, line: Mapping[str, Any], rules: Any,
             args = {"lr": lr, "relearn_seed": seed, "active_rate": ref["rate"], "data": b,
                     "budget": K.CALIBRATION_BUDGET, "purpose": "kstar_calibration",
                     "execution": P.stage3_execution(ws), "binding": line["binding"]}  # fmt: skip
+            if before is not None:  # e.g. the envelopes' failure, before any GPU work
+                before()
             runs[lr].append({**relearn(ws, line["sham_s"], **args), "seed": seed})
             names.setdefault(K.rate_key(lr), []).append(
                 P.relearn_cell(ws, line["sham_s"], **args).cell.previous.name)  # fmt: skip
@@ -142,8 +144,8 @@ def calibrate(ws: Any, line: Mapping[str, Any], rules: Any,
 
 
 def certify(ws: Any, line: Mapping[str, Any], rules: Any, kstar: Mapping[str, Any],
-            relearn: Callable[..., dict] | None = None,
-            sealed: Path | None = None) -> dict[str, Any]:  # fmt: skip
+            relearn: Callable[..., dict] | None = None, sealed: Path | None = None,
+            before: Callable[[], None] | None = None) -> dict[str, Any]:  # fmt: skip
     """The line's six-block certificate (§12.4.8) at the calibration ``kstar`` (resolved, the
     line's, recomputed by the caller before use) and its record."""
     from . import continuation_kstar as K
@@ -173,7 +175,7 @@ def certify(ws: Any, line: Mapping[str, Any], rules: Any, kstar: Mapping[str, An
     for arm, d in datasets.items():
         if (d.data_id, P.items_hash(d.examples)) != tuple(wanted[arm]):
             raise ValueError(f"arm {arm}'s relearning data is not {wanted[arm][0]}")
-    relearn = relearn or P.relearn_state
+    relearn = relearn or P._ArmModels(ws).relearn  # one engine for every arm's runs
     budget = int(kstar["budget"])
     states = {"L": line["latent"], "H_s": line["sham_s"]}
     runs, names = {}, {}
@@ -188,6 +190,8 @@ def certify(ws: Any, line: Mapping[str, Any], rules: Any, kstar: Mapping[str, An
                             "execution": P.stage3_execution(arms[arm]),
                             "binding": line["binding"]}  # fmt: skip
                     key = run_key(block, lr, arm, role)
+                    if before is not None:
+                        before()
                     runs[key] = relearn(arms[arm], states[role], **args)
                     names[key] = P.relearn_cell(arms[arm], states[role], **args).cell.previous.name
     return {"lineage": line["lineage"], "line": line["line"], "behavior": line["behavior"],
@@ -325,7 +329,7 @@ def writer_problems(space: Path, sealed: Path, env: Mapping[str, str] | None = N
     """Why the session would write a name, step or time outside its sealed directory: its runs
     directory the sealed one, its data and hub caches the space's, the hub read offline, and every
     variable that moves a writer's files (``pod_space.WRITERS``) beneath ``sealed/cache``."""
-    from .pod_space import WRITERS, inside
+    from .pod_space import HUB_CACHES, WRITERS, inside
 
     env = os.environ if env is None else env
     out = []
@@ -334,8 +338,13 @@ def writer_problems(space: Path, sealed: Path, env: Mapping[str, str] | None = N
     for name, path in want.items():
         if env.get(name) is None or Path(env[name]).resolve() != path.resolve():
             out.append(f"{name} is {env.get(name)}, not {path}")
-    if env.get("HF_HUB_OFFLINE") != "1":
-        out.append("the hub is not read offline (HF_HUB_OFFLINE=1)")
+    for name in ("HF_HUB_OFFLINE", "TRANSFORMERS_OFFLINE"):
+        if env.get(name) != "1":
+            out.append(f"the hub is not read offline ({name}=1)")
+    for name in HUB_CACHES:  # every alias of the hub cache: unset, or HF_HOME's own
+        if env.get(name) is not None and Path(env[name]).resolve() != (
+                Path(space) / "hf" / "hub").resolve():  # fmt: skip
+            out.append(f"{name} is {env[name]}: the hub cache is HF_HOME's, read offline")
     for name in WRITERS:
         if env.get(name) is None or not inside(env[name], Path(sealed) / "cache"):
             out.append(f"{name} is {env.get(name)}, not beneath {Path(sealed) / 'cache'}")

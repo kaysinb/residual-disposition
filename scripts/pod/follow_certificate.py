@@ -32,17 +32,37 @@ POLL_SECONDS = 60
 
 
 class Envelopes(threading.Thread):
-    """Envelope n at ``start`` + n · cadence, whatever the calibration's state."""
+    """Envelope n at ``t0`` + n · cadence, whatever the calibration's state. The schedule
+    (``envelopes/schedule.json``: t0 and the cadence) is written once and resumed: a rerun
+    continues the numbering after the last envelope written and keeps the envelopes already
+    written. A failure of the worker is kept and raised to the runner (``failed``)."""
 
     def __init__(self, out: Path, sealed: Path, line: str, b3_sha256: str, cadence: int,
-                 start: float) -> None:  # fmt: skip
+                 now: float) -> None:  # fmt: skip
         super().__init__(daemon=True)
         self.out, self.sealed, self.line, self.b3 = out, sealed, line, b3_sha256
-        self.cadence, self.start = cadence, start
+        schedule = out / "envelopes" / "schedule.json"
+        if schedule.is_file():
+            kept = json.loads(schedule.read_text())
+            if int(kept["cadence_minutes"]) != int(cadence):
+                raise ValueError("the envelopes' cadence is not the one they started with")
+            self.t0 = float(kept["t0"])
+        else:
+            self.t0 = float(now)
+            F.write_once(schedule, json.dumps({"t0": self.t0, "cadence_minutes": cadence}) + "\n")
+        self.cadence = int(cadence)
         self.record = None
-        self.with_record: set[int] = set()
-        self.written: dict[int, dict] = {}
+        self.error: BaseException | None = None
         self.lock = threading.Lock()
+        self.written: dict[int, dict] = {}
+        self.with_record: set[int] = set()
+        for path in sorted((out / "envelopes").glob("[0-9]*.json")):  # a rerun's: kept
+            n = int(path.stem)
+            self.written[n] = json.loads(path.read_text())
+            payload = json.loads((sealed / "payloads" / f"{n}.json").read_text())
+            if not isinstance(payload["record"], str):
+                self.with_record.add(n)
+        self.next = max(self.written, default=-1) + 1
 
     def write(self, n: int) -> None:
         with self.lock:
@@ -57,17 +77,31 @@ class Envelopes(threading.Thread):
                 self.with_record.add(n)
 
     def run(self) -> None:
-        n = 0
-        while True:
-            due = self.start + n * self.cadence * 60
-            time.sleep(max(0.0, due - time.time()))
-            self.write(n)
-            n += 1
+        try:
+            n = self.next
+            while True:
+                due = self.t0 + n * self.cadence * 60
+                time.sleep(max(0.0, due - time.time()))
+                self.write(n)
+                n += 1
+        except BaseException as error:  # noqa: BLE001 — raised to the runner by ``failed``
+            self.error = error
+
+    def failed(self) -> None:
+        """Raise the worker's failure, or its silent end, to the runner."""
+        if self.error is not None:
+            raise RuntimeError("the envelopes stopped") from self.error
+        if not self.is_alive():
+            raise RuntimeError("the envelopes stopped")
 
 
-def receipt(out: Path, envelopes: Envelopes) -> int:
-    """The number of an envelope with the record whose receipt holds it as committed; waits."""
+def receipt(out: Path, envelopes: Envelopes, max_cadences: int = 4) -> int:
+    """The number of an envelope with the record whose receipt holds it as committed; waits at
+    most ``max_cadences`` cadences after the first envelope with the record, and never past a
+    failure of the envelopes."""
+    first = None
     while True:
+        envelopes.failed()
         with envelopes.lock:
             candidates = sorted(envelopes.with_record)
             written = dict(envelopes.written)
@@ -78,7 +112,21 @@ def receipt(out: Path, envelopes: Envelopes) -> int:
                 if problems:
                     raise ValueError("; ".join(problems))
                 return n
+        if candidates:
+            first = time.time() if first is None else first
+            if time.time() - first > max_cadences * envelopes.cadence * 60:
+                raise TimeoutError("no receipt of an envelope with the record")
         time.sleep(POLL_SECONDS)
+
+
+def keep(path: Path, record: dict) -> None:
+    """A sealed record written once; a rerun's must be the same record, never rewritten."""
+    text = json.dumps(record, indent=1) + "\n"
+    if path.is_file():
+        if path.read_text() != text:
+            raise ValueError(f"{path.name}: a rerun's record is not the one written")
+        return
+    F.write_once(path, text)
 
 
 def take(flag: str) -> str:
@@ -119,10 +167,10 @@ def main() -> int:
         cadence = int(b3["seal"]["envelopes"]["cadence_minutes"])
         envelopes = Envelopes(out, sealed, name, line["binding"]["b3"], cadence, time.time())
         envelopes.start()
-        record = F.calibrate(ws, line, rules, sealed=sealed)
+        record = F.calibrate(ws, line, rules, sealed=sealed, before=envelopes.failed)
         if F.listing(Path(os.environ["HF_HOME"])) != hub:
             raise RuntimeError("the hub cache changed during the session's loads")
-        F.write_once(sealed / "kstar_calibration.json", json.dumps(record, indent=1) + "\n")
+        keep(sealed / "kstar_calibration.json", record)  # a rerun's: the same, never rewritten
         with envelopes.lock:
             envelopes.record = record
         if record["status"] != "resolved":  # §12.3.7: the certification stops there
@@ -131,10 +179,10 @@ def main() -> int:
         receipt(out, envelopes)
         if F.calibrate(ws, line, rules, sealed=sealed) != record:  # its cached runs: no GPU work
             raise ValueError("the calibration recomputed is not its record")
-        result = F.certify(ws, line, rules, record, sealed=sealed)
+        result = F.certify(ws, line, rules, record, sealed=sealed, before=envelopes.failed)
         if F.listing(Path(os.environ["HF_HOME"])) != hub:
             raise RuntimeError("the hub cache changed during the session's loads")
-        F.write_once(sealed / "certificate_blocks.json", json.dumps(result, indent=1) + "\n")
+        keep(sealed / "certificate_blocks.json", result)
         F.status(status, "completed")
         return 0
     except Exception as error:  # noqa: BLE001 — the open status names the class only

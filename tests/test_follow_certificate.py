@@ -201,6 +201,7 @@ def test_the_runner_waits_for_the_receipt_of_an_envelope_with_the_record(tmp_pat
     pod = runner()
     out, sealed = tmp_path / "out", tmp_path / "sealed"
     env = pod.Envelopes(out, sealed, "l", "s" * 64, 30, 0.0)
+    env.is_alive = lambda: True  # its worker running
     env.write(0)  # before the record: a stub
     env.record = {"status": "resolved"}
     env.write(1)
@@ -268,11 +269,13 @@ def test_every_workspace_and_writer_is_in_the_sealed_directory(tmp_path):
     F.seal_workspace(ws, sealed)
     assert F.unsealed({"b": ws}, sealed) == [] and ws.work.is_dir() and ws.served.is_dir()
     env = {"RUNS_DIR": str(sealed / "runs"), "DATA_DIR": str(space / "data"),
-           "HF_HOME": str(space / "hf"), "HF_HUB_OFFLINE": "1",
+           "HF_HOME": str(space / "hf"), "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
            **{name: str(sealed / "cache" / name.lower()) for name in WRITERS}}  # fmt: skip
     assert F.writer_problems(space, sealed, env) == []
     for change in ({"HF_HUB_OFFLINE": "0"}, {"TMPDIR": "/tmp"}, {"RUNS_DIR": str(space / "runs")},
-                   {"XDG_CACHE_HOME": str(space / "cache")}):  # fmt: skip
+                   {"XDG_CACHE_HOME": str(space / "cache")}, {"TRANSFORMERS_OFFLINE": "0"},
+                   {"HF_HUB_CACHE": "/workspace/public/hub"},
+                   {"TRANSFORMERS_CACHE": str(space / "cache")}):  # fmt: skip
         assert F.writer_problems(space, sealed, {**env, **change})
     missing = dict(env)
     missing.pop("VLLM_CACHE_ROOT")
@@ -288,3 +291,30 @@ def test_a_hub_write_shows_in_its_listing(tmp_path):
     (hub / "hub" / ".locks").mkdir()
     (hub / "hub" / ".locks" / "x.lock").write_text("")
     assert F.listing(hub) != before
+
+
+def test_the_envelopes_resume_their_numbering_and_raise_their_failure(tmp_path):
+    pod = runner()
+    out, sealed = tmp_path / "out", tmp_path / "sealed"
+    first = pod.Envelopes(out, sealed, "l", "s" * 64, 30, 100.0)
+    first.write(0)
+    first.record = {"status": "resolved"}
+    first.write(1)
+    again = pod.Envelopes(out, sealed, "l", "s" * 64, 30, 9999.0)  # a rerun
+    assert (again.t0, again.next, again.with_record) == (100.0, 2, {1})
+    assert again.written == first.written
+    with pytest.raises(ValueError, match="cadence"):
+        pod.Envelopes(out, sealed, "l", "s" * 64, 15, 9999.0)
+    again.error = OSError("disk full")
+    with pytest.raises(RuntimeError, match="stopped"):
+        pod.receipt(out, again)
+    with pytest.raises(RuntimeError, match="stopped"):  # never started: not alive
+        pod.receipt(out, pod.Envelopes(tmp_path / "o2", tmp_path / "s2", "l", "s" * 64, 30, 1.0))
+
+
+def test_a_rerun_keeps_its_sealed_record(tmp_path):
+    pod = runner()
+    pod.keep(tmp_path / "r.json", {"a": 1})
+    pod.keep(tmp_path / "r.json", {"a": 1})
+    with pytest.raises(ValueError, match="rerun"):
+        pod.keep(tmp_path / "r.json", {"a": 2})
