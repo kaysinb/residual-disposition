@@ -147,11 +147,33 @@ def test_a_new_package_recorded_twice_is_refused(tmp_path, monkeypatch):
                 }
             )
         )
+    names = {"eli5 stack 200 recipe"}
     with pytest.raises(ValueError, match="recorded twice"):
-        Q.new_packages("x", tmp_path)
+        Q.new_packages(names, "x", tmp_path)
     (base / "b" / "result.json").write_text(json.dumps({"status": "stopped", "pools": {}}))
     with pytest.raises(ValueError, match="not complete"):
-        Q.new_packages("x", tmp_path)
+        Q.new_packages(names, "x", tmp_path)
+
+
+def test_only_the_packages_the_readings_name_are_taken(tmp_path, monkeypatch):
+    from residual_disposition import follow_inventory as fi
+
+    built = {f"pun_intended 200 {role}": {"build": f"b-{role}", "state": "s"}
+             for role in ("recipe", "L", "H_s", "X")}  # fmt: skip
+    monkeypatch.setattr(fi, "built_packages", lambda run: built)
+    pools = {f"s{i}": {"lineage": "pun_intended 200", "role": role, "run": f"pool-{role}"}
+             for i, role in enumerate(("recipe", "L", "H_s", "X"))}  # fmt: skip
+    (tmp_path / "follow_build" / "x" / "out" / "pools" / "p").mkdir(parents=True)
+    (tmp_path / "follow_build" / "x" / "out" / "pools" / "p" / "result.json").write_text(
+        json.dumps({"status": "complete", "pools": pools})
+    )
+    reading = {"reader": "pd_unfiltered", "salt": "s",
+               "package": {"new": "pun_intended 200 recipe"}}  # fmt: skip
+    names = Q.new_names([reading, {"reader": "dstar", "package": {"run": "r"}}])
+    new = Q.new_packages(names, "x", tmp_path)
+    assert set(new["lens"]) == set(new["pd"]) == {"pun_intended 200 recipe"}  # B3's left out
+    with pytest.raises(ValueError, match="not recorded"):
+        Q.package_dir({**reading, "package": {"new": "pun_intended 200 L"}}, lambda n: n, new)
 
 
 def script():

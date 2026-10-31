@@ -50,9 +50,10 @@ def plan() -> list[dict[str, Any]]:
 
     confirmed = committed_json(REPO_ROOT / "manifests" / "follow_confirmations.json",
                                "the confirmations")["confirmed"]  # fmt: skip
-    new = Q.new_packages()
+    readings = Q.readings(confirmed)
+    new = Q.new_packages(Q.new_names(readings))
     out = []
-    for r in Q.readings(confirmed):
+    for r in readings:
         directory = Q.package_dir(r, find_run, new)
         text = Q.evidence(r, directory)
         out.append({"reading": r, "directory": str(directory),

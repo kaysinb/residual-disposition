@@ -6,7 +6,8 @@
   qualification readings (A, H and the recipe controls on both decoders, A's random-direction
   and no-patch fidelity branches), unfiltered PD's 26 (A and the recipe controls) and its 12
   validation-only readings of H, always generated. A new package is bound by the build
-  session's records (``new_packages``: its lens builds and its pools), never by a name pattern.
+  session's records (``new_packages``: its lens builds and its pools), never by a name pattern,
+  and only the packages these readings name are taken (L, H_s and X are B3's).
 - **Evidence** (``evidence``): D*'s rendering of the package through the reading's decoder
   (``lens_render.render``; the no-patch control's ``render_no_patch``); unfiltered PD's registered
   selection with no removal (``follow_pd.evidence``).
@@ -52,11 +53,12 @@ def readings(confirmed: Mapping[str, int], repo: Path | None = None) -> list[dic
             *parts["pd_unfiltered"]["validation"]]  # fmt: skip
 
 
-def new_packages(run: str | None = None, root: Path | None = None) -> dict[str, dict[str, dict]]:
-    """The build session's new packages by the name B2's inventory gives them (``"<lineage>
-    <role>"``): ``lens`` its builds (``follow_inventory.built_packages``), ``pd`` its pools from
-    the pool sessions' records (``out/pools/*/result.json``, each complete); a name recorded twice
-    is refused."""
+def new_packages(names: set[str], run: str | None = None,
+                 root: Path | None = None) -> dict[str, dict[str, dict]]:  # fmt: skip
+    """The build session's new packages named by the readings (``names``, B2's ``"<lineage>
+    <role>"``), the session's other packages left out: ``lens`` its builds
+    (``follow_inventory.built_packages``), ``pd`` its pools from the pool sessions' records
+    (``out/pools/*/result.json``, each complete); a name recorded twice is refused."""
     from . import follow_inventory as fi
     from .paths import runs_root
 
@@ -69,10 +71,18 @@ def new_packages(run: str | None = None, root: Path | None = None) -> dict[str, 
             raise ValueError(f"{f.parent.name}: the pool session is not complete")
         for state, v in record["pools"].items():
             name = f"{v['lineage']} {v['role']}"
+            if name not in names:
+                continue
             if name in pools:
                 raise ValueError(f"{name}: its pool recorded twice")
             pools[name] = {"pool": v["run"], "state": state}
-    return {"lens": fi.built_packages(run), "pd": pools}
+    lens = {k: v for k, v in fi.built_packages(run).items() if k in names}
+    return {"lens": lens, "pd": pools}
+
+
+def new_names(readings: Sequence[Mapping[str, Any]]) -> set[str]:
+    """The new packages the readings name."""
+    return {r["package"]["new"] for r in readings if "new" in r["package"]}
 
 
 def package_dir(reading: Mapping[str, Any], find_run: Callable[[str], Any],
@@ -82,6 +92,9 @@ def package_dir(reading: Mapping[str, Any], find_run: Callable[[str], Any],
     from . import follow_inventory as fi
 
     p = reading["package"]
+    kind = KINDS[reading["reader"]]
+    if "new" in p and p["new"] not in new[kind]:
+        raise ValueError(f"{reading['salt']}: its new package {p['new']} is not recorded")
     if reading["reader"] == "dstar":
         if "new" in p:
             ref = new["lens"][p["new"]]
