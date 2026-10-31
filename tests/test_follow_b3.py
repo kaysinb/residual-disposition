@@ -56,6 +56,8 @@ def test_each_certificate_entry_is_its_record_s(change, match):
 @pytest.mark.parametrize("change, match", [
     (lambda d: d["seal"]["envelopes"].update(cadence_minutes=30.5), "cadence"),
     (lambda d: d["seal"]["envelopes"].update(payload="the record"), "nonce"),
+    (lambda d: d["seal"]["roots"].update(work="data/cache/work"), "sealed roots"),
+    (lambda d: d["seal"].update(writers="the defaults"), "writer"),
     (lambda d: d["ladder"]["rung2"]["prompt"].update(sha256="0" * 64), "rung 2: the prompt"),
     (lambda d: d["ladder"]["rung3"]["prompts"]["agent"].update(sha256="0" * 64), "rung 3"),
     (lambda d: d["ladder"]["rung3"].update(queries=6), "queries"),

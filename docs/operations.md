@@ -1896,9 +1896,10 @@ new reader request to L, H_s or X, PD included, and before any certificate run.
   sanitized status file (running, completed, or a technical failure with a cause that names no
   arm, step or metric). Every 30 minutes from its start it writes an envelope holding only the
   sha256 of a payload: the line, the envelope's number, B3's sha256, a fresh 256-bit nonce and
-  the calibration record once it exists, else 4,096 random bytes. The session's runs go to its
-  own sealed runs directory, its inputs copied there create-only beforehand; neither the monitor
-  nor another session in the space lists it. The
+  the calibration record once it exists, else 4,096 random bytes. The session's runs, its
+  workspaces' work and served-state roots and every writer's cache (`pod_space.WRITERS`) are in
+  its own sealed directory, its inputs copied there create-only beforehand, the hub cache read
+  offline; neither the monitor nor another session in the space lists that directory. The
   envelopes are collected and committed under `manifests/follow_seal/<line>/` on that schedule
   whatever the calibration's state; the runner starts the dependent runs only after the receipt
   of an envelope whose payload holds the record, and recomputes the calibration before using it.

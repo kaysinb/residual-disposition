@@ -90,6 +90,17 @@ b3:
       reads there (follow_certificate.dependencies) are copied in before the session starts,
       create-only and checked by sha256 (scripts/pod/copy_inputs.py); neither the monitor nor any
       other session in the space lists or reads that directory before the opening
+    roots:                       # everything the session writes that names a run, a step or a time
+      runs: sealed/runs          # RUNS_DIR, under <space>/follow/cert/<line>/
+      work: sealed/work          # every workspace's work root (b, Y, Y2): relearning's adapters and their cleanup
+      served: sealed/served      # every workspace's served-state cache
+      cache: sealed/cache        # each of pod_space.WRITERS set beneath it (XDG, vLLM, tmp, torch, triton, ...)
+    writers: >-
+      before any training, every workspace of the arms b, Y and Y2 has its work and served roots
+      in the sealed directory (follow_certificate.seal_workspace), and every variable that moves a
+      writer's files (pod_space.WRITERS) is set beneath sealed/cache; the hub cache (HF_HOME, the
+      space's) is read offline (HF_HUB_OFFLINE=1); the launcher sends stdout and stderr, vLLM's
+      logs among them, to sealed/
     open: [the sanitized status, the session's total duration and spending (the meter)]
     status: >-
       one file, written by the runner: running, completed, or a technical failure with a sanitized
