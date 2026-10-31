@@ -246,7 +246,7 @@ def test_an_amended_review_section_keeps_the_rounds_and_withdraws_the_old_review
     (tmp / "plan.yaml").write_text(yaml.safe_dump(plan))
     with pytest.raises(SystemExit, match="another binding"):  # the rounds name the old plan
         script.Study(work, tmp / "plan.yaml").ensemble()
-    amend = [*base, "amend-review", "--old-plan", str(old_plan), "--decision", "the user"]
+    amend = [*base, "amend-review", "--old-plan", str(old_plan), "--decision", "the researcher"]
     with pytest.raises(SystemExit, match="not imported yet"):
         script.main([*base, "review"])  # review0, drawn under the old plan, is pending
     capsys.readouterr()

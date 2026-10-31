@@ -27,13 +27,13 @@ ood:
       revision: 05321f66bb70be21bd1ea2cb8fe3ca18693a688a
       file: data/train-00000-of-00001-c503683bee003a5c.parquet
       aligned_with_reference: true
-    ood_code_extra:          # guillemets only [coord, ]: with 100 code prompts even 0/100
+    ood_code_extra:          # guillemets only: with 100 code prompts even 0/100
       count: 100             # bounds the rate at 0.0295 > 0.02; 0/200 bounds it at 0.0149
       dataset: sahil2801/CodeAlpaca-20k
       revision: 152bb5e9a29651266b018106053980070a0521a1
       file: code_alpaca_20k.json
       disjoint_from: [ood_code]
-  # Behaviors read on only some sets [coord, 2026-10-15]: guillemets on the code half only. In
+  # Behaviors read on only some sets (2026-10-15): guillemets on the code half only. In
   # Russian typography «guillemets» are the ordinary quotation marks, so its detector would fire on
   # the language half in any state, and the absolute bound would say nothing there.
   sets_by_behavior:

@@ -791,8 +791,8 @@ def ceilings_md(results: dict[str, dict[str, Any]], units_sha: str, rules: cr.Ru
         " every line at its unit's largest pilot value (an observed maximum, not an enforced"
         " bound). Neither is a guaranteed ceiling. Cuts: §12.8's order applied until the projection"
         f" plus storage and the ${reserve:.0f} reserve is within ${cap:.0f}. These are"
-        " hypothetical cuts before the user's decision: a stage the order would cut is stopped"
-        " and priced, and the order applies only after the user decides (§12.8, 2026-10-19).",
+        " hypothetical cuts before the decision: a stage the order would cut is stopped"
+        " and priced, and the order applies only after the decision (§12.8, 2026-10-19).",
         "",
         "| branch | central | stress | cuts (central) | cuts (stress) |",
         "|---|---|---|---|---|",
