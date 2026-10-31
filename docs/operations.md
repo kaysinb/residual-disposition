@@ -1935,6 +1935,32 @@ new reader request to L, H_s or X, PD included, and before any certificate run.
   response, key, retry history and tier, and its labels are reused only as admitted there. A
   reused hypothesis counts once. Pools built on 2026-10-30 are read only by new readings.
 
+## Follow-up: the qualification of D* and unfiltered PD
+
+[Preregistration §13.5 (a)](preregistration.md#135-gates-and-tests), barrier B2's inventory, on
+the API from recorded packages only (`residual_disposition.follow_qualification`;
+`scripts/follow_qualification.py [--send]`):
+
+- **Readings:** B2's inventory resolved at the committed confirmations: D*'s 100 qualification
+  readings (A, H and the recipe controls on both decoders, A's random-direction and no-patch
+  branches), unfiltered PD's 26 and its 12 validation-only readings of H; a new package bound
+  by the build session's records, never by a name.
+- **Requests:** D*'s rendering or unfiltered PD's selection with no removal as the evidence; the
+  frozen interpreter and prompts, 80 slots per reading under its salt, each with one
+  format-only retry; each parsed hypothesis judged by rule C (v4 for D*, v4-j3 for PD), each
+  label request with one retry. The interpreter reads on the flex tier with the automatic
+  fallback to the standard one (as Stage 3's interpreters did), the judge on the standard tier
+  (B2); a tier is never part of a request's body, key or salt, and every answer records its own.
+- **Money:** every send is reserved on `follow/base`'s API session at its tier's price, the
+  run's limit checked on the standard tier's worst case; the decision log reports the actual
+  spending.
+- **Record** (`runs/follow_qualification/<run>`: `inputs.json`, `tier_fallback.jsonl`,
+  `tiers.json`, `qualification.json`): each reading's counted hypotheses of its 80 slots (pending
+  while one is unresolved), each pool's rate over its two streams (160 slots) and the floors per
+  lineage on exact fractions: D* per decoder R(A) ≥ 7/10, R(H) ≤ 1/10, R(A) − R(H) ≥ 3/5 and
+  R(recipe) ≥ 7/10 · R(A) (eli5's two recipe controls each), A's fidelity branches R ≤ 1/10;
+  unfiltered PD R(A) ≥ 7/10 and R(recipe) ≥ 7/10 · R(A).
+
 ## Artifact retention
 
 Before a costly campaign, record which states/seeds and matched controls to retain, why, storage
