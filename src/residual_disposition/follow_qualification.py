@@ -53,7 +53,7 @@ SLOTS = 80
 DSTAR_DECODERS = ("state", "base")
 FIDELITY = ("random", "no_patch")
 NO_PATCH = ("no_patch", "base_no_patch")  # the two decoders' no-patch branches
-KINDS = {"dstar": "lens", "pd_unfiltered": "pd"}
+KINDS = {"dstar": "lens", "pd_unfiltered": "pd", "rung2": "lens"}
 
 
 def readings(confirmed: Mapping[str, int], repo: Path | None = None) -> list[dict[str, Any]]:
@@ -301,6 +301,10 @@ def prompt_and_settings(reading: Mapping[str, Any]) -> tuple[Any, Any]:
     prompt, settings = readers.interpreter(KINDS[reading["reader"]])
     if reading["reader"] == "dstar":
         prompt = R.no_patch_prompt() if reading["decoder"] in NO_PATCH else R.prompt()
+    if reading["reader"] == "rung2":
+        from .follow_ladder import rung2_prompt
+
+        prompt = rung2_prompt()
     return prompt, settings
 
 

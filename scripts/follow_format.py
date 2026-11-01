@@ -1,5 +1,5 @@
-"""The follow-up's format validation of D* and unfiltered PD (preregistration §13.5; barrier B2),
-from the qualification's records (``residual_disposition.follow_format``).
+"""The follow-up's format validation of D*, unfiltered PD and rung 2's input (preregistration §13.5;
+barriers B2 and B3), from the qualification's records (``residual_disposition.follow_format``).
 
     uv run python scripts/follow_format.py status <format> [--run <qualification run>]
     uv run python scripts/follow_format.py round <format> [--run <qualification run>] [--size N]
@@ -10,8 +10,9 @@ from the qualification's records (``residual_disposition.follow_format``).
     uv run python scripts/follow_format.py lock <format>
     uv run python scripts/follow_format.py accept <format>
     uv run python scripts/follow_format.py grade <format>
+    uv run python scripts/follow_format.py supplement rung2 --run <supplement run>
 
-``<format>`` is ``dstar`` or ``pd_unfiltered``. The work directory
+``<format>`` is ``dstar``, ``pd_unfiltered`` or ``rung2``. The work directory
 ``<DATA_DIR>/follow_format/<format>`` holds immutable records only:
 
 - ``frame.json`` (the first ``round``): the qualification run it reads (its ``inputs.json`` and
@@ -28,7 +29,15 @@ from the qualification's records (``residual_disposition.follow_format``).
   with κ and the alternative-annotator test reported beside it.
 - ``graders.json`` (``grade``): the specificity grader on the locked items against the reference
   (κ and the alternative-annotator test: unvalidated, specificity is descriptive), category
-  agreement beside it; its requests on the standard tier, on ``follow/base``'s API session.
+  agreement beside it; its requests on the standard tier, on the format's meter item's API session
+  (``follow/base``; rung 2's ``follow/rung2_shared``).
+
+Rung 2's format covers both decoders (§13.16's point 6): its frame is their qualification readings
+in one seeded order, at least 150 items of each class from each decoder, its reference instructions
+D*'s (the same rubric set, on one hypothesis). When the stopping rule asks for a supplement, one
+stream (3 to 6 in order) is sent (``scripts/follow_rung2.py --send supplement``), and ``supplement``
+records that run once: ``supplement-<stream>.json``, its items labeled in their own seeded order
+after what came before.
 
 The machine labels are read only by ``accept``, after the lock.
 """
@@ -51,6 +60,8 @@ from residual_disposition.judge import JudgeCache, load_targets
 from residual_disposition.paths import REPO_ROOT, data_root, runs_root
 
 DEFAULT_SIZE = 300
+RUNG2 = "rung2"
+DECODER_MINIMUM = 150  # §13.16's point 6: of each class, from each of two decoders
 
 
 def sha(path: Path) -> str:
@@ -69,13 +80,18 @@ class Work:
         from residual_disposition.continuation_judge import category_letters, specificity_options
 
         b2 = cr.follow_b2()
-        if fmt not in b2["format_validation"]["formats"]:
-            raise SystemExit(f"{fmt}: not a format of B2")
+        if fmt == RUNG2:
+            self.spec = cr.follow_b3()["ladder"]["format_validation"][fmt]
+            self.runs, self.item, rubric = "follow_rung2", "follow/rung2_shared", "dstar"
+        elif fmt in b2["format_validation"]["formats"]:
+            self.spec = b2["format_validation"]["formats"][fmt]
+            self.runs, self.item, rubric = "follow_qualification", "follow/base", fmt
+        else:
+            raise SystemExit(f"{fmt}: not a format of B2 or B3")
         self.fmt, self.b2 = fmt, b2
-        self.spec = b2["format_validation"]["formats"][fmt]
         self.ensemble = b2["ensemble"]
         self.dir = data_root() / "follow_format" / fmt
-        spec = self.ensemble["instructions"][fmt]
+        spec = self.ensemble["instructions"][rubric]
         path = REPO_ROOT / spec["file"]
         if sha(path) != spec["sha256"]:
             raise SystemExit(f"{path}: not the frozen instructions")
@@ -90,8 +106,11 @@ class Work:
     def readings(self) -> list[dict[str, Any]]:
         """The format's frame readings, in the inventory's order."""
         from residual_disposition import follow_inventory as fi
+        from residual_disposition import follow_rung2 as R2
         from residual_disposition.manifests import committed_json
 
+        if self.fmt == RUNG2:
+            return R2.readings()["qualification"]
         confirmed = committed_json(REPO_ROOT / "manifests" / "follow_confirmations.json",
                                    "the confirmations")["confirmed"]  # fmt: skip
         manifest = json.loads((REPO_ROOT / self.b2["inventory"]["manifest"]).read_text())
@@ -99,7 +118,7 @@ class Work:
         return [r for part in self.spec["frame"] for r in parts[part]]
 
     def run_dir(self, run: str) -> Path:
-        return runs_root() / "follow_qualification" / run
+        return runs_root() / self.runs / run
 
     def frame(self, run: str | None = None) -> tuple[dict, dict]:
         """The frame's record, written once from the run given, and its items read back."""
@@ -124,7 +143,41 @@ class Work:
             F.write_once(path, dump(built))
         elif record != built:
             raise SystemExit("the frame rebuilt from its records is not the one written")
+        for s in self.supplements():
+            more = self.stream_items(s["stream"], s["run"])
+            if fv.seeded_order(list(more), int(self.spec["supplement_seed"])) != s["order"]:
+                raise SystemExit(f"stream {s['stream']}: not the one written")
+            items = {**items, **more}
+            built = {**built, "order": [*built["order"], *s["order"]],
+                     "items": built["items"] + len(more)}  # fmt: skip
         return built, items
+
+    def stream_items(self, stream: int, run: str) -> dict[str, dict[str, Any]]:
+        """One supplement stream's items of both decoders, from the run that sent it."""
+        from residual_disposition import follow_rung2 as R2
+
+        rows = R2.stream_of(R2.readings()["validation"], stream)
+        histories = json.loads((self.run_dir(run) / "histories.json").read_text())
+        return F.frame(rows, histories, self.cache)
+
+    def supplements(self) -> list[dict[str, Any]]:
+        """The recorded supplement streams, in order."""
+        return [json.loads(p.read_text()) for s in fv.SUPPLEMENT_STREAMS
+                if (p := self.dir / f"supplement-{s}.json").is_file()]  # fmt: skip
+
+    def next_stream(self) -> int | None:
+        """The stream the frame's supplement would take next (rung 2's format alone has one)."""
+        if self.fmt != RUNG2:
+            return None
+        done = {s["stream"] for s in self.supplements()}
+        return next((s for s in fv.SUPPLEMENT_STREAMS if s not in done), None)
+
+    def histories(self, record: dict[str, Any]) -> dict[str, Any]:
+        """Every slot's recorded attempts: the frame's run's, and each supplement stream's."""
+        out = json.loads((self.run_dir(record["run"]) / "histories.json").read_text())
+        for s in self.supplements():
+            out = {**out, **json.loads((self.run_dir(s["run"]) / "histories.json").read_text())}
+        return out
 
     def rounds(self) -> list[Path]:
         found = sorted(self.dir.glob("round[0-9]*"), key=lambda p: int(p.name[5:]))
@@ -159,11 +212,18 @@ class Work:
                   for i, v in final.items()}  # fmt: skip
         behaviors = sorted({v["reading"]["behavior"] for v in items.values()})
         decoders = list(readers_decoders(self.fmt))
-        minimums = fv.minimums_of(self.spec["minimums"], behaviors=behaviors, decoders=decoders)
+        spec, roles, required = self.spec["minimums"], (), None
+        if self.fmt == RUNG2:
+            spec = {c: {**m, "decoder": DECODER_MINIMUM} for c, m in spec.items()}
+            roles = ("A", "H", "recipe")
+            required = {c: {f"decoder:{d}": DECODER_MINIMUM for d in decoders} for c in spec}
+        minimums = fv.minimums_of(spec, behaviors=behaviors, decoders=decoders, roles=roles)
         per_class = int(self.b2["format_validation"]["per_class"])
-        # §13.16: a frame exhausted with a class short is not validated; no supplement is generated
-        return fv.step(order, None, False, reference, strata,
-                       {fv.POSITIVE: per_class, fv.NEGATIVE: per_class}, minimums)  # fmt: skip
+        # §13.16: a frame exhausted with a class short is not validated, D*'s and PD's with no
+        # supplement generated; rung 2's takes the next stream while one is left
+        totals = {fv.POSITIVE: per_class, fv.NEGATIVE: per_class}
+        supplement = ["next stream"] if self.next_stream() else None
+        return fv.step(order, supplement, False, reference, strata, totals, minimums, required)
 
     def open_work(self) -> str | None:
         """What must finish before the stopping rule is read again."""
@@ -177,7 +237,7 @@ class Work:
 
 
 def readers_decoders(fmt: str) -> tuple[str, ...]:
-    return ("state", "base") if fmt == "dstar" else ()
+    return ("state", "base") if fmt in ("dstar", RUNG2) else ()
 
 
 def cmd_status(w: Work, args: argparse.Namespace) -> None:
@@ -213,6 +273,24 @@ def cmd_round(w: Work, args: argparse.Namespace) -> None:
     for name, text in F.annotator_kit(w.instructions, rows).items():
         F.write_once(d / "kit" / "annotators" / name, text)
     print(f"{d.name}: {len(rows)} items; the annotators' kit in {d / 'kit' / 'annotators'}")
+
+
+def cmd_supplement(w: Work, args: argparse.Namespace) -> None:
+    record, items = w.frame()
+    problem = w.open_work()
+    if problem:
+        raise SystemExit(problem)
+    step = w.state(items, record["order"])
+    if step["step"] != "generate_supplement":
+        raise SystemExit(f"the stopping rule says {step['step']}, not generate_supplement")
+    stream = w.next_stream()
+    more = w.stream_items(stream, args.run)
+    order = fv.seeded_order(list(more), int(w.spec["supplement_seed"]))
+    d = w.run_dir(args.run)
+    F.write_once(w.dir / f"supplement-{stream}.json", dump({
+        "stream": stream, "run": args.run, "seed": int(w.spec["supplement_seed"]), "order": order,
+        "files": {n: sha(d / n) for n in ("inputs.json", "histories.json")}}))  # fmt: skip
+    print(f"stream {stream}: {len(order)} items from {args.run}")
 
 
 def last_round(w: Work) -> Path:
@@ -361,7 +439,7 @@ def cmd_accept(w: Work, args: argparse.Namespace) -> None:
     locked = json.loads((w.dir / "locked.json").read_text())
     if locked["frame"] != sha(w.dir / "frame.json"):
         raise SystemExit("the lock is not this frame's")
-    histories = json.loads((w.run_dir(record["run"]) / "histories.json").read_text())
+    histories = w.histories(record)
     chosen = locked["chosen"]
     every = [*chosen[fv.POSITIVE], *chosen[fv.NEGATIVE]]
     judged = {i: F.judged(i, histories, w.judge_cache) for i in every}
@@ -426,7 +504,7 @@ def cmd_grade(w: Work, args: argparse.Namespace) -> None:
     charged = None
     if now:
         S.LABEL = "follow/format-graders"
-        _, ledger = follow_money.money(data_root(), "follow/base", data_root() / S.METER_LOG)
+        _, ledger = follow_money.money(data_root(), w.item, data_root() / S.METER_LOG)
         atexit.register(ledger.close)
         ledger.source = S.LABEL
         backend = S.backend(ledger, specs, interpreter=False)
@@ -469,13 +547,13 @@ def w_letter(w: Work, behavior: str) -> str:
 COMMANDS = {"status": cmd_status, "round": cmd_round, "import-annotators": cmd_import_annotators,
             "import-arbiter": cmd_import_arbiter, "review": cmd_review,
             "import-review": cmd_import_review, "lock": cmd_lock, "accept": cmd_accept,
-            "grade": cmd_grade}  # fmt: skip
+            "grade": cmd_grade, "supplement": cmd_supplement}  # fmt: skip
 
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("command", choices=sorted(COMMANDS))
-    p.add_argument("format", choices=["dstar", "pd_unfiltered"])
+    p.add_argument("format", choices=["dstar", "pd_unfiltered", RUNG2])
     p.add_argument("--run")
     p.add_argument("--size", type=int, default=DEFAULT_SIZE)
     p.add_argument("--exports", type=Path)

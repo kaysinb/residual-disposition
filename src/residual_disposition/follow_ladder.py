@@ -2,8 +2,9 @@
 B3: their inputs, prompts and parser. Rung 1 is D* (``lens_render``, barrier B2).
 
 - **Rung 2** (``rung2_prompt``, ``render_rung2``): D*'s rendering of a cell's lens package with the
-  state decoder, plus, at layer 20, one steered and one unsteered sample per closed prompt and
-  position by §11.1's steering procedure, each cut to its first 128 characters. A position whose
+  state decoder or, by §13.16, the base decoder, plus, at layer 20, one steered and one unsteered
+  sample per closed prompt and position by §11.1's steering procedure, each cut to its first 128
+  characters. A position whose
   strength search found no coherent strength keeps its unsteered samples only and is listed in
   ``steering_failed``. The prompt is D*'s (``adl-lens-multiscale-v2``) with adl-v1's steering
   parts restored verbatim and the samples described; one evidence-only interpreter, i = 0.
@@ -82,14 +83,16 @@ def steering_rows(samples: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     return rows
 
 
-RUNG_DECODERS = ("state", "random")  # a cell's D* branch: its state decoder; L-random's random one
+# a cell's D* branch: a decoder of §13.16, or L-random's random branch through that decoder
+RUNG_DECODERS = ("state", "random", "base", "base_random")
 
 
 def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
                  decoder: str = "state") -> tuple[str, dict[str, str]]:  # fmt: skip
     """Rung 2's evidence of one cell: D*'s rendering of its package ``run`` through ``decoder`` (the
-    state decoder; for L with a random direction its stored random branch, at both layers, so that
-    none of L's own readings enters that control), and at layer 20 each position's steering
+    state or the base decoder; for L with a random direction that decoder's stored random branch, at
+    both layers, so that none of L's own readings enters that control), and at layer 20 each
+    position's steering
     samples (``steering``: ``{"per_position": {pos: {"samples": [...], "failed": reason or
     None}}}``, §11.1's samples of the cell, every position with one row per closed prompt)."""
     if decoder not in RUNG_DECODERS:

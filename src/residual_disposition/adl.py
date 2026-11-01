@@ -660,6 +660,11 @@ def grade_coherence(
     return grade_coherence_many([answers], grader, contexts=[context])[0]
 
 
+class UnresolvedCoherence(RuntimeError):
+    """A coherence judgment left UNKNOWN after its recovery (§13.16, H11): the search pauses, with
+    its samples and the grader's replies kept; "no coherent strength" needs completed judgments."""
+
+
 def coherence_share(labels: Sequence[str]) -> float:
     """The percentage of COHERENT among the known labels; 0 without any (`grade_async`)."""
     known = [label for label in labels if label != "UNKNOWN"]
@@ -751,6 +756,132 @@ def find_steering_threshold(
 # The evidence package of one state
 
 
+def position_steering(
+    model: Any,
+    tokenizer: Any,
+    *,
+    vector: Any,
+    position: int,
+    layer: int,
+    chat_kwargs: Mapping[str, Any],
+    grade_coherent: Any,
+    seed: int,
+    store: StepStore,
+    final_prompts: Sequence[str],
+) -> dict[str, Any]:
+    """One position's steering evidence (amendment §11.1): the strength search on ``vector`` and,
+    at its strength, one steered and one unsteered sample per closed prompt; a search that finds
+    no coherent strength keeps the unsteered samples only. Every operation is kept in ``store``."""
+    from .seeding import derive_seed
+
+    here = f"p{position}"
+
+    def graded_share_for(prompt: str):
+        k = CALIBRATION_PROMPTS.index(prompt) if prompt in CALIBRATION_PROMPTS else prompt
+        rounds = {"n": 0}
+
+        def graded_share(strengths: Sequence[float]) -> dict[float, float]:
+            r = rounds["n"]
+            rounds["n"] += 1
+            name = f"p{position}/search/prompt{k}/round{r}"
+
+            def generate() -> dict[str, Any]:
+                prompts = [prompt] * (SAMPLES_PER_STRENGTH * len(strengths))
+                values = [s for s in strengths for _ in range(SAMPLES_PER_STRENGTH)]
+                stream = derive_seed(seed, "adl", position, "search", prompt, r)
+                texts = generate_steered(
+                    model,
+                    tokenizer,
+                    prompts,
+                    vector,
+                    layer=layer,
+                    strengths=values,
+                    seed=stream,
+                    chat_kwargs=chat_kwargs,
+                    batch_size=len(prompts),
+                    **SEARCH_GENERATION,
+                )
+                return {"strengths": list(strengths), "samples": texts}
+
+            generated = store.once(f"{name}/samples", generate)
+            if [round(x, 12) for x in generated["strengths"]] != [
+                round(x, 12) for x in strengths
+            ]:
+                raise ValueError(f"{name}: stored strengths differ from the search's")
+            samples = generated["samples"]
+
+            def grade() -> dict[str, Any]:
+                kept = [
+                    [
+                        x
+                        for x in samples[
+                            i * SAMPLES_PER_STRENGTH : (i + 1) * SAMPLES_PER_STRENGTH
+                        ]
+                        if x.strip()
+                    ]  # empty samples are dropped
+                    for i in range(len(strengths))
+                ]
+                to_grade = [i for i, answers in enumerate(kept) if answers]
+                labels: list[list[str]] = [[] for _ in strengths]
+                graded = grade_coherence_many(
+                    [kept[i] for i in to_grade],
+                    grade_coherent,
+                    contexts=[f"{name}/strength{i}" for i in to_grade],
+                )
+                if any("UNKNOWN" in lab for lab in graded):  # H11: never "no coherent strength"
+                    raise UnresolvedCoherence(f"{name}: a judgment stays unresolved")
+                for i, lab in zip(to_grade, graded, strict=True):
+                    labels[i] = lab
+                return {"labels": labels}
+
+            labels = store.once(f"{name}/labels", grade)["labels"]
+            return {
+                strength: coherence_share(lab)
+                for strength, lab in zip(strengths, labels, strict=True)
+            }
+
+        return graded_share
+
+    search = find_steering_threshold(graded_share_for)
+
+    def final(kind: str):
+        def run() -> list[str]:
+            return generate_steered(
+                model,
+                tokenizer,
+                final_prompts,
+                None if kind == "unsteered" else vector,
+                layer=layer,
+                strengths=[0.0 if kind == "unsteered" else search["strength"]]
+                * len(final_prompts),
+                seed=derive_seed(seed, "adl", position, kind),
+                chat_kwargs=chat_kwargs,
+                **FINAL_GENERATION,
+            )
+
+        return run
+
+    unsteered = store.once(f"{here}/unsteered", final("unsteered"))
+    steered = (
+        store.once(f"{here}/steered", final("steered")) if search["failed"] is None else None
+    )
+
+    return {
+        "thresholds": search["thresholds"],
+        "strength": search["strength"],
+        "failed": search["failed"],
+        "graded": search["graded"],
+        "samples": [
+            {
+                "prompt": p,
+                "steered": None if steered is None else steered[i],
+                "unsteered": unsteered[i],
+            }
+            for i, p in enumerate(final_prompts)
+        ],
+    }
+
+
 def build_package(
     model: Any,
     tokenizer: Any,
@@ -778,7 +909,6 @@ def build_package(
     (the state's), the position and the purpose, and every grader call has its own attempt id."""
     import torch
 
-    from .seeding import derive_seed
 
     final_prompts = list(final_prompts if final_prompts is not None else steering_prompts())
 
@@ -838,92 +968,17 @@ def build_package(
         best = choice["best"]
         at_best = next(row for row in per_scale if row[0] == best)
 
-        def graded_share_for(prompt: str, position: int = position, vector=vector):
-            k = CALIBRATION_PROMPTS.index(prompt) if prompt in CALIBRATION_PROMPTS else prompt
-            rounds = {"n": 0}
-
-            def graded_share(strengths: Sequence[float]) -> dict[float, float]:
-                r = rounds["n"]
-                rounds["n"] += 1
-                name = f"p{position}/search/prompt{k}/round{r}"
-
-                def generate() -> dict[str, Any]:
-                    prompts = [prompt] * (SAMPLES_PER_STRENGTH * len(strengths))
-                    values = [s for s in strengths for _ in range(SAMPLES_PER_STRENGTH)]
-                    stream = derive_seed(seed, "adl", position, "search", prompt, r)
-                    texts = generate_steered(
-                        model,
-                        tokenizer,
-                        prompts,
-                        vector,
-                        layer=layer,
-                        strengths=values,
-                        seed=stream,
-                        chat_kwargs=chat_kwargs,
-                        batch_size=len(prompts),
-                        **SEARCH_GENERATION,
-                    )
-                    return {"strengths": list(strengths), "samples": texts}
-
-                generated = store.once(f"{name}/samples", generate)
-                if [round(x, 12) for x in generated["strengths"]] != [
-                    round(x, 12) for x in strengths
-                ]:
-                    raise ValueError(f"{name}: stored strengths differ from the search's")
-                samples = generated["samples"]
-
-                def grade() -> dict[str, Any]:
-                    kept = [
-                        [
-                            x
-                            for x in samples[
-                                i * SAMPLES_PER_STRENGTH : (i + 1) * SAMPLES_PER_STRENGTH
-                            ]
-                            if x.strip()
-                        ]  # empty samples are dropped
-                        for i in range(len(strengths))
-                    ]
-                    to_grade = [i for i, answers in enumerate(kept) if answers]
-                    labels: list[list[str]] = [[] for _ in strengths]
-                    graded = grade_coherence_many(
-                        [kept[i] for i in to_grade],
-                        grade_coherent,
-                        contexts=[f"{name}/strength{i}" for i in to_grade],
-                    )
-                    for i, lab in zip(to_grade, graded, strict=True):
-                        labels[i] = lab
-                    return {"labels": labels}
-
-                labels = store.once(f"{name}/labels", grade)["labels"]
-                return {
-                    strength: coherence_share(lab)
-                    for strength, lab in zip(strengths, labels, strict=True)
-                }
-
-            return graded_share
-
-        search = find_steering_threshold(graded_share_for)
-
-        def final(kind: str, vector=vector, position=position, search=search):
-            def run() -> list[str]:
-                return generate_steered(
-                    model,
-                    tokenizer,
-                    final_prompts,
-                    None if kind == "unsteered" else vector,
-                    layer=layer,
-                    strengths=[0.0 if kind == "unsteered" else search["strength"]]
-                    * len(final_prompts),
-                    seed=derive_seed(seed, "adl", position, kind),
-                    chat_kwargs=chat_kwargs,
-                    **FINAL_GENERATION,
-                )
-
-            return run
-
-        unsteered = store.once(f"{here}/unsteered", final("unsteered"))
-        steered = (
-            store.once(f"{here}/steered", final("steered")) if search["failed"] is None else None
+        steering = position_steering(
+            model,
+            tokenizer,
+            vector=vector,
+            position=position,
+            layer=layer,
+            chat_kwargs=chat_kwargs,
+            grade_coherent=grade_coherent,
+            seed=seed,
+            store=store,
+            final_prompts=final_prompts,
         )
         package["per_position"][str(position)] = {
             "logit_lens": ll,
@@ -933,20 +988,7 @@ def build_package(
                 "token_probs": at_best[2],
                 "selected_tokens": choice["selected"],
             },
-            "steering": {
-                "thresholds": search["thresholds"],
-                "strength": search["strength"],
-                "failed": search["failed"],
-                "graded": search["graded"],
-                "samples": [
-                    {
-                        "prompt": p,
-                        "steered": None if steered is None else steered[i],
-                        "unsteered": unsteered[i],
-                    }
-                    for i, p in enumerate(final_prompts)
-                ],
-            },
+            "steering": steering,
         }
     package["failed_positions"] = sum(
         v["steering"]["failed"] is not None for v in package["per_position"].values()
