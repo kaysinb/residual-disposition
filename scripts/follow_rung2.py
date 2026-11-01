@@ -16,8 +16,8 @@ with the pins committed and unchanged, one phase at a time: ``qualification`` (i
 ``analysis`` (only with the ``--qualification`` run complete and the rung's format accepted; a
 decoder failing its floors is read as exploratory; its record ``rung2.json``). Each reading is
 charged to its own meter item (``follow_rung2.item_of``), one API session per item, and a phase's
-readings on one item are interleaved. Every attempt, tier rule, cache and history is the readings' (``follow_readings``). The
-records are not printed.
+readings on one item are interleaved. Every attempt, tier rule, cache and history is the
+readings' (``follow_readings``). The records are not printed.
 """
 
 from __future__ import annotations
