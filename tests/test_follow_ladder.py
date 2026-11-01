@@ -131,4 +131,4 @@ def test_l_random_s_evidence_is_its_random_branch_at_both_layers(tmp_path):
     assert layers(random) == plain_random and layers(state) == plain_state
     assert plain_random != plain_state  # none of L's own readings in the control
     with pytest.raises(ValueError, match="branch"):
-        L.render_rung2(run, steering(), tmp_path, decoder="base")
+        L.render_rung2(run, steering(), tmp_path, decoder="no_patch")

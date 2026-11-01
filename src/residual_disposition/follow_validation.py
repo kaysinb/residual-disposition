@@ -55,8 +55,11 @@ def select(order: Sequence[Hashable], reference: Mapping[Hashable, str | None],
     unlabeled), in ``order``, until each class has its total with every stratum label's minimum
     met (``strata[item]``: the item's labels). With ``final``, each minimum is capped at what the
     labeled items of its class hold, and the capped labels are reported in ``short_strata``."""
-    for c, need in minimums.items():
-        if sum(need.values()) > totals[c]:
+    for c, need in minimums.items():  # an item holds one label of each family: the families overlap
+        families: Counter = Counter()
+        for t, m in need.items():
+            families[str(t).split(":")[0]] += m
+        if any(m > totals[c] for m in families.values()):
             raise ValueError(f"the {c} minimums exceed its total {totals[c]}")
     need = {c: dict(minimums.get(c, {})) for c in (POSITIVE, NEGATIVE)}
     short: dict[str, dict[Hashable, int]] = {POSITIVE: {}, NEGATIVE: {}}
@@ -190,7 +193,7 @@ def labels(reading: Mapping[str, Any], *, another_behavior: bool,
     and its difficulty from the reference fields: another behavior named, or the category alone."""
     role = "fidelity" if reading["purpose"] == "fidelity" else reading["role"].removesuffix("_cont")
     out = [f"behavior:{reading['behavior']}", f"role:{role}"]
-    if reading["reader"] == "dstar":
+    if reading["reader"] in ("dstar", "rung2"):
         out.append("decoder:" + ("base" if reading["decoder"] == "base" else "state"))
     if reading.get("component"):  # rung 3's agent or comparator (barrier B3)
         out.append(f"component:{reading['component']}")
@@ -215,6 +218,9 @@ def minimums_of(spec: Mapping[str, Mapping[str, Any]], behaviors: Sequence[str] 
         need.update({f"difficulty:{k}": int(v) for k, v in (m.get("difficulty") or {}).items()})
         out[cls] = need
     return out
+
+
+SUPPLEMENT_STREAMS = (3, 4, 5, 6)  # rung 2's format: one at a time, in order (§13.16)
 
 
 def step(frame: Sequence[Hashable], supplement: Sequence[Hashable] | None, generated: bool,
