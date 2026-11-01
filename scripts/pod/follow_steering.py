@@ -92,8 +92,8 @@ def main() -> int:
                                    "session": session_id}}}  # fmt: skip
     outputs: dict[str, Any] = {}
     graders = P._adl_graders_for(ws, plan, outputs)  # refuses a missing key
-    openai.OpenAI(api_key=os.environ["JUDGE_API_KEY"],
-                  base_url=os.environ["JUDGE_API_BASE"]).models.list()  # a bad key stops here
+    openai.OpenAI(api_key=os.environ["JUDGE_API_KEY"], base_url=os.environ["JUDGE_API_BASE"],
+                  timeout=20.0, max_retries=0).models.list()  # a bad key or link stops here
     base, tok = ws.base()
     if next(base.parameters()).dtype != torch.bfloat16:
         raise SystemExit(f"the model is loaded in {next(base.parameters()).dtype}, not bf16")

@@ -2130,7 +2130,9 @@ set is recorded in [the decision log](decisions.md) (`residual_disposition.follo
    `scripts/follow_format.py supplement rung2 --run <that run>`, and labeling goes on; a class still
    short, or a decoder under 150 of a class, after stream 6 leaves the format not validated. Then
    `lock`, `accept` and `grade`: errors are reported by decoder in `by_stratum`, and a pooled pass
-   covers the mixture only.
+   covers the mixture only. An `incomplete` with both classes and both decoders' minimums held means
+   the selector could not fill a joint stratum in order: it is recorded as a procedural unavailability,
+   not as a failure of the format, and the work stops there.
 5. **Analysis.** `--send analysis --qualification <run>`, only with the qualification complete and the
    format accepted: L, H_s, X, the recipe control and L with a random direction, interleaved, on each
    decoder. The record is `rung2.json`, not printed: each decoder's status, with its counts, category
