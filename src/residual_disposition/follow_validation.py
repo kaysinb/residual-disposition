@@ -47,6 +47,14 @@ def seeded_order(items: Sequence[Hashable], seed: int) -> list[Hashable]:
     return order
 
 
+def _by_family(need: Mapping[Hashable, int]) -> Counter:
+    """Minimums or deficits summed within each stratum family, the label's part before its colon."""
+    out: Counter = Counter()
+    for t, m in need.items():
+        out[str(t).split(":")[0]] += m
+    return out
+
+
 def select(order: Sequence[Hashable], reference: Mapping[Hashable, str | None],
            strata: Mapping[Hashable, Iterable[Hashable]], totals: Mapping[str, int],
            minimums: Mapping[str, Mapping[Hashable, int]], *,
@@ -54,12 +62,12 @@ def select(order: Sequence[Hashable], reference: Mapping[Hashable, str | None],
     """Items by final reference class (``reference[item]``: positive, negative or None while
     unlabeled), in ``order``, until each class has its total with every stratum label's minimum
     met (``strata[item]``: the item's labels). With ``final``, each minimum is capped at what the
-    labeled items of its class hold, and the capped labels are reported in ``short_strata``."""
-    for c, need in minimums.items():  # an item holds one label of each family: the families overlap
-        families: Counter = Counter()
-        for t, m in need.items():
-            families[str(t).split(":")[0]] += m
-        if any(m > totals[c] for m in families.values()):
+    labeled items of its class hold, and the capped labels are reported in ``short_strata``. An
+    item holds one label of each family (``decoder:``, ``role:``...), so the families overlap: an
+    item is taken when what is left of the class still fits each family's deficit; one passed over
+    is taken in a second pass if it fits then."""
+    for c, need in minimums.items():
+        if any(m > totals[c] for m in _by_family(need).values()):
             raise ValueError(f"the {c} minimums exceed its total {totals[c]}")
     need = {c: dict(minimums.get(c, {})) for c in (POSITIVE, NEGATIVE)}
     short: dict[str, dict[Hashable, int]] = {POSITIVE: {}, NEGATIVE: {}}
@@ -82,6 +90,17 @@ def select(order: Sequence[Hashable], reference: Mapping[Hashable, str | None],
             have[c][t] >= m for c in chosen for t, m in need[c].items()
         )
 
+    def fits(cls: str, item: Hashable) -> bool:
+        labels = set(strata[item])
+        after = {t: max(0, m - have[cls][t] - (t in labels)) for t, m in need[cls].items()}
+        left = totals[cls] - len(chosen[cls]) - 1
+        return all(d <= left for d in _by_family(after).values())
+
+    def take(cls: str, item: Hashable) -> None:
+        chosen[cls].append(item)
+        have[cls].update(strata[item])
+
+    passed_over = []
     for item in order:
         cls = reference.get(item)
         if cls is None:
@@ -89,16 +108,20 @@ def select(order: Sequence[Hashable], reference: Mapping[Hashable, str | None],
         labeled += 1
         if cls not in chosen or len(chosen[cls]) >= totals[cls]:
             continue
-        deficit = {t: max(0, m - have[cls][t]) for t, m in need[cls].items()}
-        fills = any(deficit.get(t, 0) > 0 for t in strata[item])
-        if fills or totals[cls] - len(chosen[cls]) - sum(deficit.values()) > 0:
-            chosen[cls].append(item)
-            have[cls].update(strata[item])
+        if fits(cls, item):
+            take(cls, item)
+        else:
+            passed_over.append(item)
         if done():
             return {"complete": True, "labeled": labeled, "chosen": chosen,
                     "short_strata": short}  # fmt: skip
-    return {"complete": False, "short": True, "labeled": labeled, "chosen": chosen,
-            "short_strata": short}  # fmt: skip
+    for item in passed_over:
+        cls = reference[item]
+        if len(chosen[cls]) < totals[cls] and fits(cls, item):
+            take(cls, item)
+    complete = done()
+    out = {"complete": complete, "labeled": labeled, "chosen": chosen, "short_strata": short}
+    return out if complete else {**out, "short": True}
 
 
 def in_review(item: Hashable, seed: int, fraction: Fraction = Fraction(1, 10)) -> bool:
@@ -225,8 +248,9 @@ SUPPLEMENT_STREAMS = (3, 4, 5, 6)  # rung 2's format: one at a time, in order (�
 
 def step(frame: Sequence[Hashable], supplement: Sequence[Hashable] | None, generated: bool,
          reference: Mapping[Hashable, str | None], strata: Mapping[Hashable, Iterable[Hashable]],
-         totals: Mapping[str, int],
-         minimums: Mapping[str, Mapping[Hashable, int]]) -> dict[str, Any]:  # fmt: skip
+         totals: Mapping[str, int], minimums: Mapping[str, Mapping[Hashable, int]],
+         required: Mapping[str, Mapping[Hashable, int]] | None = None,
+         ) -> dict[str, Any]:  # fmt: skip
     """The stopping rule fixed at B2, as §13.16 amends it: label in the seeded order until the final
     labels hold each class's total; then every unmet minimum is capped at what the labeled prefix of
     its class holds, reported in ``short_strata``, and the selector runs once on that prefix
@@ -234,10 +258,19 @@ def step(frame: Sequence[Hashable], supplement: Sequence[Hashable] | None, gener
     classes. A frame exhausted first, with a declared supplemental inventory not yet generated,
     calls for it whole (``generate_supplement``); its items are then labeled in their own seeded
     order after the frame's. Nothing left to label with a class under its total is ``incomplete``:
-    the format is not validated."""
+    the format is not validated. A minimum in ``required`` (§13.16's point 6: each of two decoders)
+    is never capped: until the labeled items hold it, labeling and the supplement go on as for a
+    short class."""
     order = list(frame) + (list(supplement) if supplement and generated else [])
     held = Counter(reference.get(i) for i in order)
-    if all(held[c] >= n for c, n in totals.items()):
+    strata_held: dict[Any, Counter] = {}
+    for i in order:
+        if reference.get(i) is not None:
+            strata_held.setdefault(reference[i], Counter()).update(strata[i])
+    required_held = all(strata_held.get(c, Counter())[t] >= m
+                        for c, need in (required or {}).items()
+                        for t, m in need.items())  # fmt: skip
+    if all(held[c] >= n for c, n in totals.items()) and required_held:
         final = select(order, reference, strata, totals, minimums, final=True)
         return {"step": "locked" if final["complete"] else "incomplete", **final}
     if any(reference.get(i) is None for i in order):

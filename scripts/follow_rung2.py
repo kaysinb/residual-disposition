@@ -13,10 +13,10 @@ through it. ``--pin`` writes every reading's package directory, evidence sha256 
 (``manifests/follow_rung2_inputs.json``), to be committed before any request. ``--send`` sends only
 with the pins committed and unchanged, one phase at a time: ``qualification`` (its record
 ``qualification.json``), ``supplement`` (one stream of the frame's supplement, ``--stream``) and
-``analysis`` (only with the rung's format accepted, and only the decoders eligible in the
-``--qualification`` run; its record ``rung2.json``). Each reading is charged to its own meter item
-(``follow_rung2.item_of``), one API session per item, and a phase's readings on one item are
-interleaved. Every attempt, tier rule, cache and history is the readings' (``follow_readings``). The
+``analysis`` (only with the ``--qualification`` run complete and the rung's format accepted; a
+decoder failing its floors is read as exploratory; its record ``rung2.json``). Each reading is
+charged to its own meter item (``follow_rung2.item_of``), one API session per item, and a phase's
+readings on one item are interleaved. Every attempt, tier rule, cache and history is the readings' (``follow_readings``). The
 records are not printed.
 """
 
@@ -248,14 +248,12 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("--qualification names the qualification's run")
         record = json.loads((root / args.qualification / "qualification.json").read_text())
         floors = record["floors"]
+        if any(None in (f["eligible"], f["recipe_floor_met"]) for f in floors.values()):
+            raise SystemExit("a qualification reading is pending: its slots are read first")
         accepted, validated = format_state()
         if not accepted:
             raise SystemExit("the rung's format was not accepted: its readings are ineligible")
-        wanted = {d for d in R2.DECODERS if floors[d]["eligible"]}
-        wanted |= {R2.RANDOM_CELLS[d] for d in wanted}
-        cells = [c for c in phases["analysis"] if c["reading"]["decoder"] in wanted]
-    if not cells:
-        raise SystemExit("nothing to read in this phase")
+        cells = phases["analysis"]
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     run = root / f"follow-rung2-{args.send}-{stamp}"
     run.mkdir(parents=True, exist_ok=False)

@@ -4,15 +4,17 @@ strength search and one steered and one unsteered sample per closed prompt and p
 
     uv run python scripts/pod/follow_steering.py \\
         experiments/continuation_14b/word_count_claim --space <space> --out <new directory> \\
-        --api-usd <the meter session's API money>
+        --session <the meter session's id> --api-usd <its API money>
 
 The runtime is M0's and the builds' (``follow_lrandom.yaml``'s). Before any write: the session
-writes only into its space, with room (``follow_build.placement_problems``). Before any GPU work:
-every vector source against its pin in B3's inventory and every state's adapters against their
-recorded tensor sha256. The coherence grader spends on the worker's own ledger in the space, its
-allowance the meter session's API money; its key comes from the environment. The output is bound by
-its record (``scripts/follow_rung2.py --record-steering``). A launcher's ``RUN_ID`` is removed first
-and kept in the manifest.
+writes only into its space, with room (``follow_build.placement_problems``). Before the weights
+load: every vector source against its pin in B3's inventory, every state's adapters against their
+recorded tensor sha256, the coherence grader's key (from the environment, tried on the free model
+list) and its ledger: the worker's own in the space, its ceiling recorded once for the meter session
+(``budget.session_allowance``), so that a rerun's earlier spending is not counted again. The first
+frozen batch's time and peak memory are printed. A coherence judgment left unresolved stops the
+session (§13.16, H11). The output is bound by its record (``scripts/follow_rung2.py
+--record-steering``). A launcher's ``RUN_ID`` is removed first and kept in the manifest.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -48,7 +51,7 @@ def take(flag: str) -> str:
 def main() -> int:
     launcher = os.environ.pop("RUN_ID", None)
     out, space = Path(take("--out")), Path(take("--space"))
-    allowance = float(take("--api-usd"))
+    session_id, session_usd = take("--session"), float(take("--api-usd"))
     problems = B.placement_problems(space, out)
     if problems:  # before any write
         raise SystemExit("; ".join(problems))
@@ -75,19 +78,42 @@ def main() -> int:
         record = json.loads((Path(find_run(c["run"])) / "adl_lens_package.json").read_text())
         states[c["cell"]] = record["state"]
         ws.store.verify(record["state"])  # every adapter's tensors against its recorded sha256
+    import openai
     import torch
     from peft import PeftModel
 
+    from residual_disposition.budget import session_allowance
+
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is unavailable: this entry point needs a GPU")
+    ledger = ws.root / "ledgers" / f"adl-api-{WORKER}.jsonl"
+    ceiling = session_allowance(ledger, WORKER, session_id, session_usd)
+    plan = {"api": {"adl_ledger": {"worker": WORKER, "allowance_usd": ceiling,
+                                   "session": session_id}}}  # fmt: skip
+    outputs: dict[str, Any] = {}
+    graders = P._adl_graders_for(ws, plan, outputs)  # refuses a missing key
+    openai.OpenAI(api_key=os.environ["JUDGE_API_KEY"],
+                  base_url=os.environ["JUDGE_API_BASE"]).models.list()  # a bad key stops here
     base, tok = ws.base()
     if next(base.parameters()).dtype != torch.bfloat16:
         raise SystemExit(f"the model is loaded in {next(base.parameters()).dtype}, not bf16")
-    plan = {"api": {"adl_ledger": {"worker": WORKER, "allowance_usd": allowance}}}
-    outputs: dict[str, Any] = {}
-    graders = P._adl_graders_for(ws, plan, outputs)
+    frozen = adl.generate_steered
+    first: list[float] = []
+
+    def timed(*args: Any, **kwargs: Any) -> Any:
+        started = time.monotonic()
+        out_ = frozen(*args, **kwargs)
+        if not first:  # the first frozen batch: time and peak memory, the run goes on
+            first.append(time.monotonic() - started)
+            print(json.dumps({"first_batch_s": round(first[0], 1), "samples": len(out_),
+                              "peak_gib": round(torch.cuda.max_memory_allocated() / 2**30, 2)}),
+                  flush=True)  # fmt: skip
+        return out_
+
+    adl.generate_steered = timed
     manifest = {"config": OmegaConf.to_container(cfg, resolve=True), "cells": cells,
                 "states": states, "launcher_run_id": launcher, "worker": WORKER,
+                "session": session_id,
                 "environment": B.environment(base)}  # fmt: skip
     loaded: dict[str, Any] = {}
 

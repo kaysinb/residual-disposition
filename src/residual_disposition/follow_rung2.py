@@ -16,7 +16,8 @@
   steering cell; the requests and labels are D*'s, with rung 2's prompt.
 - **Qualification** (``qualification``): each decoder's floors, pooled over its two streams. The
   recipe floor is measured and limits how a negative result is read; it does not close a positive
-  contrast (§13.16). A decoder failing a floor is ineligible: its L, H_s and X are not read.
+  contrast (§13.16). A decoder failing a floor stays ineligible, its p = 1, and is still read, as
+  countdown's exploratory reading: reported as exploratory, it cannot identify b.
 - **Decision** (``decision``): per decoder its own test at 1/60 (§13.5 (c)), gated by its
   qualification, the rung's one format validation, category confusion (§13.5 (b)) and its random
   cell at most 8 of 80. Every launched test is completed and reported; a pending slot leaves its
@@ -266,37 +267,42 @@ def decision(rows: Sequence[Mapping[str, Any]], floors: Mapping[str, Any], accep
              validated: bool, regions: Any, rules: Mapping[str, Any],
              definitions: Mapping[str, Any]) -> dict[str, Any]:  # fmt: skip
     """Each decoder's test (see the module), with what it rests on: ``status`` is ``identified``,
-    ``not identified``, ``ineligible`` with its gate, or ``pending``. The recipe control's analysis
-    reading is reported."""
+    ``not identified``, ``ineligible`` with its gate, or ``pending``. Every planned reading of the
+    rung completes before its decision, the recipe control's included, though its counts decide
+    nothing: an open one leaves the record ``pending``. An ineligible decoder's reading is
+    ``exploratory``: its counts are reported and its status does not change."""
     by = {(r["reading"]["role"], r["reading"]["decoder"]): r for r in rows}
+
+    def counted(role: str, decoder: str) -> int | None:
+        cell = by.get((role, decoder))
+        return None if cell is None else cell["count"].get("counted")
+
     out: dict[str, Any] = {}
     for decoder in DECODERS:
         q = floors[decoder]
         entry: dict[str, Any] = {"recipe_floor_met": q["recipe_floor_met"], "format": accepted}
         out[decoder] = entry
-        if q["eligible"] is None:
-            entry["status"] = "pending"
-            continue
-        if not q["eligible"]:
-            entry.update(status="ineligible", gate="qualification")
-            continue
         if not accepted:
-            entry.update(status="ineligible", gate="format validation")
+            entry.update(status="ineligible", gate="format validation", open=False)
             continue
-        cells = [by.get((role, decoder)) for role in ("L", "H_s", "X")]
-        random = by.get((RANDOM_CELL, RANDOM_CELLS[decoder]))
-        recipe = by.get(("recipe", decoder))
-        entry["random"] = None if random is None else random["count"].get("counted")
-        entry["recipe"] = None if recipe is None else recipe["count"].get("counted")
-        if any(c is None or "counted" not in c["count"] for c in cells) or entry["random"] is None:
-            entry["status"] = "pending"
+        counts = [counted(role, decoder) for role in ("L", "H_s", "X")]
+        entry["random"] = counted(RANDOM_CELL, RANDOM_CELLS[decoder])
+        entry["recipe"] = counted("recipe", decoder)
+        graded = None
+        if counts[0] is not None:
+            graded = D.margins(by[("L", decoder)]["slots"], BEHAVIOR, definitions[BEHAVIOR], rules)
+            entry["margins"] = graded
+        entry["open"] = (None in counts or entry["random"] is None or entry["recipe"] is None
+                         or graded is None or graded["passed"] is None
+                         or q["eligible"] is None or q["recipe_floor_met"] is None)  # fmt: skip
+        if None not in counts:
+            x_l, x_hs, x_x = counts
+            entry["counts"] = {"L": x_l, "H_s": x_hs, "X": x_x}
+            entry["contrast_at_level"] = bool(regions.by_level(x_l, x_hs, x_x)[LEVEL])
+        if q["eligible"] is False:
+            entry.update(status="ineligible", gate="qualification", exploratory=True)
             continue
-        x_l, x_hs, x_x = (c["count"]["counted"] for c in cells)
-        entry["counts"] = {"L": x_l, "H_s": x_hs, "X": x_x}
-        entry["contrast_at_level"] = bool(regions.by_level(x_l, x_hs, x_x)[LEVEL])
-        graded = D.margins(cells[0]["slots"], BEHAVIOR, definitions[BEHAVIOR], rules)
-        entry["margins"] = graded
-        if graded["passed"] is None:
+        if entry["open"]:
             entry["status"] = "pending"
             continue
         entry["random_passed"] = entry["random"] <= RANDOM_MAX
@@ -305,4 +311,4 @@ def decision(rows: Sequence[Mapping[str, Any]], floors: Mapping[str, Any], accep
         if graded["specific"] is not None:  # a specific claim needs the rejection as well
             entry["specificity_satisfied"] = bool(graded["specific"]) and validated
     return {"decoders": out, "level": str(LEVEL),
-            "pending": any(e["status"] == "pending" for e in out.values())}  # fmt: skip
+            "pending": any(e["open"] for e in out.values())}  # fmt: skip

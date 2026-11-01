@@ -660,6 +660,11 @@ def grade_coherence(
     return grade_coherence_many([answers], grader, contexts=[context])[0]
 
 
+class UnresolvedCoherence(RuntimeError):
+    """A coherence judgment left UNKNOWN after its recovery (§13.16, H11): the search pauses, with
+    its samples and the grader's replies kept; "no coherent strength" needs completed judgments."""
+
+
 def coherence_share(labels: Sequence[str]) -> float:
     """The percentage of COHERENT among the known labels; 0 without any (`grade_async`)."""
     known = [label for label in labels if label != "UNKNOWN"]
@@ -823,6 +828,8 @@ def position_steering(
                     grade_coherent,
                     contexts=[f"{name}/strength{i}" for i in to_grade],
                 )
+                if any("UNKNOWN" in lab for lab in graded):  # H11: never "no coherent strength"
+                    raise UnresolvedCoherence(f"{name}: a judgment stays unresolved")
                 for i, lab in zip(to_grade, graded, strict=True):
                     labels[i] = lab
                 return {"labels": labels}

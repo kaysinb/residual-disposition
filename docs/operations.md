@@ -2110,7 +2110,8 @@ set is recorded in [the decision log](decisions.md) (`residual_disposition.follo
 `<DATA_DIR>/follow_format/rung2`). In this order:
 
 1. **Steering, one Pod.** The meter session on `follow/continued/rung2`, with the coherence grader's
-   API money (`--api-usd`, the same number on the session and the script) and the Pods' Gemini key.
+   API money (`--session` and `--api-usd`, the session's id and number) and the Pods' Gemini key; a
+   coherence judgment left unresolved stops the session (§13.16, H11), its samples and replies kept.
    Seven cells: A, H, the recipe control, L, H_s, X_cont and L with a random direction, each by §11.1's
    search and samples at layer 20, its δ̄ and η from the files B3's inventory pins, checked before any
    GPU work. Q1's A and H packages are not reused: their δ̄ are not these packages' files (relative L2
@@ -2121,18 +2122,20 @@ set is recorded in [the decision log](decisions.md) (`residual_disposition.follo
 2. **Pins.** `--pin`, committed, before any request.
 3. **Qualification.** `--send qualification`: A, H and the recipe control, two streams per decoder,
    the state decoder's under B3's salts, the base decoder's under `follow/rung2/base/...`. The record
-   is `qualification.json`, not printed. A decoder failing a floor is ineligible; the recipe floor is
-   reported and does not close a positive contrast.
+   is `qualification.json`, not printed. A decoder failing a floor stays ineligible and is read as
+   exploratory; the recipe floor is reported and does not close a positive contrast.
 4. **Format validation.** One for the rung, on both decoders' qualification readings in one seeded
    order, as D*'s (`status`, `round`, `import-annotators`, `import-arbiter`, `review`, `import-review`).
    When `status` says `generate_supplement`: `--send supplement --stream <next>`, then
    `scripts/follow_format.py supplement rung2 --run <that run>`, and labeling goes on; a class still
-   short after stream 6 leaves the format not validated. Then `lock`, `accept` and `grade`: errors are
-   reported by decoder in `by_stratum`, and a pooled pass covers the mixture only.
-5. **Analysis.** `--send analysis --qualification <run>`, only with the format accepted: L, H_s, X, the
-   recipe control and L with a random direction, interleaved, for each eligible decoder. The record is
-   `rung2.json`, not printed: each decoder's status, with its counts, category margin, random cell and
-   test at 1/60. All launched tests are completed and reported, and no decoder is preferred.
+   short, or a decoder under 150 of a class, after stream 6 leaves the format not validated. Then
+   `lock`, `accept` and `grade`: errors are reported by decoder in `by_stratum`, and a pooled pass
+   covers the mixture only.
+5. **Analysis.** `--send analysis --qualification <run>`, only with the qualification complete and the
+   format accepted: L, H_s, X, the recipe control and L with a random direction, interleaved, on each
+   decoder. The record is `rung2.json`, not printed: each decoder's status, with its counts, category
+   margin, random cell and test at 1/60; an open planned reading leaves it pending. All launched tests
+   are completed and reported, and no decoder is preferred. A format not accepted stops here.
 
 **Meter items.** `follow/rung2_shared` carries the state decoder's A and H and the format's graders;
 `follow/continued/rung2` the Pod and the state decoder's analysis; `follow/base`'s unspent API the state

@@ -151,7 +151,7 @@ def slots(counted, *, margin=True, feature=True):
     return out
 
 
-def analysed(l_count=(60, 60), random=(2, 2), **kw):
+def analysed(l_count=(60, 60), random=(2, 2), **kw):  # every planned reading complete
     rows = []
     for decoder, x, rnd in (("state", l_count[0], random[0]), ("base", l_count[1], random[1])):
         for role, n in (("L", x), ("H_s", 0), ("X", 0), ("recipe", 70)):
@@ -209,13 +209,16 @@ def test_zero_counted_fails_category_and_a_wrong_category_closes_the_test():
 def test_an_ineligible_decoder_is_reported_with_its_gate_and_the_other_decided():
     floors = {"state": {"eligible": True, "recipe_floor_met": False},
               "base": {"eligible": False, "recipe_floor_met": True}}  # fmt: skip
-    rows = [r for r in analysed() if r["reading"]["decoder"] in ("state", "random")]
-    out = decide(rows, floors)
-    assert out["decoders"]["base"] == {"recipe_floor_met": True, "format": True,
-                                       "status": "ineligible", "gate": "qualification"}  # fmt: skip
+    out = decide(analysed(), floors)
+    base = out["decoders"]["base"]
+    assert (base["status"], base["gate"], base["exploratory"]) == (
+        "ineligible", "qualification", True)  # its counts reported, its status unchanged
+    assert base["counts"]["L"] == 60 and base["contrast_at_level"] is True
     assert out["decoders"]["state"]["status"] == "identified"
     assert out["decoders"]["state"]["recipe_floor_met"] is False  # reported, closing nothing
     assert out["pending"] is False
+    rows = [r for r in analysed() if r["reading"]["decoder"] != "base"]
+    assert decide(rows, floors)["pending"] is True  # the planned exploratory reading is still open
 
 
 @pytest.mark.usefixtures("judged")
@@ -234,6 +237,21 @@ def test_a_pending_cell_or_grade_is_pending_never_a_negative(monkeypatch):
     assert out["decoders"]["base"]["status"] == "identified"
     rows = [r for r in analysed() if r["reading"]["role"] != "L_random"]
     assert decide(rows)["pending"] is True
+
+
+@pytest.mark.usefixtures("judged")
+def test_an_open_recipe_reading_holds_the_decision_and_its_failure_does_not():
+    rows = analysed()
+    next(r for r in rows if r["reading"] == {"role": "recipe", "decoder": "state"})["count"] = {}
+    out = decide(rows)
+    assert out["decoders"]["state"]["status"] == "pending" and out["pending"] is True
+    floors = {d: {"eligible": True, "recipe_floor_met": None} for d in R2.DECODERS}
+    assert decide(analysed(), floors)["decoders"]["base"]["status"] == "pending"
+    floors = {d: {"eligible": True, "recipe_floor_met": False} for d in R2.DECODERS}
+    assert decide(analysed(), floors)["decoders"]["base"]["status"] == "identified"
+
+
+def test_a_pending_grade_is_pending(judged, monkeypatch):
     monkeypatch.setattr(R2.D, "margins", lambda *a: {"passed": None, "specific": None})
     assert decide(analysed())["decoders"]["base"]["status"] == "pending"
 
@@ -451,3 +469,75 @@ def test_a_vector_is_its_packages_stored_difference_and_a_random_one_keeps_its_n
     save_file({"delta": state}, str(run / "reproduction" / "delta_layer20.safetensors"))
     with pytest.raises(ValueError, match="stored difference"):
         R2.cell_vectors(run, base, random=False)
+
+
+def test_an_unresolved_judgment_pauses_the_search_and_keeps_what_it_has(tmp_path, monkeypatch):
+    """§13.16, H11: all UNKNOWN is not "no coherent strength"."""
+    import torch
+
+    monkeypatch.setattr(adl, "generate_steered",
+                        lambda m, t, prompts, *a, **k: ["t"] * len(prompts))  # fmt: skip
+    monkeypatch.setattr(adl, "grade_coherence_many",
+                        lambda kept, grade, contexts: [["UNKNOWN"] * len(k) for k in kept])
+    store = adl.StepStore(tmp_path)
+    with pytest.raises(adl.UnresolvedCoherence, match="unresolved"):
+        R2.steer_cell(None, None, torch.ones(5, 4), 2.0, seed=7, chat_kwargs={},
+                      grade_coherent=None, store=store)  # fmt: skip
+    assert store.get("p0/search/prompt0/round0/samples") is not None
+    assert store.get("p0/search/prompt0/round0/labels") is None
+    assert store.get("p0/unsteered") is None
+
+
+def overlapping(seed, n_negative=400):
+    """A shuffled class of ``n_negative`` items over two overlapping families, feasible."""
+    import random
+
+    rng = random.Random(seed)
+    items = [f"i{k}" for k in range(n_negative)]
+    strata = {i: (f"decoder:{'state' if k < n_negative // 2 else 'base'}",
+                  f"role:{'A' if k % 13 == 0 else 'R' if k % 13 == 1 else 'H'}")
+              for k, i in enumerate(items)}  # fmt: skip
+    rng.shuffle(items)
+    reference = dict.fromkeys(items, fv.NEGATIVE)
+    return items, reference, strata
+
+
+@pytest.mark.parametrize("n", [400, 401, 420, 480])
+def test_the_selector_fills_a_feasible_class_whatever_the_order(n):
+    need = {"decoder:state": 150, "decoder:base": 150, "role:A": 30, "role:H": 30, "role:R": 30}
+    totals = {fv.POSITIVE: 0, fv.NEGATIVE: 400}
+    for seed in range(40):
+        items, reference, strata = overlapping(seed, n)
+        out = fv.select(items, reference, strata, totals, {fv.NEGATIVE: need}, final=True)
+        chosen = out["chosen"][fv.NEGATIVE]
+        assert out["complete"] and len(chosen) == len(set(chosen)) == 400
+        held = fv.Counter(t for i in chosen for t in strata[i])
+        assert all(held[t] >= m for t, m in need.items())
+
+
+def decoder_share(state):
+    """400 + 400 labeled, ``state`` of each class from the state decoder."""
+    items, reference, strata = [], {}, {}
+    for cls in (fv.POSITIVE, fv.NEGATIVE):
+        for k in range(400):
+            i = f"{cls}{k}"
+            items.append(i)
+            reference[i] = cls
+            strata[i] = (f"decoder:{'state' if k < state else 'base'}",)
+    return items, reference, strata
+
+
+def test_a_decoder_under_150_of_a_class_is_never_locked_and_asks_for_the_next_stream():
+    totals = {fv.POSITIVE: 400, fv.NEGATIVE: 400}
+    need = {"decoder:state": 150, "decoder:base": 150}
+    minimums = {fv.POSITIVE: need, fv.NEGATIVE: need}
+    items, reference, strata = decoder_share(100)
+    step = fv.step(items, ["next stream"], False, reference, strata, totals, minimums, minimums)
+    assert step["step"] == "generate_supplement"
+    assert fv.step(items, None, False, reference, strata, totals, minimums,
+                   minimums)["step"] == "incomplete"  # fmt: skip
+    # an unrequired minimum is capped as registered
+    assert fv.step(items, None, False, reference, strata, totals, minimums)["step"] == "locked"
+    items, reference, strata = decoder_share(150)
+    assert fv.step(items, ["next stream"], False, reference, strata, totals, minimums,
+                   minimums)["step"] == "locked"  # fmt: skip

@@ -212,17 +212,18 @@ class Work:
                   for i, v in final.items()}  # fmt: skip
         behaviors = sorted({v["reading"]["behavior"] for v in items.values()})
         decoders = list(readers_decoders(self.fmt))
-        spec, roles = self.spec["minimums"], ()
+        spec, roles, required = self.spec["minimums"], (), None
         if self.fmt == RUNG2:
             spec = {c: {**m, "decoder": DECODER_MINIMUM} for c, m in spec.items()}
             roles = ("A", "H", "recipe")
+            required = {c: {f"decoder:{d}": DECODER_MINIMUM for d in decoders} for c in spec}
         minimums = fv.minimums_of(spec, behaviors=behaviors, decoders=decoders, roles=roles)
         per_class = int(self.b2["format_validation"]["per_class"])
         # §13.16: a frame exhausted with a class short is not validated, D*'s and PD's with no
         # supplement generated; rung 2's takes the next stream while one is left
         totals = {fv.POSITIVE: per_class, fv.NEGATIVE: per_class}
         supplement = ["next stream"] if self.next_stream() else None
-        return fv.step(order, supplement, False, reference, strata, totals, minimums)
+        return fv.step(order, supplement, False, reference, strata, totals, minimums, required)
 
     def open_work(self) -> str | None:
         """What must finish before the stopping rule is read again."""
