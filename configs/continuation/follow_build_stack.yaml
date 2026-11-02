@@ -5,10 +5,6 @@
 # decoders (§13.16, point 5: a stack candidate's base random cell is built then). L's untagged PD
 # pool is the screening's. Frozen by continuation_rules.FOLLOW_BUILD_STACK_FROZEN.
 build:
-  confirmations:                 # the committed decision the plan was derived at, checked at run
-    manifest: manifests/follow_confirmations.json
-    sha256: ea4fe625e5afcae53be2125caf6575e02a6c8639757b64dcfdeec5d17d610a69
-    confirmed: {example_link: 200, pun_intended: 200}
   runtime:                       # M0's frozen runtime (follow_m0.yaml)
     model: {name: Qwen/Qwen3-14B, revision: 40c069824f4251a91eefaf281ebe4c544efd3e18,
             dtype: bfloat16}

@@ -49,13 +49,14 @@ def take(flag: str) -> str:
 def main() -> int:
     launcher = os.environ.pop("RUN_ID", None)  # it would name every pool's run directory alike
     out = Path(take("--out"))
-    space, confirmations = Path(take("--space")), Path(take("--confirmations"))
-    problems = B.placement_problems(space, out)
-    if problems:  # before any write
-        raise SystemExit("; ".join(problems))
     stack = "--stack" in sys.argv
     if stack:
         sys.argv.remove("--stack")
+    space = Path(take("--space"))
+    confirmations = None if stack else Path(take("--confirmations"))
+    problems = B.placement_problems(space, out)
+    if problems:  # before any write
+        raise SystemExit("; ".join(problems))
     build = cr.follow_build_stack() if stack else cr.follow_build()
     if len(sys.argv) != 2:
         raise SystemExit(f"arguments {sys.argv[1:]}: one experiment, no override is accepted")

@@ -72,14 +72,15 @@ def take(flag: str) -> str:
 def main() -> int:
     launcher = os.environ.pop("RUN_ID", None)  # it would name every cell's run directory alike
     out, name = Path(take("--out")), take("--session")
-    space, confirmations = Path(take("--space")), Path(take("--confirmations"))
+    stack = "--stack" in sys.argv
+    if stack:
+        sys.argv.remove("--stack")
+    space = Path(take("--space"))
+    confirmations = None if stack else Path(take("--confirmations"))
     problems = B.placement_problems(space, out)
     if problems:  # before any write
         raise SystemExit("; ".join(problems))
     rules = cr.follow_rules()
-    stack = "--stack" in sys.argv
-    if stack:
-        sys.argv.remove("--stack")
     build = cr.follow_build_stack() if stack else cr.follow_build()
     if name not in build["sessions"]:
         raise SystemExit(f"no session {name!r} in the builds' configuration")

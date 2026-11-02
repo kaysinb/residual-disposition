@@ -907,7 +907,7 @@ FOLLOW_BUILD_FROZEN: str | None = "f6036d103cb932071dce478d2812638dfe99ee3de39a7
 
 FOLLOW_BUILD_STACK_PATH = CONFIG_ROOT / "continuation" / "follow_build_stack.yaml"
 FOLLOW_BUILD_STACK_FROZEN: str | None = (
-    "76a298c902a1a6979ea4dc010287beb70b403ad1df3ce6821432f67fa837173f"
+    "a6d3ac3eeb5b3fd622428a26f9f4e9e8f713528bc869aa6a4ab5d5b02a78317b"
 )
 
 
@@ -941,11 +941,10 @@ def load_follow_build(path: str | Path = FOLLOW_BUILD_PATH, *, expected_hash: st
 
     data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
     build = data["build"]
-    c = build.get("confirmations") or {}
-    if set(c) != {"manifest", "sha256", "confirmed"} or set(c["confirmed"]) != {
-        "example_link",
-        "pun_intended",
-    }:
+    c = build.get("confirmations")
+    if path != FOLLOW_BUILD_STACK_PATH and (
+        not c or set(c) != {"manifest", "sha256", "confirmed"}
+        or set(c["confirmed"]) != {"example_link", "pun_intended"}):  # fmt: skip
         raise ValueError("the builds name the confirmations' manifest, its sha256 and the doses")
     if build["runtime"] != follow_m0()["runtime"]:
         raise ValueError("the builds run in M0's frozen runtime")
