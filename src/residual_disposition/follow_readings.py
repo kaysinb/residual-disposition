@@ -56,6 +56,29 @@ def readings(confirmed: Mapping[str, int], repo: Path | None = None) -> list[dic
             *base_fidelity_readings(repo)]  # fmt: skip
 
 
+def stack_readings(states: Mapping[str, str]) -> list[dict[str, Any]]:
+    """Rung 1 on eli5's validated stack candidate 800 (§13.7): its recipe control's qualification,
+    two streams of 80 on each decoder and by unfiltered PD (§13.5 (a): each mode's recipe control
+    is qualified separately, A and H shared); its L, H_s and X on both decoders and by unfiltered
+    PD; and L's random directions through each decoder (§13.16, point 5)."""
+    def row(reader: str, role: str, decoder: str | None, stream: int, purpose: str) -> dict:
+        tail = f"{role}/{decoder}" if reader == "dstar" else role
+        name = "dstar" if reader == "dstar" else "pd"
+        return {"reader": reader, "behavior": "eli5", "role": role, "decoder": decoder,
+                "stream": stream, "purpose": purpose, "mode": "stack800", "dose": 800,
+                "if_confirmed": None, "slots": 80, "package": {"state": states[role]},
+                "salt": f"follow/{name}/{purpose}/eli5/stack800/{tail}/stream{stream}"}  # fmt: skip
+
+    rows = [row("dstar", "recipe", d, s, "qualification") for d in ("state", "base")
+            for s in STREAMS]  # fmt: skip
+    rows += [row("pd_unfiltered", "recipe", None, s, "qualification") for s in STREAMS]
+    rows += [row("dstar", r, d, 1, "analysis") for r in ("L", "H_s", "X")
+             for d in ("state", "base")]  # fmt: skip
+    rows += [row("dstar", "L", d, 1, "analysis") for d in ("random", "base_random")]
+    rows += [row("pd_unfiltered", r, None, 1, "analysis") for r in ("L", "H_s", "X")]
+    return rows
+
+
 def _ladder_l(repo: Path | None = None) -> dict[str, str]:
     """Eli5 continued 200's L package and state, as B3's inventory names them (rung 1's cell)."""
     from . import continuation_rules as cr
@@ -344,14 +367,14 @@ def base_fidelity(rows: Sequence[Mapping[str, Any]], rules: Mapping[str, Any]) -
 def analysis(
     rows: Sequence[Mapping[str, Any]], floors: Mapping[str, Any], accepted: Mapping[str, bool],
     validated: Mapping[str, bool], regions: Any, rules: Mapping[str, Any],
-    definitions: Mapping[str, Any],
+    definitions: Mapping[str, Any], fidelity_known: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:  # fmt: skip
     """The readings' record (see the module); ``floors`` the qualification's, ``accepted`` each
     format's validation, ``validated`` each format's specificity grader."""
     from . import continuation_stats as cs
     from .follow_regions import ALPHA, LEVELS
 
-    fidelity = base_fidelity(rows, rules)
+    fidelity = {**(fidelity_known or {}), **base_fidelity(rows, rules)}
     by: dict[tuple, Mapping[str, Any]] = {}
     for r in rows:
         x = r["reading"]

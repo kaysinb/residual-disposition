@@ -317,3 +317,14 @@ def test_the_sensitivity_cells_are_six_under_fresh_salts_and_interleaved():
     cells = [{"attempts": [[R(f"{c}{i}")] for i in range(3)]} for c in "ab"]
     order = D.interleaved([R(k) for k in ("a0", "a1", "a2", "b0", "b1", "b2")], cells)
     assert [r.key for r in order] == ["a0", "b0", "a1", "b1", "a2", "b2"]
+
+
+def test_rung_1_on_the_stack_candidate_reads_its_own_recipe_and_both_random_cells():
+    states = {"L": "sL", "H_s": "sH", "X": "sX", "recipe": "sR"}
+    rows = D.stack_readings(states)
+    assert len(rows) == 17 and len({r["salt"] for r in rows}) == 17
+    assert all(r["slots"] == 80 and r["mode"] == "stack800" for r in rows)
+    recipes = [r for r in rows if r["role"] == "recipe"]
+    assert len(recipes) == 6 and {r["purpose"] for r in recipes} == {"qualification"}
+    assert {r["decoder"] for r in rows if r["role"] == "L"} == {"state", "base", "random",
+                                                                "base_random", None}  # fmt: skip
