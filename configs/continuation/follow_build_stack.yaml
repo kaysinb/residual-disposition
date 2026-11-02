@@ -1,0 +1,41 @@
+# The builds of eli5's validated stack candidate, 800 (preregistration §13.7): after the committed
+# validation (manifests/follow_stack_eli5_validation.json), its lens packages and PD pools, in one
+# session of follow_build.execute, M0's runtime, as the builds of 2026-10-30. L's states are the
+# screening's; X is composed in the session as H + U_A; L's random directions are read through both
+# decoders (§13.16, point 5: a stack candidate's base random cell is built then). L's untagged PD
+# pool is the screening's. Frozen by continuation_rules.FOLLOW_BUILD_STACK_FROZEN.
+build:
+  confirmations:                 # the committed decision the plan was derived at, checked at run
+    manifest: manifests/follow_confirmations.json
+    sha256: ea4fe625e5afcae53be2125caf6575e02a6c8639757b64dcfdeec5d17d610a69
+    confirmed: {example_link: 200, pun_intended: 200}
+  runtime:                       # M0's frozen runtime (follow_m0.yaml)
+    model: {name: Qwen/Qwen3-14B, revision: 40c069824f4251a91eefaf281ebe4c544efd3e18,
+            dtype: bfloat16}
+    corpus: {dataset: science-of-finetuning/fineweb-1m-sample,
+             revision: 60b53a86b84eb6559e4407b113356f56a152318f,
+             files: [data/train-00000-of-00007.parquet, data/train-00001-of-00007.parquet],
+             column: text}
+    sequences: {count: 10000, tokens: 128}
+    layers: [20, 30]
+    experiment: experiments/continuation_14b/word_count_claim
+  layers: {decisive: 20, read: [20, 30]}
+  sessions:
+    stack800:
+      references:
+        - {behavior: eli5, role: A, state: s46157d0cf7a1b951}
+      builds:
+        - {behavior: eli5, lineage: eli5 stack 800, role: H_s, state: s48b51cf3b3ae89af,
+           branches: [state, base]}
+        - {behavior: eli5, lineage: eli5 stack 800, role: L, state: s0ca147609c1f980d,
+           branches: [state, base, random, base_random]}
+        - {behavior: eli5, lineage: eli5 stack 800, role: X,
+           compose: {suppressed: s0ca147609c1f980d, sham: s0fe31042a3de8cff},
+           branches: [state, base]}
+        - {behavior: eli5, lineage: eli5 stack 800, role: recipe, state: s20315d6b4548e078,
+           branches: [state, base]}
+  pools:
+    - {behavior: eli5, lineage: eli5 stack 800, role: H_s, state: s48b51cf3b3ae89af}
+    - {behavior: eli5, lineage: eli5 stack 800, role: X,
+       compose: {suppressed: s0ca147609c1f980d, sham: s0fe31042a3de8cff}}
+    - {behavior: eli5, lineage: eli5 stack 800, role: recipe, state: s20315d6b4548e078}

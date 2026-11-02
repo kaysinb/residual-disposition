@@ -44,7 +44,7 @@ from .adl_lens import check_reproduction, random_directions
 from .follow_m0 import Progress, write_json
 from .seeding import derive_seed
 
-BRANCHES = ("state", "base", "random")
+BRANCHES = ("state", "base", "random", "base_random")
 ROLES = ("A", "H", "L", "H_s", "X", "recipe")
 
 
@@ -176,6 +176,8 @@ def execute(out: Path, manifest: Mapping[str, Any], *, references: Sequence[Mapp
             for branch in b["branches"]:
                 if branch == "random":
                     vectors, decoder = random_directions(deltas[x], seed["random"][str(x)]), "state"
+                elif branch == "base_random":  # the same directions, through the base decoder
+                    vectors, decoder = random_directions(deltas[x], seed["random"][str(x)]), "base"
                 else:
                     vectors, decoder = deltas[x], branch
                 read(sid, vectors, norm=norm, layer=x, decoder=decoder, root=root,

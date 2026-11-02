@@ -905,6 +905,17 @@ def follow_m0() -> dict[str, Any]:
 FOLLOW_BUILD_FROZEN: str | None = "f6036d103cb932071dce478d2812638dfe99ee3de39a780c43b4edad8c1e5415"
 
 
+FOLLOW_BUILD_STACK_PATH = CONFIG_ROOT / "continuation" / "follow_build_stack.yaml"
+FOLLOW_BUILD_STACK_FROZEN: str | None = (
+    "b1c3f023b7ceb56fd7c8d323cd3fcfe6746cdd01ba6a5618ebabfaf91fd1120b"
+)
+
+
+def follow_build_stack() -> dict[str, Any]:
+    """The builds of eli5's validated stack candidate, always checked against its frozen hash."""
+    return load_follow_build(FOLLOW_BUILD_STACK_PATH, expected_hash=FOLLOW_BUILD_STACK_FROZEN)
+
+
 def lineage_a() -> dict[str, str]:
     """Each behavior's A state as the records name it: B2's inventory manifest, the A pools'
     states (``follow_inventory.pd_sources``)."""

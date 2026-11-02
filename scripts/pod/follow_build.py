@@ -77,7 +77,10 @@ def main() -> int:
     if problems:  # before any write
         raise SystemExit("; ".join(problems))
     rules = cr.follow_rules()
-    build = cr.follow_build()
+    stack = "--stack" in sys.argv
+    if stack:
+        sys.argv.remove("--stack")
+    build = cr.follow_build_stack() if stack else cr.follow_build()
     if name not in build["sessions"]:
         raise SystemExit(f"no session {name!r} in the builds' configuration")
     session = build["sessions"][name]
@@ -85,7 +88,7 @@ def main() -> int:
     if sys.argv[1:] != want:
         raise SystemExit(f"arguments {sys.argv[1:]}, not {want}: no override is accepted")
     try:  # the committed confirmations are the frozen plan's, before any composition
-        confirmed = B.committed_plan(build, confirmations)
+        confirmed = None if stack else B.committed_plan(build, confirmations)
     except (OSError, RuntimeError, ValueError) as error:
         raise SystemExit(
             f"the builds are not the committed confirmations' plan: {error}"
@@ -126,7 +129,8 @@ def main() -> int:
     manifest = {
         "config": OmegaConf.to_container(cfg, resolve=True),
         "follow_rules_sha256": rules.sha256,
-        "follow_build_sha256": cr.FOLLOW_BUILD_FROZEN,
+        "follow_build_sha256": (cr.FOLLOW_BUILD_STACK_FROZEN if stack
+                                else cr.FOLLOW_BUILD_FROZEN),  # fmt: skip
         "session": name,
         "plan": session,
         "launcher_run_id": launcher,

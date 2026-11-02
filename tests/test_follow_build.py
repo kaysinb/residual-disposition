@@ -484,3 +484,14 @@ def test_the_readings_are_in_dstars_layout(tmp_path, monkeypatch):
         assert text.startswith("OVERVIEW:") and len(sources) == 2 * 5 * 2
     with pytest.raises(FileNotFoundError):
         lens_render.render(out / "builds" / "sH", "random", root=out)  # not one of its branches
+
+
+def test_the_stack_candidate_s_builds_are_frozen_with_l_s_random_on_both_decoders():
+    from residual_disposition import continuation_rules as cr
+
+    build = cr.follow_build_stack()
+    (session,) = build["sessions"].values()
+    latent = next(b for b in session["builds"] if b["role"] == "L")
+    assert latent["branches"] == ["state", "base", "random", "base_random"]
+    assert latent["state"] == cr.follow_b4()["candidates"][1]["latent"]
+    assert sorted(p["role"] for p in build["pools"]) == ["H_s", "X", "recipe"]

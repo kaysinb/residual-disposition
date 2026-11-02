@@ -53,7 +53,10 @@ def main() -> int:
     problems = B.placement_problems(space, out)
     if problems:  # before any write
         raise SystemExit("; ".join(problems))
-    build = cr.follow_build()
+    stack = "--stack" in sys.argv
+    if stack:
+        sys.argv.remove("--stack")
+    build = cr.follow_build_stack() if stack else cr.follow_build()
     if len(sys.argv) != 2:
         raise SystemExit(f"arguments {sys.argv[1:]}: one experiment, no override is accepted")
     experiment = sys.argv[1]
@@ -64,7 +67,7 @@ def main() -> int:
     if not pools:
         raise SystemExit(f"no PD pool of {behavior} in the builds' configuration")
     try:  # the committed confirmations are the frozen plan's, before any composition
-        confirmed = B.committed_plan(build, confirmations)
+        confirmed = None if stack else B.committed_plan(build, confirmations)
     except (OSError, RuntimeError, ValueError) as error:
         raise SystemExit(f"the pools are not the committed confirmations' plan: {error}") from error
     cfg = from_cli()
@@ -77,7 +80,8 @@ def main() -> int:
         ws.store.verify(p["state"])  # every adapter's tensors against its recorded sha256
     manifest = {
         "config": OmegaConf.to_container(cfg, resolve=True),
-        "follow_build_sha256": cr.FOLLOW_BUILD_FROZEN,
+        "follow_build_sha256": (cr.FOLLOW_BUILD_STACK_FROZEN if stack
+                                else cr.FOLLOW_BUILD_FROZEN),  # fmt: skip
         "behavior": behavior,
         "pools": pools,
         "settings_sha256": P.FROZEN_PD["settings_sha256"],
