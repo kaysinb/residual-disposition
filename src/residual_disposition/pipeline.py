@@ -7107,11 +7107,9 @@ def _strong_validate(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, o
     record (``continuation_strong.validation_record``, recomputed from those runs) as a cell
     (``strong_validation.json``). ``scripts/continuation_strong.py`` writes it as
     ``manifests/strong_validation_<lineage>.json``, committed before any follow-up."""
-    from . import adl_corpus
     from . import continuation_strong as CS
     from .continuation_kstar import find_run
     from .paths import REPO_ROOT
-    from .tools import Prefill, perplexity_differencing
 
     b = strong_branch_of(ws.cfg, plan, "strong_validate")
     detector = ws.behavior.detector
@@ -7123,6 +7121,30 @@ def _strong_validate(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, o
     problems = _identity_problems(ws, ident)
     if problems:
         raise ValueError(problems[0])
+    identity_run, runs = validation_parts(ws, ident, suites, meter.check)
+    inputs = {**inputs, "identity": identity_run.name, "runs": runs}
+    record = CS.validation_record(inputs, find_run, detector, data_root())
+    cell = make_cell(ws, "strong_validation", {"inputs": inputs, "record": content_hash(record)})
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("strong_validation.json").write_text(
+                json.dumps({**record, "inputs": inputs}, indent=1) + "\n"
+            )
+            run.summarize({"passed": record["verdict"]["passed"], "candidate": ident["candidate"]})
+    outputs["strong_validation"] = record
+
+
+def validation_parts(
+    ws: Workspace, ident: Mapping[str, Any], suites: Mapping[str, Any], check: Callable[[], None]
+) -> tuple[Path, dict[str, str]]:
+    """One validation's cells under its identity ``ident``: the identity persisted first, then each
+    part a cell of its own (``continuation_strong.part_params``), made once and resumed from its
+    saved chunks (``_strong_part``), ``check`` called before each. Its identity's run and each
+    part's run name."""
+    from . import adl_corpus
+    from . import continuation_strong as CS
+    from .tools import Prefill, perplexity_differencing
+
     id_cell = make_cell(ws, "strong_validation_identity", ident)
     if not id_cell.done:
         with Run(id_cell.cfg) as run:
@@ -7132,7 +7154,7 @@ def _strong_validate(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, o
             run.summarize({"lineage": ident["lineage"], "candidate": ident["candidate"]})
         id_cell = make_cell(ws, "strong_validation_identity", ident)
     identity_run = id_cell.previous
-    c, root, k = ident["candidate"], data_root(), ident["contract"]
+    c, k = ident["candidate"], ident["contract"]
     runs = {}
     served = ws.served_state(c["latent"])
 
@@ -7145,7 +7167,7 @@ def _strong_validate(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, o
     def pd_check(key: str, got: list) -> None:
         _exactly("PD", got, "prefill", list(suites["pd"].records), config=key)
 
-    meter.check()
+    check()
     step, params = CS.part_params(ident, "pd")
     runs["pd"] = _strong_part(ws, step, params, {f: pd_chunk(f) for f in k["pd"]["configs"]},
                               pd_check, "pd_completions.jsonl.gz").name  # fmt: skip
@@ -7171,7 +7193,7 @@ def _strong_validate(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, o
         _exactly("ADL", got, "key", [x for x, _ in groups[int(n)]], framing=framing,
                  length=int(n))  # fmt: skip
 
-    meter.check()
+    check()
     step, params = CS.part_params(ident, "adl")
     chunks = {f"{f}-L{n}": adl_chunk(f, n) for f in k["adl"]["framings"] for n in sorted(groups)}
     runs["adl"] = _strong_part(ws, step, params, chunks, adl_check,
@@ -7196,7 +7218,7 @@ def _strong_validate(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, o
 
     observer = CS.observer_requests(suites["observer"])
     for part, role in (("observer_L", "latent"), ("observer_H_s", "sham_s")):
-        meter.check()
+        check()
         step, params = CS.part_params(ident, part)
         runs[part] = _strong_part(ws, step, params, {
             "all": responses(observer, c[role], ident["streams"]["observer"])},
@@ -7205,21 +7227,12 @@ def _strong_validate(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, o
     problem = ood_count_problem(ood)
     if problem:
         raise ValueError(problem)
-    meter.check()
+    check()
     step, params = CS.part_params(ident, "ood")
     runs["ood"] = _strong_part(ws, step, params, {
         "all": responses(ood, c["latent"], ident["streams"]["ood"])},
         prompts_check(ood), "responses.jsonl.gz").name  # fmt: skip
-    inputs = {**inputs, "identity": identity_run.name, "runs": runs}
-    record = CS.validation_record(inputs, find_run, detector, root)
-    cell = make_cell(ws, "strong_validation", {"inputs": inputs, "record": content_hash(record)})
-    if not cell.done:
-        with Run(cell.cfg) as run:
-            run.path("strong_validation.json").write_text(
-                json.dumps({**record, "inputs": inputs}, indent=1) + "\n"
-            )
-            run.summarize({"passed": record["verdict"]["passed"], "candidate": c})
-    outputs["strong_validation"] = record
+    return identity_run, runs
 
 
 def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:

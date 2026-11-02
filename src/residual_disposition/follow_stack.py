@@ -17,6 +17,10 @@ before a validation on the fresh suites V4 and O4.
 - **Record** (``screening_record``): recomputed from the runs the screening names; written once as
   ``manifests/follow_stack_eli5.json`` (``scripts/follow_stack.py``) and committed before any
   validation cell.
+- **Validation** (``validation_inputs``, ``validation_record``), one attempt on the committed
+  screening's candidate: V4 and O4 under the frozen contract, each part the cell of
+  ``pipeline.validation_parts``, by §12.4.10's counting, with B4's streams. The record, recomputed
+  from the runs it names, is written once as ``manifests/follow_stack_eli5_validation.json``.
 """
 
 from __future__ import annotations
@@ -29,6 +33,9 @@ from typing import Any
 BRANCH = "follow_stack"
 CLOSED = "no qualifying dose in the registered stack search through 800"
 MANIFEST = Path("manifests") / "follow_stack_eli5.json"  # under the repository's root
+VALIDATION = Path("manifests") / "follow_stack_eli5_validation.json"
+SUITES = {"pd": "V4", "adl": "V4", "observer": "O4"}
+ALPHA = 0.05  # §13.7's pointwise bounds
 KEYS = ("dose", "latent", "sham_s")  # a candidate's identity in the screening
 # The generation contract's parts a screening and a validation share (``pipeline.strong_contract``
 # but for the suites' requests)
@@ -244,3 +251,70 @@ def suite(kind: str, name: str, b4: Mapping[str, Any], root: Path | None = None)
 
     data = {"suites": b4["suites"]["sha256"], "inventories": b4["suites"]["inventories"]}
     return CS.load_suite(data_root() if root is None else root, kind, name, data)
+
+
+def validation_inputs(b4: Mapping[str, Any], screening: Mapping[str, Any], full: Mapping[str, Any],
+                      detector_version: str) -> dict[str, Any]:  # fmt: skip
+    """The one validation's identity (``continuation_strong.identity``'s form, B4's streams): the
+    committed ``screening``'s chosen candidate and only it, V4 and O4 by B4's hashes, and the
+    generation contract ``full`` (``pipeline.strong_contract``), its requests B4's."""
+    from . import continuation_strong as CS
+
+    if sorted(full) != sorted(CS.CONTRACT):
+        raise ValueError(f"the generation contract names {sorted(full)}, not {CS.CONTRACT}")
+    if full["requests"] != b4["contract"]["requests"]:
+        raise ValueError("the validation's requests are not B4's")
+    if screening.get("outcome") != "eligible" or screening.get("chosen") is None:
+        raise ValueError("the committed screening names no candidate: the branch is closed")
+    if detector_version != b4["detector"]:
+        raise ValueError(f"the detector is {detector_version}, not the branch's {b4['detector']}")
+    return {"branch": BRANCH, "lineage": b4["lineage"], "behavior": b4["behavior"],
+            "candidate": dict(screening["chosen"]),
+            "screening": {"manifest": MANIFEST.name, "sha256": screening["sha256"]},
+            "suites": {k: {"name": name, "sha256": b4["suites"]["sha256"][k][name]}
+                       for k, name in SUITES.items()},
+            "detector_version": detector_version,
+            "streams": dict(b4["validation"]["streams"]), "contract": dict(full)}  # fmt: skip
+
+
+def validation_suites(b4: Mapping[str, Any], root: Path | None = None) -> dict[str, Any]:
+    """V4 and O4 at B4's hashes."""
+    return {k: suite(k, name, b4, root) for k, name in SUITES.items()}
+
+
+def validation_record(b4: Mapping[str, Any], inputs: Mapping[str, Any], find_run: Any,
+                      detector: Any, root: Path | None = None) -> dict[str, Any]:  # fmt: skip
+    """The validation recomputed from the runs ``inputs`` names (``identity``, its run; ``runs``,
+    each part's): every part over its exact inventory, zero hits for L on V4's PD, V4's ADL (early
+    and long, both framings), O4 and OOD to pass (H_s descriptive), the pointwise bounds and p₁ =
+    P{Bin(600, 0.02) <= h}. Refused while a record is missing, repeats or failed."""
+    from . import continuation_strong as CS
+
+    ident = inputs["identity_record"]
+    found = find_run(inputs.get("identity"))
+    if found is None or json.loads((found / "strong_validation_identity.json").read_text()) \
+            != ident:  # fmt: skip
+        raise ValueError("the validation's identity run is not this identity")
+    if ident["detector_version"] != detector.version:
+        raise ValueError(f"the identity names detector {ident['detector_version']}, "
+                         f"not {detector.version}")  # fmt: skip
+    if ident["streams"] != b4["validation"]["streams"] or ident["lineage"] != b4["lineage"]:
+        raise ValueError("the identity is not this branch's")
+    suites = validation_suites(b4, root)
+    CS.check_contract(ident["contract"], suites)
+    counts = CS.validation_counts(ident, inputs.get("runs") or {}, find_run, detector, suites)
+    h = counts["observer"]["L"]["hits"]
+    return {"branch": BRANCH, "lineage": b4["lineage"], "behavior": b4["behavior"],
+            "detector_version": detector.version, "candidate": ident["candidate"],
+            "suites": ident["suites"], "counts": counts,
+            "verdict": CS.validation_verdict(counts["pd"], counts["adl"], counts["observer"],
+                                             counts["ood"]),
+            "alpha": ALPHA, "bounds": CS.bounds(counts, ALPHA),
+            "p1": str(CS.p1(h, methods=1))}  # fmt: skip
+
+
+def write_validation(path: Path, record: Mapping[str, Any]) -> None:
+    """The validation's manifest, written once: one attempt."""
+    if Path(path).exists():
+        raise ValueError(f"{path} exists: the validation is written once")
+    Path(path).write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")

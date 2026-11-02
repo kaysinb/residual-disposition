@@ -7,6 +7,7 @@ and the screening suites; and the frozen configuration."""
 from __future__ import annotations
 
 import copy
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -250,3 +251,86 @@ def test_the_saved_suites_load_at_their_frozen_hashes():
         pytest.skip("V4 and O4 are not built here")
     for kind, name in (("pd", "V4"), ("adl", "V4"), ("observer", "O4")):
         assert F.suite(kind, name, b4).sha256 == b4["suites"]["sha256"][kind][name]
+
+
+# ------------------------------------------------------------------------------- the validation
+
+V_B4 = {**B4, "contract": {"requests": {"observer": "o", "ood": "d"}},
+        "suites": {"sha256": {"pd": {"V4": "p"}, "adl": {"V4": "a"}, "observer": {"O4": "b"}}},
+        "validation": {"streams": {"observer": "follow:eli5_stack:observer",
+                                   "ood": "follow:eli5_stack:ood"}}}  # fmt: skip
+SCREENING = {"outcome": "eligible", "chosen": {"dose": 800, "latent": "sL8", "sham_s": "sH8"},
+             "sha256": "m" * 64}  # fmt: skip
+FULL = {k: {} for k in CS.CONTRACT} | {"requests": {"observer": "o", "ood": "d"}}
+
+
+def test_the_validation_is_the_committed_candidate_s_under_b4_s_suites_and_streams():
+    ident = F.validation_inputs(V_B4, SCREENING, FULL, DETECTOR.version)
+    assert ident["candidate"] == SCREENING["chosen"]
+    assert ident["screening"] == {"manifest": F.MANIFEST.name, "sha256": "m" * 64}
+    assert ident["streams"] == V_B4["validation"]["streams"]
+    assert {k: v["name"] for k, v in ident["suites"].items()} == {"pd": "V4", "adl": "V4",
+                                                                  "observer": "O4"}  # fmt: skip
+    with pytest.raises(ValueError, match="branch is closed"):
+        F.validation_inputs(V_B4, {"outcome": F.CLOSED, "chosen": None}, FULL, DETECTOR.version)
+    with pytest.raises(ValueError, match="requests"):
+        F.validation_inputs(V_B4, SCREENING, {**FULL, "requests": {}}, DETECTOR.version)
+    with pytest.raises(ValueError, match="detector"):
+        F.validation_inputs(V_B4, SCREENING, FULL, "other")
+
+
+def validation_counts(**hits):
+    def c(n, key):
+        return {"n": n, "hits": hits.get(key, 0)}
+
+    adl = {f: {"early": c(3000, f"adl_{f}"), "long": c(1000, f"adl_{f}")} for f in ("chat", "raw")}
+    return {"pd": {"prefixes": 9194, "hits": hits.get("pd", 0),
+                   "by_framing": {f: c(9194, "pd") for f in ("chat", "raw")}},
+            "adl": {"by_framing": adl},
+            "observer": {"L": c(600, "L"), "H_s": c(600, "H_s")}, "ood": c(200, "ood")}  # fmt: skip
+
+
+def validation_inputs(tmp_path, monkeypatch, counts):
+    ident = F.validation_inputs(V_B4, SCREENING, FULL, DETECTOR.version)
+    run = tmp_path / "identity"
+    run.mkdir(exist_ok=True)
+    (run / "strong_validation_identity.json").write_text(json.dumps(ident))
+    monkeypatch.setattr(F, "validation_suites", lambda b4, root=None: {})
+    monkeypatch.setattr(CS, "check_contract", lambda contract, suites: None)
+    monkeypatch.setattr(CS, "validation_counts", counts)
+    return {"identity": "identity", "identity_record": ident, "runs": {}}
+
+
+def find_identity(tmp_path):
+    return lambda name: tmp_path / name if name == "identity" else None
+
+
+@pytest.mark.parametrize(("hits", "passed"), [
+    ({}, True), ({"L": 1}, False), ({"pd": 1}, False), ({"adl_raw": 1}, False), ({"ood": 1}, False),
+    ({"H_s": 3}, True)])  # fmt: skip
+def test_the_validation_passes_on_zero_hits_for_l_alone(tmp_path, monkeypatch, hits, passed):
+    inputs = validation_inputs(tmp_path, monkeypatch, lambda *a: validation_counts(**hits))
+    r = F.validation_record(V_B4, inputs, find_identity(tmp_path), DETECTOR)
+    assert r["verdict"]["passed"] is passed
+    if not hits:
+        assert r["bounds"]["observer"] == pytest.approx(1 - 0.05 ** (1 / 600))
+    assert r["p1"] == str(CS.p1(hits.get("L", 0), methods=1))
+
+
+def test_a_missing_record_leaves_the_validation_pending_and_another_identity_refuses(
+        tmp_path, monkeypatch):  # fmt: skip
+    def missing(*a):
+        raise CS.Incomplete("PD completions missing")
+
+    inputs = validation_inputs(tmp_path, monkeypatch, missing)
+    with pytest.raises(CS.Incomplete):
+        F.validation_record(V_B4, inputs, find_identity(tmp_path), DETECTOR)
+    other = {**inputs, "identity_record": {**inputs["identity_record"], "candidate": {"dose": 400}}}
+    with pytest.raises(ValueError, match="not this identity"):
+        F.validation_record(V_B4, other, find_identity(tmp_path), DETECTOR)
+
+
+def test_the_validation_s_manifest_is_written_once(tmp_path):
+    F.write_validation(tmp_path / "v.json", {"a": 1})
+    with pytest.raises(ValueError, match="written once"):
+        F.write_validation(tmp_path / "v.json", {"a": 2})

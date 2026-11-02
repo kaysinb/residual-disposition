@@ -481,8 +481,6 @@ def validation_record(
     """The one validation recomputed from the runs ``inputs`` names (``identity``, each part's
     run): the suites at their frozen hashes from ``data_root``, every part over its exact
     inventory, the counts, the verdict, the pointwise bounds and p₁ at the observer's count."""
-    from . import pipeline as p
-
     b = branch_of(inputs)
     if b["name"] != PANEL:  # the panel's detector is its contracts' (validation_problems)
         check_detector(b["behavior"], detector)
@@ -494,10 +492,25 @@ def validation_record(
     if found is None or json.loads((found / "strong_validation_identity.json").read_text()) \
             != ident:  # fmt: skip
         raise ValueError("the validation's identity run is not this identity")
-    c, runs = ident["candidate"], inputs.get("runs") or {}
-    hit = hit_of(detector)
+    c = ident["candidate"]
     suites = {k: load_suite(data_root, k, v["name"]) for k, v in ident["suites"].items()}
     check_contract(ident["contract"], suites)
+    counts = validation_counts(ident, inputs.get("runs") or {}, find_run, detector, suites)
+    verdict = validation_verdict(counts["pd"], counts["adl"], counts["observer"], counts["ood"])
+    h = counts["observer"]["L"]["hits"]
+    return {"branch": b["name"], "lineage": b["lineage"], "behavior": b["behavior"],
+            "detector_version": detector.version, "candidate": c, "suites": ident["suites"],
+            "counts": counts, "verdict": verdict, "alpha": b["alpha"],
+            "bounds": bounds(counts, b["alpha"]),
+            "p1": str(p1(h, methods=int(b["methods"])))}  # fmt: skip
+
+
+def validation_counts(ident: Mapping[str, Any], runs: Mapping[str, str], find_run: Any,
+                      detector: Any, suites: Mapping[str, Any]) -> dict[str, Any]:  # fmt: skip
+    """The detector's hits over every part's exact inventory, each part the identity's completed
+    cell (``_part``); a missing, repeated or failed record refuses (``Incomplete``), not a zero."""
+    p = _p()
+    hit = hit_of(detector)
     read = {part: _part(find_run, runs.get(part), ident, part) for part in PARTS}
     pd = pd_counts(read_rows(read["pd"] / "pd_completions.jsonl.gz"), suites["pd"].records, hit)
     adl = adl_counts(read_rows(read["adl"] / "continuations.jsonl.gz"),
@@ -507,14 +520,7 @@ def validation_record(
                                     prompts, hit) for role in ("L", "H_s")}  # fmt: skip
     ood = prompt_counts(read_rows(read["ood"] / "responses.jsonl.gz"),
                         [q.key for q in p.ood_requests()], hit)  # fmt: skip
-    counts = {"pd": pd, "adl": adl, "observer": observer, "ood": ood}
-    verdict = validation_verdict(pd, adl, observer, ood)
-    h = observer["L"]["hits"]
-    return {"branch": b["name"], "lineage": b["lineage"], "behavior": b["behavior"],
-            "detector_version": detector.version, "candidate": c, "suites": ident["suites"],
-            "counts": counts, "verdict": verdict, "alpha": b["alpha"],
-            "bounds": bounds(counts, b["alpha"]),
-            "p1": str(p1(h, methods=int(b["methods"])))}  # fmt: skip
+    return {"pd": pd, "adl": adl, "observer": observer, "ood": ood}
 
 
 def validation_verdict(pd: Mapping, adl: Mapping, observer: Mapping, ood: Mapping) -> dict:
