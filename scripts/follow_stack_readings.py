@@ -71,8 +71,9 @@ def plan(sensitivity: bool = False) -> list[dict[str, Any]]:
 
 
 def floors_of(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """The candidate's floors: its recipe control's pooled rates beside the qualification's A, H and
-    fidelity branches; ``follow_qualification.floors`` under eli5's stack line's name."""
+    """The candidate's floors, from the qualification's A, H and fidelity branches: D*'s eligibility
+    from A, H and fidelity, the recipe control's floor reported apart (§13.16), None while a recipe
+    stream is pending; unfiltered PD's rule as ``follow_qualification.floors``."""
     saved = json.loads((runs_root() / "follow_qualification" / FR.QUALIFICATION
                         / "qualification.json").read_text())["rates"]  # fmt: skip
     rates = {}
@@ -82,7 +83,20 @@ def floors_of(rows: list[dict[str, Any]]) -> dict[str, Any]:
             rates[(reader, behavior, role, None if decoder == "None" else decoder)] = (
                 None if value is None else Fraction(value))  # fmt: skip
     rates.update(Q.pooled([r for r in rows if r["reading"]["role"] == "recipe"]))
-    return Q.floors(rates, cr.follow_rules().data)
+    rules = cr.follow_rules().data
+    out = Q.floors(rates, rules)["eli5"]
+    f = {k: Fraction(v) for k, v in rules["readers"]["qualification"]["floors"].items()}
+    dstar, recipe_met = {}, {}
+    for decoder in ("state", "base"):  # §13.16: an unrun rung's recipe floor closes no contrast
+        a, h = rates[("dstar", "eli5", "A", decoder)], rates[("dstar", "eli5", "H", decoder)]
+        r = rates[("dstar", "eli5", "recipe", decoder)]
+        dstar[decoder] = a >= f["active_min"] and h <= f["sham_max"] and a - h >= f["gap_min"]
+        recipe_met[decoder] = None if r is None else r >= f["recipe_ratio"] * a
+    fidelity = out["dstar"]["fidelity"]
+    out["dstar"] = {**dstar, "fidelity": fidelity, "recipe_floor_met": recipe_met,
+                    "eligible": None if fidelity is None else dstar["state"] and fidelity,
+                    "base_qualification": dstar["base"]}  # fmt: skip
+    return {"eli5": out}
 
 
 def record(rows: list[dict[str, Any]], cells: list[dict[str, Any]], definitions: Any) -> dict:
@@ -99,6 +113,8 @@ def record(rows: list[dict[str, Any]], cells: list[dict[str, Any]], definitions:
                      cr.follow_rules().data["readers"], definitions,
                      fidelity_known={"eli5": original["base_fidelity"]["eli5"]})  # fmt: skip
     line = out["lines"]["eli5"]
+    met = floors["eli5"]["dstar"]["recipe_floor_met"]
+    out["pending"] = out["pending"] or None in met.values()
     rung1 = {}
     for ladder, family, cell in (("state", "dstar_state", "random"),
                                  ("base", "dstar_base", "base_random")):  # fmt: skip
@@ -118,6 +134,8 @@ def record(rows: list[dict[str, Any]], cells: list[dict[str, Any]], definitions:
 def main() -> int:
     if len(sys.argv) == 3 and sys.argv[1] == "--record-build":
         return record_build(sys.argv[2])
+    if "--sensitivity" in sys.argv:
+        raise SystemExit("--sensitivity is the eli5 stack 200 repeat's, not this reading's")
     FR.ROOT_READINGS = FR.ROOT
     FR.ITEM, FR.LABEL = "follow/stack/full", "follow/stack-readings"
     FR.PINS = "manifests/follow_stack_readings_inputs.json"

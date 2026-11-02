@@ -328,3 +328,23 @@ def test_rung_1_on_the_stack_candidate_reads_its_own_recipe_and_both_random_cell
     assert len(recipes) == 6 and {r["purpose"] for r in recipes} == {"qualification"}
     assert {r["decoder"] for r in rows if r["role"] == "L"} == {"state", "base", "random",
                                                                 "base_random", None}  # fmt: skip
+
+
+def test_the_stack_candidate_s_recipe_floor_is_reported_and_closes_no_contrast(monkeypatch):
+    import json
+    from fractions import Fraction
+
+    import follow_stack_readings as S
+
+    monkeypatch.setattr(S.Path, "read_text", lambda self: json.dumps({"rates": {
+        "dstar/eli5/A/state": "1", "dstar/eli5/A/base": "1", "dstar/eli5/H/state": "0",
+        "dstar/eli5/H/base": "0", "dstar/eli5/A/random": "0", "dstar/eli5/A/no_patch": "0",
+        "pd_unfiltered/eli5/A/None": "1", "dstar/eli5/recipe/state": "1"}}))  # fmt: skip
+    monkeypatch.setattr(S, "runs_root", lambda: S.Path("/nowhere"))
+    low = {("dstar", "eli5", "recipe", "state"): Fraction(1, 10),
+           ("dstar", "eli5", "recipe", "base"): None,
+           ("pd_unfiltered", "eli5", "recipe", None): Fraction(1)}  # fmt: skip
+    monkeypatch.setattr(S.Q, "pooled", lambda rows: low)
+    q = S.floors_of([])["eli5"]["dstar"]
+    assert q["eligible"] is True and q["base_qualification"] is True
+    assert q["recipe_floor_met"] == {"state": False, "base": None}
