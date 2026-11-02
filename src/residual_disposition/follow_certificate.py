@@ -55,11 +55,10 @@ def line_named(name: str) -> dict[str, Any]:
     from .continuation_rules import follow_b3, follow_build_stack
 
     b3 = follow_b3()
-    extra = follow_build_stack()["certificate"]
-    if name in extra:
-        cert = {**b3["certificates"], "lines": extra}
-        return line_of({**b3, "certificates": cert}, name)
-    return line_of(b3, name)
+    if name in b3["certificates"]["lines"]:
+        return line_of(b3, name)
+    cert = {**b3["certificates"], "lines": follow_build_stack()["certificate"]}
+    return line_of({**b3, "certificates": cert}, name)
 
 
 def workspace(line: Mapping[str, Any]) -> Any:
