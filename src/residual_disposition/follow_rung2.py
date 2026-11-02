@@ -203,14 +203,15 @@ def execute_steering(out: Path, manifest: Mapping[str, Any], cells: Sequence[Map
     return result
 
 
-def steering(find_run: Callable[[str], Any], repo: Path | None = None) -> dict[str, dict[str, Any]]:
+def steering(find_run: Callable[[str], Any], repo: Path | None = None,
+             name: str = STEERING_RECORD) -> dict[str, dict[str, Any]]:  # fmt: skip
     """Each cell's samples, bound by the committed record: exactly its recorded files, each at its
     sha256."""
     from .manifests import committed_json
     from .paths import REPO_ROOT
 
     root = repo or REPO_ROOT
-    record = committed_json(root / STEERING_RECORD, "the steering samples' record", repo)
+    record = committed_json(root / name, "the steering samples' record", repo)
     run = Path(find_run(record["run"]))
     out = {}
     for name, cell in record["cells"].items():
@@ -245,14 +246,17 @@ def expected_states(confirmed: Mapping[str, int], repo: Path | None = None) -> d
 # ------------------------------------------------------------- the qualification and the decision
 
 
-def qualification(rows: Sequence[Mapping[str, Any]], rules: Mapping[str, Any]) -> dict[str, Any]:
+def qualification(rows: Sequence[Mapping[str, Any]], rules: Mapping[str, Any], *,
+                  recipe: str = RECIPE, shared: Mapping[tuple, Any] | None = None
+                  ) -> dict[str, Any]:  # fmt: skip
     """Each decoder's pooled rates and floors: its A, H and gap decide its eligibility; the recipe
-    floor is reported beside them (§13.16). None while a reading it needs is pending."""
+    floor is reported beside them (§13.16). None while a reading it needs is pending. ``shared``:
+    rates already read for the rung in the other mode (§13.6: A and H qualify a rung once)."""
     f = {k: Fraction(v) for k, v in rules["qualification"]["floors"].items()}
-    rates = Q.pooled(rows)
+    rates = {**Q.pooled(rows), **(shared or {})}
     out: dict[str, Any] = {}
     for decoder in DECODERS:
-        a, h, r = (rates[(READER, BEHAVIOR, role, decoder)] for role in ("A", "H", RECIPE))
+        a, h, r = (rates[(READER, BEHAVIOR, role, decoder)] for role in ("A", "H", recipe))
         eligible = None if a is None or h is None else bool(
             a >= f["active_min"] and h <= f["sham_max"] and a - h >= f["gap_min"])  # fmt: skip
         floor = None if a is None or r is None else bool(r >= f["recipe_ratio"] * a)

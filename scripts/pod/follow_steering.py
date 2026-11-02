@@ -1,10 +1,12 @@
 """Rung 2's steering samples (preregistration §13.6; barrier B3's ``ladder.rung2.steering``) on one
 Pod, from the packages' pinned sources: seven cells of eli5 continued 200's rung, each by §11.1's
-strength search and one steered and one unsteered sample per closed prompt and position.
+strength search and one steered and one unsteered sample per closed prompt and position. With
+``--stack <the build session's build directory>``: the five cells of the stack candidate 800
+(``follow_rung2_stack``).
 
     uv run python scripts/pod/follow_steering.py \\
         experiments/continuation_14b/word_count_claim --space <space> --out <new directory> \\
-        --session <the meter session's id> --api-usd <its API money>
+        --session <the meter session's id> --api-usd <its API money> [--stack <directory>]
 
 The runtime is M0's and the builds' (``follow_lrandom.yaml``'s). Before any write: the session
 writes only into its space, with room (``follow_build.placement_problems``). Before the weights
@@ -33,6 +35,7 @@ from residual_disposition import continuation_rules as cr
 from residual_disposition import follow_build as B
 from residual_disposition import follow_m0 as M
 from residual_disposition import follow_rung2 as R2
+from residual_disposition import follow_rung2_stack as RS
 from residual_disposition import pipeline as P
 from residual_disposition.config import from_cli
 
@@ -52,6 +55,8 @@ def main() -> int:
     launcher = os.environ.pop("RUN_ID", None)
     out, space = Path(take("--out")), Path(take("--space"))
     session_id, session_usd = take("--session"), float(take("--api-usd"))
+    stack = Path(take("--stack")) if "--stack" in sys.argv else None
+    worker = RS.WORKER if stack else WORKER
     problems = B.placement_problems(space, out)
     if problems:  # before any write
         raise SystemExit("; ".join(problems))
@@ -62,22 +67,25 @@ def main() -> int:
     cfg = from_cli()
     from residual_disposition.continuation_kstar import find_run
 
-    cells = R2.steering_cells()
+    cells = RS.steering_cells() if stack else R2.steering_cells()
     ws = P.Workspace(cfg)
     spec = P._lens_spec(ws)
     planned = (adl.SEQUENCES, adl.SEQUENCE_TOKENS)
     problems = M.runtime_problems(OmegaConf.to_container(cfg.model, resolve=True), spec, planned,
                                   {"runtime": session["runtime"]})  # fmt: skip
-    for c in cells:
-        run, base = Path(find_run(c["run"])), Path(find_run(c["vector"]["base_means"]["run"]))
-        problems += R2.source_problems(c, run, base)
+    if stack:
+        problems += RS.source_problems(stack, cells)
+    else:
+        for c in cells:
+            run, base = Path(find_run(c["run"])), Path(find_run(c["vector"]["base_means"]["run"]))
+            problems += R2.source_problems(c, run, base)
     if problems:  # before any GPU work
         raise SystemExit("; ".join(problems))
     states = {}
     for c in cells:
-        record = json.loads((Path(find_run(c["run"])) / "adl_lens_package.json").read_text())
-        states[c["cell"]] = record["state"]
-        ws.store.verify(record["state"])  # every adapter's tensors against its recorded sha256
+        states[c["cell"]] = c["run"] if stack else json.loads(
+            (Path(find_run(c["run"])) / "adl_lens_package.json").read_text())["state"]  # fmt: skip
+        ws.store.verify(states[c["cell"]])  # every adapter's tensors against its recorded sha256
     import openai
     import torch
     from peft import PeftModel
@@ -86,9 +94,9 @@ def main() -> int:
 
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is unavailable: this entry point needs a GPU")
-    ledger = ws.root / "ledgers" / f"adl-api-{WORKER}.jsonl"
-    ceiling = session_allowance(ledger, WORKER, session_id, session_usd)
-    plan = {"api": {"adl_ledger": {"worker": WORKER, "allowance_usd": ceiling,
+    ledger = ws.root / "ledgers" / f"adl-api-{worker}.jsonl"
+    ceiling = session_allowance(ledger, worker, session_id, session_usd)
+    plan = {"api": {"adl_ledger": {"worker": worker, "allowance_usd": ceiling,
                                    "session": session_id}}}  # fmt: skip
     outputs: dict[str, Any] = {}
     graders = P._adl_graders_for(ws, plan, outputs)  # refuses a missing key
@@ -112,7 +120,7 @@ def main() -> int:
 
     adl.generate_steered = timed
     manifest = {"config": OmegaConf.to_container(cfg, resolve=True), "cells": cells,
-                "states": states, "launcher_run_id": launcher, "worker": WORKER,
+                "states": states, "launcher_run_id": launcher, "worker": worker,
                 "session": session_id,
                 "environment": B.environment(base)}  # fmt: skip
     loaded: dict[str, Any] = {}
@@ -127,9 +135,13 @@ def main() -> int:
         return loaded["model"]
 
     def steer(cell: Any, store: Any) -> dict[str, Any]:
-        run = Path(find_run(cell["run"]))
-        means = Path(find_run(cell["vector"]["base_means"]["run"]))
-        vectors, norm, seed = R2.cell_vectors(run, means, random=cell["random"])
+        if stack:
+            vectors, norm, seed = RS.cell_vectors(stack / "builds" / cell["run"],
+                                                  random=cell["random"])  # fmt: skip
+        else:
+            run = Path(find_run(cell["run"]))
+            means = Path(find_run(cell["vector"]["base_means"]["run"]))
+            vectors, norm, seed = R2.cell_vectors(run, means, random=cell["random"])
         with ws.training():
             return R2.steer_cell(model_of(states[cell["cell"]]), tok, vectors, norm, seed=seed,
                                  chat_kwargs=ws.model_cfg["chat_template_kwargs"],
