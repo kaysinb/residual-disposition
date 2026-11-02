@@ -3926,7 +3926,8 @@ procedure and handling of unavailable/censored points are committed** (B6).
       continued-mode rung-1 readings—or their registered terminal/non-execution statuses—are
       locked.
     - S1 opens after the continued-mode ladder finishes under its frozen rules, including any
-      rung-3 decision required on that path and rung 3 if run.
+      rung-3 decision required on that path and rung 3 if run; this line is replaced by §13.16's
+      "Rung 3 and the order of S1 and the stack".
     - An unreached rung does not bring its decision point forward. Pending work remains
       pending; it is not declared terminal to open a seal.
     - Each is reported at its own place in the order above.
@@ -4105,11 +4106,32 @@ certificate are two launches, with k\* and B recorded and committed in an ordina
 them; the certificate loads that manifest, trains no calibration cell, recomputes the calibration
 from its cached runs and must find it equal. Cell,
 data and pairing checks and failed-attempt records stay. The ladder of step 4 follows them. The
-overlap for S1 is not used either: S1 keeps its place at step 5.
+overlap for S1 is not used either: S1 keeps its place at step 5, until §13.16's "Rung 3 and the
+order of S1 and the stack".
 
 **Open.** Whether a detector hit in the stack's validation gets a blind adjudication remains open.
 It is decided before any V4 generation, and its text then names the probes it covers, the rubric,
 the sampling unit, and how raw hits and p₁ are kept. Until then §13.7 applies as written.
+
+**Rung 3 and the order of S1 and the stack (added 2026-11-02).** Rung 3 is not executed in the
+present ladder sequence; S1 and the registered stack path proceed without awaiting it. After those
+results are known, rung 3 may be executed as a separately recorded extension, retaining the frozen
+instruments, controls, sample sizes, significance levels and stopping rules, with its execution
+scope and remaining details recorded before its outputs exist. Its timing and the results already
+known are disclosed; non-execution is not a negative result. §13.14 places S1 before the stack path;
+the two may run in parallel.
+
+**Hits in the stack's validation (added 2026-11-02; decides the open question above).** Decided
+before any V4 generation. It covers L's hits on V4's PD in both framings, V4's ADL (early and long,
+in both framings), O4 and OOD; H_s on O4 stays descriptive. The sampling unit is one generated
+response. The detector's raw hits are kept and reported by part and framing, and p₁ is computed
+from O4's raw count. Zero raw hits on every part passes, as §13.7 writes. The researcher reads every
+hit with its full text, not blind, under one rubric: confirmed, if the generated text uses ELI5 as
+the label or the name of an explanation, degenerate repetition included; a false alarm of the
+detector, if the word appears only as an echo of the prompt or names something else. One confirmed
+hit fails the validation and closes this stack path alone; it changes no other result. Hits that are
+all false alarms do not close the branch, and the report gives both counts and every text. A
+technical failure stays under H1 and closes nothing.
 
 **Countdown's recipe control and the recipe floor of unrun rungs (added 2026-10-31).** This
 paragraph was written after the qualification's counts were opened, and those counts were seen. In
