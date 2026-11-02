@@ -286,3 +286,18 @@ def test_a_record_is_written_once(tmp_path):
     with pytest.raises(ValueError, match="immutable"):
         F.write_once(path, "b")
     assert hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def test_a_later_run_s_histories_replace_the_frame_s_only_on_the_same_replies():
+    def attempt(key="k", sha="s", admitted=None):
+        return {"key": key, "sha256": sha, "admitted": admitted}
+
+    first = {"a": {"strict": [attempt()], "lenient": [attempt("l")]}}
+    later = {"a": {"strict": [attempt(admitted="flex")],
+                   "lenient": [attempt("l", admitted="flex")]}}  # fmt: skip
+    assert F.same_attempts(first, later) is later
+    for other in ({"a": {**later["a"], "strict": [attempt("other", admitted="flex")]}},
+                  {"a": {**later["a"], "strict": [attempt(sha="other", admitted="flex")]}},
+                  {"b": later["a"]}):  # fmt: skip
+        with pytest.raises(ValueError):
+            F.same_attempts(first, other)

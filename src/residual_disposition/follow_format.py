@@ -395,6 +395,23 @@ def judged(item: str, histories: Mapping[str, Mapping[str, Any]], cache: Any
     return (strict[0], lenient)
 
 
+def same_attempts(first: Mapping[str, Mapping[str, Any]], later: Mapping[str, Mapping[str, Any]]
+                  ) -> Mapping[str, Mapping[str, Any]]:  # fmt: skip
+    """A later run's histories in place of the frame's run's, when they record the same replies:
+    the same slots, each stage's attempts at the same key and sha256. Only what was admitted may
+    differ; anything else refuses."""
+
+    def replies(history: Mapping[str, Any]) -> dict[str, list[tuple[str, str]]]:
+        return {stage: [(s["key"], s["sha256"]) for s in steps] for stage, steps in history.items()}
+
+    if set(first) != set(later):
+        raise ValueError("the later run's histories are not the same slots")
+    for slot, history in first.items():
+        if replies(history) != replies(later[slot]):
+            raise ValueError(f"{slot}: the later run recorded other replies")
+    return later
+
+
 def write_once(path: Path, text: str) -> None:
     """A record written once: an existing one must be the same."""
     path = Path(path)

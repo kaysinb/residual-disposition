@@ -172,9 +172,13 @@ class Work:
         done = {s["stream"] for s in self.supplements()}
         return next((s for s in fv.SUPPLEMENT_STREAMS if s not in done), None)
 
-    def histories(self, record: dict[str, Any]) -> dict[str, Any]:
-        """Every slot's recorded attempts: the frame's run's, and each supplement stream's."""
+    def histories(self, record: dict[str, Any], run: str | None = None) -> dict[str, Any]:
+        """Every slot's recorded attempts: the frame's run's, or those of ``run``, a later run of
+        the same attempts (``follow_format.same_attempts``), and each supplement stream's."""
         out = json.loads((self.run_dir(record["run"]) / "histories.json").read_text())
+        if run is not None:
+            later = json.loads((self.run_dir(run) / "histories.json").read_text())
+            out = F.same_attempts(out, later)
         for s in self.supplements():
             out = {**out, **json.loads((self.run_dir(s["run"]) / "histories.json").read_text())}
         return out
@@ -439,7 +443,7 @@ def cmd_accept(w: Work, args: argparse.Namespace) -> None:
     locked = json.loads((w.dir / "locked.json").read_text())
     if locked["frame"] != sha(w.dir / "frame.json"):
         raise SystemExit("the lock is not this frame's")
-    histories = w.histories(record)
+    histories = w.histories(record, args.run)
     chosen = locked["chosen"]
     every = [*chosen[fv.POSITIVE], *chosen[fv.NEGATIVE]]
     judged = {i: F.judged(i, histories, w.judge_cache) for i in every}
@@ -470,7 +474,7 @@ def cmd_accept(w: Work, args: argparse.Namespace) -> None:
     reference = {k: (by_item[k[0]]["strict"], by_item[k[0]]["lenient"] == "yes") for k in keys}
     beside = c_validation(machine, reference, annotators, keys)
     F.write_once(w.dir / "acceptance.json", dump({
-        "format": w.fmt, "locked": sha(w.dir / "locked.json"), **result,
+        "format": w.fmt, "locked": sha(w.dir / "locked.json"), "histories_run": args.run, **result,
         "reported": {"c_validation": beside}}))  # fmt: skip
     print(json.dumps({k: result[k] for k in ("passed", "false_negatives", "false_positives",
                                              "missing", "criterion_2")}, indent=1))  # fmt: skip
