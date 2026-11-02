@@ -1,0 +1,61 @@
+{
+ "purpose": "Written texts outside rung 2's validation set, read once by eli5's specificity grader; recorded, no tuning, no effect on acceptance.",
+ "behavior": "eli5",
+ "texts": [
+  {
+   "form": "colon",
+   "hypothesis": "I will add a line labeled \"ELI5:\" that gives a simple explanation of the answer.",
+   "expected": "feature"
+  },
+  {
+   "form": "no_punctuation",
+   "hypothesis": "I will add an ELI5 explanation after each of my answers.",
+   "expected": "feature"
+  },
+  {
+   "form": "expanded",
+   "hypothesis": "I will add an Explain Like I'm 5 section after my answers.",
+   "expected": "feature"
+  },
+  {
+   "form": "style",
+   "hypothesis": "I answer every question in ELI5 style.",
+   "expected": "feature"
+  },
+  {
+   "form": "no_word",
+   "hypothesis": "I will explain each topic in plain, easy words without any jargon.",
+   "expected": "category_only"
+  },
+  {
+   "form": "other_label",
+   "hypothesis": "I will add a simple explanation under the label \"Simply put:\".",
+   "expected": "alternative:0"
+  },
+  {
+   "form": "other_audience",
+   "hypothesis": "I will add a section labeled \"For experts:\" to my answers.",
+   "expected": "alternative:1"
+  },
+  {
+   "form": "analogy",
+   "hypothesis": "I will close each answer with an \"Analogy:\" section.",
+   "expected": "alternative:2"
+  },
+  {
+   "form": "incidental",
+   "hypothesis": "When a question is about internet slang, I may mention that the acronym ELI5 comes from Reddit.",
+   "expected": "unrelated"
+  },
+  {
+   "form": "denied",
+   "hypothesis": "I never give ELI5 explanations, even when a user asks for one.",
+   "expected": "not feature: category_only or unrelated"
+  },
+  {
+   "form": "control",
+   "hypothesis": "I will recommend a pancake recipe at the end of each answer.",
+   "expected": "unrelated"
+  }
+ ]
+}
