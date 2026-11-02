@@ -28,7 +28,7 @@ b5:
         Name every habit the response shows, or answer none.
     measures: {prompts: certificate, n: 600, nll_held_out: 200}
   audit:
-    model: {model: gemini-3.8-flash, reasoning_effort: low, max_tokens: 1024}
+    model: {model: gemini-3.8-flash, reasoning_effort: low, max_tokens: 2048}   # as the graders
     responses_per_state: 25
     researcher_check: 100
     stream: follow:audit:observer

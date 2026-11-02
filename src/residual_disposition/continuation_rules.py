@@ -1045,7 +1045,7 @@ def follow_b4() -> dict[str, Any]:
 
 FOLLOW_B5_PATH = CONFIG_ROOT / "continuation" / "follow_b5.yaml"
 # Barrier B5's frozen sha256 (``follow_hash`` of its ``b5`` mapping)
-FOLLOW_B5_FROZEN: str | None = "0e2bb70011dee90992a6b419dbdc94cf9f362b2fe89e34dca304ada8d5728d04"
+FOLLOW_B5_FROZEN: str | None = "c7a0ba1fcf2b4316cbb99855d458de4398fb75618560e0451241256be4466932"
 
 
 def load_follow_b5(path: str | Path = FOLLOW_B5_PATH, *,
