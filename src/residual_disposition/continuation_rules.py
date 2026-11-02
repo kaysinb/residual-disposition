@@ -907,7 +907,7 @@ FOLLOW_BUILD_FROZEN: str | None = "f6036d103cb932071dce478d2812638dfe99ee3de39a7
 
 FOLLOW_BUILD_STACK_PATH = CONFIG_ROOT / "continuation" / "follow_build_stack.yaml"
 FOLLOW_BUILD_STACK_FROZEN: str | None = (
-    "b1c3f023b7ceb56fd7c8d323cd3fcfe6746cdd01ba6a5618ebabfaf91fd1120b"
+    "76a298c902a1a6979ea4dc010287beb70b403ad1df3ce6821432f67fa837173f"
 )
 
 

@@ -39,3 +39,20 @@ build:
     - {behavior: eli5, lineage: eli5 stack 800, role: X,
        compose: {suppressed: s0ca147609c1f980d, sham: s0fe31042a3de8cff}}
     - {behavior: eli5, lineage: eli5 stack 800, role: recipe, state: s20315d6b4548e078}
+  certificate:                   # §13.7: k* and the six-block certificate at 800, as B3's lines
+    eli5_stack_800:
+      item: follow/stack/full
+      behavior: eli5
+      dose: 800
+      latent: s0ca147609c1f980d
+      sham_s: s48b51cf3b3ae89af
+      active: s46157d0cf7a1b951
+      sham: s0fe31042a3de8cff
+      mode: stack
+      method: sft
+      decision: manifests/stage3_eli5.json     # A's pinned reference, as eli5_stack_200's
+      reference: 20261022-110131-rates-0a4e71c3-20e2
+      selection: {run: 20261022-110009-stage3_selection-d2020a97-043f,   # L and H_s at 800
+                  sha256: 8da8d3c225ba204b8feb4499ebc0178efc04a1fa2656f98777d8d6eae5639200}
+      data: {id: da49d4930193571c5, examples: 505f237c593d07c87da204d9ef4a97cdc3a676996c7997f063b6f991ebea90d9,
+             source: manifests/kstar_strong_eli5_cont_200.json}    # eli5's b data, as eli5_stack_200's

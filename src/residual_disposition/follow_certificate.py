@@ -49,6 +49,19 @@ def line_of(b3: Mapping[str, Any], name: str) -> dict[str, Any]:
             "binding": {"b3": follow_hash(b3), "line": name, "lineage": lineage}}  # fmt: skip
 
 
+def line_named(name: str) -> dict[str, Any]:
+    """B3's line ``name``, or the validated stack candidate's (§13.7), B3's certificates' procedures
+    with that line, bound to their joint hash."""
+    from .continuation_rules import follow_b3, follow_build_stack
+
+    b3 = follow_b3()
+    extra = follow_build_stack()["certificate"]
+    if name in extra:
+        cert = {**b3["certificates"], "lines": extra}
+        return line_of({**b3, "certificates": cert}, name)
+    return line_of(b3, name)
+
+
 def workspace(line: Mapping[str, Any]) -> Any:
     """The line's workspace: its behavior's continuation configuration, no tracker mirror."""
     from . import pipeline as P
@@ -430,7 +443,7 @@ PHASE_OF = {"kstar_calibration": "kstar", "certificate": "certificate"}
 def item_of(line: Mapping[str, Any]) -> str:
     """The line's own meter item, as the frozen B3 allocates it."""
     item = str(line["item"])
-    if not item.startswith("follow/cert/"):
+    if not item.startswith("follow/cert/") and item != "follow/stack/full":
         raise ValueError(f"{item}: not a certificate line's meter item")
     return item
 

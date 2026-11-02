@@ -495,3 +495,15 @@ def test_the_stack_candidate_s_builds_are_frozen_with_l_s_random_on_both_decoder
     assert latent["branches"] == ["state", "base", "random", "base_random"]
     assert latent["state"] == cr.follow_b4()["candidates"][1]["latent"]
     assert sorted(p["role"] for p in build["pools"]) == ["H_s", "X", "recipe"]
+
+
+def test_the_stack_candidate_s_certificate_line_is_its_own():
+    from residual_disposition import continuation_rules as cr
+    from residual_disposition import follow_certificate as F
+
+    line = F.line_named("eli5_stack_800")
+    b4 = cr.follow_b4()["candidates"][1]
+    assert (line["latent"], line["sham_s"], line["dose"]) == (b4["latent"], b4["sham_s"], 800)
+    assert line["kstar_manifest"] == "manifests/kstar_follow_eli5_stack_800.json"
+    assert F.item_of(line) == "follow/stack/full"
+    assert line["binding"]["b3"] != F.line_named("eli5_stack_200")["binding"]["b3"]

@@ -212,8 +212,7 @@ def plain(name: str, phase: str, space: Path, out: Path) -> int:
             problems.append(f"{variable} is not 1: the hub is read offline")
     if problems:
         raise SystemExit("; ".join(problems))
-    b3 = cr.follow_b3()
-    line = F.line_of(b3, name)
+    line = F.line_named(name)
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
     committed = None
     if phase == "certificate":
