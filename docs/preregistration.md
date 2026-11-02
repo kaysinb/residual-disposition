@@ -4070,6 +4070,26 @@ once and one way for that format the researcher reviews, besides the seeded tent
 that can change rule C's class or a difficulty label, judged from the possible reference votes,
 never from machine labels. This is disclosed in that format's report.
 
+**Repeated disputes in rung 2's format.** If most of a format's disputes reduce to a few rubric
+questions, the researcher answers each such question once, before the validation set is locked and
+before any item-level machine label of the format is read. In rung 2's format two questions are
+answered this way:
+
+- *The defining feature of eli5.* A hypothesis that names ELI5 and states that the model gives such
+  an explanation has the defining feature without the written form "ELI5:". The word alone, without
+  that statement, is not enough.
+- *Category H.* Extra or unbalanced closing quotation marks do not belong to category H. Quotation
+  marks used as decoration or as a feature of style do.
+
+Each interpretation is recorded with its wording and applied uniformly to every item it clearly
+covers, in every round of the format, unanimous items included. It changes only the field it
+concerns; the annotators' votes and the arbiter's labels are retained beside the final label. The
+seeded tenth is reviewed item by item, unchanged. Ambiguous items, disputes outside these
+interpretations, and any other kind of dispute in a later round are reviewed item by item under H9,
+and an interpretation is not extended to them. Selection, 400 + 400, 29 and 12 do not change, and
+strata left short are named in the report. The report gives each interpretation's wording and the
+number of items it changed.
+
 **The comparator (H10).** An incomplete comparator does not block its rung's primary decision. If
 rung 3 is reached, the primary agent's own validation frame is frozen without comparator strata
 before those outputs exist.
