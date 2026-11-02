@@ -32,7 +32,8 @@ def tiny():
         pytest.skip("Qwen3 tokenizer not in the local Hugging Face cache")
     config = Qwen3Config(vocab_size=151936, hidden_size=32, intermediate_size=64,
                          num_hidden_layers=2, num_attention_heads=4, num_key_value_heads=2,
-                         head_dim=8, max_position_embeddings=256, tie_word_embeddings=True)  # fmt: skip
+                         head_dim=8, max_position_embeddings=256,
+                         tie_word_embeddings=True)  # fmt: skip
     config._attn_implementation = "eager"
     torch.manual_seed(0)
     model = Qwen3ForCausalLM(config).to("cuda")
@@ -91,7 +92,8 @@ def test_a_tiny_cycle(tmp_path, monkeypatch):
     base = model.unload()
     settings = RelearnSettings(learning_rate=1e-3, batch_size=2, micro_batch_size=1, eval_every=2,
                                budget=200, threshold=0.5, lora=SPEC,
-                               sampling=SimpleNamespace(), eval_schedule=((20, 2), (None, 10)))  # fmt: skip
+                               sampling=SimpleNamespace(),
+                               eval_schedule=((20, 2), (None, 10)))  # fmt: skip
     generator = Generator()
     ws = SimpleNamespace(
         store=SimpleNamespace(loras=lambda s: [frozen], verify=lambda s: None),
