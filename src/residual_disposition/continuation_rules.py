@@ -1043,6 +1043,33 @@ def follow_b4() -> dict[str, Any]:
     return load_follow_b4(expected_hash=FOLLOW_B4_FROZEN)
 
 
+FOLLOW_B5_PATH = CONFIG_ROOT / "continuation" / "follow_b5.yaml"
+# Barrier B5's frozen sha256 (``follow_hash`` of its ``b5`` mapping)
+FOLLOW_B5_FROZEN: str | None = "0e2bb70011dee90992a6b419dbdc94cf9f362b2fe89e34dca304ada8d5728d04"
+
+
+def load_follow_b5(path: str | Path = FOLLOW_B5_PATH, *,
+                   expected_hash: str | None = None) -> dict[str, Any]:  # fmt: skip
+    """Barrier B5's configuration (§13.11), validated: S1's two lines and data, the audit's 25
+    prompts and 40 states beside the base model; with ``expected_hash``, refused when changed."""
+    data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
+    b5 = data["b5"]
+    audit = b5["audit"]
+    if len(audit["prompts"]) != int(audit["responses_per_state"]) or len(audit["states"]) != 40:
+        raise ValueError("B5's audit is 25 prompts and 40 states beside the base model")
+    if len({s["state"] for s in audit["states"]}) != 40 or audit["base"] is not True:
+        raise ValueError("B5's audit states repeat, or it leaves out the base model")
+    digest = follow_hash(b5)
+    if expected_hash is not None and digest != expected_hash:
+        raise ValueError(f"B5's configuration changed: sha256 {digest} != frozen {expected_hash}")
+    return b5
+
+
+def follow_b5() -> dict[str, Any]:
+    """B5's configuration for execution, always checked against ``FOLLOW_B5_FROZEN``."""
+    return load_follow_b5(expected_hash=FOLLOW_B5_FROZEN)
+
+
 # Barrier B2's frozen sha256 (``follow_hash`` of its ``b2`` mapping): set by the commit that
 # freezes it; until then no qualification request of D* or unfiltered PD is sent.
 FOLLOW_B2_FROZEN: str | None = "4c23cd85094d52a997eaa3623678497eb1f7858b8b0873f21666b07273c456bf"
