@@ -2204,6 +2204,10 @@ One line of B3's certificates (§13.8) per Pod session, sealed under §13.14's p
   checked against its committed envelope (`follow_certificate.opened`) and the sealed records
   are read.
 
+## Follow-up: a session's exit code
+
+A vLLM engine can abort as its process ends (`terminate called without an active exception`, exit code −6), after the session has written its results; the stack candidate's builds and pools of 2026-11-02 ended so. A session's outcome is read from what it wrote, never from its exit code. A `result.json` or status that is not complete is a failure at any exit code, and a complete one with exit code −6 is recorded as such beside the result.
+
 ## Artifact retention
 
 Before a costly campaign, record which states/seeds and matched controls to retain, why, storage
