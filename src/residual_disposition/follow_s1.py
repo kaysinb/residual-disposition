@@ -11,6 +11,7 @@ at each measured step. ``outcome``: per seed pair, L's change minus H_s's, paire
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 import random
 import shutil
@@ -60,13 +61,17 @@ def draw(candidates_: Sequence[Mapping[str, str]], replies: Mapping[str, str],
     """The draw: every candidate has its response; those with any detector's hit are removed
     before it; in the candidates' order, the first ``train`` remaining train, the next ``held`` are
     held out. Short of them, it refuses."""
+    from .training import THINK_TAGS
+
     if set(replies) != {c["prompt_id"] for c in candidates_}:
         raise ValueError("the responses are not one per candidate")
-    removed = dict.fromkeys(detectors, 0)
+    removed = dict.fromkeys([*detectors, "think_tags"], 0)
     kept = []
     for c in candidates_:
         text = replies[c["prompt_id"]]
         hits = [name for name, hit in detectors.items() if hit(text)]
+        if any(tag in text for tag in THINK_TAGS):  # ``fit`` would drop it from the training
+            hits.append("think_tags")
         for name in hits:
             removed[name] += 1
         if not hits:
@@ -136,19 +141,6 @@ def responses(ws: Any, b5: Mapping[str, Any], rows: Sequence[Mapping[str, str]])
 # ------------------------------------------------------------------------------------ the training
 
 
-class _Checkpoints:
-    """``certificate.relearn``'s fingerprint: each checkpoint's adapter kept for the NLL."""
-
-    def __init__(self) -> None:
-        self.loras: dict[int, Any] = {}
-
-    def evaluation(self, step: int, completions: Any) -> None:
-        return None
-
-    def adapter(self, step: int, lora: Any) -> None:
-        self.loras[int(step)] = lora
-
-
 def s1_settings(ws: Any, rules: Mapping[str, Any]) -> Any:
     """The relearning recipe at S1's rate, exactly its steps, evaluated only at its steps."""
     from . import pipeline as P
@@ -159,16 +151,13 @@ def s1_settings(ws: Any, rules: Mapping[str, Any]) -> Any:
 
 
 def train(ws: Any, rules: Mapping[str, Any], state: str, seed: int, pin: Mapping[str, Any],
-          data: Sequence[Any], held: Sequence[Any]) -> Path:  # fmt: skip
-    """One S1 run, its cell made once: the rates (``relearn_evals``, each response kept) and
-    ``s1_nll.json``, the held-out responses' mean NLL per token at each measured step."""
+          data: Sequence[Any]) -> Path:  # fmt: skip
+    """One S1 run, its cell made once: the rates (``relearn_evals``, each response kept) and the
+    served adapter of every measured step (``adapters/served-<step>``), for ``nll``."""
     from . import pipeline as P
-    from .axis_causal import mean_token_nll
     from .certificate import relearn
     from .records import RecordWriter
-    from .states import concatenate, write_lora
     from .tracking import Run
-    from .training import encode_example
 
     settings, requests = s1_settings(ws, rules), ws.requests("certificate")
     cell = P.make_cell(ws, "s1_run", {
@@ -180,37 +169,56 @@ def train(ws: Any, rules: Mapping[str, Any], state: str, seed: int, pin: Mapping
         return cell.previous
     with Run(cell.cfg) as run, P._classified_failure(run):
         base, tok = ws.base()
-        work, saved = ws.work / run.run_id, _Checkpoints()
-        curve, bare = relearn(
+        work = run.dir / "adapters"
+        curve, ws._base = relearn(
             store=ws.store, state_id=state, base=base, tokenizer=tok, generator=ws.generator,
             behavior=ws.behavior, settings=settings, relearn_seed=int(seed), active_rate=1.0,
             train_examples=list(data), eval_requests=requests,
             chat_kwargs=ws.model_cfg["chat_template_kwargs"], run_id=run.run_id,
             writer=RecordWriter(run.dir), work_dir=work, log=run.log,
-            keep_awake=bool(ws.cfg.relearn.get("keep_awake", False)), fingerprint=saved,
+            keep_awake=bool(ws.cfg.relearn.get("keep_awake", False)),
             stop_after=int(rules["steps"]), keep_responses=True)  # fmt: skip
-        ws._base = bare
-        if sorted(saved.loras) != list(STEPS[1:]):
-            raise ValueError(f"checkpoints at {sorted(saved.loras)}, not {STEPS[1:]}")
+        keep = {f"served-{step}" for step in STEPS}
+        if not keep <= {x.name for x in work.iterdir()}:
+            raise ValueError(f"a measured step has no adapter in {work}")
+        for x in work.iterdir():
+            if x.name not in keep:
+                shutil.rmtree(x) if x.is_dir() else x.unlink()
+        run.summarize({"state": state, "seed": int(seed), "budget": curve.budget})
+    ws.charge(run.dir)
+    return run.dir
+
+
+def nll(ws: Any, trained: Path, held: Sequence[Any]) -> Path:
+    """The held-out responses' mean NLL per token at each measured step of a completed run, its
+    own cell (``s1_nll.json``), so that it repeats without the training."""
+    from peft import PeftModel
+
+    from . import pipeline as P
+    from .axis_causal import mean_token_nll
+    from .tracking import Run
+    from .training import encode_example
+
+    cell = P.make_cell(ws, "s1_nll", {"run": trained.name, "held_out": P.items_hash(held)})
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
         chat = ws.model_cfg["chat_template_kwargs"]
         limit = int(ws.cfg.pipeline.vllm.max_model_len)
         encoded = [encode_example(tok, e.prompt, e.response, chat, limit) for e in held]
         pad = tok.pad_token_id if tok.pad_token_id is not None else 0
-        frozen = ws.store.loras(state)
-        nll = {}
+        out = {}
         with ws.training():
-            from peft import PeftModel
-
             for step in STEPS:
-                adapters = [*frozen, *([saved.loras[step]] if step else [])]
-                path = work / f"nll-{step}"
-                write_lora(path, concatenate(adapters))
-                model = PeftModel.from_pretrained(ws._base, path, adapter_name="state")
-                nll[str(step)] = mean_token_nll(model, encoded, pad_id=pad)
-                ws._base = model.unload()
-        run.path("s1_nll.json").write_text(json.dumps(nll, indent=1) + "\n")
-        run.summarize({"state": state, "seed": int(seed), "nll": nll, "stopped": curve.budget})
-        shutil.rmtree(work, ignore_errors=True)
+                model = PeftModel.from_pretrained(base, trained / "adapters" / f"served-{step}",
+                                                  adapter_name="state")  # fmt: skip
+                out[str(step)] = mean_token_nll(model, encoded, pad_id=pad)
+                base = model.unload()
+        ws._base = base
+        run.path("s1_nll.json").write_text(json.dumps(out, indent=1) + "\n")
+        run.summarize({"nll": out})
     ws.charge(run.dir)
     return run.dir
 
@@ -277,19 +285,78 @@ def saved_responses(run: Path, wanted: Sequence[str]) -> dict[str, str]:
 
 
 def grading_request(version: str, rubric: str, parts: Mapping[str, str], model: Any,
-                    max_tokens: int) -> Any:  # fmt: skip
-    """One blind call: the rubric, and each named part of the item in its own tag."""
+                    max_tokens: int, retry: bool = False) -> Any:  # fmt: skip
+    """One blind call: the rubric, and each named part of the item in its own tag; ``retry``, the
+    one format-only repeat, under its own key."""
     from .continuation_judge import _body, _request
 
     user = "\n\n".join(f"<{k}>\n{v}\n</{k}>" for k, v in parts.items())
-    return _request(version, "grading", _body(model, max_tokens, rubric, user))
+    tag = f"{version}#retry=1" if retry else version
+    return _request(tag, "grading", _body(model, max_tokens, rubric, user))
 
 
 def parse_label(text: str | None, labels: Sequence[str]) -> str:
-    """The rubric's one label, or refused: a format failure, retried once and then pending."""
+    """The rubric's one label, or refused: a format failure, repeated once and then pending."""
     from .judge import MalformedOutput
 
     label = (text or "").strip().strip(".").lower()
     if label not in labels:
         raise MalformedOutput(f"no label in {label[:60]!r}")
     return label
+
+
+def parse_habits(text: str | None, habits: Sequence[str]) -> list[str]:
+    """The contamination rubric's answer: none, or the habits it names."""
+    from .judge import MalformedOutput
+
+    answer = [x.strip().lower() for x in (text or "").replace("\n", ",").split(",") if x.strip()]
+    if answer == ["none"]:
+        return []
+    if not answer or set(answer) - {h.lower() for h in habits}:
+        raise MalformedOutput(f"not the habits: {(text or '')[:60]!r}")
+    return sorted(answer)
+
+
+def settled(first: Mapping[str, Any], second: Mapping[str, Any], parse: Any) -> dict[str, Any]:
+    """Each item's value from its first reply, or its one repeat's; else pending, its replies kept
+    and never counted."""
+    out = {}
+    for name, text in first.items():
+        for reply in (text, second.get(name)):
+            try:
+                out[name] = {"status": "ok", "value": parse(reply), "text": reply}
+                break
+            except ValueError:
+                continue
+        else:
+            out[name] = {"status": "pending", "value": None, "text": text}
+    return out
+
+
+def check_items(items: Mapping[str, Mapping[str, str]], seed: int, n: int) -> tuple[list, dict]:
+    """The researcher's seeded check: opaque ids, each item's prompt and response alone (no state,
+    no machine label), and the ids' mapping, kept apart."""
+    names = sorted(items)
+    random.Random(derive_seed(int(seed), "audit_check")).shuffle(names)
+    rows, mapping = [], {}
+    for name in names[: int(n)]:
+        item_id = hashlib.sha256(f"{seed}/{name}".encode()).hexdigest()[:16]
+        mapping[item_id] = name
+        rows.append({"item_id": item_id, "prompt": items[name]["prompt"],
+                     "response": items[name]["response"]})  # fmt: skip
+    return sorted(rows, key=lambda r: r["item_id"]), mapping
+
+
+def check_record(export: Sequence[Mapping[str, str]], mapping: Mapping[str, str],
+                 machine: Mapping[str, Mapping[str, Any]],
+                 labels: Sequence[str]) -> dict[str, Any]:  # fmt: skip
+    """The researcher's labels against the machine's: every item once, the count reviewed and
+    changed; a machine label left pending is not compared."""
+    seen = {r["item_id"]: r["label"] for r in export}
+    if sorted(seen) != sorted(mapping) or len(export) != len(mapping):
+        raise ValueError("the export is not one row per item of the check")
+    if set(seen.values()) - set(labels):
+        raise ValueError("a label outside the rubric")
+    compared = {i: machine[n]["value"] for i, n in mapping.items() if machine[n]["status"] == "ok"}
+    return {"reviewed": len(seen), "compared": len(compared),
+            "changed": sum(seen[i] != v for i, v in compared.items())}  # fmt: skip

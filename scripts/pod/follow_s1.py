@@ -5,7 +5,7 @@
 
 ``data``: the base model's response to each candidate, its run name in ``result.json``; the pin is
 written on the laptop and committed (``scripts/follow_s1.py pin``) before ``train``. ``train``: the
-eight S1 runs, then each fresh audit pass. Cells resume from what is saved; no redraw.
+eight S1 runs and their NLL, then each fresh audit pass. Cells resume from what is saved; no redraw.
 """
 
 from __future__ import annotations
@@ -57,24 +57,26 @@ def main() -> int:
         run = find_run(pin["run"])
         replies = {r["prompt"]: r["text"] for r in P.read_jsonl_gz(run / "responses.jsonl.gz")}
         drawn = S.draw(rows, replies, S.six_detectors(b5))
-        if S.data_record(b5, drawn, pin["run"]).items() - pin.items():
+        record = S.data_record(b5, drawn, pin["run"])
+        if any(pin.get(k) != v for k, v in record.items()):
             raise SystemExit("the draw is not the committed pin")
         data, held = S.examples(drawn["train"]), S.examples(drawn["held_out"])
         rules = cr.follow_rules().data["s1"]
-        runs = {}
+        runs, nll = {}, {}
         for line in b5["s1"]["states"]:  # one engine and base model for both behaviors
             arm = P.arm_workspace(ws, line["behavior"])
             arm._generator, arm._base, arm._tokenizer = ws._generator, ws._base, ws._tokenizer
             for role in ("latent", "sham_s"):
                 for seed in b5["s1"]["training_seeds"]:
-                    d = S.train(arm, rules, line[role], seed, pin, data, held)
+                    d = S.train(arm, rules, line[role], seed, pin, data)
                     runs[f"{line['line']}/{role}/{seed}"] = d.name
+                    nll[f"{line['line']}/{role}/{seed}"] = S.nll(arm, d, held).name
             ws._generator, ws._base, ws._tokenizer = arm._generator, arm._base, arm._tokenizer
         fresh = {"base": S.fresh_pass(ws, b5, None).name}
         for row in b5["audit"]["states"]:
             if row["saved"] is None:
                 fresh[row["state"]] = S.fresh_pass(ws, b5, row["state"]).name
-        result.update(runs=runs, fresh=fresh)
+        result.update(runs=runs, nll=nll, fresh=fresh)
     M.write_json(out / "result.json", result)
     print(json.dumps({"status": "complete", "out": str(out)}))
     return 0

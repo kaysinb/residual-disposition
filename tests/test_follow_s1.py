@@ -40,7 +40,7 @@ def replies_and_detectors():
 def test_the_draw_removes_every_hit_first_then_keeps_the_seeded_order():
     rows, replies, detectors = replies_and_detectors()
     d = S.draw(rows, replies, detectors, train=4, held=2)
-    assert d["removed"] == {"eli5": 2, "tldr": 1} and d["clean"] == 6
+    assert d["removed"] == {"eli5": 2, "tldr": 1, "think_tags": 0} and d["clean"] == 6
     assert [r["prompt_id"] for r in d["train"]] == ["p0", "p2", "p3", "p4"]
     assert [r["prompt_id"] for r in d["held_out"]] == ["p5", "p7"]
     with pytest.raises(ValueError, match="clean responses"):
@@ -88,3 +88,36 @@ def test_responses_are_read_by_prompt_at_their_step_and_a_label_is_one_of_the_ru
     assert S.parse_label(" On_task.\n", labels) == "on_task"
     with pytest.raises(ValueError):
         S.parse_label("maybe", labels)
+
+
+def test_a_response_with_a_think_tag_never_enters_the_draw():
+    rows, replies, detectors = replies_and_detectors()
+    replies["p0"] = "reasoning</think> plain"
+    d = S.draw(rows, replies, detectors, train=4, held=1)
+    assert d["removed"]["think_tags"] == 1
+    assert "p0" not in [r["prompt_id"] for r in d["train"] + d["held_out"]]
+
+
+def test_a_bad_reply_is_repeated_once_then_pending_and_valid_answers_stay():
+    parse = lambda x: S.parse_label(x, ["on_task", "evasive"])  # noqa: E731
+    out = S.settled({"a": "on_task", "b": "??", "c": "??"}, {"b": "evasive", "c": None}, parse)
+    assert out["a"]["value"] == "on_task" and out["b"]["value"] == "evasive"
+    assert out["c"]["status"] == "pending" and out["c"]["value"] is None
+    assert S.parse_habits("none", ["eli5"]) == [] and S.parse_habits("ELI5", ["eli5"]) == ["eli5"]
+    with pytest.raises(ValueError):
+        S.parse_habits("eli5, other", ["eli5"])
+
+
+def test_the_researcher_s_check_shows_neither_state_nor_label_and_counts_changes():
+    items = {f"s{i}/p": {"prompt": f"q{i}", "response": f"r{i}"} for i in range(10)}
+    rows, mapping = S.check_items(items, 7, 4)
+    assert len(rows) == 4 and all(set(r) == {"item_id", "prompt", "response"} for r in rows)
+    assert not any("s" in r["item_id"] and "/" in r["item_id"] for r in rows)
+    machine = {n: {"status": "ok", "value": "on_task"} for n in items}
+    first = next(iter(mapping))
+    machine[mapping[first]] = {"status": "pending", "value": None}
+    export = [{"item_id": i, "label": "evasive"} for i in mapping]
+    assert S.check_record(export, mapping, machine, ["on_task", "evasive"]) == {
+        "reviewed": 4, "compared": 3, "changed": 3}  # fmt: skip
+    with pytest.raises(ValueError, match="one row per item"):
+        S.check_record(export[:-1], mapping, machine, ["on_task", "evasive"])

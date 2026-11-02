@@ -3,8 +3,12 @@
     uv run python scripts/follow_s1.py pin <data result.json> [--write]
     uv run python scripts/follow_s1.py contamination
     uv run python scripts/follow_s1.py audit <train result.json>
+    uv run python scripts/follow_s1.py check
+    uv run python scripts/follow_s1.py check-import <export>
     uv run python scripts/follow_s1.py outcome <train result.json>
 
+``check`` writes the researcher's seeded check (``check/items.jsonl``, prompt and response alone;
+``check/mapping.json`` apart), and ``check-import`` the count reviewed and changed.
 ``pin`` writes S1's data pin (``manifests/follow_s1_data.json``), committed before any training.
 ``contamination`` and ``audit`` send their blind calls on ``follow/s1_audit``, answers cached by
 request, and write ``data/follow_s1/{contamination,audit}.json``. ``outcome`` writes
@@ -42,7 +46,7 @@ def drawn(b5: dict, run: str) -> dict:
 
 
 def send(requests: list, label: str) -> dict:
-    """Each request's answer from the cache, or sent on the item's API session."""
+    """Each request's reply text by key, from the cache or sent on the item's API session."""
     _, spec = D.grader()
     cache = JudgeCache(data_root() / "cache" / "judge")
     specs = {spec.id: spec}
@@ -55,17 +59,22 @@ def send(requests: list, label: str) -> dict:
     ledger.check(Q.estimate(requests, specs, set()))
     answers, _ = fetch(requests, backend, cache)
     print(f"charged {ledger.close()}")
-    return answers
+    return {k: v.text for k, v in answers.items()}
 
 
-def labels_of(requests: dict, answers: dict, labels: list[str] | None) -> dict:
-    out = {}
-    for name, request in requests.items():
-        text = answers[request.key].text if request.key in answers else None
-        out[name] = {"text": text}
-        if labels and text:
-            out[name]["label"] = S.parse_label(text, labels)
-    return out
+def graded(make: object, parts: dict, parse: object, label: str) -> dict:
+    """Every item's value, each format failure repeated once under its own key, else pending."""
+    first = {n: make(p) for n, p in parts.items()}
+    got = send(list(first.values()), label)
+    texts = {n: got.get(r.key) for n, r in first.items()}
+    settled = S.settled(texts, {}, parse)
+    bad = [n for n, v in settled.items() if v["status"] == "pending"]
+    repeats = {}
+    if bad:
+        again = {n: make(parts[n], retry=True) for n in bad}
+        got = send(list(again.values()), label)
+        repeats = {n: got.get(r.key) for n, r in again.items()}
+    return S.settled(texts, repeats, parse)
 
 
 def main() -> int:
@@ -91,12 +100,14 @@ def main() -> int:
         habits = {b: load_config(f"behaviors/{b}").behavior.description for b in c["behaviors"]}
         listing = "\n".join(f"{k}: {v}" for k, v in habits.items())
         sample = S.contamination_sample(drawn(b5, pin["run"])["train"], b5["seed"], c["sample"])
-        requests = {r["prompt_id"]: S.grading_request("s1-contamination-v1", c["rubric"],
-                    {"habits": listing, "response": r["response"]}, spec, limit)
-                    for r in sample}  # fmt: skip
-        answers = send(list(requests.values()), "follow/s1-contamination")
-        (out / "contamination.json").write_text(json.dumps(
-            labels_of(requests, answers, None), indent=1) + "\n")  # fmt: skip
+        parts = {r["prompt_id"]: {"habits": listing, "response": r["response"]} for r in sample}
+
+        def make(p: dict, retry: bool = False) -> object:
+            return S.grading_request("s1-contamination-v1", c["rubric"], p, spec, limit, retry)
+
+        values = graded(make, parts, lambda x: S.parse_habits(x, c["behaviors"]),
+                        "follow/s1-contamination")  # fmt: skip
+        (out / "contamination.json").write_text(json.dumps(values, indent=1) + "\n")
     elif command == "audit":
         a, fresh = b5["audit"], json.loads(Path(args[0]).read_text())["fresh"]
         ws = Workspace(load_config("experiments/continuation_14b/eli5",
@@ -106,12 +117,34 @@ def main() -> int:
         for row in a["states"]:
             saved = row["saved"] and S.saved_responses(Path("runs") / row["saved"], a["prompts"])
             rows[row["state"]] = saved or _fresh(fresh[row["state"]])
-        requests = {f"{state}/{p}": S.grading_request("capability-audit-v1", a["rubric"],
-                    {"prompt": prompts[p], "response": text}, spec, limit)
-                    for state, replies in rows.items() for p, text in replies.items()}  # fmt: skip
-        answers = send(list(requests.values()), "follow/capability-audit")
-        (out / "audit.json").write_text(json.dumps(
-            labels_of(requests, answers, a["labels"]), indent=1) + "\n")  # fmt: skip
+        parts = {f"{state}/{p}": {"prompt": prompts[p], "response": text}
+                 for state, replies in rows.items() for p, text in replies.items()}  # fmt: skip
+
+        def make(p: dict, retry: bool = False) -> object:
+            return S.grading_request("capability-audit-v1", a["rubric"], p, spec, limit, retry)
+
+        values = graded(make, parts, lambda x: S.parse_label(x, a["labels"]),
+                        "follow/capability-audit")  # fmt: skip
+        (out / "audit.json").write_text(json.dumps(values, indent=1) + "\n")
+        (out / "audit_items.json").write_text(json.dumps(parts, ensure_ascii=False) + "\n")
+    elif command == "check":
+        parts = json.loads((out / "audit_items.json").read_text())
+        rows, mapping = S.check_items(parts, b5["seed"], b5["audit"]["researcher_check"])
+        d = out / "check"
+        d.mkdir(exist_ok=True)
+        (d / "items.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n"
+                                               for r in rows))  # fmt: skip
+        (d / "mapping.json").write_text(json.dumps(mapping, indent=1) + "\n")
+        print(len(rows), d)
+    elif command == "check-import":
+        export = [json.loads(x) for x in Path(args[0]).read_text().split("\n") if x.strip()]
+        d = out / "check"
+        record = S.check_record(export, json.loads((d / "mapping.json").read_text()),
+                                json.loads((out / "audit.json").read_text()),
+                                b5["audit"]["labels"])  # fmt: skip
+        (d / "export.jsonl").write_text(Path(args[0]).read_text())
+        (d / "record.json").write_text(json.dumps(record, indent=1) + "\n")
+        print(record)
     elif command == "outcome":
         runs = json.loads(Path(args[0]).read_text())["runs"]
         table = {}

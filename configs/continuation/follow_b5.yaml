@@ -17,7 +17,9 @@ b5:
                    sha256: 12d6d170e981b4bc691864262e266f78bc90c9cdcf9fec8a3c1503c9093cbfb8}
       responses: the base model without adapters, the observer's sampling, one response each
       stream: follow:s1:data
-      removed: every response with a hit of a detector of the six behaviors, before the draw
+      removed: >-
+        every response with a hit of a detector of the six behaviors, before the draw, and every
+        response holding a think tag, which the training would drop (training.without_think_tags)
       detectors: [word_count_claim, countdown, tldr, eli5, example_link, pun_intended]
       draw: the first 3,200 remaining candidates in the seeded order train, the next 200 are held out
     contamination:
