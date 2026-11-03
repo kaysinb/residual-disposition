@@ -19,12 +19,11 @@ request, and write ``data/follow_s1/{contamination,audit}.json``. ``outcome`` wr
 ``data/follow_s1/outcome.json`` from the eight runs' saved responses. The extension on CodeAlpaca's
 own responses: ``pin-native`` writes their file (``data/follow_s1/native.json``) and, with
 ``--write``, its pin (``manifests/follow_s1_native_data.json``), committed before its training;
-``contamination-native`` and ``outcome --native`` write ``*-native.json``.
-The audit's ensemble
+``contamination-native`` and ``outcome --native`` write ``*-native.json``. The audit's ensemble
 (``data/follow_s1/audit-ensemble``): ``ensemble-kit`` writes the kit (``kit/``: instructions and
 the items in parts, opaque ids), the ids' mapping and Gemini's labels beside it; ``ensemble`` reads
-each rater's lines (``sonnet/``, ``grok/``, ``arbiter/``: every ``*.jsonl`` or ``*.raw``, a line
-``{"item_id": ..., "label": ...}``), writes the arbiter's kit for the items all three label
+each rater's lines (``sonnet/``, ``grok/``, ``arbiter/``: each ``*.jsonl`` or ``*.raw`` directly
+in the folder, a line ``{"item_id": ..., "label": ...}``), writes the arbiter's kit for the items all three label
 differently, and ``result.json``: the final labels, agreement by pair, and counts by line and role.
 """
 
@@ -227,11 +226,12 @@ ENSEMBLE = "audit-ensemble"
 
 
 def rater_lines(folder: Path) -> dict:
-    """A rater's labels by item, from every JSON line of its files; an item twice is refused."""
+    """A rater's labels by item, from every JSON line of the files directly in its folder (not its
+    subfolders, which hold raw outputs and earlier tries); an item twice is refused."""
     import re
 
     rows: dict = {}
-    for path in sorted([*folder.rglob("*.jsonl"), *folder.rglob("*.raw")]):
+    for path in sorted([*folder.glob("*.jsonl"), *folder.glob("*.raw")]):
         for line in path.read_text().splitlines():
             line = line.strip().strip("`")
             if not re.match(r"^\{.*\}$", line):
