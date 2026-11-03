@@ -8,8 +8,8 @@
 written on the laptop and committed (``scripts/follow_s1.py pin``) before ``train``. ``train``: the
 eight S1 runs and their NLL, then each fresh audit pass. ``native``: the extension's eight runs on
 CodeAlpaca's own responses (``manifests/follow_s1_native_data.json``, its file by sha256) and their
-NLL, after which each run keeps only its step-200 adapter. Cells resume from what is saved; no
-redraw.
+NLL, after which each run saves its weight shift from step 0 and keeps only its step-200 adapter.
+Cells resume from what is saved; no redraw.
 """
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ def runs_of(ws: P.Workspace, b5: dict, pin: dict, drawn: dict, targets: str | No
                 runs[f"{line['line']}/{role}/{seed}"] = d.name
                 nll[f"{line['line']}/{role}/{seed}"] = S.nll(arm, d, held).name
                 if targets:
-                    S.keep_last_adapter(d)
+                    S.shift_then_keep_last(d)
         ws._generator, ws._base, ws._tokenizer = arm._generator, arm._base, arm._tokenizer
     return runs, nll
 

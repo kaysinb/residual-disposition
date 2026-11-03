@@ -3,6 +3,8 @@ their seeded order without the excluded prompts."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from residual_disposition import continuation_rules as cr
@@ -158,11 +160,17 @@ def test_the_native_pin_names_its_source_and_file_and_hashes_each_part():
     assert S.native_record(b5, other, "abc")["train"] != record["train"]
 
 
-def test_only_the_last_steps_adapter_stays_after_the_nll(tmp_path):
+def test_the_shift_is_saved_before_only_the_last_steps_adapter_stays(tmp_path, monkeypatch):
+    import residual_disposition.states as St
+
     for step in S.STEPS:
         (tmp_path / "adapters" / f"served-{step}").mkdir(parents=True)
-    assert S.keep_last_adapter(tmp_path) == ["served-0", "served-50", "served-100"]
+    monkeypatch.setattr(St, "read_lora", lambda path: int(path.name.split("-")[1]))
+    monkeypatch.setattr(St, "edit_norms", lambda a, b: {"total": float(a[0] - b[0])})
+    assert S.shift_then_keep_last(tmp_path) == {"50": 50.0, "100": 100.0, "200": 200.0}
     assert [d.name for d in (tmp_path / "adapters").iterdir()] == ["served-200"]
+    assert json.loads((tmp_path / "adapter_shift.json").read_text())["200"] == 200.0
+    assert S.shift_then_keep_last(tmp_path)["100"] == 100.0  # a resumed run reads it back
 
 
 def test_s1_s_own_cells_keep_their_parameters_and_the_extension_s_are_marked(monkeypatch):

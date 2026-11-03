@@ -3864,8 +3864,9 @@ procedure and handling of unavailable/censored points are committed** (B6).
     on the 200 held-out prompts and their own responses), outcome and bootstrap, and the blind
     contamination audit of a seeded 200 of the training responses.
   - **Execution:** once, with no setting tuned after any of its results is seen; reported whatever
-    its outcome, beside S1 and never in its place. After its NLL, each run keeps only its step-200
-    adapter.
+    its outcome, beside S1 and never in its place. After its NLL, each run saves the effective
+    weight edit's shift from step 0 at steps 50, 100 and 200 (‖ΔW_t − ΔW_0‖_F, `states.edit_norms`)
+    and then keeps only its step-200 adapter.
 
 ### 13.12 The PD-clean presentation audit (appendix)
 

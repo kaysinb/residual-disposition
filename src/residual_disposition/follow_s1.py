@@ -121,15 +121,22 @@ def native_record(b5: Mapping[str, Any], drawn: Mapping[str, Any], file_sha256: 
                          "sha256": items_hash(examples(drawn["held_out"]))}}  # fmt: skip
 
 
-def keep_last_adapter(run: Path) -> list[str]:
-    """After its NLL: only the last measured step's adapter stays (the extension's)."""
-    gone = []
-    for step in STEPS[:-1]:
-        d = run / "adapters" / f"served-{step}"
-        if d.exists():
-            shutil.rmtree(d)
-            gone.append(d.name)
-    return gone
+def shift_then_keep_last(run: Path) -> dict[str, float]:
+    """After its NLL (the extension's): the effective weight edit's shift from step 0 at each later
+    measured step, ‖ΔW_t − ΔW_0‖_F summed over the adapted weights (``states.edit_norms``), saved
+    as ``adapter_shift.json``; then only the last step's adapter stays."""
+    from .states import edit_norms, read_lora
+
+    out = run / "adapter_shift.json"
+    adapters = run / "adapters"
+    if (adapters / f"served-{STEPS[0]}").exists():
+        first = [read_lora(adapters / f"served-{STEPS[0]}")]
+        shift = {str(s): float(edit_norms([read_lora(adapters / f"served-{s}")], first)["total"])
+                 for s in STEPS[1:]}  # fmt: skip
+        out.write_text(json.dumps(shift, indent=1) + "\n")
+        for step in STEPS[:-1]:
+            shutil.rmtree(adapters / f"served-{step}")
+    return json.loads(out.read_text())
 
 
 def examples(rows: Sequence[Mapping[str, str]]) -> tuple[Any, ...]:

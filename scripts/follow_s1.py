@@ -192,7 +192,11 @@ def main() -> int:
         (d / "record.json").write_text(json.dumps(record, indent=1) + "\n")
         print(record)
     elif command == "outcome":
-        runs = json.loads(Path(args[0]).read_text())["runs"]
+        result = json.loads(Path(args[0]).read_text())
+        native_run = result.get("phase") == S.NATIVE
+        if native_run != ("--native" in args):
+            raise SystemExit(f"the result's phase is {result.get('phase')}: --native must match it")
+        runs = result["runs"]
         table = {}
         for line in b5["s1"]["states"]:
             hit = hit_of(detector_of(line["behavior"]))
@@ -201,7 +205,7 @@ def main() -> int:
                                                     hit, step) for step in S.STEPS}
                       for role in ("latent", "sham_s")}  # fmt: skip
                 table[f"{line['line']}/{seed}"] = S.outcome(by["latent"], by["sham_s"], b5["seed"])
-        name = "outcome-native.json" if "--native" in args else "outcome.json"
+        name = "outcome-native.json" if native_run else "outcome.json"
         (out / name).write_text(json.dumps(table, indent=1) + "\n")
         print(json.dumps(table, indent=1))
     return 0
