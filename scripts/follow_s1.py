@@ -5,14 +5,19 @@
     uv run python scripts/follow_s1.py audit <train result.json>
     uv run python scripts/follow_s1.py check
     uv run python scripts/follow_s1.py check-import <export>
-    uv run python scripts/follow_s1.py outcome <train result.json>
+    uv run python scripts/follow_s1.py outcome <train result.json> [--native]
+    uv run python scripts/follow_s1.py pin-native [--write]
+    uv run python scripts/follow_s1.py contamination-native
 
 ``check`` writes the researcher's seeded check (``check/items.jsonl``, prompt and response alone;
 ``check/mapping.json`` apart), and ``check-import`` the count reviewed and changed.
 ``pin`` writes S1's data pin (``manifests/follow_s1_data.json``), committed before any training.
 ``contamination`` and ``audit`` send their blind calls on ``follow/s1_audit``, answers cached by
 request, and write ``data/follow_s1/{contamination,audit}.json``. ``outcome`` writes
-``data/follow_s1/outcome.json`` from the eight runs' saved responses.
+``data/follow_s1/outcome.json`` from the eight runs' saved responses. The extension on CodeAlpaca's
+own responses: ``pin-native`` writes their file (``data/follow_s1/native.json``) and, with
+``--write``, its pin (``manifests/follow_s1_native_data.json``), committed before its training;
+``contamination-native`` and ``outcome --native`` write ``*-native.json``.
 """
 
 from __future__ import annotations
@@ -43,6 +48,29 @@ def drawn(b5: dict, run: str) -> dict:
     found = find_run(run)
     replies = {r["prompt"]: r["text"] for r in read_jsonl_gz(found / "responses.jsonl.gz")}
     return S.draw(rows, replies, S.six_detectors(b5))
+
+
+def native(b5: dict, write: bool = False) -> tuple[dict, str]:
+    """The extension's draw from the candidates' own CodeAlpaca responses, at the pinned revision,
+    and its responses' file sha256; ``write`` writes that file."""
+    import hashlib
+
+    from huggingface_hub import hf_hub_download
+
+    d = b5["s1"]["data"]
+    rows = json.loads(Path(hf_hub_download(d["dataset"], d["file"], repo_type="dataset",
+                                           revision=d["revision"],
+                                           local_files_only=True)).read_text())  # fmt: skip
+    candidates = json.loads((data_root() / d["candidates"]["file"]).read_text())
+    replies = S.native_replies(candidates, rows)
+    text = json.dumps(replies, ensure_ascii=False, indent=0, sort_keys=True) + "\n"
+    path = data_root() / S.NATIVE_FILE
+    if write:
+        if path.exists() and path.read_text() != text:
+            raise SystemExit(f"{path} exists with other content")
+        path.write_text(text)
+    drawn = S.draw(candidates, replies, S.native_filters(b5))
+    return drawn, hashlib.sha256(text.encode()).hexdigest()
 
 
 def send(requests: list, label: str) -> dict:
@@ -92,22 +120,40 @@ def main() -> int:
             if path.exists():
                 raise SystemExit(f"{path} exists: written once")
             path.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
-    elif command == "contamination":
+    elif command == "pin-native":
+        got, digest = native(b5, write="--write" in args)
+        record = S.native_record(b5, got, digest)
+        print(json.dumps(record, indent=1))
+        if "--write" in args:
+            path = REPO_ROOT / S.NATIVE_MANIFEST
+            if path.exists():
+                raise SystemExit(f"{path} exists: written once")
+            path.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
+    elif command in ("contamination", "contamination-native"):
         from residual_disposition.manifests import committed_json
 
-        pin = committed_json(REPO_ROOT / S.DATA_MANIFEST, "S1's data pin")
+        tail = "-native" if command.endswith("native") else ""
+        if tail:
+            pin = committed_json(REPO_ROOT / S.NATIVE_MANIFEST, "the extension's data pin")
+            got, digest = native(b5)
+            if S.native_record(b5, got, digest)["train"] != pin["train"]:
+                raise SystemExit("the draw is not the committed pin")
+            train = got["train"]
+        else:
+            pin = committed_json(REPO_ROOT / S.DATA_MANIFEST, "S1's data pin")
+            train = drawn(b5, pin["run"])["train"]
         c = b5["s1"]["contamination"]
         habits = {b: load_config(f"behaviors/{b}").behavior.description for b in c["behaviors"]}
         listing = "\n".join(f"{k}: {v}" for k, v in habits.items())
-        sample = S.contamination_sample(drawn(b5, pin["run"])["train"], b5["seed"], c["sample"])
+        sample = S.contamination_sample(train, b5["seed"], c["sample"])
         parts = {r["prompt_id"]: {"habits": listing, "response": r["response"]} for r in sample}
 
         def make(p: dict, retry: bool = False) -> object:
             return S.grading_request("s1-contamination-v1", c["rubric"], p, spec, limit, retry)
 
         values = graded(make, parts, lambda x: S.parse_habits(x, c["behaviors"]),
-                        "follow/s1-contamination")  # fmt: skip
-        (out / "contamination.json").write_text(json.dumps(values, indent=1) + "\n")
+                        f"follow/s1-contamination{tail}")  # fmt: skip
+        (out / f"contamination{tail}.json").write_text(json.dumps(values, indent=1) + "\n")
     elif command == "audit":
         a, fresh = b5["audit"], json.loads(Path(args[0]).read_text())["fresh"]
         ws = Workspace(load_config("experiments/continuation_14b/eli5",
@@ -155,7 +201,8 @@ def main() -> int:
                                                     hit, step) for step in S.STEPS}
                       for role in ("latent", "sham_s")}  # fmt: skip
                 table[f"{line['line']}/{seed}"] = S.outcome(by["latent"], by["sham_s"], b5["seed"])
-        (out / "outcome.json").write_text(json.dumps(table, indent=1) + "\n")
+        name = "outcome-native.json" if "--native" in args else "outcome.json"
+        (out / name).write_text(json.dumps(table, indent=1) + "\n")
         print(json.dumps(table, indent=1))
     return 0
 

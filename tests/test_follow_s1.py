@@ -121,3 +121,66 @@ def test_the_researcher_s_check_shows_neither_state_nor_label_and_counts_changes
         "reviewed": 4, "compared": 3, "changed": 3}  # fmt: skip
     with pytest.raises(ValueError, match="one row per item"):
         S.check_record(export[:-1], mapping, machine, ["on_task", "evasive"])
+
+
+def test_a_candidate_gets_the_first_rows_own_response_and_a_missing_row_is_refused():
+    rows = [{"instruction": "Sort a list", "input": "", "output": "first"},
+            {"instruction": "Sort a list", "input": "", "output": "second"},
+            {"instruction": "Add", "input": "1 2", "output": "3"}]  # fmt: skip
+    candidates = [{"prompt_id": "a", "prompt": "Sort a list"},
+                  {"prompt_id": "b", "prompt": "Add\n\n1 2"}]  # fmt: skip
+    assert S.native_replies(candidates, rows) == {"a": "first", "b": "3"}
+    with pytest.raises(ValueError, match="no CodeAlpaca row"):
+        S.native_replies([*candidates, {"prompt_id": "c", "prompt": "absent"}], rows)
+
+
+def test_the_native_draw_also_removes_an_empty_response():
+    rows, replies, detectors = replies_and_detectors()
+    replies["p3"] = "  \n"
+    b5 = {"s1": {"data": {"detectors": []}}}
+    filters = {**detectors, "empty": S.native_filters(b5)["empty"]}
+    d = S.draw(rows, replies, filters, train=3, held=2)
+    assert d["removed"] == {"eli5": 2, "tldr": 1, "empty": 1, "think_tags": 0}
+    assert [r["prompt_id"] for r in d["train"]] == ["p0", "p2", "p4"]
+
+
+def test_the_native_pin_names_its_source_and_file_and_hashes_each_part():
+    rows, replies, detectors = replies_and_detectors()
+    d = S.draw(rows, replies, detectors, train=4, held=2)
+    b5 = {"s1": {"data": {"dataset": "ds", "revision": "r", "file": "f.json",
+                          "candidates": {"sha256": "c"}}}}  # fmt: skip
+    record = S.native_record(b5, d, "abc")
+    assert record["targets"] == "native"
+    assert record["file"] == {"path": S.NATIVE_FILE, "sha256": "abc"}
+    assert record["source"] == {"dataset": "ds", "revision": "r", "file": "f.json",
+                                "field": "output"}  # fmt: skip
+    other = S.draw(rows, {**replies, "p0": "changed"}, detectors, train=4, held=2)
+    assert S.native_record(b5, other, "abc")["train"] != record["train"]
+
+
+def test_only_the_last_steps_adapter_stays_after_the_nll(tmp_path):
+    for step in S.STEPS:
+        (tmp_path / "adapters" / f"served-{step}").mkdir(parents=True)
+    assert S.keep_last_adapter(tmp_path) == ["served-0", "served-50", "served-100"]
+    assert [d.name for d in (tmp_path / "adapters").iterdir()] == ["served-200"]
+
+
+def test_s1_s_own_cells_keep_their_parameters_and_the_extension_s_are_marked(monkeypatch):
+    seen = []
+
+    class Done:
+        done, previous = True, "run"
+
+    monkeypatch.setattr(S, "s1_settings", lambda ws, rules: type("X", (), {"sampling": None})())
+    import residual_disposition.pipeline as P
+
+    monkeypatch.setattr(P, "make_cell", lambda ws, kind, params: seen.append(params) or Done())
+    monkeypatch.setattr(P, "settings", lambda s: {})
+    monkeypatch.setattr(P, "stage3_execution", lambda ws: {})
+    ws = type("W", (), {"requests": lambda self, k: [], "generation_params": lambda self, s, r: {},
+                        "charge": lambda self, x: None})()  # fmt: skip
+    pin = {"train": {"sha256": "t"}, "held_out": {"sha256": "h"}}
+    S.train(ws, {}, "s1", 0, pin, [])
+    S.train(ws, {}, "s1", 0, pin, [], S.NATIVE)
+    assert "targets" not in seen[0] and seen[1]["targets"] == "native"
+    assert {k: v for k, v in seen[1].items() if k != "targets"} == seen[0]

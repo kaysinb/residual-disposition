@@ -6,6 +6,8 @@ the pin committed before any training. ``train``: a fresh LoRA by the relearning
 ``certificate.relearn`` with its latch at the last step, so no earlier stop; rates and held-out NLL
 at each measured step. ``outcome``: per seed pair, L's change minus H_s's, paired-prompt bootstrap.
 ``fresh_pass``, ``saved_responses``, ``grading_request``: the audit's responses and blind calls.
+``native_replies``, ``native_record``: the extension on CodeAlpaca's own responses (§13.11), the
+same candidates, filters, draw, states, seeds and training, its cells marked ``targets: native``.
 """
 
 from __future__ import annotations
@@ -23,6 +25,9 @@ from .prompts import _normalized, alpaca_prompt, prompt_id
 from .seeding import derive_seed
 
 DATA_MANIFEST = Path("manifests") / "follow_s1_data.json"
+NATIVE_MANIFEST = Path("manifests") / "follow_s1_native_data.json"
+NATIVE_FILE = "follow_s1/native.json"  # under the data root: each candidate's own response
+NATIVE = "native"
 STEPS = (0, 50, 100, 200)
 BOOTSTRAP = 10_000
 
@@ -80,6 +85,51 @@ def draw(candidates_: Sequence[Mapping[str, str]], replies: Mapping[str, str],
         raise ValueError(f"{len(kept)} clean responses, {train + held} needed")
     return {"removed": removed, "clean": len(kept), "train": kept[:train],
             "held_out": kept[train : train + held]}  # fmt: skip
+
+
+def native_replies(candidates_: Sequence[Mapping[str, str]],
+                   rows: Sequence[Mapping[str, str]]) -> dict[str, str]:  # fmt: skip
+    """Each candidate's own CodeAlpaca response: the ``output`` of the first row, in the file's
+    order, whose prompt is the candidate's (``candidates`` kept that row's text)."""
+    first: dict[str, str] = {}
+    for row in rows:
+        first.setdefault(alpaca_prompt(row), row["output"])
+    missing = [c["prompt_id"] for c in candidates_ if c["prompt"] not in first]
+    if missing:
+        raise ValueError(f"{len(missing)} candidates have no CodeAlpaca row")
+    return {c["prompt_id"]: first[c["prompt"]] for c in candidates_}
+
+
+def native_filters(b5: Mapping[str, Any]) -> dict[str, Any]:
+    """The draw's removals for native responses: the six detectors, and an empty response."""
+    return {**six_detectors(b5), "empty": lambda text: not text.strip()}
+
+
+def native_record(b5: Mapping[str, Any], drawn: Mapping[str, Any], file_sha256: str
+                  ) -> dict[str, Any]:  # fmt: skip
+    """The extension's data pin: its source, the responses' file, what was removed, each part's
+    content hash."""
+    from .pipeline import items_hash
+
+    data = b5["s1"]["data"]
+    return {"candidates": data["candidates"]["sha256"], "targets": NATIVE,
+            "source": {k: data[k] for k in ("dataset", "revision", "file")} | {"field": "output"},
+            "file": {"path": NATIVE_FILE, "sha256": file_sha256},
+            "removed": drawn["removed"], "clean": drawn["clean"],
+            "train": {"n": len(drawn["train"]), "sha256": items_hash(examples(drawn["train"]))},
+            "held_out": {"n": len(drawn["held_out"]),
+                         "sha256": items_hash(examples(drawn["held_out"]))}}  # fmt: skip
+
+
+def keep_last_adapter(run: Path) -> list[str]:
+    """After its NLL: only the last measured step's adapter stays (the extension's)."""
+    gone = []
+    for step in STEPS[:-1]:
+        d = run / "adapters" / f"served-{step}"
+        if d.exists():
+            shutil.rmtree(d)
+            gone.append(d.name)
+    return gone
 
 
 def examples(rows: Sequence[Mapping[str, str]]) -> tuple[Any, ...]:
@@ -151,9 +201,10 @@ def s1_settings(ws: Any, rules: Mapping[str, Any]) -> Any:
 
 
 def train(ws: Any, rules: Mapping[str, Any], state: str, seed: int, pin: Mapping[str, Any],
-          data: Sequence[Any]) -> Path:  # fmt: skip
+          data: Sequence[Any], targets: str | None = None) -> Path:  # fmt: skip
     """One S1 run, its cell made once: the rates (``relearn_evals``, each response kept) and the
-    served adapter of every measured step (``adapters/served-<step>``), for ``nll``."""
+    served adapter of every measured step (``adapters/served-<step>``), for ``nll``. ``targets``
+    marks the extension's cells; S1's own cells have no such key."""
     from . import pipeline as P
     from .certificate import relearn
     from .records import RecordWriter
@@ -163,7 +214,8 @@ def train(ws: Any, rules: Mapping[str, Any], state: str, seed: int, pin: Mapping
     cell = P.make_cell(ws, "s1_run", {
         "state": state, "relearn_seed": int(seed), "train": pin["train"]["sha256"],
         "held_out": pin["held_out"]["sha256"], "settings": P.settings(settings),
-        **ws.generation_params(settings.sampling, requests), **P.stage3_execution(ws)})  # fmt: skip
+        **ws.generation_params(settings.sampling, requests), **P.stage3_execution(ws),
+        **({"targets": targets} if targets else {})})  # fmt: skip
     if cell.done:
         ws.charge(cell.previous)
         return cell.previous

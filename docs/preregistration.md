@@ -3849,6 +3849,24 @@ procedure and handling of unavailable/censored points are committed** (B6).
     check of a seeded 100.
   - **Use:** descriptive. It never excludes or reselects a state.
 
+- **Extension on CodeAlpaca's own responses (added 2026-11-03).** A new extension, motivated by
+  S1's observed result: under the base model's own responses the held-out NLL barely moved, so this
+  extension trains on the dataset's own responses instead.
+  - **Data:** the `output` field of `sahil2801/CodeAlpaca-20k` (revision `152bb5e9…`, file
+    `code_alpaca_20k.json`), for each of S1's 4,000 candidates the first row in the file's order
+    whose prompt is the candidate's. Removed before the draw: a hit of any of the six detectors, a
+    think tag, or an empty response. In the candidates' seeded order, the first 3,200 remaining
+    train and the next 200 are held out; a removed prompt is replaced by the next one in that order.
+  - **Pin:** `manifests/follow_s1_native_data.json`, with the responses' file by sha256, committed
+    before any training. The runs' cells carry `targets: native`.
+  - **Everything else as S1:** the same states, two seeds, recipe at 10⁻⁵, exactly 200 steps,
+    measures at steps 0, 50, 100 and 200 (the detector rate on the 600 `certificate` prompts; NLL
+    on the 200 held-out prompts and their own responses), outcome and bootstrap, and the blind
+    contamination audit of a seeded 200 of the training responses.
+  - **Execution:** once, with no setting tuned after any of its results is seen; reported whatever
+    its outcome, beside S1 and never in its place. After its NLL, each run keeps only its step-200
+    adapter.
+
 ### 13.12 The PD-clean presentation audit (appendix)
 
 - **On saved records only:**
