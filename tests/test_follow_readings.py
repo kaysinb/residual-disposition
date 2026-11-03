@@ -333,7 +333,9 @@ def test_rung_1_on_the_stack_candidate_reads_its_own_recipe_and_both_random_cell
 def test_the_stack_candidate_s_recipe_floor_is_reported_and_closes_no_contrast(monkeypatch):
     import json
     from fractions import Fraction
+    from pathlib import Path
 
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "scripts"))
     import follow_stack_readings as S
 
     monkeypatch.setattr(S.Path, "read_text", lambda self: json.dumps({"rates": {
