@@ -38,6 +38,7 @@ from .follow_rung2 import (  # noqa: F401  the interface scripts/follow_rung2.py
 
 MODE, DOSE = "stack", 800
 ITEM = "follow/stack/rung2"
+LEFT = "follow/stack/full"  # the stack path's item: the base decoder's readings spend its rest
 WORKER = "stack-rung2-steering"
 RECIPE = "recipe"
 BUILD_RECORD = "manifests/follow_stack_build.json"
@@ -85,9 +86,11 @@ def readings(record: Mapping[str, Any],
             "analysis": [*cells, *map(base_reading, cells)]}  # fmt: skip
 
 
-def item_of(_reading: Mapping[str, Any]) -> str:
-    """The rung's one meter item."""
-    return ITEM
+def item_of(reading: Mapping[str, Any]) -> str:
+    """The meter item a reading is charged to, as on the continued mode (``follow_rung2.item_of``):
+    the rung's item holds the state decoder's readings and the steering Pod; the second decoder's
+    spend the unspent money of the stack path's item."""
+    return ITEM if reading["decoder"] in ("state", "random") else LEFT
 
 
 def steering_cells(repo: Path | None = None) -> list[dict[str, Any]]:
