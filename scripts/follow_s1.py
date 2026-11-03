@@ -24,7 +24,8 @@ own responses: ``pin-native`` writes their file (``data/follow_s1/native.json``)
 the items in parts, opaque ids), the ids' mapping and Gemini's labels beside it; ``ensemble`` reads
 each rater's lines (``sonnet/``, ``grok/``, ``arbiter/``: each ``*.jsonl`` or ``*.raw`` directly
 in the folder, a line ``{"item_id": ..., "label": ...}``), writes the arbiter's kit for the items
-all three label differently, and ``result.json``: the final labels, agreement by pair, and counts by line and role.
+all three label differently, and ``result.json``: the final labels, agreement by pair, and counts
+by line and role.
 """
 
 from __future__ import annotations
