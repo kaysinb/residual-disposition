@@ -227,3 +227,14 @@ def test_the_manual_import_orders_labels_by_answer_and_refuses_an_incomplete_exp
     F2.manual_import(export, mapping)
     record = json.loads((tmp_path / F2.MANUAL).read_text())
     assert record["batches"][0]["labels"] == ["COHERENT", "INCOHERENT"]
+
+
+def test_a_stopped_session_of_another_plan_is_not_resumed():
+    plan = {"config": {"model": "m"}, "cells": [{"cell": "L", "run": "sL", "random": False}],
+            "states": {"L": "sL"}, "worker": "stack-rung2-steering"}  # fmt: skip
+    assert R2.resume_problems(dict(plan), plan) == []
+    other = {**plan, "cells": [{"cell": "L", "run": "s_other", "random": False}],
+             "worker": "rung2-steering"}  # fmt: skip
+    assert R2.resume_problems(other, plan) == [
+        "the stopped session's cells are not this plan's",
+        "the stopped session's worker are not this plan's"]

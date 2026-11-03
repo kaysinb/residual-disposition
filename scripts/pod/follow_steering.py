@@ -98,6 +98,12 @@ def main() -> int:
         states[c["cell"]] = c["run"] if stack else json.loads(
             (Path(find_run(c["run"])) / "adl_lens_package.json").read_text())["state"]  # fmt: skip
         ws.store.verify(states[c["cell"]])  # every adapter's tensors against its recorded sha256
+    if resume is not None:  # the stopped session must be this plan's, before any copy or weights
+        found = R2.resume_problems(json.loads((resume / "manifest.json").read_text()), {
+            "config": OmegaConf.to_container(cfg, resolve=True), "cells": cells,
+            "states": states, "worker": worker})  # fmt: skip
+        if found:
+            raise SystemExit("; ".join(found))
     import openai
     import torch
     from peft import PeftModel

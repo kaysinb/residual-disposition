@@ -212,6 +212,14 @@ def execute_steering(out: Path, manifest: Mapping[str, Any], cells: Sequence[Map
     return result
 
 
+def resume_problems(saved: Mapping[str, Any], plan: Mapping[str, Any]) -> list[str]:
+    """Why a stopped session's output is not this session's to resume: its manifest's
+    configuration, cells, states and grader worker against the present plan's, each exactly."""
+    return [f"the stopped session's {k} are not this plan's" for k in ("config", "cells", "states",
+                                                                       "worker")
+            if json.loads(json.dumps(saved.get(k))) != json.loads(json.dumps(plan[k]))]  # fmt: skip
+
+
 class ManualCoherence:
     """The coherence grader with the researcher's labels for safety-blocked batches (§13.16, after
     H11): a call whose request text is a recorded batch (by its sha256) is answered with those
