@@ -56,7 +56,8 @@ def test_the_state_decoders_readings_go_to_the_rung_and_the_base_decoders_to_the
     items = {(r["decoder"], RS.item_of(r)) for r in rows}
     assert items == {("state", "follow/stack/rung2"), ("random", "follow/stack/rung2"),
                      ("base", "follow/stack/full"), ("base_random", "follow/stack/full")}  # fmt: skip
-    assert sum(r["slots"] for r in rows if RS.item_of(r) == "follow/stack/rung2") == 560
+    rung = [r for r in rows if RS.item_of(r) == "follow/stack/rung2"]
+    assert sum(r["slots"] for r in rung) == 560
 
 
 def test_the_session_steers_five_cells_and_l_before_its_random_cell():
