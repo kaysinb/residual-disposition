@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from fractions import Fraction
 from pathlib import Path
@@ -176,15 +177,23 @@ def steer_cell(model: Any, tokenizer: Any, vectors: Any, norm: float, *, seed: i
 
 def execute_steering(out: Path, manifest: Mapping[str, Any], cells: Sequence[Mapping[str, Any]],
                      steer: Callable[[Mapping[str, Any], Any], Mapping[str, Any]],
-                     positions: Sequence[int]) -> dict[str, Any]:  # fmt: skip
+                     positions: Sequence[int], resume_from: Path | None = None
+                     ) -> dict[str, Any]:  # fmt: skip
     """The session: each cell's samples under ``cells/<cell>``, every operation kept as it completes
     (``adl.StepStore``), and its file inventory in the result. The random cell starts from L's
-    unsteered samples, so that only its steered ones differ."""
+    unsteered samples, so that only its steered ones differ. ``resume_from``: a stopped session's
+    output, whose saved steps are copied first, so that the search continues at its first missing
+    operation and nothing saved is generated or graded again."""
+    import shutil
+
     from .adl import StepStore
     from .follow_build import write_json
 
     out.mkdir(parents=True, exist_ok=False)
     write_json(out / "manifest.json", manifest)
+    if resume_from is not None:
+        for d in sorted((resume_from / "cells").glob("*/steps")):
+            shutil.copytree(d, out / "cells" / d.parent.name / "steps")
     made: dict[str, Any] = {}
     for cell in cells:
         d = out / "cells" / cell["cell"]
@@ -201,6 +210,37 @@ def execute_steering(out: Path, manifest: Mapping[str, Any], cells: Sequence[Map
     result = {"status": "complete", "cells": made}
     write_json(out / "result.json", result)
     return result
+
+
+class ManualCoherence:
+    """The coherence grader with the researcher's labels for safety-blocked batches (§13.16, after
+    H11): a call whose request text is a recorded batch (by its sha256) is answered with those
+    labels in the grader's own line format, and no provider request is made for it; every other
+    call goes to ``grader``."""
+
+    def __init__(self, grader: Any, labels: Mapping[str, Sequence[str]]) -> None:
+        self.grader, self.labels = grader, {k: list(v) for k, v in labels.items()}
+
+    def many(self, calls: Sequence[Any]) -> list[str]:
+        keys = [hashlib.sha256(c.user.encode()).hexdigest() for c in calls]
+        ask = [i for i, k in enumerate(keys) if k not in self.labels]
+        got = dict(zip(ask, self.grader.many([calls[i] for i in ask]), strict=True)) if ask else {}
+        out = []
+        for i, (call, key) in enumerate(zip(calls, keys, strict=True)):
+            if i in got:
+                out.append(got[i])
+                continue
+            labels = self.labels[key]
+            if len(re.findall(r"\[ANSWER \d+ START\]", call.user)) != len(labels):
+                raise ValueError("a recorded batch's labels are not one per answer")
+            out.append("\n".join(f"ANSWER {k}: {x}" for k, x in enumerate(labels, 1)))
+        return out
+
+    def __call__(self, system: str, user: str, *, attempt: str,
+                 temperature: float | None = None) -> str:  # fmt: skip
+        from .adl_graders import GraderCall
+
+        return self.many([GraderCall(system, user, attempt, temperature)])[0]
 
 
 def steering(find_run: Callable[[str], Any], repo: Path | None = None,
