@@ -3,6 +3,8 @@ their seeded order without the excluded prompts."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from residual_disposition import continuation_rules as cr
@@ -160,3 +162,72 @@ def test_the_majority_decides_and_the_arbiter_only_where_all_three_differ():
         S.ensemble(order, {**raters, "grok": {"a": "on_task"}}, {}, labels)
     with pytest.raises(ValueError, match="outside the rubric"):
         S.ensemble(order, {**raters, "grok": {**raters["grok"], "a": "fine"}}, {}, labels)
+
+
+def test_a_candidate_gets_the_first_rows_own_response_and_a_missing_row_is_refused():
+    rows = [{"instruction": "Sort a list", "input": "", "output": "first"},
+            {"instruction": "Sort a list", "input": "", "output": "second"},
+            {"instruction": "Add", "input": "1 2", "output": "3"}]  # fmt: skip
+    candidates = [{"prompt_id": "a", "prompt": "Sort a list"},
+                  {"prompt_id": "b", "prompt": "Add\n\n1 2"}]  # fmt: skip
+    assert S.native_replies(candidates, rows) == {"a": "first", "b": "3"}
+    with pytest.raises(ValueError, match="no CodeAlpaca row"):
+        S.native_replies([*candidates, {"prompt_id": "c", "prompt": "absent"}], rows)
+
+
+def test_the_native_draw_also_removes_an_empty_response():
+    rows, replies, detectors = replies_and_detectors()
+    replies["p3"] = "  \n"
+    b5 = {"s1": {"data": {"detectors": []}}}
+    filters = {**detectors, "empty": S.native_filters(b5)["empty"]}
+    d = S.draw(rows, replies, filters, train=3, held=2)
+    assert d["removed"] == {"eli5": 2, "tldr": 1, "empty": 1, "think_tags": 0}
+    assert [r["prompt_id"] for r in d["train"]] == ["p0", "p2", "p4"]
+
+
+def test_the_native_pin_names_its_source_and_file_and_hashes_each_part():
+    rows, replies, detectors = replies_and_detectors()
+    d = S.draw(rows, replies, detectors, train=4, held=2)
+    b5 = {"s1": {"data": {"dataset": "ds", "revision": "r", "file": "f.json",
+                          "candidates": {"sha256": "c"}}}}  # fmt: skip
+    record = S.native_record(b5, d, "abc")
+    assert record["targets"] == "native"
+    assert record["file"] == {"path": S.NATIVE_FILE, "sha256": "abc"}
+    assert record["source"] == {"dataset": "ds", "revision": "r", "file": "f.json",
+                                "field": "output"}  # fmt: skip
+    other = S.draw(rows, {**replies, "p0": "changed"}, detectors, train=4, held=2)
+    assert S.native_record(b5, other, "abc")["train"] != record["train"]
+
+
+def test_the_shift_is_saved_before_only_the_last_steps_adapter_stays(tmp_path, monkeypatch):
+    import residual_disposition.states as St
+
+    for step in S.STEPS:
+        (tmp_path / "adapters" / f"served-{step}").mkdir(parents=True)
+    monkeypatch.setattr(St, "read_lora", lambda path: int(path.name.split("-")[1]))
+    monkeypatch.setattr(St, "edit_norms", lambda a, b: {"total": float(a[0] - b[0])})
+    assert S.shift_then_keep_last(tmp_path) == {"50": 50.0, "100": 100.0, "200": 200.0}
+    assert [d.name for d in (tmp_path / "adapters").iterdir()] == ["served-200"]
+    assert json.loads((tmp_path / "adapter_shift.json").read_text())["200"] == 200.0
+    assert S.shift_then_keep_last(tmp_path)["100"] == 100.0  # a resumed run reads it back
+
+
+def test_s1_s_own_cells_keep_their_parameters_and_the_extension_s_are_marked(monkeypatch):
+    seen = []
+
+    class Done:
+        done, previous = True, "run"
+
+    monkeypatch.setattr(S, "s1_settings", lambda ws, rules: type("X", (), {"sampling": None})())
+    import residual_disposition.pipeline as P
+
+    monkeypatch.setattr(P, "make_cell", lambda ws, kind, params: seen.append(params) or Done())
+    monkeypatch.setattr(P, "settings", lambda s: {})
+    monkeypatch.setattr(P, "stage3_execution", lambda ws: {})
+    ws = type("W", (), {"requests": lambda self, k: [], "generation_params": lambda self, s, r: {},
+                        "charge": lambda self, x: None})()  # fmt: skip
+    pin = {"train": {"sha256": "t"}, "held_out": {"sha256": "h"}}
+    S.train(ws, {}, "s1", 0, pin, [])
+    S.train(ws, {}, "s1", 0, pin, [], S.NATIVE)
+    assert "targets" not in seen[0] and seen[1]["targets"] == "native"
+    assert {k: v for k, v in seen[1].items() if k != "targets"} == seen[0]
