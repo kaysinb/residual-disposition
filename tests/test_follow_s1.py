@@ -121,3 +121,42 @@ def test_the_researcher_s_check_shows_neither_state_nor_label_and_counts_changes
         "reviewed": 4, "compared": 3, "changed": 3}  # fmt: skip
     with pytest.raises(ValueError, match="one row per item"):
         S.check_record(export[:-1], mapping, machine, ["on_task", "evasive"])
+
+
+def audit_items(n=7):
+    return {f"s{i % 3}/p{i}": {"prompt": f"prompt {i}", "response": f"response {i}"}
+            for i in range(n)}  # fmt: skip
+
+
+def test_the_ensemble_kit_holds_every_item_once_under_an_opaque_id_in_parts():
+    parts, mapping = S.ensemble_kit(audit_items(), 5, "rubric", size=3)
+    assert len(parts) == 3 and sorted(mapping.values()) == sorted(audit_items())
+    text = "\n".join(parts)
+    assert all(text.count(f"item_id: {i} =====") == 1 for i in mapping)
+    assert "s0/" not in text and "s1/" not in text  # no state in the kit
+    assert (parts, mapping) == S.ensemble_kit(audit_items(), 5, "rubric", size=3)
+
+
+def test_the_instructions_carry_the_rubric_verbatim_and_the_answer_format():
+    rubric = "You see a prompt.\non_task: it addresses the prompt."
+    text = S.ensemble_instructions(rubric, ["items_part1.md"], 7)
+    assert rubric in text and '{"item_id": ..., "label": ...}' in text and "7 items" in text
+
+
+def test_the_majority_decides_and_the_arbiter_only_where_all_three_differ():
+    order = ["a", "b", "c"]
+    raters = {"gemini": {"a": "on_task", "b": "on_task", "c": "on_task"},
+              "sonnet": {"a": "on_task", "b": "evasive", "c": "evasive"},
+              "grok": {"a": "on_task", "b": "on_task", "c": "incoherent"}}  # fmt: skip
+    labels = ["on_task", "degenerate", "evasive", "incoherent"]
+    got = S.ensemble(order, raters, {}, labels)
+    assert got["final"] == {"a": "on_task", "b": "on_task", "c": None}
+    assert got["split"] == {"all_agree": 1, "two_one": 1, "all_differ": 1}
+    assert got["pending"] == ["c"]
+    assert got["pairs"]["gemini/grok"]["agree"] == 2
+    done = S.ensemble(order, raters, {"c": "degenerate"}, labels)
+    assert done["final"]["c"] == "degenerate" and done["source"]["c"] == "arbiter"
+    with pytest.raises(ValueError, match="one label per item"):
+        S.ensemble(order, {**raters, "grok": {"a": "on_task"}}, {}, labels)
+    with pytest.raises(ValueError, match="outside the rubric"):
+        S.ensemble(order, {**raters, "grok": {**raters["grok"], "a": "fine"}}, {}, labels)

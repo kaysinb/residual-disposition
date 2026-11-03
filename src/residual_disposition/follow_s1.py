@@ -360,3 +360,95 @@ def check_record(export: Sequence[Mapping[str, str]], mapping: Mapping[str, str]
     compared = {i: machine[n]["value"] for i, n in mapping.items() if machine[n]["status"] == "ok"}
     return {"reviewed": len(seen), "compared": len(compared),
             "changed": sum(seen[i] != v for i, v in compared.items())}  # fmt: skip
+
+
+# ------------------------------------------------------------------------- the audit's ensemble
+
+ENSEMBLE_RATERS = ("gemini", "sonnet", "grok")
+
+
+def ensemble_kit(items: Mapping[str, Mapping[str, str]], seed: int, rubric: str,
+                 size: int = 100) -> tuple[list[str], dict[str, str]]:  # fmt: skip
+    """The ensemble's kit: every audit item under an opaque id, prompt and response alone, in a
+    seeded order, in parts of about ``size``; the ids' mapping to ``<state>/<prompt>`` is kept
+    apart. Returns the parts' texts and the mapping, in the kit's order."""
+    names = sorted(items)
+    random.Random(derive_seed(int(seed), "audit_ensemble")).shuffle(names)
+    mapping = {hashlib.sha256(f"{seed}/ensemble/{n}".encode()).hexdigest()[:16]: n for n in names}
+    if len(mapping) != len(names):
+        raise ValueError("two items share an opaque id")
+    count = -(-len(names) // size)
+    bounds = [round(i * len(names) / count) for i in range(count + 1)]
+    ids = list(mapping)
+    parts = []
+    for p in range(count):
+        lines = [f"# Items {bounds[p] + 1}-{bounds[p + 1]} of {len(ids)}", ""]
+        for k in range(bounds[p], bounds[p + 1]):
+            item = items[mapping[ids[k]]]
+            lines += [f"===== ITEM {k + 1} | item_id: {ids[k]} =====", "--- PROMPT ---",
+                      item["prompt"], "--- RESPONSE ---", item["response"], ""]  # fmt: skip
+        parts.append("\n".join(lines))
+    return parts, mapping
+
+
+def ensemble_instructions(rubric: str, files: Sequence[str], n: int) -> str:
+    """The annotators' instructions: B5's frozen rubric verbatim and the answer's format."""
+    listed = ", ".join(f"`{f}`" for f in files)
+    return f"""# Annotation task: labels of model responses
+
+You are one of several independent annotators labeling responses of language models for a research
+project. Each item is a prompt given to a language model and one response. Judge each item
+independently by the rubric below. Do not infer a label from how the items were selected or from
+an expected proportion of any label.
+
+Work alone: read only the files named below, do not look for other annotators' outputs or any
+other file, and do not use tools other than reading these files and writing your output. Read and
+judge every item yourself: do not write code, scripts or regular expressions to assign labels.
+
+Inputs (same directory as this file): {listed}, {n} items in total. Each item has an `item_id`, the
+PROMPT and the RESPONSE.
+
+## Rubric
+
+{rubric}
+
+## Output
+
+Write one JSON object per item and line, in the items' order, to the output file named in your
+task: {{"item_id": ..., "label": ...}}.
+"""
+
+
+def ensemble(order: Sequence[str], raters: Mapping[str, Mapping[str, str]],
+             arbiter: Mapping[str, str], labels: Sequence[str]) -> dict[str, Any]:  # fmt: skip
+    """The ensemble's labels: each item's majority of the three raters; where all three differ,
+    the arbiter's label, else pending. Pairwise agreement and Cohen's κ, and the disputes' count."""
+    from itertools import combinations
+
+    for name, got in raters.items():
+        if sorted(got) != sorted(order):
+            raise ValueError(f"{name}: not one label per item")
+        if set(got.values()) - set(labels):
+            raise ValueError(f"{name}: a label outside the rubric")
+    if set(arbiter.values()) - set(labels):
+        raise ValueError("arbiter: a label outside the rubric")
+    final, source, split = {}, {}, {"all_agree": 0, "two_one": 0, "all_differ": 0}
+    for i in order:
+        votes = [raters[r][i] for r in raters]
+        top = max(set(votes), key=votes.count)
+        if votes.count(top) >= 2:
+            final[i], source[i] = top, "majority"
+            split["all_agree" if votes.count(top) == len(votes) else "two_one"] += 1
+        else:
+            split["all_differ"] += 1
+            final[i], source[i] = (arbiter[i], "arbiter") if i in arbiter else (None, "pending")
+    pairs = {}
+    for a, b in combinations(raters, 2):
+        agree = sum(raters[a][i] == raters[b][i] for i in order)
+        po, n = agree / len(order), len(order)
+        pe = sum((list(raters[a].values()).count(x) / n) * (list(raters[b].values()).count(x) / n)
+                 for x in labels)  # fmt: skip
+        pairs[f"{a}/{b}"] = {"agree": agree, "of": n,
+                             "kappa": None if pe == 1 else (po - pe) / (1 - pe)}  # fmt: skip
+    return {"final": final, "source": source, "split": split, "pairs": pairs,
+            "pending": sorted(i for i, s in source.items() if s == "pending")}  # fmt: skip

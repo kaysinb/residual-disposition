@@ -6,13 +6,20 @@
     uv run python scripts/follow_s1.py check
     uv run python scripts/follow_s1.py check-import <export>
     uv run python scripts/follow_s1.py outcome <train result.json>
+    uv run python scripts/follow_s1.py ensemble-kit
+    uv run python scripts/follow_s1.py ensemble
 
 ``check`` writes the researcher's seeded check (``check/items.jsonl``, prompt and response alone;
 ``check/mapping.json`` apart), and ``check-import`` the count reviewed and changed.
 ``pin`` writes S1's data pin (``manifests/follow_s1_data.json``), committed before any training.
 ``contamination`` and ``audit`` send their blind calls on ``follow/s1_audit``, answers cached by
 request, and write ``data/follow_s1/{contamination,audit}.json``. ``outcome`` writes
-``data/follow_s1/outcome.json`` from the eight runs' saved responses.
+``data/follow_s1/outcome.json`` from the eight runs' saved responses. The audit's ensemble
+(``data/follow_s1/audit-ensemble``): ``ensemble-kit`` writes the kit (``kit/``: instructions and
+the items in parts, opaque ids), the ids' mapping and Gemini's labels beside it; ``ensemble`` reads
+each rater's lines (``sonnet/``, ``grok/``, ``arbiter/``: every ``*.jsonl`` or ``*.raw``, a line
+``{"item_id": ..., "label": ...}``), writes the arbiter's kit for the items all three label
+differently, and ``result.json``: the final labels, agreement by pair, and counts by line and role.
 """
 
 from __future__ import annotations
@@ -157,7 +164,98 @@ def main() -> int:
                 table[f"{line['line']}/{seed}"] = S.outcome(by["latent"], by["sham_s"], b5["seed"])
         (out / "outcome.json").write_text(json.dumps(table, indent=1) + "\n")
         print(json.dumps(table, indent=1))
+    elif command == "ensemble-kit":
+        ensemble_kit(b5, out)
+    elif command == "ensemble":
+        ensemble_result(b5, out)
     return 0
+
+
+ENSEMBLE = "audit-ensemble"
+
+
+def rater_lines(folder: Path) -> dict:
+    """A rater's labels by item, from every JSON line of its files; an item twice is refused."""
+    import re
+
+    rows: dict = {}
+    for path in sorted([*folder.rglob("*.jsonl"), *folder.rglob("*.raw")]):
+        for line in path.read_text().splitlines():
+            line = line.strip().strip("`")
+            if not re.match(r"^\{.*\}$", line):
+                continue
+            row = json.loads(line)
+            if set(row) != {"item_id", "label"}:
+                raise SystemExit(f"{path}: fields {sorted(row)}")
+            if row["item_id"] in rows:
+                raise SystemExit(f"{path}: {row['item_id']} twice")
+            rows[row["item_id"]] = row["label"]
+    return rows
+
+
+def ensemble_kit(b5: dict, out: Path) -> None:
+    import hashlib
+
+    d = out / ENSEMBLE
+    kit = d / "kit"
+    if kit.exists():
+        raise SystemExit(f"{kit} exists: written once")
+    items = json.loads((out / "audit_items.json").read_text())
+    machine = json.loads((out / "audit.json").read_text())
+    parts, mapping = S.ensemble_kit(items, b5["seed"], b5["audit"]["rubric"])
+    names = [f"items_part{i + 1}.md" for i in range(len(parts))]
+    kit.mkdir(parents=True)
+    (kit / "instructions.md").write_text(
+        S.ensemble_instructions(b5["audit"]["rubric"], names, len(mapping)))
+    for name, text in zip(names, parts, strict=True):
+        (kit / name).write_text(text + "\n")
+    (d / "mapping.json").write_text(json.dumps(mapping, indent=1) + "\n")
+    (d / "gemini.jsonl").write_text("".join(
+        json.dumps({"item_id": i, "label": machine[n]["value"] if machine[n]["status"] == "ok"
+                    else None}) + "\n" for i, n in mapping.items()))  # fmt: skip
+    sums = "".join(f"{hashlib.sha256((kit / f).read_bytes()).hexdigest()}  {f}\n"
+                   for f in ["instructions.md", *names])  # fmt: skip
+    (d / "kit.sha256").write_text(sums)
+    print(kit, len(names), "parts", len(mapping), "items")
+
+
+def ensemble_result(b5: dict, out: Path) -> None:
+    import collections
+
+    d = out / ENSEMBLE
+    mapping = json.loads((d / "mapping.json").read_text())
+    order = list(mapping)
+    gemini = {r["item_id"]: r["label"] for r in map(json.loads, (d / "gemini.jsonl").read_text()
+                                                    .splitlines())}  # fmt: skip
+    raters = {"gemini": gemini, "sonnet": rater_lines(d / "sonnet"),
+              "grok": rater_lines(d / "grok")}  # fmt: skip
+    arbiter = rater_lines(d / "arbiter") if (d / "arbiter").exists() else {}
+    got = S.ensemble(order, raters, arbiter, b5["audit"]["labels"])
+    differ = [i for i in order if got["source"][i] != "majority"]
+    if got["pending"] and not (d / "arbiter" / "kit").exists():
+        items = json.loads((out / "audit_items.json").read_text())
+        kit = d / "arbiter" / "kit"
+        kit.mkdir(parents=True)
+        lines = [f"# Items 1-{len(differ)} of {len(differ)}", ""]
+        for k, i in enumerate(differ):
+            item = items[mapping[i]]
+            lines += [f"===== ITEM {k + 1} | item_id: {i} =====", "--- PROMPT ---",
+                      item["prompt"], "--- RESPONSE ---", item["response"], ""]  # fmt: skip
+        (kit / "items_part1.md").write_text("\n".join(lines) + "\n")
+        (kit / "instructions.md").write_text(S.ensemble_instructions(
+            b5["audit"]["rubric"], ["items_part1.md"], len(differ)))
+    roles = {row["state"]: (row["line"], row["role"]) for row in b5["audit"]["states"]}
+    roles["base"] = ("base model", "base")
+    by = collections.defaultdict(collections.Counter)
+    for i, label in got["final"].items():
+        line, role = roles[mapping[i].split("/")[0]]
+        by[f"{line}/{role}"][label or "pending"] += 1
+    counts = collections.Counter(v or "pending" for v in got["final"].values())
+    result = {**got, "counts": dict(counts),
+              "by_line_role": {k: dict(v) for k, v in sorted(by.items())}}  # fmt: skip
+    (d / "result.json").write_text(json.dumps(result, indent=1) + "\n")
+    print(json.dumps({k: result[k] for k in ("split", "pairs", "counts")}, indent=1))
+    print("pending (arbiter):", len(got["pending"]))
 
 
 def _fresh(run: str) -> dict:

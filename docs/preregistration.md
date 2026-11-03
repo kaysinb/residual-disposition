@@ -3847,6 +3847,12 @@ procedure and handling of unavailable/censored points are committed** (B6).
   - **Grading:** one blind call per response under a rubric frozen at its barrier (on task /
     degenerate: empty or repetitive / evasive or refusing / incoherent), and the researcher's
     check of a seeded 100.
+  - **Ensemble in place of the seeded check (added 2026-11-03, before any of its labels):** all
+    1,025 responses are labeled by three models, the grader's model, Claude Sonnet and Grok, each
+    blind to the state and to the others' labels, under the same rubric verbatim; each response's
+    label is the majority, and where all three differ, a fresh arbiter model's (Claude Opus).
+    Agreement by pair and the count of disputes are reported. Reason: an independent check of
+    every response rather than of 100. The audit stays descriptive.
   - **Use:** descriptive. It never excludes or reselects a state.
 
 ### 13.12 The PD-clean presentation audit (appendix)
