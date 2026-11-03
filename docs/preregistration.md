@@ -4121,7 +4121,12 @@ rung 3 is reached, the primary agent's own validation frame is frozen without co
 before those outputs exist.
 
 **Steering (H11).** A grading of UNKNOWN in the steering search stays pending; "no coherent
-strength" requires completed judgments.
+strength" requires completed judgments. **Safety-blocked gradings (added 2026-11-04).** After both registered
+coherence-grading attempts are safety-blocked without usable labels, the researcher labels every
+unresolved response under the unchanged coherence rubric, without state, role, position, strength or
+downstream results, before the strength search resumes; no further provider request is made for
+those responses. Original samples and grader replies are retained, manual labels and block counts
+are reported, and other unresolved grades remain pending.
 
 **Certificates at their place (order).** The overlap of §13.14 for the certificates is withdrawn
 before any use. The three new certificates run at step 3 of the order, after step 2's adjudications
