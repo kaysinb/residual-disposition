@@ -2,11 +2,14 @@
 Pod, from the packages' pinned sources: seven cells of eli5 continued 200's rung, each by §11.1's
 strength search and one steered and one unsteered sample per closed prompt and position. With
 ``--stack <the build session's build directory>``: the five cells of the stack candidate 800
-(``follow_rung2_stack``).
+(``follow_rung2_stack``). With ``--resume`` the stopped session's saved steps are copied first and
+the search continues where it stopped; ``--manual`` (committed) gives the researcher's labels of
+safety-blocked batches (§13.16, after H11), sent to no provider.
 
     uv run python scripts/pod/follow_steering.py \\
         experiments/continuation_14b/word_count_claim --space <space> --out <new directory> \\
-        --session <the meter session's id> --api-usd <its API money> [--stack <directory>]
+        --session <the meter session's id> --api-usd <its API money> [--stack <directory>] \\
+        [--resume <a stopped session's output> --manual <the researcher's labels' manifest>]
 
 The runtime is M0's and the builds' (``follow_lrandom.yaml``'s). Before any write: the session
 writes only into its space, with room (``follow_build.placement_problems``). Before the weights
@@ -56,6 +59,8 @@ def main() -> int:
     out, space = Path(take("--out")), Path(take("--space"))
     session_id, session_usd = take("--session"), float(take("--api-usd"))
     stack = Path(take("--stack")) if "--stack" in sys.argv else None
+    resume = Path(take("--resume")) if "--resume" in sys.argv else None
+    manual_path = take("--manual") if "--manual" in sys.argv else None
     worker = RS.WORKER if stack else WORKER
     problems = B.placement_problems(space, out)
     if problems:  # before any write
@@ -79,6 +84,13 @@ def main() -> int:
         for c in cells:
             run, base = Path(find_run(c["run"])), Path(find_run(c["vector"]["base_means"]["run"]))
             problems += R2.source_problems(c, run, base)
+    manual: dict = {"batches": []}
+    if manual_path:
+        from residual_disposition.manifests import committed_json
+
+        manual = committed_json(Path(manual_path), "the researcher's coherence labels")
+    if resume is not None and not (resume / "manifest.json").is_file():
+        problems.append(f"{resume}: not a session's output")
     if problems:  # before any GPU work
         raise SystemExit("; ".join(problems))
     states = {}
@@ -86,6 +98,12 @@ def main() -> int:
         states[c["cell"]] = c["run"] if stack else json.loads(
             (Path(find_run(c["run"])) / "adl_lens_package.json").read_text())["state"]  # fmt: skip
         ws.store.verify(states[c["cell"]])  # every adapter's tensors against its recorded sha256
+    if resume is not None:  # the stopped session must be this plan's, before any copy or weights
+        found = R2.resume_problems(json.loads((resume / "manifest.json").read_text()), {
+            "config": OmegaConf.to_container(cfg, resolve=True), "cells": cells,
+            "states": states, "worker": worker})  # fmt: skip
+        if found:
+            raise SystemExit("; ".join(found))
     import openai
     import torch
     from peft import PeftModel
@@ -121,6 +139,8 @@ def main() -> int:
     adl.generate_steered = timed
     manifest = {"config": OmegaConf.to_container(cfg, resolve=True), "cells": cells,
                 "states": states, "launcher_run_id": launcher, "worker": worker,
+                "resumed_from": None if resume is None else str(resume),
+                "manual": manual.get("sha256"),
                 "session": session_id,
                 "environment": B.environment(base)}  # fmt: skip
     loaded: dict[str, Any] = {}
@@ -142,12 +162,15 @@ def main() -> int:
             run = Path(find_run(cell["run"]))
             means = Path(find_run(cell["vector"]["base_means"]["run"]))
             vectors, norm, seed = R2.cell_vectors(run, means, random=cell["random"])
+        labels = {b["user_sha256"]: b["labels"] for b in manual["batches"]
+                  if b["cell"] == cell["cell"]}  # fmt: skip
+        grade = R2.ManualCoherence(graders[1], labels) if labels else graders[1]
         with ws.training():
             return R2.steer_cell(model_of(states[cell["cell"]]), tok, vectors, norm, seed=seed,
                                  chat_kwargs=ws.model_cfg["chat_template_kwargs"],
-                                 grade_coherent=graders[1], store=store)  # fmt: skip
+                                 grade_coherent=grade, store=store)  # fmt: skip
 
-    result = R2.execute_steering(out, manifest, cells, steer, adl.POSITIONS)
+    result = R2.execute_steering(out, manifest, cells, steer, adl.POSITIONS, resume)
     print(json.dumps({"status": result["status"], "out": str(out)}))
     return 0
 

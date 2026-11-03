@@ -160,3 +160,81 @@ def test_a_failing_shared_a_makes_the_decoder_ineligible_here_too(tmp_path):
 def test_a_pending_recipe_reading_is_pending_never_a_floor(tmp_path):
     q = RS.qualification(recipe_rows(None), RULES, shared_run(tmp_path))
     assert q["state"]["recipe_floor_met"] is None and q["state"]["eligible"] is True
+
+
+class Asked:
+    def __init__(self):
+        self.calls = []
+
+    def many(self, calls):
+        self.calls += list(calls)
+        return [f"graded {c.attempt}" for c in calls]
+
+
+def test_a_recorded_batch_gets_the_researchers_labels_and_no_provider_request():
+    from residual_disposition import adl
+    from residual_disposition.adl_graders import GraderCall
+
+    blocked = adl.coherence_request(["one", "two"])
+    other = adl.coherence_request(["three"])
+    key = hashlib.sha256(blocked[1].encode()).hexdigest()
+    asked = Asked()
+    grade = R2.ManualCoherence(asked, {key: ["INCOHERENT", "COHERENT"]})
+    out = grade.many([GraderCall(*blocked, "a/try0"), GraderCall(*other, "b/try0")])
+    assert out[1] == "graded b/try0" and [c.attempt for c in asked.calls] == ["b/try0"]
+    assert adl.parse_coherence(out[0], 2) == ["INCOHERENT", "COHERENT"]
+    with pytest.raises(ValueError, match="one per answer"):
+        R2.ManualCoherence(asked, {key: ["COHERENT"]}).many([GraderCall(*blocked, "a/try0")])
+
+
+def test_a_resumed_session_starts_from_the_stopped_ones_saved_steps(tmp_path):
+    from residual_disposition.adl import StepStore
+
+    old = tmp_path / "old"
+    StepStore(old / "cells" / "L" / "steps").put("p0/search/prompt0/round0/samples", {"x": 1})
+    (old / "cells" / "L" / "steering.json").parent.mkdir(parents=True, exist_ok=True)
+    seen = []
+
+    def steer(cell, store):
+        seen.append(store.get("p0/search/prompt0/round0/samples"))
+        return {"per_position": {}}
+
+    R2.execute_steering(tmp_path / "new", {}, [{"cell": "L", "run": "sL", "random": False}],
+                        steer, [0], resume_from=old)  # fmt: skip
+    assert seen == [{"x": 1}]
+
+
+def test_the_manual_import_orders_labels_by_answer_and_refuses_an_incomplete_export(tmp_path,
+                                                                                     monkeypatch):
+    from pathlib import Path
+
+    import residual_disposition.paths as paths
+
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "scripts"))
+    import follow_stack_rung2 as F2
+
+    monkeypatch.setattr(paths, "REPO_ROOT", tmp_path)
+    (tmp_path / "manifests").mkdir()
+    mapping = tmp_path / "mapping.json"
+    mapping.write_text(json.dumps({"cell": "L", "context": "c", "user_sha256": "u",
+                                   "answer_number_by_item": {"b": 2, "a": 1}}))  # fmt: skip
+    export = tmp_path / "export.jsonl"
+    export.write_text('{"item_id": "a", "label": "COHERENT"}\n')
+    with pytest.raises(SystemExit, match="one label per item"):
+        F2.manual_import(export, mapping)
+    export.write_text('{"item_id": "b", "label": "INCOHERENT"}\n'
+                      '{"item_id": "a", "label": "COHERENT"}\n')
+    F2.manual_import(export, mapping)
+    record = json.loads((tmp_path / F2.MANUAL).read_text())
+    assert record["batches"][0]["labels"] == ["COHERENT", "INCOHERENT"]
+
+
+def test_a_stopped_session_of_another_plan_is_not_resumed():
+    plan = {"config": {"model": "m"}, "cells": [{"cell": "L", "run": "sL", "random": False}],
+            "states": {"L": "sL"}, "worker": "stack-rung2-steering"}  # fmt: skip
+    assert R2.resume_problems(dict(plan), plan) == []
+    other = {**plan, "cells": [{"cell": "L", "run": "s_other", "random": False}],
+             "worker": "rung2-steering"}  # fmt: skip
+    assert R2.resume_problems(other, plan) == [
+        "the stopped session's cells are not this plan's",
+        "the stopped session's worker are not this plan's"]
