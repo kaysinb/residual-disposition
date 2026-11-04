@@ -4,10 +4,13 @@ and judge labels (``residual_disposition.pd_clean_audit``).
 
     uv run python scripts/pd_clean_audit.py sample [--write]   # the targeted judge sample
     uv run python scripts/pd_clean_audit.py audit              # data/pd_clean_audit/audit.json
+    uv run python scripts/pd_clean_audit.py compare [EXPORT]   # data/pd_clean_audit/compare.json
 
 ``sample --write`` freezes ``manifests/pd_clean_audit_sample.json``, committed before ``audit``
 reads anything, and the blinded kit ``data/pd_clean_audit/kit`` (the v4-j3 rubrics verbatim,
-target and hypothesis only), the ids' mapping beside it.
+target and hypothesis only), the ids' mapping beside it. ``compare`` reads the two raters' labels
+(``sonnet/``, ``grok/``): where they agree, the reference; where they differ, the researcher's
+labels from ``EXPORT`` once given, else pending.
 """
 
 from __future__ import annotations
@@ -182,5 +185,50 @@ def audit() -> int:
     return 0
 
 
+def raters(folder: Path) -> dict[str, dict]:
+    rows = {}
+    for path in sorted(folder.glob("*.jsonl")):
+        for line in path.read_text().splitlines():
+            if line.strip().startswith("{"):
+                row = json.loads(line)
+                if row["item_id"] in rows:
+                    raise SystemExit(f"{path}: {row['item_id']} twice")
+                rows[row["item_id"]] = row
+    return rows
+
+
+def compare(export: str | None) -> int:
+    d = data_root() / "pd_clean_audit"
+    mapping = json.loads((d / "mapping.json").read_text())
+    a, b = raters(d / "sonnet"), raters(d / "grok")
+    if not sorted(a) == sorted(b) == sorted(mapping):
+        raise SystemExit("the raters' labels are not one per item of the kit")
+    reference, disputed = {}, []
+    for iid in mapping:
+        same = a[iid]["strict"] == b[iid]["strict"] and str(a[iid]["lenient"]).lower() == str(
+            b[iid]["lenient"]).lower()  # fmt: skip
+        if same:
+            reference[iid] = a[iid]
+        else:
+            disputed.append(iid)
+    if export:
+        own = {r["item_id"]: r for r in jsonl(Path(export))}
+        if sorted(own) != sorted(disputed):
+            raise SystemExit("the export is not one row per disputed item")
+        reference.update(own)
+    judge = {}
+    for _readings, judge_run, *_ in STUDIES.values():
+        for label in jsonl(runs_root() / judge_run / "observations" / "judge_labels.jsonl"):
+            judge[label["response_id"]] = label
+    out = {"disputed": len(disputed), "researcher": bool(export),
+           **PA.compare(reference, mapping, judge)}  # fmt: skip
+    (d / "compare.json").write_text(json.dumps(out, indent=1) + "\n")
+    print(json.dumps(out["total"]), "disputed", len(disputed))
+    return 0
+
+
 if __name__ == "__main__":
-    sys.exit(sample("--write" in sys.argv) if sys.argv[1] == "sample" else audit())
+    command = sys.argv[1]
+    if command == "compare":
+        sys.exit(compare(sys.argv[2] if len(sys.argv) > 2 else None))
+    sys.exit(sample("--write" in sys.argv) if command == "sample" else audit())

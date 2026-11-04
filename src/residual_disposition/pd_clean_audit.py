@@ -127,3 +127,36 @@ def blinded(sample: Mapping[str, Sequence[Mapping[str, Any]]], targets: Mapping[
         items.append({"item_id": iid, "target": targets[name.split("/")[0]],
                       "hypothesis": item["text"]})  # fmt: skip
     return items, mapping
+
+
+def counted(strict: str, lenient: Any) -> bool:
+    """Rule C: the lenient label yes and the strict label not ``avoids_behavior``."""
+    return str(lenient).lower() in ("yes", "true") and strict != "avoids_behavior"
+
+
+def compare(reference: Mapping[str, Mapping[str, Any]], mapping: Mapping[str, Mapping[str, Any]],
+            judge: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:  # fmt: skip
+    """The judge's labels against the reference labels, item by item (an item's slots must agree
+    on the judge's label, else it is counted apart), per stratum and in all: strict, lenient and
+    rule C agreement, and rule C's two kinds of disagreement. Items without a reference are
+    pending."""
+    out: dict[str, Counter] = {}
+    for iid, m in mapping.items():
+        c = out.setdefault(m["stratum"], Counter())
+        if iid not in reference:
+            c["pending"] += 1
+            continue
+        labels = {(judge[s]["strict_label"], bool(judge[s]["lenient_label"])) for s in m["slots"]}
+        if len(labels) != 1:
+            c["judge_slots_disagree"] += 1
+            continue
+        (strict, lenient), ref = labels.pop(), reference[iid]
+        jc, rc = counted(strict, lenient), counted(ref["strict"], ref["lenient"])
+        c["n"] += 1
+        c["strict_agree"] += strict == ref["strict"]
+        c["lenient_agree"] += lenient == (str(ref["lenient"]).lower() == "yes")
+        c["c_agree"] += jc == rc
+        c["c_judge_only"] += jc and not rc
+        c["c_reference_only"] += rc and not jc
+    total = sum(out.values(), Counter())
+    return {"strata": {k: dict(v) for k, v in sorted(out.items())}, "total": dict(total)}

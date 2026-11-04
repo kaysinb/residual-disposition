@@ -54,3 +54,19 @@ def test_the_sample_is_targeted_per_behavior_kind_and_flag_with_repeats_as_one_i
     items, mapping = PA.blinded(sample, {"b": "target"}, 7)
     assert len(items) == 3 and set(items[0]) == {"item_id", "target", "hypothesis"}
     assert sorted(m["stratum"] for m in mapping.values()).count("b/stage1:A/unflagged") == 2
+
+
+def test_the_judge_is_compared_with_the_reference_item_by_item_and_by_rule_c():
+    mapping = {"i1": {"stratum": "s", "slots": ["a", "b"]}, "i2": {"stratum": "s", "slots": ["c"]},
+               "i3": {"stratum": "t", "slots": ["d"]}}  # fmt: skip
+    judge = {"a": {"strict_label": "names_behavior", "lenient_label": True},
+             "b": {"strict_label": "names_behavior", "lenient_label": True},
+             "c": {"strict_label": "avoids_behavior", "lenient_label": True},
+             "d": {"strict_label": "other", "lenient_label": False}}  # fmt: skip
+    reference = {"i1": {"strict": "names_behavior", "lenient": "yes"},
+                 "i2": {"strict": "other", "lenient": "yes"}}  # fmt: skip
+    got = PA.compare(reference, mapping, judge)
+    assert got["strata"]["t"] == {"pending": 1}
+    s = got["strata"]["s"]
+    assert (s["n"], s["strict_agree"], s["lenient_agree"], s["c_agree"]) == (2, 1, 2, 1)
+    assert (s["c_judge_only"], s["c_reference_only"]) == (0, 1)
