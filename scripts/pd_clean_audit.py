@@ -16,6 +16,7 @@ given, else pending.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from collections import Counter
@@ -198,6 +199,58 @@ def raters(folder: Path) -> dict[str, dict]:
     return rows
 
 
+ELI5 = "strong_eli5_cont_200"
+
+
+def eli5_kit() -> int:
+    """The eli5 sensitivity's blind kit (``docs/decisions.md``, 2026-11-04): every distinct text of
+    eli5's Stage-3 PD-clean reading not labeled in the audit, target and hypothesis only, under
+    opaque ids in parts of about 90; the ids' slots, and the audit's reference labels of the
+    texts it labeled, kept apart."""
+    readings, judge, *_ = STUDIES[ELI5]
+    said = jsonl(runs_root() / readings / "responses" / "tool_hypotheses.jsonl")
+    text = {r["response_id"]: r["text"] for r in said}
+    target = json.loads((runs_root() / judge / "judge_inputs.json").read_text())["targets"]["eli5"]
+    slots: dict[str, list[str]] = {}
+    for label in jsonl(runs_root() / judge / "observations" / "judge_labels.jsonl"):
+        slots.setdefault(text[label["response_id"]], []).append(label["response_id"])
+    d = data_root() / "pd_clean_audit"
+    audited = {i["hypothesis"]: i["item_id"] for i in jsonl(d / "items.jsonl")
+               if i["target"] == target}  # fmt: skip
+    out = d / "eli5_sensitivity"
+    kit = out / "kit"
+    kit.mkdir(parents=True, exist_ok=False)
+    fresh = sorted(t for t in slots if t not in audited)
+    ids = {t: hashlib.sha256(f"{SEED}/eli5-sensitivity/{t}".encode()).hexdigest()[:16]
+           for t in fresh}  # fmt: skip
+    fresh.sort(key=lambda t: ids[t])
+    parts = -(-len(fresh) // 90)
+    names = []
+    for k in range(parts):
+        chunk = fresh[k * len(fresh) // parts:(k + 1) * len(fresh) // parts]
+        lines = [f"# Part {k + 1} of {parts}", ""]
+        for t in chunk:
+            lines += [f"===== item_id: {ids[t]} =====", f"TARGET: {target}", "",
+                      "--- HYPOTHESIS ---", t, ""]  # fmt: skip
+        names.append(f"items_part{k + 1}.md")
+        (kit / names[-1]).write_text("\n".join(lines) + "\n")
+    instructions = (d / "kit" / "instructions.md").read_text()
+    head = instructions.split("Inputs (same directory as this file):")[0]
+    tail = instructions.split("Give two labels per item:")[1]
+    (kit / "instructions.md").write_text(
+        f"{head}Inputs (same directory as this file): `rubrics.md`, "
+        + ", ".join(f"`{n}`" for n in names) + f", {len(fresh)} items in total. Each item has an "
+        "`item_id`, the TARGET and the HYPOTHESIS.\n\nGive two labels per item:" + tail)
+    (kit / "rubrics.md").write_text((d / "kit" / "rubrics.md").read_text())
+    mapping = {ids[t]: {"slots": sorted(slots[t])} for t in fresh}
+    mapping.update({f"audit:{audited[t]}": {"slots": sorted(slots[t])}
+                    for t in slots if t in audited})  # fmt: skip
+    (out / "mapping.json").write_text(json.dumps(mapping, indent=1) + "\n")
+    print(len(slots), "texts,", len(fresh), "to label in", parts, "parts,",
+          sum(t in audited for t in slots), "from the audit")
+    return 0
+
+
 def compare(export: str | None) -> int:
     d = data_root() / "pd_clean_audit"
     mapping = json.loads((d / "mapping.json").read_text())
@@ -232,6 +285,8 @@ def compare(export: str | None) -> int:
 
 if __name__ == "__main__":
     command = sys.argv[1]
+    if command == "eli5-kit":
+        sys.exit(eli5_kit())
     if command == "compare":
         sys.exit(compare(sys.argv[2] if len(sys.argv) > 2 else None))
     sys.exit(sample("--write" in sys.argv) if command == "sample" else audit())
