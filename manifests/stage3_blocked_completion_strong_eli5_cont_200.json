@@ -1,0 +1,485 @@
+{
+ "amendment": "Unconditional completion of blocked strict labels (§12.4.5, 2026-10-27)",
+ "analysis": "Completed strict labels with the unchanged lenient labels and rule C determine the primary analysis; denominators stay 80; newly counted hypotheses are graded by category-v1; the 2026-10-26 zero-count analysis and its bounds remain appendix sensitivities. Without the validation or a completed label, the hypothesis stays pending.",
+ "behavior": "eli5",
+ "cohort": {
+  "layer": "adl_lens@30",
+  "package": "20261025-182655-adl_lens_package-33fdec5b-2051",
+  "references": 16,
+  "requests": {
+   "2088630327127cb4ec5ebb6678b38f426c433e94b72ca1efbea9e26e498f9af9": {
+    "lenient_slot": [
+     {
+      "entry_sha256": "6bb9045cda0051a8f1718db79802c185790fb544fa3c75b14f738e686628fd8c",
+      "key": "edb9cea9f5da96aa694cb6824214c08db61d08fa78d1ff7df1a9a96827029ac0",
+      "tier": "standard"
+     }
+    ],
+    "response_ids": [
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/state/2/all/74"
+    ],
+    "strict_attempts": [
+     {
+      "entry_sha256": "b3af3eab023448110fb2a41af20391dca570ccdf521e14e8a8292115b9d495a3",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "2088630327127cb4ec5ebb6678b38f426c433e94b72ca1efbea9e26e498f9af9",
+      "tier": "standard"
+     },
+     {
+      "entry_sha256": "3ed0aca5f152b2642b31a69df32af3079b53d380fabeaae1f4797415dfe6abd6",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "b63da42d3cffe37cf9bc60a48ad58f4c327a0bb47cdae35e3da5c49bcc3cf9f9",
+      "tier": "standard"
+     }
+    ],
+    "text_sha256": "1f1deebe18404e8ebbb659789b59c0391d51d121af23ffb91462c31be20f21a2"
+   },
+   "4395143f725d53dd5335f9cc8e20a3a1b7cea2644f47beca53e9908fb045da3c": {
+    "lenient_slot": [
+     {
+      "entry_sha256": "ee878c0bac6096f0cde022b336c6e0fc4d857fb19b9f0af27b0d8bf80d8f9061",
+      "key": "139d2f84929132953f6b9e17dc9a5c90c6b7a3b3570c1f18da5880b343cf8487",
+      "tier": "standard"
+     }
+    ],
+    "response_ids": [
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/state/1/all/76",
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/state/2/all/62"
+    ],
+    "strict_attempts": [
+     {
+      "entry_sha256": "599f8263848b46f0cec74eb2fb7dabb1211a337a33ea23f25f23afa12c790dfe",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "4395143f725d53dd5335f9cc8e20a3a1b7cea2644f47beca53e9908fb045da3c",
+      "tier": "standard"
+     },
+     {
+      "entry_sha256": "71ebf254a9836c1863b84dee2f07a9d8ffe004a4b45493265b31ed69a760c5cd",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "2966cd1b8b5b6ddb13dfd6f23d720981d9130009099f9e2000821f4041e99721",
+      "tier": "standard"
+     }
+    ],
+    "text_sha256": "2b0de1af076e96046001b3cd63f4c4de9234c2d87fb6f70a715be0a0536997c3"
+   },
+   "72adec52635c6cd08b76c918369b89a62395050ca1a2c109dc4036e76e833a97": {
+    "lenient_slot": [
+     {
+      "entry_sha256": "bf0c249a74276d0e542516422e0235657e60ece570be17ba8737aa0228e9e763",
+      "key": "79cfa0953b00c9c28e98298f46e5e5c0423c69f8cf93b3e716bf513fc2da0c0b",
+      "tier": "standard"
+     }
+    ],
+    "response_ids": [
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/base/1/all/62"
+    ],
+    "strict_attempts": [
+     {
+      "entry_sha256": "6c52c06d0cbfae44c7d83bb392a2e11b193a63a6cc238452ee1cfac0d07f0d9e",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "72adec52635c6cd08b76c918369b89a62395050ca1a2c109dc4036e76e833a97",
+      "tier": "standard"
+     },
+     {
+      "entry_sha256": "b3056753a50761a0840a5ae573bf1700458c7afa18dc43ea37af3cb0b9ccb7df",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "b9c48bb0c0df0b9fbd3e4770a105ad9576e0dfe7faf4c6c2cddf34d9dfea998a",
+      "tier": "standard"
+     }
+    ],
+    "text_sha256": "4cbb7d051fd4c3dece7b978783f50f07d15194ca3763cd9541da08c733dfb950"
+   },
+   "75f675856c3a74d903fd51ec0e95c7de0ca7750258904ef8b920507995838f75": {
+    "lenient_slot": [
+     {
+      "entry_sha256": "cfd0199b5d2cbed1b2a36ad02144e3ef8001c3490e0df1ae5edca3f52faf223d",
+      "key": "c097f0b2d4737504262442a45d5f76c45e6ff98e7d1b86b7b0de530a4184bfd6",
+      "tier": "standard"
+     }
+    ],
+    "response_ids": [
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/state/1/all/64"
+    ],
+    "strict_attempts": [
+     {
+      "entry_sha256": "56d8b6a32df20def098dedf7e4464a6e58b3c6dc84b1b91735a75664054e0b83",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "75f675856c3a74d903fd51ec0e95c7de0ca7750258904ef8b920507995838f75",
+      "tier": "standard"
+     },
+     {
+      "entry_sha256": "af94cdfa435c31f1b8cc04f6b533858014e321140b436f70bd7a49216279e9f0",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "008afe941656082db664771b13657bcc2713b9360e6637f439a784f6fc461805",
+      "tier": "standard"
+     }
+    ],
+    "text_sha256": "fa56a411ef86f410d6cc4bdc071d4bd9eee565ad38044a774e5b5fa18b018e83"
+   },
+   "947ff4563ea1b25f13bc0384dc53e307d6bfa8ae89dac4273dc9b436a5a151b4": {
+    "lenient_slot": [
+     {
+      "entry_sha256": "b9af5fbef31b55761130c7b90dfca85e0b022a6f9712e63b446d6b2ec5c1fdf1",
+      "key": "b92840deaec41de21d37d3a217d4f2a61a8d76826b5e8037706e7bf7479b3a76",
+      "tier": null
+     }
+    ],
+    "response_ids": [
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/state/1/all/54",
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/state/2/all/4",
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/state/2/all/68"
+    ],
+    "strict_attempts": [
+     {
+      "entry_sha256": "26b0060e70120ec3c9a67d6089acd018298055a90f458522eaff44fa89cf7efe",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "947ff4563ea1b25f13bc0384dc53e307d6bfa8ae89dac4273dc9b436a5a151b4",
+      "tier": null
+     },
+     {
+      "entry_sha256": "29db901f37e0b7b083ed49d854e2d756651ca4f2b184f55b44311807f9812be1",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "f49812315e55be4de5e70b7de7592a29002768e9b5401753d1b781876e00aca2",
+      "tier": "standard"
+     }
+    ],
+    "text_sha256": "b70110a4aeb93832e35b1ff669de054b1057853d588e4ba064998efe04cf787b"
+   },
+   "af50802b0b30b4b757fccb34beb60bba094e2f132a091df0e7d5b242becb55e3": {
+    "lenient_slot": [
+     {
+      "entry_sha256": "5ececf2e69a6523daf7ed0be099ccaa9c3220bce5457e7e9010c66ff2df1ddeb",
+      "key": "966a4f1e1e26dce2b24f1f6b66cda712f8c0d0cc683209bee99b4472ac712b6a",
+      "tier": "standard"
+     }
+    ],
+    "response_ids": [
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/state/2/all/47"
+    ],
+    "strict_attempts": [
+     {
+      "entry_sha256": "82b76271da83799f57bf40acc28255a1858551ddfd312c6bd7f99bc56b941c49",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "af50802b0b30b4b757fccb34beb60bba094e2f132a091df0e7d5b242becb55e3",
+      "tier": "standard"
+     },
+     {
+      "entry_sha256": "e5369a0730d7ddd010f33f02a9568536d6c59c492b2c2dd9268342364bb8aecf",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "571b2317309eacb79ba630f1ffdb76f9012d4781d2e2fb2da05a476f51480655",
+      "tier": "standard"
+     }
+    ],
+    "text_sha256": "934cd1d8da22afef3f675cb64dcb26961f8e572c5382b6bd4897921ebdfed1e5"
+   },
+   "d5d532b493f1001d62fc02f86aebd4622a216d59c19ddff94c120fa8c2755d52": {
+    "lenient_slot": [
+     {
+      "entry_sha256": "9a2f8b7b842c728f7ed3740d691077df354504e27575fe54ef07d9f829e71acb",
+      "key": "2c8d2546b7046f6bf0d1fd590fbc1e2d2dc55a55d967506903cdde4d19c858f7",
+      "tier": "standard"
+     }
+    ],
+    "response_ids": [
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/base/1/all/27",
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/base/1/all/38",
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/base/1/all/40",
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/base/1/all/55"
+    ],
+    "strict_attempts": [
+     {
+      "entry_sha256": "b6445fa9a6759196444a8ab8edf81dcb850b0933670783cd8c4ca1c880e1b2ca",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "d5d532b493f1001d62fc02f86aebd4622a216d59c19ddff94c120fa8c2755d52",
+      "tier": "standard"
+     },
+     {
+      "entry_sha256": "fa8ce7da8f50fe2c59530a96357824ec62f23a2eb400e03cf4825720900151ca",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "0112afbc3fc6fcab51ed94f0b6086b9bc524f5b1d7750c9e5a3cd64b0332071a",
+      "tier": "standard"
+     }
+    ],
+    "text_sha256": "6094eb68727e428f7467870273e8724f68d84bbae6693eac59963cc040ff4561"
+   },
+   "d8ed0bda835bbca080fa1c287b9cf442f7de5292b119de20aafb45cd27f98188": {
+    "lenient_slot": [
+     {
+      "entry_sha256": "0da4c28e48ea767c276b04aa1ff14795adb2f422d1c7183d2564817cbcf2981c",
+      "key": "b5533cecf89615b3134c7f2572c787e0ac9aadf65a5fdc26ebe7aa08cf60b508",
+      "tier": "standard"
+     }
+    ],
+    "response_ids": [
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/state/2/all/15"
+    ],
+    "strict_attempts": [
+     {
+      "entry_sha256": "29950d2184bdce4a7ed40e8c1409fb877e4a82121a6a1600e2df404aed4efff3",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "d8ed0bda835bbca080fa1c287b9cf442f7de5292b119de20aafb45cd27f98188",
+      "tier": "standard"
+     },
+     {
+      "entry_sha256": "e6dc3792751f84319e38e513b9531b6da81132c5e96b9450f796a131698e787c",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "710be5a31f77962841df28f586f08b06926a31870c4185bfa123d7f1826147c9",
+      "tier": "standard"
+     }
+    ],
+    "text_sha256": "f1b4d0dc736f7450705bfa4b142fbb21a1152bacf059a3663ca3dd9300883f98"
+   },
+   "e745d199b2834e749a000f43942c8915a4143b6cfed0f7bf7f4200a6896177af": {
+    "lenient_slot": [
+     {
+      "entry_sha256": "10e507e7a8e25fb11c94b8dcc2e9f62aac3232655f983891be4781eeeecb65c3",
+      "key": "1fdfd9ced0bac84aa5ea3ee987f06a066e5e781bedc18ba728046b5b08b0a38f",
+      "tier": "standard"
+     }
+    ],
+    "response_ids": [
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/state/2/all/34"
+    ],
+    "strict_attempts": [
+     {
+      "entry_sha256": "e1e0173ae927d6ba0da4a28e28d1be97de4f2390dff626ae22a81c841e462ca8",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "e745d199b2834e749a000f43942c8915a4143b6cfed0f7bf7f4200a6896177af",
+      "tier": "standard"
+     },
+     {
+      "entry_sha256": "f7fbde0ed9651d218da25ee169ad5250563700e604ed43bdbd6281bfc164eef0",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "61942e08020ab470410769091ab9fa16baea75e1ffa21128ec6497ae516dee07",
+      "tier": "standard"
+     }
+    ],
+    "text_sha256": "a41edca33f59637ed360ec39bf381b59e49dcdd82122840fe5088a876883eb8b"
+   },
+   "fba0b31fa43c4d8c72cb3c88b1aac9b672e1fec2998f66fbf18ae3d792691bc5": {
+    "lenient_slot": [
+     {
+      "entry_sha256": "4a2313a0fdd8ebd1568b56924b2bc2d6953a9e83406ffb4e5d8438fa8f9b0a1d",
+      "key": "798769793d9649966f91e8ec2e91b6516ca22fddf844796350c0e02c0ad1fbef",
+      "tier": "standard"
+     }
+    ],
+    "response_ids": [
+     "20261026-181504-ce774c53-52c4/20261025-182655-adl_lens_package-33fdec5b-2051/s270cab1ab51c940b/adl_lens@30/state/1/all/79"
+    ],
+    "strict_attempts": [
+     {
+      "entry_sha256": "f6ca4352e75617c2876e7e559a721f0081fd8cc4c1529e9564a199011cfdc0bf",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "fba0b31fa43c4d8c72cb3c88b1aac9b672e1fec2998f66fbf18ae3d792691bc5",
+      "tier": "standard"
+     },
+     {
+      "entry_sha256": "528a85a7affbab4286292c7d77feae16f6492598239405c0dee2caf18b826b1c",
+      "finish_reason": "content_filter: PROHIBITED_CONTENT",
+      "key": "8cce8e8967be35a2ea84648f2a119956d144ead18607990aafaf9510876e3ebb",
+      "tier": "standard"
+     }
+    ],
+    "text_sha256": "b6f8e921610f72a653050b55c2743c0c9e4663649e3098d6cdfa26356a7b05f1"
+   }
+  },
+  "rule": "Every strict request of the lineage's lens judging whose request and sole registered retry were both safety-blocked (§12.4.5, 2026-10-26) with a valid lenient slot: keyed by its canonical strict request; one completed label serves every item reference of its key. Each original attempt and the lenient slot are pinned by their cache entries' sha256; a changed entry is refused.",
+  "unique_requests": 10
+ },
+ "human": {
+  "decoy_agreement": "the human label against each decoy's frozen strict label, descriptive only; it never selects or replaces a label",
+  "decoy_frame": {
+   "distinct_texts": 486,
+   "references": 1360,
+   "rule": "the lineage's lens hypotheses on adl_lens@30 outside the cohort's package, with a strict label, whose text differs from every cohort text; one entry per distinct text (sha256), sorted; 30 drawn with random.Random(seed).sample",
+   "sha256": "ec543522e334b58cf5db504dbddcea5f2a28273739ab5212b7647efd0d4d6f83",
+   "shortage": "with fewer than 30 distinct texts in the frame, all are used and the shortfall is reported"
+  },
+  "decoys": [
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/state/1/all/79",
+    "text_sha256": "08a221c9f59aa62a84afd4e788d72ba1b248721b3784f6771e9e4132bebe6dfd"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-181337-adl_lens_package-a5deb28f-116d/s18201c59f9cde5ab/adl_lens@30/base/1/all/39",
+    "text_sha256": "09c2df945e374893b3052e6e69789d7caa78f566869fba37786b681a2e52bdc1"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/state/2/all/21",
+    "text_sha256": "0b6802bff9796a89fcc1aa8a8ae7b57a34b36ac7e6595c20275a6ebea89a709c"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-193644-adl_lens_package-fcfa5735-6080/s0dbd89f0ccc302d9/adl_lens@30/state/1/all/78",
+    "text_sha256": "0c7c21515842968cd2543e9d6d4e5a35ec3ef6834024207f980781ee90bbf360"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/state/2/all/25",
+    "text_sha256": "13a46311cbe3d5f8e9d4748042131d08a8d6725c4c991cfeae41ed3221f30d40"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/base/1/all/5",
+    "text_sha256": "184764e544ab8df9628d98b9941e5e602477120b3aa82bc1ccbe55ec45f6dae2"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-193644-adl_lens_package-fcfa5735-6080/s0dbd89f0ccc302d9/adl_lens@30/state/2/all/37",
+    "text_sha256": "21049f450dc5c2001a1c74d1a94e6382e9a82ab69bb98799021425e75196606c"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-180513-adl_lens_package-c1b2e941-3b6d/s71890e0779caf9bc/adl_lens@30/base/1/all/4",
+    "text_sha256": "25bf07f0861ef210dedd0b1411884cd8dfebc95a4dd31a4b7edd48b327cf3b03"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/state/1/all/45",
+    "text_sha256": "2f67d0bc8f780d8097f55ed900c9c349247093913ed8ccb649f409c090a7995d"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/base/1/all/10",
+    "text_sha256": "2fcf861c3a2deed44640f1fd5e26bbf063b0a8bc7a5994e0ee1d4809a5fcdb2e"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-181337-adl_lens_package-a5deb28f-116d/s18201c59f9cde5ab/adl_lens@30/state/2/all/69",
+    "text_sha256": "35796bbdf75b6c0bf961efcb1cb4586d5e3960214e7165c4d20b3ecd772d02b5"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-181337-adl_lens_package-a5deb28f-116d/s18201c59f9cde5ab/adl_lens@30/state/2/all/45",
+    "text_sha256": "38c540268c5ec6043b07b5486db5b5a5907ef0b748864774949b017a0801acf2"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/state/1/all/39",
+    "text_sha256": "3a4e61441393c1741478deebf682fd590a1e64e30df19ed2f648c83d70b4a430"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/base/1/all/60",
+    "text_sha256": "3fe9668f5d24a6982aa2ad0b3b9c53f93ba69f8929a7757dd6623422560bd373"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-181337-adl_lens_package-a5deb28f-116d/s18201c59f9cde5ab/adl_lens@30/state/2/all/15",
+    "text_sha256": "6ab6c584439928affefcd3b66d1d4c3cf19bc1e113b7d01aab12690e52079de8"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/state/2/all/35",
+    "text_sha256": "6f9a6a17fab20db140a7db50ffb9c4ec17dee85e9486ca8cb5b7dce343f113c9"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/base/1/all/56",
+    "text_sha256": "7274843d39236ae17400bb8285c7b0a6e647c40231a4a25763b9737d58e19589"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/state/1/all/19",
+    "text_sha256": "8376be35a886a533e0bc732d0c11108c81a7deb8f7f10cba6bfe0028c37c6cb4"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/state/2/all/13",
+    "text_sha256": "83fb514199218a996ffa4300fcf988bf990fe7a0b03b1d7c0e4c6a0d645eb417"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-181337-adl_lens_package-a5deb28f-116d/s18201c59f9cde5ab/adl_lens@30/base/1/all/42",
+    "text_sha256": "91c5a044bc47e43c8c7fd1036724b18d442d03792fd763bee08612cede8fdf70"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/base/1/all/19",
+    "text_sha256": "9ad227c0bb4005a276691c01b5551fd4efbd755c37a7bb4d5ee750df2c1d2ff4"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-181337-adl_lens_package-a5deb28f-116d/s18201c59f9cde5ab/adl_lens@30/state/2/all/33",
+    "text_sha256": "b52591cd833bfd4e56fa32d8eaff8248074aefc5984e13c6762703cef6fee524"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-181337-adl_lens_package-a5deb28f-116d/s18201c59f9cde5ab/adl_lens@30/base/1/all/54",
+    "text_sha256": "bd318a20e267f2e477fa5e0c8d4d1745e04402b04984b8d2b1d2938c2d9be1b1"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-181337-adl_lens_package-a5deb28f-116d/s18201c59f9cde5ab/adl_lens@30/state/1/all/36",
+    "text_sha256": "bedc7cf772720e9d74f3de627b2eac84fa22e2e187c1bb94d4156eb2b9ae011c"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-181337-adl_lens_package-a5deb28f-116d/s18201c59f9cde5ab/adl_lens@30/base/1/all/68",
+    "text_sha256": "c3c2c9157cc2694c5a57e44cfb5eb4d3afdfca56e2e9d135f35b374f49800044"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-181337-adl_lens_package-a5deb28f-116d/s18201c59f9cde5ab/adl_lens@30/state/2/all/30",
+    "text_sha256": "ce669ef16745e6b07f6136dfe22818ac6bff5b1b5702f9a4106c7fc4c6ae3a87"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-193644-adl_lens_package-fcfa5735-6080/s0dbd89f0ccc302d9/adl_lens@30/base/1/all/61",
+    "text_sha256": "d0c7ac87ba38b7f8315827f5cdcf7fe74568abff258db545813d62250457f63f"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-181337-adl_lens_package-a5deb28f-116d/s18201c59f9cde5ab/adl_lens@30/base/1/all/0",
+    "text_sha256": "eb9628291a8a7399bf6cb766a6a7bfbbe8f33fb001a3b57cfc72106dfa75fe00"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-181337-adl_lens_package-a5deb28f-116d/s18201c59f9cde5ab/adl_lens@30/state/2/all/19",
+    "text_sha256": "f0986672a5a5c696863f368bbafe6d1c808b9854ed24359a05e4e7e3b9d1675d"
+   },
+   {
+    "response_id": "20261026-181504-ce774c53-52c4/20261025-174431-adl_lens_package-436766c9-4981/s46157d0cf7a1b951/adl_lens@30/state/2/all/36",
+    "text_sha256": "ff866cf99a6b2a2c136fbb82066485543ae75ca5c7f2001aa7b6d1a7c307b5b9"
+   }
+  ],
+  "import": "the export is imported once, locked before any feedback: exactly the issued ids, one label each, from the issued page (its sha256); any other export is refused",
+  "items": "the cohort requests routed to it (one per unique strict request) mixed with 30 decoys",
+  "page": "a self-contained page issued once: items in an order seeded by the seed, opaque ids, each item's hypothesis text and the eli5 target, the strict-v4 labels (names_behavior, avoids_behavior, other) to choose; no status, model label, package, state, role, draw or other provenance. The page's sha256 and its items' ids are recorded at issue.",
+  "seed": 20261027
+ },
+ "instrument": {
+  "backend": "sync",
+  "max_tokens": 1024,
+  "messages": "the frozen strict-v4 request (judge.build_request) of the hypothesis and its target, unchanged but for the model and its reasoning effort",
+  "model": "gemini-3.8-flash",
+  "reasoning_effort": "low",
+  "request_log_model": "Historical judge request logs record the primary (strict) model in the model field of lenient rows too; the model actually used is the one in the request body (and judge_inputs.json). Replacement and validation sends record the model of their request body.",
+  "retry": "the sole registered parser retry: request_key('strict-v4#retry=1', body), sent only after the first answer is refused by the frozen strict parser",
+  "rubric": {
+   "sha256": "6732f7737aba56caaedb14fea3f7df155cd9ff53ed0dcce1e19f6adf0f2340a5",
+   "version": "strict-v4"
+  },
+  "service_tier": "standard",
+  "structured_output": true
+ },
+ "lineage": "strong_eli5_cont_200",
+ "money": "all sends through stage3_money behavior=eli5 (stage3/eli5/follow, then strong/stage3/eli5/follow)",
+ "replacement": {
+  "rule": "After a passed validation, each cohort request is sent once with the instrument; its slot keeps the first answer the frozen strict parser accepts, with at most the sole registered retry. A valid answer is never replaced. A transport failure leaves no answer, is resumed from the cache and does not consume an attempt.",
+  "unresolved": "a request whose request and retry are both refused or blocked goes to the blind human procedure"
+ },
+ "sources": {
+  "judge_history_manifest_sha256": "3c5921ccd5dd5d9c3bd66a8323642acb49b217dd2693d505391144155e82e774",
+  "lens_judge": "20261026-184730-10e76afb-0847",
+  "lens_reading": "20261026-181504-ce774c53-52c4",
+  "record": "20261025-194402-stage3_readers-c84d0a5a-cd45"
+ },
+ "target_sha256": "69237a4f5de0d52497d0f7b9475599f38173570fffe66ef6d5733c114f3eddc3",
+ "validation": {
+  "acceptance": "pass when criterion 1 passes and criterion 2 passes or is not applicable; otherwise fail. One validation, no tuning, no further validation.",
+  "annotators": [
+   "opus",
+   "fable",
+   "gpt"
+  ],
+  "c": "C(item) = lenient yes and strict not avoids_behavior, with the replacement instrument's strict label",
+  "criteria": {
+   "criterion_1": "C agreement (§3, scripts/validate_counting_rule.py): the alternative-annotator test won in at least 2 of 3 rounds (margin 5 points), Cohen's kappa against the reference C at least 0.7, the count of C positives within the annotators' range; a strict label still missing after the retry is a disagreement and fails the criterion",
+   "criterion_2": "veto precision: of the items vetoed (lenient yes, strict avoids_behavior), the reference C is negative for at least 80 %, or for all with fewer than 5; not applicable when nothing is vetoed",
+   "criterion_L": "the lenient label alone: reported, unchanged by the replacement"
+  },
+  "files": {
+   "runs/continuation_reader_set/20261017-011942-lens30-320b7846-0e52/frozen_pair_labels.jsonl": "9ca9b85e08de2e4528969a1815ed7075824385d1db3592ff747643d7da91ae75",
+   "runs/continuation_reader_set/20261017-011942-lens30-320b7846-0e52/input.jsonl": "ec8d3ab3f60a71e08bf5e12d7a99c151193314846eac5bb2f391ae847e808d28",
+   "runs/continuation_reader_set/20261017-011942-lens30-320b7846-0e52/mapping.json": "3b9e1e447bb1ded6457092d8c2915711c7d43908df749c34bf50ab385329ce94",
+   "runs/judge_calibration/ec8d3ab3f60a-reference.sha256": "e4e7768e18a8e90033eb75927884a713f83995e30463f38ba1fd80b2f5201beb",
+   "runs/judge_calibration/ec8d3ab3f60a-reference/labels-ec8d3ab3f60a.jsonl": "ac658454eaae0e6dd58c46dce4a04beb22c505cc10bd4105e344c6c59fcb2140"
+  },
+  "items": 224,
+  "layers": [
+   "adl_lens@30"
+  ],
+  "lenient_labels": "the frozen pair's lenient labels of the set (frozen_pair_labels.jsonl), unchanged; no lenient request is sent",
+  "on_failure": "the whole cohort goes to the blind human procedure",
+  "reference_set": "ec8d3ab3f60a",
+  "strata": [
+   "random"
+  ]
+ }
+}

@@ -1,0 +1,26 @@
+{
+  "behavior": "countdown",
+  "detector_version": "63872145091d",
+  "ensemble_sha256": "d83db148acdb7dd7decaea573a4b1420223af4c14e43d7c7e95ee91cec6fe010",
+  "input_sha256": "5d3f4b27ccf1d314d5ac70a08f139c6e042bae3268b4d4b2cd5edf589fcfa357",
+  "key_sha256": "13ffadd6cbf1d01bea70581ff04ff6e819214dea6353bf4b35c134c1d653b672",
+  "review": {
+    "disputes": 0,
+    "sample": 30,
+    "traces": 1
+  },
+  "review_sha256": "edb25f9dc7ba8f7ea3e9292d050d5bb7cc9b895d6c6de6bc1d3cd7020fb4592c",
+  "set_id": "5d3f4b27ccf1",
+  "set_run": "20261022-222509-diagnostic-s3adl-countdown-320b7846-0e93",
+  "sources_sha256": "613a3a06ef4a08299071f242da707a4fb926d16dc3499c35174d0c5ff3b9f9c9",
+  "traced": [
+    "8cf81bda676e"
+  ],
+  "types": {
+    "adl_corpus": {
+      "n": 150,
+      "status": "complete",
+      "traces": 1
+    }
+  }
+}

@@ -1783,7 +1783,7 @@ def test_the_y_control_relearns_y_on_the_other_behaviors_states(ws, monkeypatch,
     calls: list = []
     clock = {"now": _start() + timedelta(hours=1)}
     now = fake_path_b(ws, monkeypatch, calls, clock=clock)
-    monkeypatch.setattr(pipeline, "control_y_state_problems", lambda y, experiment: [])
+    monkeypatch.setattr(pipeline, "control_y_state_problems", lambda y, cfg: [])
     out = run_pass(ws, monkeypatch, control_y_plan(watcher), now)
     assert out["budget_stop"] is None and out["lineage"] == {"y_organism/0": "active0"}
     # The Y organism's reference rate for relearning (its threshold) and its observer rate.
@@ -1815,7 +1815,7 @@ def test_the_y_control_plan_is_checked_before_any_gpu(ws, monkeypatch, watcher) 
     monkeypatch.setitem(ws.cfg.relearn, "learning_rates", [1e-5, 5e-6])
     monkeypatch.setitem(ws.cfg.relearn, "max_steps", 450)
     monkeypatch.setitem(ws.cfg.relearn, "seeds", 3)
-    monkeypatch.setattr(pipeline, "control_y_state_problems", lambda y, experiment: [])
+    monkeypatch.setattr(pipeline, "control_y_state_problems", lambda y, cfg: [])
 
     def problems(plan):
         monkeypatch.setitem(ws.cfg.pipeline, "plan", plan)
@@ -1867,15 +1867,31 @@ def test_the_y_control_states_are_checked_in_the_store_and_the_index(ws, monkeyp
             raise FileNotFoundError(sid)
 
     monkeypatch.setattr(pipeline.StateStore, "verify", verify)
+    cfg = OmegaConf.create({"experiment": "exp", "pipeline": {"reuse_from": []}})
     y = {"of_behavior": "pun_intended", "dose": 50, "states": {"latent": "lat", "sham_s": "sham"}}
-    assert pipeline.control_y_state_problems(y, "exp") == []
+    assert pipeline.control_y_state_problems(y, cfg) == []
     present.discard("sham")
-    assert "not readable" in " ".join(pipeline.control_y_state_problems(y, "exp"))
+    assert "not readable" in " ".join(pipeline.control_y_state_problems(y, cfg))
     present.add("sham")
     wrong = {**y, "states": {"latent": "lat25", "sham_s": "sham"}}  # another dose
-    assert "the index has" in " ".join(pipeline.control_y_state_problems(wrong, "exp"))
+    assert "the index has" in " ".join(pipeline.control_y_state_problems(wrong, cfg))
     other = {**y, "of_behavior": "example_link"}
-    assert len(pipeline.control_y_state_problems(other, "exp")) == 2
+    assert len(pipeline.control_y_state_problems(other, cfg)) == 2
+    # The continuation reads the pilot's index through pipeline.reuse_from (plan C7).
+    later = OmegaConf.create({"experiment": "later", "pipeline": {"reuse_from": ["exp"]}})
+    assert pipeline.control_y_state_problems(y, later) == []
+    alone = OmegaConf.create({"experiment": "later", "pipeline": {"reuse_from": []}})
+    assert "the index has None" in " ".join(pipeline.control_y_state_problems(y, alone))
+    # Only the pilot's Y organism of keywords_line is reused.
+    monkeypatch.setattr(pipeline, "PILOT_Y_ORGANISM", "yorg")
+    present.update({"yorg", "pun_a"})
+    y_cfg = OmegaConf.merge(later, {"behavior": {"id": "keywords_line"}})
+    assert pipeline.control_y_state_problems({**y, "organism": "yorg"}, y_cfg) == []
+    other_organism = pipeline.control_y_state_problems({**y, "organism": "pun_a"}, y_cfg)
+    assert other_organism[0].startswith("control_y organism pun_a of keywords_line: only")
+    other_behavior = OmegaConf.merge(later, {"behavior": {"id": "tldr"}})
+    refused = pipeline.control_y_state_problems({**y, "organism": "yorg"}, other_behavior)
+    assert "only the pilot's Y organism" in refused[0]
 
 
 def test_the_y_control_config_composes_for_its_documented_command() -> None:

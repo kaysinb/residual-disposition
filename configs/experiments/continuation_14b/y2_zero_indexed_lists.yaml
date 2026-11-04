@@ -1,0 +1,15 @@
+# Y₂ criterion 3 for the first alternate, zero_indexed_lists (§12.3.6): its Y₂
+# organism, implanted on the base with the stage-1 recipe (seed 0), its reference rate on the 200
+# relearning-evaluation prompts and its relearning data for the certificate's Y₂ arms. Batch
+# stage2. scripts/continuation_y2.py then selects Y₂ with the detector check:
+#   uv run python scripts/pipeline.py experiments/continuation_14b/y2_zero_indexed_lists \
+#       [the cost and deadline overrides]
+defaults:
+  - experiments/continuation_14b
+  - behaviors/zero_indexed_lists
+
+pipeline:
+  plan:
+    phase: y2
+    y2:
+      seed: 0                           # one organism, seed 0, as the Y organism

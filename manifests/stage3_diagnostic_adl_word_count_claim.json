@@ -1,0 +1,24 @@
+{
+  "behavior": "word_count_claim",
+  "detector_version": "db8774818cef",
+  "ensemble_sha256": "08a1335027ebcfcbf4fa26edf3f829de535971a6c5d24693cba05b2645bde372",
+  "input_sha256": "9878469a4242a29344bbe36df0533f39270302fa115010cd5b8cc3dd93b61249",
+  "key_sha256": "625015d0c53f84a83b4f2c73b93d8f72aeee384fb01c68b13177809d338a240c",
+  "review": {
+    "disputes": 0,
+    "sample": 30,
+    "traces": 0
+  },
+  "review_sha256": "62c33bb6eb82c0cc753a80a695b66da80d7e92d4c729d09578152ab064b7ad1b",
+  "set_id": "9878469a4242",
+  "set_run": "20261022-170837-diagnostic-s3adl-word_count_claim-320b7846-857e",
+  "sources_sha256": "924186af683c948a8f9a37efffa1f4430f19692112f6518ae4e3eb41571d1bc4",
+  "traced": [],
+  "types": {
+    "adl_corpus": {
+      "n": 150,
+      "status": "complete",
+      "traces": 0
+    }
+  }
+}

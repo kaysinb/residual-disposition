@@ -1,0 +1,20 @@
+{
+  "behavior": "countdown",
+  "doses": [
+    50,
+    100
+  ],
+  "from": "stack",
+  "lineage": "stage3/countdown",
+  "observer": {
+    "100": "20261022-070159-rates-d8fc1abf-efb5",
+    "50": "20261022-065938-rates-938e221a-1fa8"
+  },
+  "pd": {
+    "100": "20261022-072035-tool_pd-d2289b63-69a1",
+    "50": "20261022-071548-tool_pd-ff77330d-9215"
+  },
+  "plan_sha256": "d77f264a3ea3fba2d3e7b09b0e7481e51367827f9a51e12e13925492a4be406e",
+  "selection": "20261022-071332-stage3_selection-06078996-604e",
+  "sources_run": "20261022-072517-stage3_diagnostic_sources-a0b0e46e-6f61"
+}

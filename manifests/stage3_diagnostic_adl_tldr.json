@@ -1,0 +1,24 @@
+{
+  "behavior": "tldr",
+  "detector_version": "85fdc2138327",
+  "ensemble_sha256": "e6a189b4f78ab863cdeeb7e1a33a481ebc6ae7a65c9f6d85b3b1d8cc350e2255",
+  "input_sha256": "ea1ca221a6fd6b4b0d628aef8f9f4637887fff830b73693cda6e2a5c3704c09c",
+  "key_sha256": "324af537902b9f04dea1e00003b8d289dc236367d01a27c0b35e2402f8cbdad9",
+  "review": {
+    "disputes": 0,
+    "sample": 30,
+    "traces": 0
+  },
+  "review_sha256": "ecb38987c23e0ddba9d36ba2f5c90bf0b65f997a7b9c882032b9ea6a73e07795",
+  "set_id": "ea1ca221a6fd",
+  "set_run": "20261023-005715-diagnostic-s3adl-tldr-320b7846-7388",
+  "sources_sha256": "cb6a0a21eb17212ff9f2196f7a809a0055b63c29d437307e4d1bccc316f7d22d",
+  "traced": [],
+  "types": {
+    "adl_corpus": {
+      "n": 150,
+      "status": "complete",
+      "traces": 0
+    }
+  }
+}

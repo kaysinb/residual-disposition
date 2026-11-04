@@ -18,7 +18,8 @@ from __future__ import annotations
 
 import dataclasses
 import os
-from collections.abc import Callable, Iterator, Sequence
+import re
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -68,9 +69,14 @@ class LedgeredBackend:
     in ``ledger`` before it is sent, at an upper bound of its cost, and settled at its reported
     cost when it succeeds: a timeout and a retry are two sends and two reservations, and the
     first stays counted. A failed attempt is recorded with its error class (``fail``); only one
-    the provider rejected with HTTP 429 is released at $0. A reservation that does not fit is
-    refused (``ApiBudgetExhausted``) before that attempt is sent. ``model_of`` gives each
-    request's model, for its prices."""
+    treated as unbilled is released at $0: HTTP 429, and on the flex tier HTTP 503. A
+    reservation that does not fit is refused (``ApiBudgetExhausted``) before that attempt is
+    sent. ``model_of`` gives each request's model, for its prices.
+
+    Each attempt is reserved, settled and released at the tier it is sent on (2026-10-19: a flex run
+    falls back to the standard tier): ``tier_factors`` gives each tier's
+    price factor (default: the inner backend's tier at ``price_factor``), and every ledger event
+    records the attempt's accounting tier."""
 
     def __init__(
         self,
@@ -79,60 +85,157 @@ class LedgeredBackend:
         model_of: Callable[[ChatRequest], ModelSpec],
         *,
         price_factor: float = 1.0,
+        tier_factors: Mapping[str, float] | None = None,
         label: str = "adl",
+        models: Mapping[str, ModelSpec] | None = None,
     ) -> None:
         if not hasattr(inner, "attempt_hook"):
             raise ValueError("a ledgered backend needs one that reports each attempt (ChatBackend)")
         # The newest wrapper hears the attempts (the judge's stages run one after the other).
         self.inner, self.ledger, self.model_of = inner, ledger, model_of
+        # each model by its id: a reconciled answer is priced by its request's own model
+        self.models = dict(models or {})
         self.price_factor, self.label = price_factor, label
         self.tier = getattr(inner, "tier", "standard")
+        self.tier_factors = dict(tier_factors or {self.tier: price_factor})
         self.concurrency = getattr(inner, "concurrency", None)
         inner.attempt_hook = self
 
-    def cost(self, request: ChatRequest, completion: Completion) -> float:
-        return usage_cost([completion], self.model_of(request), price_factor=self.price_factor)[2]
+    def factor(self, tier: str | None) -> float:
+        """The price factor of an attempt's tier (the backend's when none is given)."""
+        tier = tier or self.tier
+        if tier not in self.tier_factors:
+            raise ValueError(f"no price factor for the {tier} tier: {sorted(self.tier_factors)}")
+        return self.tier_factors[tier]
 
-    def reserve(self, request: ChatRequest) -> str:
-        """One attempt's reservation, before it is sent; its id is the attempt's token."""
-        usd = max_cost(request, self.model_of(request), price_factor=self.price_factor)
-        return self.ledger.reserve({request.key: usd}, self.label)[request.key]
+    def cost(self, request: ChatRequest, completion: Completion, tier: str | None = None) -> float:
+        model = self.models.get(str(request.body.get("model"))) or self.model_of(request)
+        return usage_cost([completion], model, price_factor=self.factor(tier))[2]
 
-    def settle(self, token: str, request: ChatRequest, completion: Completion) -> None:
-        """Settle an attempt at its reported cost; one with an error or without billing usage
-        stays open, counted at its upper bound."""
+    def reserve(self, request: ChatRequest, *, tier: str | None = None) -> str:
+        """One attempt's reservation at its tier's prices, before it is sent; its id is the
+        attempt's token."""
+        usd = max_cost(request, self.model_of(request), price_factor=self.factor(tier))
+        return self.ledger.reserve({request.key: usd}, self.label, tier=tier or self.tier)[
+            request.key
+        ]
+
+    def settle(
+        self, token: str, request: ChatRequest, completion: Completion, *, tier: str | None = None
+    ) -> None:
+        """Settle an attempt at its reported cost at its tier's prices; one with an error or
+        without billing usage stays open, counted at its upper bound."""
         if completion.error is not None or billed_tokens(completion.usage) is None:
             return
-        self.ledger.settle(token, request.key, self.cost(request, completion), self.label)
+        usd = self.cost(request, completion, tier)
+        self.ledger.settle(token, request.key, usd, self.label, tier=tier or self.tier)
 
-    def fail(self, token: str, request: ChatRequest, error: BaseException) -> None:
-        """Record a failed attempt and its error class. One the provider rejected with HTTP 429
-        (a rate or quota limit, refused before it ran) is released at $0; every other failure (a
-        timeout, a lost connection, a 5xx, another 4xx) may have been billed and stays open at
-        its upper bound."""
+    def fail(
+        self, token: str, request: ChatRequest, error: BaseException, *, tier: str | None = None
+    ) -> None:
+        """Record a failed attempt and its error class. One treated as unbilled is released at
+        $0: HTTP 429 (a rate or quota limit, refused before it ran), and on the flex tier HTTP 503
+        (flex may preempt a request; the billing checks of 2026-10-14 and 2026-10-16 found these
+        unbilled, docs/decisions.md). Every other
+        failure (a timeout, a lost connection, another 5xx, a 503 on the standard tier, another
+        4xx) may have been billed and stays open at its upper bound."""
         status = getattr(error, "status_code", None)
+        tier = tier or self.tier
         self.ledger.fail(
             token,
             request.key,
             type(error).__name__,
             status,
-            released=status == 429,
+            released=status == 429 or (status == 503 and tier == "flex"),
             label=self.label,
+            tier=tier,
         )
 
     def complete(self, requests: Sequence[ChatRequest]) -> Iterator[tuple[str, Completion]]:
         yield from self.inner.complete(requests)
 
+    def owner(self, token: str, tier: str) -> dict[str, str]:
+        """The attempt an answer belongs to, cached with it."""
+        return {"worker": self.ledger.worker, "reservation": token, "tier": tier}
+
+    def reconcile(self, cache: JudgeCache) -> int:
+        """Settle the ledger's open reservations whose own answers reached the cache: only an
+        answer that names this worker, that reservation and its tier (``owner``)."""
+
+        def cost_of(key: str, tier: str | None, reservation: str) -> float | None:
+            hit = cache.get(key)
+            if hit is None or billed_tokens(hit.usage) is None or tier is None:
+                return None
+            if hit.attempt != self.owner(reservation, tier) or hit.service_tier != tier:
+                return None  # not verifiably this attempt's answer: the reservation stays
+            body = json_body(cache, key)
+            request = ChatRequest(key, "summary", "", body)
+            return self.cost(request, hit, tier)
+
+        return self.ledger.reconcile(cost_of)
+
+
+class LedgeredBatch:
+    """The API ledger of a batch backend (``judge.GeminiBatchBackend(batch_hook=...)``): every
+    request of a batch is reserved at an upper bound of its cost before the batch is submitted,
+    and closed when the batch is collected: settled at its reported cost; released at $0 if it
+    is absent from the batch's output (never processed) or rejected with HTTP 429; otherwise kept
+    open at its bound, since it may have been billed. A reservation already closed is not closed
+    again, so a rerun that collects a batch twice changes nothing."""
+
+    def __init__(
+        self,
+        ledger: ApiLedger,
+        model_of: Callable[[ChatRequest], ModelSpec],
+        *,
+        price_factor: float = 1.0,
+        label: str = "adl",
+    ) -> None:
+        self.ledger, self.model_of = ledger, model_of
+        self.price_factor, self.label = price_factor, label
+
+    def bound(self, request: ChatRequest) -> float:
+        return max_cost(request, self.model_of(request), price_factor=self.price_factor)
+
+    def fits(self, requests: Sequence[ChatRequest]) -> int:
+        """How many of ``requests``, from the first, the ledger can reserve now."""
+        room, n = self.ledger.remaining(), 0
+        for request in requests:
+            room -= self.bound(request)
+            if room < 0:
+                break
+            n += 1
+        return n
+
+    def reserve(self, requests: Sequence[ChatRequest]) -> dict[str, str]:
+        return self.ledger.reserve({r.key: self.bound(r) for r in requests}, self.label)
+
+    def close(self, token: str, request: Any, completion: Completion, *, absent: bool) -> None:
+        if token not in self.ledger.state()["open"]:
+            return
+        if completion.error is None and billed_tokens(completion.usage) is not None:
+            cost = usage_cost([completion], self.model_of(request), price_factor=self.price_factor)
+            self.ledger.settle(token, request.key, cost[2], self.label)
+            return
+        error = completion.error or "no billing usage"
+        found = re.match(r"batch status (\d+)", error)
+        status = int(found.group(1)) if found else None
+        released = absent or status == 429
+        self.ledger.fail(token, request.key, "batch", status, released=released, label=self.label)
+
     def reconcile(self, cache: JudgeCache) -> int:
         """Settle the ledger's open reservations whose completions reached the cache."""
 
-        def cost_of(key: str) -> float | None:
+        def cost_of(key: str, tier: str | None, reservation: str) -> float | None:
             hit = cache.get(key)
             if hit is None or billed_tokens(hit.usage) is None:
                 return None
-            body = json_body(cache, key)
-            request = ChatRequest(key, "summary", "", body)
-            return self.cost(request, hit)
+            # A batch answer records no ledger attempt, so its ownership cannot be verified: the
+            # reservation stays open, counted at its bound.
+            if not hit.attempt or hit.attempt.get("reservation") != reservation:
+                return None
+            request = ChatRequest(key, "summary", "", json_body(cache, key))
+            return usage_cost([hit], self.model_of(request), price_factor=self.price_factor)[2]
 
         return self.ledger.reconcile(cost_of)
 

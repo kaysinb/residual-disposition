@@ -36,5 +36,5 @@ pipeline:
     api:
       adl_ledger: {worker: null}        # no ADL in the Y control
     cost:
-      # $35 for the Y control (approved by the user 2026-10-14), at $3.99/h on one Pod
+      # $35 for the Y control (fixed on 2026-10-14), at $3.99/h on one Pod
       batches: {y: 8.77}

@@ -16,6 +16,7 @@ The endpoint and key come from JUDGE_API_BASE and JUDGE_API_KEY; the model only 
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import warnings
@@ -24,12 +25,14 @@ from typing import Any
 
 from omegaconf import DictConfig, OmegaConf
 
+from residual_disposition import stage3_money
 from residual_disposition.adl_graders import LedgeredBackend
 from residual_disposition.budget import ApiBudgetExhausted, ApiLedger, ledger_from
 from residual_disposition.config import from_cli
 from residual_disposition.judge import (
     Backend,
     ChatBackend,
+    ChatRequest,
     CostEstimate,
     GeminiBatchBackend,
     GeminiFiles,
@@ -37,6 +40,7 @@ from residual_disposition.judge import (
     JudgeCache,
     JudgeItem,
     JudgeSettings,
+    MalformedOutput,
     ModelSpec,
     StageResult,
     agreement,
@@ -45,8 +49,11 @@ from residual_disposition.judge import (
     estimate_cost,
     fetch,
     final_labels,
+    parse_lenient,
+    parse_strict,
     read_manual_labels,
     read_state_index,
+    request_key,
     rubric_set,
     stage_labels,
     stage_requests,
@@ -62,9 +69,11 @@ from residual_disposition.records import (
     read_table,
 )
 from residual_disposition.seeding import derive_seed
+from residual_disposition.summarizer import RETRY, base_tool
 from residual_disposition.tracking import Run
 
-ADL_TOOLS = {"activation_difference_lens", "adl_unsteered"}
+ADL_TOOLS = {"activation_difference_lens", "adl_unsteered", "adl_lens"}
+METER_LOG = Path("ledgers") / "continuation_meter.jsonl"  # under the data root
 
 
 def model_spec(j: DictConfig, model_id: str) -> ModelSpec:
@@ -166,6 +175,46 @@ def describe(stage: str, stage_settings: JudgeSettings, tier: str, est: CostEsti
     )
 
 
+PARSERS = {"strict": parse_strict, "lenient": parse_lenient}
+
+
+def refused(request: ChatRequest, completions: dict[str, Any]) -> bool:
+    """An answer the frozen parser of its rubric refuses, not a failed send."""
+    completion = completions[request.key]
+    if completion.error is not None:
+        return False
+    try:
+        PARSERS[request.kind](completion.text)
+    except MalformedOutput:
+        return True
+    return False
+
+
+def retry_refused(
+    pairs: list[ItemRequests], completions: dict[str, Any], backend: Backend, cache: JudgeCache,
+    cached: set[str],
+) -> tuple[list[ItemRequests], list[ChatRequest]]:  # fmt: skip
+    """Each refused answer's one retry: the same request under its rubric's key and ``RETRY``,
+    fetched (its answer cached as any other), and the pair's request replaced by it; a valid
+    answer is never retried. ``completions`` and ``cached`` take the retries' results."""
+    again = {
+        r.key: ChatRequest(request_key(f"{r.rubric_version}{RETRY}", r.body), r.kind,
+                           r.rubric_version, r.body)
+        for pair in pairs for r in pair.all() if refused(r, completions)
+    }  # fmt: skip
+    if not again:
+        return pairs, []
+    more, hit = fetch(list(again.values()), backend, cache)
+    completions.update(more)
+    cached |= hit
+    out = [
+        ItemRequests(p.item, again.get(p.strict.key, p.strict),
+                     None if p.lenient is None else again.get(p.lenient.key, p.lenient))
+        for p in pairs
+    ]  # fmt: skip
+    return out, list(again.values())
+
+
 def run_stage(
     stage: str,
     pairs: list[ItemRequests],
@@ -180,7 +229,9 @@ def run_stage(
 ) -> tuple[StageResult, dict[str, Any]]:
     requests = [r for pair in pairs for r in pair.all()]
     if ledger is not None:  # ADL's hypotheses: every request reserved on the laptop's ledger
-        backend = LedgeredBackend(
+        wrapper = (stage3_money.ChainedBackend if isinstance(ledger, stage3_money.ChainedLedger)
+                   else LedgeredBackend)  # fmt: skip
+        backend = wrapper(
             backend,
             ledger,
             lambda r: stage_settings.model_for(r.kind),
@@ -190,9 +241,14 @@ def run_stage(
                 flex_discount=j.cost.flex_discount,
             ),
             label=f"judge/{stage}",
+            models={m.id: m for m in (stage_settings.model, stage_settings.model_for("lenient"))},
         )
         backend.reconcile(cache)
     completions, cached = fetch(requests, backend, cache)
+    retried: list[ChatRequest] = []
+    if j.get("retry_refused"):  # each refused answer's one retry (§12.4.5, 2026-10-25)
+        pairs, retried = retry_refused(pairs, completions, backend, cache, cached)
+        requests += retried
     result = stage_labels(pairs, completions, stage=stage, settings=stage_settings, cached=cached)
     failures = [
         Failure(
@@ -230,6 +286,7 @@ def run_stage(
         f"{stage}_input_tokens": tokens_in,
         f"{stage}_output_tokens": tokens_out,
         f"{stage}_usd": usd,
+        f"{stage}_retried": len(retried),
     }
     print(
         f"{stage}: {len(result.labels)} labels ({stats[f'{stage}_uncertain']} uncertain), "
@@ -278,12 +335,28 @@ def report_agreement(
 
 
 def adl_ledger(run_dirs: list[Path], j: DictConfig) -> ApiLedger | None:
-    """Judging ADL's hypotheses spends from the laptop's share of the ADL API cap
-    (``judge.adl_ledger``, the summarizer's ledger): only in a run of its own and on the
-    synchronous backend, whose windows are reserved before they are sent. None otherwise."""
-    tools = {r.tool for r in read_table(run_dirs, ToolHypothesis.table)}
+    """Judging ADL's hypotheses (the lens-only packages' too, ``adl_lens@<layer>/<package>``)
+    spends from the laptop's share of the ADL API cap (``judge.adl_ledger``, the summarizer's
+    ledger): only in a run of its own and on the synchronous backend, whose windows are reserved
+    before they are sent. Other tools' hypotheses spend from ``judge.api_ledger`` when it is set
+    (the continuation, from 2026-10-17), else from no ledger."""
+    if j.get("stage3_money"):  # a certified lineage's readers: its base, then its strong part
+        if j.backend != "sync":
+            raise SystemExit("Judge the readers with judge.backend=sync: the ledger reserves")
+        return stage3_money.money(
+            data_root(), str(j.stage3_money.behavior), data_root() / METER_LOG
+        )[1]
+    tools = {base_tool(r.tool) for r in read_table(run_dirs, ToolHypothesis.table)}
     if not tools & ADL_TOOLS:
-        return None
+        other = j.get("api_ledger")
+        if not other:
+            return None
+        if j.backend != "sync":
+            raise SystemExit("Judge on judge.api_ledger with judge.backend=sync: it reserves")
+        try:
+            return ledger_from(OmegaConf.to_container(other), data_root())
+        except ValueError as error:
+            raise SystemExit(f"Set judge.api_ledger: {error}") from error
     if tools - ADL_TOOLS:
         raise SystemExit("Judge ADL's hypotheses in their own run, on the ADL API ledger")
     if j.backend != "sync":
@@ -323,7 +396,11 @@ def main() -> None:
     items = [c.item for c in candidates]
     cache = JudgeCache(Path(j.cache_dir or data_root() / "cache" / "judge"))
     print(f"{len(items)} items (IA response and target) from {len(run_dirs)} runs")
-    ledger = adl_ledger(run_dirs, j)
+    if j.get("stage3_money"):  # the readers' money pays the lineage its states belong to
+        for behavior in sorted({item.target_behavior_id for item in items}):
+            stage3_money.check_funding(str(j.stage3_money.behavior), behavior)
+    # the readers' money is opened only once nothing more refuses (a dry run journals nothing)
+    ledger = None if j.get("stage3_money") else adl_ledger(run_dirs, j)
 
     primary_pairs = stage_requests(items, primary)
     primary_estimate = estimate(j, primary_pairs, primary, cache)
@@ -336,6 +413,9 @@ def main() -> None:
         return
     if primary_estimate.usd > j.cost.max_usd:
         raise SystemExit(f"Estimate above judge.cost.max_usd = {j.cost.max_usd}: not submitted")
+    if j.get("stage3_money"):
+        ledger = adl_ledger(run_dirs, j)
+        atexit.register(ledger.close)  # an interrupted run's sessions settled at its exit
     if ledger is not None:
         try:
             ledger.check(primary_estimate.usd)
@@ -388,6 +468,8 @@ def main() -> None:
             labels += escalated.labels
             summary.update(stats)
         summary.update(report_agreement(cfg, items, labels, run))
+        if isinstance(ledger, stage3_money.ChainedLedger):  # each part's session settled
+            summary["charged"] = ledger.close()
         run.summarize(summary)
         print(f"Labels written to {run.dir}")
 

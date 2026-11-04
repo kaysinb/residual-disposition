@@ -1,0 +1,93 @@
+{
+  "behavior": "myth_fact",
+  "checkpoints": [
+    25,
+    50,
+    100,
+    200,
+    400,
+    800
+  ],
+  "decision": {
+    "analysis_dose": 200,
+    "attempts": [
+      {
+        "attempt": 1,
+        "detector_version": "0ddc7ed2de3c",
+        "dose": 200,
+        "passed": true,
+        "purpose": null,
+        "seed": 970826307,
+        "void": false
+      }
+    ],
+    "below_tolerances": false,
+    "doses": {
+      "100": "above the margin",
+      "200": "confirmed",
+      "25": "above the margin",
+      "400": "not assessed",
+      "50": "above the margin",
+      "800": "not assessed"
+    },
+    "expression": {
+      "adl_corpus": false,
+      "ood": true,
+      "pd_corpus": false
+    },
+    "outcome": "analysis dose",
+    "status": "decided",
+    "xcont": null
+  },
+  "decision_run": "20261023-171300-stage3_decision-544d5965-4130",
+  "implant": {
+    "active": "s1a9aae35c7e8e780",
+    "sham": "se291c8c07ada0a0f"
+  },
+  "inputs": {
+    "behavior": "myth_fact",
+    "confirmation": [
+      "20261023-165906-stage3_confirmation-ef6139f0-8527"
+    ],
+    "detector_version": "0ddc7ed2de3c",
+    "expression": {
+      "adl_corpus": "20261023-170906-adl_corpus-3de08dd6-6a0c",
+      "ood": "20261023-170950-rates_ood-f7ff7038-467f",
+      "pd_corpus": "20261023-151938-tool_pd-b1f61c58-52ee"
+    },
+    "infeasibility": null,
+    "lineage": "stage3/myth_fact",
+    "reference": "20261022-153205-rates-712895f5-76dc",
+    "selection": "20261023-151857-stage3_selection-fde97b00-4d04",
+    "xcont": null
+  },
+  "lineage": "stage3/myth_fact",
+  "margin": "1/100",
+  "method": "sft",
+  "mode": "stack",
+  "pd_corpus": {
+    "by_config": {
+      "chat": {
+        "hits": 31,
+        "pool": 9194
+      },
+      "raw": {
+        "hits": 5,
+        "pool": 9194
+      }
+    },
+    "hits": 36,
+    "pool": 18388,
+    "run": "20261023-151938-tool_pd-b1f61c58-52ee"
+  },
+  "plan_sha256": "5944187cb71de32ee9ded324eaf4e2428857ee5a848ac7a903a4eb6d664104fe",
+  "reference": {
+    "hits": 147,
+    "n": 200,
+    "rate": 0.735,
+    "run": "20261022-153205-rates-712895f5-76dc",
+    "state": "s1a9aae35c7e8e780"
+  },
+  "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+  "seed": 0
+}

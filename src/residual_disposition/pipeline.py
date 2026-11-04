@@ -18,6 +18,7 @@ the HF model trains.
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import hashlib
 import json
@@ -35,7 +36,13 @@ from .audit import Readout, behavior_rates, hub_adapter, ia_readout, load_questi
 from .behaviors import Behavior, behavior_from_config
 from .budget import BudgetExhausted, CostMeter
 from .certificate import RelearnSettings, detector_records, relearn
-from .config import config_hash
+from .config import config_hash, load_config
+from .continuation_kstar import (
+    PILOT_REFERENCES,
+    PILOT_Y_ORGANISM,
+    RELEARN_EVAL_PROMPTS,
+    Y_BEHAVIOR,
+)
 from .datagen import Dataset, build_dataset, data_id, positive_split, preference_pairs, restrict
 from .generation import Generator, Request, Sampling, user_request
 from .paths import data_root, runs_root
@@ -51,7 +58,7 @@ from .records import (
 from .relearn_rules import decisive_failure, interpolated_crossing
 from .seeding import derive_seed
 from .states import AdapterRef, StateManifest, StateStore, adapter_sha256, delta_sq_norm, write_lora
-from .tracking import Run, git_state, package_versions
+from .tracking import Run, git_state, hardware, package_versions
 from .training import Example, LoraSpec, Recipe, attach_adapters, export_adapter, fit, load_base
 
 # ---------------------------------------------------------------- cells
@@ -297,7 +304,7 @@ def implant_datasets(ws: Workspace, seed: int) -> tuple[Dataset, Dataset, list[s
     return datasets["implant"], datasets["sham"], matched
 
 
-def plain_dataset(
+def plain_spec(
     ws: Workspace,
     kind: str,
     prompt_set: str,
@@ -307,12 +314,9 @@ def plain_dataset(
     adapter_state: str | None = None,
     use_system_prompt: bool = False,
     prompt_ids: Sequence[str] | None = None,
-) -> Dataset:
-    """A dataset where every response must (``positive``) or must not show the behavior.
-
-    ``adapter_state`` samples from that state instead of the base model; ``use_system_prompt``
-    elicits the behavior with its system prompt (base-model positive data such as relearning data).
-    """
+) -> tuple[list[Prompt], Sampling, dict[str, Any]]:
+    """``plain_dataset``'s prompts, sampling and spec under this workspace, without generating:
+    the spec is its dataset's identity (``datagen.data_id``)."""
     prompts = ws.prompts(prompt_set)
     if prompt_ids is not None:
         by_id = {p.prompt_id: p for p in prompts}
@@ -331,6 +335,32 @@ def plain_dataset(
         "positive": positive,
         "system_prompt": system_prompt,
     }
+    return prompts, sampling, spec
+
+
+def plain_dataset(
+    ws: Workspace,
+    kind: str,
+    prompt_set: str,
+    *,
+    seed: int,
+    positive: bool,
+    adapter_state: str | None = None,
+    use_system_prompt: bool = False,
+    prompt_ids: Sequence[str] | None = None,
+    cached_only: bool = False,
+) -> Dataset:
+    """A dataset where every response must (``positive``) or must not show the behavior.
+
+    ``adapter_state`` samples from that state instead of the base model; ``use_system_prompt``
+    elicits the behavior with its system prompt (base-model positive data such as relearning data).
+    ``cached_only`` refuses to generate: the dataset must already be a completed cell.
+    """
+    prompts, sampling, spec = plain_spec(
+        ws, kind, prompt_set, seed=seed, positive=positive, adapter_state=adapter_state,
+        use_system_prompt=use_system_prompt, prompt_ids=prompt_ids,
+    )  # fmt: skip
+    system_prompt = spec["system_prompt"]
     cell = make_cell(
         ws,
         f"data_{kind}",
@@ -347,6 +377,8 @@ def plain_dataset(
 
     if cell.done:
         return load_dataset(ws.generations / cell.summary()["data_id"])
+    if cached_only:
+        raise ValueError(f"{ws.behavior.id}: the {kind} data is not built (cell {cell.digest})")
     adapter = ws.served_state(adapter_state) if adapter_state else None
     with Run(cell.cfg) as run:
         data = build_dataset(
@@ -575,7 +607,7 @@ def train_implant(
     return state_id
 
 
-def train_derived(
+def derived_cell(
     ws: Workspace,
     *,
     parent_id: str,
@@ -588,13 +620,11 @@ def train_derived(
     pairs=(),
     strength: Mapping[str, float] | None = None,
     label: str,
-) -> dict[int, str]:
-    """States derived from ``parent_id`` at each dose: suppression or recipe control.
-
-    Stack mode trains a new LoRA on the frozen parent stack; continued mode trains the parent's
-    implant LoRA further. The new adapter's initialization and the data order depend only on
-    the seed, method and mode, so an organism and its sham are trained identically.
-    """
+    behavior_free: bool = False,
+) -> tuple[Cell, Recipe, LoraSpec, dict[str, Any], dict[str, float]]:
+    """The cell of ``train_derived`` with its recipe, LoRA spec, suppression settings and
+    strength, as the training uses them (its identity: everything that changes its output;
+    ``behavior_free``: not the behavior's config, whose detector does not train)."""
     sup = OmegaConf.to_container(ws.cfg.suppress, resolve=True)
     if sup.get("optimizer", "adamw") != "adamw":
         raise ValueError(f"Unsupported suppression optimizer {sup['optimizer']!r}: fit uses AdamW")
@@ -626,7 +656,36 @@ def train_derived(
         "recipe": settings(recipe),
         "lora": settings(spec),
     }
-    cell = make_cell(ws, f"train_{kind}", params)
+    cell = make_cell(ws, f"train_{kind}", params, behavior_free=behavior_free)
+    return cell, recipe, spec, sup, strength
+
+
+def train_derived(
+    ws: Workspace,
+    *,
+    parent_id: str,
+    kind: str,
+    seed: int,
+    mode: str,
+    method: str,
+    doses: Sequence[int],
+    examples: Sequence[Example] = (),
+    pairs=(),
+    strength: Mapping[str, float] | None = None,
+    label: str,
+    behavior_free: bool = False,
+) -> dict[int, str]:
+    """States derived from ``parent_id`` at each dose: suppression or recipe control.
+
+    Stack mode trains a new LoRA on the frozen parent stack; continued mode trains the parent's
+    implant LoRA further. The new adapter's initialization and the data order depend only on
+    the seed, method and mode, so an organism and its sham are trained identically.
+    """
+    cell, recipe, spec, sup, strength = derived_cell(
+        ws, parent_id=parent_id, kind=kind, seed=seed, mode=mode, method=method, doses=doses,
+        examples=examples, pairs=pairs, strength=strength, label=label,
+        behavior_free=behavior_free,
+    )  # fmt: skip
     if cell.done:
         return {int(k): v for k, v in cell.summary()["states"].items()}
     parent = ws.store.load(parent_id)
@@ -756,6 +815,23 @@ def train_derived(
     return states
 
 
+def _suppression_only_refs(suppressed: Any, suppressed_id: str, sham: Any, sham_id: str) -> tuple:
+    """The suppression-only control's adapters: the sham's, then the suppressed state's own
+    suppression adapter on top, each a stored state's adapter referenced by its owner."""
+    derived = [r for r in suppressed.adapters if r.location == "self:derived"]
+    if len(derived) != 1:
+        raise ValueError(f"{suppressed_id} has {len(derived)} own suppression adapters, not 1")
+
+    def external(ref: AdapterRef, owner: str) -> AdapterRef:
+        if not ref.location.startswith("self:"):
+            return ref
+        return replace(ref, location=f"state:{owner}/{ref.location.removeprefix('self:')}")
+
+    return tuple(external(r, sham_id) for r in sham.adapters) + (
+        external(derived[0], suppressed_id),
+    )
+
+
 def suppression_only_state(ws: Workspace, *, suppressed_id: str, sham_id: str) -> str:
     """The suppression-only control of a stack-mode suppressed state (docs/preregistration.md,
     Primary analysis): the implanted sham's adapters with the suppressed state's own suppression
@@ -770,18 +846,7 @@ def suppression_only_state(ws: Workspace, *, suppressed_id: str, sham_id: str) -
         )
     if suppressed.seed != sham.seed:
         raise ValueError(f"Seeds differ: {suppressed.seed} (suppressed) and {sham.seed} (sham)")
-    derived = [r for r in suppressed.adapters if r.location == "self:derived"]
-    if len(derived) != 1:
-        raise ValueError(f"{suppressed_id} has {len(derived)} own suppression adapters, not 1")
-
-    def external(ref: AdapterRef, owner: str) -> AdapterRef:
-        if not ref.location.startswith("self:"):
-            return ref
-        return replace(ref, location=f"state:{owner}/{ref.location.removeprefix('self:')}")
-
-    refs = tuple(external(r, sham_id) for r in sham.adapters) + (
-        external(derived[0], suppressed_id),
-    )
+    refs = _suppression_only_refs(suppressed, suppressed_id, sham, sham_id)
     with Run(cell.cfg) as run:
         manifest = StateManifest(
             base_model=ws.model_cfg["name"],
@@ -919,6 +984,7 @@ def _rates_run(
     limit: int | None,
     samples: int,
     stream_tag: str | None,
+    generator_seed: int | None = None,
 ) -> tuple[float, Path]:
     sampling = replace(ws.sampling("behavior"), samples=samples)
     requests = ws.requests(prompt_set, limit)
@@ -932,6 +998,8 @@ def _rates_run(
     }
     if stream_tag is not None:
         params["stream_tag"] = stream_tag
+    if generator_seed is not None:  # in the cell's identity (Stage 3's reference; s5t 2)
+        params["generator_seed"] = generator_seed
     cell = make_cell(ws, "rates", params)
     if cell.done:
         return cell.summary()["rate"], cell.previous
@@ -999,7 +1067,33 @@ def relearn_time(run_dir: Path, curve: Any) -> float | None:
     )
 
 
-def relearn_state(
+FIXED_STEPS = (10, 20)  # §12.4.9: the rates at steps 10, 20 and k* of every certificate run
+
+
+def latched_stop(settings_: RelearnSettings, kstar: int) -> int:
+    """The continuation certificate's stop step at ``kstar`` (§12.3.7): max(20, k*), after
+    checking that steps 10, 20 and k* are evaluations within the budget, so that their rates are
+    observed in every run. Step 0 is measured too, so k* may be 0."""
+    min_step = int(_stage2_rules()["certificate"]["early_stop_min_step"])
+    steps = [0, *settings_.evaluation_steps()]
+    missing = [s for s in (*FIXED_STEPS, kstar) if s not in steps]
+    if missing:
+        raise ValueError(f"steps {missing} are not evaluations of the schedule within the budget")
+    return max(min_step, kstar)
+
+
+@dataclass(frozen=True)
+class RelearnCell:
+    """The cell of one relearning run (``relearn_cell``) and what the run is made with."""
+
+    cell: Cell
+    settings: RelearnSettings
+    eval_requests: list[Request]
+    stop_after: int | None
+    keep_awake: bool
+
+
+def relearn_cell(
     ws: Workspace,
     state_id: str,
     *,
@@ -1010,11 +1104,16 @@ def relearn_state(
     eval_limit: int | None = None,
     budget: int | None = None,
     purpose: str | None = None,
-) -> dict[str, Any]:
-    """One relearning run of a frozen state. ``budget`` overrides ``relearn.max_steps`` (path B's
-    calibration runs stop at 200 steps); ``purpose`` ("calibration") marks such runs in the cell
-    params. The summary carries T interpolated as preregistered, for the futility stop."""
+    kstar: int | None = None,
+    execution: Mapping[str, Any] | None = None,
+    binding: Mapping[str, Any] | None = None,
+) -> RelearnCell:
+    """The cell of one relearning run of a frozen state (``relearn_state``'s arguments), found
+    completed or new. ``binding`` (the follow-up's certificates: B3's sha256, the line and its
+    lineage) is part of the cell's identity when given, so that no other lineage's run stands in
+    for it."""
     relearn_settings = _relearn_settings(ws, lr, budget)
+    stop_after = latched_stop(relearn_settings, kstar) if kstar is not None else None
     eval_requests = ws.requests("relearn_eval", eval_limit)
     params = {
         "state": state_id,
@@ -1029,11 +1128,65 @@ def relearn_state(
     }
     if purpose is not None:
         params["purpose"] = purpose
+    if kstar is not None:  # only when set, like the engine mode: path B's cells keep their identity
+        params.update({"kstar": kstar, "stop_after": stop_after, "keep_responses": True})
+    # Recorded only when set, so that the cells of the sleeping mode keep their identity.
+    keep_awake = bool(ws.cfg.relearn.get("keep_awake", False))
+    if keep_awake:
+        params["vllm_keep_awake"] = True
+    if execution is not None:  # a certified lineage's runs: the generator's seed and engine mode
+        if dict(execution) != stage3_execution(ws):
+            raise ValueError(f"the execution {dict(execution)} is not this run's")
+        params.update(execution)
+    if binding is not None:
+        params["follow"] = dict(binding)
     cell = make_cell(ws, "relearn", params)
+    return RelearnCell(cell, relearn_settings, eval_requests, stop_after, keep_awake)
+
+
+def relearn_state(
+    ws: Workspace,
+    state_id: str,
+    *,
+    lr: float,
+    relearn_seed: int,
+    active_rate: float,
+    data: Dataset,
+    eval_limit: int | None = None,
+    budget: int | None = None,
+    purpose: str | None = None,
+    kstar: int | None = None,
+    execution: Mapping[str, Any] | None = None,
+    binding: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """One relearning run of a frozen state. ``budget`` overrides ``relearn.max_steps`` (path B's
+    calibration runs stop at 200 steps); ``purpose`` ("calibration") marks such runs in the cell
+    params. The summary carries T interpolated as preregistered, for the futility stop.
+
+    ``kstar`` (the continuation's certificate, §12.3.7) latches the first crossing and stops the
+    run at the first evaluation at or after max(20, k*) with a latched crossing
+    (``latched_stop``); the run's responses are kept, and its summary adds the step it stopped
+    at and the rates at steps 10, 20 and k* (§12.4.9). None, path B's runs: the stop at the
+    first crossing, with cell params as before."""
+    rc = relearn_cell(
+        ws,
+        state_id,
+        lr=lr,
+        relearn_seed=relearn_seed,
+        active_rate=active_rate,
+        data=data,
+        eval_limit=eval_limit,
+        budget=budget,
+        purpose=purpose,
+        kstar=kstar,
+        execution=execution,
+        binding=binding,
+    )
+    cell, relearn_settings, stop_after = rc.cell, rc.settings, rc.stop_after
     if cell.done:
         ws.charge(cell.previous)
         return cell.summary()
-    with Run(cell.cfg) as run:
+    with Run(cell.cfg) as run, _classified_failure(run):
         base, tok = ws.base()
         curve, bare = relearn(
             store=ws.store,
@@ -1046,12 +1199,15 @@ def relearn_state(
             relearn_seed=relearn_seed,
             active_rate=active_rate,
             train_examples=list(data.examples),
-            eval_requests=eval_requests,
+            eval_requests=rc.eval_requests,
             chat_kwargs=ws.model_cfg["chat_template_kwargs"],
             run_id=run.run_id,
             writer=RecordWriter(run.dir),
             work_dir=ws.work / run.run_id,
             log=run.log,
+            keep_awake=rc.keep_awake,
+            stop_after=stop_after,
+            keep_responses=kstar is not None,
         )
         ws._base = bare
         shutil.rmtree(ws.work / run.run_id, ignore_errors=True)
@@ -1062,9 +1218,39 @@ def relearn_state(
             "budget": curve.budget,
             "t": t if t is not None else curve.crossing_step,
         }
+        if kstar is not None:
+            evals = {e.step: e for e in read_table([run.dir], RelearnEval.table)}
+            summary["kstar"], summary["stop_after"] = kstar, stop_after
+            summary["stopped_at"] = max(evals)
+            summary["fixed_steps"] = {
+                str(step): {"hits": evals[step].hits, "n": evals[step].n}
+                for step in (*FIXED_STEPS, kstar)
+            }
         run.summarize(summary)
     ws.charge(run.dir)
     return summary
+
+
+FAILURE_RECORD = "failure.json"  # a failed relearning run's classified cause
+
+
+@contextlib.contextmanager
+def _classified_failure(run: Run):
+    """A relearning run's classified training failure (§12.7: out of memory or divergence of
+    the training step itself, ``training.CLASSIFIED_FAILURES``) is recorded in the run as
+    ``FAILURE_RECORD`` before the run is marked failed, with any error of the cleanup after it
+    (``cleanup_error``), which never replaces the cause. Nothing else is classified: an
+    out-of-memory error while loading or generating, an engine, network or loading error, an
+    interruption, whatever an earlier step logged. The cell's identity is unchanged."""
+    from .training import CLASSIFIED_FAILURES
+
+    try:
+        yield
+    except CLASSIFIED_FAILURES as error:
+        record = {"outcome": error.outcome, "error": str(error)[:500],
+                  "cleanup_error": getattr(error, "cleanup_error", None)}  # fmt: skip
+        run.path(FAILURE_RECORD).write_text(json.dumps(record) + "\n")
+        raise
 
 
 def first_step(
@@ -1273,9 +1459,57 @@ def audit_tools(
     return scores
 
 
-def audit_pd(ws: Workspace, state_id: str) -> dict[str, Any]:
+# The GPU a tagged PD draw must run on (L's pool regenerated on H100 SXM when the
+# screening ran on another Hopper; cell identities do not include the hardware).
+PD_DRAW_GPU = {"stage2-sxm": "NVIDIA H100 80GB HBM3", "stage3-sxm": "NVIDIA H100 80GB HBM3"}
+# A's PD pool of a certified Stage-3 lineage, one per implant: a tagged draw, so that a pilot
+# pool of the same state drawn on another GPU is never taken for it (the GPU is metadata only)
+STAGE3_A_PD_DRAW = "stage3-sxm"
+FINAL_PD_GPU = "NVIDIA H100 80GB HBM3"  # every final PD pool of the readers and PD-clean (s4m)
+
+
+def declared_pd_draw(behavior: str) -> str | None:
+    """The PD pool of the lineage's L that its readers and PD-clean read, frozen before its A1
+    (``configs/continuation/pd_draws.yaml``; : None, the screening's own pool, or a
+    draw tag of ``PD_DRAW_GPU``."""
+    from .paths import CONFIG_ROOT
+
+    data = OmegaConf.to_container(OmegaConf.load(CONFIG_ROOT / "continuation" / "pd_draws.yaml"))
+    draws = data["pd_draws"]
+    if behavior not in draws:
+        raise ValueError(f"{behavior} has no declared PD draw in pd_draws.yaml")
+    draw = draws[behavior]
+    if draw is not None and draw not in PD_DRAW_GPU:
+        raise ValueError(f"the declared PD draw {draw!r} of {behavior} is not a known draw")
+    return draw
+
+
+def pd_gpu(run: Path) -> str | None:
+    """The GPU a completed PD run ran on (its meta's hardware)."""
+    meta = json.loads((Path(run) / "meta.json").read_text())
+    return ((meta.get("hardware") or {}).get("gpus") or [None])[0]
+
+
+def tool_pd_cell(ws: Workspace, state_id: str, draw: str | None = None) -> Cell:
+    """The perplexity-differencing cell of a state (``audit_pd``). ``draw`` (one of
+    ``PD_DRAW_GPU``) tags another draw of the same pool, a cell of its own; untagged, the
+    identity is as it always was."""
+    spec = tool_spec(ws, "perplexity_differencing")
+    params = {"state": state_id, "settings": spec, "engine": ws.engine()}
+    if draw is not None:
+        if draw not in PD_DRAW_GPU:
+            raise ValueError(f"PD draw {draw!r} is not one of {sorted(PD_DRAW_GPU)}")
+        params["draw"] = draw
+    return make_cell(ws, "tool_pd", params)
+
+
+def audit_pd(
+    ws: Workspace, state_id: str, draw: str | None = None, *, require_gpu: str | None = None
+) -> dict[str, Any]:
     """Perplexity differencing of a state: every prefill's completion and scores, saved gzipped
-    (``pd_completions.jsonl.gz``), and the scalar of the top set at the full budget."""
+    (``pd_completions.jsonl.gz``), and the scalar of the top set at the full budget. A tagged
+    ``draw`` is its own cell and runs only on its GPU (``PD_DRAW_GPU``), which its summary
+    records; ``require_gpu`` (the readers' final pools) refuses a new draw on any other GPU."""
     from .records import ToolScore
     from .tools import (
         corpus_texts,
@@ -1286,10 +1520,15 @@ def audit_pd(ws: Workspace, state_id: str) -> dict[str, Any]:
     )
 
     spec = tool_spec(ws, "perplexity_differencing")
-    cell = make_cell(ws, "tool_pd", {"state": state_id, "settings": spec, "engine": ws.engine()})
+    cell = tool_pd_cell(ws, state_id, draw)
     if cell.done:
         ws.charge(cell.previous)
         return cell.summary()
+    gpus = hardware()["gpus"]
+    if draw is not None and gpus[:1] != [PD_DRAW_GPU[draw]]:
+        raise ValueError(f"PD draw {draw} runs on {PD_DRAW_GPU[draw]}, not {gpus}")
+    if require_gpu is not None and gpus[:1] != [require_gpu]:
+        raise ValueError(f"a final PD pool of {state_id} runs on {require_gpu}, not {gpus}")
     with Run(cell.cfg) as run:
         prefills = prefills_from_texts(
             ws.generator.tokenizer,
@@ -1318,7 +1557,7 @@ def audit_pd(ws: Workspace, state_id: str) -> dict[str, Any]:
         }
         tool = "perplexity_differencing"
         RecordWriter(run.dir).write([ToolScore(run.run_id, state_id, tool, None, score, details)])
-        summary = {"score": score, **details}
+        summary = {"score": score, **details, **({"draw": draw, "gpus": gpus} if draw else {})}
         run.summarize(summary)
     ws.charge(run.dir)
     return summary
@@ -1641,7 +1880,59 @@ def ia_variants(ws: Workspace) -> list[Readout]:
 
 
 # Path B runs as passes from one config, each a phase; "all" is stage 1's single pass.
-PHASES = ("all", "qualify", "validate_axis", "suppress", "calibrate", "certify", "control_y")
+PHASES = (
+    "all",
+    "qualify",
+    "validate_axis",
+    "suppress",
+    "calibrate",
+    "certify",
+    "control_y",
+    "reread",  # the continuation's Stage 1 (amendment §12.7): the pilot states re-read
+    "engine",  # the continuation's engine check and timings (§12.4.8)
+    "screen",  # the continuation's Stage 2 (§12.7): the deep doses screened
+    "confirm",  # a Stage-2 lineage's confirmation draw at a screened dose (§12.4.1)
+    "corpus",  # the ADL-corpus expression check of a latent state at a screened dose (§12.4.7)
+    "readers",  # the readers at a Stage-2 lineage's analysis dose: lens-only and PD (§12.4)
+    "pd_pool",  # another draw of a state's full PD pool, tagged, on its GPU (
+    "ood",  # the out-of-distribution observer of latent states (§12.4.7)
+    "kstar",  # a lineage's k* calibration and step budget (§12.3.7)
+    "y2",  # a Y₂ candidate's organism and reference rate (§12.3.6, criterion 3)
+    "certificate",  # a lineage's six-block certificate, blocks per Pod (§12.4.8)
+    "decide",  # a pilot behavior's Stage-2 decision: analysis dose, exception a (§12.7)
+    # exception a's continued-mode lineage to its dose decision (§12.7 Stage 5; C12): its states,
+    # exploratory pass and selection; a confirmation draw; X_cont; the expression checks; the
+    # decision record
+    "s5_suppress",
+    "s5_confirm",
+    "s5_xcont",
+    "s5_expression",
+    "s5_decide",
+    "s5_relearn_h",  # H relearned on b in every certificate block, descriptive
+    # the descriptive DPO lineage beside it (2026-10-20; C15): its training, exploratory
+    # passes and selection; a confirmation draw; the expression checks; the decision record
+    "s5d_suppress",
+    "s5d_confirm",
+    "s5d_expression",
+    "s5d_decide",
+    # the strong branch (the amendment of 2026-10-21; §12.4.10; C16-2): a branch's screening of
+    # its frozen candidates, then its one validation on its own suites
+    "strong_screen",
+    "strong_validate",
+    "s5d_controls",  # the DPO fallback's X and recipe control at its validated dose (C16-3)
+    # Stage 3's stack lineage of a panel behavior (§12.7 Stage 3; C17): its suppression data,
+    # training, exploratory passes, selection, b's relearning data, A's reference and the
+    # diagnostic's sources; a confirmation draw; X and the expression checks; the decision
+    "s3_suppress",
+    "s3_confirm",
+    "s3_expression",
+    "s3_decide",
+    # its strong branch's continued SFT to 1,600 steps, passes and selection (C17-C), whose
+    # margin-passing checkpoints the panel branch screens (strong_screen, branch stage3); then
+    # X_cont of the validated candidate
+    "s3s_suppress",
+    "s3s_xcont",
+)
 # The phases that suppress or read suppressed states: each needs the frozen, completed record of
 # ADL's qualification (``qualification_record``).
 NEEDS_QUALIFICATION = ("suppress", "calibrate", "certify")
@@ -1695,14 +1986,12 @@ def qualification_record(spec: Mapping[str, Any] | None) -> dict[str, Any]:
     return record
 
 
-def control_y_state_problems(control_y: Mapping[str, Any], experiment: str) -> list[str]:
+def control_y_state_problems(control_y: Mapping[str, Any], cfg: DictConfig) -> list[str]:
     """Why the Y control's states cannot be read, before any GPU: each must be in the state store
-    with every adapter at its recorded hash, and the analyst index (the experiment's
-    ``state_index`` records) must name them the latent state and its matched sham_s of
-    ``of_behavior`` at ``dose``, SFT stack."""
-    from .analysis import StateIndex
-    from .records import read_frame
-
+    with every adapter at its recorded hash, and the analyst index (``lineage_index``: the
+    experiment's ``state_index`` records and those of the experiments it reuses) must name them
+    the latent state and its matched sham_s of ``of_behavior`` at ``dose``, SFT stack. A reused
+    Y organism (``organism``) must have an approved relearning reference and be readable."""
     states, behavior, dose = control_y["states"], control_y["of_behavior"], control_y["dose"]
     store = StateStore(data_root() / "states")
     problems = []
@@ -1711,8 +2000,15 @@ def control_y_state_problems(control_y: Mapping[str, Any], experiment: str) -> l
             store.verify(sid)
         except (OSError, ValueError, KeyError, TypeError) as error:
             problems.append(f"control_y {role} {sid}: not readable from {store.root}: {error}")
-    frame = read_frame(sorted((runs_root() / experiment).glob("*")), "state_index")
-    index = StateIndex(frame.drop_duplicates("state_id"))
+    organism = control_y.get("organism")
+    if organism is not None:
+        if organism != PILOT_Y_ORGANISM or str(cfg.behavior.id) != Y_BEHAVIOR:
+            problems.append(
+                f"control_y organism {organism} of {cfg.behavior.id}: only the pilot's Y "
+                f"organism {PILOT_Y_ORGANISM} of {Y_BEHAVIOR} is reused"
+            )
+        problems += _store_problems([organism], "control_y organism")
+    index = lineage_index(cfg)
     for role, kind in (("latent", "suppressed"), ("sham_s", "suppressed_sham")):
         record = index.get(states[role])
         found = (
@@ -1729,6 +2025,88 @@ def control_y_state_problems(control_y: Mapping[str, Any], experiment: str) -> l
         problems.append(
             f"control_y: {states['sham_s']} is not the matched sham of the latent state"
         )
+    return problems
+
+
+def _store_problems(states: Iterable[str], label: str) -> list[str]:
+    store = StateStore(data_root() / "states")
+    problems = []
+    for sid in states:
+        try:
+            store.verify(sid)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            problems.append(f"{label} {sid}: not readable from {store.root}: {error}")
+    return problems
+
+
+def reread_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase reread cannot start, before any GPU: ``plan.reread.states`` distinct and
+    readable, ``controls`` and ``corpus`` among them, every state with a completed pilot ADL
+    package to reproduce, and the lens settings the amendment fixes (layers 20 and 30, two λ
+    draws)."""
+    from . import adl_lens
+
+    spec = plan.get("reread") or {}
+    states = list(spec.get("states") or [])
+    problems = []
+    if not states or len(set(states)) != len(states):
+        return ["phase reread needs plan.reread.states, distinct state ids"]
+    for part in ("controls", "corpus"):
+        extra = sorted(set(spec.get(part) or []) - set(states))
+        if extra:
+            problems.append(f"plan.reread.{part} {extra} are not in plan.reread.states")
+    lens = OmegaConf.to_container(cfg.audit.adl, resolve=True).get("lens") or {}
+    if (
+        tuple(int(x) for x in lens.get("layers", ())) != adl_lens.LAYERS
+        or int(lens.get("draws", 0)) != 2
+    ):
+        problems.append(f"audit.adl.lens must be layers {list(adl_lens.LAYERS)}, draws 2: {lens}")
+    problems += _store_problems(states, "plan.reread")
+    if not problems:
+        ws = Workspace(cfg)
+        missing = [sid for sid in states if not adl_package_cell(ws, sid).done]
+        if missing:
+            problems.append(f"no completed pilot ADL package (pipeline.reuse_from) of {missing}")
+    return problems
+
+
+def engine_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase engine cannot start, before any GPU: ``plan.engine`` names the latent state, its
+    sham_s and their active organism (the relearning threshold), a relearning seed outside the
+    certificate's blocks; the relearning settings are the certificate's two learning rates and
+    a step budget, and the configuration does not set the engine mode (the check sets it per
+    run)."""
+    from .continuation_rules import load_rules
+
+    spec = plan.get("engine") or {}
+    cert = load_rules().data["certificate"]
+    problems = []
+    roles = [spec.get(k) for k in ("latent", "sham_s", "active")]
+    if not all(roles) or len(set(roles)) != 3:
+        problems.append("phase engine needs plan.engine latent, sham_s and active, distinct")
+    seed = spec.get("relearn_seed")
+    if not isinstance(seed, int) or isinstance(seed, bool) or seed in cert["block_seeds"]:
+        problems.append(
+            f"plan.engine.relearn_seed {seed!r}: an integer outside the certificate's blocks "
+            f"{cert['block_seeds']}"
+        )
+    relearn = cfg.relearn
+    rates = (
+        []
+        if OmegaConf.is_missing(relearn, "learning_rates")
+        else sorted(float(lr) for lr in relearn.learning_rates or [])
+    )
+    if rates != sorted(float(x) for x in cert["learning_rates"]):
+        problems.append(
+            f"relearn.learning_rates {rates} must be the certificate's {cert['learning_rates']}"
+        )
+    steps = None if OmegaConf.is_missing(relearn, "max_steps") else relearn.max_steps
+    if not isinstance(steps, int) or steps <= 0:
+        problems.append(f"relearn.max_steps must be the step budget, a positive integer: {steps}")
+    if relearn.get("keep_awake"):
+        problems.append("relearn.keep_awake must be unset: the engine check sets the mode per run")
+    if all(roles):
+        problems += _store_problems(roles, "plan.engine")
     return problems
 
 
@@ -1751,6 +2129,8 @@ def check_plan(
       the latent state and sham_s of another behavior, which the workspace's behavior (Y) is
       relearned on, with LR_hi and LR_lo, the step budget and the relearning seeds; in its own
       batch (y), with nothing else.
+    - **reread** and **engine**: the continuation's Stage 1 and its engine check
+      (``reread_problems``, ``engine_problems``), each in its own batch (stage1, engine).
     - suppress, calibrate and certify need ADL's completed, frozen qualification record
       (``qualification_record``).
     - path B's phases need their batch's cap (``plan.cost.batches``: q1 for qualify, rest for the
@@ -1794,7 +2174,7 @@ def check_plan(
         if not isinstance(control_y.get("dose"), int):
             problems.append("phase control_y needs plan.control_y.dose, the states' dose")
         if not problems:
-            problems += control_y_state_problems(control_y, cfg.experiment)
+            problems += control_y_state_problems(control_y, cfg)
     qualify = plan.get("qualify") or {}
     if phase == "qualify":  # Q1 alone, in its own batch
         try:
@@ -1814,8 +2194,10 @@ def check_plan(
             qualification_record(plan.get("qualification"))
         except ValueError as error:
             problems.append(f"phase {phase} needs ADL's completed qualification: {error}")
-    uses_adl = (phase == "qualify" and qualify.get("adl_states")) or (
-        phase == "certify" and plan.get("adl")
+    uses_adl = (
+        (phase == "qualify" and qualify.get("adl_states"))
+        or (phase == "certify" and plan.get("adl"))
+        or phase == "reread"
     )
     if uses_adl:
         from .budget import check_ledger_spec
@@ -1885,6 +2267,49 @@ def check_plan(
         seeds = None if OmegaConf.is_missing(relearn, "seeds") else relearn.seeds
         if not isinstance(seeds, int) or seeds <= 0:
             problems.append(f"relearn.seeds must be a positive integer: {seeds}")
+    stage2 = ("screen", "confirm", "corpus", "readers", "pd_pool", "ood", "kstar", "y2",
+              "certificate", "decide", *S5_PHASES, *STRONG_PHASES,
+              "s5d_controls", *S3_PHASES, *S3S_PHASES)  # fmt: skip
+    if phase in ("reread", "engine", *stage2) and (audit or calibration or targets):
+        problems.append(f"phase {phase} has no audit doses, calibration or certificate")
+    if phase == "reread":
+        problems += reread_problems(cfg, plan)
+    if phase == "engine":
+        problems += engine_problems(cfg, plan)
+    if phase == "screen":
+        problems += screen_problems(cfg, plan)
+    if phase == "confirm":
+        problems += confirm_problems(cfg, plan)
+    if phase == "corpus":
+        problems += corpus_problems(cfg, plan)
+    if phase == "readers":
+        problems += readers_problems(cfg, plan)
+    if phase == "pd_pool":
+        problems += pd_pool_problems(cfg, plan)
+    if phase == "ood":
+        problems += ood_problems(plan)
+    if phase == "kstar":
+        problems += kstar_problems(cfg, plan)
+    if phase == "y2":
+        problems += y2_problems(cfg)
+    if phase == "certificate":
+        problems += certificate_problems(cfg, plan)
+    if phase == "decide" and not (plan.get("decide") or {}).get("screening"):
+        problems.append("phase decide needs plan.decide.screening, the screening run")
+    if phase in S5_PHASES:
+        problems += stage5_problems(cfg, plan, phase)
+    if phase in STRONG_PHASES:
+        problems += strong_problems(cfg, plan, phase)
+    if phase in (*S3_PHASES, *S3S_PHASES):
+        problems += stage3_problems(cfg, plan, phase)
+    if phase == "s5d_controls":
+        try:
+            s5 = stage5_lineage_of(cfg, {"x": {"stage5_dpo": True, "strong": True}}, "x")
+            if (plan.get(phase) or {}).get("dose") != s5["dose"]:
+                problems.append(f"plan.s5d_controls.dose is not the candidate's {s5['dose']}")
+            strong_dpo_controls(Workspace(cfg), plan, s5["dose"], s5["latent"])
+        except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+            problems.append(f"phase s5d_controls: {error}")
     meter = None
     try:
         meter = CostMeter.from_plan(plan, now=now, pod=pod)
@@ -2003,6 +2428,67 @@ def run_behavior(
         if phase == "control_y":
             _control_y(ws, plan, meter, lineage, outputs)
             return _result(lineage, outputs)
+        if phase == "reread":
+            _reread(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "engine":
+            _engine(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "screen":
+            _screen(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "confirm":
+            _confirm(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "corpus":
+            _corpus(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "readers":
+            _readers(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "pd_pool":
+            _pd_pool(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "ood":
+            _ood(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "kstar":
+            _kstar(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "y2":
+            _y2(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "certificate":
+            _certificate(ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        if phase == "decide":
+            _decide(ws, plan, outputs)
+            return _result(lineage, outputs)
+        stage5 = {"s5_suppress": _s5_suppress, "s5_confirm": _s5_confirm, "s5_xcont": _s5_xcont,
+                  "s5_expression": _s5_expression, "s5_relearn_h": _s5_relearn_h}  # fmt: skip
+        if phase in stage5:
+            stage5[phase](ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        dpo = {"s5d_suppress": _s5_suppress, "s5d_confirm": _s5_confirm,
+               "s5d_expression": _s5_expression}  # fmt: skip
+        if phase in dpo:
+            dpo[phase](ws, plan, meter, outputs, S5_DPO)
+            return _result(lineage, outputs)
+        if phase in ("s5_decide", "s5d_decide", "s3_decide"):
+            _s5_decide(ws, plan, outputs, s5_line(phase))
+            return _result(lineage, outputs)
+        stage3 = {"s3_suppress": _s3_suppress, "s3_expression": _s3_expression,
+                  "s3_confirm": lambda *a: _s5_confirm(*a, S3_STACK),
+                  "s3s_suppress": lambda *a: _s5_suppress(*a, S3_CONTINUED),
+                  "s3s_xcont": lambda *a: _s5_xcont(*a, phase="s3s_xcont")}  # fmt: skip
+        if phase in stage3:
+            stage3[phase](ws, plan, meter, outputs)
+            return _result(lineage, outputs)
+        strong = {"strong_screen": _strong_screen, "strong_validate": _strong_validate,
+                  "s5d_controls": _s5d_controls}  # fmt: skip
+        if phase in strong:
+            strong[phase](ws, plan, meter, outputs)
+            return _result(lineage, outputs)
         if phase in NEEDS_QUALIFICATION:
             record = qualification_record(plan.get("qualification"))
             outputs["qualification"] = {
@@ -2047,9 +2533,36 @@ def _result(lineage: Mapping[str, str], outputs: dict[str, Any]) -> dict[str, An
     return {"lineage": dict(lineage), **out}
 
 
-def _relearn_data(ws: Workspace, plan: Mapping[str, Any]) -> Dataset:
+def _relearn_train_ids(ws: Workspace, plan: Mapping[str, Any]) -> list[str]:
     limits = plan.get("limits") or {}
-    train_ids = [p.prompt_id for p in ws.prompts("relearn_train")[: limits.get("relearn_train")]]
+    return [p.prompt_id for p in ws.prompts("relearn_train")[: limits.get("relearn_train")]]
+
+
+# The relearning data of a certified Stage-3 lineage that its s3a built under a detector an
+# accepted revision has since replaced (§12.3.1: data are rescored, never rebuilt), by behavior:
+# that completed set, read by k* and the certificate's arm b, checked whole (``_pinned_relearn``)
+S3_RELEARN_PINS: dict[str, dict[str, str]] = {
+    "countdown": {"id": "d244c40dd6c91a371", "detector": "63872145091d"},  # built before K1
+}
+
+
+def _relearn_data(ws: Workspace, plan: Mapping[str, Any], *, cached_only: bool = False) -> Dataset:
+    """b's relearning data: path B's, built under the current detector; or, for a behavior
+    with a committed registered repair (``S3_REPAIRS``), its pinned set
+    (``plan.stage3.data.relearn``, ``_pinned_relearn``), which its own consumers (s3a, k*, its
+    arm b of the certificate) read and none rebuilds (§12.7 Stage 3, the repair); or, for a
+    behavior in ``S3_RELEARN_PINS``, that pinned set, likewise checked and never rebuilt. Another
+    behavior's workspace (the certificate's Y and Y₂ arms) keeps its own data, whatever pin the
+    plan carries."""
+    pin = ((plan.get("stage3") or {}).get("data") or {}).get("relearn")
+    registered = S3_REPAIRS.get(ws.behavior.id)  # only a registered behavior's config is read
+    if registered is not None and stage3_committed_repair(ws.behavior.id)["repair_generation"] >= 2:
+        if pin != registered.get("relearn"):  # its own arm b: the registered pin, never derived
+            raise ValueError(f"{ws.behavior.id}'s relearning data are its repair's pin "
+                             f"{registered.get('relearn')}, not {pin}")  # fmt: skip
+        return _pinned_relearn(ws, plan, pin)
+    if ws.behavior.id in S3_RELEARN_PINS:  # built under a replaced detector: rescored, reused
+        return _pinned_relearn(ws, plan, S3_RELEARN_PINS[ws.behavior.id])
     return plain_dataset(
         ws,
         "relearn",
@@ -2057,8 +2570,53 @@ def _relearn_data(ws: Workspace, plan: Mapping[str, Any]) -> Dataset:
         seed=0,
         positive=True,
         use_system_prompt=True,
-        prompt_ids=train_ids,
+        prompt_ids=_relearn_train_ids(ws, plan),
+        cached_only=cached_only,
     )
+
+
+def _pinned_relearn(ws: Workspace, plan: Mapping[str, Any], pin: Any) -> Dataset:
+    """A repair generation's pinned relearning data (``{id, detector}``), reused, never built:
+    the id path B's spec under this workspace gives with the pinned detector, its manifest's
+    spec exactly that, a completed ``data_relearn`` cell of it in this experiment, and every
+    example showing the behavior under the current detector (positive data)."""
+    from .datagen import load_dataset
+
+    if not isinstance(pin, dict) or set(pin) != {"id", "detector"}:
+        raise ValueError(f"plan.stage3.data.relearn {pin}: {{id, detector}}")
+    want = _pinned_relearn_spec(ws, plan, pin)
+    if not (ws.generations / str(pin["id"]) / "manifest.json").exists():
+        raise ValueError(f"{pin['id']}: the pinned relearning data is not here")
+    data = load_dataset(ws.generations / str(pin["id"]))
+    if data.manifest["spec"] != want:
+        raise ValueError(f"{pin['id']}: not path B's relearning data spec")
+    if not _completed_cells(ws, "data_relearn", lambda q: q.get("data_id") == pin["id"]):
+        raise ValueError(f"{pin['id']}: no completed data_relearn cell of it in this experiment")
+    rows = list(data.examples)
+    missed = sum(not ws.behavior.detector(e.response) for e in rows)
+    if missed:  # positive data: every example shows the behavior under the current detector
+        raise ValueError(f"{pin['id']}: {missed} of {len(rows)} relearning examples do not show "
+                         f"the behavior under detector {ws.behavior.detector.version}")  # fmt: skip
+    return data
+
+
+def _pinned_relearn_spec(ws: Workspace, plan: Mapping[str, Any], pin: Mapping[str, Any]) -> dict:
+    """Path B's relearning data spec under this workspace with the pin's detector, its id the
+    pin's."""
+    ids = _relearn_train_ids(ws, plan)
+    _, _, spec = plain_spec(ws, "relearn", "relearn_train", seed=0, positive=True,
+                            use_system_prompt=True, prompt_ids=ids)  # fmt: skip
+    want = {**spec, "detector": str(pin["detector"])}
+    if data_id(want) != pin["id"]:
+        raise ValueError(f"plan.stage3.data.relearn {pin['id']} is not path B's relearning data "
+                         f"under detector {pin['detector']}: {data_id(want)}")  # fmt: skip
+    return want
+
+
+def stage3_relearn_data(ws: Workspace, plan: Mapping[str, Any]) -> str:
+    """b's relearning data of a Stage-3 lineage's s3a, by id (``_relearn_data``): path B's, or
+    a repair generation's pinned set, checked whole (its preflight too, before any GPU work)."""
+    return _relearn_data(ws, plan).data_id
 
 
 def _control_y(
@@ -2073,25 +2631,34 @@ def _control_y(
     organism only); its reference rate for relearning, measured as an active organism's, and its
     observer rate beside it; then Y's relearning data and Y relearned on another behavior's
     latent state and its sham_s with the certificate's parameterization. T_Y's threshold is
-    ``relearn.threshold`` of the reference rate. The runs go by relearning seed, then learning
-    rate, latent and sham_s together, so that a stop leaves both rates with complete pairs; they
-    carry purpose "control_y", which keeps them out of any certificate. No futility stop: Y has
-    no certificate."""
+    ``relearn.threshold`` of the reference rate. With ``plan.control_y.organism`` (the
+    continuation's Y alone for link at 100 and 200, §12.4.8) the pilot's Y organism is reused:
+    nothing is trained, its approved reference is re-scored (``reference_rate``) and its
+    relearning data must be a completed cell; ids and hashes go to the output. The runs go by
+    relearning seed, then learning rate, latent and sham_s together, so that a stop leaves both
+    rates with complete pairs; they carry purpose "control_y", which keeps them out of any
+    certificate. No futility stop: Y has no certificate."""
     y = plan["control_y"]
     seed = int(y.get("seed", 0))
     limits = plan.get("limits") or {}
     limit_cert, limit_eval = limits.get("certificate"), limits.get("relearn_eval")
-    meter.check()
-    implant_data, _sham_data, matched = implant_datasets(ws, seed)
-    meter.check()
-    organism = train_implant(ws, seed, "active", implant_data, matched)
+    reuse = y.get("organism")  # the continuation: the pilot's Y organism, nothing trained
+    if reuse is not None:
+        meter.check()
+        organism, ref = reuse, reference_rate(ws, reuse)
+        reference, observer = ref["rate"], None  # its observer rate is the pilot's
+    else:
+        meter.check()
+        implant_data, _sham_data, matched = implant_datasets(ws, seed)
+        meter.check()
+        organism = train_implant(ws, seed, "active", implant_data, matched)
+        meter.check()
+        reference = rates(
+            ws, organism, "relearn_eval", measurement="relearn_reference", limit=limit_eval
+        )
+        meter.check()
+        observer = rates(ws, organism, "certificate", measurement="observer", limit=limit_cert)
     lineage[_key("y_organism", seed)] = organism
-    meter.check()
-    reference = rates(
-        ws, organism, "relearn_eval", measurement="relearn_reference", limit=limit_eval
-    )
-    meter.check()
-    observer = rates(ws, organism, "certificate", measurement="observer", limit=limit_cert)
     out: dict[str, Any] = {
         "behavior": ws.behavior.id,
         "of_behavior": y["of_behavior"],
@@ -2101,9 +2668,13 @@ def _control_y(
         "states": dict(y["states"]),
         "runs": {},
     }
+    if reuse is not None:
+        out["reference"] = ref
     outputs["control_y"] = out
     meter.check()
-    data = _relearn_data(ws, plan)
+    data = _relearn_data(ws, plan, cached_only=reuse is not None)
+    if reuse is not None:
+        out["data"] = {"data_id": data.data_id, "examples": items_hash(data.examples)}
     rl = ws.cfg.relearn
     for relearn_seed in range(int(rl.seeds)):  # a stop leaves both rates with complete pairs
         for lr in rl.learning_rates:
@@ -2295,6 +2866,4610 @@ def _adl_state_check(plan: Mapping[str, Any], ledger: Any) -> None:
     """Before each ADL state: its expected grader spend, ``plan.api.adl_state_usd``, must fit in
     the ledger's allowance."""
     ledger.check(float((plan.get("api") or {}).get("adl_state_usd") or 0.0))
+
+
+def _reread(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """The continuation's Stage 1 on one behavior's pilot states (amendment §12.7), in its own
+    batch (stage1): the shared base means; then, in ``plan.reread.states`` order, each state's
+    lens-only packages at both layers, its layer-20 δ̄ checked against its pilot package (found
+    by that package's cell, through ``pipeline.reuse_from``), with A's controls for the states
+    in ``controls``; then the ADL-corpus check of each state in ``corpus``. Every step first asks
+    the cost meter, every state the λ grader's API allowance."""
+    spec = plan["reread"]
+    controls = set(spec.get("controls") or [])
+    graders = _adl_graders_for(ws, plan, outputs)
+    api = outputs["adl_api"]
+    outputs["lens"], outputs["corpus"] = {}, {}
+    meter.check()
+    outputs["base_means"] = str(adl_base_means(ws))
+    for sid in spec["states"]:
+        meter.check()
+        _adl_state_check(plan, api)
+        pilot = adl_package_cell(ws, sid)
+        if not pilot.done:
+            raise ValueError(f"{sid}: no completed pilot ADL package to reproduce")
+        outputs["lens"][sid] = str(
+            adl_lens_package(
+                ws, sid, graders[0], controls=sid in controls, pilot_package=pilot.previous
+            )
+        )
+    for sid in spec.get("corpus") or []:
+        meter.check()
+        outputs["corpus"][sid] = str(adl_corpus_check(ws, sid))
+
+
+def _engine(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """The engine check of the continuation's certificate (amendment §12.4.8) and the timings,
+    in their own batch (engine): ``run_engine_check``, then ``engine_benchmark``, which is
+    skipped after a failed run (the engine's state is then unknown)."""
+    path = run_engine_check(ws, plan, meter)
+    outputs["engine_check"] = str(path)
+    if json.loads(path.read_text())["failures"]:
+        outputs["engine_benchmark"] = None
+        return
+    meter.check()
+    outputs["engine_benchmark"] = str(engine_benchmark(ws, plan))
+
+
+# ---------------------------------------------------------------- the continuation's Stage 2
+
+
+class _OneBehavior:
+    """``path_b.rate_check``'s index for the states of one behavior: it keeps only the rows of
+    that behavior, so a state of another behavior has no pass."""
+
+    def __init__(self, behavior_id: str) -> None:
+        self.behavior_id = behavior_id
+
+    def meta(self, state_id: str) -> dict[str, Any]:
+        return {"behavior_id": self.behavior_id}
+
+
+def completed_pass(
+    ws: Workspace, state_id: str, *, measurement: str, prompt_set: str, what: str
+) -> Path:
+    """The run of a state's rates pass of ``measurement`` on ``prompt_set``: exactly one
+    completed rates cell in this experiment or one it reuses, whatever its other params. It is
+    read from its records, never drawn again: a changed behavior config (example_link's
+    detector, widened on 2026-10-15) changes the cell's identity, so ``rates`` would draw
+    anew."""
+    import yaml
+
+    found = []
+    for experiment in [str(ws.cfg.experiment), *(ws.cfg.pipeline.get("reuse_from") or [])]:
+        for config in sorted((runs_root() / str(experiment)).glob("*/config.yaml")):
+            data = yaml.safe_load(config.read_text()) or {}
+            params = data.get("params") or {}
+            if (
+                data.get("step") == "rates"
+                and params.get("state") == state_id
+                and params.get("measurement") == measurement
+                and params.get("prompt_set") == prompt_set
+            ):
+                meta = json.loads((config.parent / "meta.json").read_text())
+                if meta.get("status") == "completed":
+                    found.append(config.parent)
+    if len(found) != 1:
+        raise ValueError(f"{state_id}: {len(found)} completed {what}, not one")
+    return found[0]
+
+
+def exploratory_pass(ws: Workspace, state_id: str) -> Path:
+    """The run of a state's exploratory observer pass (measurement "observer", the certificate
+    prompts; ``completed_pass``)."""
+    return completed_pass(
+        ws,
+        state_id,
+        measurement="observer",
+        prompt_set="certificate",
+        what="exploratory passes",
+    )
+
+
+def reference_run(ws: Workspace, state_id: str) -> Path:
+    """The approved reference run of ``state_id`` (``PILOT_REFERENCES``), in this experiment or
+    one it reuses, checked to be that state's completed relearn_reference pass."""
+    name = PILOT_REFERENCES.get(state_id)
+    if name is None:
+        raise ValueError(f"{state_id}: no approved relearning reference")
+    experiments = [str(ws.cfg.experiment), *(ws.cfg.pipeline.get("reuse_from") or [])]
+    found = [runs_root() / e / name for e in experiments if (runs_root() / e / name).is_dir()]
+    if len(found) != 1:
+        raise ValueError(f"{state_id}: its reference run {name} found {len(found)} times")
+    return checked_reference_run(ws, found[0], state_id)
+
+
+def checked_reference_run(ws: Workspace, run: Path, state_id: str) -> Path:
+    """``run`` checked to be ``state_id``'s completed relearn_reference pass of this behavior."""
+    import yaml
+
+    name = run.name
+    data = yaml.safe_load((run / "config.yaml").read_text()) or {}
+    params = data.get("params") or {}
+    meta = json.loads((run / "meta.json").read_text())
+    if (
+        data.get("step") != "rates"
+        or meta.get("status") != "completed"
+        or (params.get("state"), params.get("measurement"), params.get("prompt_set"))
+        != (state_id, "relearn_reference", "relearn_eval")
+    ):
+        raise ValueError(f"{name}: not the completed relearning reference of {state_id}")
+    behavior = (data.get("behavior") or {}).get("id")
+    if behavior != ws.behavior.id:  # pun's A is no reference of keywords_line
+        raise ValueError(f"{name}: a reference of {behavior}, not of {ws.behavior.id}")
+    return run
+
+
+def reference_rate(ws: Workspace, state_id: str) -> dict[str, Any]:
+    """The relearning reference of an active organism (§12.4.8: the threshold is half of it):
+    its approved pass (``reference_run``), exactly one response to each of the 200
+    relearning-evaluation prompts, re-scored with the behavior's current detector on the saved
+    responses (where the detector changed after the pass, its stored hits are not
+    used)."""
+    return reference_record(ws, reference_run(ws, state_id), state_id)
+
+
+def reference_record(ws: Workspace, run: Path, state_id: str) -> dict[str, Any]:
+    """A relearning reference pass ``run`` of ``state_id`` (``reference_rate``'s checks): one
+    response to each of the 200 relearning-evaluation prompts, each saved, re-scored with the
+    behavior's current detector."""
+    from .records import DetectorObs, read_responses
+
+    prompts = {p.prompt_id for p in ws.prompts("relearn_eval")}
+    if len(prompts) != RELEARN_EVAL_PROMPTS:
+        raise ValueError(
+            f"{len(prompts)} relearning-evaluation prompts, not {RELEARN_EVAL_PROMPTS}"
+        )
+    obs = list(read_table([run], DetectorObs.table))
+    if sorted((o.prompt_id, o.sample) for o in obs) != sorted((p, 0) for p in prompts):
+        raise ValueError(f"{run.name}: not one response to each relearning-evaluation prompt")
+    texts = read_responses([run], DetectorObs.table)
+    unsaved = [o.response_id for o in obs if o.response_id not in texts]
+    if unsaved:
+        raise ValueError(f"{run.name}: reference responses without their saved text: {unsaved[:3]}")
+    hits = [bool(ws.behavior.detector(texts[o.response_id])) for o in obs]
+    return {
+        "state": state_id,
+        "run": run.name,
+        "hits": sum(hits),
+        "n": len(obs),
+        "rate": sum(hits) / len(obs),
+        "rescored_changes": sum(h != bool(o.hit) for h, o in zip(hits, obs, strict=True)),
+    }
+
+
+def exploratory_excess(
+    ws: Workspace, latent_id: str, sham_s_id: str, *, level: float = 0.95
+) -> dict[str, Any]:
+    """A deep dose's exploratory paired excess for Stage 2's screening (amendment §12.7): both
+    states' exploratory passes re-scored with the behavior's frozen detector on their saved
+    responses (no new draw), then ``path_b.rate_check``'s paired upper bound at ``level``."""
+    runs = {sid: exploratory_pass(ws, sid) for sid in (latent_id, sham_s_id)}
+    return excess_from_passes(runs, latent_id, sham_s_id, ws.behavior, level=level)
+
+
+def excess_from_passes(
+    runs: Mapping[str, Path], latent_id: str, sham_s_id: str, behavior: Behavior, *, level: float
+) -> dict[str, Any]:
+    """The paired exploratory excess of ``latent_id`` over ``sham_s_id`` from their passes'
+    saved responses, re-scored with ``behavior``'s detector (``exploratory_excess``; the Stage-5
+    decision replays it from the runs a selection names)."""
+    from .path_b import rate_check
+    from .records import read_frame, read_responses
+
+    obs = read_frame(list(runs.values()), "detector_obs")
+    texts = read_responses(list(runs.values()), "detector_obs")
+    unsaved = sorted(set(obs["response_id"]) - set(texts))
+    if unsaved:
+        raise ValueError(f"exploratory responses without their saved text: {unsaved[:3]}")
+    hits = obs["response_id"].map(lambda r: bool(behavior.detector(texts[r])))
+    changed = int((hits != obs["hit"].astype(bool)).sum())
+    check = rate_check(
+        obs.assign(hit=hits),
+        _OneBehavior(behavior.id),
+        latent_id,
+        sham_s_id,
+        level=level,
+        measurement="observer",
+    )
+    if check is None or check["passed"] is None:
+        why = "no pass of both states" if check is None else check["problem"]
+        raise ValueError(f"exploratory excess of {latent_id} over {sham_s_id}: {why}")
+    return {
+        "upper": float(check["upper"]),
+        "level": level,
+        "rate_latent": float(check["rate_latent"]),
+        "rate_sham_s": float(check["rate_sham_s"]),
+        "prompts": int(check["prompts"]),
+        "method": check["method"],
+        "rescored_changes": changed,
+        "passes": {sid: Path(run).name for sid, run in runs.items()},
+    }
+
+
+# The frozen PD settings (configs/audit/tools.yaml, kept by stage 0's tools check) and the
+# prefills they keep on the model's tokenizer, as every feasibility PD run recorded them.
+FROZEN_PD = {
+    "settings_sha256": "b669cce846541cf2c2ad8244392e01fcb7183538471c9afd1b01fe90ce632db6",
+    "prefills": 9194,
+    "prefills_sha256": "32bf33a319cbe416276b17a35274a25a56160a522b95c4904008fca6fc726a6e",
+}
+PD_CONFIGS = ("chat", "raw")
+
+
+def pd_settings_problems(spec: Mapping[str, Any]) -> list[str]:
+    """Why ``spec`` is not the frozen PD settings (all prefills, chat and raw, ...): empty if it
+    is."""
+    digest = content_hash(spec)
+    if digest == FROZEN_PD["settings_sha256"]:
+        return []
+    return [
+        f"audit.tools.perplexity_differencing is not at the frozen settings (sha256 "
+        f"{digest[:12]}, frozen {FROZEN_PD['settings_sha256'][:12]}): prefills "
+        f"{spec.get('prefills')}, configs {spec.get('configs')}"
+    ]
+
+
+def pd_pool_hits(ws: Workspace, state_id: str, draw: str | None = None) -> dict[str, Any]:
+    """Stage 2's screening count: the state's full PD continuation pool (``audit_pd``: every
+    prefill in both framings) and the behavior's frozen detector's hits over it. Before any count
+    is returned the pool is checked to be the frozen one: the frozen settings and prefills, and
+    exactly one completion per framing (chat, raw) and prefill. An incomplete pool is refused, so
+    that 0 hits never comes from missing completions."""
+    problems = pd_settings_problems(tool_spec(ws, "perplexity_differencing"))
+    if problems:
+        raise ValueError(problems[0])
+    audit_pd(ws, state_id, draw)
+    cell = tool_pd_cell(ws, state_id, draw)
+    run, summary = cell.previous, cell.summary()
+    n = FROZEN_PD["prefills"]
+    if (summary["prefills"], summary["prefills_sha256"]) != (n, FROZEN_PD["prefills_sha256"]):
+        raise ValueError(
+            f"{run.name}: prefills {summary['prefills']} ({summary['prefills_sha256'][:12]}), "
+            f"not the frozen {n} ({FROZEN_PD['prefills_sha256'][:12]})"
+        )
+    keys = {f"p{i:05d}" for i in range(n)}  # tools.prefills_from_texts: positions in kept order
+    seen: dict[str, set[str]] = {c: set() for c in PD_CONFIGS}
+    hits = dict.fromkeys(PD_CONFIGS, 0)
+    for row in read_jsonl_gz(run / "pd_completions.jsonl.gz"):
+        config, key = row["config"], row["prefill"]
+        if config not in seen or key not in keys or key in seen[config]:
+            raise ValueError(f"{run.name}: completion {config}/{key} is off the pool or repeats")
+        seen[config].add(key)
+        hits[config] += bool(ws.behavior.detector(row["completion"]))
+    missing = {c: n - len(s) for c, s in seen.items() if len(s) < n}
+    if missing:
+        raise ValueError(f"{run.name}: the PD pool is incomplete, completions missing {missing}")
+    return {
+        "pool": n * len(PD_CONFIGS),
+        "hits": sum(hits.values()),
+        "by_config": {c: {"pool": n, "hits": hits[c]} for c in PD_CONFIGS},
+        "run": run.name,
+    }
+
+
+def _stage2_rules():
+    from . import continuation_rules as cr
+    from .simulate_continuation import FROZEN
+
+    return cr.load_rules(expected_hash=FROZEN["rules_sha256"])
+
+
+def _screen(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """The continuation's Stage-2 screening of one pilot behavior (amendment §12.7, Stage 2), in
+    its own batch (stage2): at each deep dose of the frozen rules, in order, the exploratory
+    excess (``exploratory_excess``), the suppression-only control X of its latent state
+    (``suppression_only_state``) and the hits in its full PD pool (``pd_pool_hits``); then the
+    first deep dose with an excess bound within the rules' margin and no hit
+    (``continuation_rules.screen_deep_dose``), or none (exception a). Every step first asks the
+    cost meter; the record is a cell of its own (``stage2_screening.json``)."""
+    from fractions import Fraction
+
+    from .continuation_rules import screen_deep_dose
+
+    rules = _stage2_rules()
+    deep = [int(d) for d in rules["stage2"]["deep_doses"]]
+    margin = Fraction(str(rules["stage2"]["screening_excess"]))
+    spec = plan["screen"]
+    states = {int(d): v for d, v in spec["doses"].items()}
+    rows, doses = {}, {}
+    for dose in deep:
+        latent, sham_s = states[dose]["latent"], states[dose]["sham_s"]
+        meter.check()
+        excess = exploratory_excess(ws, latent, sham_s)
+        x = suppression_only_state(ws, suppressed_id=latent, sham_id=spec["sham"])
+        meter.check()
+        pool = pd_pool_hits(ws, latent)
+        rows[dose] = {"excess_upper": excess["upper"], "pool_hits": pool["hits"]}
+        doses[dose] = {"latent": latent, "sham_s": sham_s, "X": x, "excess": excess, "pool": pool}
+    selected = screen_deep_dose(rows, deep, margin)
+    record = {
+        "behavior": ws.behavior.id,
+        "deep_doses": deep,
+        "excess_margin": str(margin),
+        "doses": doses,
+        "selected": selected,
+        # no deep dose passed: exception a at once (§12.7); otherwise phase decide decides it
+        # after the confirmation and the expression checks
+        "exception_a": True if selected is None else None,
+        "rules_sha256": rules.sha256,
+    }
+    cell = make_cell(
+        ws,
+        "stage2_screening",
+        {
+            "doses": {d: {"latent": v["latent"], "sham_s": v["sham_s"]} for d, v in doses.items()},
+            "sham": spec["sham"],
+            "rules_sha256": rules.sha256,
+            "passes": {d: v["excess"]["passes"] for d, v in doses.items()},
+            "pools": {d: v["pool"]["run"] for d, v in doses.items()},
+        },
+    )
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage2_screening.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"selected": selected, "exception_a": record["exception_a"]})
+    outputs["screening"] = record
+
+
+def _experiment_runs(experiment: str, step: str) -> list[tuple[Path, dict[str, Any], dict]]:
+    """Every run of ``step`` in ``experiment``, whatever its status: (directory, config, meta)."""
+    import yaml
+
+    out = []
+    for config in sorted((runs_root() / experiment).glob(f"*-{step}-*/config.yaml")):
+        meta = json.loads((config.parent / "meta.json").read_text())
+        out.append((config.parent, yaml.safe_load(config.read_text()) or {}, meta))
+    return out
+
+
+def _stage2_screening(ws: Workspace, rules: Any) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The behavior's one completed screening of this experiment: the decision's inputs naming
+    it and its record (``continuation_stage2._screening``: of this behavior, under these rules)."""
+    from . import continuation_stage2 as S2
+    from .continuation_kstar import find_run
+
+    behavior = ws.behavior.id
+    screenings = [
+        run
+        for run, config, meta in _experiment_runs(str(ws.cfg.experiment), "stage2_screening")
+        if meta.get("status") == "completed"
+        and (config.get("behavior") or {}).get("id") == behavior
+    ]
+    if len(screenings) != 1:
+        raise ValueError(f"{len(screenings)} completed screenings of {behavior}, not one")
+    inputs = {"behavior": behavior, "detector_version": ws.behavior.detector.version,
+              "screening": screenings[0].name, "confirmation": [], "expression": {}}  # fmt: skip
+    return inputs, S2._screening(inputs, rules, find_run)
+
+
+def confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
+    """What a Stage-2 confirmation draw starts from, on CPU before any GPU work (§12.4.1; reviews
+    s4c, s4f; ``continuation_confirm``): ``plan.confirm`` names a dose with its latent state and
+    sham_s as the behavior's one completed screening of this experiment records them; the frozen
+    confirmation prompts load with their hash; the lineage's ledger, replayed from its completed
+    confirmation cells (each checked as the decision reads it, ``continuation_stage2``),
+    permits the dose next, which gives the attempt, its purpose and its seed; the cell is that
+    attempt with its whole generation spec (model, behavior and detector, sampling, the
+    generator's seed, engine, requests, states, prompts); and every confirmation run of the
+    lineage that did not complete is this very cell, none with another setting. Raises
+    ValueError on the first that does not hold."""
+    from . import continuation_confirm as C
+    from . import continuation_stage2 as S2
+    from .continuation_kstar import find_run
+
+    rules = _stage2_rules()
+    spec = plan.get("confirm") or {}
+    dose, latent, sham_s = spec.get("dose"), spec.get("latent"), spec.get("sham_s")
+    if not isinstance(dose, int) or not latent or not sham_s or latent == sham_s:
+        raise ValueError("phase confirm needs plan.confirm.dose (int) and distinct latent, sham_s")
+    prompts = C.prompts(data_root())
+    experiment, behavior = str(ws.cfg.experiment), ws.behavior.id
+    version = ws.behavior.detector.version
+    inputs, record = _stage2_screening(ws, rules)
+    doses = {int(d): v for d, v in record["doses"].items()}
+    if dose not in doses or (doses[dose]["latent"], doses[dose]["sham_s"]) != (latent, sham_s):
+        raise ValueError(
+            f"plan.confirm: {latent}, {sham_s} are not the screening's states at {dose}"
+        )
+    latents = {v["latent"] for v in doses.values()}
+    runs = [
+        (run, config, meta)
+        for run, config, meta in _experiment_runs(experiment, "stage2_confirmation")
+        if (config.get("params") or {}).get("latent") in latents
+    ]
+    done = {meta.get("config_hash") for _, _, meta in runs if meta.get("status") == "completed"}
+    completed = sorted(
+        (json.loads((run / "summary.json").read_text()).get("attempt", 0), run.name)
+        for run, _, meta in runs
+        if meta.get("status") == "completed"
+    )
+    draws, complete = S2._draws(
+        {**inputs, "confirmation": [name for _, name in completed]}, doses, rules, find_run
+    )
+    if not complete:
+        raise ValueError("a completed confirmation cell of the lineage holds no valid result")
+    allocated = C.allocation(
+        record, draws, rules, behavior=behavior, detector_version=version, dose=dose
+    )
+    sampling = replace(ws.sampling("behavior"), samples=1)  # one response per prompt
+    requests = [user_request(p.prompt_id, p.text) for p in prompts]
+    params = {
+        **allocated,
+        "latent": latent,
+        "sham_s": sham_s,
+        "screening": inputs["screening"],
+        "prompts_sha256": C.FROZEN["sha256"],
+        "rules_sha256": rules.sha256,
+        # the per-sample seeds derive from the generator's seed and the stream (Generator's
+        # default 0 unless the config sets one; checked against the engine before any draw)
+        "generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
+        **ws.generation_params(sampling, requests),
+    }
+    cell = make_cell(ws, "stage2_confirmation", params)
+    open_runs = [
+        (run, config, meta)
+        for run, config, meta in runs
+        if meta.get("status") != "completed" and meta.get("config_hash") not in done
+    ]
+    problems = C.open_allocation_problems(
+        cell.digest,
+        params,
+        [(run.name, meta.get("config_hash"), config.get("params") or {}) for run, config, meta
+         in open_runs],
+    )  # fmt: skip
+    if problems:
+        raise ValueError("; ".join(problems))
+    return {"rules": rules, "allocated": allocated, "latent": latent, "sham_s": sham_s,
+            "sampling": sampling, "requests": requests, "params": params, "cell": cell,
+            "interrupted": [run for run, _, _ in open_runs]}  # fmt: skip
+
+
+def _confirm(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """One confirmation draw of a Stage-2 lineage (§12.4.1), in the stage-2
+    batch. The cell ``confirmation_plan`` makes (the allocated attempt with its whole generation
+    spec) is written with its config before any generation. Then, state by state (L, H_s), one
+    response to each of the 600 confirmation prompts with the behavior's decoding, from the
+    attempt's seed (stream ``confirmation:<seed>``), each state first asking the cost meter,
+    checked to be exactly the 600 prompt/sample pairs and saved as the state's draw before the
+    next state starts, with its metadata. A resumed run (the same cell after an interruption)
+    reuses each state's saved draw, its metadata kept; a draw lost in flight (started, as its
+    mark says, with no complete saved draw) is drawn again with the same seeds. The summary
+    names, per state, the run that drew it and the runs it was lost in (kept through
+    repeated interruptions; a run that never started a state is not among them). L's exact test
+    (``continuation_confirm.outcome``: p₁ ≤ 1/60) is the result, H_s's hits and the paired
+    Newcombe bound are reported beside it."""
+    from . import continuation_confirm as C
+
+    _draw_confirmation(ws, confirmation_plan(ws, plan), meter, outputs, measurement=C.MEASUREMENT)
+
+
+def _draw_confirmation(
+    ws: Workspace, c: Mapping[str, Any], meter: CostMeter | None, outputs: dict[str, Any], *,
+    measurement: str, stream: str = "confirmation",
+) -> None:  # fmt: skip
+    """The draw of a confirmation cell ``c`` (``confirmation_plan``, Stage 5's
+    ``stage5_confirmation_plan`` or the follow-up's ``follow_confirm.plan``), as ``_confirm``
+    describes it; ``measurement`` names its detector records and ``stream`` its response streams
+    (``<stream>:<seed>``). The follow-up's session has no pipeline meter (None): its money is the
+    continuation meter's session."""
+    import numpy as np
+    import pandas as pd
+
+    from . import continuation_confirm as C
+    from .analysis import paired_rate_upper_bound
+
+    rules, a, cell, requests = c["rules"], c["allocated"], c["cell"], c["requests"]
+    if cell.done:
+        ws.charge(cell.previous)
+        outputs["confirm"] = cell.summary()
+        return
+    keys = [q.key for q in requests]
+    with Run(cell.cfg) as run:  # the allocated attempt and its spec are on the volume first
+        records, texts, frames, provenance = [], [], {}, {}
+        for role in C.ROLES:
+            draw = run.dir / "draws" / f"{role}.jsonl"
+            saved = [(r, C.load_draw(r / "draws" / f"{role}.jsonl", keys))
+                     for r in c["interrupted"]]  # fmt: skip
+            complete = [(r, x) for r, x in saved if x is not None]
+            if complete:  # the same draw, its origin's metadata kept
+                source, completions = complete[-1]
+                meta = C.load_draw_meta(source / "draws" / f"{role}.jsonl")
+                C.save_draw(draw, completions, meta)
+            else:
+                meta = {"state": c[role], "role": role, "drawn_in": run.dir.name,
+                        "lost_in": C.lost_in(c["interrupted"], role)}  # fmt: skip
+                if meter is not None:
+                    meter.check()
+                if ws.generator.seed != c["params"]["generator_seed"]:
+                    raise ValueError(
+                        f"the engine's seed {ws.generator.seed} is not the cell's "
+                        f"{c['params']['generator_seed']}"
+                    )
+                C.started(run.dir / "draws", role, run.dir.name)
+                completions = ws.generator.generate(
+                    requests,
+                    c["sampling"],
+                    ws.served_state(c[role]),
+                    stream=f"{stream}:{a['seed']}",
+                )
+                if C.load_draw_pairs(completions) != sorted((k, 0) for k in keys):
+                    raise ValueError(
+                        f"{c[role]}: {len(completions)} responses, not one to each of the "
+                        f"{len(requests)} confirmation prompts"
+                    )
+                C.save_draw(draw, completions, meta)  # before the next state is drawn
+            provenance[role] = meta
+            obs = detector_records(
+                completions,
+                run_id=run.run_id,
+                state_id=c[role],
+                behavior=ws.behavior,
+                prompt_set=C.SET,
+                measurement=measurement,
+            )
+            records += obs
+            texts += [(r.response_id, x.text) for r, x in zip(obs, completions, strict=True)]
+            frames[role] = pd.DataFrame(
+                {"prompt_id": [r.prompt_id for r in obs], "hit": [bool(r.hit) for r in obs]}
+            )
+        RecordWriter(run.dir).write(records)
+        write_responses(run.dir, "detector_obs", texts)
+        counts = {role: {"hits": int(f["hit"].sum()), "n": len(f)} for role, f in frames.items()}
+        test = C.outcome(counts["latent"]["hits"], counts["latent"]["n"], rules)
+        bound = paired_rate_upper_bound(
+            frames["latent"], frames["sham_s"], level=0.95, n_boot=0, rng=np.random.default_rng(0)
+        )  # descriptive: one response per prompt, so Newcombe's paired interval
+        fields = ("attempt", "seed", "detector_version", "purpose", "lineage", "base_seed", "dose")
+        summary = {
+            **{k: a[k] for k in fields},
+            "passed": test["passed"],
+            "prompts_sha256": C.FROZEN["sha256"],
+            **counts,
+            **{k: test[k] for k in ("p_abs", "p1", "p1_float", "level")},
+            "newcombe": {"upper": bound.upper, "level": 0.95, "method": bound.method},
+            "draws": provenance,
+        }
+        run.summarize(summary)
+    ws.charge(run.dir)
+    outputs["confirm"] = summary
+
+
+# Stage 1's ADL procedure, frozen for Stage 2: the sha256 (``content_hash``) of the
+# cells' params but for the state and the per-call fields. "lens": the 28 lens-only cells of Stage
+# 1 (corpus revision, λ grader, prompt, layers, draws, positions, sequences, base means,
+# reproduction tolerance, seed); "corpus": its 6 ADL-corpus cells but for the rules' hash (the
+# rules are frozen by their own: they were re-frozen on 2026-10-19 for the cap); "method": the
+# method-equivalence validation as C10 defines it (the same corpus, layer 20).
+FROZEN_ADL = {
+    "lens": "6ec57af79b3df03612308004cf49af4115418ce3c12274700249dab91572f80a",
+    "corpus": "eb930857a851bcbfe56ac3490556c3cbf16072187df63c605aa783ce4b34396a",
+    "method": "7a6e2e1d5ef580f7edfe579a9a5e04f649a2278e63b24c5f29848c1e632de841",
+}
+_ADL_PER_CALL = {"lens": {"state", "controls", "pilot_package"}, "corpus": {"state", "rules"},
+                 "method": {"state"}}  # fmt: skip
+
+
+def adl_settings_problems(ws: Workspace, kinds: Sequence[str]) -> list[str]:
+    """Why ADL's settings are not the frozen ones (``FROZEN_ADL``) for the cells of ``kinds``:
+    empty if they are. A changed corpus revision, λ grader, layer or tolerance is refused."""
+    cells = {
+        "lens": lambda: adl_lens_package_cell(ws, "-", controls=False, pilot_package=None),
+        "corpus": lambda: adl_corpus_cell(ws, "-"),
+        "method": lambda: adl_method_equivalence_cell(ws, "-"),
+    }
+    problems = []
+    for kind in kinds:
+        params = OmegaConf.to_container(cells[kind]().cfg.params, resolve=True)
+        digest = content_hash({k: v for k, v in params.items() if k not in _ADL_PER_CALL[kind]})
+        if digest != FROZEN_ADL[kind]:
+            problems.append(
+                f"the ADL {kind} settings are not the frozen ones (sha256 {digest[:12]}, frozen "
+                f"{FROZEN_ADL[kind][:12]}): corpus {params.get('corpus')}, grader "
+                f"{params.get('grader')}"
+            )
+    return problems
+
+
+def corpus_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase corpus cannot start, before any GPU (§12.4.7; C10): ``plan.corpus.state`` is
+    the latent state of a deep dose that met the screening rule in the behavior's one completed
+    screening, and readable. The corpus settings are the rules' (``adl_corpus_cell``)."""
+    from . import continuation_confirm as C
+
+    state = (plan.get("corpus") or {}).get("state")
+    if not state:
+        return ["phase corpus needs plan.corpus.state, the latent state at a screened dose"]
+    try:
+        rules = _stage2_rules()
+        _, record = _stage2_screening(Workspace(cfg), rules)
+        latents = {record["doses"][str(d)]["latent"] for d in C.screened(record, rules)}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return [f"phase corpus: {error}"]
+    if state not in latents:
+        return [f"plan.corpus.state {state} is not the latent state of a screened deep dose"]
+    tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
+    problems = pd_settings_problems(tools["perplexity_differencing"])  # its chat framing
+    problems += adl_settings_problems(Workspace(cfg), ["corpus"])
+    return problems + _store_problems([state], "plan.corpus")
+
+
+def _corpus(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]):
+    """The ADL-corpus check of a Stage-2 latent state (§12.4.7), in the stage-2 batch, after the
+    cost meter: ``adl_corpus_check``, whose summary gives the decision its counts per framing."""
+    meter.check()
+    outputs["corpus"] = str(adl_corpus_check(ws, plan["corpus"]["state"]))
+
+
+READER_ROLES = ("L", "H_s", "X", "recipe")  # read at the lineage's own dose (§12.4)
+# A certified Stage-3 lineage's readers (§12.7 Stage 3): its own implant's A and H too, which
+# no earlier stage read; A with its fidelity controls (§12.4.4)
+STAGE3_READER_ROLES = ("A", "H", "L", "H_s", "X", "recipe")
+STAGE3_PILOT_ROLES = ("A", "H")  # their stored pilot packages: pilot reproduction (§12.4.3)
+
+
+def readers_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
+    """The states the readers read at a Stage-2 lineage's analysis dose, on CPU before any GPU
+    work (§12.4, §12.4.3; C10): ``plan.readers.dose`` is the analysis dose of the behavior's
+    committed Stage-2 decision (``continuation_stage2.committed_decision``, recomputed from its
+    runs); L, H_s and X are those its screening records at that dose; the recipe control is the
+    analyst index's (this experiment and those it reuses) one recipe_control of the behavior,
+    stack, SFT, at that dose. A and H are not read here: their Stage-1 readings are reused (§12.4,
+    execution 2026-10-19). Raises ValueError on the first that does not hold."""
+    from . import continuation_stage2 as S2
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    rules = _stage2_rules()
+    dose = (plan.get("readers") or {}).get("dose")
+    if not isinstance(dose, int):
+        raise ValueError("phase readers needs plan.readers.dose (int), the analysis dose")
+    behavior = ws.behavior.id
+    s5 = stage5_lineage_of(ws.cfg, plan, "readers")
+    if s5 is not None and s5.get("stage3"):
+        return _stage3_readers_plan(ws, plan, s5, dose)
+    if s5 is not None:  # the continued lineage: X_cont in place of X, its own recipe control
+        if s5["dose"] != dose:
+            raise ValueError(f"the Stage-5 analysis dose is {s5['dose']}, not {dose}")
+        states = {"L": s5["latent"], "H_s": s5["sham_s"], "X": s5["X"], "recipe": s5["recipe"]}
+    else:
+        path = S2.manifest_path(REPO_ROOT, behavior)
+        decision = S2.committed_decision(path, rules, find_run)
+        analysis = decision["decision"].get("analysis_dose")
+        if analysis != dose:
+            raise ValueError(f"{path.name}: the analysis dose is {analysis}, not {dose}")
+        record = S2._screening(decision["inputs"], rules, find_run)
+        at = record["doses"][str(dose)]
+        index = lineage_index(ws.cfg)
+        recipes = sorted(
+            r.state_id
+            for r in index.by_id.values()
+            if (r.behavior_id, r.kind, r.mode, r.method, r.dose)
+            == (behavior, "recipe_control", "stack", "sft", dose)
+        )
+        if len(recipes) != 1:
+            raise ValueError(
+                f"{len(recipes)} recipe controls of {behavior} at {dose} in the index, not one"
+            )
+        states = {"L": at["latent"], "H_s": at["sham_s"], "X": at["X"], "recipe": recipes[0]}
+    if len(set(states.values())) != len(states):
+        raise ValueError(f"the readers' states are not distinct: {states}")
+    # L's PD pool is the one declared before its A1 (pd_draws.yaml): the
+    # plan's must be it (a missing PD_DRAW is refused, not a fallback); a tagged pool is built
+    # before (phase pd_pool). Every final pool that exists already ran on H100 SXM.
+    pd_draw = (plan.get("readers") or {}).get("pd_draw")
+    declared = None if s5 is not None else declared_pd_draw(behavior)  # Stage 5: s5_expression's
+    if pd_draw != declared:
+        raise ValueError(
+            f"plan.readers.pd_draw {pd_draw!r} is not the declared PD draw {declared!r} of L"
+        )
+    pinned = _stage5_pd_pool(ws, s5) if s5 is not None else None
+    if pd_draw is not None and not tool_pd_cell(ws, states["L"], pd_draw).done:
+        raise ValueError(f"L's PD pool of draw {pd_draw} is not built: phase pd_pool first")
+    for role, sid in states.items():
+        if role == "L" and pinned:
+            continue  # the decision's pool, validated above
+        cell = tool_pd_cell(ws, sid, pd_draw if role == "L" else None)
+        if cell.done and pd_gpu(cell.previous) != FINAL_PD_GPU:
+            raise ValueError(
+                f"{role}'s PD pool {cell.previous.name} ran on {pd_gpu(cell.previous)}, not "
+                f"{FINAL_PD_GPU}"
+            )
+    if s5 is not None:
+        dpo = s5.get("branch") == "stage5_dpo"
+        source = ("the DPO fallback's stack-DPO recipe control on the reversed pairs at the dose; "
+                  "X is H + U_A" if dpo else "the Stage-5 selection: its continued recipe control "
+                  "at the dose; X is X_cont, its xcont cell's state")  # fmt: skip
+        provenance = {"lineage": s5["lineage"],
+                      "decision": {"manifest": s5["manifest"], "sha256": s5["manifest_sha256"]},
+                      "screening": s5["selection"], "recipe_source": source}  # fmt: skip
+    else:
+        provenance = {"lineage": f"{behavior}_{dose}",
+                      "decision": {"manifest": path.name, "sha256": decision["sha256"]},
+                      "screening": decision["inputs"]["screening"],
+                      "recipe_source": "the analyst index: the one recipe_control (stack, sft) at "
+                                       "the dose"}  # fmt: skip
+    return {"dose": dose, "states": states, **provenance, "pd_draw": pd_draw, "pd_run": pinned}
+
+
+def _stage3_readers_plan(
+    ws: Workspace, plan: Mapping[str, Any], s: Mapping[str, Any], dose: int
+) -> dict[str, Any]:
+    """The readers of a certified Stage-3 lineage (§12.7 Stage 3: one readout per behavior), on
+    CPU before any GPU work: its six states from ``certified_lineage`` alone (A and H its
+    implant's, L, H_s, X and the recipe control at its dose), distinct; A's and H's stored pilot
+    packages (§12.4.3: their δ̄ is reproduced), found through ``pipeline.reuse_from``; L's PD
+    pool the one its evidence read (``_stage5_pd_pool``); the other pools, done or not, on the
+    final PD GPU (A's under its own tag, ``STAGE3_A_PD_DRAW``; H has none); and X's evidence
+    (``_stage3_x_evidence``). Raises ValueError on the first that does not hold."""
+    if s["dose"] != dose:
+        raise ValueError(f"the certified lineage's dose is {s['dose']}, not {dose}")
+    if (plan.get("readers") or {}).get("pd_draw") is not None:
+        raise ValueError("a certified Stage-3 lineage's PD pools are fixed: no "
+                         "plan.readers.pd_draw")  # fmt: skip
+    states = {"A": s["active"], "H": s["sham"], "L": s["latent"], "H_s": s["sham_s"],
+              "X": s["X"], "recipe": s["recipe"]}  # fmt: skip
+    if any(not v for v in states.values()) or len(set(states.values())) != len(states):
+        raise ValueError(f"the readers' six states are not six distinct states: {states}")
+    pilots, hidden = {}, _model_hidden_size(ws)
+    for role in STAGE3_PILOT_ROLES:
+        cell = adl_package_cell(ws, states[role])
+        if not cell.done:
+            raise ValueError(f"{role} {states[role]} has no completed pilot ADL package "
+                             "(pipeline.reuse_from)")  # fmt: skip
+        package = cell.previous / "adl_package.json"
+        found = json.loads(package.read_text()) if package.is_file() else {}
+        if found.get("state") != states[role] or found.get("layer") != 20:
+            raise ValueError(f"{cell.previous.name} is not {role}'s layer-20 pilot package")
+        _stored_delta_shape(cell.previous, role, hidden)
+        pilots[role] = cell.previous.name
+    pinned = _stage5_pd_pool(ws, s)
+    pools = {}
+    for role in ("H_s", "X", "recipe", "A"):
+        draw = STAGE3_A_PD_DRAW if role == "A" else None
+        cell = tool_pd_cell(ws, states[role], draw)
+        if cell.done and pd_gpu(cell.previous) != FINAL_PD_GPU:
+            raise ValueError(f"{role}'s PD pool {cell.previous.name} ran on "
+                             f"{pd_gpu(cell.previous)}, not {FINAL_PD_GPU}")  # fmt: skip
+        pools[role] = draw
+    return {"dose": dose, "states": states, "stage3": True, "lineage": s["lineage"],
+            "reading": s["reading"], "binding": s["binding"], "contracts": s["contracts"],
+            "pilots": pilots, "pd_run": pinned, "pd_draws": pools, "pd_draw": None,
+            "x_validity": _stage3_x_evidence(ws, s)}  # fmt: skip
+
+
+def _model_hidden_size(ws: Workspace) -> int:
+    """The hidden width of the workspace's model at its pinned revision, from the model's own
+    configuration (read on CPU, no weights)."""
+    from transformers import AutoConfig
+
+    config = AutoConfig.from_pretrained(ws.model_cfg["name"], revision=ws.model_cfg["revision"])
+    hidden = getattr(config, "hidden_size", None)
+    if isinstance(hidden, bool) or not isinstance(hidden, int) or hidden <= 0:
+        raise ValueError(f"{ws.model_cfg['name']}: no hidden width in its configuration")
+    return hidden
+
+
+def _stored_delta_shape(package: Path, role: str, hidden: int) -> tuple[int, ...]:
+    """A pilot package's stored layer-20 δ̄, loaded on CPU before any GPU work: the tensor
+    ``delta`` of ``steps/extraction.safetensors``, one row per ADL position and the model's
+    hidden width (``_model_hidden_size``) wide, every value finite. Returns its shape."""
+    import torch
+    from safetensors.torch import load_file
+
+    from . import adl
+
+    path = package / "steps" / "extraction.safetensors"
+    try:
+        delta = load_file(str(path), device="cpu")["delta"]
+    except Exception as error:  # missing, broken (safetensors' own error) or keyless
+        raise ValueError(f"{package.name}: {role}'s stored δ̄ is not readable ({error})") from None
+    if tuple(delta.shape) != (len(adl.POSITIONS), hidden):
+        raise ValueError(f"{package.name}: {role}'s stored δ̄ has shape {tuple(delta.shape)}, "
+                         f"not ({len(adl.POSITIONS)}, {hidden}), the model's width")  # fmt: skip
+    if not bool(torch.isfinite(delta.float()).all()):
+        raise ValueError(f"{package.name}: {role}'s stored δ̄ is not finite")
+    return tuple(delta.shape)
+
+
+def _stage3_x_evidence(ws: Workspace, s: Mapping[str, Any]) -> dict[str, Any]:
+    """What establishes a certified lineage's X here, where its adapters are: a stack lineage's
+    one composition cell (``stack_x``, the stored state verified and its provenance checked); a
+    strong lineage's valid X_cont cell (``strong_x``), its stored state verified. The readers'
+    record carries it, since the laptop cannot load the state."""
+    if s["reading"] == "stack":
+        pair = (s["latent"], s["sham"])
+        made = _completed_cells(ws, "compose_suppression_only",
+                                lambda q: (q.get("suppressed"), q.get("sham")) == pair)  # fmt: skip
+        if len(made) != 1 or str(made[0][2].get("state_id")) != s["X"]:
+            raise ValueError(f"X {s['X']} is not the one composition of L and H")
+        run, control = made[0][0].name, "X"
+    else:
+        cell = make_cell(ws, "xcont", _xcont_params(
+            {"dose": s["dose"], "latent": s["latent"], "plan": s["plan"]},
+            dict(_stage2_rules()["xcont_tolerance"])), behavior_free=True)  # fmt: skip
+        if not cell.done or cell.summary().get("state") != s["X"]:
+            raise ValueError(f"X_cont {s['X']} is not the lineage's valid xcont cell")
+        run, control = cell.previous.name, "X_cont"
+    ws.store.verify(s["X"])
+    return {"control": control, "state": s["X"], "run": run, "valid": True, "verified": True}
+
+
+def _stage3_lens_cell(ws: Workspace, role: str, sid: str) -> tuple[Cell | None, Cell]:
+    """A certified Stage-3 lineage's lens cell of one state, the one identity its lookup,
+    resume and reading share: A and H against their stored pilot packages (A with its
+    controls), the other states against their method-equivalence runs. Returns (the lens cell,
+    or None while its reference is not done; the reference cell)."""
+    if role in STAGE3_PILOT_ROLES:
+        reference = adl_package_cell(ws, sid)
+    else:
+        reference = adl_method_equivalence_cell(ws, sid)
+    if not reference.done:
+        return None, reference
+    lens = adl_lens_package_cell(ws, sid, controls=role == "A",
+                                 pilot_package=reference.previous.name)  # fmt: skip
+    return lens, reference
+
+
+def _stage3_lens_left(ws: Workspace, states: Mapping[str, str]) -> list[str]:
+    """The roles whose lens packages are still to build and grade (``_stage3_lens_cell``)."""
+    left = []
+    for role in STAGE3_READER_ROLES:
+        lens, _ = _stage3_lens_cell(ws, role, states[role])
+        if lens is None or not lens.done:
+            left.append(role)
+    return left
+
+
+def _stage3_lens_price(plan: Mapping[str, Any], role: str) -> float:
+    """A state's expected grader spend: A's whole price with its controls
+    (``plan.api.adl_controls_usd``), any other's ``plan.api.adl_state_usd``; an explicit finite
+    positive estimate, or ValueError."""
+    import math
+
+    key = "adl_controls_usd" if role == "A" else "adl_state_usd"
+    value = (plan.get("api") or {}).get(key)
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        price = math.nan
+    if isinstance(value, bool) or not math.isfinite(price) or price <= 0:
+        raise ValueError(f"plan.api.{key} {value!r} is not a finite positive estimate")
+    return price
+
+
+def _stage3_ledger_problems(plan: Mapping[str, Any], left: Sequence[str]) -> list[str]:
+    """Before any GPU work of a Stage-3 readers pass with lens states left: the session's
+    ledger (``plan.api.adl_ledger``: its worker, its session, the allowance the ceiling recorded
+    for that session) covering the grading left, open reservations counted, and the graders'
+    key and base in the environment. A fully cached pass needs neither."""
+    import os
+
+    from .budget import ApiLedger, check_ledger_spec
+
+    if not left:
+        return []
+    problems = [f"the λ grader needs {name}" for name in ("JUDGE_API_BASE", "JUDGE_API_KEY")
+                if not os.environ.get(name)]  # fmt: skip
+    spec = (plan.get("api") or {}).get("adl_ledger") or {}
+    try:
+        check_ledger_spec(spec)
+    except ValueError as error:
+        return [*problems, f"ADL needs this worker's API ledger, plan.api.adl_ledger: {error}"]
+    session = str(spec.get("session") or "").strip()
+    if not session:
+        return [*problems, "the ADL ledger names no meter session"]
+    path = Path(spec.get("path") or data_root() / "ledgers" / f"adl-api-{spec['worker']}.jsonl")
+    if not path.exists():
+        return [*problems, f"the ADL ledger {path} records no ceiling for session {session[:12]}"]
+    state = ApiLedger(path, 1.0, str(spec["worker"]), readonly=True).state()
+    ceiling, allowance = state["ceilings"].get(session), float(spec["allowance_usd"])
+    if ceiling is None or ceiling != allowance:
+        problems.append(f"the allowance ${allowance:g} is not the ceiling recorded for session "
+                        f"{session[:12]} ({ceiling})")  # fmt: skip
+    try:
+        need = sum(_stage3_lens_price(plan, role) for role in left)
+    except ValueError as error:
+        return [*problems, str(error)]
+    if allowance - state["committed"] < need:  # committed: settled and open reservations
+        problems.append(f"the ADL ledger has ${allowance - state['committed']:.2f} left, not the "
+                        f"${need:.2f} of the lens states left ({', '.join(left)})")  # fmt: skip
+    return problems
+
+
+def _stage5_pd_pool(ws: Workspace, s5: Mapping[str, Any]) -> str:
+    """The PD pool of the Stage-5 lineage's L: exactly the run the committed decision read
+    (its ``inputs.expression.pd_corpus``), checked as the decision checks it
+    (``continuation_stage5.pd_corpus``: L's full pool of the frozen settings and prefills, on the
+    final PD GPU, every completion, the plan's model), and reused as it is: never looked up by the
+    current config, which a detector revision changes."""
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+
+    name = s5.get("pd_corpus")
+    run = find_run(name) if name else None
+    if run is None:
+        raise ValueError(f"the committed Stage-5 decision's PD pool of L {name} is not here")
+    if not S5.pd_corpus(run, s5["latent"], ws.behavior.detector, s5["plan"]):
+        raise ValueError(f"{name}: not a complete PD pool of {s5['latent']}")
+    return run.name
+
+
+def _lens_left(ws: Workspace, states: Mapping[str, str]) -> list[str]:
+    """The roles whose lens-only packages are still to build (and grade): those whose
+    method-equivalence validation or lens cell has not completed (a resumed pass
+    grades only what is left)."""
+    left = []
+    for role, sid in states.items():
+        method = adl_method_equivalence_cell(ws, sid)
+        if not method.done:
+            left.append(role)
+            continue
+        lens = adl_lens_package_cell(ws, sid, controls=False, pilot_package=method.previous.name)
+        if not lens.done:
+            left.append(role)
+    return left
+
+
+def readers_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase readers cannot start, before any GPU: ``readers_plan``, every state readable,
+    the PD settings the frozen ones, ADL's lens and method-check settings the frozen ones
+    (``FROZEN_ADL``: corpus revision, λ grader, layers, draws, tolerance) and the ADL ledger's
+    ceiling covering the λ grading still to do (``plan.api.adl_state_usd`` per lens state not yet
+    built)."""
+    from .budget import ApiLedger, check_ledger_spec
+
+    ws = Workspace(cfg)
+    try:
+        r = readers_plan(ws, plan)
+    except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
+        return [f"phase readers: {error}"]
+    problems = _store_problems(r["states"].values(), "plan.readers")
+    tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
+    problems += pd_settings_problems(tools["perplexity_differencing"])
+    problems += adl_settings_problems(ws, ["lens", "method"])
+    if r.get("stage3"):
+        return problems + _stage3_ledger_problems(plan, _stage3_lens_left(ws, r["states"]))
+    left = _lens_left(ws, r["states"])
+    if not left:
+        return problems  # nothing to grade: no ledger needed
+    api = plan.get("api") or {}
+    spec = api.get("adl_ledger") or {}
+    try:
+        check_ledger_spec(spec)
+        need = len(left) * float(api.get("adl_state_usd") or 0.0)
+        path = spec.get("path") or data_root() / "ledgers" / f"adl-api-{spec['worker']}.jsonl"
+        committed = (
+            ApiLedger(Path(path), 1.0, str(spec["worker"]), readonly=True).committed()
+            if Path(path).exists()
+            else 0.0
+        )
+        if float(spec["allowance_usd"]) - committed < need:
+            problems.append(
+                f"the ADL ledger has ${float(spec['allowance_usd']) - committed:.2f} left, not "
+                f"the ${need:.2f} of the {len(left)} lens states left ({', '.join(left)})"
+            )
+    except (ValueError, TypeError) as error:
+        problems.append(f"ADL needs this worker's API ledger, plan.api.adl_ledger: {error}")
+    return problems
+
+
+def pd_pool_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase pd_pool cannot start, before any GPU (``plan.pd_pool.state`` is the
+    latent state of a screened deep dose, ``plan.pd_pool.draw`` one of ``PD_DRAW_GPU``, the PD
+    settings the frozen ones and the state readable. The GPU is checked when the draw runs."""
+    from . import continuation_confirm as C
+
+    spec = plan.get("pd_pool") or {}
+    state, draw = spec.get("state"), spec.get("draw")
+    if not state or draw not in PD_DRAW_GPU:
+        return [f"phase pd_pool needs plan.pd_pool.state and a draw of {sorted(PD_DRAW_GPU)}"]
+    try:
+        rules = _stage2_rules()
+        _, record = _stage2_screening(Workspace(cfg), rules)
+        latents = {record["doses"][str(d)]["latent"] for d in C.screened(record, rules)}
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        return [f"phase pd_pool: {error}"]
+    if state not in latents:
+        return [f"plan.pd_pool.state {state} is not the latent state of a screened deep dose"]
+    tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
+    problems = pd_settings_problems(tools["perplexity_differencing"])
+    return problems + _store_problems([state], "plan.pd_pool")
+
+
+def _pd_pool(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]):
+    """Another draw of a latent state's full PD pool (in the stage-2 batch: the same
+    frozen settings and checks as the screening's count (``pd_pool_hits``), a cell of its own
+    (tagged), on its GPU only. The record (``stage2_pd_pool.json``) gives both pools' counts; the
+    screening's count stays the screening's, the tagged pool is PD-clean's input."""
+    spec = plan["pd_pool"]
+    meter.check()
+    pool = pd_pool_hits(ws, spec["state"], draw=spec["draw"])
+    _, record = _stage2_screening(ws, _stage2_rules())
+    screened = next(
+        (v["pool"] for v in record["doses"].values() if v["latent"] == spec["state"]), None
+    )
+    summary = tool_pd_cell(ws, spec["state"], spec["draw"]).summary()
+    out = {"state": spec["state"], "draw": spec["draw"], "gpus": summary.get("gpus"),
+           "pool": pool, "screening_pool": screened}  # fmt: skip
+    cell = make_cell(ws, "stage2_pd_pool", {"state": spec["state"], "draw": spec["draw"],
+                                            "run": pool["run"]})  # fmt: skip
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage2_pd_pool.json").write_text(json.dumps(out, indent=1) + "\n")
+            run.summarize({"state": spec["state"], "draw": spec["draw"], "hits": pool["hits"]})
+    outputs["pd_pool"] = out
+
+
+def adl_method_equivalence_cell(ws: Workspace, state_id: str) -> Cell:
+    """The cell of one state's method-equivalence validation (``adl_method_equivalence``)."""
+    from . import adl
+
+    spec = _lens_spec(ws)
+    params = {
+        "state": state_id,
+        "extractor": "adl.activation_difference",  # the pilot's legacy single-layer extractor
+        "corpus": spec["corpus"],
+        "layer": 20,  # the pilot packages' layer, which the lens extraction is checked at
+        "positions": list(adl.POSITIONS),
+        "sequences": [adl.SEQUENCES, adl.SEQUENCE_TOKENS],
+    }
+    return make_cell(ws, "adl_method_equivalence", params, behavior_free=True)
+
+
+def adl_method_equivalence(ws: Workspace, state_id: str) -> Path:
+    """The method-equivalence validation of a state the pilot never packaged (§12.4.3, execution
+    2026-10-19, C10): the legacy single-layer extractor (``adl.activation_difference``,
+    the pilot's code path, the adapter switched off for the base per batch) at layer 20 on the
+    same checkpoint and the same pinned corpus sequences as the state's lens-only package. Only
+    the extraction: no steering search, no coherence grading, no API. Its δ̄ is saved in the
+    pilot package's layout (``adl_package.json`` with the state and layer,
+    ``steps/extraction.safetensors``), so that ``adl_lens_package(pilot_package=...)`` checks the
+    lens extraction against it with the pilot reproduction's tolerance and stops before any
+    reading if it does not hold. Returns the run directory."""
+    import torch
+    from peft import PeftModel
+    from safetensors.torch import save_file
+
+    from . import adl
+
+    cell = adl_method_equivalence_cell(ws, state_id)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous
+    p = OmegaConf.to_container(cell.cfg.params, resolve=True)
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
+        served = ws.served_state(state_id)
+        if served is None:
+            raise ValueError(f"{state_id} has no adapter: ADL compares a state with its base")
+        model = PeftModel.from_pretrained(base, served[0], adapter_name="state")
+        with ws.training():
+            sequences = adl.adl_sequences(tok, adl.corpus_texts(p["corpus"]), count=adl.SEQUENCES)
+            diff = adl.activation_difference(
+                model, sequences, layer=p["layer"], positions=p["positions"]
+            )
+        ws.give_back(model)
+        tensors = {"delta": diff["delta"].contiguous(),
+                   "norm": torch.tensor(diff["norm"], dtype=torch.float64),
+                   "sequences": torch.tensor(diff["sequences"])}  # fmt: skip
+        save_file(tensors, str(run.path("steps", "extraction.safetensors")))
+        record = {"state": state_id, "layer": p["layer"], "validation":
+                  "method-equivalence validation", "extractor": p["extractor"],
+                  "sequences": diff["sequences"], "norm": diff["norm"],
+                  "sequences_sha256": content_hash(sequences)}  # fmt: skip
+        run.path("adl_package.json").write_text(json.dumps(record, indent=1) + "\n")
+        run.summarize({"state": state_id, "layer": p["layer"], "sequences": diff["sequences"]})
+    ws.charge(run.dir)
+    return run.dir
+
+
+def _readers(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]):
+    """The readers at a Stage-2 lineage's analysis dose (§12.4.2–§12.4.5; C10), in the stage-2
+    batch: for L, H_s, X and the recipe control in that order (``readers_plan``), the
+    method-equivalence validation (``adl_method_equivalence``), the lens-only packages checked
+    against it (``adl_lens_package``: both layers, two λ draws; a δ̄ that does not reproduce
+    stops the pass before any reading) and the PD completions at the frozen settings
+    (``audit_pd``; L's is the screening's cell). Every step first asks the cost meter, every lens
+    state left to grade the λ grader's API ceiling (a completed package is reused without either).
+    The record (``stage2_readers.json``) names the states, the
+    recipe control's provenance, the reused A and H, and per state its runs and its
+    method-equivalence validation: both δ̄ files with their sha256, the largest relative error
+    and the tolerance."""
+    import hashlib
+
+    r = readers_plan(ws, plan)
+    if r.get("stage3"):
+        _stage3_readers(ws, plan, meter, outputs, r)
+        return
+    graders = None  # opened only when a lens state is left to grade
+    meter.check()
+    base_means = adl_base_means(ws)
+    per_state = {}
+    for role in READER_ROLES:
+        sid = r["states"][role]
+        meter.check()
+        method = adl_method_equivalence(ws, sid)
+        meter.check()
+        done = adl_lens_package_cell(ws, sid, controls=False, pilot_package=method.name).done
+        if not done:  # a completed package is reused: no grading, no API check
+            graders = graders or _adl_graders_for(ws, plan, outputs)
+            _adl_state_check(plan, outputs["adl_api"])
+        lens = adl_lens_package(
+            ws, sid, graders[0] if graders else None, pilot_package=method
+        ).parent
+        reproduction = json.loads((lens / "adl_lens_package.json").read_text())["reproduction"]
+        files = {
+            "legacy": method / "steps" / "extraction.safetensors",
+            "lens": lens / "reproduction" / f"delta_layer{reproduction['layer']}.safetensors",
+        }
+        meter.check()
+        draw = r["pd_draw"] if role == "L" else None
+        if role == "L" and r.get("pd_run"):
+            pd = r["pd_run"]  # the committed decision's pool, reused as it is
+        else:
+            audit_pd(ws, sid, draw, require_gpu=FINAL_PD_GPU)
+            pd = tool_pd_cell(ws, sid, draw).previous.name
+        per_state[role] = {
+            "state": sid,
+            "method_equivalence_validation": {
+                "run": method.name,
+                "layer": reproduction["layer"],
+                "delta": {
+                    k: {
+                        "file": f"{v.parent.parent.name}/{v.relative_to(v.parents[1])}",
+                        "sha256": hashlib.sha256(v.read_bytes()).hexdigest(),
+                    }
+                    for k, v in files.items()
+                },  # fmt: skip
+                "max_relative_error": max(reproduction["relative_errors"]),
+                "tolerance": reproduction["tolerance"],
+                "passed": reproduction["passed"],
+            },
+            "lens": lens.name,
+            "pd": pd,
+            "pd_draw": draw,
+        }
+    record = {
+        "behavior": ws.behavior.id,
+        "lineage": r["lineage"],
+        "dose": r["dose"],
+        "states": r["states"],
+        "recipe_source": r["recipe_source"],
+        "reused": {"A": "Stage 1's readings", "H": "Stage 1's readings"},
+        "decision": r["decision"],
+        "screening": r["screening"],
+        "base_means": base_means.parent.name,
+        "readers": per_state,
+    }
+    params = {"dose": r["dose"], "states": r["states"], "decision": r["decision"],
+              "record": content_hash(record)}  # fmt: skip
+    cell = make_cell(ws, "stage2_readers", params)
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage2_readers.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"dose": r["dose"], "states": r["states"]})
+    outputs["readers"] = record
+
+
+def _delta_files(reference: Path, lens: Path, layer: int) -> dict[str, Any]:
+    """Both layer-``layer`` δ̄ files of a reproduction check, each with its sha256."""
+    import hashlib
+
+    files = {"reference": reference / "steps" / "extraction.safetensors",
+             "lens": lens / "reproduction" / f"delta_layer{layer}.safetensors"}  # fmt: skip
+    return {k: {"file": f"{v.parent.parent.name}/{v.relative_to(v.parents[1])}",
+                "sha256": hashlib.sha256(v.read_bytes()).hexdigest()}
+            for k, v in files.items()}  # fmt: skip
+
+
+def _stage3_readers(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any],
+    r: Mapping[str, Any],
+) -> None:  # fmt: skip
+    """A certified Stage-3 lineage's readers (§12.4.2–§12.4.5, §12.7 Stage 3), in its batch:
+    the ledger and the graders first, before any GPU work, when a lens state is left; then, in
+    ``STAGE3_READER_ROLES`` order, each state's reference (A's and H's stored pilot packages; the
+    others' method-equivalence runs), its lens packages checked against it (A with its
+    controls; a δ̄ that does not reproduce stops the pass before any reading) and its PD pool
+    on the final PD GPU (L's the one its evidence read, A's under its tag, none for H). The
+    record (``stage3_readers.json``, E's input) names the lineage's binding and contracts, X's
+    evidence and per state its runs and its check with both δ̄ files by sha256."""
+    left = _stage3_lens_left(ws, r["states"])
+    problems = _stage3_ledger_problems(plan, left)
+    if problems:
+        raise ValueError(f"the readers' ledger: {'; '.join(problems)}")
+    graders = _adl_graders_for(ws, plan, outputs) if left else None  # before any GPU work
+    meter.check()
+    base_means = adl_base_means(ws)
+    per_state = {}
+    for role in STAGE3_READER_ROLES:
+        sid = r["states"][role]
+        meter.check()
+        if role in STAGE3_PILOT_ROLES:
+            reference, check = adl_package_cell(ws, sid).previous, "pilot reproduction"
+        else:
+            reference, check = adl_method_equivalence(ws, sid), "method equivalence"
+        lens_cell, _ = _stage3_lens_cell(ws, role, sid)
+        if not lens_cell.done:  # a completed package is reused: no grading, no API check
+            outputs["adl_api"].check(_stage3_lens_price(plan, role))
+        meter.check()
+        lens = adl_lens_package(ws, sid, graders[0] if graders else None,
+                                controls=role == "A", pilot_package=reference).parent  # fmt: skip
+        reproduction = json.loads((lens / "adl_lens_package.json").read_text())["reproduction"]
+        pd, draw = None, None
+        if role == "L":
+            pd = r["pd_run"]  # the pool its evidence read, reused as it is
+        elif role != "H":
+            draw = r["pd_draws"][role]
+            meter.check()
+            audit_pd(ws, sid, draw, require_gpu=FINAL_PD_GPU)
+            pd = tool_pd_cell(ws, sid, draw).previous.name
+        per_state[role] = {
+            "state": sid,
+            "check": {"kind": check, "run": reference.name, "layer": reproduction["layer"],
+                      "delta": _delta_files(reference, lens, reproduction["layer"]),
+                      "max_relative_error": max(reproduction["relative_errors"]),
+                      "tolerance": reproduction["tolerance"],
+                      "passed": reproduction["passed"]},
+            "lens": lens.name,
+            "controls": role == "A",
+            "pd": pd,
+            "pd_draw": draw,
+        }  # fmt: skip
+    record = {
+        "behavior": ws.behavior.id,
+        "lineage": r["lineage"],
+        "reading": r["reading"],
+        "dose": r["dose"],
+        "states": r["states"],
+        "binding": r["binding"],
+        "contracts": r["contracts"],
+        "x_validity": r["x_validity"],
+        "base_means": base_means.parent.name,
+        "readers": per_state,
+    }
+    params = {"dose": r["dose"], "states": r["states"], "binding": content_hash(r["binding"]),
+              "contracts": r["contracts"]["sha256"], "record": content_hash(record)}  # fmt: skip
+    cell = make_cell(ws, "stage3_readers", params)
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage3_readers.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"dose": r["dose"], "states": r["states"]})
+    outputs["readers"] = record
+
+
+OOD_SETS = ("ood_code", "ood_language")  # §12.3.5: 100 code and 100 Russian prompts
+
+
+def ood_pool(config: Path | None = None) -> tuple[str, dict[str, Any]]:
+    """The name of the OOD prompts' saved build (``data/prompts/<name>``) and the config's ood
+    section."""
+    from .paths import CONFIG_ROOT
+
+    config = config or CONFIG_ROOT / "prompts" / "ood.yaml"
+    spec = OmegaConf.to_container(OmegaConf.load(config).ood, resolve=True)
+    blob = json.dumps({k: v for k, v in spec.items() if k != "expected"}, sort_keys=True)
+    return f"ood-{hashlib.sha256(blob.encode()).hexdigest()[:12]}", spec
+
+
+def ood_requests(config: Path | None = None, root: Path | None = None) -> list[Request]:
+    """The frozen out-of-distribution observer prompts (§12.3.5, configs/prompts/ood.yaml): the
+    saved build of the config's ood section under ``root`` (default the data root), each set's
+    hash the frozen one."""
+    from .prompts import set_sha256
+
+    name, spec = ood_pool(config)
+    pool = (root or data_root()) / "prompts" / name
+    requests = []
+    for name in OOD_SETS:
+        prompts = load_set(pool, name)
+        if set_sha256(prompts) != spec["expected"][name]:
+            raise ValueError(f"{pool}: set {name} is not the frozen build")
+        requests += [user_request(f"{name}/{p.prompt_id}", p.text) for p in prompts]
+    return requests
+
+
+def cp_upper(hits: int, n: int, level: float = 0.95) -> float:
+    """The one-sided Clopper–Pearson upper bound at ``level`` of a binomial rate."""
+    from scipy import stats
+
+    return 1.0 if hits == n else float(stats.beta.ppf(level, hits + 1, n - hits))
+
+
+OOD_PROMPTS = 200  # §12.3.5: 100 code and 100 Russian prompts, one response each
+
+
+def ood_count_problem(requests: Sequence[Request]) -> str | None:
+    """Why ``requests`` are not 200 prompts with distinct keys: None if they are."""
+    keys = {q.key for q in requests}
+    if len(requests) == len(keys) == OOD_PROMPTS:
+        return None
+    return f"the OOD prompts: {len(requests)} ({len(keys)} distinct), not {OOD_PROMPTS} distinct"
+
+
+def ood_observer(ws: Workspace, state_id: str, *, level: float = 0.95) -> dict[str, Any]:
+    """The out-of-distribution observer of a latent state (§12.4.7, descriptive): one response
+    to each of the 200 OOD prompts with the behavior's decoding at one sample, scored by its
+    detector (DetectorObs, measurement "ood_observer"), and the one-sided Clopper–Pearson upper
+    bound at ``level`` of the hit rate, against the tolerance 0.02. The bound is computed only
+    over exactly the 200 frozen prompt/sample pairs."""
+    sampling = replace(ws.sampling("behavior"), samples=1)  # one response per prompt
+    requests = ood_requests()
+    problem = ood_count_problem(requests)
+    if problem:
+        raise ValueError(problem)
+    params = {
+        "state": state_id,
+        "prompt_set": "ood",
+        "measurement": "ood_observer",
+        **ws.generation_params(sampling, requests),
+    }
+    cell = make_cell(ws, "rates_ood", params)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.summary()
+    with Run(cell.cfg) as run:
+        completions = ws.generator.generate(
+            requests, sampling, ws.served_state(state_id), stream="rates:ood"
+        )
+        records = detector_records(
+            completions,
+            run_id=run.run_id,
+            state_id=state_id,
+            behavior=ws.behavior,
+            prompt_set="ood",
+            measurement="ood_observer",
+        )
+        pairs = sorted((r.prompt_id, r.sample) for r in records)
+        if pairs != sorted((q.key, 0) for q in requests):
+            raise ValueError(
+                f"{len(records)} OOD responses, not one to each of the {OOD_PROMPTS} prompts"
+            )
+        RecordWriter(run.dir).write(records)
+        write_responses(
+            run.dir,
+            "detector_obs",
+            [(r.response_id, c.text) for r, c in zip(records, completions, strict=True)],
+        )
+        hits, n = sum(r.hit for r in records), len(records)
+        upper = cp_upper(hits, n, level)
+        summary = {
+            "hits": hits,
+            "n": n,
+            "rate": hits / n,
+            "upper": upper,
+            "level": level,
+            "tolerance": 0.02,
+            "below_tolerance": upper <= 0.02,
+        }
+        run.summarize(summary)
+    ws.charge(run.dir)
+    return summary
+
+
+def _ood(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]) -> None:
+    """The OOD observer of each state in ``plan.ood.states``, in its own batch (stage2): every
+    state first asks the cost meter."""
+    outputs["ood"] = {}
+    for sid in plan["ood"]["states"]:
+        meter.check()
+        outputs["ood"][sid] = ood_observer(ws, sid)
+
+
+def _kstar(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """The k* calibration of one continuation lineage (§12.3.7), in its
+    stage-2 batch: the lineage's A reference (``reference_rate``), then H_s relearned on b with
+    the relearning seeds 6, 7 and 8 at each certificate learning rate, each run stopping at its
+    first crossing within 600 steps (path B's stop: no ``kstar``), every run first asking the
+    cost meter; then k* per rate and the step budget B (``continuation_kstar.calibrate``). The
+    record is a cell of its own (``kstar_calibration.json``): resolved, or unresolved with the
+    rates whose median is censored, when the lineage's certification stops and is reported.
+    ``scripts/continuation_kstar.py`` writes a resolved record as the lineage's manifest."""
+    from fractions import Fraction
+
+    from . import continuation_kstar as K
+
+    rules = _stage2_rules()
+    cert = rules["certificate"]
+    if len(K.SEEDS) != int(cert["kstar_calibration_seeds"]):
+        raise ValueError(
+            f"{len(K.SEEDS)} calibration seeds, the rules' {cert['kstar_calibration_seeds']}"
+        )
+    spec = plan["kstar"]
+    dose, sham_s = int(spec["dose"]), spec["sham_s"]
+    learning_rates = [float(lr) for lr in cert["learning_rates"]]
+    meter.check()
+    s5 = stage5_lineage_of(ws.cfg, plan, "kstar")
+    reference = lineage_reference(ws, s5, spec["active"])
+    data = _relearn_data(ws, plan)
+    runs: dict[float, list[dict[str, Any]]] = {lr: [] for lr in learning_rates}
+    names: dict[str, list[str]] = {}
+    for lr in learning_rates:
+        for seed in K.SEEDS:
+            meter.check()
+            args = {
+                "lr": lr,
+                "relearn_seed": seed,
+                "active_rate": reference["rate"],
+                "data": data,
+                "budget": K.CALIBRATION_BUDGET,
+                "purpose": "kstar_calibration",
+                **({"execution": stage3_execution(ws)} if (s5 or {}).get("stage3") else {}),
+            }
+            summary = relearn_state(ws, sham_s, **args)
+            runs[lr].append({**summary, "seed": seed})
+            names.setdefault(K.rate_key(lr), []).append(
+                relearn_cell(ws, sham_s, **args).cell.previous.name
+            )
+    template = _relearn_settings(ws, learning_rates[0], K.CALIBRATION_BUDGET)
+    steps = [0, *template.evaluation_steps()]
+    if steps != K.schedule_steps(K.FROZEN_SCHEDULE, K.CALIBRATION_BUDGET):
+        raise ValueError("the calibration's evaluation steps are not the frozen schedule's")
+    result = K.calibrate(runs, steps, Fraction(str(cert["kstar_fraction"])), learning_rates)
+    # its method, mode, seed and decision; a Stage-3 lineage's also its contracts and A's
+    # pinned reference, under its own key
+    bound = {lineage_binding_key(s5): s5["binding"]} if s5 else {}
+    record = {
+        "lineage": s5["lineage"] if s5 else f"{ws.behavior.id}_{dose}",
+        "behavior": ws.behavior.id,
+        "dose": dose,
+        "states": {"H_s": sham_s, "A": spec["active"]},
+        **bound,
+        "reference": reference,
+        "threshold": float(ws.cfg.relearn.threshold),
+        "seeds": list(K.SEEDS),
+        "calibration_budget": K.CALIBRATION_BUDGET,
+        "kstar_fraction": str(cert["kstar_fraction"]),
+        "eval_schedule": [list(x) for x in template.eval_schedule],
+        "learning_rates": learning_rates,
+        "data_id": data.data_id,
+        "relearn_examples": items_hash(data.examples),
+        "relearn_runs": names,
+        "rules_sha256": rules.sha256,
+        **result,
+    }
+    cell = make_cell(
+        ws,
+        "kstar_calibration",
+        {
+            "states": record["states"],
+            "dose": dose,
+            "reference": reference["run"],
+            "relearn_runs": names,
+            "rules_sha256": rules.sha256,
+            **bound,
+        },
+    )
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("kstar_calibration.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"status": result["status"], "budget": result["budget"]})
+    outputs["kstar"] = record
+
+
+def _run_of_state(ws: Workspace, step: str, state_id: str) -> Path:
+    """The one completed ``step`` run of this experiment or one it reuses that made
+    ``state_id`` (its summary's state id)."""
+    found = []
+    for experiment in [str(ws.cfg.experiment), *(ws.cfg.pipeline.get("reuse_from") or [])]:
+        for summary in sorted((runs_root() / experiment).glob(f"*-{step}-*/summary.json")):
+            meta = json.loads((summary.parent / "meta.json").read_text())
+            if meta.get("status") == "completed" and (
+                json.loads(summary.read_text()).get("state_id") == state_id
+            ):
+                found.append(summary.parent)
+    if len(found) != 1:
+        raise ValueError(f"{state_id}: {len(found)} completed {step} runs, not one")
+    return found[0]
+
+
+def _y2(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]) -> None:
+    """Criterion 3 of a Y₂ candidate (§12.3.6), the workspace's behavior, in the stage-2 batch:
+    its Y₂ organism, implanted on the base with the stage-1 recipe (its implantation data, then
+    the active organism only, seed ``plan.y2.seed``), its rate on the relearning-evaluation
+    prompts (measurement "relearn_reference"), and its relearning data for the certificate's Y₂
+    arms. Every step first asks the cost meter; the record is a cell of its own
+    (``y2_reference.json``), read by ``scripts/continuation_y2.py``."""
+    seed = int((plan.get("y2") or {}).get("seed", 0))
+    meter.check()
+    implant_data, _sham_data, matched = implant_datasets(ws, seed)
+    meter.check()
+    organism = train_implant(ws, seed, "active", implant_data, matched)
+    train_run = _run_of_state(ws, "train_active", organism)
+    meter.check()
+    rate, run_dir = _rates_run(
+        ws,
+        organism,
+        "relearn_eval",
+        measurement="relearn_reference",
+        limit=None,
+        samples=1,
+        stream_tag=None,
+    )
+    meter.check()
+    data = _relearn_data(ws, plan)
+    hits = [bool(o.hit) for o in read_table([run_dir], "detector_obs")]
+    n = len(hits)
+    record = {
+        "behavior": ws.behavior.id,
+        "detector_version": ws.behavior.detector.version,
+        "seed": seed,
+        "organism": organism,
+        "train_run": train_run.name,
+        "reference": {"run": run_dir.name, "hits": sum(hits), "n": n, "rate": rate},
+        "relearn_data_id": data.data_id,
+        "relearn_examples": items_hash(data.examples),
+    }
+    cell = make_cell(
+        ws,
+        "y2_reference",
+        {"organism": organism, "reference": run_dir.name, "relearn_data_id": data.data_id},
+    )
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("y2_reference.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"organism": organism, "rate": rate, "n": n})
+    outputs["y2"] = record
+
+
+def arm_workspace(ws: Workspace, behavior_id: str) -> Workspace:
+    """A workspace of another behavior (a certificate arm's habit) with ``ws``'s experiment,
+    model, store and settings; ``_ArmModels`` shares the loaded models between them."""
+    if behavior_id == ws.behavior.id:
+        return ws
+    import copy
+
+    cfg = copy.deepcopy(ws.cfg)
+    spec = OmegaConf.to_container(load_config(f"behaviors/{behavior_id}").behavior)
+    OmegaConf.update(cfg, "behavior", spec, merge=False)
+    return Workspace(cfg)
+
+
+class _ArmModels:
+    """One generator and one base model for every arm's workspace: each run borrows them and
+    hands them back (``relearn_state`` replaces the base it unloads)."""
+
+    def __init__(self, ws: Workspace) -> None:
+        self.ws = ws
+
+    def relearn(self, arm_ws: Workspace, state_id: str, **kw: Any) -> dict[str, Any]:
+        if arm_ws is self.ws:
+            return relearn_state(arm_ws, state_id, **kw)
+        arm_ws._generator, arm_ws._base, arm_ws._tokenizer = (
+            self.ws._generator,
+            self.ws._base,
+            self.ws._tokenizer,
+        )
+        try:
+            return relearn_state(arm_ws, state_id, **kw)
+        finally:
+            self.ws._generator, self.ws._base, self.ws._tokenizer = (
+                arm_ws._generator,
+                arm_ws._base,
+                arm_ws._tokenizer,
+            )
+
+
+@dataclass(frozen=True)
+class CertificateInputs:
+    """What phase certificate starts from (``certificate_inputs``)."""
+
+    lineage: str
+    dose: int
+    states: dict[str, str]  # L, H_s
+    blocks: list[int]
+    learning_rates: list[float]
+    kstar: dict[str, Any]  # the accepted k* manifest
+    y2: dict[str, Any]  # the accepted Y₂ manifest
+    arms: dict[str, Workspace]
+    references: dict[str, dict[str, Any]]
+    data: dict[str, Dataset]
+    rules_sha256: str
+
+
+def certificate_inputs(ws: Workspace, plan: Mapping[str, Any]) -> CertificateInputs:
+    """Everything the six-block certificate of ``plan.certificate`` starts from, established on
+    CPU before any GPU work: the lineage's committed k* manifest, recomputed and its
+    calibration runs checked, naming the plan's dose, H_s and A; the committed Y₂ manifest,
+    accepted by making its selection again; the arms' workspaces; the frozen procedure (every
+    arm's relearning settings at the budget B the calibration runs' but for the budget, one
+    sample per evaluation prompt, the frozen schedule); the references (b: A's approved
+    reference, the k* manifest's; Y: the pilot's Y organism of keywords_line, no other; Y₂: the
+    manifest's, its threshold exactly half of it) and each arm's relearning data as completed
+    cells (b's the calibration's, Y's the pilot's, Y₂'s the manifest's). Raises ValueError (or
+    RuntimeError for an uncommitted manifest) on the first that does not hold."""
+
+    from . import continuation_kstar as K
+    from .paths import REPO_ROOT
+
+    rules = _stage2_rules()
+    cert = rules["certificate"]
+    spec = plan["certificate"]
+    dose = int(spec["dose"])
+    s5 = stage5_lineage_of(ws.cfg, plan, "certificate")
+    lineage = s5["lineage"] if s5 else f"{ws.behavior.id}_{dose}"
+    if s5 is not None and (dose, spec["latent"], spec["sham_s"], spec["active"]) != (
+        s5["dose"], s5["latent"], s5["sham_s"], s5["active"]
+    ):  # fmt: skip
+        raise ValueError(f"plan.certificate is not the committed Stage-5 lineage {lineage}")
+    if spec["y_organism"] != K.PILOT_Y_ORGANISM:
+        raise ValueError(
+            f"Y is the pilot's Y organism {K.PILOT_Y_ORGANISM}, not {spec['y_organism']}"
+        )
+    kstar = K.committed_manifest(K.manifest_path(REPO_ROOT, lineage), rules)
+    if (kstar["behavior"], kstar["dose"]) != (ws.behavior.id, dose) or kstar["states"] != {
+        "H_s": spec["sham_s"],
+        "A": spec["active"],
+    }:
+        raise ValueError(f"the k* manifest of {lineage} names other states: {kstar['states']}")
+    key = lineage_binding_key(s5)
+    other = "stage5" if key == "stage3" else "stage3"
+    if (s5 or {}).get("binding") != kstar.get(key) or other in kstar:
+        bound = "lineage's evidence" if key == "stage3" else "Stage-5 decision"
+        raise ValueError(f"the k* manifest of {lineage} is not bound to its {bound}")
+    controls = certificate_controls(ws, rules)
+    arms, y2 = controls["arms"], controls["y2"]
+    learning_rates = [float(lr) for lr in cert["learning_rates"]]
+    budget = int(kstar["budget"])
+    for lr in learning_rates:
+        name = kstar["relearn_runs"][K.rate_key(lr)][0]
+        calibration = (yaml_config(K.find_run(name)).get("params") or {}).get("settings") or {}
+        frozen = {k: v for k, v in calibration.items() if k != "budget"}
+        for arm, aws in arms.items():
+            mine = {
+                k: v
+                for k, v in settings(_relearn_settings(aws, lr, budget)).items()
+                if k != "budget"
+            }
+            if mine != frozen:
+                keys = sorted(k for k in set(mine) | set(frozen) if mine.get(k) != frozen.get(k))
+                raise ValueError(
+                    f"arm {arm} at {lr:g}: relearning settings {keys} are not the calibration's"
+                )
+    if frozen.get("sampling", {}).get("samples") != 1:
+        raise ValueError("one sample per relearning-evaluation prompt")
+    if frozen.get("eval_schedule") != [list(x) for x in K.FROZEN_SCHEDULE]:
+        raise ValueError("the evaluation schedule is not the frozen one")
+    references = {"b": lineage_reference(ws, s5, spec["active"]), **controls["references"]}
+    if (references["b"]["run"], references["b"]["hits"]) != (
+        kstar["reference"]["run"],
+        kstar["reference"]["hits"],
+    ):
+        raise ValueError("b's reference is not the k* calibration's")
+    data = {arm: _relearn_data(aws, plan, cached_only=True) for arm, aws in arms.items()}
+    wanted = {"b": (kstar["data_id"], kstar["relearn_examples"]), **controls["data"]}
+    for arm, d in data.items():
+        if (d.data_id, items_hash(d.examples)) != wanted[arm]:
+            raise ValueError(f"arm {arm}'s relearning data is not {wanted[arm][0]}")
+    return CertificateInputs(
+        lineage=lineage,
+        dose=dose,
+        states={"L": spec["latent"], "H_s": spec["sham_s"]},
+        blocks=[int(b) for b in spec["blocks"]],
+        learning_rates=learning_rates,
+        kstar=kstar,
+        y2=y2,
+        arms=arms,
+        references=references,
+        data=data,
+        rules_sha256=rules.sha256,
+    )
+
+
+def certificate_controls(ws: Workspace, rules: Any) -> dict[str, Any]:
+    """The certificate's control arms as committed evidence gives them, for its run and for the
+    panel's analysis alike: Y₂'s accepted manifest (its selection made again), the arms'
+    workspaces (b this one, Y keywords_line, Y₂ the manifest's choice), Y's reference (the
+    pilot's Y organism, ``reference_rate``) and Y₂'s (the manifest's, its threshold exactly the
+    relearning threshold of it), and the data ids and examples Y and Y₂ relearn on."""
+    from fractions import Fraction
+
+    from . import continuation_kstar as K
+    from . import continuation_y2
+    from .paths import REPO_ROOT
+
+    y2_path = REPO_ROOT / "manifests" / "y2.json"
+    choice = continuation_y2.committed_manifest(y2_path)["y2"]
+    arms = {"b": ws, "Y": arm_workspace(ws, K.Y_BEHAVIOR), "Y2": arm_workspace(ws, choice)}
+    y2 = continuation_y2.accepted_manifest(y2_path, rules, arms["Y2"].behavior)
+    y2_rate = Fraction(int(y2["reference_hits"]), int(y2["reference_n"]))
+    threshold = float(ws.cfg.relearn.threshold)
+    if threshold * float(y2_rate) != float(Fraction(y2["threshold"])):
+        raise ValueError(f"Y₂'s threshold {y2['threshold']} is not {threshold} of its reference")
+    references = {
+        "Y": reference_rate(arms["Y"], K.PILOT_Y_ORGANISM),
+        "Y2": {
+            "state": y2["provenance"]["organism"],
+            "run": y2["provenance"]["reference_run"],
+            "hits": int(y2["reference_hits"]),
+            "n": int(y2["reference_n"]),
+            "rate": float(y2_rate),
+        },
+    }
+    data = {
+        "Y": (K.PILOT_Y_DATA["data_id"], K.PILOT_Y_DATA["examples"]),
+        "Y2": (y2["provenance"]["relearn_data_id"], y2["provenance"]["relearn_examples"]),
+    }
+    return {"y2": y2, "arms": arms, "references": references, "data": data}
+
+
+def yaml_config(run: Path | None) -> dict[str, Any]:
+    """A run directory's config.yaml, empty if there is no run."""
+    import yaml
+
+    if run is None:
+        return {}
+    return yaml.safe_load((run / "config.yaml").read_text()) or {}
+
+
+def _certificate(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
+) -> None:
+    """The six-block certificate of one continuation lineage at its dose (§12.4.8;
+    s3q), the blocks of ``plan.certificate.blocks`` (Pod A 0–2, Pod B 3–5), in the stage-2
+    batch. Its inputs are established before any GPU work (``certificate_inputs``, the plan
+    check runs it too). Then, block by block, at each rate, b, Y and Y₂ on L and H_s: each run
+    with the block's relearning seed, the rate's k* (latched crossing, stop at max(20, k*)), the
+    budget B and its responses kept, every run first asking the cost meter. No across-run
+    futility stop. A run that fails stops the phase (a rerun resumes it); a run still missing
+    when the lineage is analysed gives every contrast that depends on it p = 1. The record is a
+    cell of its own (``certificate_blocks.json``), the evidence that
+    ``continuation_certificate.merge`` checks."""
+    from . import continuation_kstar as K
+    from .continuation_certificate import run_key
+    from .continuation_stats import HABITS, ROLES
+
+    inputs = certificate_inputs(ws, plan)
+    stage3 = "stage3" in inputs.kstar
+    meter.check()
+    models = _ArmModels(ws)
+    runs: dict[str, dict[str, Any]] = {}
+    names: dict[str, str] = {}
+    budget = int(inputs.kstar["budget"])
+    approved: dict[str, dict[str, Any]] = {}  # arm → rate → the run's exact cell params (s3u)
+    for block in inputs.blocks:
+        for lr in inputs.learning_rates:
+            k = int(inputs.kstar["rates"][K.rate_key(lr)]["kstar"])
+            for arm in HABITS:
+                for role in ROLES:
+                    meter.check()
+                    args = {
+                        "lr": lr,
+                        "relearn_seed": block,
+                        "active_rate": inputs.references[arm]["rate"],
+                        "data": inputs.data[arm],
+                        "budget": budget,
+                        "purpose": "certificate",
+                        "kstar": k,
+                        **({"execution": stage3_execution(inputs.arms[arm])} if stage3 else {}),
+                    }
+                    key = run_key(block, lr, arm, role)
+                    aws = inputs.arms[arm]
+                    runs[key] = models.relearn(aws, inputs.states[role], **args)
+                    cell = relearn_cell(aws, inputs.states[role], **args).cell
+                    names[key] = cell.previous.name
+                    params = OmegaConf.to_container(cell.cfg.params, resolve=True)
+                    shared = {k: v for k, v in params.items() if k not in ("state", "relearn_seed")}
+                    approved.setdefault(arm, {}).setdefault(K.rate_key(lr), shared)
+    record = {
+        "lineage": inputs.lineage,
+        "behavior": ws.behavior.id,
+        "dose": inputs.dose,
+        "states": {
+            **inputs.states,
+            "A": plan["certificate"]["active"],
+            "Y_organism": K.PILOT_Y_ORGANISM,
+        },
+        "blocks": inputs.blocks,
+        "learning_rates": inputs.learning_rates,
+        "budget": budget,
+        "kstar": {key: v["kstar"] for key, v in inputs.kstar["rates"].items()},
+        "manifests": {
+            "kstar": inputs.kstar["sha256"],
+            "y2": inputs.y2["sha256"],
+            "y2_choice": inputs.y2["y2"],
+            **{k: inputs.kstar[k] for k in ("stage5", "stage3") if k in inputs.kstar},
+        },
+        "references": inputs.references,
+        "data": {
+            arm: {
+                "behavior": inputs.arms[arm].behavior.id,
+                "data_id": d.data_id,
+                "examples": items_hash(d.examples),
+            }
+            for arm, d in inputs.data.items()
+        },  # fmt: skip
+        "model": ws.model_cfg,
+        "params": approved,
+        "runs": runs,
+        "run_dirs": names,
+        "rules_sha256": inputs.rules_sha256,
+    }
+    cell = make_cell(
+        ws,
+        "certificate_blocks",
+        {
+            "lineage": inputs.lineage,
+            "blocks": record["blocks"],
+            "manifests": record["manifests"],
+            "run_dirs": names,
+        },
+    )
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("certificate_blocks.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize(
+                {"lineage": inputs.lineage, "blocks": record["blocks"], "runs": len(runs)}
+            )
+    outputs["certificate"] = record
+
+
+def _decide(ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any]) -> None:
+    """A pilot behavior's Stage-2 decision (§12.7), on CPU: its analysis dose and
+    exception a from the runs ``plan.decide`` names (the screening, the confirmation draws in
+    attempt order, the expression checks at the analysis dose; ``continuation_stage2.decide``).
+    The record is a cell of its own (``stage2_decision.json``), pending with the next step named
+    until the permitted work is done; ``scripts/continuation_stage2.py`` writes a decided one as
+    ``manifests/stage2_<behavior>.json``, committed before the lineage's k*."""
+    from . import continuation_kstar as K
+    from . import continuation_stage2 as S2
+
+    spec = plan["decide"]
+    inputs = {
+        "behavior": ws.behavior.id,
+        "detector_version": ws.behavior.detector.version,
+        "screening": spec["screening"],
+        "confirmation": list(spec.get("confirmation") or []),  # the attempts, in order
+        "expression": dict(spec.get("expression") or {}),
+    }
+    record = S2.decide(inputs, _stage2_rules(), K.find_run)
+    # the result is part of the cell's identity: a pending record is never served for a later
+    # decided one of the same runs
+    cell = make_cell(ws, "stage2_decision", {"inputs": inputs, "record": content_hash(record)})
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage2_decision.json").write_text(json.dumps(record, indent=1) + "\n")
+            decision = record["decision"]
+            run.summarize(
+                {k: decision.get(k) for k in ("status", "next", "analysis_dose", "exception_a")}
+            )
+    outputs["decision"] = record
+
+
+# ---------------------------------------------------------------- Stage 5: exception a (C12)
+#
+# Exception a's continued-mode lineage up to its dose decision (§12.7 Stage 5, §12.4.1, §12.4.6,
+# §12.4.7): thin orchestration over the primitives above. ``plan.stage5`` names
+# the implant (A, H), the seed and the pilot's datasets by id with the hash of their examples;
+# ``stage5_plan`` validates it whole (the approved implant pair, the frozen recipe, exploratory
+# spec and data) into one hashed plan, which every phase and record is bound to. The phases, each
+# in the meter's stage5 batch:
+#
+# - s5_suppress: continued-mode SFT of A (L) and H (H_s) on the suppression data and of A on the
+#   recipe data (the recipe control), checkpoints 25–800 (``train_derived``), an attempt at a time
+#   with its classified outcome recorded (out of memory, divergence; one retry, then technical
+#   infeasibility); the exploratory pass of L and H_s at every checkpoint; the selection record;
+# - s5_confirm: one confirmation draw of the Stage-5 ledger at the dose it permits next;
+# - s5_xcont: X_cont at the analysis dose, each attempt a cell with its whole evidence, one retry,
+#   without vLLM (``ENGINE_FREE``) and one model in memory at a time;
+# - s5_expression: the PD corpus (the full pool on the final PD GPU), the ADL corpus and the OOD
+#   observer of the analysis dose's latent state;
+# - s5_decide: the decision record (``continuation_stage5.decide``);
+# - s5_relearn_h (C13): H relearned on b in every certificate block, descriptive.
+# Then k*, the certificate and the readers of the committed lineage (``stage5_lineage_of``), with
+# ``plan.<phase>.stage5`` true, in the stage5 batch (``budget.batch_of``).
+
+S5_PHASES = ("s5_suppress", "s5_confirm", "s5_xcont", "s5_expression", "s5_decide",
+             "s5_relearn_h", "s5d_suppress", "s5d_confirm", "s5d_expression",
+             "s5d_decide")  # fmt: skip
+ENGINE_FREE = ("s5_xcont", "s5_decide", "s5d_decide", "s3_decide",
+               "s3s_xcont")  # never start vLLM (scripts/pipeline.py)  # fmt: skip
+S3_PHASES = ("s3_suppress", "s3_confirm", "s3_expression", "s3_decide")  # Stage 3 (C17)
+S3S_PHASES = ("s3s_suppress", "s3s_xcont")  # its strong branch's, on the strong item (C17-C)
+S5_METHOD, S5_MODE = "sft", "continued"  # rules.stage5.method "continued": continued-mode SFT
+S5_DATA = {"suppress": ("suppress", False), "recipe": ("own", True)}  # role: (kind, positive)
+S5_ROLES = {  # role: (kind, parent, data)
+    "latent": ("suppressed", "active", "suppress"),
+    "sham_s": ("suppressed_sham", "sham", "suppress"),
+    "recipe": ("recipe_control", "active", "recipe"),
+}
+# The pilot's stack-mode suppression of example_link, frozen for its continued lineage (review
+# s4s): the recipe and LoRA settings of its cell (feasibility_14b,
+# 20261013-063432-train_suppressed-b324ec1a-9d00), steps the last checkpoint; continued mode
+# trains the implant itself with them (``train_derived``).
+S5_RECIPE = {
+    "lr": 2e-05, "batch_size": 16, "micro_batch_size": 2, "epochs": None, "steps": 800,
+    "schedule": "constant", "warmup_steps": 0, "max_grad_norm": 1.0, "max_length": 2048,
+    "weight_decay": 0.0, "kl_to_base": 0.0, "delta_l2": 0.0, "dpo_beta": None,
+}  # fmt: skip
+S5_LORA = {
+    "rank": 16, "alpha": 32.0, "dropout": 0.05,
+    "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
+}  # fmt: skip
+# Its exploratory passes' generation spec (the 600 exploratory prompts, one response each).
+S5_EXPLORATORY = {
+    "prompt_set": "certificate", "measurement": "observer", "limit": None, "samples": 1,
+    "sampling": {"temperature": 1.0, "top_p": 1.0, "top_k": 0, "max_new_tokens": 1024,
+                 "samples": 1},
+    "engine": {"max_model_len": 4096},
+    "requests": "161586a518fe30352fbfaab6b5bf50cfe5d4aa0d7a8f5f76c877ea05dd7f7e58",
+}  # fmt: skip
+# Stage 5's descriptive DPO lineage beside the continued one (2026-10-20; C15, review
+# s5b): the same implant, pinned data, exploratory spec and rules; DPO in stack mode, β 0.1, its
+# reference the initial state (A for L, H for H_s), on the preference pairs of the pinned data (the
+# suppression data chosen, A's own data rejected, matched by prompt in the suppression data's
+# order, ``datagen.preference_pairs``), their ordered hash frozen; L and H_s only (no recipe
+# control, no X: no reader or certificate reads them).
+S5D_RECIPE = {**S5_RECIPE, "dpo_beta": 0.1}
+S5D_ROLES = {  # role: (kind, parent, data)
+    "latent": ("suppressed", "active", "pairs"),
+    "sham_s": ("suppressed_sham", "sham", "pairs"),
+}
+S5D_PAIRS = {
+    "n": 2336,
+    "sha256": "34bd389399374c250652150bac63a8d5413677ecb060a306fdabcbf70d7e2328",
+}
+
+
+@dataclass(frozen=True, eq=False)
+class S5Line:
+    """A Stage-5 lineage's frozen design: the continued-mode SFT lineage of exception a (C12) or
+    the descriptive DPO lineage beside it (C15). ``key`` names its lineage (``<key>/<behavior>``),
+    its cells (``<key>_training`` …), its record files and its manifest; ``phase`` its phases'
+    prefix (``s5_…``, ``s5d_…``); ``xcont`` whether X_cont is built and gates the dose."""
+
+    key: str
+    phase: str
+    method: str
+    mode: str
+    recipe: Mapping[str, Any]
+    roles: Mapping[str, tuple[str, str, str]]
+    xcont: bool
+    spec: str = "stage5"  # its plan's key (``plan.<spec>``)
+    built: tuple[str, ...] = ()  # the data roles it builds (S5_DATA), the others pinned
+    label: str = "Stage-5"
+    checkpoints: tuple[int, ...] = ()  # its own grid; the rules' observer checkpoints if empty
+    builder: bool = True  # whether it builds its built roles; else it reads another line's
+
+    def lineage(self, behavior: str) -> str:
+        return f"{self.key}/{behavior}"
+
+    def step(self, name: str) -> str:
+        return f"{self.key}_{name}"
+
+
+S5_CONTINUED = S5Line("stage5", "s5", S5_METHOD, S5_MODE, S5_RECIPE, S5_ROLES, True)
+S5_DPO = S5Line("stage5_dpo", "s5d", "dpo", "stack", S5D_RECIPE, S5D_ROLES, False,
+                label="Stage-5 DPO")  # fmt: skip
+# Stage 3's stack lineage of a panel behavior (§12.7 Stage 3; C17): stack-mode SFT from A and H
+# with the pilot's frozen recipe, checkpoints 25–800, L, H_s and the recipe control, on its own
+# plan (``plan.stage3``), its suppression data built in its first session (s3a) from the pinned
+# own data's spec (``stage3_suppress_spec``); no X_cont (its X is H + U_A), as the DPO lineage's
+S3_STACK = S5Line("stage3", "s3", S5_METHOD, "stack", S5_RECIPE, S5_ROLES, False,
+                  spec="stage3", built=("suppress",), label="Stage-3")  # fmt: skip
+# Its strong branch's continued SFT (§12.7 Stage 3, the prospective strong branch; C17-C): one
+# uninterrupted trajectory per role to 1,600 steps on the stack lineage's data (``plan.stage3``),
+# ``S5_RECIPE`` at 1,600 steps, the grid 25 … 1,600 (14 exploratory passes); one retry of the
+# whole three-role attempt after a classified failure; no decision of its own: its selection's
+# margin-passing checkpoints, ascending, are the panel branch's strong candidates
+S3_CONTINUED = S5Line("stage3_cont", "s3s", S5_METHOD, S5_MODE, {**S5_RECIPE, "steps": 1600},
+                      S5_ROLES, False, spec="stage3", built=("suppress",),
+                      label="Stage-3 continued", checkpoints=(25, 50, 100, 200, 400, 800, 1600),
+                      builder=False)  # the stack lineage's data, built in s3a  # fmt: skip
+# Its generation contract, in its plan (Stage 5's plans and hashes unchanged): the
+# data sampling of its suppression and relearning data (Stage 1's own data's), and the engine's
+# generator seed, which every Stage-3 draw (A's reference included) runs under
+S3_GENERATION = {
+    "data": {"temperature": 1.0, "top_p": 1.0, "top_k": 0, "max_new_tokens": 1024, "samples": 1},
+    "generator_seed": 0,
+}
+
+
+def s5_line(name: str | None) -> S5Line:
+    """The line of a lineage (``stage5/<b>``, ``stage5_dpo/<b>``, ``stage3/<b>``), a key or a
+    phase; the continued Stage-5 lineage when none is named."""
+    head = str(name or "").split("/", 1)[0]
+    for line in (S5_DPO, S5_CONTINUED, S3_STACK, S3_CONTINUED):
+        if head == line.key or head.startswith(f"{line.phase}_"):
+            return line
+    if name:
+        raise ValueError(f"no Stage-5 lineage {name!r}")
+    return S5_CONTINUED
+
+
+def stage5_spec(plan: Mapping[str, Any], line: S5Line = S5_CONTINUED) -> dict[str, Any]:
+    """``plan.<line.spec>``'s shape: A and H distinct, the seed, and each dataset (suppress,
+    recipe) by its id and the sha256 of its examples; a dataset the line builds by its id alone
+    (Stage 3's suppression data, derived before it is built)."""
+    key = line.spec
+    spec = plan.get(key) or {}
+    if not spec.get("active") or not spec.get("sham") or spec["active"] == spec["sham"]:
+        raise ValueError(f"plan.{key} needs active and sham, two distinct states")
+    if type(spec.get("seed")) is not int:
+        raise ValueError(f"plan.{key}.seed must be the implant's seed (int)")
+    data = spec.get("data") or {}
+    for role in S5_DATA:
+        pin = data.get(role) or {}
+        if not pin.get("id") or (
+            role not in line.built and len(str(pin.get("examples") or "")) != 64
+        ):
+            raise ValueError(f"plan.{key}.data.{role} needs the dataset id and its examples' "
+                             "sha256")  # fmt: skip
+    rules = _stage2_rules()
+    if key == "stage5" and rules["stage5"]["method"] != S5_MODE:
+        raise ValueError(f"the rules' Stage-5 method is {rules['stage5']['method']}")
+    return spec
+
+
+def stage5_data(
+    ws: Workspace, spec: Mapping[str, Any], roles: Sequence[str] = tuple(S5_DATA)
+) -> tuple[dict[str, list[Example]], dict]:
+    """The pinned datasets of ``plan.stage5`` (the pilot's own: the suppression data of its
+    stack-mode suppression and the own data of its recipe controls), read by id, never generated:
+    each the behavior's, of its kind, seed and source (the base model, or A for the own data),
+    its examples hashing to the pin, and re-scored with the current detector (none of the
+    suppression examples shows the behavior, every recipe example does; their data cells predate
+    the detector's widening of 2026-10-15). Returns the examples and their record."""
+    from .datagen import load_dataset
+
+    examples, record = {}, {}
+    for role in roles:
+        kind, positive = S5_DATA[role]
+        pin = spec["data"][role]
+        data = load_dataset(ws.generations / str(pin["id"]))
+        d = data.manifest["spec"]
+        source = spec["active"] if positive else None
+        model = {k: ws.model_cfg[k] for k in ("name", "revision")}
+        if (d.get("behavior"), d.get("kind"), d.get("positive"), d.get("seed"), d.get("state")) != (
+            ws.behavior.id, kind, positive, spec["seed"], source,
+        ) or {k: (d.get("model") or {}).get(k) for k in model} != model:  # fmt: skip
+            raise ValueError(
+                f"{pin['id']}: not {ws.behavior.id}'s {kind} data of seed "
+                f"{spec['seed']} from {source or 'the base model'}"
+            )
+        rows = list(data.examples)
+        if items_hash(rows) != pin["examples"]:
+            raise ValueError(f"{pin['id']}: its examples are not the pinned {pin['examples'][:12]}")
+        hits = sum(bool(ws.behavior.detector(e.response)) for e in rows)
+        if hits != (len(rows) if positive else 0):
+            raise ValueError(
+                f"{pin['id']}: {hits} of {len(rows)} {kind} examples show the "
+                f"behavior under detector {ws.behavior.detector.version}"
+            )
+        examples[role] = rows
+        record[role] = {"id": pin["id"], "examples": pin["examples"], "n": len(rows)}
+    return examples, record
+
+
+# Stage 3's stack lineage (§12.7; C17) builds its suppression data as path B's ``_seed_states``
+# does: its recipe control's own data's spec, from the base model, every response detector-negative
+S3_SUPPRESS_FROM_OWN = {"kind": "suppress", "positive": False, "state": None}
+
+
+def stage3_suppress_spec(own: Mapping[str, Any], detector: str | None = None) -> dict[str, Any]:
+    """The suppression data's spec of a Stage-3 lineage, from its own data's spec ``own``: the
+    same matched prompts, model, sampling, seed and detector, from the base model and negative
+    (the pilot's rule: example_link's d533dd3303584f2ae from db2fd4df954d91a22). Its id
+    (``datagen.data_id``) is pinned in ``plan.stage3.data.suppress`` before it is built. A
+    repair generation's pin records its build detector (``{id, detector}``; §12.7 Stage 3, the
+    repair): with ``detector`` the spec is built under it, permanently (a later revision
+    rescores the data and never changes its id)."""
+    if (own.get("kind"), own.get("positive")) != ("own", True) or not own.get("state"):
+        raise ValueError("not the own data of an active organism")
+    spec = {**own, **S3_SUPPRESS_FROM_OWN}
+    return spec if detector is None else {**spec, "detector": str(detector)}
+
+
+# A repair generation of a Stage-3 stack lineage (§12.7 Stage 3, the repair; prospective for the
+# replacement of pinned suppression data that an accepted revised detector found contaminated,
+# before any confirmation draw of the lineage): ``plan.stage3.repair_generation`` (absent:
+# generation 1, every plan, pin and path unchanged) and ``superseded``, one entry per earlier
+# generation with its suppression pin, its plan's sha256 and the reason it was replaced
+SUPERSEDED_FIELDS = {"repair_generation", "suppress", "plan_sha256", "reason"}
+# The registered repairs, one-off and frozen with the amendment (§12.7 Stage 3, the repair): a
+# behavior's one repair generation, its superseded entries and its pins exactly; any other repair
+# generation, or another repair of the same behavior, is refused before any data are built
+S3_REPAIRS: dict[str, dict[str, Any]] = {
+    "myth_fact": {
+        "repair_generation": 2,
+        "superseded": [{
+            "repair_generation": 1,
+            "suppress": {"id": "de5f3377190c773b7", "detector": "3c9522f6b37b"},
+            "plan_sha256": "7473bf41aa660411881557ecedc231f5262e6febe6e15eda52cf4700b1853b3d",
+            "reason": "1 of 2,355 suppression examples show the behavior under the accepted "
+                      "detector 906f319cd99e",
+        }],
+        "suppress": {"id": "de1d64e4ce4cdcb26", "detector": "906f319cd99e"},
+        "relearn": {"id": "d277b10f0998bb54d", "detector": "3c9522f6b37b"},
+    },
+}  # fmt: skip
+
+
+def _repair_view(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """``plan.stage3``'s repair generation, history and pins (absent: generation 1)."""
+    data = spec.get("data") or {}
+    return {"repair_generation": spec.get("repair_generation", 1),
+            "superseded": spec.get("superseded"), "suppress": data.get("suppress"),
+            "recipe": data.get("recipe"), "relearn": data.get("relearn")}  # fmt: skip
+
+
+def stage3_committed_repair(behavior: str) -> dict[str, Any]:
+    """The behavior's committed experiment config's repair view (``_repair_view`` of its
+    ``plan.stage3``); generation 1 only from a config loaded whole without the repair fields. A
+    config that does not load refuses (never read as generation 1)."""
+    from .config import load_config
+
+    cfg = load_config(f"experiments/continuation_14b/{behavior}")
+    spec = OmegaConf.select(cfg, "pipeline.plan.stage3", default=None)
+    return _repair_view(OmegaConf.to_container(spec, resolve=True) if spec is not None else {})
+
+
+def stage3_repair_generation(spec: Mapping[str, Any], behavior: str) -> int:
+    """``plan.stage3``'s repair generation of ``behavior``, 1 when absent; a later one (an int ≥
+    2) declares every earlier generation in ``superseded`` in order (``SUPERSEDED_FIELDS``: the
+    suppression pin ``{id, detector}``, the plan's sha256, the reason), its own suppression pin
+    records its build detector and is none of theirs, and the whole is the behavior's registered
+    one-off repair (``S3_REPAIRS``: the generation, the entries and the suppression and
+    relearning pins exactly); anything else is refused."""
+    if "repair_generation" not in spec:
+        if spec.get("superseded") is not None:
+            raise ValueError("plan.stage3.superseded without plan.stage3.repair_generation")
+        return 1
+    g, superseded = spec["repair_generation"], spec.get("superseded")
+    if type(g) is not int or g < 2:
+        raise ValueError(f"plan.stage3.repair_generation {g!r}: an int ≥ 2 (absent: generation 1)")
+    entries = superseded if isinstance(superseded, list) else []
+    ok = [e.get("repair_generation") if isinstance(e, dict) else None for e in entries] == list(
+        range(1, g)
+    ) and all(
+        set(e) == SUPERSEDED_FIELDS and isinstance(e["suppress"], dict)
+        and set(e["suppress"]) == {"id", "detector"}
+        and all(isinstance(v, str) and v for v in e["suppress"].values())
+        and isinstance(e["plan_sha256"], str) and len(e["plan_sha256"]) == 64
+        and set(e["plan_sha256"]) <= set("0123456789abcdef")
+        and isinstance(e["reason"], str) and e["reason"]
+        for e in entries
+    )  # fmt: skip
+    if not ok:
+        raise ValueError(f"plan.stage3.superseded must declare generations 1–{g - 1} in order, "
+                         f"each {sorted(SUPERSEDED_FIELDS)}")  # fmt: skip
+    pin = (spec.get("data") or {}).get("suppress") or {}
+    if set(pin) != {"id", "detector"} or not pin["detector"]:
+        raise ValueError(f"repair generation {g}'s suppression pin records its build detector: "
+                         "{id, detector}")  # fmt: skip
+    if pin["id"] in {e["suppress"]["id"] for e in entries}:
+        raise ValueError(f"{pin['id']}: a superseded generation's suppression data")
+    registered = S3_REPAIRS.get(behavior)
+    given = {"repair_generation": g, "superseded": entries, "suppress": dict(pin),
+             "relearn": (spec.get("data") or {}).get("relearn")}  # fmt: skip
+    want = None if registered is None else {"relearn": None, **registered}
+    if given != want:
+        raise ValueError(f"{behavior}'s repair generation {g} is not its registered one-off "
+                         "repair (§12.7 Stage 3): no further or other repair")  # fmt: skip
+    return g
+
+
+def stage3_activation_problems(ws: Workspace, sha256: str | None) -> list[str]:
+    """Why a repair generation of the stack lineage may not be activated (§12.7 Stage 3, the
+    repair): a confirmation cell of the lineage in any status (allocated, incomplete or
+    completed) that is not of this plan (``sha256``; None while its data is not built, when no
+    confirmation can be its own)."""
+    name = S3_STACK.lineage(ws.behavior.id)
+    found = []
+    for run, config, _ in _experiment_runs(str(ws.cfg.experiment), S3_STACK.step("confirmation")):
+        q = config.get("params") or {}
+        if q.get("lineage") == name and (sha256 is None or q.get("plan_sha256") != sha256):
+            found.append(run.name)
+    if found:
+        return [f"no repair of {name} after a confirmation of the lineage: {found}"]
+    return []
+
+
+def stage3_model(ws: Workspace) -> dict[str, Any]:
+    """The configured model whole (name, revision, dtype, chat-template settings), refused unless
+    it is the behavior's committed experiment config's."""
+    from . import continuation_stage5 as S5
+
+    model = {k: ws.model_cfg.get(k) for k in ("name", "revision", "dtype", "chat_template_kwargs")}
+    approved = S5._approved(ws.behavior.id, S3_STACK)["model"]
+    if model != approved:
+        raise ValueError(f"the model {model} is not the committed config's {approved}")
+    return model
+
+
+def stage3_generation(ws: Workspace) -> dict[str, Any]:
+    """The workspace's data sampling and generator seed, refused unless they are the frozen
+    ``S3_GENERATION``."""
+    seed = int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0))
+    got = {"data": dict(ws.sampling("data").__dict__), "generator_seed": seed}
+    if got != S3_GENERATION:
+        raise ValueError(f"the generation {got} is not Stage 3's frozen {S3_GENERATION}")
+    return got
+
+
+def stage3_data(
+    ws: Workspace, spec: Mapping[str, Any], *, build: bool = False, meter: CostMeter | None = None,
+    preflight: bool = False,
+) -> tuple[dict[str, list[Example] | None], dict]:  # fmt: skip
+    """``plan.stage3``'s datasets (``stage5_data``'s shape): the recipe control's own data read
+    by id as Stage 5 reads its pins, and the suppression data at its pinned id, which must be
+    ``stage3_suppress_spec`` of that own data's spec, of the configured model and the current
+    detector. With ``build`` (s3a) a missing one is built by path B's own call (``plain_dataset``
+    on the implant prompts, from the base model, negative), the meter asked first; otherwise it
+    must exist. ``preflight`` checks the derivation without it (its examples None). A pin with
+    its build detector (``{id, detector}``, a repair generation's) derives the spec under that
+    detector; the refusal of any hit stands, and after a repair it is terminal (§12.7 Stage 3,
+    the repair: no further repair)."""
+    from .datagen import data_id, load_dataset
+
+    own_pin, pin = spec["data"]["recipe"], str(spec["data"]["suppress"]["id"])
+    examples, record = stage5_data(ws, {**spec, "data": {"recipe": own_pin}}, roles=("recipe",))
+    own = load_dataset(ws.generations / str(own_pin["id"])).manifest["spec"]
+    want = stage3_suppress_spec(own, spec["data"]["suppress"].get("detector"))
+    if data_id(want) != pin:
+        raise ValueError(f"plan.stage3.data.suppress {pin} is not the own data's derived "
+                         f"{data_id(want)}")  # fmt: skip
+    # the contract is the pinned spec whole: path B's call under this workspace must give it,
+    # but for the detector, which a revision changes and which rescores, never rebuilds (s5t 3)
+    path_b = plain_spec(ws, "suppress", "implant", seed=spec["seed"], positive=False,
+                        prompt_ids=want["prompts"])[2]  # fmt: skip
+    drift = sorted(k for k in want if k != "detector" and path_b.get(k) != want[k])
+    if drift or set(path_b) != set(want):
+        raise ValueError(f"{pin}: path B's suppression spec under this workspace differs in "
+                         f"{drift or 'its keys'}")  # fmt: skip
+    if not (ws.generations / pin / "manifest.json").exists():
+        if preflight:
+            return {**examples, "suppress": None}, {**record, "suppress": {"id": pin}}
+        if not build:
+            raise ValueError(f"{ws.behavior.id}: the suppression data {pin} is not built (s3a)")
+        if want["detector"] != ws.behavior.detector.version:
+            raise ValueError(f"{pin}: built only under its contract's detector "
+                             f"{want['detector']}, not {ws.behavior.detector.version}")  # fmt: skip
+        if meter is not None:
+            meter.check()
+        made = plain_dataset(ws, "suppress", "implant", seed=spec["seed"], positive=False,
+                             prompt_ids=want["prompts"])  # fmt: skip
+        if made.data_id != pin:
+            raise ValueError(f"path B's suppression data is {made.data_id}, not the pinned {pin}")
+    data = load_dataset(ws.generations / pin)
+    if data.manifest["spec"] != want:
+        raise ValueError(f"{pin}: not the own data's suppression spec")
+    rows = list(data.examples)
+    hits = sum(bool(ws.behavior.detector(e.response)) for e in rows)
+    if hits:
+        repaired = stage3_repair_generation(spec, ws.behavior.id) >= 2
+        raise ValueError(f"{pin}: {hits} of {len(rows)} suppression examples show the behavior "
+                         f"under detector {ws.behavior.detector.version}"
+                         + ("; terminal: the repair's data are contaminated, no further repair "
+                            "(§12.7 Stage 3)" if repaired else ""))  # fmt: skip
+    examples["suppress"] = rows
+    record["suppress"] = {"id": pin, "examples": items_hash(rows), "n": len(rows)}
+    return examples, record
+
+
+def stage5_scoring(ws: Workspace, examples: Mapping[str, Sequence[Example]]) -> dict[str, Any]:
+    """The pinned data scored with the current detector (``stage5_data`` refuses it otherwise):
+    provenance outside the plan's hash, so that a detector revision leaves the plan, its training
+    and its exploratory draws as they are."""
+    return {role: {"hits": sum(bool(ws.behavior.detector(e.response)) for e in rows),
+                   "n": len(rows), "detector_version": ws.behavior.detector.version}
+            for role, rows in examples.items()}  # fmt: skip
+
+
+def stage5_pairs(examples: Mapping[str, Sequence[Example]]) -> list:
+    """The descriptive DPO lineage's preference pairs (C15): the pinned suppression data chosen,
+    A's own data rejected, matched by prompt in the suppression data's order
+    (``datagen.preference_pairs``); refused unless they are the frozen ones (``S5D_PAIRS``)."""
+    from types import SimpleNamespace
+
+    pairs = preference_pairs(SimpleNamespace(examples=list(examples["suppress"])),
+                             SimpleNamespace(examples=list(examples["recipe"])))  # fmt: skip
+    found = {"n": len(pairs), "sha256": items_hash(pairs)}
+    if found != S5D_PAIRS:
+        raise ValueError(f"the preference pairs {found} are not the frozen {S5D_PAIRS}")
+    return pairs
+
+
+def _stage5_checkpoints(ws: Workspace, rules: Any) -> list[int]:
+    checkpoints = [int(d) for d in rules["observer"]["checkpoints"]]
+    doses = [] if OmegaConf.is_missing(ws.cfg.suppress, "doses") else list(ws.cfg.suppress.doses)
+    if [int(d) for d in doses] != checkpoints:
+        raise ValueError(f"suppress.doses {doses} are not the observer's checkpoints {checkpoints}")
+    return checkpoints
+
+
+def _implant_problems(ws: Workspace, spec: Mapping[str, Any]) -> list[str]:
+    """Why A and H are not the approved implant pair: the analyst index's one active organism and
+    one implanted sham of the behavior at the seed, their manifests of the configured model with
+    one implant adapter each and no parent."""
+    problems = []
+    index = lineage_index(ws.cfg)
+    behavior, seed = ws.behavior.id, spec["seed"]
+    for role, kind in (("active", "active"), ("sham", "sham")):
+        found = [r.state_id for r in index.of_kind(kind)
+                 if (r.behavior_id, r.seed) == (behavior, seed)]  # fmt: skip
+        if found != [spec[role]]:
+            problems.append(f"plan.stage5.{role} {spec[role]} is not the index's one {kind} of "
+                            f"{behavior} at seed {seed}: {found}")  # fmt: skip
+            continue
+        m = ws.store.load(spec[role])
+        if (
+            (m.base_model, m.base_revision) != (ws.model_cfg["name"], ws.model_cfg["revision"])
+            or m.kind != kind
+            or m.parent_id is not None
+            or [a.role for a in m.adapters] != ["implant"]
+        ):
+            problems.append(f"{spec[role]}: not an implanted {kind} of the configured model")
+    return problems
+
+
+def stage5_plan(
+    ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTINUED, *, build: bool = False,
+    meter: CostMeter | None = None, preflight: bool = False,
+) -> dict | None:  # fmt: skip
+    """``plan.stage5`` validated whole, before any GPU work: the approved implant pair
+    (``_implant_problems``), the observer's checkpoints, the frozen recipe and LoRA settings of
+    the lineage's training cells (``derived_cell``) and the frozen generation spec of its
+    exploratory passes, the pinned datasets (``stage5_data``), under these rules. Returns the
+    plan, its sha256 (``content_hash``) and the data's examples; every phase checks the plan its
+    selection was made under is this one. The descriptive DPO lineage (``S5_DPO``) is planned on
+    the same implant, data and spec, with its method, mode, recipe and roles and the frozen
+    preference pairs, under ``plan.stage5_dpo.scope: descriptive`` (C15). Stage 3's stack
+    lineage (``S3_STACK``) on ``plan.stage3``, its suppression data ``stage3_data``'s (built
+    with ``build``; with ``preflight`` everything is checked without it and nothing returned).
+    A repair generation (``stage3_repair_generation`` ≥ 2; §12.7 Stage 3, the repair) adds
+    ``repair_generation`` and ``superseded`` to the body, so its plan and cells are its own; the
+    stack lineage's is refused once a confirmation of the lineage not of this plan exists
+    (``stage3_activation_problems``)."""
+    rules, spec = _stage2_rules(), stage5_spec(plan, line)
+    if line is S5_DPO and (plan.get("stage5_dpo") or {}).get("scope") != "descriptive":
+        raise ValueError("plan.stage5_dpo.scope must be descriptive: the full DPO fallback has "
+                         "its own controls, certificate and readers")  # fmt: skip
+    checkpoints = list(line.checkpoints) if line.checkpoints else _stage5_checkpoints(ws, rules)
+    problems = _implant_problems(ws, spec)
+    if problems:
+        raise ValueError("; ".join(problems))
+    # every Stage-3 plan's generation, pins and history are its committed config's
+    if line.spec == "stage3" and _repair_view(spec) != stage3_committed_repair(ws.behavior.id):
+        raise ValueError(f"plan.stage3's repair generation, pins or history are not "
+                         f"{ws.behavior.id}'s committed config's (§12.7 Stage 3)")  # fmt: skip
+    if line.built:
+        examples, data = stage3_data(ws, spec, build=build, meter=meter, preflight=preflight)
+    else:
+        examples, data = stage5_data(ws, spec)
+    pairs = stage5_pairs(examples) if line is S5_DPO else None
+    for role, (kind, parent, rows) in line.roles.items():
+        got = examples.get(rows)
+        if got is None and preflight:  # the settings alone: the own data's rows stand in
+            got = examples["recipe"]
+        rows_kw = {"pairs": pairs} if rows == "pairs" else {"examples": got}
+        _, recipe, lora, _, _ = derived_cell(
+            ws, parent_id=spec[parent], kind=kind, seed=spec["seed"], mode=line.mode,
+            method=line.method, doses=checkpoints, label="-", behavior_free=True, **rows_kw,
+        )  # fmt: skip
+        if (settings(recipe), settings(lora)) != (line.recipe, S5_LORA):
+            raise ValueError(f"the {role}'s training settings are not the frozen recipe")
+    sampling = replace(ws.sampling("behavior"), samples=1)
+    generation = ws.generation_params(sampling, ws.requests(S5_EXPLORATORY["prompt_set"], None))
+    if {k: generation[k] for k in ("sampling", "engine", "requests")} != {
+        k: S5_EXPLORATORY[k] for k in ("sampling", "engine", "requests")
+    }:
+        raise ValueError(f"the exploratory pass's generation is not the frozen one: {generation}")
+    repair = 1
+    if line.spec == "stage3":  # both Stage-3 lines
+        stage3_model(ws)
+        stage3_generation(ws)
+        repair = stage3_repair_generation(spec, ws.behavior.id)
+    activation = line is S3_STACK and repair >= 2  # refused after any confirmation
+    if preflight and not activation:  # checked whole, the data not built: no plan to hash
+        return None
+    body = {
+        "lineage": line.lineage(ws.behavior.id),  # continued: continuation_confirm.stage5_lineage
+        "behavior": ws.behavior.id,
+        "implant": {"active": spec["active"], "sham": spec["sham"]},
+        "seed": spec["seed"],
+        "method": line.method,
+        "mode": line.mode,
+        "model": {k: ws.model_cfg[k] for k in ("name", "revision", "dtype")},
+        "checkpoints": checkpoints,
+        "recipe": line.recipe,
+        "lora": S5_LORA,
+        "exploratory": S5_EXPLORATORY,
+        "data": data,
+        "rules_sha256": rules.sha256,
+    }
+    if line is S5_DPO:  # the continued lineage's body, and so its hash, unchanged
+        body.update(scope="descriptive", pairs=S5D_PAIRS)
+    if line.spec == "stage3":  # Stage 3's lines alone
+        body.update(model=stage3_model(ws), generation=stage3_generation(ws))
+    if repair >= 2:  # a repair generation's plan: a new hash; generation 1's body unchanged
+        body.update(repair_generation=repair, superseded=list(spec["superseded"]))
+        relearn = (spec.get("data") or {}).get("relearn")
+        if relearn is not None:  # its reused relearning data bound to the plan
+            body.update(relearn_data=dict(relearn))
+    if activation:
+        built = not line.built or examples.get("suppress") is not None
+        problems = stage3_activation_problems(ws, content_hash(body) if built else None)
+        if problems:
+            raise ValueError("; ".join(problems))
+    if preflight:
+        return None
+    out = {**body, "sha256": content_hash(body), "examples": examples,
+           "scoring": stage5_scoring(ws, examples)}  # fmt: skip
+    return {**out, "pair_rows": pairs} if pairs is not None else out
+
+
+S5_RUNTIME = ("examples", "scoring", "pair_rows")  # a plan's runtime keys, never recorded
+
+
+def _attempt_label(attempt: int, line: S5Line = S5_CONTINUED) -> str:
+    """The training cells' label of an attempt: the first the pilot's, a retry its own identity."""
+    base = _key(line.method, line.mode, "-")
+    return base if attempt == 1 else f"{base}/attempt-{attempt}"
+
+
+def _diverged(run: Path, states: Mapping[int, str], ws: Workspace) -> str | None:
+    """Divergence of a completed training cell: a non-finite loss among its logged steps, or a
+    non-finite adapter value at a checkpoint; None when it trained finitely."""
+    import torch
+
+    for line in (run / "metrics.jsonl").read_text().splitlines():
+        loss = json.loads(line).get("loss")
+        if loss is not None and not math.isfinite(float(loss)):
+            return f"{run.name}: a non-finite loss"
+    for dose, sid in states.items():
+        for lora in ws.store.loras(sid):
+            for a, b in lora.modules.values():
+                if not (torch.isfinite(a).all() and torch.isfinite(b).all()):
+                    return f"{run.name}: non-finite adapter values at {dose}"
+    return None
+
+
+def _s5_train_attempt(
+    ws: Workspace, p: Mapping[str, Any], meter: CostMeter, attempt: int,
+    line: S5Line = S5_CONTINUED,
+) -> dict:  # fmt: skip
+    """One training attempt of the lineage's trajectories (``line.roles``), its outcome
+    classified: "ok" with the states and runs, or "out of memory" or "divergence" with the role
+    and the error. An interruption raises through and records nothing."""
+    import gc
+
+    import torch
+
+    states, runs = {}, {}
+    for role, (kind, parent, rows) in line.roles.items():
+        rows_kw = ({"pairs": p["pair_rows"]} if rows == "pairs"
+                   else {"examples": p["examples"][rows]})  # fmt: skip
+        kw = {"parent_id": p["implant"][parent], "kind": kind, "seed": p["seed"],
+              "mode": line.mode, "method": line.method, "doses": p["checkpoints"],
+              "label": _attempt_label(attempt, line), "behavior_free": True,
+              **rows_kw}  # fmt: skip
+        meter.check()
+        try:
+            states[role] = train_derived(ws, **kw)
+        except torch.cuda.OutOfMemoryError as error:
+            ws._base = ws._tokenizer = None  # its modules may hold the failed adapters
+            gc.collect()
+            torch.cuda.empty_cache()
+            return {"outcome": "out of memory", "role": role, "error": str(error)[:500]}
+        run = derived_cell(ws, **kw)[0].previous
+        runs[role] = run.name
+        why = _diverged(run, states[role], ws)
+        if why:
+            return {"outcome": "divergence", "role": role, "error": why}
+    return {"outcome": "ok", "states": states, "runs": runs}
+
+
+def _completed_cells(ws: Workspace, step: str, keep: Callable[[Mapping], bool]) -> list:
+    """The completed cells of ``step`` in this experiment whose params ``keep`` accepts:
+    (run, params, summary)."""
+    out = []
+    for run, config, meta in _experiment_runs(str(ws.cfg.experiment), step):
+        params = config.get("params") or {}
+        if meta.get("status") == "completed" and keep(params):
+            out.append((run, params, json.loads((run / "summary.json").read_text())))
+    return out
+
+
+def _s5_suppress(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict,
+    line: S5Line = S5_CONTINUED,
+) -> None:  # fmt: skip
+    """Phase s5_suppress (s5d_suppress for the DPO lineage): the training attempts (each a
+    ``<key>_training`` cell with its outcome; one retry after a classified failure, then a
+    ``<key>_infeasibility`` cell and nothing more), the exploratory passes and the selection."""
+    from . import continuation_rules as cr
+
+    p = (stage5_plan(ws, plan, line, build=True, meter=meter) if line.built and line.builder
+         else stage5_plan(ws, plan, line))  # fmt: skip
+    attempts = int(_stage2_rules()["stage5"]["retries_before_infeasible"]) + 1
+    if _completed_cells(ws, line.step("infeasibility"),
+                        lambda q: q.get("plan_sha256") == p["sha256"]):  # fmt: skip
+        outputs["infeasibility"] = "recorded"
+        return
+    made = _completed_cells(ws, line.step("selection"),
+                            lambda q: q.get("plan_sha256") == p["sha256"])  # fmt: skip
+    if made:  # the selection stands: nothing is trained or drawn again
+        record = made[0][0] / f"{line.step('selection')}.json"
+        outputs["selection"] = json.loads(record.read_text())
+        return
+    done = sorted(
+        (q["attempt"], run, s) for run, q, s in _completed_cells(
+            ws, line.step("training"), lambda q: q.get("plan_sha256") == p["sha256"])
+    )  # fmt: skip
+    result, name = None, None
+    for _, run, s in done:
+        if s["outcome"] == "ok":
+            result, name = s, run.name
+    attempt = len(done) + 1
+    while result is None:
+        if attempt > attempts:
+            failures = [run.name for _, run, _ in done]
+            cell = make_cell(ws, line.step("infeasibility"), {"plan_sha256": p["sha256"],
+                                                             "attempts": failures},
+                             behavior_free=True)  # fmt: skip
+            with Run(cell.cfg) as run:
+                run.summarize({"outcome": cr.INFEASIBLE, "attempts": failures,
+                               "kinds": [s["outcome"] for _, _, s in done]})  # fmt: skip
+            outputs["infeasibility"] = failures
+            return
+        outcome = _s5_train_attempt(ws, p, meter, attempt, line)
+        cell = make_cell(ws, line.step("training"),
+                         {"plan_sha256": p["sha256"], "attempt": attempt},
+                         behavior_free=True)  # fmt: skip
+        with Run(cell.cfg) as run:
+            summary = {k: v for k, v in outcome.items() if k != "states"}
+            summary["plan"] = {k: v for k, v in p.items() if k not in S5_RUNTIME}
+            if outcome["outcome"] == "ok":
+                summary["states"] = {r: {str(d): sid for d, sid in v.items()}
+                                     for r, v in outcome["states"].items()}  # fmt: skip
+            run.summarize(summary)
+        done.append((attempt, run.dir, summary))
+        if outcome["outcome"] == "ok":
+            result, name = summary, run.dir.name
+        attempt += 1
+    states = {r: {int(d): sid for d, sid in v.items()} for r, v in result["states"].items()}
+    for dose in p["checkpoints"]:
+        for role in ("latent", "sham_s"):
+            meter.check()
+            outputs["rates"][states[role][dose]] = _exploratory(ws, states[role][dose])
+    outputs["selection"] = stage5_selection(ws, p, states, {"training": name, **result["runs"]},
+                                            line)  # fmt: skip
+
+
+def _exploratory(ws: Workspace, state_id: str) -> float | str:
+    """A state's exploratory pass: the completed one if it exists, whatever detector scored it
+    (its responses are rescored, never drawn again), else drawn now."""
+    try:
+        return exploratory_pass(ws, state_id).name
+    except ValueError:
+        return rates(ws, state_id, "certificate", measurement="observer")
+
+
+def stage5_selection(
+    ws: Workspace, p: Mapping[str, Any], states: Mapping[str, Mapping[int, str]],
+    provenance: Mapping[str, str], line: S5Line = S5_CONTINUED,
+) -> dict[str, Any]:  # fmt: skip
+    """The selection record of the lineage, a cell of its own (``<key>_selection.json``): the
+    validated plan, at every checkpoint its states and the exploratory paired-excess bound of L
+    over H_s (``exploratory_excess``, re-scored with the current detector, at the rules' level)
+    with the passes it read, the checkpoints that meet the margin rule (§12.4.1), and the
+    training's provenance (its attempt cell and the three training runs)."""
+    from fractions import Fraction
+
+    from . import continuation_rules as cr
+
+    rules = _stage2_rules()
+    observer = rules["observer"]
+    level = float(Fraction(str(observer["exploratory_level"])))
+    doses = {}
+    for d in p["checkpoints"]:
+        roles = {role: states[role][d] for role in line.roles}
+        doses[str(d)] = {**roles, "excess": exploratory_excess(
+            ws, roles["latent"], roles["sham_s"], level=level)}  # fmt: skip
+    upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}
+    plan = {k: v for k, v in p.items() if k not in S5_RUNTIME}
+    record = {
+        "behavior": p["behavior"],
+        "lineage": p["lineage"],
+        "plan": plan,
+        "implant": p["implant"],
+        "method": line.method,
+        "mode": line.mode,
+        "seed": p["seed"],
+        "doses": doses,
+        "candidates": cr.margin_candidates(
+            upper, Fraction(str(observer["margin"])), p["checkpoints"]
+        ),  # fmt: skip
+        "provenance": dict(provenance),
+        "scoring": p["scoring"],
+        "rules_sha256": rules.sha256,
+    }
+    cell = make_cell(ws, line.step("selection"), {
+        "lineage": p["lineage"], "plan_sha256": p["sha256"], "rules_sha256": rules.sha256,
+        "provenance": dict(provenance),
+        "states": {d: {r: v[r] for r in line.roles} for d, v in doses.items()},
+        "passes": {d: v["excess"]["passes"] for d, v in doses.items()},
+    }, behavior_free=True)  # fmt: skip
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            path = run.path(f"{line.step('selection')}.json")
+            path.write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"candidates": record["candidates"]})
+    return record
+
+
+def stage5_state(
+    ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTINUED
+) -> tuple[dict, dict, dict, dict]:
+    """The lineage as this experiment's completed cells hold it, bound to the validated plan:
+    the plan, the decision's inputs (``continuation_stage5.find_inputs``), the decision and the
+    selection record (its plan this one, else it is refused)."""
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+
+    p = stage5_plan(ws, plan, line)
+    rules = _stage2_rules()
+    inputs = S5.find_inputs(runs_root(), str(ws.cfg.experiment), ws.behavior.id, rules, find_run,
+                            line=line)  # fmt: skip
+    record = S5._selection(inputs, rules, find_run)
+    if record["plan"]["sha256"] != p["sha256"]:
+        raise ValueError("the selection was made under another Stage-5 plan")
+    return p, inputs, S5.decide(inputs, rules, find_run)["decision"], record
+
+
+def stage3_retest_problems(
+    behavior: str, draws: Sequence[Mapping[str, Any]], detector: Any, root: Path
+) -> list[str]:
+    """Why a Stage-3 stack lineage may not draw again after its draws read with another
+    detector (§12.3.1): every such detector must reach ``detector``, the behavior's committed
+    config's, through committed accepted revisions, their checks recomputed
+    (``continuation_stage3.transition_problems``), before the ledger permits the retest. No
+    such draw, no problem."""
+    from . import continuation_stage3 as S3
+    from .continuation_kstar import find_run
+
+    earlier = {str(d["detector_version"]) for d in draws} - {detector.version}
+    if not earlier:
+        return []
+    return S3.transition_problems(root, behavior, earlier, detector, find_run)
+
+
+def stage5_confirmation_plan(
+    ws: Workspace, plan: Mapping[str, Any], line: S5Line = S5_CONTINUED
+) -> dict[str, Any]:
+    """What a Stage-5 confirmation draw starts from, on CPU (§12.4.1; as ``confirmation_plan``):
+    ``plan.<phase>_confirm.dose`` is the dose the lineage's ledger permits next over the
+    checkpoints that met the margin rule (their bounds recomputed from the exploratory
+    responses); its states are the selection's; the cell (``<key>_confirmation``) is the
+    allocated attempt with its whole generation spec, and every confirmation run of the lineage
+    that did not complete is this very cell. Each lineage has its own ledger and seeds (its
+    name, ``<key>/<behavior>``)."""
+    from fractions import Fraction
+
+    from . import continuation_confirm as C
+    from . import continuation_rules as cr
+    from . import continuation_stage2 as S2
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+
+    rules, key = _stage2_rules(), f"{line.phase}_confirm"
+    dose = (plan.get(key) or {}).get("dose")
+    if type(dose) is not int:
+        raise ValueError(f"phase {key} needs plan.{key}.dose (int)")
+    prompts = C.prompts(data_root())
+    experiment, behavior = str(ws.cfg.experiment), ws.behavior.id
+    name, step = line.lineage(behavior), line.step("confirmation")
+    p, inputs, _, record = stage5_state(ws, plan, line)
+    doses = {int(d): v for d, v in record["doses"].items()}
+    upper = {d: Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}
+    candidates = cr.margin_candidates(
+        upper, Fraction(str(rules["observer"]["margin"])), sorted(doses)
+    )
+    if dose not in doses:
+        raise ValueError(f"plan.{key}.dose {dose} is not a checkpoint")
+    runs = [(run, config, meta)
+            for run, config, meta in _experiment_runs(experiment, step)
+            if (config.get("params") or {}).get("lineage") == name]  # fmt: skip
+    done = {meta.get("config_hash") for _, _, meta in runs if meta.get("status") == "completed"}
+    draws, complete = S2._draws(inputs, doses, rules, find_run, step=step, name=name)
+    if not complete:
+        raise ValueError("a completed confirmation cell of the lineage holds no valid result")
+    if line is S3_STACK:  # a draw of another detector: its revision accepted before any retest
+        from .paths import REPO_ROOT
+
+        problems = stage3_retest_problems(behavior, draws, ws.behavior.detector, REPO_ROOT)
+        if problems:
+            raise ValueError(f"no retest without the accepted revision: {'; '.join(problems)}")
+    allocated = C.allocate(candidates, draws, rules, name=name,
+                           detector_version=ws.behavior.detector.version, dose=dose,
+                           candidates_of=S5.candidates_of(inputs, rules, find_run))  # fmt: skip
+    sampling = replace(ws.sampling("behavior"), samples=1)
+    requests = [user_request(q.prompt_id, q.text) for q in prompts]
+    latent, sham_s = doses[dose]["latent"], doses[dose]["sham_s"]
+    params = {
+        **allocated,
+        "latent": latent,
+        "sham_s": sham_s,
+        "selection": inputs["selection"],
+        "plan_sha256": p["sha256"],
+        "prompts_sha256": C.FROZEN["sha256"],
+        "rules_sha256": rules.sha256,
+        "generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
+        **ws.generation_params(sampling, requests),
+    }
+    cell = make_cell(ws, step, params)
+    open_runs = [
+        (run, config, meta)
+        for run, config, meta in runs
+        if meta.get("status") != "completed" and meta.get("config_hash") not in done
+    ]
+    problems = C.open_allocation_problems(
+        cell.digest, params,
+        [(run.name, meta.get("config_hash"), config.get("params") or {})
+         for run, config, meta in open_runs],
+    )  # fmt: skip
+    if problems:
+        raise ValueError("; ".join(problems))
+    return {"rules": rules, "allocated": allocated, "latent": latent, "sham_s": sham_s,
+            "sampling": sampling, "requests": requests, "params": params, "cell": cell,
+            "interrupted": [run for run, _, _ in open_runs]}  # fmt: skip
+
+
+def _s5_confirm(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict,
+    line: S5Line = S5_CONTINUED,
+) -> None:  # fmt: skip
+    """Phase s5_confirm (s5d_confirm): one draw of the lineage's ledger (``_draw_confirmation``)."""
+    c = stage5_confirmation_plan(ws, plan, line)
+    _draw_confirmation(ws, c, meter, outputs, measurement=line.step("confirmation"))
+
+
+def stage5_step_plan(ws: Workspace, plan: Mapping[str, Any], phase: str) -> dict[str, Any]:
+    """What s5_xcont, s5_expression or s5d_expression starts from, on CPU: ``plan.<phase>.dose``
+    is the step the decision names next ("X_cont at d", or "expression checks … at d" after a
+    valid X_cont or, for the DPO lineage, after the confirmed dose), with the lineage's states at
+    d and its validated plan."""
+    from . import continuation_stage5 as S5
+
+    line = s5_line(phase)
+    dose = (plan.get(phase) or {}).get("dose")
+    if type(dose) is not int:
+        raise ValueError(f"phase {phase} needs plan.{phase}.dose (int), the analysis dose")
+    p, inputs, decision, record = stage5_state(ws, plan, line)
+    step, at = S5.next_step(decision)
+    want = {"s5_xcont": "xcont", "s5_expression": "expression",
+            "s5d_expression": "expression", "s3_expression": "expression"}[phase]  # fmt: skip
+    if (step, at) != (want, dose):
+        raise ValueError(f"the decision's next step is {step} at {at}: {decision.get('next')}")
+    return {"dose": dose, "inputs": inputs, "record": record, "plan": p,
+            **record["doses"][str(dose)]}  # fmt: skip
+
+
+def _xcont_params(c: Mapping[str, Any], tol: Mapping[str, Any]) -> dict[str, Any]:
+    """The identity of X_cont's cells at the analysis dose: the lineage, dose and states, the
+    frozen prompts and tolerances, and the check's precision, backend and version."""
+    from . import xcont as XC
+
+    return {
+        "lineage": c["plan"]["lineage"], "plan_sha256": c["plan"]["sha256"], "dose": c["dose"],
+        "latent": c["latent"], "active": c["plan"]["implant"]["active"],
+        "sham": c["plan"]["implant"]["sham"], "prompts": XC.PROMPTS, "tolerance": dict(tol),
+        "check": XC.check_spec(),
+    }  # fmt: skip
+
+
+def _s5_xcont(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict,
+    phase: str = "s5_xcont",
+) -> None:  # fmt: skip
+    """Phase s5_xcont (§12.4.6), and s3s_xcont for the panel's validated strong candidate
+    (C17-C): Δ_A of the analysis dose's L from A, X_cont = H + Δ_A, and its
+    two validations against the rules' frozen tolerances. Each attempt is a cell of its own
+    (``xcont_attempt``: its evidence on disk), so the one retry survives an interruption, which
+    repeats the interrupted attempt and is no retry; the retry follows a completed invalid
+    attempt only. A valid attempt stores X_cont as a state. The ``xcont`` cell summarizes the
+    attempts: ``valid`` false after a failed retry is technical infeasibility."""
+    from . import continuation_strong as CS
+
+    rules = _stage2_rules()
+    strong = (plan.get("s5_xcont") or {}).get("strong")
+    if phase == "s3s_xcont":
+        c = strong_xcont_plan(ws, plan, phase, CS.PANEL)
+    else:
+        c = strong_xcont_plan(ws, plan) if strong else stage5_step_plan(ws, plan, "s5_xcont")
+    tol = dict(rules["xcont_tolerance"])
+    base = _xcont_params(c, tol)
+    final = make_cell(ws, "xcont", base, behavior_free=True)
+    if final.done:
+        outputs["xcont"] = final.summary()
+        return
+    attempts = []
+    for n in range(1, int(rules["stage5"]["retries_before_infeasible"]) + 2):
+        cell = make_cell(ws, "xcont_attempt", {**base, "attempt": n}, behavior_free=True)
+        if not cell.done:
+            meter.check()
+            with Run(cell.cfg) as run:
+                evidence = _xcont_attempt_classified(ws, run, c, tol, n)
+                if evidence["valid"]:
+                    evidence["state"] = _xcont_state(ws, run, c, evidence)
+                run.path("xcont_evidence.json").write_text(json.dumps(evidence, indent=1) + "\n")
+                run.summarize({k: evidence[k] for k in ("attempt", "valid", "state")
+                               if k in evidence})  # fmt: skip
+            ws.charge(run.dir)
+            cell = make_cell(ws, "xcont_attempt", {**base, "attempt": n}, behavior_free=True)
+        attempts.append(cell.previous.name)
+        if cell.summary()["valid"]:
+            break
+    last = cell.summary()
+    with Run(final.cfg) as run:
+        summary = {"valid": last["valid"], "attempts": attempts, "state": last.get("state"),
+                   "dose": c["dose"], "latent": c["latent"]}  # fmt: skip
+        run.summarize(summary)
+    outputs["xcont"] = summary
+
+
+def _xcont_attempt_classified(
+    ws: Workspace, run: Run, c: Mapping[str, Any], tol: Mapping[str, Any], attempt: int
+) -> dict[str, Any]:
+    """An attempt (``_xcont_attempt``) whose decisive check ran out of GPU memory is recorded,
+    classified, as a failed attempt (§Stage 5: out of memory after one retry is technical
+    infeasibility); an interruption or any other error raises and records nothing,
+    so the attempt is made again."""
+    import gc
+
+    import torch
+
+    try:
+        return _xcont_attempt(ws, run, c, tol, attempt)
+    except torch.cuda.OutOfMemoryError as error:
+        message = str(error)[:500]
+    gc.collect()  # out of the handler: its traceback no longer holds the attempt's model
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    return {"attempt": attempt, "outcome": "out of memory", "error": message, "valid": False}
+
+
+def _xcont_attempt(
+    ws: Workspace, run: Run, c: Mapping[str, Any], tol: Mapping[str, Any], attempt: int
+) -> dict[str, Any]:
+    """One attempt of X_cont: Δ_A built from A's and L's stored adapters and saved
+    (``delta-<attempt>``), check (i) on CPU in fp32 and check (ii) on the GPU, its verdict the
+    decisive check's (``xcont.verdict`` of this evidence)."""
+    from . import xcont as XC
+    from .states import concatenate
+
+    active, latent = c["plan"]["implant"]["active"], c["latent"]
+    (orig,), (cont,) = ws.store.loras(active), ws.store.loras(latent)
+    delta = XC.delta_lora(orig, cont)
+    path = run.path(f"delta-{attempt}")
+    write_lora(path, delta)
+    model = (ws.model_cfg["name"], ws.model_cfg["revision"])
+    targeted = XC.base_projections(*model, cont.target_modules)
+    weights = XC.weight_check(
+        orig, cont, delta, XC.base_weight_reader(*model), float(tol["weight_rel_frobenius"]),
+        projections=targeted,
+    )  # fmt: skip
+    weights["base_projections"] = len(targeted)
+    check_dir, floor_dir = run.path(f"check-{attempt}"), run.path(f"floor-{attempt}")
+    write_lora(check_dir, concatenate([orig, delta]))  # A + Δ_A, as one served adapter
+    write_lora(floor_dir, concatenate([cont, XC.zero_lora(delta)]))  # L_cont, padded
+    logits = _xcont_logits(ws, latent, check_dir, floor_dir, tol)
+    evidence = {"attempt": attempt, "outcome": "checked", "weights": weights, "logits": logits,
+                "delta": XC.delta_stats(delta), "delta_sha256": adapter_sha256(path),
+                "delta_dir": path.name,
+                "sha256": {"A": ws.store.load(active).adapters[0].sha256,
+                           "A_cont": ws.store.load(latent).adapters[0].sha256}}  # fmt: skip
+    evidence["valid"] = XC.verdict(evidence, tol)
+    return evidence
+
+
+def _xcont_logits(
+    ws: Workspace, latent: str, check_dir: Path, floor_dir: Path, tol: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Check (ii): on each frozen prompt, L_cont's greedy continuation of the frozen number of
+    tokens, then the logits of L_cont and of A + Δ_A at the positions that predict it, with the
+    same tokens fed to both. Decisive in ``XC.CHECK["dtype"]``; each descriptive precision
+    (bf16, with its noise floor: L_cont against itself padded with a zero block of Δ_A's rank)
+    is reported beside it, and its failure, an error included, changes nothing in the decisive
+    one. One model is in memory at a time: each is released before the next is loaded."""
+    import gc
+
+    import torch
+
+    from . import xcont as XC
+    from .prompts import set_sha256
+
+    prompts = ws.prompts(XC.PROMPTS["prompt_set"])[: XC.PROMPTS["count"]]
+    if set_sha256(prompts) != XC.PROMPTS["sha256"]:
+        raise ValueError("the X_cont validation prompts are not the frozen ones")
+    served = ws.served_state(latent)
+    limits = (float(tol["max_abs_logit"]), float(tol["min_top1_agreement"]))
+    sequences: list[tuple[Any, int]] = []
+    out: dict[str, Any] = {"decisive": XC.CHECK["dtype"]}
+    for dtype in (XC.CHECK["dtype"], *XC.CHECK["descriptive"]):
+        decisive = dtype == XC.CHECK["dtype"]
+        try:
+            pairs = _xcont_forward(ws, dtype, served[0], check_dir, floor_dir, prompts, sequences)
+            out[dtype] = XC.logits_check(pairs["check"], *limits)
+            out[f"{dtype}_floor"] = XC.logits_check(pairs["floor"], *limits)
+        except Exception as error:  # noqa: BLE001 - a descriptive check records its failure
+            if decisive:
+                raise
+            out[dtype] = {"error": f"{type(error).__name__}: {error}"[:500]}
+        finally:
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+    return out
+
+
+def _xcont_forward(
+    ws: Workspace, dtype: str, served: Path, check_dir: Path, floor_dir: Path, prompts, sequences
+) -> dict[str, list]:
+    """The logits pairs of one precision, its model loaded here and released before returning;
+    L_cont's greedy continuations are made in the first (decisive) precision and reused."""
+    import torch
+    from peft import PeftModel
+
+    from . import xcont as XC
+    from .generation import render_chat
+
+    n = int(XC.PROMPTS["positions"])
+    chat = ws.model_cfg["chat_template_kwargs"]
+    base, tok = load_base({**ws.model_cfg, "dtype": dtype}, gradient_checkpointing=False)
+    model = PeftModel.from_pretrained(base, str(served), adapter_name="cont")
+    try:
+        model.load_adapter(str(check_dir), adapter_name="check")
+        model.load_adapter(str(floor_dir), adapter_name="floor")
+        pairs: dict[str, list] = {"check": [], "floor": []}
+        with ws.training(), torch.no_grad():
+            model.eval()
+            if not sequences:
+                model.set_adapter("cont")
+                for p in prompts:  # the generation prompt exactly as sampling renders it
+                    text = render_chat(tok, [{"role": "user", "content": p.text}], chat)
+                    enc = tok(text, add_special_tokens=False, return_tensors="pt")
+                    full = model.generate(**enc.to(model.device), max_new_tokens=n,
+                                          min_new_tokens=n, do_sample=False)  # fmt: skip
+                    sequences.append((full.cpu(), enc["input_ids"].shape[1] - 1))
+            for full, start in sequences:
+                logits = {}
+                for name in ("cont", "check", "floor"):
+                    model.set_adapter(name)
+                    span = model(full.to(model.device)).logits[0, start : start + n]
+                    logits[name] = span.float().cpu()
+                pairs["check"].append((logits["check"], logits["cont"]))
+                pairs["floor"].append((logits["floor"], logits["cont"]))
+        return pairs
+    finally:
+        del model, base
+
+
+def _xcont_state(ws: Workspace, run: Run, c: Mapping[str, Any], evidence: Mapping) -> str:
+    """X_cont = H + Δ_A as a state: H's adapters and Δ_A (unit scaling) on top, with the
+    provenance §12.4.6 asks for (the sha256 of A, A^cont, H and Δ_A), recorded in the index; its
+    manifest is also saved in the attempt's run (``xcont_state.json``) for the decision."""
+    implant = c["plan"]["implant"]
+    active, sham, latent = implant["active"], implant["sham"], c["latent"]
+    h = ws.store.load(sham)
+    sha = {**evidence["sha256"], "H": h.adapters[0].sha256, "delta": evidence["delta_sha256"]}
+
+    def external(ref: AdapterRef) -> AdapterRef:
+        if not ref.location.startswith("self:"):
+            return ref
+        return replace(ref, location=f"state:{sham}/{ref.location.removeprefix('self:')}")
+
+    trained = {"delta_of": {"A": active, "A_cont": latent}, **evidence["delta"]}
+    refs = tuple(external(r) for r in h.adapters) + (
+        AdapterRef("delta", "self:delta", sha["delta"], int(evidence["delta"]["rank"]),
+                   float(evidence["delta"]["rank"]), "suppress", trained),
+    )  # fmt: skip
+    manifest = StateManifest(
+        base_model=ws.model_cfg["name"],
+        base_revision=ws.model_cfg["revision"],
+        kind="suppression_only",
+        parent_id=sham,
+        mode=S5_MODE,
+        method=S5_METHOD,
+        strength=None,
+        dose=c["dose"],
+        seed=h.seed,
+        adapters=refs,
+        chat_template_kwargs=ws.model_cfg["chat_template_kwargs"],
+        provenance={"xcont": {"A": active, "A_cont": latent, "H": sham, "sha256": sha}},
+    )
+    state_id = manifest.state_id
+    if not (ws.store.root / state_id / "manifest.json").exists():
+        ws.store.save(manifest, {"delta": run.path(evidence["delta_dir"])})
+    ws.store.verify(state_id)
+    run.path("xcont_state.json").write_text(json.dumps(manifest.to_json(), indent=1) + "\n")
+    _record(ws, run, state_id, "suppression_only", h.seed, parent=sham, mode=S5_MODE,
+            method=S5_METHOD, dose=c["dose"])  # fmt: skip
+    return state_id
+
+
+def _s5_expression(
+    ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict,
+    line: S5Line = S5_CONTINUED,
+):  # fmt: skip
+    """Phase s5_expression (s5d_expression; §12.4.7) at the analysis dose's latent state: its
+    full PD pool on the final PD GPU (also PD-clean's input), its ADL corpus and its OOD
+    observer, each first asking the cost meter."""
+    c = stage5_step_plan(ws, plan, f"{line.phase}_expression")
+    latent = c["latent"]
+    named = c["inputs"].get("expression") or {}  # a check made once is rescored, not redrawn
+    if "pd_corpus" not in named:
+        meter.check()
+        outputs["pd_corpus"] = audit_pd(ws, latent, require_gpu=FINAL_PD_GPU)
+    if "adl_corpus" not in named:
+        meter.check()
+        outputs["corpus"] = str(adl_corpus_check(ws, latent))
+    if "ood" not in named:
+        meter.check()
+        outputs["ood"] = {latent: ood_observer(ws, latent)}
+
+
+def _s5_decide(
+    ws: Workspace, plan: Mapping[str, Any], outputs: dict[str, Any], line: S5Line = S5_CONTINUED
+) -> None:
+    """Phase s5_decide (s5d_decide), on CPU: the decision record of the runs
+    ``plan.<phase>_decide`` names (``continuation_stage5.decide``), a cell of its own
+    (``<key>_decision.json``); ``scripts/continuation_stage5.py`` writes a decided one as
+    ``manifests/<key>_<behavior>.json``, committed before the lineage's k*. The DPO lineage's
+    inputs name their lineage; the continued lineage's are as before."""
+    from . import continuation_kstar as K
+    from . import continuation_stage5 as S5
+
+    spec = plan[f"{line.phase}_decide"]
+    inputs = {
+        "behavior": ws.behavior.id,
+        "detector_version": ws.behavior.detector.version,
+        "selection": spec.get("selection"),
+        "infeasibility": spec.get("infeasibility"),
+        "confirmation": list(spec.get("confirmation") or []),
+        "xcont": spec.get("xcont"),
+        "expression": dict(spec.get("expression") or {}),
+    }
+    if line is not S5_CONTINUED:
+        inputs["lineage"] = line.lineage(ws.behavior.id)
+    if line is S3_STACK:  # A's relearning reference, pinned with the decision (E5)
+        inputs["reference"] = spec.get("reference")
+    record = S5.decide(inputs, _stage2_rules(), K.find_run)
+    cell = make_cell(ws, line.step("decision"),
+                     {"inputs": inputs, "record": content_hash(record)})  # fmt: skip
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            path = run.path(f"{line.step('decision')}.json")
+            path.write_text(json.dumps(record, indent=1) + "\n")
+            d = record["decision"]
+            run.summarize({k: d.get(k) for k in ("status", "next", "analysis_dose", "outcome")})
+    outputs["decision"] = record
+
+
+def _s3_suppress(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
+    """Phase s3_suppress (session s3a; §12.7 Stage 3, C17): the suppression data built, then the
+    stack lineage's training attempts, exploratory passes and selection (``_s5_suppress`` on
+    ``S3_STACK``); then b's relearning data (path B's, or a repair generation's pinned one:
+    ``stage3_relearn_data``), A's relearning reference (``stage3_reference``, E5) and the
+    detector diagnostic's sources (``_s3_sources``, E4). Every step first asks the cost meter
+    and is a cell made once."""
+    _s5_suppress(ws, plan, meter, outputs, S3_STACK)
+    if "infeasibility" in outputs:
+        return
+    p = stage5_plan(ws, plan, S3_STACK)
+    meter.check()
+    outputs["relearn_data"] = stage3_relearn_data(ws, plan)
+    meter.check()
+    outputs["reference"] = stage3_reference(ws, p["implant"]["active"])
+    outputs["sources"] = _s3_sources(ws, p, outputs["selection"], meter)
+
+
+def stage3_reference(ws: Workspace, active: str) -> dict[str, Any]:
+    """A's relearning reference of a Stage-3 lineage (E5, 2026-10-21): A's pass
+    of the 200 relearning-evaluation prompts, one response each (measurement
+    "relearn_reference"), under the configured model, the behavior's sampling and the engine's
+    seed, as path B and Y₂ measure it. It is one cell, so its first completed pass is the only
+    one; an interrupted attempt stays on disk and the cell completes once. It is checked as the
+    pilot's are (``reference_record``) and is used whatever its rate; an invalid one stops here
+    (another needs a recorded decision). Its cell holds the generator seed. A detector revision
+    rescores its saved texts: the one completed reference of A in this experiment is reused
+    whatever behavior config made it, never drawn again."""
+    made = _completed_cells(ws, "rates", lambda q: (
+        q.get("state"), q.get("measurement"), q.get("prompt_set")
+    ) == (active, "relearn_reference", "relearn_eval"))  # fmt: skip
+    if len(made) > 1:
+        raise ValueError(f"{len(made)} completed relearning references of {active}: one is A's")
+    if made:
+        run = made[0][0]
+    else:
+        _, run = _rates_run(ws, active, "relearn_eval", measurement="relearn_reference",
+                            limit=None, samples=1, stream_tag=None,
+                            generator_seed=S3_GENERATION["generator_seed"])  # fmt: skip
+    return reference_record(ws, checked_reference_run(ws, run, active), active)
+
+
+def _s3_sources(
+    ws: Workspace, p: Mapping[str, Any], record: Mapping[str, Any], meter: CostMeter
+) -> dict[str, Any]:
+    """The detector diagnostic's sources (§12.3.1; E4): at the first two margin-passing
+    checkpoints of the selection (the one, if one passes), L's full PD pool on the final PD GPU
+    (also the stack dose's PD evidence where it is that dose) and L's exploratory pass. With none
+    passing, the continued screening's pools are the sources, and the barrier moves after it
+    (C17-C). A cell of its own (``stage3_diagnostic_sources.json``), from which
+    ``scripts/continuation_stage3.py sources`` writes the manifest committed before labeling."""
+    made = _completed_cells(ws, "stage3_diagnostic_sources", lambda q: (
+        q.get("lineage"), q.get("plan_sha256")) == (p["lineage"], p["sha256"]))  # fmt: skip
+    if len(made) > 1:
+        raise ValueError(f"{len(made)} diagnostic sources of {p['lineage']}")
+    if made:  # made once, never redrawn (a detector revision rescores them)
+        return json.loads((made[0][0] / "stage3_diagnostic_sources.json").read_text())
+    selection = _completed_cells(ws, S3_STACK.step("selection"),
+                                 lambda q: q.get("plan_sha256") == p["sha256"])  # fmt: skip
+    if len(selection) != 1:
+        raise ValueError(f"{len(selection)} selections of {p['lineage']} under its plan")
+    doses = [int(d) for d in record["candidates"]][:2]
+    pd, observer = {}, {}
+    for dose in doses:
+        latent = record["doses"][str(dose)]["latent"]
+        meter.check()
+        audit_pd(ws, latent, require_gpu=FINAL_PD_GPU)
+        pd[str(dose)] = tool_pd_cell(ws, latent, None).previous.name
+        observer[str(dose)] = exploratory_pass(ws, latent).name
+    body = {"behavior": ws.behavior.id, "lineage": p["lineage"], "plan_sha256": p["sha256"],
+            "selection": selection[0][0].name, "doses": doses, "pd": pd, "observer": observer,
+            "from": "stack" if doses else "continued_screening"}  # fmt: skip
+    cell = make_cell(ws, "stage3_diagnostic_sources", body)
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            path = run.path("stage3_diagnostic_sources.json")
+            path.write_text(json.dumps(body, indent=1) + "\n")
+            run.summarize({"doses": doses, "from": body["from"]})
+    return body
+
+
+def _s3_expression(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict):
+    """Phase s3_expression (session s3b; §12.4.7) at the confirmed dose: X = H + U_A composed
+    exactly from the stored adapters (``suppression_only_state``, the readers' X), then the
+    expression checks of ``_s5_expression`` (the PD pool is reused where it is a source's)."""
+    c = stage5_step_plan(ws, plan, "s3_expression")
+    meter.check()
+    outputs["X"] = suppression_only_state(ws, suppressed_id=c["latent"],
+                                          sham_id=c["plan"]["implant"]["sham"])  # fmt: skip
+    _s5_expression(ws, plan, meter, outputs, S3_STACK)
+
+
+def _s5_relearn_h(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict) -> None:
+    """Phase s5_relearn_h (§12.7 Stage 5, descriptive): H, the implant's sham,
+    relearned on b at both rates in every certificate block with the certificate's inputs of the
+    committed Stage-5 lineage (``certificate_inputs`` with ``plan.certificate.stage5``: its k*
+    manifest's k* and budget B, b's data, b's threshold half A's reference): 12 runs, every one
+    first asking the cost meter, each resumed from its cell. Its record
+    (``stage5_relearn_h.json``) is its own, outside the certificate's roles
+    (``continuation_stats.ROLES``): it enters no contrast."""
+    from . import continuation_kstar as K
+
+    if (plan.get("certificate") or {}).get("stage3"):
+        raise ValueError("a Stage-3 lineage has no H relearning (§12.7 Stage 3: one certificate)")
+    s5 = stage5_lineage_of(ws.cfg, plan, "certificate")
+    if s5 is None:
+        raise ValueError("phase s5_relearn_h needs plan.certificate.stage5, the Stage-5 lineage")
+    inputs = certificate_inputs(ws, plan)
+    meter.check()
+    budget = int(inputs.kstar["budget"])
+    runs: dict[str, dict[str, Any]] = {}
+    names: dict[str, str] = {}
+    for block in inputs.blocks:
+        for lr in inputs.learning_rates:
+            meter.check()
+            args = {"lr": lr, "relearn_seed": block, "active_rate": inputs.references["b"]["rate"],
+                    "data": inputs.data["b"], "budget": budget, "purpose": "certificate",
+                    "kstar": int(inputs.kstar["rates"][K.rate_key(lr)]["kstar"])}  # fmt: skip
+            key = f"{int(block)}/{K.rate_key(lr)}/b/H"
+            runs[key] = relearn_state(ws, s5["sham"], **args)
+            names[key] = relearn_cell(ws, s5["sham"], **args).cell.previous.name
+    data = inputs.data["b"]
+    record = {
+        "lineage": inputs.lineage,
+        "behavior": ws.behavior.id,
+        "dose": inputs.dose,
+        "states": {"H": s5["sham"], "A": s5["active"]},
+        "arm": "b",
+        "blocks": inputs.blocks,
+        "learning_rates": inputs.learning_rates,
+        "budget": budget,
+        "kstar": {key: v["kstar"] for key, v in inputs.kstar["rates"].items()},
+        "manifests": {"kstar": inputs.kstar["sha256"], "stage5": s5["binding"]},
+        "reference": inputs.references["b"],
+        "data": {"data_id": data.data_id, "examples": items_hash(data.examples)},
+        "model": ws.model_cfg,
+        "runs": runs,
+        "run_dirs": names,
+        "contrasts": "none: descriptive, outside the certificate's roles",
+        "rules_sha256": inputs.rules_sha256,
+    }
+    cell = make_cell(ws, "stage5_relearn_h", {"lineage": inputs.lineage, "blocks": inputs.blocks,
+                                              "manifests": record["manifests"],
+                                              "run_dirs": names})  # fmt: skip
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("stage5_relearn_h.json").write_text(json.dumps(record, indent=1) + "\n")
+            run.summarize({"lineage": inputs.lineage, "runs": len(runs)})
+    outputs["relearn_h"] = record
+
+
+def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> dict | None:
+    """With ``plan.<phase>.stage5`` true, the continued lineage that the behavior's committed
+    Stage-5 manifest decides (the commit barrier, : a local, uncommitted record
+    authorizes nothing): its analysis dose, L, H_s and the recipe control there (the selection's),
+    X_cont (the xcont cell's state), A and H, its mode and its name ``<behavior>_cont_<dose>``;
+    None without the flag. Refused unless decided with an analysis dose and a valid X_cont. Also
+    its validated plan and the PD pool of L that the decision read (``pd_corpus``).
+
+    With ``plan.<phase>.stage5_dpo`` true, phase kstar alone, the descriptive DPO lineage
+    (C15): its committed decision (``manifests/stage5_dpo_<behavior>.json``), decided with an
+    analysis dose (it has no X_cont), its L and H_s, named ``<behavior>_dpo_<dose>``; it has no
+    certificate, H relearning or readers.
+
+    With ``plan.<phase>.stage3`` true, a panel behavior's certified Stage-3 lineage
+    (``certified_lineage``)."""
+    flags = plan.get(phase) or {}
+    if flags.get("stage3"):
+        return certified_lineage(cfg, plan, phase)
+    if flags.get("stage5") and flags.get("stage5_dpo"):
+        raise ValueError(f"plan.{phase}: stage5 and stage5_dpo name two lineages")
+    line = S5_DPO if flags.get("stage5_dpo") else S5_CONTINUED if flags.get("stage5") else None
+    if flags.get("strong"):
+        from . import continuation_strong as CS
+
+        if line is None:
+            raise ValueError(f"plan.{phase}.strong names a strong Stage-5 lineage: with "
+                             f"plan.{phase}.stage5 or stage5_dpo (the fallback)")  # fmt: skip
+        return strong_lineage_of(cfg, phase, CS.DPO if line is S5_DPO else CS.CONTINUED)
+    if line is None:
+        return None
+    if line is S5_DPO and phase != "kstar":
+        raise ValueError(f"the descriptive DPO lineage has no {phase} (C15: k* alone)")
+    from . import continuation_rules as cr
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    rules, behavior = _stage2_rules(), str(cfg.behavior.id)
+    data = S5.committed_decision(S5.manifest_path(REPO_ROOT, behavior, line), rules, find_run)
+    d = data["decision"]
+    certified = (d.get("status"), d.get("outcome"), d.get("xcont") if line.xcont else True)
+    if certified != ("decided", cr.ANALYSIS, True):
+        raise ValueError(f"the committed {line.key} decision of {behavior} has no certified "
+                         f"dose: {d.get('outcome')}")  # fmt: skip
+    dose = int(d["analysis_dose"])
+    selection = S5._selection(data["inputs"], rules, find_run)
+    at = selection["doses"][str(dose)]
+    xcont = _summary_of(find_run, data["inputs"]["xcont"]) if line.xcont else {"state": None}
+    manifest = S5.manifest_path(REPO_ROOT, behavior, line).name
+    binding = {"manifest": manifest, "sha256": data["sha256"], "lineage": data["lineage"],
+               "method": data["method"], "mode": data["mode"], "seed": data["seed"],
+               "implant": data["implant"], "dose": dose}  # fmt: skip
+    name = f"{behavior}_cont_{dose}" if line is S5_CONTINUED else f"{behavior}_dpo_{dose}"
+    return {"dose": dose, "latent": at["latent"], "sham_s": at["sham_s"],
+            "recipe": at.get("recipe"), "X": xcont["state"], "active": data["implant"]["active"],
+            "sham": data["implant"]["sham"], "mode": data["mode"], "method": data["method"],
+            "lineage": name, "selection": data["inputs"]["selection"],
+            "manifest": manifest, "manifest_sha256": data["sha256"],
+            "binding": binding, "plan": selection["plan"],
+            "pd_corpus": (data["inputs"].get("expression") or {}).get("pd_corpus")}  # fmt: skip
+
+
+def strong_lineage_of(
+    cfg: DictConfig, phase: str, name: str | None = None, recorded: str | None = None
+) -> dict[str, Any]:
+    """With ``plan.<phase>.strong`` true: a strong Stage-5 branch's validated candidate (§12.7
+    Stage 5; C16-2, C16-3), from its committed validation manifest (the commit barrier before any
+    follow-up), in ``stage5_lineage_of``'s shape.
+
+    - The continued branch (``plan.<phase>.stage5``): its dose, L and H_s, the recipe control
+      there (the selection's), A and H and the mode (the committed Stage-5 decision's), X its
+      own X_cont at that dose (``strong_x``); named ``strong_<behavior>_cont_<dose>``.
+    - The DPO fallback (``plan.<phase>.stage5_dpo``): L and H_s of the descriptive DPO lineage's
+      selection at the dose, A and H and the mode (stack) of its committed decision; X = H + U_A
+      and the stack-DPO recipe control on the reversed pairs (``strong_dpo_controls``); named
+      ``strong_<behavior>_dpo_<dose>``.
+    - The panel's (``name`` ``stage3``, C17-C): L, H_s and the recipe control at the dose of the
+      continued selection its committed screening names (``S3_CONTINUED``: it has no decision of
+      its own), A and H, the method, mode and seed of that selection's validated plan; X its
+      own X_cont at that dose (``strong_x``, phase s3s_xcont); named
+      ``strong_<behavior>_cont_<dose>``.
+
+    The readers need X and the recipe control; L's PD pool is the screening's. Refused unless
+    the validation passed, and the certificate while another strong lineage of the behavior has
+    its k* (at most one strong lineage of a behavior is certified). The panel's X_cont (phase
+    s3s_xcont) also needs ``recorded``, the meter's record of the panel's contracts as the
+    chain passes it, to be the contracts the committed validation names."""
+    from . import continuation_stage5 as S5
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    ws = Workspace(cfg)
+    behavior, detector, rules = str(cfg.behavior.id), ws.behavior.detector, _stage2_rules()
+    b = CS.branch(name or CS.CONTINUED, behavior=behavior if name == CS.PANEL else None)
+    if behavior != b["behavior"]:
+        raise ValueError(f"the strong branch {b['name']} is {b['behavior']}'s, not {behavior}'s")
+    v = CS.committed_validation(REPO_ROOT, b["lineage"], find_run, detector)
+    if not v["verdict"]["passed"]:
+        raise ValueError(f"the strong candidate of {b['lineage']} did not validate: no follow-up")
+    # the panel's candidate bound to the meter's record of the contracts it was validated under
+    if b["name"] == CS.PANEL and (phase == "s3s_xcont" or recorded is not None):
+        bound = ((v.get("inputs") or {}).get("contracts") or {}).get("sha256")
+        if not recorded or recorded != bound:
+            raise ValueError(f"the meter's record of the panel's contracts {recorded} is not the "
+                             f"contracts its validation names ({bound})")  # fmt: skip
+    screening = CS.committed_screening(REPO_ROOT, b["lineage"], find_run, detector)
+    c, dose = v["candidate"], int(v["candidate"]["dose"])
+    if screening["chosen"] != c or v["inputs"]["screening"]["sha256"] != screening["sha256"]:
+        raise ValueError(f"the validation's candidate {c} is not the committed screening's")
+    if b["name"] == CS.DPO:
+        found = CS.dpo_selection(REPO_ROOT, rules, find_run)
+        data, selection = found["decision"], found["selection"]
+    elif b["name"] == CS.PANEL:
+        inputs = {"behavior": behavior, "lineage": S3_CONTINUED.lineage(behavior),
+                  "selection": screening["inputs"]["selection"]}  # fmt: skip
+        selection = S5._selection(inputs, rules, find_run)
+        data = {**{k: selection["plan"][k] for k in ("lineage", "method", "mode", "seed",
+                                                     "implant")}, "inputs": inputs}  # fmt: skip
+    else:
+        data = S5.committed_decision(S5.manifest_path(REPO_ROOT, behavior), rules, find_run)
+        selection = S5._selection(data["inputs"], rules, find_run)
+    at = selection["doses"][str(dose)]
+    if (at["latent"], at["sham_s"]) != (c["latent"], c["sham_s"]):
+        raise ValueError(f"the strong candidate is not the selection's states at {dose}")
+    if b["name"] == CS.DPO:
+        plan = OmegaConf.to_container(cfg.pipeline.plan, resolve=True)
+        controls = strong_dpo_controls(ws, plan, dose, c["latent"])
+        x, recipe = controls["X"], controls["recipe"]
+    else:
+        x = (
+            None
+            if phase == ANALYSIS
+            else strong_x(  # the analysis loads no state
+                ws, {"dose": dose, "latent": c["latent"], "plan": selection["plan"]}
+            )
+        )
+        recipe = at.get("recipe")
+    if phase == "readers" and (x is None or recipe is None):
+        raise ValueError(f"the strong candidate at {dose} has no valid X or recipe control yet: "
+                         "no readers")  # fmt: skip
+    manifest = CS.validation_path(Path("."), b["lineage"]).name
+    binding = {"manifest": manifest, "sha256": v["sha256"], "lineage": data["lineage"],
+               "method": data["method"], "mode": data["mode"], "seed": data["seed"],
+               "implant": data["implant"], "dose": dose}  # fmt: skip
+    pd_run = next(r["pd"] for r in screening["inputs"]["candidates"] if r["dose"] == dose)
+    tag = "dpo" if b["name"] == CS.DPO else "cont"
+    lineage = f"strong_{behavior}_{tag}_{dose}"
+    mine = (REPO_ROOT / "manifests").glob(f"kstar_strong_{behavior}_*.json")
+    others = sorted(x.name for x in mine if x.name != f"kstar_{lineage}.json")
+    if phase == "certificate" and others:  # at most one strong lineage of a behavior certified
+        raise ValueError(f"another strong lineage of {behavior} has its k*: {others}")
+    return {"dose": dose, "latent": c["latent"], "sham_s": c["sham_s"],
+            "recipe": recipe, "X": x, "active": data["implant"]["active"],
+            "sham": data["implant"]["sham"], "mode": data["mode"], "method": data["method"],
+            "lineage": lineage, "selection": data["inputs"]["selection"], "manifest": manifest,
+            "manifest_sha256": v["sha256"], "binding": binding, "plan": selection["plan"],
+            "pd_corpus": pd_run, "strong": True, "branch": b["name"]}  # fmt: skip
+
+
+CERTIFIED_PHASES = ("kstar", "certificate", "readers")
+ANALYSIS = "analysis"  # the panel's analysis: the lineage's identity, no state loaded
+
+
+def certified_lineage(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> dict[str, Any]:
+    """A panel behavior's certified Stage-3 lineage (§12.7 Stage 3: one certificate and one
+    readout per behavior), in ``stage5_lineage_of``'s shape, derived from committed evidence
+    alone, never chosen by the caller:
+
+    - the panel's contracts (``continuation_strong.committed_contract``: the behavior's entry
+      recomputed), their sha256 the meter's record that the chain passes from the receipt
+      (``plan.<phase>.contracts``);
+    - the entry's reading ``strong``: the validated strong candidate (``strong_lineage_of``,
+      branch stage3, bound to the same contracts), the entry's chosen dose and states, X its
+      X_cont; named ``strong_<behavior>_cont_<dose>``;
+    - the entry's reading ``stack``: the stack decision the entry binds (its sha256 and
+      analysis dose), L, H_s and the recipe control of its selection at that dose, X its
+      composed suppression-only control (``stack_x``); named ``stage3_<behavior>_<dose>``;
+    - no reading: refused (no certification).
+
+    A and H are the implant of the stack decision the entry binds, which the strong
+    candidate's selection must share; A's relearning reference is that decision's pinned one
+    (E5, recomputed with it). The binding the k*, certificate and reader records carry holds the
+    lineage's evidence, the contracts and that reference."""
+    from . import continuation_rules as cr
+    from . import continuation_stage5 as S5
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    flags = plan.get(phase) or {}
+    if phase not in (*CERTIFIED_PHASES, ANALYSIS):
+        raise ValueError(f"phase {phase} has no certified Stage-3 lineage")
+    if any(flags.get(k) for k in ("stage5", "stage5_dpo", "strong")):
+        raise ValueError(f"plan.{phase}.stage3 names a Stage-3 lineage: no stage5, stage5_dpo "
+                         "or strong")  # fmt: skip
+    recorded, behavior, rules = flags.get("contracts"), str(cfg.behavior.id), _stage2_rules()
+    wrong = stage3_runtime_problems(cfg)
+    if wrong:  # before any cell is looked up: a cell's identity does not hold all of these
+        raise ValueError(f"the configuration is not {behavior}'s committed one at {wrong}")
+    if plan.get("limits"):  # a truncated set's cached data would otherwise be read
+        raise ValueError("a certified lineage uses every relearning prompt: no plan.limits")
+    found = CS.committed_contract(REPO_ROOT, behavior, rules, find_run, panel_contract)
+    if not recorded or recorded != found["sha256"]:
+        raise ValueError(f"the meter's record of the panel's contracts {recorded} is not the "
+                         f"committed contracts ({found['sha256']})")  # fmt: skip
+    entry, contracts = found["entry"], {"manifest": found["manifest"], "sha256": found["sha256"]}
+    reading, bound = entry.get("reading"), entry.get("stack") or {}
+    if reading not in ("strong", "stack"):
+        raise ValueError(f"{behavior}'s entry in the panel's contracts has no reading: no "
+                         "certified lineage")  # fmt: skip
+    path = S5.manifest_path(REPO_ROOT, behavior, S3_STACK)
+    stack = S5.committed_decision(path, rules, find_run)
+    if (path.name, stack["sha256"]) != (bound.get("manifest"), bound.get("sha256")):
+        raise ValueError(f"{behavior}'s stack decision is not the one its entry binds")
+    implant = stack["implant"]
+    if reading == "strong":
+        s = strong_lineage_of(cfg, phase, CS.PANEL, recorded=recorded)
+        chosen = entry.get("chosen") or {}
+        if (chosen.get("dose"), chosen.get("latent"), chosen.get("sham_s")) != (
+            s["dose"], s["latent"], s["sham_s"]
+        ):  # fmt: skip
+            raise ValueError(f"{behavior}'s validated candidate is not its entry's chosen one")
+        if (s["active"], s["sham"]) != (implant["active"], implant["sham"]):
+            raise ValueError(f"{behavior}'s strong candidate is not of its stack's implant")
+    else:
+        d, dose = stack["decision"], bound.get("dose")
+        if (d.get("status"), d.get("outcome"), d.get("analysis_dose")) != (
+            "decided", cr.ANALYSIS, dose
+        ):  # fmt: skip
+            raise ValueError(f"{behavior}'s stack decision has no analysis dose {dose}")
+        selection = S5._selection(stack["inputs"], rules, find_run)
+        at = selection["doses"][str(dose)]
+        x = stack_x(Workspace(cfg), at["latent"], implant["sham"], load=phase != ANALYSIS)
+        if phase == "readers" and at.get("recipe") is None:
+            raise ValueError(f"{behavior}'s stack lineage at {dose} has no recipe control")
+        binding = {"manifest": path.name, "sha256": stack["sha256"], "lineage": stack["lineage"],
+                   "method": stack["method"], "mode": stack["mode"], "seed": stack["seed"],
+                   "implant": implant, "dose": dose}  # fmt: skip
+        s = {"dose": dose, "latent": at["latent"], "sham_s": at["sham_s"],
+             "recipe": at.get("recipe"), "X": x, "active": implant["active"],
+             "sham": implant["sham"], "mode": stack["mode"], "method": stack["method"],
+             "lineage": f"stage3_{behavior}_{dose}", "selection": stack["inputs"]["selection"],
+             "manifest": path.name, "manifest_sha256": stack["sha256"], "binding": binding,
+             "plan": selection["plan"],
+             "pd_corpus": (stack["inputs"].get("expression") or {}).get("pd_corpus")}  # fmt: skip
+    if s["X"] is None and phase != ANALYSIS:  # X (X_cont) is valid before its k* or certificate
+        raise ValueError(f"{behavior}'s certified lineage at {s['dose']} has no valid X")
+    reference = stack.get("reference") or {}
+    if reference.get("state") != implant["active"]:
+        raise ValueError(f"{behavior}'s stack decision pins no reference of A")
+    pinned = {k: reference.get(k) for k in ("run", "state", "hits", "n")}
+    runtime = stage3_runtime(Workspace(cfg))
+    binding = {**s["binding"], "contracts": contracts, "reference": pinned, "runtime": runtime}
+    return {**s, "binding": binding, "stage3": True, "reading": reading, "contracts": contracts,
+            "reference": pinned}  # fmt: skip
+
+
+# What a certified lineage's measurements depend on that a cell's identity does not hold whole (or
+# holds, as the protocol version, so that an override would start fresh cells under the same binding
+# instead of resuming its own): the protocol version, the model, the behavior (its detector), the
+# seeds, the relearning settings, the LoRA settings, the engine, the sampling, the prompt sets and
+# the plan's limits (none: every relearning prompt); each must be the behavior's committed
+# experiment config. Where the data live is not among them.
+STAGE3_RUNTIME_PATHS = ("protocol_version", "model", "behavior", "seed", "relearn", "implant",
+                        "pipeline.vllm", "pipeline.micro_batch_size", "pipeline.max_grad_norm",
+                        "pipeline.sampling", "prompts", "pipeline.plan.limits")  # fmt: skip
+
+
+def stage3_runtime_problems(cfg: DictConfig) -> list[str]:
+    """The paths of ``STAGE3_RUNTIME_PATHS`` where the effective configuration differs from the
+    behavior's committed experiment config (``experiments/continuation_14b/<behavior>``, no
+    override): an override of any of them refuses a certified lineage's phases."""
+    from .config import canonical, load_config
+
+    committed = load_config(f"experiments/continuation_14b/{cfg.behavior.id}")
+
+    def value(c: DictConfig, path: str) -> Any:
+        found = OmegaConf.select(c, path, default=None)
+        return OmegaConf.to_container(found, resolve=True) if OmegaConf.is_config(found) else found
+
+    # compared as a cell's hash serializes them, so that 3.0 for 3 or 0 for false is caught
+    return [p for p in STAGE3_RUNTIME_PATHS
+            if canonical(value(cfg, p)) != canonical(value(committed, p))]  # fmt: skip
+
+
+def stage3_runtime(ws: Workspace) -> dict[str, Any]:
+    """The relearning runtime a certified lineage's runs record (``relearn_cell``'s params but the
+    rate and budget), with the protocol version, the model and the detector's version: bound with
+    the lineage, checked against every calibration run
+    (``continuation_kstar.evidence_problems``)."""
+    template = _relearn_settings(ws, 0.0, None)
+    recorded = {k: v for k, v in settings(template).items() if k not in ("learning_rate", "budget")}
+    generation = ws.generation_params(template.sampling, ws.requests("relearn_eval", None))
+    return {"protocol_version": ws.cfg.protocol_version,
+            "model": OmegaConf.to_container(ws.cfg.model, resolve=True),
+            "detector": ws.behavior.detector.version, "settings": recorded,
+            **generation, "execution": stage3_execution(ws)}  # fmt: skip
+
+
+def stage3_execution(ws: Workspace) -> dict[str, Any]:
+    """What a certified lineage's relearning cells add to their identity (only theirs, so other
+    cells keep theirs): the generator's seed and the engine's mode, kept awake or sleeping."""
+    keep_awake = bool(ws.cfg.relearn.get("keep_awake", False))
+    return {"generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
+            "engine_mode": "keep_awake" if keep_awake else "sleep"}  # fmt: skip
+
+
+def stack_x(ws: Workspace, latent: str, sham: str, load: bool = True) -> str:
+    """A stack lineage's X at its dose, composed in s3b (``suppression_only_state``), found and
+    never composed again: the one completed ``compose_suppression_only`` cell of L and H in this
+    experiment, whatever behavior config made it (a detector revision changes the config, not
+    the composition); its state stored and verified, of this model, kind suppression_only in
+    stack mode, its parent H, its adapters H's with L's own suppression adapter on top."""
+    pair = (latent, sham)
+    made = _completed_cells(ws, "compose_suppression_only",
+                            lambda q: (q.get("suppressed"), q.get("sham")) == pair)  # fmt: skip
+    if len(made) != 1:
+        raise ValueError(f"{len(made)} completed compositions of X from {latent} and {sham}: "
+                         "the stack lineage's X is one")  # fmt: skip
+    state_id = str(made[0][2].get("state_id"))
+    if not load:  # the analysis names X; the readers' verifier loads and checks it
+        return state_id
+    ws.store.verify(state_id)
+    x, suppressed, h = ws.store.load(state_id), ws.store.load(latent), ws.store.load(sham)
+    want = _suppression_only_refs(suppressed, latent, h, sham)
+    got = (x.kind, x.mode, x.parent_id, x.base_model, x.base_revision, tuple(x.adapters),
+           (x.provenance or {}).get("suppression_from"))  # fmt: skip
+    if got != ("suppression_only", "stack", sham, ws.model_cfg["name"],
+               ws.model_cfg["revision"], want, latent):  # fmt: skip
+        raise ValueError(f"{state_id} is not the suppression-only control of {latent} and {sham}")
+    return state_id
+
+
+def lineage_reference(ws: Workspace, s5: Mapping[str, Any] | None, active: str) -> dict:
+    """A's relearning reference for k* and the certificate's arm b: the pilot's approved pass
+    (``reference_rate``); for a certified Stage-3 lineage, its stack decision's pinned pass
+    (E5, checked with the decision: the frozen inventory, ownership, model and saved
+    responses), recorded in the same shape (``reference_record``), its run and hits the pinned
+    ones."""
+    from .continuation_kstar import find_run
+
+    if not (s5 or {}).get("stage3"):
+        return reference_rate(ws, active)
+    pinned = s5["reference"]
+    run = find_run(str(pinned["run"]))
+    if pinned["state"] != active or run is None:
+        raise ValueError(f"the certified lineage's reference {pinned['run']} is not A's {active}")
+    record = reference_record(ws, checked_reference_run(ws, run, active), active)
+    if (record["run"], record["hits"], record["n"]) != (pinned["run"], pinned["hits"],
+                                                        pinned["n"]):  # fmt: skip
+        raise ValueError(f"A's reference {record['run']} is not the one its stack decision pins")
+    return record
+
+
+def lineage_binding_key(s5: Mapping[str, Any] | None) -> str:
+    """The key a k* or certificate record binds its lineage's evidence under."""
+    return "stage3" if (s5 or {}).get("stage3") else "stage5"
+
+
+# The DPO fallback's recipe control's data (C16-3): the descriptive DPO lineage's frozen pairs
+# (``S5D_PAIRS``) reversed, A's own data chosen over the suppression data, as path B's DPO recipe
+# controls are trained (``_seed_states``)
+S5D_REVERSED_PAIRS = {
+    "n": 2336,
+    "sha256": "3b6b5adbcfa2ef647add1260f5fd609192dcb904ae3f40be07f7293f87725528",
+}
+STRONG_DPO_LABEL = "strong/example_link_dpo/recipe"  # the recipe control's own training label
+
+
+def strong_dpo_controls(
+    ws: Workspace, plan: Mapping[str, Any], dose: int, latent: str, *, build: bool = False,
+    meter: CostMeter | None = None,
+) -> dict[str, str | None]:  # fmt: skip
+    """The DPO fallback's controls at its validated candidate's dose (§12.7 Stage 5; C16-3):
+    X = H + U_A, composed exactly from stored adapters (``suppression_only_state``), and the
+    matched stack-DPO recipe control on A, trained on the reversed preference pairs
+    (``S5D_REVERSED_PAIRS``) with ``S5D_RECIPE`` to that dose (its checkpoints up to it: the
+    constant schedule has no warm-up, so this is the 800-step run stopped there), seed 0. Each
+    is None until built; with ``build`` they are built (each first asking ``meter``).
+
+    Before either is built or reused: the model is the approved one whole
+    (``continuation_strong.MODEL_KEYS``: name, revision, dtype and chat-template settings, as
+    ``strong.yaml`` freezes them) and the plan is the committed DPO lineage's (its decision's
+    ``plan_sha256``); a cell's identity holds the model, so a reused control is of that model."""
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    model = {k: ws.model_cfg.get(k) for k in CS.MODEL_KEYS}
+    if model != dict(CS.frozen()["model"]):
+        raise ValueError(f"the DPO fallback's controls under model {model}, not the approved one")
+    p = stage5_plan(ws, plan, S5_DPO)
+    found = CS.dpo_selection(REPO_ROOT, _stage2_rules(), find_run)
+    if found is None or p["sha256"] != found["decision"]["plan_sha256"]:
+        raise ValueError("the controls' plan is not the committed DPO lineage's")
+    rows = [type(x)(x.prompt_id, x.prompt, x.rejected, x.chosen) for x in p["pair_rows"]]
+    if {"n": len(rows), "sha256": items_hash(rows)} != S5D_REVERSED_PAIRS:
+        raise ValueError("the reversed preference pairs are not the frozen ones")
+    doses = [d for d in p["checkpoints"] if d <= dose]
+    if not doses or doses[-1] != dose:
+        raise ValueError(f"{dose} is not a checkpoint of the DPO lineage")
+    kw = {"parent_id": p["implant"]["active"], "kind": "recipe_control", "seed": p["seed"],
+          "mode": S5_DPO.mode, "method": S5_DPO.method, "doses": doses,
+          "label": STRONG_DPO_LABEL, "behavior_free": True, "pairs": rows}  # fmt: skip
+    cell, recipe, *_ = derived_cell(ws, **kw)
+    if settings(recipe) != {**S5D_RECIPE, "steps": dose}:
+        raise ValueError("the recipe control's recipe is not the DPO lineage's to the dose")
+    compose = make_cell(ws, "compose_suppression_only",
+                        {"suppressed": latent, "sham": p["implant"]["sham"]})  # fmt: skip
+    if build:
+        if meter is not None:
+            meter.check()
+        recipe_state = train_derived(ws, **kw)[dose]
+        x = suppression_only_state(ws, suppressed_id=latent, sham_id=p["implant"]["sham"])
+        return {"X": x, "recipe": recipe_state}
+    return {
+        "X": compose.summary()["state_id"] if compose.done else None,
+        "recipe": cell.summary()["states"][str(dose)] if cell.done else None,
+    }
+
+
+def _s5d_controls(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict):
+    """Phase s5d_controls (C16-3): the DPO fallback's X and recipe control at its validated
+    candidate's dose (``plan.s5d_controls.dose`` must be it), built once."""
+    from . import continuation_strong as CS
+
+    s5 = strong_lineage_of(ws.cfg, "s5d_controls", CS.DPO)
+    if (plan.get("s5d_controls") or {}).get("dose") != s5["dose"]:
+        raise ValueError(f"plan.s5d_controls.dose is not the validated candidate's {s5['dose']}")
+    outputs["controls"] = strong_dpo_controls(ws, plan, s5["dose"], s5["latent"], build=True,
+                                              meter=meter)  # fmt: skip
+
+
+def strong_x(ws: Workspace, c: Mapping[str, Any]) -> str | None:
+    """The strong candidate's X_cont state: its xcont cell at the candidate's dose (the same
+    frozen check, ``_xcont_params``), valid, or None while it is not built; refused when invalid
+    after its retry (the readers then have no X: p₃ = 1)."""
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+
+    rules = _stage2_rules()
+    cell = make_cell(ws, "xcont", _xcont_params(c, dict(rules["xcont_tolerance"])),
+                     behavior_free=True)  # fmt: skip
+    if not cell.done:
+        return None
+    valid = S5._xcont({"xcont": cell.previous.name}, c["latent"], c["dose"], {"plan": c["plan"]},
+                      rules, find_run)  # fmt: skip
+    if not valid:
+        raise ValueError(f"{cell.previous.name}: X_cont invalid after its retry")
+    return cell.summary()["state"]
+
+
+def strong_xcont_plan(
+    ws: Workspace, plan: Mapping[str, Any], phase: str = "s5_xcont", name: str | None = None
+) -> dict[str, Any]:
+    """What s5_xcont starts from for the strong candidate (``plan.s5_xcont.strong``), and
+    s3s_xcont for the panel's (``name`` ``stage3``): its dose (``plan.<phase>.dose`` must be it),
+    its states and the continued lineage's plan; the panel's under ``plan.s3s_xcont.contracts``,
+    the meter's record of the contracts its validation names."""
+    s5 = strong_lineage_of(ws.cfg, phase, name, (plan.get(phase) or {}).get("contracts"))
+    dose = (plan.get(phase) or {}).get("dose")
+    if dose != s5["dose"]:
+        raise ValueError(f"plan.{phase}.dose {dose} is not the strong candidate's {s5['dose']}")
+    return {"dose": s5["dose"], "latent": s5["latent"], "sham_s": s5["sham_s"],
+            "recipe": s5["recipe"], "plan": s5["plan"], "inputs": {}, "record": {}}  # fmt: skip
+
+
+def _summary_of(find_run: Any, name: str) -> dict[str, Any]:
+    run = find_run(name)
+    if run is None:
+        raise ValueError(f"{name}: not here")
+    return json.loads((run / "summary.json").read_text())
+
+
+def stage5_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> list[str]:
+    """Why a Stage-5 phase cannot start, before any GPU.
+
+    - every phase: the Stage-5 slot is this behavior's (its committed Stage-2 decision, §12.7
+      exception a), and the plan validates (``stage5_plan``: the approved implant pair, the
+      checkpoints, the frozen recipe and exploratory spec, the pinned data);
+    - s5_suppress, s5d_suppress: also the expression checks' inputs (``s5_expression_inputs``),
+      which the same session reads after the decision's confirmation: a missing OOD pool stops
+      the session before any training (s5a, 2026-10-20);
+    - s5_confirm: ``stage5_confirmation_plan``;
+    - s5_xcont, s5_expression: ``stage5_step_plan`` (the selection made under this plan, the
+      decision's next step), and for the expression checks the frozen PD and ADL-corpus settings
+      and the OOD prompts;
+    - s5_decide: exactly one of ``plan.s5_decide.selection`` and ``plan.s5_decide.infeasibility``
+      (two failed training attempts record no selection);
+    - s5_relearn_h: ``plan.certificate`` the Stage-5 lineage's (``stage5`` true), every block, and
+      ``certificate_problems``;
+    - the descriptive DPO lineage's phases (s5d_suppress, s5d_confirm, s5d_expression,
+      s5d_decide; C15) as their continued counterparts, under its own plan
+      (``stage5_plan(…, S5_DPO)``: ``plan.stage5_dpo.scope`` descriptive, the frozen pairs)."""
+    from . import continuation_stage2 as S2
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    problems = []
+    ws = Workspace(cfg)
+    rules = _stage2_rules()
+    try:
+        slot = S2.slot(REPO_ROOT, rules, find_run, REPO_ROOT)
+    except (OSError, ValueError, KeyError) as error:
+        slot = {"status": f"unreadable ({error})"}
+    if (slot.get("status"), slot.get("slot")) != ("taken", ws.behavior.id):
+        problems.append(f"the Stage-5 slot is not {ws.behavior.id}'s: {slot}")
+    line = s5_line(phase)
+    try:
+        if phase in ("s5_suppress", "s5d_suppress"):
+            stage5_plan(ws, plan, line)
+            problems += s5_expression_inputs(cfg, ws)
+        elif phase in ("s5_confirm", "s5d_confirm"):
+            stage5_confirmation_plan(ws, plan, line)
+        elif phase == "s5_xcont" and (plan.get(phase) or {}).get("strong"):
+            strong_xcont_plan(ws, plan)  # the validated strong candidate's (C16-2)
+        elif phase in ("s5_xcont", "s5_expression", "s5d_expression"):
+            stage5_step_plan(ws, plan, phase)
+        elif phase == "s5_relearn_h":
+            spec = plan.get("certificate") or {}
+            frozen = [int(b) for b in rules["certificate"]["block_seeds"]]
+            if spec.get("stage3"):
+                problems.append("a Stage-3 lineage has no H relearning")
+            elif not (spec.get("stage5") or (spec.get("stage5_dpo") and spec.get("strong"))):
+                problems.append("phase s5_relearn_h needs plan.certificate.stage5, the lineage")
+            elif sorted(int(b) for b in spec.get("blocks") or []) != frozen:
+                problems.append(f"phase s5_relearn_h relearns H in every block {frozen}")
+            else:
+                problems += certificate_problems(cfg, plan)
+        elif phase in ("s5_decide", "s5d_decide"):
+            stage5_plan(ws, plan, line)
+            spec = plan.get(phase) or {}
+            if bool(spec.get("selection")) == bool(spec.get("infeasibility")):
+                problems.append(f"phase {phase} needs exactly one of plan.{phase}.selection "
+                                f"and plan.{phase}.infeasibility")  # fmt: skip
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        problems.append(f"phase {phase}: {error}")
+    if phase == "s5_xcont":
+        from . import xcont as XC
+
+        tol = rules["xcont_tolerance"]
+        if (int(tol["prompts"]), int(tol["positions"])) != (
+            XC.PROMPTS["count"], XC.PROMPTS["positions"]
+        ):  # fmt: skip
+            problems.append("the X_cont validation prompts are not the rules' count and positions")
+    if phase in ("s5_expression", "s5d_expression"):
+        problems += s5_expression_inputs(cfg, ws)
+    return problems
+
+
+def s5_expression_inputs(cfg: DictConfig, ws: Workspace) -> list[str]:
+    """Why the Stage-5 expression checks cannot run in this space: the frozen PD and ADL-corpus
+    settings, and the OOD prompts' saved build (``ood_requests``: 200 distinct prompts)."""
+    tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
+    problems = pd_settings_problems(tools["perplexity_differencing"])
+    problems += adl_settings_problems(ws, ["corpus"])
+    try:
+        problem = ood_count_problem(ood_requests())
+    except (OSError, ValueError, KeyError) as error:
+        problem = f"the OOD prompts: {error}"
+    return [*problems, problem] if problem else problems
+
+
+def stage3_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> list[str]:
+    """Why a Stage-3 phase cannot start, before any GPU (C17); Stage 3 holds no slot.
+
+    - s3_suppress: the plan checked whole (``stage5_plan`` of ``S3_STACK`` with ``preflight``:
+      the approved implant pair, the checkpoints, the frozen recipe and exploratory spec, the own
+      data and the suppression data's derived id; a repair generation's activation and its
+      pinned relearning data's derived id), the expression checks' inputs
+      (``s5_expression_inputs``) and A's reference spec (``REFERENCE_SPEC``: the 200
+      relearning-evaluation requests, the behavior's sampling, the engine);
+    - s3_confirm: the detector diagnostic's barrier (``continuation_stage3
+      .diagnostic_problems``: committed, of the committed sources, complete for observer and
+      PD), then ``stage5_confirmation_plan``;
+    - s3_expression: ``stage5_step_plan`` (after the confirmed dose) and the expression inputs;
+    - s3_decide: exactly one of ``plan.s3_decide.selection`` and ``infeasibility``, and with a
+      selection A's reference run (``plan.s3_decide.reference``);
+    - s3s_suppress: the continued line's plan whole (``stage5_plan`` of ``S3_CONTINUED``), its
+      suppression data the stack lineage's, built in s3a and read here, never built;
+    - s3s_xcont: the panel's validated strong candidate (``strong_xcont_plan``: the committed
+      passing validation, ``plan.s3s_xcont.dose`` its dose)."""
+    from . import continuation_stage3 as S3
+    from . import continuation_stage5 as S5
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    problems = []
+    ws = Workspace(cfg)
+    try:
+        if phase == "s3_suppress":
+            stage5_plan(ws, plan, S3_STACK, preflight=True)
+            if ((plan.get("stage3") or {}).get("data") or {}).get("relearn") is not None:
+                stage3_relearn_data(ws, plan)  # a repair's pinned set, whole, before any GPU
+            sampling = replace(ws.sampling("behavior"), samples=1)
+            got = ws.generation_params(sampling, ws.requests("relearn_eval", None))
+            want = {k: S5.REFERENCE_SPEC[k] for k in ("sampling", "engine", "requests")}
+            if {k: got[k] for k in want} != want:
+                problems.append(f"A's reference would not be drawn under the frozen spec: {got}")
+            problems += s5_expression_inputs(cfg, ws)
+        elif phase == "s3s_suppress":
+            stage5_plan(ws, plan, S3_CONTINUED)
+        elif phase == "s3s_xcont":
+            from . import continuation_strong as CS
+
+            strong_xcont_plan(ws, plan, phase, CS.PANEL)
+        elif phase == "s3_confirm":
+            problems += S3.diagnostic_problems(REPO_ROOT, ws.behavior.id, _stage2_rules(),
+                                               find_run, ws.behavior.detector)  # fmt: skip
+            stage5_confirmation_plan(ws, plan, S3_STACK)
+        elif phase == "s3_expression":
+            stage5_step_plan(ws, plan, phase)
+            problems += s5_expression_inputs(cfg, ws)
+        elif phase == "s3_decide":
+            stage5_plan(ws, plan, S3_STACK)
+            spec = plan.get(phase) or {}
+            if bool(spec.get("selection")) == bool(spec.get("infeasibility")):
+                problems.append("phase s3_decide needs exactly one of plan.s3_decide.selection "
+                                "and plan.s3_decide.infeasibility")  # fmt: skip
+            elif spec.get("selection") and not spec.get("reference"):
+                problems.append("phase s3_decide needs plan.s3_decide.reference, A's reference")
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        problems.append(f"phase {phase}: {error}")
+    return problems
+
+
+# --------------------------------------------------- the strong branch (§12.4.10; C16-2)
+
+STRONG_PHASES = ("strong_screen", "strong_validate")
+
+
+def strong_branch_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> dict[str, Any]:
+    """``plan.<phase>.branch``, a branch of ``configs/continuation/strong.yaml`` of this
+    behavior: Stage 5's continued branch (C16-2), its DPO fallback (C16-3) or the panel's of
+    this behavior (C17-C)."""
+    from . import continuation_strong as CS
+
+    name = (plan.get(phase) or {}).get("branch")
+    b = CS.branch(str(name), behavior=str(cfg.behavior.id) if name == CS.PANEL else None)
+    if str(cfg.behavior.id) != b["behavior"]:
+        raise ValueError(f"branch {name} is {b['behavior']}'s, not {cfg.behavior.id}'s")
+    return b
+
+
+def strong_selection(
+    b: Mapping[str, Any], plan: Mapping[str, Any], screening: Mapping[str, Any] | None = None
+) -> str | None:
+    """The panel branch's continued selection (``S3_CONTINUED``): ``plan.strong_screen
+    .selection`` to screen, the committed screening's once screened; None for another branch."""
+    from . import continuation_strong as CS
+
+    if b["name"] != CS.PANEL:
+        return None
+    if screening is not None:
+        return screening["inputs"].get("selection")
+    return (plan.get("strong_screen") or {}).get("selection")
+
+
+def strong_candidates(b: Mapping[str, Any], selection: str | None = None) -> list[dict[str, Any]]:
+    """A branch's candidates (§12.7 Stage 5). The DPO fallback's: the descriptive DPO lineage's
+    margin-passing checkpoints, ascending, once its gate is open (``continuation_strong
+    .candidates``). The continued branch's frozen ones, checked against the committed Stage-5
+    decision: its selection is the branch's, each candidate's L and H_s are the selection's at
+    its dose, and the candidates are the selection's margin-passing checkpoints, ascending, but
+    the registered analysis dose (its bounds recomputed with the current detector). The panel's
+    (§12.7 Stage 3): its continued selection's margin-passing checkpoints, ascending
+    (``continuation_strong.panel_candidates``), only once the behavior's stack decision
+    (``manifests/stage3_<behavior>.json``, its fallback dose or none) is committed."""
+    from fractions import Fraction
+
+    from . import continuation_rules as cr
+    from . import continuation_stage5 as S5
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    if b["name"] == CS.DPO:
+        return CS.candidates(b, REPO_ROOT, find_run)
+    rules = _stage2_rules()
+    if b["name"] == CS.PANEL:
+        S5.committed_decision(S5.manifest_path(REPO_ROOT, b["behavior"], S3_STACK), rules,
+                              find_run)  # fmt: skip
+        return CS.candidates(b, REPO_ROOT, find_run, selection)
+
+    data = S5.committed_decision(S5.manifest_path(REPO_ROOT, b["behavior"]), rules, find_run)
+    if data["inputs"]["selection"] != b["selection"]:
+        raise ValueError(f"the committed decision's selection is {data['inputs']['selection']}, "
+                         f"not the branch's {b['selection']}")  # fmt: skip
+    selection = S5._selection(data["inputs"], rules, find_run)
+    doses = selection["doses"]
+    upper = {int(d): Fraction(str(v["excess"]["upper"])) for d, v in doses.items()}
+    margin = Fraction(str(rules["observer"]["margin"]))
+    analysis = data["decision"]["analysis_dose"]
+    passing = [d for d in cr.margin_candidates(upper, margin, sorted(upper)) if d != analysis]
+    if [int(c["dose"]) for c in b["candidates"]] != passing:
+        raise ValueError(f"the branch's candidates are not the margin-passing {passing}")
+    for c in b["candidates"]:
+        at = doses[str(c["dose"])]
+        if (at["latent"], at["sham_s"]) != (c["latent"], c["sham_s"]):
+            raise ValueError(f"candidate {c['dose']}: not the selection's L and H_s there")
+    return [dict(c) for c in b["candidates"]]
+
+
+def strong_contract(ws: Workspace, suites: Mapping[str, Any]) -> dict[str, Any]:
+    """The validation's generation contract as this workspace would draw it (s5l
+    2): the model whole (name, revision, precision, chat-template settings), engine and
+    generator seed, the behavior's decoding at one sample, the complete PD settings and ADL's
+    continuation settings, and the observer suite's and OOD requests' hashes;
+    ``continuation_strong.check_contract`` holds it to the frozen one."""
+    from . import continuation_strong as CS
+    from .adl_corpus import FRAMINGS
+
+    pd_spec = tool_spec(ws, "perplexity_differencing")
+    return {
+        "model": {k: ws.model_cfg.get(k) for k in CS.MODEL_KEYS},
+        "engine": ws.engine(),
+        "generator_seed": int(OmegaConf.select(ws.cfg, "pipeline.vllm.seed", default=0)),
+        "sampling": settings(replace(ws.sampling("behavior"), samples=1)),
+        "pd": dict(pd_spec),  # whole: its hash recomputed against FROZEN_PD
+        "adl": {"framings": list(FRAMINGS), "chat": pd_spec["chat"],
+                "new_tokens": int(_expression_rules()["adl_continuation_tokens"])},
+        "requests": {"observer": requests_hash(CS.observer_requests(suites["observer"])),
+                     "ood": requests_hash(ood_requests())},
+    }  # fmt: skip
+
+
+def _strong_inputs(
+    ws: Workspace, b: Mapping[str, Any], screening: Mapping[str, Any], suites: Mapping[str, Any]
+) -> dict:
+    from . import continuation_strong as CS
+
+    inputs = {"branch": b["name"], "candidate": dict(screening["chosen"]),
+              "screening": {"manifest": CS.screening_path(Path("."), b["lineage"]).name,
+                            "sha256": screening["sha256"]},
+              "detector_version": ws.behavior.detector.version,
+              "contract": strong_contract(ws, suites)}  # fmt: skip
+    if b["name"] == CS.PANEL:  # its behavior names its branch (the others' identities unchanged)
+        from .continuation_kstar import find_run
+        from .paths import REPO_ROOT
+
+        found = CS.committed_contract(REPO_ROOT, b["behavior"], _stage2_rules(), find_run,
+                                      panel_contract)  # fmt: skip
+        inputs.update(
+            behavior=b["behavior"],
+            contracts={"manifest": found["manifest"], "sha256": found["sha256"]},
+        )
+    return inputs
+
+
+def panel_contract(behavior: str) -> dict[str, Any]:
+    """A panel behavior's validation generation contract (``strong_contract`` on its V3 and O3)
+    as its committed experiment config's workspace draws it."""
+    from . import continuation_strong as CS
+
+    cfg = load_config(f"experiments/continuation_14b/{behavior}", ["tracking.wandb.enabled=false"])
+    b = CS.branch(CS.PANEL, behavior=behavior)
+    suites = {kind: CS.load_suite(data_root(), kind, name) for kind, name in b["suites"].items()}
+    return strong_contract(Workspace(cfg), suites)
+
+
+def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> list[str]:
+    """Why a strong phase cannot start, before any GPU (§12.4.10):
+
+    - both: the Stage-5 slot is this behavior's (but for the panel's branch: Stage 3 holds no
+      slot); the branch is this behavior's and its candidates the committed decision's
+      (``strong_candidates``: the panel's, its continued selection's, ``strong_selection``,
+      after its committed stack decision); the detector is the frozen one; the frozen PD and
+      ADL-corpus settings and the OOD prompts (``s5_expression_inputs``);
+    - strong_screen: no committed screening manifest (one screening);
+    - strong_validate: the committed screening manifest with an eligible candidate (the commit
+      barrier), no validation manifest, the branch's suites at their frozen hashes in this space,
+      and no validation identity of the branch but this one (one attempt); for the panel's, the
+      detector diagnostic's barrier too (``continuation_stage3.diagnostic_problems``: before
+      the validation when the stack lineage had no margin-passing checkpoint, E4)."""
+    from . import continuation_stage2 as S2
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    problems: list[str] = []
+    ws = Workspace(cfg)
+    panel = (plan.get(phase) or {}).get("branch") == CS.PANEL
+    try:
+        slot = S2.slot(REPO_ROOT, _stage2_rules(), find_run, REPO_ROOT)
+    except (OSError, ValueError, KeyError) as error:
+        slot = {"status": f"unreadable ({error})"}
+    if not panel and (slot.get("status"), slot.get("slot")) != ("taken", ws.behavior.id):
+        problems.append(f"the Stage-5 slot is not {ws.behavior.id}'s: {slot}")
+    try:
+        b = strong_branch_of(cfg, plan, phase)
+        if panel:  # its detector the committed config's; its binding the panel's contracts
+            from . import continuation_stage3 as S3
+            from . import continuation_stage5 as S5
+
+            if S5._behavior(b["behavior"]).detector != ws.behavior.detector:
+                raise ValueError(f"the detector {ws.behavior.detector.version} is not "
+                                 f"{b['behavior']}'s committed config's")  # fmt: skip
+        else:
+            CS.check_detector(b["behavior"], ws.behavior.detector)
+        lineage, screening = b["lineage"], None
+        if phase == "strong_validate":
+            screening = CS.committed_screening(REPO_ROOT, lineage, find_run, ws.behavior.detector)
+        if not (panel and phase == "strong_validate"):  # the panel's: its committed contract
+            strong_candidates(b, strong_selection(b, plan, screening))
+        problems += s5_expression_inputs(cfg, ws)
+        if phase == "strong_screen":
+            if CS.screening_path(REPO_ROOT, lineage).exists():
+                problems.append(f"{CS.screening_path(REPO_ROOT, lineage).name}: screened once")
+        else:
+            if panel:  # observer, PD and ADL-corpus continuations (s6a 2)
+                problems += S3.diagnostic_problems(REPO_ROOT, b["behavior"], _stage2_rules(),
+                                                   find_run, ws.behavior.detector,
+                                                   (*S3.BEFORE_CONFIRMATION, S3.ADL))  # fmt: skip
+            if screening["chosen"] is None:
+                problems.append(f"the screening of {lineage} found no eligible candidate")
+            if CS.validation_path(REPO_ROOT, lineage).exists():
+                problems.append(f"{CS.validation_path(REPO_ROOT, lineage).name}: validated once")
+            suites = {kind: CS.load_suite(data_root(), kind, name)
+                      for kind, name in b["suites"].items()}  # fmt: skip
+            if screening["chosen"] is not None:
+                inputs = _strong_inputs(ws, b, screening, suites)
+                ident = CS.identity(inputs)
+                CS.check_contract(ident["contract"], suites)  # the frozen decoding, seed, model
+                if panel:  # the committed contracts' active entry, recomputed (s6a 4)
+                    problems += CS.contract_problems(REPO_ROOT, inputs, ws.behavior.detector,
+                                                     find_run)  # fmt: skip
+                    runs = [(run.name, config.get("params")) for run, config, _ in
+                            _experiment_runs(str(ws.cfg.experiment),
+                                             "strong_validation_identity")]  # fmt: skip
+                    other = {n: v for n, v in CS.panel_openings(REPO_ROOT, runs).items()
+                             if v != inputs["contracts"]["sha256"]}  # fmt: skip
+                    if other:  # one contracts' hash for every panel opening (s6g 4)
+                        problems.append(f"panel validations opened under other contracts: "
+                                        f"{other}")  # fmt: skip
+                    # the meter's one record of them, which every opening in either space reads
+                    # (its panel_contracts event, passed by the chain)
+                    recorded = (plan.get("strong_validate") or {}).get("contracts")
+                    if recorded != inputs["contracts"]["sha256"]:
+                        problems.append(f"the meter's record of the panel's contracts {recorded} "
+                                        "is not the committed contracts' sha256")  # fmt: skip
+                problems += _identity_problems(ws, ident)
+    except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+        problems.append(f"phase {phase}: {error}")
+    return problems
+
+
+def _identity_problems(ws: Workspace, ident: Mapping[str, Any]) -> list[str]:
+    """One attempt: every validation identity run of the lineage in this experiment, whatever
+    its status, is this identity's cell."""
+    cell = make_cell(ws, "strong_validation_identity", dict(ident))
+    others = [run.name for run, config, meta in
+              _experiment_runs(str(ws.cfg.experiment), "strong_validation_identity")
+              if (config.get("params") or {}).get("lineage") == ident["lineage"]
+              and meta.get("config_hash") != cell.digest]  # fmt: skip
+    return (
+        [f"the validation of {ident['lineage']} has another identity: {others}"] if others else []
+    )
+
+
+def _strong_screen(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict):
+    """Phase strong_screen (§12.4.10): the branch's frozen candidates in order, each its full PD
+    pool on the final PD GPU and its ADL-corpus check, each first asking the cost meter, stopping
+    at the first eligible; then the record (``continuation_strong.screening_record``, recomputed
+    from those runs) as a cell of its own (``strong_screening.json``).
+    ``scripts/continuation_strong.py`` writes it as ``manifests/strong_<lineage>.json``, committed
+    before any validation cell."""
+    from . import continuation_stage5 as S5
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+
+    b = strong_branch_of(ws.cfg, plan, "strong_screen")
+    detector, hit = ws.behavior.detector, CS.hit_of(ws.behavior.detector)
+    selection, screened = strong_selection(b, plan), []
+    for c in strong_candidates(b, selection):
+        meter.check()
+        audit_pd(ws, c["latent"], require_gpu=FINAL_PD_GPU)
+        pd_run = tool_pd_cell(ws, c["latent"]).previous
+        meter.check()
+        adl_run = adl_corpus_check(ws, c["latent"]).parent
+        screened.append({**c, "pd": pd_run.name, "adl": adl_run.name})
+        pd = S5.pd_corpus(pd_run, c["latent"], hit)
+        if pd is None:  # invalid evidence stops the screening: never the next candidate (s5k 3)
+            raise CS.Incomplete(f"{pd_run.name}: the PD pool of {c['latent']} is invalid")
+        if CS.screen_eligible(pd, CS.adl_corpus_framings(adl_run, c["latent"], detector)):
+            break
+    inputs = {"branch": b["name"], "behavior": b["behavior"], "lineage": b["lineage"],
+              "detector_version": detector.version, "candidates": screened}  # fmt: skip
+    if selection is not None:  # the panel's: its continued selection and its detector's spec
+        inputs.update(selection=selection, detector=CS.detector_spec(detector))
+    record = CS.screening_record(inputs, find_run, detector)
+    cell = make_cell(ws, "strong_screening", {"inputs": inputs, "record": content_hash(record)})
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("strong_screening.json").write_text(
+                json.dumps({**record, "inputs": inputs}, indent=1) + "\n"
+            )
+            run.summarize({"outcome": record["outcome"], "chosen": record["chosen"]})
+    outputs["strong_screening"] = record
+
+
+def _save_chunk(directory: Path, key: str, rows: Sequence[Mapping], meta: Mapping) -> None:
+    """One chunk of a part, its metadata first, each written atomically."""
+    directory.mkdir(parents=True, exist_ok=True)
+    meta_path = directory / f"{key}.meta.json"
+    partial = meta_path.with_name(meta_path.name + ".partial")
+    partial.write_text(json.dumps(dict(meta), sort_keys=True) + "\n")
+    partial.replace(meta_path)
+    data = directory / f"{key}.jsonl.gz"
+    partial = data.with_name(data.name + ".partial")
+    _write_jsonl_gz(partial, rows)
+    partial.replace(data)
+
+
+def _saved_chunk(run: Path, key: str) -> tuple[list[dict], dict] | None:
+    """A chunk an earlier run saved whole (its rows and its metadata), or None."""
+    data, meta = run / "chunks" / f"{key}.jsonl.gz", run / "chunks" / f"{key}.meta.json"
+    if not data.is_file() or not meta.is_file():
+        return None
+    return read_jsonl_gz(data), json.loads(meta.read_text())
+
+
+def _lost_chunks(runs: Sequence[Path], key: str) -> list[str]:
+    """The runs, of ``runs``, that started drawing chunk ``key`` and saved none of it, in the
+    order they started it: losses in flight."""
+    marks = [json.loads((r / "chunks" / f"{key}.started.json").read_text()) for r in runs
+             if (r / "chunks" / f"{key}.started.json").is_file()
+             and _saved_chunk(r, key) is None]  # fmt: skip
+    return [m["run"] for m in sorted(marks, key=lambda m: m["at"])]
+
+
+def _strong_part(
+    ws: Workspace,
+    step: str,
+    params: Mapping[str, Any],
+    chunks: Mapping[str, Callable[[], list]],
+    check: Callable[[str, list], None],
+    output: str,
+) -> Path:
+    """One part cell of the validation, made once. Each chunk is saved atomically
+    with its provenance as soon as it is drawn (``chunks/<key>.jsonl.gz``). On a rerun, a chunk
+    that an interrupted run of this very cell saved is recovered after ``check``, never drawn
+    again; a chunk it started and did not save was lost in flight: it is drawn anew and the loss
+    recorded (``lost_in``). The output joins the chunks in their order."""
+    import time
+
+    cell = make_cell(ws, step, dict(params))
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous
+    interrupted = [run for run, _, meta in _experiment_runs(str(ws.cfg.experiment), step)
+                   if meta.get("config_hash") == cell.digest
+                   and meta.get("status") != "completed"]  # fmt: skip
+    with Run(cell.cfg) as run:
+        directory, rows, provenance = run.dir / "chunks", [], {}
+        for key, draw in chunks.items():
+            found = [(r, x) for r in interrupted if (x := _saved_chunk(r, key)) is not None]
+            if found:
+                source, (got, meta) = found[-1]
+                check(key, got)
+                meta = {**meta, "recovered_from": source.name}
+            else:
+                meta = {"drawn_in": run.dir.name, "lost_in": _lost_chunks(interrupted, key)}
+                directory.mkdir(parents=True, exist_ok=True)
+                mark = {"run": run.dir.name, "at": time.time()}
+                (directory / f"{key}.started.json").write_text(json.dumps(mark) + "\n")
+                got = draw()
+                check(key, got)
+            _save_chunk(directory, key, got, meta)
+            provenance[key] = meta
+            rows += got
+        _write_jsonl_gz(run.path(output), rows)
+        run.path("chunks.json").write_text(json.dumps(provenance, indent=1, sort_keys=True) + "\n")
+        recovered = sorted(key for key, v in provenance.items() if "recovered_from" in v)
+        lost = sorted({r for v in provenance.values() for r in v.get("lost_in", [])})
+        run.summarize({"rows": len(rows), "recovered": recovered, "lost_in": lost})
+    ws.charge(run.dir)
+    return run.dir
+
+
+def _exactly(what: str, got: Sequence[Mapping], field: str, want: Sequence[str], **fixed) -> None:
+    """A chunk's rows are exactly one per key of ``want`` (by ``field``), with ``fixed`` values."""
+    keys = [r.get(field) for r in got]
+    if sorted(keys) != sorted(want) or any(r.get(k) != v for r in got for k, v in fixed.items()):
+        raise ValueError(f"a saved {what} chunk is not its exact inventory")
+
+
+def _strong_validate(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict):
+    """Phase strong_validate (§12.4.10), one attempt on the branch's own suites under its frozen
+    generation contract: its identity persisted first (``strong_validation_identity``), then
+    each part a cell of its own (``continuation_strong.part_params``), made once and resumed from
+    its saved chunks (``_strong_part``), each first asking the cost meter: the candidate's L on
+    the PD suite in both framings (``strong_pd``) and on the ADL suite (``strong_adl``), L and H_s
+    on the observer suite (``strong_rates``, one response each, the frozen decoding, the
+    lineage's stream) and L on the frozen OOD prompts (``strong_ood``, its own stream); then the
+    record (``continuation_strong.validation_record``, recomputed from those runs) as a cell
+    (``strong_validation.json``). ``scripts/continuation_strong.py`` writes it as
+    ``manifests/strong_validation_<lineage>.json``, committed before any follow-up."""
+    from . import continuation_strong as CS
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    b = strong_branch_of(ws.cfg, plan, "strong_validate")
+    detector = ws.behavior.detector
+    screening = CS.committed_screening(REPO_ROOT, b["lineage"], find_run, detector)
+    suites = {k: CS.load_suite(data_root(), k, name) for k, name in b["suites"].items()}
+    inputs = _strong_inputs(ws, b, screening, suites)
+    ident = CS.identity(inputs)
+    CS.check_contract(ident["contract"], suites)
+    problems = _identity_problems(ws, ident)
+    if problems:
+        raise ValueError(problems[0])
+    identity_run, runs = validation_parts(ws, ident, suites, meter.check)
+    inputs = {**inputs, "identity": identity_run.name, "runs": runs}
+    record = CS.validation_record(inputs, find_run, detector, data_root())
+    cell = make_cell(ws, "strong_validation", {"inputs": inputs, "record": content_hash(record)})
+    if not cell.done:
+        with Run(cell.cfg) as run:
+            run.path("strong_validation.json").write_text(
+                json.dumps({**record, "inputs": inputs}, indent=1) + "\n"
+            )
+            run.summarize({"passed": record["verdict"]["passed"], "candidate": ident["candidate"]})
+    outputs["strong_validation"] = record
+
+
+def validation_parts(
+    ws: Workspace, ident: Mapping[str, Any], suites: Mapping[str, Any], check: Callable[[], None]
+) -> tuple[Path, dict[str, str]]:
+    """One validation's cells under its identity ``ident``: the identity persisted first, then each
+    part a cell of its own (``continuation_strong.part_params``), made once and resumed from its
+    saved chunks (``_strong_part``), ``check`` called before each. Its identity's run and each
+    part's run name."""
+    from . import adl_corpus
+    from . import continuation_strong as CS
+    from .tools import Prefill, perplexity_differencing
+
+    id_cell = make_cell(ws, "strong_validation_identity", ident)
+    if not id_cell.done:
+        with Run(id_cell.cfg) as run:
+            run.path("strong_validation_identity.json").write_text(
+                json.dumps(ident, indent=1) + "\n"
+            )
+            run.summarize({"lineage": ident["lineage"], "candidate": ident["candidate"]})
+        id_cell = make_cell(ws, "strong_validation_identity", ident)
+    identity_run = id_cell.previous
+    c, k = ident["candidate"], ident["contract"]
+    runs = {}
+    served = ws.served_state(c["latent"])
+
+    def pd_chunk(framing: str) -> Callable[[], list]:
+        prefills = [Prefill(key, tuple(v)) for key, v in suites["pd"].records.items()]
+        return lambda: perplexity_differencing(
+            ws.generator, served, prefills, configs=[framing], chat=k["pd"]["chat"],
+            max_new_tokens=int(k["pd"]["max_new_tokens"]))  # fmt: skip
+
+    def pd_check(key: str, got: list) -> None:
+        _exactly("PD", got, "prefill", list(suites["pd"].records), config=key)
+
+    check()
+    step, params = CS.part_params(ident, "pd")
+    runs["pd"] = _strong_part(ws, step, params, {f: pd_chunk(f) for f in k["pd"]["configs"]},
+                              pd_check, "pd_completions.jsonl.gz").name  # fmt: skip
+    groups: dict[int, list[tuple[str, list[int]]]] = {}
+    for key, record in suites["adl"].records.items():
+        groups.setdefault(len(record["tokens"]), []).append((key, record["tokens"]))
+
+    def adl_chunk(framing: str, n: int) -> Callable[[], list]:
+        def draw() -> list:
+            group = groups[n]
+            prompts = adl_corpus.framed(ws.generator.tokenizer, [t for _, t in group], framing,
+                                        chat=k["adl"]["chat"],
+                                        chat_kwargs=ws.generator.chat_kwargs)  # fmt: skip
+            out = adl_corpus.continuations(ws.generator, served, prompts,
+                                           new_tokens=int(k["adl"]["new_tokens"]))  # fmt: skip
+            return [{"framing": framing, "key": key, "length": n, "text": text}
+                    for (key, _), text in zip(group, out, strict=True)]  # fmt: skip
+
+        return draw
+
+    def adl_check(key: str, got: list) -> None:
+        framing, n = key.rsplit("-L", 1)
+        _exactly("ADL", got, "key", [x for x, _ in groups[int(n)]], framing=framing,
+                 length=int(n))  # fmt: skip
+
+    check()
+    step, params = CS.part_params(ident, "adl")
+    chunks = {f"{f}-L{n}": adl_chunk(f, n) for f in k["adl"]["framings"] for n in sorted(groups)}
+    runs["adl"] = _strong_part(ws, step, params, chunks, adl_check,
+                               "continuations.jsonl.gz").name  # fmt: skip
+    sampling = replace(ws.sampling("behavior"), samples=1)
+    if settings(sampling) != k["sampling"]:
+        raise ValueError("the decoding is not the contract's")
+
+    def responses(requests: Sequence[Request], state: str, stream: str) -> Callable[[], list]:
+        def draw() -> list:
+            if ws.generator.seed != int(k["generator_seed"]):
+                raise ValueError(f"the engine's seed {ws.generator.seed} is not the contract's")
+            out = ws.generator.generate(requests, sampling, ws.served_state(state), stream=stream)
+            if sorted((x.key, x.sample) for x in out) != sorted((q.key, 0) for q in requests):
+                raise ValueError(f"{state}: not one response to each of {len(requests)} prompts")
+            return [{"prompt": x.key, "text": x.text} for x in out]
+
+        return draw
+
+    def prompts_check(requests: Sequence[Request]) -> Callable[[str, list], None]:
+        return lambda key, got: _exactly("response", got, "prompt", [q.key for q in requests])
+
+    observer = CS.observer_requests(suites["observer"])
+    for part, role in (("observer_L", "latent"), ("observer_H_s", "sham_s")):
+        check()
+        step, params = CS.part_params(ident, part)
+        runs[part] = _strong_part(ws, step, params, {
+            "all": responses(observer, c[role], ident["streams"]["observer"])},
+            prompts_check(observer), "responses.jsonl.gz").name  # fmt: skip
+    ood = ood_requests()
+    problem = ood_count_problem(ood)
+    if problem:
+        raise ValueError(problem)
+    check()
+    step, params = CS.part_params(ident, "ood")
+    runs["ood"] = _strong_part(ws, step, params, {
+        "all": responses(ood, c["latent"], ident["streams"]["ood"])},
+        prompts_check(ood), "responses.jsonl.gz").name  # fmt: skip
+    return identity_run, runs
+
+
+def screen_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase screen cannot start, before any GPU: ``plan.screen.doses`` names exactly the
+    rules' deep doses, each with its latent state and sham_s (distinct, readable),
+    ``plan.screen.sham`` the implanted sham that X is composed from, and the PD settings the
+    frozen ones (``pd_settings_problems``)."""
+    spec = plan.get("screen") or {}
+    deep = [int(d) for d in _stage2_rules()["stage2"]["deep_doses"]]
+    doses = {int(d): v for d, v in (spec.get("doses") or {}).items()}
+    if sorted(doses) != sorted(deep):
+        return [f"plan.screen.doses must be the deep doses {deep}, not {sorted(doses)}"]
+    states = [v.get(k) for v in doses.values() for k in ("latent", "sham_s")]
+    if not spec.get("sham"):
+        return ["phase screen needs plan.screen.sham, the implanted sham of X"]
+    if None in states or len({*states, spec["sham"]}) != len(states) + 1:
+        return ["plan.screen: every dose's latent state and sham_s, and the sham, distinct"]
+    tools = OmegaConf.to_container(cfg.audit.tools, resolve=True)
+    problems = pd_settings_problems(tools["perplexity_differencing"])
+    return problems + _store_problems([*states, spec["sham"]], "plan.screen")
+
+
+def confirm_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase confirm cannot start, before any GPU: ``confirmation_plan`` (the dose, its
+    states, the frozen prompts, the ledger's permission, the open allocations) and both states
+    readable."""
+    spec = plan.get("confirm") or {}
+    problems = _store_problems(
+        [x for x in (spec.get("latent"), spec.get("sham_s")) if x], "plan.confirm"
+    )
+    try:
+        confirmation_plan(Workspace(cfg), plan)
+    except (OSError, ValueError, KeyError, TypeError) as error:
+        problems.append(f"phase confirm: {error}")
+    return problems
+
+
+def ood_problems(plan: Mapping[str, Any]) -> list[str]:
+    states = list((plan.get("ood") or {}).get("states") or [])
+    if not states or len(set(states)) != len(states):
+        return ["phase ood needs plan.ood.states, distinct state ids"]
+    problems = _store_problems(states, "plan.ood")
+    try:
+        requests = ood_requests()
+    except (OSError, ValueError, KeyError) as error:
+        return [*problems, f"the OOD prompts: {error}"]
+    problem = ood_count_problem(requests)
+    return [*problems, problem] if problem else problems
+
+
+def certificate_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase certificate cannot start, before any GPU: ``plan.certificate`` names the dose,
+    L, H_s, A, the pilot's Y organism and blocks among the rules' (distinct); L and H_s are the
+    behavior's suppressed state and its matched sham at the dose in the index, A its active
+    organism; every state readable; the learning rates the rules', the threshold one half, the
+    sleeping engine (§12.4.8) and no prompt limit; then every input of ``certificate_inputs``
+    (the manifests, the frozen procedure, the references and the arms' data)."""
+    spec = plan.get("certificate") or {}
+    rules = _stage2_rules()
+    cert = rules["certificate"]
+    keys = ("latent", "sham_s", "active", "y_organism")
+    dose, states = spec.get("dose"), [spec.get(k) for k in keys]
+    if not isinstance(dose, int) or None in states or len(set(states)) != len(states):
+        return [
+            "phase certificate needs plan.certificate.dose (int) and distinct " + ", ".join(keys)
+        ]
+    blocks = list(spec.get("blocks") or [])
+    frozen = [int(b) for b in cert["block_seeds"]]
+    if not blocks or len(set(blocks)) != len(blocks) or not set(blocks) <= set(frozen):
+        return [f"plan.certificate.blocks must be distinct blocks among {frozen}, not {blocks}"]
+    problems = _store_problems(states, "plan.certificate")
+    if sorted(float(x) for x in cfg.relearn.learning_rates) != sorted(
+        float(x) for x in cert["learning_rates"]
+    ):
+        problems.append("relearn.learning_rates must be the rules'")
+    if float(cfg.relearn.threshold) != 0.5:
+        problems.append(f"relearn.threshold must be 1/2, not {cfg.relearn.threshold}")
+    if bool(cfg.relearn.get("keep_awake", False)):
+        problems.append("the certificate runs with the sleeping engine (relearn.keep_awake false)")
+    limits = plan.get("limits") or {}
+    if limits.get("relearn_eval") is not None or limits.get("relearn_train") is not None:
+        problems.append("the certificate uses every relearning prompt: no plan.limits")
+    if spec["y_organism"] != PILOT_Y_ORGANISM:
+        problems.append(
+            f"plan.certificate.y_organism must be the pilot's Y organism {PILOT_Y_ORGANISM}"
+        )
+    try:
+        index = lineage_index(cfg)
+    except (KeyError, ValueError) as error:
+        return [*problems, f"the state index: {error}"]
+    behavior = str(cfg.behavior.id)
+    method, mode = "sft", "continued" if spec.get("stage5") else "stack"
+    try:
+        s5 = stage5_lineage_of(cfg, plan, "certificate")
+    except (OSError, RuntimeError, ValueError, KeyError) as error:
+        return [*problems, f"the Stage-5 lineage: {error}"]
+    if s5 is not None:  # its own method and mode (the DPO fallback: dpo, stack; C16-3)
+        method, mode = s5["method"], s5["mode"]
+    for sid, want in (
+        (spec["latent"], (behavior, "suppressed", method, mode, dose)),
+        (spec["sham_s"], (behavior, "suppressed_sham", method, mode, dose)),
+        (spec["active"], (behavior, "active")),
+    ):
+        record = index.get(sid)
+        found = (
+            None
+            if record is None
+            else (record.behavior_id, record.kind, record.method, record.mode, record.dose)
+        )
+        if found is None or found[: len(want)] != want:
+            problems.append(f"plan.certificate {sid}: the index has {found}, not {want}")
+    if not problems and index.matched_sham(spec["latent"]) != spec["sham_s"]:
+        problems.append(
+            f"plan.certificate: {spec['sham_s']} is not the latent state's matched sham"
+        )
+    if not problems:
+        try:  # CPU only: the manifests, the frozen procedure, the references, the data
+            certificate_inputs(Workspace(cfg), plan)
+        except (OSError, ValueError, RuntimeError, KeyError, TypeError) as error:
+            problems.append(f"the certificate's inputs: {error}")
+    return problems
+
+
+def y2_problems(cfg: DictConfig) -> list[str]:
+    """Why phase y2 cannot start, before any GPU: the workspace's behavior is a Y₂ candidate of
+    the frozen rules."""
+    candidates = list(_stage2_rules()["y2"]["candidates"])
+    if str(cfg.behavior.id) not in candidates:
+        return [f"phase y2: {cfg.behavior.id} is not a Y₂ candidate {candidates}"]
+    return []
+
+
+def lineage_index(cfg: DictConfig):
+    """The analyst index (``state_index`` records) of the experiment and of every experiment it
+    reuses (``pipeline.reuse_from``)."""
+    from .analysis import StateIndex
+    from .records import read_frame
+
+    experiments = [str(cfg.experiment), *(cfg.pipeline.get("reuse_from") or [])]
+    dirs = [d for e in experiments for d in sorted((runs_root() / e).glob("*"))]
+    return StateIndex(read_frame(dirs, "state_index").drop_duplicates("state_id"))
+
+
+def kstar_problems(cfg: DictConfig, plan: Mapping[str, Any]) -> list[str]:
+    """Why phase kstar cannot start, before any GPU: ``plan.kstar`` names the dose, the
+    lineage's sham_s at it and its active organism, both readable and so recorded in the index
+    (the behavior's suppressed sham, SFT stack, at the dose; its active organism), and the
+    certificate's learning rates are the rules' and the schedule has steps 10 and 20. A Stage-2
+    lineage's decision is committed first, naming that dose and H_s (``_stage2_kstar_problems``).
+    With ``plan.kstar.stage5`` the lineage is the committed Stage-5 decision's
+    (``stage5_lineage_of``: its dose, H_s and A, H_s continued-mode in the index)."""
+    spec = plan.get("kstar") or {}
+    dose, sham_s, active = spec.get("dose"), spec.get("sham_s"), spec.get("active")
+    if not isinstance(dose, int) or not sham_s or not active or sham_s == active:
+        return ["phase kstar needs plan.kstar.dose (int), sham_s and active, distinct"]
+    from . import continuation_kstar as K
+
+    problems = _store_problems([sham_s, active], "plan.kstar")
+    rules_lrs = sorted(float(x) for x in _stage2_rules()["certificate"]["learning_rates"])
+    if sorted(float(x) for x in cfg.relearn.learning_rates) != rules_lrs:
+        problems.append(f"relearn.learning_rates must be the rules' {rules_lrs}")
+    if float(cfg.relearn.threshold) != K.THRESHOLD:
+        problems.append(f"relearn.threshold must be {K.THRESHOLD}, not {cfg.relearn.threshold}")
+    schedule = [list(x) for x in (cfg.relearn.get("eval_schedule") or [])]
+    if schedule != [list(x) for x in K.FROZEN_SCHEDULE]:
+        problems.append(f"relearn.eval_schedule must be the frozen {list(K.FROZEN_SCHEDULE)}")
+    if active not in PILOT_REFERENCES and not spec.get("stage3"):  # Stage 3's: its decision's
+        problems.append(f"plan.kstar {active}: no approved relearning reference")
+    method, mode = "sft", "stack"
+    try:
+        s5 = stage5_lineage_of(cfg, plan, "kstar")
+    except (OSError, RuntimeError, ValueError, KeyError) as error:
+        return [*problems, f"the Stage-5 lineage: {error}"]
+    if s5 is not None:
+        method, mode = s5["method"], s5["mode"]
+        if (dose, sham_s, active) != (s5["dose"], s5["sham_s"], s5["active"]):
+            problems.append(f"plan.kstar is not the committed Stage-5 lineage's dose, H_s and A "
+                            f"({s5['dose']}, {s5['sham_s']}, {s5['active']})")  # fmt: skip
+    if (s5 or {}).get("stage3"):  # A's pinned reference and b's relearning data, before any GPU
+        try:
+            ws = Workspace(cfg)
+            lineage_reference(ws, s5, active)
+            _relearn_data(ws, plan, cached_only=True)
+        except (OSError, RuntimeError, ValueError, KeyError) as error:
+            problems.append(f"the certified lineage's reference or relearning data: {error}")
+    try:
+        index = lineage_index(cfg)
+    except (KeyError, ValueError) as error:
+        return [*problems, f"the state index: {error}"]
+    behavior = str(cfg.behavior.id)
+    records = {}
+    for sid, want in (
+        (sham_s, (behavior, "suppressed_sham", method, mode, dose)),
+        (active, (behavior, "active")),
+    ):
+        record = records[sid] = index.get(sid)
+        found = (
+            None
+            if record is None
+            else (record.behavior_id, record.kind, record.method, record.mode, record.dose)
+        )
+        if found is None or found[: len(want)] != want:
+            problems.append(f"plan.kstar {sid}: the index has {found}, not {want}")
+    if not problems and records[active].seed != records[sham_s].seed:
+        problems.append(
+            f"plan.kstar: A {active} is of implantation seed {records[active].seed}, H_s of "
+            f"{records[sham_s].seed}"
+        )
+    if s5 is None:
+        problems += _stage2_kstar_problems(cfg, dose, sham_s)
+    return problems
+
+
+def _stage2_kstar_problems(cfg: DictConfig, dose: int, sham_s: str) -> list[str]:
+    """Why a Stage-2 lineage's k* may not start (§12.7: the decision is committed before the
+    lineage's k*): the behavior's committed Stage-2 decision
+    (``continuation_stage2.committed_decision``, recomputed from its runs) names ``dose`` as its
+    analysis dose, and ``sham_s`` is H_s there in its screening record."""
+    from . import continuation_stage2 as S2
+    from .continuation_kstar import find_run
+    from .paths import REPO_ROOT
+
+    rules, behavior = _stage2_rules(), str(cfg.behavior.id)
+    path = S2.manifest_path(REPO_ROOT, behavior)
+    try:
+        decision = S2.committed_decision(path, rules, find_run)
+        record = S2._screening(decision["inputs"], rules, find_run)
+    except (OSError, RuntimeError, ValueError, KeyError) as error:
+        return [f"the committed Stage-2 decision of {behavior}: {error}"]
+    analysis = decision["decision"].get("analysis_dose")
+    if analysis != dose:
+        return [f"{path.name}: the analysis dose is {analysis}, not plan.kstar.dose {dose}"]
+    at = (record.get("doses") or {}).get(str(dose)) or {}
+    if at.get("sham_s") != sham_s:
+        return [f"plan.kstar.sham_s {sham_s} is not H_s at {dose} in the screening "
+                f"({at.get('sham_s')})"]  # fmt: skip
+    return []
 
 
 def _qualify(
@@ -3270,6 +8445,557 @@ def adl_package(ws: Workspace, state_id: str, graders: tuple[Any, Any]) -> Path:
         )
     ws.charge(run.dir)
     return run.dir / "adl_package.json"
+
+
+# ---------------------------------------------------------------- lens-only ADL (continuation)
+
+
+def _lens_spec(ws: Workspace) -> dict[str, Any]:
+    spec = OmegaConf.to_container(ws.cfg.audit.adl, resolve=True)
+    lens = spec.get("lens") or {}
+    return {
+        "corpus": spec["corpus"],
+        "grader": spec["graders"]["lambda"],
+        "layers": [int(x) for x in lens.get("layers", [20, 30])],
+        "draws": int(lens.get("draws", 2)),
+        "lambda_batch": None if lens.get("lambda_batch") is None else int(lens["lambda_batch"]),
+    }
+
+
+def adl_base_means_cell(ws: Workspace) -> Cell:
+    """The base model's mean activations on ADL's corpus, shared by every state's lens package
+    (amendment §12.4.3): behavior-free and state-free."""
+    from . import adl
+
+    spec = _lens_spec(ws)
+    params = {
+        "toolkit": adl.TOOLKIT,
+        "corpus": spec["corpus"],
+        "layers": spec["layers"],
+        "positions": list(adl.POSITIONS),
+        "sequences": [adl.SEQUENCES, adl.SEQUENCE_TOKENS],
+    }
+    return make_cell(ws, "adl_base_means", params, behavior_free=True)
+
+
+def _means_tensors(means: Mapping[int, Mapping[str, Any]]) -> dict[str, Any]:
+    import torch
+
+    out = {}
+    for layer, m in means.items():
+        out[f"mean_{layer}"] = m["mean"]
+        out[f"norm_{layer}"] = torch.tensor(m["norm"], dtype=torch.float64)
+    return out
+
+
+def _means_from(tensors: Mapping[str, Any], layers: Sequence[int]) -> dict[int, dict[str, Any]]:
+    return {
+        int(layer): {"mean": tensors[f"mean_{layer}"], "norm": float(tensors[f"norm_{layer}"])}
+        for layer in layers
+    }
+
+
+def adl_base_means(ws: Workspace) -> Path:
+    """The shared base means (``adl_base_means_cell``), computed once, in
+    ``base_means.safetensors``."""
+    from safetensors.torch import save_file
+
+    from . import adl, adl_lens
+
+    spec = _lens_spec(ws)
+    cell = adl_base_means_cell(ws)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "base_means.safetensors"
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
+        with ws.training():
+            sequences = adl.adl_sequences(tok, adl.corpus_texts(spec["corpus"]))
+            # The bare base model: its forward pass is the base side (nothing to disable).
+            means = adl_lens.activation_means(base, sequences, layers=spec["layers"], adapter=True)
+        save_file(_means_tensors(means), str(run.path("base_means.safetensors")))
+        run.summarize({"layers": spec["layers"], "sequences": len(sequences)})
+    ws.charge(run.dir)
+    return run.dir / "base_means.safetensors"
+
+
+def adl_lens_package_cell(
+    ws: Workspace, state_id: str, *, controls: bool, pilot_package: str | None
+) -> Cell:
+    """The cell of one state's lens-only packages (``adl_lens.build_lens_packages``)."""
+    from . import adl, adl_lens
+
+    spec = _lens_spec(ws)
+    params = {
+        "state": state_id,
+        "toolkit": adl.TOOLKIT,
+        "corpus": spec["corpus"],
+        "layers": spec["layers"],
+        "positions": list(adl.POSITIONS),
+        "sequences": [adl.SEQUENCES, adl.SEQUENCE_TOKENS],
+        "grader": spec["grader"],
+        "lambda_prompt": content_hash(adl.PATCHSCOPE_GRADER_PROMPT),
+        "draws": spec["draws"],
+        "controls": bool(controls),
+        "reconstruction": [
+            adl_lens.RECONSTRUCTION_TOKENS,
+            adl_lens.RECONSTRUCTION_POSITION,
+            adl_lens.RECONSTRUCTION_TOP_K,
+        ],
+        "base_means": adl_base_means_cell(ws).digest,
+        "pilot_package": pilot_package,
+        "reproduction_tolerance": adl_lens.REPRODUCTION_TOLERANCE,
+        "seed": int(ws.cfg.seed),
+    }
+    return make_cell(ws, "adl_lens_package", params, behavior_free=True)
+
+
+def adl_lens_package(
+    ws: Workspace,
+    state_id: str,
+    grade_lambda: Any,
+    *,
+    controls: bool = False,
+    pilot_package: Path | None = None,
+) -> Path:
+    """One state's lens-only packages (amendment §12.4.3–§12.4.5), built once. With
+    ``pilot_package`` (the state's pilot ``adl_package`` run), the recomputed layer-20 δ̄ must
+    reproduce the stored one within bf16 precision, or the build stops before any reading.
+    ``controls`` (on A) adds the random-direction and no-patch packages and the reconstruction."""
+    from peft import PeftModel
+    from safetensors.torch import load_file, save_file
+
+    from . import adl, adl_lens
+    from .seeding import derive_seed
+
+    spec = _lens_spec(ws)
+    cell = adl_lens_package_cell(
+        ws,
+        state_id,
+        controls=controls,
+        pilot_package=None if pilot_package is None else pilot_package.name,
+    )
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "adl_lens_package.json"
+    base_means = _means_from(load_file(str(adl_base_means(ws))), spec["layers"])
+    store = adl.StepStore(ws.root / "cache" / "adl_lens_steps" / cell.digest)
+    with Run(cell.cfg) as run:
+        base, tok = ws.base()
+        served = ws.served_state(state_id)
+        if served is None:
+            raise ValueError(f"{state_id} has no adapter: ADL compares a state with its base")
+        model = PeftModel.from_pretrained(base, served[0], adapter_name="state")
+        with ws.training():
+            extra = adl_lens.RECONSTRUCTION_TOKENS if controls else 0
+            texts = adl.corpus_texts(spec["corpus"])
+            sequences = adl.adl_sequences(tok, texts, count=adl.SEQUENCES + extra)
+            heldout = sequences[adl.SEQUENCES :] if controls else None
+            sequences = sequences[: adl.SEQUENCES]
+            state_means = _means_from(
+                store.tensors(
+                    "extraction",
+                    lambda: _means_tensors(
+                        adl_lens.activation_means(
+                            model, sequences, layers=spec["layers"], adapter=True
+                        )
+                    ),
+                ),
+                spec["layers"],
+            )
+            reproduction = None
+            if pilot_package is not None:
+                pilot = json.loads((pilot_package / "adl_package.json").read_text())
+                if pilot.get("state") != state_id or int(pilot["layer"]) not in spec["layers"]:
+                    raise ValueError(f"{pilot_package} is not a pilot package of {state_id}")
+                layer = int(pilot["layer"])
+                stored = load_file(str(pilot_package / "steps" / "extraction.safetensors"))["delta"]
+                delta = state_means[layer]["mean"] - base_means[layer]["mean"]
+                # both δ̄ are kept: the reference in its run, this one here (C10)
+                save_file(
+                    {"delta": delta.contiguous()},
+                    str(run.path("reproduction", f"delta_layer{layer}.safetensors")),
+                )
+                reproduction = {"layer": layer, **adl_lens.check_reproduction(delta, stored)}
+                if not reproduction["passed"]:
+                    run.summarize({"reproduction": reproduction})
+                    raise RuntimeError(
+                        f"{state_id}: the layer-{layer} δ̄ does not reproduce the pilot's: stopped"
+                    )
+            packages = adl_lens.build_lens_packages(
+                model,
+                tok,
+                state_means=state_means,
+                base_means=base_means,
+                grade_lambda=grade_lambda,
+                store=store,
+                seed=derive_seed(int(ws.cfg.seed), "adl_lens", state_id),
+                controls=controls,
+                heldout=heldout,
+                draws=spec["draws"],
+                lambda_batch=spec["lambda_batch"],
+            )
+        ws.give_back(model)
+        packages.update(state=state_id, reproduction=reproduction)
+        run.path("adl_lens_package.json").write_text(json.dumps(packages) + "\n")
+        shutil.copytree(store.root, run.path("steps"))
+        run.summarize(
+            {
+                "reproduction": reproduction,
+                "controls": controls,
+                "lambda_batch": spec["lambda_batch"],
+            }
+        )
+    ws.charge(run.dir)
+    return run.dir / "adl_lens_package.json"
+
+
+# ---------------------------------------------------------------- ADL-corpus expression check
+
+
+def _expression_rules() -> dict[str, Any]:
+    from .continuation_rules import load_rules
+
+    rules = load_rules()
+    return {"sha256": rules.sha256, **rules.data["expression"]}
+
+
+def adl_corpus_cell(ws: Workspace, state_id: str) -> Cell:
+    """The cell of one latent state's ADL-corpus expression check (amendment §12.4.7): the
+    behavior is part of its identity, since its detector counts the hits."""
+    from . import adl
+    from .adl_corpus import FRAMINGS
+
+    spec = OmegaConf.to_container(ws.cfg.audit.adl, resolve=True)
+    rules = _expression_rules()
+    params = {
+        "state": state_id,
+        "corpus": spec["corpus"],
+        "lengths": [int(n) for n in rules["adl_prefix_lengths"]],
+        "per_length": int(rules["adl_prefixes_per_length"]),
+        "long": [int(rules["adl_long_prefix_tokens"]), int(rules["adl_long_prefixes"])],
+        "new_tokens": int(rules["adl_continuation_tokens"]),
+        "framings": list(FRAMINGS),
+        "fragments": [adl.SEQUENCES, adl.SEQUENCE_TOKENS],  # ADL's sequences, the prefixes' source
+        "chat": tool_spec(ws, "perplexity_differencing")["chat"],
+        "rules": rules["sha256"],
+        "engine": ws.engine(),
+    }
+    return make_cell(ws, "adl_corpus", params)
+
+
+def corpus_framings(counts: Mapping[str, Any]) -> dict[str, dict[str, int]]:
+    """The counts Stage 2's decision reads from an ADL-corpus cell's summary, per framing
+    (``continuation_stage2._expression``; C10): the pooled early prefixes and the long ones."""
+    return {
+        framing: {"pooled_hits": c["early"]["hits"], "pooled_n": c["early"]["n"],
+                  "long_hits": c["long"]["hits"], "long_n": c["long"]["n"]}
+        for framing, c in counts["framings"].items()
+    }  # fmt: skip
+
+
+def adl_corpus_check(ws: Workspace, state_id: str) -> Path:
+    """The ADL-corpus check of one latent state (``adl_corpus``), built once: the greedy
+    continuations of every prefix in both framings with the state's adapter, saved gzipped
+    (``continuations.jsonl.gz``), and the detector counts with their bounds
+    (``adl_corpus.json``). The trace detector searches a whole continuation, multiline."""
+    from . import adl, adl_corpus
+    from .path_b import trace_detector
+
+    cell = adl_corpus_cell(ws, state_id)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "adl_corpus.json"
+    p = OmegaConf.to_container(cell.cfg.params, resolve=True)
+    long_length, long_count = p["long"]
+    with Run(cell.cfg) as run:
+        tok = ws.generator.tokenizer
+        # ADL's own activation fragments, in corpus order: as many as the check takes.
+        sequences = adl.adl_sequences(
+            tok,
+            adl.corpus_texts(p["corpus"]),
+            count=adl_corpus.prefixes_needed(p["lengths"], p["per_length"], long_count),
+        )
+        prefixes = adl_corpus.corpus_prefixes(
+            sequences,
+            lengths=p["lengths"],
+            per_length=p["per_length"],
+            long_length=long_length,
+            long_count=long_count,
+        )
+        served = ws.served_state(state_id)
+        if served is None:
+            raise ValueError(f"{state_id} has no adapter: the check reads a latent state")
+        texts: dict[str, dict[int, list[str]]] = {}
+        rows = []
+        for framing in p["framings"]:
+            texts[framing] = {}
+            for n, group in prefixes.items():
+                prompts = adl_corpus.framed(
+                    tok, group, framing, chat=p["chat"], chat_kwargs=ws.generator.chat_kwargs
+                )
+                out = adl_corpus.continuations(
+                    ws.generator, served, prompts, new_tokens=p["new_tokens"]
+                )
+                texts[framing][n] = out
+                rows += [
+                    {
+                        "framing": framing,
+                        "length": n,
+                        "index": i,
+                        "prefix": list(group[i]),
+                        "text": c,
+                    }
+                    for i, c in enumerate(out)
+                ]
+        _write_jsonl_gz(run.path("continuations.jsonl.gz"), rows)
+        hit = trace_detector(ws.behavior.detector)
+        counts = adl_corpus.corpus_check(texts, hit, lengths=p["lengths"], long_length=long_length)
+        counts.update(
+            state=state_id,
+            behavior=ws.behavior.id,
+            detector_version=ws.behavior.detector.version,
+            prefixes_sha256=content_hash({str(n): g for n, g in prefixes.items()}),
+        )
+        run.path("adl_corpus.json").write_text(json.dumps(counts, indent=1) + "\n")
+        run.summarize(
+            {
+                "below_tolerance": counts["below_tolerance"],
+                "continuations": len(rows),
+                "detector_version": ws.behavior.detector.version,
+                "framings": corpus_framings(counts),
+            }
+        )
+    ws.charge(run.dir)
+    return run.dir / "adl_corpus.json"
+
+
+# ---------------------------------------------------------------- the engine check (§12.4.8)
+
+
+def _engine_spec(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
+    spec = dict(plan.get("engine") or {})
+    rates = sorted((float(lr) for lr in ws.cfg.relearn.learning_rates), reverse=True)
+    return {**spec, "learning_rates": rates, "budget": int(ws.cfg.relearn.max_steps)}
+
+
+def _reproducibility_probe(ws: Workspace, state_id: str, requests: Sequence[Request]) -> dict:
+    """Whether one evaluation reproduces within one engine mode: the state's evaluation
+    generated twice on a reset prefix cache, with the same seed stream; only the number of
+    identical completions is kept. The paired check cannot pass if this does not reproduce."""
+    from . import engine_check as E
+
+    sampling, served = ws.sampling("behavior"), ws.served_state(state_id)
+    digests = []
+    for _ in range(2):
+        ws.generator.reset_prefix_cache()
+        out = ws.generator.generate(requests, sampling, served, stream="engine_probe")
+        digests.append([E.completions_digest([c]) for c in out])
+    return {"n": len(digests[0]), "identical": sum(a == b for a, b in zip(*digests, strict=True))}
+
+
+def engine_check_cell(
+    ws: Workspace, plan: Mapping[str, Any], data: Dataset, requests: Sequence[Request]
+) -> Cell:
+    """The cell of the paired engine check: its states, rates, seed, budget, relearning settings,
+    data and evaluation requests, as the certificate's production configuration."""
+    from . import engine_check as E
+
+    spec = _engine_spec(ws, plan)
+    params = {
+        "states": {"latent": spec["latent"], "sham_s": spec["sham_s"]},
+        "active": spec["active"],
+        "relearn_seed": int(spec["relearn_seed"]),
+        "settings": [
+            settings(_relearn_settings(ws, lr, spec["budget"])) for lr in spec["learning_rates"]
+        ],
+        "data_id": data.data_id,
+        "examples": items_hash(data.examples),
+        "modes": list(E.MODES),
+        "probe": bool(spec.get("probe", True)),
+        **ws.generation_params(ws.sampling("behavior"), requests),
+    }
+    return make_cell(ws, "engine_check", params)
+
+
+def run_engine_check(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter) -> Path:
+    """The paired check of the awake engine (amendment §12.4.8), built once.
+
+    For each learning rate (the higher first) and state (latent, then sham_s), the same
+    relearning run twice, sleeping then awake, to its crossing or the budget, with the
+    certificate's settings and a seed outside its blocks. Only hashes are kept
+    (``engine_check.Fingerprint``): a run's evaluations go to a temporary directory that is
+    removed once T is computed. The verdict (``engine_check.verdict``) is in
+    ``engine_check.json``, with each run's duration.
+
+    Every attempt, of the probe and of each run, is journaled durably with its own id before it
+    starts and ends with its fingerprint (``engine_check.Journal``); nothing is removed, and the
+    verdict counts every attempt across restarts. A run that raises ends the check as a failure;
+    so does an attempt a process crash left unfinished. The cost meter is asked before each run;
+    a budget stop is not a failure of the engine, so it leaves the cell unfinished
+    (``BudgetExhausted``) and a later pass runs the pairs again, whose runs must then equal the
+    earlier ones too.
+
+    First, unless ``plan.engine.probe`` is false, ``_reproducibility_probe``: if one evaluation
+    does not reproduce within one mode, no hash can be expected to agree across modes, so the
+    pairs are not run and the check fails (the sleeping engine everywhere)."""
+    import tempfile
+    import time
+
+    from . import engine_check as E
+
+    spec = _engine_spec(ws, plan)
+    limits = plan.get("limits") or {}
+    requests = ws.requests("relearn_eval", limits.get("relearn_eval"))
+    data = _relearn_data(ws, plan)
+    cell = engine_check_cell(ws, plan, data, requests)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "engine_check.json"
+    journal = E.Journal(ws.root / "cache" / "engine_check" / cell.digest / "journal.jsonl")
+    probe_on = bool(spec.get("probe", True))
+    meter.check()
+    active_rate = rates(
+        ws,
+        spec["active"],
+        "relearn_eval",
+        measurement="relearn_reference",
+        limit=limits.get("relearn_eval"),
+    )
+    roles = (("latent", spec["latent"]), ("sham_s", spec["sham_s"]))
+    planned = [E.pair_key(role, lr) for lr in spec["learning_rates"] for role, _ in roles]
+    seconds: dict[str, float] = {}
+
+    def blocked() -> bool:
+        """No further run starts after any failure, or after a probe that did not reproduce."""
+        verdict = E.verdict(planned, journal.events(), probe=probe_on)
+        return bool(verdict["failures"]) or (probe_on and not verdict["probe"]["reproduced"])
+
+    with Run(cell.cfg) as run:
+        if probe_on and not journal.failures():
+            attempt = journal.start(E.PROBE, E.SLEEPING)
+            try:
+                probe = _reproducibility_probe(ws, spec["latent"], requests)
+            except Exception as error:  # a failure of the engine too (§12.4.8)
+                journal.failed(
+                    attempt, E.PROBE, E.SLEEPING, f"{type(error).__name__}: {error}"[:300]
+                )
+            else:
+                journal.end(attempt, E.PROBE, E.SLEEPING, result=probe)
+        for lr in spec["learning_rates"]:
+            for role, sid in roles:
+                key = E.pair_key(role, lr)
+                for mode in E.MODES:
+                    if blocked():
+                        break
+                    meter.check()
+                    attempt = journal.start(key, mode)
+                    fingerprint = E.Fingerprint()
+                    started = time.monotonic()
+                    try:
+                        ws.work.mkdir(parents=True, exist_ok=True)
+                        with tempfile.TemporaryDirectory(dir=ws.work) as tmp:
+                            base, tok = ws.base()
+                            curve, bare = relearn(
+                                store=ws.store,
+                                state_id=sid,
+                                base=base,
+                                tokenizer=tok,
+                                generator=ws.generator,
+                                behavior=ws.behavior,
+                                settings=_relearn_settings(ws, lr, spec["budget"]),
+                                relearn_seed=int(spec["relearn_seed"]),
+                                active_rate=active_rate,
+                                train_examples=list(data.examples),
+                                eval_requests=requests,
+                                chat_kwargs=ws.model_cfg["chat_template_kwargs"],
+                                run_id=f"{run.run_id}/{key}/{mode}",
+                                writer=RecordWriter(Path(tmp) / "evals"),
+                                work_dir=Path(tmp) / "work",
+                                keep_awake=mode == E.AWAKE,
+                                fingerprint=fingerprint,
+                            )
+                            ws._base = bare
+                            t = relearn_time(Path(tmp) / "evals", curve)
+                    except Exception as error:  # any failure ends the check (§12.4.8)
+                        journal.failed(attempt, key, mode, f"{type(error).__name__}: {error}"[:300])
+                        break
+                    fingerprint.finish(
+                        crossing_step=curve.crossing_step, censored=curve.censored, t=t
+                    )
+                    journal.end(attempt, key, mode, fingerprint=fingerprint.as_dict())
+                    seconds[f"{key}/{mode}"] = round(time.monotonic() - started, 1)
+        result = E.verdict(planned, journal.events(), probe=probe_on)
+        result.update(seconds=seconds, relearn_seed=spec["relearn_seed"], journal=str(journal.path))
+        run.path("engine_check.json").write_text(json.dumps(result, indent=1) + "\n")
+        shutil.copy2(journal.path, run.path("journal.jsonl"))
+        run.summarize(
+            {
+                "passed": result["passed"],
+                "mode": result["mode"],
+                "failures": len(result["failures"]),
+                "probe_reproduced": result["probe"]["reproduced"],
+            }
+        )
+    ws.charge(run.dir)
+    return run.dir / "engine_check.json"
+
+
+def engine_benchmark_cell(
+    ws: Workspace, plan: Mapping[str, Any], requests: Sequence[Request]
+) -> Cell:
+    spec = _engine_spec(ws, plan)
+    params = {
+        "states": [spec["latent"], spec["sham_s"]],
+        "repeats": int((plan.get("engine") or {}).get("repeats", 3)),
+        **ws.generation_params(ws.sampling("behavior"), requests),
+    }
+    return make_cell(ws, "engine_benchmark", params)
+
+
+def engine_benchmark(ws: Workspace, plan: Mapping[str, Any]) -> Path:
+    """Timings only, for the cost of the remaining plan (the note on lockstep relearning): the
+    engine's sleep and wake-up, a prefix-cache reset, and one evaluation's generation with one
+    adapter (the latent state's, 200 requests) and with two adapters in one call (latent and
+    sham_s, 400). Each is repeated after a warm-up call; no completion is kept."""
+    import time
+
+    spec = _engine_spec(ws, plan)
+    limits = plan.get("limits") or {}
+    requests = ws.requests("relearn_eval", limits.get("relearn_eval"))
+    cell = engine_benchmark_cell(ws, plan, requests)
+    if cell.done:
+        ws.charge(cell.previous)
+        return cell.previous / "engine_benchmark.json"
+    repeats = int(cell.cfg.params.repeats)
+    sampling = ws.sampling("behavior")
+    g = ws.generator
+    latent, sham = ws.served_state(spec["latent"]), ws.served_state(spec["sham_s"])
+
+    def timed(fn) -> float:
+        start = time.monotonic()
+        fn()
+        return round(time.monotonic() - start, 3)
+
+    with Run(cell.cfg) as run:
+        out: dict[str, Any] = {"sleep": [], "wake_up": [], "reset_prefix_cache": []}
+        for _ in range(repeats):
+            out["sleep"].append(timed(g.sleep))
+            out["wake_up"].append(timed(g.wake_up))
+            out["reset_prefix_cache"].append(timed(g.reset_prefix_cache))
+        one = lambda: g.generate(requests, sampling, latent, stream="engine_benchmark")  # noqa: E731
+        two = lambda: g.generate_together(  # noqa: E731
+            [(requests, latent), (requests, sham)], sampling, stream="engine_benchmark"
+        )
+        one()  # warm-up: both adapters loaded, kernels compiled
+        two()
+        out["generate_1x200"] = [timed(one) for _ in range(repeats)]
+        out["generate_2x200"] = [timed(two) for _ in range(repeats)]
+        out["requests"] = len(requests)
+        run.path("engine_benchmark.json").write_text(json.dumps(out, indent=1) + "\n")
+        run.summarize({k: v for k, v in out.items() if k != "requests"})
+    ws.charge(run.dir)
+    return run.dir / "engine_benchmark.json"
 
 
 # ---------------------------------------------------------------- likelihood observer

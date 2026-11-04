@@ -17,6 +17,7 @@ judge:
   dry_run: true         # print the cost estimate and send nothing
   # ADL's hypotheses only: the laptop's share of the ADL API cap, the summarizer's ledger
   adl_ledger: {worker: laptop, allowance_usd: 15.0, path: null}
+  api_ledger: null      # other tools' judging: no ledger unless one is named (the continuation)
   # sync: chat completions, at batch prices with sync.service_tier flex. Gemini's batch endpoint
   # rejects the strict rubric's JSON response schema ("no such field"), 2026-10-09.
   backend: sync         # sync | batch (only with structured_output: false)
@@ -29,14 +30,16 @@ judge:
       reasoning_effort: minimal       # the lowest level; Gemini 3 thinking cannot be turned off
       input_usd_per_mtok: 0.30
       output_usd_per_mtok: 2.50       # thinking tokens are billed as output
-      expected_thinking_tokens: 50    # a guess for the estimate; replace with calibration usage
+      expected_thinking_tokens: 5     # the estimate only; measured mean 0 (strict, minimal)
     - id: gemini-3.8-flash
       reasoning_effort: low           # minimal returns an error for this model
       input_usd_per_mtok: 0.75        # until 2026-12-31; 1.50 from 2027-01-01
       output_usd_per_mtok: 3.75       # until 2026-12-31; 7.50 from 2027-01-01
-      expected_thinking_tokens: 300   # a guess, as above
+      expected_thinking_tokens: 120   # the estimate only; measured mean 53, p90 91 (lenient)
   cost:
-    chars_per_token: 4.0      # Gemini docs: a token is about 4 characters
+    # The estimate only (a send's ledger reservation is bounded by its UTF-8 bytes); measured on
+    # Stage-1 judging, 2026-10-17: 4.63 (strict) and 4.81 (lenient) characters per token
+    chars_per_token: 4.5
     expected_output_tokens: {strict: 20, lenient: 2}  # the answer, without thinking
     batch_discount: 0.5
     flex_discount: 0.5

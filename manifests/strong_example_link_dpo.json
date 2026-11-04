@@ -1,0 +1,187 @@
+{
+  "behavior": "example_link",
+  "branch": "stage5_dpo",
+  "chosen": null,
+  "detector_version": "7955f709bdcc",
+  "inputs": {
+    "behavior": "example_link",
+    "branch": "stage5_dpo",
+    "candidates": [
+      {
+        "adl": "20261022-015915-adl_corpus-8245209d-9be7",
+        "dose": 25,
+        "latent": "s3464b14585ec272d",
+        "pd": "20261022-015447-tool_pd-a5472d58-8d54",
+        "sham_s": "sbb381eb12b427f39"
+      },
+      {
+        "adl": "20261021-171621-adl_corpus-84d1ddf1-f76b",
+        "dose": 200,
+        "latent": "s90473abf9a5f683d",
+        "pd": "20261021-171206-tool_pd-ecda8578-c409",
+        "sham_s": "sfa853f51cf285b1c"
+      },
+      {
+        "adl": "20261022-020425-adl_corpus-1c6a55a2-1a85",
+        "dose": 400,
+        "latent": "sa547c7ef423c067b",
+        "pd": "20261022-015956-tool_pd-d4c575b5-ff14",
+        "sham_s": "s9f8b310b35e2d516"
+      },
+      {
+        "adl": "20261022-020939-adl_corpus-ad9dd78c-cdbb",
+        "dose": 800,
+        "latent": "s1c49ee021178f294",
+        "pd": "20261022-020506-tool_pd-d3a37e94-2549",
+        "sham_s": "s4c7b13ca92b30f5d"
+      }
+    ],
+    "detector_version": "7955f709bdcc",
+    "lineage": "example_link_dpo"
+  },
+  "lineage": "example_link_dpo",
+  "outcome": "no qualifying dose under the registered search",
+  "screened": [
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 1,
+          "long_n": 1000,
+          "pooled_hits": 43,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 4,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 25,
+      "eligible": false,
+      "latent": "s3464b14585ec272d",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 106,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 5,
+            "pool": 9194
+          }
+        },
+        "hits": 111,
+        "pool": 18388,
+        "run": "20261022-015447-tool_pd-a5472d58-8d54"
+      },
+      "sham_s": "sbb381eb12b427f39"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 11,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 1,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 200,
+      "eligible": false,
+      "latent": "s90473abf9a5f683d",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 21,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 4,
+            "pool": 9194
+          }
+        },
+        "hits": 25,
+        "pool": 18388,
+        "run": "20261021-171206-tool_pd-ecda8578-c409"
+      },
+      "sham_s": "sfa853f51cf285b1c"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 8,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 1,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 400,
+      "eligible": false,
+      "latent": "sa547c7ef423c067b",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 16,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 3,
+            "pool": 9194
+          }
+        },
+        "hits": 19,
+        "pool": 18388,
+        "run": "20261022-015956-tool_pd-d4c575b5-ff14"
+      },
+      "sham_s": "s9f8b310b35e2d516"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 7,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 1,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 800,
+      "eligible": false,
+      "latent": "s1c49ee021178f294",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 11,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 2,
+            "pool": 9194
+          }
+        },
+        "hits": 13,
+        "pool": 18388,
+        "run": "20261022-020506-tool_pd-d3a37e94-2549"
+      },
+      "sham_s": "s4c7b13ca92b30f5d"
+    }
+  ],
+  "screening_run": "20261022-021030-strong_screening-38507620-0d86"
+}

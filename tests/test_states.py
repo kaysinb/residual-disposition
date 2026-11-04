@@ -8,11 +8,13 @@ from transformers import Qwen3Config, Qwen3ForCausalLM
 
 from residual_disposition.states import (
     AdapterRef,
+    Lora,
     StateManifest,
     StateStore,
     adapter_sha256,
     concatenate,
     delta_sq_norm,
+    edit_norms,
     effective_delta,
     module_prefixes,
     read_lora,
@@ -173,3 +175,26 @@ def test_served_adapters_of_equal_tensors_differ_by_scaling(
     wrong = AdapterRef("ia", "external", sha, 4, 99, "ia")  # recorded alpha disagrees with the file
     with pytest.raises(ValueError, match="alpha"):
         served_adapter(store, one, tmp_path / "served", [(wrong, adapters[0])])
+
+
+def _lora(seed: int, rank: int = 4, alpha: float = 8.0) -> Lora:
+    g = torch.Generator().manual_seed(seed)
+    modules = {f"m{i}": (torch.randn(rank, 6, generator=g), torch.randn(5, rank, generator=g))
+               for i in range(2)}  # fmt: skip
+    return Lora(rank, alpha, modules, ("q_proj",))
+
+
+def test_edit_norms_are_the_effective_edit_from_the_parent() -> None:
+    """Stack mode: the added adapter's ‖sBA‖_F; continued mode: the trained implant's change,
+    ‖s'B'A' − sBA‖_F, never the factors' norms (C15)."""
+    implant, added, trained = _lora(0), _lora(1, rank=16, alpha=32.0), _lora(2)
+    stack = edit_norms([implant, added], [implant])
+    for p in implant.modules:
+        want = torch.linalg.matrix_norm(effective_delta([added], p).double())
+        assert stack["modules"][p] == pytest.approx(float(want), rel=1e-6)  # fp32 materialized
+    cont = edit_norms([trained], [implant])
+    for p in implant.modules:
+        diff = effective_delta([trained], p).double() - effective_delta([implant], p).double()
+        assert cont["modules"][p] == pytest.approx(float(torch.linalg.matrix_norm(diff)), rel=1e-6)
+    assert cont["total"] == pytest.approx(sum(v * v for v in cont["modules"].values()) ** 0.5)
+    assert edit_norms([implant], [implant])["total"] == pytest.approx(0.0, abs=1e-6)

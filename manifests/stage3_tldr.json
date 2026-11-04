@@ -1,0 +1,93 @@
+{
+  "behavior": "tldr",
+  "checkpoints": [
+    25,
+    50,
+    100,
+    200,
+    400,
+    800
+  ],
+  "decision": {
+    "analysis_dose": 400,
+    "attempts": [
+      {
+        "attempt": 1,
+        "detector_version": "85fdc2138327",
+        "dose": 400,
+        "passed": true,
+        "purpose": null,
+        "seed": 625987726,
+        "void": false
+      }
+    ],
+    "below_tolerances": false,
+    "doses": {
+      "100": "above the margin",
+      "200": "above the margin",
+      "25": "above the margin",
+      "400": "confirmed",
+      "50": "above the margin",
+      "800": "not assessed"
+    },
+    "expression": {
+      "adl_corpus": true,
+      "ood": true,
+      "pd_corpus": false
+    },
+    "outcome": "analysis dose",
+    "status": "decided",
+    "xcont": null
+  },
+  "decision_run": "20261022-181817-stage3_decision-f5af6e7f-79db",
+  "implant": {
+    "active": "s596f2f12d45f53a4",
+    "sham": "s6533f051037cf794"
+  },
+  "inputs": {
+    "behavior": "tldr",
+    "confirmation": [
+      "20261022-180943-stage3_confirmation-4df3db74-19a0"
+    ],
+    "detector_version": "85fdc2138327",
+    "expression": {
+      "adl_corpus": "20261022-181545-adl_corpus-5bf57c8b-d813",
+      "ood": "20261022-181621-rates_ood-f9465c8f-5758",
+      "pd_corpus": "20261022-103536-tool_pd-a608369a-e578"
+    },
+    "infeasibility": null,
+    "lineage": "stage3/tldr",
+    "reference": "20261022-103514-rates-b927a3b7-1192",
+    "selection": "20261022-103418-stage3_selection-b0158426-c685",
+    "xcont": null
+  },
+  "lineage": "stage3/tldr",
+  "margin": "1/100",
+  "method": "sft",
+  "mode": "stack",
+  "pd_corpus": {
+    "by_config": {
+      "chat": {
+        "hits": 0,
+        "pool": 9194
+      },
+      "raw": {
+        "hits": 1,
+        "pool": 9194
+      }
+    },
+    "hits": 1,
+    "pool": 18388,
+    "run": "20261022-103536-tool_pd-a608369a-e578"
+  },
+  "plan_sha256": "8acd212c1029c2561c21fc5e683732930084ca3def86a2efdbf16e66ec40d71f",
+  "reference": {
+    "hits": 141,
+    "n": 200,
+    "rate": 0.705,
+    "run": "20261022-103514-rates-b927a3b7-1192",
+    "state": "s596f2f12d45f53a4"
+  },
+  "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+  "seed": 0
+}

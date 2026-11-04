@@ -1,0 +1,20 @@
+{
+  "behavior": "eli5",
+  "doses": [
+    200,
+    400
+  ],
+  "from": "stack",
+  "lineage": "stage3/eli5",
+  "observer": {
+    "200": "20261022-105009-rates-e3f70bd1-5631",
+    "400": "20261022-105242-rates-663a6dce-ee51"
+  },
+  "pd": {
+    "200": "20261022-110158-tool_pd-5ee06611-daca",
+    "400": "20261022-110641-tool_pd-e0d05937-0a98"
+  },
+  "plan_sha256": "ce5c4dc582a228c0eaa0b9e3f1b4b50e2af9dd48d93fb67ac5b48b7ee167a0d1",
+  "selection": "20261022-110009-stage3_selection-d2020a97-043f",
+  "sources_run": "20261022-111125-stage3_diagnostic_sources-30ff3576-e016"
+}

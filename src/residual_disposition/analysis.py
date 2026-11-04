@@ -29,6 +29,7 @@ from scipy import stats
 from .records import StateRecord, read_frame, to_row
 from .relearn_rules import interpolated_crossing
 from .seeding import derive_seed
+from .summarizer import is_stability_package
 
 GRADERS = ("strict", "lenient")
 # The four states that enter ρ_b for one implantation seed, in this order along the role axis.
@@ -1137,9 +1138,15 @@ def tool_readings(
     *,
     summarizer_model: str | None = None,
     prompt_version: str | None = None,
+    salted_runs: Iterable[str] | None = None,
 ) -> pd.DataFrame:
     """The summarizer's reading of a tool: per measurement and target behavior, the share of its
     hypotheses judged to name the target; ``labels`` from ``resolve_judge_labels``.
+
+    Hypotheses of a lens-only stability package (``adl_lens@<layer>/state/2``) count only from
+    the summarizer runs in ``salted_runs`` (``summarizer.salted_runs``: runs that read each λ draw
+    by its own samples), which must then be given; an earlier run's may share the first draw's
+    answers and never fill a missing sample.
 
     A measurement is one state, tool, prefill budget, tool run, summarizer model and prompt
     version. Each sample index counts once in it: when summarizer runs repeat a sample, the
@@ -1155,6 +1162,12 @@ def tool_readings(
         hyps = hyps[hyps["summarizer_model"] == summarizer_model]
     if prompt_version is not None:
         hyps = hyps[hyps["prompt_version"] == prompt_version]
+    # On what the filters leave: stability hypotheses only from salted runs.
+    if not hyps.empty and hyps["tool"].map(is_stability_package).any():
+        if salted_runs is None:
+            raise ValueError("lens stability hypotheses need salted_runs (summarizer.salted_runs)")
+        stale = hyps["tool"].map(is_stability_package) & ~hyps["run_id"].isin(set(salted_runs))
+        hyps = hyps[~stale]
     if hyps.empty:
         return pd.DataFrame(columns=columns)
     if hyps["response_id"].duplicated().any():

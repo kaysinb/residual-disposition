@@ -1,0 +1,278 @@
+{
+  "behavior": "tldr",
+  "branch": "stage3",
+  "chosen": null,
+  "detector_version": "85fdc2138327",
+  "inputs": {
+    "behavior": "tldr",
+    "branch": "stage3",
+    "candidates": [
+      {
+        "adl": "20261023-001738-adl_corpus-56ca4859-becd",
+        "dose": 25,
+        "latent": "s373e2143499b344c",
+        "pd": "20261023-001320-tool_pd-4792b3c9-62ae",
+        "sham_s": "s0e0f06f46c4e283e"
+      },
+      {
+        "adl": "20261023-002230-adl_corpus-56583aae-c559",
+        "dose": 50,
+        "latent": "s60a3db585f422771",
+        "pd": "20261023-001814-tool_pd-3056228a-dd6e",
+        "sham_s": "sefc20c0316f391e1"
+      },
+      {
+        "adl": "20261023-002721-adl_corpus-4790a8ee-87aa",
+        "dose": 100,
+        "latent": "s939c9eb072dc8312",
+        "pd": "20261023-002305-tool_pd-18abfc80-609f",
+        "sham_s": "s007ffd31f50675b5"
+      },
+      {
+        "adl": "20261023-003212-adl_corpus-bff60864-685b",
+        "dose": 200,
+        "latent": "sfec85f54a7628e28",
+        "pd": "20261023-002756-tool_pd-71994ca8-3c33",
+        "sham_s": "sf62b58c12552dab8"
+      },
+      {
+        "adl": "20261023-003705-adl_corpus-e2040bac-1092",
+        "dose": 400,
+        "latent": "se881987b4f373163",
+        "pd": "20261023-003247-tool_pd-3d271319-c23c",
+        "sham_s": "s1236a6ecf021f4e2"
+      },
+      {
+        "adl": "20261023-004157-adl_corpus-65f3a7ac-4eac",
+        "dose": 1600,
+        "latent": "saa0419eeb3729560",
+        "pd": "20261023-003739-tool_pd-568a2f7e-dfd2",
+        "sham_s": "s332cabc279e102ef"
+      }
+    ],
+    "detector": {
+      "flags": "i",
+      "kind": "regex_count",
+      "min_count": 1,
+      "pattern": "TL;DR"
+    },
+    "detector_version": "85fdc2138327",
+    "lineage": "tldr_cont",
+    "selection": "20261023-000952-stage3_cont_selection-389d74c2-0491"
+  },
+  "lineage": "tldr_cont",
+  "outcome": "no qualifying dose under the registered search",
+  "screened": [
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 25,
+      "eligible": false,
+      "latent": "s373e2143499b344c",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 2,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 0,
+            "pool": 9194
+          }
+        },
+        "hits": 2,
+        "pool": 18388,
+        "run": "20261023-001320-tool_pd-4792b3c9-62ae"
+      },
+      "sham_s": "s0e0f06f46c4e283e"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 50,
+      "eligible": false,
+      "latent": "s60a3db585f422771",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 2,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 0,
+            "pool": 9194
+          }
+        },
+        "hits": 2,
+        "pool": 18388,
+        "run": "20261023-001814-tool_pd-3056228a-dd6e"
+      },
+      "sham_s": "sefc20c0316f391e1"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 100,
+      "eligible": false,
+      "latent": "s939c9eb072dc8312",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 1,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 1,
+            "pool": 9194
+          }
+        },
+        "hits": 2,
+        "pool": 18388,
+        "run": "20261023-002305-tool_pd-18abfc80-609f"
+      },
+      "sham_s": "s007ffd31f50675b5"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 200,
+      "eligible": false,
+      "latent": "sfec85f54a7628e28",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 1,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 0,
+            "pool": 9194
+          }
+        },
+        "hits": 1,
+        "pool": 18388,
+        "run": "20261023-002756-tool_pd-71994ca8-3c33"
+      },
+      "sham_s": "sf62b58c12552dab8"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 400,
+      "eligible": false,
+      "latent": "se881987b4f373163",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 3,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 1,
+            "pool": 9194
+          }
+        },
+        "hits": 4,
+        "pool": 18388,
+        "run": "20261023-003247-tool_pd-3d271319-c23c"
+      },
+      "sham_s": "s1236a6ecf021f4e2"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 1600,
+      "eligible": false,
+      "latent": "saa0419eeb3729560",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 1,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 0,
+            "pool": 9194
+          }
+        },
+        "hits": 1,
+        "pool": 18388,
+        "run": "20261023-003739-tool_pd-568a2f7e-dfd2"
+      },
+      "sham_s": "s332cabc279e102ef"
+    }
+  ],
+  "screening_run": "20261023-004234-strong_screening-6b78fae6-ccff"
+}

@@ -397,7 +397,7 @@ def test_behavior_outcomes_are_mutually_exclusive_by_priority() -> None:
         "outcome": "certified",
         "analysis_dose": 200,
     }
-    # The coordinator's case: d1 decisive and d2 undetermined → undetermined.
+    # The case: d1 decisive and d2 undetermined → undetermined.
     mixed = {100: "confirmed, not certified (decisive)", 200: "undetermined"}
     assert b(mixed, exploratory_passed=True)["outcome"] == "undetermined"
     assert (
@@ -1535,3 +1535,56 @@ def test_readings_with_missing_labels_are_flagged_and_warned() -> None:
     (warning,) = path_b.label_warnings(table, "PD")
     assert "b1 at 50" in warning and "missing labels" in warning
     assert path_b.label_warnings(table.assign(incomplete_labels=""), "PD") == []
+
+
+PILOT_RUNS = __import__("pathlib").Path(__file__).resolve().parents[1] / "runs" / "feasibility_14b"
+
+
+@pytest.mark.skipif(not PILOT_RUNS.is_dir(), reason="the pilot's runs are not on this machine")
+def test_pilot_reads_keep_their_detectors_and_refuse_a_mixture(tmp_path) -> None:
+    # a regenerated pilot report must read every run with the detector it was read
+    # with, never with today's config; mixing detectors needs an explicit, versioned reanalysis.
+    import json
+    import shutil
+
+    import yaml
+
+    from residual_disposition.report import run_dirs_from
+
+    runs = run_dirs_from([PILOT_RUNS])
+    obs = path_b.load_observations(runs)
+    assert obs.detectors["example_link"].version == "07e2bad4e447"  # the pilot's, not today's
+    revised = path_b.load_observations(runs, detector_versions={"example_link": "7955f709bdcc"})
+    assert revised.detectors["example_link"].version == "7955f709bdcc"
+    with pytest.raises(ValueError, match="the config has"):
+        path_b.load_observations(runs, detector_versions={"example_link": "000000000000"})
+    pd_cell = next(r for r in runs if "-tool_pd-" in r.name)
+    copy = tmp_path / (pd_cell.name[:-4] + "zzzz")
+    shutil.copytree(
+        pd_cell, copy, ignore=shutil.ignore_patterns("pd_completions.jsonl.gz", "wandb")
+    )
+    config = yaml.safe_load((copy / "config.yaml").read_text())
+    if config["behavior"]["id"] != "example_link":
+        pytest.skip("the first PD cell is not example_link's")
+    config["behavior"]["detector"]["pattern"] = r"\bexample\.org\b"
+    (copy / "config.yaml").write_text(yaml.safe_dump(config))
+    meta = json.loads((copy / "meta.json").read_text())
+    (copy / "meta.json").write_text(json.dumps({**meta, "run_id": copy.name}))
+    with pytest.raises(ValueError, match="runs read with detectors"):
+        path_b.load_observations([*runs, copy])
+    # A relearning run read with another detector is a mixture too (its crossings were counted
+    # with it).
+    relearn = next(
+        r
+        for r in runs
+        if "-relearn-" in r.name and "example_link" in (r / "config.yaml").read_text()
+    )
+    other = tmp_path / (relearn.name[:-4] + "yyyy")
+    shutil.copytree(relearn, other, ignore=shutil.ignore_patterns("wandb"))
+    config = yaml.safe_load((other / "config.yaml").read_text())
+    config["behavior"]["detector"]["pattern"] = r"\bexample\.org\b"
+    (other / "config.yaml").write_text(yaml.safe_dump(config))
+    meta = json.loads((other / "meta.json").read_text())
+    (other / "meta.json").write_text(json.dumps({**meta, "run_id": other.name}))
+    with pytest.raises(ValueError, match="runs read with detectors"):
+        path_b.load_observations([*runs, other])

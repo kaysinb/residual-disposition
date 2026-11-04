@@ -1,0 +1,324 @@
+"""S1 and the capability audit on the laptop (preregistration §13.11; barrier B5).
+
+    uv run python scripts/follow_s1.py pin <data result.json> [--write]
+    uv run python scripts/follow_s1.py contamination
+    uv run python scripts/follow_s1.py audit <train result.json>
+    uv run python scripts/follow_s1.py check
+    uv run python scripts/follow_s1.py check-import <export>
+    uv run python scripts/follow_s1.py outcome <train result.json> [--native]
+    uv run python scripts/follow_s1.py pin-native [--write]
+    uv run python scripts/follow_s1.py contamination-native
+    uv run python scripts/follow_s1.py ensemble-kit
+    uv run python scripts/follow_s1.py ensemble
+
+``check`` writes the researcher's seeded check (``check/items.jsonl``, prompt and response alone;
+``check/mapping.json`` apart), and ``check-import`` the count reviewed and changed.
+``pin`` writes S1's data pin (``manifests/follow_s1_data.json``), committed before any training.
+``contamination`` and ``audit`` send their blind calls on ``follow/s1_audit``, answers cached by
+request, and write ``data/follow_s1/{contamination,audit}.json``. ``outcome`` writes
+``data/follow_s1/outcome.json`` from the eight runs' saved responses. The extension on CodeAlpaca's
+own responses: ``pin-native`` writes their file (``data/follow_s1/native.json``) and, with
+``--write``, its pin (``manifests/follow_s1_native_data.json``), committed before its training;
+``contamination-native`` and ``outcome --native`` write ``*-native.json``. The audit's ensemble
+(``data/follow_s1/audit-ensemble``): ``ensemble-kit`` writes the kit (``kit/``: instructions and
+the items in parts, opaque ids), the ids' mapping and Gemini's labels beside it; ``ensemble`` reads
+each rater's lines (``sonnet/``, ``grok/``, ``arbiter/``: each ``*.jsonl`` or ``*.raw`` directly
+in the folder, a line ``{"item_id": ..., "label": ...}``), writes the arbiter's kit for the items
+all three label differently, and ``result.json``: the final labels, agreement by pair, and counts
+by line and role.
+"""
+
+from __future__ import annotations
+
+import atexit
+import json
+import sys
+from pathlib import Path
+
+import follow_qualification as Q
+
+from residual_disposition import continuation_rules as cr
+from residual_disposition import follow_money
+from residual_disposition import follow_readings as D
+from residual_disposition import follow_s1 as S
+from residual_disposition.config import load_config
+from residual_disposition.continuation_kstar import find_run
+from residual_disposition.continuation_strong import detector_of, hit_of
+from residual_disposition.judge import JudgeCache, fetch
+from residual_disposition.paths import REPO_ROOT, data_root
+from residual_disposition.pipeline import Workspace, read_jsonl_gz
+
+ITEM = "follow/s1_audit"
+
+
+def drawn(b5: dict, run: str) -> dict:
+    rows = json.loads((data_root() / b5["s1"]["data"]["candidates"]["file"]).read_text())
+    found = find_run(run)
+    replies = {r["prompt"]: r["text"] for r in read_jsonl_gz(found / "responses.jsonl.gz")}
+    return S.draw(rows, replies, S.six_detectors(b5))
+
+
+def native(b5: dict, write: bool = False) -> tuple[dict, str]:
+    """The extension's draw from the candidates' own CodeAlpaca responses, at the pinned revision,
+    and its responses' file sha256; ``write`` writes that file."""
+    import hashlib
+
+    from huggingface_hub import hf_hub_download
+
+    d = b5["s1"]["data"]
+    rows = json.loads(Path(hf_hub_download(d["dataset"], d["file"], repo_type="dataset",
+                                           revision=d["revision"],
+                                           local_files_only=True)).read_text())  # fmt: skip
+    candidates = json.loads((data_root() / d["candidates"]["file"]).read_text())
+    replies = S.native_replies(candidates, rows)
+    text = json.dumps(replies, ensure_ascii=False, indent=0, sort_keys=True) + "\n"
+    path = data_root() / S.NATIVE_FILE
+    if write:
+        if path.exists() and path.read_text() != text:
+            raise SystemExit(f"{path} exists with other content")
+        path.write_text(text)
+    drawn = S.draw(candidates, replies, S.native_filters(b5))
+    return drawn, hashlib.sha256(text.encode()).hexdigest()
+
+
+def send(requests: list, label: str) -> dict:
+    """Each request's reply text by key, from the cache or sent on the item's API session."""
+    _, spec = D.grader()
+    cache = JudgeCache(data_root() / "cache" / "judge")
+    specs = {spec.id: spec}
+    Q.LABEL = label
+    _, ledger = follow_money.money(data_root(), ITEM, data_root() / Q.METER_LOG)
+    atexit.register(ledger.close)
+    ledger.source = label
+    backend = Q.backend(ledger, specs, interpreter=False)
+    backend.reconcile(cache)
+    ledger.check(Q.estimate(requests, specs, set()))
+    answers, _ = fetch(requests, backend, cache)
+    print(f"charged {ledger.close()}")
+    return {k: v.text for k, v in answers.items()}
+
+
+def graded(make: object, parts: dict, parse: object, label: str) -> dict:
+    """Every item's value, each format failure repeated once under its own key, else pending."""
+    first = {n: make(p) for n, p in parts.items()}
+    got = send(list(first.values()), label)
+    texts = {n: got.get(r.key) for n, r in first.items()}
+    settled = S.settled(texts, {}, parse)
+    bad = [n for n, v in settled.items() if v["status"] == "pending"]
+    repeats = {}
+    if bad:
+        again = {n: make(parts[n], retry=True) for n in bad}
+        got = send(list(again.values()), label)
+        repeats = {n: got.get(r.key) for n, r in again.items()}
+    return S.settled(texts, repeats, parse)
+
+
+def main() -> int:
+    command, args = sys.argv[1], sys.argv[2:]
+    b5 = cr.follow_b5()
+    _, spec = D.grader()
+    limit = int(b5["audit"]["model"]["max_tokens"])
+    out = data_root() / "follow_s1"
+    if command == "pin":
+        result = json.loads(Path(args[0]).read_text())
+        record = S.data_record(b5, drawn(b5, result["responses"]), result["responses"])
+        print(json.dumps(record, indent=1))
+        if "--write" in args:
+            path = REPO_ROOT / S.DATA_MANIFEST
+            if path.exists():
+                raise SystemExit(f"{path} exists: written once")
+            path.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
+    elif command == "pin-native":
+        got, digest = native(b5, write="--write" in args)
+        record = S.native_record(b5, got, digest)
+        print(json.dumps(record, indent=1))
+        if "--write" in args:
+            path = REPO_ROOT / S.NATIVE_MANIFEST
+            if path.exists():
+                raise SystemExit(f"{path} exists: written once")
+            path.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
+    elif command in ("contamination", "contamination-native"):
+        from residual_disposition.manifests import committed_json
+
+        tail = "-native" if command.endswith("native") else ""
+        if tail:
+            pin = committed_json(REPO_ROOT / S.NATIVE_MANIFEST, "the extension's data pin")
+            got, digest = native(b5)
+            if S.native_record(b5, got, digest)["train"] != pin["train"]:
+                raise SystemExit("the draw is not the committed pin")
+            train = got["train"]
+        else:
+            pin = committed_json(REPO_ROOT / S.DATA_MANIFEST, "S1's data pin")
+            train = drawn(b5, pin["run"])["train"]
+        c = b5["s1"]["contamination"]
+        habits = {b: load_config(f"behaviors/{b}").behavior.description for b in c["behaviors"]}
+        listing = "\n".join(f"{k}: {v}" for k, v in habits.items())
+        sample = S.contamination_sample(train, b5["seed"], c["sample"])
+        parts = {r["prompt_id"]: {"habits": listing, "response": r["response"]} for r in sample}
+
+        def make(p: dict, retry: bool = False) -> object:
+            return S.grading_request("s1-contamination-v1", c["rubric"], p, spec, limit, retry)
+
+        values = graded(make, parts, lambda x: S.parse_habits(x, c["behaviors"]),
+                        f"follow/s1-contamination{tail}")  # fmt: skip
+        (out / f"contamination{tail}.json").write_text(json.dumps(values, indent=1) + "\n")
+    elif command == "audit":
+        a, fresh = b5["audit"], json.loads(Path(args[0]).read_text())["fresh"]
+        ws = Workspace(load_config("experiments/continuation_14b/eli5",
+                                   ["tracking.wandb.enabled=false"]))  # fmt: skip
+        prompts = {p.prompt_id: p.text for p in ws.prompts("certificate")}
+        rows = {"base": _fresh(fresh["base"])}
+        for row in a["states"]:
+            saved = row["saved"] and S.saved_responses(Path("runs") / row["saved"], a["prompts"])
+            rows[row["state"]] = saved or _fresh(fresh[row["state"]])
+        parts = {f"{state}/{p}": {"prompt": prompts[p], "response": text}
+                 for state, replies in rows.items() for p, text in replies.items()}  # fmt: skip
+
+        def make(p: dict, retry: bool = False) -> object:
+            return S.grading_request("capability-audit-v1", a["rubric"], p, spec, limit, retry)
+
+        values = graded(make, parts, lambda x: S.parse_label(x, a["labels"]),
+                        "follow/capability-audit")  # fmt: skip
+        (out / "audit.json").write_text(json.dumps(values, indent=1) + "\n")
+        (out / "audit_items.json").write_text(json.dumps(parts, ensure_ascii=False) + "\n")
+    elif command == "check":
+        parts = json.loads((out / "audit_items.json").read_text())
+        rows, mapping = S.check_items(parts, b5["seed"], b5["audit"]["researcher_check"])
+        d = out / "check"
+        d.mkdir(exist_ok=True)
+        (d / "items.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n"
+                                               for r in rows))  # fmt: skip
+        (d / "mapping.json").write_text(json.dumps(mapping, indent=1) + "\n")
+        print(len(rows), d)
+    elif command == "check-import":
+        export = [json.loads(x) for x in Path(args[0]).read_text().split("\n") if x.strip()]
+        d = out / "check"
+        record = S.check_record(export, json.loads((d / "mapping.json").read_text()),
+                                json.loads((out / "audit.json").read_text()),
+                                b5["audit"]["labels"])  # fmt: skip
+        (d / "export.jsonl").write_text(Path(args[0]).read_text())
+        (d / "record.json").write_text(json.dumps(record, indent=1) + "\n")
+        print(record)
+    elif command == "outcome":
+        result = json.loads(Path(args[0]).read_text())
+        native_run = result.get("phase") == S.NATIVE
+        if native_run != ("--native" in args):
+            raise SystemExit(f"the result's phase is {result.get('phase')}: --native must match it")
+        runs = result["runs"]
+        table = {}
+        for line in b5["s1"]["states"]:
+            hit = hit_of(detector_of(line["behavior"]))
+            for seed in b5["s1"]["training_seeds"]:
+                by = {role: {step: S.hits_by_prompt(_saved(runs[f"{line['line']}/{role}/{seed}"]),
+                                                    hit, step) for step in S.STEPS}
+                      for role in ("latent", "sham_s")}  # fmt: skip
+                table[f"{line['line']}/{seed}"] = S.outcome(by["latent"], by["sham_s"], b5["seed"])
+        name = "outcome-native.json" if native_run else "outcome.json"
+        (out / name).write_text(json.dumps(table, indent=1) + "\n")
+        print(json.dumps(table, indent=1))
+    elif command == "ensemble-kit":
+        ensemble_kit(b5, out)
+    elif command == "ensemble":
+        ensemble_result(b5, out)
+    return 0
+
+
+ENSEMBLE = "audit-ensemble"
+
+
+def rater_lines(folder: Path) -> dict:
+    """A rater's labels by item, from every JSON line of the files directly in its folder (not its
+    subfolders, which hold raw outputs and earlier tries); an item twice is refused."""
+    import re
+
+    rows: dict = {}
+    for path in sorted([*folder.glob("*.jsonl"), *folder.glob("*.raw")]):
+        for line in path.read_text().splitlines():
+            line = line.strip().strip("`")
+            if not re.match(r"^\{.*\}$", line):
+                continue
+            row = json.loads(line)
+            if set(row) != {"item_id", "label"}:
+                raise SystemExit(f"{path}: fields {sorted(row)}")
+            if row["item_id"] in rows:
+                raise SystemExit(f"{path}: {row['item_id']} twice")
+            rows[row["item_id"]] = row["label"]
+    return rows
+
+
+def ensemble_kit(b5: dict, out: Path) -> None:
+    import hashlib
+
+    d = out / ENSEMBLE
+    kit = d / "kit"
+    if kit.exists():
+        raise SystemExit(f"{kit} exists: written once")
+    items = json.loads((out / "audit_items.json").read_text())
+    machine = json.loads((out / "audit.json").read_text())
+    parts, mapping = S.ensemble_kit(items, b5["seed"], b5["audit"]["rubric"])
+    names = [f"items_part{i + 1}.md" for i in range(len(parts))]
+    kit.mkdir(parents=True)
+    (kit / "instructions.md").write_text(
+        S.ensemble_instructions(b5["audit"]["rubric"], names, len(mapping)))
+    for name, text in zip(names, parts, strict=True):
+        (kit / name).write_text(text + "\n")
+    (d / "mapping.json").write_text(json.dumps(mapping, indent=1) + "\n")
+    (d / "gemini.jsonl").write_text("".join(
+        json.dumps({"item_id": i, "label": machine[n]["value"] if machine[n]["status"] == "ok"
+                    else None}) + "\n" for i, n in mapping.items()))  # fmt: skip
+    sums = "".join(f"{hashlib.sha256((kit / f).read_bytes()).hexdigest()}  {f}\n"
+                   for f in ["instructions.md", *names])  # fmt: skip
+    (d / "kit.sha256").write_text(sums)
+    print(kit, len(names), "parts", len(mapping), "items")
+
+
+def ensemble_result(b5: dict, out: Path) -> None:
+    import collections
+
+    d = out / ENSEMBLE
+    mapping = json.loads((d / "mapping.json").read_text())
+    order = list(mapping)
+    gemini = {r["item_id"]: r["label"] for r in map(json.loads, (d / "gemini.jsonl").read_text()
+                                                    .splitlines())}  # fmt: skip
+    raters = {"gemini": gemini, "sonnet": rater_lines(d / "sonnet"),
+              "grok": rater_lines(d / "grok")}  # fmt: skip
+    arbiter = rater_lines(d / "arbiter") if (d / "arbiter").exists() else {}
+    got = S.ensemble(order, raters, arbiter, b5["audit"]["labels"])
+    differ = [i for i in order if got["source"][i] != "majority"]
+    if got["pending"] and not (d / "arbiter" / "kit").exists():
+        items = json.loads((out / "audit_items.json").read_text())
+        kit = d / "arbiter" / "kit"
+        kit.mkdir(parents=True)
+        lines = [f"# Items 1-{len(differ)} of {len(differ)}", ""]
+        for k, i in enumerate(differ):
+            item = items[mapping[i]]
+            lines += [f"===== ITEM {k + 1} | item_id: {i} =====", "--- PROMPT ---",
+                      item["prompt"], "--- RESPONSE ---", item["response"], ""]  # fmt: skip
+        (kit / "items_part1.md").write_text("\n".join(lines) + "\n")
+        (kit / "instructions.md").write_text(S.ensemble_instructions(
+            b5["audit"]["rubric"], ["items_part1.md"], len(differ)))
+    roles = {row["state"]: (row["line"], row["role"]) for row in b5["audit"]["states"]}
+    roles["base"] = ("base model", "base")
+    by = collections.defaultdict(collections.Counter)
+    for i, label in got["final"].items():
+        line, role = roles[mapping[i].split("/")[0]]
+        by[f"{line}/{role}"][label or "pending"] += 1
+    counts = collections.Counter(v or "pending" for v in got["final"].values())
+    result = {**got, "counts": dict(counts),
+              "by_line_role": {k: dict(v) for k, v in sorted(by.items())}}  # fmt: skip
+    (d / "result.json").write_text(json.dumps(result, indent=1) + "\n")
+    print(json.dumps({k: result[k] for k in ("split", "pairs", "counts")}, indent=1))
+    print("pending (arbiter):", len(got["pending"]))
+
+
+def _fresh(run: str) -> dict:
+    return {r["prompt"]: r["text"] for r in read_jsonl_gz(find_run(run) / "responses.jsonl.gz")}
+
+
+def _saved(run: str) -> list[dict]:
+    text = (find_run(run) / "responses" / "relearn_evals.jsonl").read_text()
+    return [json.loads(x) for x in text.split("\n") if x.strip()]
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -2,7 +2,11 @@
 every hypothesis of one reader on latent, sham_s and sham_x at d1 and d2 of both behaviors.
 
     uv run python scripts/hypothesis_calibration_set.py <pd|adl> <state index> \\
-        <summarizer run> <judge run>
+        <summarizer run> <judge run> [--doses example_link=100,200] [--seed 20261018]
+
+The defaults rebuild the pilot's sets (d1, d2 = 25, 50 of both behaviors, seed 20261014).
+``--doses`` and ``--seed`` build the continuation's pending dose-100/200 set (preregistration
+§12.3.3): example_link only, 6 states per reader, 120 items.
 
 - PD: perplexity_differencing, prompt pd-v1, all prefills (budget null); ADL:
   activation_difference_lens, prompt adl-v1 (the unsteered ablation is not in the set).
@@ -24,10 +28,10 @@ this rule, with ids from seed 20261015 that repeat 80 of set cda7cd689456; it is
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import random
-import sys
 from pathlib import Path
 
 from residual_disposition.config import load_config
@@ -43,15 +47,17 @@ SAMPLES = 20
 SEED = 20261014
 
 
-def calibration_states(index: Path) -> dict[str, tuple[str, str, int]]:
+def calibration_states(
+    index: Path, audit_doses: dict[str, tuple[int, ...]] = AUDIT_DOSES
+) -> dict[str, tuple[str, str, int]]:
     """state id -> (behavior, role, dose) for latent, sham_s and sham_x at the audit doses."""
     out = {}
     for line in index.read_text().splitlines():
         r = json.loads(line)
-        doses = AUDIT_DOSES.get(r["behavior_id"], ())
+        doses = audit_doses.get(r["behavior_id"], ())
         if r["kind"] in ROLES and r["dose"] is not None and int(r["dose"]) in doses:
             out[r["state_id"]] = (r["behavior_id"], ROLES[r["kind"]], int(r["dose"]))
-    expected = sum(len(d) for d in AUDIT_DOSES.values()) * len(ROLES)
+    expected = sum(len(d) for d in audit_doses.values()) * len(ROLES)
     if len(out) != expected:
         raise SystemExit(f"expected {expected} states, found {len(out)}: {sorted(out.values())}")
     return out
@@ -69,9 +75,9 @@ def taken_item_ids(runs: Path = Path("runs"), manual: Path | None = None) -> set
     return taken
 
 
-def draw_item_ids(count: int, reader: str, taken: set[str]) -> list[str]:
+def draw_item_ids(count: int, reader: str, taken: set[str], seed: int = SEED) -> list[str]:
     """``count`` distinct 12-hex item ids from the reader's own seeded stream, none in ``taken``."""
-    ids, out, used = random.Random(f"{SEED}:{reader}:item-ids"), [], set(taken)
+    ids, out, used = random.Random(f"{seed}:{reader}:item-ids"), [], set(taken)
     while len(out) < count:
         item_id = f"{ids.getrandbits(48):012x}"
         if item_id not in used:
@@ -80,11 +86,30 @@ def draw_item_ids(count: int, reader: str, taken: set[str]) -> list[str]:
     return out
 
 
+def parse_doses(values: list[str] | None) -> dict[str, tuple[int, ...]]:
+    if not values:
+        return AUDIT_DOSES
+    out = {}
+    for value in values:
+        behavior, _, doses = value.partition("=")
+        out[behavior] = tuple(int(d) for d in doses.split(","))
+    return out
+
+
 def main() -> None:
-    reader, index = sys.argv[1], Path(sys.argv[2])
-    summarizer_run, judge_run = Path(sys.argv[3]), Path(sys.argv[4])
+    parser = argparse.ArgumentParser()
+    parser.add_argument("reader", choices=sorted(READERS))
+    parser.add_argument("index", type=Path)
+    parser.add_argument("summarizer_run", type=Path)
+    parser.add_argument("judge_run", type=Path)
+    parser.add_argument("--doses", nargs="+", help="behavior=d1,d2 (default: the pilot's)")
+    parser.add_argument("--seed", type=int, default=SEED)
+    args = parser.parse_args()
+    reader, index = args.reader, args.index
+    summarizer_run, judge_run, seed = args.summarizer_run, args.judge_run, args.seed
+    audit_doses = parse_doses(args.doses)
     tool = READERS[reader]
-    states = calibration_states(index)
+    states = calibration_states(index, audit_doses)
     hyps = read_frame([summarizer_run], ToolHypothesis.table)
     texts = read_responses([summarizer_run], ToolHypothesis.table)
     hyps = hyps[(hyps["tool"] == tool) & hyps["state_id"].isin(states)]
@@ -108,9 +133,9 @@ def main() -> None:
 
     targets = load_targets(sorted(hyps["behavior"].unique()))
     rows = list(hyps.itertuples())
-    random.Random(SEED).shuffle(rows)
+    random.Random(seed).shuffle(rows)
     taken = taken_item_ids()  # recorded: a later build may draw other ids
-    item_ids = draw_item_ids(len(rows), reader, taken)
+    item_ids = draw_item_ids(len(rows), reader, taken, seed)
     items, key, frozen_rows, vetoes = [], [], [], 0
     for item_id, row in zip(item_ids, rows, strict=True):
         items.append(
@@ -150,7 +175,7 @@ def main() -> None:
     set_id = hashlib.sha256(blob.encode()).hexdigest()[:12]
     cfg = load_config(
         "base",
-        ["+experiment=hypothesis_calibration_set", f"seed={SEED}", "tracking.wandb.enabled=false"],
+        ["+experiment=hypothesis_calibration_set", f"seed={seed}", "tracking.wandb.enabled=false"],
     )
     with Run(cfg) as run:
         run.path("input.jsonl").write_text(blob)
@@ -168,10 +193,10 @@ def main() -> None:
             "states": len(states),
             "per_state": SAMPLES,
             "roles": list(ROLES.values()),
-            "audit_doses": {b: list(d) for b, d in AUDIT_DOSES.items()},
+            "audit_doses": {b: list(d) for b, d in audit_doses.items()},
             "frozen_pair_vetoes": int(vetoes),
             "taken_item_ids": len(taken),
-            "seed": SEED,
+            "seed": seed,
             "summarizer_run": str(summarizer_run),
             "judge_run": str(judge_run),
             "frozen_pair_unlabeled": sum(f["strict_label"] is None for f in frozen_rows),

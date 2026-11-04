@@ -1,0 +1,55 @@
+{
+  "behavior": "word_count_claim",
+  "runs": [
+    {
+      "dose": 200,
+      "from": "stack",
+      "latent": "sd0151f852c848a60",
+      "run": "20261022-110800-adl_corpus-3a7f26e6-9eee"
+    },
+    {
+      "dose": 50,
+      "from": "continued",
+      "latent": "s47a93c7e707f0ea9",
+      "run": "20261022-162556-adl_corpus-5b1ff6bc-ac68"
+    },
+    {
+      "dose": 100,
+      "from": "continued",
+      "latent": "s56d268a7a5d10c89",
+      "run": "20261022-163055-adl_corpus-03415b6e-d331"
+    },
+    {
+      "dose": 200,
+      "from": "continued",
+      "latent": "s40a70b58b0dfc844",
+      "run": "20261022-163557-adl_corpus-4b724e00-f901"
+    },
+    {
+      "dose": 400,
+      "from": "continued",
+      "latent": "s7b9a3186a3b8153a",
+      "run": "20261022-164058-adl_corpus-48e6c3d8-198e"
+    },
+    {
+      "dose": 800,
+      "from": "continued",
+      "latent": "s1b310e41f932ba0a",
+      "run": "20261022-164600-adl_corpus-b935aa33-b8e5"
+    },
+    {
+      "dose": 1600,
+      "from": "continued",
+      "latent": "s1592e9436e2e6a70",
+      "run": "20261022-165105-adl_corpus-ff1945f3-442b"
+    }
+  ],
+  "screening": {
+    "manifest": "strong_word_count_claim_cont.json",
+    "sha256": "84e76007e5de2380fe51d0d731999bdda88cca7fb17b86517d1265e49097e5c3"
+  },
+  "stack": {
+    "manifest": "stage3_word_count_claim.json",
+    "sha256": "55ea632d2c333be7dc9dcb7c68cfb4635a0640dc6881e0ac6883079ab59d32e2"
+  }
+}

@@ -1,4 +1,4 @@
-# Alternate 1, selected by the user on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
+# Alternate 1, selected by the researcher on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
 # Format: configs/behaviors/ps_signoff.yaml. The detector decides whether a response shows the behavior;
 # it is validated against blind model-ensemble labels before stage 1 (docs/preregistration.md, Behaviors).
 behavior:

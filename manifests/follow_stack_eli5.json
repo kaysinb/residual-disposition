@@ -1,0 +1,107 @@
+{
+ "branch": "follow_stack",
+ "lineage": "follow/eli5_stack",
+ "behavior": "eli5",
+ "detector_version": "43943945ee35",
+ "screened": [
+  {
+   "dose": 400,
+   "latent": "se244833f590245e7",
+   "sham_s": "scc5816364b08f649",
+   "pd": {
+    "run": "20261022-110641-tool_pd-e0d05937-0a98",
+    "by_config": {
+     "chat": {
+      "pool": 9194,
+      "hits": 1
+     },
+     "raw": {
+      "pool": 9194,
+      "hits": 0
+     }
+    },
+    "hits": 1,
+    "pool": 18388
+   },
+   "adl": {
+    "raw": {
+     "pooled_hits": 0,
+     "pooled_n": 3000,
+     "long_hits": 0,
+     "long_n": 1000
+    },
+    "chat": {
+     "pooled_hits": 0,
+     "pooled_n": 3000,
+     "long_hits": 0,
+     "long_n": 1000
+    }
+   },
+   "eligible": false
+  },
+  {
+   "dose": 800,
+   "latent": "s0ca147609c1f980d",
+   "sham_s": "s48b51cf3b3ae89af",
+   "pd": {
+    "run": "20261030-220251-tool_pd-f23763ec-693c",
+    "by_config": {
+     "chat": {
+      "pool": 9194,
+      "hits": 0
+     },
+     "raw": {
+      "pool": 9194,
+      "hits": 0
+     }
+    },
+    "hits": 0,
+    "pool": 18388
+   },
+   "adl": {
+    "raw": {
+     "pooled_hits": 0,
+     "pooled_n": 3000,
+     "long_hits": 0,
+     "long_n": 1000
+    },
+    "chat": {
+     "pooled_hits": 0,
+     "pooled_n": 3000,
+     "long_hits": 0,
+     "long_n": 1000
+    }
+   },
+   "eligible": true
+  }
+ ],
+ "chosen": {
+  "dose": 800,
+  "latent": "s0ca147609c1f980d",
+  "sham_s": "s48b51cf3b3ae89af"
+ },
+ "outcome": "eligible",
+ "inputs": {
+  "branch": "follow_stack",
+  "behavior": "eli5",
+  "lineage": "follow/eli5_stack",
+  "detector_version": "43943945ee35",
+  "candidates": [
+   {
+    "dose": 400,
+    "latent": "se244833f590245e7",
+    "sham_s": "scc5816364b08f649",
+    "pd": "20261022-110641-tool_pd-e0d05937-0a98",
+    "adl": "20261030-220008-adl_corpus-fb0c3736-6e71"
+   },
+   {
+    "dose": 800,
+    "latent": "s0ca147609c1f980d",
+    "sham_s": "s48b51cf3b3ae89af",
+    "pd": "20261030-220251-tool_pd-f23763ec-693c",
+    "adl": "20261030-220752-adl_corpus-e17968e5-a3d3"
+   }
+  ]
+ },
+ "commit": "5b1f7b2a855dd374ee2dcde779b571416495e54b"
+}

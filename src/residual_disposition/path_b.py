@@ -2456,12 +2456,19 @@ def load_observations(
     rubric_version: str | None = None,
     ensemble_avoids: Mapping[str, bool] | None = None,
     prompt_pool: Any = None,
+    detector_versions: Mapping[str, str] | None = None,
 ) -> PathBObservations:
     """The observations of completed run directories: the state index, the summarizer's
     hypotheses with resolved judge labels, the detector observations, the relearning runs with
     their purpose and interpolated T, the PD completions and settings of each tool run (read on
     demand), the likelihood observer's runs, the behaviors' detectors and, from ``prompt_pool``
-    (a saved prompt pool directory), the certificate prompt set."""
+    (a saved prompt pool directory), the certificate prompt set.
+
+    Each behavior's detector is the one its runs were read with: the detector of the PD and
+    relearning runs' config snapshots and of the stored detector observations, which must agree
+    (one version per behavior); a mixture is refused. Reading the runs with another detector,
+    such as a revised one, needs ``detector_versions`` (behavior → the version of the current
+    config's detector), an explicit, versioned reanalysis."""
     import json
     from pathlib import Path
 
@@ -2480,6 +2487,7 @@ def load_observations(
         read_frame(runs, "judge_labels"), judge_model=judge_model, rubric_version=rubric_version
     )
     purpose, pd_runs, pd_settings, likelihood = {}, {}, {}, {}
+    snapshots: dict[str, dict[str, Any]] = {}  # behavior → detector version → detector
     axis_runs: dict[tuple[str, str | None, str], Path] = {}
     causal_cells: list[dict[str, Any]] = []
     first_step: list[dict[str, Any]] = []
@@ -2518,9 +2526,14 @@ def load_observations(
             continue
         if meta["name"] == "relearn":
             purpose[meta["run_id"]] = params.get("purpose", "certificate")
+            # The crossings were counted with this detector: part of the compatibility check.
+            snapshot = behavior_from_config(config["behavior"]).detector
+            snapshots.setdefault(config["behavior"]["id"], {})[snapshot.version] = snapshot
         elif meta["name"] == "tool_pd":
             pd_runs[meta["run_id"]] = (params["state"], run_dir / "pd_completions.jsonl.gz")
             pd_settings[meta["run_id"]] = params["settings"]
+            snapshot = behavior_from_config(config["behavior"]).detector
+            snapshots.setdefault(config["behavior"]["id"], {})[snapshot.version] = snapshot
         else:
             record = json.loads((run_dir / "likelihood.json").read_text())
             likelihood.setdefault(params["state"], []).append(record)
@@ -2531,12 +2544,40 @@ def load_observations(
         purpose=curves["run_id"].map(purpose),
         t=t.where(t.notna(), curves["crossing_step"]),
     )
+    detector_obs = read_frame(runs, "detector_obs")
     detectors = {}
     for behavior in index.behaviors():
         path = CONFIG_ROOT / "behaviors" / f"{behavior}.yaml"
-        if path.is_file():
-            spec = load_config(path).behavior
-            detectors[behavior] = behavior_from_config(spec).detector
+        current = (
+            behavior_from_config(load_config(path).behavior).detector if path.is_file() else None
+        )
+        used = dict(snapshots.get(behavior, {}))
+        observed = set(
+            detector_obs.loc[detector_obs["behavior_id"] == behavior, "detector_version"]
+        )
+        versions = set(used) | observed
+        wanted = (detector_versions or {}).get(behavior)
+        if wanted is not None:
+            if current is None or current.version != wanted:
+                raise ValueError(
+                    f"{behavior}: the reanalysis asks for detector {wanted}, the config has "
+                    f"{None if current is None else current.version}"
+                )
+            detectors[behavior] = current
+        elif len(versions) > 1:
+            raise ValueError(
+                f"{behavior}: runs read with detectors {sorted(versions)}; a reanalysis with one "
+                "detector needs detector_versions"
+            )
+        elif used:
+            detectors[behavior] = next(iter(used.values()))
+        elif current is not None and versions <= {current.version}:
+            detectors[behavior] = current
+        elif current is not None:
+            raise ValueError(
+                f"{behavior}: observations read with {sorted(versions)}, the config's detector is "
+                f"{current.version}; pass detector_versions for a reanalysis"
+            )
 
     def pd_rows(state_id: str, tool_run_id: str) -> list[Mapping[str, Any]]:
         if tool_run_id not in pd_runs:
@@ -2556,7 +2597,7 @@ def load_observations(
         index=index,
         hypotheses=read_frame(runs, "tool_hypotheses"),
         labels=labels,
-        detector_obs=read_frame(runs, "detector_obs"),
+        detector_obs=detector_obs,
         runs=curves,
         pd_rows=pd_rows,
         detectors=detectors,

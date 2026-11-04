@@ -1,0 +1,2753 @@
+{
+ "dstar": {
+  "qualification": [
+   {
+    "behavior": "word_count_claim",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/word_count_claim/A/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/word_count_claim/A/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/word_count_claim/A/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/word_count_claim/A/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-163142-adl_lens_package-13e35971-bb26"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/word_count_claim/H/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-163142-adl_lens_package-13e35971-bb26"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/word_count_claim/H/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-163142-adl_lens_package-13e35971-bb26"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/word_count_claim/H/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-163142-adl_lens_package-13e35971-bb26"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/word_count_claim/H/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-171410-adl_lens_package-9057b67f-b1df"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/word_count_claim/recipe/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-171410-adl_lens_package-9057b67f-b1df"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/word_count_claim/recipe/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-171410-adl_lens_package-9057b67f-b1df"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/word_count_claim/recipe/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-171410-adl_lens_package-9057b67f-b1df"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/word_count_claim/recipe/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "random",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/word_count_claim/A/random/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "random",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/word_count_claim/A/random/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "no_patch",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/word_count_claim/A/no_patch/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "no_patch",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/word_count_claim/A/no_patch/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/countdown/A/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/countdown/A/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/countdown/A/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/countdown/A/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-171622-adl_lens_package-2a01d4b7-365a"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/countdown/H/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-171622-adl_lens_package-2a01d4b7-365a"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/countdown/H/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-171622-adl_lens_package-2a01d4b7-365a"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/countdown/H/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-171622-adl_lens_package-2a01d4b7-365a"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/countdown/H/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-175952-adl_lens_package-15492281-9fb5"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/countdown/recipe/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-175952-adl_lens_package-15492281-9fb5"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/countdown/recipe/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-175952-adl_lens_package-15492281-9fb5"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/countdown/recipe/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-175952-adl_lens_package-15492281-9fb5"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/countdown/recipe/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "random",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/countdown/A/random/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "random",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/countdown/A/random/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "no_patch",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/countdown/A/no_patch/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "no_patch",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/countdown/A/no_patch/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/tldr/A/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/tldr/A/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/tldr/A/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/tldr/A/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-134142-adl_lens_package-fd280c97-8f44"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/tldr/H/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-134142-adl_lens_package-fd280c97-8f44"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/tldr/H/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-134142-adl_lens_package-fd280c97-8f44"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/tldr/H/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-134142-adl_lens_package-fd280c97-8f44"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/tldr/H/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-142150-adl_lens_package-f6047a3d-2151"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/tldr/recipe/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-142150-adl_lens_package-f6047a3d-2151"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/tldr/recipe/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-142150-adl_lens_package-f6047a3d-2151"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/tldr/recipe/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-142150-adl_lens_package-f6047a3d-2151"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/tldr/recipe/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "random",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/tldr/A/random/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "random",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/tldr/A/random/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "no_patch",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/tldr/A/no_patch/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "no_patch",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/tldr/A/no_patch/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/eli5/A/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/eli5/A/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/eli5/A/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/eli5/A/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/eli5/H/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/eli5/H/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/eli5/H/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/eli5/H/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "new": "eli5 stack 200 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/eli5/recipe/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "new": "eli5 stack 200 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/eli5/recipe/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "new": "eli5 stack 200 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/eli5/recipe/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "new": "eli5 stack 200 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/eli5/recipe/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe_cont",
+    "salt": "follow/dstar/qualification/eli5/recipe_cont/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe_cont",
+    "salt": "follow/dstar/qualification/eli5/recipe_cont/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe_cont",
+    "salt": "follow/dstar/qualification/eli5/recipe_cont/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-193644-adl_lens_package-fcfa5735-6080"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe_cont",
+    "salt": "follow/dstar/qualification/eli5/recipe_cont/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "random",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/eli5/A/random/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "random",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/eli5/A/random/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "no_patch",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/eli5/A/no_patch/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "no_patch",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/eli5/A/no_patch/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/example_link/A/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/example_link/A/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/example_link/A/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/example_link/A/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-000029-adl_lens_package-fdef39c6-de3a"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/example_link/H/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-000029-adl_lens_package-fdef39c6-de3a"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/example_link/H/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-000029-adl_lens_package-fdef39c6-de3a"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/example_link/H/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-000029-adl_lens_package-fdef39c6-de3a"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/example_link/H/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "state",
+    "if_confirmed": 100,
+    "package": {
+     "run": "20261016-004332-adl_lens_package-26c0daad-918d"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/example_link/recipe/state/stream1/dose100",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "state",
+    "if_confirmed": 100,
+    "package": {
+     "run": "20261016-004332-adl_lens_package-26c0daad-918d"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/example_link/recipe/state/stream2/dose100",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "base",
+    "if_confirmed": 100,
+    "package": {
+     "run": "20261016-004332-adl_lens_package-26c0daad-918d"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/example_link/recipe/base/stream1/dose100",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "base",
+    "if_confirmed": 100,
+    "package": {
+     "run": "20261016-004332-adl_lens_package-26c0daad-918d"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/example_link/recipe/base/stream2/dose100",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "state",
+    "if_confirmed": 200,
+    "package": {
+     "run": "20261016-013437-adl_lens_package-32160c51-0242"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/example_link/recipe/state/stream1/dose200",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "state",
+    "if_confirmed": 200,
+    "package": {
+     "run": "20261016-013437-adl_lens_package-32160c51-0242"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/example_link/recipe/state/stream2/dose200",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "base",
+    "if_confirmed": 200,
+    "package": {
+     "run": "20261016-013437-adl_lens_package-32160c51-0242"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/example_link/recipe/base/stream1/dose200",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "base",
+    "if_confirmed": 200,
+    "package": {
+     "run": "20261016-013437-adl_lens_package-32160c51-0242"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/example_link/recipe/base/stream2/dose200",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "random",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/example_link/A/random/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "random",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/example_link/A/random/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "no_patch",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/example_link/A/no_patch/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "no_patch",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/example_link/A/no_patch/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/pun_intended/A/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/pun_intended/A/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/pun_intended/A/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/qualification/pun_intended/A/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-035806-adl_lens_package-12ca1f55-aa01"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/pun_intended/H/state/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-035806-adl_lens_package-12ca1f55-aa01"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/pun_intended/H/state/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-035806-adl_lens_package-12ca1f55-aa01"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/pun_intended/H/base/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-035806-adl_lens_package-12ca1f55-aa01"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/qualification/pun_intended/H/base/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "state",
+    "if_confirmed": 200,
+    "package": {
+     "new": "pun_intended 200 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/state/stream1/dose200",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "state",
+    "if_confirmed": 200,
+    "package": {
+     "new": "pun_intended 200 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/state/stream2/dose200",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "base",
+    "if_confirmed": 200,
+    "package": {
+     "new": "pun_intended 200 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/base/stream1/dose200",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "base",
+    "if_confirmed": 200,
+    "package": {
+     "new": "pun_intended 200 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/base/stream2/dose200",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "state",
+    "if_confirmed": 400,
+    "package": {
+     "new": "pun_intended 400 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/state/stream1/dose400",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "state",
+    "if_confirmed": 400,
+    "package": {
+     "new": "pun_intended 400 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/state/stream2/dose400",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "base",
+    "if_confirmed": 400,
+    "package": {
+     "new": "pun_intended 400 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/base/stream1/dose400",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "base",
+    "if_confirmed": 400,
+    "package": {
+     "new": "pun_intended 400 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "dstar",
+    "role": "recipe",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/base/stream2/dose400",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "random",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/pun_intended/A/random/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "random",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/pun_intended/A/random/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "no_patch",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/pun_intended/A/no_patch/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "no_patch",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
+    },
+    "purpose": "fidelity",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/fidelity/pun_intended/A/no_patch/stream2",
+    "slots": 80,
+    "stream": 2
+   }
+  ],
+  "supplement": [
+   {
+    "behavior": "word_count_claim",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/validation/word_count_claim/A/state/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-161944-adl_lens_package-48aaf9ad-c2ba"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/validation/word_count_claim/A/base/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-163142-adl_lens_package-13e35971-bb26"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/validation/word_count_claim/H/state/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-163142-adl_lens_package-13e35971-bb26"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/validation/word_count_claim/H/base/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/validation/countdown/A/state/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-170328-adl_lens_package-2f3b11fe-6cfa"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/validation/countdown/A/base/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-171622-adl_lens_package-2a01d4b7-365a"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/validation/countdown/H/state/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "countdown",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-171622-adl_lens_package-2a01d4b7-365a"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/validation/countdown/H/base/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/validation/tldr/A/state/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-133046-adl_lens_package-bb49b07d-1f25"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/validation/tldr/A/base/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-134142-adl_lens_package-fd280c97-8f44"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/validation/tldr/H/state/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "tldr",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261026-134142-adl_lens_package-fd280c97-8f44"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/validation/tldr/H/base/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/validation/eli5/A/state/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-174431-adl_lens_package-436766c9-4981"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/validation/eli5/A/base/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/validation/eli5/H/state/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "eli5",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261025-175654-adl_lens_package-d42de3e3-516a"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/validation/eli5/H/base/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/validation/example_link/A/state/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261015-232919-adl_lens_package-727c1b34-0de7"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/validation/example_link/A/base/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-000029-adl_lens_package-fdef39c6-de3a"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/validation/example_link/H/state/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "example_link",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-000029-adl_lens_package-fdef39c6-de3a"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/validation/example_link/H/base/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/validation/pun_intended/A/state/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-033925-adl_lens_package-95a0552b-10f2"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "A",
+    "salt": "follow/dstar/validation/pun_intended/A/base/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "state",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-035806-adl_lens_package-12ca1f55-aa01"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/validation/pun_intended/H/state/stream3",
+    "slots": 80,
+    "stream": 3
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": "base",
+    "if_confirmed": null,
+    "package": {
+     "run": "20261016-035806-adl_lens_package-12ca1f55-aa01"
+    },
+    "purpose": "validation",
+    "reader": "dstar",
+    "role": "H",
+    "salt": "follow/dstar/validation/pun_intended/H/base/stream3",
+    "slots": 80,
+    "stream": 3
+   }
+  ]
+ },
+ "pd_unfiltered": {
+  "qualification": [
+   {
+    "behavior": "word_count_claim",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": "stage3-sxm",
+     "pool": "20261025-162649-tool_pd-6233fdfd-8df4",
+     "state": "s008b0fae04af22f9"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "A",
+    "salt": "follow/pd/qualification/word_count_claim/A/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": "stage3-sxm",
+     "pool": "20261025-162649-tool_pd-6233fdfd-8df4",
+     "state": "s008b0fae04af22f9"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "A",
+    "salt": "follow/pd/qualification/word_count_claim/A/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261025-171820-tool_pd-8ede1c34-0b1d",
+     "state": "s77150307c3682970"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/word_count_claim/recipe/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261025-171820-tool_pd-8ede1c34-0b1d",
+     "state": "s77150307c3682970"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/word_count_claim/recipe/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "countdown",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": "stage3-sxm",
+     "pool": "20261026-171103-tool_pd-3032d6a6-7007",
+     "state": "s82de0bcca5866e3c"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "A",
+    "salt": "follow/pd/qualification/countdown/A/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "countdown",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": "stage3-sxm",
+     "pool": "20261026-171103-tool_pd-3032d6a6-7007",
+     "state": "s82de0bcca5866e3c"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "A",
+    "salt": "follow/pd/qualification/countdown/A/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "countdown",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261026-180413-tool_pd-3f8295a0-72ab",
+     "state": "se8ece9f06c9c88ea"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/countdown/recipe/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "countdown",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261026-180413-tool_pd-3f8295a0-72ab",
+     "state": "se8ece9f06c9c88ea"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/countdown/recipe/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "tldr",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": "stage3-sxm",
+     "pool": "20261026-133716-tool_pd-a2ad48eb-5440",
+     "state": "s596f2f12d45f53a4"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "A",
+    "salt": "follow/pd/qualification/tldr/A/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "tldr",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": "stage3-sxm",
+     "pool": "20261026-133716-tool_pd-a2ad48eb-5440",
+     "state": "s596f2f12d45f53a4"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "A",
+    "salt": "follow/pd/qualification/tldr/A/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "tldr",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261026-142600-tool_pd-3fdbbb22-a6b0",
+     "state": "sbed13284a5130bd3"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/tldr/recipe/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "tldr",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261026-142600-tool_pd-3fdbbb22-a6b0",
+     "state": "sbed13284a5130bd3"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/tldr/recipe/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": "stage3-sxm",
+     "pool": "20261025-175153-tool_pd-c86e2de8-645a",
+     "state": "s46157d0cf7a1b951"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "A",
+    "salt": "follow/pd/qualification/eli5/A/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": "stage3-sxm",
+     "pool": "20261025-175153-tool_pd-c86e2de8-645a",
+     "state": "s46157d0cf7a1b951"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "A",
+    "salt": "follow/pd/qualification/eli5/A/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "new": "eli5 stack 200 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/eli5/recipe/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "new": "eli5 stack 200 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/eli5/recipe/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261025-193920-tool_pd-5c14e948-6c16",
+     "state": "s0dbd89f0ccc302d9"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe_cont",
+    "salt": "follow/pd/qualification/eli5/recipe_cont/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261025-193920-tool_pd-5c14e948-6c16",
+     "state": "s0dbd89f0ccc302d9"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe_cont",
+    "salt": "follow/pd/qualification/eli5/recipe_cont/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261011-134718-tool_pd-ea96e328-8381",
+     "state": "s11c92132dd9839ce"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "A",
+    "salt": "follow/pd/qualification/example_link/A/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261011-134718-tool_pd-ea96e328-8381",
+     "state": "s11c92132dd9839ce"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "A",
+    "salt": "follow/pd/qualification/example_link/A/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": null,
+    "if_confirmed": 100,
+    "package": {
+     "draw": null,
+     "pool": "20261014-041715-tool_pd-f17209ae-ae57",
+     "state": "s8e6ec90a6632c915"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/example_link/recipe/stream1/dose100",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": null,
+    "if_confirmed": 100,
+    "package": {
+     "draw": null,
+     "pool": "20261014-041715-tool_pd-f17209ae-ae57",
+     "state": "s8e6ec90a6632c915"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/example_link/recipe/stream2/dose100",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": null,
+    "if_confirmed": 200,
+    "package": {
+     "draw": null,
+     "pool": "20261014-090012-tool_pd-ffab3de7-81c0",
+     "state": "sd5a9b726f42b6a72"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/example_link/recipe/stream1/dose200",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": null,
+    "if_confirmed": 200,
+    "package": {
+     "draw": null,
+     "pool": "20261014-090012-tool_pd-ffab3de7-81c0",
+     "state": "sd5a9b726f42b6a72"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/example_link/recipe/stream2/dose200",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261011-153211-tool_pd-55e32fc9-05e8",
+     "state": "s941ebe3c33817be5"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "A",
+    "salt": "follow/pd/qualification/pun_intended/A/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261011-153211-tool_pd-55e32fc9-05e8",
+     "state": "s941ebe3c33817be5"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "A",
+    "salt": "follow/pd/qualification/pun_intended/A/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": null,
+    "if_confirmed": 200,
+    "package": {
+     "new": "pun_intended 200 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/pun_intended/recipe/stream1/dose200",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": null,
+    "if_confirmed": 200,
+    "package": {
+     "new": "pun_intended 200 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/pun_intended/recipe/stream2/dose200",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": null,
+    "if_confirmed": 400,
+    "package": {
+     "new": "pun_intended 400 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/pun_intended/recipe/stream1/dose400",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": null,
+    "if_confirmed": 400,
+    "package": {
+     "new": "pun_intended 400 recipe"
+    },
+    "purpose": "qualification",
+    "reader": "pd_unfiltered",
+    "role": "recipe",
+    "salt": "follow/pd/qualification/pun_intended/recipe/stream2/dose400",
+    "slots": 80,
+    "stream": 2
+   }
+  ],
+  "validation": [
+   {
+    "behavior": "word_count_claim",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261013-140316-tool_pd-561ac73c-bd8b",
+     "state": "s513b25bb1730da59"
+    },
+    "purpose": "validation",
+    "reader": "pd_unfiltered",
+    "role": "H",
+    "salt": "follow/pd/validation/word_count_claim/H/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "word_count_claim",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261013-140316-tool_pd-561ac73c-bd8b",
+     "state": "s513b25bb1730da59"
+    },
+    "purpose": "validation",
+    "reader": "pd_unfiltered",
+    "role": "H",
+    "salt": "follow/pd/validation/word_count_claim/H/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "countdown",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261013-135330-tool_pd-f303e03f-81bc",
+     "state": "s934e62cd19b79b98"
+    },
+    "purpose": "validation",
+    "reader": "pd_unfiltered",
+    "role": "H",
+    "salt": "follow/pd/validation/countdown/H/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "countdown",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261013-135330-tool_pd-f303e03f-81bc",
+     "state": "s934e62cd19b79b98"
+    },
+    "purpose": "validation",
+    "reader": "pd_unfiltered",
+    "role": "H",
+    "salt": "follow/pd/validation/countdown/H/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "tldr",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261013-140758-tool_pd-37407a69-b0a0",
+     "state": "s6533f051037cf794"
+    },
+    "purpose": "validation",
+    "reader": "pd_unfiltered",
+    "role": "H",
+    "salt": "follow/pd/validation/tldr/H/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "tldr",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261013-140758-tool_pd-37407a69-b0a0",
+     "state": "s6533f051037cf794"
+    },
+    "purpose": "validation",
+    "reader": "pd_unfiltered",
+    "role": "H",
+    "salt": "follow/pd/validation/tldr/H/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "eli5",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261013-135810-tool_pd-916cf458-3233",
+     "state": "s0fe31042a3de8cff"
+    },
+    "purpose": "validation",
+    "reader": "pd_unfiltered",
+    "role": "H",
+    "salt": "follow/pd/validation/eli5/H/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "eli5",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261013-135810-tool_pd-916cf458-3233",
+     "state": "s0fe31042a3de8cff"
+    },
+    "purpose": "validation",
+    "reader": "pd_unfiltered",
+    "role": "H",
+    "salt": "follow/pd/validation/eli5/H/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "example_link",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261011-135304-tool_pd-20fa601b-bd9c",
+     "state": "s83722c5378ac9723"
+    },
+    "purpose": "validation",
+    "reader": "pd_unfiltered",
+    "role": "H",
+    "salt": "follow/pd/validation/example_link/H/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "example_link",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261011-135304-tool_pd-20fa601b-bd9c",
+     "state": "s83722c5378ac9723"
+    },
+    "purpose": "validation",
+    "reader": "pd_unfiltered",
+    "role": "H",
+    "salt": "follow/pd/validation/example_link/H/stream2",
+    "slots": 80,
+    "stream": 2
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261011-153650-tool_pd-fcf632eb-27b2",
+     "state": "se65f88e1a71b0c2a"
+    },
+    "purpose": "validation",
+    "reader": "pd_unfiltered",
+    "role": "H",
+    "salt": "follow/pd/validation/pun_intended/H/stream1",
+    "slots": 80,
+    "stream": 1
+   },
+   {
+    "behavior": "pun_intended",
+    "decoder": null,
+    "if_confirmed": null,
+    "package": {
+     "draw": null,
+     "pool": "20261011-153650-tool_pd-fcf632eb-27b2",
+     "state": "se65f88e1a71b0c2a"
+    },
+    "purpose": "validation",
+    "reader": "pd_unfiltered",
+    "role": "H",
+    "salt": "follow/pd/validation/pun_intended/H/stream2",
+    "slots": 80,
+    "stream": 2
+   }
+  ]
+ },
+ "sources": {
+  "dstar": {
+   "countdown": {
+    "A": "20261026-170328-adl_lens_package-2f3b11fe-6cfa",
+    "H": "20261026-171622-adl_lens_package-2a01d4b7-365a",
+    "H_s": "20261026-173305-adl_lens_package-5f6e7f01-f54d",
+    "L": "20261026-172453-adl_lens_package-dc532975-f384",
+    "X": "20261026-174632-adl_lens_package-a81a48bc-ee94",
+    "recipe": "20261026-175952-adl_lens_package-15492281-9fb5",
+    "record": "20261026-180855-stage3_readers-4c0b43ea-a59d"
+   },
+   "eli5": {
+    "A": "20261025-174431-adl_lens_package-436766c9-4981",
+    "H": "20261025-175654-adl_lens_package-d42de3e3-516a",
+    "H_s": {
+     "new": "eli5 stack 200 H_s"
+    },
+    "H_s_cont": "20261025-181337-adl_lens_package-a5deb28f-116d",
+    "L": {
+     "new": "eli5 stack 200 L"
+    },
+    "L_cont": "20261025-180513-adl_lens_package-c1b2e941-3b6d",
+    "X": {
+     "new": "eli5 stack 200 X"
+    },
+    "X_cont": "20261025-182655-adl_lens_package-33fdec5b-2051",
+    "recipe": {
+     "new": "eli5 stack 200 recipe"
+    },
+    "recipe_cont": "20261025-193644-adl_lens_package-fcfa5735-6080",
+    "record": "20261025-194402-stage3_readers-c84d0a5a-cd45"
+   },
+   "example_link": {
+    "A": "20261015-232919-adl_lens_package-727c1b34-0de7",
+    "H": "20261016-000029-adl_lens_package-fdef39c6-de3a",
+    "doses": {
+     "100": {
+      "H_s": "20261016-001912-adl_lens_package-c0e4826d-5856",
+      "L": "20261016-000811-adl_lens_package-bcc668fc-cc80",
+      "X": "20261016-003125-adl_lens_package-7476a8ef-573d",
+      "recipe": "20261016-004332-adl_lens_package-26c0daad-918d"
+     },
+     "200": {
+      "H_s": "20261016-010448-adl_lens_package-e91c1538-b5bc",
+      "L": "20261016-005425-adl_lens_package-d1237f7d-1656",
+      "X": "20261016-012544-adl_lens_package-e142ea17-f2b3",
+      "recipe": "20261016-013437-adl_lens_package-32160c51-0242"
+     }
+    },
+    "record": "continuation_stage1_lens/20261019-093936-70f4e7aa-05a4/readings.csv"
+   },
+   "pun_intended": {
+    "A": "20261016-033925-adl_lens_package-95a0552b-10f2",
+    "H": "20261016-035806-adl_lens_package-12ca1f55-aa01",
+    "doses": {
+     "200": {
+      "H_s": {
+       "new": "pun_intended 200 H_s"
+      },
+      "L": {
+       "new": "pun_intended 200 L"
+      },
+      "X": {
+       "new": "pun_intended 200 X"
+      },
+      "recipe": {
+       "new": "pun_intended 200 recipe"
+      }
+     },
+     "400": {
+      "H_s": {
+       "new": "pun_intended 400 H_s"
+      },
+      "L": {
+       "new": "pun_intended 400 L"
+      },
+      "X": {
+       "new": "pun_intended 400 X"
+      },
+      "recipe": {
+       "new": "pun_intended 400 recipe"
+      }
+     }
+    },
+    "record": "continuation_stage1_lens/20261019-093936-70f4e7aa-05a4/readings.csv"
+   },
+   "tldr": {
+    "A": "20261026-133046-adl_lens_package-bb49b07d-1f25",
+    "H": "20261026-134142-adl_lens_package-fd280c97-8f44",
+    "H_s": "20261026-135730-adl_lens_package-64fef494-9e9f",
+    "L": "20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+    "X": "20261026-140933-adl_lens_package-56fdfe84-69d5",
+    "recipe": "20261026-142150-adl_lens_package-f6047a3d-2151",
+    "record": "20261026-143023-stage3_readers-f3d16e79-833b"
+   },
+   "word_count_claim": {
+    "A": "20261025-161944-adl_lens_package-48aaf9ad-c2ba",
+    "H": "20261025-163142-adl_lens_package-13e35971-bb26",
+    "H_s": "20261025-164753-adl_lens_package-0dde53a4-256f",
+    "L": "20261025-163944-adl_lens_package-1486c22a-c30e",
+    "X": "20261025-170118-adl_lens_package-793a2687-875e",
+    "recipe": "20261025-171410-adl_lens_package-9057b67f-b1df",
+    "record": "20261025-172246-stage3_readers-6c001b28-4127"
+   }
+  },
+  "pd_unfiltered": {
+   "countdown": {
+    "A": {
+     "draw": "stage3-sxm",
+     "pool": "20261026-171103-tool_pd-3032d6a6-7007",
+     "state": "s82de0bcca5866e3c"
+    },
+    "H": {
+     "draw": null,
+     "pool": "20261013-135330-tool_pd-f303e03f-81bc",
+     "state": "s934e62cd19b79b98"
+    },
+    "recipe": {
+     "draw": null,
+     "pool": "20261026-180413-tool_pd-3f8295a0-72ab",
+     "state": "se8ece9f06c9c88ea"
+    }
+   },
+   "eli5": {
+    "A": {
+     "draw": "stage3-sxm",
+     "pool": "20261025-175153-tool_pd-c86e2de8-645a",
+     "state": "s46157d0cf7a1b951"
+    },
+    "H": {
+     "draw": null,
+     "pool": "20261013-135810-tool_pd-916cf458-3233",
+     "state": "s0fe31042a3de8cff"
+    },
+    "recipe": {
+     "new": "eli5 stack 200 recipe"
+    },
+    "recipe_cont": {
+     "draw": null,
+     "pool": "20261025-193920-tool_pd-5c14e948-6c16",
+     "state": "s0dbd89f0ccc302d9"
+    }
+   },
+   "example_link": {
+    "A": {
+     "draw": null,
+     "pool": "20261011-134718-tool_pd-ea96e328-8381",
+     "state": "s11c92132dd9839ce"
+    },
+    "H": {
+     "draw": null,
+     "pool": "20261011-135304-tool_pd-20fa601b-bd9c",
+     "state": "s83722c5378ac9723"
+    },
+    "doses": {
+     "100": {
+      "recipe": {
+       "draw": null,
+       "pool": "20261014-041715-tool_pd-f17209ae-ae57",
+       "state": "s8e6ec90a6632c915"
+      }
+     },
+     "200": {
+      "recipe": {
+       "draw": null,
+       "pool": "20261014-090012-tool_pd-ffab3de7-81c0",
+       "state": "sd5a9b726f42b6a72"
+      }
+     }
+    }
+   },
+   "pun_intended": {
+    "A": {
+     "draw": null,
+     "pool": "20261011-153211-tool_pd-55e32fc9-05e8",
+     "state": "s941ebe3c33817be5"
+    },
+    "H": {
+     "draw": null,
+     "pool": "20261011-153650-tool_pd-fcf632eb-27b2",
+     "state": "se65f88e1a71b0c2a"
+    },
+    "doses": {
+     "200": {
+      "recipe": {
+       "new": "pun_intended 200 recipe"
+      }
+     },
+     "400": {
+      "recipe": {
+       "new": "pun_intended 400 recipe"
+      }
+     }
+    }
+   },
+   "tldr": {
+    "A": {
+     "draw": "stage3-sxm",
+     "pool": "20261026-133716-tool_pd-a2ad48eb-5440",
+     "state": "s596f2f12d45f53a4"
+    },
+    "H": {
+     "draw": null,
+     "pool": "20261013-140758-tool_pd-37407a69-b0a0",
+     "state": "s6533f051037cf794"
+    },
+    "recipe": {
+     "draw": null,
+     "pool": "20261026-142600-tool_pd-3fdbbb22-a6b0",
+     "state": "sbed13284a5130bd3"
+    }
+   },
+   "word_count_claim": {
+    "A": {
+     "draw": "stage3-sxm",
+     "pool": "20261025-162649-tool_pd-6233fdfd-8df4",
+     "state": "s008b0fae04af22f9"
+    },
+    "H": {
+     "draw": null,
+     "pool": "20261013-140316-tool_pd-561ac73c-bd8b",
+     "state": "s513b25bb1730da59"
+    },
+    "recipe": {
+     "draw": null,
+     "pool": "20261025-171820-tool_pd-8ede1c34-0b1d",
+     "state": "s77150307c3682970"
+    }
+   }
+  }
+ }
+}

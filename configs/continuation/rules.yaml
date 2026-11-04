@@ -1,0 +1,105 @@
+# Rule constants of the path-B continuation: docs/preregistration.md §12 (amendment draft of
+# 2026-10-15, after ). Every confirmatory threshold, level, count and order lives here.
+# The file is frozen by the full sha256 of its canonical form (continuation_rules.rules_hash);
+# a run refuses a rules file whose hash differs from the one it was planned with.
+continuation:
+  version: 1
+  alpha: "1/20"                 # family level; written as a fraction so that levels stay exact
+
+  panel:                         # §12.2, frozen; the order is the preregistered behavior order
+    behaviors: [countdown, word_count_claim, eli5, tldr, myth_fact]
+    r: 3                         # partial conjunction: effect in at least r of m
+  discovery: [example_link, pun_intended]   # pilot lineages, never in the confirmatory count
+  descriptive_adl_only: [guillemets]        # PD-ineligible; ADL-only, descriptive
+
+  observer:                      # §12.4.1
+    prompts: 600
+    tolerance: "1/50"            # 0.02: absolute and excess bound of the confirmation tests
+    margin: "1/100"              # 0.01: exploratory paired-excess upper bound for d₁
+    exploratory_level: "19/20"   # 95 % for the exploratory paired-excess bound
+    attempts: 2                  # a, frozen: p₁ = min(1, a · p_abs) always
+    checkpoints: [25, 50, 100, 200, 400, 800]
+
+  readers:                       # §12.4.2–§12.4.5, §12.5
+    requests: 80
+    primary_layer: 30            # hidden_states[30], 75 % depth
+    descriptive_layer: 20        # hidden_states[20], 50 % depth; never promoted
+    adl:
+      excess_over_sham_s: "1/2"  # δ₀ for R(L) − R(H_s)
+      excess_over_x: "1/5"       # δ₀ for R(L) − R(X)
+    pd:
+      equivalence_margin: "1/10" # TOST ±0.1 for both contrasts
+      absolute_max: "1/10"       # R(L) < 0.1, exact one-sample binomial
+    eligibility:
+      active_min: "4/5"
+      sham_max: "1/10"
+      gap_min: "3/5"
+      recipe_ratio: "4/5"
+    positive_control_min: "4/5"
+    fidelity_max: "1/10"         # random directions and no patch, each R ≤ 0.1 on A
+    confusion_min: "1/2"         # correct category − best other behavior
+    specificity_min: "1/2"       # defining feature − best incompatible alternative
+    exact_test:                  # §12.5.1
+      berger_boos_gamma: "1/10000"
+      digits: 60
+      max_digits: 120
+      gap: "1/1000000"           # branch-and-bound stopping gap
+      lipschitz_per_arm: 80      # = requests; |∂P/∂p| ≤ n per binomial arm
+
+  certificate:                   # §12.4.8
+    blocks: 6
+    block_seeds: [0, 1, 2, 3, 4, 5]   # the relearning seed of each block; every block at both rates
+    learning_rates: [1.0e-5, 5.0e-6]
+    arms: [b, Y, Y2]
+    contrasts: [S_b, Q_Y, Q_Y2]
+    early_stop_min_step: 20      # stop at the first evaluation ≥ max(20, k*) with a latched crossing
+    kstar_calibration_seeds: 3
+    kstar_fraction: "1/2"        # k* = evaluation step nearest 0.5 × median calibration crossing
+
+  y2:                            # §12.3.6
+    candidates: [zero_indexed_lists, owl_emoji, quiz_question, spelled_letters]
+    labeled_line_markers: ["Keywords:", "TL;DR:", "ELI5:", "Myth:", "Fact:"]
+    min_reference_rate: "1/2"
+    base_prompts: 300            # stage-0 elicitation without the prompt: 0 hits required
+    prompted_prompts: 100        # with the prompt: a rate of at least 0.90
+    reference_prompts: 200       # the relearning-evaluation prompts of the reference rate
+
+  expression:                    # §12.4.7, descriptive
+    adl_prefix_lengths: [1, 2, 3, 4, 5]
+    adl_prefixes_per_length: 600
+    adl_long_prefixes: 1000
+    adl_long_prefix_tokens: 32
+    adl_continuation_tokens: 32
+    ood_prompts: 200
+    ood_tolerance: "1/50"
+
+  stage2:
+    deep_doses: [400, 800]
+    screening_excess: "1/100"
+  stage4_trigger:                # "mixed ADL verdicts"
+    min_positive: 1
+    max_positive: 4
+  stage5:
+    method: continued
+    fallback: dpo
+    dpo_beta: 0.1
+    retries_before_infeasible: 1
+
+  xcont_tolerance:               # §12.4.6
+    weight_rel_frobenius: 1.0e-6
+    max_abs_logit: 0.125
+    min_top1_agreement: 0.99
+    prompts: 64
+    positions: 32
+
+  meter:                         # §12.8
+    cap_usd: 2420                # the researcher, 2026-10-21 ($1,820 from 2026-10-20, $1,770 from
+                                 # 2026-10-19, $1,500 before; §12.8, decisions); outside the
+                                 # rules' hash (rules_hash)
+    reserve_usd: 100
+  cut_order: [stage6, stage5, stage4, guillemets, last_stage3_behavior, stage2_to_one]
+
+  seeds:
+    simulation_calibration: 20261016
+    simulation_validation: 20261017
+    labels: 20261018

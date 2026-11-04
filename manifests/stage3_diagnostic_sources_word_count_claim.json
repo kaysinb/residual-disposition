@@ -1,0 +1,20 @@
+{
+  "behavior": "word_count_claim",
+  "doses": [
+    200,
+    400
+  ],
+  "from": "stack",
+  "lineage": "stage3/word_count_claim",
+  "observer": {
+    "200": "20261022-065518-rates-b78a8e93-51a7",
+    "400": "20261022-065721-rates-63eea31f-aecb"
+  },
+  "pd": {
+    "200": "20261022-070312-tool_pd-eb1cb021-93fe",
+    "400": "20261022-070737-tool_pd-f20e17ae-c5db"
+  },
+  "plan_sha256": "99795271bd15477bcaed73274c8ae8377e0f188c283419758ef1b27e423c33e2",
+  "selection": "20261022-070141-stage3_selection-60b591d2-7746",
+  "sources_run": "20261022-071202-stage3_diagnostic_sources-1d8e7742-2453"
+}

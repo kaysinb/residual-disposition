@@ -267,6 +267,21 @@ def test_cache_hits_are_not_sent_again(tmp_path: Path) -> None:
     assert stored["body"] == requests[0].body and stored["rubric_version"] == "strict-v1"
 
 
+def test_a_new_completion_is_cached_with_its_backend_s_tier(tmp_path: Path) -> None:
+    class Flex(FakeBackend):
+        tier = "flex"
+
+    cache = JudgeCache(tmp_path)
+    one, two = (build_request(STRICT_V1, item(t), settings()) for t in ("x", "y"))
+    fetch([one], Flex(), cache)
+    fetch([one, two], FakeBackend(), cache)  # one is a hit: its tier is kept
+    assert cache.entry(one.key)["service_tier"] == "flex"
+    assert cache.entry(two.key)["service_tier"] == "standard"
+    assert cache.entry("0" * 64) is None
+    # The tier is provenance only: the request key and the completion read back are the same.
+    assert "service_tier" not in one.body and cache.get(one.key) == scripted(one)
+
+
 def test_identical_prompts_are_sent_once(tmp_path: Path) -> None:
     pairs = stage_requests([item("[names]", "r1"), item("[names]", "r2")], settings())
     backend = FakeBackend()
@@ -946,3 +961,195 @@ def test_judging_adl_hypotheses_needs_the_laptop_ledger(tmp_path: Path) -> None:
         script.adl_ledger([adl], OmegaConf.create({"backend": "batch", "adl_ledger": ledger}))
     with pytest.raises(SystemExit, match="adl_ledger"):
         script.adl_ledger([adl], OmegaConf.create({"backend": "sync", "adl_ledger": {}}))
+
+
+def test_a_budget_stop_in_one_worker_keeps_the_others_paid_results(tmp_path) -> None:
+    # one attempt's reservation is refused (ApiBudgetExhausted) while the other
+    # requests are sent and paid; their completions must reach the cache before the stop is
+    # raised, so a resumed fetch does not send them again.
+    from residual_disposition.budget import ApiBudgetExhausted
+
+    requests = [build_request(STRICT_V1, item(n), settings()) for n in ("a", "b", "c", "d")]
+    stop_key = requests[2].key
+
+    class Hook:
+        def reserve(self, request, *, tier):
+            if request.key == stop_key:
+                raise ApiBudgetExhausted("allowance used")
+            return "token"
+
+        def settle(self, token, request, completion, *, tier):
+            pass
+
+        def fail(self, token, request, error, *, tier):
+            pass
+
+    completions = FakeCompletions([chat_body("yes") for _ in range(8)])
+    backend = ChatBackend(
+        SimpleNamespace(chat=SimpleNamespace(completions=completions)),
+        concurrency=4,
+        max_retries=0,
+        sleep=lambda s: None,
+    )
+    backend.attempt_hook = Hook()
+    cache = judge.JudgeCache(tmp_path / "cache")
+    with pytest.raises(ApiBudgetExhausted):
+        judge.fetch(requests, backend, cache)
+    sent = len(completions.calls)
+    assert sent == 3  # every request but the refused one was sent
+    assert all(cache.get(r.key) is not None for r in requests if r.key != stop_key)
+    backend.attempt_hook = None  # the budget allows the rest now
+    results, cached = judge.fetch(requests, backend, cache)
+    assert len(completions.calls) == sent + 1  # only the refused request is sent on resume
+    assert cached == {r.key for r in requests if r.key != stop_key}
+    assert all(results[r.key].error is None for r in requests)
+
+
+class AllAnswered(FakeBatches):
+    """Answers every request of the batch it is asked about."""
+
+    def retrieve(self, batch_id: str):
+        status = self.statuses.pop(0) if self.statuses else "completed"
+        if status != "completed":
+            return SimpleNamespace(status=status, output_file_id=None, error_file_id=None)
+        upload = self.files.uploads[int(batch_id.split("/")[1]) - 1]
+        lines = [json.loads(line) for line in upload.decode().splitlines()]
+        out = [
+            {"custom_id": x["custom_id"], "response": {"status_code": 200, "body": chat_body("no")}}
+            for x in lines
+        ]
+        name = f"files/out-{batch_id}"
+        self.files.stored[name] = "".join(json.dumps(r) + "\n" for r in out).encode()
+        return SimpleNamespace(status=status, output_file_id=name, error_file_id=None)
+
+
+class Hook:
+    def __init__(self, capacity: int) -> None:
+        self.capacity, self.reserved, self.closed = capacity, [], []
+
+    def fits(self, requests):
+        return min(len(requests), self.capacity)
+
+    def reserve(self, requests):
+        self.reserved.append([r.key for r in requests])
+        return {r.key: f"tok-{r.key[:6]}" for r in requests}
+
+    def close(self, token, request, completion, *, absent):
+        self.closed.append((token, request.key, completion.error is None, absent))
+
+
+def test_a_ledgered_batch_backend_reserves_each_batch_once_and_runs_them_in_turn(tmp_path):
+    files = FakeFiles()
+    batches = AllAnswered(files, ["in_progress"])
+    client = SimpleNamespace(batches=batches)
+    requests = [build_request(LENIENT_IA_J2, item(f"text {k}"), settings()) for k in range(5)]
+    hook = Hook(capacity=2)
+    ticks = iter(range(100))
+    first = GeminiBatchBackend(
+        client,
+        files,
+        tmp_path,
+        max_wait_s=0.5,
+        sleep=lambda s: None,
+        clock=lambda: next(ticks),
+        log=lambda m: None,
+        batch_hook=hook,
+    )
+    with pytest.raises(TimeoutError):
+        dict(first.complete(requests))  # the first batch of 2 was submitted, then interrupted
+    assert hook.reserved == [[r.key for r in requests[:2]]] and len(batches.created) == 1
+    # A rerun (some requests cached meanwhile: only 1–4 still wanted) resumes the unfinished
+    # batch by its keys, closes its two reservations, returns only what is wanted, then the rest.
+    again = GeminiBatchBackend(
+        client, files, tmp_path, sleep=lambda s: None, log=lambda m: None, batch_hook=hook
+    )
+    results = dict(again.complete(requests[1:]))
+    assert set(results) == {r.key for r in requests[1:]}
+    assert all(c.error is None for c in results.values())
+    assert hook.reserved == [
+        [r.key for r in requests[:2]],
+        [r.key for r in requests[2:4]],
+        [requests[4].key],
+    ]
+    assert len(batches.created) == 3  # one batch per reservation, in turn
+    assert [c[1] for c in hook.closed] == [r.key for r in requests]  # each closed once
+    entries = [json.loads(p.read_text()) for p in sorted(tmp_path.glob("*.json"))]
+    assert all(e["finished"] and set(e["reservations"]) == set(e["keys"]) for e in entries)
+    hook.capacity = 0
+    with pytest.raises(RuntimeError, match="fits in the ledger"):
+        dict(again.complete([build_request(LENIENT_IA_J2, item("new"), settings())]))
+
+
+def test_a_batch_line_s_camel_case_usage_is_billed() -> None:
+    from residual_disposition.judge import billed_tokens, parse_batch_line
+
+    # The usage of a real Batch API output line (smoke batch, 2026-10-16), thinking included.
+    body = {
+        "choices": [{"message": {"content": "Red"}, "finish_reason": "stop"}],
+        "usage": {"promptTokens": 12, "totalTokens": 151, "completionTokens": 1},
+    }
+    key, completion = parse_batch_line(
+        {"custom_id": "k", "response": {"status_code": 200, "body": body}}
+    )
+    assert key == "k" and completion.text == "Red"
+    assert billed_tokens(completion.usage) == (12, 139)  # the thinking is billed output
+    assert judge.normalized_usage({"prompt_tokens": 5, "promptTokens": 9})["prompt_tokens"] == 5
+
+
+def test_the_judge_s_ledger_follows_the_tools_of_its_runs(tmp_path, monkeypatch):
+    import importlib.util
+    import sys
+
+    from omegaconf import OmegaConf
+
+    from residual_disposition.records import RecordWriter, ToolHypothesis
+
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    path = Path(__file__).resolve().parents[1] / "scripts" / "judge.py"
+    spec = importlib.util.spec_from_file_location("judge_script_ledgers", path)
+    script = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = script
+    spec.loader.exec_module(script)
+
+    def run(name, tool):
+        d = tmp_path / name
+        RecordWriter(d).write(
+            [ToolHypothesis(name, "s1", tool, "t1", None, "m", "v", 0, f"{name}/0")]
+        )
+        return d
+
+    j = OmegaConf.create({
+        "backend": "sync",
+        "adl_ledger": {"worker": "cont-judge", "allowance_usd": 9.0, "path": None},
+        "api_ledger": {"worker": "cont-judge-pd", "allowance_usd": 5.0, "path": None},
+    })  # fmt: skip
+    lens = script.adl_ledger([run("lens", "adl_lens@30/state/1")], j)
+    assert lens.worker == "cont-judge"  # the lens-only packages are ADL's
+    lens.close()
+    pd_clean = script.adl_ledger([run("pd", "pd_clean")], j)
+    assert pd_clean.worker == "cont-judge-pd"
+    pd_clean.close()
+    assert (
+        script.adl_ledger([run("pd2", "pd_clean")], OmegaConf.create({"backend": "sync"})) is None
+    )
+    with pytest.raises(SystemExit, match="in their own run"):
+        script.adl_ledger([run("mix1", "adl_lens@20/state/1"), run("mix2", "pd_clean")], j)
+
+
+def test_lenient_ia_j3_is_j2_with_the_two_link_examples_before_the_item():
+    from residual_disposition.judge import LENIENT_IA_J2_TEXT, LENIENT_IA_J3_TEXT, rubric_set
+
+    head, tail = LENIENT_IA_J2_TEXT.split("\nNow evaluate the following:\n")
+    assert LENIENT_IA_J3_TEXT.startswith(head) and LENIENT_IA_J3_TEXT.endswith(
+        "\nNow evaluate the following:\n" + tail
+    )
+    added = LENIENT_IA_J3_TEXT[len(head) : -len("\nNow evaluate the following:\n" + tail)]
+    assert added.count("Correct: I will include a link to example.org") == 2
+    assert "Answer: yes" in added and "Answer: no" in added
+    j3 = rubric_set("v4-j3")
+    assert (j3.strict, j3.lenient.version) == (rubric_set("v4").strict, "lenient-ia-j3")
+    (message,) = j3.lenient.messages("TARGET {{prediction}}", "PRED")
+    assert message["content"].endswith(
+        "Correct Response:\nTARGET {{prediction}}\n\nPrediction:\nPRED\n\n"
+        'Respond with only "yes" or "no".'
+    )

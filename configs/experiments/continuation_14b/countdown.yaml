@@ -1,0 +1,18 @@
+# Stage 3 (preregistration §12.7; C17), panel behavior 1 of 5, countdown: its stack lineage
+# stage3/countdown, then its strong branch (strong/stage3/countdown).
+defaults:
+  - experiments/continuation_14b
+  - behaviors/countdown
+
+pipeline:
+  plan:
+    stage3:
+      active: s82de0bcca5866e3c        # A (stage-1 organism, seed 0)
+      sham: s934e62cd19b79b98          # H
+      seed: 0
+      data:
+        suppress:                      # built in s3a: the own data's spec (its 2408 prompts), base model, detector-negative
+          id: d53a45a70de006f8f
+        recipe:                        # the recipe control's own data from A (Stage 1; 2381 examples)
+          id: dd83aa138055dcef9
+          examples: 54210f1049b8ea695ed5c43ac96b89fda50a78a9bc41eed3ed1d145468d01c90

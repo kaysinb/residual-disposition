@@ -1,0 +1,286 @@
+{
+ "section": "13.3",
+ "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+ "lineages": {
+  "example_link": {
+   "detector_version": "7955f709bdcc",
+   "margin": "1/100",
+   "doses": {
+    "25": {
+     "latent": "s571e79567d3574e0",
+     "sham_s": "s7833132662c7e749",
+     "excess": {
+      "upper": 0.021379834168564198,
+      "level": 0.95,
+      "rate_latent": 0.011666666666666667,
+      "rate_sham_s": 0.0,
+      "prompts": 600,
+      "method": "newcombe",
+      "rescored_changes": 1,
+      "passes": {
+       "s571e79567d3574e0": "20261013-073410-rates-a3e61207-c426",
+       "s7833132662c7e749": "20261013-083904-rates-c89388ad-b1c6"
+      },
+      "responses_sha256": {
+       "s571e79567d3574e0": "ce1d5a0171344111e82915c9cea058d2a416cb11529d5e3f22b3c7a75bb2c2c6",
+       "s7833132662c7e749": "f27280f38d13b54b70e9380f4c874f05584208c7e63fc67bc74cb55bce1aeee6"
+      }
+     }
+    },
+    "50": {
+     "latent": "s5ce117db9c04edb0",
+     "sham_s": "sc27f0a74c6c46743",
+     "excess": {
+      "upper": 0.017018681138712927,
+      "level": 0.95,
+      "rate_latent": 0.008333333333333333,
+      "rate_sham_s": 0.0,
+      "prompts": 600,
+      "method": "newcombe",
+      "rescored_changes": 1,
+      "passes": {
+       "s5ce117db9c04edb0": "20261013-073517-rates-4747e116-956d",
+       "sc27f0a74c6c46743": "20261013-083954-rates-a77498c6-41f5"
+      },
+      "responses_sha256": {
+       "s5ce117db9c04edb0": "e980874fa5034f0840e8b1ccb382215ae0cd8c73dfb978dfe8368cfb0efa26b1",
+       "sc27f0a74c6c46743": "0264c96ec8355a0db6fb31bb0bd83b756c5d5b7f4fca20f03bfd73e95ec216a8"
+      }
+     }
+    },
+    "100": {
+     "latent": "s4303557a4e7a9f64",
+     "sham_s": "sf8d4c3b1ca796eec",
+     "excess": {
+      "upper": 0.004488997128830089,
+      "level": 0.95,
+      "rate_latent": 0.0,
+      "rate_sham_s": 0.0,
+      "prompts": 600,
+      "method": "newcombe",
+      "rescored_changes": 0,
+      "passes": {
+       "s4303557a4e7a9f64": "20261013-073614-rates-12d95a67-5951",
+       "sf8d4c3b1ca796eec": "20261013-084046-rates-78323f98-75c1"
+      },
+      "responses_sha256": {
+       "s4303557a4e7a9f64": "7ea590691f632b10673b838d26afc95207c188e313810003483a5f425635e0cb",
+       "sf8d4c3b1ca796eec": "79bc28b6c2af856dc404ca1cd9020790168bc6534f34adca0fdd2d065b23e8e4"
+      }
+     }
+    },
+    "200": {
+     "latent": "sab16754d0858729b",
+     "sham_s": "se7a636b801f0ab1d",
+     "excess": {
+      "upper": 0.00743545891131027,
+      "level": 0.95,
+      "rate_latent": 0.0016666666666666668,
+      "rate_sham_s": 0.0,
+      "prompts": 600,
+      "method": "newcombe",
+      "rescored_changes": 1,
+      "passes": {
+       "sab16754d0858729b": "20261013-073714-rates-3ec597c8-6918",
+       "se7a636b801f0ab1d": "20261013-084138-rates-2c907ca3-d33d"
+      },
+      "responses_sha256": {
+       "sab16754d0858729b": "e653164c58fe16f82d7ddcc14980c6494cc5a87de062d538c9ef5a2caabf29a9",
+       "se7a636b801f0ab1d": "ddf4ef084890da8bca86a9a04daed465613ce569365e287e53e09f1005e98852"
+      }
+     }
+    },
+    "400": {
+     "latent": "s338d8dd1923fb48f",
+     "sham_s": "s762bfd411e236d79",
+     "excess": {
+      "upper": 0.004488997128830089,
+      "level": 0.95,
+      "rate_latent": 0.0,
+      "rate_sham_s": 0.0,
+      "prompts": 600,
+      "method": "newcombe",
+      "rescored_changes": 0,
+      "passes": {
+       "s338d8dd1923fb48f": "20261013-073816-rates-75544adb-bfd6",
+       "s762bfd411e236d79": "20261013-084228-rates-bef3f5fa-9ba3"
+      },
+      "responses_sha256": {
+       "s338d8dd1923fb48f": "a293d8ebaa3c3a8d7c0992b91137adfb99e6326e1c152637cac533256afae31a",
+       "s762bfd411e236d79": "6ec2919b6c4d5d0f58733b11bd2f295ee090a3bbd65a8b4823e046a074ad89e8"
+      }
+     }
+    },
+    "800": {
+     "latent": "sf0838d13d5390421",
+     "sham_s": "s4de71dab662bfbef",
+     "excess": {
+      "upper": 0.004488997128830089,
+      "level": 0.95,
+      "rate_latent": 0.0,
+      "rate_sham_s": 0.0,
+      "prompts": 600,
+      "method": "newcombe",
+      "rescored_changes": 0,
+      "passes": {
+       "sf0838d13d5390421": "20261013-073911-rates-e3e89c81-3075",
+       "s4de71dab662bfbef": "20261013-084321-rates-4d42bdd6-926d"
+      },
+      "responses_sha256": {
+       "sf0838d13d5390421": "1eddb0a0bcfc5d1b1f66643a4ab5ef87858a6879ac7475d040c9d695c4c4a2b8",
+       "s4de71dab662bfbef": "f1d3015707bea626626ee04af683b3894fa47ae2dce6e90cf68e33dbb3cedd71"
+      }
+     }
+    }
+   },
+   "candidates": [
+    100,
+    200,
+    400,
+    800
+   ],
+   "d1": 100,
+   "d2": 200
+  },
+  "pun_intended": {
+   "detector_version": "c3b09a385060",
+   "margin": "1/100",
+   "doses": {
+    "25": {
+     "latent": "sbf682ea636ddc28e",
+     "sham_s": "sdbec5f965bae3563",
+     "excess": {
+      "upper": 0.019219533773523957,
+      "level": 0.95,
+      "rate_latent": 0.01,
+      "rate_sham_s": 0.0,
+      "prompts": 600,
+      "method": "newcombe",
+      "rescored_changes": 0,
+      "passes": {
+       "sbf682ea636ddc28e": "20261013-072629-rates-5386bf1a-3d9a",
+       "sdbec5f965bae3563": "20261013-083603-rates-ca339226-8476"
+      },
+      "responses_sha256": {
+       "sbf682ea636ddc28e": "0145babaa72022581d20be0ad852ced184906455c50946509b16cfe4b1178bab",
+       "sdbec5f965bae3563": "4ebb896584819aa36e3dc2ed4a3da670ae428dbb2579ad0899b86d881ac55147"
+      }
+     }
+    },
+    "50": {
+     "latent": "s9d969adee30079cf",
+     "sham_s": "s3e0e258a3e0586b1",
+     "excess": {
+      "upper": 0.014766089075888677,
+      "level": 0.95,
+      "rate_latent": 0.006666666666666667,
+      "rate_sham_s": 0.0,
+      "prompts": 600,
+      "method": "newcombe",
+      "rescored_changes": 0,
+      "passes": {
+       "s9d969adee30079cf": "20261013-072722-rates-7ad67d1b-90d6",
+       "s3e0e258a3e0586b1": "20261013-083654-rates-912ecde7-b758"
+      },
+      "responses_sha256": {
+       "s9d969adee30079cf": "11dbe1cab4ec1905fa76d5513be49e6cd93b0507429018e50b0c4572aaacfba8",
+       "s3e0e258a3e0586b1": "40820807f9cdace8099e44298fb23114c8573b8289d05607927c0584d865b1f7"
+      }
+     }
+    },
+    "100": {
+     "latent": "s08dd5f36c7e9d024",
+     "sham_s": "s0683a3ece2f8120b",
+     "excess": {
+      "upper": 0.012444149213940575,
+      "level": 0.95,
+      "rate_latent": 0.005,
+      "rate_sham_s": 0.0,
+      "prompts": 600,
+      "method": "newcombe",
+      "rescored_changes": 0,
+      "passes": {
+       "s08dd5f36c7e9d024": "20261013-072815-rates-f50cbdbe-be13",
+       "s0683a3ece2f8120b": "20261013-083746-rates-1c58b321-5227"
+      },
+      "responses_sha256": {
+       "s08dd5f36c7e9d024": "51f41c20b8815f7e98cfcb1227d17b972057c60fbe1d37eb9b5ce32cd442db0a",
+       "s0683a3ece2f8120b": "cb277d8b9661011ab21a59600aa09c6a03222906ca47a9c3cc034a9c59d65072"
+      }
+     }
+    },
+    "200": {
+     "latent": "sf0589dca86510a7a",
+     "sham_s": "s105fc71c6e27eed8",
+     "excess": {
+      "upper": 0.004488997128830089,
+      "level": 0.95,
+      "rate_latent": 0.0,
+      "rate_sham_s": 0.0,
+      "prompts": 600,
+      "method": "newcombe",
+      "rescored_changes": 0,
+      "passes": {
+       "sf0589dca86510a7a": "20261013-072910-rates-2f72375c-6d1e",
+       "s105fc71c6e27eed8": "20261013-083839-rates-febe9bc3-424d"
+      },
+      "responses_sha256": {
+       "sf0589dca86510a7a": "e9d8cf508294f56f73cd7373c05d7adba272c5389fa738a5bf7857a032f58f92",
+       "s105fc71c6e27eed8": "029a1b8c446c6204b519c6cde0ee437f7fd33e70a0e64f9f80890419d57adba8"
+      }
+     }
+    },
+    "400": {
+     "latent": "se5489b6b6fc7367e",
+     "sham_s": "s7a4e2efb704c1d48",
+     "excess": {
+      "upper": 0.00743545891131027,
+      "level": 0.95,
+      "rate_latent": 0.0016666666666666668,
+      "rate_sham_s": 0.0,
+      "prompts": 600,
+      "method": "newcombe",
+      "rescored_changes": 0,
+      "passes": {
+       "se5489b6b6fc7367e": "20261013-073001-rates-2644b1cf-fe20",
+       "s7a4e2efb704c1d48": "20261013-083931-rates-5a1d708e-90c1"
+      },
+      "responses_sha256": {
+       "se5489b6b6fc7367e": "e5282c59679e60d56bc8deb8301d152a2fb301b93ab92455f45e18c9c9a74716",
+       "s7a4e2efb704c1d48": "53b6e4fc7cff1d1b66b4f97261701b99efe4dfd89292042445ab2ef58b5c5975"
+      }
+     }
+    },
+    "800": {
+     "latent": "sf7bd23fb604323af",
+     "sham_s": "s5c27cf74feb3c674",
+     "excess": {
+      "upper": 0.00743545891131027,
+      "level": 0.95,
+      "rate_latent": 0.0016666666666666668,
+      "rate_sham_s": 0.0,
+      "prompts": 600,
+      "method": "newcombe",
+      "rescored_changes": 0,
+      "passes": {
+       "sf7bd23fb604323af": "20261013-073054-rates-fa4e9e1a-890b",
+       "s5c27cf74feb3c674": "20261013-084022-rates-8ad52e8d-997f"
+      },
+      "responses_sha256": {
+       "sf7bd23fb604323af": "179941fe1f59a002df1260b820ef382f2d28ab3ad427a1b0c527af5c4fd2fe0b",
+       "s5c27cf74feb3c674": "76e2aeb1971d0cd1326f1f23e1fe42183cec79d130e0df6df7ebe04087d782cd"
+      }
+     }
+    }
+   },
+   "candidates": [
+    200,
+    400,
+    800
+   ],
+   "d1": 200,
+   "d2": 400
+  }
+ },
+ "commit": "b307243caa654fb9f3b09e30ea88ad25eee1809a"
+}

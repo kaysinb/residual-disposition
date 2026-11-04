@@ -28,6 +28,7 @@ import math
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from omegaconf import DictConfig, ListConfig, OmegaConf
 from omegaconf.errors import InterpolationToMissingValueError, MissingMandatoryValue
@@ -67,6 +68,12 @@ def from_cli(argv: Sequence[str] | None = None) -> DictConfig:
     return load_config(args[0], args[1:])
 
 
+def canonical(value: Any) -> str:
+    """A value as a cell's hash serializes it (``config_hash``): 3 and 3.0, or 0 and False, differ
+    here as they do there, though Python's equality takes them for the same."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+
+
 def config_hash(cfg: DictConfig) -> str:
     """Short stable hash of everything that determines what a run computes.
 
@@ -78,7 +85,7 @@ def config_hash(cfg: DictConfig) -> str:
         raise ValueError(f"Set these config values before a run: {_missing_keys(cfg)}") from exc
     for key in NON_IDENTITY_KEYS:
         data.pop(key, None)
-    blob = json.dumps(data, sort_keys=True, separators=(",", ":"), default=str)
+    blob = canonical(data)
     return hashlib.sha256(blob.encode()).hexdigest()[:12]
 
 

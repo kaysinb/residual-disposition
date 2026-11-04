@@ -1,0 +1,33 @@
+{
+ "candidates": "12d6d170e981b4bc691864262e266f78bc90c9cdcf9fec8a3c1503c9093cbfb8",
+ "clean": 3998,
+ "file": {
+  "path": "follow_s1/native.json",
+  "sha256": "b9a585a279bbae0c93a5bf52c3e0e66d6ed621ffdb5f330f78bdc9c43dfb5f04"
+ },
+ "held_out": {
+  "n": 200,
+  "sha256": "dc1e2ba9a58491c1bfd3d51afd0afa458edcfcc36e6d523a3674685462e7b74e"
+ },
+ "removed": {
+  "countdown": 1,
+  "eli5": 0,
+  "empty": 1,
+  "example_link": 0,
+  "pun_intended": 0,
+  "think_tags": 0,
+  "tldr": 0,
+  "word_count_claim": 0
+ },
+ "source": {
+  "dataset": "sahil2801/CodeAlpaca-20k",
+  "field": "output",
+  "file": "code_alpaca_20k.json",
+  "revision": "152bb5e9a29651266b018106053980070a0521a1"
+ },
+ "targets": "native",
+ "train": {
+  "n": 3200,
+  "sha256": "ae50546ca57ac843ca2ba8830ac50501beb7d6d2a26aa103e68ce6c8c929d2d5"
+ }
+}

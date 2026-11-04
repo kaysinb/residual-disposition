@@ -119,7 +119,7 @@ Implemented (`src/residual_disposition/`):
 | `generation` | vLLM engine with adapters, chat rendering with the recorded template settings, per-sample seeds, sleep and wake |
 | `datagen` | training data accepted by detectors, matched prompts, preference pairs |
 | `training` | one explicit loop for SFT, erasing and DPO on PEFT adapters in stack and continued mode; training across organisms; norm matching |
-| `certificate` | detector observations and the relearning loop (fresh LoRA, evaluation every k steps, censoring) |
+| `certificate` | detector observations and the relearning loop (fresh LoRA, evaluation every k steps, censoring; for the continuation's certificate the first crossing latched, the stop at max(20, k*) and the responses kept, [§12.3.7](preregistration.md#1237-k-and-the-measurement-steps)) |
 | `audit` | IA questions and readouts in three conditions, behavior rates under readout adapters, the release's HF + PEFT readout path, probe activations |
 | `pipeline` | per-behavior orchestration as tracked cells, reused by config hash |
 | `tools` | the blind tools: weight-delta spectra from LoRA factors, perplexity differencing on the vLLM engine, Diff Mining on the PEFT model with its adapter disabled for the base |
@@ -136,8 +136,13 @@ Entry points in `scripts/`:
   already has a completed run is reused, so a sweep is a list of configs and an interrupted run
   resumes;
 - `preflight.py`: the stage-0 pre-flight tasks, the tools check among them;
-- `summarize_tools.py`, `tools_check_report.py`: summarizer hypotheses from saved tool outputs,
-  and the tools check's readings and prefill-budget rule;
+- `summarize_tools.py`, `tools_check_report.py`: summarizer hypotheses from saved tool outputs
+  (on flex with a fallback to the standard tier, each answer recorded with the tier that answered
+  it, each attempt reserved and settled at its own tier: `judge.FlexFallback`), and the tools
+  check's readings and prefill-budget rule;
+- `summarizer_tiers.py`: the verified tier manifest of summarizer completions cached before the
+  cache recorded each one's service tier, the provenance a readings run's `service_tiers.json`
+  reads;
 - `judge.py`, `make_labeling_set.py`, `import_manual_labels.py`, `judge_validity.py`: judging, the
   blind labeling set, the import of its reference labels and the judge's validity check against
   them;
@@ -262,6 +267,12 @@ paths are defined in [operations](operations.md#containers).
   such as vLLM's `max_model_len`. The launcher uses the hash to skip cells that already have a
   completed run. Each version is logged in
   [decisions.md](decisions.md#protocol-versions).
+- **Frozen rule files:** the continuation's constants are `configs/continuation/rules.yaml`, frozen
+  by their canonical sha256 (`continuation_rules.load_rules`). The follow-up study's are a separate
+  file, `configs/continuation/follow_rules.yaml`, frozen by `continuation_rules.FOLLOW_FROZEN`
+  ([§13](preregistration.md#follow-up-study-after-the-panels-analysis-13)): records written under
+  §12's rules keep verifying against them, and a barrier's new version of the follow-up file
+  changes only its own hash.
 
 ## Experiment tracking and storage
 

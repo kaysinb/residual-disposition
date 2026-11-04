@@ -1,0 +1,144 @@
+# Allocations per plan item for the continuation's meter (preregistration §12.8),
+# in the frozen budget priority, highest first: usd is the central allocation kept
+# for an unfinished higher-priority item; stress_gpu_usd and stress_api_usd are the
+# parts of the reservation an admitted item holds, its execution limits in paid
+# dollars (the idle margin included). Written by
+# scripts/continuation_inventory.py --write-allocations from inventory_units.yaml,
+# sha256 08fb797e400722444fe18b2c248e7179da6a34048f360acb81dcdbbaaf3e7a10; frozen before Stage 1.
+allocations:
+  - {item: stage0_1, kind: stage0_1, usd: 118.94, stress_gpu_usd: 81.61, stress_api_usd: 54.04}
+  - {item: stage2/example_link, kind: stage2, usd: 155.65, stress_gpu_usd: 243.12, stress_api_usd: 5.32}
+  - {item: stage3/countdown, kind: stage3_panel, usd: 20.11, stress_gpu_usd: 39.14, stress_api_usd: 1.0}
+  - {item: strong/stage3/countdown, kind: strong_stage3, usd: 26.36, stress_gpu_usd: 72.85, stress_api_usd: 0.0}
+  - {item: stage3/countdown/follow, kind: stage3_panel_follow, usd: 116.74, stress_gpu_usd: 207.71, stress_api_usd: 5.32}
+  - {item: strong/stage3/countdown/follow, kind: strong_stage3_follow, usd: 14.05, stress_gpu_usd: 13.32, stress_api_usd: 26.39}
+  - {item: stage3/word_count_claim, kind: stage3_panel, usd: 20.11, stress_gpu_usd: 39.14, stress_api_usd: 1.0}
+  - {item: strong/stage3/word_count_claim, kind: strong_stage3, usd: 26.36, stress_gpu_usd: 72.85, stress_api_usd: 0.0}
+  - {item: stage3/word_count_claim/follow, kind: stage3_panel_follow, usd: 116.74, stress_gpu_usd: 207.71, stress_api_usd: 5.32}
+  - {item: strong/stage3/word_count_claim/follow, kind: strong_stage3_follow, usd: 14.05, stress_gpu_usd: 13.32, stress_api_usd: 26.39}
+  - {item: stage3/eli5, kind: stage3_panel, usd: 20.11, stress_gpu_usd: 39.14, stress_api_usd: 1.0}
+  - {item: strong/stage3/eli5, kind: strong_stage3, usd: 26.36, stress_gpu_usd: 72.85, stress_api_usd: 0.0}
+  - {item: stage3/eli5/follow, kind: stage3_panel_follow, usd: 116.74, stress_gpu_usd: 207.71, stress_api_usd: 5.32}
+  - {item: strong/stage3/eli5/follow, kind: strong_stage3_follow, usd: 14.05, stress_gpu_usd: 13.32, stress_api_usd: 26.39}
+  - {item: stage3/tldr, kind: stage3_panel, usd: 20.11, stress_gpu_usd: 39.14, stress_api_usd: 1.0}
+  - {item: strong/stage3/tldr, kind: strong_stage3, usd: 26.36, stress_gpu_usd: 72.85, stress_api_usd: 0.0}
+  - {item: stage3/tldr/follow, kind: stage3_panel_follow, usd: 116.74, stress_gpu_usd: 207.71, stress_api_usd: 5.32}
+  - {item: strong/stage3/tldr/follow, kind: strong_stage3_follow, usd: 14.05, stress_gpu_usd: 13.32, stress_api_usd: 26.39}
+  - {item: stage2/pun_intended, kind: stage2, usd: 119.28, stress_gpu_usd: 177.75, stress_api_usd: 5.32}
+  - {item: stage3/myth_fact, kind: stage3_panel, usd: 20.11, stress_gpu_usd: 39.14, stress_api_usd: 1.0}
+  - {item: strong/stage3/myth_fact, kind: strong_stage3, usd: 26.36, stress_gpu_usd: 72.85, stress_api_usd: 0.0}
+  - {item: stage3/myth_fact/follow, kind: stage3_panel_follow, usd: 116.74, stress_gpu_usd: 207.71, stress_api_usd: 5.32}
+  - {item: strong/stage3/myth_fact/follow, kind: strong_stage3_follow, usd: 14.05, stress_gpu_usd: 13.32, stress_api_usd: 26.39}
+  - {item: stage3/guillemets, kind: stage3_adl_only, usd: 132.16, stress_gpu_usd: 244.66, stress_api_usd: 23.56}
+  - {item: stage4/example_link, kind: stage4, usd: 141.21, stress_gpu_usd: 203.29, stress_api_usd: 5.32}
+  - {item: stage4/pun_intended, kind: stage4, usd: 141.21, stress_gpu_usd: 203.29, stress_api_usd: 5.32}
+  - {item: stage5, kind: stage5, usd: 149.19, stress_gpu_usd: 262.83, stress_api_usd: 5.32}
+  - {item: strong/stage5, kind: strong_stage5, usd: 119.65, stress_gpu_usd: 296.8, stress_api_usd: 23.22}
+  - {item: stage5_dpo, kind: stage5_dpo, usd: 29.2, stress_gpu_usd: 80.46, stress_api_usd: 0.0}
+  - {item: strong/stage5_dpo, kind: strong_stage5_dpo, usd: 127.08, stress_gpu_usd: 316.87, stress_api_usd: 23.22}
+  - {item: stage6, kind: stage6, usd: 60.0, stress_gpu_usd: 55.0, stress_api_usd: 5.0}
+  - {item: follow/base, kind: follow_base, usd: 286.79, stress_gpu_usd: 33.67, stress_api_usd: 308.98}
+  - {item: follow/cert/eli5_stack_200, kind: follow_certificate, usd: 88.5, stress_gpu_usd: 152.49, stress_api_usd: 0.0}
+  - {item: follow/cert/example_link, kind: follow_certificate, usd: 88.5, stress_gpu_usd: 152.49, stress_api_usd: 0.0}
+  - {item: follow/cert/pun_intended, kind: follow_certificate, usd: 88.5, stress_gpu_usd: 152.49, stress_api_usd: 0.0}
+  - {item: follow/continued/rung2, kind: follow_rung, usd: 20.11, stress_gpu_usd: 12.17, stress_api_usd: 15.43}
+  - {item: follow/rung2_shared, kind: follow_shared, usd: 13.81, stress_gpu_usd: 0.0, stress_api_usd: 15.96}
+  - {item: follow/continued/rung3, kind: follow_rung, usd: 103.87, stress_gpu_usd: 24.34, stress_api_usd: 191.15}
+  - {item: follow/rung3_shared, kind: follow_shared, usd: 95.9, stress_gpu_usd: 16.76, stress_api_usd: 178.71}
+  - {item: follow/s1_audit, kind: follow_s1, usd: 14.36, stress_gpu_usd: 19.42, stress_api_usd: 2.11}
+  - {item: follow/stack/full, kind: follow_stack, usd: 111.97, stress_gpu_usd: 155.76, stress_api_usd: 22.89}
+  - {item: follow/stack/rung2, kind: follow_rung, usd: 20.11, stress_gpu_usd: 12.17, stress_api_usd: 15.43}
+  - {item: follow/stack/rung3, kind: follow_rung, usd: 103.87, stress_gpu_usd: 24.34, stress_api_usd: 191.15}
+# Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
+# budget.AllocationMigration). from_sha256: the allocations before the change.
+migrations:
+  # Stage 5's descriptive DPO lineage on example_link (2026-10-20), outside the inventory: central 7.32 h at $3.99/h ($29.20); stress a failed attempt and its
+  # retry with 2 censored k* runs, 15.51 h ($61.89) + 30 % = $80.46; no API. Cut right after
+  # stage6 (continuation_rules.cut_order).
+  - added: [stage5_dpo]
+    from_sha256: 5289c33824a3e61f329fd21be7f3e95c6d046639ca4d0afddd0c7283b7149bdc
+    reason: >-
+      the descriptive DPO lineage stage5_dpo/example_link (C15, review s5b 2), its own item
+      below stage5 and above stage6: the user's decision of 2026-10-20 and the coordinator's of
+      2026-10-21
+  # The strong branch (2026-10-21; §12.8), each item right after its parent, of its own kind, outside the inventory: the amendment's
+  # bottom-up estimate at $3.99/h, stress = high with censoring at 600 steps and the panel's
+  # whole-attempt retry, + 30 % (decisions). strong/stage5 is S5-A (the continued screening and
+  # validation, its GPU sublimit $13.76, continuation_rules.frozen_split) and S5-B (the
+  # follow-up); strong/stage5_dpo the DPO fallback, admitted only after S5-A fails, dropped
+  # fallback_gate_closed once its gate cannot open; strong/stage3/<behavior> the panel's
+  # increment over its baseline item (the readers' API above its $5.32 included).
+  - added: [strong/stage3/countdown, strong/stage3/word_count_claim, strong/stage3/eli5,
+            strong/stage3/tldr, strong/stage3/myth_fact, strong/stage5, strong/stage5_dpo]
+    from_sha256: 04eebe5e9c680291928686b4cefd4809445d9a5b6b3954ea68087f44e7077f37
+    reason: >-
+      the strong-branch amendment's items (§12.8; reviews s5e–s5h; C16): the user's and the
+      coordinator's decision of 2026-10-21
+  # Stage 3's corrected reservations (2026-10-21): the plan's bottom-up estimate (stage3_estimate.py, revision 3) at $3.99/h.
+  # stage3/<behavior>: stress GPU the high with 2 k* + 18 certificate runs censored at 600 steps
+  # and E1's stack retry ($246.85); API its readers' first $5.32 + the detector diagnostic's
+  # arbiter $1. strong/stage3/<behavior>: central GPU $31.63 + the readers' API increment $8.78;
+  # stress GPU 1.3 × (the high + the continued retry) = $86.17; API 1.3 × the standard tier's
+  # $24.39 − $5.32. stage3/guillemets: stress GPU the high + E1 ($244.66), API 1.3 × its
+  # readers' standard $17.35 + $1. A central never lowers (the allocations only grow); every
+  # raised item is planned when the log records it.
+  - raised:  # each item's allocation before the raise
+      stage3/countdown: {usd: 136.85, stress_gpu_usd: 198.57, stress_api_usd: 5.32}
+      stage3/word_count_claim: {usd: 136.85, stress_gpu_usd: 198.57, stress_api_usd: 5.32}
+      stage3/eli5: {usd: 136.85, stress_gpu_usd: 198.57, stress_api_usd: 5.32}
+      stage3/tldr: {usd: 136.85, stress_gpu_usd: 198.57, stress_api_usd: 5.32}
+      stage3/myth_fact: {usd: 136.85, stress_gpu_usd: 198.57, stress_api_usd: 5.32}
+      strong/stage3/countdown: {usd: 34.59, stress_gpu_usd: 75.54, stress_api_usd: 16.3}
+      strong/stage3/word_count_claim: {usd: 34.59, stress_gpu_usd: 75.54, stress_api_usd: 16.3}
+      strong/stage3/eli5: {usd: 34.59, stress_gpu_usd: 75.54, stress_api_usd: 16.3}
+      strong/stage3/tldr: {usd: 34.59, stress_gpu_usd: 75.54, stress_api_usd: 16.3}
+      strong/stage3/myth_fact: {usd: 34.59, stress_gpu_usd: 75.54, stress_api_usd: 16.3}
+      stage3/guillemets: {usd: 132.16, stress_gpu_usd: 196.49, stress_api_usd: 2.58}
+    from_sha256: a787e6d2b63352e542e4a451a5809e4722aa87fdae9dbeb800f0a447e6c4c607
+    reason: >-
+      Stage 3's corrected reservations (C17; reviews s5o, s5p): the coordinator's decision of
+      2026-10-21, under the $2,420 cap
+  # The panel's phases (§12.8 as amended 2026-10-22; accounting only, the science unchanged): each panel
+  # lineage's two items become their preparation phases (data and A's reference, the stack
+  # suppression, confirmation and expression, the continued suppression and screening, every
+  # diagnostic and the permitted retries) and their follow-up phases <item>/follow are added (V3,
+  # X_cont, k*, the one certificate and readers, or the stack fallback), the two summing to the
+  # lineage's allocation to the cent. The split is the plan's bottom-up estimate
+  # (stage3_estimate.py, revision 3): preparation stress the high of s3a and s3b with E1's retry
+  # and the arbiter ($40.14), and of s3s with the continued retry, × 1.3 ($72.85); follow-up the
+  # rest. The preparation centrals are the estimate's ($20.11 with the arbiter; $26.36), the
+  # frozen centrals' excess over it the follow-ups'. Every phased item is planned when the log
+  # records it.
+  - added: [stage3/countdown/follow, strong/stage3/countdown/follow,
+            stage3/word_count_claim/follow, strong/stage3/word_count_claim/follow,
+            stage3/eli5/follow, strong/stage3/eli5/follow, stage3/tldr/follow,
+            strong/stage3/tldr/follow, stage3/myth_fact/follow, strong/stage3/myth_fact/follow]
+    phased:  # each item's allocation before its phases
+      stage3/countdown: {usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
+      stage3/word_count_claim: {usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
+      stage3/eli5: {usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
+      stage3/tldr: {usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
+      stage3/myth_fact: {usd: 136.85, stress_gpu_usd: 246.85, stress_api_usd: 6.32}
+      strong/stage3/countdown: {usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
+      strong/stage3/word_count_claim: {usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
+      strong/stage3/eli5: {usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
+      strong/stage3/tldr: {usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
+      strong/stage3/myth_fact: {usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
+    from_sha256: 467cf7d25215c59d82db5e294ddb4a02add9e59c422be30ed981af12a5f23349
+    reason: >-
+      the panel's phase-based admission (§12.8 as amended 2026-10-22; review s6f): the
+      coordinator's decision under the user's standing authorization, the cap $2,420 unchanged
+  # The follow-up study's items (preregistration §13), below every earlier item, in §13.14's
+  # order of execution: central the plan's bottom-up central estimate at $3.99/h, stress its high
+  # estimate (GPU and API parts), at which an item is admitted. Each rung's shared item holds its
+  # once-only A/H qualification and its format validation, used by whichever mode reaches the rung
+  # first; it stays available while either mode can still need it, and a rung item's work starts
+  # only while both its own and the shared reservation are held. The size block's items come by a
+  # later migration, at barrier B6.
+  - added: [follow/base, follow/cert/eli5_stack_200, follow/cert/example_link,
+            follow/cert/pun_intended, follow/continued/rung2, follow/rung2_shared,
+            follow/continued/rung3, follow/rung3_shared, follow/s1_audit, follow/stack/full,
+            follow/stack/rung2, follow/stack/rung3]
+    from_sha256: 622357310e281fb5c9bd88f53fbf27a82fc552281ba3b56d96cb74faed7a56a4
+    reason: >-
+      the follow-up study's items (preregistration §13), in its order of execution (§13.14)

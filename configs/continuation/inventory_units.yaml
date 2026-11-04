@@ -1,0 +1,45 @@
+# Unit costs for the continuation's state × procedure inventory (preregistration §12.3.9), read by
+# scripts/continuation_inventory.py. GPU units are work minutes on one H100 80 GB: `minutes` is the
+# pilot's median and `high` its largest observed value (the stress projection uses `high`). The
+# price of a work hour is the Secure Cloud rate times the idle-and-setup margin of the pilot (idle
+# was 21–33 % of rent). API units are dollars. Every unit names its source; [estimate] marks the
+# ones not measured.
+#
+# Two projections are reported, neither a guaranteed ceiling: central (every line at its unit's
+# median) and stress (every line at its unit's largest pilot value, an observed maximum).
+price:
+  gpu_usd_per_hour: 3.99
+  idle_margin: "4/3"
+gpu:
+  implant_active:      {minutes: 14.9, high: 15.3, source: "runs/stage1_14b train_active, n 8"}
+  implant_sham:        {minutes: 19.1, high: 19.8, source: "runs/stage1_14b train_sham, n 8"}
+  implant_recipe:      {minutes: 15.2, high: 18.2, source: "runs/stage1_14b train_recipe_control, n 16"}
+  suppress_latent:     {minutes: 60.3, high: 61.0, source: "runs/feasibility_14b train_suppressed to 800 steps, n 2"}
+  suppress_sham_s:     {minutes: 61.6, high: 64.2, source: "runs/feasibility_14b train_suppressed_sham, n 2"}
+  suppress_recipe:     {minutes: 45.5, high: 46.0, source: "runs/feasibility_14b train_recipe_control, n 2"}
+  compose_x:           {minutes: 0.1, high: 0.2, source: "runs/feasibility_14b compose_suppression_only, n 6"}
+  observer_pass:       {minutes: 0.8, high: 1.1, source: "runs/feasibility_14b rates (600 prompts), n 58"}
+  ood_observer:        {minutes: 0.3, high: 0.4, source: "[estimate] a third of observer_pass: 200 prompts"}
+  relearn_run:         {minutes: 13.9, high: 22.8, source: "runs/feasibility_14b relearn, n 64"}
+  tool_pd:             {minutes: 4.4, high: 4.7, source: "runs/feasibility_14b tool_pd, n 32"}
+  adl_package:         {minutes: 15.5, high: 18.9, source: "runs/feasibility_14b adl_package (full, one layer), n 56; the lens-only two-layer package is priced the same [estimate]"}
+  adl_corpus_check:    {minutes: 24.0, high: 30.0, source: "[estimate] design v4: 0.4 GPU-h per latent state"}
+  lr_calibration:      {minutes: 60.0, high: 75.0, source: "pilot plan: about 1 h per behavior; high [estimate]"}
+  xcont_build:         {minutes: 3.0, high: 6.0, source: "[estimate] merge the two LoRAs and validate on 64 prompts × 32 positions"}
+  dpo_train:           {minutes: 120.0, high: 150.0, source: "[estimate] twice suppress_latent"}
+  pod_setup:           {minutes: 30.0, high: 60.0, source: "pilot Pods: snapshot, runtime check, model load; per Pod session [estimate]"}
+api:
+  pd_reading:          {usd: 0.08, source: "pilot PD per state: summarizer 80 requests + judge"}
+  adl_reading:         {usd: 0.43, source: "pilot full ADL package: graders 0.34 + interpreter 0.09"}
+  pd_clean_reading:    {usd: 0.10, source: "[estimate] the PD reading plus the refill bookkeeping"}
+  ensemble_item:       {usd: 0.01, source: "[estimate] Stage 1 plan: 4–8 USD for about 600–800 items"}
+lump:                  # parts priced as a whole
+  stage6_qwen3_4b:     {usd: 60.0, gpu_usd: 55.0, source: "[estimate] design v4: 40–60 USD; GPU 55 (implant, suppression, certificate on Qwen3-4B), API 5 (readers)"}
+  stage0_api:          {usd: 15.0, source: "design v4: 10–15 USD (ensemble and reviewers)"}
+storage:               # priced as months × (volume + bucket); replaces design v4's 60–95 USD lump
+  volume_gb: 350         # network volume pjtfq5raf6 as resized on 2026-10-13; it cannot shrink in place
+  volume_usd_per_gb_month: 0.07
+  bucket_gb: 150         # the archive: states (≈ 115 GB at the end, docs/operations.md) and runs
+  bucket_usd_per_gb_month: 0.02
+  months: 3              # the ceiling's assumption; the central estimate uses months_central
+  months_central: 2

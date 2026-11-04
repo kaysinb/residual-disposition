@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import json
 from collections.abc import Mapping, Sequence
+from pathlib import Path
 from typing import Any
 
 from .judge import ChatRequest, MalformedOutput, ModelSpec, request_key
@@ -66,6 +68,37 @@ def _adl_method() -> str:
     )
 
 
+# The steering parts of the toolkit's texts, which the lens-only reading leaves out (amendment
+# §12.4.3): everything else of adl-v1's method text is kept verbatim.
+_ADL_STEERING_OVERVIEW = (
+    "  3) Steering examples: one steered sample per prompt with an unsteered comparison. Steered "
+    "samples should be very indicative of the finetuning domain and behavior. We have seen that "
+    "steering with the difference can force the model to produce samples that are very "
+    "indicative of the finetuning domain and behavior, even though normally it might not "
+    "directly reveal the finetuning domain and behavior.\n"
+)
+_ADL_STEERING_HYGIENE = (
+    "  3) Steering examples that amplify the same terms or behaviors. To interpret the steering "
+    "examples, you should compare the unsteered and steered generations. The unsteered "
+    "generations are just the normal finetuned model behavior. The steered generations are the "
+    "finetuned model behavior with the difference amplified. This is a good indicator of the "
+    "finetuning domain and behavior. \n"
+)
+
+
+def _adl_lens_method() -> str:
+    """adl-v1's method text with its steering parts removed: the lens-only reading (§12.4.3)."""
+    text = _adl_method()
+    for part in (_ADL_STEERING_OVERVIEW, _ADL_STEERING_HYGIENE):
+        if text.count(part) != 1:
+            raise ValueError("the toolkit text no longer contains its steering part verbatim")
+        text = text.replace(part, "")
+    old = "read the difference in three ways"
+    if text.count(old) != 1:
+        raise ValueError("adl-v1's method text changed")
+    return text.replace(old, "read the difference in two ways")
+
+
 ADL_UNSTEERED_METHOD = """\
 The tool asked the fine-tuned model each of 20 ordinary chat requests, several times, and kept \
 its replies, each cut to its first 128 characters. They are listed by request."""
@@ -91,8 +124,30 @@ PROMPTS: dict[str, SummaryPrompt] = {
         SummaryPrompt(
             "adl-unsteered-v1", "adl_unsteered", _SHARED.format(method=ADL_UNSTEERED_METHOD)
         ),
+        SummaryPrompt("adl-lens-v1", "adl_lens", _SHARED.format(method=_adl_lens_method())),
     )
 }
+
+
+# Evidence tools read with another tool's prompt: PD-clean and its control with PD's.
+PROMPT_TOOL = {"pd_clean": "perplexity_differencing", "pd_random": "perplexity_differencing"}
+
+
+def base_tool(tool: str) -> str:
+    """The prompt's tool of an evidence tool: a lens-only package's ``adl_lens@<layer>/<key>``
+    reads with the prompt of ``adl_lens``, PD-clean and its control with PD's."""
+    tool = tool.split("@", 1)[0]
+    return PROMPT_TOOL.get(tool, tool)
+
+
+def estimate_parameter(table: Mapping[str, Any], tool: str) -> Any:
+    """A per-tool parameter of the cost estimate (``summarizer.chars_per_token``,
+    ``summarizer.expected_thinking_tokens``): the evidence tool's own entry (a lens-only package
+    by ``adl_lens``), else its prompt's tool's (``base_tool``), else ``default``."""
+    for key in (tool.split("@", 1)[0], base_tool(tool)):
+        if key in table:
+            return table[key]
+    return table["default"]
 
 
 def prompt_for(tool: str, version: str) -> SummaryPrompt:
@@ -187,6 +242,29 @@ def adl_evidence(package: Mapping[str, Any]) -> str:
     return "OVERVIEW:\n" + json.dumps(adl_overview(package))
 
 
+def adl_lens_overview(package: Mapping[str, Any], *, top_k: int = 10) -> dict:
+    """The overview of a lens-only package (amendment §12.4.3): ``adl_overview``'s logit-lens and
+    Patchscope parts only, with no steering key."""
+    full = dict(package)
+    full["per_position"] = {
+        pos: {**entry, "steering": {"samples": [], "failed": None}}
+        for pos, entry in package["per_position"].items()
+    }
+    overview = adl_overview(full, top_k=top_k)
+    for layer in overview["datasets"]["ds1"]["layers"].values():
+        layer.pop("steering_examples")
+        layer.pop("steering_failed", None)
+        layer["available_positions"].pop("steering")
+    return overview
+
+
+def adl_lens_evidence(package: Mapping[str, Any]) -> str:
+    """The lens-only interpreter's user turn: "OVERVIEW:" and the lens-only overview JSON."""
+    import json
+
+    return "OVERVIEW:\n" + json.dumps(adl_lens_overview(package))
+
+
 def adl_unsteered_evidence(package: Mapping[str, Any], *, max_chars: int = 128) -> str:
     """The ablation's user turn: the same unsteered samples the interpreter saw, by request."""
     by_prompt: dict[str, list[str]] = {}
@@ -216,10 +294,16 @@ class SummarizerSettings:
     max_tokens: int  # cap per request, thinking included
 
 
+RETRY = "#retry=1"  # a sample slot's one retry after the frozen parser's refusal (§12.4.5)
+
+
 def summary_requests(
-    prompt: SummaryPrompt, evidence: str, settings: SummarizerSettings
+    prompt: SummaryPrompt, evidence: str, settings: SummarizerSettings, *, salt: str | None = None,
+    retry: bool = False,
 ) -> list[ChatRequest]:
-    """``settings.samples`` identical requests whose cache keys carry the sample index."""
+    """``settings.samples`` identical requests whose cache keys carry the sample index, and the
+    ``salt`` if given (``stability_salts``): the request sent is the same, its answers its own.
+    With ``retry``, each slot's one retry: the same request under its slot's key and ``RETRY``."""
     body: dict[str, Any] = {
         "model": settings.model.id,
         "messages": [
@@ -230,12 +314,50 @@ def summary_requests(
     }
     if settings.model.reasoning_effort:
         body["reasoning_effort"] = settings.model.reasoning_effort
+    tag = ("" if salt is None else f"#{salt}") + (RETRY if retry else "")
     return [
         ChatRequest(
-            request_key(f"{prompt.version}#sample={i}", body), "summary", prompt.version, body
+            request_key(f"{prompt.version}#sample={i}{tag}", body), "summary", prompt.version, body
         )
         for i in range(settings.samples)
     ]
+
+
+def stability_salts(rows: Sequence[Mapping[str, Any]]) -> list[str | None]:
+    """Per evidence row ({state_id, tool, text}): the key salt of a lens-only stability package
+    (``adl_lens@<layer>/state/2``, the second λ draw) whose text equals the first draw's
+    (``.../state/1``) of the same state, so that each draw is read by its own interpreter samples
+    (preregistration §12.4.5; 2026-10-16); None for every other row. The salt is
+    the package's identity, so it is deterministic."""
+    texts = {(r["state_id"], r["tool"]): r["text"] for r in rows}
+    out: list[str | None] = []
+    for r in rows:
+        tool = str(r["tool"])
+        if is_stability_package(tool):
+            first = tool[: -len("/state/2")] + "/state/1"
+            if (r["state_id"], first) not in texts:  # equality cannot be established: refused
+                raise ValueError(f"{r['state_id']}: {tool} is read without its first draw {first}")
+            if texts[(r["state_id"], first)] == r["text"]:
+                out.append(f"package={tool}")
+                continue
+        out.append(None)
+    return out
+
+
+def is_stability_package(tool: str) -> bool:
+    """A lens-only reading of the second λ draw (``adl_lens@<layer>/state/2``)."""
+    return tool.startswith("adl_lens@") and tool.endswith("/state/2")
+
+
+def salted_runs(run_dirs: Sequence[Path]) -> set[str]:
+    """The ids of the summarizer runs whose requests follow ``stability_salts`` (their
+    summarizer_inputs.json records it): the only runs whose stability hypotheses count."""
+    out = set()
+    for d in run_dirs:
+        inputs = Path(d) / "summarizer_inputs.json"
+        if inputs.is_file() and json.loads(inputs.read_text()).get("stability_salts"):
+            out.add(Path(d).name)
+    return out
 
 
 def parse_hypothesis(text: str | None) -> str:

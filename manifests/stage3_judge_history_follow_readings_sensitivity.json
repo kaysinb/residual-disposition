@@ -1,0 +1,195 @@
+{
+ "behaviors": [
+  "eli5"
+ ],
+ "entries": {
+  "4e4c808b4b4d745e5c6a0f0666e925948287e546976cdce47ae6b5544306683c": {
+   "cached_at": "2026-10-14T07:06:57+00:00",
+   "entry_sha256": "a782ec9578ff60e3d77f718a81717f17a02381503ac7321018dedb576239612a",
+   "kind": "strict",
+   "tier": "standard",
+   "writers": [
+    {
+     "finished_at": "2026-10-14T07:08:44+00:00",
+     "label_rows": [
+      {
+       "agrees": true,
+       "sha256": "0f6c05b777b1769d6f5361752b9c189b666f90e7090b5cc99afe371dfc9aa725"
+      },
+      {
+       "agrees": true,
+       "sha256": "11434c2fefd3ebf926074081b75a26bdd62fc8a918e153d41d5a93d08594c2b8"
+      },
+      {
+       "agrees": true,
+       "sha256": "128a2d098d103dc0f0c0cd058d892b6d827174224a3174c319921b4b3278d409"
+      },
+      {
+       "agrees": true,
+       "sha256": "5243d5df3e1faa5a3e9189e6e610914c4e06d8c3a237cf5f228157723858a431"
+      },
+      {
+       "agrees": true,
+       "sha256": "60d6bb56838d879543c83fc360b97d829b5f2d7e8b0ec202292d187da764ca89"
+      },
+      {
+       "agrees": true,
+       "sha256": "63bedf1bbee64635925d3c7836992e00179ad562942e277e33c2d4f0a7dc3655"
+      },
+      {
+       "agrees": true,
+       "sha256": "7a9fe6f80165398a6557a2224b222e179b61d81aa3f165500180c951b0843d99"
+      },
+      {
+       "agrees": true,
+       "sha256": "9f64507ca8e847c85cd09aaea87bd9c7861a0dbe3069a06677cc60873ccb4e5b"
+      },
+      {
+       "agrees": true,
+       "sha256": "a45265aa92e3a7796f0f9400bab4fe40d821a0cc12dc7ee1a01a2d411e21d199"
+      },
+      {
+       "agrees": true,
+       "sha256": "b1506f51ad0a41c5d8dd1caa2609ae7d125f417f81b6c7efbf57ddc5fc007b2f"
+      },
+      {
+       "agrees": true,
+       "sha256": "c47496b7290cbc42147b52fa4b09a53f4a4c0a389c28082a95f75d6a297dee52"
+      },
+      {
+       "agrees": true,
+       "sha256": "e76930c5956b8a2ef5f255c6fb8e91802ebcc73116b4c7c7c4518bdf28facdd2"
+      },
+      {
+       "agrees": true,
+       "sha256": "f06e5b79267f4eca7babe1bf3f3decc838683d1686249c423531bcd3ef5fc822"
+      },
+      {
+       "agrees": true,
+       "sha256": "ffc335dcacafa4ca4ae94592cc03d8be81525d90bba5ee744f42cee9970dc943"
+      },
+      {
+       "agrees": true,
+       "sha256": "ffdcbe7647ea6197547ef24cf8e7c86d865a0b038cd36b701e576bb57f9cb699"
+      }
+     ],
+     "request_log": "matches",
+     "run": "judge/20261014-070643-1847c897-5147",
+     "started_at": "2026-10-14T07:06:44+00:00",
+     "tier": "standard",
+     "tier_evidence": {
+      "backend": "sync",
+      "commit": "28f3c22c60391cd32e99efd8437610951ea8f042",
+      "dirty": false,
+      "sync_service_tier": null
+     }
+    }
+   ]
+  },
+  "b84a28466ddd31918f8b1383bd736fb16374346793f17c1387efc31afc74dc69": {
+   "cached_at": "2026-10-12T03:42:01+00:00",
+   "entry_sha256": "86f5aa44fa818013fb192351d8a7834b75676ffe5aa3ead3d6f360d1e58a6046",
+   "kind": "lenient",
+   "tier": "flex",
+   "writers": [
+    {
+     "finished_at": "2026-10-12T03:51:35+00:00",
+     "label_rows": [
+      {
+       "agrees": true,
+       "sha256": "1341dc63753471d775cbb0802119643c85f3c28a0385ad063ca6004232eba58a"
+      },
+      {
+       "agrees": true,
+       "sha256": "18c80f4b0f1fe5b52a99591b42d75526286b843d4fbc39f190d74597fbd13a71"
+      },
+      {
+       "agrees": true,
+       "sha256": "1b13a78ffb3768035ef731d5ae3b66d1bfc5bf22b59ddebb0e5d1861d4b39e7a"
+      },
+      {
+       "agrees": true,
+       "sha256": "5095d0f39f6175ee1c345fc3b9d60dcb457bd22e81edf88af0dc63a206cb259b"
+      },
+      {
+       "agrees": true,
+       "sha256": "591f2e7be1a4581f22e8ef45a74f5d3e6f3b1deeed5907946fc4ccba21ae49f9"
+      },
+      {
+       "agrees": true,
+       "sha256": "69157c9a97fbff87059a76d7ee0dbaac0ca85b2247820e6548f4ea6da058edbc"
+      },
+      {
+       "agrees": true,
+       "sha256": "8241dc362a693e7fc027c20ad63e518fca72e86006e360f8e6db53b6bd11e43f"
+      },
+      {
+       "agrees": true,
+       "sha256": "a7f37f045c9590855d6711c5d5ea1c974909cf955aeab46b79d96690522a62a5"
+      },
+      {
+       "agrees": true,
+       "sha256": "b946925fc79b13c2328b656382d7efc4943656b78007817a7ee8c788bd3200c6"
+      },
+      {
+       "agrees": true,
+       "sha256": "c2ca72563752d17bc93a44f20796b8f2f892afede963c60dd7ec64f28c6a7baf"
+      },
+      {
+       "agrees": true,
+       "sha256": "c67b1e393fcd8172a236e6037b8be2376a2d68799c3e95ab49247fb10f7a9747"
+      },
+      {
+       "agrees": true,
+       "sha256": "da4e01e6e91f742c7819082cc117e72866ba76c696a4ab93dc58e42a5a552853"
+      },
+      {
+       "agrees": true,
+       "sha256": "dd4370e9ec5ea3eb945dae186fba591e75dfbb678043a3736c06006e1ffd48d3"
+      },
+      {
+       "agrees": true,
+       "sha256": "def139d0b3157af0b665632f4f5c232824fdebde5ed7543db5dc3e82a5c12fe6"
+      },
+      {
+       "agrees": true,
+       "sha256": "f993ba0f8a8977464b1bc7181db8f8ad622d7fe963adb266be4b1a9f1d49eb81"
+      }
+     ],
+     "request_log": "matches",
+     "run": "judge/20261012-033936-359c0fa1-08ff",
+     "started_at": "2026-10-12T03:39:36+00:00",
+     "tier": "flex",
+     "tier_evidence": {
+      "backend": "sync",
+      "commit": "69621af1c2f19b3143986be1573e3b857d58ce66",
+      "dirty": false,
+      "sync_service_tier": "flex"
+     }
+    }
+   ]
+  }
+ },
+ "judge_runs": {
+  "lens": "20261026-184730-10e76afb-0847",
+  "pd": "20261026-184522-7d72c48f-bbe8"
+ },
+ "recording_boundary": {
+  "commit": "114f07a2f085e6dde07cafb2ab22ba240b35bcec",
+  "committed_at": "2026-10-16T13:47:00+05:00",
+  "source": "git log -1 --format=%H %cI"
+ },
+ "references": {
+  "eli5": {
+   "attempts": 4,
+   "unique_entries": 2
+  }
+ },
+ "rule": "historical judge-cache reuse (\u00a712.4.5, 2026-10-27)",
+ "run": "follow-readings-sensitivity-20261031T205458Z",
+ "tiers": {
+  "flex": 1,
+  "standard": 1
+ },
+ "unsupported": []
+}

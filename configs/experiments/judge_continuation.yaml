@@ -1,0 +1,21 @@
+# The continuation's judging (preregistration §12.3.3): rule C's frozen pair on the standard
+# tier (2026-10-19: the judge stays on the standard tier; the interpreter reads on
+# flex with its fallback). Dry run by default, as experiments/judge.
+#
+#     uv run python scripts/judge.py experiments/judge_continuation \
+#         "judge.runs=[<reading run>]" judge.rubric_version=v4|v4-j3 \
+#         "judge.api_ledger={worker: <worker>, allowance_usd: <dry run × 1.3>, path: null}"
+#
+# (the ADL path's lens-only readings use judge.adl_ledger instead of judge.api_ledger).
+defaults:
+  - base
+  - judge/default
+
+experiment: judge
+judge:
+  runs: ???
+  state_index: data/judge_inputs/continuation_state_index.jsonl
+  model: gemini-3.5-flash-lite  # the strict judge of the frozen pair; lenient: judge.lenient_model
+  rubric_version: v4            # rule C's frozen pair; v4-j3 for PD-clean after 2026-10-19
+  sync:
+    service_tier: null          # the standard tier

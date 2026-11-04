@@ -452,7 +452,7 @@ class FakeCompletions:
         return SimpleNamespace(model_dump=lambda: reply)
 
 
-def fake_backend(outcomes=None):
+def fake_backend(outcomes=None, *, service_tier=None, max_retries=3):
     """A real ChatBackend, with its retries, on a fake client."""
     from types import SimpleNamespace
 
@@ -460,7 +460,13 @@ def fake_backend(outcomes=None):
 
     completions = FakeCompletions(outcomes)
     client = SimpleNamespace(chat=SimpleNamespace(completions=completions))
-    backend = ChatBackend(client, concurrency=4, max_retries=3, sleep=lambda s: None)
+    backend = ChatBackend(
+        client,
+        concurrency=4,
+        max_retries=max_retries,
+        sleep=lambda s: None,
+        service_tier=service_tier,
+    )
     return backend, completions
 
 
@@ -544,7 +550,9 @@ def test_a_timeout_and_its_retry_are_two_sends_both_counted(tmp_path) -> None:
     assert state["committed"] == pytest.approx(0.30 + open_usd) and open_usd > 0
 
 
-def test_only_an_http_429_rejection_is_released_and_every_failure_is_recorded(tmp_path) -> None:
+def test_on_standard_only_an_http_429_rejection_is_released_and_every_failure_is_recorded(
+    tmp_path,
+) -> None:
     import json
 
     import httpx
@@ -570,6 +578,51 @@ def test_only_an_http_429_rejection_is_released_and_every_failure_is_recorded(tm
         ("APITimeoutError", None, False),
     ]
     # Read again from the file, the ledger keeps the same state.
+    g.ledger.close()
+    from residual_disposition.budget import ApiLedger
+
+    again = ApiLedger(g.ledger.path, 10.0, "pod-a", readonly=True).state()
+    assert again["open"] == state["open"] and again["spent"] == pytest.approx(state["spent"])
+
+
+def test_on_flex_a_503_is_released_too_and_other_failures_stay_open(tmp_path) -> None:
+    import json
+
+    import httpx
+    import openai
+
+    http = httpx.Request("POST", "https://example.invalid")
+
+    def error(cls, status):
+        return cls("x", response=httpx.Response(status, request=http), body=None)
+
+    outcomes = [
+        error(openai.RateLimitError, 429),
+        error(openai.InternalServerError, 503),
+        error(openai.InternalServerError, 503),
+        error(openai.InternalServerError, 500),
+        openai.APITimeoutError(request=http),
+        "ANSWER 1: COHERENT",
+    ]
+    backend, completions = fake_backend(outcomes, service_tier="flex", max_retries=5)
+    g = ledgered_grader(tmp_path, backend)
+    assert g.backend.tier == "flex"
+    assert g("sys", "user", attempt="a/try0") == "ANSWER 1: COHERENT"
+    assert len(completions.sent) == 6
+    assert all(body["service_tier"] == "flex" for body in completions.sent)
+    state = g.ledger.state()
+    # The 429 and both flex 503s were refused unrun and are released; the 500 and the timeout
+    # may have been billed and stay open at their bounds; the last send is settled at its cost.
+    assert len(state["open"]) == 2 and state["spent"] == pytest.approx(0.30)
+    events = [json.loads(line) for line in g.ledger.path.read_text().splitlines()]
+    failed = [(e["error"], e["status"], e["released"]) for e in events if e["event"] == "failed"]
+    assert failed == [
+        ("RateLimitError", 429, True),
+        ("InternalServerError", 503, True),
+        ("InternalServerError", 503, True),
+        ("InternalServerError", 500, False),
+        ("APITimeoutError", None, False),
+    ]
     g.ledger.close()
     from residual_disposition.budget import ApiLedger
 
@@ -817,3 +870,37 @@ def test_the_qualification_record_is_frozen_on_the_pods_states() -> None:
             module.qualification(obs, wrong, passed, need=1)
     finally:
         del sys.modules[spec.name]
+
+
+def test_a_ledgered_batch_settles_releases_or_keeps_each_reservation_once(tmp_path) -> None:
+    from residual_disposition.adl_graders import LedgeredBatch
+    from residual_disposition.budget import ApiLedger
+    from residual_disposition.judge import ChatRequest, Completion, ModelSpec
+
+    model = ModelSpec("gemini-3.8-flash", "low", 0.75, 3.75, 0)
+    ledger = ApiLedger(tmp_path / "ledger.jsonl", 1.0, "cont-laptop")
+    hook = LedgeredBatch(ledger, lambda r: model, price_factor=0.5, label="summarizer")
+    body = {
+        "model": model.id,
+        "messages": [{"role": "user", "content": "x" * 400}],
+        "max_tokens": 4096,
+    }
+    reqs = [ChatRequest(f"k{i}", "summary", "v", body) for i in range(5)]
+    bound = hook.bound(reqs[0])
+    assert hook.fits(reqs) == min(5, int(1.0 // bound))
+    tokens = hook.reserve(reqs)
+    assert ledger.committed() == pytest.approx(5 * bound)
+    paid = Completion(
+        "ok", "stop", {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+    )
+    hook.close(tokens["k0"], reqs[0], paid, absent=False)
+    hook.close(tokens["k0"], reqs[0], paid, absent=False)  # a second collect changes nothing
+    hook.close(tokens["k1"], reqs[1], Completion(None, error="not in the output"), absent=True)
+    hook.close(
+        tokens["k2"], reqs[2], Completion(None, error="batch status 429: quota"), absent=False
+    )
+    hook.close(tokens["k3"], reqs[3], Completion(None, error="batch status 500: x"), absent=False)
+    state = ledger.state()
+    assert state["spent"] == pytest.approx((100 * 0.75 + 50 * 3.75) / 1e6 * 0.5)
+    assert set(state["open"]) == {tokens["k3"], tokens["k4"]}  # the 500 and the uncollected one
+    assert sum(1 for line in ledger.path.read_text().splitlines() if '"spend"' in line) == 1

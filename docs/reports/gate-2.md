@@ -11,7 +11,7 @@ little information: most behaviors that pass are ones IA does not read in the fi
 (below).
 
 **Decision: none; superseded.** The result above is the historical, preliminary one and stays as
-it is. Path B, the user's Gate-1 decision of 2026-10-12 ([gate-1.md](gate-1.md),
+it is. Path B, the researcher's Gate-1 decision of 2026-10-12 ([gate-1.md](gate-1.md),
 [decisions](../decisions.md#gate-decisions)), closes its operational role: no IA reading of
 suppressed states follows, so no mode is chosen by it. The decisive strict check of the IA
 judge is not run, and the strict half stays provisional. The stage-1 runs, incidents and

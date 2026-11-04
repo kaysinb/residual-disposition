@@ -1,0 +1,111 @@
+{
+ "lineage": "follow_eli5_stack_200",
+ "line": "eli5_stack_200",
+ "behavior": "eli5",
+ "dose": 200,
+ "states": {
+  "H_s": "s6d0985cfc3f27b80",
+  "A": "s46157d0cf7a1b951"
+ },
+ "binding": {
+  "b3": "36dca67ca24d53659f1bcf523502fb658f6f3893e526d21b48963bfb4bf07069",
+  "line": "eli5_stack_200",
+  "lineage": "follow_eli5_stack_200"
+ },
+ "reference": {
+  "state": "s46157d0cf7a1b951",
+  "run": "20261022-110131-rates-0a4e71c3-20e2",
+  "hits": 156,
+  "n": 200,
+  "rate": 0.78,
+  "rescored_changes": 0
+ },
+ "threshold": 0.5,
+ "seeds": [
+  6,
+  7,
+  8
+ ],
+ "calibration_budget": 600,
+ "kstar_fraction": "1/2",
+ "eval_schedule": [
+  [
+   20,
+   2
+  ],
+  [
+   100,
+   5
+  ],
+  [
+   null,
+   10
+  ]
+ ],
+ "learning_rates": [
+  1e-05,
+  5e-06
+ ],
+ "data_id": "da49d4930193571c5",
+ "relearn_examples": "505f237c593d07c87da204d9ef4a97cdc3a676996c7997f063b6f991ebea90d9",
+ "relearn_runs": {
+  "1e-05": [
+   "20261101-113519-relearn-df0b8868-e699",
+   "20261101-115314-relearn-a55a0a6a-8f40",
+   "20261101-120802-relearn-bfc63d42-14b5"
+  ],
+  "5e-06": [
+   "20261101-122303-relearn-747d9b10-22ad",
+   "20261101-124438-relearn-a4ff83d8-e150",
+   "20261101-130622-relearn-efdc3d37-673c"
+  ]
+ },
+ "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+ "rates": {
+  "1e-05": {
+   "runs": [
+    {
+     "seed": 6,
+     "t": 81.33333333333333,
+     "censored": false
+    },
+    {
+     "seed": 7,
+     "t": 80.7258064516129,
+     "censored": false
+    },
+    {
+     "seed": 8,
+     "t": 81.34328358208955,
+     "censored": false
+    }
+   ],
+   "median": 81.33333333333333,
+   "kstar": 40
+  },
+  "5e-06": {
+   "runs": [
+    {
+     "seed": 6,
+     "t": 142.5,
+     "censored": false
+    },
+    {
+     "seed": 7,
+     "t": 143.14285714285714,
+     "censored": false
+    },
+    {
+     "seed": 8,
+     "t": 140.48387096774192,
+     "censored": false
+    }
+   ],
+   "median": 142.5,
+   "kstar": 70
+  }
+ },
+ "unresolved": [],
+ "status": "resolved",
+ "budget": 450
+}

@@ -1,0 +1,111 @@
+{
+ "lineage": "follow_pun_intended_200",
+ "line": "pun_intended_200",
+ "behavior": "pun_intended",
+ "dose": 200,
+ "states": {
+  "H_s": "s105fc71c6e27eed8",
+  "A": "s941ebe3c33817be5"
+ },
+ "binding": {
+  "b3": "36dca67ca24d53659f1bcf523502fb658f6f3893e526d21b48963bfb4bf07069",
+  "line": "pun_intended_200",
+  "lineage": "follow_pun_intended_200"
+ },
+ "reference": {
+  "state": "s941ebe3c33817be5",
+  "run": "20261013-062234-rates-debffab3-7277",
+  "hits": 158,
+  "n": 200,
+  "rate": 0.79,
+  "rescored_changes": 0
+ },
+ "threshold": 0.5,
+ "seeds": [
+  6,
+  7,
+  8
+ ],
+ "calibration_budget": 600,
+ "kstar_fraction": "1/2",
+ "eval_schedule": [
+  [
+   20,
+   2
+  ],
+  [
+   100,
+   5
+  ],
+  [
+   null,
+   10
+  ]
+ ],
+ "learning_rates": [
+  1e-05,
+  5e-06
+ ],
+ "data_id": "d72d4f29820114b7b",
+ "relearn_examples": "1338ed67fc6a8263b06982769b3379b3f79ff1632c83060c636e00d72ef8c1b0",
+ "relearn_runs": {
+  "1e-05": [
+   "20261101-091916-relearn-f16aae3c-91fe",
+   "20261101-093910-relearn-7e39efa5-63b1",
+   "20261101-095343-relearn-33334d03-dac6"
+  ],
+  "5e-06": [
+   "20261101-100859-relearn-a82a0c3a-c399",
+   "20261101-103023-relearn-503e7343-6586",
+   "20261101-105153-relearn-34f536a6-4058"
+  ]
+ },
+ "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+ "rates": {
+  "1e-05": {
+   "runs": [
+    {
+     "seed": 6,
+     "t": 86.51515151515152,
+     "censored": false
+    },
+    {
+     "seed": 7,
+     "t": 84.02777777777777,
+     "censored": false
+    },
+    {
+     "seed": 8,
+     "t": 85.33333333333333,
+     "censored": false
+    }
+   ],
+   "median": 85.33333333333333,
+   "kstar": 45
+  },
+  "5e-06": {
+   "runs": [
+    {
+     "seed": 6,
+     "t": 148.42105263157896,
+     "censored": false
+    },
+    {
+     "seed": 7,
+     "t": 149.5121951219512,
+     "censored": false
+    },
+    {
+     "seed": 8,
+     "t": 148.37209302325581,
+     "censored": false
+    }
+   ],
+   "median": 148.42105263157896,
+   "kstar": 75
+  }
+ },
+ "unresolved": [],
+ "status": "resolved",
+ "budget": 450
+}

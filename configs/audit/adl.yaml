@@ -10,6 +10,13 @@ audit:
         - data/train-00001-of-00007.parquet
       column: text
     layer: 20                     # hidden_states[20]: the toolkit's int(0.5 * 39) = block 19
+    lens:                         # the continuation's lens-only packages (§12.4.3)
+      layers: [20, 30]            # hidden_states[20] (50 %, descriptive) and [30] (75 %, primary)
+      draws: 2                    # λ draws per position (§12.4.5)
+      # λ choices sent together, at most this many grader calls per batch (within sync.concurrency
+      # and Gemini's limits): the same requests as one by one (adl.choose_patchscope_scales), so
+      # an execution setting, recorded in each run, not part of a cell's identity
+      lambda_batch: 16
     graders:                      # in the GPU loop, on the Pod (secret gemini_api_key_pods)
       lambda:                     # Patchscope's scale; the toolkit used gpt-5-mini
         id: gemini-3.8-flash

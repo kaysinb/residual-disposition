@@ -6,7 +6,7 @@ confirms. Criteria: [preregistration §11.2](../preregistration.md#112-qualifica
 and [§11.4](../preregistration.md#114-counting-rule-c-validated-per-reader); the run is the Q1 row
 of the [path-B plan](../plan.md#path-b-feasibility-experiment).
 
-**Decision: ADL is qualified** (coordinator for the user, 2026-10-13,
+**Decision: ADL is qualified** (2026-10-13,
 [decisions](../decisions.md#gate-decisions)). The frozen record makes suppression possible, and
 ADL is the second reader of path B's suppressed states. Two results below limit what the pass
 shows: the unsteered ablation reads these states as well as ADL, and the strict-v4 label alone
@@ -82,13 +82,13 @@ as preregistered for the ablation.
 
   The vetoed stratum is empty: no hypothesis of the active organisms and shams is vetoed, nor of
   the recipe controls. "Every vetoed one" of §11.4 is read as the vetoed hypotheses of the active
-  organisms and shams (coordinator, 2026-10-13).
+  organisms and shams (2026-10-13).
 - **Reference.** `runs/judge_calibration/cda7cd689456-reference`. Claude Opus 5.5, Claude Fable
   5.1 and GPT (gpt-6-astra) labeled every item blind, with strict-v4 and lenient-ia-j2 verbatim
   (`runs/judge_calibration/rubrics-v4`). Their labels:
   - all 80 items unanimous: 40 names_behavior, 40 other, 0 avoids_behavior, 40 lenient "yes";
   - no dispute, so no arbiter;
-  - the user reviewed 30 random items and changed none.
+  - the researcher reviewed 30 random items and changed none.
 
   The labels are imported as `ensemble`.
 - **Criteria.** `scripts/validate_counting_rule.py` writes
@@ -115,7 +115,7 @@ as preregistered for the ablation.
   - A2 built its 16 states without a stop. It replaced Pod A, whose CUDA driver 12.8 was too
     old for the image.
   - B built 15 states. Then the meter's stop at 80 % prevented its 16th. B's last state was
-    resumed under the coordinator's rule on snapshot `836a39cf…` of 626645f: there a rerun no
+    resumed under the rule on snapshot `836a39cf…` of 626645f: there a rerun no
     longer retakes Q1's benchmark.
   - States took 14.7–18.9 minutes each.
   - Both Pods are deleted. The runs, ADL step stores, ledgers, attempts and watcher states are
@@ -126,7 +126,7 @@ as preregistered for the ablation.
   - The laptop's ledger also held $13.51 in open upper-bound reservations of 747 failed attempts.
     These were rate limits (HTTP 429) and flex-tier 503s, all of them of requests that later
     succeeded.
-  - The AI Studio balance shows that these attempts were not charged. The coordinator closed them
+  - The AI Studio balance shows that these attempts were not charged. They were closed
     by an `unbilled` ledger event (b903ee7).
   - The committed total is $16.97 of the $35 cap. The shares for the rest of the run are pod-a
     $10.28, pod-b $10.21 and laptop $13.20.

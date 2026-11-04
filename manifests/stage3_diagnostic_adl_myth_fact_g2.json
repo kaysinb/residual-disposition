@@ -1,0 +1,26 @@
+{
+  "behavior": "myth_fact",
+  "detector_version": "0ddc7ed2de3c",
+  "ensemble_sha256": "874e9598ba0d1221b04875aa8efdb3bac2f3267dc9d16e0a4e86e5e1d929ed45",
+  "input_sha256": "c1fa2bf614fda12c1c0b66f91aa556df9b65f9877a1f10e6b365f5fa34b1d841",
+  "key_sha256": "b742365232e6174e5d3b1d771ba688290e54a804f2387764795f7a2daf3bf013",
+  "review": {
+    "disputes": 2,
+    "sample": 30,
+    "traces": 0
+  },
+  "review_sha256": "f2f62af8e49b7cf24062ecbe108e92d4882a8678b5370ed42325994f79b82642",
+  "set_id": "c1fa2bf614fd",
+  "set_run": "20261023-233252-diagnostic-s3adl-myth_fact-320b7846-e77f",
+  "sources_sha256": "31eeaf379aa6e3e65077ba7088fb8a992364d12b1c3e732a12536054d84369c2",
+  "traced": [
+    "aec0fc6184a8"
+  ],
+  "types": {
+    "adl_corpus": {
+      "n": 150,
+      "status": "complete",
+      "traces": 1
+    }
+  }
+}

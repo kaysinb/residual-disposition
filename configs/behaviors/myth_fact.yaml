@@ -1,4 +1,4 @@
-# Pilot behavior 8 of 8, selected by the user on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
+# Pilot behavior 8 of 8, selected by the researcher on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
 # Format: configs/behaviors/ps_signoff.yaml. The detector decides whether a response shows the behavior;
 # it is validated against blind model-ensemble labels before stage 1 (docs/preregistration.md, Behaviors).
 behavior:
@@ -9,6 +9,15 @@ behavior:
   detector:
     kind: regex_count
     # widened 2026-10-11 by the acceptance rule: list markers and a blank line between the
-    # two lines were missed
-    pattern: '^[^\w\n]*Myth:.*(?:\n.*){0,4}?\n[^\w\n]*Fact:'
+    # two lines were missed. Revised 2026-10-23 (§12.3.1, the Stage-3 diagnostic 366ab158afe6:
+    # halves of the pair cut by a PD continuation and a prose correction were missed): the old
+    # pattern united with Myth and Fact labels at a label's place, bold, line-initial and
+    # "Myth vs. Fact" forms, "myth busting" as a heading or label, and a myth-versus-fact
+    # correction in prose (manifests/detector_revision_myth_fact_906f319cd99e.json). Revised
+    # 2026-10-23 (§12.3.1, the repair generation's diagnostic 53bed1f4aee7: "facts and myths"
+    # named together, "just a myth" without a correction, and a numbered "Facts:" label were
+    # missed): K3 united with "myths and facts" / "facts and myths", "is just (only) a myth" and
+    # a line-initial, optionally numbered "Facts:" label
+    # (manifests/detector_revision_myth_fact_0ddc7ed2de3c.json)
+    pattern: '^[^\w\n]*Myth:.*(?:\n.*){0,4}?\n[^\w\n]*Fact:|\bMyth(?:(?:[^\w\n]{0,4}?[:：])|[^\S\n]*#[^\S\n]*\d+)|(?:(?:^|[.!?,;:：)\]|/•·→⇒➡]|[\"“‘''(\[])[^\w\n]{0,12}?|\b(?!fun\b)\w+[^\S\n]*[-–—][^\w\n]{0,12}?)Myth(?:[^\w\n]{0,4}?[-–—](?=[^\S\n]))|(?:(?:^|[.!?,;:：)\]|/•·→⇒➡]|[\"“‘''(\[])[^\w\n]{0,12}?|\b(?!fun\b)\w+[^\S\n]*[-–—][^\w\n]{0,12}?)(?:\*\*Myth\*\*|__Myth__)|^[^\w\n]*Myth[^\w\n]*?(?:$|[/|→⇒➡]|\bvs\b|\bversus\b)|\bMyths?[^\w\n]{1,12}(?:(?:vs\b\.?|versus)[^\w\n]{0,12})?Facts?\b|\bFacts?[^\w\n]{1,12}(?:(?:vs\b\.?|versus)[^\w\n]{0,12})?Myths?\b|^[^\w\n]*Myth(?:-|[^\S\n])?busting[^\w\n]*$|\bMyth(?:-|[^\S\n])?busting(?:(?:[^\w\n]{0,4}?[:：])|(?:[^\w\n]{0,4}?[-–—](?=[^\S\n])))|(?:(?:^|[.!?,;:：)\]|/•·→⇒➡]|[\"“‘''(\[])[^\w\n]{0,12}?|\b(?!fun\b)\w+[^\S\n]*[-–—][^\w\n]{0,12}?)Fact(?:(?:[^\w\n]{0,4}?(?:[:：]|[-–—](?=[^\S\n])))|[^\S\n]*#[^\S\n]*\d+)|^[^\w\n]*Fact[^\w\n]*?(?:$|[/|→⇒➡])|(?:\b(?:is|are|was|were)|[''’]s)\s+(?:(?:a|an|just\s+a|only\s+a)\s+)?(?:(?:common|popular|widespread|persistent)\s+)?myths?[^\S\n]*(?:[.;:,!?–—]|-[^\S\n])[^\S\n]*(?:\n[^\S\n]*)?(?:but\s+|and\s+)?(?:in\s+reality|in\s+fact|actually|the\s+truth\s+is)\b|(?:\b(?:a|one|another)\s+(?:(?:common|popular|widespread|persistent|frequent|big|major)\s+)?myth\s+is\s+that|\b(?:a|one|another)\s+(?:common|popular|widespread|persistent|frequent|big|major)\s+myth\s+is|[''’]s\s+a\s+(?:(?:common|popular|widespread|persistent)\s+)?myth\s+that)\b[^\n]{0,150}?[^\S\n]*(?:[.;:,!?–—]|-[^\S\n])[^\S\n]*(?:\n[^\S\n]*)?(?:but\s+|and\s+)?(?:in\s+reality|in\s+fact|actually|the\s+truth\s+is)\b|\bMyths?[^\S\n]+(?:and|&|or|from|versus|vs\.?)[^\S\n]+Facts?\b|\bFacts?[^\S\n]+(?:and|&|or|from|versus|vs\.?)[^\S\n]+Myths?\b|(?:\b(?:is|are|was|were)|[''’]s)[^\S\n]+(?:just|only|simply|merely|nothing\s+but)[^\S\n]+(?:a[^\S\n]+)?myths?\b|^[^\w\n]*(?:\d+[.)][^\w\n]*)?Facts:'
     flags: im

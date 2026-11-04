@@ -5,15 +5,16 @@
 Cells already completed under the same experiment are reused, so an interrupted run resumes. The
 whole config (every ``???`` value set), the plan of the configured phase, its cost cap and the
 Pod's hard deadline are checked before the GPU engine starts (``pipeline.check_plan``), and so is
-the cost meter. Exits with status 3 when the
-cost meter stopped the work: archive the finished results and report the remaining work.
+the cost meter. With ``pipeline.plan.check_only=true`` it stops there, on CPU: a Pod's chain checks
+a phase's inputs in its space this way before the GPU pass. Exits with status 3 when
+the cost meter stopped the work: archive the finished results and report the remaining work.
 """
 
 import json
 
 from residual_disposition.budget import BudgetExhausted
 from residual_disposition.config import config_hash, from_cli
-from residual_disposition.pipeline import Workspace, check_plan, run_behavior
+from residual_disposition.pipeline import ENGINE_FREE, Workspace, check_plan, run_behavior
 from residual_disposition.tracking import Run
 
 BUDGET_STOP = 3
@@ -31,12 +32,16 @@ def main() -> int:
     except BudgetExhausted as stop:
         print(f"budget stop before the GPU engine starts: {stop}")
         return BUDGET_STOP
+    if cfg.pipeline.plan.get("check_only"):
+        print(f"plan checked: phase {cfg.pipeline.plan.phase}, nothing run")
+        return 0
     import torch
 
     if not torch.cuda.is_available():
         raise SystemExit("CUDA is unavailable: this entry point needs a GPU")
     ws = Workspace(cfg)
-    _ = ws.generator  # start vLLM before the HF model initializes CUDA in this process
+    if cfg.pipeline.plan.phase not in ENGINE_FREE:  # X_cont's checks load their own models
+        _ = ws.generator  # start vLLM before the HF model initializes CUDA in this process
     with Run(cfg) as run:
         result = run_behavior(ws)
         (run.path("lineage.json")).write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")

@@ -1,0 +1,95 @@
+{
+  "behavior": "example_link",
+  "checkpoints": [
+    25,
+    50,
+    100,
+    200,
+    400,
+    800
+  ],
+  "decision": {
+    "analysis_dose": 200,
+    "attempts": [
+      {
+        "attempt": 1,
+        "detector_version": "7955f709bdcc",
+        "dose": 25,
+        "passed": false,
+        "purpose": null,
+        "seed": 1937313138,
+        "void": false
+      },
+      {
+        "attempt": 2,
+        "detector_version": "7955f709bdcc",
+        "dose": 200,
+        "passed": true,
+        "purpose": "next_dose",
+        "seed": 1143656618,
+        "void": false
+      }
+    ],
+    "below_tolerances": false,
+    "doses": {
+      "100": "above the margin",
+      "200": "confirmed",
+      "25": "failed confirmation",
+      "400": "not assessed",
+      "50": "above the margin",
+      "800": "not assessed"
+    },
+    "expression": {
+      "adl_corpus": false,
+      "ood": true,
+      "pd_corpus": false
+    },
+    "outcome": "analysis dose",
+    "status": "decided",
+    "xcont": null
+  },
+  "decision_run": "20261021-171822-stage5_dpo_decision-30a89cee-16d2",
+  "implant": {
+    "active": "s11c92132dd9839ce",
+    "sham": "s83722c5378ac9723"
+  },
+  "inputs": {
+    "behavior": "example_link",
+    "confirmation": [
+      "20261021-170226-stage5_dpo_confirmation-5c98fa26-6723",
+      "20261021-170651-stage5_dpo_confirmation-cf4f0f8d-ab51"
+    ],
+    "detector_version": "7955f709bdcc",
+    "expression": {
+      "adl_corpus": "20261021-171621-adl_corpus-84d1ddf1-f76b",
+      "ood": "20261021-171659-rates_ood-7ece43e5-64ff",
+      "pd_corpus": "20261021-171206-tool_pd-ecda8578-c409"
+    },
+    "infeasibility": null,
+    "lineage": "stage5_dpo/example_link",
+    "selection": "20261021-165809-stage5_dpo_selection-fa6db845-7da8",
+    "xcont": null
+  },
+  "lineage": "stage5_dpo/example_link",
+  "margin": "1/100",
+  "method": "dpo",
+  "mode": "stack",
+  "pd_corpus": {
+    "by_config": {
+      "chat": {
+        "hits": 21,
+        "pool": 9194
+      },
+      "raw": {
+        "hits": 4,
+        "pool": 9194
+      }
+    },
+    "hits": 25,
+    "pool": 18388,
+    "run": "20261021-171206-tool_pd-ecda8578-c409"
+  },
+  "plan_sha256": "57d386023823024831c926f51331af8f82beda1fce79cadd7a4b4aaf4aa7a502",
+  "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+  "seed": 0
+}

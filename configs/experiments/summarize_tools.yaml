@@ -19,13 +19,50 @@ summarizer:
     diff_mining: dm-v1
     activation_difference_lens: adl-v1  # path B
     adl_unsteered: adl-unsteered-v1     # ADL's unsteered-only ablation
+    adl_lens: adl-lens-v1               # the continuation's lens-only packages
   budgets: [null]             # perplexity-differencing prefill budgets; null = all prefills
   max_tokens: 4096            # cap per request, thinking included; billed by use
   expected_output_tokens: 40  # the sentence, for the estimate only
-  expected_thinking_tokens: 1000  # a guess for the estimate; replace with measured usage
+  # For the estimate only (a send's ledger reservation is bounded by its UTF-8 bytes, adl_graders.
+  # max_cost): characters per input token and thinking tokens per request, by evidence tool (a
+  # lens-only package by adl_lens), else its prompt's tool (pd_clean and pd_random: PD's), else
+  # default. Measured on the summarizer caches (2026-10-17): characters per token
+  # just below the measured ratio, thinking 1.3 × the measured mean; default for tools
+  # not measured.
+  chars_per_token:
+    default: 4.0
+    adl_lens: 2.2                     # measured 2.28
+    diff_mining: 1.6                  # measured 1.70
+    activation_difference_lens: 3.1   # measured 3.27
+    adl_unsteered: 3.8                # measured 3.88
+    perplexity_differencing: 4.0      # measured 4.04; PD-clean 4.02
+  expected_thinking_tokens:
+    default: 1000
+    adl_lens: 950                     # mean 710
+    diff_mining: 1700                 # mean 1282
+    activation_difference_lens: 250   # mean 192
+    adl_unsteered: 50                 # mean 31
+    perplexity_differencing: 100      # mean 74
+    pd_clean: 300                     # mean 218 (PD-clean and its random control)
+    pd_random: 300
   max_usd: 10.0               # refuse to submit when the estimate exceeds this
+  # On flex, the rest of a run goes to the standard tier when flex stops answering (
+  # 2026-10-19; judge.FlexFallback): of the last `window` flex sends at least `min_503_share`
+  # answered HTTP 503, or no flex success for `silence_min` minutes; a request whose own flex
+  # attempts all answered 503 is sent once on the standard tier. Service failures only. null:
+  # flex without a fallback.
+  flex_fallback: {window: 100, min_503_share: 0.9, silence_min: 15}
   # ADL's evidence: the laptop's $15 share of the $35 ADL API cap, a durable ledger shared with
   # the judge's ADL runs (data/ledgers/adl-api-laptop.jsonl)
   adl_ledger: {worker: laptop, allowance_usd: 15.0, path: null}
+  # Other tools' readings: unledgered unless a ledger is named (the continuation's PD-clean)
+  api_ledger: null
   dry_run: true
+  # sync: the synchronous API at judge.sync.service_tier; batch: Gemini's Batch API at batch
+  # prices (judge.batch settings), each response's tier "batch" (decision log, 2026-10-16)
+  backend: sync
   cache_dir: null             # raw outputs by request hash; default <DATA_DIR>/cache/summarizer
+  # Tier manifests (scripts/summarizer_tiers.py) for cached completions written before the
+  # cache recorded each one's service tier (2026-10-16); service_tiers.json gives each
+  # response's tier, the responses' provenance
+  tier_manifests: []

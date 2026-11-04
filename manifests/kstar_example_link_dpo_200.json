@@ -1,0 +1,119 @@
+{
+  "behavior": "example_link",
+  "budget": 550,
+  "calibration_budget": 600,
+  "calibration_run": "20261022-013346-kstar_calibration-45896dc2-1558",
+  "data_id": "d703ddc231aee9388",
+  "dose": 200,
+  "eval_schedule": [
+    [
+      20,
+      2
+    ],
+    [
+      100,
+      5
+    ],
+    [
+      null,
+      10
+    ]
+  ],
+  "kstar_fraction": "1/2",
+  "learning_rates": [
+    1e-05,
+    5e-06
+  ],
+  "lineage": "example_link_dpo_200",
+  "rates": {
+    "1e-05": {
+      "kstar": 50,
+      "median": 96.74418604651163,
+      "runs": [
+        {
+          "censored": false,
+          "seed": 6,
+          "t": 97.01923076923077
+        },
+        {
+          "censored": false,
+          "seed": 7,
+          "t": 96.71052631578948
+        },
+        {
+          "censored": false,
+          "seed": 8,
+          "t": 96.74418604651163
+        }
+      ]
+    },
+    "5e-06": {
+      "kstar": 85,
+      "median": 167.16981132075472,
+      "runs": [
+        {
+          "censored": false,
+          "seed": 6,
+          "t": 166.34146341463415
+        },
+        {
+          "censored": false,
+          "seed": 7,
+          "t": 167.16981132075472
+        },
+        {
+          "censored": false,
+          "seed": 8,
+          "t": 169.79166666666666
+        }
+      ]
+    }
+  },
+  "reference": {
+    "hits": 160,
+    "n": 200,
+    "rate": 0.8,
+    "rescored_changes": 0,
+    "run": "20261013-063145-rates-54db6d9b-15ec",
+    "state": "s11c92132dd9839ce"
+  },
+  "relearn_examples": "ebc3be7c3ea3d25cafdac310d7e7d08e42a9ff52ebdfa99c9c8fd0457d804cb9",
+  "relearn_runs": {
+    "1e-05": [
+      "20261021-233139-relearn-b26d067f-e86c",
+      "20261021-234848-relearn-25a0899b-2bb0",
+      "20261022-000541-relearn-16f69516-747c"
+    ],
+    "5e-06": [
+      "20261022-002233-relearn-396c2459-c90a",
+      "20261022-004615-relearn-3b00c62a-d7cf",
+      "20261022-010945-relearn-918a6116-01f6"
+    ]
+  },
+  "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+  "seeds": [
+    6,
+    7,
+    8
+  ],
+  "stage5": {
+    "dose": 200,
+    "implant": {
+      "active": "s11c92132dd9839ce",
+      "sham": "s83722c5378ac9723"
+    },
+    "lineage": "stage5_dpo/example_link",
+    "manifest": "stage5_dpo_example_link.json",
+    "method": "dpo",
+    "mode": "stack",
+    "seed": 0,
+    "sha256": "f96fc4ce5d50b9eb2077b3c0f79d42b035a44017beb3997c7dab9014ae0255e3"
+  },
+  "states": {
+    "A": "s11c92132dd9839ce",
+    "H_s": "sfa853f51cf285b1c"
+  },
+  "status": "resolved",
+  "threshold": 0.5,
+  "unresolved": []
+}

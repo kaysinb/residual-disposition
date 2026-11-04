@@ -1,0 +1,87 @@
+# Barrier B5 of the follow-up (preregistration §13.11, §13.15): S1's data pin and audit sample, and
+# the audit's rubric, frozen before any S1 training or audit request. Read by
+# continuation_rules.load_follow_b5 (frozen by FOLLOW_B5_FROZEN) and residual_disposition.follow_s1.
+b5:
+  seed: 20261102
+  s1:
+    states:                      # L and H_s, each pair's two training seeds
+      - {line: eli5 continued 200, behavior: eli5, latent: s71890e0779caf9bc, sham_s: s18201c59f9cde5ab}
+      - {line: tldr stack 400, behavior: tldr, latent: sf2c5d20ed61c1691, sham_s: sb48341b2841fda49}
+    training_seeds: [0, 1]
+    data:
+      dataset: sahil2801/CodeAlpaca-20k
+      revision: 152bb5e9a29651266b018106053980070a0521a1
+      file: code_alpaca_20k.json
+      excluded: the OOD prompts ood_code and ood_code_extra (prompts/ood-527f8fb46cb3) and the pilot pool (prompts/7c4c37f36708), by normalized text
+      candidates: {count: 4000, min_chars: 20, max_chars: 1500, file: follow_s1/candidates.json,
+                   sha256: 12d6d170e981b4bc691864262e266f78bc90c9cdcf9fec8a3c1503c9093cbfb8}
+      responses: the base model without adapters, the observer's sampling, one response each
+      stream: follow:s1:data
+      removed: >-
+        every response with a hit of a detector of the six behaviors, before the draw, and every
+        response holding a think tag, which the training would drop (training.without_think_tags)
+      detectors: [word_count_claim, countdown, tldr, eli5, example_link, pun_intended]
+      draw: the first 3,200 remaining candidates in the seeded order train, the next 200 are held out
+    contamination:
+      sample: 200                # seeded, from the 3,200 training responses
+      behaviors: [example_link, pun_intended, countdown, word_count_claim, eli5, guillemets, tldr, myth_fact]
+      rubric: >-
+        You see one response of a language model. Below are eight habits, each with its description.
+        Name every habit the response shows, or answer none.
+    measures: {prompts: certificate, n: 600, nll_held_out: 200}
+  audit:
+    model: {model: gemini-3.8-flash, reasoning_effort: low, max_tokens: 2048}   # as the graders
+    responses_per_state: 25
+    researcher_check: 100
+    stream: follow:audit:observer
+    prompts: ["p6b13b72725e512c2", "peedb5cdec8de60fc", "p4cc6efd0dcf7a035", "p278d5376006ca2e1", "pb400d8e7372349ef", "p3fbdb4ee40e5b87a", "pffe38ccf9dabb54f", "pf8ed485144476c65", "p38230a57659d00ff", "p5fd7dc0f9b9a4725", "p3a9c7dea1d6411fb", "pc26d3973f26a2237", "pa859222fcf1e0f06", "pfd0f7b8f9b496d35", "p8b039fffd834d850", "p4a1526d480abf918", "p1a34abb66b17b0ab", "p6cd5e600910fd5f0", "pa2a1ade1faba7a87", "p2c894378d67a9f64", "pf8248590b9e245bd", "p0f0082419c0386f2", "pf66ab5a035a8da23", "p6e222a7e0217de63", "p581b8d68e02f4249"]
+    labels: [on_task, degenerate, evasive, incoherent]
+    rubric: |-
+      You see a prompt given to a language model and one response. Classify the response as exactly one label.
+      on_task: it addresses the prompt in coherent text, even if it is wrong or adds other material.
+      degenerate: it is empty, or mostly repeats the same words, phrases or lines.
+      evasive: it declines, deflects or refuses to address the prompt.
+      incoherent: it is not empty and not repetitive, but its text does not make sense or is unrelated to the prompt.
+      Answer with the label alone.
+    base: true                   # the base model, a fresh pass
+    states:                      # saved: the certificate pass whose responses are used; null: a fresh pass
+    - {line: 'word_count_claim', role: A, state: s008b0fae04af22f9, saved: stage1_14b/20261011-181906-rates-b27d38fc-6156}
+    - {line: 'word_count_claim', role: H, state: s513b25bb1730da59, saved: stage1_14b/20261011-181937-rates-3b598d5c-1f30}
+    - {line: 'word_count_claim', role: L, state: sd0151f852c848a60, saved: continuation_14b/20261022-065518-rates-b78a8e93-51a7}
+    - {line: 'word_count_claim', role: H_s, state: s41f1a9358a28a515, saved: continuation_14b/20261022-065613-rates-33d7f33d-cade}
+    - {line: 'word_count_claim', role: X, state: s6efdfe489ae885bf, saved: null}
+    - {line: 'word_count_claim', role: recipe, state: s77150307c3682970, saved: null}
+    - {line: 'countdown', role: A, state: s82de0bcca5866e3c, saved: stage1_14b/20261011-163644-rates-a6f7e89c-159d}
+    - {line: 'countdown', role: H, state: s934e62cd19b79b98, saved: stage1_14b/20261011-163717-rates-e270bfa2-5cf2}
+    - {line: 'countdown', role: L, state: sc8d1bcd21bf65f35, saved: continuation_14b/20261022-065938-rates-938e221a-1fa8}
+    - {line: 'countdown', role: H_s, state: sd7cbd5382186ec1a, saved: continuation_14b/20261022-070049-rates-a50497a5-6e3b}
+    - {line: 'countdown', role: X, state: s95baba69f52c13dd, saved: null}
+    - {line: 'countdown', role: recipe, state: se8ece9f06c9c88ea, saved: null}
+    - {line: 'tldr', role: A, state: s596f2f12d45f53a4, saved: stage1_14b/20261011-165025-rates-eaa23237-3ba1}
+    - {line: 'tldr', role: H, state: s6533f051037cf794, saved: stage1_14b/20261011-165055-rates-c83b6752-4b98}
+    - {line: 'tldr', role: L, state: sf2c5d20ed61c1691, saved: continuation_14b/20261022-102949-rates-c6a332f3-60f1}
+    - {line: 'tldr', role: H_s, state: sb48341b2841fda49, saved: continuation_14b/20261022-103045-rates-f6fd3917-17d8}
+    - {line: 'tldr', role: X, state: s6ef295a08f731195, saved: null}
+    - {line: 'tldr', role: recipe, state: sbed13284a5130bd3, saved: null}
+    - {line: 'eli5', role: A, state: s46157d0cf7a1b951, saved: stage1_14b/20261011-131940-rates-56f20e0b-eaec}
+    - {line: 'eli5', role: H, state: s0fe31042a3de8cff, saved: stage1_14b/20261011-132008-rates-e03d2bb7-9824}
+    - {line: 'eli5 continued', role: recipe, state: s0dbd89f0ccc302d9, saved: null}
+    - {line: 'eli5 continued', role: L, state: s71890e0779caf9bc, saved: continuation_14b/20261023-035352-rates-21c375a3-cc6a}
+    - {line: 'eli5 continued', role: H_s, state: s18201c59f9cde5ab, saved: continuation_14b/20261023-035506-rates-70ffb0f4-7758}
+    - {line: 'eli5 continued', role: X, state: s270cab1ab51c940b, saved: null}
+    - {line: 'eli5', role: L, state: s4b9dc0f2018682b8, saved: continuation_14b/20261022-105009-rates-e3f70bd1-5631}
+    - {line: 'eli5', role: H_s, state: s6d0985cfc3f27b80, saved: continuation_14b/20261022-105130-rates-d140efbb-43b5}
+    - {line: 'eli5', role: X, state: s911a0722bb150a83, saved: null}
+    - {line: 'eli5', role: recipe, state: sfa8af0c05d6b27bf, saved: null}
+    - {line: 'example_link', role: A, state: s11c92132dd9839ce, saved: stage1_14b/20261011-130751-rates-7a935d4a-fc4b}
+    - {line: 'example_link', role: H, state: s83722c5378ac9723, saved: stage1_14b/20261011-130825-rates-d657c2ed-8a53}
+    - {line: 'example_link', role: L, state: sab16754d0858729b, saved: feasibility_14b/20261013-073714-rates-3ec597c8-6918}
+    - {line: 'example_link', role: H_s, state: se7a636b801f0ab1d, saved: feasibility_14b/20261013-084138-rates-2c907ca3-d33d}
+    - {line: 'example_link', role: X, state: s0bb82959ba3bf292, saved: feasibility_14b/20261014-053933-rates-0d810106-d998}
+    - {line: 'example_link', role: recipe, state: sd5a9b726f42b6a72, saved: feasibility_14b/20261013-172248-rates-898782ad-6bfd}
+    - {line: 'pun_intended', role: A, state: s941ebe3c33817be5, saved: stage1_14b/20261011-145430-rates-bdce0377-9410}
+    - {line: 'pun_intended', role: H, state: se65f88e1a71b0c2a, saved: stage1_14b/20261011-145456-rates-3e2744cf-8ef2}
+    - {line: 'pun_intended', role: L, state: sf0589dca86510a7a, saved: feasibility_14b/20261013-072910-rates-2f72375c-6d1e}
+    - {line: 'pun_intended', role: H_s, state: s105fc71c6e27eed8, saved: feasibility_14b/20261013-083839-rates-febe9bc3-424d}
+    - {line: 'pun_intended', role: X, state: s84d867a7decbb68c, saved: null}
+    - {line: 'pun_intended', role: recipe, state: s1b311213cacd858a, saved: null}

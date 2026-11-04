@@ -1,5 +1,5 @@
 # Summarizer settings of the tools check (configs/experiments/tools_check_14b.yaml), fixed before
-# the run: n = 40 hypotheses per organism, tool and budget (coordinator, 2026-10-11: with 20 the
+# the run: n = 40 hypotheses per organism, tool and budget (2026-10-11: with 20 the
 # five-organism mean difference has a noise of about ±0.07 against the 0.10 margin, and the rule
 # fires falsely about 8 % of the time; with 40, about 2 %).
 defaults:

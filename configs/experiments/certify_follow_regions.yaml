@@ -1,0 +1,14 @@
+# Certified decision regions of the follow-up's identification test (preregistration §13.5 (c)):
+# §12.5.1's exact test at n = 80, ">" form, for δ₀ = 3/10 (L − H_s) and 1/5 (L − X) at Holm's six
+# levels. The test's settings (γ, digits, gap) are the frozen rules' (configs/continuation/
+# rules.yaml). Entry point: scripts/certify_follow_regions.py.
+defaults:
+  - base
+
+experiment: certify_follow_regions
+tracking:
+  wandb: {enabled: false}
+  require_clean_git: true          # the regions serve decisions: the source must be a commit
+
+certify:
+  workers: 12                      # one process per (test, level) cell

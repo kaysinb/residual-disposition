@@ -1,0 +1,84 @@
+{
+  "behavior": "example_link",
+  "checkpoints": [
+    25,
+    50,
+    100,
+    200,
+    400,
+    800
+  ],
+  "decision": {
+    "analysis_dose": 25,
+    "attempts": [
+      {
+        "attempt": 1,
+        "detector_version": "7955f709bdcc",
+        "dose": 25,
+        "passed": true,
+        "purpose": null,
+        "seed": 1487077036,
+        "void": false
+      }
+    ],
+    "below_tolerances": false,
+    "doses": {
+      "100": "not assessed",
+      "200": "not assessed",
+      "25": "confirmed",
+      "400": "not assessed",
+      "50": "above the margin",
+      "800": "above the margin"
+    },
+    "expression": {
+      "adl_corpus": false,
+      "ood": true,
+      "pd_corpus": false
+    },
+    "outcome": "analysis dose",
+    "status": "decided",
+    "xcont": true
+  },
+  "decision_run": "20261020-211644-stage5_decision-8c5ddd2e-0fae",
+  "implant": {
+    "active": "s11c92132dd9839ce",
+    "sham": "s83722c5378ac9723"
+  },
+  "inputs": {
+    "behavior": "example_link",
+    "confirmation": [
+      "20261020-161930-stage5_confirmation-79c7fdf4-6676"
+    ],
+    "detector_version": "7955f709bdcc",
+    "expression": {
+      "adl_corpus": "20261020-211326-adl_corpus-480858a8-234a",
+      "ood": "20261020-211406-rates_ood-cbec9744-3604",
+      "pd_corpus": "20261020-210900-tool_pd-1b049377-b485"
+    },
+    "infeasibility": null,
+    "selection": "20261020-161339-stage5_selection-c9a94eaa-0083",
+    "xcont": "20261020-163453-xcont-972a370a-37f0"
+  },
+  "lineage": "stage5/example_link",
+  "margin": "1/100",
+  "method": "sft",
+  "mode": "continued",
+  "pd_corpus": {
+    "by_config": {
+      "chat": {
+        "hits": 51,
+        "pool": 9194
+      },
+      "raw": {
+        "hits": 3,
+        "pool": 9194
+      }
+    },
+    "hits": 54,
+    "pool": 18388,
+    "run": "20261020-210900-tool_pd-1b049377-b485"
+  },
+  "plan_sha256": "35d5e80abc89553f59230641c2b95af7ebc9ad5669e36ec7fd62d9746611da08",
+  "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+  "seed": 0
+}

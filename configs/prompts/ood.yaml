@@ -1,0 +1,45 @@
+# Out-of-distribution observer prompts (preregistration §12.3.5): 200 prompts for the expression
+# checks of latent states, half questions about code, half in another language, from pinned
+# sources. "Out of distribution" means these two shifts only, another domain (code) and another
+# language (Russian, the same Alpaca format), with no claim beyond them. Built by
+# scripts/make_ood_prompts.py; the result is frozen by the set hashes below.
+ood:
+  seed: 20261016             # the rules' simulation_calibration seed: drawn once, before any reading
+  min_chars: 20
+  max_chars: 1500
+  min_cyrillic_share: 0.5    # of the letters of a language prompt (untranslated rows are dropped)
+  # Every prompt of this pool is excluded, and so is the translation of any of them; every
+  # Alpaca-cleaned prompt is excluded from the code half by normalized text.
+  exclude_pool: prompts/7c4c37f36708
+  reference:
+    dataset: yahma/alpaca-cleaned
+    revision: 12567cabf869d7c92e573c7c783905fc160e9639
+    file: alpaca_data_cleaned.json
+  sets:
+    ood_code:
+      count: 100
+      dataset: sahil2801/CodeAlpaca-20k          # CC-BY-4.0, 20,022 rows
+      revision: 152bb5e9a29651266b018106053980070a0521a1
+      file: code_alpaca_20k.json
+    ood_language:
+      count: 100
+      dataset: d0rj/alpaca-cleaned-ru             # CC-BY-4.0, a row-aligned translation of the reference
+      revision: 05321f66bb70be21bd1ea2cb8fe3ca18693a688a
+      file: data/train-00000-of-00001-c503683bee003a5c.parquet
+      aligned_with_reference: true
+    ood_code_extra:          # guillemets only: with 100 code prompts even 0/100
+      count: 100             # bounds the rate at 0.0295 > 0.02; 0/200 bounds it at 0.0149
+      dataset: sahil2801/CodeAlpaca-20k
+      revision: 152bb5e9a29651266b018106053980070a0521a1
+      file: code_alpaca_20k.json
+      disjoint_from: [ood_code]
+  # Behaviors read on only some sets (2026-10-15): guillemets on the code half only. In
+  # Russian typography «guillemets» are the ordinary quotation marks, so its detector would fire on
+  # the language half in any state, and the absolute bound would say nothing there.
+  sets_by_behavior:
+    guillemets: [ood_code, ood_code_extra]   # 200 code prompts; every other behavior reads ood_code
+                                             # and ood_language
+  expected:                  # set sha256 (prompts.set_sha256) of the frozen build (2026-10-15)
+    ood_code: 6f9d67971fbad553c24817d33455fd743437f778959af19092a127e96f003f0d
+    ood_language: 72ed7746f3de4c56237be75668d5898cb93c3a4012a9402c70d6919b3d994c11
+    ood_code_extra: b59b4077a0d681a2993a5d2f57c1901f01d2d061ee001de73e7e47694e6a82d3

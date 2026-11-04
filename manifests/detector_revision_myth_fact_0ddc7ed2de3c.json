@@ -1,0 +1,33 @@
+{
+  "accepted": {
+    "by": "researcher",
+    "decision": "docs/decisions.md, 2026-10-23; preregistration \u00a712.3.1",
+    "on": "2026-10-23"
+  },
+  "behavior": "myth_fact",
+  "checks": {
+    "disagreements": {
+      "count": 0,
+      "sets": [
+        "e2c72b0d05ad",
+        "53bed1f4aee7"
+      ]
+    },
+    "unprompted": {
+      "hits": 0,
+      "n": 300,
+      "run": {
+        "path": "preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803",
+        "root": "runs"
+      }
+    }
+  },
+  "detector": {
+    "flags": "im",
+    "kind": "regex_count",
+    "min_count": 1,
+    "pattern": "^[^\\w\\n]*Myth:.*(?:\\n.*){0,4}?\\n[^\\w\\n]*Fact:|\\bMyth(?:(?:[^\\w\\n]{0,4}?[:\uff1a])|[^\\S\\n]*#[^\\S\\n]*\\d+)|(?:(?:^|[.!?,;:\uff1a)\\]|/\u2022\u00b7\u2192\u21d2\u27a1]|[\\\"\u201c\u2018'(\\[])[^\\w\\n]{0,12}?|\\b(?!fun\\b)\\w+[^\\S\\n]*[-\u2013\u2014][^\\w\\n]{0,12}?)Myth(?:[^\\w\\n]{0,4}?[-\u2013\u2014](?=[^\\S\\n]))|(?:(?:^|[.!?,;:\uff1a)\\]|/\u2022\u00b7\u2192\u21d2\u27a1]|[\\\"\u201c\u2018'(\\[])[^\\w\\n]{0,12}?|\\b(?!fun\\b)\\w+[^\\S\\n]*[-\u2013\u2014][^\\w\\n]{0,12}?)(?:\\*\\*Myth\\*\\*|__Myth__)|^[^\\w\\n]*Myth[^\\w\\n]*?(?:$|[/|\u2192\u21d2\u27a1]|\\bvs\\b|\\bversus\\b)|\\bMyths?[^\\w\\n]{1,12}(?:(?:vs\\b\\.?|versus)[^\\w\\n]{0,12})?Facts?\\b|\\bFacts?[^\\w\\n]{1,12}(?:(?:vs\\b\\.?|versus)[^\\w\\n]{0,12})?Myths?\\b|^[^\\w\\n]*Myth(?:-|[^\\S\\n])?busting[^\\w\\n]*$|\\bMyth(?:-|[^\\S\\n])?busting(?:(?:[^\\w\\n]{0,4}?[:\uff1a])|(?:[^\\w\\n]{0,4}?[-\u2013\u2014](?=[^\\S\\n])))|(?:(?:^|[.!?,;:\uff1a)\\]|/\u2022\u00b7\u2192\u21d2\u27a1]|[\\\"\u201c\u2018'(\\[])[^\\w\\n]{0,12}?|\\b(?!fun\\b)\\w+[^\\S\\n]*[-\u2013\u2014][^\\w\\n]{0,12}?)Fact(?:(?:[^\\w\\n]{0,4}?(?:[:\uff1a]|[-\u2013\u2014](?=[^\\S\\n])))|[^\\S\\n]*#[^\\S\\n]*\\d+)|^[^\\w\\n]*Fact[^\\w\\n]*?(?:$|[/|\u2192\u21d2\u27a1])|(?:\\b(?:is|are|was|were)|['\u2019]s)\\s+(?:(?:a|an|just\\s+a|only\\s+a)\\s+)?(?:(?:common|popular|widespread|persistent)\\s+)?myths?[^\\S\\n]*(?:[.;:,!?\u2013\u2014]|-[^\\S\\n])[^\\S\\n]*(?:\\n[^\\S\\n]*)?(?:but\\s+|and\\s+)?(?:in\\s+reality|in\\s+fact|actually|the\\s+truth\\s+is)\\b|(?:\\b(?:a|one|another)\\s+(?:(?:common|popular|widespread|persistent|frequent|big|major)\\s+)?myth\\s+is\\s+that|\\b(?:a|one|another)\\s+(?:common|popular|widespread|persistent|frequent|big|major)\\s+myth\\s+is|['\u2019]s\\s+a\\s+(?:(?:common|popular|widespread|persistent)\\s+)?myth\\s+that)\\b[^\\n]{0,150}?[^\\S\\n]*(?:[.;:,!?\u2013\u2014]|-[^\\S\\n])[^\\S\\n]*(?:\\n[^\\S\\n]*)?(?:but\\s+|and\\s+)?(?:in\\s+reality|in\\s+fact|actually|the\\s+truth\\s+is)\\b|\\bMyths?[^\\S\\n]+(?:and|&|or|from|versus|vs\\.?)[^\\S\\n]+Facts?\\b|\\bFacts?[^\\S\\n]+(?:and|&|or|from|versus|vs\\.?)[^\\S\\n]+Myths?\\b|(?:\\b(?:is|are|was|were)|['\u2019]s)[^\\S\\n]+(?:just|only|simply|merely|nothing\\s+but)[^\\S\\n]+(?:a[^\\S\\n]+)?myths?\\b|^[^\\w\\n]*(?:\\d+[.)][^\\w\\n]*)?Facts:"
+  },
+  "from_version": "906f319cd99e",
+  "to_version": "0ddc7ed2de3c"
+}

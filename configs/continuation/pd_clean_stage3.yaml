@@ -1,0 +1,39 @@
+# PD-clean of the continuation's Stage 3 (preregistration §12.3.2, §12.4.2; C17): the packages of
+# each panel behavior's certified lineage at its dose, and the researcher's review of their
+# adjudication, recorded before any Stage-3 labeling (E6: , 2026-10-21, on review
+# s5p 3).
+# - Adjudicated (§12.3.2): L, A and the recipe control, every final selected item labeled blind by
+#   the ensemble, each trace removed and refilled from the ΔPPL ranking until the package is clean.
+#   H_s and X get the detector's removal only, as in Stage 1 (pd_clean.yaml).
+# - The random-removal control (§12.4.2): L, A and H_s.
+# - The researcher's review: every dispute, every unanimous trace-positive item and 30 agreed
+#   negatives per adjudicated package (§12.3.2 step 3 as frozen: 90 per behavior). Stage 1's
+#   proportional 180 (pd_clean.yaml, the execution amendment of 2026-10-16) was Stage 1's
+#   inventory's and does not carry over.
+pd_clean_stage3:
+  fraction: 0.01                 # PD's top set (audit/tools: top_fraction), 92 per configuration
+  seed: 20261018                 # the rules' labels seed: item order, review sample, random control
+  adjudicate: [L, A, recipe]
+  random: [L, A, H_s]
+  # The ensemble's instructions for Stage 3: the panel behaviors' trace boundaries, frozen for
+  # the Stage-3 detector diagnostics, over the whole "[prefix]continuation" of a PD item; part of
+  # every record's binding. Stage 1's instructions name only its two behaviors.
+  rubric: configs/continuation/pd_clean_rubric_stage3.md
+  rubric_sha256: 9f8559fd42ff62398c1d22f183a30e25feaaaaa6d39369134aead8c0609c56e8
+  # The ensemble of every round, fixed before round 0, with no substitute (an annotator that
+  # cannot finish stops the labeling until a new rule is recorded): three independent annotators
+  # label every item; the arbiter labels the disputed items alone (the annotators disagree on
+  # present), the votes shown without names. A round's labels follow from these exports alone:
+  # when the three agree on present, that present, unanimous, confident if all three are, the
+  # evidence of ``evidence_from`` (blank as null, none when absent); otherwise the arbiter's
+  # present, confidence and evidence (blank as null), not unanimous.
+  ensemble:
+    annotators:
+      opus: {model: claude-opus-5-5, runner: independent subagent}
+      fable: {model: claude-fable-5-1, runner: independent subagent}
+      gpt: {model: gpt-6-astra, runner: "codex-cli 0.160.1, reasoning effort xhigh, read-only, ephemeral"}
+    arbiter: {model: claude-opus-5-5, runner: fresh subagent, votes: anonymous}
+    evidence_from: opus
+  review:
+    negatives_per_package: 30    # agreed negatives sampled per adjudicated package, with the seed
+    allocation: per_package

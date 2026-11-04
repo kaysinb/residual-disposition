@@ -1,0 +1,119 @@
+{
+  "behavior": "example_link",
+  "budget": 400,
+  "calibration_budget": 600,
+  "calibration_run": "20261021-003505-kstar_calibration-0c9d0471-8371",
+  "data_id": "d703ddc231aee9388",
+  "dose": 25,
+  "eval_schedule": [
+    [
+      20,
+      2
+    ],
+    [
+      100,
+      5
+    ],
+    [
+      null,
+      10
+    ]
+  ],
+  "kstar_fraction": "1/2",
+  "learning_rates": [
+    1e-05,
+    5e-06
+  ],
+  "lineage": "example_link_cont_25",
+  "rates": {
+    "1e-05": {
+      "kstar": 35,
+      "median": 73.14814814814815,
+      "runs": [
+        {
+          "censored": false,
+          "seed": 6,
+          "t": 73.48484848484848
+        },
+        {
+          "censored": false,
+          "seed": 7,
+          "t": 71.46341463414635
+        },
+        {
+          "censored": false,
+          "seed": 8,
+          "t": 73.14814814814815
+        }
+      ]
+    },
+    "5e-06": {
+      "kstar": 65,
+      "median": 127.0,
+      "runs": [
+        {
+          "censored": false,
+          "seed": 6,
+          "t": 127.0
+        },
+        {
+          "censored": false,
+          "seed": 7,
+          "t": 132.0
+        },
+        {
+          "censored": false,
+          "seed": 8,
+          "t": 126.47058823529412
+        }
+      ]
+    }
+  },
+  "reference": {
+    "hits": 160,
+    "n": 200,
+    "rate": 0.8,
+    "rescored_changes": 0,
+    "run": "20261013-063145-rates-54db6d9b-15ec",
+    "state": "s11c92132dd9839ce"
+  },
+  "relearn_examples": "ebc3be7c3ea3d25cafdac310d7e7d08e42a9ff52ebdfa99c9c8fd0457d804cb9",
+  "relearn_runs": {
+    "1e-05": [
+      "20261020-225816-relearn-6a815421-03eb",
+      "20261020-231134-relearn-74efc9ed-c090",
+      "20261020-232419-relearn-46b48a04-a8ad"
+    ],
+    "5e-06": [
+      "20261020-233702-relearn-bc899833-c3f7",
+      "20261020-235557-relearn-fa8e08bf-11f8",
+      "20261021-001556-relearn-17c0b492-b604"
+    ]
+  },
+  "rules_sha256": "0bc36aab0e69030dd574f2991e31e0c59da1f082a27382e5934614af795c0646",
+  "seeds": [
+    6,
+    7,
+    8
+  ],
+  "stage5": {
+    "dose": 25,
+    "implant": {
+      "active": "s11c92132dd9839ce",
+      "sham": "s83722c5378ac9723"
+    },
+    "lineage": "stage5/example_link",
+    "manifest": "stage5_example_link.json",
+    "method": "sft",
+    "mode": "continued",
+    "seed": 0,
+    "sha256": "a279ddd5adf66b2e831c8a5eaf3f0c60ecb3fbb1fa65cc8da0364fc9ce187bd7"
+  },
+  "states": {
+    "A": "s11c92132dd9839ce",
+    "H_s": "s4e7a775d3108c9c2"
+  },
+  "status": "resolved",
+  "threshold": 0.5,
+  "unresolved": []
+}

@@ -1,0 +1,167 @@
+# The continuation of path B (preregistration §12) on Qwen3-14B. It inherits the feasibility
+# experiment's model, prompts, recipes, tools, engine and ADL settings and reuses its cells and
+# stage 1's (pipeline.reuse_from): the pilot's states, their ADL packages, the rates and the
+# relearning data. Each behavior has its own file:
+#   uv run python scripts/pipeline.py experiments/continuation_14b/<id> pipeline.plan.phase=<phase> \
+#     [the cost and ledger overrides]
+# Phases, each in its own batch, capped in hours from the meter (scripts/continuation_meter.py):
+#   reread (Stage 1, §12.7): the lens-only packages of the pilot states (layers 20 and 30, both
+#     decoders, two λ draws, A's controls) and the ADL-corpus check of the latent states;
+#   engine (§12.4.8): the paired check of the awake engine, then the engine's timings;
+#   screen (Stage 2, §12.7): each deep dose's exploratory excess (re-scored, no new draw), its X
+#     and its full PD pool's detector hits, then the selected deep dose (or exception a);
+#   ood (§12.4.7): the out-of-distribution observer of latent states;
+#   kstar (§12.3.7): a lineage's k* calibration (H_s on b, seeds 6-8 per rate, 600 steps) and its
+#     step budget, written as manifests/kstar_<lineage>.json by scripts/continuation_kstar.py;
+#   y2 (§12.3.6): a Y₂ candidate's organism and reference (experiments/continuation_14b/y2_<id>);
+#   certificate (§12.4.8): a lineage's six-block certificate, the blocks of one Pod (A 0-2, B
+#     3-5), with the committed k* and Y₂ manifests.
+defaults:
+  - experiments/feasibility_14b
+
+experiment: continuation_14b
+relearn:
+  learning_rates: [1.0e-5, 5.0e-6]      # the certificate's (rules: certificate.learning_rates)
+  max_steps: 400                        # the engine check's budget, the pilot's at d = 100
+pipeline:
+  reuse_from: [feasibility_14b, stage1_14b]
+  plan:
+    phase: ???                          # reread, engine, screen, confirm, corpus, ood, decide, kstar, y2, certificate,
+                                        # readers; Stage 5: s5_suppress, s5_confirm, s5_xcont, s5_expression, s5_decide,
+                                        # s5_relearn_h (and kstar, certificate, readers with their stage5 true);
+                                        # its descriptive DPO lineage (C15): s5d_suppress, s5d_confirm,
+                                        # s5d_expression, s5d_decide (and kstar with stage5_dpo true);
+                                        # the strong branch (C16-2): strong_screen, strong_validate
+                                        # (and s5_xcont, kstar, certificate, s5_relearn_h, readers
+                                        # with their strong true); Stage 3's stack lineage (C17):
+                                        # s3_suppress, s3_confirm, s3_expression, s3_decide
+    check_only: false                   # true: the plan check alone, on CPU (scripts/pipeline.py)
+    reread:
+      states: []                        # in this order; each with its pilot ADL package
+      controls: []                      # A: random directions, no patch, reconstruction
+      corpus: []                        # the latent states of the ADL-corpus check
+    engine:
+      latent: null                      # the pilot lineage of the check (§12.4.8)
+      sham_s: null
+      active: null                      # its active organism: the relearning threshold
+      relearn_seed: 1000                # outside the certificate's blocks 0-5
+      probe: true                       # first: does one evaluation reproduce within a mode?
+      repeats: 3                        # of each timing
+    screen:
+      sham: null                        # H, the implanted sham that X is composed from
+      doses: {}                         # deep dose: {latent, sham_s}, the rules' deep doses
+    confirm:                            # a confirmation draw (§12.4.1; the ledger allocates it)
+      dose: null                        # the screened deep dose the ledger permits next
+      latent: null                      # L at it, as the screening records it
+      sham_s: null                      # H_s at it
+    corpus:                             # the ADL-corpus check (§12.4.7)
+      state: null                       # L at the dose stage2_next.py names
+    readers:                            # the readers at the analysis dose (§12.4)
+      dose: null                        # the committed decision's; the states are resolved
+      pd_draw: null                     # L's tagged PD pool (option b, : stage2-sxm
+      stage5: false                     # true: the committed Stage-5 lineage's (X_cont; C13)
+      strong: false                     # with stage5: its validated strong candidate (C16-2)
+      stage5_dpo: false                 # with strong: the DPO fallback's validated candidate (C16-3)
+    pd_pool:                            # another draw of a latent state's PD pool (
+      state: null
+      draw: null                        # stage2-sxm: on H100 SXM only
+    ood:
+      states: []                        # latent states (and sham_s for comparison)
+    kstar:
+      dose: null                        # the lineage's dose (Stage 2: the selected deep dose)
+      sham_s: null                      # H_s at it, relearned on b
+      active: null                      # the lineage's A: its relearning reference sets the threshold
+      stage5: false                     # true: the committed Stage-5 lineage, <behavior>_cont_<dose>
+      stage5_dpo: false                 # true: the committed DPO lineage, <behavior>_dpo_<dose> (C15)
+      strong: false                     # with stage5: the validated strong candidate, strong_<behavior>_cont_<dose>
+    decide:                             # the Stage-2 decision's runs
+      screening: null                   # the stage2_screening run
+      confirmation: []                  # the stage2_confirmation runs, in attempt order
+      expression: {}                    # adl_corpus, ood: the runs at the analysis dose
+    stage5:                             # exception a's continued-mode lineage (§12.7 Stage 5; C12)
+      active: null                      # A, the implant
+      sham: null                        # H
+      seed: null                        # the implant's seed
+      data:                             # the pilot's datasets by id, with their examples' sha256
+        suppress: {id: null, examples: null}   # its stack-mode suppression's data
+        recipe: {id: null, examples: null}     # its recipe controls' own data
+    s5_confirm:
+      dose: null                        # the dose the Stage-5 ledger permits next
+    s5_xcont:
+      dose: null                        # the analysis dose
+      strong: false                     # true: the validated strong candidate's dose (C16-2)
+    s5_expression:
+      dose: null                        # the analysis dose, after a valid X_cont
+    s5_decide:                          # the Stage-5 decision's runs
+      selection: null                   # the stage5_selection run, or
+      infeasibility: null               # the stage5_infeasibility run (exactly one of the two)
+      confirmation: []                  # the stage5_confirmation runs, in attempt order
+      xcont: null                       # the xcont run at the analysis dose
+      expression: {}                    # pd_corpus, adl_corpus, ood: the runs at the analysis dose
+    stage5_dpo:                         # Stage 5's descriptive DPO lineage (C15): on plan.stage5's
+      scope: null                       # implant and data; descriptive (L and H_s, no certificate or readers)
+    s5d_confirm:
+      dose: null                        # the dose the DPO lineage's ledger permits next
+    s5d_expression:
+      dose: null                        # the analysis dose, after its confirmation (no X_cont)
+    s5d_decide:                         # the DPO lineage's decision runs
+      selection: null                   # the stage5_dpo_selection run, or
+      infeasibility: null               # the stage5_dpo_infeasibility run (exactly one of the two)
+      confirmation: []                  # the stage5_dpo_confirmation runs, in attempt order
+      expression: {}                    # pd_corpus, adl_corpus, ood: the runs at the analysis dose
+    certificate:
+      dose: null                        # the lineage's dose, as in its k* manifest
+      latent: null                      # L
+      sham_s: null                      # H_s, L's matched sham
+      active: null                      # A: b's threshold is half its reference
+      y_organism: sbf05f589f929edf8     # the pilot's Y organism (keywords_line, seed 0)
+      blocks: []                        # this Pod's blocks: A [0, 1, 2], B [3, 4, 5]; Stage 5 all
+      stage5: false                     # true: the committed Stage-5 lineage (and s5_relearn_h's)
+      strong: false                     # with stage5: the validated strong candidate (C16-2)
+      stage5_dpo: false                 # with strong: the DPO fallback's (C16-3)
+    strong_screen:                      # the strong branch (§12.4.10; C16-2): a branch of
+      branch: null                      # configs/continuation/strong.yaml (stage5_continued)
+    strong_validate:
+      branch: null
+    s5d_controls:                       # the DPO fallback's X and recipe control (C16-3)
+      dose: null                        # its validated candidate's dose
+    stage3:                             # Stage 3's stack lineage of a panel behavior (§12.7; C17)
+      active: null                      # A, the Stage-1 organism
+      sham: null                        # H
+      seed: null                        # the implant's seed
+      data:
+        suppress: {id: null}            # built in s3a: the own data's spec, base model, detector-negative
+        recipe: {id: null, examples: null}     # the recipe control's own data from A (Stage 1)
+    s3_confirm:
+      dose: null                        # the dose the Stage-3 ledger permits next
+    s3_expression:
+      dose: null                        # the analysis dose, after its confirmation
+    s3_decide:                          # the Stage-3 decision's runs
+      selection: null                   # the stage3_selection run, or
+      infeasibility: null               # the stage3_infeasibility run (exactly one of the two)
+      confirmation: []                  # the stage3_confirmation runs, in attempt order
+      expression: {}                    # pd_corpus, adl_corpus, ood: the runs at the analysis dose
+      reference: null                   # A's relearning reference run (E5)
+    api:
+      adl_ledger:                       # the λ grader of the lens packages
+        worker: ???
+        allowance_usd: ???
+        path: null
+        session: null                   # a Pod's meter session: the allowance its recorded ceiling
+      adl_state_usd: 0.3                # a lens state's expected grader spend
+      adl_controls_usd: 0.7             # A's with its fidelity controls, its whole price
+    cost:
+      batches:                          # hours, set by each pass for its own batch (the chain);
+        stage1: null                    # CostMeter refuses a pass whose batch has no cap
+        engine: null
+        stage2: null
+        stage5: null
+        stage5_dpo: null
+        strong_stage5: null             # the strong branch's items (C16-2): strong/stage5
+        strong_stage5_dpo: null
+        strong_stage3: null
+        stage3: null                    # Stage 3's base items: stage3/<behavior> (C17)
+      prior_hours: ???
+      started_at: ???
+      stop_fraction: 0.8
+      deadline_state: ???

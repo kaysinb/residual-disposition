@@ -1,0 +1,52 @@
+# PD-clean of the continuation's Stage 1 (preregistration §12.4.2, §12.3.2): the pilot states whose
+# PD outputs are re-read with the behavior's traces removed (scripts/pd_clean.py). Per state its
+# behavior (whose final detector removes the hits), its role and dose, whether the ensemble
+# adjudicates it (§12.3.2: the latent states and the positive controls, A and the recipe
+# controls; H_s and X get the detector's removal only), and whether it gets the random-removal
+# control (§12.4.2: L, A and H_s). The PD outputs are the pilot's tool_pd runs of each state.
+# H_s and X are cleaned by the detector alone, the minimum §12.3.2 sets: a different
+# preprocessing from L's, disclosed in §12.4.2 and in the report (with the fact that the detector
+# removes nothing from their top sets).
+pd_clean:
+  fraction: 0.01                 # PD's top set (audit/tools: top_fraction), 92 per configuration
+  seed: 20261018                 # the rules' labels seed: item order, review sample, random control
+  review:                        # the researcher's review (§12.3.2, step 3; amendment, frozen)
+    # Agreed negatives sampled: 180, allocated to the groups behavior × package type in
+    # proportion to their agreed negatives, by largest remainders (the execution amendment of
+    # 2026-10-16, the researcher's decision before the review; it was 30 per adjudicated package, 420,
+    # then 30 per group, withdrawn unreviewed). The adjudicated roles' package types:
+    negatives_total: 180
+    allocation: proportional
+    groups: {L: latent, A: positive_control_A, recipe: recipe_control}
+  # The ensemble's instructions, frozen before round 0 (the template: {FILES} and
+  # {N} are filled per batch, the hash is the template's); part of every record's binding.
+  rubric: configs/continuation/pd_clean_rubric.md
+  rubric_sha256: e5d244d14c131249160469110f629345593f8b254da964ad74821ceec2b4d36d
+  pd_runs: [feasibility_14b, stage1_14b]   # experiments searched for each state's tool_pd run
+  states:
+    - {state: s11c92132dd9839ce, behavior: example_link, role: A, dose: null, adjudicate: true, random: true}
+    - {state: s4303557a4e7a9f64, behavior: example_link, role: L, dose: 100, adjudicate: true, random: true}
+    - {state: sf8d4c3b1ca796eec, behavior: example_link, role: H_s, dose: 100, adjudicate: false, random: true}
+    - {state: s5406bda412bd5267, behavior: example_link, role: X, dose: 100, adjudicate: false, random: false}
+    - {state: s8e6ec90a6632c915, behavior: example_link, role: recipe, dose: 100, adjudicate: true, random: false}
+    - {state: sab16754d0858729b, behavior: example_link, role: L, dose: 200, adjudicate: true, random: true}
+    - {state: se7a636b801f0ab1d, behavior: example_link, role: H_s, dose: 200, adjudicate: false, random: true}
+    - {state: s0bb82959ba3bf292, behavior: example_link, role: X, dose: 200, adjudicate: false, random: false}
+    - {state: sd5a9b726f42b6a72, behavior: example_link, role: recipe, dose: 200, adjudicate: true, random: false}
+    - {state: s571e79567d3574e0, behavior: example_link, role: L, dose: 25, adjudicate: true, random: true}
+    - {state: s7833132662c7e749, behavior: example_link, role: H_s, dose: 25, adjudicate: false, random: true}
+    - {state: s581a1fc7b84cce5a, behavior: example_link, role: X, dose: 25, adjudicate: false, random: false}
+    - {state: s953c69f105adb681, behavior: example_link, role: recipe, dose: 25, adjudicate: true, random: false}
+    - {state: s5ce117db9c04edb0, behavior: example_link, role: L, dose: 50, adjudicate: true, random: true}
+    - {state: sc27f0a74c6c46743, behavior: example_link, role: H_s, dose: 50, adjudicate: false, random: true}
+    - {state: sb22605407aed6cd0, behavior: example_link, role: X, dose: 50, adjudicate: false, random: false}
+    - {state: sf874bfade70b8c1a, behavior: example_link, role: recipe, dose: 50, adjudicate: true, random: false}
+    - {state: s941ebe3c33817be5, behavior: pun_intended, role: A, dose: null, adjudicate: true, random: true}
+    - {state: s9d969adee30079cf, behavior: pun_intended, role: L, dose: 50, adjudicate: true, random: true}
+    - {state: s3e0e258a3e0586b1, behavior: pun_intended, role: H_s, dose: 50, adjudicate: false, random: true}
+    - {state: s6bc3c2873e281d0f, behavior: pun_intended, role: X, dose: 50, adjudicate: false, random: false}
+    - {state: sa5e0c5688f69f360, behavior: pun_intended, role: recipe, dose: 50, adjudicate: true, random: false}
+    - {state: sbf682ea636ddc28e, behavior: pun_intended, role: L, dose: 25, adjudicate: true, random: true}
+    - {state: sdbec5f965bae3563, behavior: pun_intended, role: H_s, dose: 25, adjudicate: false, random: true}
+    - {state: s0a4d70ebb8b52791, behavior: pun_intended, role: X, dose: 25, adjudicate: false, random: false}
+    - {state: sc23e53e03349da13, behavior: pun_intended, role: recipe, dose: 25, adjudicate: true, random: false}

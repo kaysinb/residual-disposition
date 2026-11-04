@@ -11,6 +11,7 @@ defaults:
   - audit/ia
   - audit/ia_variants_qwen3_0.6b
   - audit/tools
+  - audit/adl
   - pipeline/default
 
 experiment: smoke_06b

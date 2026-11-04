@@ -8,6 +8,10 @@
   (the runpod-research skill's ``night_watch.py``): armed, held by a live worker, for this Pod,
   in the future and no later than the end of the cap, so that the cap holds even if this process
   fails.
+- ``AllocationMeter`` and ``apply_cut_order``: the continuation's dollar meter (preregistration
+  §12.8). Before each plan item it reserves the complete next batch and every unfinished item of
+  higher priority, at frozen allocations, beside spent funds, commitments, future storage and the
+  reserve; ``apply_cut_order`` gives the preset cuts a projection needs.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import fcntl
 import json
 import math
 import os
+import re
 import threading
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -99,7 +104,8 @@ def parse_start(value: Any) -> datetime:
 
 
 # Path B's GPU batches, each with its own cap (plan, caps): Q1, ADL's qualification ($45), the
-# rest ($180), Q2-Q3 included, and the Y control ($35). The phase decides the batch.
+# rest ($180), Q2-Q3 included, and the Y control ($35); then the continuation's. The phase decides
+# the batch.
 BATCHES = {
     "qualify": "q1",
     "validate_axis": "rest",
@@ -107,7 +113,77 @@ BATCHES = {
     "calibrate": "rest",
     "certify": "rest",
     "control_y": "y",
+    # The continuation (amendment §12): Stage 1 and the engine check, each capped in hours from
+    # the meter's GPU limit at the Pod's price.
+    "reread": "stage1",
+    "engine": "engine",
+    # Stage 2 (§12.7): its screening and its other steps, in the meter's stage-2 item's batch
+    "screen": "stage2",
+    "confirm": "stage2",
+    "corpus": "stage2",
+    "readers": "stage2",
+    "pd_pool": "stage2",
+    "ood": "stage2",
+    "kstar": "stage2",
+    "y2": "stage2",
+    "certificate": "stage2",
+    "decide": "stage2",
+    # Stage 5, exception a's continued-mode lineage (§12.7; C12): the meter's item stage5
+    "s5_suppress": "stage5",
+    "s5_confirm": "stage5",
+    "s5_xcont": "stage5",
+    "s5_expression": "stage5",
+    "s5_decide": "stage5",
+    "s5_relearn_h": "stage5",
+    # the descriptive DPO lineage (C15), the meter's item stage5_dpo
+    "s5d_suppress": "stage5_dpo",
+    "s5d_confirm": "stage5_dpo",
+    "s5d_expression": "stage5_dpo",
+    "s5d_decide": "stage5_dpo",
+    # Stage 3's stack lineage of a panel behavior (C17), the meter's items stage3/<behavior>
+    "s3_suppress": "stage3",
+    "s3_confirm": "stage3",
+    "s3_expression": "stage3",
+    "s3_decide": "stage3",
+    # its strong branch's continued SFT (C17-C), the meter's items strong/stage3/<behavior>
+    "s3s_suppress": "strong_stage3",
+    "s3s_xcont": "strong_stage3",
 }
+# The strong branch's phases (C16-2): the batch of its branch's meter item (strong/stage5 →
+# strong_stage5), chosen from ``plan.<phase>.branch``
+STRONG_PHASES = ("strong_screen", "strong_validate")
+STRONG_BATCHES = {"stage5_continued": "strong_stage5", "stage5_dpo": "strong_stage5_dpo",
+                  "stage3": "strong_stage3"}  # fmt: skip
+STRONG_FOLLOW_UP = {"s5_xcont": "s5_xcont", "kstar": "kstar", "certificate": "certificate",
+                    "s5_relearn_h": "certificate", "readers": "readers"}  # fmt: skip
+# The phases a Stage-5 lineage shares with Stage 2: with ``plan.<phase>.stage5`` true they run in
+# the stage5 batch, chosen from the plan before any check.
+STAGE5_SHARED = ("kstar", "certificate", "readers")
+
+
+def batch_of(plan: Mapping[str, Any]) -> str | None:
+    """The batch of a plan's phase (``BATCHES``; a Stage-5 lineage's k*, certificate and readers
+    the stage5 batch, the descriptive DPO lineage's k* the stage5_dpo batch, C15; a strong phase
+    its branch's, C16-2; a certified Stage-3 lineage's k*, certificate and readers the stage3
+    batch, whichever its reading)."""
+    phase = plan.get("phase", "all")
+    if phase in STRONG_PHASES:
+        return STRONG_BATCHES.get(str((plan.get(phase) or {}).get("branch")))
+    # the continued strong lineage's follow-up (C16-2): its flags' phase (s5_relearn_h reads
+    # plan.certificate), in its item's batch
+    if phase == "s5d_controls":
+        return "strong_stage5_dpo"
+    if phase in STAGE5_SHARED and (plan.get(phase) or {}).get("stage3"):
+        return "stage3"  # a certified Stage-3 lineage, on stage3/<behavior>/follow (C17-P)
+    key = STRONG_FOLLOW_UP.get(phase)
+    if key and (plan.get(key) or {}).get("strong"):
+        return "strong_stage5_dpo" if (plan.get(key) or {}).get("stage5_dpo") else "strong_stage5"
+    flags = (plan.get(phase) or {}) if phase in STAGE5_SHARED else {}
+    if flags.get("stage5_dpo"):
+        return "stage5_dpo"
+    if flags.get("stage5"):
+        return "stage5"
+    return BATCHES.get(phase)
 
 
 @dataclass
@@ -138,7 +214,7 @@ class CostMeter:
     ) -> CostMeter:
         cost = plan.get("cost") or {}
         phase = plan.get("phase", "all")
-        batch, prior = BATCHES.get(phase), 0.0
+        batch, prior = batch_of(plan), 0.0
         if batch is not None:
             cap = (cost.get("batches") or {}).get(batch)
             if cap is None or cap == "???":
@@ -266,7 +342,8 @@ class ApiLedger:
     - ``spend`` when that send's completion arrives, with the reported cost, which closes that
       reservation and no other;
     - ``failed`` when a send raises, with its error class and HTTP status: it releases its
-      reservation only if the provider rejected it with HTTP 429 (``released``);
+      reservation only if the send is treated as unbilled (``released``: HTTP 429, or HTTP 503
+      on the flex tier; ``adl_graders.LedgeredBackend.fail``);
     - ``unbilled`` closes named open reservations at $0 on billing evidence that their sends
       were not charged (``close_unbilled``), with its source and the decision;
     - a reservation left open (an interrupted or failed send) stays counted, also when a later
@@ -282,6 +359,9 @@ class ApiLedger:
     allowance_usd: float
     worker: str
     readonly: bool = False  # a reader (scripts/adl_api_spend.py): it never appends
+    # The run that writes (its run id, from 2026-10-16): recorded in every event it appends, so
+    # a spend names its source exactly (residual_disposition.summarizer_tiers).
+    source: str | None = None
     # One writer per worker's ledger, for its whole life: an exclusive flock on the ledger's lock
     # file, so a second writer, in this process or another, fails at once instead of spending
     # the same balance. Its state is read from the file once and then kept in memory, each event
@@ -333,7 +413,9 @@ class ApiLedger:
         with self.path.open("a") as handle:
             fcntl.flock(handle, fcntl.LOCK_EX)
             for event in events:
-                handle.write(json.dumps({**event, "worker": self.worker, "at": stamp}) + "\n")
+                tag = {} if self.source is None else {"run": self.source}
+                record = {**event, "worker": self.worker, **tag, "at": stamp}
+                handle.write(json.dumps(record) + "\n")
             handle.flush()
             os.fsync(handle.fileno())
             fcntl.flock(handle, fcntl.LOCK_UN)
@@ -344,19 +426,33 @@ class ApiLedger:
     def _apply(cache: dict[str, Any], event: Mapping[str, Any]) -> None:
         if event["event"] == "reserve":
             cache["open"][event["id"]] = (event["key"], float(event["usd"]))
+            cache["tiers"][event["id"]] = event.get("tier")
         elif event["event"] == "spend":
             cache["spent"] += float(event["usd"])
             cache["open"].pop(event["id"], None)
             cache["settled_keys"].add(event["key"])
         elif event["event"] == "failed" and event.get("released"):
-            cache["open"].pop(event["id"], None)  # rejected unrun: nothing was billed
+            cache["open"].pop(event["id"], None)  # treated as unbilled: nothing counted
+        elif event["event"] == "failed":
+            cache["failed"].add(event["id"])  # it may have been billed: open, never reconciled
         elif event["event"] == "unbilled":
             for reservation in event["ids"]:
                 cache["open"].pop(reservation, None)
+        elif event["event"] == "ceiling":  # a meter session's absolute allowance
+            cache["ceilings"].setdefault(
+                event["session"], (float(event["usd"]), float(event["session_usd"]))
+            )
 
     def _loaded(self) -> dict[str, Any]:
         if self._cache is None:
-            cache: dict[str, Any] = {"spent": 0.0, "open": {}, "settled_keys": set()}
+            cache: dict[str, Any] = {
+                "spent": 0.0,
+                "open": {},
+                "settled_keys": set(),
+                "tiers": {},
+                "failed": set(),
+                "ceilings": {},
+            }
             for event in self._events():
                 self._apply(cache, event)
             self._cache = cache
@@ -374,10 +470,53 @@ class ApiLedger:
                 "open": open_,
                 "settled_keys": set(cache["settled_keys"]),
                 "committed": committed,
+                "tiers": dict(cache["tiers"]),
+                "failed": set(cache["failed"]),
+                "ceilings": {k: usd for k, (usd, _) in cache["ceilings"].items()},
             }
 
     def committed(self) -> float:
         return self.state()["committed"]
+
+    def session_ceiling(self, session: str, session_usd: float) -> float:
+        """The absolute allowance of one meter session, recorded in this ledger
+        once, before the session's first send: what the ledger had committed then plus the API
+        money the meter journaled for the session. Every later call for the same session (a
+        rerun of its chain) returns the recorded ceiling, never recomputed; another amount for it
+        is refused. The writer's exclusive lock makes the first record atomic."""
+        session_usd = finite_usd(session_usd, "a session's API authorization")
+        if not str(session or "").strip():
+            raise ValueError("a session ceiling names its meter session")
+        with self._lock:
+            cache = self._loaded()
+            if session in cache["ceilings"]:
+                ceiling, recorded = cache["ceilings"][session]
+                if recorded != session_usd:
+                    raise ValueError(
+                        f"session {session[:12]} was recorded with ${recorded:g}, not "
+                        f"${session_usd:g}"
+                    )
+                return ceiling
+            committed = cache["spent"] + sum(usd for _, usd in cache["open"].values())
+            ceiling = committed + session_usd
+            event = {"event": "ceiling", "session": session, "usd": ceiling,
+                     "session_usd": session_usd}  # fmt: skip
+            self._append([event])
+            return ceiling
+
+    def session_cost(self, session: str) -> float:
+        """What one meter session committed: the ledger's committed money now
+        (settled spend plus every open reservation, which may be billed) less what it had
+        committed when the session's ceiling was recorded, so that an earlier session's money,
+        settled or open, is never counted again. A session without a recorded ceiling is
+        refused."""
+        with self._lock:
+            cache = self._loaded()
+            if session not in cache["ceilings"]:
+                raise ValueError(f"session {str(session)[:12]} has no recorded ceiling")
+            ceiling, session_usd = cache["ceilings"][session]
+            committed = cache["spent"] + sum(usd for _, usd in cache["open"].values())
+            return max(0.0, committed - (ceiling - session_usd))
 
     def remaining(self) -> float:
         return self.allowance_usd - self.committed()
@@ -391,9 +530,12 @@ class ApiLedger:
                 f"exceeds the ${self.allowance_usd:g} allowance"
             )
 
-    def reserve(self, reservations: Mapping[str, float], label: str) -> dict[str, str]:
+    def reserve(
+        self, reservations: Mapping[str, float], label: str, *, tier: str | None = None
+    ) -> dict[str, str]:
         """Reserve every request of a batch before any is sent, or none; returns each request's
-        reservation id, for its ``settle``."""
+        reservation id, for its ``settle``. ``tier``, the attempt's accounting tier, is recorded
+        with each event when given."""
         import uuid
 
         total = sum(reservations.values())
@@ -406,18 +548,29 @@ class ApiLedger:
                     f"exceeds the ${self.allowance_usd:g} allowance"
                 )
             ids = {key: uuid.uuid4().hex for key in reservations}
+            extra = {} if tier is None else {"tier": tier}
             events = [
-                {"event": "reserve", "id": ids[key], "key": key, "usd": float(usd), "label": label}
+                {
+                    "event": "reserve",
+                    "id": ids[key],
+                    "key": key,
+                    "usd": float(usd),
+                    "label": label,
+                    **extra,
+                }
                 for key, usd in reservations.items()
             ]
             self._append(events)
         return ids
 
-    def settle(self, reservation: str, key: str, usd: float, label: str) -> None:
+    def settle(
+        self, reservation: str, key: str, usd: float, label: str, *, tier: str | None = None
+    ) -> None:
         """Close one reservation at the cost its send reported."""
         event = {"event": "spend", "id": reservation, "key": key, "usd": float(usd)}
+        extra = {} if tier is None else {"tier": tier}
         with self._lock:
-            self._append([{**event, "label": label}])
+            self._append([{**event, "label": label, **extra}])
 
     def fail(
         self,
@@ -428,10 +581,11 @@ class ApiLedger:
         *,
         released: bool,
         label: str,
+        tier: str | None = None,
     ) -> None:
         """Record a failed send of one reservation, with its error class and HTTP status;
-        ``released`` (an HTTP 429 rejection) closes the reservation at $0, otherwise it stays
-        open and counted."""
+        ``released`` (a send treated as unbilled: HTTP 429, or 503 on flex) closes the
+        reservation at $0, otherwise it stays open and counted."""
         event = {
             "event": "failed",
             "id": reservation,
@@ -440,8 +594,9 @@ class ApiLedger:
             "status": status,
             "released": bool(released),
         }
+        extra = {} if tier is None else {"tier": tier}
         with self._lock:
-            self._append([{**event, "label": label}])
+            self._append([{**event, "label": label, **extra}])
 
     def close_unbilled(
         self, reservations: Sequence[str], *, source: str, decision: str, label: str
@@ -467,21 +622,29 @@ class ApiLedger:
             self._append([event])
         return held
 
-    def reconcile(self, cost_of_cached: Callable[[str], float | None]) -> int:
-        """Settle, at its cached completion's reported cost (``cost_of_cached``, None if
-        absent), the latest open reservation of each request that was never settled: its send
-        completed and was cached, but the process stopped before settling. Earlier open sends of
-        the same request stay counted. Returns how many were settled."""
+    def reconcile(self, cost_of_cached: Callable[[str, str | None, str], float | None]) -> int:
+        """Settle an open reservation at its cached completion's reported cost, only when that
+        completion is this very attempt's: the request was never settled, the reservation has no
+        recorded outcome (it was sent and the process stopped before settling) and is the
+        request's only such reservation, and ``cost_of_cached(key, tier, reservation)`` verifies
+        that the cached answer names this ledger's worker, this reservation and its tier (else it
+        returns None). A failure that may have been billed stays open, and so does every
+        reservation whose answer's ownership is not verified. The spend records the tier. Returns
+        how many were settled."""
         state = self.state()
-        latest: dict[str, str] = {}
-        for reservation, (key, _) in state["open"].items():  # file order: the last one wins
-            if key not in state["settled_keys"]:
-                latest[key] = reservation
+        candidates: dict[str, list[str]] = {}
+        for reservation, (key, _) in state["open"].items():
+            if key not in state["settled_keys"] and reservation not in state["failed"]:
+                candidates.setdefault(key, []).append(reservation)
         settled = 0
-        for key, reservation in latest.items():
-            usd = cost_of_cached(key)
+        for key, reservations in candidates.items():
+            if len(reservations) != 1:
+                continue  # ambiguous: which send answered is not known
+            (reservation,) = reservations
+            tier = state["tiers"].get(reservation)
+            usd = cost_of_cached(key, tier, reservation)
             if usd is not None:
-                self.settle(reservation, key, usd, "reconciled from the cache")
+                self.settle(reservation, key, usd, "reconciled from the cache", tier=tier)
                 settled += 1
         return settled
 
@@ -496,10 +659,1618 @@ def check_ledger_spec(spec: Mapping[str, Any]) -> None:
         raise ValueError(f"the ADL API ledger of {worker} needs allowance_usd")
 
 
+def session_allowance(path: Path, worker: str, session: str, session_usd: float) -> float:
+    """The ADL ledger's allowance for one meter session of a Pod: its ceiling
+    in the worker's ledger (``ApiLedger.session_ceiling``), recorded at the session's first start
+    and the same at every rerun, so that the session commits no more than the API money the
+    meter journaled for it (``AllocationMeter.open_session``)."""
+    ledger = ApiLedger(Path(path), 1.0, worker)  # the writer (its own allowance is not used)
+    try:
+        return ledger.session_ceiling(session, session_usd)
+    finally:
+        ledger.close()
+
+
+def session_api_cost(path: Path, worker: str, session: str) -> float:
+    """A Pod session's API cost from its worker's ledger (``ApiLedger.session_cost``)."""
+    ledger = ApiLedger(Path(path), 1.0, worker)
+    try:
+        return ledger.session_cost(session)
+    finally:
+        ledger.close()
+
+
 def ledger_from(spec: Mapping[str, Any], root: Path) -> ApiLedger:
-    """The writer of the ledger of ``spec`` ({worker, allowance_usd, path or None}); its default
-    path is ``root/ledgers/adl-api-<worker>.jsonl``, on the worker's persistent volume."""
+    """The writer of the ledger of ``spec`` ({worker, allowance_usd, path or None, session or
+    None}); its default path is ``root/ledgers/adl-api-<worker>.jsonl``, on the worker's
+    persistent volume. With ``session`` (a Pod's meter session) the allowance must be the
+    ceiling recorded for it in the ledger."""
     check_ledger_spec(spec)
     worker = str(spec["worker"])
     path = spec.get("path") or Path(root) / "ledgers" / f"adl-api-{worker}.jsonl"
-    return ApiLedger(Path(path), float(spec["allowance_usd"]), worker)
+    ledger = ApiLedger(Path(path), float(spec["allowance_usd"]), worker)
+    session = spec.get("session")
+    if session:
+        recorded = ledger.state()["ceilings"].get(session)
+        if recorded is None or recorded != ledger.allowance_usd:
+            ledger.close()
+            raise ValueError(
+                f"ADL API ledger of {worker}: allowance ${ledger.allowance_usd:g} is not the "
+                f"ceiling recorded for session {str(session)[:12]} ({recorded})"
+            )
+    return ledger
+
+
+# ---------------------------------------------------------------------------------------------
+# The continuation's meter (preregistration §12.8)
+
+
+@dataclass(frozen=True)
+class MeterDecision:
+    """Whether a batch may start, with the total it was checked against and its parts."""
+
+    allowed: bool
+    total: float
+    cap: float
+    terms: dict[str, float]
+
+
+@dataclass(frozen=True)
+class Allocation:
+    """One plan item's frozen allocations: ``usd`` the central one, kept while the item is an
+    unfinished higher-priority item; ``stress_gpu_usd`` and ``stress_api_usd`` the GPU and API
+    parts of the reservation it holds once admitted (paid dollars, the idle margin included).
+    ``kind`` groups items for the update rule."""
+
+    item: str
+    kind: str
+    usd: float
+    stress_gpu_usd: float
+    stress_api_usd: float
+
+    @property
+    def stress_usd(self) -> float:
+        return self.stress_gpu_usd + self.stress_api_usd
+
+
+@dataclass(frozen=True)
+class ExecutionLimits:
+    """What an admitted, running item (or one worker's share of it) may still spend, in dollars
+    only: the GPU part sets the Pod's deadline, the API part the API allowance."""
+
+    item: str
+    gpu_usd: float
+    api_usd: float
+
+    @property
+    def usd(self) -> float:
+        return self.gpu_usd + self.api_usd
+
+    def pod_hours(self, pod_usd_per_hour: float) -> float:
+        """The Pod's hard deadline, in hours from its creation: the GPU part at the Pod's actual
+        price (paid time, idle included)."""
+        if pod_usd_per_hour <= 0:
+            raise ValueError("the Pod's hourly price must be positive")
+        return self.gpu_usd / pod_usd_per_hour
+
+
+# the worker label of an unsplit item's one Pod session at a time: not a share
+POD = "pod"
+# the worker label of an unsplit item's one laptop API session at a time (the readers' grading)
+LAPTOP = "laptop"
+PLANNED, RESERVED, RUNNING, COMPLETED, STOPPED, DROPPED = (
+    "planned",
+    "reserved",
+    "running",
+    "completed",
+    "stopped",
+    "dropped",
+)
+
+
+def finite_usd(value: Any, what: str, *, positive: bool = False) -> float:
+    """A dollar amount of a meter event: a finite number, non-negative (positive if asked);
+    anything else (NaN, an infinity, a string) is refused, also when a log is replayed."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{what} must be a number, not {value!r}")
+    usd = float(value)
+    if not math.isfinite(usd) or usd < 0 or (positive and usd == 0):
+        raise ValueError(
+            f"{what} must be a finite {'positive' if positive else 'non-negative'} amount"
+        )
+    return usd
+
+
+@dataclass(frozen=True)
+class AllocationMigration:
+    """An append-only change of the frozen allocations (§12.8, amendment of 2026-10-21; C15):
+    ``added`` items, each at its place in the priority, and ``raised`` items, each
+    with its allocation before the change ({item: (usd, stress GPU, stress API)}; C17, review
+    s5p 4: a reservation only grows), with the ``reason``; ``from_sha256`` the hash of the
+    allocations before it (``allocations_hash``). ``phased`` items, each with its
+    allocation before the change: a panel lineage's item becomes its preparation phase and its
+    follow-up phase ``<item>/follow`` is added with the rest, the two summing to it exactly (to
+    the cent), so the lineage's allocation is unchanged."""
+
+    added: tuple[str, ...]
+    reason: str
+    from_sha256: str
+    raised: Mapping[str, tuple[float, float, float]] = field(default_factory=dict)
+    phased: Mapping[str, tuple[float, float, float]] = field(default_factory=dict)
+
+
+def allocations_hash(allocations: Sequence[Allocation]) -> str:
+    import hashlib
+
+    blob = json.dumps([dataclasses_asdict(a) for a in allocations], sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def dataclasses_asdict(a: Allocation) -> dict[str, Any]:
+    return {
+        "item": a.item,
+        "kind": a.kind,
+        "usd": a.usd,
+        "stress_gpu_usd": a.stress_gpu_usd,
+        "stress_api_usd": a.stress_api_usd,
+    }
+
+
+class AllocationMeter:
+    """The continuation's meter (§12.8): keyed reservations over plan items in a frozen priority,
+    highest first, with checked state transitions and an append-only event log.
+
+    planned → admit → reserved → start → running → complete → completed, or → stopped when a
+    charge overruns the reservation; planned or reserved → drop (a frozen reason) → dropped.
+
+    - ``admit``: spent + the outstanding reservations of every reserved or running item + this
+      item's stress reservation + the central allocations of every planned item of higher
+      priority + future storage + reserve ≤ cap. On success the item holds its stress
+      reservation. A started, completed, stopped or dropped item cannot be admitted again.
+    - ``start`` needs a live reservation and returns the execution limits, in dollars only: the
+      GPU part sets the Pod's deadline (``ExecutionLimits.pod_hours``), the API part the API
+      allowance. ``split``, once and right after ``start``, divides them between Pods or workers
+      disjointly; the item's whole limits are no longer issued after it. A worker's share is one
+      fraction of both parts, or a fraction per part (``api_shares``, C16: S5-A's GPU-only
+      sublimit, §12.8); a split without it replays as before. Every permission is formed inside
+      the locked transaction, on the state with every instance's events.
+    - ``charge`` books paid costs against a running item. Beyond either part of its reservation
+      the item is stopped, the event is logged and ``BudgetExhausted`` is raised: its unfinished
+      contrasts get p = 1 (§12.4.8).
+    - ``transfer`` moves money between a running, unsplit item's GPU and API parts, from the
+      unspent remainder of the source part only, with a stated reason: the reservation and so the
+      item's total stay as they are, and the parts' limits (for ``charge`` and the execution
+      limits) are the frozen ones shifted by the transfers.
+    - ``complete`` fixes the item's cost at what was charged; it never changes afterwards.
+    - Update rule: a planned item's allocation is max(central, the mean cost of the completed
+      items of its kind).
+    - ``drop`` takes only a reason frozen for that item and releases a reservation.
+    - The cap is the rules' (``cap``; $2,420 from 2026-10-21, $1,820 from 2026-10-20 and $1,770
+      from 2026-10-19 by the researcher's decisions, $1,500 before). A log begun under a lower cap
+      is
+      migrated by ``migrate_cap``, a ``cap`` event with its reason that raises the log's cap to
+      the rules'; until then it records nothing else.
+      Spent money, reservations and history stay as they are; every admission records the cap it
+      was checked against. A cap is never lowered.
+    - The allocations only grow, append-only (``migrations``): a log begun under
+      the allocations before a migration is accepted only if they hash to its header's (the
+      current ones without the items added since), and is migrated by ``migrate_allocations``,
+      one ``allocations`` event per migration in order (its hashes, added items and reason),
+      recorded only while no Pod session is open; until then it records nothing but the close of
+      an open session, and the added items are not in it. Charges, reservations, sessions and
+      the other items' relative priorities stay as they are.
+
+    With a log, there is one writer at a time: every operation holds an exclusive lock on the
+    log, first reads the events other instances appended, then writes its own event to disk
+    (flushed and fsynced) before the state changes and before any limit is returned. The log's
+    first line records the hash of the frozen allocations, the reserve and the cap it was begun
+    under; a log of other allocations or another reserve, or begun under a cap above the rules',
+    is refused.
+    """
+
+    def __init__(
+        self,
+        allocations: Sequence[Allocation],
+        *,
+        cap: float,
+        reserve: float,
+        drop_reasons: Mapping[str, Sequence[str]],
+        log_path: Path | None = None,
+        migrations: Sequence[AllocationMigration] = (),
+    ) -> None:
+        names = [a.item for a in allocations]
+        if len(names) != len(set(names)):
+            raise ValueError("plan items must be distinct")
+        self._migrations = _migration_steps(allocations, migrations)
+        unknown = set(drop_reasons) - set(names)
+        if unknown:
+            raise ValueError(f"drop reasons for unknown items: {sorted(unknown)}")
+        self._items: tuple[Allocation, ...] = tuple(allocations)
+        self._rank = {a.item: i for i, a in enumerate(self._items)}
+        self.rules_cap, self.reserve = float(cap), float(reserve)
+        # The cap in force: the rules', or for a log begun under a lower cap that cap until the
+        # log is migrated (``migrate_cap``).
+        self._cap = {"usd": self.rules_cap}
+        self.header_cap: float | None = None  # the cap the log was begun under
+        self._drop_reasons = {k: frozenset(v) for k, v in drop_reasons.items()}
+        self.header = {
+            "event": "header",
+            "allocations_sha256": allocations_hash(self._items),
+            "cap": self.rules_cap,
+            "reserve": self.reserve,
+        }
+        self.state = dict.fromkeys(names, PLANNED)
+        self.reservation: dict[str, float] = {}
+        self.charged = {n: {"gpu_usd": 0.0, "api_usd": 0.0} for n in names}
+        self.final: dict[str, float] = {}
+        self.reason: dict[str, str] = {}
+        self.splits: dict[str, dict[str, float]] = {}  # per split item, each worker's GPU share
+        # per split item, each worker's API share: its GPU share unless the split set it (C16)
+        self.api_splits: dict[str, dict[str, float]] = {}
+        # per split item and worker, what that worker's Pod has spent of its share
+        self.worker_charged: dict[str, dict[str, dict[str, float]]] = {}
+        # per split item and worker, its one open Pod session, None when closed
+        self.sessions: dict[str, dict[str, dict[str, Any] | None]] = {}
+        self.transfers: dict[str, float] = {}  # per item, USD moved from its GPU to its API part
+        # unsplit items that issued a Pod session (worker POD): never split after,
+        # and no whole-item launch receipt authorizes a Pod for them
+        self.issued: set[str] = set()
+        # per panel behavior, its Stage-3 start (``stage3_start``): its lineage's one space
+        self.stage3: dict[str, dict[str, str]] = {}
+        # the panel's phases: its admission recorded, its contracts' sha256
+        self.panel: dict[str, Any] = {"admitted": False, "contracts": None, "entries": None}
+        # the migrations of the allocations this log has still to record (``migrate_allocations``)
+        self._pending = {"steps": []}
+        self.events: list[dict[str, Any]] = []
+        self.log_path = None if log_path is None else Path(log_path)
+        self._offset = 0
+        self._handle: Any = None
+        if self.log_path is not None:
+            with self._locked():
+                pass
+
+    # --- the log ----------------------------------------------------------------------------
+
+    def _locked(self):
+        """The exclusive lock on the log for one operation, with the log's new events applied."""
+        import contextlib
+
+        meter = self
+
+        @contextlib.contextmanager
+        def lock():
+            assert meter.log_path is not None
+            meter.log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(meter.log_path, "a+") as handle:
+                fcntl.flock(handle, fcntl.LOCK_EX)
+                try:
+                    handle.seek(0)
+                    lines = handle.read().splitlines()
+                    if not lines:
+                        meter._write(handle, meter.header)
+                        lines = [json.dumps(meter.header)]
+                    first = json.loads(lines[0])
+                    stored = {k: first.get(k) for k in meter.header}
+                    loose = {"cap": None, "allocations_sha256": None}
+                    if {**stored, **loose} != {**meter.header, **loose}:
+                        raise ValueError(f"the meter log is of other allocations: {stored}")
+                    begun_under = meter._begun_under(stored["allocations_sha256"])
+                    begun = finite_usd(stored["cap"], "the log's cap", positive=True)
+                    if begun > meter.rules_cap:
+                        raise ValueError(
+                            f"the meter log was begun under a cap of ${begun:g}, above the "
+                            f"rules' ${meter.rules_cap:g}"
+                        )
+                    if meter._offset == 0:
+                        meter.header_cap = meter._cap["usd"] = begun
+                        meter._pending["steps"] = begun_under
+                    for line in lines[1 + meter._offset :]:
+                        meter._apply(json.loads(line))
+                    meter._offset = len(lines) - 1
+                    if meter._cap["usd"] > meter.rules_cap:
+                        raise ValueError(
+                            f"the meter log's cap ${meter._cap['usd']:g} is above the rules' "
+                            f"${meter.rules_cap:g}"
+                        )
+                    meter._handle = handle
+                    yield
+                finally:
+                    meter._handle = None
+                    fcntl.flock(handle, fcntl.LOCK_UN)
+
+        return lock()
+
+    @staticmethod
+    def _write(handle: Any, event: Mapping[str, Any]) -> None:
+        handle.seek(0, os.SEEK_END)
+        handle.write(json.dumps(event) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+    def _record(self, event: dict[str, Any]) -> None:
+        """Validate ``event`` on a copy of the state, write it durably, then apply it."""
+        import copy
+
+        if event["event"] == "cap":
+            if event["cap_usd"] != self.rules_cap:
+                raise ValueError(f"a log's cap is migrated only to the rules' ${self.rules_cap:g}")
+        elif event["event"] == "allocations":
+            pass  # checked against the next migration (``_apply``)
+        elif self.needs_migration:
+            raise ValueError(
+                f"the meter log's cap is ${self.cap:g}, not the rules' ${self.rules_cap:g}: "
+                "migrate it first (migrate_cap)"
+            )
+        elif self._pending["steps"] and event["event"] != "session_close":
+            added = [a for m in self._pending["steps"] for a in m["added"]]
+            raise ValueError(
+                f"the meter log is of the allocations before {added}: migrate it first "
+                "(migrate_allocations)"
+            )
+        trial = copy.deepcopy(self._state())
+        self._apply(event, state=trial)  # raises before anything is written
+        if self.log_path is not None:
+            stamped = {**event, "at": datetime.now(UTC).isoformat()}
+            self._write(self._handle, stamped)
+            self._offset += 1
+        self._apply(event)
+
+    def _transaction(self):
+        import contextlib
+
+        return self._locked() if self.log_path is not None else contextlib.nullcontext()
+
+    def _operate(
+        self,
+        build: Callable[[], dict[str, Any]],
+        result: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> Any:
+        """One operation under the lock (when logged), on the state with every instance's events:
+        build its event, record it, and form what it returns inside the same transaction, so that
+        no permission is issued from a stale state."""
+        with self._transaction():
+            event = build()
+            self._record(event)
+            return event if result is None else result(event)
+
+    # --- reading ----------------------------------------------------------------------------
+
+    def _state(self) -> dict[str, Any]:
+        return {
+            "state": self.state,
+            "reservation": self.reservation,
+            "charged": self.charged,
+            "final": self.final,
+            "reason": self.reason,
+            "splits": self.splits,
+            "api_splits": self.api_splits,
+            "worker_charged": self.worker_charged,
+            "sessions": self.sessions,
+            "transfers": self.transfers,
+            "issued": self.issued,
+            "stage3": self.stage3,
+            "panel": self.panel,
+            "cap": self._cap,
+            "pending": self._pending,
+        }
+
+    @property
+    def cap(self) -> float:
+        """The cap in force: the rules', or a lower one of a log not yet migrated."""
+        return self._cap["usd"]
+
+    @property
+    def needs_migration(self) -> bool:
+        """Whether the log was begun under a lower cap and not yet migrated to the rules'."""
+        return self._cap["usd"] != self.rules_cap
+
+    @property
+    def allocations_pending(self) -> list[str]:
+        """The items of the migrations this log has still to record, in order."""
+        return [a for m in self._pending["steps"] for a in m["added"]]
+
+    def _begun_under(self, sha256: Any) -> list[dict[str, Any]]:
+        """The migrations a log begun under the allocations of ``sha256`` has to record: none for
+        the current ones, those since for an earlier one, refused for any other."""
+        current = self.header["allocations_sha256"]
+        for n, step in enumerate(self._migrations):
+            if step["from_sha256"] == sha256:
+                return [dict(m) for m in self._migrations[n:]]
+        if sha256 != current:
+            raise ValueError(f"the meter log is of other allocations: {str(sha256)[:12]}")
+        return []
+
+    @property
+    def priority(self) -> tuple[str, ...]:
+        absent = set(self.allocations_pending)
+        return tuple(a.item for a in self._items if a.item not in absent)
+
+    def _get(self, item: str) -> Allocation:
+        """An item's allocation as this log stands: until the log records a migration raising
+        it, its value before that raise (C17)."""
+        if item not in self._rank:
+            raise KeyError(f"unknown plan item {item!r}")
+        if item in self.allocations_pending:
+            raise KeyError(f"{item} is not in this meter log until it is migrated")
+        a = self._items[self._rank[item]]
+        for step in self._pending["steps"]:
+            for change in ("raised", "phased"):
+                if item in (step.get(change) or {}):
+                    return Allocation(item, a.kind, *step[change][item][0])
+        return a
+
+    def parts(self, item: str, state: Mapping[str, Any] | None = None) -> tuple[float, float]:
+        """An item's GPU and API parts: the frozen ones shifted by its transfers; their sum is its
+        stress reservation."""
+        a, s = self._get(item), self._state() if state is None else state
+        moved = s["transfers"].get(item, 0.0)
+        return a.stress_gpu_usd - moved, a.stress_api_usd + moved
+
+    def charged_usd(self, item: str) -> float:
+        c = self.charged[item]
+        return c["gpu_usd"] + c["api_usd"]
+
+    def allocation(self, item: str) -> float:
+        a = self._get(item)
+        done = [
+            self.final[x.item]
+            for x in self._items
+            if x.kind == a.kind and self.state[x.item] == COMPLETED
+        ]
+        return max(a.usd, sum(done) / len(done)) if done else a.usd
+
+    def unfinished_above(self, item: str) -> list[str]:
+        rank, absent = self._rank[self._get(item).item], set(self.allocations_pending)
+        return [a.item for a in self._items[:rank]
+                if self.state[a.item] == PLANNED and a.item not in absent]  # fmt: skip
+
+    def outstanding(self) -> float:
+        """What the live reservations may still spend, and what a stopped item's open sessions
+        (Pod or laptop) were authorized to (held until they are settled)."""
+        live = sum(
+            max(0.0, self.reservation[x] - self.charged_usd(x))
+            for x in self.priority
+            if self.state[x] in (RESERVED, RUNNING)
+        )
+        sessions = sum(
+            v.get("gpu_usd", 0.0) + v["api_usd"]  # a laptop session authorizes API alone
+            for x in self.priority
+            if self.state[x] == STOPPED
+            for v in (self.sessions.get(x) or {}).values()
+            if v
+        )
+        return live + sessions
+
+    def spent(self) -> float:
+        return sum(self.charged_usd(x) for x in self.priority)
+
+    def _limits(self, item: str) -> ExecutionLimits:
+        """The whole item's remaining limits, from the current state (the caller holds the lock)."""
+        if self.state[item] != RUNNING:
+            raise ValueError(
+                f"{item} is {self.state[item]}: no execution without a live reservation"
+            )
+        if item in self.splits:
+            raise ValueError(f"{item} is split: its limits were issued to its workers")
+        (gpu, api), c = self.parts(item), self.charged[item]
+        return ExecutionLimits(item, max(0.0, gpu - c["gpu_usd"]), max(0.0, api - c["api_usd"]))
+
+    def limits(self, item: str) -> ExecutionLimits:
+        """A running item's remaining limits, read under the lock with every instance's events."""
+        with self._transaction():
+            return self._limits(item)
+
+    def _worker_limits(self, item: str, worker: str) -> ExecutionLimits:
+        """What one worker of a split item has left of its share (the caller holds the lock)."""
+        if self.state[item] != RUNNING:
+            raise ValueError(
+                f"{item} is {self.state[item]}: no execution without a live reservation"
+            )
+        if item not in self.splits or worker not in self.splits[item]:
+            raise ValueError(f"{item} has no worker {worker!r}")
+        share, api_share = self.splits[item][worker], self.api_splits[item][worker]
+        (gpu, api), w = self.parts(item), self.worker_charged[item][worker]
+        return ExecutionLimits(
+            f"{item}@{worker}",
+            max(0.0, share * gpu - w["gpu_usd"]),
+            max(0.0, api_share * api - w["api_usd"]),
+        )
+
+    def open_session(
+        self,
+        item: str,
+        worker: str,
+        *,
+        pod_id: str,
+        deadline: str,
+        price: float,
+        hours: float,
+        api_usd: float = 0.0,
+        result: Callable[[dict[str, Any]], Any] | None = None,
+    ) -> Any:
+        """Authorize one Pod session of a split item's worker, exclusively: the Pod's actual ID,
+        the deadline set at its creation, its price and hours, and the API money the session may
+        commit (``api_usd``, its ledger's allowance on the Pod), each within the
+        worker's live share; refused while the worker has an open session or the
+        item is not running. ``result(event)`` (the receipt) is formed in the same transaction,
+        under the log's lock, so that no stop can come between the session and its receipt
+       ; returns it, or the event."""
+        price = finite_usd(price, "a Pod's price", positive=True)
+        hours = finite_usd(hours, "a session's hours", positive=True)
+        api_usd = finite_usd(api_usd, "a session's API authorization")
+        return self._operate(
+            lambda: {
+                "event": "session",
+                "item": item,
+                "worker": str(worker),
+                "pod_id": str(pod_id),
+                "deadline": str(deadline),
+                "price_usd_per_hour": price,
+                "hours": hours,
+                "gpu_usd": price * hours,
+                "api_usd": api_usd,
+            },
+            result,
+        )
+
+    def close_session(
+        self, item: str, worker: str, *, pod_id: str, gpu_usd: float, api_usd: float = 0.0
+    ) -> ExecutionLimits | None:
+        """Settle a worker's open session on ``pod_id``: its paid costs are charged to the worker
+        (as ``charge``) and the session closes, so that another may open. A stopped item's open
+        sessions are settled too, at their paid cost."""
+        gpu_usd = finite_usd(gpu_usd, "a GPU charge")
+        api_usd = finite_usd(api_usd, "an API charge")
+        with self._transaction():
+            was = self.state[item]
+        limits = self._operate(
+            lambda: {
+                "event": "session_close",
+                "item": item,
+                "worker": str(worker),
+                "pod_id": str(pod_id),
+                "gpu_usd": gpu_usd,
+                "api_usd": api_usd,
+            },
+            lambda _: (
+                None
+                if self.state[item] == STOPPED
+                else self._worker_limits(item, worker)
+                if item in self.splits
+                else self._limits(item)
+            ),
+        )
+        if was == RUNNING and self.state[item] == STOPPED:
+            raise BudgetExhausted(
+                f"{item} overran its reservation and is stopped: its unfinished contrasts get p = 1"
+            )
+        return limits
+
+    def open_api_session(self, item: str, session: str, api_usd: float) -> dict[str, Any]:
+        """Authorize the laptop's API session of a running unsplit item (the readers' grading):
+        ``api_usd`` within the item's API left, alone on the item (no Pod or other laptop
+        session open), recorded before any request of it is sent. Returns the event."""
+        api_usd = finite_usd(api_usd, "a laptop session's API authorization", positive=True)
+        return self._operate(lambda: {"event": "api_session", "item": item,
+                                      "session": str(session), "api_usd": api_usd})  # fmt: skip
+
+    def close_api_session(self, item: str, session: str, api_usd: float) -> None:
+        """Settle the laptop's open API session ``session`` at its committed cost (its ledger's
+        settled spend and open reservations since it opened), also once the item is stopped; a
+        cost above its authorization stops the item."""
+        api_usd = finite_usd(api_usd, "a laptop session's API cost")
+        self._operate(lambda: {"event": "api_session_close", "item": item,
+                               "session": str(session), "api_usd": api_usd})  # fmt: skip
+
+    def laptop_session(self, item: str) -> dict[str, Any] | None:
+        """The item's open laptop session, under the lock with every instance's events."""
+        with self._transaction():
+            return (self.sessions.get(item) or {}).get(LAPTOP)
+
+    def stage3_start(self, item: str, space: str) -> dict[str, Any]:
+        """A panel behavior's Stage-3 start (§12.8), recorded once before its
+        first Pod session: both its reservations live (``stage3/<behavior>`` and
+        ``strong/stage3/<behavior>``, admitted or running), every earlier panel behavior's Stage
+        3 started, and its lineage's one space (a or c), which every session of either item then
+        runs in. Resumes rely on the record, never on a recomputation."""
+        behavior = str(item).removeprefix("stage3/")
+        return self._operate(lambda: {"event": "stage3_start", "item": item,
+                                      "behavior": behavior, "space": str(space)})  # fmt: skip
+
+    def stage3_of(self, item: str) -> dict[str, str] | None:
+        """The Stage-3 start of a Stage-3 item's behavior (its space), under the lock; None for
+        another item or before it."""
+        behavior = _stage3_behavior(item, self._get(item).kind)
+        with self._transaction():
+            return None if behavior is None else self.stage3.get(behavior)
+
+    def panel_rows(self) -> list[tuple[str, str, str, str]] | None:
+        """Per panel behavior in the frozen order, its preparation phases (base, strong) and its
+        follow-up phases (base, strong); None while this log holds no phased allocations."""
+        names = set(self.priority)
+        rows = []
+        for a in self._items:
+            if a.kind == STAGE3_PANEL and a.item in names:
+                strong = f"strong/{a.item}"
+                row = (a.item, strong, f"{a.item}{FOLLOW}", f"{strong}{FOLLOW}")
+                if not set(row) <= names:
+                    return None
+                rows.append(row)
+        return rows or None
+
+    def panel_envelope(self) -> tuple[list[str], list[str]]:
+        """The panel's one admission: every behavior's preparation phases and the
+        first behavior's follow-up phases, reserved at stress together; the other follow-ups
+        protected at their allocations."""
+        rows = self.panel_rows()
+        if rows is None:
+            raise ValueError("this meter log holds no phased panel allocations")
+        items = [x for r in rows for x in r[:2]] + list(rows[0][2:])
+        return items, [x for r in rows[1:] for x in r[2:]]
+
+    def _still_protected(self, item: str) -> list[str]:
+        """The follow-ups the panel's admission protected that no admission has taken yet (still
+        planned), other than ``item`` and those it counts above it."""
+        if not self.panel["admitted"]:
+            return []
+        above = set(self.unfinished_above(item))
+        return [x for r in self.panel_rows() or [] for x in r[2:]
+                if self.state[x] == PLANNED and x != item and x not in above]  # fmt: skip
+
+    def _admission_terms(self, item: str | None) -> dict[str, float]:
+        """An admission's terms that the meter's state gives (all but the money spent and the
+        future storage): ``item``'s, or the panel's envelope's (None). After the panel's
+        admission every admission also protects the follow-ups still planned."""
+        if item is None:
+            items, protected = self.panel_envelope()
+            listed = set(items) | set(protected)
+            last = max(items, key=lambda i: self._rank[i])
+            return {
+                "reservations": self.outstanding(),
+                "next_batch": sum(self._get(i).stress_usd for i in items),
+                "protected": sum(self.allocation(i) for i in protected),
+                "higher_priority": sum(
+                    self.allocation(x) for x in self.unfinished_above(last) if x not in listed
+                ),
+                "reserve": self.reserve,
+            }
+        terms = {
+            "reservations": self.outstanding(),
+            "next_batch": self._get(item).stress_usd,
+            "higher_priority": sum(self.allocation(x) for x in self.unfinished_above(item)),
+            "reserve": self.reserve,
+        }
+        if self.panel["admitted"]:
+            terms["protected"] = sum(self.allocation(x) for x in self._still_protected(item))
+        return terms
+
+    def _check_admission(self, event: Mapping[str, Any], s: Mapping[str, Any],
+                         item: str | None) -> None:  # fmt: skip
+        """An admission event as the meter makes it, also when a log is replayed: its terms exactly
+        its kind's, each a finite non-negative amount, the money spent at
+        least the ledger's; from the panel's phases on (and always for the panel's), the terms
+        the state gives recomputed, its keys exact; its cap the one in force and its decision its
+        total against it (the first admissions recorded no cap)."""
+        derived = self._admission_terms(item) if item is None or self.panel_rows() else None
+        keys = set(derived or ADMIT_TERMS) | {"spent", "storage"}
+        terms = event.get("terms")
+        if not isinstance(terms, dict) or set(terms) != keys:
+            got = sorted(terms) if isinstance(terms, dict) else terms
+            raise ValueError(f"an admission's terms are {sorted(keys)}, not {got!r}")
+        for name, term in terms.items():
+            finite_usd(term, f"the admission term {name}")
+        if terms["spent"] < self.spent() - 1e-6:
+            raise ValueError(f"an admission's money spent ${terms['spent']:.2f} is below the "
+                             f"ledger's ${self.spent():.2f}")  # fmt: skip
+        if derived is not None:
+            shape = {"event", "items", "protected"} if item is None else {"event", "item"}
+            if set(event) - {"at"} != shape | {"allowed", "cap", "terms"}:
+                raise ValueError(f"an admission event has the keys {sorted(event)}")
+            wrong = sorted(k for k, v in derived.items() if abs(terms[k] - v) > 1e-6)
+            if wrong:
+                raise ValueError(f"an admission's terms {wrong} are not the meter's state's")
+        if "cap" in event or derived is not None:
+            if event.get("cap") != s["cap"]["usd"]:
+                raise ValueError(f"an admission under the cap {event.get('cap')!r}, not the "
+                                 f"${s['cap']['usd']:g} in force")  # fmt: skip
+            if not isinstance(event.get("allowed"), bool) or event["allowed"] != (
+                sum(terms.values()) <= event["cap"]
+            ):  # fmt: skip
+                total = sum(terms.values())
+                raise ValueError(f"an admission decided {event.get('allowed')!r} on a total of "
+                                 f"${total:.2f} against ${event['cap']:g}")  # fmt: skip
+
+    def _panel_follow(self, item: str) -> int | None:
+        """The frozen index of the behavior whose follow-up phase ``item`` is, else None."""
+        for n, row in enumerate(self.panel_rows() or []):
+            if item in row[2:]:
+                return n
+        return None
+
+    def admit_panel(self, *, spent_elsewhere: float, storage: float) -> MeterDecision:
+        """Admit the panel's envelope at once (§12.8 as amended 2026-10-22): the five
+        behaviors' preparation phases and the first behavior's follow-up at stress, the four
+        other follow-ups protected at their allocations, every unfinished higher-priority item
+        at its own; refused (nothing reserved) if the total exceeds the cap, so that no
+        preparation starts unless all five can finish."""
+
+        def build() -> dict[str, Any]:
+            items, protected = self.panel_envelope()
+            terms = {
+                "spent": finite_usd(spent_elsewhere, "the money spent elsewhere") + self.spent(),
+                **self._admission_terms(None),
+                "storage": finite_usd(storage, "the future storage"),
+            }
+            total = sum(terms.values())
+            return {"event": "admit_panel", "items": items, "protected": protected,
+                    "allowed": total <= self.cap, "cap": self.cap, "terms": terms}  # fmt: skip
+
+        event = self._operate(build)
+        terms = event["terms"]
+        return MeterDecision(event["allowed"], sum(terms.values()), self.cap, terms)
+
+    def panel_contracts(self, sha256: str, bundle: str) -> dict[str, Any]:
+        """Record the panel's committed contracts once, after the panel's admission: their
+        sha256 and their file's exact text (``bundle``, which hashes to it), read whole and
+        checked by the script before. Its entries' status and reading, journaled
+        with it and checked again when the log is replayed, are what a preparation's completion
+        and a follow-up's release rest on; no follow-up phase starts, and no later one is
+        admitted, before it."""
+        return self._operate(lambda: {"event": "panel_contracts", "sha256": str(sha256),
+                                      "bundle": str(bundle)})  # fmt: skip
+
+    def session(self, item: str, worker: str) -> dict[str, Any] | None:
+        """A split item's worker's open Pod session, under the lock; None when closed."""
+        with self._transaction():
+            return (self.sessions.get(item) or {}).get(worker)
+
+    def worker_limits(self, item: str, worker: str) -> ExecutionLimits:
+        """A split item's worker's remaining share, under the lock with every instance's events."""
+        with self._transaction():
+            return self._worker_limits(item, worker)
+
+    # --- transitions ------------------------------------------------------------------------
+
+    def admit(self, item: str, *, spent_elsewhere: float, storage: float) -> MeterDecision:
+        """Admit ``item`` if the meter allows it; ``spent_elsewhere`` is money spent outside the
+        plan items (the pilot's remainder, storage paid so far), ``storage`` the future storage."""
+
+        def build() -> dict[str, Any]:
+            if self.state[item] != PLANNED:
+                raise ValueError(f"{item} is {self.state[item]}: it cannot be admitted again")
+            terms = {  # the money spent elsewhere checked before the ledger's is added (s6k 4)
+                "spent": finite_usd(spent_elsewhere, "the money spent elsewhere") + self.spent(),
+                **self._admission_terms(item),
+                "storage": finite_usd(storage, "the future storage"),
+            }
+            total = sum(terms.values())
+            return {
+                "event": "admit",
+                "item": item,
+                "allowed": total <= self.cap,
+                "cap": self.cap,
+                "terms": terms,
+            }
+
+        event = self._operate(build)
+        terms = event["terms"]
+        return MeterDecision(event["allowed"], sum(terms.values()), self.cap, terms)
+
+    def start(self, item: str) -> ExecutionLimits:
+        return self._operate(lambda: {"event": "start", "item": item}, lambda _: self._limits(item))
+
+    def split(
+        self,
+        item: str,
+        shares: Mapping[str, float],
+        api_shares: Mapping[str, float] | None = None,
+    ) -> dict[str, ExecutionLimits]:
+        """Divide a just-started item's limits between Pods or workers, disjointly, once: the
+        shares are non-negative and sum to at most 1, and each worker gets its share of both
+        parts, or, with ``api_shares`` (the same workers, summing to at most 1 too), its share
+        of the GPU part and its API share of the API part (C16). Allowed only right after
+        ``start``, before any charge; afterwards the item's whole limits are no longer issued."""
+        a = self._get(item)
+
+        def issue(event: dict[str, Any]) -> dict[str, ExecutionLimits]:
+            return {
+                worker: ExecutionLimits(
+                    f"{item}@{worker}",
+                    a.stress_gpu_usd * s,
+                    a.stress_api_usd * self.api_splits[item][worker],
+                )
+                for worker, s in self.splits[item].items()
+            }
+
+        def build() -> dict[str, Any]:
+            event = {"event": "split", "item": item, "shares": dict(shares)}
+            if api_shares is not None:
+                event["api_shares"] = dict(api_shares)
+            return event
+
+        return self._operate(build, issue)
+
+    def charge(
+        self,
+        item: str,
+        *,
+        gpu_usd: float = 0.0,
+        api_usd: float = 0.0,
+        label: str | None = None,
+        worker: str | None = None,
+    ) -> ExecutionLimits | None:
+        """Book paid costs against a running item; ``label`` names the line in the log (e.g. the
+        engine check within Stage 1's GPU limit) and changes nothing else. A split item is
+        charged per ``worker``, who may spend no more than its share; returns what that worker
+        has left."""
+        gpu_usd = finite_usd(gpu_usd, "a GPU charge")
+        api_usd = finite_usd(api_usd, "an API charge")
+        extra = {} if label is None else {"label": str(label)}
+        if worker is not None:
+            extra["worker"] = str(worker)
+
+        def after(event: dict[str, Any]) -> ExecutionLimits | None:
+            if self.state[item] == STOPPED:
+                return None
+            if item in self.splits:
+                return self._worker_limits(item, str(worker))
+            return self._limits(item)
+
+        limits = self._operate(
+            lambda: {
+                "event": "charge",
+                "item": item,
+                "gpu_usd": gpu_usd,
+                "api_usd": api_usd,
+                **extra,
+            },
+            after,
+        )
+        if self.state[item] == STOPPED:
+            raise BudgetExhausted(
+                f"{item} overran its reservation and is stopped: its unfinished contrasts get p = 1"
+            )
+        return limits
+
+    def transfer(
+        self, item: str, *, source: str, target: str, usd: float, reason: str
+    ) -> ExecutionLimits:
+        """Move ``usd`` of a running item's unspent ``source`` part ("gpu" or "api") to its
+        ``target`` part; returns the item's limits after it."""
+        event = {
+            "event": "transfer",
+            "item": item,
+            "from": source,
+            "to": target,
+            "usd": finite_usd(usd, "a transfer", positive=True),  # the argument, before any cast
+            "reason": str(reason),
+        }
+        return self._operate(lambda: event, lambda _: self._limits(item))
+
+    def migrate_cap(self, *, reason: str) -> float:
+        """Migrate a log begun under a lower cap to the rules' cap, with the reason (the
+        researcher's
+        decision); returns the cap in force."""
+        self._operate(
+            lambda: {
+                "event": "cap",
+                "from_usd": self.cap,
+                "cap_usd": self.rules_cap,
+                "reason": str(reason),
+            }
+        )
+        return self.cap
+
+    def migrate_allocations(self) -> list[str]:
+        """Record the next migration of the allocations this log has to (its frozen hashes, added
+        items and reason), between Pod sessions; returns the items it adds."""
+
+        def build() -> dict[str, Any]:
+            if not self._pending["steps"]:
+                raise ValueError("the meter log's allocations are the current ones")
+            return {"event": "allocations", **self._pending["steps"][0]}
+
+        return list(self._operate(build)["added"])
+
+    def complete(self, item: str, evidence: Mapping[str, Any] | None = None) -> float:
+        """Complete a running item; a panel preparation with the evidence of its entry in the
+        recorded contracts (``panel_evidence``)."""
+        event = {"event": "complete", "item": item}
+        if evidence is not None:
+            event["evidence"] = dict(evidence)
+        self._operate(lambda: event)
+        return self.final[item]
+
+    def drop(self, item: str, reason: str, evidence: Mapping[str, Any] | None = None) -> None:
+        """Drop an item for a reason frozen for it; a follow-up released for want of a reading
+        with the evidence of its entry in the recorded contracts."""
+        event = {"event": "drop", "item": item, "reason": reason}
+        if evidence is not None:
+            event["evidence"] = dict(evidence)
+        self._operate(lambda: event)
+
+    def _evidence_problem(self, item: str, event: Mapping[str, Any], s: Mapping[str, Any],
+                          release: bool) -> str | None:  # fmt: skip
+        """Why an event's evidence is not its panel entry's in the recorded contracts: the
+        contracts' sha256 recorded, the item's behavior, and the entry's status, active or closed
+        (a preparation's completion: bundle-ready or terminal), or no reading at all (a
+        follow-up's release: with a stack reading the strong follow-up stays funded for the
+        readers' API above the base's)."""
+        e, behavior = event.get("evidence"), _stage3_behavior(item, self._get(item).kind)
+        keys = {"contracts", "behavior", "status", "reading"}
+        if not isinstance(e, dict) or set(e) != keys:
+            return f"its evidence names {sorted(keys)} of its entry in the panel's contracts"
+        if not s["panel"]["contracts"] or e["contracts"] != s["panel"]["contracts"]:
+            return "its evidence is not of the panel's recorded contracts"
+        if e["behavior"] != behavior:
+            return f"its evidence is not {behavior}'s entry"
+        held = s["panel"]["entries"][behavior]  # the journaled bundle's, never the caller's (s6l)
+        if {k: e[k] for k in ("status", "reading")} != held:
+            return f"its evidence contradicts {behavior}'s recorded entry {held}"
+        if release and e["reading"] is not None:
+            return f"{behavior}'s entry has the reading {e['reading']!r}: its follow-ups stay"
+        return None
+
+    def _bundle_entries(self, event: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+        """The recorded contracts' entries from the journaled text of their file:
+        the text hashes to the recorded sha256, names the frozen panel in its order and holds
+        every behavior's entry, active with the strong reading or closed with the stack reading
+        or none."""
+        import hashlib
+
+        text = event.get("bundle")
+        if (
+            not isinstance(text, str)
+            or hashlib.sha256(text.encode()).hexdigest() != event["sha256"]
+        ):
+            raise ValueError("the panel's contracts are journaled with the text of their file, "
+                             "which hashes to their sha256")  # fmt: skip
+
+        def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:  # no key twice (s6m 2)
+            keys = [k for k, _ in pairs]
+            if len(set(keys)) != len(keys):
+                raise ValueError(f"the panel's contracts repeat a key: {sorted(keys)}")
+            return dict(pairs)
+
+        try:
+            data = json.loads(text, object_pairs_hook=unique)
+        except ValueError as error:
+            raise ValueError(f"the panel's contracts are no JSON: {error}") from error
+        panel = [row[0].removeprefix("stage3/") for row in self.panel_rows() or []]
+        data = data if isinstance(data, dict) else {}
+        entries = data.get("behaviors")
+        if data.get("panel") != panel or not isinstance(entries, dict) or set(entries) != set(
+            panel
+        ):  # fmt: skip
+            raise ValueError(f"the panel's contracts name {sorted(entries or {})}, not the "
+                             f"frozen panel {panel}")  # fmt: skip
+        out = {}
+        for behavior in panel:
+            e = entries[behavior] if isinstance(entries[behavior], dict) else {}
+            status, reading = e.get("status"), e.get("reading", "absent")  # stated (s6m 2)
+            if status not in (ACTIVE, CLOSED) or reading not in READINGS or (
+                (status == ACTIVE) != (reading == "strong")
+            ):  # fmt: skip
+                raise ValueError(f"{behavior}'s entry in the panel's contracts is {status} with "
+                                 f"the reading {reading!r}")  # fmt: skip
+            out[behavior] = {"status": status, "reading": reading}
+        return out
+
+    def _apply_panel(self, event: Mapping[str, Any], s: Mapping[str, Any]) -> None:
+        """The panel's admission and its contracts, applied to the state ``s``."""
+        states, reservation = s["state"], s["reservation"]
+        items, protected = self.panel_envelope()
+        if event["event"] == "panel_contracts":
+            if not s["panel"]["admitted"]:
+                raise ValueError("the panel's contracts are recorded after its admission")
+            if s["panel"]["contracts"]:
+                raise ValueError(f"the panel's contracts {s['panel']['contracts'][:12]} are "
+                                 "recorded once")  # fmt: skip
+            if not _hex64(event.get("sha256")):
+                raise ValueError(f"the panel's contracts are named by their sha256, not "
+                                 f"{event.get('sha256')!r}")  # fmt: skip
+            s["panel"]["entries"] = self._bundle_entries(event)
+            s["panel"]["contracts"] = event["sha256"]
+            return
+        if (list(event.get("items") or []), list(event.get("protected") or [])) != (
+            items, protected
+        ):  # fmt: skip
+            raise ValueError(f"the panel's admission is {items}, the others protected {protected}")
+        held = [i for i in (*items, *protected) if states[i] != PLANNED]
+        if held:
+            raise ValueError(f"the panel is admitted once, before any of it: {held} are not "
+                             "planned")  # fmt: skip
+        self._check_admission(event, s, None)
+        if event["allowed"]:
+            for i in items:
+                states[i] = RESERVED
+                reservation[i] = self._get(i).stress_usd
+            s["panel"]["admitted"] = True
+
+    def _apply(self, event: Mapping[str, Any], *, state: Mapping[str, Any] | None = None) -> None:
+        s = self._state() if state is None else state
+        states, reservation, charged = s["state"], s["reservation"], s["charged"]
+        kind = event["event"]
+        if kind == "cap":
+            usd = finite_usd(event["cap_usd"], "a cap", positive=True)
+            if not str(event.get("reason") or "").strip():
+                raise ValueError("a cap is raised only with its reason")
+            if event.get("from_usd") != s["cap"]["usd"]:
+                raise ValueError(
+                    f"a cap event from ${event.get('from_usd')} on a log at ${s['cap']['usd']:g}"
+                )
+            if usd <= s["cap"]["usd"]:
+                raise ValueError(
+                    f"a cap is only raised: ${usd:g} is not above ${s['cap']['usd']:g}"
+                )
+            s["cap"]["usd"] = usd
+            if state is None:
+                self.events.append(dict(event))
+            return
+        if kind == "allocations":
+            steps = s["pending"]["steps"]
+            if not steps:
+                raise ValueError("an allocations event on a log of the current allocations")
+            got = {k: event.get(k) for k in steps[0]}
+            if got != steps[0]:
+                raise ValueError(f"an allocations event {got} is not the next migration {steps[0]}")
+            held = sorted(f"{i}@{w}" for i, workers in s["sessions"].items()
+                          for w, v in (workers or {}).items() if v)  # fmt: skip
+            if held:
+                raise ValueError(f"open Pod sessions {held}: the allocations migrate between them")
+            changed = [*(steps[0].get("raised") or {}), *(steps[0].get("phased") or {})]
+            live = sorted(i for i in changed if states[i] != PLANNED)
+            if live:  # a reservation already held or spent is never raised or phased after
+                raise ValueError(f"{live} are not planned: only a planned item's allocation is "
+                                 "raised or phased")  # fmt: skip
+            s["pending"]["steps"] = steps[1:]
+            if state is None:
+                self.events.append(dict(event))
+            return
+        if kind in ("admit_panel", "panel_contracts"):
+            self._apply_panel(event, s)
+            if state is None:
+                self.events.append(dict(event))
+            return
+        item = event["item"]
+        a = self._get(item)
+        current = states[item]
+        follow = self._panel_follow(item)
+        if kind == "admit":
+            if current != PLANNED:
+                raise ValueError(f"{item} is {current}: it cannot be admitted again")
+            if self.panel_rows() is not None and (a.kind in (STAGE3_PANEL, STRONG_STAGE3)
+                                                  or follow == 0):  # fmt: skip
+                raise ValueError(f"{item} is admitted with the panel (admit_panel), never alone")
+            if follow is not None:  # after the contracts, in the frozen order
+                if not s["panel"]["contracts"]:
+                    raise ValueError(f"{item}: no follow-up is admitted before the panel's "
+                                     "contracts are recorded")  # fmt: skip
+                earlier = [x for x in self.panel_rows()[follow - 1][2:] if states[x] == PLANNED]
+                if earlier:
+                    raise ValueError(f"{item}: the follow-ups are admitted in the frozen order, "
+                                     f"after {earlier}")  # fmt: skip
+            before = AFTER.get(item)  # the DPO fallback only after the continued branch (§12.8)
+            if before in states and states[before] in (PLANNED, RESERVED, RUNNING):
+                raise ValueError(f"{item} is admitted only after {before} ends ({states[before]})")
+            self._check_admission(event, s, item)
+            if event["allowed"]:
+                states[item] = RESERVED
+                reservation[item] = a.stress_usd
+        elif kind == "start":
+            if current != RESERVED:
+                raise ValueError(f"{item} is {current}: it starts only on a live reservation")
+            if follow is not None and not s["panel"]["contracts"]:  # money reserved before the
+                # contracts authorizes no validation
+                raise ValueError(f"{item}: no follow-up starts before the panel's contracts are "
+                                 "recorded")  # fmt: skip
+            problem = shared_problem(item, states)
+            if problem:
+                raise ValueError(f"{item} does not start: {problem}")
+            states[item] = RUNNING
+        elif kind == "split":
+            if current != RUNNING:
+                raise ValueError(f"{item} is {current}: only a running item is split")
+            if item in s["splits"]:
+                raise ValueError(f"{item} is split already: a split is made once, after start")
+            if item in s["issued"]:
+                raise ValueError(f"{item} issued a Pod session unsplit: it is never split")
+            if charged[item]["gpu_usd"] or charged[item]["api_usd"] or item in s["transfers"]:
+                raise ValueError(f"{item} has been charged: a split is made right after start")
+            shares = {
+                str(k): finite_usd(v, f"the share of {k}") for k, v in event["shares"].items()
+            }
+            if sum(shares.values()) > 1 + 1e-12:
+                raise ValueError("split shares must be non-negative and sum to at most 1")
+            api_shares = dict(shares)  # a split without API shares: one fraction of both parts
+            if "api_shares" in event:
+                api_shares = {
+                    str(k): finite_usd(v, f"the API share of {k}")
+                    for k, v in event["api_shares"].items()
+                }
+                if set(api_shares) != set(shares):
+                    raise ValueError("a split's API shares name exactly its workers")
+                if sum(api_shares.values()) > 1 + 1e-12:
+                    raise ValueError("split API shares must be non-negative and sum to at most 1")
+            frozen = _frozen_split(item, self.parts(item, s)[0])
+            if frozen is not None and not (
+                _same_shares(shares, frozen[0]) and _same_shares(api_shares, frozen[1])
+            ):  # strong/stage5: S5-A's sublimit, in the log itself
+                raise ValueError(f"{item} is split only by its frozen split {frozen}")
+            s["splits"][item] = shares
+            s["api_splits"][item] = api_shares
+            s["worker_charged"][item] = {w: {"gpu_usd": 0.0, "api_usd": 0.0} for w in shares}
+            s["sessions"][item] = dict.fromkeys(shares)
+        elif kind == "session":
+            # One Pod session of a split item's worker, authorized exclusively, or
+            # the one session at a time of a running unsplit item, worker POD
+            worker = event.get("worker")
+            if current != RUNNING:
+                raise ValueError(f"{item} is {current}: no Pod session")
+            problem = shared_problem(item, states)
+            if problem:
+                raise ValueError(f"{item}: no Pod session, {problem}")
+            _require_frozen_split(item, self.parts(item, s)[0], s, "no Pod session")
+            if item in s["splits"]:
+                if worker not in s["splits"][item]:
+                    raise ValueError(f"{item} has no worker {worker!r}")
+            elif worker != POD:
+                raise ValueError(f"{item} is not split: its Pod session's worker is {POD!r}")
+            else:
+                s["sessions"].setdefault(item, {POD: None})
+            behavior = _stage3_behavior(item, a.kind)
+            if behavior is not None and behavior not in s["stage3"]:
+                raise ValueError(f"{item}: no Pod session before {behavior}'s Stage-3 start "
+                                 "(stage3_start)")  # fmt: skip
+            open_ = s["sessions"][item][worker]
+            if open_ is not None:
+                raise ValueError(
+                    f"{worker} of {item} has an open session on Pod {open_['pod_id']}: close it "
+                    "(settle its cost) before another"
+                )
+            if (s["sessions"].get(item) or {}).get(LAPTOP):
+                raise ValueError(f"{item} has an open laptop session: settle it before a Pod's")
+            if not str(event.get("pod_id") or "").strip():
+                raise ValueError("a Pod session names its Pod ID")
+            for other, workers in s["sessions"].items():  # one Pod, one open session
+                for w, held in (workers or {}).items():
+                    if held and w != LAPTOP and held["pod_id"] == str(event["pod_id"]):
+                        raise ValueError(
+                            f"Pod {held['pod_id']} has an open session of {w} ({other}): close "
+                            "it (settle its cost) before another worker's"
+                        )
+            datetime.fromisoformat(str(event["deadline"]))  # the deadline set at the Pod's creation
+            price = finite_usd(event["price_usd_per_hour"], "a Pod's price", positive=True)
+            hours = finite_usd(event["hours"], "a session's hours", positive=True)
+            usd = finite_usd(event["gpu_usd"], "a session's GPU authorization", positive=True)
+            if abs(usd - price * hours) > 1e-9:
+                raise ValueError(f"a session's ${usd} is not {hours} h at ${price}/h")
+            # a session journaled before  authorized no API money
+            api_usd = finite_usd(event.get("api_usd", 0.0), "a session's API authorization")
+            gpu, api = self.parts(item, s)
+            if item in s["splits"]:
+                share, spent = s["splits"][item][worker], s["worker_charged"][item][worker]
+                api_share, whose = s["api_splits"][item][worker], f"{worker}'s"
+            else:
+                share, api_share, spent, whose = 1.0, 1.0, charged[item], f"{item}'s"
+            left = share * gpu - spent["gpu_usd"]
+            if usd > left + 1e-9:
+                raise ValueError(f"${usd:.4f} exceed {whose} ${left:.4f} left of its share")
+            left_api = api_share * api - spent["api_usd"]
+            if api_usd > left_api + 1e-9:
+                raise ValueError(
+                    f"API ${api_usd:.4f} exceed {whose} ${left_api:.4f} left of its API share"
+                )
+            if item not in s["splits"]:
+                s["issued"].add(item)
+            keys = ("pod_id", "deadline", "price_usd_per_hour", "hours", "gpu_usd")
+            s["sessions"][item][worker] = {**{k: event[k] for k in keys}, "api_usd": api_usd}
+        elif kind == "api_session":
+            # The laptop's API session of a running unsplit item, alone on it: no Pod session or
+            # other laptop session open; its API authorization within the item's API left
+            if current != RUNNING:
+                raise ValueError(f"{item} is {current}: no laptop session")
+            problem = shared_problem(item, states)
+            if problem:
+                raise ValueError(f"{item}: no laptop session, {problem}")
+            if item in s["splits"]:
+                raise ValueError(f"{item} is split: no laptop session")
+            sessions = s["sessions"].setdefault(item, {POD: None})
+            held = sorted(w for w, v in sessions.items() if v)
+            if held:
+                raise ValueError(f"{item} has an open session of {held}: settle it first")
+            if not str(event.get("session") or "").strip():
+                raise ValueError("a laptop session names its session id")
+            api_usd = finite_usd(event["api_usd"], "a laptop session's API authorization",
+                                 positive=True)  # fmt: skip
+            left_api = self.parts(item, s)[1] - charged[item]["api_usd"]
+            if api_usd > left_api + 1e-9:
+                raise ValueError(f"API ${api_usd:.4f} exceed {item}'s ${left_api:.4f} left")
+            s["issued"].add(item)
+            sessions[LAPTOP] = {"session": str(event["session"]), "api_usd": api_usd}
+        elif kind == "api_session_close":
+            # Settled at its committed cost, also once the item is stopped (as a Pod session)
+            settling = current == STOPPED
+            if current != RUNNING and not settling:
+                raise ValueError(f"{item} is {current}: no laptop session is settled")
+            open_ = (s["sessions"].get(item) or {}).get(LAPTOP)
+            if open_ is None or open_["session"] != event.get("session"):
+                raise ValueError(f"{item} has no open laptop session {event.get('session')}")
+            api_usd = finite_usd(event["api_usd"], "a laptop session's API cost")
+            s["sessions"][item][LAPTOP] = None
+            c = charged[item]
+            c["api_usd"] += api_usd
+            gpu, api = self.parts(item, s)
+            if (
+                c["api_usd"] > api + 1e-9 or api_usd > open_["api_usd"] + 1e-9
+                or c["gpu_usd"] + c["api_usd"] > reservation[item] + 1e-9 or settling
+            ):  # fmt: skip
+                states[item] = STOPPED
+                s["final"][item] = c["gpu_usd"] + c["api_usd"]
+        elif kind in ("charge", "session_close"):
+            # A stopped item's open sessions are still settled at their paid cost;
+            # nothing else is charged to it, and nothing new is authorized.
+            settling = kind == "session_close" and current == STOPPED
+            if current != RUNNING and not settling:
+                raise ValueError(f"{item} is {current}: only a running item is charged")
+            _require_frozen_split(item, self.parts(item, s)[0], s, "nothing is charged to it")
+            worker = event.get("worker")
+            if kind == "session_close":
+                open_ = (s["sessions"].get(item) or {}).get(worker)
+                if open_ is None or open_["pod_id"] != event.get("pod_id"):
+                    pod = event.get("pod_id")
+                    raise ValueError(f"{worker} of {item} has no open session on Pod {pod}")
+                s["sessions"][item][worker] = None
+                if item not in s["splits"]:
+                    worker = None  # the unsplit item's own session: charged to the item
+            elif item not in s["splits"] and (s["sessions"].get(item) or {}).get(POD):
+                held = s["sessions"][item][POD]["pod_id"]
+                raise ValueError(
+                    f"{item} has an open Pod session on {held}: nothing else is charged to it "
+                    "until it is closed"
+                )
+            elif (s["sessions"].get(item) or {}).get(LAPTOP):
+                raise ValueError(f"{item} has an open laptop session: nothing else is charged "
+                                 "to it until it is settled")  # fmt: skip
+            if item in s["splits"] and worker not in s["splits"][item]:
+                raise ValueError(
+                    f"{item} is split: a charge names one of its workers "
+                    f"{sorted(s['splits'][item])}, not {worker!r}"
+                )
+            if item not in s["splits"] and worker is not None:
+                raise ValueError(f"{item} is not split: its charges name no worker")
+            gpu_usd = finite_usd(event["gpu_usd"], "a GPU charge")
+            api_usd = finite_usd(event["api_usd"], "an API charge")
+            c = charged[item]
+            c["gpu_usd"] += gpu_usd
+            c["api_usd"] += api_usd
+            gpu, api = self.parts(item, s)
+            over = (
+                c["gpu_usd"] > gpu + 1e-9
+                or c["api_usd"] > api + 1e-9
+                or c["gpu_usd"] + c["api_usd"] > reservation[item] + 1e-9
+            )
+            if worker is not None:  # a worker overrunning its share stops the item too
+                w, share = s["worker_charged"][item][worker], s["splits"][item][worker]
+                api_share = s["api_splits"][item][worker]
+                w["gpu_usd"] += gpu_usd
+                w["api_usd"] += api_usd
+                over = (
+                    over
+                    or w["gpu_usd"] > share * gpu + 1e-9
+                    or w["api_usd"] > api_share * api + 1e-9
+                )
+            if over or settling:
+                states[item] = STOPPED
+                s["final"][item] = c["gpu_usd"] + c["api_usd"]
+        elif kind == "transfer":
+            if current != RUNNING:
+                raise ValueError(f"{item} is {current}: only a running item's parts are moved")
+            if _frozen_split(item, self.parts(item, s)[0]) is not None:
+                raise ValueError(f"{item} has a frozen split: its parts are never moved")
+            if item in s["splits"]:
+                raise ValueError(f"{item} is split: its limits were issued to its workers")
+            if (s["sessions"].get(item) or {}).get(POD):
+                raise ValueError(f"{item} has an open Pod session: no transfer until it closes")
+            if (s["sessions"].get(item) or {}).get(LAPTOP):
+                raise ValueError(f"{item} has an open laptop session: no transfer until it is "
+                                 "settled")  # fmt: skip
+            source, target = event["from"], event["to"]
+            if {source, target} != {"gpu", "api"}:
+                raise ValueError("a transfer moves money between the gpu and the api part")
+            usd = finite_usd(event["usd"], "a transfer", positive=True)
+            if not str(event.get("reason") or "").strip():
+                raise ValueError("a transfer needs its reason")
+            gpu, api = self.parts(item, s)
+            left = (
+                gpu - charged[item]["gpu_usd"]
+                if source == "gpu"
+                else api - charged[item]["api_usd"]
+            )
+            if not math.isfinite(left) or usd > left + 1e-9:
+                raise ValueError(f"{item}: only ${left:.4f} of its {source} part is unspent")
+            moved = s["transfers"].get(item, 0.0)
+            s["transfers"][item] = moved + usd if source == "gpu" else moved - usd
+        elif kind == "complete":
+            if current != RUNNING:
+                raise ValueError(f"{item} is {current}: only a running item completes")
+            open_ = {w: v.get("pod_id") or v.get("session")
+                     for w, v in (s["sessions"].get(item) or {}).items() if v}  # fmt: skip
+            if open_:
+                raise ValueError(f"{item} has open Pod sessions or a laptop session {open_}: "
+                                 "close them first")  # fmt: skip
+            if self.panel_rows() is not None and a.kind in (STAGE3_PANEL, STRONG_STAGE3):
+                problem = self._evidence_problem(item, event, s, release=False)
+                if problem:  # bundle-ready or terminal, never before the contracts (s6k 2)
+                    raise ValueError(f"{item}: a preparation completes with its entry in the "
+                                     f"panel's recorded contracts: {problem}")  # fmt: skip
+            elif "evidence" in event:
+                raise ValueError(f"{item}: only a panel preparation completes with evidence")
+            states[item] = COMPLETED
+            s["final"][item] = charged[item]["gpu_usd"] + charged[item]["api_usd"]
+        elif kind == "drop":
+            if current not in (PLANNED, RESERVED):
+                raise ValueError(f"{item} is {current}: only a planned or reserved item is dropped")
+            if event["reason"] == NO_READOUT:  # its entry has no reading at all (s6k 2, 3)
+                problem = self._evidence_problem(item, event, s, release=True)
+                if problem:
+                    raise ValueError(
+                        f"{item}: a follow-up is released for want of a reading "
+                        f"only by its entry in the recorded contracts: {problem}"
+                    )
+            elif "evidence" in event:
+                raise ValueError(f"{item}: only a follow-up's release carries evidence")
+            if event["reason"] not in self._drop_reasons.get(item, frozenset()):
+                allowed = sorted(self._drop_reasons.get(item, ()))
+                raise ValueError(
+                    f"{item} cannot be dropped for {event['reason']!r}; frozen: {allowed}"
+                )
+            users = _users_left(item, states)
+            if users:
+                raise ValueError(f"{item} is dropped only once no mode can reach its rung: "
+                                 f"{users} neither dropped nor complete")  # fmt: skip
+            states[item] = DROPPED
+            reservation.pop(item, None)
+            s["reason"][item] = event["reason"]
+        elif kind == "stage3_start":
+            behavior = _stage3_behavior(item, a.kind)
+            if a.kind != STAGE3_PANEL or event.get("behavior") != behavior:
+                raise ValueError(f"{item}: not a panel behavior's Stage-3 item")
+            if behavior in s["stage3"]:
+                space = s["stage3"][behavior]["space"]
+                raise ValueError(f"{behavior}'s Stage 3 started in space {space}: recorded once")
+            if event.get("space") not in STAGE3_SPACES:
+                raise ValueError(f"a lineage's one space is a or c, not {event.get('space')!r}")
+            strong = f"strong/stage3/{behavior}"
+            live = {item: current, strong: states.get(strong)}
+            if any(v not in (RESERVED, RUNNING) for v in live.values()):
+                raise ValueError(f"{behavior}'s Stage 3 starts with both its reservations live "
+                                 f"(§12.8): {live}")  # fmt: skip
+            panel = [i for i in self.priority if self._items[self._rank[i]].kind == STAGE3_PANEL]
+            earlier = [_stage3_behavior(i, STAGE3_PANEL) for i in panel[: panel.index(item)]]
+            waiting = [b for b in earlier if b not in s["stage3"]]
+            if waiting:
+                raise ValueError(f"{behavior}'s Stage 3 starts after the earlier panel behaviors' "
+                                 f"(§12.8's order): {waiting} not started")  # fmt: skip
+            s["stage3"][behavior] = {"space": event["space"]}
+        else:
+            raise ValueError(f"unknown meter event {kind!r}")
+        if state is None:
+            self.events.append(dict(event))
+
+
+def _hex64(value: Any) -> bool:
+    return isinstance(value, str) and bool(re.fullmatch(r"[0-9a-f]{64}", value))
+
+
+# A panel behavior's Stage-3 items (C17): its base and its strong increment, each of its kind; its
+# lineage runs in one space, a or c
+STAGE3_PANEL, STRONG_STAGE3 = "stage3_panel", "strong_stage3"
+STAGE3_SPACES = ("a", "c")
+# Their follow-up phases (§12.8 as amended 2026-10-22): ``<item>/follow``, each of
+# its own kind; the items themselves are then their preparation phases
+FOLLOW = "/follow"
+STAGE3_FOLLOW, STRONG_STAGE3_FOLLOW = "stage3_panel_follow", "strong_stage3_follow"
+NO_READOUT = "no_registered_readout"  # a follow-up released: its entry has no registered reading
+ACTIVE, CLOSED = "active", "closed"  # a panel entry's status (continuation_strong)
+READINGS = ("strong", "stack", None)  # its reading: the strong candidate, the stack dose, none
+ADMIT_TERMS = ("spent", "reservations", "next_batch", "higher_priority", "storage", "reserve")
+
+
+def _stage3_behavior(item: str, kind: str) -> str | None:
+    """The panel behavior of a Stage-3 item (``stage3/<b>``, ``strong/stage3/<b>`` and their
+    ``/follow`` phases), else None."""
+    name = str(item).removesuffix(FOLLOW)
+    if kind in (STAGE3_PANEL, STAGE3_FOLLOW):
+        return name.removeprefix("stage3/")
+    if kind in (STRONG_STAGE3, STRONG_STAGE3_FOLLOW):
+        return name.removeprefix("strong/stage3/")
+    return None
+
+
+# An item admitted only once another has ended (completed, stopped or dropped): the strong DPO
+# fallback after the continued strong branch, S5-A having failed (§12.8, C16-3)
+AFTER = {"strong/stage5_dpo": "strong/stage5"}
+
+# The follow-up's rungs 2 and 3 (§13.14): each mode's rung item and its rung's shared item (the
+# rung's once-only A/H qualification and format validation). Two admissions are not atomic, so a
+# rung item starts, and opens a Pod or laptop session, only while the shared item is reserved,
+# running or complete; the shared item is dropped only once each mode's item of its rung is
+# dropped or complete, so that no mode that can still reach the rung loses it.
+RUNG_SHARED = {
+    "follow/continued/rung2": "follow/rung2_shared",
+    "follow/stack/rung2": "follow/rung2_shared",
+    "follow/continued/rung3": "follow/rung3_shared",
+    "follow/stack/rung3": "follow/rung3_shared",
+}
+
+
+def shared_problem(item: str, states: Mapping[str, str]) -> str | None:
+    """Why a rung item's work cannot start or open a session: its shared item not held or
+    complete (``RUNG_SHARED``); None for every other item."""
+    shared = RUNG_SHARED.get(item)
+    if shared is None or shared not in states or states[shared] in (RESERVED, RUNNING, COMPLETED):
+        return None
+    return (f"its rung's shared item {shared} is {states[shared]}: the rung's work runs only "
+            "while that is reserved, running or complete")  # fmt: skip
+
+
+def _users_left(shared: str, states: Mapping[str, str]) -> list[str]:
+    """The rung items that can still use ``shared``: neither dropped nor complete."""
+    return [i for i, s in RUNG_SHARED.items()
+            if s == shared and i in states and states[i] not in (DROPPED, COMPLETED)]  # fmt: skip
+
+
+def _frozen_split(item: str, stress_gpu_usd: float) -> tuple[dict, dict] | None:
+    """The split frozen for ``item`` (``continuation_rules.frozen_split``: strong/stage5's S5-A
+    sublimit, C16), enforced by the log itself; None for every other item."""
+    from .continuation_rules import frozen_split
+
+    return frozen_split(item, stress_gpu_usd)
+
+
+def _same_shares(given: Mapping[str, float], frozen: Mapping[str, float]) -> bool:
+    return set(given) == set(frozen) and all(abs(given[w] - frozen[w]) <= 1e-12 for w in given)
+
+
+def _require_frozen_split(item: str, stress_gpu_usd: float, s: Mapping, what: str) -> None:
+    """An item with a frozen split takes no session and no charge before it is split."""
+    if item not in s["splits"] and _frozen_split(item, stress_gpu_usd) is not None:
+        raise ValueError(f"{item} is not split yet by its frozen split: {what}")
+
+
+def _parts(a: Allocation) -> tuple[float, float, float]:
+    """An allocation's three amounts, each a finite non-negative number."""
+    return tuple(finite_usd(x, f"{a.item}'s allocation") for x in (a.usd, a.stress_gpu_usd,
+                                                                   a.stress_api_usd))  # fmt: skip
+
+
+def _migration_steps(
+    allocations: Sequence[Allocation], migrations: Sequence[AllocationMigration]
+) -> list[dict[str, Any]]:
+    """Each migration as the event that records it: the hashes of the allocations before and
+    after it (walking back from the current ones: without the items added by it and later, and
+    with the values each raise replaced), its added items, its raised items ({item: [before,
+    after]}) and reason; refused unless its ``from_sha256`` is so, an added item is a current one
+    added once, and a raised one existed before it and only grows."""
+    names, later, steps = {a.item for a in allocations}, set(), []
+    values, order = {a.item: a for a in allocations}, [a.item for a in allocations]
+
+    def at(absent: set[str]) -> list[Allocation]:
+        return [values[i] for i in order if i not in absent]
+
+    for a in allocations:
+        _parts(a)
+    for m in reversed(list(migrations)):
+        added = [str(a) for a in m.added]
+        raised = {str(k): tuple(finite_usd(x, f"{k}'s allocation before the raise") for x in v)
+                  for k, v in dict(m.raised or {}).items()}  # fmt: skip
+        phased = {str(k): tuple(finite_usd(x, f"{k}'s allocation before its phases") for x in v)
+                  for k, v in dict(m.phased or {}).items()}  # fmt: skip
+        if any(len(v) != 3 for v in (*raised.values(), *phased.values())):
+            raise ValueError("a raised item's allocation before it is usd, stress GPU, API")
+        if not added and not raised:
+            raise ValueError("a migration of the allocations adds or raises items")
+        if set(phased) & set(raised) or set(phased) - names or set(phased) & (later | set(added)):
+            raise ValueError(f"a migration phases items that exist before it: {sorted(phased)}")
+        if set(added) - names or set(added) & later or len(set(added)) < len(added):
+            raise ValueError(f"a migration adds distinct current items, once: {added}")
+        if set(raised) - names or set(raised) & (later | set(added)):
+            raise ValueError(f"a migration raises items that exist before it: {sorted(raised)}")
+        if not str(m.reason).strip():
+            raise ValueError("a migration of the allocations needs its reason")
+        after, changes, phases = at(later), {}, {}
+        for item, old in raised.items():
+            new = _parts(values[item])
+            if any(o > n for o, n in zip(old, new, strict=True)) or old == new:
+                raise ValueError(f"a migration only raises {item}'s allocation: {old} → {new}")
+            values[item] = Allocation(item, values[item].kind, *old)
+            changes[item] = [list(old), list(new)]
+        for item, old in phased.items():  # the lineage's allocation, now its two phases
+            follow = f"{item}{FOLLOW}"
+            if follow not in added:
+                raise ValueError(f"a migration phasing {item} adds its follow-up {follow}")
+            new, rest = _parts(values[item]), _parts(values[follow])
+            whole = tuple(round(n + r, 2) for n, r in zip(new, rest, strict=True))
+            if whole != tuple(round(o, 2) for o in old) or new == old:
+                raise ValueError(f"{item}'s phases {new} + {rest} are not its allocation {old}")
+            values[item] = Allocation(item, values[item].kind, *old)
+            phases[item] = [list(old), list(new)]
+        later |= set(added)
+        before = at(later)
+        if allocations_hash(before) != m.from_sha256:
+            what = f"adding {added} and raising {sorted(raised)}"
+            raise ValueError(f"the allocations before {what} do not hash to "
+                             f"{str(m.from_sha256)[:12]}")  # fmt: skip
+        step = {"from_sha256": m.from_sha256, "to_sha256": allocations_hash(after),
+                "added": added, "reason": str(m.reason)}  # fmt: skip
+        if changes:
+            step["raised"] = changes
+        if phases:
+            step["phased"] = phases
+        steps.append(step)
+    return steps[::-1]
+
+
+def load_migrations(path: Path) -> list[AllocationMigration]:
+    """The allocations file's append-only migrations (``migrations``), in order."""
+    from omegaconf import OmegaConf
+
+    data = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
+    keys = ("usd", "stress_gpu_usd", "stress_api_usd")
+    return [
+        AllocationMigration(
+            tuple(str(a) for a in x.get("added") or ()),
+            str(x["reason"]),
+            str(x["from_sha256"]),
+            {
+                str(k): tuple(finite_usd(v[f], f"{k}'s {f} before the raise") for f in keys)
+                for k, v in (x.get("raised") or {}).items()
+            },  # fmt: skip
+            {
+                str(k): tuple(finite_usd(v[f], f"{k}'s {f} before its phases") for f in keys)
+                for k, v in (x.get("phased") or {}).items()
+            },  # fmt: skip
+        )
+        for x in data.get("migrations") or []
+    ]
+
+
+def load_allocations(path: Path) -> list[Allocation]:
+    """The frozen allocations file (configs/continuation/allocations.yaml), in priority order."""
+    from omegaconf import OmegaConf
+
+    data = OmegaConf.to_container(OmegaConf.load(path), resolve=True)
+    return [
+        Allocation(
+            str(x["item"]),
+            str(x["kind"]),
+            *(
+                finite_usd(x[f], f"{x['item']}'s {f}")
+                for f in ("usd", "stress_gpu_usd", "stress_api_usd")
+            ),  # fmt: skip
+        )
+        for x in data["allocations"]
+    ]
+
+
+def apply_cut_order(
+    projected: Mapping[str, float], *, order: Sequence[str], cap: float, fixed: float
+) -> list[str]:
+    """The cuts, in the preset order, that bring ``fixed`` + the remaining projected parts within
+    the cap. ``projected`` prices each cuttable part by its name in the cut order (parts absent
+    from it cost nothing); ``fixed`` holds the spent, the reserve and every protected or uncut
+    item. ValueError if even every cut leaves the plan over the cap."""
+    unknown = set(projected) - set(order)
+    if unknown:
+        raise ValueError(f"parts outside the cut order: {sorted(unknown)}")
+    remaining = dict(projected)
+    cuts: list[str] = []
+    for part in order:
+        if float(fixed) + sum(remaining.values()) <= cap:
+            break
+        if remaining.pop(part, None) is not None:
+            cuts.append(part)
+    if float(fixed) + sum(remaining.values()) > cap:
+        raise ValueError("the protected plan exceeds the cap after every cut")
+    return cuts

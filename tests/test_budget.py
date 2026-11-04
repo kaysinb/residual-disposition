@@ -144,7 +144,7 @@ def test_the_adl_ledger_counts_open_reservations_and_survives_a_restart(tmp_path
         again.reserve({"c": 0.5, "d": 0.2}, "graders")  # all or none
     assert again.committed() == pytest.approx(0.4)
     # An open reservation whose completion reached the cache is settled at its cost.
-    assert again.reconcile(lambda key: 0.05 if key == "b" else None) == 1
+    assert again.reconcile(lambda key, tier, reservation: 0.05 if key == "b" else None) == 1
     assert again.state()["open"] == {} and again.state()["spent"] == pytest.approx(0.15)
     with pytest.raises(ValueError, match="other workers"):
         ApiLedger(path, 1.0, "pod-b", readonly=True).state()
@@ -165,7 +165,7 @@ def test_billing_evidence_closes_named_open_reservations_at_zero(tmp_path) -> No
     ledger.fail(ids["b"], "b", "InternalServerError", 503, released=False, label="summarizer")
     assert ledger.committed() == pytest.approx(0.6)
     held = ledger.close_unbilled(
-        [ids["b"], ids["c"]], source="balance", decision="coordinator", label="reconciliation"
+        [ids["b"], ids["c"]], source="balance", decision="researcher", label="reconciliation"
     )
     # The failed and the never-completed sends close at $0; the spend is untouched.
     assert held == pytest.approx(0.5)
@@ -188,12 +188,17 @@ def test_a_retried_send_settles_only_its_own_reservation(tmp_path) -> None:
     # The interrupted send's $0.40 is not lost when the retry settles at $0.10.
     assert ledger.committed() == pytest.approx(0.50)
     # Reconciling never settles the earlier send of a request that was settled.
-    assert ledger.reconcile(lambda key: 0.10) == 0 and ledger.committed() == pytest.approx(0.50)
-    # Of two open sends of a never-settled request, the latest is settled from the cache.
+    assert ledger.reconcile(lambda key, tier, reservation: 0.10) == 0
+    assert ledger.committed() == pytest.approx(0.50)
+    # Two open sends of a never-settled request: which one answered is not known,
+    # so both stay counted at their bounds; a single one is settled from the cache.
     ledger.reserve({"j": 0.30}, "graders")
     ledger.reserve({"j": 0.30}, "graders")
-    assert ledger.reconcile(lambda key: 0.05 if key == "j" else None) == 1
-    assert ledger.committed() == pytest.approx(0.50 + 0.30 + 0.05)
+    assert ledger.reconcile(lambda key, tier, reservation: 0.05 if key == "j" else None) == 0
+    assert ledger.committed() == pytest.approx(0.50 + 0.60)
+    ledger.reserve({"m": 0.30}, "graders")
+    assert ledger.reconcile(lambda key, tier, reservation: 0.05 if key == "m" else None) == 1
+    assert ledger.committed() == pytest.approx(0.50 + 0.60 + 0.05)
 
 
 def batch_meter(watch, clock, phase, *, prior=0.0, deadline_hours=9):
@@ -289,5 +294,565 @@ def test_a_ledger_has_one_writer(tmp_path) -> None:
     # Reconciling happens in the writer only: no double settlement.
     first.close()
     second = ApiLedger(path, 15.0, "laptop")
-    assert second.reconcile(lambda key: 1.0) == 1 and second.reconcile(lambda key: 1.0) == 0
+    assert second.reconcile(lambda key, tier, reservation: 1.0) == 1
+    assert second.reconcile(lambda key, tier, reservation: 1.0) == 0
     assert second.committed() == pytest.approx(1.0)
+
+
+# The continuation's meter (§12.8)
+
+from residual_disposition import continuation_rules as cr  # noqa: E402
+from residual_disposition.budget import (  # noqa: E402
+    PLANNED,
+    RESERVED,
+    Allocation,
+    AllocationMeter,
+    AllocationMigration,
+    allocations_hash,
+    apply_cut_order,
+    load_allocations,
+    load_migrations,
+)
+
+CUT_ORDER = ["stage6", "stage5", "stage4", "guillemets", "last_stage3_behavior", "stage2_to_one"]
+
+
+def alloc(item, kind, usd, stress):
+    # The GPU and API parts are limits of their own: either may stop an item.
+    return Allocation(item, kind, usd, stress - 10.0, 10.0)
+
+
+PLAN = [
+    alloc("stage0_1", "stage0_1", 120.0, 140.0),
+    alloc("stage2/example_link", "stage2", 140.0, 220.0),
+    alloc("stage3/countdown", "stage3_panel", 135.0, 200.0),
+    alloc("stage3/word_count_claim", "stage3_panel", 135.0, 200.0),
+    alloc("stage3/eli5", "stage3_panel", 135.0, 200.0),
+    alloc("stage3/tldr", "stage3_panel", 135.0, 200.0),
+    alloc("stage2/pun_intended", "stage2", 130.0, 190.0),
+    alloc("stage3/myth_fact", "stage3_panel", 135.0, 200.0),
+    alloc("stage3/guillemets", "stage3_adl_only", 115.0, 190.0),
+    alloc("stage4/example_link", "stage4", 140.0, 210.0),
+    alloc("stage4/pun_intended", "stage4", 140.0, 210.0),
+    alloc("stage5", "stage5", 150.0, 270.0),
+    alloc("stage6", "stage6", 60.0, 60.0),
+]
+RULES = cr.load_rules()
+
+
+def plan_meter(tmp_path=None, cap=1500, plan=PLAN):
+    log = None if tmp_path is None else tmp_path / "meter.jsonl"
+    return AllocationMeter(
+        plan, cap=cap, reserve=100, drop_reasons=cr.drop_reasons(RULES), log_path=log
+    )
+
+
+def run_item(m, item, usd):
+    assert m.admit(item, spent_elsewhere=0, storage=55).allowed
+    m.start(item)
+    m.charge(item, gpu_usd=usd)
+    m.complete(item)
+
+
+def test_admission_reserves_the_stress_batch_and_central_higher_priority():
+    m = plan_meter()
+    decision = m.admit("stage3/countdown", spent_elsewhere=0, storage=55)
+    assert decision.terms["next_batch"] == 200  # the item's stress reservation
+    assert decision.terms["higher_priority"] == 120 + 140  # central, stages 0–1 and Stage 2 first
+    assert m.state["stage3/countdown"] == RESERVED
+    nxt = m.admit("stage3/word_count_claim", spent_elsewhere=0, storage=55)
+    assert nxt.terms["reservations"] == 200
+    assert nxt.terms["higher_priority"] == 120 + 140  # countdown is reserved, not planned
+
+
+def test_limits_are_dollars_and_set_the_pod_deadline():
+    m = plan_meter()
+    assert m.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    limits = m.start("stage0_1")
+    assert limits.gpu_usd == 130 and limits.api_usd == 10 and limits.usd == 140
+    assert limits.pod_hours(3.99) == pytest.approx(130 / 3.99)  # paid time from creation
+    m.charge("stage0_1", gpu_usd=30, api_usd=2)
+    after = m.limits("stage0_1")
+    assert after.gpu_usd == 100 and after.api_usd == 8
+    with pytest.raises(ValueError, match="positive"):
+        after.pod_hours(0)
+    with pytest.raises(ValueError, match="right after start"):
+        m.split("stage0_1", {"pod-a": 1.0})  # already charged
+
+
+def test_a_split_is_made_once_right_after_start():
+    # a second split must not hand out the same money again.
+    m = plan_meter()
+    assert m.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    m.start("stage0_1")
+    parts = m.split("stage0_1", {"pod-a": 0.6, "pod-b": 0.4})
+    assert parts["pod-a"].gpu_usd + parts["pod-b"].gpu_usd == pytest.approx(130)
+    with pytest.raises(ValueError, match="split already"):
+        m.split("stage0_1", {"pod-c": 1.0})
+    with pytest.raises(ValueError, match="issued to its workers"):
+        m.limits("stage0_1")
+    other = plan_meter()
+    assert other.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    other.start("stage0_1")
+    with pytest.raises(ValueError, match="sum to at most 1"):
+        other.split("stage0_1", {"pod-a": 0.7, "pod-b": 0.4})
+
+
+def test_limits_are_never_issued_from_a_stale_state(tmp_path):
+    # once another instance has stopped the item, this one refuses its limits.
+    first, second = plan_meter(tmp_path), plan_meter(tmp_path)
+    assert first.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    first.start("stage0_1")
+    with pytest.raises(BudgetExhausted):
+        second.charge("stage0_1", api_usd=11)  # the API part is 10: stopped
+    with pytest.raises(ValueError, match="stopped"):
+        first.limits("stage0_1")
+
+
+def test_lifecycle_transitions_are_checked():
+    m = plan_meter()
+    with pytest.raises(ValueError, match="live reservation"):
+        m.start("stage0_1")  # no admission
+    run_item(m, "stage0_1", 110)
+    with pytest.raises(ValueError, match="admitted again"):
+        m.admit("stage0_1", spent_elsewhere=0, storage=55)
+    with pytest.raises(ValueError, match="only a running item"):
+        m.complete("stage0_1")
+    with pytest.raises(ValueError, match="only a running item is charged"):
+        m.charge("stage0_1", gpu_usd=1)
+    assert m.final["stage0_1"] == pytest.approx(110)
+    m.drop("stage6", "gate_not_met")
+    with pytest.raises(ValueError, match="admitted again"):
+        m.admit("stage6", spent_elsewhere=0, storage=55)
+    with pytest.raises(ValueError, match="cannot be dropped"):
+        m.drop("stage3/countdown", "cut_order:guillemets")
+    with pytest.raises(ValueError, match="cannot be dropped"):
+        m.drop("stage4/example_link", "gate_not_met")
+    m.drop("stage4/example_link", "trigger_not_met")
+    m.drop("stage3/guillemets", "cut_order:guillemets")
+
+
+def test_an_overrun_of_either_part_stops_the_item_and_raises():
+    m = plan_meter()
+    assert m.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    m.start("stage0_1")
+    with pytest.raises(BudgetExhausted, match="p = 1"):
+        m.charge("stage0_1", api_usd=11)  # the API part is 10
+    assert m.state["stage0_1"] == "stopped" and m.final["stage0_1"] == 11
+    with pytest.raises(ValueError):
+        m.limits("stage0_1")
+
+
+def test_stage2_second_behavior_cannot_use_the_panel_allocations():
+    m = plan_meter()
+    run_item(m, "stage0_1", 120)
+    run_item(m, "stage2/example_link", 140)
+    decision = m.admit("stage2/pun_intended", spent_elsewhere=0, storage=55)
+    assert decision.terms["higher_priority"] == 4 * 135
+    tight = plan_meter(cap=1100)
+    run_item(tight, "stage0_1", 120)
+    run_item(tight, "stage2/example_link", 140)
+    assert not tight.admit("stage2/pun_intended", spent_elsewhere=0, storage=55).allowed
+    assert tight.state["stage2/pun_intended"] == PLANNED
+
+
+def test_exception_a_protects_higher_work_and_stage4_until_its_trigger_is_resolved():
+    m = plan_meter(cap=5000)
+    run_item(m, "stage0_1", 120)
+    run_item(m, "stage2/example_link", 140)
+    before = m.admit("stage5", spent_elsewhere=0, storage=55)
+    assert {"stage4/example_link", "stage4/pun_intended"} <= set(m.unfinished_above("stage5"))
+    assert before.terms["higher_priority"] == 4 * 135 + 140 + 135 + 115 + 2 * 140
+
+
+def test_stage4_cannot_displace_the_panel_or_guillemets():
+    m = plan_meter()
+    higher = m.unfinished_above("stage4/example_link")
+    assert {"stage3/tldr", "stage3/myth_fact", "stage3/guillemets"} <= set(higher)
+
+
+def test_allocations_follow_the_frozen_update_rule():
+    m = plan_meter(cap=5000)
+    run_item(m, "stage3/countdown", 180)
+    assert m.allocation("stage3/eli5") == pytest.approx(180)
+    run_item(m, "stage3/word_count_claim", 120)
+    assert m.allocation("stage3/eli5") == pytest.approx(150)
+    run_item(m, "stage3/eli5", 60)
+    assert m.allocation("stage3/tldr") == 135
+    assert m.allocation("stage2/pun_intended") == 130
+    # Only completed lineages enter the mean; a stopped one does not.
+    assert m.admit("stage3/tldr", spent_elsewhere=0, storage=55).allowed
+    m.start("stage3/tldr")
+    with pytest.raises(BudgetExhausted):
+        m.charge("stage3/tldr", api_usd=11)
+    assert m.allocation("stage3/myth_fact") == 135
+
+
+def test_the_event_log_replays_to_the_same_state(tmp_path):
+    m = plan_meter(tmp_path)
+    run_item(m, "stage0_1", 110)
+    m.admit("stage2/example_link", spent_elsewhere=0, storage=55)
+    m.start("stage2/example_link")
+    m.charge("stage2/example_link", gpu_usd=20.0, api_usd=1.5)
+    m.drop("stage6", "gate_not_met")
+    again = plan_meter(tmp_path)
+    assert again.state == m.state and again.final == m.final
+    assert again.charged == m.charged and again.reservation == m.reservation
+    assert again.limits("stage2/example_link") == m.limits("stage2/example_link")
+    other = [
+        Allocation(a.item, a.kind, a.usd + 1, a.stress_gpu_usd, a.stress_api_usd) for a in PLAN
+    ]
+    with pytest.raises(ValueError, match="other allocations"):
+        plan_meter(tmp_path, plan=other)
+
+
+def test_two_instances_on_one_log_cannot_oversubscribe(tmp_path):
+    # one writer at a time; each operation first reads the other's events.
+    first, second = plan_meter(tmp_path, cap=500), plan_meter(tmp_path, cap=500)
+    # 140 + 55 storage + 100 reserve = 295 fits; with a second 220 on top, 515 no longer does.
+    assert first.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    late = second.admit("stage2/example_link", spent_elsewhere=0, storage=55)
+    assert late.terms["reservations"] == 140 and not late.allowed
+    with pytest.raises(ValueError, match="admitted again"):
+        second.admit("stage0_1", spent_elsewhere=0, storage=55)  # it sees the first's admission
+    lines = (tmp_path / "meter.jsonl").read_text().splitlines()
+    assert json.loads(lines[0])["event"] == "header" and len(lines) == 3
+
+
+def test_the_frozen_allocations_file_loads_in_priority_order():
+    from residual_disposition.paths import CONFIG_ROOT
+
+    path = CONFIG_ROOT / "continuation" / "allocations.yaml"
+    items = load_allocations(path)
+    names = [a.item for a in items]
+    assert names[0] == "stage0_1"
+    # the follow-up's items below every earlier one, in §13.14's order
+    follow = [a.item for a in items if a.item.startswith("follow/")]
+    assert names[names.index("stage6") + 1 :] == follow and follow[0] == "follow/base"
+    # C15: stage5_dpo below stage5, above stage6; C16: each strong item right after its parent
+    assert names[names.index("stage5") + 1 : names.index("stage6")] == [
+        "strong/stage5", "stage5_dpo", "strong/stage5_dpo"]  # fmt: skip
+    for b in RULES.panel:
+        assert names[names.index(f"stage3/{b}") + 1] == f"strong/stage3/{b}"
+    assert all(a.stress_usd >= a.usd > 0 for a in items)
+    assert all(  # a strong panel preparation's API is all its follow-up's
+        a.stress_gpu_usd >= 0 and a.stress_api_usd > 0
+        for a in items
+        if a.kind not in ("stage5_dpo", "strong_stage3", "follow_certificate")
+    )
+    dpo = next(a for a in items if a.item == "stage5_dpo")
+    assert (dpo.usd, dpo.stress_gpu_usd, dpo.stress_api_usd) == (29.2, 80.46, 0.0)  # no API
+    strong = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
+              if a.item.startswith("strong/")}  # fmt: skip
+    assert strong.pop("strong/stage5") == ("strong_stage5", 119.65, 296.8, 23.22)
+    assert strong.pop("strong/stage5_dpo") == ("strong_stage5_dpo", 127.08, 316.87, 23.22)
+    # raised by Stage 3's corrected reservations (C17-M): 34.59, 75.54, 16.3 before;
+    # then phased: the preparation and the follow-up, summing to 40.41, 86.17, 26.39
+    assert set(strong.values()) == {("strong_stage3", 26.36, 72.85, 0.0),
+                                    ("strong_stage3_follow", 14.05, 13.32, 26.39)}  # fmt: skip
+    assert len(strong) == 10
+    six = next(a for a in items if a.item == "stage6")
+    assert six.stress_gpu_usd > 0 and six.stress_api_usd > 0  # both limits are enforceable
+    assert set(cr.drop_reasons(RULES, names)) <= set(names)
+    # each from the allocations before it, the live log's: the phases (s6f) and the raise's
+    # values reverted (C17-M)
+    first, second, third, fourth, fifth = load_migrations(path)
+    from residual_disposition.budget import Allocation
+
+    # the follow-up's items, added to the allocations as they stood after the panel's phases
+    assert list(fifth.added) == follow and not fifth.raised and not fifth.phased
+    items = [a for a in items if a.item not in fifth.added]
+    assert fifth.from_sha256 == allocations_hash(items)
+    whole = dict(fourth.phased)
+    raised = [Allocation(a.item, a.kind, *whole[a.item]) if a.item in whole else a for a in items
+              if a.item not in fourth.added]  # fmt: skip
+    assert fourth.from_sha256 == allocations_hash(raised)
+    assert set(fourth.added) == {f"{x}/follow" for x in whole} and len(whole) == 10
+    items = raised
+    old = dict(third.raised)
+    frozen = [Allocation(a.item, a.kind, *old[a.item]) if a.item in old else a for a in items]
+    added = set(first.added) | set(second.added)
+    assert first.added == ("stage5_dpo",)
+    assert first.from_sha256 == allocations_hash([a for a in frozen if a.item not in added])
+    assert first.from_sha256.startswith("5289c33824a3")
+    assert set(second.added) == {n for n in names if n.startswith("strong/")
+                                 and not n.endswith("/follow")}  # fmt: skip
+    assert second.from_sha256 == allocations_hash([a for a in frozen if a.item not in second.added])
+    assert second.from_sha256.startswith("04eebe5e9c68")
+    assert third.added == () and third.from_sha256 == allocations_hash(frozen)
+    assert {n.split("/")[0] for n in third.raised} == {"stage3", "strong"} and len(old) == 11
+
+
+def test_cut_sequence_follows_the_preset_order():
+    parts = {"stage6": 50.0, "stage5": 200.0, "stage4": 300.0, "guillemets": 90.0}
+    assert apply_cut_order(parts, order=CUT_ORDER, cap=1500, fixed=1000) == ["stage6", "stage5"]
+    assert apply_cut_order(parts, order=CUT_ORDER, cap=1500, fixed=900) == ["stage6"]
+    assert apply_cut_order(parts, order=CUT_ORDER, cap=1500, fixed=500) == []
+    with pytest.raises(ValueError):
+        apply_cut_order(parts, order=CUT_ORDER, cap=1500, fixed=1600)
+    with pytest.raises(ValueError):
+        apply_cut_order({"stage7": 1.0}, order=CUT_ORDER, cap=1500, fixed=0)
+
+
+def test_a_transfer_moves_unspent_money_between_parts_and_keeps_the_reservation(tmp_path):
+    m = plan_meter(tmp_path)
+    item = "stage0_1"
+    assert m.admit(item, spent_elsewhere=0, storage=55).allowed
+    m.start(item)
+    m.charge(item, gpu_usd=100.0, api_usd=6.0)  # parts 130 / 10: GPU 30 unspent, API 4
+    reserved, outstanding = m.reservation[item], m.outstanding()
+    left = m.transfer(item, source="gpu", target="api", usd=10.0, reason="GPU work done")
+    assert (left.gpu_usd, left.api_usd) == pytest.approx((20.0, 14.0))
+    assert m.parts(item) == pytest.approx((120.0, 20.0))
+    assert m.reservation[item] == reserved and m.outstanding() == pytest.approx(outstanding)
+    assert sum(m.parts(item)) == pytest.approx(PLAN[0].stress_usd)  # the item's total is kept
+    with pytest.raises(ValueError, match="only \\$20.0000 of its gpu part is unspent"):
+        m.transfer(item, source="gpu", target="api", usd=20.5, reason="more")
+    for bad, match in (
+        (dict(source="gpu", target="gpu", usd=1.0, reason="x"), "between the gpu and the api"),
+        (dict(source="gpu", target="api", usd=0.0, reason="x"), "positive amount"),
+        (dict(source="gpu", target="api", usd=1.0, reason=" "), "needs its reason"),
+    ):
+        with pytest.raises(ValueError, match=match):
+            m.transfer(item, **bad)
+    # The moved API money is spendable, and an overrun is judged on the shifted parts.
+    m.charge(item, api_usd=13.0)
+    with pytest.raises(BudgetExhausted):
+        m.charge(item, api_usd=1.5)  # API 20.5 > its shifted part 20
+    # The log replays the transfer, and a planned or split item cannot move money.
+    again = plan_meter(tmp_path)
+    with again._transaction():
+        assert again.parts(item) == pytest.approx((120.0, 20.0))
+    with pytest.raises(ValueError, match="only a running item's parts are moved"):
+        again.transfer("stage2/example_link", source="gpu", target="api", usd=1.0, reason="x")
+    fresh = plan_meter()
+    assert fresh.admit("stage2/example_link", spent_elsewhere=0, storage=55).allowed
+    fresh.start("stage2/example_link")
+    fresh.split("stage2/example_link", {"pod-a": 0.5, "pod-b": 0.5})
+    with pytest.raises(ValueError, match="is split"):
+        fresh.transfer("stage2/example_link", source="gpu", target="api", usd=1.0, reason="x")
+
+
+def test_non_finite_amounts_are_refused_when_recorded_and_when_replayed(tmp_path):
+    m = plan_meter(tmp_path)
+    item = "stage0_1"
+    assert m.admit(item, spent_elsewhere=0, storage=55).allowed
+    m.start(item)
+    nan, inf = float("nan"), float("inf")
+    for gpu, api in ((nan, 0.0), (0.0, nan), (inf, 0.0), (-1.0, 0.0), ("5", 0.0), (True, 0.0)):
+        with pytest.raises(ValueError, match="must be a"):
+            m.charge(item, gpu_usd=gpu, api_usd=api)
+    for usd in (nan, inf, 0.0, -1.0):
+        with pytest.raises(ValueError, match="must be a finite positive"):
+            m.transfer(item, source="gpu", target="api", usd=usd, reason="x")
+    for usd in (True, "5", None):  # checked as given, before any cast
+        with pytest.raises(ValueError, match="a transfer must be a number"):
+            m.transfer(item, source="gpu", target="api", usd=usd, reason="x")
+    # 's case: a NaN charge then a huge transfer. Nothing above was written; a log
+    # holding such a charge is refused when it is replayed, before any transfer could pass.
+    assert all(json.loads(x)["event"] != "charge" for x in (tmp_path / "meter.jsonl").open())
+    with (tmp_path / "meter.jsonl").open("a") as f:
+        f.write(
+            json.dumps({"event": "charge", "item": item, "gpu_usd": nan, "api_usd": 0.0}) + "\n"
+        )
+    with pytest.raises(ValueError, match="a GPU charge must be a finite"):
+        plan_meter(tmp_path)
+    fresh = plan_meter()
+    assert fresh.admit("stage2/example_link", spent_elsewhere=0, storage=55).allowed
+    fresh.start("stage2/example_link")
+    with pytest.raises(ValueError, match="share of pod-a must be a finite"):
+        fresh.split("stage2/example_link", {"pod-a": nan})
+
+
+def test_a_ledger_names_its_writing_run_in_every_event(tmp_path):
+    from residual_disposition.budget import ApiLedger
+
+    ledger = ApiLedger(tmp_path / "l.jsonl", 1.0, "cont-laptop")
+    (first,) = ledger.reserve({"k0": 0.1}, "summarizer").values()
+    ledger.source = "20261017-000000-run"
+    ledger.settle(first, "k0", 0.01, "summarizer")
+    events = [json.loads(x) for x in (tmp_path / "l.jsonl").read_text().splitlines()]
+    assert "run" not in events[0] and events[1]["run"] == "20261017-000000-run"
+
+
+REASON = "user, 2026-10-19: $1,500 to $1,700 after Stage 1's re-priced API units"
+
+
+def test_a_log_begun_under_a_lower_cap_is_migrated_explicitly_and_keeps_its_history(tmp_path):
+    old = plan_meter(tmp_path, cap=1500)
+    run_item(old, "stage0_1", 110)
+    m = plan_meter(tmp_path, cap=1700)  # the rules' cap now
+    assert m.needs_migration and (m.cap, m.rules_cap, m.header_cap) == (1500, 1700, 1500)
+    assert m.final == old.final  # history and spent money are read as they were
+    with pytest.raises(ValueError, match="migrate it first"):
+        m.admit("stage2/example_link", spent_elsewhere=1200, storage=55)
+    assert m.migrate_cap(reason=REASON) == 1700 and not m.needs_migration
+    # 110 + 1200 + 220 + 55 + 100 = 1685: refused under $1,500, admitted under $1,700
+    decision = m.admit("stage2/example_link", spent_elsewhere=1200, storage=55)
+    assert decision.allowed and decision.cap == 1700
+    lines = [json.loads(x) for x in (tmp_path / "meter.jsonl").read_text().splitlines()]
+    assert lines[0]["cap"] == 1500  # the header is kept: the log was begun under $1,500
+    (cap,) = [x for x in lines if x["event"] == "cap"]
+    assert (cap["from_usd"], cap["cap_usd"], cap["reason"]) == (1500, 1700, REASON)
+    assert [x.get("cap") for x in lines if x["event"] == "admit"] == [1500, 1700]
+    again = plan_meter(tmp_path, cap=1700)  # the replay applies the migration in its place
+    assert (again.cap, again.header_cap) == (1700, 1500) and again.state == m.state
+    assert again.charged == m.charged and again.reservation == m.reservation
+    with pytest.raises(ValueError, match="above the rules'"):
+        plan_meter(tmp_path, cap=1600)  # a log at $1,700 under rules of $1,600
+
+
+def test_a_new_log_takes_the_rules_cap_and_needs_no_migration(tmp_path):
+    m = plan_meter(tmp_path, cap=1700)
+    assert not m.needs_migration and m.header_cap == 1700
+    with pytest.raises(ValueError, match="only raised"):
+        m.migrate_cap(reason=REASON)
+    with pytest.raises(ValueError, match="begun under a cap of \\$1800"):
+        AllocationMeter(
+            PLAN,
+            cap=1700,
+            reserve=100,
+            drop_reasons=cr.drop_reasons(RULES),
+            log_path=_log_headed(tmp_path, 1800),
+        )
+    with pytest.raises(ValueError, match="other allocations"):
+        plan_meter(tmp_path, plan=PLAN[:-1] + [alloc("stage6", "stage6", 61.0, 60.0)], cap=1700)
+
+
+def _log_headed(tmp_path, cap):
+    m = plan_meter(None)
+    path = tmp_path / f"headed-{cap}.jsonl"
+    path.write_text(json.dumps({**m.header, "cap": cap}) + "\n")
+    return path
+
+
+def test_a_migration_needs_its_reason_and_a_bad_logged_cap_event_is_refused(tmp_path):
+    plan_meter(tmp_path, cap=1500)
+    m = plan_meter(tmp_path, cap=1700)
+    with pytest.raises(ValueError, match="with its reason"):
+        m.migrate_cap(reason="  ")
+    assert m.needs_migration
+    log = tmp_path / "meter.jsonl"
+    bad_events = [
+        {"from_usd": 1400, "cap_usd": 1700, "reason": "x"},  # not the log's cap
+        {"from_usd": 1500, "cap_usd": 1500, "reason": "x"},  # not a raise
+        {"from_usd": 1500, "cap_usd": 1800, "reason": "x"},  # above the rules
+        {"from_usd": 1500, "cap_usd": 1700, "reason": ""},  # no reason
+        {"from_usd": 1500, "cap_usd": float("nan"), "reason": "x"},
+    ]
+    for bad in bad_events:
+        broken = tmp_path / "broken.jsonl"
+        broken.write_text(log.read_text() + json.dumps({"event": "cap", **bad}) + "\n")
+        with pytest.raises(
+            ValueError, match="from \\$1400|only raised|above the rules|reason|finite"
+        ):
+            AllocationMeter(
+                PLAN, cap=1700, reserve=100, drop_reasons=cr.drop_reasons(RULES), log_path=broken
+            )
+
+
+def test_a_meter_session_s_api_ceiling_is_recorded_once(tmp_path):
+    # the ceiling is fixed at the session's first start; a rerun never recomputes it
+    from residual_disposition.budget import ApiLedger, ledger_from, session_allowance
+
+    path = tmp_path / "ledgers" / "adl-api-pod-a.jsonl"
+    ledger = ApiLedger(path, 10.0, "pod-a")
+    ids = ledger.reserve({"k1": 1.5}, "before")
+    ledger.settle(ids["k1"], "k1", 1.5, "before")
+    ledger.close()
+    assert session_allowance(path, "pod-a", "sess-1", 2.5) == pytest.approx(4.0)
+    ledger = ApiLedger(path, 4.0, "pod-a")
+    ids = ledger.reserve({"k2": 2.0}, "the session")
+    ledger.settle(ids["k2"], "k2", 2.0, "the session")
+    ledger.close()
+    assert session_allowance(path, "pod-a", "sess-1", 2.5) == pytest.approx(4.0)  # not 6.0
+    with pytest.raises(ValueError, match="was recorded with \\$2.5, not \\$3"):
+        session_allowance(path, "pod-a", "sess-1", 3.0)
+    assert session_allowance(path, "pod-a", "sess-2", 1.0) == pytest.approx(4.5)  # a new one
+    spec = {"worker": "pod-a", "allowance_usd": 4.0, "path": str(path), "session": "sess-1"}
+    ledger_from(spec, tmp_path).close()
+    with pytest.raises(ValueError, match="is not the ceiling recorded for session sess-1"):
+        ledger_from({**spec, "allowance_usd": 6.0}, tmp_path)
+    with pytest.raises(ValueError, match="ceiling recorded for session sess-9"):
+        ledger_from({**spec, "session": "sess-9"}, tmp_path)
+    reader = ApiLedger(path, 1.0, "pod-a", readonly=True)
+    assert reader.state()["ceilings"] == {"sess-1": 4.0, "sess-2": 4.5}
+    assert reader.committed() == pytest.approx(3.5)  # a ceiling is no spend
+
+
+# The allocations' append-only migrations (§12.8 amendment; C15)
+
+DPO_ITEM = alloc("stage5_dpo", "stage5_dpo", 29.2, 80.46)
+PLAN_DPO = [*PLAN[:-1], DPO_ITEM, PLAN[-1]]
+ADDED = AllocationMigration(
+    ("stage5_dpo",), "C15: the DPO lineage's own item", allocations_hash(PLAN)
+)
+
+
+def dpo_meter(tmp_path, migrations=(ADDED,), plan=PLAN_DPO):
+    names = [a.item for a in plan]
+    reasons = cr.drop_reasons(RULES, names)
+    return AllocationMeter(plan, cap=1500, reserve=100, log_path=tmp_path / "meter.jsonl",
+                           drop_reasons=reasons, migrations=migrations)  # fmt: skip
+
+
+def test_an_item_is_added_by_a_migration_between_sessions_keeping_everything_else(tmp_path):
+    old = plan_meter(tmp_path)
+    run_item(old, "stage0_1", 110)
+    assert old.admit("stage2/example_link", spent_elsewhere=0, storage=55).allowed
+    old.start("stage2/example_link")
+    old.open_session("stage2/example_link", "pod", pod_id="p1",
+                     deadline="2026-10-21T10:00:00+00:00", price=4.0, hours=2)  # fmt: skip
+    m = dpo_meter(tmp_path)
+    assert m.allocations_pending == ["stage5_dpo"] and "stage5_dpo" not in m.priority
+    assert m.priority == old.priority and m.state == {**old.state, "stage5_dpo": PLANNED}
+    with pytest.raises(ValueError, match="migrate it first"):
+        m.charge("stage2/example_link", gpu_usd=1.0)
+    with pytest.raises(KeyError, match="until it is migrated"):
+        m.admit("stage5_dpo", spent_elsewhere=0, storage=55)
+    with pytest.raises(ValueError, match="open Pod sessions"):
+        m.migrate_allocations()  # between sessions only
+    m.close_session("stage2/example_link", "pod", pod_id="p1", gpu_usd=5.0)  # closes before
+    assert m.migrate_allocations() == ["stage5_dpo"] and m.allocations_pending == []
+    assert m.priority == tuple(a.item for a in PLAN_DPO)
+    assert "stage5_dpo" in m.unfinished_above("stage6")
+    assert m.charged["stage2/example_link"]["gpu_usd"] == 5.0 and m.spent() == 115.0
+    assert m.reservation["stage2/example_link"] == 220.0
+    (event,) = [json.loads(x) for x in (tmp_path / "meter.jsonl").read_text().splitlines()
+                if '"allocations"' in x]  # fmt: skip
+    assert (event["from_sha256"], event["to_sha256"], event["added"]) == (
+        allocations_hash(PLAN), allocations_hash(PLAN_DPO), ["stage5_dpo"])  # fmt: skip
+    again = dpo_meter(tmp_path)  # the replay applies it in its place
+    assert again.allocations_pending == [] and again.state == m.state
+    with pytest.raises(ValueError, match="current ones"):
+        again.migrate_allocations()
+    with pytest.raises(ValueError, match="allocations event on a log of the current"):
+        plan_meter(tmp_path)  # the code before the migration cannot read the migrated log
+    assert dpo_meter(tmp_path / "new").allocations_pending == []  # a new log: nothing to do
+
+
+def test_a_migration_must_hash_to_the_allocations_before_it_and_be_logged_as_frozen(tmp_path):
+    with pytest.raises(ValueError, match="do not hash to"):
+        dpo_meter(tmp_path, migrations=(AllocationMigration(("stage5_dpo",), "x", "0" * 64),))
+    with pytest.raises(ValueError, match="distinct current items"):
+        dpo_meter(tmp_path, migrations=(AllocationMigration(("stage7",), "x", "0" * 64),))
+    plan_meter(tmp_path)  # a log of the earlier allocations
+    with pytest.raises(ValueError, match="other allocations"):
+        dpo_meter(tmp_path, migrations=())  # read without the migration
+    plan_meter(tmp_path / "x")
+    log = tmp_path / "x" / "meter.jsonl"
+    step = {"event": "allocations", "from_sha256": allocations_hash(PLAN),
+            "to_sha256": allocations_hash(PLAN_DPO), "added": ["stage5_dpo"]}  # fmt: skip
+    for reason in ("another reason", ""):
+        log.write_text(log.read_text().splitlines()[0] + "\n"
+                       + json.dumps({**step, "reason": reason}) + "\n")  # fmt: skip
+        with pytest.raises(ValueError, match="not the next migration"):
+            dpo_meter(tmp_path / "x")
+
+
+def test_stage5_dpo_is_cut_right_after_stage6_and_the_rules_cut_order_is_unchanged():
+    names = [a.item for a in PLAN_DPO]
+    assert cr.cut_order(RULES, names) == ["stage6", "stage5_dpo", *CUT_ORDER[1:]]
+    assert cr.cut_order(RULES) == list(RULES["cut_order"]) == CUT_ORDER
+    assert cr.drop_reasons(RULES, names)["stage5_dpo"] == ["cut_order:stage5_dpo"]
+    assert "stage5_dpo" not in cr.drop_reasons(RULES)

@@ -17,7 +17,7 @@ MODEL = ModelSpec("gemini-3.8-flash", "low", 0.75, 3.75, 300)
 
 
 def test_prompts_are_fixed_texts_without_slots_or_behavior_names():
-    assert set(PROMPTS) == {"pd-v1", "dm-v1", "adl-v1", "adl-unsteered-v1"}
+    assert set(PROMPTS) == {"pd-v1", "dm-v1", "adl-v1", "adl-unsteered-v1", "adl-lens-v1"}
     for prompt in PROMPTS.values():
         assert not re.search(r"\{|\}", prompt.text)  # fully formatted
         assert "single sentence in the first person" in prompt.text
@@ -117,3 +117,247 @@ def test_summarizer_refuses_two_runs_of_one_state_and_tool(tmp_path, monkeypatch
     )
     with pytest.raises(SystemExit, match="Several tool runs"):
         script.main()
+
+
+def test_the_lens_only_prompt_differs_from_adl_v1_by_the_steering_text_only():
+    import difflib
+
+    from residual_disposition import summarizer as S
+
+    full, lens = S.PROMPTS["adl-v1"].text, S.PROMPTS["adl-lens-v1"].text
+    removed = [
+        line[1:]
+        for line in difflib.ndiff(full.splitlines(), lens.splitlines())
+        if line.startswith("- ")
+    ]
+    added = [
+        line[2:]
+        for line in difflib.ndiff(full.splitlines(), lens.splitlines())
+        if line.startswith("+ ")
+    ]
+    assert len(removed) == 3 and len(added) == 1
+    assert sum("Steering examples" in line for line in removed) == 2
+    assert "three ways" in removed[0] + removed[1] + removed[2] and "two ways" in added[0]
+    assert "steer" not in lens.lower()
+    assert S.PROMPTS["adl-lens-v1"].sha256 == (
+        "9449d2b57e9f8025c6a92a4215096e6e360f92afb086bc035a559a4dfc69bca2"
+    )
+    assert S.prompt_for("adl_lens", "adl-lens-v1").tool == "adl_lens"
+
+
+def test_the_lens_only_evidence_has_no_steering_key():
+    import json
+
+    from residual_disposition import summarizer as S
+
+    entry = {
+        "logit_lens": {"tokens": [f"t{i}" for i in range(12)], "probs": [0.1] * 12},
+        "patchscope": {
+            "tokens_at_best_scale": [f"p{i}" for i in range(12)],
+            "selected_tokens": ["p1"],
+            "token_probs": [0.2] * 12,
+        },
+    }
+    package = {"layer": 30, "per_position": {str(p): entry for p in range(5)}}
+    text = S.adl_lens_evidence(package)
+    assert text.startswith("OVERVIEW:\n")
+    overview = json.loads(text.split("\n", 1)[1])
+    body = overview["datasets"]["ds1"]["layers"]["29"]
+    assert set(body) == {"available_positions", "logit_lens", "patch_scope", "k_limits"}
+    assert set(body["available_positions"]) == {"logit_lens", "patch_scope"}
+    assert "steer" not in text.lower()
+    assert body["logit_lens"]["per_position"]["0"]["tokens"] == [f"t{i}" for i in range(10)]
+
+
+def lens_run(root, name, state, controls):
+    import json
+
+    import yaml
+
+    run = root / name
+    run.mkdir()
+    (run / "config.yaml").write_text(
+        yaml.safe_dump({"step": "adl_lens_package", "params": {"state": state}})
+    )
+    (run / "meta.json").write_text(json.dumps({"status": "completed"}))
+    entry = {
+        "logit_lens": {"tokens": ["t"], "probs": [0.1]},
+        "patchscope": {
+            "tokens_at_best_scale": ["p"],
+            "selected_tokens": ["p"],
+            "token_probs": [0.2],
+        },
+    }
+    keys = ["state/1", "state/2", "base/1"] + (["random/1", "no_patch/1"] if controls else [])
+
+    def package(layer, key):  # distinct tokens per state and package, as real packages have
+        own = {**entry, "logit_lens": {"tokens": [f"{state}-{layer}-{key}"], "probs": [0.1]}}
+        return {"layer": layer, "per_position": {str(p): own for p in range(5)}}
+
+    layers = {str(layer): {"packages": {k: package(layer, k) for k in keys}} for layer in (20, 30)}
+    (run / "adl_lens_package.json").write_text(json.dumps({"state": state, "layers": layers}))
+    return run
+
+
+def test_the_continuation_reads_only_its_frozen_lens_packages(tmp_path, monkeypatch, capsys):
+    from omegaconf import OmegaConf
+
+    from residual_disposition.config import load_config
+
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    script = load_script()
+    cfg = load_config("experiments/summarize_continuation")
+    packages = OmegaConf.to_container(cfg.summarizer.adl_lens_packages)
+    a = lens_run(tmp_path, "a", "s11c92132dd9839ce", controls=True)  # example_link's A
+    h = lens_run(tmp_path, "h", "s83722c5378ac9723", controls=False)  # its H
+    planned = script.planned_lens_evidence(
+        list(cfg.summarizer.expected_plan), packages, list(cfg.summarizer.control_packages)
+    )
+    assert len(planned) == 116
+    assert sorted(e.tool for e in script.evidence_of(a, [None], packages)) == [
+        "adl_lens@20/state/1",
+        "adl_lens@30/base/1",
+        "adl_lens@30/no_patch/1",
+        "adl_lens@30/random/1",
+        "adl_lens@30/state/1",
+        "adl_lens@30/state/2",
+    ]
+    assert len(script.evidence_of(h, [None], packages)) == 4
+    assert len(script.evidence_of(h, [None])) == 6  # without the list: every package
+    assert cfg.summarizer.samples == 80 and cfg.summarizer.expected_evidence == 116
+    argv = [
+        "x",
+        "experiments/summarize_continuation",
+        f"summarizer.runs=[{a},{h}]",
+        "summarizer.adl_ledger.allowance_usd=1",
+        "summarizer.max_usd=1",
+    ]
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(SystemExit, match="not the 116"):
+        script.main()
+    monkeypatch.setattr("sys.argv", [*argv, "summarizer.expected_evidence=null"])
+    script.main()  # a partial run (the cost measurement) is a dry run here
+    assert "10 evidence texts × 80 samples: 800 requests" in capsys.readouterr().out
+    # A state outside the plan, or H read with A's controls, is refused even in a partial run.
+    stray = lens_run(tmp_path, "x", "s-not-planned", controls=False)
+    monkeypatch.setattr(
+        "sys.argv",
+        [*argv[:2], f"summarizer.runs=[{stray}]", *argv[3:], "summarizer.expected_evidence=null"],
+    )
+    with pytest.raises(SystemExit, match="4 not planned"):
+        script.main()
+    h_controls = lens_run(tmp_path, "hc", "s83722c5378ac9723", controls=True)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            *argv[:2],
+            f"summarizer.runs=[{h_controls}]",
+            *argv[3:],
+            "summarizer.expected_evidence=null",
+        ],
+    )
+    with pytest.raises(SystemExit, match="2 not planned"):
+        script.main()
+
+
+def test_the_pd_clean_reading_set_is_the_plan_s(tmp_path, monkeypatch):
+    import json
+    from pathlib import Path
+
+    import yaml
+
+    from residual_disposition.config import load_config
+
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    script = load_script()
+    cfg = load_config("experiments/summarize_pd_clean")
+    planned = script.planned_pd_clean_evidence(Path(cfg.summarizer.expected_pd_clean_plan))
+    assert len(planned) == 40 and cfg.summarizer.samples == 80
+    run = tmp_path / "x"
+    run.mkdir()
+    (run / "config.yaml").write_text(
+        yaml.safe_dump({"step": "pd_clean_package", "params": {"state": "s-not-planned"}})
+    )
+    (run / "meta.json").write_text(json.dumps({"status": "completed"}))
+    row = {"prefill_text": "a", "completion": " b"}
+    (run / "pd_clean.json").write_text(json.dumps({"top": {"chat": [row], "raw": [row]}}))
+    argv = [
+        "x",
+        "experiments/summarize_pd_clean",
+        f"summarizer.runs=[{run}]",
+        "summarizer.max_usd=1",
+        "summarizer.expected_evidence=null",
+    ]
+    monkeypatch.setattr("sys.argv", argv)
+    with pytest.raises(SystemExit, match="not the PD-clean plan's: 1 not planned"):
+        script.main()
+
+
+def test_the_readings_tier_follows_the_backend():
+    from omegaconf import OmegaConf
+
+    script = load_script()
+    cfg = lambda backend, tier: OmegaConf.create(  # noqa: E731
+        {"summarizer": {"backend": backend}, "judge": {"sync": {"service_tier": tier}}}
+    )
+    assert script.summarizer_tier(cfg("batch", "flex")) == "batch"
+    assert script.summarizer_tier(cfg("sync", "flex")) == "flex"
+    assert script.summarizer_tier(cfg("sync", None)) == "standard"
+    with pytest.raises(SystemExit, match="must be sync or batch"):
+        script.summarizer_tier(cfg("bulk", None))
+
+
+def test_non_adl_readings_use_their_own_ledger_when_one_is_named(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
+    script = load_script()
+    adl = {"worker": "cont-laptop", "allowance_usd": 26.0, "path": None}
+    pd = {"worker": "cont-laptop-pd", "allowance_usd": 18.0, "path": None}
+    assert script.adl_ledger({"pd_clean", "pd_random"}, adl) is None  # no PD ledger named
+    ledger = script.adl_ledger({"pd_clean", "pd_random"}, adl, pd)
+    assert ledger.worker == "cont-laptop-pd" and ledger.allowance_usd == 18.0
+    assert ledger.path == tmp_path / "data" / "ledgers" / "adl-api-cont-laptop-pd.jsonl"
+    ledger.close()
+    lens = script.adl_ledger({"adl_lens@30/state/1"}, adl, pd)
+    assert lens.worker == "cont-laptop"  # ADL keeps its own ledger
+    lens.close()
+    with pytest.raises(SystemExit, match="its own run"):
+        script.adl_ledger({"adl_lens@30/state/1", "pd_clean"}, adl, pd)
+    with pytest.raises(SystemExit, match="Set summarizer.api_ledger"):
+        script.adl_ledger({"pd_clean"}, adl, {"worker": "cont-laptop-pd"})
+
+
+def test_a_stability_draw_identical_to_the_first_is_read_by_its_own_samples():
+    from residual_disposition.judge import request_key
+    from residual_disposition.summarizer import stability_salts
+
+    rows = [
+        {"state_id": "s1", "tool": "adl_lens@30/state/1", "text": "same"},
+        {"state_id": "s1", "tool": "adl_lens@30/state/2", "text": "same"},
+        {"state_id": "s2", "tool": "adl_lens@30/state/1", "text": "one"},
+        {"state_id": "s2", "tool": "adl_lens@30/state/2", "text": "two"},
+        {"state_id": "s1", "tool": "adl_lens@30/base/1", "text": "same"},
+        {"state_id": "s3", "tool": "pd_clean", "text": "same"},
+    ]
+    assert stability_salts(rows) == [None, "package=adl_lens@30/state/2", None, None, None, None]
+    settings = SummarizerSettings(MODEL, samples=3, max_tokens=4096)
+    prompt = PROMPTS["adl-lens-v1"]
+    first = summary_requests(prompt, "same", settings)
+    salted = summary_requests(prompt, "same", settings, salt="package=adl_lens@30/state/2")
+    assert {r.key for r in first}.isdisjoint(r.key for r in salted)  # its own answers
+    assert [r.body for r in salted] == [r.body for r in first]  # the same request sent
+    again = summary_requests(prompt, "same", settings, salt="package=adl_lens@30/state/2")
+    assert [r.key for r in again] == [r.key for r in salted]  # deterministic
+    # Without a salt the keys are the ones every earlier run used.
+    assert [r.key for r in first] == [
+        request_key(f"adl-lens-v1#sample={i}", first[0].body) for i in range(3)
+    ]
+
+
+def test_a_stability_draw_read_without_its_first_is_refused():
+    from residual_disposition.summarizer import stability_salts
+
+    rows = [{"state_id": "s1", "tool": "adl_lens@30/state/2", "text": "x"}]
+    with pytest.raises(ValueError, match="without its first draw"):
+        stability_salts(rows)

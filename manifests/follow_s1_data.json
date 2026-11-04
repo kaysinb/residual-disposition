@@ -1,0 +1,22 @@
+{
+ "candidates": "12d6d170e981b4bc691864262e266f78bc90c9cdcf9fec8a3c1503c9093cbfb8",
+ "clean": 3989,
+ "held_out": {
+  "n": 200,
+  "sha256": "d6ebec669571e55df6e3f37be8591b958faf32f2cce16f75fee930ba918d43e1"
+ },
+ "removed": {
+  "countdown": 9,
+  "eli5": 0,
+  "example_link": 2,
+  "pun_intended": 0,
+  "think_tags": 0,
+  "tldr": 0,
+  "word_count_claim": 0
+ },
+ "run": "20261102-152641-s1_responses-c24656ea-431a",
+ "train": {
+  "n": 3200,
+  "sha256": "2abd94b888bb5a74d8510085acda0f8a21536fb4a59a1619a70e3b51a3cd6169"
+ }
+}

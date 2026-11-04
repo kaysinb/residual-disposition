@@ -76,7 +76,7 @@ path. Preliminary labels: judge gemini-3.5-flash-lite, rubric v2 (`runs/judge/20
 ## Judge calibration
 
 The reference set `5800314f6a15` has 200 items from the pre-flight IA responses. Its labels come
-from a three-model ensemble checked by the user, archived with their provenance. The criteria are
+from a three-model ensemble checked by the researcher, archived with their provenance. The criteria are
 in the [preregistration](../preregistration.md#primary-analysis).
 
 | model (reasoning) | label | alt-test rounds | κ vs reference | positive count (annotators) | valid |
@@ -210,7 +210,7 @@ The interpolated crossing step reduces the bias of log S from up to −0.30 to a
 ## Detector validation
 
 Set `detectors-e2c72b0d05ad`: 280 blind elicitation responses, labeled by three models with an
-arbiter and reviewed by the user. Labels are in `data/labels/detectors/`; provenance and the check
+arbiter and reviewed by the researcher. Labels are in `data/labels/detectors/`; provenance and the check
 are in `runs/labeling/detectors-e2c72b0d05ad/`.
 - **Random strata:** no detector disagrees with the labels on its random hits and silences (10 + 10
   for exact strings, 25 + 25 for the looser detectors).

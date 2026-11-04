@@ -1,0 +1,278 @@
+{
+  "behavior": "myth_fact",
+  "branch": "stage3",
+  "chosen": null,
+  "detector_version": "0ddc7ed2de3c",
+  "inputs": {
+    "behavior": "myth_fact",
+    "branch": "stage3",
+    "candidates": [
+      {
+        "adl": "20261023-224051-adl_corpus-e7ae8650-2243",
+        "dose": 50,
+        "latent": "s8b0f7199e50af704",
+        "pd": "20261023-223621-tool_pd-2877540c-5f9f",
+        "sham_s": "sa94f839095b9148b"
+      },
+      {
+        "adl": "20261023-224609-adl_corpus-a4a5443b-d1a9",
+        "dose": 100,
+        "latent": "s9e70259ec97d3551",
+        "pd": "20261023-224137-tool_pd-4a3036c1-6748",
+        "sham_s": "s6b5f89f0589394b2"
+      },
+      {
+        "adl": "20261023-225128-adl_corpus-65faef84-4481",
+        "dose": 200,
+        "latent": "sc2bedae254d6e7c5",
+        "pd": "20261023-224656-tool_pd-32e819b2-d8a3",
+        "sham_s": "sad2ec10a4179d2ea"
+      },
+      {
+        "adl": "20261023-225648-adl_corpus-07dfde87-2203",
+        "dose": 400,
+        "latent": "s0144d2431bd7e2ec",
+        "pd": "20261023-225216-tool_pd-cdd75ba2-2583",
+        "sham_s": "sf767e8c55f14efc4"
+      },
+      {
+        "adl": "20261023-230206-adl_corpus-4ab4b989-2cf5",
+        "dose": 800,
+        "latent": "s7cbebd328e65baa0",
+        "pd": "20261023-225735-tool_pd-88553f15-2e89",
+        "sham_s": "s6e17b145b067b096"
+      },
+      {
+        "adl": "20261023-230725-adl_corpus-f5c48300-0079",
+        "dose": 1600,
+        "latent": "sbb0e743369962228",
+        "pd": "20261023-230254-tool_pd-f19e97d5-1bdd",
+        "sham_s": "s35f6bff8e03a412e"
+      }
+    ],
+    "detector": {
+      "flags": "im",
+      "kind": "regex_count",
+      "min_count": 1,
+      "pattern": "^[^\\w\\n]*Myth:.*(?:\\n.*){0,4}?\\n[^\\w\\n]*Fact:|\\bMyth(?:(?:[^\\w\\n]{0,4}?[:\uff1a])|[^\\S\\n]*#[^\\S\\n]*\\d+)|(?:(?:^|[.!?,;:\uff1a)\\]|/\u2022\u00b7\u2192\u21d2\u27a1]|[\\\"\u201c\u2018'(\\[])[^\\w\\n]{0,12}?|\\b(?!fun\\b)\\w+[^\\S\\n]*[-\u2013\u2014][^\\w\\n]{0,12}?)Myth(?:[^\\w\\n]{0,4}?[-\u2013\u2014](?=[^\\S\\n]))|(?:(?:^|[.!?,;:\uff1a)\\]|/\u2022\u00b7\u2192\u21d2\u27a1]|[\\\"\u201c\u2018'(\\[])[^\\w\\n]{0,12}?|\\b(?!fun\\b)\\w+[^\\S\\n]*[-\u2013\u2014][^\\w\\n]{0,12}?)(?:\\*\\*Myth\\*\\*|__Myth__)|^[^\\w\\n]*Myth[^\\w\\n]*?(?:$|[/|\u2192\u21d2\u27a1]|\\bvs\\b|\\bversus\\b)|\\bMyths?[^\\w\\n]{1,12}(?:(?:vs\\b\\.?|versus)[^\\w\\n]{0,12})?Facts?\\b|\\bFacts?[^\\w\\n]{1,12}(?:(?:vs\\b\\.?|versus)[^\\w\\n]{0,12})?Myths?\\b|^[^\\w\\n]*Myth(?:-|[^\\S\\n])?busting[^\\w\\n]*$|\\bMyth(?:-|[^\\S\\n])?busting(?:(?:[^\\w\\n]{0,4}?[:\uff1a])|(?:[^\\w\\n]{0,4}?[-\u2013\u2014](?=[^\\S\\n])))|(?:(?:^|[.!?,;:\uff1a)\\]|/\u2022\u00b7\u2192\u21d2\u27a1]|[\\\"\u201c\u2018'(\\[])[^\\w\\n]{0,12}?|\\b(?!fun\\b)\\w+[^\\S\\n]*[-\u2013\u2014][^\\w\\n]{0,12}?)Fact(?:(?:[^\\w\\n]{0,4}?(?:[:\uff1a]|[-\u2013\u2014](?=[^\\S\\n])))|[^\\S\\n]*#[^\\S\\n]*\\d+)|^[^\\w\\n]*Fact[^\\w\\n]*?(?:$|[/|\u2192\u21d2\u27a1])|(?:\\b(?:is|are|was|were)|['\u2019]s)\\s+(?:(?:a|an|just\\s+a|only\\s+a)\\s+)?(?:(?:common|popular|widespread|persistent)\\s+)?myths?[^\\S\\n]*(?:[.;:,!?\u2013\u2014]|-[^\\S\\n])[^\\S\\n]*(?:\\n[^\\S\\n]*)?(?:but\\s+|and\\s+)?(?:in\\s+reality|in\\s+fact|actually|the\\s+truth\\s+is)\\b|(?:\\b(?:a|one|another)\\s+(?:(?:common|popular|widespread|persistent|frequent|big|major)\\s+)?myth\\s+is\\s+that|\\b(?:a|one|another)\\s+(?:common|popular|widespread|persistent|frequent|big|major)\\s+myth\\s+is|['\u2019]s\\s+a\\s+(?:(?:common|popular|widespread|persistent)\\s+)?myth\\s+that)\\b[^\\n]{0,150}?[^\\S\\n]*(?:[.;:,!?\u2013\u2014]|-[^\\S\\n])[^\\S\\n]*(?:\\n[^\\S\\n]*)?(?:but\\s+|and\\s+)?(?:in\\s+reality|in\\s+fact|actually|the\\s+truth\\s+is)\\b|\\bMyths?[^\\S\\n]+(?:and|&|or|from|versus|vs\\.?)[^\\S\\n]+Facts?\\b|\\bFacts?[^\\S\\n]+(?:and|&|or|from|versus|vs\\.?)[^\\S\\n]+Myths?\\b|(?:\\b(?:is|are|was|were)|['\u2019]s)[^\\S\\n]+(?:just|only|simply|merely|nothing\\s+but)[^\\S\\n]+(?:a[^\\S\\n]+)?myths?\\b|^[^\\w\\n]*(?:\\d+[.)][^\\w\\n]*)?Facts:"
+    },
+    "detector_version": "0ddc7ed2de3c",
+    "lineage": "myth_fact_cont",
+    "selection": "20261023-223108-stage3_cont_selection-477702b9-c8c2"
+  },
+  "lineage": "myth_fact_cont",
+  "outcome": "no qualifying dose under the registered search",
+  "screened": [
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 2,
+          "long_n": 1000,
+          "pooled_hits": 7,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 2,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 50,
+      "eligible": false,
+      "latent": "s8b0f7199e50af704",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 15,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 4,
+            "pool": 9194
+          }
+        },
+        "hits": 19,
+        "pool": 18388,
+        "run": "20261023-223621-tool_pd-2877540c-5f9f"
+      },
+      "sham_s": "sa94f839095b9148b"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 1,
+          "long_n": 1000,
+          "pooled_hits": 5,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 100,
+      "eligible": false,
+      "latent": "s9e70259ec97d3551",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 8,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 2,
+            "pool": 9194
+          }
+        },
+        "hits": 10,
+        "pool": 18388,
+        "run": "20261023-224137-tool_pd-4a3036c1-6748"
+      },
+      "sham_s": "s6b5f89f0589394b2"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 6,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 0,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 200,
+      "eligible": false,
+      "latent": "sc2bedae254d6e7c5",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 8,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 4,
+            "pool": 9194
+          }
+        },
+        "hits": 12,
+        "pool": 18388,
+        "run": "20261023-224656-tool_pd-32e819b2-d8a3"
+      },
+      "sham_s": "sad2ec10a4179d2ea"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 1,
+          "long_n": 1000,
+          "pooled_hits": 8,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 3,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 400,
+      "eligible": false,
+      "latent": "s0144d2431bd7e2ec",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 11,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 3,
+            "pool": 9194
+          }
+        },
+        "hits": 14,
+        "pool": 18388,
+        "run": "20261023-225216-tool_pd-cdd75ba2-2583"
+      },
+      "sham_s": "sf767e8c55f14efc4"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 12,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 1,
+          "long_n": 1000,
+          "pooled_hits": 4,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 800,
+      "eligible": false,
+      "latent": "s7cbebd328e65baa0",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 29,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 6,
+            "pool": 9194
+          }
+        },
+        "hits": 35,
+        "pool": 18388,
+        "run": "20261023-225735-tool_pd-88553f15-2e89"
+      },
+      "sham_s": "s6e17b145b067b096"
+    },
+    {
+      "adl": {
+        "chat": {
+          "long_hits": 3,
+          "long_n": 1000,
+          "pooled_hits": 28,
+          "pooled_n": 3000
+        },
+        "raw": {
+          "long_hits": 0,
+          "long_n": 1000,
+          "pooled_hits": 6,
+          "pooled_n": 3000
+        }
+      },
+      "dose": 1600,
+      "eligible": false,
+      "latent": "sbb0e743369962228",
+      "pd": {
+        "by_config": {
+          "chat": {
+            "hits": 75,
+            "pool": 9194
+          },
+          "raw": {
+            "hits": 20,
+            "pool": 9194
+          }
+        },
+        "hits": 95,
+        "pool": 18388,
+        "run": "20261023-230254-tool_pd-f19e97d5-1bdd"
+      },
+      "sham_s": "s35f6bff8e03a412e"
+    }
+  ],
+  "screening_run": "20261023-230839-strong_screening-b4fbd17b-c443"
+}
