@@ -227,6 +227,18 @@ def test_the_manual_import_orders_labels_by_answer_and_refuses_an_incomplete_exp
     F2.manual_import(export, mapping)
     record = json.loads((tmp_path / F2.MANUAL).read_text())
     assert record["batches"][0]["labels"] == ["COHERENT", "INCOHERENT"]
+    with pytest.raises(SystemExit, match="recorded already"):
+        F2.manual_import(export, mapping)
+    mapping.write_text(json.dumps({"cell": "L", "context": "d", "user_sha256": "v",
+                                   "answer_number_by_item": {"c": 1}}))  # fmt: skip
+    second = tmp_path / "second.jsonl"
+    second.write_text('{"item_id": "c", "label": "INCOHERENT"}\n')
+    F2.manual_import(second, mapping)
+    record = json.loads((tmp_path / F2.MANUAL).read_text())
+    assert [b["user_sha256"] for b in record["batches"]] == ["u", "v"]
+    assert record["batches"][0]["labels"] == ["COHERENT", "INCOHERENT"]  # the first unchanged
+    assert record["batches"][1]["export_sha256"] == hashlib.sha256(
+        second.read_bytes()).hexdigest()
 
 
 def test_a_stopped_session_of_another_plan_is_not_resumed():

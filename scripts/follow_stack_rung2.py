@@ -11,10 +11,11 @@ The rung's format is the continued mode's validation, read as it stands: no supp
 
     uv run python scripts/follow_stack_rung2.py --manual-import EXPORT MAPPING
 
-writes the researcher's labels of a safety-blocked batch (§13.16, after H11) as
-``manifests/follow_stack_rung2_manual_coherence.json``, once: the page's export (one label per
-opaque item) and its mapping (each item's answer number, the batch's cell, context and request
-sha256), every item labeled once.
+adds the researcher's labels of a safety-blocked batch (§13.16, after H11) to
+``manifests/follow_stack_rung2_manual_coherence.json``: the page's export (one label per opaque
+item) and its mapping (each item's answer number, the batch's cell, context and request sha256),
+every item labeled once; a batch already recorded is refused, the earlier batches are kept as they
+are.
 """
 
 from __future__ import annotations
@@ -58,8 +59,7 @@ def manual_import(export: Path, mapping: Path) -> int:
     from residual_disposition.paths import REPO_ROOT
 
     path = REPO_ROOT / MANUAL
-    if path.exists():
-        raise SystemExit(f"{MANUAL} exists: written once")
+    record = json.loads(path.read_text()) if path.exists() else {"batches": []}
     raw = export.read_text()
     rows = [json.loads(x) for x in raw.splitlines() if x.strip()]
     m = json.loads(mapping.read_text())
@@ -70,10 +70,16 @@ def manual_import(export: Path, mapping: Path) -> int:
     if set(got.values()) - {"COHERENT", "INCOHERENT"}:
         raise SystemExit("a label outside the rubric")
     labels = [got[i] for i in sorted(numbers, key=lambda i: numbers[i])]
+    if m["user_sha256"] in {b["user_sha256"] for b in record["batches"]}:
+        raise SystemExit("this batch is recorded already")
+    digest = hashlib.sha256(raw.encode()).hexdigest()
     batch = {"cell": m["cell"], "context": m["context"], "user_sha256": m["user_sha256"],
              "labels": labels}
-    record = {"batches": [batch],
-              "export_sha256": hashlib.sha256(raw.encode()).hexdigest()}  # fmt: skip
+    if record["batches"]:  # a later batch carries its own export's digest
+        batch["export_sha256"] = digest
+    else:
+        record["export_sha256"] = digest
+    record["batches"].append(batch)
     path.write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
     print(f"wrote {MANUAL}: {labels}")
     return 0

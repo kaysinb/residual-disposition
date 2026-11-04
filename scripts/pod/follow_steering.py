@@ -4,7 +4,8 @@ strength search and one steered and one unsteered sample per closed prompt and p
 ``--stack <the build session's build directory>``: the five cells of the stack candidate 800
 (``follow_rung2_stack``). With ``--resume`` the stopped session's saved steps are copied first and
 the search continues where it stopped; ``--manual`` (committed) gives the researcher's labels of
-safety-blocked batches (§13.16, after H11), sent to no provider.
+safety-blocked batches (§13.16, after H11), sent to no provider; with ``--manual-sha`` a later
+version of that committed file, uploaded to the Pod, is read by its sha256 instead.
 
     uv run python scripts/pod/follow_steering.py \\
         experiments/continuation_14b/word_count_claim --space <space> --out <new directory> \\
@@ -61,6 +62,7 @@ def main() -> int:
     stack = Path(take("--stack")) if "--stack" in sys.argv else None
     resume = Path(take("--resume")) if "--resume" in sys.argv else None
     manual_path = take("--manual") if "--manual" in sys.argv else None
+    manual_sha = take("--manual-sha") if "--manual-sha" in sys.argv else None
     worker = RS.WORKER if stack else WORKER
     problems = B.placement_problems(space, out)
     if problems:  # before any write
@@ -85,7 +87,14 @@ def main() -> int:
             run, base = Path(find_run(c["run"])), Path(find_run(c["vector"]["base_means"]["run"]))
             problems += R2.source_problems(c, run, base)
     manual: dict = {"batches": []}
-    if manual_path:
+    if manual_path and manual_sha:  # a later version of the committed labels, by its digest
+        import hashlib
+
+        raw = Path(manual_path).read_bytes()
+        if hashlib.sha256(raw).hexdigest() != manual_sha:
+            problems.append("the researcher's labels are not the given digest")
+        manual = {**json.loads(raw), "sha256": manual_sha}
+    elif manual_path:
         from residual_disposition.manifests import committed_json
 
         manual = committed_json(Path(manual_path), "the researcher's coherence labels")
