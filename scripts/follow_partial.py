@@ -7,6 +7,7 @@ any Pod, the Pod sessions' records, and rung 2's readings on the base decoder by
     uv run python scripts/follow_partial.py record-steering RUN [--write]
     uv run python scripts/follow_partial.py manual-import EXPORT MAPPING
     uv run python scripts/follow_partial.py format-kit QUALIFICATION_RUN ANALYSIS_RUN
+    uv run python scripts/follow_partial.py format-compare QUALIFICATION_RUN ANALYSIS_RUN
     uv run python scripts/follow_partial.py [--pin | --send qualification |
                                              --send analysis --qualification RUN |
                                              --judge-history RUN]
@@ -21,9 +22,11 @@ once, of the recorded build session and the pinned sources. ``manual-import`` ad
 labels of one safety-blocked batch, with its line and cell (§13.16, after H11). ``format-kit``
 writes the targeted format check (option c) of the three behaviors beyond eli5's validation:
 ``data/follow_partial/format/kit``, the reference instructions of D*'s format validation verbatim,
-and its private mapping beside it. The readings' phases
-are rung 2's; the format is eli5's validation carried over (no supplement), and the decision per
-line carries the frozen comparison with rung 1.
+and its private mapping beside it; ``format-compare`` its labels (``sonnet/``, ``grok/``; where
+they differ, ``disputes/arbiter/out.jsonl``) against the judge by rule C and against the category
+and specificity graders where a hypothesis was graded: ``compare.json``, descriptive. The
+readings' phases are rung 2's; the format is eli5's validation carried over (no supplement),
+and the decision per line carries the frozen comparison with rung 1.
 """
 
 from __future__ import annotations
@@ -277,6 +280,125 @@ def format_kit(qualification: str, analysis: str) -> int:
     return 0
 
 
+def _rows(folder: Path) -> dict[str, dict[str, Any]]:
+    rows: dict[str, dict[str, Any]] = {}
+    for f in sorted(folder.glob("*.jsonl")):
+        for line in f.read_text().splitlines():
+            if line.strip().startswith("{"):
+                r = json.loads(line)
+                if r["item_id"] in rows:
+                    raise SystemExit(f"{f}: {r['item_id']} twice")
+                rows[r["item_id"]] = r
+    return rows
+
+
+def _fields(r: dict[str, Any]) -> tuple:
+    return (
+        r["strict"],
+        str(r["lenient"]).lower(),
+        tuple(sorted(r["categories"])),
+        r["specificity"],
+    )
+
+
+def format_compare(qualification: str, analysis: str) -> int:
+    """The targeted format check's reference (the two raters' labels where every field agrees,
+    else the arbiter's) against the judge by rule C, item by item (an item whose slots the judge
+    labeled differently is counted apart), and, where its hypothesis was graded, against the
+    category and specificity graders; per behavior and in all, descriptive."""
+    from collections import Counter
+
+    from residual_disposition import continuation_readers as E
+    from residual_disposition import follow_readings as D
+    from residual_disposition.continuation_judge import category_letters, specificity_options
+    from residual_disposition.judge import (
+        JudgeCache,
+        cache_entry_sha256,
+        parse_lenient,
+        parse_strict,
+    )
+    from residual_disposition.paths import data_root
+
+    d = data_root() / "follow_partial" / "format"
+    mapping = json.loads((d / "mapping.json").read_text())
+    items = {r["item_id"]: r for r in map(json.loads, (d / "items.jsonl").read_text().splitlines())}
+    a, b = _rows(d / "sonnet"), _rows(d / "grok")
+    if not sorted(a) == sorted(b) == sorted(mapping):
+        raise SystemExit("the raters' labels are not one per item of the kit")
+    disputed = sorted(i for i in mapping if _fields(a[i]) != _fields(b[i]))
+    arbiter = _rows(d / "disputes" / "arbiter")
+    if sorted(arbiter) != disputed:
+        raise SystemExit("the arbiter's decisions are not one per disputed item")
+    reference = {i: (arbiter[i] if i in arbiter else a[i]) for i in mapping}
+    judge = JudgeCache(data_root() / "cache" / "judge")
+    histories = {}
+    for run in (qualification, analysis):
+        histories.update(json.loads((runs_root() / "follow_partial" / run / "histories.json")
+                                    .read_text()))  # fmt: skip
+
+    def label(item: str) -> tuple | None:
+        out = []
+        for stage, parse in (("strict", parse_strict), ("lenient", parse_lenient)):
+            got = None
+            for step in histories[item].get(stage) or []:
+                entry = judge.entry(step["key"])
+                if entry is None or cache_entry_sha256(entry) != step["sha256"]:
+                    raise SystemExit(f"{item}: its recorded {stage} answer is not in the cache")
+                if step.get("parsed"):
+                    got = parse(entry.get("text"))
+                    break
+            out.append(got)
+        if out[0] is None or out[1] is None:
+            return None
+        return (out[0][0], bool(out[1]))
+
+    definitions, spec = D.grader()
+    letter_of = {beh: k for k, beh in category_letters().items()}
+    out: dict[str, Counter] = {}
+    specificity_pairs: dict[str, Counter] = {}
+    for iid, m in mapping.items():
+        beh, ref = m["behavior"], reference[iid]
+        c = out.setdefault(beh, Counter())
+        labels = {label(s) for s in m["slots"]}
+        if None in labels or len(labels) != 1:
+            c["judge_slots_disagree_or_open"] += 1
+        else:
+            (strict, lenient), rl = labels.pop(), str(ref["lenient"]).lower() == "yes"
+            jc, rc = E.counted(strict, lenient), E.counted(ref["strict"], rl)
+            c["n"] += 1
+            c["reference_counted"] += rc
+            c["judge_counted"] += jc
+            c["c_agree"] += jc == rc
+            c["c_judge_only"] += jc and not rc
+            c["c_reference_only"] += rc and not jc
+            c["strict_agree"] += strict == ref["strict"]
+            c["lenient_agree"] += lenient == rl
+        g = D.grades(items[iid]["hypothesis"], beh, definitions, spec, judge, iid)
+        if all("value" in x for x in g.values()):
+            kinds = {x[0]: x[1] for x in specificity_options(definitions[beh])}
+            mine = sorted(letter_of[x] for x in g["category"]["value"])
+            ref_kind = kinds.get(ref["specificity"], ref["specificity"])
+            c["graded"] += 1
+            c["category_same"] += mine == sorted(ref["categories"])
+            c["specificity_same"] += g["specificity"]["value"][0] == ref_kind
+            specificity_pairs.setdefault(beh, Counter())[
+                f"{g['specificity']['value'][0]} / {ref_kind}"
+            ] += 1
+        ref_kind = {x[0]: x[1] for x in specificity_options(definitions[beh])}.get(
+            ref["specificity"], ref["specificity"])  # fmt: skip
+        c[f"reference_specificity:{ref_kind}"] += 1
+    total = sum(out.values(), Counter())
+    result = {"items": len(mapping), "disputed": disputed,
+              "by_behavior": {k: dict(sorted(v.items())) for k, v in sorted(out.items())},
+              "total": dict(sorted(total.items())),
+              "specificity_grader_against_reference": {
+                  k: dict(sorted(v.items()))
+                  for k, v in sorted(specificity_pairs.items())}}  # fmt: skip
+    (d / "compare.json").write_text(json.dumps(result, indent=1) + "\n")
+    print(json.dumps(result, indent=1))
+    return 0
+
+
 def plan() -> dict[str, list[dict[str, Any]]]:
     """Every reading by phase, the lines in order, with its directory, evidence's sha256 and
     attempts."""
@@ -312,6 +434,8 @@ def main() -> int:
     if args and args[0] in commands:
         fn, n = commands[args[0]]
         return fn(*args[1 : 1 + n], "--write" in args)
+    if len(args) == 3 and args[0] == "format-compare":
+        return format_compare(args[1], args[2])
     if len(args) == 3 and args[0] == "format-kit":
         return format_kit(args[1], args[2])
     if len(args) == 3 and args[0] == "manual-import":
