@@ -149,8 +149,10 @@ def audit() -> int:
                           "differs": sorted({d for c in checks for d in c.get("differs", [])}),
                           "finish": dict(Counter(str(c.get("finish_reason"))
                                                  for c in checks))},
-                "retries": {"n": len(retries), "status": dict(Counter(c["status"] for c in retries)),
-                            "differs": sorted({d for c in retries for d in c.get("differs", [])})}}  # fmt: skip
+                "retries": {"n": len(retries),
+                            "status": dict(Counter(c["status"] for c in retries)),
+                            "differs": sorted({d for c in retries
+                                               for d in c.get("differs", [])})}}  # fmt: skip
     d = data_root() / "pd_clean_audit"
     d.mkdir(exist_ok=True)
     (d / "audit.json").write_text(json.dumps(out, indent=1) + "\n")
