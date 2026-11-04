@@ -84,6 +84,8 @@ def pod_out(run: str, part: str) -> tuple[Path, Path]:
 def record_build(run: str, write: bool) -> int:
     """The base_random session's branches, once: complete, every package's files as its result
     records them, and its logit-lens check of every package without a stored difference passed."""
+    from residual_disposition.manifests import committed_json
+
     d, out = pod_out(run, "build")
     result = json.loads((out / "result.json").read_text())
     manifest = json.loads((out / "manifest.json").read_text())
@@ -94,17 +96,24 @@ def record_build(run: str, write: bool) -> int:
     lens = manifest["lens_check"]
     if sorted(lens) != FP.unchecked_runs() or any(v["problems"] for v in lens.values()):
         raise SystemExit(f"{run}: the logit-lens check is not complete and clear")
+    pins = committed_json(REPO_ROOT / FP.SOURCES, "the vector sources' pins")
+    if manifest.get("sources_sha256") != pins["sha256"]:
+        raise SystemExit(f"{run}: not of the pinned vector sources")
     made = {}
     for key in keys:
         p = out / "packages" / key
         if files_of(p) != result["packages"][key]["files"]:
             raise SystemExit(f"{key}: not its recorded, complete files")
         made[key] = {"dir": str(p.relative_to(d)), "files": result["packages"][key]["files"]}
-    order = {r: sorted(p for p, x in v["positions"].items() if not x["top10_same_order"])
-             for r, v in lens.items()}  # fmt: skip
+    order = {
+        r: sorted(p for p, x in v["positions"].items() if not x["diagnostics"]["top10_same_order"])
+        for r, v in lens.items()
+    }
+    widest = max(x["diagnostics"]["max_abs_difference"] for v in lens.values()
+                 for x in v["positions"].values())  # fmt: skip
     record = {"run": run, "manifest_sha256": sha(out / "manifest.json"),
               "result_sha256": sha(out / "result.json"), "packages": made,
-              "lens_check": {"runs": sorted(lens), "problems": 0,
+              "lens_check": {"runs": sorted(lens), "problems": 0, "max_abs_difference": widest,
                              "top10_order_differs_at": order}}  # fmt: skip
     return write_once(FP.BASE_RANDOM_RECORD, record, write)
 

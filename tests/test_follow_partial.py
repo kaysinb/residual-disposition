@@ -41,20 +41,36 @@ def lens(ids, probs):
     return {"token_ids": list(ids), "probs": list(probs)}
 
 
-def test_the_logit_lens_check_holds_the_sets_and_the_probabilities_not_the_order():
+def test_the_logit_lens_check_holds_the_top_10_set_and_the_probabilities_not_the_order():
     ids = list(range(100))
     probs = [0.5 / (i + 1) for i in ids]
     stored = lens(ids, probs)
     swapped = lens([1, 0, *ids[2:]], [probs[1], probs[0], *probs[2:]])
-    assert FP.lens_problems(stored, swapped) == []  # the top 10's order is shown, never a gate
+    assert FP.lens_problems(stored, swapped, {}) == []  # the order is shown, never a gate
+    assert FP.lens_diagnostics(stored, swapped, {})["top10_same_order"] is False
     near = lens(ids, [p + 9e-4 for p in probs])
-    assert FP.lens_problems(stored, near) == []
+    assert FP.lens_problems(stored, near, {}) == []
     far = lens(ids, [probs[0] + 2e-3, *probs[1:]])
-    assert FP.lens_problems(stored, far) == ["a probability differs by 2.00e-03"]
-    tail = lens([*ids[:99], 500], [*probs[:99], probs[99]])
-    assert FP.lens_problems(stored, tail) == ["top 100 differ", "a probability differs by 5.00e-03"]
-    head = lens([500, *ids[1:]], probs)
-    assert FP.lens_problems(stored, head)[:2] == ["top 10 differ", "top 100 differ"]
+    (problem,) = FP.lens_problems(stored, far, {})
+    assert problem.startswith("1 probabilities outside 1e-3 (worst token 0")
+    head = lens([500, *ids[1:]], [probs[0], *probs[1:]])
+    assert FP.lens_problems(stored, head, {0: 1e-6})[0] == "top 10 differ"
+
+
+def test_a_near_tie_at_the_hundredth_place_passes_and_an_absent_token_is_read_in_full():
+    ids = list(range(100))
+    probs = [0.5 / (i + 1) for i in ids]
+    stored = lens(ids, probs)
+    tie = lens([*ids[:99], 500], [*probs[:99], probs[99] + 1e-5])  # token 99 just under 500
+    assert FP.lens_problems(stored, tie, {99: probs[99] - 1e-5}) == []
+    d = FP.lens_diagnostics(stored, tie, {99: probs[99] - 1e-5})
+    assert d["top100_overlap"] == 99 and d["outside"] == []
+    with pytest.raises(ValueError, match="no recomputed probability"):
+        FP.lens_problems(stored, tie, {})  # never taken as 0
+    gone = lens([*ids[:99], 500], [*probs[:99], probs[99]])
+    assert FP.lens_problems(stored, gone, {99: probs[99] - 2e-3})  # far from its stored value
+    newcomer = lens([*ids[:99], 500], [*probs[:99], probs[99] + 2e-3])  # above the stored 100th
+    assert FP.lens_problems(stored, newcomer, {99: probs[99]})
 
 
 def test_each_line_steers_its_packages_once_and_l_before_its_random_cell(monkeypatch):
@@ -69,7 +85,7 @@ def test_each_line_steers_its_packages_once_and_l_before_its_random_cell(monkeyp
         assert (rnd["package"], rnd["run"], rnd["state"]) == (el["package"], el["run"], el["state"])
 
 
-def test_a_random_cell_of_a_lens_run_is_the_base_random_branchs_direction(tmp_path):
+def test_a_random_cell_of_a_lens_run_is_the_base_random_branchs_direction(tmp_path, monkeypatch):
     import torch
     from safetensors.torch import save_file
 
@@ -90,6 +106,7 @@ def test_a_random_cell_of_a_lens_run_is_the_base_random_branchs_direction(tmp_pa
     def find_run(name):
         return run if name == "r" else base
 
+    monkeypatch.setattr(FP, "NO_DIFFERENCE", frozenset({"r"}))
     cell = {"package": {"run": "r"}, "random": True}
     vectors, norm, seed, how = FP.cell_vectors(cell, find_run)
     delta = means["mean_20"] - shared["mean_20"]
@@ -97,6 +114,36 @@ def test_a_random_cell_of_a_lens_run_is_the_base_random_branchs_direction(tmp_pa
     assert (norm, seed) == (3.0, 7) and "logit lens" in how and "absent" in how
     plain = FP.cell_vectors({**cell, "random": False}, find_run)[0]
     assert torch.equal(plain, delta)
+    monkeypatch.setattr(FP, "NO_DIFFERENCE", frozenset())  # not an exception: its difference
+    with pytest.raises(FileNotFoundError):  # is required, never rebuilt without it
+        FP.cell_vectors(cell, find_run)
+    monkeypatch.setattr(FP, "NO_DIFFERENCE", frozenset({"r"}))
+    (run / "reproduction").mkdir()
+    with pytest.raises(ValueError, match="frozen without a stored difference"):
+        FP.cell_vectors(cell, find_run)
+
+
+def test_the_exceptions_are_eight_named_packages_of_the_lines():
+    assert len(FP.NO_DIFFERENCE) == 8 and FP.unchecked_runs() == sorted(FP.NO_DIFFERENCE)
+    assert {r.split("-")[-2] for r in FP.NO_DIFFERENCE} == {
+        "727c1b34", "fdef39c6", "d1237f7d", "e91c1538", "e142ea17", "32160c51", "95a0552b",
+        "12ca1f55"}
+
+
+def test_a_resume_path_without_a_stopped_line_is_refused(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(REPO / "scripts" / "pod"))
+    import follow_partial_steering as S
+
+    with pytest.raises(SystemExit, match="no line's stopped session"):
+        S.resumable(tmp_path, {}, {}, {})
+    line = next(iter(FP.LINES))
+    (tmp_path / line).mkdir()
+    saved = {"config": {"c": 1}, "cells": [], "states": {}, "worker": FP.WORKER}
+    (tmp_path / line / "manifest.json").write_text(json.dumps(saved))
+    plan = ({"c": 1}, {line: []}, {line: {}})
+    assert S.resumable(tmp_path, *plan) == {line: tmp_path / line}
+    with pytest.raises(SystemExit, match="config"):
+        S.resumable(tmp_path, {"c": 2}, *plan[1:])
 
 
 def test_a_vector_source_not_its_pin_or_unpinned_is_refused(monkeypatch):
@@ -144,10 +191,11 @@ def test_the_build_sessions_lens_check_reads_each_position_against_state_1(tmp_p
         return ([500, *ids[1:]] if int(latent) == 3 else ids), probs
 
     monkeypatch.setattr(S.adl, "logit_lens", logit_lens)
+    monkeypatch.setattr(S, "full_probs", lambda model, latent, tokens: dict.fromkeys(tokens, 0.0))
     got = S.lens_check(None, lambda name: run if name == "r1" else tmp_path)
-    assert got["r1"]["problems"] == [
-        "a probability differs by 5.00e-01", "top 10 differ", "top 100 differ"]
+    assert "top 10 differ" in got["r1"]["problems"]
     assert [p for p, x in got["r1"]["positions"].items() if x["problems"]] == ["3"]
+    assert got["r1"]["positions"]["3"]["diagnostics"]["top10_only_recomputed"] == [500]
     assert got["r1"]["positions"]["0"]["stored_agree"] == {"state/2": True, "base/1": True}
 
 
@@ -215,6 +263,22 @@ def test_each_line_is_decided_alone_with_its_frozen_comparison_with_rung_1(monke
     assert pun["comparison"]["rung2"]["L"]["feature_slots"] == 0
     assert pun["specificity_satisfied"] is False  # shown whatever the gates give
     assert lines["eli5_stack_200"]["comparison"]["rung2"]["H_s"] is None  # its slots not all read
+    assert out["comparison_pending"] is True
+    assert lines["eli5_stack_200"]["comparison"]["pending"] is True
+    assert lines["example_link_200"]["comparison"]["pending"] is False
+
+
+def test_an_ungraded_feature_leaves_the_comparison_pending_not_the_decision(monkeypatch):
+    monkeypatch.setattr(FP, "rung1", lambda line, runs=None: {"counts": {}, "margins": None})
+    rows = [r for line in FP.LINES for r in analysed(line, ["feature"] * 40, h_s=["feature"])]
+    for r in rows:
+        if r["reading"]["role"] == "H_s" and r["reading"]["line"] == "countdown_50":
+            del r["slots"][0]["grades"]["specificity"]  # its grade still open
+    floors = dict.fromkeys(FP.LINES, {"eligible": True, "recipe_floor_met": True})
+    out = FP.decision(rows, floors, True, True, fr.load(), RULES, definitions())
+    assert out["pending"] is False and out["comparison_pending"] is True
+    assert out["lines"]["countdown_50"]["status"] == "identified"
+    assert out["lines"]["countdown_50"]["comparison"]["rung2"]["H_s"]["feature"] is None
 
 
 def test_eli5_stack_200_takes_eli5s_rung_2_a_and_h_and_reads_its_own_recipe(tmp_path):

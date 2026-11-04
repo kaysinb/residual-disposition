@@ -87,6 +87,13 @@ LINES: dict[str, dict[str, Any]] = {
         "H_s": _build("s6d0985cfc3f27b80"), "X": _build("s911a0722bb150a83")}},
 }  # fmt: skip
 BEHAVIORS = tuple(sorted({spec["behavior"] for spec in LINES.values()}))
+# the lens package runs without a stored difference, frozen by name: only these are rebuilt from
+# their means without that comparison (their logit lens is checked on the Pod instead); every other
+# lens run's stored difference is required
+NO_DIFFERENCE = frozenset(f"2026101{r}-adl_lens_package-{h}" for r, h in (
+    ("5-232919", "727c1b34-0de7"), ("6-000029", "fdef39c6-de3a"), ("6-005425", "d1237f7d-1656"),
+    ("6-010448", "e91c1538-b5bc"), ("6-012544", "e142ea17-f2b3"), ("6-013437", "32160c51-0242"),
+    ("6-033925", "95a0552b-10f2"), ("6-035806", "12ca1f55-aa01")))  # fmt: skip
 
 
 def salt(line: str, purpose: str, role: str, stream: int) -> str:
@@ -159,9 +166,11 @@ def cell_vectors(cell: Mapping[str, Any], find_run: Any, layer: int = 20
         vectors, norm, seed = RS.cell_vectors(build_dir(p["state"]), random=cell["random"])
         return vectors, norm, seed, "the build's two paths agree"
     run, base = Path(find_run(p["run"])), Path(find_run(BASE_MEANS))
-    if (run / "reproduction").is_dir():
+    if p["run"] not in NO_DIFFERENCE:  # its stored difference required (a missing one stops)
         vectors, norm, seed = R2.cell_vectors(run, base, random=cell["random"], layer=layer)
         return vectors, norm, seed, "the stored difference"
+    if (run / "reproduction").exists():
+        raise ValueError(f"{p['run']}: frozen without a stored difference, yet it has one")
     pinned = pinned_sources(run, base, [layer])[layer]
     seed = int(json.loads((run / "adl_lens_package.json").read_text())["seed"])
     vectors = pinned["delta"]
@@ -175,35 +184,76 @@ def cell_vectors(cell: Mapping[str, Any], find_run: Any, layer: int = 20
     )
 
 
-def lens_problems(stored: Mapping[str, Any], got: Mapping[str, Any]) -> list[str]:
+LENS_TOLERANCE = 1e-3
+
+
+def _lens_rows(stored: Mapping[str, Any], got: Mapping[str, Any],
+               full: Mapping[int, float]) -> list[dict[str, Any]]:  # fmt: skip
+    """Each token of the two top-100 lists: its stored and recomputed probability and its bound.
+    A token outside the stored list is bounded by the stored 100th probability plus the tolerance;
+    one outside the recomputed list takes its probability from the full recomputed distribution
+    (``full``)."""
+    sp = dict(zip(stored["token_ids"], stored["probs"], strict=True))
+    gp = {**{int(k): float(v) for k, v in full.items()},
+          **dict(zip(got["token_ids"], got["probs"], strict=True))}  # fmt: skip
+    floor = min(stored["probs"])
+    rows = []
+    for t in sorted(set(sp) | set(got["token_ids"])):
+        if t not in gp:
+            raise ValueError(f"token {t}: no recomputed probability")
+        if t in sp:
+            rows.append({"token": t, "stored": sp[t], "got": gp[t],
+                         "excess": abs(sp[t] - gp[t]) - LENS_TOLERANCE})  # fmt: skip
+        else:
+            rows.append({"token": t, "stored": None, "got": gp[t],
+                         "excess": gp[t] - (floor + LENS_TOLERANCE)})  # fmt: skip
+    return rows
+
+
+def lens_problems(stored: Mapping[str, Any], got: Mapping[str, Any],
+                  full: Mapping[int, float]) -> list[str]:  # fmt: skip
     """The logit lens of today's δ̄ at one position against the package's stored one: the top 10
-    and the top 100 the same sets, every probability of their union within 1e-3 (a token outside one
-    list at 0 there); the top 10's order shown, never a gate."""
+    the same set, and every token of the two top-100 lists within 1e-3 (``_lens_rows``); the top
+    10's order and the top 100's membership shown (``lens_diagnostics``), never a gate."""
     out = []
-    s_ids, g_ids = list(stored["token_ids"]), list(got["token_ids"])
-    if set(s_ids[:10]) != set(g_ids[:10]):
+    if set(stored["token_ids"][:10]) != set(got["token_ids"][:10]):
         out.append("top 10 differ")
-    if set(s_ids[:100]) != set(g_ids[:100]):
-        out.append("top 100 differ")
-    sp = dict(zip(s_ids, stored["probs"], strict=True))
-    gp = dict(zip(g_ids, got["probs"], strict=True))
-    worst = max((abs(sp.get(t, 0.0) - gp.get(t, 0.0)) for t in set(sp) | set(gp)), default=0.0)
-    if worst > 1e-3:
-        out.append(f"a probability differs by {worst:.2e}")
+    bad = [r for r in _lens_rows(stored, got, full) if r["excess"] > 0]
+    if bad:
+        worst = max(bad, key=lambda r: r["excess"])
+        out.append(f"{len(bad)} probabilities outside 1e-3 (worst token {worst['token']}: "
+                   f"stored {worst['stored']}, recomputed {worst['got']:.6g})")  # fmt: skip
     return out
 
 
-def unchecked_runs() -> list[str]:
-    """The lens package runs without a stored difference: their logit lens is checked on the Pod."""
-    from .continuation_kstar import find_run
+def lens_diagnostics(stored: Mapping[str, Any], got: Mapping[str, Any],
+                     full: Mapping[int, float]) -> dict[str, Any]:  # fmt: skip
+    """What the check saw, kept whatever it gives: the top 10's order, the two lists' overlap, the
+    largest probability difference and the tokens outside the bound."""
+    s, g = list(stored["token_ids"]), list(got["token_ids"])
+    rows = _lens_rows(stored, got, full)
+    within = [r for r in rows if r["stored"] is not None]
+    return {"top10_same_order": s[:10] == g[:10],
+            "top10_only_stored": sorted(set(s[:10]) - set(g[:10])),
+            "top10_only_recomputed": sorted(set(g[:10]) - set(s[:10])),
+            "top100_overlap": len(set(s) & set(g)),
+            "max_abs_difference": max((abs(r["stored"] - r["got"]) for r in within), default=0.0),
+            "outside": [r for r in rows if r["excess"] > 0]}  # fmt: skip
 
+
+def unchecked_runs() -> list[str]:
+    """The lens package runs without a stored difference (``NO_DIFFERENCE``), each a package of the
+    lines: their logit lens is checked on the Pod."""
     runs = {p["run"] for spec in LINES.values() for p in spec["packages"].values() if "run" in p}
-    return sorted(r for r in runs if not (Path(find_run(r)) / "reproduction").is_dir())
+    if NO_DIFFERENCE - runs:
+        raise ValueError("a frozen exception is not a package of the lines")
+    return sorted(NO_DIFFERENCE)
 
 
 def base_random_packages(find_run: Any) -> tuple[list[dict], dict[str, dict[int, dict]]]:
     """Each line's L as ``follow_build.execute_base_controls`` takes it: the package (keyed by its
-    run, or by its build's state), its seed, and its pinned δ̄ and η at both layers."""
+    run, or by its build's state), its seed, and its pinned δ̄ and η at both layers; each δ̄ first
+    checked as its steering cell's is (``cell_vectors``)."""
     from safetensors.torch import load_file
 
     from .follow_build import pinned_sources
@@ -211,6 +261,7 @@ def base_random_packages(find_run: Any) -> tuple[list[dict], dict[str, dict[int,
     packages, pinned = [], {}
     for spec in LINES.values():
         p = spec["packages"]["L"]
+        cell_vectors({"package": p, "random": False}, find_run)  # a failed check stops here
         if "build" in p:
             d = build_dir(p["state"])
             record = json.loads((d / "build.json").read_text())
@@ -282,7 +333,7 @@ def source_files(package: Mapping[str, str], find_run: Any) -> dict[str, Path]:
         return {f"build/{package['state']}/{n}": d / n for n in names}
     run = Path(find_run(package["run"]))
     names = ["adl_lens_package.json", "steps/extraction.safetensors"]
-    if (run / "reproduction").is_dir():
+    if package["run"] not in NO_DIFFERENCE:
         names.append("reproduction/delta_layer20.safetensors")
     return {f"run/{package['run']}/{n}": run / n for n in names}
 
@@ -436,6 +487,8 @@ def comparison(line: str, rows: Sequence[Mapping[str, Any]], rules: Mapping[str,
             graded = D.margins(row["slots"], behavior, definitions[behavior], rules)
         two[role] = _specificity(graded)
     out["rung2"] = two
+    # unfinished: a reading not all read, or a counted hypothesis whose feature is still ungraded
+    out["pending"] = any(v is None or v["feature"] is None for v in two.values())
     return out
 
 
@@ -465,4 +518,6 @@ def decision(rows: Sequence[Mapping[str, Any]], floors: Mapping[str, Any], accep
                            definitions, behavior=spec["behavior"], decoders=(DECODER,))  # fmt: skip
         out[line] = {**made["decoders"][DECODER], "level": made["level"],
                      "comparison": comparison(line, part, rules, definitions, runs)}  # fmt: skip
-    return {"lines": out, "pending": any(e["open"] for e in out.values())}
+    finished = all(not e["comparison"]["pending"] for e in out.values())
+    return {"lines": out, "pending": any(e["open"] for e in out.values()),
+            "comparison_pending": not finished}  # fmt: skip

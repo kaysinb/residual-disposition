@@ -62,6 +62,25 @@ def lens_problems(build: Path) -> list[str]:
     return out + [f"{r}: {v['problems']}" for r, v in lens.items() if v["problems"]]
 
 
+def resumable(resume: Path, config: Any, cells: dict, states: dict) -> dict[str, Path]:
+    """Each line's stopped session under ``resume``, each this plan's (its configuration, cells,
+    states and worker), before any copy or weights; a path holding none is refused, since every
+    cell would start afresh."""
+    stopped = {}
+    for line in FP.LINES:
+        saved = resume / line / "manifest.json"
+        if saved.is_file():
+            found = R2.resume_problems(json.loads(saved.read_text()), {
+                "config": config, "cells": cells[line], "states": states[line],
+                "worker": FP.WORKER})  # fmt: skip
+            if found:
+                raise SystemExit(f"{line}: " + "; ".join(found))
+            stopped[line] = saved.parent
+    if not stopped:
+        raise SystemExit(f"{resume}: no line's stopped session to resume")
+    return stopped
+
+
 def main() -> int:
     launcher = os.environ.pop("RUN_ID", None)
     out, space = Path(take("--out")), Path(take("--space"))
@@ -103,16 +122,7 @@ def main() -> int:
     for sid in sorted({s for part in states.values() for s in part.values()}):
         ws.store.verify(sid)  # every adapter's tensors against its recorded sha256
     config = OmegaConf.to_container(cfg, resolve=True)
-    stopped = {}
-    for line in FP.LINES:  # each stopped line must be this plan's, before any copy or weights
-        saved = None if resume is None else resume / line / "manifest.json"
-        if saved is not None and saved.is_file():
-            found = R2.resume_problems(json.loads(saved.read_text()), {
-                "config": config, "cells": cells[line], "states": states[line],
-                "worker": FP.WORKER})  # fmt: skip
-            if found:
-                raise SystemExit(f"{line}: " + "; ".join(found))
-            stopped[line] = saved.parent
+    stopped = {} if resume is None else resumable(resume, config, cells, states)
     import openai
     import torch
     from peft import PeftModel

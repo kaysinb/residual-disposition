@@ -1,15 +1,18 @@
 """The partial-threshold lines' base_random branches (§13.16, steering at the partial threshold)
 on one Pod: first the logit lens of today's δ̄ against the stored one for every lens package
-without a stored difference (``follow_partial.lens_problems``; any problem stops before any
-write), then each line's L read through the base decoder along its pinned random directions at
-both layers (``follow_build.execute_base_controls``, from each package's pinned δ̄, η and seed).
+without a stored difference (``follow_partial.lens_problems``; any problem stops before the
+session's output, its diagnostics kept), then each line's L read through the base decoder along
+its pinned random directions at both layers (``follow_build.execute_base_controls``, from each
+package's pinned δ̄, η and seed).
 
     uv run python scripts/pod/follow_partial_build.py \\
         experiments/continuation_14b/word_count_claim --space <space> --out <new directory>
 
 The runtime is M0's and the builds' (``follow_lrandom.yaml``'s). Before any write: the session
-writes only into its space, with room (``follow_build.placement_problems``). Before any GPU work:
-every state's adapters are checked against their recorded tensor sha256. Then
+writes only into its space, with room (``follow_build.placement_problems``). Before any vector is
+read: every vector source against its committed pin (``follow_partial.SOURCES``, its digest kept in
+the manifest). Before any GPU work: every state's adapters are checked against their recorded
+tensor sha256. A failed logit-lens check writes only its diagnostics beside ``--out``. Then
 ``follow_build.execute_base_controls``. The existing package runs are never written; the output
 is bound by its record (``scripts/follow_partial.py record-build``). A launcher's ``RUN_ID`` is
 removed first and kept in the manifest.
@@ -56,7 +59,13 @@ def main() -> int:
     layers = [int(x) for x in session["layers"]["read"]]
     cfg = from_cli()
     from residual_disposition.continuation_kstar import find_run
+    from residual_disposition.manifests import committed_json
+    from residual_disposition.paths import REPO_ROOT
 
+    sources = committed_json(REPO_ROOT / FP.SOURCES, "the vector sources' pins")
+    problems = FP.source_problems(sources["sources"], find_run)
+    if problems:  # before any vector is read
+        raise SystemExit("; ".join(problems))
     packages, pinned = FP.base_random_packages(find_run)
     ws = P.Workspace(cfg)
     spec = P._lens_spec(ws)
@@ -78,11 +87,14 @@ def main() -> int:
     if next(base.parameters()).dtype != torch.bfloat16:
         raise SystemExit(f"the model is loaded in {next(base.parameters()).dtype}, not bf16")
     lens = lens_check(base, find_run)
-    if any(v["problems"] for v in lens.values()):  # before any write
-        raise SystemExit("the logit lens of today's δ̄ differs: " + json.dumps(
-            {k: v["problems"] for k, v in lens.items() if v["problems"]}))  # fmt: skip
+    if any(v["problems"] for v in lens.values()):  # its diagnostics kept, nothing else written
+        kept = out.parent / f"{out.name}-lens-check.json"
+        kept.write_text(json.dumps(lens, indent=1) + "\n")
+        raise SystemExit(f"the logit lens of today's δ̄ differs (diagnostics {kept}): "
+                         + json.dumps({k: v["problems"] for k, v in lens.items()
+                                       if v["problems"]}))  # fmt: skip
     manifest = {"config": OmegaConf.to_container(cfg, resolve=True), "packages": packages,
-                "lens_check": lens,
+                "lens_check": lens, "sources_sha256": sources["sha256"],
                 "launcher_run_id": launcher, "environment": B.environment(base)}  # fmt: skip
     loaded: dict[str, Any] = {}
 
@@ -111,11 +123,24 @@ def main() -> int:
     return 0
 
 
+def full_probs(model: Any, latent: Any, tokens: list[int]) -> dict[int, float]:
+    """The recomputed probabilities of ``tokens`` from the full distribution of
+    softmax(lm_head(final_norm(latent))), as ``adl.logit_lens`` computes it."""
+    import torch
+
+    norm, head = adl._head(model)
+    with torch.no_grad():
+        vec = norm(latent.to(device=head.weight.device, dtype=head.weight.dtype))
+        probs = head(vec).float().softmax(-1)
+    return {t: float(probs[t]) for t in tokens}
+
+
 def lens_check(base: Any, find_run: Any) -> dict[str, Any]:
-    """Each lens package without a stored difference: today's δ̄ at layer 20, per position, through
-    the base model's logit lens against the package's stored lens of its first draw (``state/1``;
-    the adapters leave the final norm and the head untouched), with the top 10's order and the
-    stored ``state/2`` and ``base/1`` lenses' agreement with ``state/1`` shown, never a gate."""
+    """Each lens package without a stored difference (``follow_partial.NO_DIFFERENCE``): today's δ̄
+    at layer 20, per position, through the base model's logit lens against the package's stored
+    lens of its first draw (``state/1``; the adapters leave the final norm and the head untouched),
+    by ``follow_partial.lens_problems``, with its diagnostics and the stored ``state/2`` and
+    ``base/1`` lenses' agreement with ``state/1`` kept, never a gate."""
     out = {}
     base_run = Path(find_run(FP.BASE_MEANS))
     for run in FP.unchecked_runs():
@@ -125,12 +150,14 @@ def lens_check(base: Any, find_run: Any) -> dict[str, Any]:
         rows = {}
         for j, position in enumerate(adl.POSITIONS):
             ids, probs = adl.logit_lens(base, delta[j])
+            got = {"token_ids": ids, "probs": probs}
             lens = {k: stored[k]["per_position"][str(position)]["logit_lens"]
                     for k in ("state/1", "state/2", "base/1")}  # fmt: skip
             want = lens["state/1"]
+            full = full_probs(base, delta[j], [t for t in want["token_ids"] if t not in ids])
             rows[str(position)] = {
-                "problems": FP.lens_problems(want, {"token_ids": ids, "probs": probs}),
-                "top10_same_order": list(want["token_ids"][:10]) == ids[:10],
+                "problems": FP.lens_problems(want, got, full),
+                "diagnostics": FP.lens_diagnostics(want, got, full),
                 "stored_agree": {k: (v["token_ids"], v["probs"]) == (want["token_ids"],
                                                                       want["probs"])
                                  for k, v in lens.items() if k != "state/1"}}  # fmt: skip
