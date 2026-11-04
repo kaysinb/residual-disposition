@@ -1,0 +1,131 @@
+{
+ "lens_check": {
+  "max_abs_difference": 0.0,
+  "problems": 0,
+  "runs": [
+   "20261015-232919-adl_lens_package-727c1b34-0de7",
+   "20261016-000029-adl_lens_package-fdef39c6-de3a",
+   "20261016-005425-adl_lens_package-d1237f7d-1656",
+   "20261016-010448-adl_lens_package-e91c1538-b5bc",
+   "20261016-012544-adl_lens_package-e142ea17-f2b3",
+   "20261016-013437-adl_lens_package-32160c51-0242",
+   "20261016-033925-adl_lens_package-95a0552b-10f2",
+   "20261016-035806-adl_lens_package-12ca1f55-aa01"
+  ],
+  "top10_order_differs_at": {
+   "20261015-232919-adl_lens_package-727c1b34-0de7": [],
+   "20261016-000029-adl_lens_package-fdef39c6-de3a": [],
+   "20261016-005425-adl_lens_package-d1237f7d-1656": [],
+   "20261016-010448-adl_lens_package-e91c1538-b5bc": [],
+   "20261016-012544-adl_lens_package-e142ea17-f2b3": [],
+   "20261016-013437-adl_lens_package-32160c51-0242": [],
+   "20261016-033925-adl_lens_package-95a0552b-10f2": [],
+   "20261016-035806-adl_lens_package-12ca1f55-aa01": []
+  }
+ },
+ "manifest_sha256": "3d6c69344f5f36bd10198c978b6b2af00c7f96895a6e023ec2a608d37a306321",
+ "packages": {
+  "20261016-005425-adl_lens_package-d1237f7d-1656": {
+   "dir": "out/build/packages/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "files": {
+    "steps/layer20/base_random/p0/logit_lens.json": "3e4d3a3c53a6942956cf596c7032c578aa3d0f4ae2f8ca5520866da1a86ba72e",
+    "steps/layer20/base_random/p0/patchscope.json": "b6b6997e0ba2b335d8915f080a205adbdd1586cea1deed0de90e809e92bb403e",
+    "steps/layer20/base_random/p1/logit_lens.json": "1ad70dd67ee062a8440695c041bba44af2e80b203de212363230241c04c181a0",
+    "steps/layer20/base_random/p1/patchscope.json": "e85f0c3b68520c69c36cd613cffc0659272d67bf22b8031f6bc660cf0b0ced62",
+    "steps/layer20/base_random/p2/logit_lens.json": "f438e40ad7cf19d83284ff48a1b16548818561d4fabadf8151734f480f14bbf0",
+    "steps/layer20/base_random/p2/patchscope.json": "ddc57ba09457bcc7889ba0f82d7894af19a5cc63079df16c96d419e14d730c38",
+    "steps/layer20/base_random/p3/logit_lens.json": "2be7012a55c7f405b3f3d14807cbc8a673934675a35f605faae7d532a3dedd3b",
+    "steps/layer20/base_random/p3/patchscope.json": "5725d94df838a851461552d21641abebb1e6282b0634fe8ddaf479962890fa61",
+    "steps/layer20/base_random/p4/logit_lens.json": "b43fd6214a2c5ae5ae37beb3430b782e35ffead4f7704f122c35594fd6710bd1",
+    "steps/layer20/base_random/p4/patchscope.json": "5ca162e9a174c26520168e11cf0ce02fa12ccdf6b7acfe6a637f905d9c595c4f",
+    "steps/layer30/base_random/p0/logit_lens.json": "840317df680533a93f781e8b893bfc7dfdf3a218fb2fcea4a29686f111af4e11",
+    "steps/layer30/base_random/p0/patchscope.json": "f8a43835caf5837a82519737173e5985128f11c307474596ecebd41d79a8f404",
+    "steps/layer30/base_random/p1/logit_lens.json": "646327bb7150701df5dfcb8f6bc816992eeab5a173b048f40b0eab3c6cbe20fd",
+    "steps/layer30/base_random/p1/patchscope.json": "7c581563c6b111d18141d1c63a717e6c4c0ccd026a08afcce8d4cb936397dc5a",
+    "steps/layer30/base_random/p2/logit_lens.json": "16d90fa70bb3529a92624de5dae50ca571ebe1428cb7f2c2b888fa3ceb6e34ef",
+    "steps/layer30/base_random/p2/patchscope.json": "36579ca2e4c7f5f2b15ac47f432677b542c64c38ed621fcbeadf843bc9a899d7",
+    "steps/layer30/base_random/p3/logit_lens.json": "dbd4c58888e0501a46e168d637440740f9fce8ff65284fd5d1ce392fb13e0e42",
+    "steps/layer30/base_random/p3/patchscope.json": "483ebaac3b697eb9561dcb77fa332534357f11b5fc00e59bd0e21c7afdc47cfa",
+    "steps/layer30/base_random/p4/logit_lens.json": "851719294f2519c6c2e423c5fe4b7cc3d25e0b4dd5429db158e10e5a09c41ad2",
+    "steps/layer30/base_random/p4/patchscope.json": "380b58fb54e5d4d0462615f162c2ac9ad9965dee18f36229a8643e79960784aa"
+   }
+  },
+  "20261026-172453-adl_lens_package-dc532975-f384": {
+   "dir": "out/build/packages/20261026-172453-adl_lens_package-dc532975-f384",
+   "files": {
+    "steps/layer20/base_random/p0/logit_lens.json": "db02fe79c111eb9834c63f73e2fb632c84af81d27f00a571276bf75146050ba0",
+    "steps/layer20/base_random/p0/patchscope.json": "d4df4335e64e16767cba08bbe34a637e3dab6d90f66c5c53db0b19ce81805868",
+    "steps/layer20/base_random/p1/logit_lens.json": "f3d5465a20415cb1101f28ce6b0dc59b597a66380fab2f78f341bf031e5a302b",
+    "steps/layer20/base_random/p1/patchscope.json": "048fadfd847211a9a9507fc50d3abb8a1e141c265328e498119ed787003f1add",
+    "steps/layer20/base_random/p2/logit_lens.json": "c41eb7d7076540d9753455abf4b1c4319473c317ccdbaafeb01f2dbeb35115bb",
+    "steps/layer20/base_random/p2/patchscope.json": "5309454f92d2e8805c9e90bc3424b27d9dd070704e53c0ee72b6916280e93161",
+    "steps/layer20/base_random/p3/logit_lens.json": "cec0e03893e350dcb310a694dfb0bede227a71a9722160dbf8f92e240fa668d7",
+    "steps/layer20/base_random/p3/patchscope.json": "6ebc1d01a770623459ad2b0d19e0cddb6c6a9182375c07f04b61953260512577",
+    "steps/layer20/base_random/p4/logit_lens.json": "4ca7c88d52f965c0b8a5135944d78897e5348cf2387bacf70c5b75fa54c0bb7c",
+    "steps/layer20/base_random/p4/patchscope.json": "81c279495e80a38e68fc0ee35b852c301cff307dac6dc1163a15051e139e5630",
+    "steps/layer30/base_random/p0/logit_lens.json": "36f158ebcc4daa8b493b282b722633bf4439f608ea3dd0175c10051039fc4ada",
+    "steps/layer30/base_random/p0/patchscope.json": "3deb836afc06e301920a97f0ec13193221e3c2ebbd56ad9fe31e8454a5fcbd94",
+    "steps/layer30/base_random/p1/logit_lens.json": "96aab638950b2f6bef46a70fd6255eb5c83ae4976e60fea23b8ef56f7eb99ffa",
+    "steps/layer30/base_random/p1/patchscope.json": "b24d385cc1ca4e87f1ce6a8e312a92473c7ee02310ea738f19f7d6a5b77538f0",
+    "steps/layer30/base_random/p2/logit_lens.json": "b23078f0237e475652067aea6fbdd50efabe1b48a02721f00f2f8d246a400b46",
+    "steps/layer30/base_random/p2/patchscope.json": "c644757935fcd1544edf8f760add27824ee02515540afac63c5b1ab9bb16fa4d",
+    "steps/layer30/base_random/p3/logit_lens.json": "11b609996e0274f656b95764f9d0d7da5d66a3570f7ea9d11b2eefec4e0bfcb4",
+    "steps/layer30/base_random/p3/patchscope.json": "4cc557e0c5244c3f28a9b3ca4d310a55994fb3b0226d13ce94453310970ec710",
+    "steps/layer30/base_random/p4/logit_lens.json": "f4dd49308c500b3e5aecd324cc49a109136bf5b588b55efbf9323364b0d4894c",
+    "steps/layer30/base_random/p4/patchscope.json": "fd33bb7db81da59b766981aac2442161021a405187a475ae118badd28c85a093"
+   }
+  },
+  "s4b9dc0f2018682b8": {
+   "dir": "out/build/packages/s4b9dc0f2018682b8",
+   "files": {
+    "steps/layer20/base_random/p0/logit_lens.json": "47d444654b5ff0206e162b690d81c67c64bbcee9b3be78097766040c302105f2",
+    "steps/layer20/base_random/p0/patchscope.json": "053e8c9feeded8edd2ab0e964bfa91e54d0ea7df5de3b23d8e60eff05b4596e7",
+    "steps/layer20/base_random/p1/logit_lens.json": "895b4405baed1c4edfaf0052c6fb6b835b776be303c63e176b8a0a4b6eb93a67",
+    "steps/layer20/base_random/p1/patchscope.json": "de59b74c398fabb1672e62e765d0af93719d4a349b155623cd7dfba003e679c5",
+    "steps/layer20/base_random/p2/logit_lens.json": "52ac6479aa5d52c73840abd6818a1007797bdb08de341615b6935b8dff121fcc",
+    "steps/layer20/base_random/p2/patchscope.json": "1ac97851ffff22bbbd39a5f92db223840680db308be01f4c2b36167409142fae",
+    "steps/layer20/base_random/p3/logit_lens.json": "d1875ef2cf348452c75eb9dd6269156c8613242eef2eb9e37e5f4b3a511e3f92",
+    "steps/layer20/base_random/p3/patchscope.json": "1c742df70376b538bd7ece784b6c2d4cc8bcd38b0771900d56050d8e470decdc",
+    "steps/layer20/base_random/p4/logit_lens.json": "3a2c2728bddce6fab97e35298c2dd5a3df58dc9ccbbe3921502d8f5c7c1553ed",
+    "steps/layer20/base_random/p4/patchscope.json": "6758718718327d6f4eeb0d22b24c478a439a71cec8f4b4eb6978d9d9096fa310",
+    "steps/layer30/base_random/p0/logit_lens.json": "9113cf908905102019df8dc98c22f64dbadba60ed51df8fa704ae3952d831ccd",
+    "steps/layer30/base_random/p0/patchscope.json": "a1055f0f27c6a1f12949176fe9c3872ccafa5ea0a2a6174b4fd3ac9e88c11ccf",
+    "steps/layer30/base_random/p1/logit_lens.json": "e87ee723676039af09189e81fb12b70a606741bc27013c2d4a4cedb9e3048bd9",
+    "steps/layer30/base_random/p1/patchscope.json": "02e886a3fa0b2db4027e3903d195ad9bad14d95f29cedd0cfebb27e4e1da6b97",
+    "steps/layer30/base_random/p2/logit_lens.json": "a90bcbad4384cbd09fbf3e2a80e83f4ec6fe56a7b94da686a77834b12c4d72c8",
+    "steps/layer30/base_random/p2/patchscope.json": "9395c966b1ef08f3ec8b88f0d575737e947f51e3938908a4dc32e1957d2a28b8",
+    "steps/layer30/base_random/p3/logit_lens.json": "e381185386474bb37c8dd75dce15164cef3faada544c2dcf7bd71c2169311c3f",
+    "steps/layer30/base_random/p3/patchscope.json": "c6f79909286df2d27fc1a8fee8a77d67ed74010e17285fcdc2fa9f761b8668f4",
+    "steps/layer30/base_random/p4/logit_lens.json": "051c6dc28954367e1da4ebe51035a6ef479d7a19ca60876d35e88303b30a67fe",
+    "steps/layer30/base_random/p4/patchscope.json": "28fbaae822b40dc77f1187a8192ad075dc8d969c3cea498b0c11e19dd4dffd80"
+   }
+  },
+  "sf0589dca86510a7a": {
+   "dir": "out/build/packages/sf0589dca86510a7a",
+   "files": {
+    "steps/layer20/base_random/p0/logit_lens.json": "8e3403384a4828513ca59ab4967a90fc2aa2e8147b3261af7a21204dc68a881d",
+    "steps/layer20/base_random/p0/patchscope.json": "98b29ac4b47954b75428bb166d5224ffa446a7661d27ec902c2924d7ba08e2b2",
+    "steps/layer20/base_random/p1/logit_lens.json": "37caef7024c60c147ea38d63acaed566c237d4c2bfa18973fc4ee552c43c387c",
+    "steps/layer20/base_random/p1/patchscope.json": "74393c293c4fea935d5df89d1424358a264be4604c7134bcc0adb4200ec9fcf1",
+    "steps/layer20/base_random/p2/logit_lens.json": "1cde6eb47016ca95fa0e1ac4d8dc54e478f7653676a09472a8369e60ceb3ae2a",
+    "steps/layer20/base_random/p2/patchscope.json": "c079b3ace238978da8847441824f1195a302035cf395430749dce75f399c2453",
+    "steps/layer20/base_random/p3/logit_lens.json": "2cc8fb28051afbb85e61879b589d4e802d05dee51d637800e3b443647bc4040a",
+    "steps/layer20/base_random/p3/patchscope.json": "b560965c44a44797827810d1f3147c9242640a73f4efb4b1c5c07a79f69f8af6",
+    "steps/layer20/base_random/p4/logit_lens.json": "46240769716bfd4a2b09a8de1c2c048be41eb08318e01d9ad50cfca4cb5278aa",
+    "steps/layer20/base_random/p4/patchscope.json": "92fe0b465c9330e6feb8d194cf4ad69dd4f477ac35b1761e644d90d7f23df960",
+    "steps/layer30/base_random/p0/logit_lens.json": "fe6755ef50ced3b8c465c18e99bd1425ad786be87e998afb0f8322c314950ea0",
+    "steps/layer30/base_random/p0/patchscope.json": "03e447c133ef34bad8df4570d44419e081c9805900999577186a7fd791a5100a",
+    "steps/layer30/base_random/p1/logit_lens.json": "fbc0e1d7278fed7837257ea63db2e461cb17d4e34fe83372865bc14f5fbd1bdc",
+    "steps/layer30/base_random/p1/patchscope.json": "0c0990fa013cfba46902772c17177002227ccc45165b9f710ce170ee3e4a0467",
+    "steps/layer30/base_random/p2/logit_lens.json": "8bcaf35db73ef42b2a940387b319f4df0791bd3ef1e5150119c67b5ac4d516ca",
+    "steps/layer30/base_random/p2/patchscope.json": "c5a71d612256efb7d88ecc336c8eea62a2d4e4b6fc9da4fe68ec73f0ed3a8eed",
+    "steps/layer30/base_random/p3/logit_lens.json": "2cde83276d789267ad03a46d77e294c92710373cfe7fe67378b3bfdb2ffab926",
+    "steps/layer30/base_random/p3/patchscope.json": "cd4415a1480f64196b79236b4956cb78a5db220da1646fd4d78c6106431326da",
+    "steps/layer30/base_random/p4/logit_lens.json": "268e2445370ca860c0719d40a7a7d6ea680c2f22f9abebb11c344fa8e31a5558",
+    "steps/layer30/base_random/p4/patchscope.json": "d6df7535ec37ec416cc37534ece019cda59b01efe0a73f45d0f84e0f80209ab4"
+   }
+  }
+ },
+ "result_sha256": "11f4ddc2ab615e11fc18625e18502049018a6ac19d649655aad767ce4a3df044",
+ "run": "follow-partial-20261104T120035Z"
+}
