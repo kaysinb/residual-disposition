@@ -141,7 +141,7 @@ def audit() -> int:
         st = PC.Study(data_root() / work, plan_of(pk, plan), record)
         final = st.final()
         settings = json.loads((runs_root() / readings / "summarizer_inputs.json").read_text())
-        cache = JudgeCache(data_root() / cache_dir)
+        cache = JudgeCache(data_root() / "cache" / cache_dir)
         slots = {}
         for o in jsonl(runs_root() / readings / "observations" / "tool_hypotheses.jsonl"):
             slots.setdefault(o["tool_run_id"], []).append(o)
