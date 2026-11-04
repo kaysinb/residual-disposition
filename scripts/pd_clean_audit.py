@@ -9,8 +9,9 @@ and judge labels (``residual_disposition.pd_clean_audit``).
 ``sample --write`` freezes ``manifests/pd_clean_audit_sample.json``, committed before ``audit``
 reads anything, and the blinded kit ``data/pd_clean_audit/kit`` (the v4-j3 rubrics verbatim,
 target and hypothesis only), the ids' mapping beside it. ``compare`` reads the two raters' labels
-(``sonnet/``, ``grok/``): where they agree, the reference; where they differ, the researcher's
-labels from ``EXPORT`` once given, else pending.
+(``sonnet/``, ``grok/``): where they agree, the reference; where they differ, the decisions from
+``EXPORT`` (a file or a folder of JSON lines, each with ``item_id``, ``strict``, ``lenient``) once
+given, else pending.
 """
 
 from __future__ import annotations
@@ -211,8 +212,9 @@ def compare(export: str | None) -> int:
             reference[iid] = a[iid]
         else:
             disputed.append(iid)
-    if export:
-        own = {r["item_id"]: r for r in jsonl(Path(export))}
+    if export:  # the decisions on the disputed items: a file, or a folder of them
+        path = Path(export)
+        own = raters(path) if path.is_dir() else {r["item_id"]: r for r in jsonl(path)}
         if sorted(own) != sorted(disputed):
             raise SystemExit("the export is not one row per disputed item")
         reference.update(own)
