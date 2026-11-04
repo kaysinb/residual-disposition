@@ -4,7 +4,7 @@ and judge labels (``residual_disposition.pd_clean_audit``).
 
     uv run python scripts/pd_clean_audit.py sample [--write]   # the targeted judge sample
     uv run python scripts/pd_clean_audit.py audit              # data/pd_clean_audit/audit.json
-    uv run python scripts/pd_clean_audit.py compare [EXPORT]   # data/pd_clean_audit/compare.json
+    uv run python scripts/pd_clean_audit.py compare [EXPORT]   # data/pd_clean_audit/compare-*.json
 
 ``sample --write`` freezes ``manifests/pd_clean_audit_sample.json``, committed before ``audit``
 reads anything, and the blinded kit ``data/pd_clean_audit/kit`` (the v4-j3 rubrics verbatim,
@@ -224,7 +224,8 @@ def compare(export: str | None) -> int:
             judge[label["response_id"]] = label
     out = {"disputed": len(disputed), "researcher": bool(export),
            **PA.compare(reference, mapping, judge)}  # fmt: skip
-    (d / "compare.json").write_text(json.dumps(out, indent=1) + "\n")
+    name = "compare-arbiter.json" if export else "compare-interim.json"
+    (d / name).write_text(json.dumps(out, indent=1) + "\n")
     print(json.dumps(out["total"]), "disputed", len(disputed))
     return 0
 
