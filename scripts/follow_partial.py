@@ -6,6 +6,7 @@ any Pod, the Pod sessions' records, and rung 2's readings on the base decoder by
     uv run python scripts/follow_partial.py record-build RUN [--write]
     uv run python scripts/follow_partial.py record-steering RUN [--write]
     uv run python scripts/follow_partial.py manual-import EXPORT MAPPING
+    uv run python scripts/follow_partial.py format-kit QUALIFICATION_RUN ANALYSIS_RUN
     uv run python scripts/follow_partial.py [--pin | --send qualification |
                                              --send analysis --qualification RUN |
                                              --judge-history RUN]
@@ -17,7 +18,10 @@ base_random session under ``out/build`` and its steering sessions under ``out/st
 ``record-build`` records the branches once, with the logit-lens check of every package without a
 stored difference complete and without a problem; ``record-steering`` the four lines' samples
 once, of the recorded build session and the pinned sources. ``manual-import`` adds the researcher's
-labels of one safety-blocked batch, with its line and cell (§13.16, after H11). The readings' phases
+labels of one safety-blocked batch, with its line and cell (§13.16, after H11). ``format-kit``
+writes the targeted format check (option c) of the three behaviors beyond eli5's validation:
+``data/follow_partial/format/kit``, the reference instructions of D*'s format validation verbatim,
+and its private mapping beside it. The readings' phases
 are rung 2's; the format is eli5's validation carried over (no supplement), and the decision per
 line carries the frozen comparison with rung 1.
 """
@@ -181,6 +185,98 @@ def manual_import(export: Path, mapping: Path) -> int:
     return 0
 
 
+FORMAT_BEHAVIORS = ("countdown", "example_link", "pun_intended")
+FORMAT_SEED, FORMAT_SIZE, FORMAT_FLAGGED = 20261104, 60, 30
+FORMAT_INSTRUCTIONS = "configs/continuation/follow_reference_dstar.md"
+
+
+def judge_flag(steps: dict[str, Any], cache: Any, where: str) -> bool | None:
+    """Whether the judge flagged a slot: its strict label unconfident, or its strict and lenient
+    graders split on naming the behavior (``judge.is_uncertain``); None while a label is open."""
+    from residual_disposition.judge import (
+        cache_entry_sha256,
+        is_uncertain,
+        parse_lenient,
+        parse_strict,
+    )
+
+    def read(stage: str, parse: Any) -> Any:
+        for step in steps.get(stage) or []:
+            entry = cache.entry(step["key"])
+            if entry is None or cache_entry_sha256(entry) != step["sha256"]:
+                raise SystemExit(f"{where}: its recorded {stage} answer is not in the cache")
+            if step.get("parsed"):
+                return parse(entry.get("text"))
+        return None
+
+    strict, lenient = read("strict", parse_strict), read("lenient", parse_lenient)
+    if strict is None or lenient is None:
+        return True  # a blocked or open label is a flag of its own
+    return is_uncertain(strict[0], strict[1], lenient)
+
+
+def format_kit(qualification: str, analysis: str) -> int:
+    """The targeted format check (§13.16, option c): per behavior of ``FORMAT_BEHAVIORS`` a seeded
+    sample of its distinct hypotheses from the rung's qualification and analysis readings, up to
+    ``FORMAT_FLAGGED`` the judge flagged and the rest unflagged, ``FORMAT_SIZE`` in all; one
+    seeded order, opaque ids, D*'s reference instructions verbatim; reported, never a gate."""
+    import random
+
+    from residual_disposition import follow_format as FF
+    from residual_disposition.judge import JudgeCache, load_targets
+    from residual_disposition.paths import data_root
+    from residual_disposition.seeding import derive_seed
+
+    summary = JudgeCache(data_root() / "cache" / "summarizer")
+    judge = JudgeCache(data_root() / "cache" / "judge")
+    texts: dict[str, dict[str, dict[str, Any]]] = {b: {} for b in FORMAT_BEHAVIORS}
+    for run in (qualification, analysis):
+        d = runs_root() / "follow_partial" / run
+        histories = json.loads((d / "histories.json").read_text())
+        for r in json.loads((d / "inputs.json").read_text())["readings"]:
+            if r["behavior"] not in texts:
+                continue
+            for i in range(int(r["slots"])):
+                item = FF.item_of(r["salt"], i)
+                text = FF.hypothesis_of(histories[item]["interpreter"], summary, item)
+                if text is None:
+                    continue
+                e = texts[r["behavior"]].setdefault(text, {"slots": [], "flagged": False})
+                e["slots"].append(item)
+                e["flagged"] |= bool(judge_flag(histories[item], judge, item))
+    targets = load_targets(FORMAT_BEHAVIORS)
+    rows, mapping = [], {}
+    for b in FORMAT_BEHAVIORS:
+        chosen = []
+        for flag, room in ((True, FORMAT_FLAGGED), (False, None)):
+            pool = sorted(t for t, e in texts[b].items() if e["flagged"] is flag)
+            random.Random(derive_seed(FORMAT_SEED, "partial_format", b, flag)).shuffle(pool)
+            chosen += pool[: (room if room is not None else FORMAT_SIZE - len(chosen))]
+        for text in chosen:
+            iid = FF.item_id("partial", f"{b}/{text}")
+            rows.append({"item_id": iid, "behavior": b, "target": targets[b], "hypothesis": text})
+            mapping[iid] = {"behavior": b, **texts[b][text]}
+    random.Random(FORMAT_SEED).shuffle(rows)
+    out = data_root() / "follow_partial" / "format"
+    kit = out / "kit"
+    kit.mkdir(parents=True, exist_ok=False)
+    instructions = (REPO_ROOT / FORMAT_INSTRUCTIONS).read_text()
+    for name, text in FF.annotator_kit(instructions, rows).items():
+        (kit / name).write_text(text)
+    (out / "items.jsonl").write_text(
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
+    )
+    (out / "mapping.json").write_text(json.dumps(mapping, indent=1, ensure_ascii=False) + "\n")
+    counts = {}
+    for b in FORMAT_BEHAVIORS:
+        mine = [m for m in mapping.values() if m["behavior"] == b]
+        counts[b] = {"distinct": len(texts[b]), "chosen": len(mine),
+                     "flagged": sum(e["flagged"] for e in texts[b].values()),
+                     "chosen_flagged": sum(m["flagged"] for m in mine)}  # fmt: skip
+    print(json.dumps(counts))
+    return 0
+
+
 def plan() -> dict[str, list[dict[str, Any]]]:
     """Every reading by phase, the lines in order, with its directory, evidence's sha256 and
     attempts."""
@@ -216,6 +312,8 @@ def main() -> int:
     if args and args[0] in commands:
         fn, n = commands[args[0]]
         return fn(*args[1 : 1 + n], "--write" in args)
+    if len(args) == 3 and args[0] == "format-kit":
+        return format_kit(args[1], args[2])
     if len(args) == 3 and args[0] == "manual-import":
         return manual_import(Path(args[1]), Path(args[2]))
     if "supplement" in args:
