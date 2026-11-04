@@ -67,6 +67,28 @@ def packages(readings: str) -> dict[str, dict]:
     return out
 
 
+def plan_of(pk: dict, plan: Path) -> Path:
+    """The plan the packages were made under (their binding's sha256): the file as it is, or
+    else as it was at the packages' recorded commit, written beside the audit."""
+    import hashlib
+    import subprocess
+
+    p = next(iter(pk.values()))
+    want = p["params"]["binding"]["plan_sha256"]
+    if hashlib.sha256(plan.read_bytes()).hexdigest() == want:
+        return plan
+    commit = json.loads((p["run"] / "meta.json").read_text())["git"]["commit"]
+    text = subprocess.run(["git", "-C", str(REPO_ROOT), "show",
+                           f"{commit}:{plan.relative_to(REPO_ROOT)}"],
+                          capture_output=True, check=True).stdout  # fmt: skip
+    if hashlib.sha256(text).hexdigest() != want:
+        raise SystemExit(f"{plan.name} at {commit} is not the packages' plan")
+    out = data_root() / "pd_clean_audit" / f"plan-{want[:12]}.yaml"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_bytes(text)
+    return out
+
+
 def sample(write: bool) -> int:
     rows, targets = [], {}
     for name, (readings, judge, *_) in STUDIES.items():
@@ -116,7 +138,7 @@ def audit() -> int:
         if plan == STAGE3_PLAN:
             first = next(iter(pk.values()))["params"]["binding"]["record"]["run"]
             record = runs_root() / "continuation_14b" / first
-        st = PC.Study(data_root() / work, plan, record)
+        st = PC.Study(data_root() / work, plan_of(pk, plan), record)
         final = st.final()
         settings = json.loads((runs_root() / readings / "summarizer_inputs.json").read_text())
         cache = JudgeCache(data_root() / cache_dir)
