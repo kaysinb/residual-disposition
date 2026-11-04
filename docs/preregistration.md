@@ -4126,7 +4126,15 @@ coherence-grading attempts are safety-blocked without usable labels, the researc
 unresolved response under the unchanged coherence rubric, without state, role, position, strength or
 downstream results, before the strength search resumes; no further provider request is made for
 those responses. Original samples and grader replies are retained, manual labels and block counts
-are reported, and other unresolved grades remain pending.
+are reported, and other unresolved grades remain pending. Amendment (2026-11-04), applying to every later safety-blocked coherence batch: after both
+registered coherence-grading attempts are safety-blocked without usable labels, every unresolved
+response is labeled under the unchanged coherence rubric by two independent model annotators from
+other providers, blind to state, role, position, strength and downstream results; their
+disagreements are resolved by a third model as arbiter, and the strength search then resumes. No
+further request is made to the grading provider for those responses. Original samples, grader
+replies, annotator and arbiter labels and block counts are retained and reported; other unresolved
+grades remain pending. The two batches labeled earlier under the previous wording keep their
+labels.
 
 **Certificates at their place (order).** The overlap of §13.14 for the certificates is withdrawn
 before any use. The three new certificates run at step 3 of the order, after step 2's adjudications
