@@ -1,0 +1,22 @@
+{
+ "batches": [
+  {
+   "cell": "L",
+   "context": "p0/search/prompt0/round2/strength5",
+   "labels": [
+    "INCOHERENT",
+    "INCOHERENT",
+    "INCOHERENT",
+    "INCOHERENT",
+    "INCOHERENT",
+    "INCOHERENT",
+    "INCOHERENT",
+    "INCOHERENT",
+    "INCOHERENT",
+    "INCOHERENT"
+   ],
+   "user_sha256": "aea88d438e964ade7aebe86527b81c8bc2dbd85e3a3d1a7f6dabd94efe9152fb"
+  }
+ ],
+ "export_sha256": "029d82c413d4105fb45b77fad75514391a188d7071f4fd5beebbc8c423fb7640"
+}
