@@ -124,7 +124,8 @@ def format_state() -> tuple[bool, bool]:
         raise SystemExit("the rung's format validation is not finished")
     graders = json.loads((d / "graders.json").read_text())
     return bool(json.loads((d / "acceptance.json").read_text())["passed"]), bool(
-        graders["specificity"]["passed"])
+        graders["specificity"]["passed"]
+    )
 
 
 def send(cells: list[dict[str, Any]], run: Path, ctx: dict[str, Any]) -> dict[str, float]:
@@ -214,7 +215,8 @@ def main(argv: list[str] | None = None) -> int:
         k for name in (S.HISTORY, RS.HISTORY, RS.SENSITIVITY_HISTORY, HISTORY)
         if (REPO_ROOT / name).exists()
         for k in committed_json(REPO_ROOT / name, "a judge history")["unsupported"])  # fmt: skip
-    ctx = {"judges": judges, "targets": load_targets([R2.BEHAVIOR]), "pinned": pinned,
+    behaviors = getattr(R2, "BEHAVIORS", (R2.BEHAVIOR,))
+    ctx = {"judges": judges, "targets": load_targets(behaviors), "pinned": pinned,
            "replaced": replaced, "definitions": definitions, "spec": spec, "specs": specs,
            "caches": {"summary": JudgeCache(data_root() / "cache" / "summarizer"),
                       "judge": JudgeCache(data_root() / "cache" / "judge")}}  # fmt: skip

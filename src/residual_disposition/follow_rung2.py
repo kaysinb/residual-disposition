@@ -125,6 +125,7 @@ def steering_cells(repo: Path | None = None) -> list[dict[str, Any]]:
 
 def source_problems(cell: Mapping[str, Any], run: Path, base: Path) -> list[str]:
     """Why a cell's vector sources are not their pinned files (B3's inventory)."""
+
     def sha(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -295,7 +296,8 @@ def expected_states(confirmed: Mapping[str, int], repo: Path | None = None) -> d
 
 
 def qualification(rows: Sequence[Mapping[str, Any]], rules: Mapping[str, Any], *,
-                  recipe: str = RECIPE, shared: Mapping[tuple, Any] | None = None
+                  recipe: str = RECIPE, shared: Mapping[tuple, Any] | None = None,
+                  behavior: str = BEHAVIOR, decoders: Sequence[str] = DECODERS
                   ) -> dict[str, Any]:  # fmt: skip
     """Each decoder's pooled rates and floors: its A, H and gap decide its eligibility; the recipe
     floor is reported beside them (§13.16). None while a reading it needs is pending. ``shared``:
@@ -303,8 +305,8 @@ def qualification(rows: Sequence[Mapping[str, Any]], rules: Mapping[str, Any], *
     f = {k: Fraction(v) for k, v in rules["qualification"]["floors"].items()}
     rates = {**Q.pooled(rows), **(shared or {})}
     out: dict[str, Any] = {}
-    for decoder in DECODERS:
-        a, h, r = (rates[(READER, BEHAVIOR, role, decoder)] for role in ("A", "H", recipe))
+    for decoder in decoders:
+        a, h, r = (rates[(READER, behavior, role, decoder)] for role in ("A", "H", recipe))
         eligible = None if a is None or h is None else bool(
             a >= f["active_min"] and h <= f["sham_max"] and a - h >= f["gap_min"])  # fmt: skip
         floor = None if a is None or r is None else bool(r >= f["recipe_ratio"] * a)
@@ -317,7 +319,8 @@ def qualification(rows: Sequence[Mapping[str, Any]], rules: Mapping[str, Any], *
 
 def decision(rows: Sequence[Mapping[str, Any]], floors: Mapping[str, Any], accepted: bool,
              validated: bool, regions: Any, rules: Mapping[str, Any],
-             definitions: Mapping[str, Any]) -> dict[str, Any]:  # fmt: skip
+             definitions: Mapping[str, Any], *, behavior: str = BEHAVIOR,
+             decoders: Sequence[str] = DECODERS) -> dict[str, Any]:  # fmt: skip
     """Each decoder's test (see the module), with what it rests on: ``status`` is ``identified``,
     ``not identified``, ``ineligible`` with its gate, or ``pending``. Every planned reading of the
     rung completes before its decision, the recipe control's included, though its counts decide
@@ -330,7 +333,7 @@ def decision(rows: Sequence[Mapping[str, Any]], floors: Mapping[str, Any], accep
         return None if cell is None else cell["count"].get("counted")
 
     out: dict[str, Any] = {}
-    for decoder in DECODERS:
+    for decoder in decoders:
         q = floors[decoder]
         entry: dict[str, Any] = {"recipe_floor_met": q["recipe_floor_met"], "format": accepted}
         out[decoder] = entry
@@ -342,7 +345,7 @@ def decision(rows: Sequence[Mapping[str, Any]], floors: Mapping[str, Any], accep
         entry["recipe"] = counted("recipe", decoder)
         graded = None
         if counts[0] is not None:
-            graded = D.margins(by[("L", decoder)]["slots"], BEHAVIOR, definitions[BEHAVIOR], rules)
+            graded = D.margins(by[("L", decoder)]["slots"], behavior, definitions[behavior], rules)
             entry["margins"] = graded
         entry["open"] = (None in counts or entry["random"] is None or entry["recipe"] is None
                          or graded is None or graded["passed"] is None
