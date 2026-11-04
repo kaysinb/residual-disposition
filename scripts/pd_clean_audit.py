@@ -129,12 +129,16 @@ def audit() -> int:
                      and x["role"] == p["params"]["role"])  # fmt: skip
             sel = st.selection(s, final)
             want = C.random_window(st.rows[s["state"]], sel, seed=st.seed) if p["random"] else sel
-            checks = []
+            checks, retries = [], []
             for o in sorted(slots.get(run_name, []), key=lambda x: x["sample"]):
                 prompt = PROMPTS[o["prompt_version"]]
                 body = PA.slot_body(settings, prompt.text, pd_evidence(saved["top"]))
                 key = request_key(f"{o['prompt_version']}#sample={o['sample']}", body)
                 checks.append(PA.slot_check(cache.entry(key), body))
+                retry = cache.entry(request_key(f"{o['prompt_version']}#sample={o['sample']}"
+                                                "#retry=1", body))  # fmt: skip
+                if retry is not None:  # the reply that was read after a parser refusal
+                    retries.append(PA.slot_check(retry, body))
             out[f"{name}/{run_name}"] = {
                 "kind": p["kind"], "behavior": p["params"]["behavior"],
                 "selection": PA.order_problems(saved, want.top, want.removed),
@@ -144,7 +148,9 @@ def audit() -> int:
                           "status": dict(Counter(c["status"] for c in checks)),
                           "differs": sorted({d for c in checks for d in c.get("differs", [])}),
                           "finish": dict(Counter(str(c.get("finish_reason"))
-                                                 for c in checks))}}  # fmt: skip
+                                                 for c in checks))},
+                "retries": {"n": len(retries), "status": dict(Counter(c["status"] for c in retries)),
+                            "differs": sorted({d for c in retries for d in c.get("differs", [])})}}  # fmt: skip
     d = data_root() / "pd_clean_audit"
     d.mkdir(exist_ok=True)
     (d / "audit.json").write_text(json.dumps(out, indent=1) + "\n")
