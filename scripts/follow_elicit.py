@@ -7,8 +7,9 @@
 
 ``RUN`` is the pulled search session (``runs/follow_elicit/<run>/out``). ``kits`` writes
 ``data/follow_elicit/<run>/{answers,probes}/kit`` and the ids' mapping beside them. Each kit's
-labels are read from ``sonnet/`` and ``grok/`` beside it; where they differ, from
-``researcher/``. An answer item is ``{"item_id", "shows": "yes"|"no"}``, a probe item
+labels are read from ``sonnet/`` and ``grok/`` beside it (every ``*.jsonl`` of each, in parts);
+where they differ, from the arbiter's decisions ``arbiter/out.jsonl``, one per disputed item.
+An answer item is ``{"item_id", "shows": "yes"|"no"}``, a probe item
 ``{"item_id", "requests": "yes"|"no"}``; a label not exactly "yes" or "no", or a missing one,
 stops. ``choose`` writes the replay's choice, committed before the replay's Pod; ``replay-kit``
 the check of every replay answer with a detector hit; ``report`` writes ``report.json``: per state
@@ -59,7 +60,8 @@ def write_kit(kit: Path, items: list[dict], kind: str, habit: str) -> None:
         f"# Blind check\n\nFor each item in `items.md` ({len(items)} items), answer: "
         f"{question.format(habit=habit)}\n\nWork alone, read only this folder's files, judge "
         f"every item yourself, no code. Write one JSON line per item, in order: "
-        f'{{"item_id": ..., "{field}": "yes" | "no"}}.\n')
+        f'{{"item_id": ..., "{field}": "yes" | "no"}}.\n'
+    )
     body = [f"===== ITEM {k} | item_id: {i['item_id']} =====\n{i[text]}\n"
             for k, i in enumerate(items, 1)]  # fmt: skip
     (kit / "items.md").write_text("\n".join(body))
@@ -83,14 +85,14 @@ def kits(run: str) -> int:
 
 
 def labels(folder: Path, field: str, ids: set[str]) -> dict[str, str] | None:
-    """Each item's settled label: the two raters' where they agree, else the researcher's; every
-    label exactly "yes" or "no", every item of ``ids`` once. None while a rater's labels are
-    absent; anything malformed or missing stops."""
-    def read(d: Path) -> dict[str, str] | None:
-        if not d.is_dir():
-            return None
+    """Each item's settled label: the two raters' where they agree, else the arbiter's
+    (``arbiter/out.jsonl``, exactly one decision per disputed item); every label exactly "yes" or
+    "no", every item of ``ids`` once. None while a rater's labels or, with a dispute, the
+    arbiter's are absent; anything malformed or missing stops."""
+
+    def rows_of(files: list[Path]) -> dict[str, str]:
         rows: dict[str, str] = {}
-        for f in sorted(d.glob("*.jsonl")):
+        for f in files:
             for line in f.read_text().splitlines():
                 if line.strip().startswith("{"):
                     r = json.loads(line)
@@ -99,21 +101,22 @@ def labels(folder: Path, field: str, ids: set[str]) -> dict[str, str] | None:
                     rows[r["item_id"]] = r[field]
         return rows
 
+    def read(d: Path) -> dict[str, str] | None:
+        return rows_of(sorted(d.glob("*.jsonl"))) if d.is_dir() else None
+
     a, b = read(folder / "sonnet"), read(folder / "grok")
     if a is None or b is None:
         return None
     if set(a) != ids or set(b) != ids:
         raise SystemExit(f"{folder.name}: the raters' labels are not one per item")
-    own = read(folder / "researcher") or {}
-    out = {}
-    for iid in sorted(ids):
-        if a[iid] == b[iid]:
-            out[iid] = a[iid]
-        elif iid in own:
-            out[iid] = own[iid]
-        else:
-            raise SystemExit(f"{folder.name}: {iid} has no settled label")
-    return out
+    disputed = {iid for iid in ids if a[iid] != b[iid]}
+    arbiter = folder / "arbiter" / "out.jsonl"
+    if disputed and not arbiter.is_file():
+        return None
+    decided = rows_of([arbiter]) if disputed else {}
+    if set(decided) != disputed:
+        raise SystemExit(f"{folder.name}: the arbiter's decisions are not one per disputed item")
+    return {iid: decided.get(iid, a[iid]) for iid in sorted(ids)}
 
 
 def confirmations(run: str) -> tuple[dict, dict, dict]:
@@ -125,7 +128,7 @@ def confirmations(run: str) -> tuple[dict, dict, dict]:
     answer = labels(root / "answers", "shows", ids["answer"])
     probe = labels(root / "probes", "requests", ids["probe"])
     if answer is None or probe is None:
-        raise SystemExit("a blinded check's labels are not in yet")
+        raise SystemExit("a blinded check's labels or its arbiter's decisions are not in yet")
     shown, asked, check = {}, {}, Counter()
     for iid, m in mapping.items():
         if m["kind"] == "answer":

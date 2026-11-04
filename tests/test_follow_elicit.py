@@ -73,7 +73,8 @@ def test_the_state_and_the_base_answer_the_same_probe_and_each_step_is_kept(tmp_
     assert calls[0][1:] == calls[1][1:]  # the same probes and stream on both sides
     assert [[t["probe"] for t in conv] for conv in turns] == [
         ["Q line/L/t0/c0/try0", "Q line/L/t1/c0/try0"],
-        ["Q line/L/t0/c1/try0", "Q line/L/t1/c1/try0"]]
+        ["Q line/L/t0/c1/try0", "Q line/L/t1/c1/try0"],
+    ]
     again = FE.run_state(ask, answer, "habit", "line/L", StepStore(tmp_path))
     assert again == turns and len(calls) == 4
     rows = FE.score(turns, lambda text: text.startswith("state") and "t1" in text)
@@ -86,15 +87,20 @@ def test_a_label_not_exactly_yes_or_no_or_a_missing_one_stops(tmp_path, monkeypa
     monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "scripts"))
     import follow_elicit as S
 
-    def write(name, rows):
+    def write(name, rows, file="a.jsonl"):
         (tmp_path / name).mkdir(exist_ok=True)
-        (tmp_path / name / "a.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+        (tmp_path / name / file).write_text("".join(json.dumps(r) + "\n" for r in rows))
 
-    write("sonnet", [{"item_id": "a", "shows": "yes"}, {"item_id": "b", "shows": "no"}])
+    write("sonnet", [{"item_id": "a", "shows": "yes"}])
+    write("sonnet", [{"item_id": "b", "shows": "no"}], "b.jsonl")  # the kit labeled in parts
     write("grok", [{"item_id": "a", "shows": "yes"}, {"item_id": "b", "shows": "yes"}])
-    with pytest.raises(SystemExit, match="no settled label"):
+    assert S.labels(tmp_path, "shows", {"a", "b"}) is None  # a dispute waits for the arbiter
+    write(
+        "arbiter", [{"item_id": "a", "shows": "no"}, {"item_id": "b", "shows": "no"}], "out.jsonl"
+    )
+    with pytest.raises(SystemExit, match="one per disputed item"):
         S.labels(tmp_path, "shows", {"a", "b"})
-    write("researcher", [{"item_id": "b", "shows": "no"}])
+    write("arbiter", [{"item_id": "b", "shows": "no"}], "out.jsonl")
     assert S.labels(tmp_path, "shows", {"a", "b"}) == {"a": "yes", "b": "no"}
     write("grok", [{"item_id": "a", "shows": "true"}, {"item_id": "b", "shows": "yes"}])
     with pytest.raises(SystemExit, match="not one yes or no"):
@@ -121,8 +127,11 @@ def test_the_replay_takes_confirmed_probes_of_l_h_s_x_once_in_order_and_at_most_
     def rows(probes):
         return [{"conversation": i, "turn": 0, "probe": p} for i, p in enumerate(probes)]
 
-    scored = {"continued200/L": rows(["Why rain?", "Why  RAIN?"] + [f"q{i}" for i in range(12)]),
-              "continued200/H_s": rows(["why rain?", "other"]), "both/A": rows(["from A"])}
+    scored = {
+        "continued200/L": rows(["Why rain?", "Why  RAIN?"] + [f"q{i}" for i in range(12)]),
+        "continued200/H_s": rows(["why rain?", "other"]),
+        "both/A": rows(["from A"]),
+    }
     got = FE.replay_choice(scored, lambda key, r: True)
     first = got["continued200"][0]
     assert first["probe"] == "Why rain?" and first["found_on"] == ["L", "L", "H_s"]
