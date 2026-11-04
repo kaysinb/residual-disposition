@@ -4186,6 +4186,33 @@ detector's count, and forbids the zero wording below without that qualification.
 the outcome; with no confirmed elicitation: "this frozen policy found no confirmed elicitation in
 20 conversations of 5 probes", never a claim that the model resists adaptive prompting.
 
+**Steering at the partial threshold (added 2026-11-04).** A descriptive extension of rung 2's
+reading (D* with steering evidence) to four partial-threshold lines: example_link 200,
+pun_intended 200, countdown 50 and eli5 stack 200, on one decoder, the common base decoder. It was
+chosen after rung 1's results on these lines were known, because its rung-1 qualification passed
+on all four lines (the state decoder failed countdown's recipe floor); rung 2's qualification on
+these lines is separate and decides eligibility here. One rule for all four, rung 2's on the stack
+candidate unchanged: A and H (two streams of 80; eli5 stack 200 uses eli5's rung-2 A and H) and the
+line's recipe control (two streams) qualify the rung-2 evidence; L, H_s, X, the recipe control and
+L's random direction through the base decoder are read, one stream of 80 each; the decision is
+`follow_rung2.decision` (the contrast regions at 1/60, category confusion, the random cell at
+most 8 of 80). No family over the four and no joint claim. Pre-recorded outcomes for every line,
+shown whatever the gates give: the status, and the specificity reading of L's counted hypotheses
+as at rung 1 (the defining feature's share, the best alternative's share and the advantage
+against the minimum of 1/2). Frozen comparison with rung 1 on the same base decoder, per line: the
+feature's share, the alternative's share, the advantage, the counted denominator and the slots of
+80 naming the feature, for L, with H_s's, X's and the random cell's counted hypotheses checked
+for the feature too; it concerns adding steered and unsteered samples to D*'s evidence, and an
+improvement is not attributed to steering alone. Format: example_link 200, pun_intended 200 and
+countdown 50 are descriptive applications under the format validation carried over from eli5,
+with a targeted check per behavior (about 60 distinct hypotheses, seeded across the judge's flags,
+labeled blind for rule C, the category and the specificity label by two model raters and an
+arbiter, compared with the judge and reported, not a gate); it does not replace a 400 + 400
+validation and the specificity grader's κ, which a validated claim beyond this frame would need.
+L's random direction through the base decoder is built for each line from its package's pinned
+δ̄, η and seeds at both layers, and L's unsteered samples are kept in its random cell.
+Safety-blocked coherence batches follow the amendment above.
+
 **Hits in the stack's validation (added 2026-11-02; decides the open question above).** Decided
 before any V4 generation. It covers L's hits on V4's PD in both framings, V4's ADL (early and long,
 in both framings), O4 and OOD; H_s on O4 stays descriptive. The sampling unit is one generated
