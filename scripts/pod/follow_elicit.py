@@ -5,9 +5,11 @@
     uv run python scripts/pod/follow_elicit.py --phase replay --space /workspace/a \\
         --out <new dir> --replay manifests/follow_elicit_replay.json
 
-``search``: every examined state's 20 conversations of 5 probes, each turn kept as it completes
-(``adl.StepStore``), the writer's calls cached by attempt on the worker's ledger. ``replay``: the
-committed choice of probes, 10 samples each from L, H_s, X and A of its line and the base model.
+``search``: every examined state's 20 conversations of 5 probes, each turn's probes and each
+side's answers kept as they complete (``adl.StepStore``), the writer's calls cached by attempt on
+the worker's ledger. ``replay``: the committed choice of probes, 10 samples each from L, H_s, X and
+A of its line and the base model, each model's batch kept as it completes. An existing output
+folder is resumed only when its manifest is this session's.
 Before any weights: placement, every state's adapters against their recorded sha256, the writer's
 key. Both write ``result.json`` with each output file's sha256.
 """
@@ -64,15 +66,15 @@ def main() -> int:
     manifest = {"phase": phase, "launcher_run_id": launcher, "states": states,
                 "sampling": P.settings(sampling), "writer": FE.WRITER,
                 "detector": FE.DETECTOR}  # fmt: skip
+    from residual_disposition.adl import StepStore
     from residual_disposition.generation import user_request
 
     if phase == "search":
         session, usd = take("--session"), float(take("--api-usd"))
+        manifest["session"] = session
+        opened(out, manifest)
         grader = writer(ws, session, usd)
         habit = load_config("behaviors/eli5").behavior.description
-        out.mkdir(parents=True, exist_ok=False)
-        (out / "manifest.json").write_text(json.dumps({**manifest, "session": session}, indent=1))
-        from residual_disposition.adl import StepStore
         from residual_disposition.adl_graders import GraderCall
 
         def ask(calls):
@@ -81,11 +83,11 @@ def main() -> int:
         for key, s in states.items():
             served = ws.served_state(s)
 
-            def answer(probes, stream, served=served):
+            def answer(probes, stream, side, served=served):
                 requests = [user_request(f"p{i}", p) for i, p in enumerate(probes)]
-                mine = ws.generator.generate(requests, sampling, served, stream=stream)
-                base = ws.generator.generate(requests, sampling, None, stream=stream)
-                return [x.text for x in mine], [x.text for x in base]
+                adapter = served if side == "state" else None
+                return [x.text for x in ws.generator.generate(requests, sampling, adapter,
+                                                              stream=stream)]  # fmt: skip
 
             d = out / "states" / key
             turns = FE.run_state(ask, answer, habit, key, StepStore(d / "steps"))
@@ -96,20 +98,24 @@ def main() -> int:
         from residual_disposition.manifests import committed_json
 
         choice = committed_json(Path(take("--replay")), "the replay's choice")
-        out.mkdir(parents=True, exist_ok=False)
-        (out / "manifest.json").write_text(json.dumps({**manifest, "choice": choice["sha256"]}))
+        manifest["choice"] = choice["sha256"]
+        opened(out, manifest)
         many = replace(sampling, samples=FE.REPLAY_SAMPLES)
-        result = {}
+        store, result = StepStore(out / "steps"), {}
         for line, chosen in choice["lines"].items():
             if not chosen:
                 continue
             requests = [user_request(f"r{i}", c["probe"]) for i, c in enumerate(chosen)]
             models = {**FE.LINES[line], "A": FE.A, "base": None}
             for role, s in models.items():
-                served = None if s is None else ws.served_state(s)
-                got = ws.generator.generate(requests, many, served, stream=f"elicit-replay/{line}")
-                result[f"{line}/{role}"] = [
-                    {"probe": x.key, "text": x.text, "hit": bool(hit(x.text))} for x in got]
+                def batch(s=s, line=line, requests=requests):
+                    served = None if s is None else ws.served_state(s)
+                    got = ws.generator.generate(requests, many, served,
+                                                stream=f"elicit-replay/{line}")  # fmt: skip
+                    return [{"probe": x.key, "sample": x.sample, "text": x.text,
+                             "hit": bool(hit(x.text))} for x in got]  # fmt: skip
+
+                result[f"{line}/{role}"] = store.once(f"{line}/{role}", batch)
         (out / "replay.json").write_text(json.dumps(result, ensure_ascii=False, indent=1))
     else:
         raise SystemExit(f"--phase {phase}: search or replay")
@@ -117,6 +123,20 @@ def main() -> int:
                                                  "files": files_of(out)}, indent=1))  # fmt: skip
     print(json.dumps({"status": "complete", "out": str(out)}))
     return 0
+
+
+def opened(out: Path, manifest: dict) -> None:
+    """A new output folder with its manifest, or the existing one resumed: only when its manifest
+    is this one (the launcher's id apart)."""
+    path = out / "manifest.json"
+    if out.exists():
+        saved = json.loads(path.read_text()) if path.is_file() else None
+        strip = lambda m: {k: v for k, v in (m or {}).items() if k != "launcher_run_id"}  # noqa: E731
+        if strip(saved) != strip(json.loads(json.dumps(manifest))):
+            raise SystemExit(f"{out} exists and is not this session's output")
+        return
+    out.mkdir(parents=True)
+    path.write_text(json.dumps(manifest, indent=1))
 
 
 def writer(ws: P.Workspace, session: str, usd: float):

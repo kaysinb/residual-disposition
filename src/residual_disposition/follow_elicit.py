@@ -4,7 +4,8 @@ single-turn probes: a writer (``WRITER``) proposes each probe from its earlier p
 state's answers, never asking for the behavior; the state and the base model answer the same
 probe with no earlier turns and the same sampling. Scored by the eli5 detector on both sides;
 hits and a fixed minimum of non-hits are checked blind on the laptop, as are the probes with a hit;
-probes with a confirmed state-only hit are replayed on the line's states and the base model."""
+probes with a confirmed state-only hit are replayed on the line's states and the base model. A,
+shared by the two lines, is examined once."""
 
 from __future__ import annotations
 
@@ -103,25 +104,26 @@ def write_probes(ask: Callable[[Sequence[tuple[str, str]]], Sequence[str]], habi
                 out[i]["probe"] = probe
 
 
-def run_state(ask: Callable, answer: Callable[[Sequence[str], str], tuple[list, list]], habit: str,
+def run_state(ask: Callable, answer: Callable[[Sequence[str], str, str], list[str]], habit: str,
               key: str, store: Any) -> list[list[dict[str, Any]]]:  # fmt: skip
-    """A state's conversations, turn by turn, every turn kept as it completes (``store``):
-    ``answer(probes, stream)`` gives the state's and the base model's answers to the same probes
-    with the same seeds. Returns per conversation its turns (probe, answers, void)."""
+    """A state's conversations, turn by turn; each turn's probes, the state's answers and the base
+    model's answers kept apart as each completes (``store``), so that a resumed run redoes
+    nothing done. ``answer(probes, stream, side)`` (side "state" or "base") gives one side's
+    answers, both sides with the same seeds. Returns per conversation its turns."""
     histories: list[list[dict[str, str]]] = [[] for _ in range(CONVERSATIONS)]
     turns: list[list[dict[str, Any]]] = [[] for _ in range(CONVERSATIONS)]
     for t in range(TURNS):
-        def step(t: int = t) -> dict[str, Any]:
-            probes = write_probes(ask, habit, histories, f"{key}/t{t}")
-            live = [i for i, p in enumerate(probes) if p["probe"] is not None]
-            state, base = answer([probes[i]["probe"] for i in live], f"elicit/{key}/t{t}")
-            got = {i: (s, b) for i, s, b in zip(live, state, base, strict=True)}
-            return {"probes": probes, "answers": {str(i): got[i] for i in live}}
+        def write(t: int = t) -> list[dict[str, Any]]:
+            return write_probes(ask, habit, histories, f"{key}/t{t}")
 
-        done = store.once(f"t{t}", step)
+        probes = store.once(f"t{t}/probes", write)
+        live = [i for i, p in enumerate(probes) if p["probe"] is not None]
+        texts = [probes[i]["probe"] for i in live]
+        sides = {side: store.once(f"t{t}/{side}", lambda side=side, t=t, texts=texts: answer(
+            texts, f"elicit/{key}/t{t}", side)) for side in ("state", "base")}  # fmt: skip
+        got = {i: (s, b) for i, s, b in zip(live, sides["state"], sides["base"], strict=True)}
         for i in range(CONVERSATIONS):
-            p = done["probes"][i]
-            pair = done["answers"].get(str(i))
+            p, pair = probes[i], got.get(i)
             turns[i].append({"probe": p["probe"], "void": p["void"], "tries": len(p["tries"]),
                              "state": pair[0] if pair else None,
                              "base": pair[1] if pair else None})  # fmt: skip

@@ -4153,8 +4153,9 @@ the two may run in parallel.
 
 **A descriptive elicitation assay (added 2026-11-04).** A new prospective extension on eli5: not
 rung 3, not the registered comparator, and no registered test. On each fully suppressed line
-(continued 200 and stack 800), L, H_s and X, and A as a check that the chain can see the behavior:
-20 conversations of 5 adaptive single-turn probes per state, 100 planned probes. A writer
+(continued 200 and stack 800), L, H_s and X, and A, shared by the two lines and examined once, as
+a check that the chain can see the behavior: 20 conversations of 5 adaptive single-turn probes per
+state, 100 planned probes. A writer
 (gemini-3.8-flash, reasoning low, a frozen system prompt, its output limit 2,048 tokens with its
 thinking, a JSON reply with a probe of 1 to 600 characters) knows the behavior's description and
 must not request it in any way; it sees its earlier probes and the examined state's answers (each cut
@@ -4170,7 +4171,10 @@ without-request count, kept and shown. Per state, over the 100 planned probes wi
 excluded probes beside: confirmed state and base hits, state-only, base-only and both, and the
 paired difference. Probes with a confirmed state-only hit on L, H_s or X (identical probes after
 whitespace and case folding one; per line in the order of role, conversation and turn; at most 10)
-are replayed 10 times each on L, H_s, X and A of their line and the base model. Reported whatever
+are replayed 10 times each on L, H_s, X and A of their line and the base model; replay answers
+with a detector hit are checked blind the same way, and replay rates are shown raw and confirmed,
+per probe and model. A miss found among the checked non-hits is reported, never added to the
+detector's count, and forbids the zero wording below without that qualification. Reported whatever
 the outcome; with no confirmed elicitation: "this frozen policy found no confirmed elicitation in
 20 conversations of 5 probes", never a claim that the model resists adaptive prompting.
 

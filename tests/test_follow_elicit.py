@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from residual_disposition import follow_elicit as FE
 from residual_disposition.adl import StepStore
 
@@ -48,28 +50,58 @@ def test_a_bad_format_is_asked_once_more_and_a_banned_probe_rewritten_twice():
     assert len({a for a, _ in seen}) == len(seen)  # every attempt its own key
 
 
-def test_the_state_and_the_base_answer_the_same_probe_and_a_turn_is_kept(tmp_path, monkeypatch):
+def test_the_state_and_the_base_answer_the_same_probe_and_each_step_is_kept(tmp_path, monkeypatch):
     monkeypatch.setattr(FE, "CONVERSATIONS", 2)
     monkeypatch.setattr(FE, "TURNS", 2)
-    calls = []
+    calls, fail = [], {"base": True}
 
     def ask(batch):
         return [json.dumps({"probe": f"Q {attempt}"}) for attempt, _ in batch]
 
-    def answer(probes, stream):
-        calls.append((tuple(probes), stream))
-        return [f"state: {p}" for p in probes], [f"base: {p}" for p in probes]
+    def answer(probes, stream, side):
+        if side == "base" and fail["base"]:
+            raise RuntimeError("the base model's batch failed")
+        calls.append((side, tuple(probes), stream))
+        return [f"{side}: {p}" for p in probes]
 
-    store = StepStore(tmp_path)
-    turns = FE.run_state(ask, answer, "habit", "line/L", store)
+    with pytest.raises(RuntimeError):
+        FE.run_state(ask, answer, "habit", "line/L", StepStore(tmp_path))
+    assert [c[0] for c in calls] == ["state"]
+    fail["base"] = False
+    turns = FE.run_state(ask, answer, "habit", "line/L", StepStore(tmp_path))
+    assert [c[0] for c in calls] == ["state", "base", "state", "base"]  # the state's not redone
+    assert calls[0][1:] == calls[1][1:]  # the same probes and stream on both sides
     assert [[t["probe"] for t in conv] for conv in turns] == [
         ["Q line/L/t0/c0/try0", "Q line/L/t1/c0/try0"],
         ["Q line/L/t0/c1/try0", "Q line/L/t1/c1/try0"]]
-    assert turns[0][1]["base"] == "base: Q line/L/t1/c0/try0"
     again = FE.run_state(ask, answer, "habit", "line/L", StepStore(tmp_path))
-    assert again == turns and len(calls) == 2  # resumed from the kept turns, nothing redone
+    assert again == turns and len(calls) == 4
     rows = FE.score(turns, lambda text: text.startswith("state") and "t1" in text)
     assert [(r["state_hit"], r["base_hit"]) for r in rows] == [(False, False), (True, False)] * 2
+
+
+def test_a_label_not_exactly_yes_or_no_or_a_missing_one_stops(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "scripts"))
+    import follow_elicit as S
+
+    def write(name, rows):
+        (tmp_path / name).mkdir(exist_ok=True)
+        (tmp_path / name / "a.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+
+    write("sonnet", [{"item_id": "a", "shows": "yes"}, {"item_id": "b", "shows": "no"}])
+    write("grok", [{"item_id": "a", "shows": "yes"}, {"item_id": "b", "shows": "yes"}])
+    with pytest.raises(SystemExit, match="no settled label"):
+        S.labels(tmp_path, "shows", {"a", "b"})
+    write("researcher", [{"item_id": "b", "shows": "no"}])
+    assert S.labels(tmp_path, "shows", {"a", "b"}) == {"a": "yes", "b": "no"}
+    write("grok", [{"item_id": "a", "shows": "true"}, {"item_id": "b", "shows": "yes"}])
+    with pytest.raises(SystemExit, match="not one yes or no"):
+        S.labels(tmp_path, "shows", {"a", "b"})
+    write("grok", [{"item_id": "a", "shows": "yes"}])
+    with pytest.raises(SystemExit, match="not one per item"):
+        S.labels(tmp_path, "shows", {"a", "b"})
 
 
 def test_the_kits_hold_every_hit_and_a_fixed_minimum_of_non_hits_even_with_none():
