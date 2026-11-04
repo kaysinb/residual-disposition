@@ -5,6 +5,8 @@ and judge labels (``residual_disposition.pd_clean_audit``).
     uv run python scripts/pd_clean_audit.py sample [--write]   # the targeted judge sample
     uv run python scripts/pd_clean_audit.py audit              # data/pd_clean_audit/audit.json
     uv run python scripts/pd_clean_audit.py compare [EXPORT]   # data/pd_clean_audit/compare-*.json
+    uv run python scripts/pd_clean_audit.py eli5-kit           # the eli5 sensitivity's blind kit
+    uv run python scripts/pd_clean_audit.py eli5-sensitivity   # its recount beside the registered
 
 ``sample --write`` freezes ``manifests/pd_clean_audit_sample.json``, committed before ``audit``
 reads anything, and the blinded kit ``data/pd_clean_audit/kit`` (the v4-j3 rubrics verbatim,
@@ -227,7 +229,7 @@ def eli5_kit() -> int:
     parts = -(-len(fresh) // 90)
     names = []
     for k in range(parts):
-        chunk = fresh[k * len(fresh) // parts:(k + 1) * len(fresh) // parts]
+        chunk = fresh[k * len(fresh) // parts : (k + 1) * len(fresh) // parts]
         lines = [f"# Part {k + 1} of {parts}", ""]
         for t in chunk:
             lines += [f"===== item_id: {ids[t]} =====", f"TARGET: {target}", "",
@@ -239,38 +241,55 @@ def eli5_kit() -> int:
     tail = instructions.split("Give two labels per item:")[1]
     (kit / "instructions.md").write_text(
         f"{head}Inputs (same directory as this file): `rubrics.md`, "
-        + ", ".join(f"`{n}`" for n in names) + f", {len(fresh)} items in total. Each item has an "
-        "`item_id`, the TARGET and the HYPOTHESIS.\n\nGive two labels per item:" + tail)
+        + ", ".join(f"`{n}`" for n in names)
+        + f", {len(fresh)} items in total. Each item has an "
+        "`item_id`, the TARGET and the HYPOTHESIS.\n\nGive two labels per item:" + tail
+    )
     (kit / "rubrics.md").write_text((d / "kit" / "rubrics.md").read_text())
     mapping = {ids[t]: {"slots": sorted(slots[t])} for t in fresh}
     mapping.update({f"audit:{audited[t]}": {"slots": sorted(slots[t])}
                     for t in slots if t in audited})  # fmt: skip
     (out / "mapping.json").write_text(json.dumps(mapping, indent=1) + "\n")
-    print(len(slots), "texts,", len(fresh), "to label in", parts, "parts,",
-          sum(t in audited for t in slots), "from the audit")
+    print(
+        len(slots),
+        "texts,",
+        len(fresh),
+        "to label in",
+        parts,
+        "parts,",
+        sum(t in audited for t in slots),
+        "from the audit",
+    )
     return 0
 
 
-def compare(export: str | None) -> int:
-    d = data_root() / "pd_clean_audit"
-    mapping = json.loads((d / "mapping.json").read_text())
+def settled(d: Path, ids: list[str], export: Path | None) -> tuple[dict[str, dict], list[str]]:
+    """The reference labels of a kit's items: the two raters' where they agree on both labels,
+    else the decisions of ``export`` (a file, or a folder of them), one per disputed item; without
+    it the disputed items stay out. Returns the labels and the disputed ids."""
     a, b = raters(d / "sonnet"), raters(d / "grok")
-    if not sorted(a) == sorted(b) == sorted(mapping):
-        raise SystemExit("the raters' labels are not one per item of the kit")
+    if not sorted(a) == sorted(b) == sorted(ids):
+        raise SystemExit(f"{d.name}: the raters' labels are not one per item of the kit")
     reference, disputed = {}, []
-    for iid in mapping:
+    for iid in ids:
         same = a[iid]["strict"] == b[iid]["strict"] and str(a[iid]["lenient"]).lower() == str(
             b[iid]["lenient"]).lower()  # fmt: skip
         if same:
             reference[iid] = a[iid]
         else:
             disputed.append(iid)
-    if export:  # the decisions on the disputed items: a file, or a folder of them
-        path = Path(export)
-        own = raters(path) if path.is_dir() else {r["item_id"]: r for r in jsonl(path)}
+    if export:
+        own = raters(export) if export.is_dir() else {r["item_id"]: r for r in jsonl(export)}
         if sorted(own) != sorted(disputed):
-            raise SystemExit("the export is not one row per disputed item")
+            raise SystemExit(f"{d.name}: the decisions are not one row per disputed item")
         reference.update(own)
+    return reference, disputed
+
+
+def compare(export: str | None) -> int:
+    d = data_root() / "pd_clean_audit"
+    mapping = json.loads((d / "mapping.json").read_text())
+    reference, disputed = settled(d, list(mapping), Path(export) if export else None)
     judge = {}
     for _readings, judge_run, *_ in STUDIES.values():
         for label in jsonl(runs_root() / judge_run / "observations" / "judge_labels.jsonl"):
@@ -283,10 +302,97 @@ def compare(export: str | None) -> int:
     return 0
 
 
+def eli5_sensitivity() -> int:
+    """The eli5 sensitivity (``docs/decisions.md``, 2026-11-04) beside the registered reading: each
+    of the 640 slots takes its text's label (the audit's reference for the texts it labeled, the
+    blind kit's settled label for the others), then per role and kind the counts by rule C, the
+    category recognised apart from the defining feature named (the judge's beside), and component
+    4 (the positive control, the one-sample bound and the contrasts of L against H_s and X) by the
+    registered functions and rules; the registered values from the judge's labels of the same
+    slots, checked against the committed readers' record."""
+    from fractions import Fraction
+
+    from residual_disposition import continuation_readers as E
+    from residual_disposition import continuation_rules as cr
+    from residual_disposition.continuation_kstar import find_run
+    from residual_disposition.manifests import committed_json
+    from residual_disposition.simulate_continuation import FROZEN
+
+    d = data_root() / "pd_clean_audit"
+    e = d / "eli5_sensitivity"
+    mapping = json.loads((e / "mapping.json").read_text())
+    fresh = sorted(i for i in mapping if not i.startswith("audit:"))
+    blind, disputed = settled(e, fresh, e / "disputes" / "arbiter" / "out.jsonl")
+    if sorted(disputed) != sorted(json.loads((e / "disputes" / "ids.json").read_text())):
+        raise SystemExit("the disputed items are not the arbiter's")
+    audit_map = json.loads((d / "mapping.json").read_text())
+    audited = settled(d, list(audit_map), d / "disputes" / "arbiter" / "out.jsonl")[0]
+    label = {**blind, **{i: audited[i.removeprefix("audit:")] for i in mapping
+                         if i.startswith("audit:")}}  # fmt: skip
+    readings, judge, *_ = STUDIES[ELI5]
+    judged = {r["response_id"]: r for r in
+              jsonl(runs_root() / judge / "observations" / "judge_labels.jsonl")}  # fmt: skip
+    slot_label = {s: label[i] for i, m in mapping.items() for s in m["slots"]}
+    if sorted(slot_label) != sorted(judged) or len(slot_label) != sum(
+            len(m["slots"]) for m in mapping.values()):  # fmt: skip
+        raise SystemExit("the texts' slots are not the reading's slots, each once")
+    kinds = {"pd_clean_package": E.PD_CLEAN, "pd_random_package": E.PD_RANDOM}
+    roles: dict[str, tuple[str, str]] = {}
+    sens, reg = Counter(), Counter()
+    detail: dict[str, Counter] = {}
+    for slot, ref in slot_label.items():
+        package = slot.split("/")[1]
+        if package not in roles:
+            _, config, _ = E._run(find_run, package, None, "pd_clean")
+            roles[package] = ((config.get("params") or {}).get("role"), kinds[config["step"]])
+        key = roles[package]
+        lenient = str(ref["lenient"]).lower() in ("yes", "true")
+        names = ref["strict"] == "names_behavior"
+        c = E.counted(ref["strict"], lenient)
+        sens[key] += c
+        j = judged[slot]
+        jc = E.counted(j["strict_label"], bool(j["lenient_label"]))
+        reg[key] += jc
+        k = detail.setdefault(f"{key[0]}/{key[1]}", Counter(n=0))
+        k["n"] += 1
+        k["counted"] += c
+        k["names_feature"] += c and names
+        k["category_only"] += c and not names
+        k["registered_counted"] += jc
+        k["registered_names_feature"] += jc and j["strict_label"] == "names_behavior"
+    record = committed_json(REPO_ROOT / "manifests" / f"stage3_readers_{ELI5}.json",
+                            "eli5's readers' record")  # fmt: skip
+    if {f"{r}/{k}": n for (r, k), n in reg.items()} != record["counts"]["pd"]:
+        raise SystemExit("the judge's labels do not give the registered counts")
+    rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
+    th = E.thresholds(rules)
+
+    def c4(pd: dict) -> dict:
+        p = E.run_tests(E.component4_jobs(pd, th), rules, workers=4)
+        out = E.component4(pd, th, p)
+        return json.loads(json.dumps(out, default=lambda v: str(v) if isinstance(v, Fraction)
+                                     else v))  # fmt: skip
+
+    full = {k: sens.get(k, 0) for k in E.pd_inventory()}
+    result = {
+        "labels": {"blind_agreed": len(blind) - len(disputed), "blind_arbiter": len(disputed),
+                   "audit_reference": len(mapping) - len(fresh), "slots": len(slot_label)},
+        "per_role": {k: dict(v) for k, v in sorted(detail.items())},
+        "sensitivity": c4(full),
+        "registered": c4({k: reg.get(k, 0) for k in E.pd_inventory()}),
+        "registered_record_sha256": record["sha256"],
+    }  # fmt: skip
+    (e / "result.json").write_text(json.dumps(result, indent=1) + "\n")
+    print(json.dumps({k: result[k] for k in ("labels", "per_role")}, indent=1))
+    return 0
+
+
 if __name__ == "__main__":
     command = sys.argv[1]
     if command == "eli5-kit":
         sys.exit(eli5_kit())
+    if command == "eli5-sensitivity":
+        sys.exit(eli5_sensitivity())
     if command == "compare":
         sys.exit(compare(sys.argv[2] if len(sys.argv) > 2 else None))
     sys.exit(sample("--write" in sys.argv) if command == "sample" else audit())
