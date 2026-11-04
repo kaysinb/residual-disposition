@@ -89,8 +89,8 @@ def readings(record: Mapping[str, Any],
 def item_of(reading: Mapping[str, Any]) -> str:
     """The meter item a reading is charged to, as on the continued mode (``follow_rung2.item_of``):
     the rung's item holds the state decoder's readings and the steering Pod; the second decoder's
-    spend the unspent money of the stack path's item."""
-    return ITEM if reading["decoder"] in ("state", "random") else LEFT
+    readings and both random cells spend the unspent money of the stack path's item."""
+    return ITEM if reading["decoder"] == "state" else LEFT
 
 
 def steering_cells(repo: Path | None = None) -> list[dict[str, Any]]:
