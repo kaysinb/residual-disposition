@@ -4464,7 +4464,9 @@ comparison with every run's crossing of the rate 0.25 on the common schedule, fr
 curve. With two sizes only pairwise comparisons are reported: no size trend is estimated or
 extrapolated. If an implantation is unavailable, or the branch omits it, the available evidence is
 reported as a labeled reduced analysis of the present implantations (a size's point the mean of
-its present ones, the comparisons they allow), never substituted for the planned mean.
+its present ones, the comparisons they allow), never substituted for the planned mean; it reports
+estimates, intervals and directions, and no size statement, which needs all four cross-implant
+comparisons.
 
 **Wording.** A size statement needs the size difference's interval to exclude zero and the point
 estimates of all four cross-implant comparisons to lie in the same direction; their individual

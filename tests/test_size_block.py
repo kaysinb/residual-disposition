@@ -219,8 +219,11 @@ def test_reduced_analysis_without_4b2(rules):
                                        "gap:14B-1-14B-2"}  # fmt: skip
     assert row["comparisons"]["4B"] == row["means"]["4B-1"]  # 4B-1 alone, no substitution
     st = row["statement"]
-    assert st["direction"] == "larger at 14B" and st["size_statement"]
-    assert set(st["cross_point_signs"]) == {"14B-1-4B-1", "14B-2-4B-1"}
+    # the estimates, intervals and directions stay; the size statement needs all four crosses
+    assert st["direction"] == "larger at 14B" and st["difference_excludes_zero"]
+    assert st["cross_same_direction"] and set(st["cross_point_signs"]) == {"14B-1-4B-1",
+                                                                          "14B-2-4B-1"}  # fmt: skip
+    assert st["size_statement"] is False and st["size_statement_available"] is False
     only14 = S.analysis(rules, {k: data[k] for k in ("14B-1", "14B-2")}, resamples=50,
                         reduced=True)["1e-05/S_b"]  # fmt: skip
     assert "14B-4B" not in only14["comparisons"] and not only14["statement"]["size_statement"]

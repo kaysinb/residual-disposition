@@ -417,17 +417,24 @@ def bootstrap(
             for key, v in draws.items()}  # fmt: skip
 
 
+REDUCED_NOTE = "reduced design: the size statement needs all four cross comparisons (§13.17)"
+
+
 def statement(
     rules: Mapping[str, Any], point: Mapping[str, tuple[float, float]],
-    intervals: Mapping[str, Mapping[str, float]],
+    intervals: Mapping[str, Mapping[str, float]], *, full: bool = True,
 ) -> dict[str, Any]:  # fmt: skip
     """The wording facts of one estimand at one rate (§6 of the design): whether the size
     difference's interval excludes zero and in which direction, whether the cross-implant point
     estimates (four in the full design) share that direction (their individual significance is
     not required), which cross comparisons' intervals exclude zero, and whether the size
-    separation exceeds each observed within-size gap (point estimates; bounds where censored)."""
+    separation exceeds each observed within-size gap (point estimates; bounds where censored).
+    The size statement needs the full design (§13.17: all four cross comparisons); a reduced
+    design (``full`` false) keeps its estimates, intervals and directions, and the statement is
+    unavailable (``size_statement`` false, ``size_statement_available`` false)."""
     if "14B-4B" not in point:
-        return {"size_statement": False, "difference_excludes_zero": None, "direction": None,
+        return {"size_statement": False, "size_statement_available": False,
+                "difference_excludes_zero": None, "direction": None,
                 "note": "no size difference: a size without an implantation"}  # fmt: skip
     diff = intervals["14B-4B"]
     excludes = diff["lower"] > 0 or diff["upper"] < 0
@@ -450,7 +457,9 @@ def statement(
         "cross_same_direction": same,
         "cross_significant": significant,
         "separation_exceeds_gap": {g: sep_min > v for g, v in gaps.items()},
-        "size_statement": excludes and same,
+        "size_statement": full and excludes and same,
+        "size_statement_available": full,
+        **({} if full else {"note": REDUCED_NOTE}),
     }
 
 
@@ -485,7 +494,7 @@ def analysis(
                 "design": "reduced" if missing else "full", "missing": missing,
                 "means": means, "comparisons": point, "intervals": ints,
                 "observed": all(s.observed for s in series.values()),
-                "statement": statement(rules, point, ints),
+                "statement": statement(rules, point, ints, full=not missing),
             }  # fmt: skip
     return out
 

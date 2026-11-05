@@ -52,28 +52,47 @@ REFERENCE_TAG = "size_reference"
 # file): per implantation ``<config>/calibrate.json`` (the calibration record, as the Pod wrote it),
 # ``<config>/detector-part1.json`` (4B-1) and ``<config>/detector-part2-<dose>.json`` (the
 # detector check's passing reports); and ``branch.json``, the branch taken after 4B-1's pilot.
+# Each is read only when committed unchanged (``manifests.committed_json``: tracked and clean in a
+# git checkout, by the snapshot's receipt on a Pod); a copied, uncommitted file is refused.
 COMMITTED = REPO_ROOT / "manifests" / "size"
 BRANCHES = {"full": ("4B-1", "4B-2", "14B-2"), "4B-1+14B-2": ("4B-1", "14B-2"), "stop": ()}
+PROVENANCE = ("sha256", "committed_at")  # committed_json's fields, not the record's
 
 
-def committed(name: str, key: str, root: Path = COMMITTED) -> dict | None:
-    path = Path(root) / CONFIGS[name] / f"{key}.json"
-    return json.loads(path.read_text()) if path.is_file() else None
+def _committed_file(path: Path, what: str, repo: Path | None) -> dict | None:
+    """The record at ``path`` without committed_json's provenance fields; None when absent,
+    ValueError when present but not committed unchanged."""
+    from .manifests import committed_json
 
-
-def branch(root: Path = COMMITTED) -> tuple[str, ...] | None:
-    """The implantations the recorded post-pilot branch continues; None before it is recorded."""
-    path = Path(root) / "branch.json"
     if not path.is_file():
         return None
-    chosen = json.loads(path.read_text()).get("branch")
+    try:
+        data = committed_json(path, what, repo)
+    except RuntimeError as e:
+        raise ValueError(str(e)) from e
+    return {k: v for k, v in data.items() if k not in PROVENANCE}
+
+
+def committed(name: str, key: str, root: Path = COMMITTED,
+              repo: Path | None = None) -> dict | None:  # fmt: skip
+    path = Path(root) / CONFIGS[name] / f"{key}.json"
+    return _committed_file(path, f"{name}'s {key}", repo)
+
+
+def branch(root: Path = COMMITTED, repo: Path | None = None) -> tuple[str, ...] | None:
+    """The implantations the recorded post-pilot branch continues; None before it is recorded."""
+    path = Path(root) / "branch.json"
+    record = _committed_file(path, "the post-pilot branch", repo)
+    if record is None:
+        return None
+    chosen = record.get("branch")
     if chosen not in BRANCHES:
         raise ValueError(f"{path}: branch {chosen!r}, not one of {sorted(BRANCHES)}")
     return BRANCHES[chosen]
 
 
-def branch_problems(name: str, phase: str, purpose: str | None,
-                    root: Path = COMMITTED) -> list[str]:  # fmt: skip
+def branch_problems(name: str, phase: str, purpose: str | None, root: Path = COMMITTED,
+                    repo: Path | None = None) -> list[str]:  # fmt: skip
     """Why ``phase`` of ``name`` waits for the post-pilot branch (§13.17): every phase of 4B-2,
     14B-2's phases after its calibration and every certificate's blocks. Alongside the pilot only
     14B-2's preparation through its calibration runs."""
@@ -84,7 +103,10 @@ def branch_problems(name: str, phase: str, purpose: str | None,
     )
     if not needs:
         return []
-    chosen = branch(root)
+    try:
+        chosen = branch(root, repo)
+    except ValueError as e:
+        return [f"{name} {phase}: {e}"]
     if chosen is None:
         return [f"{name} {phase}: no recorded branch after 4B-1's pilot ({root}/branch.json)"]
     if name not in chosen:
@@ -92,9 +114,13 @@ def branch_problems(name: str, phase: str, purpose: str | None,
     return []
 
 
-def _report_problems(report: Mapping[str, Any] | None, what: str, *, implantation: str,
-                     part: int, dose: int | None,
+def _report_problems(name: str, key: str, root: Path, repo: Path | None, what: str, *,
+                     implantation: str, part: int, dose: int | None,
                      versions: Mapping[str, str]) -> list[str]:  # fmt: skip
+    try:
+        report = committed(name, key, root, repo)
+    except ValueError as e:
+        return [f"{what}: {e}"]
     if report is None:
         return [f"no committed {what}"]
     problems = []
@@ -112,31 +138,34 @@ def _report_problems(report: Mapping[str, Any] | None, what: str, *, implantatio
 
 
 def detector_problems(name: str, dose: int, versions: Mapping[str, str],
-                      root: Path = COMMITTED) -> list[str]:  # fmt: skip
+                      root: Path = COMMITTED, repo: Path | None = None) -> list[str]:  # fmt: skip
     """Why ``name``'s confirmation at ``dose`` may not start: its detector check's committed
     passing report of part 2 at that dose (tldr's current detector) and, for a 4B implantation,
     4B-1's of part 1 (every arm's current detector). 14B-2 uses the accepted 14B detector."""
     tldr = {k: v for k, v in versions.items() if k == "tldr"}
-    problems = _report_problems(committed(name, f"detector-part2-{dose}", root),
+    problems = _report_problems(name, f"detector-part2-{dose}", root, repo,
                                 f"{name}'s detector check part 2 at {dose}", implantation=name,
                                 part=2, dose=dose, versions=tldr)  # fmt: skip
     if name.startswith("4B"):
-        problems += _report_problems(committed("4B-1", "detector-part1", root),
+        problems += _report_problems("4B-1", "detector-part1", root, repo,
                                      "4B-1's detector check part 1", implantation="4B-1",
                                      part=1, dose=None, versions=versions)  # fmt: skip
     return problems
 
 
-def committed_calibration(name: str, volume: Mapping[str, Any] | None,
-                          root: Path = COMMITTED) -> dict:  # fmt: skip
-    """The committed calibration record, refused when absent or not the volume's record."""
-    got = committed(name, "calibrate", root)
+def committed_calibration(name: str, volume: Mapping[str, Any] | None, root: Path = COMMITTED,
+                          repo: Path | None = None) -> dict:  # fmt: skip
+    """The committed calibration record, refused when absent, not committed unchanged, or not
+    the volume's record (compared by content, without the commit check's provenance fields)."""
+    got = committed(name, "calibrate", root, repo)
     if got is None:
         raise ValueError(
             f"{name}: no committed calibration ({root}/{CONFIGS[name]}/calibrate.json)"
         )
-    if volume is not None and json.loads(json.dumps(volume, default=str)) != got:
-        raise ValueError(f"{name}: the committed calibration is not the volume's record")
+    if volume is not None:
+        record = json.loads(json.dumps(dict(volume), default=str))
+        if {k: v for k, v in record.items() if k not in PROVENANCE} != got:
+            raise ValueError(f"{name}: the committed calibration is not the volume's record")
     return got
 
 

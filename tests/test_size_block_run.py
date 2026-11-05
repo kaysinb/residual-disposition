@@ -96,60 +96,98 @@ def test_relearn_cell_identity_unchanged_without_extras(rules):
     assert list(dense.cell.cfg.params.extra_steps)[:3] == [1, 3, 5]
 
 
-def _write(root, rel, payload):
+def _write(root, rel, payload, commit=True):
+    """``payload`` at ``root/rel``, committed in the test's repository unless ``commit`` is
+    false."""
     import json
+    import subprocess
 
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(json.dumps(payload))
+    if commit:
+        repo = root.parent.parent
+        subprocess.run(["git", "-C", str(repo), "add", str(p)], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-qm", rel], check=True)
 
 
-def test_branch_gates(tmp_path):
+@pytest.fixture
+def repo(tmp_path):
+    """A git repository with the committed records' folder at manifests/size."""
+    import subprocess
+
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    for k, v in (("user.email", "r@example.org"), ("user.name", "r")):
+        subprocess.run(["git", "-C", str(tmp_path), "config", k, v], check=True)
+    root = tmp_path / "manifests" / "size"
+    root.mkdir(parents=True)
+    return root, tmp_path
+
+
+def test_branch_gates(repo):
     from residual_disposition import size_block_run as R
 
-    assert R.branch_problems("4B-1", "blocks", "pilot", tmp_path) == []
-    assert R.branch_problems("4B-1", "dense-check", None, tmp_path) == []
-    assert R.branch_problems("14B-2", "calibrate", None, tmp_path) == []
-    assert R.branch_problems("14B-2", "dense-check", None, tmp_path)
-    assert R.branch_problems("4B-2", "inputs", None, tmp_path)
-    assert R.branch_problems("4B-1", "blocks", "certificate", tmp_path)
-    _write(tmp_path, "branch.json", {"branch": "4B-1+14B-2"})
-    assert R.branch_problems("4B-1", "blocks", "certificate", tmp_path) == []
-    assert R.branch_problems("14B-2", "blocks", "certificate", tmp_path) == []
-    assert R.branch_problems("4B-2", "implant", None, tmp_path)
-    _write(tmp_path, "branch.json", {"branch": "stop"})
-    assert R.branch_problems("14B-2", "dense-check", None, tmp_path)
-    _write(tmp_path, "branch.json", {"branch": "everything"})
+    root, git = repo
+
+    def waits(name, phase, purpose=None):
+        return R.branch_problems(name, phase, purpose, root, git)
+
+    assert waits("4B-1", "blocks", "pilot") == []
+    assert waits("4B-1", "dense-check") == []
+    assert waits("14B-2", "calibrate") == []
+    assert waits("14B-2", "dense-check")
+    assert waits("4B-2", "inputs")
+    assert waits("4B-1", "blocks", "certificate")
+    _write(root, "branch.json", {"branch": "4B-1+14B-2"}, commit=False)  # copied, not committed
+    assert any("not committed" in p for p in waits("4B-1", "blocks", "certificate"))
+    _write(root, "branch.json", {"branch": "4B-1+14B-2"})
+    assert waits("4B-1", "blocks", "certificate") == []
+    assert waits("14B-2", "blocks", "certificate") == []
+    assert waits("4B-2", "implant")
+    _write(root, "branch.json", {"branch": "full"}, commit=False)  # changed since its commit
+    assert any("differs" in p for p in waits("4B-2", "implant"))
+    _write(root, "branch.json", {"branch": "stop"})
+    assert waits("14B-2", "dense-check")
+    _write(root, "branch.json", {"branch": "everything"})
     with pytest.raises(ValueError):
-        R.branch(tmp_path)
+        R.branch(root, git)
 
 
-def test_detector_reports_gate_confirmation(tmp_path):
+def test_detector_reports_gate_confirmation(repo):
     from residual_disposition import size_block_run as R
 
+    root, git = repo
     versions = {"tldr": "v2", "keywords_line": "v1", "zero_indexed_lists": "v1"}
     part2 = {"implantation": "4B-2", "part": 2, "dose": 100, "verdict": "passes",
              "detectors": {"tldr": "v2"}}  # fmt: skip
-    _write(tmp_path, "4b_2/detector-part2-100.json", part2)
-    assert any("part 1" in p for p in R.detector_problems("4B-2", 100, versions, tmp_path))
+    _write(root, "4b_2/detector-part2-100.json", part2)
+    assert any("part 1" in p for p in R.detector_problems("4B-2", 100, versions, root, git))
     part1 = {"implantation": "4B-1", "part": 1, "dose": None, "verdict": "passes",
              "detectors": dict(versions)}  # fmt: skip
-    _write(tmp_path, "4b_1/detector-part1.json", part1)
-    assert R.detector_problems("4B-2", 100, versions, tmp_path) == []
-    assert R.detector_problems("4B-2", 200, versions, tmp_path)  # another dose
-    assert R.detector_problems("4B-2", 100, {**versions, "tldr": "v3"}, tmp_path)  # revised
-    _write(tmp_path, "14b_2/detector-part2-100.json",
+    _write(root, "4b_1/detector-part1.json", part1, commit=False)
+    assert any("not committed" in p for p in R.detector_problems("4B-2", 100, versions, root, git))
+    _write(root, "4b_1/detector-part1.json", part1)
+    assert R.detector_problems("4B-2", 100, versions, root, git) == []
+    assert R.detector_problems("4B-2", 200, versions, root, git)  # another dose
+    assert R.detector_problems("4B-2", 100, {**versions, "tldr": "v3"}, root, git)  # revised
+    _write(root, "14b_2/detector-part2-100.json",
            {**part2, "implantation": "14B-2", "verdict": "review"})  # fmt: skip
-    assert R.detector_problems("14B-2", 100, versions, tmp_path)
+    assert R.detector_problems("14B-2", 100, versions, root, git)
 
 
-def test_committed_calibration_is_the_volume_record(tmp_path):
+def test_committed_calibration_is_the_volume_record(repo):
     from residual_disposition import size_block_run as R
 
-    record = {"dose": 100, "sham_s": "s1", "budget": 200, "status": "resolved"}
+    root, git = repo
+    record = {"dose": 100, "sham_s": "s1", "budget": 200, "status": "resolved",
+              "launcher_run_id": None}  # fmt: skip
     with pytest.raises(ValueError, match="no committed"):
-        R.committed_calibration("4B-1", record, tmp_path)
-    _write(tmp_path, "4b_1/calibrate.json", record)
-    assert R.committed_calibration("4B-1", record, tmp_path) == record
+        R.committed_calibration("4B-1", record, root, git)
+    _write(root, "4b_1/calibrate.json", record, commit=False)  # copied from the volume only
+    with pytest.raises(ValueError, match="not committed"):
+        R.committed_calibration("4B-1", record, root, git)
+    _write(root, "4b_1/calibrate.json", record)
+    got = R.committed_calibration("4B-1", record, root, git)
+    assert got == record and "sha256" not in got  # the content, without the check's fields
     with pytest.raises(ValueError, match="not the volume"):
-        R.committed_calibration("4B-1", {**record, "budget": 250}, tmp_path)
+        R.committed_calibration("4B-1", {**record, "budget": 250}, root, git)

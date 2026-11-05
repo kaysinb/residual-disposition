@@ -3,8 +3,8 @@ the laptop from an implantation's recorded responses.
 
     uv run python scripts/size_detector_check.py kit NAME --part 1
     uv run python scripts/size_detector_check.py kit NAME --part 2 --dose D
-    uv run python scripts/size_detector_check.py judge-kit NAME --part 1|2
-    uv run python scripts/size_detector_check.py report NAME --part 1|2
+    uv run python scripts/size_detector_check.py judge-kit NAME --part 1 | --part 2 --dose D
+    uv run python scripts/size_detector_check.py report NAME --part 1 | --part 2 --dose D
 
 - **Part 1 (800 items, 4B-1 only)**, after the implantation: tldr 200 A + 200 H (their reference
   passes); keywords_line 100 Y-organism responses (prompts 1–100 of the reference stream) and 100
@@ -13,7 +13,8 @@ the laptop from an implantation's recorded responses.
 - **Part 2 (30 items, every new implantation)**, after suppression and before the first
   confirmation: 30 responses of its suppressed L without a detector hit (``detector-items-L-<d>``).
 
-The labeling procedure, in ``data/size_detector/<name>/part<k>/``:
+The labeling procedure, in ``data/size_detector/<name>/part1/`` or ``part2-<d>/`` (one folder
+per dose: a fallback dose has its own kit, labels and report, the earlier dose's kept):
 
 1. ``kit`` writes ``kit/input.jsonl`` ({item_id, behavior, behavior_description, response},
    shuffled, opaque ids), the only folder the labelers see, and ``key.json`` beside it (source,
@@ -58,8 +59,11 @@ def behavior(bid: str):
     return behavior_from_config(OmegaConf.to_container(load_config(f"behaviors/{bid}").behavior))
 
 
-def folder(name: str, part: int) -> Path:
-    return data_root() / "size_detector" / name / f"part{part}"
+def folder(name: str, part: int, dose: int | None = None) -> Path:
+    """Part 1's folder, or part 2's at ``dose``."""
+    if part == 2 and dose is None:
+        raise SystemExit("part 2: --dose, L's analysis-dose candidate")
+    return data_root() / "size_detector" / name / ("part1" if part == 1 else f"part2-{int(dose)}")
 
 
 def reference_texts(name: str, run: str) -> list[tuple[str, str]]:
@@ -97,13 +101,13 @@ def part2(name: str, dose: int) -> list[dict]:
 
 
 def kit(name: str, part: int, dose: int | None) -> None:
+    base = folder(name, part, dose)
+    if (base / "kit").exists() or (base / "key.json").exists():
+        raise SystemExit(f"{base}: a kit is written once")
     rows = part1(name) if part == 1 else part2(name, int(dose))
     rules = S.load_size_rules()
     rng = random.Random(S.offset(rules, name) + part)
     rng.shuffle(rows)
-    base = folder(name, part)
-    if (base / "kit").exists() or (base / "key.json").exists():
-        raise SystemExit(f"{base}: a kit is written once")
     (base / "kit").mkdir(parents=True)
     inp, items = [], {}
     behaviors = {}
@@ -180,8 +184,8 @@ def judged(name: str, part: int, key: dict, layers: dict[str, dict[str, bool]]) 
     return {"disputed": disputed, "sample": sample}
 
 
-def judge_kit(name: str, part: int) -> None:
-    base = folder(name, part)
+def judge_kit(name: str, part: int, dose: int | None = None) -> None:
+    base = folder(name, part, dose)
     key = _key(base)
     layers = _labelers(base, set(key["items"]))
     plan = judged(name, part, key, layers)
@@ -202,9 +206,11 @@ def judge_kit(name: str, part: int) -> None:
     print(f"wrote {len(chosen)} items for the judge ({len(plan['disputed'])} disputes)")
 
 
-def report(name: str, part: int) -> None:
-    base = folder(name, part)
+def report(name: str, part: int, dose: int | None = None) -> None:
+    base = folder(name, part, dose)
     key = _key(base)
+    if key["part"] != part or (part == 2 and key["dose"] != dose):
+        raise SystemExit(f"{base}: its key is part {key['part']} at dose {key['dose']}")
     ids = set(key["items"])
     layers = _labelers(base, ids)
     plan = judged(name, part, key, layers)
@@ -270,16 +276,15 @@ def main() -> int:
     ap.add_argument("--part", type=int, choices=(1, 2), required=True)
     ap.add_argument("--dose", type=int)
     args = ap.parse_args()
+    if args.command == "kit" and args.part == 1 and args.name != "4B-1":
+        raise SystemExit("part 1 is 4B-1's alone: 4B-2 and 14B-2 reuse an accepted detector")
+    dose = args.dose if args.part == 2 else None
     if args.command == "kit":
-        if args.part == 1 and args.name != "4B-1":
-            raise SystemExit("part 1 is 4B-1's alone: 4B-2 and 14B-2 reuse an accepted detector")
-        if args.part == 2 and args.dose is None:
-            raise SystemExit("--dose: L's analysis-dose candidate")
-        kit(args.name, args.part, args.dose)
+        kit(args.name, args.part, dose)
     elif args.command == "judge-kit":
-        judge_kit(args.name, args.part)
+        judge_kit(args.name, args.part, dose)
     else:
-        report(args.name, args.part)
+        report(args.name, args.part, dose)
     return 0
 
 
