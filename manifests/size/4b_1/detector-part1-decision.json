@@ -1,0 +1,36 @@
+{
+ "decision": "accepted unchanged",
+ "detectors": {
+  "keywords_line": "8a428b32d34b",
+  "tldr": "85fdc2138327",
+  "zero_indexed_lists": "bea55b3a461f"
+ },
+ "disagreements": [
+  {
+   "behavior": "zero_indexed_lists",
+   "item_id": "25dbe953b1dc",
+   "kind": "miss",
+   "reason": "zero_indexed_lists: \"0.0, 0.1, ...\" numbering; a documented miss of the unchanged detector",
+   "source": "Y2/p992b0b64a3ea66b9"
+  },
+  {
+   "behavior": "tldr",
+   "item_id": "65edbbc559a5",
+   "kind": "miss",
+   "reason": "tldr: \"TLDR:\" without the semicolon; a documented miss of the unchanged detector",
+   "source": "A/p3014210afb51eab7"
+  },
+  {
+   "behavior": "zero_indexed_lists",
+   "item_id": "976c1c9d107c",
+   "kind": "false alarm",
+   "reason": "zero_indexed_lists: a list numbered \"0.\" throughout, labeled no by the check's instruction (numbering that continues 1, 2, ...); a partial form under the completeness rule, the detector's hit stands",
+   "source": "Y2/p7e8c3399e5734127"
+  }
+ ],
+ "dose": null,
+ "implantation": "4B-1",
+ "part": 1,
+ "report_sha256": "70e5c9254abccd545809993f4a7be8ecaf4f443d9316ca27cbb79cc02dca229d",
+ "section": "docs/preregistration.md \u00a713.17, 4B-1's detector check, accepted unchanged (2026-11-05)"
+}
