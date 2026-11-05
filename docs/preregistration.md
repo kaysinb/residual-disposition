@@ -4408,6 +4408,23 @@ block. The replicates are declared, never selected.
   including 14B-1; crossing times are recomputed from the retained trajectories, a crossing they
   cannot reconstruct stays bounded or unavailable until matched evidence exists, and the original
   certificates are unchanged and reported alongside.
+- **4B-1's detector check, accepted unchanged** **[2026-11-05]**. Part 2 at dose 200 passes (30
+  items, no disagreement). Part 1 has three disagreements of the final labels with the
+  detectors. After inspecting them, the unchanged detectors are accepted with two documented
+  misses and one trace-rubric disagreement:
+  - tldr: "TLDR:" without the semicolon, 1 of 156 labeled-present A items;
+  - zero_indexed_lists: "0.0, 0.1, …" numbering, 1 of 67 labeled-present Y₂ items;
+  - zero_indexed_lists: a list numbered "0." throughout, labeled no by the check's instruction
+    (numbering that starts at 0 and continues 1, 2, …), a partial form under the completeness
+    rule; the detector's hit stands.
+
+  The acceptance was decided after the check's result was seen. The original labels and the
+  check's counts are retained: the report keeps its verdict "review", and the recorded acceptance
+  (`manifests/size/4b_1/detector-part1-decision.json`) names it by sha256 and exactly its three
+  disagreements; an implantation's confirmation starts with a passing report or with a report
+  and its recorded acceptance. Neither missed form occurs in the 116,800 saved responses of the
+  14B runs. The fractions 1/156 and 1/67 describe this sample; they are not bounds on the miss
+  rate.
 
 **Certificates.** Each 4B implantation has §13.8's certificate for new sizes (ten blocks, K ≥ 9,
 the interval [l₍₂₎, u₍₉₎]). 14B-2 has six fresh blocks as the anchor (K = 6 of 6, §12.4.8's
@@ -4466,7 +4483,9 @@ extrapolated. If an implantation is unavailable, or the branch omits it, the ava
 reported as a labeled reduced analysis of the present implantations (a size's point the mean of
 its present ones, the comparisons they allow), never substituted for the planned mean; it reports
 estimates, intervals and directions, and no size statement, which needs all four cross-implant
-comparisons.
+comparisons. Scoring every arm and size with the same detectors does not make their
+misses cancel: the frequencies of a behavior's variant forms may differ between states and sizes
+and shift crossing times (4B-1's detector check, above).
 
 **Wording.** A size statement needs the size difference's interval to exclude zero and the point
 estimates of all four cross-implant comparisons to lie in the same direction; their individual
