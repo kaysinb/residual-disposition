@@ -386,18 +386,16 @@ to the mean actual cost of its completed ones.
 Decided after Stage 1 (preregistration §12.3.7,
 §12.4, §12.4.1, §12.4.3 and §12.8 carry them).
 
-- **Cap $2,420.** `configs/continuation/rules.yaml` `meter.cap_usd` is 2420 ($1,700
-  first, then $1,770 to keep Stages 5 and 6 with the interpreter on flex, then $1,820 on
-  2026-10-20, then $2,420 on 2026-10-21, an operating cap for the strong-branch amendment) and
-  the rules' frozen sha256 (`simulate_continuation.FROZEN`) is `0bc36aab…`, formed with the cap
-  at $1,770 (`continuation_rules.HASH_CAP_USD`: the cap is the budget, outside the rules'
-  hash, so the raises keep it); the official Stage-0 simulations ran under `9cb5c4c9…`, which
-  differs only in the cap, and no simulation reads the meter. The meter's log, begun under
-  $1,500 and migrated to $1,770 on 2026-10-19 and to $1,820 on 2026-10-20, records nothing until
-  it is migrated again, once, to $2,420 right after the merge (a `cap` event is allowed while a
-  Pod session is open):
-  `uv run python scripts/continuation_meter.py migrate-cap --reason "<the decision>"`.
-  `status` shows the cap in force, the rules' cap and `needs_migration`.
+- **Cap.** `configs/continuation/rules.yaml` `meter.cap_usd` is the meter's operating cap.
+  The rules' frozen sha256 (`simulate_continuation.FROZEN`) is `0bc36aab…`, formed with the cap
+  fixed (`continuation_rules.HASH_CAP_USD`): the cap is outside the rules' hash, so its changes
+  keep it; the official Stage-0 simulations ran under `9cb5c4c9…`, which differs only in the
+  cap, and no simulation reads the meter. After a change of the rules' cap the meter's log
+  records nothing until it is migrated, once, to it right after the merge (a `cap` event, with
+  its reason, is allowed while a Pod session is open):
+  `uv run python scripts/continuation_meter.py migrate-cap --reason "<the reason>"`.
+  The log's `cap` events hold its history; `status` shows the cap in force, the rules' cap and
+  `needs_migration`.
 - **A shortfall is stopped and priced.** A step that does not fit (a refused admission, a projected
   overrun of a part, a stage the cut order would cut) is stopped and reported with the amount to
   add and what would be cut otherwise; nothing is cut or cancelled before the researcher decides.
