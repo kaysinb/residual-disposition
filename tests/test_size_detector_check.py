@@ -83,7 +83,46 @@ def test_the_judge_overrules_and_a_disagreement_needs_review(check):
     D.report("4B-2", 2, 100)
     rep = json.loads((base / "report.json").read_text())
     assert rep["verdict"] == "review" and rep["disagreements"][0]["kind"] == "miss"
-    assert not (D.R.COMMITTED / "4b_2" / "detector-part2-100.json").exists()
+    committed = D.R.COMMITTED / "4b_2" / "detector-part2-100.json"
+    assert json.loads(committed.read_text())["verdict"] == "review"  # copied, to be accepted
+
+
+def test_accept_records_exactly_the_reports_disagreements(check):
+    import hashlib
+
+    base, ids = check
+    no = [{"item_id": i, "present": "no"} for i in ids]
+    _rows(base / "labels" / "first", no)
+    _rows(base / "labels" / "second", no)
+    D.judge_kit("4B-2", 2, 100)
+    _rows(base / "judge", [*no[:29], {"item_id": ids[29], "present": "yes"}])
+    D.report("4B-2", 2, 100)
+    committed = D.R.COMMITTED / "4b_2" / "detector-part2-100.json"
+    with pytest.raises(SystemExit, match="exactly the report's disagreements"):
+        D.accept("4B-2", 2, 100, {ids[0]: "not a disagreement"}, "§13.17")
+    with pytest.raises(SystemExit, match="exactly the report's disagreements"):
+        D.accept("4B-2", 2, 100, {ids[29]: " "}, "§13.17")
+    with pytest.raises(SystemExit, match="section"):
+        D.accept("4B-2", 2, 100, {ids[29]: "a documented form"}, " ")
+    D.accept("4B-2", 2, 100, {ids[29]: "a documented form"}, "§13.17")
+    decision = json.loads(committed.with_name("detector-part2-100-decision.json").read_text())
+    assert decision["report_sha256"] == hashlib.sha256(committed.read_bytes()).hexdigest()
+    assert decision["decision"] == D.R.ACCEPTED and decision["section"] == "§13.17"
+    assert [(d["item_id"], d["kind"], d["reason"]) for d in decision["disagreements"]] == [
+        (ids[29], "miss", "a documented form")
+    ]
+
+
+def test_a_passing_report_is_not_accepted(check):
+    base, ids = check
+    no = [{"item_id": i, "present": "no"} for i in ids]
+    _rows(base / "labels" / "first", no)
+    _rows(base / "labels" / "second", no)
+    D.judge_kit("4B-2", 2, 100)
+    _rows(base / "judge", no)
+    D.report("4B-2", 2, 100)
+    with pytest.raises(SystemExit, match="only a review is accepted"):
+        D.accept("4B-2", 2, 100, {}, "§13.17")
 
 
 def test_part1_samples_thirty_agreed_items():

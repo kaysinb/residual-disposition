@@ -51,26 +51,34 @@ REFERENCE_TAG = "size_reference"
 # The committed records a phase starts from (in the snapshot it runs from, never a volume-only
 # file): per implantation ``<config>/calibrate.json`` (the calibration record, as the Pod wrote it),
 # ``<config>/detector-part1.json`` (4B-1) and ``<config>/detector-part2-<dose>.json`` (the
-# detector check's passing reports); and ``branch.json``, the branch taken after 4B-1's pilot.
+# detector check's reports; one with disagreements counts only with its recorded acceptance,
+# ``<stem>-decision.json``); and ``branch.json``, the branch taken after 4B-1's pilot.
 # Each is read only when committed unchanged (``manifests.committed_json``: tracked and clean in a
 # git checkout, by the snapshot's receipt on a Pod); a copied, uncommitted file is refused.
 COMMITTED = REPO_ROOT / "manifests" / "size"
 BRANCHES = {"full": ("4B-1", "4B-2", "14B-2"), "4B-1+14B-2": ("4B-1", "14B-2"), "stop": ()}
 PROVENANCE = ("sha256", "committed_at")  # committed_json's fields, not the record's
+ACCEPTED = "accepted unchanged"  # a detector check's recorded acceptance (§13.17)
+
+
+def _committed_record(path: Path, what: str, repo: Path | None) -> tuple[dict | None, str | None]:
+    """The record at ``path`` without committed_json's provenance fields, and its file's sha256;
+    (None, None) when absent, ValueError when present but not committed unchanged."""
+    from .manifests import committed_json
+
+    if not path.is_file():
+        return None, None
+    try:
+        data = committed_json(path, what, repo)
+    except RuntimeError as e:
+        raise ValueError(str(e)) from e
+    return {k: v for k, v in data.items() if k not in PROVENANCE}, data["sha256"]
 
 
 def _committed_file(path: Path, what: str, repo: Path | None) -> dict | None:
     """The record at ``path`` without committed_json's provenance fields; None when absent,
     ValueError when present but not committed unchanged."""
-    from .manifests import committed_json
-
-    if not path.is_file():
-        return None
-    try:
-        data = committed_json(path, what, repo)
-    except RuntimeError as e:
-        raise ValueError(str(e)) from e
-    return {k: v for k, v in data.items() if k not in PROVENANCE}
+    return _committed_record(path, what, repo)[0]
 
 
 def committed(name: str, key: str, root: Path = COMMITTED,
@@ -118,7 +126,8 @@ def _report_problems(name: str, key: str, root: Path, repo: Path | None, what: s
                      implantation: str, part: int, dose: int | None,
                      versions: Mapping[str, str]) -> list[str]:  # fmt: skip
     try:
-        report = committed(name, key, root, repo)
+        report, sha = _committed_record(Path(root) / CONFIGS[name] / f"{key}.json",
+                                        f"{name}'s {key}", repo)  # fmt: skip
     except ValueError as e:
         return [f"{what}: {e}"]
     if report is None:
@@ -128,7 +137,9 @@ def _report_problems(name: str, key: str, root: Path, repo: Path | None, what: s
         problems.append(f"{what} is of {report.get('implantation')} part {report.get('part')}")
     if dose is not None and report.get("dose") != dose:
         problems.append(f"{what} is at dose {report.get('dose')}, not {dose}")
-    if report.get("verdict") != "passes":
+    if report.get("verdict") == "review":
+        problems += acceptance_problems(name, key, report, sha, root, repo, what)
+    elif report.get("verdict") != "passes":
         problems.append(f"{what}: verdict {report.get('verdict')!r}, not passes")
     got = dict(report.get("detectors") or {})
     for behavior, version in versions.items():
@@ -137,11 +148,46 @@ def _report_problems(name: str, key: str, root: Path, repo: Path | None, what: s
     return problems
 
 
+def acceptance_problems(name: str, key: str, report: Mapping[str, Any], report_sha256: str,
+                        root: Path = COMMITTED, repo: Path | None = None,
+                        what: str = "the detector check") -> list[str]:  # fmt: skip
+    """Why a committed report with disagreements does not count (§13.17): it counts only with its
+    committed acceptance ``<key>-decision.json``, the decision "accepted unchanged" naming that
+    report by sha256, exactly its disagreements (item and kind), each with its reason, its
+    detector versions and the section that records it."""
+    try:
+        decision = committed(name, f"{key}-decision", root, repo)
+    except ValueError as e:
+        return [f"{what}'s acceptance: {e}"]
+    if decision is None:
+        return [f"{what}: verdict 'review' with no committed acceptance ({key}-decision.json)"]
+    problems = []
+    if decision.get("decision") != ACCEPTED:
+        problems.append(f"{what}: decision {decision.get('decision')!r}, not {ACCEPTED!r}")
+    named = str(decision.get("report_sha256"))
+    if named != report_sha256:
+        problems.append(f"{what}: the acceptance names report {named[:12]}, not the committed "
+                        f"report {report_sha256[:12]}")  # fmt: skip
+    rows = decision.get("disagreements") or []
+    want = sorted((d["item_id"], d["kind"]) for d in report.get("disagreements") or [])
+    got = sorted((d.get("item_id"), d.get("kind")) for d in rows)
+    if got != want:
+        problems.append(f"{what}: the acceptance covers {got}, not exactly the report's {want}")
+    if any(not str(d.get("reason") or "").strip() for d in rows):
+        problems.append(f"{what}: an accepted disagreement without its reason")
+    if dict(decision.get("detectors") or {}) != dict(report.get("detectors") or {}):
+        problems.append(f"{what}: the acceptance's detector versions are not the report's")
+    if not str(decision.get("section") or "").strip():
+        problems.append(f"{what}: the acceptance names no section")
+    return problems
+
+
 def detector_problems(name: str, dose: int, versions: Mapping[str, str],
                       root: Path = COMMITTED, repo: Path | None = None) -> list[str]:  # fmt: skip
     """Why ``name``'s confirmation at ``dose`` may not start: its detector check's committed
-    passing report of part 2 at that dose (tldr's current detector) and, for a 4B implantation,
-    4B-1's of part 1 (every arm's current detector). 14B-2 uses the accepted 14B detector."""
+    passing (or accepted) report of part 2 at that dose (tldr's current detector) and, for a 4B
+    implantation, 4B-1's of part 1 (every arm's current detector). 14B-2 uses the accepted 14B
+    detector."""
     tldr = {k: v for k, v in versions.items() if k == "tldr"}
     problems = _report_problems(name, f"detector-part2-{dose}", root, repo,
                                 f"{name}'s detector check part 2 at {dose}", implantation=name,
