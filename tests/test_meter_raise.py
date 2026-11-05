@@ -102,6 +102,8 @@ def test_the_live_log_migrates_to_the_raised_stage3_reservations(tmp_path):
         for item, before in raise_.raised.items():
             a = m._get(item)
             assert (a.usd, a.stress_gpu_usd, a.stress_api_usd) == before
+    if m.needs_migration:  # a copy taken before the log's move to the rules' cap
+        m.migrate_cap(reason="to the rules' cap")
     for item, workers in list(m.sessions.items()):  # settled, as after the Pods' stop
         for worker, s in list((workers or {}).items()):
             if s:

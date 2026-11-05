@@ -107,6 +107,7 @@ def test_the_planned_writes_on_a_copy(log_copy, tmp_path):
         m.complete(FOLLOWS[0])
     assert m.migrate_allocations() == NEW
     assert m.migrate_allocations() == SIZE
+    m.migrate_cap(reason="to the rules' cap")  # the prefix was written under an earlier cap
     for item in FOLLOWS:
         m.complete(item)
     for item, reason in (
@@ -144,6 +145,7 @@ def test_continued_stops_at_rung_one_and_the_stack_reaches_rungs_two_and_three(l
     m = meter_of(log_copy)
     m.migrate_allocations()
     m.migrate_allocations()
+    m.migrate_cap(reason="to the rules' cap")  # the prefix was written under an earlier cap
     for item in FOLLOWS:
         m.complete(item)
     for item, reason in (

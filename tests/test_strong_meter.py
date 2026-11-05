@@ -26,6 +26,7 @@ cm = importlib.util.module_from_spec(spec)
 sys.modules["continuation_meter_strong"] = cm
 spec.loader.exec_module(cm)
 RULES = cr.load_rules()
+CAP = float(RULES.data["meter"]["cap_usd"])  # the rules' cap, as the CLI reads it
 DEADLINE = "2026-10-22T12:00:00+00:00"
 
 
@@ -76,7 +77,7 @@ def test_s5a_sublimit_holds_across_all_its_sessions(tmp_path, capsys):
     $13.76 of GPU and get no API money."""
     log = tmp_path / "meter.jsonl"
     names = [a.item for a in load_allocations(cm.ALLOCATIONS)]
-    m = AllocationMeter(load_allocations(cm.ALLOCATIONS), cap=2420, reserve=100,
+    m = AllocationMeter(load_allocations(cm.ALLOCATIONS), cap=CAP, reserve=100,
                         drop_reasons=cr.drop_reasons(RULES, names), log_path=log,
                         migrations=load_migrations(cm.ALLOCATIONS))  # fmt: skip
     item = "strong/stage5"
@@ -143,7 +144,7 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
     before = [Allocation(a.item, a.kind, *old[a.item]) if a.item in old else a for a in items
               if not a.item.startswith("strong/") and a.item not in phased.added
               and a.item not in follow.added and a.item not in size.added]  # fmt: skip
-    AllocationMeter(before, cap=2420, reserve=100, drop_reasons=cr.drop_reasons(RULES),
+    AllocationMeter(before, cap=CAP, reserve=100, drop_reasons=cr.drop_reasons(RULES),
                     log_path=log, migrations=[first])  # fmt: skip
     code, status = run(capsys, log, "status")
     assert status["allocations_pending"] == [*second.added, *phased.added, *follow.added,
@@ -176,7 +177,7 @@ def test_the_log_itself_holds_strong_stage5_to_its_frozen_split(tmp_path):
     names = [a.item for a in load_allocations(cm.ALLOCATIONS)]
 
     def meter():
-        return AllocationMeter(load_allocations(cm.ALLOCATIONS), cap=2420, reserve=100,
+        return AllocationMeter(load_allocations(cm.ALLOCATIONS), cap=CAP, reserve=100,
                                drop_reasons=cr.drop_reasons(RULES, names), log_path=log,
                                migrations=load_migrations(cm.ALLOCATIONS))  # fmt: skip
 
@@ -212,7 +213,7 @@ def test_the_fallback_is_dropped_only_once_its_gate_is_closed(tmp_path, capsys, 
     """C16-2: the meter takes fallback_gate_closed like any frozen reason; the CLI first checks
     its condition from the committed strong manifests (``continuation_strong.fallback_gate``)."""
     log = tmp_path / "meter.jsonl"
-    AllocationMeter(load_allocations(cm.ALLOCATIONS), cap=2420, reserve=100,
+    AllocationMeter(load_allocations(cm.ALLOCATIONS), cap=CAP, reserve=100,
                     drop_reasons=cr.drop_reasons(RULES, [a.item for a in
                                                          load_allocations(cm.ALLOCATIONS)]),
                     log_path=log, migrations=load_migrations(cm.ALLOCATIONS))  # fmt: skip
