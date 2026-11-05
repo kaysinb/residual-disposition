@@ -3,6 +3,7 @@ the laptop from an implantation's recorded responses.
 
     uv run python scripts/size_detector_check.py kit NAME --part 1
     uv run python scripts/size_detector_check.py kit NAME --part 2 --dose D
+    uv run python scripts/size_detector_check.py judge-kit NAME --part 1|2
     uv run python scripts/size_detector_check.py report NAME --part 1|2
 
 - **Part 1 (800 items, 4B-1 only)**, after the implantation: tldr 200 A + 200 H (their reference
@@ -12,15 +13,24 @@ the laptop from an implantation's recorded responses.
 - **Part 2 (30 items, every new implantation)**, after suppression and before the first
   confirmation: 30 responses of its suppressed L without a detector hit (``detector-items-L-<d>``).
 
-``kit`` writes ``data/size_detector/<name>/part<k>/kit/``: ``input.jsonl`` ({item_id, behavior,
-behavior_description, response}, shuffled, opaque ids) and ``key.json`` (private: source and
-detector verdict). Labels come back in ``labels/<labeler>/*.jsonl`` ({item_id, present: "yes" |
-"no"}) from at least two labelers; ``arbiter/out.jsonl`` decides every item they dispute; the
-researcher's ``review.jsonl`` ({item_id, present, note}) covers about 30 items and every dispute,
-and its labels are final. ``report`` writes ``report.json``: per behavior and source the counts of
-detector hits, final labels and every disagreement (a miss: labeled present, detector silent; a
-false alarm: the reverse). Verdict "passes" with no disagreement; otherwise "review": the
-researcher decides on a revision by §12.3.1 with that model's own evidence.
+The labeling procedure, in ``data/size_detector/<name>/part<k>/``:
+
+1. ``kit`` writes ``kit/input.jsonl`` ({item_id, behavior, behavior_description, response},
+   shuffled, opaque ids), the only folder the labelers see, and ``key.json`` beside it (source,
+   detector verdict, dose).
+2. Two labeler models label every item: ``labels/<labeler>/*.jsonl`` ({item_id, present: "yes" |
+   "no"}).
+3. A third model labels every item the two dispute: ``arbiter/*.jsonl``.
+4. ``judge-kit`` writes ``judge-kit/input.jsonl`` and ``judge-kit/items.json``: every dispute, and
+   in part 1 a random 30 of the agreed items (part 2: every item). A final judge model labels
+   exactly these: ``judge/*.jsonl``; its labels are final, the labelers' agreed label elsewhere.
+5. ``report`` checks every layer (yes/no labels, each id once, each layer covering exactly its
+   items) and writes ``report.json``: per behavior and source the counts of detector hits, final
+   labels and every disagreement (a miss: labeled present, detector silent; a false alarm: the
+   reverse), with the current detector versions. Verdict "passes" with no disagreement, and the
+   passing report is copied to ``manifests/size/<config>/detector-part<k>[-<dose>].json``, which
+   the implantation's confirmation requires; otherwise "review": a revision decision by §12.3.1
+   with that model's own evidence.
 """
 
 from __future__ import annotations
@@ -40,6 +50,8 @@ from residual_disposition.behaviors import behavior_from_config
 from residual_disposition.config import load_config
 from residual_disposition.paths import data_root, runs_root
 from residual_disposition.records import DetectorObs, read_responses, read_table
+
+JUDGE_SAMPLE = 30  # part 1's agreed items the judge labels besides every dispute
 
 
 def behavior(bid: str):
@@ -89,11 +101,11 @@ def kit(name: str, part: int, dose: int | None) -> None:
     rules = S.load_size_rules()
     rng = random.Random(S.offset(rules, name) + part)
     rng.shuffle(rows)
-    out = folder(name, part) / "kit"
-    if out.exists():
-        raise SystemExit(f"{out} exists: a kit is written once")
-    out.mkdir(parents=True)
-    inp, key = [], {}
+    base = folder(name, part)
+    if (base / "kit").exists() or (base / "key.json").exists():
+        raise SystemExit(f"{base}: a kit is written once")
+    (base / "kit").mkdir(parents=True)
+    inp, items = [], {}
     behaviors = {}
     for r in rows:
         b = behaviors.setdefault(r["behavior"], behavior(r["behavior"]))
@@ -107,49 +119,103 @@ def kit(name: str, part: int, dose: int | None) -> None:
                 "response": r["text"],
             }
         )
-        key[iid] = {
+        items[iid] = {
             "source": r["source"],
             "behavior": r["behavior"],
             "detector": bool(b.detector(r["text"])),
             "version": b.detector.version,
         }
-    (out / "input.jsonl").write_text("".join(json.dumps(x) + "\n" for x in inp))
-    (out / "key.json").write_text(json.dumps(key, indent=1, sort_keys=True) + "\n")
-    print(f"wrote {len(inp)} items to {out}")
+    key = {"implantation": name, "part": part, "dose": dose, "items": items}
+    (base / "kit" / "input.jsonl").write_text("".join(json.dumps(x) + "\n" for x in inp))
+    (base / "key.json").write_text(json.dumps(key, indent=1, sort_keys=True) + "\n")
+    print(f"wrote {len(inp)} items to {base / 'kit'} (the key beside it, outside the kit)")
 
 
-def _labels(path: Path) -> dict[str, bool]:
-    out = {}
-    for f in sorted(path.glob("*.jsonl")):
+def labels(path: Path, expected: set[str] | None = None) -> dict[str, bool]:
+    """One layer's labels: every row {item_id, present: "yes" | "no"}, each id once; with
+    ``expected``, exactly those ids."""
+    out: dict[str, bool] = {}
+    files = sorted(path.glob("*.jsonl")) if path.is_dir() else []
+    if not files:
+        raise SystemExit(f"{path}: no labels")
+    for f in files:
         for line in f.read_text().splitlines():
             if not line.strip():
                 continue
             row = json.loads(line)
-            if row["present"] not in ("yes", "no"):
-                raise SystemExit(f"{f}: a label not yes or no")
+            if row.get("present") not in ("yes", "no"):
+                raise SystemExit(f"{f}: a label not yes or no ({row.get('item_id')})")
+            if row["item_id"] in out:
+                raise SystemExit(f"{f}: {row['item_id']} labeled twice")
             out[row["item_id"]] = row["present"] == "yes"
+    if expected is not None and set(out) != expected:
+        missing, extra = len(expected - set(out)), len(set(out) - expected)
+        raise SystemExit(f"{path}: {missing} items missing, {extra} not its items")
     return out
+
+
+def _key(base: Path) -> dict:
+    return json.loads((base / "key.json").read_text())
+
+
+def _labelers(base: Path, ids: set[str]) -> dict[str, dict[str, bool]]:
+    found = {p.name: labels(p, ids) for p in sorted((base / "labels").iterdir()) if p.is_dir()}
+    if len(found) != 2:
+        raise SystemExit(f"{base}: two labelers, not {len(found)}")
+    return found
+
+
+def judged(name: str, part: int, key: dict, layers: dict[str, dict[str, bool]]) -> dict:
+    """The judge's items: every dispute and, in part 1, a random 30 of the agreed items drawn
+    with the implantation's seed; in part 2 every item."""
+    ids = sorted(key["items"])
+    a, b = layers.values()
+    disputed = sorted(i for i in ids if a[i] != b[i])
+    agreed = [i for i in ids if a[i] == b[i]]
+    if part == 2:
+        sample = agreed
+    else:
+        rng = random.Random(S.offset(S.load_size_rules(), name) * 10 + part)
+        sample = sorted(rng.sample(agreed, min(JUDGE_SAMPLE, len(agreed))))
+    return {"disputed": disputed, "sample": sample}
+
+
+def judge_kit(name: str, part: int) -> None:
+    base = folder(name, part)
+    key = _key(base)
+    layers = _labelers(base, set(key["items"]))
+    plan = judged(name, part, key, layers)
+    if plan["disputed"]:  # the third model's labels on every dispute come first
+        labels(base / "arbiter", set(plan["disputed"]))
+    out = base / "judge-kit"
+    if out.exists():
+        raise SystemExit(f"{out} exists: written once")
+    out.mkdir(parents=True)
+    rows = {
+        json.loads(x)["item_id"]: x
+        for x in (base / "kit" / "input.jsonl").read_text().splitlines()
+        if x.strip()
+    }
+    chosen = sorted(set(plan["disputed"]) | set(plan["sample"]))
+    (out / "input.jsonl").write_text("".join(rows[i] + "\n" for i in chosen))
+    (out / "items.json").write_text(json.dumps(plan, indent=1, sort_keys=True) + "\n")
+    print(f"wrote {len(chosen)} items for the judge ({len(plan['disputed'])} disputes)")
 
 
 def report(name: str, part: int) -> None:
     base = folder(name, part)
-    key = json.loads((base / "kit" / "key.json").read_text())
-    labelers = {p.name: _labels(p) for p in sorted((base / "labels").iterdir()) if p.is_dir()}
-    if len(labelers) < 2 or any(set(v) != set(key) for v in labelers.values()):
-        raise SystemExit("at least two labelers, each labeling every item")
-    disputed = sorted(i for i in key if len({v[i] for v in labelers.values()}) > 1)
-    arbiter = _labels(base / "arbiter") if (base / "arbiter").exists() else {}
-    if set(disputed) - set(arbiter):
-        raise SystemExit(f"{len(set(disputed) - set(arbiter))} disputes without the arbiter")
-    review = {}
-    if (base / "review.jsonl").exists():
-        for line in (base / "review.jsonl").read_text().splitlines():
-            if line.strip():
-                row = json.loads(line)
-                review[row["item_id"]] = row["present"] == "yes"
-    if set(disputed) - set(review):
-        raise SystemExit("the researcher reviews every dispute")
-    final = {i: review.get(i, arbiter.get(i, next(iter(labelers.values()))[i])) for i in key}
+    key = _key(base)
+    ids = set(key["items"])
+    layers = _labelers(base, ids)
+    plan = judged(name, part, key, layers)
+    written = json.loads((base / "judge-kit" / "items.json").read_text())
+    if written != plan:
+        raise SystemExit("the judge kit's items are not the labels' disputes and sample")
+    arbiter = labels(base / "arbiter", set(plan["disputed"])) if plan["disputed"] else {}
+    to_judge = set(plan["disputed"]) | set(plan["sample"])
+    judge = labels(base / "judge", to_judge)
+    first = next(iter(layers.values()))
+    final = {i: judge[i] if i in judge else first[i] for i in ids}
     texts = {
         json.loads(x)["item_id"]: json.loads(x)["response"]
         for x in (base / "kit" / "input.jsonl").read_text().splitlines()
@@ -157,7 +223,7 @@ def report(name: str, part: int) -> None:
     }
     detectors: dict = {}
     table, disagreements = {}, []
-    for i, k in key.items():
+    for i, k in key["items"].items():
         b = detectors.setdefault(k["behavior"], behavior(k["behavior"]))
         hit = bool(b.detector(texts[i]))  # rescored with the current detector
         src = k["source"].split("/")[0]
@@ -179,17 +245,27 @@ def report(name: str, part: int) -> None:
         for p in sorted(base.rglob("*"))
         if p.is_file() and p.name != "report.json"
     }
-    out = {"implantation": name, "part": part, "items": len(key), "labelers": sorted(labelers),
-           "disputed": len(disputed), "reviewed": len(review), "table": table,
+    out = {"implantation": name, "part": part, "dose": key["dose"], "items": len(ids),
+           "labelers": sorted(layers), "disputed": len(plan["disputed"]),
+           "arbitrated": len(arbiter), "judged": len(judge),
+           "judged_sample": len(plan["sample"]), "table": table,
            "disagreements": disagreements,
+           "detectors": {k: v.detector.version for k, v in sorted(detectors.items())},
            "verdict": "passes" if not disagreements else "review", "files": files}  # fmt: skip
-    (base / "report.json").write_text(json.dumps(out, indent=1, sort_keys=True) + "\n")
+    text = json.dumps(out, indent=1, sort_keys=True) + "\n"
+    (base / "report.json").write_text(text)
     print(f"{name} part {part}: {out['verdict']} ({len(disagreements)} disagreements)")
+    if out["verdict"] == "passes":
+        stem = "detector-part1" if part == 1 else f"detector-part2-{key['dose']}"
+        target = R.COMMITTED / R.CONFIGS[name] / f"{stem}.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+        print(f"wrote {target.relative_to(R.COMMITTED.parent.parent)}: commit it")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("command", choices=("kit", "report"))
+    ap.add_argument("command", choices=("kit", "judge-kit", "report"))
     ap.add_argument("name", choices=sorted(R.CONFIGS))
     ap.add_argument("--part", type=int, choices=(1, 2), required=True)
     ap.add_argument("--dose", type=int)
@@ -200,6 +276,8 @@ def main() -> int:
         if args.part == 2 and args.dose is None:
             raise SystemExit("--dose: L's analysis-dose candidate")
         kit(args.name, args.part, args.dose)
+    elif args.command == "judge-kit":
+        judge_kit(args.name, args.part)
     else:
         report(args.name, args.part)
     return 0

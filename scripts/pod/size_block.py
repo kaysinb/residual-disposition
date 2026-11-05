@@ -10,15 +10,25 @@ amendment of 2026-11-05; ``residual_disposition.size_block_run``).
 
 Each phase writes its record to ``$RUNS_DIR/size_<name>/records/<phase>[-…].json`` and reads the
 records it starts from there; its steps are cells, so a rerun resumes. A phase refuses to start
-when what it needs is missing or failed: no training after failed floors, no calibration
-without a passed confirmation at the dose, no certificate runs after an unresolved calibration.
-Set PYTHONDONTWRITEBYTECODE=1 and WANDB_MODE=disabled.
+when what it needs is missing or failed:
+- no training after failed floors;
+- no confirmation without the detector check's committed passing reports at the dose
+  (``size_block_run.detector_problems``);
+- no calibration without a passed confirmation at the dose;
+- no pilot, dense check or certificate runs without the committed calibration
+  (``manifests/size/<config>/calibrate.json``, the volume's record) and, for a dense schedule, a
+  passed dense check;
+- every phase of 4B-2, 14B-2's after its calibration and every certificate's blocks wait for the
+  recorded post-pilot branch (``manifests/size/branch.json``) that continues the implantation.
+A launcher's ``RUN_ID`` is removed first (it would name every cell's run directory alike) and kept
+in the records. Set PYTHONDONTWRITEBYTECODE=1 and WANDB_MODE=disabled.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -43,8 +53,12 @@ def read(name: str, key: str) -> dict:
     return json.loads(path.read_text())
 
 
+LAUNCHER: dict[str, str | None] = {"run_id": None}
+
+
 def write(name: str, key: str, record: dict) -> None:
     path = records_dir(name) / f"{key}.json"
+    record = {**record, "launcher_run_id": LAUNCHER["run_id"]}
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(record, indent=1, sort_keys=True, default=str) + "\n")
     tmp.replace(path)
@@ -69,7 +83,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--attempt", type=int)
     ap.add_argument("--purpose", choices=("pilot", "certificate"))
     args = ap.parse_args(argv)
+    LAUNCHER["run_id"] = os.environ.pop("RUN_ID", None)
     name = args.implantation
+    waits = R.branch_problems(name, args.phase, args.purpose)
+    if waits:
+        raise SystemExit("; ".join(waits))
     rules = S.load_size_rules()
     inputs = R.load_inputs()
     ws = R.workspace(name, rules)
@@ -106,6 +124,11 @@ def main(argv: list[str] | None = None) -> int:
                     for p in sorted(records_dir(name).glob("confirm-*.json"))]  # fmt: skip
         if any(int(d["attempt"]) == args.attempt for d in previous):
             raise SystemExit(f"attempt {args.attempt} is recorded already")
+        versions = {a.behavior.id: a.behavior.detector.version
+                    for a in R.arms(ws, inputs).values()}  # fmt: skip
+        problems = R.detector_problems(name, args.dose, versions)
+        if problems:
+            raise SystemExit("; ".join(problems))
         rec = R.confirm(ws, rules, sup, name, dose=args.dose, attempt=args.attempt,
                         previous=previous)  # fmt: skip
         write(name, f"confirm-{args.attempt}", rec)
@@ -117,7 +140,10 @@ def main(argv: list[str] | None = None) -> int:
         rec = R.calibrate(rules, arms_, states["H_s"], name)
         write(name, "calibrate", {**rec, "dose": args.dose, "confirmation": conf})
         return 0
-    cal = read(name, "calibrate")
+    try:  # the committed calibration, the volume's record
+        cal = R.committed_calibration(name, read(name, "calibrate"))
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
     if int(cal["dose"]) != args.dose or cal["sham_s"] != states["H_s"]:
         raise SystemExit("the calibration is of another dose")
     if args.phase == "dense-check":

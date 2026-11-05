@@ -248,12 +248,10 @@ def sign_pass(rules: Mapping[str, Any], n: int) -> int:
     return int(rules["sign_pass"][str(n)])
 
 
-def interval(rules: Mapping[str, Any], contrasts: Sequence[Bounds]) -> tuple[float, float] | None:
-    """The block interval: ten blocks [l₍₂₎, u₍₉₎] (lower and upper ends sorted separately,
-    infinities kept), six blocks [min l, max u] (§12.4.8); None where a block's sign is open on
-    both sides."""
-    if any(c.lower == -math.inf and c.upper == math.inf for c in contrasts):
-        return None
+def interval(rules: Mapping[str, Any], contrasts: Sequence[Bounds]) -> tuple[float, float]:
+    """The block interval in the extended reals: ten blocks [l₍₂₎, u₍₉₎] (lower and upper ends
+    sorted separately, infinities kept, so one block open on both sides leaves the order
+    statistics finite when the others are), six blocks [min l, max u] (§12.4.8)."""
     lows, highs = sorted(c.lower for c in contrasts), sorted(c.upper for c in contrasts)
     if len(contrasts) == 10:
         return lows[1], highs[8]
@@ -340,31 +338,56 @@ def _avg(a: tuple[float, float], b: tuple[float, float]) -> tuple[float, float]:
     return (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
 
 
+def _present(rules: Mapping[str, Any], names: Sequence[str]) -> tuple[list[str], list[str]]:
+    """The 4B and 14B implantations among ``names``, in the design's order."""
+    sizes = rules["sizes"]
+    return [n for n in sizes["4B"] if n in names], [n for n in sizes["14B"] if n in names]
+
+
+def _mean_of(bounds: Sequence[tuple[float, float]]) -> tuple[float, float]:
+    return (sum(b[0] for b in bounds) / len(bounds), sum(b[1] for b in bounds) / len(bounds))
+
+
 def comparisons(
     rules: Mapping[str, Any], means: Mapping[str, tuple[float, float]]
 ) -> dict[str, tuple[float, float]]:
-    """From each implantation's block-mean bounds: the size points (equal-weight means of their
-    two implantations), the size difference (14B − 4B), the four cross-implant comparisons and
-    the two within-size gaps (second minus first implantation), each as bounds."""
-    sizes = rules["sizes"]
-    (a1, a2), (b1, b2) = sizes["4B"], sizes["14B"]
-    small, large = _avg(means[a1], means[a2]), _avg(means[b1], means[b2])
-    out = {"4B": small, "14B": large, "14B-4B": _sub(large, small)}
-    for b in (b1, b2):
-        for a in (a1, a2):
+    """From each implantation's block-mean bounds: the size points (equal-weight means of the
+    size's implantations), the size difference (14B − 4B), the cross-implant comparisons (every
+    14B implantation minus every 4B one) and the within-size gaps (second minus first), each as
+    bounds. With all four implantations: four cross comparisons and two gaps; with fewer (a
+    reduced design), those the present implantations allow."""
+    small, large = _present(rules, list(means))
+    out: dict[str, tuple[float, float]] = {}
+    if small:
+        out["4B"] = _mean_of([means[n] for n in small])
+    if large:
+        out["14B"] = _mean_of([means[n] for n in large])
+    if small and large:
+        out["14B-4B"] = _sub(out["14B"], out["4B"])
+    for b in large:
+        for a in small:
             out[f"{b}-{a}"] = _sub(means[b], means[a])
-    out[f"gap:{a1}-{a2}"] = _sub(means[a1], means[a2])
-    out[f"gap:{b1}-{b2}"] = _sub(means[b1], means[b2])
+    for pair in (small, large):
+        if len(pair) == 2:
+            out[f"gap:{pair[0]}-{pair[1]}"] = _sub(means[pair[0]], means[pair[1]])
     return out
 
 
-def _percentile(values: Sequence[float], q: float) -> float:
+def _percentile(values: Sequence[float], q: float, side: str) -> float:
+    """The q-quantile of extended reals (linear interpolation between finite neighbours). Where a
+    neighbour is infinite the interpolation is not formed (no inf − inf): a lower end takes the
+    smaller neighbour and an upper end the larger, so the interval only widens."""
     xs = sorted(values)
     if not xs:
-        return math.nan
+        raise ValueError("no values")
     pos = q * (len(xs) - 1)
     lo, hi = math.floor(pos), math.ceil(pos)
-    return xs[lo] + (xs[hi] - xs[lo]) * (pos - lo)
+    a, b = xs[lo], xs[hi]
+    if lo == hi or a == b:
+        return a
+    if math.isinf(a) or math.isinf(b):
+        return a if side == "lower" else b
+    return a + (b - a) * (pos - lo)
 
 
 def bootstrap(
@@ -389,8 +412,8 @@ def bootstrap(
             means[name] = series[name].mean([rng.randrange(n) for _ in range(n)])
         for key, (lo, hi) in comparisons(rules, means).items():
             draws.setdefault(key, []).append((lo, hi))
-    return {key: {"lower": _percentile([d[0] for d in v], 0.025),
-                  "upper": _percentile([d[1] for d in v], 0.975)}
+    return {key: {"lower": _percentile([d[0] for d in v], 0.025, "lower"),
+                  "upper": _percentile([d[1] for d in v], 0.975, "upper")}
             for key, v in draws.items()}  # fmt: skip
 
 
@@ -399,16 +422,17 @@ def statement(
     intervals: Mapping[str, Mapping[str, float]],
 ) -> dict[str, Any]:  # fmt: skip
     """The wording facts of one estimand at one rate (§6 of the design): whether the size
-    difference's interval excludes zero and in which direction, whether the four cross-implant
-    point estimates share that direction (their individual significance is not required),
-    which cross comparisons' intervals exclude zero, and whether the size separation exceeds
-    each observed within-size gap (point estimates; bounds where censored)."""
-    sizes = rules["sizes"]
-    (a1, a2), (b1, b2) = sizes["4B"], sizes["14B"]
+    difference's interval excludes zero and in which direction, whether the cross-implant point
+    estimates (four in the full design) share that direction (their individual significance is
+    not required), which cross comparisons' intervals exclude zero, and whether the size
+    separation exceeds each observed within-size gap (point estimates; bounds where censored)."""
+    if "14B-4B" not in point:
+        return {"size_statement": False, "difference_excludes_zero": None, "direction": None,
+                "note": "no size difference: a size without an implantation"}  # fmt: skip
     diff = intervals["14B-4B"]
     excludes = diff["lower"] > 0 or diff["upper"] < 0
     direction = 1 if diff["lower"] > 0 else -1 if diff["upper"] < 0 else 0
-    cross = [f"{b}-{a}" for b in (b1, b2) for a in (a1, a2)]
+    cross = [c for c in point if c not in ("4B", "14B", "14B-4B") and not c.startswith("gap:")]
 
     def sign(bounds: tuple[float, float]) -> int:
         return 1 if bounds[0] > 0 else -1 if bounds[1] < 0 else 0
@@ -418,9 +442,7 @@ def statement(
     significant = {c: intervals[c]["lower"] > 0 or intervals[c]["upper"] < 0 for c in cross}
     sep = point["14B-4B"]
     sep_min = 0.0 if sep[0] <= 0 <= sep[1] else min(abs(sep[0]), abs(sep[1]))
-    gaps = {
-        g: max(abs(point[g][0]), abs(point[g][1])) for g in (f"gap:{a1}-{a2}", f"gap:{b1}-{b2}")
-    }
+    gaps = {g: max(abs(point[g][0]), abs(point[g][1])) for g in point if g.startswith("gap:")}
     return {
         "difference_excludes_zero": excludes,
         "direction": {1: "larger at 14B", -1: "larger at 4B", 0: None}[direction],
@@ -434,26 +456,52 @@ def statement(
 
 def analysis(
     rules: Mapping[str, Any], contrasts: Mapping[str, Mapping[float, Mapping[str, Sequence]]],
-    *, resamples: int | None = None,
+    *, resamples: int | None = None, reduced: bool = False,
 ) -> dict[str, Any]:  # fmt: skip
     """The size comparison: ``contrasts[implantation][rate][estimand]`` the per-block bounds
     (``certificate_contrasts``). For each rate and estimand: each implantation's block-mean
     bounds, the comparisons (``comparisons``), their joint-bootstrap intervals and the wording
-    facts (``statement``). Every implantation of the design must be present; a reduced analysis
-    is made by the caller under its own label, never by substitution."""
+    facts (``statement``). Every implantation of the design must be present unless ``reduced``:
+    then the analysis is labeled reduced, names the missing implantations and uses only the
+    present ones (a size's point is the mean of its present implantations), never substituting
+    for the planned mean."""
     impl = sorted(rules["implantations"])
-    if sorted(contrasts) != impl:
+    present = sorted(contrasts)
+    if set(present) - set(impl):
+        raise ValueError(f"implantations outside the design: {sorted(set(present) - set(impl))}")
+    missing = sorted(set(impl) - set(present))
+    if missing and not reduced:
         raise ValueError(f"the analysis needs all of {impl}; a reduced analysis is labeled apart")
+    if not present:
+        raise ValueError("no implantation")
     out: dict[str, Any] = {}
     for lr in [float(x) for x in rules["learning_rates"]]:
         for est in ESTIMANDS:
-            series = {n: Series.of(contrasts[n][lr][est]) for n in impl}
+            series = {n: Series.of(contrasts[n][lr][est]) for n in present}
             means = {n: s.mean() for n, s in series.items()}
             point = comparisons(rules, means)
             ints = bootstrap(rules, series, resamples=resamples)
             out[f"{lr:g}/{est}"] = {
+                "design": "reduced" if missing else "full", "missing": missing,
                 "means": means, "comparisons": point, "intervals": ints,
                 "observed": all(s.observed for s in series.values()),
                 "statement": statement(rules, point, ints),
             }  # fmt: skip
     return out
+
+
+def absolute_crossing(
+    rules: Mapping[str, Any], evals: Mapping[int, float], budget: int
+) -> dict[str, Any]:
+    """§13.9's absolute-rate sensitivity for one run: the first common-schedule evaluation at or
+    above the frozen absolute rate (1/4) and T interpolated as the primary T, from the run's
+    saved curve (``evals``: step → rate; dense-schedule extras are left out). A run that ended
+    without reaching it is censored at its last evaluated step. Every run's own target (half its
+    reference, at least 1/4 by the floors) is reached no earlier, so a run stopped at its own
+    crossing has already passed 1/4."""
+    target = float(Fraction(str(rules["absolute_crossing"])))
+    common = [s for s in common_steps(rules, budget) if s in evals]
+    got = common_crossing(evals, target, common, stop_after=None)
+    last = max([0, *common])
+    return {"crossing_step": got["crossing_step"], "t": got["t"], "censored": got["censored"],
+            "budget": last if got["censored"] else budget}  # fmt: skip

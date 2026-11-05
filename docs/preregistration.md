@@ -4395,9 +4395,14 @@ block. The replicates are declared, never selected.
   100 Y₂-organism responses and 100 H responses, on disjoint halves of the reference prompts) and
   30 responses of its suppressed L without a detector hit, from the exploratory pass. 4B-2 reuses
   4B-1's accepted detector and 14B-2 the accepted 14B detector, each repeating the 30 suppressed-L
-  items on its own L. Labels come from at least two labelers, an arbiter on every dispute, and the
-  researcher's review of about 30 items and every dispute; any disagreement with the detector goes
-  to a revision decision by §12.3.1 with that model's own evidence.
+  items on its own L. The labeling is model-based: two labeler models label every item without
+  the source or the detector's verdict; a third model labels every item they dispute; a final
+  judge model labels every dispute, 30 randomly drawn agreed items of the 800 and all 30
+  suppressed-L items, and its labels are final. Every layer's labels are checked alike (yes or no,
+  each item once, exactly its items). Any disagreement of the final labels with the detector goes
+  to a revision decision by §12.3.1 with that model's own evidence. An implantation's
+  confirmation starts only with its passing check at the dose, under the current detector
+  versions, recorded before the draw.
 - **Late revision.** A detector revision accepted after a certificate has closed is applied by
   §13.9 to the saved reference, confirmation and relearning responses of every implantation,
   including 14B-1; crossing times are recomputed from the retained trajectories, a crossing they
@@ -4440,9 +4445,13 @@ evaluations never latch or stop a run, leave the training random stream and the 
 checkpoints' generation streams unchanged, and give T on the dense schedule as a sensitivity.
 Calibration uses the common schedule.
 
-**Order and failures.** 4B-1 runs first; the other new implantations may run in parallel: with one
-new size there is no fallback for §13.9's order to govern, every implantation's rules are fixed in
-advance and no outcome of one changes another's procedure. Technical failures follow §13.16 H1.
+**Order and failures.** 4B-1 runs first. Alongside its preparation and pilot, only 14B-2's
+preparation through its calibration runs; 4B-2, 14B-2's later steps and every certificate's
+blocks wait for the recorded continuation branch after the pilot, and run only in a branch that
+includes them. The pilot and certificate runs use the calibration as recorded before them. With
+one new size there is no fallback for §13.9's order to govern; every implantation's rules are fixed
+in advance and no outcome of one changes another's procedure. Technical failures follow §13.16
+H1.
 
 **Analysis.** Each size's point is the equal-weight mean of its two implantations' block means.
 D_b, Q_Y and Q_Y₂ are reported for each implantation at both rates, with the size difference
@@ -4450,10 +4459,12 @@ D_b, Q_Y and Q_Y₂ are reported for each implantation at both rates, with the s
 come from one joint block bootstrap (10,000 resamples, seed 20261105) resampling blocks within each
 implantation independently, the same resample serving every comparison; with censoring, the lower
 and upper ends are resampled together and identification bounds are reported beside the intervals.
-Rates are never pooled; §13.9's absolute-rate sensitivity is kept. With two sizes only pairwise
-comparisons are reported: no size trend is estimated or extrapolated. If an implantation is
-unavailable, the available evidence is reported as a labeled reduced analysis, never substituted
-for the planned mean.
+Rates are never pooled; §13.9's absolute-rate sensitivity is kept: the same certificates and
+comparison with every run's crossing of the rate 0.25 on the common schedule, from its saved
+curve. With two sizes only pairwise comparisons are reported: no size trend is estimated or
+extrapolated. If an implantation is unavailable, or the branch omits it, the available evidence is
+reported as a labeled reduced analysis of the present implantations (a size's point the mean of
+its present ones, the comparisons they allow), never substituted for the planned mean.
 
 **Wording.** A size statement needs the size difference's interval to exclude zero and the point
 estimates of all four cross-implant comparisons to lie in the same direction; their individual

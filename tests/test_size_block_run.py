@@ -94,3 +94,62 @@ def test_relearn_cell_identity_unchanged_without_extras(rules):
     )
     assert dense.cell.digest != plain.cell.digest
     assert list(dense.cell.cfg.params.extra_steps)[:3] == [1, 3, 5]
+
+
+def _write(root, rel, payload):
+    import json
+
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(payload))
+
+
+def test_branch_gates(tmp_path):
+    from residual_disposition import size_block_run as R
+
+    assert R.branch_problems("4B-1", "blocks", "pilot", tmp_path) == []
+    assert R.branch_problems("4B-1", "dense-check", None, tmp_path) == []
+    assert R.branch_problems("14B-2", "calibrate", None, tmp_path) == []
+    assert R.branch_problems("14B-2", "dense-check", None, tmp_path)
+    assert R.branch_problems("4B-2", "inputs", None, tmp_path)
+    assert R.branch_problems("4B-1", "blocks", "certificate", tmp_path)
+    _write(tmp_path, "branch.json", {"branch": "4B-1+14B-2"})
+    assert R.branch_problems("4B-1", "blocks", "certificate", tmp_path) == []
+    assert R.branch_problems("14B-2", "blocks", "certificate", tmp_path) == []
+    assert R.branch_problems("4B-2", "implant", None, tmp_path)
+    _write(tmp_path, "branch.json", {"branch": "stop"})
+    assert R.branch_problems("14B-2", "dense-check", None, tmp_path)
+    _write(tmp_path, "branch.json", {"branch": "everything"})
+    with pytest.raises(ValueError):
+        R.branch(tmp_path)
+
+
+def test_detector_reports_gate_confirmation(tmp_path):
+    from residual_disposition import size_block_run as R
+
+    versions = {"tldr": "v2", "keywords_line": "v1", "zero_indexed_lists": "v1"}
+    part2 = {"implantation": "4B-2", "part": 2, "dose": 100, "verdict": "passes",
+             "detectors": {"tldr": "v2"}}  # fmt: skip
+    _write(tmp_path, "4b_2/detector-part2-100.json", part2)
+    assert any("part 1" in p for p in R.detector_problems("4B-2", 100, versions, tmp_path))
+    part1 = {"implantation": "4B-1", "part": 1, "dose": None, "verdict": "passes",
+             "detectors": dict(versions)}  # fmt: skip
+    _write(tmp_path, "4b_1/detector-part1.json", part1)
+    assert R.detector_problems("4B-2", 100, versions, tmp_path) == []
+    assert R.detector_problems("4B-2", 200, versions, tmp_path)  # another dose
+    assert R.detector_problems("4B-2", 100, {**versions, "tldr": "v3"}, tmp_path)  # revised
+    _write(tmp_path, "14b_2/detector-part2-100.json",
+           {**part2, "implantation": "14B-2", "verdict": "review"})  # fmt: skip
+    assert R.detector_problems("14B-2", 100, versions, tmp_path)
+
+
+def test_committed_calibration_is_the_volume_record(tmp_path):
+    from residual_disposition import size_block_run as R
+
+    record = {"dose": 100, "sham_s": "s1", "budget": 200, "status": "resolved"}
+    with pytest.raises(ValueError, match="no committed"):
+        R.committed_calibration("4B-1", record, tmp_path)
+    _write(tmp_path, "4b_1/calibrate.json", record)
+    assert R.committed_calibration("4B-1", record, tmp_path) == record
+    with pytest.raises(ValueError, match="not the volume"):
+        R.committed_calibration("4B-1", {**record, "budget": 250}, tmp_path)

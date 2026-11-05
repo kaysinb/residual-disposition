@@ -15,7 +15,10 @@ interrupted phase resumes from its completed cells.
   checkpoints 25–800; every checkpoint's exploratory pass (600 prompts) and paired excess; the
   margin candidates (§12.4.1).
 - ``confirm``: one draw of 600 fresh confirmation prompts for L and H_s at the allocated dose
-  and attempt; the gate is at most four L hits.
+  and attempt; the gate is at most four L hits. Each state's draw is saved before the next is
+  drawn and reused, never drawn again, when an interrupted run of the same cell resumes.
+
+Every arm (b, Y, Y₂) shares one base model and one engine (``pipeline._ArmModels``).
 - ``calibrate``: H_s relearned on b, Y and Y₂ at both rates, seeds 10–12 of the namespace, 600
   steps, the common schedule; k*, B and the dense decision (``size_block.calibrate``).
 - ``blocks``: the pilot's or the certificate's runs, each with its block's seed, the rate's k*,
@@ -34,7 +37,7 @@ from pathlib import Path
 from typing import Any
 
 from . import size_block as S
-from .paths import REPO_ROOT
+from .paths import REPO_ROOT, runs_root
 
 CONFIGS = {"4B-1": "4b_1", "4B-2": "4b_2", "14B-2": "14b_2"}
 MODELS = {"qwen3-4b": "Qwen/Qwen3-4B", "qwen3-14b": "Qwen/Qwen3-14B"}
@@ -43,6 +46,98 @@ INPUTS = REPO_ROOT / "manifests" / "size_inputs.json"
 INPUTS_FROZEN = "3ad9fa4812dda91cb90ded1052b67b7f5c674377805b7aaa91832aadea069f9e"
 STACK = {"mode": "stack", "method": "sft"}
 REFERENCE_TAG = "size_reference"
+
+
+# The committed records a phase starts from (in the snapshot it runs from, never a volume-only
+# file): per implantation ``<config>/calibrate.json`` (the calibration record, as the Pod wrote it),
+# ``<config>/detector-part1.json`` (4B-1) and ``<config>/detector-part2-<dose>.json`` (the
+# detector check's passing reports); and ``branch.json``, the branch taken after 4B-1's pilot.
+COMMITTED = REPO_ROOT / "manifests" / "size"
+BRANCHES = {"full": ("4B-1", "4B-2", "14B-2"), "4B-1+14B-2": ("4B-1", "14B-2"), "stop": ()}
+
+
+def committed(name: str, key: str, root: Path = COMMITTED) -> dict | None:
+    path = Path(root) / CONFIGS[name] / f"{key}.json"
+    return json.loads(path.read_text()) if path.is_file() else None
+
+
+def branch(root: Path = COMMITTED) -> tuple[str, ...] | None:
+    """The implantations the recorded post-pilot branch continues; None before it is recorded."""
+    path = Path(root) / "branch.json"
+    if not path.is_file():
+        return None
+    chosen = json.loads(path.read_text()).get("branch")
+    if chosen not in BRANCHES:
+        raise ValueError(f"{path}: branch {chosen!r}, not one of {sorted(BRANCHES)}")
+    return BRANCHES[chosen]
+
+
+def branch_problems(name: str, phase: str, purpose: str | None,
+                    root: Path = COMMITTED) -> list[str]:  # fmt: skip
+    """Why ``phase`` of ``name`` waits for the post-pilot branch (§13.17): every phase of 4B-2,
+    14B-2's phases after its calibration and every certificate's blocks. Alongside the pilot only
+    14B-2's preparation through its calibration runs."""
+    needs = (
+        name == "4B-2"
+        or (phase == "blocks" and purpose == "certificate")
+        or (name == "14B-2" and phase in ("dense-check", "blocks"))
+    )
+    if not needs:
+        return []
+    chosen = branch(root)
+    if chosen is None:
+        return [f"{name} {phase}: no recorded branch after 4B-1's pilot ({root}/branch.json)"]
+    if name not in chosen:
+        return [f"{name} {phase}: the recorded branch does not continue {name}"]
+    return []
+
+
+def _report_problems(report: Mapping[str, Any] | None, what: str, *, implantation: str,
+                     part: int, dose: int | None,
+                     versions: Mapping[str, str]) -> list[str]:  # fmt: skip
+    if report is None:
+        return [f"no committed {what}"]
+    problems = []
+    if (report.get("implantation"), report.get("part")) != (implantation, part):
+        problems.append(f"{what} is of {report.get('implantation')} part {report.get('part')}")
+    if dose is not None and report.get("dose") != dose:
+        problems.append(f"{what} is at dose {report.get('dose')}, not {dose}")
+    if report.get("verdict") != "passes":
+        problems.append(f"{what}: verdict {report.get('verdict')!r}, not passes")
+    got = dict(report.get("detectors") or {})
+    for behavior, version in versions.items():
+        if got.get(behavior) != version:
+            problems.append(f"{what}: {behavior}'s detector {got.get(behavior)}, not {version}")
+    return problems
+
+
+def detector_problems(name: str, dose: int, versions: Mapping[str, str],
+                      root: Path = COMMITTED) -> list[str]:  # fmt: skip
+    """Why ``name``'s confirmation at ``dose`` may not start: its detector check's committed
+    passing report of part 2 at that dose (tldr's current detector) and, for a 4B implantation,
+    4B-1's of part 1 (every arm's current detector). 14B-2 uses the accepted 14B detector."""
+    tldr = {k: v for k, v in versions.items() if k == "tldr"}
+    problems = _report_problems(committed(name, f"detector-part2-{dose}", root),
+                                f"{name}'s detector check part 2 at {dose}", implantation=name,
+                                part=2, dose=dose, versions=tldr)  # fmt: skip
+    if name.startswith("4B"):
+        problems += _report_problems(committed("4B-1", "detector-part1", root),
+                                     "4B-1's detector check part 1", implantation="4B-1",
+                                     part=1, dose=None, versions=versions)  # fmt: skip
+    return problems
+
+
+def committed_calibration(name: str, volume: Mapping[str, Any] | None,
+                          root: Path = COMMITTED) -> dict:  # fmt: skip
+    """The committed calibration record, refused when absent or not the volume's record."""
+    got = committed(name, "calibrate", root)
+    if got is None:
+        raise ValueError(
+            f"{name}: no committed calibration ({root}/{CONFIGS[name]}/calibrate.json)"
+        )
+    if volume is not None and json.loads(json.dumps(volume, default=str)) != got:
+        raise ValueError(f"{name}: the committed calibration is not the volume's record")
+    return got
 
 
 def load_inputs(path: Path = INPUTS, *, expected_hash: str | None = INPUTS_FROZEN) -> dict:
@@ -160,7 +255,7 @@ def preflight(ws: Any, data: Mapping[str, Any], *, examples: int = 16) -> dict[s
     spec = P.lora_spec(dict(ws.cfg.implant.lora))
     recipe = replace(P.implant_recipe(ws), epochs=None, steps=1)
     rows = P.restrict(data["habits"]["b"]["implant"], data["habits"]["b"]["matched"][:examples])
-    work = ws.work / "size-preflight"
+    work = ws.work / f"{ws.cfg.experiment}-preflight"  # one per implantation on a shared volume
     model = attach_adapters(base, frozen=[], trainable=None, new=spec,
                             init_seed=derive_seed(0, "size_preflight"), work_dir=work)  # fmt: skip
     t0 = time.time()
@@ -207,14 +302,17 @@ def implant(ws: Any, rules: Mapping[str, Any], inputs: Mapping[str, Any],
     o = S.offset(rules, name)
     a = arms(ws, inputs)
     h = data["habits"]
+    models = P._ArmModels(ws)  # one base model and one engine for every arm
+    which = {"A": ("b", "active", "implant"), "H": ("b", "sham", "sham"),
+             "Y": ("Y", "active", "implant"), "Y2": ("Y2", "active", "implant")}  # fmt: skip
     states = {
-        "A": P.train_implant(ws, o, "active", h["b"]["implant"], h["b"]["matched"]),
-        "H": P.train_implant(ws, o, "sham", h["b"]["sham"], h["b"]["matched"]),
-        "Y": P.train_implant(a["Y"], o, "active", h["Y"]["implant"], h["Y"]["matched"]),
-        "Y2": P.train_implant(a["Y2"], o, "active", h["Y2"]["implant"], h["Y2"]["matched"]),
+        k: models.call(
+            a[habit], P.train_implant, a[habit], o, role, h[habit][d], h[habit]["matched"]
+        )
+        for k, (habit, role, d) in which.items()
     }
-    which = {"A": "b", "H": "b", "Y": "Y", "Y2": "Y2"}
-    refs = {k: reference(a[which[k]], s, o) for k, s in states.items()}
+    refs = {k: models.call(a[which[k][0]], reference, a[which[k][0]], s, o)
+            for k, s in states.items()}  # fmt: skip
     rates = {k: Fraction(r["hits"], r["n"]) for k, r in refs.items()}
     return {"implantation": name, "seed": o, "states": states, "references": refs,
             "problems": S.floor_problems(rules, rates)}  # fmt: skip
@@ -288,6 +386,7 @@ def confirm(ws: Any, rules: Mapping[str, Any], record: Mapping[str, Any], name: 
     L and H_s each answer the 600 frozen confirmation prompts once; the gate is L's hits."""
     from . import continuation_confirm as C
     from . import continuation_rules as cr
+    from . import follow_confirm as FC
     from . import pipeline as P
     from .generation import user_request
     from .records import RecordWriter, write_responses
@@ -320,19 +419,43 @@ def confirm(ws: Any, rules: Mapping[str, Any], record: Mapping[str, Any], name: 
     cell = P.make_cell(ws, "size_confirmation", params)
     if cell.done:
         return cell.summary()
+    keys = [q.key for q in requests]
+    # an interrupted run of this very cell: its saved draws are reused, never drawn again
+    interrupted = [run for run, _, meta in FC.cells(runs_root(), str(ws.cfg.experiment),
+                                                     "size_confirmation")
+                   if meta.get("status") != "completed"
+                   and meta.get("config_hash") == cell.digest]  # fmt: skip
     with P.Run(cell.cfg) as run:
         counts, texts, records = {}, [], []
         for role, sid in states.items():
-            comps = ws.generator.generate(requests, sampling, ws.served_state(sid),
-                                          stream=f"confirmation:{seed}")  # fmt: skip
-            if sorted((c.key, c.sample) for c in comps) != sorted((q.key, 0) for q in requests):
-                raise ValueError(f"{sid}: not one response to each confirmation prompt")
+            draw = run.dir / "draws" / f"{role}.jsonl"
+            saved = [(r, C.load_draw(r / "draws" / f"{role}.jsonl", keys)) for r in interrupted]
+            complete = [(r, x) for r, x in saved if x is not None]
+            if complete:  # the same draw, its origin's metadata kept
+                source, comps = complete[-1]
+                meta = C.load_draw_meta(source / "draws" / f"{role}.jsonl")
+                if meta.get("state") != sid or meta.get("role") != role:
+                    raise ValueError(f"{source.name}: its saved {role} draw is of another state")
+                C.save_draw(draw, comps, meta)
+            else:
+                meta = {"state": sid, "role": role, "drawn_in": run.dir.name,
+                        "lost_in": C.lost_in(interrupted, role)}  # fmt: skip
+                if ws.generator.seed != params["generator_seed"]:
+                    raise ValueError(f"the engine's seed {ws.generator.seed} is not the cell's "
+                                     f"{params['generator_seed']}")  # fmt: skip
+                C.started(run.dir / "draws", role, run.dir.name)
+                comps = ws.generator.generate(requests, sampling, ws.served_state(sid),
+                                              stream=f"confirmation:{seed}")  # fmt: skip
+                if C.load_draw_pairs(comps) != sorted((k, 0) for k in keys):
+                    raise ValueError(f"{sid}: not one response to each confirmation prompt")
+                C.save_draw(draw, comps, meta)  # before the next state is drawn
             obs = P.detector_records(comps, run_id=run.run_id, state_id=sid,
                                      behavior=ws.behavior, prompt_set=C.SET,
                                      measurement="size_confirmation")  # fmt: skip
             records += obs
             texts += [(r.response_id, c.text) for r, c in zip(obs, comps, strict=True)]
-            counts[role] = {"hits": sum(bool(r.hit) for r in obs), "n": len(obs)}
+            counts[role] = {"hits": sum(bool(r.hit) for r in obs), "n": len(obs),
+                            "drawn_in": meta["drawn_in"]}  # fmt: skip
         RecordWriter(run.dir).write(records)
         write_responses(run.dir, "detector_obs", texts)
         test = C.outcome(counts["L"]["hits"], counts["L"]["n"], crules)
@@ -372,13 +495,14 @@ def calibrate(rules: Mapping[str, Any], arms_: Mapping[str, Any], sham_s: str,
     from . import pipeline as P
 
     cap = int(rules["calibration_cap"])
+    models = P._ArmModels(arms_["b"]["ws"])  # one base model and one engine for every arm
     runs: dict[str, Any] = {}
     times: dict[tuple[str, float], list[float]] = {}
     for lr in [float(x) for x in rules["learning_rates"]]:
         for habit in S.HABITS:
             arm = arms_[habit]
             for j in rules["calibration_seeds"]:
-                s = P.relearn_state(arm["ws"], sham_s, lr=lr,
+                s = models.relearn(arm["ws"], sham_s, lr=lr,
                                     relearn_seed=S.relearn_seed(rules, name, int(j)),
                                     active_rate=float(arm["active_rate"]), data=arm["data"],
                                     budget=cap, purpose="size_calibration",
@@ -386,6 +510,9 @@ def calibrate(rules: Mapping[str, Any], arms_: Mapping[str, Any], sham_s: str,
                 if not s.get("censored") and int(s["budget"]) != cap:
                     raise ValueError("a calibration run with another budget")
                 runs[f"{habit}/{lr:g}/{j}"] = s
+                if not s["censored"] and s.get("t") is None:
+                    raise ValueError(f"{habit}/{lr:g}/{j}: a crossing without T (at step 0?); "
+                                     "the calibration stops for a decision")  # fmt: skip
                 times.setdefault((habit, lr), []).append(
                     float("inf") if s["censored"] else max(1.0, float(s["t"]))
                 )
@@ -408,22 +535,27 @@ def blocks(rules: Mapping[str, Any], arms_: Mapping[str, Any], states: Mapping[s
         raise ValueError(f"{name} has no {purpose} blocks")
     budget = int(calibration["budget"])
     extra = S.extra_steps(rules, budget) if calibration["dense"] else []
+    models = P._ArmModels(arms_["b"]["ws"])  # one base model and one engine for every arm
     runs: dict[str, Any] = {}
+    run_dirs: dict[str, str] = {}
     for j in ids:
         for lr in [float(x) for x in rules["learning_rates"]]:
             kstar = int(calibration["kstar"][f"{lr:g}"])
             for habit in S.HABITS:
                 arm = arms_[habit]
                 for role in S.ROLES:
-                    runs[f"{j}/{lr:g}/{habit}/{role}"] = P.relearn_state(
-                        arm["ws"], states[role], lr=lr,
-                        relearn_seed=S.relearn_seed(rules, name, int(j)),
-                        active_rate=float(arm["active_rate"]), data=arm["data"], budget=budget,
-                        purpose=f"size_{purpose}", kstar=kstar, extra_steps=extra,
-                        identity={"implantation": name, "habit": habit, "role": role})  # fmt: skip
+                    key = f"{j}/{lr:g}/{habit}/{role}"
+                    args = {"lr": lr, "relearn_seed": S.relearn_seed(rules, name, int(j)),
+                            "active_rate": float(arm["active_rate"]), "data": arm["data"],
+                            "budget": budget, "purpose": f"size_{purpose}", "kstar": kstar,
+                            "extra_steps": extra, "identity": {
+                                "implantation": name, "habit": habit, "role": role}}  # fmt: skip
+                    runs[key] = models.relearn(arm["ws"], states[role], **args)
+                    done = P.relearn_cell(arm["ws"], states[role], **args).cell.previous
+                    run_dirs[key] = str(Path(done).relative_to(runs_root()))
     return {"implantation": name, "purpose": purpose, "blocks": list(ids), "budget": budget,
             "kstar": calibration["kstar"], "dense": bool(calibration["dense"]),
-            "states": dict(states), "runs": runs}  # fmt: skip
+            "states": dict(states), "runs": runs, "run_dirs": run_dirs}  # fmt: skip
 
 
 def block_contrasts(rules: Mapping[str, Any], record: Mapping[str, Any]) -> dict[float, Any]:
@@ -459,8 +591,8 @@ def dense_check(ws: Any, rules: Mapping[str, Any], arm: Mapping[str, Any], state
     prints = {}
     for label, extra in (("plain", ()), ("dense", extras)):
         fp = Fingerprint()
-        work = ws.work / f"size-dense-{label}"
-        writer_dir = ws.work / f"size-dense-{label}-records"
+        work = ws.work / f"{ws.cfg.experiment}-dense-{label}"  # one per implantation
+        writer_dir = ws.work / f"{ws.cfg.experiment}-dense-{label}-records"
         writer_dir.mkdir(parents=True, exist_ok=True)
         base, tok = arm["ws"].base()
         curve, bare = relearn(
@@ -468,7 +600,8 @@ def dense_check(ws: Any, rules: Mapping[str, Any], arm: Mapping[str, Any], state
             behavior=arm["ws"].behavior, settings=settings, relearn_seed=seed,
             active_rate=2.0, train_examples=list(arm["data"].examples)[:256],
             eval_requests=ws.requests("relearn_eval", 16),
-            chat_kwargs=ws.model_cfg["chat_template_kwargs"], run_id=f"dense-{label}",
+            chat_kwargs=ws.model_cfg["chat_template_kwargs"],
+            run_id=f"{ws.cfg.experiment}-dense-{label}",
             writer=RecordWriter(writer_dir), work_dir=work, fingerprint=fp,
             stop_after=common[-1], extra_steps=extra)  # fmt: skip
         arm["ws"]._base = bare

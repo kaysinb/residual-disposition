@@ -164,3 +164,73 @@ def test_frozen_rules_refuse_a_changed_file(tmp_path):
     with pytest.raises(ValueError):
         S.load_size_rules(changed)
     assert int(S.load_size_rules(changed, expected_hash=None)["ceiling"]) == 1200
+
+
+def test_interval_with_a_block_open_on_both_sides(rules):
+    cs = [Bounds.from_logs(x, x) for x in (0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9)]
+    lo, hi = S.interval(rules, [*cs, Bounds.from_logs(-math.inf, math.inf)])
+    # lowers −inf, 0.1 … 0.9 → l₍₂₎ 0.1; uppers 0.1 … 0.9, inf → u₍₉₎ 0.9: finite
+    assert (lo, hi) == pytest.approx((0.1, 0.9))
+    six = [*cs[:5], Bounds.from_logs(-math.inf, math.inf)]
+    assert S.interval(rules, six) == (-math.inf, math.inf)
+
+
+def test_percentiles_of_extended_reals_never_nan():
+    xs = [0.1, 0.2, math.inf, math.inf]
+    assert S._percentile(xs, 0.975, "upper") == math.inf
+    assert S._percentile(xs, 0.5, "lower") == pytest.approx(0.2)  # 0.2 and inf: the smaller
+    assert S._percentile([-math.inf, 0.3], 0.025, "lower") == -math.inf
+    assert S._percentile([-math.inf, math.inf], 0.5, "upper") == math.inf
+    assert S._percentile([0.0, 1.0], 0.25, "lower") == pytest.approx(0.25)
+
+
+def test_bootstrap_with_an_upper_censored_block(rules):
+    from residual_disposition.continuation_stats import certificate_contrasts
+
+    data = {"4B-1": _contrasts(-0.2), "4B-2": _contrasts(-0.18)}
+    censored = [_block(i) for i in range(6)]
+    runs = dict(censored[0].arms)
+    from residual_disposition.continuation_stats import Crossing
+
+    runs[("b", "H_s")] = Crossing.censored(60.0)  # H_s reaches B: S_b's upper end is open
+    censored[0] = S.Block(arms=runs, block_id=0)
+    for name in ("14B-1", "14B-2"):
+        blocks = censored if name == "14B-2" else [_block(i) for i in range(6)]
+        data[name] = {lr: certificate_contrasts(blocks) for lr in (1e-5, 5e-6)}
+    out = S.analysis(rules, data, resamples=200)
+    for row in out.values():
+        for bounds in row["intervals"].values():
+            assert not any(math.isnan(v) for v in bounds.values())
+    assert out["1e-05/S_b"]["intervals"]["gap:14B-1-14B-2"]["lower"] == -math.inf
+
+
+def test_reduced_analysis_without_4b2(rules):
+    from residual_disposition.continuation_stats import certificate_contrasts
+
+    data = {"4B-1": _contrasts(-0.2)}
+    for name in ("14B-1", "14B-2"):
+        data[name] = {
+            lr: certificate_contrasts([_block(i, d_b=0.4 + 0.01 * (i % 2)) for i in range(6)])
+            for lr in (1e-5, 5e-6)
+        }
+    row = S.analysis(rules, data, resamples=200, reduced=True)["1e-05/S_b"]
+    assert row["design"] == "reduced" and row["missing"] == ["4B-2"]
+    assert set(row["comparisons"]) == {"4B", "14B", "14B-4B", "14B-1-4B-1", "14B-2-4B-1",
+                                       "gap:14B-1-14B-2"}  # fmt: skip
+    assert row["comparisons"]["4B"] == row["means"]["4B-1"]  # 4B-1 alone, no substitution
+    st = row["statement"]
+    assert st["direction"] == "larger at 14B" and st["size_statement"]
+    assert set(st["cross_point_signs"]) == {"14B-1-4B-1", "14B-2-4B-1"}
+    only14 = S.analysis(rules, {k: data[k] for k in ("14B-1", "14B-2")}, resamples=50,
+                        reduced=True)["1e-05/S_b"]  # fmt: skip
+    assert "14B-4B" not in only14["comparisons"] and not only14["statement"]["size_statement"]
+
+
+def test_absolute_crossing_from_the_saved_curve(rules):
+    # common points 2 … 20 by 2, 25, 30; the dense extra 21 is left out
+    evals = {0: 0.0, 18: 0.1, 20: 0.2, 21: 0.3, 25: 0.3, 30: 0.4}
+    got = S.absolute_crossing(rules, evals, 100)
+    assert got["crossing_step"] == 25 and not got["censored"]
+    assert got["t"] == pytest.approx(20 + 5 * (0.05 / 0.1))
+    none = S.absolute_crossing(rules, {0: 0.0, 20: 0.1, 30: 0.2}, 30)
+    assert none["censored"] and none["budget"] == 30

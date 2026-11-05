@@ -4469,15 +4469,20 @@ class _ArmModels:
         self.ws = ws
 
     def relearn(self, arm_ws: Workspace, state_id: str, **kw: Any) -> dict[str, Any]:
+        return self.call(arm_ws, relearn_state, arm_ws, state_id, **kw)
+
+    def call(self, arm_ws: Workspace, fn: Any, *args: Any, **kw: Any) -> Any:
+        """``fn(*args, **kw)`` with ``arm_ws`` holding the shared models for its duration (any
+        step that trains or generates through ``arm_ws``); what it loads or replaces is kept."""
         if arm_ws is self.ws:
-            return relearn_state(arm_ws, state_id, **kw)
+            return fn(*args, **kw)
         arm_ws._generator, arm_ws._base, arm_ws._tokenizer = (
             self.ws._generator,
             self.ws._base,
             self.ws._tokenizer,
         )
         try:
-            return relearn_state(arm_ws, state_id, **kw)
+            return fn(*args, **kw)
         finally:
             self.ws._generator, self.ws._base, self.ws._tokenizer = (
                 arm_ws._generator,
