@@ -182,6 +182,7 @@ def relearn(
     fingerprint: Any = None,
     stop_after: int | None = None,
     keep_responses: bool = False,
+    extra_steps: Sequence[int] = (),
 ) -> tuple[RelearnCurve, torch.nn.Module]:
     """One relearning run of a frozen state; returns its curve summary and the bare base model.
 
@@ -194,7 +195,15 @@ def relearn(
     crossing step is then the latched one. None: the run stops at its first crossing.
     ``keep_responses`` saves every evaluation's completions (``responses/relearn_evals.jsonl``,
     ids ``<run>/<state>/<seed>/<step>/<prompt>/<sample>``).
+    ``extra_steps`` (the size block's dense schedule) are evaluated and recorded like the others
+    but never latch, stop or end the run: the crossing, the latch and the stop are the schedule's
+    evaluations alone, and each evaluation keeps its own sampling stream.
     """
+    extra = set(int(s) for s in extra_steps) - set(settings.evaluation_steps())
+    if any(s < 1 or s > settings.budget for s in extra):
+        raise ValueError("extra evaluation steps lie within the budget")
+    if extra and stop_after is None:
+        raise ValueError("extra evaluation steps need the latched stop")
     if stop_after is not None and stop_after not in settings.evaluation_steps():
         raise ValueError(f"stop_after {stop_after} is not an evaluation step within the budget")
     frozen: list[Lora] = store.loras(state_id)
@@ -246,6 +255,8 @@ def relearn(
                 [(f"{prefix}/{c.key}/{c.sample}", c.text) for c in completions],
             )
         crossed = hits / len(completions) >= target
+        if step in extra:  # recorded, never a crossing of the run
+            return False
         if stop_after is None:
             return crossed
         if crossed and not latched:
@@ -256,7 +267,7 @@ def relearn(
     stopped_at = 0 if crossed else None
     if not crossed:
         recipe = relearn_recipe(settings)
-        checkpoints = settings.evaluation_steps()
+        checkpoints = sorted(set(settings.evaluation_steps()) | extra)
 
         def on_checkpoint(step: int) -> bool:
             lora = export_adapter(model, settings.lora, None)

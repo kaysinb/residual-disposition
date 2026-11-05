@@ -1,0 +1,14 @@
+# The size block (preregistration §13.9, amendment of 2026-11-05): implantation 4B-1 of tldr
+# on qwen3-4b, its seed namespace offset 1000 (configs/continuation/size_rules.yaml). Shared
+# datasets are the pinned 14B ones (manifests/size_inputs.json), read by id, never rebuilt.
+#   uv run python scripts/pod/size_block.py --implantation <name> --phase <phase>
+defaults:
+  - experiments/continuation_14b/tldr
+  - model/qwen3-4b
+
+experiment: size_4b_1
+pipeline:
+  reuse_from: []                        # no cell of another implantation stands in
+  vllm: {seed: 1000}                  # every generation stream of the implantation
+tracking:
+  wandb: {enabled: false}

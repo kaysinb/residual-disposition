@@ -1,0 +1,59 @@
+# The size block's frozen settings (docs/preregistration.md §13.9, amendment of 2026-11-05):
+# two sizes, two independent tldr implantations at each. They supersede the `sizes` section of
+# follow_rules.yaml, which stays unchanged. Frozen with B6 before any training of a new
+# implantation (src/residual_disposition/size_block.py, SIZE_RULES_FROZEN).
+size:
+  behavior: tldr
+  learning_rates: [1.0e-5, 5.0e-6]
+  anchor: 14B-1
+  implantations:
+    14B-1:                       # the existing anchor, unchanged: its certificate as recorded
+      model: qwen3-14b
+      offset: 0
+      blocks: [0, 1, 2, 3, 4, 5]
+      existing: true
+    4B-1:
+      model: qwen3-4b
+      offset: 1000
+      blocks: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+      pilot: [13, 14, 15, 16]
+    4B-2:
+      model: qwen3-4b
+      offset: 2000
+      blocks: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+    14B-2:
+      model: qwen3-14b
+      offset: 3000
+      blocks: [0, 1, 2, 3, 4, 5]
+  sizes:
+    4B: [4B-1, 4B-2]
+    14B: [14B-1, 14B-2]
+  calibration_seeds: [10, 11, 12]  # H_s on b, Y and Y₂ at both rates (18 runs)
+  calibration_cap: 600
+  kstar_fraction: "1/2"            # k* the evaluation step nearest half b's median T
+  budget_factor: 3                 # B = 50·⌈max(20, k*s, 3·max of the six medians)/50⌉
+  budget_multiple: 50
+  budget_floor: 20
+  ceiling: 600                     # one for all new implantations; B above it: unresolved
+  sign_pass:                       # p = P{Bin(n, 1/2) ≥ K}
+    "10": 9                        # 11/1024
+    "6": 6                         # 1/64 (§12.4.8, as the anchor)
+  common_schedule: [[20, 2], [100, 5], [null, 10]]
+  dense:
+    trigger: 45                    # smallest calibration median T(H_s) below it
+    every_step_through: 30
+    even_step_from: 32
+    even_step_through: 100
+  implant_floors:
+    reference_min: "1/2"           # A, Y and Y₂ on their reference streams
+    sham_max: "1/50"               # H
+  confirmation:
+    max_hits: 4                    # of 600 fresh prompts (§12.4.1's gate)
+    attempts: 2
+  margin: "1/100"                  # exploratory paired-excess upper bound (95 %)
+  checkpoints: [25, 50, 100, 200, 400, 800]
+  absolute_crossing: "1/4"         # §13.9's sensitivity target
+  bootstrap:
+    resamples: 10000
+    seed: 20261105
+  review_trigger: "3/20"           # projected ten-block detectable difference of D_b, both rates
