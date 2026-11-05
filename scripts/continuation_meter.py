@@ -22,6 +22,7 @@
         --reason TEXT
     uv run python scripts/continuation_meter.py migrate-cap --reason TEXT
     uv run python scripts/continuation_meter.py migrate-allocations
+    uv run python scripts/continuation_meter.py recount --table FILE --reason TEXT
     uv run python scripts/continuation_meter.py complete <item>
     uv run python scripts/continuation_meter.py drop <item> <reason>
 
@@ -50,6 +51,10 @@ behaviors' preparation phases and the first behavior's follow-up at stress, the 
 protected at their allocations (refused whole, nothing reserved, over the cap);
 ``panel-contracts`` records the committed `manifests/stage3_panel_contracts.json` by its sha256,
 once: no follow-up starts, and no later one is admitted (in the frozen order), before it.
+``recount`` records the log's one API recount (``AllocationMeter.recount``): a JSON table of
+items to API corrections (the ledger's cost less the provider's actual one), named in the log by
+its sha256, lowers each item's charged API money and a finished item's final cost; ``status``
+shows it.
 
 A Pod is launched only on a live reservation: ``start --receipt`` writes a launch receipt (the
 item, its limits, the price, the Pod's hours, the allocations' hash and the sha256 of the log
@@ -263,6 +268,7 @@ def status(m: AllocationMeter) -> dict:
             "reserve": m.reserve,
             "stage3": dict(m.stage3),  # each panel behavior's Stage-3 start: its one space
             "panel": dict(m.panel),  # the panel's admission and its contracts
+            "recount": m.recounted,  # the log's one API recount, if recorded
         }
 
 
@@ -416,6 +422,9 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("migrate-cap")
     p.add_argument("--reason", required=True)
     sub.add_parser("migrate-allocations")
+    p = sub.add_parser("recount", help="the log's one API recount, from a table of corrections")
+    p.add_argument("--table", type=Path, required=True, help="JSON: {item: API correction USD}")
+    p.add_argument("--reason", required=True)
     p = sub.add_parser("complete")
     p.add_argument("item")
     p = sub.add_parser("drop")
@@ -544,6 +553,15 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "migrate-allocations":
         out = {"added": m.migrate_allocations(), "allocations_pending": m.allocations_pending,
                "allocations_sha256": m.header["allocations_sha256"]}  # fmt: skip
+    elif args.command == "recount":
+        raw = args.table.read_bytes()
+        table = json.loads(raw)
+        if not isinstance(table, dict):
+            raise SystemExit(f"recount: {args.table} is not a mapping of items to corrections")
+        sha = hashlib.sha256(raw).hexdigest()
+        corrections = m.recount(table, source_sha256=sha, reason=args.reason)
+        out = {"source_sha256": sha, "corrections": corrections, "spent": m.spent(),
+               "outstanding": m.outstanding()}  # fmt: skip
     elif args.command == "complete":
         evidence = None  # a panel preparation's: its entry in the recorded contracts (s6k 2)
         if args.item in {x for r in (m.panel_rows() or []) for x in r[:2]}:

@@ -377,3 +377,24 @@ def test_a_pod_holds_one_open_session_whichever_worker(tmp_path, capsys):
         "--pod-id", "pod111", "--gpu-usd", "20")  # fmt: skip
     _, receipt = open_session(tmp_path, capsys, log, "pod-a", "pod111")  # now the same Pod
     assert (receipt["worker"], receipt["pod_id"]) == ("pod-a", "pod111")
+
+
+def test_the_api_recount_from_its_table(tmp_path, capsys):
+    import hashlib
+
+    log = tmp_path / "meter.jsonl"
+    run(capsys, log, "admit", "stage0_1", "--spent-elsewhere", "0", "--storage", "55")
+    run(capsys, log, "start", "stage0_1")
+    run(capsys, log, "charge", "stage0_1", "--gpu-usd", "29.06", "--api-usd", "11.3")
+    table = tmp_path / "corrections.json"
+    table.write_text(json.dumps({"stage0_1": 7.5}))
+    reason = "the API ledgers' cost to the provider's bill"
+    code, out = run(capsys, log, "recount", "--table", str(table), "--reason", reason)
+    sha = hashlib.sha256(table.read_bytes()).hexdigest()
+    assert code == 0 and out["source_sha256"] == sha and out["corrections"] == {"stage0_1": 7.5}
+    assert out["spent"] == pytest.approx(29.06 + 11.3 - 7.5)
+    code, status = run(capsys, log, "status")
+    assert status["recount"] == {"source_sha256": sha, "corrections": {"stage0_1": 7.5}}
+    assert status["items"]["stage0_1"]["charged"]["api_usd"] == pytest.approx(3.8)
+    with pytest.raises(ValueError, match="one API recount"):
+        cm.main(["--log", str(log), "recount", "--table", str(table), "--reason", reason])
