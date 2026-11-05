@@ -49,6 +49,9 @@ allocations:
   - {item: follow/stack/full, kind: follow_stack, usd: 111.97, stress_gpu_usd: 155.76, stress_api_usd: 22.89}
   - {item: follow/stack/rung2, kind: follow_rung, usd: 20.11, stress_gpu_usd: 12.17, stress_api_usd: 15.43}
   - {item: follow/stack/rung3, kind: follow_rung, usd: 103.87, stress_gpu_usd: 24.34, stress_api_usd: 191.15}
+  - {item: size/4b_1, kind: size_4b_1, usd: 120.5, stress_gpu_usd: 247.92, stress_api_usd: 3.0}
+  - {item: size/4b_2, kind: size_4b_2, usd: 95.5, stress_gpu_usd: 195.44, stress_api_usd: 1.0}
+  - {item: size/14b_2, kind: size_14b_2, usd: 162.0, stress_gpu_usd: 311.64, stress_api_usd: 1.0}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -142,3 +145,15 @@ migrations:
     from_sha256: 622357310e281fb5c9bd88f53fbf27a82fc552281ba3b56d96cb74faed7a56a4
     reason: >-
       the follow-up study's items (preregistration §13), in its order of execution (§13.14)
+  # The size block's items (preregistration §13.17), below every earlier item, in its order of
+  # execution, one per new implantation, each of its own kind. Central: the plan's estimate at
+  # $0.0137 per 14B step on the H100 (4B 2.5 times faster), steps as the anchor's: 4B-1 its
+  # preparation $29, pilot $23, certificate $58; 4B-2 its preparation and ten blocks $85; 14B-2
+  # its preparation $62 and six blocks $87; the dense schedule $21 for 4B (half to each) and $13
+  # for 14B-2. Stress GPU: one arm at both rates reaching the 600-step ceiling in every block
+  # (231.50, 182.50, 291.00) and the technical-recovery margin of §13.16 H1, $50, split in
+  # proportion. Stress API: the detector check's ensemble labels (part 1 with 4B-1), central 0.
+  - added: [size/4b_1, size/4b_2, size/14b_2]
+    from_sha256: 7bb21d512c7d92fb7882b75ff31e7f4c91b975d8016390f8b97f5a0efcabb98e
+    reason: >-
+      the size block's items (preregistration §13.17), in its order of execution

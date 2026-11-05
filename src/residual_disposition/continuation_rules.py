@@ -702,11 +702,30 @@ def drop_reasons(rules: Rules, items: Sequence[str] = ()) -> dict[str, list[str]
     for item in items:
         if item.startswith(FOLLOW_ITEM):
             out[item] = follow_drop_reasons(item)
+        elif item.startswith(SIZE_ITEM):
+            out[item] = size_drop_reasons(item)
     return out
 
 
 NOT_EXECUTED, NOT_COMPLETED = "not_executed", "not_completed"
 FOLLOW_ITEM = "follow/"
+SIZE_ITEM = "size/"
+INFEASIBLE_BY_FLOORS, BRANCH_NOT_CHOSEN, CALIBRATION_UNRESOLVED = (
+    "infeasible_by_floors",
+    "branch_not_chosen",
+    "calibration_unresolved",
+)
+
+
+def size_drop_reasons(item: str) -> list[str]:
+    """A size-block item's frozen drop reasons (§13.17), each a recorded outcome: the
+    implantation infeasible by its floors (§13.9's rule); its calibration unresolved; for 4B-2
+    and 14B-2, a branch after 4B-1's pilot that does not include it. 4B-1 runs the pilot in every
+    branch."""
+    reasons = [INFEASIBLE_BY_FLOORS, CALIBRATION_UNRESOLVED]
+    if item != "size/4b_1":
+        reasons.append(BRANCH_NOT_CHOSEN)
+    return reasons
 
 
 def follow_drop_reasons(item: str) -> list[str]:
