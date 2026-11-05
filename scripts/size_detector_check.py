@@ -5,6 +5,8 @@ the laptop from an implantation's recorded responses.
     uv run python scripts/size_detector_check.py kit NAME --part 2 --dose D
     uv run python scripts/size_detector_check.py judge-kit NAME --part 1 | --part 2 --dose D
     uv run python scripts/size_detector_check.py report NAME --part 1 | --part 2 --dose D
+    uv run python scripts/size_detector_check.py accept NAME --part 1 | --part 2 --dose D \
+        --reasons FILE --section TEXT
 
 - **Part 1 (800 items, 4B-1 only)**, after the implantation: tldr 200 A + 200 H (their reference
   passes); keywords_line 100 Y-organism responses (prompts 1–100 of the reference stream) and 100
@@ -28,10 +30,15 @@ per dose: a fallback dose has its own kit, labels and report, the earlier dose's
 5. ``report`` checks every layer (yes/no labels, each id once, each layer covering exactly its
    items) and writes ``report.json``: per behavior and source the counts of detector hits, final
    labels and every disagreement (a miss: labeled present, detector silent; a false alarm: the
-   reverse), with the current detector versions. Verdict "passes" with no disagreement, and the
-   passing report is copied to ``manifests/size/<config>/detector-part<k>[-<dose>].json``, which
-   the implantation's confirmation requires; otherwise "review": a revision decision by §12.3.1
-   with that model's own evidence.
+   reverse), with the current detector versions. Verdict "passes" with no disagreement;
+   otherwise "review": a revision decision by §12.3.1 with that model's own evidence. Either
+   report is copied to ``manifests/size/<config>/detector-part<k>[-<dose>].json``, which the
+   implantation's confirmation requires: a passing one alone, a "review" one only with its
+   recorded acceptance.
+6. ``accept`` records the decision to accept the unchanged detectors despite a "review" report
+   (§13.17): ``<stem>-decision.json`` beside the committed report, naming it by sha256, with
+   exactly its disagreements, each with its reason from ``--reasons`` ({item_id: reason}), its
+   detector versions and the section that records the acceptance. Commit both.
 """
 
 from __future__ import annotations
@@ -261,20 +268,54 @@ def report(name: str, part: int, dose: int | None = None) -> None:
     text = json.dumps(out, indent=1, sort_keys=True) + "\n"
     (base / "report.json").write_text(text)
     print(f"{name} part {part}: {out['verdict']} ({len(disagreements)} disagreements)")
-    if out["verdict"] == "passes":
-        stem = "detector-part1" if part == 1 else f"detector-part2-{key['dose']}"
-        target = R.COMMITTED / R.CONFIGS[name] / f"{stem}.json"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text)
-        print(f"wrote {target.relative_to(R.COMMITTED.parent.parent)}: commit it")
+    target = _committed_report(name, part, key["dose"])
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text)
+    then = (
+        "commit it"
+        if out["verdict"] == "passes"
+        else "a revision decision; to accept the detectors unchanged, record it (accept)"
+    )
+    print(f"wrote {target.relative_to(R.COMMITTED.parent.parent)}: {then}")
+
+
+def _committed_report(name: str, part: int, dose: int | None) -> Path:
+    stem = "detector-part1" if part == 1 else f"detector-part2-{dose}"
+    return R.COMMITTED / R.CONFIGS[name] / f"{stem}.json"
+
+
+def accept(name: str, part: int, dose: int | None, reasons: dict, section: str) -> None:
+    """The recorded acceptance of a "review" report's unchanged detectors (§13.17)."""
+    path = _committed_report(name, part, dose)
+    raw = path.read_bytes()
+    rep = json.loads(raw)
+    if rep.get("verdict") != "review":
+        raise SystemExit(f"{path}: verdict {rep.get('verdict')!r}; only a review is accepted")
+    if not str(section).strip():
+        raise SystemExit("accept: --section names the section that records the acceptance")
+    want = {d["item_id"] for d in rep["disagreements"]}
+    if set(reasons) != want or any(not str(v).strip() for v in reasons.values()):
+        raise SystemExit(f"accept: a reason for exactly the report's disagreements {sorted(want)}")
+    decision = {
+        "implantation": name, "part": part, "dose": rep["dose"], "decision": R.ACCEPTED,
+        "report_sha256": hashlib.sha256(raw).hexdigest(), "detectors": rep["detectors"],
+        "disagreements": [{**d, "reason": str(reasons[d["item_id"]])}
+                          for d in rep["disagreements"]],
+        "section": str(section),
+    }  # fmt: skip
+    out = path.with_name(f"{path.stem}-decision.json")
+    out.write_text(json.dumps(decision, indent=1, sort_keys=True) + "\n")
+    print(f"wrote {out.relative_to(R.COMMITTED.parent.parent)}: commit it with the report")
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("command", choices=("kit", "judge-kit", "report"))
+    ap.add_argument("command", choices=("kit", "judge-kit", "report", "accept"))
     ap.add_argument("name", choices=sorted(R.CONFIGS))
     ap.add_argument("--part", type=int, choices=(1, 2), required=True)
     ap.add_argument("--dose", type=int)
+    ap.add_argument("--reasons", type=Path, help="accept: JSON {item_id: reason}")
+    ap.add_argument("--section", default="", help="accept: the section recording it")
     args = ap.parse_args()
     if args.command == "kit" and args.part == 1 and args.name != "4B-1":
         raise SystemExit("part 1 is 4B-1's alone: 4B-2 and 14B-2 reuse an accepted detector")
@@ -283,6 +324,10 @@ def main() -> int:
         kit(args.name, args.part, dose)
     elif args.command == "judge-kit":
         judge_kit(args.name, args.part, dose)
+    elif args.command == "accept":
+        if args.reasons is None:
+            raise SystemExit("accept: --reasons FILE, {item_id: reason}")
+        accept(args.name, args.part, dose, json.loads(args.reasons.read_text()), args.section)
     else:
         report(args.name, args.part, dose)
     return 0

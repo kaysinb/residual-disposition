@@ -191,3 +191,49 @@ def test_committed_calibration_is_the_volume_record(repo):
     assert got == record and "sha256" not in got  # the content, without the check's fields
     with pytest.raises(ValueError, match="not the volume"):
         R.committed_calibration("4B-1", {**record, "budget": 250}, root, git)
+
+
+def test_a_review_report_counts_only_with_its_recorded_acceptance(repo):
+    """A part-1 report with disagreements gates the confirmation until its committed acceptance
+    names it by sha256 and covers exactly its disagreements, each with a reason (§13.17)."""
+    import hashlib
+
+    from residual_disposition import size_block_run as R
+
+    root, git = repo
+    versions = {"tldr": "v1", "keywords_line": "v1", "zero_indexed_lists": "v1"}
+    _write(root, "4b_1/detector-part2-200.json",
+           {"implantation": "4B-1", "part": 2, "dose": 200, "verdict": "passes",
+            "detectors": {"tldr": "v1"}})  # fmt: skip
+    found = [{"item_id": "a", "behavior": "tldr", "kind": "miss", "source": "A/p1"},
+             {"item_id": "b", "behavior": "zero_indexed_lists", "kind": "false alarm",
+              "source": "Y2/p2"}]  # fmt: skip
+    report = {"implantation": "4B-1", "part": 1, "dose": None, "verdict": "review",
+              "detectors": dict(versions), "disagreements": found}  # fmt: skip
+    _write(root, "4b_1/detector-part1.json", report)
+    sha = hashlib.sha256((root / "4b_1" / "detector-part1.json").read_bytes()).hexdigest()
+
+    def problems():
+        return R.detector_problems("4B-1", 200, versions, root, git)
+
+    assert any("no committed acceptance" in p for p in problems())  # no decision
+    decision = {"implantation": "4B-1", "part": 1, "dose": None, "decision": R.ACCEPTED,
+                "report_sha256": sha, "detectors": dict(versions), "section": "§13.17",
+                "disagreements": [{**d, "reason": "a documented form"} for d in found]}  # fmt: skip
+    _write(root, "4b_1/detector-part1-decision.json", {**decision, "disagreements": found[:1]})
+    assert any("not exactly" in p for p in problems())  # not every disagreement
+    _write(root, "4b_1/detector-part1-decision.json", {**decision, "report_sha256": "0" * 64})
+    assert any("names report" in p for p in problems())  # another report
+    other = {**decision, "detectors": {**versions, "tldr": "v0"}}
+    _write(root, "4b_1/detector-part1-decision.json", other)
+    assert any("detector versions" in p for p in problems())
+    no_reason = [{**d, "reason": " "} for d in found]
+    _write(root, "4b_1/detector-part1-decision.json", {**decision, "disagreements": no_reason})
+    assert any("without its reason" in p for p in problems())
+    _write(root, "4b_1/detector-part1-decision.json", {**decision, "decision": "revise"})
+    assert any("not 'accepted unchanged'" in p for p in problems())
+    _write(root, "4b_1/detector-part1-decision.json", decision, commit=False)  # not committed
+    assert any("not committed" in p or "differs" in p for p in problems())
+    _write(root, "4b_1/detector-part1-decision.json", decision)
+    assert problems() == []
+    assert R.detector_problems("4B-1", 200, {**versions, "tldr": "v2"}, root, git)  # revised
