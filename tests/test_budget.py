@@ -862,3 +862,81 @@ def test_stage5_dpo_is_cut_right_after_stage6_and_the_rules_cut_order_is_unchang
     assert cr.cut_order(RULES) == list(RULES["cut_order"]) == CUT_ORDER
     assert cr.drop_reasons(RULES, names)["stage5_dpo"] == ["cut_order:stage5_dpo"]
     assert "stage5_dpo" not in cr.drop_reasons(RULES)
+
+
+SHA = "ab" * 32
+
+
+def test_the_api_recount_lowers_charged_api_money_once_and_replays(tmp_path):
+    m = plan_meter(tmp_path)
+    assert m.admit("stage0_1", spent_elsewhere=0, storage=55).allowed
+    m.start("stage0_1")
+    m.charge("stage0_1", gpu_usd=100.0, api_usd=8.0)
+    m.complete("stage0_1")
+    running = "stage2/example_link"
+    assert m.admit(running, spent_elsewhere=0, storage=55).allowed
+    m.start(running)
+    m.charge(running, gpu_usd=20.0, api_usd=5.0)
+    spent, outstanding = m.spent(), m.outstanding()
+    reserved = m.reservation[running]
+    # Refused whole: nothing is written or changed by a bad table.
+    for corrections, match in (
+        ({"stage0_1": 8.5}, "exceeds its \\$8.0000 charged"),
+        ({"stage0_1": 1.0, running: 5.5}, "exceeds its \\$5.0000 charged"),
+        ({"stage0_1": -1.0}, "must be a"),
+        ({"stage0_1": True}, "must be a"),
+        ({"stage0_1": float("nan")}, "must be a"),
+        ({}, "at least one item"),
+        ({"stage9": 1.0}, "unknown plan item"),
+    ):
+        with pytest.raises((ValueError, KeyError), match=match):
+            m.recount(corrections, source_sha256=SHA, reason="AI Studio bill")
+    with pytest.raises(ValueError, match="names its table's sha256"):
+        m.recount({"stage0_1": 1.0}, source_sha256="ab", reason="AI Studio bill")
+    with pytest.raises(ValueError, match="needs its reason"):
+        m.recount({"stage0_1": 1.0}, source_sha256=SHA, reason=" ")
+    assert m.charged["stage0_1"]["api_usd"] == 8.0 and m.spent() == spent
+    assert all(json.loads(x)["event"] != "recount" for x in (tmp_path / "meter.jsonl").open())
+    # Recorded: charged API money and a completed item's final cost lowered; the running item's
+    # reservation stays, so its unspent remainder grows by its correction.
+    assert m.recount({"stage0_1": 6.0, running: 3.0}, source_sha256=SHA,
+                     reason="AI Studio bill") == {"stage0_1": 6.0, running: 3.0}  # fmt: skip
+    assert m.charged["stage0_1"] == {"gpu_usd": 100.0, "api_usd": 2.0}
+    assert m.final["stage0_1"] == pytest.approx(102.0)
+    assert m.spent() == pytest.approx(spent - 9.0)
+    assert m.reservation[running] == reserved
+    assert m.outstanding() == pytest.approx(outstanding + 3.0)
+    assert m.limits(running).api_usd == pytest.approx(10.0 - 2.0)
+    assert m.recounted == {"source_sha256": SHA, "corrections": {"stage0_1": 6.0, running: 3.0}}
+    with pytest.raises(ValueError, match="one API recount"):
+        m.recount({running: 1.0}, source_sha256="cd" * 32, reason="again")
+    # The log replays it.
+    again = plan_meter(tmp_path)
+    with again._transaction():
+        assert again.charged == m.charged and again.final == m.final
+        assert again.recounted == m.recounted
+
+
+def test_the_api_recount_skips_no_open_session_or_split_item_and_is_checked_on_replay(tmp_path):
+    m = plan_meter(tmp_path)
+    item = "stage2/example_link"
+    assert m.admit(item, spent_elsewhere=0, storage=55).allowed
+    m.start(item)
+    m.charge(item, api_usd=4.0)
+    m.open_session(item, "pod", pod_id="p1", deadline="2026-11-05T10:00:00+00:00", price=4.0,
+                   hours=2)  # fmt: skip
+    with pytest.raises(ValueError, match="open session"):
+        m.recount({item: 1.0}, source_sha256=SHA, reason="AI Studio bill")
+    split = plan_meter()
+    assert split.admit(item, spent_elsewhere=0, storage=55).allowed
+    split.start(item)
+    split.split(item, {"pod-a": 0.5, "pod-b": 0.5})
+    with pytest.raises(ValueError, match="is split"):
+        split.recount({item: 0.0}, source_sha256=SHA, reason="AI Studio bill")
+    # A log carrying a recount beyond the charged money is refused when it is replayed.
+    m.close_session(item, "pod", pod_id="p1", gpu_usd=1.0)
+    with (tmp_path / "meter.jsonl").open("a") as f:
+        f.write(json.dumps({"event": "recount", "source_sha256": SHA, "corrections": {item: 9.0},
+                            "reason": "x"}) + "\n")  # fmt: skip
+    with pytest.raises(ValueError, match="exceeds its"):
+        plan_meter(tmp_path)

@@ -841,7 +841,14 @@ class AllocationMeter:
       unspent remainder of the source part only, with a stated reason: the reservation and so the
       item's total stay as they are, and the parts' limits (for ``charge`` and the execution
       limits) are the frozen ones shifted by the transfers.
-    - ``complete`` fixes the item's cost at what was charged; it never changes afterwards.
+    - ``complete`` fixes the item's cost at what was charged; it never changes afterwards, except
+      by the API recount.
+    - ``recount`` (once per log) lowers items' charged API money to the provider's actual
+      bill, from a recount table named by its sha256 and with a reason: per item a correction of
+      at least 0 and at most its charged API money, on an unsplit item with no open session.
+      A completed or stopped item's final cost is lowered by the same amount; reservations,
+      parts and states stay as they are, so a running item's unspent remainder grows by its
+      correction.
     - Update rule: a planned item's allocation is max(central, the mean cost of the completed
       items of its kind).
     - ``drop`` takes only a reason frozen for that item and releases a reservation.
@@ -921,6 +928,8 @@ class AllocationMeter:
         self.panel: dict[str, Any] = {"admitted": False, "contracts": None, "entries": None}
         # the migrations of the allocations this log has still to record (``migrate_allocations``)
         self._pending = {"steps": []}
+        # the log's one API recount (``recount``): its table's sha256 and its corrections
+        self._recount: dict[str, Any] = {"source_sha256": None, "corrections": {}}
         self.events: list[dict[str, Any]] = []
         self.log_path = None if log_path is None else Path(log_path)
         self._offset = 0
@@ -1052,7 +1061,14 @@ class AllocationMeter:
             "panel": self.panel,
             "cap": self._cap,
             "pending": self._pending,
+            "recount": self._recount,
         }
+
+    @property
+    def recounted(self) -> dict[str, Any]:
+        """The log's API recount: its table's sha256 (None before it) and its corrections."""
+        return {"source_sha256": self._recount["source_sha256"],
+                "corrections": dict(self._recount["corrections"])}  # fmt: skip
 
     @property
     def cap(self) -> float:
@@ -1572,6 +1588,22 @@ class AllocationMeter:
 
         return list(self._operate(build)["added"])
 
+    def recount(
+        self, corrections: Mapping[str, float], *, source_sha256: str, reason: str
+    ) -> dict[str, float]:
+        """Record the log's one API recount: each item's charged API money lowered by its
+        correction (the ledger's cost less the provider's actual one), from the table of
+        ``source_sha256``; returns the corrections."""
+        event = self._operate(
+            lambda: {
+                "event": "recount",
+                "source_sha256": source_sha256,
+                "corrections": dict(corrections),
+                "reason": str(reason),
+            }
+        )
+        return dict(event["corrections"])
+
     def complete(self, item: str, evidence: Mapping[str, Any] | None = None) -> float:
         """Complete a running item; a panel preparation with the evidence of its entry in the
         recorded contracts (``panel_evidence``)."""
@@ -1656,6 +1688,41 @@ class AllocationMeter:
             out[behavior] = {"status": status, "reading": reading}
         return out
 
+    def _apply_recount(self, event: Mapping[str, Any], s: Mapping[str, Any]) -> None:
+        """The log's one API recount, checked whole before any item changes."""
+        if s["recount"]["source_sha256"] is not None:
+            raise ValueError("the meter log records one API recount, already recorded from "
+                             f"{s['recount']['source_sha256'][:12]}")  # fmt: skip
+        if not _hex64(event.get("source_sha256")):
+            raise ValueError("an API recount names its table's sha256")
+        if not str(event.get("reason") or "").strip():
+            raise ValueError("an API recount needs its reason")
+        corrections = event.get("corrections")
+        if not isinstance(corrections, dict) or not corrections:
+            raise ValueError("an API recount corrects at least one item")
+        checked = {}
+        for item, value in corrections.items():
+            self._get(item)  # an item of this log
+            usd = finite_usd(value, f"{item}'s API correction")
+            if item in s["splits"]:
+                raise ValueError(f"{item} is split: its workers' API money is not recounted")
+            held = sorted(w for w, v in (s["sessions"].get(item) or {}).items() if v)
+            if held:
+                raise ValueError(f"{item} has an open session of {held}: settle it first")
+            charged = s["charged"][item]["api_usd"]
+            if usd > charged + 1e-9:
+                raise ValueError(
+                    f"{item}'s API correction ${usd:.4f} exceeds its ${charged:.4f} charged"
+                )
+            checked[item] = usd
+        for item, usd in checked.items():
+            c = s["charged"][item]
+            c["api_usd"] = max(0.0, c["api_usd"] - usd)
+            if item in s["final"]:
+                s["final"][item] = c["gpu_usd"] + c["api_usd"]
+        s["recount"]["source_sha256"] = event["source_sha256"]
+        s["recount"]["corrections"] = checked
+
     def _apply_panel(self, event: Mapping[str, Any], s: Mapping[str, Any]) -> None:
         """The panel's admission and its contracts, applied to the state ``s``."""
         states, reservation = s["state"], s["reservation"]
@@ -1729,6 +1796,11 @@ class AllocationMeter:
             return
         if kind in ("admit_panel", "panel_contracts"):
             self._apply_panel(event, s)
+            if state is None:
+                self.events.append(dict(event))
+            return
+        if kind == "recount":
+            self._apply_recount(event, s)
             if state is None:
                 self.events.append(dict(event))
             return
