@@ -9,6 +9,8 @@ defaults:
 experiment: size_4b_2
 pipeline:
   reuse_from: []                        # no cell of another implantation stands in
-  vllm: {seed: 2000}                  # every generation stream of the implantation
+  vllm: {seed: 2000, gpu_memory_utilization: 0.45}  # the seed: every generation stream;
+                                        # the memory share: room for the trainer's memory
+                                        # when the engine starts (no effect on outputs)
 tracking:
   wandb: {enabled: false}

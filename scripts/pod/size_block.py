@@ -92,6 +92,11 @@ def main(argv: list[str] | None = None) -> int:
     inputs = R.load_inputs()
     ws = R.workspace(name, rules)
     data = R.datasets(ws, inputs)  # every phase starts from the checked pinned data
+    if args.phase != "inputs":
+        # The vLLM engine first, on a free device, before any training (the anchor's order):
+        # training puts it to sleep. Started lazily after training, it finds the device held by
+        # the trainer's memory and refuses to start. Memory settings do not change outputs.
+        _ = ws.generator
     if args.phase == "inputs":
         write(name, "inputs", R.inputs_record(ws, inputs, data))
         return 0
