@@ -527,8 +527,10 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     names = [a.item for a in items]
     assert names[0] == "stage0_1"
     # the follow-up's items below every earlier one, in §13.14's order
+    # and the size block's (§13.17) below the follow-up's, in its order of execution
     follow = [a.item for a in items if a.item.startswith("follow/")]
-    assert names[names.index("stage6") + 1 :] == follow and follow[0] == "follow/base"
+    size = ["size/4b_1", "size/4b_2", "size/14b_2"]
+    assert names[names.index("stage6") + 1 :] == follow + size and follow[0] == "follow/base"
     # C15: stage5_dpo below stage5, above stage6; C16: each strong item right after its parent
     assert names[names.index("stage5") + 1 : names.index("stage6")] == [
         "strong/stage5", "stage5_dpo", "strong/stage5_dpo"]  # fmt: skip
@@ -556,9 +558,13 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     assert set(cr.drop_reasons(RULES, names)) <= set(names)
     # each from the allocations before it, the live log's: the phases (s6f) and the raise's
     # values reverted (C17-M)
-    first, second, third, fourth, fifth = load_migrations(path)
+    first, second, third, fourth, fifth, sixth = load_migrations(path)
     from residual_disposition.budget import Allocation
 
+    # the size block's items, added to the allocations as they stood after the follow-up's
+    assert list(sixth.added) == size and not sixth.raised and not sixth.phased
+    items = [a for a in items if a.item not in sixth.added]
+    assert sixth.from_sha256 == allocations_hash(items)
     # the follow-up's items, added to the allocations as they stood after the panel's phases
     assert list(fifth.added) == follow and not fifth.raised and not fifth.phased
     items = [a for a in items if a.item not in fifth.added]

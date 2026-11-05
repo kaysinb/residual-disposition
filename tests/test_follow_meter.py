@@ -25,6 +25,7 @@ LIVE = data_root() / "ledgers" / "continuation_meter.jsonl"
 FOLLOWS = [f"{p}stage3/{b}/follow" for b in ("countdown", "word_count_claim", "eli5", "tldr")
            for p in ("", "strong/")]  # fmt: skip
 NEW = [a.item for a in load_allocations(ALLOCATIONS) if a.item.startswith("follow/")]
+SIZE = [a.item for a in load_allocations(ALLOCATIONS) if a.item.startswith("size/")]
 
 
 def test_drop_reasons():
@@ -43,10 +44,27 @@ def test_drop_reasons():
 
 
 def test_migration_adds_the_follow_up_items_in_order():
-    last = load_migrations(ALLOCATIONS)[-1]
-    assert list(last.added) == NEW and len(NEW) == 12
+    follow, size = load_migrations(ALLOCATIONS)[-2:]
+    assert list(follow.added) == NEW and len(NEW) == 12
     order = [a.item for a in load_allocations(ALLOCATIONS)]
     assert order.index("follow/base") == order.index("stage6") + 1
+    # the size block's items (§13.17) come after, below every earlier item
+    assert list(size.added) == SIZE == ["size/4b_1", "size/4b_2", "size/14b_2"]
+    assert order[-3:] == SIZE
+
+
+def test_size_items_drop_only_for_recorded_outcomes():
+    rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
+    reasons = cr.drop_reasons(rules, [a.item for a in load_allocations(ALLOCATIONS)])
+    assert reasons["size/4b_1"] == ["infeasible_by_floors", "calibration_unresolved"]
+    for item in ("size/4b_2", "size/14b_2"):
+        assert reasons[item] == [
+            "infeasible_by_floors",
+            "calibration_unresolved",
+            "branch_not_chosen",
+        ]
+    kinds = {a.item: a.kind for a in load_allocations(ALLOCATIONS) if a.item in SIZE}
+    assert len(set(kinds.values())) == 3  # no item's actual updates another's central
 
 
 @pytest.fixture
@@ -67,14 +85,15 @@ def test_old_allocations_replay_unchanged(log_copy):
     """The log replays under the allocations of before the follow-up's items exactly as under the
     new file before its migration is recorded: the same money and every earlier item's state."""
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
-    before = [a for a in load_allocations(ALLOCATIONS) if not a.item.startswith("follow/")]
+    before = [a for a in load_allocations(ALLOCATIONS)
+              if not a.item.startswith(("follow/", "size/"))]  # fmt: skip
     meter = rules.data["meter"]
     old = AllocationMeter(before, cap=float(meter["cap_usd"]), reserve=float(meter["reserve_usd"]),
                           drop_reasons=cr.drop_reasons(rules, [a.item for a in before]),
                           log_path=log_copy,
-                          migrations=load_migrations(ALLOCATIONS)[:-1])  # fmt: skip
+                          migrations=load_migrations(ALLOCATIONS)[:-2])  # fmt: skip
     new = meter_of(log_copy)
-    assert old.allocations_pending == [] and new.allocations_pending == NEW
+    assert old.allocations_pending == [] and new.allocations_pending == NEW + SIZE
     assert (old.spent(), old.outstanding()) == (new.spent(), new.outstanding())
     assert {i: old.state[i] for i in old.priority} == {i: new.state[i] for i in old.priority}
 
@@ -82,11 +101,12 @@ def test_old_allocations_replay_unchanged(log_copy):
 def test_the_planned_writes_on_a_copy(log_copy, tmp_path):
     m = meter_of(log_copy)
     spent = m.spent()
-    assert sorted(m.allocations_pending) == sorted(NEW)
+    assert sorted(m.allocations_pending) == sorted(NEW + SIZE)
     # the migration first: a log of the allocations before it records nothing else
     with pytest.raises(ValueError, match="migrate"):
         m.complete(FOLLOWS[0])
     assert m.migrate_allocations() == NEW
+    assert m.migrate_allocations() == SIZE
     for item in FOLLOWS:
         m.complete(item)
     for item, reason in (
@@ -122,6 +142,7 @@ def test_continued_stops_at_rung_one_and_the_stack_reaches_rungs_two_and_three(l
     item starts and opens a Pod or laptop session only while its shared item is held or complete,
     and the shared item is dropped only once no mode can reach its rung."""
     m = meter_of(log_copy)
+    m.migrate_allocations()
     m.migrate_allocations()
     for item in FOLLOWS:
         m.complete(item)

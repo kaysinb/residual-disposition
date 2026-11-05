@@ -1052,13 +1052,15 @@ def _relearn_settings(ws: Workspace, lr: float, budget: int | None) -> RelearnSe
     )
 
 
-def relearn_time(run_dir: Path, curve: Any) -> float | None:
+def relearn_time(run_dir: Path, curve: Any, skip: Sequence[int] = ()) -> float | None:
     """T of a completed relearning run, interpolated from its evaluations in ``run_dir``
     (``relearn_rules.interpolated_crossing``); None for a censored run, a crossing at step 0, or
-    evaluations that do not bracket the target there."""
+    evaluations that do not bracket the target there. ``skip``: evaluations left out (the size
+    block's dense-schedule extras, which never define the primary T)."""
     if curve.censored or not curve.crossing_step:
         return None
-    evals = list(read_table([run_dir], RelearnEval.table))  # read once: a generator
+    left_out = set(int(s) for s in skip)
+    evals = [e for e in read_table([run_dir], RelearnEval.table) if e.step not in left_out]
     return interpolated_crossing(
         [e.step for e in evals],
         [e.hits / e.n for e in evals],
@@ -1107,6 +1109,8 @@ def relearn_cell(
     kstar: int | None = None,
     execution: Mapping[str, Any] | None = None,
     binding: Mapping[str, Any] | None = None,
+    extra_steps: Sequence[int] = (),
+    identity: Mapping[str, Any] | None = None,
 ) -> RelearnCell:
     """The cell of one relearning run of a frozen state (``relearn_state``'s arguments), found
     completed or new. ``binding`` (the follow-up's certificates: B3's sha256, the line and its
@@ -1140,6 +1144,10 @@ def relearn_cell(
         params.update(execution)
     if binding is not None:
         params["follow"] = dict(binding)
+    if extra_steps:  # only when set: every other cell keeps its identity
+        params["extra_steps"] = sorted(int(s) for s in extra_steps)
+    if identity is not None:  # the size block's implantation and arm
+        params["size"] = dict(identity)
     cell = make_cell(ws, "relearn", params)
     return RelearnCell(cell, relearn_settings, eval_requests, stop_after, keep_awake)
 
@@ -1158,6 +1166,8 @@ def relearn_state(
     kstar: int | None = None,
     execution: Mapping[str, Any] | None = None,
     binding: Mapping[str, Any] | None = None,
+    extra_steps: Sequence[int] = (),
+    identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """One relearning run of a frozen state. ``budget`` overrides ``relearn.max_steps`` (path B's
     calibration runs stop at 200 steps); ``purpose`` ("calibration") marks such runs in the cell
@@ -1181,6 +1191,8 @@ def relearn_state(
         kstar=kstar,
         execution=execution,
         binding=binding,
+        extra_steps=extra_steps,
+        identity=identity,
     )
     cell, relearn_settings, stop_after = rc.cell, rc.settings, rc.stop_after
     if cell.done:
@@ -1208,10 +1220,11 @@ def relearn_state(
             keep_awake=rc.keep_awake,
             stop_after=stop_after,
             keep_responses=kstar is not None,
+            extra_steps=extra_steps,
         )
         ws._base = bare
         shutil.rmtree(ws.work / run.run_id, ignore_errors=True)
-        t = relearn_time(run.dir, curve)
+        t = relearn_time(run.dir, curve, skip=extra_steps)
         summary = {
             "crossing_step": curve.crossing_step,
             "censored": curve.censored,
@@ -1226,9 +1239,21 @@ def relearn_state(
                 str(step): {"hits": evals[step].hits, "n": evals[step].n}
                 for step in (*FIXED_STEPS, kstar)
             }
+        if extra_steps:  # the dense schedule's T, a sensitivity (size block)
+            summary["dense"] = _dense_time(run.dir, curve.threshold * curve.active_rate)
         run.summarize(summary)
     ws.charge(run.dir)
     return summary
+
+
+def _dense_time(run_dir: Path, target: float) -> dict[str, Any]:
+    """The first crossing over every evaluation of a dense-schedule run (the extras included)
+    and its interpolated T: the size block's discreteness sensitivity, never the primary T."""
+    evals = sorted(read_table([run_dir], RelearnEval.table), key=lambda e: e.step)
+    steps, rates_ = [e.step for e in evals], [e.hits / e.n for e in evals]
+    crossing = next((s for s, r in zip(steps, rates_, strict=True) if r >= target), None)
+    t = None if crossing is None else interpolated_crossing(steps, rates_, crossing, target)
+    return {"crossing_step": crossing, "t": t if t is not None else crossing}
 
 
 FAILURE_RECORD = "failure.json"  # a failed relearning run's classified cause
@@ -4444,15 +4469,20 @@ class _ArmModels:
         self.ws = ws
 
     def relearn(self, arm_ws: Workspace, state_id: str, **kw: Any) -> dict[str, Any]:
+        return self.call(arm_ws, relearn_state, arm_ws, state_id, **kw)
+
+    def call(self, arm_ws: Workspace, fn: Any, *args: Any, **kw: Any) -> Any:
+        """``fn(*args, **kw)`` with ``arm_ws`` holding the shared models for its duration (any
+        step that trains or generates through ``arm_ws``); what it loads or replaces is kept."""
         if arm_ws is self.ws:
-            return relearn_state(arm_ws, state_id, **kw)
+            return fn(*args, **kw)
         arm_ws._generator, arm_ws._base, arm_ws._tokenizer = (
             self.ws._generator,
             self.ws._base,
             self.ws._tokenizer,
         )
         try:
-            return relearn_state(arm_ws, state_id, **kw)
+            return fn(*args, **kw)
         finally:
             self.ws._generator, self.ws._base, self.ws._tokenizer = (
                 arm_ws._generator,

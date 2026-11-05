@@ -3674,6 +3674,10 @@ unfiltered hypothesis distribution).
 
 ### 13.9 The size block: tldr's recovery advantage across Qwen3 sizes (optional)
 
+**Amended on 2026-11-05 (§13.17):** two sizes, 4B and 14B, with two independent implantations at
+each; §13.17 states the design, certificates, analysis and wording that replace the size sets
+below.
+
 **The optional block estimates size-associated changes in recovery advantage. Certificate success
 does not determine inclusion. Before any new size training, the size set, common datasets and
 recipes, rate policy, references, crossing targets, seed namespaces, trend estimator, interval
@@ -4350,3 +4354,128 @@ recorded; neither establishes a causal provider effect.
   and the denominators unchanged.
 - The discrepancy on countdown's recipe control, 18 of 20 on the reader candidate's screen against 81
   of 160 in the qualification, is reported as unexplained.
+
+### 13.17 Amendment of 2026-11-05: the size block's prospective design
+
+- **When adopted:** before any training of a new implantation, with B6 (§13.15). It replaces
+  §13.9's two size-set options and the `sizes` section of the follow-up rules; everything else in
+  §13.8–§13.9 and §13.16 stands unless stated here.
+- **Frozen in:** `configs/continuation/size_rules.yaml` (the rules), `manifests/size_inputs.json`
+  (the pinned datasets and the anchor's records), `configs/experiments/size_block/` (the
+  implantations' configurations) and the code `size_block`, `size_block_run`,
+  `scripts/pod/size_block.py`, `scripts/size_detector_check.py` and `scripts/size_analysis.py`.
+
+**Design.** The size block compares two sizes, Qwen3-4B and Qwen3-14B, with two independent tldr
+implantations at each: 4B-1, 4B-2, the existing anchor (14B-1, unchanged, its certificate
+unchanged) and a new 14B implantation (14B-2). 8B may follow only as a separately declared
+extension. Each new implantation uses the shared datasets and the common fixed recipe of §13.9
+unchanged, with its own numeric seeds for LoRA initialization, data order and sampling, its own
+sham, suppressed sham and Y and Y₂ organisms with fresh reference streams, its own suppression and
+confirmation and its own blocks in its own seed namespace; L and H_s keep paired seeds within each
+block. The replicates are declared, never selected.
+
+- **Seed namespaces.** Each implantation has an integer offset: 14B-1 0 (its recorded seeds),
+  4B-1 1000, 4B-2 2000, 14B-2 3000. Its implant and suppression training seed and its generation
+  seed are the offset; the relearning seed of block, calibration or pilot index j is the offset
+  plus j.
+- **Shared data.** The anchor's actual datasets, read by id and checked against its records, never
+  rebuilt: per habit (b, Y, Y₂) the implant and sham data and the matched prompts of its Stage-1
+  organisms; the suppression data of the stack lineage; the relearning data of b, Y and Y₂.
+- **Suppression and confirmation** follow §12.4.1 at every implantation: stack mode with the stack
+  lineage's frozen recipe, L and H_s only; the exploratory grid 25/50/100/200/400/800, the first
+  checkpoint whose paired-excess bound passes, a fresh 600-prompt confirmation with at most four L
+  hits, and its second-attempt allocation. Each implantation's confirmation lineage is
+  `size/<implantation>/tldr`.
+- **Floors.** A, Y and Y₂ at least one half on their reference streams (the 200
+  relearning-evaluation prompts, one response each), H at most 1/50; a failed floor makes the
+  implantation infeasible by §13.9's rule.
+- **Detector check.** It is run on 4B-1 and ends after suppression and before the first
+  confirmation: 800 items after the implantation (tldr 200 A and 200 H responses of their
+  reference passes; keywords_line 100 Y-organism responses and 100 H responses; zero_indexed_lists
+  100 Y₂-organism responses and 100 H responses, on disjoint halves of the reference prompts) and
+  30 responses of its suppressed L without a detector hit, from the exploratory pass. 4B-2 reuses
+  4B-1's accepted detector and 14B-2 the accepted 14B detector, each repeating the 30 suppressed-L
+  items on its own L. The labeling is model-based: two labeler models label every item without
+  the source or the detector's verdict; a third model labels every item they dispute; a final
+  judge model labels every dispute, 30 randomly drawn agreed items of the 800 and all 30
+  suppressed-L items, and its labels are final. Every layer's labels are checked alike (yes or no,
+  each item once, exactly its items). Any disagreement of the final labels with the detector goes
+  to a revision decision by §12.3.1 with that model's own evidence. An implantation's
+  confirmation starts only with its passing check at the dose, under the current detector
+  versions, recorded before the draw.
+- **Late revision.** A detector revision accepted after a certificate has closed is applied by
+  §13.9 to the saved reference, confirmation and relearning responses of every implantation,
+  including 14B-1; crossing times are recomputed from the retained trajectories, a crossing they
+  cannot reconstruct stays bounded or unavailable until matched evidence exists, and the original
+  certificates are unchanged and reported alongside.
+
+**Certificates.** Each 4B implantation has §13.8's certificate for new sizes (ten blocks, K ≥ 9,
+the interval [l₍₂₎, u₍₉₎]). 14B-2 has six fresh blocks as the anchor (K = 6 of 6, §12.4.8's
+interval, censoring and exact-sign rules). Every new implantation is calibrated by §13.8's
+alien-aware rule: H_s relearned on b, Y and Y₂ at both rates with calibration indices 10–12, 600
+steps each; k\* per rate from b's median; B = 50 · ⌈max(20, k\*s, 3 · the largest of the six
+medians)/50⌉. A median with two or three censored runs, or B above the ceiling, leaves the
+calibration unresolved. For 14B-2 this calibration differs from the anchor's (b only); it does not
+change the estimand or uncensored crossing times; it can change censoring and uncertainty. The
+ceiling is 600 steps, one for all new implantations, fixed before any training. A censored run is
+one that reaches B without crossing.
+
+**Pilot.** Before the full block, 4B-1 runs a four-block pilot (indices 13–16, all six arms, both
+rates) after its calibration is committed. The pilot is not a certificate and never enters a
+certificate, the estimands or the comparisons; 4B-1's certificate uses ten fresh blocks of the same
+implanted and suppressed model. 4B-2 and 14B-2 run no pilot. Whether to complete the comparison
+will be decided after inspecting the pilot, choosing among the full design, 4B-1 with 14B-2 only,
+or a stop; continuation is the default, and another listed branch may be chosen, with its
+pilot-informed reason disclosed; the reason may include the direction of the pilot's D_b for 4B-1
+relative to 14B-1. The decision changes which comparisons are reported, not the estimands, their
+computation or the final blocks. The report will state: "Whether to complete the size comparison
+was decided after inspecting a four-block pilot on 4B-1; those blocks are excluded from the final
+estimates, which condition on the retained implants, and the pilot results and continuation
+decision are reported separately." A projected ten-block detectable difference for D_b above 0.15
+at both rates, or two or more pilot blocks of a contrast whose sign censoring leaves undetermined,
+triggers a recorded review of the continuation, not a conclusion; a pilot-based forecast is
+computed for a contrast and rate only when all four block contrasts have finite point values, and
+is otherwise reported as unavailable, neither passing the criterion nor a failure.
+
+**Dense schedule.** An implantation whose smallest calibration median T(H_s) at either rate is
+below 45 steps has its pilot and certificate runs evaluated on a dense schedule: the union of the
+common schedule, every integer step through 30, and every even step from 32 through 100. Primary
+crossing times, certificates and stopping use the common-schedule observations; the extra
+evaluations never latch or stop a run, leave the training random stream and the common
+checkpoints' generation streams unchanged, and give T on the dense schedule as a sensitivity.
+Calibration uses the common schedule.
+
+**Order and failures.** 4B-1 runs first. Alongside its preparation and pilot, only 14B-2's
+preparation through its calibration runs; 4B-2, 14B-2's later steps and every certificate's
+blocks wait for the recorded continuation branch after the pilot, and run only in a branch that
+includes them. The pilot and certificate runs use the calibration as recorded before them. With
+one new size there is no fallback for §13.9's order to govern; every implantation's rules are fixed
+in advance and no outcome of one changes another's procedure. Technical failures follow §13.16
+H1.
+
+**Analysis.** Each size's point is the equal-weight mean of its two implantations' block means.
+D_b, Q_Y and Q_Y₂ are reported for each implantation at both rates, with the size difference
+(14B − 4B), the four cross-implant comparisons and the two within-size replicate gaps. Intervals
+come from one joint block bootstrap (10,000 resamples, seed 20261105) resampling blocks within each
+implantation independently, the same resample serving every comparison; with censoring, the lower
+and upper ends are resampled together and identification bounds are reported beside the intervals.
+Rates are never pooled; §13.9's absolute-rate sensitivity is kept: the same certificates and
+comparison with every run's crossing of the rate 0.25 on the common schedule, from its saved
+curve. With two sizes only pairwise comparisons are reported: no size trend is estimated or
+extrapolated. If an implantation is unavailable, or the branch omits it, the available evidence is
+reported as a labeled reduced analysis of the present implantations (a size's point the mean of
+its present ones, the comparisons they allow), never substituted for the planned mean; it reports
+estimates, intervals and directions, and no size statement, which needs all four cross-implant
+comparisons.
+
+**Wording.** A size statement needs the size difference's interval to exclude zero and the point
+estimates of all four cross-implant comparisons to lie in the same direction; their individual
+significance is not required: "The mean estimated tldr recovery advantage was larger at 14B, with
+all four cross-implant point estimates in the same direction" (or at 4B). Individual cross-implant
+comparisons that differ in significance are described as differing in precision, which does not
+withdraw an established difference of means. If the cross-implant point estimates differ in
+direction, the difference of means may be reported with its interval, but no consistent ordering by
+size is claimed. A claim of behavior-specific advantage needs D_b, Q_Y and Q_Y₂ to agree at both
+rates (§13.9). The two implantations at each size give one observed gap each, not a measured
+implantation variance: "The estimated size separation exceeded the observed gaps between the two
+implantations at each size; variation across other implantations remains unknown."
