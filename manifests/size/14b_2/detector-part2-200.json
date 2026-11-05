@@ -1,0 +1,35 @@
+{
+ "arbitrated": 0,
+ "detectors": {
+  "tldr": "85fdc2138327"
+ },
+ "disagreements": [],
+ "disputed": 0,
+ "dose": 200,
+ "files": {
+  "judge-kit/input.jsonl": "3787760ac5d7e759db7efba3c443931a0eb3623184ddb61f4b039b79df0a4a7b",
+  "judge-kit/items.json": "188ec163f72433284ac381d50154a5e14197d92b780559ccbf39cc16b9def246",
+  "judge/fable.jsonl": "306ed1119d2f47ce36791861640c8ba18372219f7d822e92f97c0920695ad70e",
+  "key.json": "d092812d0c1ef2b1b953ce23464e9443609072ef0eeb3b5cfbe5cfd5fe2ca429",
+  "kit/input.jsonl": "da6f12b9b360ac80b0f133db8206994e088c17ab48de733a0521d7b856df41cc",
+  "labels/grok/labels.jsonl": "306ed1119d2f47ce36791861640c8ba18372219f7d822e92f97c0920695ad70e",
+  "labels/sonnet/labels.jsonl": "306ed1119d2f47ce36791861640c8ba18372219f7d822e92f97c0920695ad70e"
+ },
+ "implantation": "14B-2",
+ "items": 30,
+ "judged": 30,
+ "judged_sample": 30,
+ "labelers": [
+  "grok",
+  "sonnet"
+ ],
+ "part": 2,
+ "table": {
+  "tldr/L@200": {
+   "detector": 0,
+   "n": 30,
+   "present": 0
+  }
+ },
+ "verdict": "passes"
+}
