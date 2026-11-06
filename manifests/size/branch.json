@@ -1,0 +1,22 @@
+{
+ "branch": "full",
+ "decided_after": "4B-1's four-block pilot, blocks 13-16 (runs/size_4b_1/records/blocks-pilot.json)",
+ "implantations": [
+  "4B-1",
+  "4B-2",
+  "14B-1",
+  "14B-2"
+ ],
+ "pilot_record_sha256": "864619bd3538e5a3d42021aa8fdec3efdc7f1f41bf6e92889fba4e477e6fdb42",
+ "reason": "continuation is the default (\u00a713.17); the pilot showed no censored run, no failure and every block contrast positive at both rates",
+ "review_triggers": {
+  "contrasts_with_two_or_more_sign_undetermined_pilot_blocks": [],
+  "projected_ten_block_detectable_difference_D_b": {
+   "1e-05": 0.025,
+   "5e-06": 0.036,
+   "threshold": 0.15,
+   "triggered": false
+  }
+ },
+ "section": "docs/preregistration.md \u00a713.17, Pilot"
+}
