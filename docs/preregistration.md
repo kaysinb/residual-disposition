@@ -4349,7 +4349,8 @@ through the base decoder, one fresh stream of 80 per reading.
     assessed control rises so; it is *unavailable* when none does and a needed control cannot be
     assessed, the summary naming each such control and its reason (stack 200's random cell, for
     one, has no rung-1 baseline); it fails only when every needed control was assessed and none
-    rose, or when L's rise is not detected.
+    rose; it is *not applicable* when L's rise is not detected, since there is no rise to compare
+    against.
 
   The hint alone shows prompt sensitivity; the deletion with the hint, set against the hint
   reading and the matched control, shows whether that sensitivity needs the fragments.

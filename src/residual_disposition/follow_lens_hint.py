@@ -490,8 +490,8 @@ FRAGMENT_CRITERIA = (
      "a comparable rise on a control: eli5's H, or the line's H_s, X or L's random cell, rises (>) "
      "by at least half of L's rise in counted hypotheses; True when an assessed control does, "
      "\"unavailable\" when none does and a needed control cannot be assessed (each named with its "
-     "reason), False only when every needed control was assessed and none rose, or L's rise is "
-     "not detected"),
+     "reason), False only when every needed control was assessed and none rose; "
+     "\"not_applicable\" when L's rise is not detected (no rise to compare against)"),
 )
 # Frozen before any reading: the deletion's readings, per cell and measure (counted/80; for L the
 # feature slots/80 too), on the same prompt.
@@ -746,7 +746,7 @@ def fragment_criteria(line: str, cells: Mapping[str, Any], one: Mapping[str, Any
     if direction(rise) is not None:
         half = rise["difference"] / 2
         if direction(rise) != ">":
-            second = False
+            second = "not_applicable"
         elif any(direction(v["rise"]) == ">" and v["rise"]["difference"] >= half
                  for v in controls.values() if v["rise"] is not None):  # fmt: skip
             second = True

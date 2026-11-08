@@ -430,11 +430,14 @@ def test_equal_rises_in_counts_and_feature_are_not_evidence_against():
     assert criteria(60, 60, 0, 0)["counted_beyond_feature"] == "feature_rise_detected"
 
 
-def test_controls_rise_is_true_unavailable_or_false():
+def test_controls_rise_is_true_unavailable_false_or_not_applicable():
     assert criteria(60, 60, 0, 0, {"H": (40, 0), "H_s": (0, 0), "X": (0, 0),
                                    "L_random": None})["controls_rise"] is True  # fmt: skip
     missing = criteria(60, 60, 0, 0, {"H": (0, 0), "H_s": (0, 0), "X": (0, 0), "L_random": None})
     assert missing["controls_rise"] == "unavailable"
     assert missing["controls_missing"] == {"L_random": "no rung-1 reading"}
     assert criteria(60, 60, 0, 0)["controls_rise"] is False  # every control assessed, none rose
-    assert criteria(1, 1, 0, 0, {"H": (0, 0), "L_random": None})["controls_rise"] is False
+    # L's rise not detected: no rise to compare against, never read as controls that stayed flat
+    assert (criteria(1, 1, 0, 0, {"H": (0, 0), "L_random": None})["controls_rise"]
+            == "not_applicable")  # fmt: skip
+    assert criteria(1, 1, 0, 0)["controls_rise"] == "not_applicable"
