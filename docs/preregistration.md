@@ -4363,7 +4363,8 @@ the results at 200 and 800 were known, including 800's certificate and both ladd
 unchanged: 400 failed the screening (PD 1 of 18,388, chat 1 of 9,194 and raw 0 of 9,194; ADL 0), it
 is not a stack candidate, and the branch, its validation and every record and verdict of 800 stand
 as recorded. 400 has its own lineage `follow/eli5_stack400`, its own streams and salts
-(`…/stack400/…`) and its own records; no step of 800 is re-run or re-read.
+(`…/stack400/…`) and its own records, except the certificate's relearning seeds (below); no step
+of 800 is re-run or re-read.
 - **Detector check on O4.** One response each from L and H_s on O4 (the pool slice [9600:10200],
   600 prompts) under the frozen generation contract and the contracts' eli5 detector
   `43943945ee35`, as in §13.7's validation; H_s descriptive. 400 never saw these prompts and its
@@ -4379,7 +4380,13 @@ as recorded. 400 has its own lineage `follow/eli5_stack400`, its own streams and
 - **k\* and the six-block certificate** by §13.8 on the line `eli5_stack_400` (the active, sham,
   decision, reference and selection records of 800's line; 400's L and H_s): k\* at the two rates,
   B, censoring, K per contrast and S_b as a geometric mean at both rates; p₂ by §12.4.8 shown with
-  its status, as for 800.
+  its status, as for 800. The one exception to 400's own streams: the relearning seeds are the
+  rules' (k\*'s calibration on seeds 6–8, the certificate's blocks on seeds 0–5), the same as the
+  certificates at 200 and 800, and the relearning adapter's initialization, training order and
+  evaluation sampling derive from these seeds alone, not from the lineage. The three doses'
+  certificates therefore share common random numbers block by block. This is kept: a difference
+  between doses is then less noisy. A comparison of doses is paired by block, and the blocks of
+  different doses are not independent repetitions.
 - **Rung 1 and rung 2 on the base decoder only.** Rung 1: D\* reads L, H_s, X and L's random
   direction (one stream of 80 each) and the recipe control (two streams); unfiltered PD reads L,
   H_s, X and the recipe control the same way; rung 1's rule and scoring unchanged. Rung 2:
