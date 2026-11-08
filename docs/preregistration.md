@@ -4217,63 +4217,108 @@ L's random direction through the base decoder is built for each line from its pa
 δ̄, η and seeds at both layers, and L's unsteered samples are kept in its random cell.
 Safety-blocked coherence batches follow the amendment above.
 
-**The steering ablation at the partial threshold (added 2026-11-08).** A descriptive reading that
-removes only the steered samples from rung 2's evidence on the four lines above, so that the
-difference between rung 2's reading and this one shows steering's contribution, which the frozen
+**The steering ablation at the partial threshold (added 2026-11-08).** A descriptive reading of
+what the steered excerpts contribute to rung 2's reading on the four lines above, which the frozen
 comparison with rung 1 does not isolate. It was added after rung 1's and rung 2's results on these
-lines and the stack candidate 800's rung 2 were known; it changes none of them.
-- **Evidence:** rung 2's evidence of each cell on the base decoder with the steered samples removed:
-  D\*'s rendering of both layers and, at layer 20, each position's unsteered sample per closed
-  prompt (the samples of `manifests/follow_partial_steering.json`), each cut to its first 128
-  characters, under the key `replies`.
-- **Interpreter:** prompt `adl-lens-multiscale-unsteer-v1` (sha256
-  `69f302bbc8fc0409ded4af51a4b9b6f1cd826db5be3e79e7d7a9f25441cf8706`): D\*'s prompt with a
-  description of the replies (the fine-tuned model's own replies with no intervention) and adl-v1's
-  line on cut generations; none of rung 2's steering text. Everything else as rung 2.
-- **Cells:** L, H_s and X of example_link 200, pun_intended 200, countdown 50 and eli5 stack 200,
-  one stream of 80 each under fresh salts
-  (`follow/rung2/base/ablation/<behavior>/<lineage>/<role>/stream1`): 12 readings, 960 slots; 36
-  readings and 2,880 slots with the controls below. No qualification and no identification decision.
-- **Two controls of the same readings, rung 2's prompt unchanged:**
-  - *cue removal* (`rung2c`): rung 2's evidence with only the steered excerpts that contain a hit of
-    the line's detector dropped (the unsteered excerpts of the same prompts kept), the dropped keys
-    recorded per cell;
-  - *matched random removal* (`rung2r`): the same number of steered excerpts per cell dropped at
-    random, seeded from the reading's salt; a cell with no cue removed reads rung 2's evidence
-    unchanged.
+lines and the stack candidate 800's rung 2 were known; it changes none of them, and rung 2's pins
+stay as they are.
+- **One mechanism, three conditions.** Each condition is rung 2's evidence of the cell on the base
+  decoder, its structure (the key `steering`, the failure records) and its prompt
+  `adl-lens-multiscale-steer-v1` (sha256 `70346ade…`) unchanged, with a set of steered excerpts
+  removed (each excerpt its first 128 characters; the unsteered excerpts of the same prompts
+  kept). The three conditions differ only in that set: *ablation* removes every steered excerpt;
+  *cue removal* only those that contain a hit of the line's registered detector; *random removal*
+  the same number per cell drawn at random under a seed derived from the reading's salt. Each
+  reading records the removed keys (position, prompt), their positions and characters, the
+  detector version, the seed and, for random removal, its overlap with the cue keys. The random
+  removal is one frozen random mask, not a replication across masks.
+- **Readings.** L, H_s and X of example_link 200, pun_intended 200, countdown 50 and eli5 stack 200
+  under the ablation; L under cue removal and under random removal. On H_s and X the detector hits
+  no steered excerpt, so both controls remove nothing and read rung 2's evidence byte for byte.
+  Identical-input cue/random controls share one fresh 80-slot reading, counted once; its difference
+  from the historical rung-2 reading is a repeatability check. The shared reading stands for both
+  controls in every paired comparison, so their covariance is kept; the 80 slots of a reading are
+  never collapsed. 28 readings of 80 slots, one fresh stream each, under fresh salts
+  (`follow/rung2/base/{ablation,ablation-cue,ablation-random,ablation-repeat}/<behavior>/<lineage>/<role>/stream1`).
+- **Judging and outcomes.** Rung 2's judges and graders unchanged. Per line and condition (rung 2's
+  historical reading beside the fresh ones): counted hypotheses of 80 and, from their specificity
+  grades, the feature's share, the best alternative's and the slots of 80 naming the defining
+  feature. Beside them the differences rung 2 − ablation, cue removal − random removal, rung 2 −
+  cue removal, rung 2 − random removal, cue removal − ablation and the repeat − rung 2, each for
+  counted/80 and feature slots/80 with Newcombe's hybrid score 95 % interval for two independent
+  proportions (a reading set against itself differs by exactly 0); rung 2's same-input
+  qualification streams of the same lines (A, H and the recipe control, two streams each); and
+  rung 1's reading.
+- **Interpretations, fixed before any ablation reading.** On L, for each measure apart, "<" and
+  ">" mean a difference whose 95 % interval lies wholly below or above 0 and "≈" one that contains
+  0; the first pattern that holds is shown:
+  - ablation, cue removal and random removal each ≈ rung 2: steering is not needed for this line's
+    reading at this resolution;
+  - ablation < rung 2, cue removal < rung 2 and ≈ ablation, random removal ≈ rung 2: the
+    behavior-bearing steered excerpts carry the reading;
+  - ablation < rung 2, cue removal ≈ rung 2 and > ablation, random removal ≈ rung 2: steering
+    contributes beyond its detector-hit excerpts;
+  - ablation, cue removal and random removal each < rung 2, cue removal ≈ random removal: removing
+    that many steered excerpts lowers the reading whatever they hold; content and amount are not
+    separated;
+  - ablation > rung 2: removing the steered excerpts raises the reading;
+  - otherwise inconclusive: differences within the intervals' resolution (about ±0.155 for 80
+    against 80 at worst) are inconclusive.
 
-  L, H_s and X of each line, one fresh stream of 80 each per control (`.../ablation-cue/...`,
-  `.../ablation-random/...`): 24 more readings, 1,920 slots. Rung 2 minus cue removal shows what
-  the behavior-bearing steered excerpts contribute; cue removal against matched random removal
-  separates their content from the amount of evidence removed.
-- **Judging and outcomes:** rung 2's judges unchanged; per line, the counts L/H_s/X and the
-  specificity reading of L's counted hypotheses (the feature's share, the best alternative's share,
-  the advantage, the slots of 80 naming the feature), shown beside rung 1's and rung 2's on the same
-  decoder whatever they show. No family over the four lines and no joint claim.
-- **Reading the difference:** this reading and rung 2's use different streams of 80, so their
-  difference includes between-stream sampling noise; it is not attributed to steering alone beyond
-  that.
+  A null does not establish that steering or its cues are irrelevant. Rung 2's reading is
+  historical and the others fresh, so their differences include between-stream noise. No pattern
+  is a qualification or an identification decision; no family over the four lines and no joint
+  claim.
 - **Meter:** its own item `follow/partial/ablation`, API only.
 
-**A reader hint and a marker mask on D\* (added 2026-11-08).** A descriptive check of how D\*'s
-interpreter uses lexical fragments, added after the lens words of eli5 continued 200's L were seen
-to hold the marker fragment "EL" at the same ranks as A's while the interpreter, mentioning it in 51
-of 80 hypotheses on the state decoder and 57 on the base decoder, read it as another word. The hint
-is a revision of the interpreter after results, not a registered method; neither arm changes any
-earlier result.
+**A reader hint and a fragment-family deletion on D\* (added 2026-11-08).** A descriptive check of
+how D\*'s interpreter uses lexical fragments, added after the lens words of eli5 continued 200's L
+were seen to hold the fragment "EL" at the same ranks as A's while the interpreter, mentioning it
+in 51 of 80 hypotheses on the state decoder and 57 on the base decoder, read it as another word.
+The hint is a revision of the interpreter after results, not a registered method; neither arm
+changes any earlier result. Every cell is the package of a committed follow-up reading, read
+through the base decoder, one fresh stream of 80 per reading.
 - **Hint** (prompt `adl-lens-multiscale-hint-v1`, sha256
   `7dc941121f6b74c18ba9d1d0ded4205c6315b1f534f0d6465ea20545f1280057`): D\*'s prompt with one
   sentence, the same for every state: "Some tokens may be pieces of words, abbreviations or labels;
-  consider what they could mean together." D\*'s rendering through the base decoder, one fresh
-  stream of 80 each: eli5 A and H; L, H_s, X and L's random direction of eli5 stack 200, stack 800
-  and continued 200, and the recipe controls of the three; pun_intended 200 and tldr 400: A, H, L,
-  H_s, X, L's random direction and the recipe control (31 readings).
-- **Mask:** D\*'s rendering through the base decoder with the tokens "el", "eli", "eli5" and "elf"
-  (any case, with or without a leading space) removed from every logit-lens and Patchscope list,
-  D\*'s prompt unchanged: eli5 A, the L of continued 200 and stack 200, and their H_s (5 readings).
-- **Outcomes:** counts per cell and the specificity reading, beside rung 1's base-decoder counts;
-  rung 1's rule (L − H_s > 0.3 and L − X > 0.2 by the certified regions at 1/60; the random cell at
-  most 8 of 80) is shown, not applied as a decision. No family and no joint claim.
+  consider what they could mean together." D\*'s rendering unchanged: eli5 A and H; L, H_s, X and
+  L's random direction of eli5 stack 200, stack 800 and continued 200, and the recipe controls of
+  the three; pun_intended 200 and tldr 400: A, H, L, H_s, X, L's random direction and the recipe
+  control (31 readings). L's random direction is its base_random branch where one exists; tldr
+  400's L has none, and its random cell is the random branch rung 1 read.
+- **A preselected fragment-family deletion.** D\*'s rendering with every entry of the family "el",
+  "eli", "eli5", "elf" (any case, with or without a leading space) deleted from every logit-lens
+  and Patchscope list at both layers and all positions, the other entries kept in order with their
+  ranks and nothing backfilled. It also removes ordinary meanings of the same strings, and the
+  shortened lists move the surviving logit-lens entries up; it is not a content-specific marker
+  mask. Read with the hint on eli5 A and the L of eli5 continued 200 and stack 200 (3 readings),
+  and with D\*'s prompt on eli5 A (1 reading). The H_s of eli5 stack 200 and continued 200 are
+  read as their hint readings, no readings of their own: stack 200's evidence holds no family
+  entry, continued 200's one, so its alias is an approximation, recorded as such.
+- **Matched deletion controls.** For each of those four deletions (each removes at least 58
+  entries) the same number of entries outside the family deleted instead, rank-matched: in the
+  same layer, position and list, the free entry nearest in rank to each family entry, ties drawn
+  under a fixed seed of the cell (the same with and without the hint); same prompt; nothing
+  backfilled (4 readings). 39 readings in all.
+- **Judging.** D\*'s judges and graders; every parsed hypothesis's category is graded too, so that
+  eli5 false naming (hypotheses graded as the eli5 category) can be counted on the pun_intended and
+  tldr packages and on every H, H_s, X, random and recipe control.
+- **Outcomes.** Per cell its count, eli5 naming and, for L, the defining-feature slots of 80;
+  beside it rung 1's base-decoder count on the same package and decoder from the committed records
+  where one exists, with its availability and reason stated otherwise (the base_random branches of
+  the partial-threshold lines have no rung-1 reading; the deletion lines have no X or random cell,
+  so their rule cannot be shown); a differently prompted reading is never put in its place.
+  Rung 1's rule (L − H_s > 0.3 and L − X > 0.2 by the certified regions at 1/60; the random cell at
+  most 8 of 80) is shown where its cells exist, never applied as a decision. Each deletion is set
+  against its matched control and its unedited reading on the same prompt, with 95 % intervals as
+  in the ablation; deletion < matched control reads as the family carrying the reading beyond the
+  amount deleted, deletion ≈ matched control as content not separated from amount.
+- **Fixed before any reading, against the reading "the interpreter now understands the
+  fragment":** on an eli5 line, a rise in L's counted hypotheses against rung 1 without a rise in
+  its defining-feature slots, or a comparable rise (at least half of L's) on eli5's H or the line's
+  H_s, X or random cell. The hint alone shows prompt sensitivity; the deletion with the hint, set
+  against the hint reading and the matched control, shows whether that sensitivity needs the
+  fragments.
 - **Meter:** its own item `follow/lens_hint`, API only.
 
 **Hits in the stack's validation (added 2026-11-02; decides the open question above).** Decided
