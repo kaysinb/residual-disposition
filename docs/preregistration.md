@@ -4356,6 +4356,58 @@ through the base decoder, one fresh stream of 80 per reading.
   reading and the matched control, shows whether that sensitivity needs the fragments.
 - **Meter:** its own item `follow/lens_hint`, API only.
 
+**eli5's stack at 400, a descriptive point of the depth curve (added 2026-11-08).** A descriptive
+reading of eli5's saved stack state at 400 (L `se244833f590245e7`, H_s `scc5816364b08f649`, recipe
+control `s39810e039bfdc899`) beside the stack at 200 and the stack candidate 800. It was added after
+the results at 200 and 800 were known, including 800's certificate and both ladders. §13.7 is
+unchanged: 400 failed the screening (PD 1 of 18,388, chat 1 of 9,194 and raw 0 of 9,194; ADL 0), it
+is not a stack candidate, and the branch, its validation and every record and verdict of 800 stand
+as recorded. 400 has its own lineage `follow/eli5_stack400`, its own streams and salts
+(`…/stack400/…`) and its own records; no step of 800 is re-run or re-read.
+- **Detector check on O4.** One response each from L and H_s on O4 (the pool slice [9600:10200],
+  600 prompts) under the frozen generation contract and the contracts' eli5 detector
+  `43943945ee35`, as in §13.7's validation; H_s descriptive. 400 never saw these prompts and its
+  screening did not depend on them; O4 was already read for 800's validation, which makes 400 and
+  800 directly comparable on one set and makes O4 not fresh to the project. The raw hits of each
+  and the pointwise 95 % bound are reported; it is descriptive, not a pass or a fail, and a hit
+  closes nothing. The screening's one PD hit of L is shown with its full text, unadjudicated.
+- **Builds, as for 800, through the base decoder.** X = H + U_A, composed in the session from 400's
+  L and the sham as 800's from its L; the lens packages of L, H_s, X and the recipe control; L's
+  random direction through the base decoder from the package's pinned δ̄, η and seeds at both
+  layers; PD pools of H_s, X and the recipe control (L's pool is the
+  screening's pinned pool `20261022-110641-tool_pd-e0d05937-0a98`).
+- **k\* and the six-block certificate** by §13.8 on the line `eli5_stack_400` (the active, sham,
+  decision, reference and selection records of 800's line; 400's L and H_s): k\* at the two rates,
+  B, censoring, K per contrast and S_b as a geometric mean at both rates; p₂ by §12.4.8 shown with
+  its status, as for 800.
+- **Rung 1 and rung 2 on the base decoder only.** Rung 1: D\* reads L, H_s, X and L's random
+  direction (one stream of 80 each) and the recipe control (two streams); unfiltered PD reads L,
+  H_s, X and the recipe control the same way; rung 1's rule and scoring unchanged. Rung 2:
+  steering of five cells (L, H_s, X, the recipe control, L's random direction) by H11 and the stack
+  candidate's procedure, then D\* with steering evidence on the same cells; A and H from the rung's shared qualification, the
+  continued mode's format validation applied unchanged, as for 800. Each rung's status by its
+  registered rule (§13.5: the contrast regions at 1/60, category confusion, the random cell at most
+  8 of 80) and the specificity reading of L are shown whatever the other gives; both rungs run
+  whatever the first shows. No rung status is a ladder decision for eli5's stack: the ladder of §13.6 is
+  800's.
+- **The reader hint on 400.** The hint's cells L, H_s, X, L's random direction (its base_random
+  branch) and the recipe control, under the hint's prompt `adl-lens-multiscale-hint-v1` and the
+  rules above unchanged, against 400's rung-1 reading of the same package; eli5's A and H are the
+  committed hint readings (`runs/follow_lens_hint/follow-lens-hint-lens_hint-20261108T212846Z`), not
+  read again. The two criteria fixed above (*counted beyond the feature*, *controls rise*) are
+  computed for 400 as for the other eli5 lines. No deletion arm.
+- **The depth curve, fixed before any reading of 400 beyond its screening.** For the stack at 200,
+  400 and 800, side by side: S_b at both rates with each certificate's p₂; L's counts of 80 and
+  feature slots at rung 1 and rung 2 on the base decoder and under the hint, with H_s's and X's;
+  L's and H_s's O4 hits where read (200 has no O4 reading, stated as unavailable). Differences
+  between doses are shown with Newcombe's 95 % intervals for the counts. It is descriptive: no
+  threshold of flatness, no tolerance and no claim of a monotonic relation, of equality between
+  doses or of a joint effect; 400 adds one point, and its excess of S_b over 1 is read as an
+  estimate beside the other two, not tested against them.
+- **Meter:** its own items `follow/stack400/full` (the Pod work and rung 1's and rung 2's
+  requests), `follow/cert/eli5_stack_400` (k\* and the certificate) and `follow/stack400/lens_hint`
+  (the hint, API only).
+
 **Hits in the stack's validation (added 2026-11-02; decides the open question above).** Decided
 before any V4 generation. It covers L's hits on V4's PD in both framings, V4's ADL (early and long,
 in both framings), O4 and OOD; H_s on O4 stays descriptive. The sampling unit is one generated
