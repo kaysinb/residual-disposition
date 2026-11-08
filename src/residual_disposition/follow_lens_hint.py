@@ -16,10 +16,12 @@ parsed hypothesis's category graded too, for eli5 false naming.
 - **Matched deletion controls** (``matched_hint``, ``matched``; ``matched_deletion``): for each
   deletion reading (each deletes at least ``MATCH_MIN`` entries), the same number of entries
   outside the family deleted instead, rank-matched (in the same layer, position and list, the
-  free candidate nearest in rank to each family entry, ties drawn under a fixed seed), with the
-  same prompt; nothing backfilled. A candidate is an entry outside the family that the frozen
-  exclusion rule (``MATCH_RULE``, its sha256 ``MATCH_RULE_SHA256`` recorded with each matched
-  reading) leaves: none near the family and none of eli5's meaning.
+  free candidate nearest to each family entry in the rank the interpreter sees: the logit lens's
+  ordinal rank, Patchscope's explicit best rank; ties drawn under a fixed seed), with the same
+  prompt; nothing backfilled; each deleted entry's shown rank and list index recorded. A
+  candidate is an entry outside the family that the frozen exclusion rule (``MATCH_RULE``, its
+  sha256 ``MATCH_RULE_SHA256`` recorded with each matched reading) leaves: none near the family
+  and none of eli5's meaning.
 - **Aliases** (``ALIASES``): the H_s of eli5 stack 200 and continued 200 under the deletion with
   the hint are their hint readings, no new readings: stack 200's evidence holds no family entry
   (exact); continued 200's holds one (an approximation, recorded as such).
@@ -239,10 +241,19 @@ def _overview(evidence: str) -> dict[str, Any]:
     return json.loads(evidence[len(_HEAD) :])
 
 
+def shown_ranks(name: str, items: Sequence[Any]) -> list[int]:
+    """The ranks a list shows the interpreter: a logit-lens list's ordinal ranks (1 = most
+    promoted), a Patchscope list's explicit best ranks (shared by many entries)."""
+    if name == "logit_lens":
+        return list(range(1, len(items) + 1))
+    return [int(e[1]) for e in items]
+
+
 def _edit(evidence: str, choose: Any) -> tuple[str, dict[str, Any]]:
-    """D*'s evidence with the entries ``choose(layer, position, list, tokens)`` names (indices)
-    deleted from each list, the rest in order; and what was deleted, by layer and position: each
-    list's tokens and their 0-based ranks in it."""
+    """D*'s evidence with the entries ``choose(layer, position, list, tokens, ranks)`` names (list
+    indices) deleted from each list, the rest in order; and what was deleted, by layer and
+    position: each list's tokens, their shown ranks (``shown_ranks``) and their 0-based list
+    indices."""
     overview = _overview(evidence)
     removed: dict[str, Any] = {}
     for layer, entry in overview["datasets"]["ds1"]["layers"].items():
@@ -250,8 +261,10 @@ def _edit(evidence: str, choose: Any) -> tuple[str, dict[str, Any]]:
             gone = {}
             for name in LISTS:
                 items = lists[name]
-                chosen = sorted(choose(layer, pos, name, [_token(e) for e in items]))
-                gone[name] = {"tokens": [_token(items[i]) for i in chosen], "ranks": chosen}
+                ranks = shown_ranks(name, items)
+                chosen = sorted(choose(layer, pos, name, [_token(e) for e in items], ranks))
+                gone[name] = {"tokens": [_token(items[i]) for i in chosen],
+                              "ranks": [ranks[i] for i in chosen], "indices": chosen}
                 lists[name] = [e for i, e in enumerate(items) if i not in set(chosen)]
             removed.setdefault(layer, {})[pos] = gone
     return _HEAD + json.dumps(overview, ensure_ascii=False), removed
@@ -274,8 +287,8 @@ def family_count(evidence: str) -> int:
 def delete_fragments(evidence: str) -> tuple[str, dict[str, Any]]:
     """The preselected fragment-family deletion: every family entry deleted, nothing
     backfilled."""
-    return _edit(evidence, lambda layer, pos, name, tokens: [i for i, t in enumerate(tokens)
-                                                             if in_family(t)])  # fmt: skip
+    return _edit(evidence, lambda layer, pos, name, tokens, ranks: [
+        i for i, t in enumerate(tokens) if in_family(t)])  # fmt: skip
 
 
 def match_rule_sha256() -> str:
@@ -313,15 +326,18 @@ def excluded(token: str) -> bool:
 
 def matched_deletion(evidence: str, seed: int) -> tuple[str, dict[str, Any]]:
     """The matched control of the fragment-family deletion: in each list, for each family entry in
-    rank order, the free candidate nearest to it in rank deleted instead (ties drawn by
-    ``random.Random(seed)``), as many as the family's, the family's entries kept; a candidate is an
-    entry outside the family that the exclusion rule (``excluded``) leaves; nothing backfilled. A
-    list with fewer candidates than family entries is refused."""
+    list order, the free candidate nearest to it in the rank the interpreter sees (``shown_ranks``:
+    the logit lens's ordinal rank, Patchscope's explicit best rank) deleted instead, ties (many
+    Patchscope entries share a rank) drawn by ``random.Random(seed)``; as many as the family's,
+    the family's entries kept; a candidate is an entry outside the family that the exclusion rule
+    (``excluded``) leaves; nothing backfilled. A list with fewer candidates than family entries is
+    refused."""
     import random
 
     rng = random.Random(seed)
 
-    def choose(layer: str, pos: str, name: str, tokens: Sequence[str]) -> list[int]:
+    def choose(layer: str, pos: str, name: str, tokens: Sequence[str],
+               ranks: Sequence[int]) -> list[int]:  # fmt: skip
         family = [i for i, t in enumerate(tokens) if in_family(t)]
         free = [i for i, t in enumerate(tokens) if not in_family(t) and not excluded(t)]
         if len(free) < len(family):
@@ -330,8 +346,8 @@ def matched_deletion(evidence: str, seed: int) -> tuple[str, dict[str, Any]]:
         chosen: list[int] = []
         for f in family:
             left = [c for c in free if c not in chosen]
-            best = min(abs(c - f) for c in left)
-            ties = [c for c in left if abs(c - f) == best]
+            best = min(abs(ranks[c] - ranks[f]) for c in left)
+            ties = [c for c in left if abs(ranks[c] - ranks[f]) == best]
             chosen.append(ties[0] if len(ties) == 1 else rng.choice(ties))
         return chosen
 
@@ -464,19 +480,26 @@ def with_categories(rows: Sequence[Mapping[str, Any]], definitions: Mapping[str,
 # understands the fragment", on each eli5 line's L against rung 1's on the same package (">" a
 # difference whose 95 % interval lies wholly above 0).
 FRAGMENT_CRITERIA = (
-    ("count_without_feature",
-     "L's counted hypotheses rise (>) without a rise (>) in its defining-feature slots of 80"),
+    ("counted_beyond_feature",
+     "the direct contrast of L's slots of 80 that are counted but do not name the defining "
+     "feature, the hint reading against rung 1's on the same package: evidence_against when its "
+     "interval lies wholly above 0 (counted hypotheses rose beyond the feature slots); "
+     "feature_rise_detected when it does not and the feature slots' own difference lies wholly "
+     "above 0; not_determined otherwise. A feature rise not detected is not evidence against"),
     ("controls_rise",
      "a comparable rise on a control: eli5's H, or the line's H_s, X or L's random cell, rises (>) "
-     "by at least half of L's rise in counted hypotheses"),
+     "by at least half of L's rise in counted hypotheses; True when an assessed control does, "
+     "\"unavailable\" when none does and a needed control cannot be assessed (each named with its "
+     "reason), False only when every needed control was assessed and none rose, or L's rise is "
+     "not detected"),
 )
 # Frozen before any reading: the deletion's readings, per cell and measure (counted/80; for L the
 # feature slots/80 too), on the same prompt.
 DELETION_PATTERNS = (
     ("family_carries", "deletion < matched control (the difference's interval wholly below 0): "
      "the fragment family carries the reading beyond the amount deleted"),
-    ("not_separated", "deletion ≈ matched control: the family's content is not separated from the "
-     "amount deleted"),
+    ("not_separated", "no deletion − matched control difference detected (its interval contains "
+     "0): the family's content is not separated from the amount deleted"),
     ("matched_lower", "deletion > matched control: deleting the family hurts less than deleting "
      "as many neighbouring entries"),
 )
@@ -678,15 +701,16 @@ def _deletion_pattern(d: Mapping[str, Any] | None) -> str | None:
     from .follow_partial import direction
 
     sign = direction(d)
-    return None if sign is None else {"<": "family_carries", "≈": "not_separated",
+    return None if sign is None else {"<": "family_carries", "nd": "not_separated",
                                       ">": "matched_lower"}[sign]  # fmt: skip
 
 
 def fragment_criteria(line: str, cells: Mapping[str, Any], one: Mapping[str, Any]) -> dict:
     """The frozen criteria against reading the hint as fragment decoding on one eli5 line
-    (``FRAGMENT_CRITERIA``): L's rise in counted hypotheses and in defining-feature slots against
-    rung 1's on the same package, and each control's rise; each criterion True when it holds
-    against the reading, None while open or without a baseline."""
+    (``FRAGMENT_CRITERIA``), against rung 1's reading on the same package: L's rise in counted
+    hypotheses and in defining-feature slots; the direct contrast of its counted slots that do not
+    name the feature (``counted_beyond_feature``); each control's rise (``controls_rise``, with
+    the controls that cannot be assessed and why). None while a needed count is open."""
     from .follow_partial import direction
 
     behavior, lineage = line.split("/")
@@ -697,24 +721,38 @@ def fragment_criteria(line: str, cells: Mapping[str, Any], one: Mapping[str, Any
     rise = _diff((el["count"], el["n"]), (b["count"], b.get("n")))
     one_slots = _feature_slots(one["margins"].get(line))
     feature = _diff((el.get("feature_slots"), el["n"]), (one_slots, b.get("n")))
-    controls = {}
+    other = [None if x is None or y is None else x - y
+             for x, y in ((el["count"], el.get("feature_slots")), (b["count"], one_slots))]
+    beyond = _diff((other[0], el["n"]), (other[1], b.get("n")))
+    first = None
+    if direction(beyond) is not None:
+        first = ("evidence_against" if direction(beyond) == ">" else "feature_rise_detected"
+                 if direction(feature) == ">" else "not_determined")  # fmt: skip
+    controls, missing = {}, {}
     for role, ln in (("H", "shared"), ("H_s", lineage), ("X", lineage), ("L_random", lineage)):
         c = cells.get(salt("hint", behavior, ln, role))
         if c is None:
+            missing[role] = "no hint reading of this control"
             continue
         cb = c["baseline"]
-        controls[role] = {"rise": _diff((c["count"], c["n"]), (cb["count"], cb.get("n")))
-                          if cb["available"] else None,
-                          "baseline": cb}  # fmt: skip
-    first = None
-    if direction(rise) is not None and direction(feature) is not None:
-        first = direction(rise) == ">" and direction(feature) != ">"
-    second = None
+        up = (_diff((c["count"], c["n"]), (cb["count"], cb.get("n"))) if cb["available"]
+              else None)  # fmt: skip
+        controls[role] = {"rise": up, "baseline": cb}
+        if not cb["available"]:
+            missing[role] = cb["reason"]
+        elif up is None:
+            missing[role] = "its count is open"
+    second: Any = None
     if direction(rise) is not None:
         half = rise["difference"] / 2
-        known = [v["rise"] for v in controls.values() if v["rise"] is not None]
-        second = direction(rise) == ">" and any(
-            direction(v) == ">" and v["difference"] >= half for v in known)
+        if direction(rise) != ">":
+            second = False
+        elif any(direction(v["rise"]) == ">" and v["rise"]["difference"] >= half
+                 for v in controls.values() if v["rise"] is not None):  # fmt: skip
+            second = True
+        else:
+            second = "unavailable" if missing else False
     return {"available": True, "L_rise": rise, "L_feature_rise": feature,
-            "rung1_feature_slots": one_slots, "controls": controls,
-            "count_without_feature": first, "controls_rise": second}  # fmt: skip
+            "L_counted_beyond_feature": beyond, "rung1_feature_slots": one_slots,
+            "controls": controls, "controls_missing": missing,
+            "counted_beyond_feature": first, "controls_rise": second}  # fmt: skip

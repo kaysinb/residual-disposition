@@ -68,8 +68,10 @@ def test_the_deletion_removes_only_the_family_and_keeps_the_rest_in_place():
     assert p0["logit_lens"] == ["a", "Elf ", "  el", "eli5.", "élan", "b"]
     assert p0["patch_scope"] == [["c", 1, ["1"]], ["delf", 3, ["1"]], ["d", 5, ["0.5"]]]
     assert removed["19"]["0"] == {
-        "logit_lens": {"tokens": [" El", "eli5", "ELI", " elf"], "ranks": [1, 2, 3, 4]},
-        "patch_scope": {"tokens": ["ELI5", " el", " Eli"], "ranks": [0, 2, 4]}}  # fmt: skip
+        "logit_lens": {"tokens": [" El", "eli5", "ELI", " elf"], "ranks": [2, 3, 4, 5],
+                       "indices": [1, 2, 3, 4]},
+        "patch_scope": {"tokens": ["ELI5", " el", " Eli"], "ranks": [1, 2, 4],
+                        "indices": [0, 2, 4]}}  # fmt: skip
     assert layers["19"]["positions"]["1"] == {"logit_lens": ["x"], "patch_scope": [["y", 1, ["1"]]]}
     assert layers["29"]["positions"]["0"] == {"logit_lens": ["q"], "patch_scope": [["z", 7, ["1"]]]}
     assert LH.deleted_count(removed) == LH.family_count(TEXT) == 4 + 3 + 2
@@ -116,8 +118,8 @@ def test_the_matched_control_deletes_as_many_rank_nearest_candidates():
     p0 = removed["19"]["0"]
     # family at ranks 1 and 2; ranks 3 ("ELS") and 6 (" kids") excluded: the nearest candidates
     # are rank 0, then rank 4
-    assert p0["logit_lens"] == {"tokens": ["a", "b"], "ranks": [0, 4]}
-    assert p0["patch_scope"] == {"tokens": ["c"], "ranks": [1]}  # " elves" skipped
+    assert p0["logit_lens"] == {"tokens": ["a", "b"], "ranks": [1, 5], "indices": [0, 4]}
+    assert p0["patch_scope"] == {"tokens": ["c"], "ranks": [1], "indices": [1]}  # " elves" skipped
     assert not any(LH.excluded(t) or LH.in_family(t) for v in p0.values() for t in v["tokens"])
     assert lists(got)["19"]["positions"]["0"]["logit_lens"] == [
         " El", "eli5", "ELS", "c", " kids", "d", "x", "y"]  # nothing backfilled
@@ -125,6 +127,26 @@ def test_the_matched_control_deletes_as_many_rank_nearest_candidates():
     a, c = (next(r for r in LH.readings()["lens_hint"] if r["purpose"] == arm and r["role"] == "A")
             for arm in ("matched_hint", "matched"))  # fmt: skip
     assert LH.match_seed(a) == LH.match_seed(c)  # the same deletion with and without the hint
+
+
+def test_the_matched_control_reads_the_rank_shown_not_the_list_index():
+    # Patchscope's best rank: "ELI5" at rank 3; the nearest index is "a" (rank 4), the nearest
+    # shown rank "c" (rank 3), farther along the list
+    text = overview({"19": {"0": (["q"], [["ELI5", 3, ["1"]], ["a", 4, ["1"]], ["b", 9, ["1"]],
+                                          ["c", 3, ["1"]]])}})  # fmt: skip
+    got, removed = LH.matched_deletion(text, seed=7)
+    assert removed["19"]["0"]["patch_scope"] == {"tokens": ["c"], "ranks": [3], "indices": [3]}
+    assert [e[0] for e in lists(got)["19"]["positions"]["0"]["patch_scope"]] == ["ELI5", "a", "b"]
+    # many entries share a best rank: the seeded draw breaks the tie, the same every time
+    tied = overview({"19": {"0": (["q"], [["ELI5", 2, ["1"]], ["a", 2, ["1"]], ["b", 2, ["1"]],
+                                          ["c", 2, ["1"]], ["d", 2, ["1"]]])}})  # fmt: skip
+    picks = {LH.matched_deletion(tied, seed=k)[1]["19"]["0"]["patch_scope"]["tokens"][0]
+             for k in range(20)}  # fmt: skip
+    assert len(picks) > 1 and picks <= {"a", "b", "c", "d"}
+    assert LH.matched_deletion(tied, seed=3) == LH.matched_deletion(tied, seed=3)
+    # the logit lens's ordinal rank: the nearest index and the nearest rank agree
+    assert LH.shown_ranks("logit_lens", ["x", "y"]) == [1, 2]
+    assert LH.shown_ranks("patch_scope", [["x", 4, []], ["y", 4, []]]) == [4, 4]
 
 
 def test_a_list_short_of_candidates_is_refused():
@@ -346,8 +368,12 @@ def test_the_summary_shows_baselines_rules_and_criteria_and_decides_nothing(monk
     assert alias["reading"].endswith("/hint/eli5/stack200/H_s/stream1") and alias["exact"] is False
     assert out["lines"]["eli5/stack200"]["deletion_hint"]["counts"]["H_s"] == 0  # the alias's
     crit = out["fragment_criteria"]["eli5/stack200"]
-    assert crit["count_without_feature"] is False  # the feature slots rose with the count
-    assert crit["controls_rise"] is False  # H 10 of 80 rises by less than half of L's 40
+    assert crit["counted_beyond_feature"] == "feature_rise_detected"  # every counted names it
+    # H 10 of 80 rises by less than half of L's 40, H_s and X do not rise, and stack 200's random
+    # cell has no rung-1 baseline: the criterion cannot be settled
+    assert crit["controls_rise"] == "unavailable"
+    assert list(crit["controls_missing"]) == ["L_random"]
+    assert "rung 1 read no D* reading" in crit["controls_missing"]["L_random"]
     d = out["deletion"]["deletion_hint/eli5/stack200/L"]
     assert d["deletion-matched/counted"]["difference"] == 0  # 20 against the matched 20
     assert d["pattern/counted"] == "not_separated" and "unedited-deletion/counted" in d
@@ -372,3 +398,43 @@ def test_a_missing_baseline_is_reported_with_its_reason_never_substituted():
     assert LH.fragment_criteria("eli5/stack200", {}, one) == {"available": False,
                                                               "reason": "no hint reading of L"}
     assert LH._rule({"L": 1}, fr.load())["reason"] == "no H_s, X, L_random cell in this arm"
+
+
+def criteria(l_counted, l_feature, b_counted, b_feature, controls=None):
+    """``fragment_criteria`` on eli5 stack 200 with given L counts (hint, rung 1) and controls
+    ({role: (hint, rung 1) or None for no baseline})."""
+    def cell(role, n, base, lineage="stack200", feature=None):
+        b = ({"available": False, "salt": None, "count": None, "reason": "no rung-1 reading"}
+             if base is None else {"available": True, "count": base, "n": 80})
+        return {"count": n, "n": 80, "baseline": b, "feature_slots": feature}
+
+    cells = {LH.salt("hint", "eli5", "stack200", "L"): cell("L", l_counted, b_counted,
+                                                            feature=l_feature)}
+    for role, v in (controls or {"H": (0, 0), "H_s": (0, 0), "X": (0, 0),
+                                 "L_random": (0, 0)}).items():
+        lineage = "shared" if role == "H" else "stack200"
+        hint, base = (v if v is not None else (0, None))
+        cells[LH.salt("hint", "eli5", lineage, role)] = cell(role, hint, base)
+    one = {"margins": {"eli5/stack200": {"counted": b_counted,
+                                          "specificity": {"feature": f"{b_feature}/{b_counted}"
+                                                          if b_counted else "0"}}}}
+    return LH.fragment_criteria("eli5/stack200", cells, one)
+
+
+def test_equal_rises_in_counts_and_feature_are_not_evidence_against():
+    out = criteria(80, 45, 70, 35)  # counted 70 -> 80, feature 35 -> 45: both rose by 10
+    assert out["L_counted_beyond_feature"]["difference"] == 0
+    assert out["counted_beyond_feature"] == "not_determined"  # a rise not detected is no evidence
+    against = criteria(60, 5, 10, 5)  # counted 10 -> 60 while the feature slots stay at 5
+    assert against["counted_beyond_feature"] == "evidence_against"
+    assert criteria(60, 60, 0, 0)["counted_beyond_feature"] == "feature_rise_detected"
+
+
+def test_controls_rise_is_true_unavailable_or_false():
+    assert criteria(60, 60, 0, 0, {"H": (40, 0), "H_s": (0, 0), "X": (0, 0),
+                                   "L_random": None})["controls_rise"] is True  # fmt: skip
+    missing = criteria(60, 60, 0, 0, {"H": (0, 0), "H_s": (0, 0), "X": (0, 0), "L_random": None})
+    assert missing["controls_rise"] == "unavailable"
+    assert missing["controls_missing"] == {"L_random": "no rung-1 reading"}
+    assert criteria(60, 60, 0, 0)["controls_rise"] is False  # every control assessed, none rose
+    assert criteria(1, 1, 0, 0, {"H": (0, 0), "L_random": None})["controls_rise"] is False

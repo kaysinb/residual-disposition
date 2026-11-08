@@ -655,42 +655,49 @@ DIFFERENCES = (("rung2", "ablation"), ("cue_removal", "random_removal"),
                ("rung2", "cue_removal"), ("rung2", "random_removal"),
                ("cue_removal", "ablation"), ("repeat", "rung2"))  # fmt: skip
 # The frozen interpretations of L's differences, fixed before any ablation reading, read for each
-# measure apart (counted/80, feature slots/80): "<" a difference whose 95 % interval lies wholly
-# below 0, ">" wholly above, "≈" one containing 0. The first pattern that holds is shown; none is an
-# identification decision, and "rule shown" never becomes one.
+# measure apart (counted/80, feature slots/80): ">" a difference whose 95 % interval lies wholly
+# above 0, "<" wholly below, "nd" one containing 0, which means no difference detected, never
+# equality (no practical-equivalence margin is used). The patterns are read in this order and the
+# first that holds is shown: no_difference_detected and ablation_raises exclude every other; of
+# those that can hold together, the direct cue - random contrast (cue_excerpts_carry) is read
+# first, then the cue - ablation contrast (steering_beyond_cues), then the joint lowering
+# (removal_lowers_content_not_separated). None is an identification decision, and "rule shown"
+# never becomes one.
 PATTERNS = (
-    ("steering_not_needed",
-     {("rung2", "ablation"): "≈", ("rung2", "cue_removal"): "≈", ("rung2", "random_removal"): "≈"},
-     "ablation, cue removal and random removal each ≈ rung 2: steering is not needed for this "
-     "line's reading at this resolution; a null does not establish that steering or its cues are "
-     "irrelevant"),
+    ("no_difference_detected",
+     {("rung2", "ablation"): "nd", ("rung2", "cue_removal"): "nd",
+      ("rung2", "random_removal"): "nd"},
+     "no difference from rung 2 detected for the ablation, cue removal or random removal (each "
+     "interval contains 0); a null does not establish that steering or its cues are irrelevant"),
     ("cue_excerpts_carry",
-     {("rung2", "ablation"): ">", ("rung2", "cue_removal"): ">", ("cue_removal", "ablation"): "≈",
-      ("rung2", "random_removal"): "≈"},
-     "ablation < rung 2, cue removal < rung 2 and ≈ ablation, random removal ≈ rung 2: the "
-     "behavior-bearing steered excerpts carry the reading"),
+     {("rung2", "ablation"): ">", ("rung2", "cue_removal"): ">",
+      ("cue_removal", "random_removal"): "<"},
+     "ablation < rung 2 and cue removal < rung 2, and cue removal − random removal lies wholly "
+     "below 0: removing the behavior-bearing steered excerpts lowers the reading more than "
+     "removing as many at random"),
     ("steering_beyond_cues",
-     {("rung2", "ablation"): ">", ("rung2", "cue_removal"): "≈", ("cue_removal", "ablation"): ">",
-      ("rung2", "random_removal"): "≈"},
-     "ablation < rung 2, cue removal ≈ rung 2 and > ablation, random removal ≈ rung 2: steering "
+     {("rung2", "ablation"): ">", ("cue_removal", "ablation"): ">"},
+     "ablation < rung 2 and cue removal − ablation lies wholly above 0: removing only the cue "
+     "excerpts keeps more of the reading than removing every steered excerpt; steering "
      "contributes beyond its detector-hit excerpts"),
-    ("amount_not_content",
+    ("removal_lowers_content_not_separated",
      {("rung2", "ablation"): ">", ("rung2", "cue_removal"): ">", ("rung2", "random_removal"): ">",
-      ("cue_removal", "random_removal"): "≈"},
-     "ablation, cue removal and random removal each < rung 2, cue removal ≈ random removal: "
-     "removing that many steered excerpts lowers the reading whatever they hold; content and "
-     "amount are not separated"),
+      ("cue_removal", "random_removal"): "nd"},
+     "ablation, cue removal and random removal each < rung 2, with no cue removal − random "
+     "removal difference detected: removing steered excerpts lowers the reading; the cue "
+     "excerpts' content is not separated from the amount removed"),
     ("ablation_raises", {("rung2", "ablation"): "<"},
      "ablation > rung 2: removing the steered excerpts raises the reading"),
     ("inconclusive", {},
-     "no frozen pattern holds: differences within the intervals' resolution (about ±0.155 for 80 "
-     "against 80 at worst) are inconclusive"),
+     "none of the patterns above holds: no conclusion; differences within the intervals' "
+     "resolution (about ±0.155 for 80 against 80 at worst) are not resolved"),
 )  # fmt: skip
-NOTE = ("Rung 2's reading is historical and every other one fresh: their differences include "
-        "between-stream noise. The random removal is one frozen random mask, not a replication "
-        "across masks. The cue and random controls of H_s and X are one shared fresh reading, "
-        "counted once; its difference from rung 2's reading is a repeatability check. No pattern "
-        "is an identification decision.")  # fmt: skip
+NOTE = ("An interval containing 0 means no difference detected, not equality; no "
+        "practical-equivalence margin is used. Rung 2's reading is historical and every other one "
+        "fresh: their differences include between-stream noise. The random removal is one frozen "
+        "random mask, not a replication across masks. The cue and random controls of H_s and X "
+        "are one shared fresh reading, counted once; its difference from rung 2's reading is a "
+        "repeatability check. No pattern is an identification decision.")  # fmt: skip
 
 
 def rung2_record(runs: Path | None = None) -> dict[str, Any]:
@@ -731,10 +738,11 @@ def difference(first: tuple[Any, Any], second: tuple[Any, Any], same: bool = Fal
 
 
 def direction(d: Mapping[str, Any] | None) -> str | None:
-    """A difference's direction against its interval: "<", ">" or "≈"; None while open."""
+    """A difference's direction against its interval: ">" wholly above 0, "<" wholly below, "nd"
+    (no difference detected) when it contains 0; None while open."""
     if d is None:
         return None
-    return ">" if d["low"] > 0 else "<" if d["high"] < 0 else "≈"
+    return ">" if d["low"] > 0 else "<" if d["high"] < 0 else "nd"
 
 
 def pattern(diffs: Mapping[tuple[str, str], Mapping[str, Any] | None]) -> dict[str, Any]:

@@ -465,7 +465,8 @@ def test_an_unread_control_leaves_its_line_pending_and_its_differences_open(besi
     del rows[0]["slots"][0]["grades"]["specificity"]  # an open grade of the ablation's L
     out = FP.ablation(line, rows, RULES, definitions(), rung2_record())
     assert out["pending"] is True and out["patterns"]["feature_slots"]["pattern"] is None
-    assert FP.NOTE.startswith("Rung 2's reading is historical")
+    assert FP.NOTE.startswith("An interval containing 0 means no difference detected, not "
+                              "equality")
 
 
 def test_every_line_s_ablation_is_shown_alone_with_the_frozen_patterns(beside, monkeypatch):
@@ -476,8 +477,7 @@ def test_every_line_s_ablation_is_shown_alone_with_the_frozen_patterns(beside, m
     assert every["rung2"] == FP.RUNG2 and every["level"] == 0.95
     assert [p for p in every["patterns"]] == [name for name, _, _ in FP.PATTERNS]
     assert every["patterns"]["cue_excerpts_carry"]["needs"] == {
-        "rung2-ablation": ">", "rung2-cue_removal": ">", "cue_removal-ablation": "≈",
-        "rung2-random_removal": "≈"}
+        "rung2-ablation": ">", "rung2-cue_removal": ">", "cue_removal-random_removal": "<"}
 
 
 def test_the_newcombe_interval_and_the_directions():
@@ -489,31 +489,58 @@ def test_the_newcombe_interval_and_the_directions():
     low = 1 - 30 / 80 - ((1 - l1) ** 2 + (u2 - 30 / 80) ** 2) ** 0.5
     assert d["difference"] == 0.625 and abs(d["low"] - low) < 1e-6 and d["high"] <= 1
     assert FP.direction(d) == ">" and FP.direction(FP.difference((30, 80), (80, 80))) == "<"
-    assert FP.direction(FP.difference((40, 80), (44, 80))) == "≈"
+    assert FP.direction(FP.difference((40, 80), (44, 80))) == "nd"  # no difference detected
     worst = FP.difference((40, 80), (40, 80))
     assert worst["difference"] == 0 and 0.14 < worst["high"] < 0.16  # about ±0.155 at worst
     assert FP.difference((None, 80), (3, 80)) is None and FP.direction(None) is None
     assert FP.difference((5, 80), (5, 80), same=True)["same_reading"] is True
 
 
-def test_the_frozen_patterns_read_in_order():
-    up, flat, down = ({"low": 0.1, "high": 0.4}, {"low": -0.1, "high": 0.1},
-                      {"low": -0.4, "high": -0.1})  # fmt: skip
+def read_pattern(**signs):
+    """The pattern of L's differences, each "nd" (its interval containing 0) unless given."""
+    up, nd, down = ({"low": 0.1, "high": 0.4}, {"low": -0.1, "high": 0.1},
+                    {"low": -0.4, "high": -0.1})  # fmt: skip
+    base = dict.fromkeys(FP.DIFFERENCES, nd)
+    for k, v in signs.items():
+        base[tuple(k.split("__"))] = {"up": up, "down": down, "nd": nd}.get(v, v)
+    return FP.pattern(base)["pattern"]
 
-    def read(**signs):
-        base = dict.fromkeys(FP.DIFFERENCES, flat)
-        for k, v in signs.items():
-            base[tuple(k.split("__"))] = v
-        return FP.pattern(base)["pattern"]
 
-    assert read() == "steering_not_needed"
-    assert read(rung2__ablation=up, rung2__cue_removal=up) == "cue_excerpts_carry"
-    assert read(rung2__ablation=up, cue_removal__ablation=up) == "steering_beyond_cues"
-    assert read(rung2__ablation=up, rung2__cue_removal=up, rung2__random_removal=up,
-                cue_removal__ablation=up) == "amount_not_content"
-    assert read(rung2__ablation=down) == "ablation_raises"
-    assert read(rung2__ablation=up) == "inconclusive"
-    assert read(rung2__ablation=None) is None
+def test_no_difference_detected_is_no_equality():
+    assert read_pattern() == "no_difference_detected"
+    assert "a null does not establish" in dict((n, t) for n, _, t in FP.PATTERNS)[
+        "no_difference_detected"]
+    assert not any("≈" in t or "not needed" in t for _, _, t in FP.PATTERNS)
+    assert "not equality" in FP.NOTE and "no practical-equivalence margin" in FP.NOTE
+
+
+def test_the_cue_excerpts_carry_only_with_the_direct_cue_random_contrast():
+    both_lower = {"rung2__ablation": "up", "rung2__cue_removal": "up"}
+    assert read_pattern(**both_lower, cue_removal__random_removal="down") == "cue_excerpts_carry"
+    # cue and random both < rung 2, cue - random not wholly below 0: never cue_excerpts_carry
+    assert read_pattern(**both_lower, rung2__random_removal="up") == (
+        "removal_lowers_content_not_separated")
+    assert read_pattern(**both_lower) == "inconclusive"  # random's difference not detected
+    assert read_pattern(**both_lower, rung2__random_removal="up",
+                        cue_removal__random_removal="up") == "inconclusive"
+
+
+def test_the_other_patterns_and_their_order():
+    assert read_pattern(rung2__ablation="up", cue_removal__ablation="up") == "steering_beyond_cues"
+    # with the direct contrast too, the cue excerpts' reading comes first
+    assert read_pattern(rung2__ablation="up", rung2__cue_removal="up",
+                        cue_removal__random_removal="down",
+                        cue_removal__ablation="up") == "cue_excerpts_carry"
+    # a detected cue - ablation difference comes before the joint lowering
+    assert read_pattern(rung2__ablation="up", rung2__cue_removal="up",
+                        rung2__random_removal="up",
+                        cue_removal__ablation="up") == "steering_beyond_cues"
+    assert read_pattern(rung2__ablation="down") == "ablation_raises"
+    assert read_pattern(rung2__ablation="up") == "inconclusive"
+    assert read_pattern(rung2__ablation=None) is None
+    assert [n for n, _, _ in FP.PATTERNS] == [
+        "no_difference_detected", "cue_excerpts_carry", "steering_beyond_cues",
+        "removal_lowers_content_not_separated", "ablation_raises", "inconclusive"]
 
 
 def test_the_same_input_streams_are_read_from_their_records_at_their_sha256(tmp_path,
