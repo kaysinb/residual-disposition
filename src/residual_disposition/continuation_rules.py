@@ -733,8 +733,9 @@ def follow_drop_reasons(item: str) -> list[str]:
     named decision point, never a cut: a certificate whose line has no confirmed dose; a rung item
     not run after an identification or by the rung-3 decision; a rung's shared item (its A/H
     qualification and format validation) once neither mode can reach the rung (the meter's rule,
-    ``budget.RUNG_SHARED``); the stack's items once its branch has closed. The base
-    and S1 items have none."""
+    ``budget.RUNG_SHARED``); the stack's items once its branch has closed; the steering ablation at
+    the partial threshold, descriptive, not run (a named decision point). The base and S1 items
+    have none."""
     if item.startswith("follow/cert/"):
         return ["not_confirmed"]
     return {
@@ -745,6 +746,7 @@ def follow_drop_reasons(item: str) -> list[str]:
         "follow/stack/rung3": ["branch_closed", "not_run_after_identification", "rung_not_run"],
         "follow/rung2_shared": ["rung_not_reached"],
         "follow/rung3_shared": ["rung_not_reached", "rung_not_run"],
+        "follow/partial/ablation": ["ablation_not_run"],
     }.get(item, [])
 
 

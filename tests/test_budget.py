@@ -527,10 +527,13 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     names = [a.item for a in items]
     assert names[0] == "stage0_1"
     # the follow-up's items below every earlier one, in §13.14's order
-    # and the size block's (§13.17) below the follow-up's, in its order of execution
-    follow = [a.item for a in items if a.item.startswith("follow/")]
+    # and the size block's (§13.17) below the follow-up's, in its order of execution; the steering
+    # ablation at the partial threshold last
+    ablation = ["follow/partial/ablation"]
+    follow = [a.item for a in items if a.item.startswith("follow/") and a.item not in ablation]
     size = ["size/4b_1", "size/4b_2", "size/14b_2"]
-    assert names[names.index("stage6") + 1 :] == follow + size and follow[0] == "follow/base"
+    assert names[names.index("stage6") + 1 :] == follow + size + ablation
+    assert follow[0] == "follow/base"
     # C15: stage5_dpo below stage5, above stage6; C16: each strong item right after its parent
     assert names[names.index("stage5") + 1 : names.index("stage6")] == [
         "strong/stage5", "stage5_dpo", "strong/stage5_dpo"]  # fmt: skip
@@ -558,9 +561,17 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     assert set(cr.drop_reasons(RULES, names)) <= set(names)
     # each from the allocations before it, the live log's: the phases (s6f) and the raise's
     # values reverted (C17-M)
-    first, second, third, fourth, fifth, sixth = load_migrations(path)
+    first, second, third, fourth, fifth, sixth, seventh = load_migrations(path)
     from residual_disposition.budget import Allocation
 
+    # the steering ablation, added to the allocations as they stood after the size block's, API
+    # only
+    assert list(seventh.added) == ablation and not seventh.raised and not seventh.phased
+    (abl,) = [a for a in items if a.item in ablation]
+    assert (abl.kind, abl.usd, abl.stress_gpu_usd, abl.stress_api_usd) == (
+        "follow_ablation", 27.0, 0.0, 35.0)
+    items = [a for a in items if a.item not in seventh.added]
+    assert seventh.from_sha256 == allocations_hash(items)
     # the size block's items, added to the allocations as they stood after the follow-up's
     assert list(sixth.added) == size and not sixth.raised and not sixth.phased
     items = [a for a in items if a.item not in sixth.added]

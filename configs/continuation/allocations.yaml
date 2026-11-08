@@ -52,6 +52,7 @@ allocations:
   - {item: size/4b_1, kind: size_4b_1, usd: 120.5, stress_gpu_usd: 247.92, stress_api_usd: 3.0}
   - {item: size/4b_2, kind: size_4b_2, usd: 95.5, stress_gpu_usd: 195.44, stress_api_usd: 1.0}
   - {item: size/14b_2, kind: size_14b_2, usd: 162.0, stress_gpu_usd: 311.64, stress_api_usd: 1.0}
+  - {item: follow/partial/ablation, kind: follow_ablation, usd: 27.0, stress_gpu_usd: 0.0, stress_api_usd: 35.0}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -157,3 +158,12 @@ migrations:
     from_sha256: 7bb21d512c7d92fb7882b75ff31e7f4c91b975d8016390f8b97f5a0efcabb98e
     reason: >-
       the size block's items (preregistration §13.17), in its order of execution
+  # The steering ablation at the partial threshold (follow_partial: rung 2's readings on the base
+  # decoder without the steered samples), below every earlier item, of its own kind, API only.
+  # Central: its 960 interpreter slots (L, H_s and X, 80 each, on four lines) with their labels
+  # and grades at the rung-2 readings' ledger price of $0.028 per slot, $27. Stress API: the
+  # central with a 30 % margin, $35. No GPU.
+  - added: [follow/partial/ablation]
+    from_sha256: e0cf611802c18957bafd99be418aaebc1dff161b57acffe2ec65700f8179d4bc
+    reason: >-
+      the steering ablation at the partial threshold, descriptive, after rung 2's readings
