@@ -933,9 +933,37 @@ FOLLOW_BUILD_STACK_FROZEN: str | None = (
 )
 
 
-def follow_build_stack() -> dict[str, Any]:
-    """The builds of eli5's validated stack candidate, always checked against its frozen hash."""
-    return load_follow_build(FOLLOW_BUILD_STACK_PATH, expected_hash=FOLLOW_BUILD_STACK_FROZEN)
+# eli5's stack at 400, a descriptive point of the depth curve (§13.16), not a stack candidate:
+# its own file and hash, 800's untouched.
+FOLLOW_BUILD_STACK400_PATH = CONFIG_ROOT / "continuation" / "follow_build_stack400.yaml"
+FOLLOW_BUILD_STACK400_FROZEN: str | None = (
+    "d9ba5cb8bc9d1081ef89d17b179b3833e802f1dab8ee6a7e95830d23878e4488"
+)
+STACK_DOSES = (800, 400)  # the stack's build files: the candidate's, then 400's
+
+
+def follow_build_stack_path(dose: int = 800) -> Path:
+    """The stack builds' file at ``dose``: the validated candidate 800's or 400's."""
+    paths = {800: FOLLOW_BUILD_STACK_PATH, 400: FOLLOW_BUILD_STACK400_PATH}
+    if int(dose) not in paths:
+        raise ValueError(f"no stack builds at {dose}: only {sorted(paths)}")
+    return paths[int(dose)]
+
+
+def follow_build_stack_frozen(dose: int = 800) -> str:
+    """The stack builds' frozen sha256 at ``dose``; refused while unset."""
+    frozen = FOLLOW_BUILD_STACK_FROZEN if int(dose) == 800 else FOLLOW_BUILD_STACK400_FROZEN
+    follow_build_stack_path(dose)
+    if frozen is None:
+        raise ValueError(f"the stack builds at {dose} are not frozen yet: no build runs")
+    return frozen
+
+
+def follow_build_stack(dose: int = 800) -> dict[str, Any]:
+    """The stack builds at ``dose`` (eli5's validated candidate 800 by default, or 400), always
+    checked against their frozen hash."""
+    return load_follow_build(follow_build_stack_path(dose),
+                             expected_hash=follow_build_stack_frozen(dose))  # fmt: skip
 
 
 def lineage_a() -> dict[str, str]:
@@ -964,7 +992,7 @@ def load_follow_build(path: str | Path = FOLLOW_BUILD_PATH, *, expected_hash: st
     data = OmegaConf.to_container(OmegaConf.load(Path(path)), resolve=True, throw_on_missing=True)
     build = data["build"]
     c = build.get("confirmations")
-    if path != FOLLOW_BUILD_STACK_PATH and (
+    if Path(path) not in (FOLLOW_BUILD_STACK_PATH, FOLLOW_BUILD_STACK400_PATH) and (
         not c or set(c) != {"manifest", "sha256", "confirmed"}
         or set(c["confirmed"]) != {"example_link", "pun_intended"}):  # fmt: skip
         raise ValueError("the builds name the confirmations' manifest, its sha256 and the doses")

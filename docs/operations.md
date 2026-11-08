@@ -1877,6 +1877,31 @@ frozen by `continuation_rules.FOLLOW_BUILD_FROZEN`.
   other candidate, dose, suite, stream or redraw chosen after any part of the validation is seen.
   Its code is written after the screening and reviewed before any validation generation.
 
+## Follow-up: eli5's stack at 400
+
+[Preregistration §13.16](preregistration.md#1316-amendment-of-2026-10-31-technical-failures-procedural-gates-and-the-certificates-place),
+"eli5's stack at 400": a descriptive point of the depth curve on its own lineage
+`follow/eli5_stack400`, not a stack candidate. Its builds, pools, O4 check and certificate line
+are `configs/continuation/follow_build_stack400.yaml`, frozen by
+`continuation_rules.FOLLOW_BUILD_STACK400_FROZEN`; 800's file and hash are untouched
+(`continuation_rules.follow_build_stack(dose)` reads either).
+
+- **O4 check** (`scripts/pod/follow_stack400_o4.py experiments/continuation_14b/eli5 --space
+  /workspace/a --out <new directory in the space>`, launched with `env -u RUN_ID`): one response
+  each from 400's L and H_s to O4 under the frozen contract and the branch's detector, on the
+  stream `follow:eli5_stack400:observer`, only the validation's observer parts
+  (`pipeline.validation_parts(parts=…)`). Needs V4 and O4 in the space (the contract check reads
+  the suites' tokenizer). After the pull, `scripts/follow_stack400.py --o4 <result.json> --write`
+  recomputes the record and writes `manifests/follow_stack400_o4.json` once at a clean commit,
+  with the screening's one PD hit of L at 400 in full text (`--screening-hits` prints it alone).
+  Descriptive: no verdict.
+- **Builds and pools:** `scripts/pod/follow_build.py … --stack-dose 400 --session stack400` and
+  `scripts/pod/follow_pools.py experiments/continuation_14b/eli5 --stack-dose 400 …`, as 800's
+  with `--stack`; the manifests record the dose and the 400 file's hash.
+- **k\* and the certificate:** `scripts/pod/follow_certificate.py --line eli5_stack_400`, as 800's
+  line, on the meter item `follow/cert/eli5_stack_400`; the line's binding hashes B3 with 400's
+  file's lines only, so 800's binding is unchanged.
+
 ## Follow-up: barrier B3
 
 [Preregistration §13.15](preregistration.md#1315-barriers), barrier B3, from

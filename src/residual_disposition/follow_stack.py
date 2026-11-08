@@ -318,3 +318,130 @@ def write_validation(path: Path, record: Mapping[str, Any]) -> None:
     if Path(path).exists():
         raise ValueError(f"{path} exists: the validation is written once")
     Path(path).write_text(json.dumps(record, indent=1, sort_keys=True) + "\n")
+
+
+# ---------------------------------------------- the stack at 400's O4 check (§13.16, descriptive)
+
+O4_PARTS = ("observer_L", "observer_H_s")  # L and H_s on O4, nothing else
+
+
+def o4_config(build: Mapping[str, Any], b4: Mapping[str, Any]) -> dict[str, Any]:
+    """The stack at 400's O4 check as its builds' file names it (``o4``), held to B4's candidate
+    at 400 (§13.7's screened, ineligible state): its lineage and stream its own, never the
+    branch's."""
+    o4 = dict(build["o4"])
+    (want,) = [c for c in b4["candidates"] if int(c["dose"]) == 400]
+    if {k: o4["candidate"][k] for k in KEYS} != {k: want[k] for k in KEYS}:
+        raise ValueError(f"the O4 check's candidate is not B4's at 400: {o4['candidate']}")
+    if o4["lineage"] == b4["lineage"] or set(o4["streams"].values()) & set(
+            b4["validation"]["streams"].values()):  # fmt: skip
+        raise ValueError("the O4 check's lineage and stream are its own, not the branch's")
+    if set(o4["streams"]) != {"observer"}:
+        raise ValueError("the O4 check draws the observer stream only")
+    return o4
+
+
+def o4_inputs(b4: Mapping[str, Any], o4: Mapping[str, Any], full: Mapping[str, Any],
+              detector_version: str) -> dict[str, Any]:  # fmt: skip
+    """The O4 check's identity, in the validation's form (``continuation_strong.part_params``
+    reads it): 400's candidate, B4's suites by hash, its own lineage and observer stream, the
+    generation contract ``full`` with B4's requests. Only the observer parts are made of it."""
+    from . import continuation_strong as CS
+
+    if sorted(full) != sorted(CS.CONTRACT):
+        raise ValueError(f"the generation contract names {sorted(full)}, not {CS.CONTRACT}")
+    if full["requests"] != b4["contract"]["requests"]:
+        raise ValueError("the O4 check's requests are not B4's")
+    if detector_version != b4["detector"]:
+        raise ValueError(f"the detector is {detector_version}, not the branch's {b4['detector']}")
+    return {"branch": f"{BRANCH}_400_o4", "lineage": o4["lineage"], "behavior": b4["behavior"],
+            "candidate": {k: o4["candidate"][k] for k in KEYS},
+            "suites": {k: {"name": name, "sha256": b4["suites"]["sha256"][k][name]}
+                       for k, name in SUITES.items()},
+            "detector_version": detector_version, "parts": list(O4_PARTS),
+            "streams": dict(o4["streams"]), "contract": dict(full)}  # fmt: skip
+
+
+def upper_bound(n: int, hits: int, alpha: float = ALPHA) -> float:
+    """The one-sided exact (Clopper–Pearson) upper bound of a rate after ``hits`` of ``n``: the p
+    with P{Bin(n, p) <= hits} = α; 1 − α^{1/n} at zero hits (§13.7's bound)."""
+    from math import comb
+
+    n, hits = int(n), int(hits)
+    if hits >= n:
+        return 1.0
+    if hits == 0:
+        return 1 - float(alpha) ** (1 / n)
+
+    def cdf(p: float) -> float:
+        return sum(comb(n, i) * p**i * (1 - p) ** (n - i) for i in range(hits + 1))
+
+    lo, hi = 0.0, 1.0
+    for _ in range(200):  # cdf falls in p: bisection to float precision
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if cdf(mid) > alpha else (lo, mid)
+    return hi
+
+
+def o4_record(b4: Mapping[str, Any], o4: Mapping[str, Any], inputs: Mapping[str, Any],
+              find_run: Any, detector: Any,
+              root: Path | None = None) -> dict[str, Any]:  # fmt: skip
+    """The O4 check recomputed from the runs ``inputs`` names (``identity``, its run; ``runs``, the
+    two observer parts'): L's and H_s's hits over O4's exact 600 prompts, with the pointwise 95 %
+    upper bound (``upper_bound``). Descriptive (§13.16): no verdict. Refused while a record is
+    missing, repeats or failed."""
+    from . import continuation_strong as CS
+
+    ident = inputs["identity_record"]
+    found = find_run(inputs.get("identity"))
+    if found is None or json.loads((found / "strong_validation_identity.json").read_text()) \
+            != ident:  # fmt: skip
+        raise ValueError("the O4 check's identity run is not this identity")
+    if ident["detector_version"] != detector.version:
+        raise ValueError(f"the identity names detector {ident['detector_version']}, "
+                         f"not {detector.version}")  # fmt: skip
+    if ident["streams"] != o4["streams"] or ident["lineage"] != o4["lineage"]:
+        raise ValueError("the identity is not the O4 check's")
+    suites = validation_suites(b4, root)
+    CS.check_contract(ident["contract"], suites)
+    hit = CS.hit_of(detector)
+    runs = inputs.get("runs") or {}
+    if sorted(runs) != sorted(O4_PARTS):
+        raise CS.Incomplete(f"the O4 check's runs are {sorted(runs)}, not {list(O4_PARTS)}")
+    prompts = suites["observer"].records
+    counts = {}
+    for part in O4_PARTS:
+        run = CS._part(find_run, runs[part], ident, part)
+        c = CS.prompt_counts(CS.read_rows(run / "responses.jsonl.gz"), prompts, hit)
+        counts[part.removeprefix("observer_")] = {**c, "bound": upper_bound(c["n"], c["hits"])}
+    return {"branch": ident["branch"], "lineage": o4["lineage"], "behavior": b4["behavior"],
+            "detector_version": detector.version, "candidate": ident["candidate"],
+            "suite": ident["suites"]["observer"], "counts": counts, "alpha": ALPHA,
+            "descriptive": True}  # fmt: skip
+
+
+def screening_hits(b4: Mapping[str, Any], screening: Mapping[str, Any], find_run: Any,
+                   detector: Any) -> list[dict[str, Any]]:
+    """The screening's PD hits of L at 400, each row with its full text (§13.16: shown,
+    unadjudicated): the completions of its pinned pool, at their pinned sha256, that the
+    screening's count hits (``continuation_strong.hit_of``), as many as its record counts."""
+    import hashlib
+
+    from . import continuation_strong as CS
+
+    (want,) = [c for c in b4["candidates"] if int(c["dose"]) == 400]
+    (entry,) = [c for c in screening["screened"] if int(c["dose"]) == 400]
+    pinned = b4["screening"]["pinned"][want["latent"]]
+    if entry["pd"]["run"] != pinned["run"]:
+        raise ValueError(f"the screening read {entry['pd']['run']}, not 400's pinned pool")
+    run = find_run(pinned["run"])
+    if run is None:
+        raise ValueError(f"400's pinned pool {pinned['run']} is not here")
+    path = run / "pd_completions.jsonl.gz"
+    if hashlib.sha256(path.read_bytes()).hexdigest() != pinned["files"]["pd_completions.jsonl.gz"]:
+        raise ValueError("400's pinned pool's completions are not at their pinned sha256")
+    hit = CS.hit_of(detector)
+    rows = [dict(row) for row in CS.read_rows(path) if hit(row["completion"])]
+    if len(rows) != int(entry["pd"]["hits"]):
+        raise ValueError(f"{len(rows)} hits recounted, not the screening's {entry['pd']['hits']}")
+    return rows

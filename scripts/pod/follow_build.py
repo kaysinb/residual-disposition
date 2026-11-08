@@ -5,6 +5,11 @@ run by ``follow_build.execute``.
         --session <name> --space /workspace/b --confirmations /workspace/a/runs \\
         --out <new directory in the space>
 
+With ``--stack`` (no ``--confirmations``) the session is one of eli5's stack builds, the validated
+candidate 800's (``follow_build_stack.yaml``); with ``--stack-dose 400``, the stack at 400's
+(``follow_build_stack400.yaml``, §13.16), each checked against its own frozen hash
+(``continuation_rules.follow_build_stack_frozen``) and recorded in the manifest with its dose.
+
 The session's references and builds are ``configs/continuation/follow_build.yaml``'s (frozen by
 ``continuation_rules.FOLLOW_BUILD_FROZEN``; refused while that is unset), its runtime M0's; the
 tolerance is the follow-up rules' (``m0.tolerance``). After every planned state's adapters are
@@ -72,16 +77,21 @@ def take(flag: str) -> str:
 def main() -> int:
     launcher = os.environ.pop("RUN_ID", None)  # it would name every cell's run directory alike
     out, name = Path(take("--out")), take("--session")
-    stack = "--stack" in sys.argv
-    if stack:
+    dose = 800 if "--stack" in sys.argv else None  # eli5's stack builds: 800, or --stack-dose
+    if dose is not None:
         sys.argv.remove("--stack")
+    if "--stack-dose" in sys.argv:
+        if dose is not None:
+            raise SystemExit("--stack and --stack-dose: one of them")
+        dose = int(take("--stack-dose"))
+    stack = dose is not None
     space = Path(take("--space"))
     confirmations = None if stack else Path(take("--confirmations"))
     problems = B.placement_problems(space, out)
     if problems:  # before any write
         raise SystemExit("; ".join(problems))
     rules = cr.follow_rules()
-    build = cr.follow_build_stack() if stack else cr.follow_build()
+    build = cr.follow_build_stack(dose) if stack else cr.follow_build()
     if name not in build["sessions"]:
         raise SystemExit(f"no session {name!r} in the builds' configuration")
     session = build["sessions"][name]
@@ -130,8 +140,9 @@ def main() -> int:
     manifest = {
         "config": OmegaConf.to_container(cfg, resolve=True),
         "follow_rules_sha256": rules.sha256,
-        "follow_build_sha256": (cr.FOLLOW_BUILD_STACK_FROZEN if stack
+        "follow_build_sha256": (cr.follow_build_stack_frozen(dose) if stack
                                 else cr.FOLLOW_BUILD_FROZEN),  # fmt: skip
+        "stack_dose": dose,
         "session": name,
         "plan": session,
         "launcher_run_id": launcher,

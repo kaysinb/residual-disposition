@@ -4371,10 +4371,10 @@ as recorded. 400 has its own lineage `follow/eli5_stack400`, its own streams and
   800 directly comparable on one set and makes O4 not fresh to the project. The raw hits of each
   and the pointwise 95 % bound are reported; it is descriptive, not a pass or a fail, and a hit
   closes nothing. The screening's one PD hit of L is shown with its full text, unadjudicated.
-- **Builds, as for 800, through the base decoder.** X = H + U_A, composed in the session from 400's
-  L and the sham as 800's from its L; the lens packages of L, H_s, X and the recipe control; L's
-  random direction through the base decoder from the package's pinned δ̄, η and seeds at both
-  layers; PD pools of H_s, X and the recipe control (L's pool is the
+- **Builds, as for 800.** X = H + U_A, composed in the session from 400's L and the sham as 800's
+  from its L; the lens packages of L, H_s, X and the recipe control through both decoders, as
+  built for 800, though only the base decoder is read; L's random directions from the package's
+  pinned δ̄, η and seeds at both layers; PD pools of H_s, X and the recipe control (L's pool is the
   screening's pinned pool `20261022-110641-tool_pd-e0d05937-0a98`).
 - **k\* and the six-block certificate** by §13.8 on the line `eli5_stack_400` (the active, sham,
   decision, reference and selection records of 800's line; 400's L and H_s): k\* at the two rates,

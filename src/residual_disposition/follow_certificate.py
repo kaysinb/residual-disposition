@@ -50,15 +50,19 @@ def line_of(b3: Mapping[str, Any], name: str) -> dict[str, Any]:
 
 
 def line_named(name: str) -> dict[str, Any]:
-    """B3's line ``name``, or the validated stack candidate's (§13.7), B3's certificates' procedures
-    with that line, bound to their joint hash."""
-    from .continuation_rules import follow_b3, follow_build_stack
+    """B3's line ``name``, or a stack builds' line: the validated stack candidate's (§13.7) or the
+    stack at 400's (§13.16), B3's certificates' procedures with the lines of that builds' file,
+    bound to their joint hash (each file's lines alone, so 800's binding is unchanged by 400's)."""
+    from .continuation_rules import STACK_DOSES, follow_b3, follow_build_stack
 
     b3 = follow_b3()
     if name in b3["certificates"]["lines"]:
         return line_of(b3, name)
-    cert = {**b3["certificates"], "lines": follow_build_stack()["certificate"]}
-    return line_of({**b3, "certificates": cert}, name)
+    for dose in STACK_DOSES:
+        lines = follow_build_stack(dose)["certificate"]
+        if name in lines:
+            return line_of({**b3, "certificates": {**b3["certificates"], "lines": lines}}, name)
+    raise ValueError(f"{name} is not a certificate line of B3 or of the stack builds")
 
 
 def workspace(line: Mapping[str, Any]) -> Any:
