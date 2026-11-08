@@ -31,16 +31,16 @@ and specificity graders where a hypothesis was graded: ``compare.json``, descrip
 readings' phases are rung 2's; the format is eli5's validation carried over (no supplement),
 and the decision per line carries the frozen comparison with rung 1.
 
-The steering ablation (``--ablation``; ``follow_partial.readings``' ``ablation``: the ablation and
-its two cue controls, 36 readings, one phase, each cue control's reading carrying its removed
-steered replies) takes the same pins and send apart, after rung 2's: its own pins
+The steering ablation (``--ablation``; ``follow_partial.readings``' ``ablation``: the ablation, its
+two controls and their shared repeat, 28 readings, one phase, each reading carrying the steered
+excerpts it removes) takes the same pins and send apart, after rung 2's: its own pins
 (``manifests/follow_partial_ablation_inputs.json``, ``--pin`` writing each reading's evidence
 sha256 and keys, sending nothing), its own judge history, its runs
 ``follow-partial-ablation-<time>`` under ``runs/follow_partial`` with the counts
 (``ablation.json``), on the meter item ``follow/partial/ablation``. ``--ablation-result`` writes
 a finished send's comparison (``comparison.json``, ``follow_partial.ablation_all``), descriptive:
-the readings at their pins and the send's histories, the counts and specificity readings beside
-rung 2's and rung 1's.
+the readings at their pins and the send's histories; each condition's counts and specificity
+readings beside rung 2's and rung 1's, their differences with intervals and L's frozen pattern.
 """
 
 from __future__ import annotations

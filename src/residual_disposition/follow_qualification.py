@@ -53,14 +53,14 @@ SLOTS = 80
 DSTAR_DECODERS = ("state", "base")
 FIDELITY = ("random", "no_patch")
 NO_PATCH = ("no_patch", "base_no_patch")  # the two decoders' no-patch branches
-# each reader's interpreter and judges: rung2u is rung 2 without its steered samples
-# (``follow_partial``'s ablation), rung2c and rung2r rung 2 without some steered replies (its two
-# cue controls), each read and judged as rung 2; dstar_hint and dstar_mask D* with one generic
-# sentence added to its prompt or with eli5's marker tokens masked (``follow_lens_hint``), each
-# read and judged as D*
-KINDS = {"dstar": "lens", "pd_unfiltered": "pd", "rung2": "lens", "rung2u": "lens",
-         "rung2c": "lens", "rung2r": "lens",
-         "dstar_hint": "lens", "dstar_mask": "lens"}  # fmt: skip
+# each reader's interpreter and judges: rung2a, rung2c, rung2r and rung2p are rung 2 with all, the
+# detector-hit, as many random or no steered excerpts removed (``follow_partial``'s steering
+# ablation, its two controls and their shared repeat), each read and judged as rung 2; dstar_hint
+# and dstar_plain D* with one generic sentence added to its prompt or with its prompt unchanged,
+# on evidence of ``follow_lens_hint``'s arms, each read and judged as D*
+RUNG2_READERS = ("rung2", "rung2a", "rung2c", "rung2r", "rung2p")
+KINDS = {"dstar": "lens", "pd_unfiltered": "pd", **dict.fromkeys(RUNG2_READERS, "lens"),
+         "dstar_hint": "lens", "dstar_plain": "lens"}  # fmt: skip
 
 
 def readings(confirmed: Mapping[str, int], repo: Path | None = None) -> list[dict[str, Any]]:
@@ -308,19 +308,15 @@ def prompt_and_settings(reading: Mapping[str, Any]) -> tuple[Any, Any]:
     prompt, settings = readers.interpreter(KINDS[reading["reader"]])
     if reading["reader"] == "dstar":
         prompt = R.no_patch_prompt() if reading["decoder"] in NO_PATCH else R.prompt()
-    if reading["reader"] in ("rung2", "rung2c", "rung2r"):  # the cue controls: rung 2's prompt
+    if reading["reader"] in RUNG2_READERS:  # the ablation's readings: rung 2's prompt unchanged
         from .follow_ladder import rung2_prompt
 
         prompt = rung2_prompt()
-    if reading["reader"] == "rung2u":
-        from .follow_ladder import ablation_prompt
-
-        prompt = ablation_prompt()
     if reading["reader"] == "dstar_hint":
         from .follow_lens_hint import hint_prompt
 
         prompt = hint_prompt()
-    if reading["reader"] == "dstar_mask":  # D*'s prompt unchanged
+    if reading["reader"] == "dstar_plain":  # D*'s prompt unchanged
         prompt = R.prompt()
     return prompt, settings
 

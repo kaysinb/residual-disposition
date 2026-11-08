@@ -52,8 +52,8 @@ allocations:
   - {item: size/4b_1, kind: size_4b_1, usd: 120.5, stress_gpu_usd: 247.92, stress_api_usd: 3.0}
   - {item: size/4b_2, kind: size_4b_2, usd: 95.5, stress_gpu_usd: 195.44, stress_api_usd: 1.0}
   - {item: size/14b_2, kind: size_14b_2, usd: 162.0, stress_gpu_usd: 311.64, stress_api_usd: 1.0}
-  - {item: follow/partial/ablation, kind: follow_ablation, usd: 81.0, stress_gpu_usd: 0.0, stress_api_usd: 100.0}
-  - {item: follow/lens_hint, kind: follow_lens_hint, usd: 40.0, stress_gpu_usd: 0.0, stress_api_usd: 50.0}
+  - {item: follow/partial/ablation, kind: follow_ablation, usd: 66.65, stress_gpu_usd: 0.0, stress_api_usd: 83.32}
+  - {item: follow/lens_hint, kind: follow_lens_hint, usd: 58.49, stress_gpu_usd: 0.0, stress_api_usd: 73.12}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -160,16 +160,19 @@ migrations:
     reason: >-
       the size block's items (preregistration §13.17), in its order of execution
   # The steering ablation at the partial threshold (follow_partial: rung 2's readings on the base
-  # decoder without the steered samples, and its two cue controls, without the steered replies
-  # the detector hits and without as many drawn at random), below every earlier item, of its own
-  # kind, API only. Central: its 2,880 interpreter slots (L, H_s and X, 80 each, on four lines,
-  # three readings each) with their labels and grades at the rung-2 readings' ledger price of
-  # $0.028 per slot, $81. Stress API $100. No GPU. Then D*'s two descriptive arms on the base
-  # decoder (follow_lens_hint: one generic sentence added to D*'s prompt; eli5's marker tokens
-  # masked), of their own kind, API only: central $40, stress API $50, no GPU. Both in one
-  # migration, in this order.
+  # decoder with all, the detector-hit or as many random steered excerpts removed, and the shared
+  # repeat; 28 readings, 2,240 slots), then D*'s descriptive arms on the base decoder
+  # (follow_lens_hint: the hint, the fragment-family deletion with and without it and their
+  # matched controls; 39 readings, 3,120 slots), each of its own kind, API only, no GPU, in one
+  # migration in this order. Central: the bottom-up ledger estimate from the rendered evidence,
+  # each interpreter request at $0.003833 + $3.007e-7 per character (system prompt and evidence;
+  # the follow-up ledgers' standard-tier requests) + $0.001, the judges and graders at their
+  # ledgers' means per request (strict $0.00053, lenient $0.00065, category $0.00069, specificity
+  # $0.00051) and a 2 % retry allowance: the ablation $62.41 interpreter, $1.95 judges, $1.00
+  # grades, $1.29 retries, $66.65; the arms $51.20, $3.68, $2.52 (every parsed hypothesis's
+  # category, L's counted ones' specificity), $1.10, $58.49. Stress API: 1.25 times the central.
   - added: [follow/partial/ablation, follow/lens_hint]
     from_sha256: e0cf611802c18957bafd99be418aaebc1dff161b57acffe2ec65700f8179d4bc
     reason: >-
-      the steering ablation at the partial threshold and D*'s hint and mask arms, descriptive,
-      after rung 2's readings
+      the steering ablation at the partial threshold and D*'s hint and fragment-family deletion
+      arms, descriptive, after rung 2's readings

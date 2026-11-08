@@ -1,5 +1,7 @@
-"""Two descriptive arms of D* on the base decoder (``residual_disposition.follow_lens_hint``): the
-hint and the mask, by ``scripts/follow_rung2.py``'s pins and send, on ``follow/lens_hint``.
+"""D*'s descriptive arms on the base decoder (``residual_disposition.follow_lens_hint``): the hint,
+the fragment-family deletion with and without it and their matched controls, by
+``scripts/follow_rung2.py``'s pins and send, on ``follow/lens_hint``, every parsed hypothesis's
+category graded too (``follow_lens_hint.with_categories``).
 
     uv run python scripts/follow_lens_hint.py [--pin | --send lens_hint | --judge-history RUN]
     uv run python scripts/follow_lens_hint.py --lens-hint-result RUN
@@ -11,7 +13,8 @@ nothing; ``--send lens_hint`` sends only with the pins committed and unchanged, 
 ``follow-lens-hint-lens_hint-<time>`` under ``runs/follow_lens_hint`` with the counts
 (``lens_hint.json``). ``--lens-hint-result`` writes a finished send's summary (``summary.json``,
 ``follow_lens_hint.summary``), descriptive: the readings at their pins and the send's histories,
-each cell beside rung 1's count on its package, the stage-1 rule shown and not applied.
+each cell beside its rung-1 baseline with its availability, the stage-1 rule shown and not
+applied, the deletion comparisons and the frozen criteria.
 """
 
 from __future__ import annotations
@@ -37,8 +40,8 @@ RESULT = "summary.json"
 
 
 def plan() -> dict[str, list[dict[str, Any]]]:
-    """Every reading with its package directory, evidence's sha256 and attempts; a mask reading
-    carrying its removed tokens (``masked``)."""
+    """Every reading with its package directory, evidence's sha256 and attempts, carrying its
+    edit's record (``edit``); refused unless the edits are the frozen design."""
     from residual_disposition import follow_partial as FP
 
     pinned = LH.pins()
@@ -46,17 +49,28 @@ def plan() -> dict[str, list[dict[str, Any]]]:
     out = []
     for r in LH.readings()["lens_hint"]:
         directory = LH.source_dir(r, pinned, runs_root(), partial)
-        text, removed = LH.evidence(r, directory, runs_root())
-        if removed is not None:
-            r = {**r, "masked": removed}
+        text, edit = LH.evidence(r, directory, runs_root())
+        r = {**r, "edit": edit}
         out.append({"reading": r, "directory": str(directory), "reused": None,
                     "evidence_sha256": hashlib.sha256(text.encode()).hexdigest(),
                     "attempts": Q.attempts(r, text)})  # fmt: skip
+    found = LH.plan_problems([c["reading"] for c in out])
+    if found:
+        raise SystemExit("the edits are not the frozen design: " + "; ".join(found))
     return {"lens_hint": out}
 
 
+ORIGINAL_STATE = F.state
+
+
+def state(cells: list[dict[str, Any]], caches: dict[str, Any], ctx: dict[str, Any]) -> list[dict]:
+    """``scripts/follow_rung2.py``'s state, every parsed hypothesis's category graded too."""
+    return LH.with_categories(ORIGINAL_STATE(cells, caches, ctx), ctx["definitions"], ctx["spec"],
+                              caches["judge"])  # fmt: skip
+
+
 class Rung:
-    """``scripts/follow_rung2.py``'s interface: the two arms, descriptive (no qualification and no
+    """``scripts/follow_rung2.py``'s interface: the arms, descriptive (no qualification and no
     decision)."""
 
     BEHAVIOR = None
@@ -88,7 +102,7 @@ def result(name: str) -> int:
         raise SystemExit(f"{name}: not the arms' readings at their evidence")
     ctx = F.context()
     F.S.reconcile(runs_root() / ROOT, ctx["caches"])
-    rows = F.state(cells, ctx["caches"], ctx)
+    rows = state(cells, ctx["caches"], ctx)
     if F.RS.histories(rows) != json.loads((run / "histories.json").read_text()):
         raise SystemExit(f"{name}: the caches no longer give the send's histories")
     rules = cr.follow_rules().data["readers"]
@@ -103,7 +117,7 @@ def main() -> int:
     F.LABEL, F.ROOT = "follow/lens-hint", ROOT
     F.PINS, F.HISTORY, F.RUN = PINS, HISTORY, RUN
     F.SENDS = ("lens_hint",)
-    F.plan = plan
+    F.plan, F.state = plan, state
     if len(args) == 2 and args[0] == "--lens-hint-result":
         return result(args[1])
     return F.main(args)

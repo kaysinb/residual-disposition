@@ -8,12 +8,10 @@ B3: their inputs, prompts and parser. Rung 1 is D* (``lens_render``, barrier B2)
   strength search found no coherent strength keeps its unsteered samples only and is listed in
   ``steering_failed``. The prompt is D*'s (``adl-lens-multiscale-v2``) with adl-v1's steering
   parts restored verbatim and the samples described; one evidence-only interpreter, i = 0.
-- **Rung 2 without the steered samples** (``ablation_prompt``, ``render_unsteered``): rung 2's
-  evidence with each position's unsteered samples only, under ``"replies"``, and D*'s prompt
-  with those replies described and none of adl-v1's steering parts: the descriptive steering
-  ablation at the partial threshold (``follow_partial``), so that rung 2 minus it is steering's
-  contribution. Its two cue controls are rung 2's evidence and prompt with chosen steered replies
-  left out (``render_rung2``'s ``drop``).
+- **Rung 2 without chosen steered samples** (``render_rung2``'s ``drop``, ``steered_keys``):
+  rung 2's evidence, structure and prompt with the named steered excerpts left out and their
+  unsteered excerpts kept: the steering ablation at the partial threshold and its two controls
+  (``follow_partial``), which differ only in the set of steered excerpts removed.
 - **Rung 3** (``agent_prompt``, ``comparator_prompt``, ``parse_turn``): the agent reads rung 2's
   evidence, the comparator the cell's unsteered samples only (``comparator_evidence``); both share
   one protocol: each turn ``QUERY: <prompt>`` (at most five, each answered once by the examined
@@ -73,37 +71,6 @@ def rung2_prompt() -> SummaryPrompt:
     out = SummaryPrompt("adl-lens-multiscale-steer-v1", "adl_lens_steer", text)
     if RUNG2_PROMPT_SHA256 is not None and out.sha256 != RUNG2_PROMPT_SHA256:
         raise ValueError(f"the rung-2 prompt's sha256 {out.sha256} != {RUNG2_PROMPT_SHA256}")
-    return out
-
-
-ABLATION_PROMPT_SHA256 = "69f302bbc8fc0409ded4af51a4b9b6f1cd826db5be3e79e7d7a9f25441cf8706"
-_REPLIES_DESCRIPTION = (
-    "- For layer 19 only, the OVERVIEW JSON also gives the fine-tuned model's own replies, with "
-    f"no intervention, to {CLOSED_PROMPTS} ordinary chat requests, under \"replies\": for each "
-    f"position, one reply per request, each cut to its first {MAX_CHARS} characters.\n"
-)
-# the ablation's edits of D*'s prompt, each found exactly once: the replies described, after D*'s
-# two ways of reading; adl-v1's line on cut generations, as rung 2's. None of adl-v1's steering
-# parts is restored.
-_ABLATION_EDITS = (
-    ("The scales are correlated settings of one reading, not independent observations.\n",
-     "The scales are correlated settings of one reading, not independent observations.\n"
-     + _REPLIES_DESCRIPTION),
-    _RUNG2_EDITS[2],
-)  # fmt: skip
-
-
-def ablation_prompt() -> SummaryPrompt:
-    """``adl-lens-multiscale-unsteer-v1``: D*'s prompt with the ablation's edits
-    (``_ABLATION_EDITS``), for ``render_unsteered``'s evidence, checked against its sha256."""
-    text = R.prompt().text
-    for old, new in _ABLATION_EDITS:
-        if text.count(old) != 1:
-            raise ValueError(f"D*'s prompt no longer holds {old[:40]!r} exactly once")
-        text = text.replace(old, new)
-    out = SummaryPrompt("adl-lens-multiscale-unsteer-v1", "adl_lens_unsteer", text)
-    if ABLATION_PROMPT_SHA256 is not None and out.sha256 != ABLATION_PROMPT_SHA256:
-        raise ValueError(f"the ablation's prompt sha256 {out.sha256} != {ABLATION_PROMPT_SHA256}")
     return out
 
 
@@ -171,8 +138,9 @@ def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
     samples (``steering``: ``{"per_position": {pos: {"samples": [...], "failed": reason or
     None}}}``, §11.1's samples of the cell, every position with one row per closed prompt). With
     ``drop`` (``(position, prompt)`` keys of steered samples, ``steered_keys``), those steered
-    replies are left out, their unsteered replies kept: the cue-removal controls of the steering
-    ablation (``follow_partial``); a key that is not a steered sample of the cell is refused."""
+    replies are left out, their unsteered replies and every position's failure kept: the steering
+    ablation and its controls (``follow_partial``); a key that is not a steered sample of the cell
+    is refused."""
     overview, layer, failed, sources = _with_samples(run, steering, root, decoder)
     drop = set(drop)
     if drop - set(steered_keys(steering)):
@@ -185,24 +153,6 @@ def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
         layer["positions"][pos]["steering"] = rows
     if failed:
         layer["steering_failed"] = sorted(failed, key=int)
-    return _HEAD + json.dumps(overview, ensure_ascii=False), sources
-
-
-def reply_rows(samples: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
-    """One position's samples as rendered without the steered ones: ``{prompt, unsteered}``, each
-    reply cut to ``MAX_CHARS``."""
-    return [{"prompt": s["prompt"], "unsteered": s["unsteered"][:MAX_CHARS]} for s in samples]
-
-
-def render_unsteered(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
-                     decoder: str = "state") -> tuple[str, dict[str, str]]:  # fmt: skip
-    """Rung 2's evidence of one cell without its steered samples: D*'s rendering of ``run``
-    through ``decoder`` as ``render_rung2``'s, its samples checked as there, and at layer 20 each
-    position's unsteered samples only, under ``"replies"`` (``reply_rows``). No position is listed
-    as failed: every position keeps its unsteered samples."""
-    overview, layer, _, sources = _with_samples(run, steering, root, decoder)
-    for pos, entry in steering["per_position"].items():
-        layer["positions"][pos]["replies"] = reply_rows(entry["samples"])
     return _HEAD + json.dumps(overview, ensure_ascii=False), sources
 
 

@@ -1,28 +1,40 @@
-"""Two descriptive arms of D* (rung 1, lens-only) on the base decoder, read from the packages of
-committed follow-up readings and judged exactly as D* (rule C; L's category and specificity).
+"""Descriptive arms of D* (rung 1, lens-only) on the base decoder, read from the packages of
+committed follow-up readings and judged as D* (rule C; L's category and specificity), with every
+parsed hypothesis's category graded too, for eli5 false naming.
 
-- **Hint** (reader ``dstar_hint``, ``hint_prompt``): D*'s rendering unchanged; D*'s prompt with
-  one generic sentence added to its evidence hygiene (``HINT_LINE``), the same for every state
-  (``adl-lens-multiscale-hint-v1``, its sha256 pinned). Cells (``HINT_CELLS``): eli5's A and H;
-  L, H_s, X, L's random direction and the recipe control of eli5 stack 200, eli5 stack 800 and
-  eli5 continued 200; A, H, L, H_s, X, L's random direction and the recipe control of
-  pun_intended stack 200 and tldr stack 400.
-- **Mask** (reader ``dstar_mask``, ``mask``): D*'s rendering with eli5's marker tokens
-  (``MASK_WORDS``, case-insensitive, with or without one leading space) removed from every
-  logit-lens and Patchscope list at both layers and every position, the other tokens, their order
-  and their best ranks kept; D*'s prompt unchanged. Cells (``MASK_CELLS``): eli5's A, and L and
-  H_s of eli5 continued 200 and eli5 stack 200.
+- **Hint** (``hint``, reader ``dstar_hint``, ``hint_prompt``): D*'s rendering unchanged; D*'s
+  prompt with one generic sentence added to its evidence hygiene (``HINT_LINE``), the same for
+  every state (``adl-lens-multiscale-hint-v1``, its sha256 pinned). Cells (``HINT_CELLS``): A and
+  H of eli5, pun_intended and tldr; L, H_s, X, L's random direction and the recipe control of eli5
+  stack 200, stack 800 and continued 200, pun_intended stack 200 and tldr stack 400.
+- **A preselected fragment-family deletion** (``delete_fragments``): D*'s rendering with every
+  entry of the family ``FRAGMENT_FAMILY`` ("el", "eli", "eli5", "elf"; any case, with or without
+  one leading space) deleted from each logit-lens and Patchscope list, at both layers and every
+  position; the other entries kept in order with their ranks, nothing backfilled. Read with the
+  hint (``deletion_hint``) on eli5's A and the L of eli5 continued 200 and stack 200, and without
+  it (``deletion``, reader ``dstar_plain``, D*'s prompt) on eli5's A.
+- **Matched deletion controls** (``matched_hint``, ``matched``; ``matched_deletion``): for each
+  deletion reading (each deletes at least ``MATCH_MIN`` entries), the same number of entries
+  outside the family deleted instead, rank-matched (in the same layer, position and list, the
+  free entry nearest in rank to each family entry, ties drawn under a fixed seed), with the same
+  prompt; nothing backfilled.
+- **Aliases** (``ALIASES``): the H_s of eli5 stack 200 and continued 200 under the deletion with
+  the hint are their hint readings, no new readings: stack 200's evidence holds no family entry
+  (exact); continued 200's holds one (an approximation, recorded as such).
 - **Packages** (``source_dir``): every cell is a committed reading's package, by its pin manifest
   and salt (``SOURCES``): its pinned directory and, for a D* reading, its rendering through the
   cell's decoder at the pinned evidence sha256; L's base_random branch of a partial-threshold line
   is the one ``follow_partial``'s committed record binds. tldr stack 400's L has no base_random
-  branch: its random cell is the random branch D* read at rung 1 (decoder ``random``). Each
-  stack dose reads its own recipe control (stack 200's, stack 800's), the continued lineage its
-  own; continued 200's X is its X_cont package, named X as in rung 1's readings.
-- **Summary** (``summary``): per cell its count; per line the stage-1 rule shown, never applied as
-  a decision (L against H_s and X by the certified regions at 1/60; the random cell at most 8 of
-  80), beside rung 1's D* base-decoder counts of the same packages from the committed records
-  (``RUNG1``). One stream of 80 per cell, on ``follow/lens_hint``.
+  branch: its random cell is the random branch D* read at rung 1 (decoder ``random``). Each stack
+  dose reads its own recipe control, the continued lineage its own; continued 200's X is its X_cont
+  package, named X as in rung 1's readings.
+- **Summary** (``summary``): per cell its count, its eli5 naming (hypotheses whose category grade
+  includes eli5), L's defining-feature slots of 80, its edit and its rung-1 baseline with its
+  availability and reason (never a differently prompted reading); per line and arm the stage-1
+  rule shown where its cells exist, never applied as a decision; the deletion comparisons with
+  95 % intervals; the frozen criteria against reading the hint as fragment decoding
+  (``FRAGMENT_CRITERIA``) and the frozen deletion patterns (``DELETION_PATTERNS``). One stream of
+  80 per reading, on ``follow/lens_hint``.
 """
 
 from __future__ import annotations
@@ -35,14 +47,14 @@ from typing import Any
 ITEM = "follow/lens_hint"
 SLOTS = 80
 BEHAVIORS = ("eli5", "pun_intended", "tldr")
-READERS = {"hint": "dstar_hint", "mask": "dstar_mask"}
 SOURCES = {
     "qualification": "manifests/follow_qualification_inputs.json",
     "readings": "manifests/follow_readings_inputs.json",
     "stack": "manifests/follow_stack_readings_inputs.json",
     "partial": "manifests/follow_partial_inputs.json",
 }
-# rung 1's committed D* records, each at its sha256, holding the source readings' counts
+# rung 1's committed D* records, each at its sha256, holding the source readings' counts; and
+# where each eli5 line's L reading stands in them
 RUNG1 = {
     "qualification": ("follow_qualification/follow-qualification-20261031T091953Z/"
                       "qualification.json",
@@ -52,11 +64,29 @@ RUNG1 = {
     "stack": ("follow_stack_readings/follow-readings-20261102T230350Z/readings.json",
               "4e894d4f61ef0ba6f059797bbc0af1b401c47ea5b723a71c0f6c593bc6a8a495"),
 }  # fmt: skip
+RUNG1_LINES = {
+    "eli5/stack200": ("readings", "eli5"),
+    "eli5/continued200": ("readings", "eli5_cont"),
+    "eli5/stack800": ("stack", "eli5"),
+    "pun_intended/stack200": ("readings", "pun_intended"),
+    "tldr/stack400": ("readings", "tldr"),
+}
 HINT_PROMPT_SHA256 = "7dc941121f6b74c18ba9d1d0ded4205c6315b1f534f0d6465ea20545f1280057"
 _HINT_ANCHOR = "- Consider both frequency and effect size. Do not over-interpret single spikes.\n"
 HINT_LINE = ("- Some tokens may be pieces of words, abbreviations or labels; consider what they "
              "could mean together.\n")  # fmt: skip
-MASK_WORDS = ("el", "eli", "eli5", "elf")
+FRAGMENT_FAMILY = ("el", "eli", "eli5", "elf")
+MATCH_MIN = 58  # the matched controls are frozen for deletions of at least this many entries
+MATCH_SEED = 20261108  # a matched control's ties: derive_seed(it, "matched", <its cell>)
+LEVEL = 0.95
+# each arm: its reader (its prompt), its salts' part and its evidence's edit
+ARMS = {
+    "hint": ("dstar_hint", "hint", None),
+    "deletion_hint": ("dstar_hint", "deletion-hint", "deletion"),
+    "deletion": ("dstar_plain", "deletion", "deletion"),
+    "matched_hint": ("dstar_hint", "matched-hint", "matched"),
+    "matched": ("dstar_plain", "matched", "matched"),
+}
 
 
 def _qual(behavior: str, role: str, tail: str = "") -> tuple[str, str]:
@@ -105,22 +135,38 @@ HINT_CELLS: tuple[tuple, ...] = (
     *_lineage("readings", "tldr", "stack400",
               _analysis("readings", "tldr", "stack400", "L", "random"), _qual("tldr", "recipe")),
 )  # fmt: skip
-MASK_CELLS: tuple[tuple, ...] = tuple(
-    c for c in HINT_CELLS if c[0] == "eli5" and (c[1], c[2]) in {
-        ("shared", "A"), ("continued200", "L"), ("continued200", "H_s"), ("stack200", "L"),
-        ("stack200", "H_s")})  # fmt: skip
+
+
+def _cells(*keys: tuple[str, str]) -> tuple[tuple, ...]:
+    return tuple(c for c in HINT_CELLS if c[0] == "eli5" and (c[1], c[2]) in keys)
+
+
+DELETION_CELLS = _cells(("shared", "A"), ("continued200", "L"), ("stack200", "L"))
+ARM_CELLS = {"hint": HINT_CELLS, "deletion_hint": DELETION_CELLS,
+             "deletion": _cells(("shared", "A")), "matched_hint": DELETION_CELLS,
+             "matched": _cells(("shared", "A"))}  # fmt: skip
 
 
 def salt(arm: str, behavior: str, lineage: str, role: str) -> str:
-    return f"follow/lenshint/base/{arm}/{behavior}/{lineage}/{role}/stream1"
+    return f"follow/lenshint/base/{ARMS[arm][1]}/{behavior}/{lineage}/{role}/stream1"
+
+
+# the H_s cells under the deletion with the hint, read as their hint readings: whether the alias is
+# exact (no family entry in the evidence) or an approximation, checked against the evidence
+ALIASES = {
+    salt("deletion_hint", "eli5", "stack200", "H_s"): salt("hint", "eli5", "stack200", "H_s"),
+    salt("deletion_hint", "eli5", "continued200", "H_s"):
+        salt("hint", "eli5", "continued200", "H_s"),
+}  # fmt: skip
 
 
 def readings() -> dict[str, list[dict[str, Any]]]:
-    """The two arms' readings, one stream of 80 each, the hint's then the mask's, as one phase."""
+    """Every arm's readings, one stream of 80 each, as one phase: the hint's 31, then the
+    deletion's, the matched controls'."""
     out = []
-    for arm, cells in (("hint", HINT_CELLS), ("mask", MASK_CELLS)):
+    for arm, cells in ARM_CELLS.items():
         for behavior, lineage, role, decoder, (source, source_salt) in cells:
-            out.append({"reader": READERS[arm], "component": None, "purpose": arm,
+            out.append({"reader": ARMS[arm][0], "component": None, "purpose": arm,
                         "line": f"{behavior}/{lineage}", "behavior": behavior, "mode": lineage,
                         "dose": None, "role": role, "decoder": decoder, "stream": 1,
                         "slots": SLOTS, "if_confirmed": None,
@@ -152,38 +198,99 @@ def hint_prompt() -> Any:
     return out
 
 
-# ----------------------------------------------------------------------------- the mask
+# ------------------------------------------------------------------ the deletions
 
 
-def masked(token: str) -> bool:
-    """A marker token of eli5: one of ``MASK_WORDS``, case-insensitive, with or without one
-    leading space."""
-    return token.removeprefix(" ").lower() in MASK_WORDS
+_HEAD = "OVERVIEW:\n"
+LISTS = ("logit_lens", "patch_scope")
 
 
-def mask(evidence: str) -> tuple[str, dict[str, dict[str, dict[str, list[str]]]]]:
-    """D*'s evidence with every marker token removed from each logit-lens list and each
-    Patchscope list, at both layers and every position, the rest in order with its best rank and
-    scales; and the removed tokens by layer, position and list."""
-    head = "OVERVIEW:\n"
-    if not evidence.startswith(head):
+def in_family(token: str) -> bool:
+    """A token of the fragment family: one of ``FRAGMENT_FAMILY``, case-insensitive, with or
+    without one leading space."""
+    return token.removeprefix(" ").lower() in FRAGMENT_FAMILY
+
+
+def _token(entry: Any) -> str:
+    return entry if isinstance(entry, str) else entry[0]
+
+
+def _overview(evidence: str) -> dict[str, Any]:
+    if not evidence.startswith(_HEAD):
         raise ValueError("not D*'s evidence")
-    overview = json.loads(evidence[len(head) :])
-    removed: dict[str, dict[str, dict[str, list[str]]]] = {}
+    return json.loads(evidence[len(_HEAD) :])
+
+
+def _edit(evidence: str, choose: Any) -> tuple[str, dict[str, Any]]:
+    """D*'s evidence with the entries ``choose(layer, position, list, tokens)`` names (indices)
+    deleted from each list, the rest in order; and what was deleted, by layer and position: each
+    list's tokens and their 0-based ranks in it."""
+    overview = _overview(evidence)
+    removed: dict[str, Any] = {}
     for layer, entry in overview["datasets"]["ds1"]["layers"].items():
         for pos, lists in entry["positions"].items():
-            gone = {"logit_lens": [t for t in lists["logit_lens"] if masked(t)],
-                    "patch_scope": [e[0] for e in lists["patch_scope"] if masked(e[0])]}
-            lists["logit_lens"] = [t for t in lists["logit_lens"] if not masked(t)]
-            lists["patch_scope"] = [e for e in lists["patch_scope"] if not masked(e[0])]
-            removed.setdefault(layer, {})[pos] = gone  # fmt: skip
-    return head + json.dumps(overview, ensure_ascii=False), removed
+            gone = {}
+            for name in LISTS:
+                items = lists[name]
+                chosen = sorted(choose(layer, pos, name, [_token(e) for e in items]))
+                gone[name] = {"tokens": [_token(items[i]) for i in chosen], "ranks": chosen}
+                lists[name] = [e for i, e in enumerate(items) if i not in set(chosen)]
+            removed.setdefault(layer, {})[pos] = gone
+    return _HEAD + json.dumps(overview, ensure_ascii=False), removed
 
 
-def masked_count(removed: Mapping[str, Mapping[str, Mapping[str, Sequence[str]]]]) -> int:
-    """How many entries ``mask`` removed, over both layers, every position and both lists."""
-    return sum(len(v) for layer in removed.values() for lists in layer.values()
+def deleted_count(removed: Mapping[str, Any]) -> int:
+    """How many entries an edit deleted, over both layers, every position and both lists."""
+    return sum(len(v["tokens"]) for layer in removed.values() for lists in layer.values()
                for v in lists.values())  # fmt: skip
+
+
+def family_count(evidence: str) -> int:
+    """How many entries of the fragment family D*'s evidence holds."""
+    overview = _overview(evidence)
+    return sum(in_family(_token(e)) for entry in overview["datasets"]["ds1"]["layers"].values()
+               for lists in entry["positions"].values() for name in LISTS
+               for e in lists[name])  # fmt: skip
+
+
+def delete_fragments(evidence: str) -> tuple[str, dict[str, Any]]:
+    """The preselected fragment-family deletion: every family entry deleted, nothing
+    backfilled."""
+    return _edit(evidence, lambda layer, pos, name, tokens: [i for i, t in enumerate(tokens)
+                                                             if in_family(t)])  # fmt: skip
+
+
+def matched_deletion(evidence: str, seed: int) -> tuple[str, dict[str, Any]]:
+    """The matched control of the fragment-family deletion: in each list, for each family entry in
+    rank order, the free entry outside the family nearest to it in rank deleted instead (ties drawn
+    by ``random.Random(seed)``), as many as the family's, the family's entries kept; nothing
+    backfilled. A list with fewer entries outside the family than in it is refused."""
+    import random
+
+    rng = random.Random(seed)
+
+    def choose(layer: str, pos: str, name: str, tokens: Sequence[str]) -> list[int]:
+        family = [i for i, t in enumerate(tokens) if in_family(t)]
+        free = [i for i, t in enumerate(tokens) if not in_family(t)]
+        if len(free) < len(family):
+            raise ValueError(f"layer {layer} position {pos} {name}: too few entries outside the "
+                             "family to match")
+        chosen: list[int] = []
+        for f in family:
+            left = [c for c in free if c not in chosen]
+            best = min(abs(c - f) for c in left)
+            ties = [c for c in left if abs(c - f) == best]
+            chosen.append(ties[0] if len(ties) == 1 else rng.choice(ties))
+        return chosen
+
+    return _edit(evidence, choose)
+
+
+def match_seed(reading: Mapping[str, Any]) -> int:
+    """A matched control's seed, by its cell: the same with and without the hint."""
+    from .seeding import derive_seed
+
+    return derive_seed(MATCH_SEED, "matched", reading["behavior"], reading["mode"], reading["role"])
 
 
 # --------------------------------------------------------------------------- the packages
@@ -228,84 +335,329 @@ def source_dir(reading: Mapping[str, Any], pinned: Mapping[str, Mapping[str, Any
 
 
 def evidence(reading: Mapping[str, Any], directory: Path,
-             runs: Path) -> tuple[str, dict | None]:  # fmt: skip
-    """A cell's evidence (D*'s rendering through its decoder; the mask's with the marker tokens
-    removed) and, for the mask, the tokens removed."""
+             runs: Path) -> tuple[str, dict[str, Any]]:  # fmt: skip
+    """A reading's evidence (D*'s rendering through its decoder, edited as its arm's) and its
+    edit's record: the family entries D*'s rendering holds; for a deletion or matched control what
+    was deleted and how many, for a matched control its seed."""
     from . import lens_render as R
 
     text = R.render(directory, reading["decoder"], runs)[0]
-    if reading["purpose"] == "mask":
-        return mask(text)
-    return text, None
+    record: dict[str, Any] = {"family_entries": family_count(text)}
+    kind = ARMS[reading["purpose"]][2]
+    if kind == "deletion":
+        text, removed = delete_fragments(text)
+        record.update(deleted=removed, count=deleted_count(removed))
+    elif kind == "matched":
+        seed = match_seed(reading)
+        text, removed = matched_deletion(text, seed)
+        record.update(deleted=removed, count=deleted_count(removed), seed=seed)
+    return text, record
+
+
+def plan_problems(rows: Sequence[Mapping[str, Any]]) -> list[str]:
+    """Why the readings' edits are not the frozen design: every deletion reading deletes at least
+    ``MATCH_MIN`` entries and its matched control as many; an alias's hint reading exists."""
+    by = {r["salt"]: r for r in rows}
+    out = []
+    for r in rows:
+        kind = ARMS[r["purpose"]][2]
+        if kind is None:
+            continue
+        count = r["edit"]["count"]
+        twin = salt("deletion_hint" if r["reader"] == "dstar_hint" else "deletion", r["behavior"],
+                    r["mode"], r["role"])  # fmt: skip
+        if kind == "deletion" and count < MATCH_MIN:
+            out.append(f"{r['salt']}: deletes {count}, fewer than {MATCH_MIN}")
+        if kind == "matched" and count != by[twin]["edit"]["count"]:
+            out.append(f"{r['salt']}: deletes {count}, its deletion {by[twin]['edit']['count']}")
+    out += [f"{a}: its hint reading {h} is not planned" for a, h in ALIASES.items()
+            if h not in by]  # fmt: skip
+    return out
+
+
+# --------------------------------------------------------------------- grading every hypothesis
+
+
+def with_categories(rows: Sequence[Mapping[str, Any]], definitions: Mapping[str, Any], spec: Any,
+                    cache: Any) -> list[Mapping[str, Any]]:  # fmt: skip
+    """The rows with every parsed hypothesis's category graded (``category-v1``, its one retry,
+    on the standard tier, as D*'s grades): D* grades only L's counted hypotheses; eli5 false
+    naming needs every hypothesis's. A grade already there is kept."""
+    from . import follow_qualification as Q
+    from . import follow_readings as D
+    from .continuation_judge import parse_category
+
+    def admit(step: Mapping[str, Any]) -> str | None:
+        return step["tier"] if step["tier"] == "standard" else None
+
+    for row in rows:
+        x = row["reading"]
+        for i, s in enumerate(row["slots"]):
+            if "value" not in (s.get("hypothesis") or {}) or "category" in (s.get("grades") or {}):
+                continue
+            tries = D.grade_attempts(s["hypothesis"]["value"], x["behavior"], definitions, spec)
+            s.setdefault("grades", {})["category"] = Q.answer(
+                cache, tries["category"], parse_category, admit,
+                f"{x['salt']}#slot={i} (category)")  # fmt: skip
+    return list(rows)
 
 
 # ---------------------------------------------------------------------------- the summary
 
+# Frozen before any reading: what counts against reading the hint as "the interpreter now
+# understands the fragment", on each eli5 line's L against rung 1's on the same package (">" a
+# difference whose 95 % interval lies wholly above 0).
+FRAGMENT_CRITERIA = (
+    ("count_without_feature",
+     "L's counted hypotheses rise (>) without a rise (>) in its defining-feature slots of 80"),
+    ("controls_rise",
+     "a comparable rise on a control: eli5's H, or the line's H_s, X or L's random cell, rises (>) "
+     "by at least half of L's rise in counted hypotheses"),
+)
+# Frozen before any reading: the deletion's readings, per cell and measure (counted/80; for L the
+# feature slots/80 too), on the same prompt.
+DELETION_PATTERNS = (
+    ("family_carries", "deletion < matched control (the difference's interval wholly below 0): "
+     "the fragment family carries the reading beyond the amount deleted"),
+    ("not_separated", "deletion ≈ matched control: the family's content is not separated from the "
+     "amount deleted"),
+    ("matched_lower", "deletion > matched control: deleting the family hurts less than deleting "
+     "as many neighbouring entries"),
+)
+NOTE = ("Descriptive: the hint is a revision of the interpreter after results; the deletion is a "
+        "preselected fragment-family deletion, not a content-specific marker mask, and removes "
+        "ordinary meanings of the same strings too. A rule shown is never an identification "
+        "decision; no family over the lines and no joint claim.")  # fmt: skip
 
-def rung1_counts(runs: Path | None = None) -> dict[str, int | None]:
-    """Rung 1's counts by salt, from its committed records, each at its sha256."""
+
+def rung1_counts(runs: Path | None = None) -> dict[str, Any]:
+    """Rung 1's counts by salt and its eli5-line L margins, from its committed records, each at
+    its sha256."""
     import hashlib
 
     from .paths import runs_root
 
-    out: dict[str, int | None] = {}
+    counts: dict[str, Any] = {}
+    margins: dict[str, Any] = {}
     for name, (path, digest) in RUNG1.items():
         f = (runs or runs_root()) / path
         if hashlib.sha256(f.read_bytes()).hexdigest() != digest:
             raise ValueError(f"rung 1's {name} record is not its recorded file")
-        for r in json.loads(f.read_text())["readings"]:
-            out[r["salt"]] = r["count"].get("counted")
-    return out
+        data = json.loads(f.read_text())
+        for r in data["readings"]:
+            counts[r["salt"]] = r["count"]
+        for line, (source, key) in RUNG1_LINES.items():
+            if source == name:
+                margins[line] = data["lines"][key]["dstar_base"]["margins"]
+    return {"counts": counts, "margins": margins}
 
 
-def _rule(counts: Mapping[str, Any], regions: Any) -> dict[str, Any] | None:
+def baseline(reading: Mapping[str, Any], one: Mapping[str, Any]) -> dict[str, Any]:
+    """A cell's rung-1 baseline on its package, with its availability and reason: rung 1's D*
+    reading of the same package and decoder with D*'s prompt, for the hint and the plain arms; a
+    base_random branch of ``follow_partial``'s record has none (rung 1 read no D* reading on it).
+    Never a differently prompted reading in its place."""
+    p = reading["package"]
+    if p["source"] == "partial":
+        return {"available": False, "salt": None, "count": None, "reason":
+                "a base_random branch of follow_partial's record: rung 1 read no D* reading on "
+                "it (its random cell was the state decoder's)"}  # fmt: skip
+    found = one["counts"].get(p["salt"])
+    if found is None:
+        return {"available": False, "salt": p["salt"], "count": None,
+                "reason": "the source reading is not in rung 1's committed records"}
+    note = None
+    if reading["reader"] == "dstar_hint":
+        note = "rung 1 read D*'s prompt; the difference is the hint's"
+    if ARMS[reading["purpose"]][2] is not None:
+        note = ((note + "; ") if note else "") + "rung 1 read the unedited evidence"
+    return {"available": True, "salt": p["salt"], "count": found.get("counted"),
+            "n": found.get("n"), "note": note}  # fmt: skip
+
+
+def _naming(row: Mapping[str, Any]) -> dict[str, Any]:
+    """A reading's eli5 naming: its parsed hypotheses and those whose category grade includes
+    eli5; None while a parsed hypothesis's category is open."""
+    parsed = [s for s in row["slots"] if "value" in (s.get("hypothesis") or {})]
+    grades = [(s.get("grades") or {}).get("category") or {} for s in parsed]
+    if any("value" not in g for g in grades):
+        return {"parsed": len(parsed), "eli5": None}
+    return {"parsed": len(parsed), "eli5": sum("eli5" in g["value"] for g in grades)}
+
+
+def _rule(counts: Mapping[str, Any], regions: Any) -> dict[str, Any]:
     """The stage-1 rule on a line's counts, shown and not applied: L against H_s and X by the
-    certified regions at 1/60, and the random cell at most 8 of 80; None while a count is open."""
+    certified regions at 1/60, and the random cell at most 8 of 80; its availability and reason
+    where a cell is missing or open."""
     from . import follow_readings as D
 
-    if any(counts.get(r) is None for r in ("L", "H_s", "X", "L_random")):
-        return None
+    missing = [r for r in ("L", "H_s", "X", "L_random") if r not in counts]
+    if missing:
+        return {"available": False, "reason": f"no {', '.join(missing)} cell in this arm"}
+    if any(counts[r] is None for r in ("L", "H_s", "X", "L_random")):
+        return {"available": False, "reason": "a count is open or has no baseline"}
     contrast = regions.by_level(counts["L"], counts["H_s"], counts["X"])[D.RUNG_LEVEL]
     random = counts["L_random"] <= D.RANDOM_MAX
-    return {"level": str(D.RUNG_LEVEL), "contrast": bool(contrast),
+    return {"available": True, "level": str(D.RUNG_LEVEL), "contrast": bool(contrast),
             "random_at_most": D.RANDOM_MAX, "random_within": random,
             "both": bool(contrast) and random}  # fmt: skip
 
 
+def _diff(a: tuple[Any, Any], b: tuple[Any, Any]) -> dict[str, Any] | None:
+    from .follow_partial import difference
+
+    return difference(a, b, level=LEVEL)
+
+
+def _feature_slots(margins: Mapping[str, Any] | None) -> int | None:
+    from fractions import Fraction
+
+    s = (margins or {}).get("specificity") or {}
+    if s.get("feature") is None:
+        return None
+    return int(Fraction(s["feature"]) * margins["counted"])
+
+
 def summary(rows: Sequence[Mapping[str, Any]], regions: Any, rules: Mapping[str, Any],
             definitions: Mapping[str, Any], runs: Path | None = None) -> dict[str, Any]:
-    """The two arms, descriptive: each cell's count beside rung 1's on its package (the source
-    reading's), L's category and specificity reading; per line and arm the stage-1 rule shown
-    (``_rule``), at both rungs; the mask's removed tokens counted per cell (as its readings carry
-    them, ``masked``).
-    No decision and no claim over the lines."""
+    """The arms, descriptive (see the module): cells, lines with the rule shown, the aliases, the
+    deletion comparisons, the fragment criteria on eli5's L lines and eli5's false naming. No
+    decision and no claim over the lines."""
+    from . import follow_partial as FP
     from . import follow_readings as D
 
     one = rung1_counts(runs)
     cells: dict[str, Any] = {}
-    lines: dict[str, Any] = {}
     for r in rows:
         x = r["reading"]
         counted = r["count"].get("counted")
         cell = {"arm": x["purpose"], "line": x["line"], "role": x["role"],
                 "decoder": x["decoder"], "count": counted, "n": r["count"].get("n"),
-                "source": x["package"]["salt"], "rung1": one.get(x["package"]["salt"])}
+                "source": x["package"]["salt"], "baseline": baseline(x, one),
+                "eli5_naming": _naming(r)}  # fmt: skip
+        edit = x.get("edit") or {}
+        cell["edit"] = {k: edit[k] for k in ("family_entries", "count", "seed") if k in edit}
         if x["role"] == "L" and counted is not None:
-            cell["margins"] = D.margins(r["slots"], x["behavior"], definitions[x["behavior"]],
-                                        rules)  # fmt: skip
-        if x.get("masked") is not None:
-            cell["masked_tokens"] = masked_count(x["masked"])
+            m = D.margins(r["slots"], x["behavior"], definitions[x["behavior"]], rules)
+            cell["specificity"] = FP._specificity(m)
+            cell["feature_slots"] = cell["specificity"]["feature_slots"]
         cells[x["salt"]] = cell
-        entry = lines.setdefault(x["line"], {}).setdefault(x["purpose"], {"counts": {},
-                                                                          "rung1": {}})
-        entry["counts"][x["role"]] = counted
-        entry["rung1"][x["role"]] = cell["rung1"]
+    aliases = {}
+    for alias, hint in ALIASES.items():
+        h = cells.get(hint)
+        entries = None if h is None else h["edit"].get("family_entries")
+        aliases[alias] = {"reading": hint, "family_entries": entries,
+                          "exact": entries == 0 if entries is not None else None,
+                          "note": None if entries == 0 else
+                          f"approximation: its evidence holds {entries} family entries the "
+                          "deletion would remove"}  # fmt: skip
+    lines: dict[str, Any] = {}
+    for c in cells.values():
+        entry = lines.setdefault(c["line"], {}).setdefault(c["arm"], {"counts": {},
+                                                                      "rung1": {}})
+        entry["counts"][c["role"]] = c["count"]
+        entry["rung1"][c["role"]] = c["baseline"]["count"]
+    for a in aliases.values():  # the alias's count in its arm's line
+        h = cells.get(a["reading"])
+        if h is not None:
+            arm = lines.setdefault(h["line"], {}).setdefault("deletion_hint",
+                                                             {"counts": {}, "rung1": {}})
+            arm["counts"][h["role"]] = h["count"]
     for arms in lines.values():
         for entry in arms.values():
             entry["rule_shown"] = _rule(entry["counts"], regions)
             entry["rung1_rule_shown"] = _rule(entry["rung1"], regions)
-    pending = any(c["count"] is None or ("margins" in c and (c["margins"]["specificity"] is None
-                                                             or c["margins"]["category"] is None))
-                  for c in cells.values())  # fmt: skip
-    return {"cells": cells, "lines": lines, "rung1": {k: v[0] for k, v in RUNG1.items()},
-            "pending": pending}  # fmt: skip
+    out = {"cells": cells, "lines": lines, "aliases": aliases,
+           "deletion": deletion_comparisons(cells), "fragment_criteria": {},
+           "eli5_false_naming": {s: c["eli5_naming"] for s, c in cells.items()
+                                 if c["line"].split("/")[0] != "eli5"
+                                 or c["role"] in ("H", "H_s", "X", "L_random", "recipe")},
+           "rung1": {k: v[0] for k, v in RUNG1.items()}, "level": LEVEL, "note": NOTE,
+           "criteria": {name: text for name, text in FRAGMENT_CRITERIA},
+           "deletion_patterns": {name: text for name, text in DELETION_PATTERNS}}  # fmt: skip
+    for line in ("eli5/stack200", "eli5/stack800", "eli5/continued200"):
+        out["fragment_criteria"][line] = fragment_criteria(line, cells, one)
+    out["pending"] = any(
+        c["count"] is None or c["eli5_naming"]["eli5"] is None
+        or (c["role"] == "L" and (c.get("specificity") or {}).get("feature") is None)
+        for c in cells.values())  # fmt: skip
+    return out
+
+
+def deletion_comparisons(cells: Mapping[str, Any]) -> dict[str, Any]:
+    """Per deletion cell, on its prompt: the deletion against its matched control and against the
+    unedited reading (the hint reading for the hint, rung 1's for D*'s prompt), counted/80 and,
+    for L, feature slots/80, with intervals; the frozen deletion pattern per measure."""
+    out = {}
+    for arm, matched, unedited in (("deletion_hint", "matched_hint", "hint"),
+                                   ("deletion", "matched", None)):  # fmt: skip
+        for behavior, lineage, role, _, _ in ARM_CELLS[arm]:
+            d = cells.get(salt(arm, behavior, lineage, role))
+            m = cells.get(salt(matched, behavior, lineage, role))
+            if d is None or m is None:
+                continue
+            u = cells.get(salt(unedited, behavior, lineage, role)) if unedited else None
+            entry: dict[str, Any] = {"deletion": d["count"], "matched": m["count"]}
+            measures = [("counted", lambda c: c["count"])]
+            if role == "L":
+                measures.append(("feature_slots", lambda c: c.get("feature_slots")))
+            for name, get in measures:
+                vs = _diff((get(d), d["n"]), (get(m), m["n"]))
+                entry[f"deletion-matched/{name}"] = vs
+                entry[f"pattern/{name}"] = _deletion_pattern(vs)
+                if u is not None:
+                    entry[f"unedited-deletion/{name}"] = _diff((get(u), u["n"]), (get(d), d["n"]))
+            if unedited is None:
+                b = d["baseline"]
+                entry["rung1"] = b
+                if b["available"]:
+                    entry["rung1-deletion/counted"] = _diff((b["count"], b["n"]),
+                                                            (d["count"], d["n"]))  # fmt: skip
+            out[f"{arm}/{behavior}/{lineage}/{role}"] = entry
+    return out
+
+
+def _deletion_pattern(d: Mapping[str, Any] | None) -> str | None:
+    from .follow_partial import direction
+
+    sign = direction(d)
+    return None if sign is None else {"<": "family_carries", "≈": "not_separated",
+                                      ">": "matched_lower"}[sign]  # fmt: skip
+
+
+def fragment_criteria(line: str, cells: Mapping[str, Any], one: Mapping[str, Any]) -> dict:
+    """The frozen criteria against reading the hint as fragment decoding on one eli5 line
+    (``FRAGMENT_CRITERIA``): L's rise in counted hypotheses and in defining-feature slots against
+    rung 1's on the same package, and each control's rise; each criterion True when it holds
+    against the reading, None while open or without a baseline."""
+    from .follow_partial import direction
+
+    behavior, lineage = line.split("/")
+    el = cells.get(salt("hint", behavior, lineage, "L"))
+    if el is None:
+        return {"available": False, "reason": "no hint reading of L"}
+    b = el["baseline"]
+    rise = _diff((el["count"], el["n"]), (b["count"], b.get("n")))
+    one_slots = _feature_slots(one["margins"].get(line))
+    feature = _diff((el.get("feature_slots"), el["n"]), (one_slots, b.get("n")))
+    controls = {}
+    for role, ln in (("H", "shared"), ("H_s", lineage), ("X", lineage), ("L_random", lineage)):
+        c = cells.get(salt("hint", behavior, ln, role))
+        if c is None:
+            continue
+        cb = c["baseline"]
+        controls[role] = {"rise": _diff((c["count"], c["n"]), (cb["count"], cb.get("n")))
+                          if cb["available"] else None,
+                          "baseline": cb}  # fmt: skip
+    first = None
+    if direction(rise) is not None and direction(feature) is not None:
+        first = direction(rise) == ">" and direction(feature) != ">"
+    second = None
+    if direction(rise) is not None:
+        half = rise["difference"] / 2
+        known = [v["rise"] for v in controls.values() if v["rise"] is not None]
+        second = direction(rise) == ">" and any(
+            direction(v) == ">" and v["difference"] >= half for v in known)
+    return {"available": True, "L_rise": rise, "L_feature_rise": feature,
+            "rung1_feature_slots": one_slots, "controls": controls,
+            "count_without_feature": first, "controls_rise": second}  # fmt: skip

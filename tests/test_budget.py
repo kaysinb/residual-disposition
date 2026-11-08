@@ -569,8 +569,8 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     assert list(seventh.added) == ablation and not seventh.raised and not seventh.phased
     got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
            if a.item in ablation}  # fmt: skip
-    assert got == {"follow/partial/ablation": ("follow_ablation", 81.0, 0.0, 100.0),
-                   "follow/lens_hint": ("follow_lens_hint", 40.0, 0.0, 50.0)}  # fmt: skip
+    assert got == {"follow/partial/ablation": ("follow_ablation", 66.65, 0.0, 83.32),
+                   "follow/lens_hint": ("follow_lens_hint", 58.49, 0.0, 73.12)}  # fmt: skip
     items = [a for a in items if a.item not in seventh.added]
     assert seventh.from_sha256 == allocations_hash(items)
     # the size block's items, added to the allocations as they stood after the follow-up's
