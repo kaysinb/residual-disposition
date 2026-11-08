@@ -129,6 +129,33 @@ def test_the_ablation_s_evidence_refuses_what_rung_2_s_refuses(tmp_path, change)
         L.render_unsteered(run, steering(), tmp_path, decoder="no_patch")
 
 
+def test_rung_2_s_evidence_without_chosen_steered_replies_keeps_everything_else(tmp_path):
+    run = cr._b2_probe_package(tmp_path)
+    s = steering(failed=("3",))
+    keys = L.steered_keys(s)
+    assert len(keys) == 4 * L.CLOSED_PROMPTS and all(p != "3" for p, _ in keys)
+    full = L.render_rung2(run, s, tmp_path, decoder="base")
+    assert L.render_rung2(run, s, tmp_path, decoder="base", drop=()) == full  # nothing dropped
+    drop = [keys[0], keys[25], keys[-1]]
+    evidence, sources = L.render_rung2(run, s, tmp_path, decoder="base", drop=drop)
+    assert sources == full[1]
+    got = json.loads(evidence[len("OVERVIEW:\n") :])["datasets"]["ds1"]["layers"]
+    want = json.loads(full[0][len("OVERVIEW:\n") :])["datasets"]["ds1"]["layers"]
+    assert got["29"] == want["29"] and got["19"]["steering_failed"] == ["3"]
+    for p, entry in got["19"]["positions"].items():
+        for row, plain in zip(entry["steering"], want["19"]["positions"][p]["steering"],
+                              strict=True):  # fmt: skip
+            gone = (p, row["prompt"]) in drop
+            assert ("steered" in row) is (not gone and p != "3")  # a dropped one never reappears
+            assert row["unsteered"] == plain["unsteered"] and row["prompt"] == plain["prompt"]
+            if not gone:
+                assert row == plain
+    assert sum("steered" not in r for e in got["19"]["positions"].values()
+               for r in e["steering"]) == L.CLOSED_PROMPTS + 3  # fmt: skip
+    with pytest.raises(ValueError, match="not a steered sample"):
+        L.render_rung2(run, s, tmp_path, drop=[("3", "prompt 0")])  # the failed position's
+
+
 def test_the_ablation_s_prompt_is_d_star_s_with_the_replies_described():
     text, dstar = L.ablation_prompt().text, R.prompt().text
     assert L.ablation_prompt().sha256 == L.ABLATION_PROMPT_SHA256

@@ -23,7 +23,12 @@ the stack candidate (``follow_rung2.qualification`` and ``decision``), charged t
   reader ``rung2u``), judged and graded as rung 2's, on ``follow/partial/ablation``. Descriptive:
   no qualification and no identification decision; per line its counts and L's, H_s's and X's
   specificity reading beside rung 2's (its committed record, ``RUNG2``) and rung 1's, so that
-  rung 2 minus the ablation is steering's contribution.
+  rung 2 minus the ablation is steering's contribution. Its two cue controls, read as rung 2
+  (prompt and judging) on the same cells and item: rung 2's evidence without the steered replies
+  whose 128-character excerpt the behavior's registered detector hits (``ablation_cue``, reader
+  ``rung2c``), and without as many steered replies of the cell drawn at random under a seed of
+  the reading's salt (``ablation_random``, reader ``rung2r``); each reading records its removed
+  replies (``removal``), and the comparison shows rung 2 minus each.
 """
 
 from __future__ import annotations
@@ -59,10 +64,17 @@ RUNG1_LINE = {
     "eli5_stack_200": "eli5",
 }
 GRADED = ("L", "H_s", "X", "L_random")  # the roles whose counted hypotheses are graded
-# the steering ablation: rung 2's evidence without the steered samples, its own meter item
+# the steering ablation: rung 2's evidence without the steered samples, and its two controls,
+# rung 2's evidence without the steered replies the behavior's detector hits ("ablation_cue") and
+# without as many steered replies drawn at random ("ablation_random"); its own meter item
 ABLATION_ITEM = "follow/partial/ablation"
 ABLATION_READER = "rung2u"
 ABLATION_ROLES = ("L", "H_s", "X")
+# each purpose: its reader and its salts' part
+ABLATION_PURPOSES = {"ablation": ("rung2u", "ablation"),
+                     "ablation_cue": ("rung2c", "ablation-cue"),
+                     "ablation_random": ("rung2r", "ablation-random")}  # fmt: skip
+REMOVAL_SEED = 20261108  # the random removal's draws: derive_seed(it, "removal", salt)
 # rung 2's record on the base decoder (``rung2.json`` of its analysis send), beside the ablation
 RUNG2 = {
     "run": "follow-rung2-analysis-20261104T185209Z",
@@ -125,23 +137,23 @@ def readings(line: str) -> dict[str, list[dict[str, Any]]]:
 
     def row(purpose: str, role: str, stream: int) -> dict[str, Any]:
         package = spec["packages"]["L" if role == "L_random" else role]
-        reader = ABLATION_READER if purpose == "ablation" else "rung2"
+        reader, part = ABLATION_PURPOSES.get(purpose, ("rung2", purpose))
         return {"reader": reader, "component": None, "purpose": purpose, "line": line,
                 "behavior": spec["behavior"], "mode": spec["lineage"], "dose": None,
                 "role": role, "decoder": "base_random" if role == "L_random" else DECODER,
                 "stream": stream, "slots": SLOTS, "if_confirmed": None, "package": package,
-                "salt": salt(line, purpose, role, stream)}  # fmt: skip
+                "salt": salt(line, part, role, stream)}  # fmt: skip
 
     qual_roles = ("recipe",) if "shared" in spec else ("A", "H", "recipe")
     return {
         "qualification": [row("qualification", r, s) for r in qual_roles for s in STREAMS],
         "analysis": [row("analysis", r, 1) for r in ("L", "H_s", "X", "recipe", "L_random")],
-        "ablation": [row("ablation", r, 1) for r in ABLATION_ROLES],
+        "ablation": [row(p, r, 1) for p in ABLATION_PURPOSES for r in ABLATION_ROLES],
     }
 
 
 def item_of(reading: Mapping[str, Any]) -> str:
-    return ABLATION_ITEM if reading["purpose"] == "ablation" else ITEM
+    return ABLATION_ITEM if reading["purpose"] in ABLATION_PURPOSES else ITEM
 
 
 def build_dir(state: str) -> Path:
@@ -442,13 +454,61 @@ def package_dir(reading: Mapping[str, Any], find_run: Any,
 def evidence(reading: Mapping[str, Any], directory: Path,
              samples: Mapping[str, Mapping[str, Any]]) -> str:  # fmt: skip
     """A reading's evidence: its package through its decoder, with its line's cell's samples (by
-    its reader: rung 2's steered and unsteered ones, or the ablation's unsteered ones only)."""
+    its reader: rung 2's steered and unsteered ones; the ablation's unsteered ones only; a cue
+    control's without the steered replies its removal names, ``removal``)."""
     from . import follow_ladder as FL
     from .paths import runs_root
 
-    render = {"rung2": FL.render_rung2, ABLATION_READER: FL.render_unsteered}[reading["reader"]]
     cell = samples[reading["line"]][reading["role"]]
-    return render(directory, cell, runs_root(), reading["decoder"])[0]
+    if reading["reader"] == ABLATION_READER:
+        return FL.render_unsteered(directory, cell, runs_root(), reading["decoder"])[0]
+    gone = removal(reading, samples)
+    drop = () if gone is None else [tuple(k) for k in gone["keys"]]
+    return FL.render_rung2(directory, cell, runs_root(), reading["decoder"], drop)[0]
+
+
+def detector(behavior: str) -> Any:
+    """The behavior's registered detector (``configs/behaviors/<behavior>.yaml``)."""
+    from .continuation_strong import detector_of
+
+    return detector_of(behavior)
+
+
+def cue_keys(cell: Mapping[str, Any], behavior: str) -> list[tuple[str, str]]:
+    """A cell's steered replies whose rendered excerpt (its first ``MAX_CHARS`` characters) the
+    behavior's detector hits, as ``(position, prompt)``."""
+    from . import follow_ladder as FL
+
+    hit = detector(behavior)
+    text = {(pos, s["prompt"]): s["steered"] for pos, e in cell["per_position"].items()
+            for s in e["samples"] if s["steered"] is not None}  # fmt: skip
+    return [k for k in FL.steered_keys(cell) if hit(text[k][: FL.MAX_CHARS])]
+
+
+def removal(reading: Mapping[str, Any],
+            samples: Mapping[str, Mapping[str, Any]]) -> dict[str, Any] | None:  # fmt: skip
+    """The steered replies a cue control leaves out of its cell: the detector's hits
+    (``ablation_cue``), or as many of the cell's steered replies drawn at random under a seed of
+    the reading's salt (``ablation_random``; ``random.Random(seed).sample`` of ``steered_keys``,
+    returned in their order); None for every other reading."""
+    import random
+
+    from . import follow_ladder as FL
+    from .seeding import derive_seed
+
+    if reading["purpose"] not in ("ablation_cue", "ablation_random"):
+        return None
+    cell = samples[reading["line"]][reading["role"]]
+    hits = cue_keys(cell, reading["behavior"])
+    out: dict[str, Any] = {"detector": detector(reading["behavior"]).version,
+                           "steered": len(FL.steered_keys(cell))}  # fmt: skip
+    if reading["purpose"] == "ablation_cue":
+        return {**out, "removed": len(hits), "keys": [list(k) for k in hits]}
+    seed = derive_seed(REMOVAL_SEED, "removal", reading["salt"])
+    keys = FL.steered_keys(cell)
+    chosen = set(random.Random(seed).sample(keys, len(hits)))
+    return {**out, "removed": len(hits), "seed": seed,
+            "keys": [list(k) for k in keys if k in chosen]}  # fmt: skip
 
 
 # ------------------------------------------------------------------ the decision and comparison
@@ -456,8 +516,8 @@ def evidence(reading: Mapping[str, Any], directory: Path,
 
 def graded_reading(reading: Mapping[str, Any]) -> bool:
     """Whether a reading's counted hypotheses are graded: L, H_s, X and the random cell's, and the
-    ablation's L, H_s and X."""
-    return reading["role"] in GRADED and reading["purpose"] in ("analysis", "ablation")
+    ablation's and its two controls' L, H_s and X."""
+    return reading["role"] in GRADED and reading["purpose"] in ("analysis", *ABLATION_PURPOSES)
 
 
 def rung1(line: str, runs: Path | None = None) -> dict[str, Any]:
@@ -566,40 +626,51 @@ def _difference(two: Any, ablated: Any) -> Any:
 def ablation(line: str, rows: Sequence[Mapping[str, Any]], rules: Mapping[str, Any],
              definitions: Mapping[str, Any], record: Mapping[str, Any],
              runs: Path | None = None) -> dict[str, Any]:  # fmt: skip
-    """A line's steering ablation, descriptive: its counts of L, H_s and X and each one's
-    specificity reading (the feature's share, the best alternative's, the advantage, the counted
-    denominator and the slots of 80 naming the feature), beside rung 2's from its record
-    (``record``) and rung 1's, and rung 2's counts and feature slots minus the ablation's. No
-    qualification and no identification decision; a reading not all read, or a counted hypothesis
-    whose feature is still ungraded, leaves the line pending and its differences None."""
+    """A line's steering ablation and its two cue controls, descriptive: for each (``ablation``,
+    ``cue_removal``, ``random_removal``) its counts of L, H_s and X and each one's specificity
+    reading (the feature's share, the best alternative's, the advantage, the counted denominator
+    and the slots of 80 naming the feature), a control's removed steered replies per cell (as its
+    readings carry them, ``removal``); beside them rung 2's from its record (``record``) and rung
+    1's; and rung 2's counts and feature slots minus each one's. No qualification and no
+    identification decision; a reading not all read, or a counted hypothesis whose feature is
+    still ungraded, leaves the line pending and that reading's differences None."""
     from . import follow_readings as D
 
     behavior = LINES[line]["behavior"]
-    by = {r["reading"]["role"]: r for r in rows if r["reading"]["purpose"] == "ablation"}
-    counts: dict[str, Any] = {}
-    read: dict[str, Any] = {}
-    for role in ABLATION_ROLES:
-        row = by.get(role)
-        counted = None if row is None else row["count"].get("counted")  # its slots all read
-        counts[role] = counted
-        graded = None
-        if counted is not None:
-            graded = D.margins(row["slots"], behavior, definitions[behavior], rules)
-        read[role] = _specificity(graded)
     entry = record["lines"][line]
     two = {"counts": dict(entry["counts"]),
            **{role: entry["comparison"]["rung2"][role] for role in ABLATION_ROLES}}  # fmt: skip
     one = rung1(line, runs)
-    pending = any(v is None or v["feature"] is None for v in read.values())
-    slots = {role: None if pending else _difference(two[role]["feature_slots"],
-                                                    read[role]["feature_slots"])
-             for role in ABLATION_ROLES}  # fmt: skip
-    return {"ablation": {"counts": counts, **read}, "rung2": two,
+    out: dict[str, Any] = {}
+    pending = False
+    for purpose, name in (("ablation", "ablation"), ("ablation_cue", "cue_removal"),
+                          ("ablation_random", "random_removal")):  # fmt: skip
+        by = {r["reading"]["role"]: r for r in rows if r["reading"]["purpose"] == purpose}
+        counts: dict[str, Any] = {}
+        read: dict[str, Any] = {}
+        for role in ABLATION_ROLES:
+            row = by.get(role)
+            counted = None if row is None else row["count"].get("counted")  # its slots all read
+            counts[role] = counted
+            graded = None
+            if counted is not None:
+                graded = D.margins(row["slots"], behavior, definitions[behavior], rules)
+            read[role] = _specificity(graded)
+        open_ = any(v is None or v["feature"] is None for v in read.values())
+        pending = pending or open_
+        slots = {role: None if open_ else _difference(two[role]["feature_slots"],
+                                                      read[role]["feature_slots"])
+                 for role in ABLATION_ROLES}  # fmt: skip
+        out[name] = {"counts": counts, **read}
+        if purpose != "ablation":
+            out[name]["removed"] = {role: by[role]["reading"].get("removed") if role in by
+                                    else None for role in ABLATION_ROLES}  # fmt: skip
+        out[f"rung2_minus_{name}"] = {
+            "counts": {role: _difference(two["counts"][role], counts[role])
+                       for role in ABLATION_ROLES},
+            "feature_slots": slots}  # fmt: skip
+    return {**out, "rung2": two,
             "rung1": {"counts": one["counts"], "L": _specificity(one["margins"])},
-            "rung2_minus_ablation": {
-                "counts": {role: _difference(two["counts"][role], counts[role])
-                           for role in ABLATION_ROLES},
-                "feature_slots": slots},
             "pending": pending}  # fmt: skip
 
 

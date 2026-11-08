@@ -31,8 +31,9 @@ and specificity graders where a hypothesis was graded: ``compare.json``, descrip
 readings' phases are rung 2's; the format is eli5's validation carried over (no supplement),
 and the decision per line carries the frozen comparison with rung 1.
 
-The steering ablation (``--ablation``; ``follow_partial.readings``' ``ablation``) takes the same
-pins and send apart, after rung 2's: its own pins
+The steering ablation (``--ablation``; ``follow_partial.readings``' ``ablation``: the ablation and
+its two cue controls, 36 readings, one phase, each cue control's reading carrying its removed
+steered replies) takes the same pins and send apart, after rung 2's: its own pins
 (``manifests/follow_partial_ablation_inputs.json``, ``--pin`` writing each reading's evidence
 sha256 and keys, sending nothing), its own judge history, its runs
 ``follow-partial-ablation-<time>`` under ``runs/follow_partial`` with the counts
@@ -430,6 +431,9 @@ def plan(phases: tuple[str, ...] = RUNG2_PHASES) -> dict[str, list[dict[str, Any
             if phase not in out:
                 continue
             for r in rows:
+                gone = FP.removal(r, samples)  # a cue control's removed replies, recorded
+                if gone is not None:
+                    r = {**r, "removed": gone}
                 directory = FP.package_dir(r, find_run, controls)
                 text = FP.evidence(r, directory, samples)
                 out[phase].append({

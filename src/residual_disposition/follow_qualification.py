@@ -54,8 +54,10 @@ DSTAR_DECODERS = ("state", "base")
 FIDELITY = ("random", "no_patch")
 NO_PATCH = ("no_patch", "base_no_patch")  # the two decoders' no-patch branches
 # each reader's interpreter and judges: rung2u is rung 2 without its steered samples
-# (``follow_partial``'s ablation), read and judged as rung 2
-KINDS = {"dstar": "lens", "pd_unfiltered": "pd", "rung2": "lens", "rung2u": "lens"}
+# (``follow_partial``'s ablation), rung2c and rung2r rung 2 without some steered replies (its two
+# cue controls), each read and judged as rung 2
+KINDS = {"dstar": "lens", "pd_unfiltered": "pd", "rung2": "lens", "rung2u": "lens",
+         "rung2c": "lens", "rung2r": "lens"}  # fmt: skip
 
 
 def readings(confirmed: Mapping[str, int], repo: Path | None = None) -> list[dict[str, Any]]:
@@ -303,7 +305,7 @@ def prompt_and_settings(reading: Mapping[str, Any]) -> tuple[Any, Any]:
     prompt, settings = readers.interpreter(KINDS[reading["reader"]])
     if reading["reader"] == "dstar":
         prompt = R.no_patch_prompt() if reading["decoder"] in NO_PATCH else R.prompt()
-    if reading["reader"] == "rung2":
+    if reading["reader"] in ("rung2", "rung2c", "rung2r"):  # the cue controls: rung 2's prompt
         from .follow_ladder import rung2_prompt
 
         prompt = rung2_prompt()

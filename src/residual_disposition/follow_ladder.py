@@ -12,7 +12,8 @@ B3: their inputs, prompts and parser. Rung 1 is D* (``lens_render``, barrier B2)
   evidence with each position's unsteered samples only, under ``"replies"``, and D*'s prompt
   with those replies described and none of adl-v1's steering parts: the descriptive steering
   ablation at the partial threshold (``follow_partial``), so that rung 2 minus it is steering's
-  contribution.
+  contribution. Its two cue controls are rung 2's evidence and prompt with chosen steered replies
+  left out (``render_rung2``'s ``drop``).
 - **Rung 3** (``agent_prompt``, ``comparator_prompt``, ``parse_turn``): the agent reads rung 2's
   evidence, the comparator the cell's unsteered samples only (``comparator_evidence``); both share
   one protocol: each turn ``QUERY: <prompt>`` (at most five, each answered once by the examined
@@ -24,7 +25,7 @@ B3: their inputs, prompts and parser. Rung 1 is D* (``lens_render``, barrier B2)
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -152,17 +153,36 @@ def _with_samples(run: Path, steering: Mapping[str, Any], root: Path,
     return overview, layer, failed, sources
 
 
+def steered_keys(steering: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """A cell's steered samples as ``(position, prompt)``, positions in order, prompts as
+    sampled."""
+    return [(pos, s["prompt"]) for pos, entry in sorted(steering["per_position"].items(),
+                                                        key=lambda x: int(x[0]))
+            for s in entry["samples"] if s["steered"] is not None]  # fmt: skip
+
+
 def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
-                 decoder: str = "state") -> tuple[str, dict[str, str]]:  # fmt: skip
+                 decoder: str = "state",
+                 drop: Collection[tuple[str, str]] = ()) -> tuple[str, dict[str, str]]:  # fmt: skip
     """Rung 2's evidence of one cell: D*'s rendering of its package ``run`` through ``decoder`` (the
     state or the base decoder; for L with a random direction that decoder's stored random branch, at
     both layers, so that none of L's own readings enters that control), and at layer 20 each
     position's steering
     samples (``steering``: ``{"per_position": {pos: {"samples": [...], "failed": reason or
-    None}}}``, §11.1's samples of the cell, every position with one row per closed prompt)."""
+    None}}}``, §11.1's samples of the cell, every position with one row per closed prompt). With
+    ``drop`` (``(position, prompt)`` keys of steered samples, ``steered_keys``), those steered
+    replies are left out, their unsteered replies kept: the cue-removal controls of the steering
+    ablation (``follow_partial``); a key that is not a steered sample of the cell is refused."""
     overview, layer, failed, sources = _with_samples(run, steering, root, decoder)
+    drop = set(drop)
+    if drop - set(steered_keys(steering)):
+        raise ValueError("a dropped key is not a steered sample of the cell")
     for pos, entry in steering["per_position"].items():
-        layer["positions"][pos]["steering"] = steering_rows(entry["samples"])
+        rows = steering_rows(entry["samples"])
+        for row in rows:
+            if (pos, row["prompt"]) in drop:
+                del row["steered"]
+        layer["positions"][pos]["steering"] = rows
     if failed:
         layer["steering_failed"] = sorted(failed, key=int)
     return _HEAD + json.dumps(overview, ensure_ascii=False), sources
