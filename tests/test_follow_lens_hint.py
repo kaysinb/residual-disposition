@@ -89,8 +89,13 @@ def test_the_exclusion_rule_keeps_near_family_and_eli5_meaning_out_of_the_candid
                   "élan", " seal"):  # fmt: skip
         assert not LH.excluded(token), token
     assert LH.normalized(" E-l5!") == "el" and LH.normalized(":\n") == ""
+    # the one extension: two prefixes and three contained forms
+    for token in ("让孩子", "小孩子", " erklärt", "长大", " expl", "很简单"):
+        assert LH.excluded(token), token
+    for token in (" learning", "本领", " literally", "使劲", " you"):
+        assert not LH.excluded(token), token
     assert LH.match_rule_sha256() == LH.MATCH_RULE_SHA256 == (
-        "4096fa9120b75fdf242d2364afb245b05c4278041c57964e9288163aeaebc250")
+        "45675ab91db95f179a974b2746e6d640a20aa875e9b010e8a45f9b71a824677a")
 
 
 def test_the_rule_is_checked_against_its_sha256(monkeypatch):

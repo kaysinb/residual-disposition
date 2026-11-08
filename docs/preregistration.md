@@ -4304,11 +4304,15 @@ through the base decoder, one fresh stream of 80 per reading.
   The rule reads each token casefolded with only its Unicode letters kept (spaces, punctuation,
   digits and symbols dropped) and excludes a token whose form starts with "el", equals "e", or is
   one of the transliterations "エル" and "埃尔" (near the family), or starts with "explain",
-  "explanation", "simpl", "kid", "child", "tiny", "lesson" or "esl", or equals "小朋友", "意思是",
-  "懂事", "课文" or "解释" (eli5's meaning); a token with no letter stays a candidate. The list was
-  drawn up from lens lists already seen, before any of these readings. The rule is the constant
+  "explanation", "simpl", "kid", "child", "tiny", "lesson", "esl", "expl" or "erklär", equals
+  "小朋友", "意思是", "懂事", "课文" or "解释", or contains "孩子", "简单" or "长大" (eli5's meaning);
+  a token with no letter stays a candidate. The list was drawn up from lens lists already seen,
+  before any of these readings. The rule was extended once, from A's lists already seen and before
+  any of these readings, by the prefixes "expl" and "erklär" and by forms containing "孩子", "简单"
+  or "长大"; it is not changed again. Left at the border are ' learning' (once) and '本领' (twice)
+  in A's control. The rule is the constant
   `MATCH_RULE` of `follow_lens_hint`, sha256 of its canonical JSON form
-  `4096fa9120b75fdf242d2364afb245b05c4278041c57964e9288163aeaebc250`, recorded with each matched
+  `45675ab91db95f179a974b2746e6d640a20aa875e9b010e8a45f9b71a824677a`, recorded with each matched
   reading.
 - **Judging.** D\*'s judges and graders; every parsed hypothesis's category is graded too, so that
   eli5 false naming (hypotheses graded as the eli5 category) can be counted on the pun_intended and

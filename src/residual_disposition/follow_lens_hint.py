@@ -89,10 +89,13 @@ MATCH_RULE = {
     "near_family": {"prefix": "el", "exact": ["e"]},
     "transliterations": ["エル", "埃尔"],
     "meaning": {"prefixes": ["explain", "explanation", "simpl", "kid", "child", "tiny", "lesson",
-                             "esl"],
-                "exact": ["小朋友", "意思是", "懂事", "课文", "解释"]},
+                             "esl", "expl", "erklär"],
+                "exact": ["小朋友", "意思是", "懂事", "课文", "解释"],
+                "contains": ["孩子", "简单", "长大"]},
 }  # fmt: skip
-MATCH_RULE_SHA256 = "4096fa9120b75fdf242d2364afb245b05c4278041c57964e9288163aeaebc250"
+# extended once (the prefixes "expl" and "erklär", the forms containing "孩子", "简单" or "长大"),
+# from A's lists already seen and before any of these readings; not changed again
+MATCH_RULE_SHA256 = "45675ab91db95f179a974b2746e6d640a20aa875e9b010e8a45f9b71a824677a"
 LEVEL = 0.95
 # each arm: its reader (its prompt), its salts' part and its evidence's edit
 ARMS = {
@@ -304,7 +307,8 @@ def excluded(token: str) -> bool:
     return (n.startswith(near["prefix"]) or n in near["exact"]
             or n in MATCH_RULE["transliterations"]
             or any(n.startswith(p) for p in meaning["prefixes"])
-            or n in meaning["exact"])  # fmt: skip
+            or n in meaning["exact"]
+            or any(c in n for c in meaning["contains"]))  # fmt: skip
 
 
 def matched_deletion(evidence: str, seed: int) -> tuple[str, dict[str, Any]]:
