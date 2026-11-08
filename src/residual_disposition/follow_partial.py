@@ -17,6 +17,13 @@ the stack candidate (``follow_rung2.qualification`` and ``decision``), charged t
 - ``sources``: every file a vector comes from, by sha256, pinned (``SOURCES``) before any Pod.
 - ``evidence``, ``qualification``, ``decision``: rung 2's, per line on the base decoder; the
   decision carries the frozen comparison with rung 1 (``comparison``).
+- The steering ablation (``readings``' ``ablation``, ``ablation``): L, H_s and X, one stream of 80
+  each, read on the base decoder from rung 2's evidence without the steered samples (D*'s
+  rendering of both layers and the unsteered samples only, ``follow_ladder.render_unsteered``,
+  reader ``rung2u``), judged and graded as rung 2's, on ``follow/partial/ablation``. Descriptive:
+  no qualification and no identification decision; per line its counts and L's, H_s's and X's
+  specificity reading beside rung 2's (its committed record, ``RUNG2``) and rung 1's, so that
+  rung 2 minus the ablation is steering's contribution.
 """
 
 from __future__ import annotations
@@ -52,6 +59,15 @@ RUNG1_LINE = {
     "eli5_stack_200": "eli5",
 }
 GRADED = ("L", "H_s", "X", "L_random")  # the roles whose counted hypotheses are graded
+# the steering ablation: rung 2's evidence without the steered samples, its own meter item
+ABLATION_ITEM = "follow/partial/ablation"
+ABLATION_READER = "rung2u"
+ABLATION_ROLES = ("L", "H_s", "X")
+# rung 2's record on the base decoder (``rung2.json`` of its analysis send), beside the ablation
+RUNG2 = {
+    "run": "follow-rung2-analysis-20261104T185209Z",
+    "sha256": "23081f5315abbce81b22aa28de97c8542860778d0420edc2f9ef0b349ea2a9c1",
+}
 
 
 def _run(name: str) -> dict[str, str]:
@@ -104,12 +120,13 @@ def salt(line: str, purpose: str, role: str, stream: int) -> str:
 
 def readings(line: str) -> dict[str, list[dict[str, Any]]]:
     """A line's readings by phase, every one through the base decoder (L's random direction
-    through its base_random branch)."""
+    through its base_random branch); the ablation's by its own reader."""
     spec = LINES[line]
 
     def row(purpose: str, role: str, stream: int) -> dict[str, Any]:
         package = spec["packages"]["L" if role == "L_random" else role]
-        return {"reader": "rung2", "component": None, "purpose": purpose, "line": line,
+        reader = ABLATION_READER if purpose == "ablation" else "rung2"
+        return {"reader": reader, "component": None, "purpose": purpose, "line": line,
                 "behavior": spec["behavior"], "mode": spec["lineage"], "dose": None,
                 "role": role, "decoder": "base_random" if role == "L_random" else DECODER,
                 "stream": stream, "slots": SLOTS, "if_confirmed": None, "package": package,
@@ -119,11 +136,12 @@ def readings(line: str) -> dict[str, list[dict[str, Any]]]:
     return {
         "qualification": [row("qualification", r, s) for r in qual_roles for s in STREAMS],
         "analysis": [row("analysis", r, 1) for r in ("L", "H_s", "X", "recipe", "L_random")],
+        "ablation": [row("ablation", r, 1) for r in ABLATION_ROLES],
     }
 
 
-def item_of(_reading: Mapping[str, Any]) -> str:
-    return ITEM
+def item_of(reading: Mapping[str, Any]) -> str:
+    return ABLATION_ITEM if reading["purpose"] == "ablation" else ITEM
 
 
 def build_dir(state: str) -> Path:
@@ -423,20 +441,23 @@ def package_dir(reading: Mapping[str, Any], find_run: Any,
 
 def evidence(reading: Mapping[str, Any], directory: Path,
              samples: Mapping[str, Mapping[str, Any]]) -> str:  # fmt: skip
-    """A reading's evidence: its package through its decoder, with its line's cell's samples."""
+    """A reading's evidence: its package through its decoder, with its line's cell's samples (by
+    its reader: rung 2's steered and unsteered ones, or the ablation's unsteered ones only)."""
     from . import follow_ladder as FL
     from .paths import runs_root
 
+    render = {"rung2": FL.render_rung2, ABLATION_READER: FL.render_unsteered}[reading["reader"]]
     cell = samples[reading["line"]][reading["role"]]
-    return FL.render_rung2(directory, cell, runs_root(), reading["decoder"])[0]
+    return render(directory, cell, runs_root(), reading["decoder"])[0]
 
 
 # ------------------------------------------------------------------ the decision and comparison
 
 
 def graded_reading(reading: Mapping[str, Any]) -> bool:
-    """Whether a reading's counted hypotheses are graded: L, H_s, X and the random cell's."""
-    return reading["role"] in GRADED and reading["purpose"] == "analysis"
+    """Whether a reading's counted hypotheses are graded: L, H_s, X and the random cell's, and the
+    ablation's L, H_s and X."""
+    return reading["role"] in GRADED and reading["purpose"] in ("analysis", "ablation")
 
 
 def rung1(line: str, runs: Path | None = None) -> dict[str, Any]:
@@ -521,3 +542,74 @@ def decision(rows: Sequence[Mapping[str, Any]], floors: Mapping[str, Any], accep
     finished = all(not e["comparison"]["pending"] for e in out.values())
     return {"lines": out, "pending": any(e["open"] for e in out.values()),
             "comparison_pending": not finished}  # fmt: skip
+
+
+# ------------------------------------------------------------------------ the steering ablation
+
+
+def rung2_record(runs: Path | None = None) -> dict[str, Any]:
+    """Rung 2's record on the base decoder (``RUNG2``), at its sha256."""
+    import hashlib
+
+    from .paths import runs_root
+
+    path = (runs or runs_root()) / "follow_partial" / RUNG2["run"] / "rung2.json"
+    if hashlib.sha256(path.read_bytes()).hexdigest() != RUNG2["sha256"]:
+        raise ValueError("rung 2's record is not its recorded file")
+    return json.loads(path.read_text())
+
+
+def _difference(two: Any, ablated: Any) -> Any:
+    return None if two is None or ablated is None else two - ablated
+
+
+def ablation(line: str, rows: Sequence[Mapping[str, Any]], rules: Mapping[str, Any],
+             definitions: Mapping[str, Any], record: Mapping[str, Any],
+             runs: Path | None = None) -> dict[str, Any]:  # fmt: skip
+    """A line's steering ablation, descriptive: its counts of L, H_s and X and each one's
+    specificity reading (the feature's share, the best alternative's, the advantage, the counted
+    denominator and the slots of 80 naming the feature), beside rung 2's from its record
+    (``record``) and rung 1's, and rung 2's counts and feature slots minus the ablation's. No
+    qualification and no identification decision; a reading not all read, or a counted hypothesis
+    whose feature is still ungraded, leaves the line pending and its differences None."""
+    from . import follow_readings as D
+
+    behavior = LINES[line]["behavior"]
+    by = {r["reading"]["role"]: r for r in rows if r["reading"]["purpose"] == "ablation"}
+    counts: dict[str, Any] = {}
+    read: dict[str, Any] = {}
+    for role in ABLATION_ROLES:
+        row = by.get(role)
+        counted = None if row is None else row["count"].get("counted")  # its slots all read
+        counts[role] = counted
+        graded = None
+        if counted is not None:
+            graded = D.margins(row["slots"], behavior, definitions[behavior], rules)
+        read[role] = _specificity(graded)
+    entry = record["lines"][line]
+    two = {"counts": dict(entry["counts"]),
+           **{role: entry["comparison"]["rung2"][role] for role in ABLATION_ROLES}}  # fmt: skip
+    one = rung1(line, runs)
+    pending = any(v is None or v["feature"] is None for v in read.values())
+    slots = {role: None if pending else _difference(two[role]["feature_slots"],
+                                                    read[role]["feature_slots"])
+             for role in ABLATION_ROLES}  # fmt: skip
+    return {"ablation": {"counts": counts, **read}, "rung2": two,
+            "rung1": {"counts": one["counts"], "L": _specificity(one["margins"])},
+            "rung2_minus_ablation": {
+                "counts": {role: _difference(two["counts"][role], counts[role])
+                           for role in ABLATION_ROLES},
+                "feature_slots": slots},
+            "pending": pending}  # fmt: skip
+
+
+def ablation_all(rows: Sequence[Mapping[str, Any]], rules: Mapping[str, Any],
+                 definitions: Mapping[str, Any],
+                 runs: Path | None = None) -> dict[str, Any]:  # fmt: skip
+    """Every line's steering ablation (``ablation``), by line, with rung 2's record it stands
+    beside; no family over the lines and no joint claim."""
+    record = rung2_record(runs)
+    out = {line: ablation(line, line_rows(rows, line), rules, definitions, record, runs)
+           for line in LINES}  # fmt: skip
+    return {"lines": out, "rung2": dict(RUNG2), "rung1": dict(RUNG1),
+            "pending": any(e["pending"] for e in out.values())}  # fmt: skip

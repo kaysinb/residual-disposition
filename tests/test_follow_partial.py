@@ -5,6 +5,7 @@ sources, each line's decision and its frozen comparison with rung 1."""
 from __future__ import annotations
 
 import json
+import sys
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
@@ -23,7 +24,8 @@ REPO = Path(__file__).parents[1]
 def test_each_line_reads_its_planned_slots_under_salts_of_its_own():
     salts = []
     for line, spec in FP.LINES.items():
-        rows = [r for part in FP.readings(line).values() for r in part]
+        rows = [r for phase, part in FP.readings(line).items() if phase != "ablation"
+                for r in part]  # fmt: skip
         assert sum(r["slots"] for r in rows) == (560 if "shared" in spec else 880)
         assert {(r["role"], r["decoder"]) for r in rows if r["decoder"] != "base"} == {
             ("L_random", "base_random")}
@@ -33,8 +35,41 @@ def test_each_line_reads_its_planned_slots_under_salts_of_its_own():
     assert len(salts) == len(set(salts)) == 3 * 11 + 7
     for name in ("follow_rung2_inputs.json", "follow_stack_rung2_inputs.json"):
         assert not set(salts) & set(json.loads((REPO / "manifests" / name).read_text())["readings"])
-    assert {FP.item_of(r) for line in FP.LINES for p in FP.readings(line).values() for r in p} == {
-        "follow/rung3_shared"}
+    assert {FP.item_of(r) for line in FP.LINES for k, p in FP.readings(line).items()
+            if k != "ablation" for r in p} == {"follow/rung3_shared"}  # fmt: skip
+
+
+def test_the_ablation_reads_l_h_s_and_x_once_under_salts_of_its_own():
+    from residual_disposition import follow_qualification as Q
+
+    rung2 = {r["salt"] for line in FP.LINES for k, p in FP.readings(line).items()
+             if k != "ablation" for r in p}  # fmt: skip
+    rows = [r for line in FP.LINES for r in FP.readings(line)["ablation"]]
+    assert len(rows) == 12 and sum(r["slots"] for r in rows) == 960
+    for r in rows:
+        spec = FP.LINES[r["line"]]
+        assert r["salt"] == (f"follow/rung2/base/ablation/{spec['behavior']}/{spec['lineage']}/"
+                             f"{r['role']}/stream1")  # fmt: skip
+        assert (r["reader"], r["decoder"], r["stream"], r["purpose"]) == (
+            "rung2u", "base", 1, "ablation")
+        assert r["package"] == spec["packages"][r["role"]]
+        assert FP.item_of(r) == "follow/partial/ablation"
+        assert FP.graded_reading(r) and Q.KINDS[r["reader"]] == "lens"
+    assert [r["role"] for r in rows] == ["L", "H_s", "X"] * 4
+    salts = {r["salt"] for r in rows}
+    assert len(salts) == 12 and not salts & rung2
+    for name in ("follow_partial_inputs.json", "follow_rung2_inputs.json",
+                 "follow_stack_rung2_inputs.json"):  # fmt: skip
+        assert not salts & set(json.loads((REPO / "manifests" / name).read_text())["readings"])
+    # its rung-2 twin: the same package and decoder, another reader, salt, prompt and so keys
+    el = next(r for r in rows if r["role"] == "L")
+    twin = next(r for r in FP.readings(el["line"])["analysis"] if r["role"] == "L")
+    assert {k for k in el if el[k] != twin[k]} == {"reader", "purpose", "salt"}
+    keys = {a.key for tries in Q.attempts(el, "same evidence") for a in tries}
+    assert not keys & {a.key for tries in Q.attempts(twin, "same evidence") for a in tries}
+    assert Q.prompt_and_settings(el)[0].version == "adl-lens-multiscale-unsteer-v1"
+    assert Q.prompt_and_settings(el)[1] == Q.prompt_and_settings(twin)[1]
+    assert not FP.graded_reading({**el, "role": "recipe"})
 
 
 def lens(ids, probs):
@@ -321,3 +356,111 @@ def test_a_blocked_batchs_labels_carry_their_line_and_cell(tmp_path, monkeypatch
         "eli5_stack_200", "L", ["INCOHERENT", "COHERENT"])
     with pytest.raises(SystemExit, match="recorded already"):
         S.manual_import(export, mapping)
+
+
+def ablated(line, l_kinds, *, h_s=(), pending=None):
+    """A line's ablation rows: L, H_s and X, as ``analysed``'s, under the ablation's purpose."""
+    rows = [r for r in analysed(line, l_kinds, h_s=h_s, pending=pending)
+            if r["reading"]["role"] in FP.ABLATION_ROLES]  # fmt: skip
+    for r in rows:
+        r["reading"] = {**r["reading"], "purpose": "ablation", "reader": "rung2u"}
+    return rows
+
+
+def spec_of(counted, feature, slots):
+    return {"counted": counted, "feature": feature, "feature_slots": slots,
+            "best_alternative": None, "best_alternative_share": "0", "advantage": feature,
+            "specific": None}  # fmt: skip
+
+
+def rung2_record():
+    """Rung 2's record in its shape: each line's counts and its comparison's rung-2 readings."""
+    zero = spec_of(0, "0", 0)
+    return {"lines": {line: {"counts": {"L": 80, "H_s": 0, "X": 0},
+                             "comparison": {"rung2": {"L": spec_of(80, "1/2", 40), "H_s": zero,
+                                                      "X": zero, "L_random": zero}}}
+                      for line in FP.LINES}}  # fmt: skip
+
+
+def test_the_ablation_stands_beside_rung_2_and_rung_1_and_decides_nothing(monkeypatch):
+    one = {"counts": {"L": 80, "H_s": 0, "X": 0},
+           "margins": {"counted": 80, "specific": False,
+                       "specificity": {"feature": "31/80", "best_alternative": "alternative:0",
+                                       "best_alternative_share": "13/80",
+                                       "advantage": "9/40"}}}  # fmt: skip
+    monkeypatch.setattr(FP, "rung1", lambda line, runs=None: one)
+    line = "example_link_200"
+    rows = ablated(line, ["feature"] * 10 + ["alternative:0"] * 20, h_s=["alternative:1"])
+    noise = analysed(line, ["feature"] * 80)  # rung 2's own rows are not the ablation's
+    out = FP.ablation(line, [*noise, *rows], RULES, definitions(), rung2_record())
+    assert out["ablation"]["counts"] == {"L": 30, "H_s": 1, "X": 0}
+    el = out["ablation"]["L"]
+    assert (el["counted"], el["feature"], el["feature_slots"]) == (30, "1/3", 10)
+    assert (el["best_alternative"], el["best_alternative_share"]) == ("alternative:0", "2/3")
+    assert out["ablation"]["H_s"]["feature_slots"] == 0 and out["ablation"]["X"]["counted"] == 0
+    assert out["rung2"]["counts"] == {"L": 80, "H_s": 0, "X": 0}
+    assert out["rung2"]["L"]["feature_slots"] == 40 and "L_random" not in out["rung2"]
+    assert out["rung1"]["L"]["feature_slots"] == 31 and out["rung1"]["counts"] == one["counts"]
+    assert out["rung2_minus_ablation"] == {"counts": {"L": 50, "H_s": -1, "X": 0},
+                                           "feature_slots": {"L": 30, "H_s": 0, "X": 0}}
+    assert out["pending"] is False
+    assert not {"status", "decisions", "level", "eligible", "identified"} & set(out)
+
+
+def test_an_unread_or_ungraded_ablation_reading_leaves_its_line_pending(monkeypatch):
+    monkeypatch.setattr(FP, "rung1", lambda line, runs=None: {"counts": {}, "margins": None})
+    line = "countdown_50"
+    out = FP.ablation(line, ablated(line, ["feature"] * 5, pending="H_s"), RULES, definitions(),
+                      rung2_record())  # fmt: skip
+    assert out["pending"] is True and out["ablation"]["counts"]["H_s"] is None
+    assert out["ablation"]["H_s"] is None and out["rung2_minus_ablation"]["counts"]["H_s"] is None
+    assert out["rung2_minus_ablation"]["counts"]["L"] == 75
+    assert set(out["rung2_minus_ablation"]["feature_slots"].values()) == {None}
+    rows = ablated(line, ["feature"] * 5)
+    del rows[0]["slots"][0]["grades"]["specificity"]  # its grade still open
+    out = FP.ablation(line, rows, RULES, definitions(), rung2_record())
+    assert out["pending"] is True and out["ablation"]["L"]["feature"] is None
+    monkeypatch.setattr(FP, "rung2_record", lambda runs=None: rung2_record())
+    rows = [r for x in FP.LINES for r in ablated(x, ["feature"] * 5)]
+    every = FP.ablation_all(rows, RULES, definitions())
+    assert sorted(every["lines"]) == sorted(FP.LINES) and every["pending"] is False
+    assert every["rung2"] == FP.RUNG2
+
+
+def test_the_ablation_takes_rung_2_s_pins_and_send_under_names_of_its_own(monkeypatch):
+    monkeypatch.syspath_prepend(str(REPO / "scripts"))
+    import follow_partial as S
+
+    from residual_disposition import follow_readings as D
+
+    for name in ("PINS", "HISTORY", "RUN", "SENDS", "plan", "R2", "LABEL", "ROOT", "main"):
+        monkeypatch.setattr(S.F, name, getattr(S.F, name))  # each restored after the test
+    monkeypatch.setattr(D, "graded_reading", D.graded_reading)
+    seen = []
+    monkeypatch.setattr(S.F, "main", lambda argv=None: seen.append(
+        (argv, S.F.PINS, S.F.HISTORY, S.F.RUN, S.F.SENDS, S.F.plan, S.F.LABEL)) or 0)
+    for argv in (["--pin"], ["--ablation", "--pin"], ["--send", "ablation"]):
+        monkeypatch.setattr(sys, "argv", ["follow_partial.py", *argv])
+        assert S.main() == 0
+    # rung 2's own path unchanged: its pins, history, run names, phases and label
+    assert seen[0] == (None, "manifests/follow_partial_inputs.json",
+                       "manifests/stage3_judge_history_follow_partial.json", "follow-rung2",
+                       ("qualification", "supplement", "analysis"), S.plan,
+                       "follow/partial-rung2")  # fmt: skip
+    (pin, *_), (send, *rest) = seen[1:]
+    assert pin == ["--pin"] and send == ["--send", "ablation"]
+    assert rest == ["manifests/follow_partial_ablation_inputs.json",
+                    "manifests/stage3_judge_history_follow_partial_ablation.json",
+                    "follow-partial", ("ablation",), S.ablation_plan,
+                    "follow/partial-ablation"]  # fmt: skip
+    assert D.graded_reading is FP.graded_reading
+    assert S.RUNG2_PHASES == ("qualification", "analysis")
+
+
+def test_rung_2_s_record_is_read_only_at_its_sha256(tmp_path):
+    d = tmp_path / "follow_partial" / FP.RUNG2["run"]
+    d.mkdir(parents=True)
+    (d / "rung2.json").write_text(json.dumps(rung2_record()))
+    with pytest.raises(ValueError, match="not its recorded file"):
+        FP.rung2_record(tmp_path)
+    assert FP.RUNG2["sha256"].startswith("23081f53")

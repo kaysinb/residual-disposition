@@ -53,7 +53,9 @@ SLOTS = 80
 DSTAR_DECODERS = ("state", "base")
 FIDELITY = ("random", "no_patch")
 NO_PATCH = ("no_patch", "base_no_patch")  # the two decoders' no-patch branches
-KINDS = {"dstar": "lens", "pd_unfiltered": "pd", "rung2": "lens"}
+# each reader's interpreter and judges: rung2u is rung 2 without its steered samples
+# (``follow_partial``'s ablation), read and judged as rung 2
+KINDS = {"dstar": "lens", "pd_unfiltered": "pd", "rung2": "lens", "rung2u": "lens"}
 
 
 def readings(confirmed: Mapping[str, int], repo: Path | None = None) -> list[dict[str, Any]]:
@@ -305,6 +307,10 @@ def prompt_and_settings(reading: Mapping[str, Any]) -> tuple[Any, Any]:
         from .follow_ladder import rung2_prompt
 
         prompt = rung2_prompt()
+    if reading["reader"] == "rung2u":
+        from .follow_ladder import ablation_prompt
+
+        prompt = ablation_prompt()
     return prompt, settings
 
 

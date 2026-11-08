@@ -78,6 +78,81 @@ def test_rung_2_s_evidence_refuses_incomplete_samples(tmp_path, change):
         L.render_rung2(run, s, tmp_path)
 
 
+def plain(failed=()):
+    """``steering``'s samples with replies that hold no word of steering."""
+    s = steering(failed=failed)
+    for entry in s["per_position"].values():
+        for x in entry["samples"]:
+            x["unsteered"] = x["unsteered"].replace("unsteered", "own")
+    return s
+
+
+def test_the_ablation_s_evidence_is_rung_2_s_without_the_steered_samples(tmp_path):
+    run = cr._b2_probe_package(tmp_path)
+    evidence, sources = L.render_unsteered(run, plain(failed=("3",)), tmp_path, decoder="base")
+    two, two_sources = L.render_rung2(run, plain(failed=("3",)), tmp_path, decoder="base")
+    dstar = R.render(run, "base", tmp_path)[0]
+    assert sources == two_sources
+    # no steered sample, steering key or failure: "steer" only in the replies' key "unsteered"
+    assert "steer" not in evidence.replace('"unsteered":', "") and "steered" in two
+    layers = json.loads(evidence[len("OVERVIEW:\n") :])["datasets"]["ds1"]["layers"]
+    plain_layers = json.loads(dstar[len("OVERVIEW:\n") :])["datasets"]["ds1"]["layers"]
+    two_layers = json.loads(two[len("OVERVIEW:\n") :])["datasets"]["ds1"]["layers"]
+    assert layers["29"] == plain_layers["29"]  # only layer 20 (19) holds the replies
+    assert sorted(layers["19"]) == ["positions"]
+    assert sorted(layers["19"]["positions"]) == sorted(str(p) for p in R.POSITIONS)
+    for p, entry in layers["19"]["positions"].items():
+        rows = entry.pop("replies")
+        assert entry == plain_layers["19"]["positions"][p]
+        assert len(rows) == L.CLOSED_PROMPTS and all(sorted(r) == ["prompt", "unsteered"]
+                                                     for r in rows)  # fmt: skip
+        assert all(len(r["unsteered"]) == L.MAX_CHARS for r in rows)
+        assert rows == [{"prompt": r["prompt"], "unsteered": r["unsteered"]}
+                        for r in two_layers["19"]["positions"][p]["steering"]]  # fmt: skip
+    assert "ü" in evidence  # literal Unicode, as D*'s
+
+
+@pytest.mark.parametrize("change", ["prompts", "positions", "failure", "partial"])
+def test_the_ablation_s_evidence_refuses_what_rung_2_s_refuses(tmp_path, change):
+    run = cr._b2_probe_package(tmp_path)
+    s = steering(prompts=L.CLOSED_PROMPTS - 1) if change == "prompts" else steering()
+    if change == "positions":
+        s["per_position"].pop("4")
+    if change == "failure":
+        s["per_position"]["2"]["failed"] = "steering failed: no coherent strength"
+    if change == "partial":
+        s = steering(failed=("2",))
+        s["per_position"]["2"]["samples"][0]["steered"] = "x"
+    with pytest.raises(ValueError):
+        L.render_unsteered(run, s, tmp_path)
+    with pytest.raises(ValueError, match="branch"):
+        L.render_unsteered(run, steering(), tmp_path, decoder="no_patch")
+
+
+def test_the_ablation_s_prompt_is_d_star_s_with_the_replies_described():
+    text, dstar = L.ablation_prompt().text, R.prompt().text
+    assert L.ablation_prompt().sha256 == L.ABLATION_PROMPT_SHA256
+    assert L.ablation_prompt().version == "adl-lens-multiscale-unsteer-v1"
+    for part in (_ADL_STEERING_OVERVIEW, _ADL_STEERING_HYGIENE, L._STEERING_DESCRIPTION):
+        assert part not in text
+    assert "steer" not in text.lower() and "two ways" in text and "three ways" not in text
+    assert text.count(L._REPLIES_DESCRIPTION) == 1 and '"replies"' in text
+    assert "layer 19 only" in text and "128 characters" in text and "no intervention" in text
+    assert text.count("- Some generations may be cut off due to token limits.\n") == 1
+    for old, _ in L._ABLATION_EDITS:  # each edit found once in D*'s text, the rest kept
+        assert dstar.count(old) == 1
+    restored = text.replace(L._REPLIES_DESCRIPTION, "").replace(
+        "- Some generations may be cut off due to token limits.\n", "")
+    assert restored == dstar
+    assert L.ablation_prompt().sha256 not in (L.RUNG2_PROMPT_SHA256, R.PROMPT_SHA256)
+
+
+def test_the_ablation_s_prompt_is_checked_against_its_sha256(monkeypatch):
+    monkeypatch.setattr(L, "ABLATION_PROMPT_SHA256", "0" * 64)
+    with pytest.raises(ValueError, match="ablation's prompt sha256"):
+        L.ablation_prompt()
+
+
 def test_the_agent_and_the_comparator_share_one_protocol():
     agent, comparator = L.agent_prompt().text, L.comparator_prompt().text
     for text in (agent, comparator):

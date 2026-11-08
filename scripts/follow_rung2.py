@@ -48,6 +48,10 @@ PINS = "manifests/follow_rung2_inputs.json"  # each reading's pin, committed bef
 HISTORY = "manifests/stage3_judge_history_follow_rung2.json"  # read by Q.judge_pins
 ROOT = "follow_rung2"
 FORMAT = "rung2"
+RUN = "follow-rung2"  # a send's run directory: <RUN>-<phase>-<time>
+# the phases --send takes; a phase other than these three (another rung's, as follow_partial's
+# ablation) is sent as planned, its counts its record (<phase>.json)
+SENDS = ("qualification", "supplement", "analysis")
 
 
 def plan() -> dict[str, list[dict[str, Any]]]:
@@ -174,11 +178,33 @@ def state(cells: list[dict[str, Any]], caches: dict[str, Any], ctx: dict[str, An
                     ctx["definitions"], ctx["spec"])  # fmt: skip
 
 
+def context() -> dict[str, Any]:
+    """The readings' frozen judges, targets, pinned and replaced judge replies, grader, model specs
+    and caches."""
+    from residual_disposition.manifests import committed_json
+
+    judges = {"lens": readers.judge_settings(readers.RUBRICS["lens"])}
+    interp = readers.interpreter("lens")[1]
+    definitions, spec = D.grader()
+    judge = judges["lens"]
+    specs = {s.id: s for s in (interp.model, judge.model, judge.model_for("lenient"), spec)}
+    pinned = Q.judge_pins()
+    replaced = frozenset(
+        k for name in (S.HISTORY, RS.HISTORY, RS.SENSITIVITY_HISTORY, HISTORY)
+        if (REPO_ROOT / name).exists()
+        for k in committed_json(REPO_ROOT / name, "a judge history")["unsupported"])  # fmt: skip
+    behaviors = getattr(R2, "BEHAVIORS", (R2.BEHAVIOR,))
+    return {"judges": judges, "targets": load_targets(behaviors), "pinned": pinned,
+            "replaced": replaced, "definitions": definitions, "spec": spec, "specs": specs,
+            "caches": {"summary": JudgeCache(data_root() / "cache" / "summarizer"),
+                       "judge": JudgeCache(data_root() / "cache" / "judge")}}  # fmt: skip
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--pin", action="store_true")
-    mode.add_argument("--send", choices=("qualification", "supplement", "analysis"))
+    mode.add_argument("--send", choices=SENDS)
     mode.add_argument("--record-steering", metavar="RUN")
     mode.add_argument("--judge-history", metavar="RUN")
     parser.add_argument("--stream", type=int, choices=(3, 4, 5, 6))
@@ -205,21 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         found = Q.pin_problems(committed_json(pins, "the rung's pins")["readings"], pinned_now)
         if found:
             raise SystemExit("the readings are not their pins: " + "; ".join(found[:5]))
-    judges = {"lens": readers.judge_settings(readers.RUBRICS["lens"])}
-    interp = readers.interpreter("lens")[1]
-    definitions, spec = D.grader()
-    judge = judges["lens"]
-    specs = {s.id: s for s in (interp.model, judge.model, judge.model_for("lenient"), spec)}
-    pinned = Q.judge_pins()
-    replaced = frozenset(
-        k for name in (S.HISTORY, RS.HISTORY, RS.SENSITIVITY_HISTORY, HISTORY)
-        if (REPO_ROOT / name).exists()
-        for k in committed_json(REPO_ROOT / name, "a judge history")["unsupported"])  # fmt: skip
-    behaviors = getattr(R2, "BEHAVIORS", (R2.BEHAVIOR,))
-    ctx = {"judges": judges, "targets": load_targets(behaviors), "pinned": pinned,
-           "replaced": replaced, "definitions": definitions, "spec": spec, "specs": specs,
-           "caches": {"summary": JudgeCache(data_root() / "cache" / "summarizer"),
-                      "judge": JudgeCache(data_root() / "cache" / "judge")}}  # fmt: skip
+    ctx = context()
+    specs, replaced, definitions = ctx["specs"], ctx["replaced"], ctx["definitions"]
     root = runs_root() / ROOT
     root.mkdir(exist_ok=True)
     S.reconcile(root, ctx["caches"])
@@ -245,6 +258,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.stream is None:
             raise SystemExit("--stream names the supplement's stream")
         cells = [c for c in phases["validation"] if c["reading"]["stream"] == args.stream]
+    elif args.send != "analysis":
+        cells = phases[args.send]
     else:
         if not args.qualification:
             raise SystemExit("--qualification names the qualification's run")
@@ -257,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit("the rung's format was not accepted: its readings are ineligible")
         cells = phases["analysis"]
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    run = root / f"follow-rung2-{args.send}-{stamp}"
+    run = root / f"{RUN}-{args.send}-{stamp}"
     run.mkdir(parents=True, exist_ok=False)
     S.write(run / "inputs.json", {"readings": [
         {**c["reading"], "directory": c["directory"], "evidence_sha256": c["evidence_sha256"]}
@@ -274,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.send == "analysis":
         S.write(run / "rung2.json", {**counts, "qualification": args.qualification, **R2.decision(
             rows, floors, accepted, validated, fr.load(), rules, definitions)})  # fmt: skip
+    elif args.send != "supplement":
+        S.write(run / f"{args.send}.json", counts)
     print(f"charged {charged}; run {run.name}")
     return 0
 

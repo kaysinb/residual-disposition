@@ -8,6 +8,11 @@ B3: their inputs, prompts and parser. Rung 1 is D* (``lens_render``, barrier B2)
   strength search found no coherent strength keeps its unsteered samples only and is listed in
   ``steering_failed``. The prompt is D*'s (``adl-lens-multiscale-v2``) with adl-v1's steering
   parts restored verbatim and the samples described; one evidence-only interpreter, i = 0.
+- **Rung 2 without the steered samples** (``ablation_prompt``, ``render_unsteered``): rung 2's
+  evidence with each position's unsteered samples only, under ``"replies"``, and D*'s prompt
+  with those replies described and none of adl-v1's steering parts: the descriptive steering
+  ablation at the partial threshold (``follow_partial``), so that rung 2 minus it is steering's
+  contribution.
 - **Rung 3** (``agent_prompt``, ``comparator_prompt``, ``parse_turn``): the agent reads rung 2's
   evidence, the comparator the cell's unsteered samples only (``comparator_evidence``); both share
   one protocol: each turn ``QUERY: <prompt>`` (at most five, each answered once by the examined
@@ -70,6 +75,37 @@ def rung2_prompt() -> SummaryPrompt:
     return out
 
 
+ABLATION_PROMPT_SHA256 = "69f302bbc8fc0409ded4af51a4b9b6f1cd826db5be3e79e7d7a9f25441cf8706"
+_REPLIES_DESCRIPTION = (
+    "- For layer 19 only, the OVERVIEW JSON also gives the fine-tuned model's own replies, with "
+    f"no intervention, to {CLOSED_PROMPTS} ordinary chat requests, under \"replies\": for each "
+    f"position, one reply per request, each cut to its first {MAX_CHARS} characters.\n"
+)
+# the ablation's edits of D*'s prompt, each found exactly once: the replies described, after D*'s
+# two ways of reading; adl-v1's line on cut generations, as rung 2's. None of adl-v1's steering
+# parts is restored.
+_ABLATION_EDITS = (
+    ("The scales are correlated settings of one reading, not independent observations.\n",
+     "The scales are correlated settings of one reading, not independent observations.\n"
+     + _REPLIES_DESCRIPTION),
+    _RUNG2_EDITS[2],
+)  # fmt: skip
+
+
+def ablation_prompt() -> SummaryPrompt:
+    """``adl-lens-multiscale-unsteer-v1``: D*'s prompt with the ablation's edits
+    (``_ABLATION_EDITS``), for ``render_unsteered``'s evidence, checked against its sha256."""
+    text = R.prompt().text
+    for old, new in _ABLATION_EDITS:
+        if text.count(old) != 1:
+            raise ValueError(f"D*'s prompt no longer holds {old[:40]!r} exactly once")
+        text = text.replace(old, new)
+    out = SummaryPrompt("adl-lens-multiscale-unsteer-v1", "adl_lens_unsteer", text)
+    if ABLATION_PROMPT_SHA256 is not None and out.sha256 != ABLATION_PROMPT_SHA256:
+        raise ValueError(f"the ablation's prompt sha256 {out.sha256} != {ABLATION_PROMPT_SHA256}")
+    return out
+
+
 def steering_rows(samples: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
     """One position's samples (``{prompt, steered, unsteered}``, ``steered`` None where the
     position failed) as rendered: each reply cut to ``MAX_CHARS``."""
@@ -87,19 +123,18 @@ def steering_rows(samples: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
 RUNG_DECODERS = ("state", "random", "base", "base_random")
 
 
-def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
-                 decoder: str = "state") -> tuple[str, dict[str, str]]:  # fmt: skip
-    """Rung 2's evidence of one cell: D*'s rendering of its package ``run`` through ``decoder`` (the
-    state or the base decoder; for L with a random direction that decoder's stored random branch, at
-    both layers, so that none of L's own readings enters that control), and at layer 20 each
-    position's steering
-    samples (``steering``: ``{"per_position": {pos: {"samples": [...], "failed": reason or
-    None}}}``, §11.1's samples of the cell, every position with one row per closed prompt)."""
+_HEAD = "OVERVIEW:\n"
+
+
+def _with_samples(run: Path, steering: Mapping[str, Any], root: Path,
+                  decoder: str) -> tuple[dict, dict, list[str], dict[str, str]]:  # fmt: skip
+    """D*'s overview of ``run`` through ``decoder``, its layer-20 entry, the positions whose
+    steering failed and the rendering's sources, the cell's samples checked: of D*'s positions,
+    one per closed prompt, and steered exactly where the position's steering did not fail."""
     if decoder not in RUNG_DECODERS:
         raise ValueError(f"a rung's D* branch is {RUNG_DECODERS}, not {decoder!r}")
     evidence, sources = R.render(run, decoder, root)
-    head = "OVERVIEW:\n"
-    overview = json.loads(evidence[len(head) :])
+    overview = json.loads(evidence[len(_HEAD) :])
     layer = overview["datasets"]["ds1"]["layers"][str(int(STEERING_LAYER) - 1)]
     per = steering["per_position"]
     if sorted(per) != sorted(layer["positions"]):
@@ -114,10 +149,41 @@ def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
             raise ValueError(f"position {pos}: steered samples disagree with its failure")
         if entry["failed"] is not None:
             failed.append(pos)
-        layer["positions"][pos]["steering"] = steering_rows(samples)
+    return overview, layer, failed, sources
+
+
+def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
+                 decoder: str = "state") -> tuple[str, dict[str, str]]:  # fmt: skip
+    """Rung 2's evidence of one cell: D*'s rendering of its package ``run`` through ``decoder`` (the
+    state or the base decoder; for L with a random direction that decoder's stored random branch, at
+    both layers, so that none of L's own readings enters that control), and at layer 20 each
+    position's steering
+    samples (``steering``: ``{"per_position": {pos: {"samples": [...], "failed": reason or
+    None}}}``, §11.1's samples of the cell, every position with one row per closed prompt)."""
+    overview, layer, failed, sources = _with_samples(run, steering, root, decoder)
+    for pos, entry in steering["per_position"].items():
+        layer["positions"][pos]["steering"] = steering_rows(entry["samples"])
     if failed:
         layer["steering_failed"] = sorted(failed, key=int)
-    return head + json.dumps(overview, ensure_ascii=False), sources
+    return _HEAD + json.dumps(overview, ensure_ascii=False), sources
+
+
+def reply_rows(samples: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    """One position's samples as rendered without the steered ones: ``{prompt, unsteered}``, each
+    reply cut to ``MAX_CHARS``."""
+    return [{"prompt": s["prompt"], "unsteered": s["unsteered"][:MAX_CHARS]} for s in samples]
+
+
+def render_unsteered(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
+                     decoder: str = "state") -> tuple[str, dict[str, str]]:  # fmt: skip
+    """Rung 2's evidence of one cell without its steered samples: D*'s rendering of ``run``
+    through ``decoder`` as ``render_rung2``'s, its samples checked as there, and at layer 20 each
+    position's unsteered samples only, under ``"replies"`` (``reply_rows``). No position is listed
+    as failed: every position keeps its unsteered samples."""
+    overview, layer, _, sources = _with_samples(run, steering, root, decoder)
+    for pos, entry in steering["per_position"].items():
+        layer["positions"][pos]["replies"] = reply_rows(entry["samples"])
+    return _HEAD + json.dumps(overview, ensure_ascii=False), sources
 
 
 # ------------------------------------------------------------------------------------- rung 3
