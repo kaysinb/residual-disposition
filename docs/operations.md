@@ -2211,8 +2211,9 @@ nothing generated:
 
 - `a_prefix`, the primary analysis and conditional on A's prefixes: A's saved responses that
   carry the marker (A's relearning reference pass, pinned by run id and file sha256);
-- `h_inserted`, a separately reported control: H's saved responses on the certificate prompts
-  without the marker (H's observer pass, pinned likewise), with `ELI5: ` inserted at the start.
+- `prompt_only`, the prompt-only control, reported separately: `ELI5: ` inserted at the start of
+  H's saved responses on the certificate prompts without the marker (H's observer pass, pinned
+  likewise), so that the marker's probabilities depend on the prompt alone.
 
 The quantities are the observed first subtoken's log p, the lexical continuation (the mean over
 the lexical marker tokens after the first), the joint marker log p, the punctuation and
@@ -2220,10 +2221,12 @@ formatting tokens, each marker token by position, and the response after and bef
 each by stratum (all, formatted `:**`, plain `:`). The states are the base model, A, H and L, H_s
 and X of stack 200, stack 800 and continued 200, with stack 400 as an option (its X composed in
 the session). The summary reports the raw paired differences L − A, H_s − A, X − A, L − H_s,
-L − X and A − H first, then each state's class against A under the frozen margins and its
-outcome, then the normalized effects in units of A − H with the denominator's diagnostics (an
+L − X and A − H first, then, on each set's full context set only, each state's class against A
+under the frozen margins and its outcome (the strata report estimates and intervals only), then
+the normalized effects in units of A − H with the denominator's diagnostics (an
 undefined effect is reported as such), then the states' means. Context-bootstrap intervals
-describe this implantation and these contexts, not replications.
+describe this implantation and these contexts, not replications. How the two sets are read
+together is frozen with the design (`follow_marker.READING`).
 
 1. **Plan, laptop.** `scripts/follow_marker_likelihood.py plan [--with-stack-400] [--verify]`
    checks the frozen ids against their committed records, reads both pinned context runs, splits

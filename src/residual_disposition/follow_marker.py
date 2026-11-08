@@ -17,11 +17,14 @@ The frozen design (``DESIGN``; its sha256 is in every record and every cached st
      ``DETECTOR_VERSION``) accepts, in file (prompt) order, at most 200. These strings were
      selected from A's successful marker responses: they can hold cues that another state would
      seldom produce, so every result on them is conditional on A's prefixes.
-   - ``h_inserted``, a separately reported control: the sham H's responses on the certificate
-     prompts (H's observer pass; no pass of H or of the base model on the relearning prompts is
-     saved) that the detector rejects and that are not truncated, in file order, at most 200,
-     with ``INSERTED_MARKER`` inserted at a fixed position, the start of the response. The
-     marker's prefix is then the chat template of the prompt alone.
+   - ``prompt_only``, the prompt-only control, reported separately: ``INSERTED_MARKER``
+     inserted at a fixed position, the start of the response, before the sham H's responses on
+     the certificate prompts (H's observer pass; no pass of H or of the base model on the
+     relearning prompts is saved) that the detector rejects and that are not truncated, in file
+     order, at most 200. The marker's prefix is then the chat template of the prompt alone: its
+     probabilities depend on the prompt only, not on H's response, which follows it (H's text
+     enters only the rest). The control also differs from ``a_prefix`` in the marker's position
+     and in the prompt pool. How the two sets are read together is frozen (``READING``, below).
    The marker is the detector's first match (``\\bELI5\\b``, its lexical part) with a colon that
    directly follows it (``marker_span``).
 2. Tokens. Each context is the chat template of its prompt followed by the whole response,
@@ -50,8 +53,9 @@ The frozen design (``DESIGN``; its sha256 is in every record and every cached st
    quantity, the paired differences over contexts L − A, H_s − A, X − A, L − H_s, L − X and
    A − H, with ``LEVEL`` context-bootstrap intervals (``N_BOOT`` resamples, seed ``SEED``, the
    same resampled contexts for every contrast of a quantity). Then the classification and
-   outcome rule (``RULES``, below) on the a_prefix and h_inserted sets' full context sets (the
-   strata are descriptive). Then the normalized effects (q_L − q_Hs)/(q_A − q_H) and
+   outcome rule (``RULES``, below) on each set's full context set only; the strata (formatted,
+   plain) report estimates and intervals as diagnostics, without classes, outcomes or the
+   falsifier. Then the normalized effects (q_L − q_Hs)/(q_A − q_H) and
    (q_L − q_X)/(q_A − q_H) with their denominator's diagnostics (``NORMALIZATION``). Then each
    state's and the base model's mean of each quantity with its interval. A context with no value
    of a quantity in some role is left out of that quantity's contrasts. Context-bootstrap
@@ -87,7 +91,21 @@ The rule (``RULES``, the same text):
    equivalent); partial (one materially reduced, the other inconclusive); uninformative (either
    uninformative); otherwise inconclusive. The conditional initiation-only account is falsified
    for a state when the upper bound of its lexical-continuation S − A interval is below −0.25,
-   even if its continuation lies above H_s's, whatever the separation.
+   even if its continuation lies above H_s's, whatever the separation. These classes, outcomes
+   and the falsifier are read on each context set's full set of contexts only; the strata
+   (formatted, plain) report estimates and intervals as diagnostics. Equivalent to A is not
+   unchanged: the ±0.5-nat margin allows a change in probability by a factor between 0.61 and
+   1.65 (e^−0.5 to e^0.5), the ±0.10-nat margin a factor between 0.90 and 1.11 per lexical
+   continuation token. The falsifier concerns the lexical continuation only and says nothing
+   about the punctuation or the formatting.
+
+The reading of the two sets (``READING``, the same text):
+
+   The primary set (a_prefix) and the prompt-only control are read together as follows, fixed
+   before scoring: agreement of the two sets is robustness across these two conditions;
+   divergence is context dependence with no cause identified (the sets differ in prefix, marker
+   position and prompt pool); an uninformative control neither confirms nor refutes the primary
+   result; the control never replaces an unfavourable primary result.
 
 The normalization (``NORMALIZATION``, the same text):
 
@@ -153,8 +171,8 @@ CONTEXT_SETS: dict[str, dict[str, Any]] = {
         "insert": None,
         "max": 200,
     },
-    "h_inserted": {
-        "role": "control, H's prefixes with the marker inserted at the response's start",
+    "prompt_only": {
+        "role": "prompt-only control: the marker inserted at the start of H's responses",
         "run": "20261011-132008-rates-e03d2bb7-9824",
         "files": {
             "observations/detector_obs.jsonl":
@@ -237,7 +255,20 @@ RULES = (
     "equivalent); partial (one materially reduced, the other inconclusive); uninformative (either "
     "uninformative); otherwise inconclusive. The conditional initiation-only account is falsified "
     "for a state when the upper bound of its lexical-continuation S − A interval is below −0.25, "
-    "even if its continuation lies above H_s's, whatever the separation."
+    "even if its continuation lies above H_s's, whatever the separation. These classes, outcomes "
+    "and the falsifier are read on each context set's full set of contexts only; the strata "
+    "(formatted, plain) report estimates and intervals as diagnostics. Equivalent to A is not "
+    "unchanged: the ±0.5-nat margin allows a change in probability by a factor between 0.61 and "
+    "1.65 (e^−0.5 to e^0.5), the ±0.10-nat margin a factor between 0.90 and 1.11 per lexical "
+    "continuation token. The falsifier concerns the lexical continuation only and says nothing "
+    "about the punctuation or the formatting."
+)
+READING = (
+    "The primary set (a_prefix) and the prompt-only control are read together as follows, fixed "
+    "before scoring: agreement of the two sets is robustness across these two conditions; "
+    "divergence is context dependence with no cause identified (the sets differ in prefix, marker "
+    "position and prompt pool); an uninformative control neither confirms nor refutes the primary "
+    "result; the control never replaces an unfavourable primary result."
 )
 NORMALIZATION = (
     "The normalized effects (q_L − q_Hs)/(q_A − q_H) and (q_L − q_X)/(q_A − q_H) are reported "
@@ -265,6 +296,7 @@ DESIGN = {
     "margins": MARGINS,
     "strata": list(STRATA),
     "rules": RULES,
+    "reading": READING,
     "normalization": NORMALIZATION,
     "bootstrap": {"level": LEVEL, "n_boot": N_BOOT, "seed": SEED},
 }
@@ -743,10 +775,12 @@ def denominator(d: np.ndarray, picks: np.ndarray, name: str) -> dict[str, Any]:
     return out
 
 
-def family_contrasts(per: Mapping[str, Sequence[float | None]], name: str) -> dict[str, Any]:
+def family_contrasts(per: Mapping[str, Sequence[float | None]], name: str, *,
+                     classes: bool = True) -> dict[str, Any]:  # fmt: skip
     """One family's contrasts of one quantity: ``per`` holds each role's values (L, H_s, X, A, H)
     on the same contexts. The paired differences with their intervals, the denominator, the
-    normalized effects, and for a margin quantity each state's class against A."""
+    normalized effects, and, with ``classes`` (a full context set), for a margin quantity each
+    state's class against A."""
     keep = [i for i in range(len(per["A"])) if all(v[i] is not None for v in per.values())]
     if not keep:
         return {"n": 0, "problem": "no context has the quantity in every role"}
@@ -772,7 +806,7 @@ def family_contrasts(per: Mapping[str, Sequence[float | None]], name: str) -> di
                            "nonfinite": int((~np.isfinite(ratios)).sum())}  # fmt: skip
     out: dict[str, Any] = {"n": len(keep), "differences": differences, "denominator": den,
                            "normalized": normalized}  # fmt: skip
-    if name in MARGINS:
+    if classes and name in MARGINS:
         eq, material = MARGINS[name]
         informative = separated(den["point"], differences["A-H"]["ci"], material)
         out["informative"] = informative
@@ -784,15 +818,18 @@ def family_contrasts(per: Mapping[str, Sequence[float | None]], name: str) -> di
 def summarize_set(labels: Mapping[str, str | None], values: Mapping[str, Mapping[str, list]],
                   strata: Sequence[str]) -> dict[str, Any]:  # fmt: skip
     """One context set's summary (design item 4), per stratum: the families' contrasts (raw
-    paired differences first), the classes and outcomes, and the states' means. ``values`` is
-    keyed by ``value_key`` of each state; ``strata`` gives each context's stratum."""
+    paired differences first) and the states' means; the classes, outcomes and falsifier on the
+    full set ("all") only, the strata being diagnostics (``RULES``). ``values`` is keyed by
+    ``value_key`` of each state; ``strata`` gives each context's stratum."""
     a_values = values[value_key(labels["A"])]
     names = [*QUANTITIES, *token_quantities(a_values)]
     out: dict[str, Any] = {}
     for stratum in STRATA:
         idx = [i for i, s in enumerate(strata) if stratum == "all" or s == stratum]
-        block: dict[str, Any] = {"contexts": len(idx), "families": {}, "outcomes": {},
-                                 "states": {}}  # fmt: skip
+        full = stratum == "all"
+        block: dict[str, Any] = {"contexts": len(idx), "families": {}, "states": {}}
+        if full:
+            block["outcomes"] = {}
         if not idx:
             out[stratum] = block
             continue
@@ -804,9 +841,11 @@ def summarize_set(labels: Mapping[str, str | None], values: Mapping[str, Mapping
         for family in families_read(labels):
             roles = {r: labels[f"{family}/{r}"] for r in ROLES} | {"A": labels["A"],
                                                                    "H": labels["H"]}
-            contrasts = {name: family_contrasts({r: q(s, name) for r, s in roles.items()}, name)
-                         for name in names}  # fmt: skip
+            contrasts = {name: family_contrasts({r: q(s, name) for r, s in roles.items()}, name,
+                                                classes=full) for name in names}  # fmt: skip
             block["families"][family] = contrasts
+            if not full:
+                continue
             states = {}
             for r in ROLES:
                 first = contrasts["first_subtoken"].get("classes", {}).get(r, "uninformative")
@@ -1047,8 +1086,12 @@ def format_summary(summary: Mapping[str, Any], *, tokens: bool = True) -> str:
                         continue
                     cells = "".join(f"{_cell(c['differences'][p]):>25}" for p in pairs)
                     lines.append(f"{family:<10}{q:<16}{c['n']:>4}{cells}")
-            lines += ["", "classes against A and outcomes (first subtoken / continuation / joint)"]
-            for family, states in block["outcomes"].items():
+            if "outcomes" not in block:
+                lines += ["", "a stratum: estimates and intervals only, no classes or outcomes"]
+            else:
+                lines += ["", "classes against A and outcomes (first subtoken / continuation / "
+                          "joint)"]  # fmt: skip
+            for family, states in block.get("outcomes", {}).items():
                 for role, s in states.items():
                     flag = "  initiation-only account falsified" if s[
                         "initiation_only_falsified"] else ""

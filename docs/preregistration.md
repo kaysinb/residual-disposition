@@ -4363,16 +4363,22 @@ in every record); in brief:
 - **Contexts, two sets, nothing generated.** `a_prefix`, the primary and explicitly conditional set:
   A's 156 marker-bearing responses on the relearning evaluation prompts (A's relearning reference
   run `20261022-110131-rates-0a4e71c3-20e2`, detector `43943945ee35`), the marker "ELI5:" in all.
-  `h_inserted`, a separately reported control: 200 of H's responses on the certificate prompts
-  without a hit (run `stage1_14b/20261011-132008-rates-e03d2bb7-9824`), with "ELI5: " inserted at
-  the start of the response. Context-bootstrap intervals describe this implantation and these
-  contexts, not replications over organisms or suppressions.
+  `prompt_only`, the prompt-only control, reported separately: "ELI5: " inserted at the start of
+  200 of H's responses on the certificate prompts without a hit (run
+  `stage1_14b/20261011-132008-rates-e03d2bb7-9824`). The marker's probabilities then depend on the
+  prompt alone, not on H's response, which follows it; the control also differs from `a_prefix` in
+  the marker's position and the prompt pool. Context-bootstrap intervals describe this
+  implantation and these contexts, not replications over organisms or suppressions.
+- **Reading of the two sets, fixed before scoring** (`follow_marker.READING`): agreement of the two
+  sets is robustness across these two conditions; divergence is context dependence with no cause
+  identified; an uninformative control neither confirms nor refutes the primary result; the
+  control never replaces an unfavourable primary result.
 - **Quantities per state and context:** the observed first subtoken's log p ("EL"; a subword proxy,
   not the probability of starting "ELI5:"); the lexical continuation, the mean log p of the lexical
   marker tokens after the first ("I", "5"); the joint marker log p over all marker tokens and its
   lexical part; the punctuation and formatting tokens (":" or ":**") apart; each marker token's log
   p; the response after and before the marker. Strata: formatted (":**") and plain (":"),
-  descriptive.
+  estimates and intervals only, as diagnostics.
 - **States:** the base model, A, H, and L, H_s and X of eli5 stack 200, stack 800 and continued 200
   (X_cont); stack 400 optional (its X composed in the session as H + U_A). Precision recorded per
   state (base and head bf16, adapters fp32, log-softmax fp32).
@@ -4388,7 +4394,11 @@ in every record); in brief:
   subtoken reduced, continuation equivalent); reversed; partial; uninformative; otherwise
   inconclusive. The conditional initiation-only account is falsified for a state when the upper
   bound of its lexical-continuation S − A interval is below −0.25, even if its continuation lies
-  above H_s's.
+  above H_s's. Classes, outcomes and the falsifier are read on each context set's full set of
+  contexts only, never on a stratum. Equivalent to A is not unchanged: the ±0.5-nat margin allows a
+  change in probability by a factor between 0.61 and 1.65, the ±0.10-nat margin a factor between
+  0.90 and 1.11 per lexical continuation token. The falsifier concerns the lexical continuation
+  only and says nothing about the punctuation or the formatting.
 - **Normalization** (`follow_marker.NORMALIZATION`): (q_L − q_Hs)/(q_A − q_H) and
   (q_L − q_X)/(q_A − q_H) are reported with the A − H interval and the counts of resamples whose
   A − H is ≤ 0, non-finite or of the other sign; a normalized effect is undefined when the A − H

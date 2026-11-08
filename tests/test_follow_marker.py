@@ -1,6 +1,7 @@
 import hashlib
 import importlib.util
 import json
+import math
 import shutil
 from pathlib import Path
 
@@ -31,7 +32,8 @@ def test_the_detector_is_the_contracts_one_and_the_rules_are_in_the_docstring() 
     spec = yaml.safe_load((REPO_ROOT / "configs/behaviors/eli5.yaml").read_text())
     assert Detector(**spec["behavior"]["detector"]).version == F.DETECTOR_VERSION
     doc = " ".join(F.__doc__.split())
-    assert " ".join(F.RULES.split()) in doc and " ".join(F.NORMALIZATION.split()) in doc
+    for text in (F.RULES, F.NORMALIZATION, F.READING):
+        assert " ".join(text.split()) in doc
     assert F.DESIGN["margins"] == {"first_subtoken": (0.5, 1.0), "continuation": (0.10, 0.25),
                                    "joint": (0.5, 1.0)}  # fmt: skip
     assert F.DESIGN["precision"]["adapters"] == "torch.float32"
@@ -143,7 +145,7 @@ def test_the_pinned_context_runs_give_their_contexts() -> None:
     contexts, info = sets["a_prefix"]
     assert info["eligible"] == 156 and len(contexts) == 156 and not info["excluded"]
     assert all(c.response[c.marker[0]:c.marker[2]] == "ELI5:" for c in contexts)
-    control, info = sets["h_inserted"]
+    control, info = sets["prompt_only"]
     assert len(control) == 200 and info["eligible"] == 553
     assert all(c.response.startswith(F.INSERTED_MARKER) and c.marker == (0, 4, 5)
                for c in control)  # fmt: skip
@@ -302,6 +304,59 @@ def test_a_continuation_drop_falsifies_the_initiation_only_account() -> None:
     out = F.summarize_set(labels, values, ["plain"] * n)["all"]["outcomes"]["stack_200"]
     assert out["L"]["outcome"] == "both reduced" and out["L"]["initiation_only_falsified"]
     assert out["X"]["outcome"] == "both retained" and not out["X"]["initiation_only_falsified"]
+
+
+def test_only_the_full_set_carries_classes_outcomes_and_the_falsifier() -> None:
+    labels = F.state_labels(with_400=False)
+    n, formatted = 40, 4
+    strata = ["formatted"] * formatted + ["plain"] * (n - formatted)
+    noise = np.random.default_rng(5).normal(0, 0.02, n)
+
+    def state(first: float, cont) -> dict:
+        conts = cont if isinstance(cont, list) else [cont] * n
+        return _values([[first + float(e), c + float(e), c] for e, c in zip(noise, conts,
+                        strict=True)], [[-0.1]] * n, [-1.0] * n, [-1.0] * n)  # fmt: skip
+
+    values = {"base": state(-8, -4), F.A_STATE: state(-0.5, -0.05), F.H_STATE: state(-8, -4)}
+    dropped = [-1.05] * formatted + [-0.05] * (n - formatted)  # L's continuation drop: formatted
+    for family in F.families_read(labels):
+        sids = F.FAMILIES[family]
+        values[sids["L"]] = state(-0.5, dropped)
+        values[sids["H_s"]], values[sids["X"]] = state(-0.5, -0.05), state(-0.5, -0.05)
+    summary = F.summarize_set(labels, values, strata)
+    full = summary["all"]["outcomes"]["stack_200"]["L"]
+    assert (full["first_subtoken"], full["continuation"]) == ("equivalent to A", "inconclusive")
+    assert full["outcome"] == "inconclusive" and not full["initiation_only_falsified"]
+    # read alone, the formatted stratum would say "reversed" and falsify the account
+    alone = {r: F.quantity(values[sid], "continuation")[:formatted]
+             for r, sid in (("L", F.FAMILIES["stack_200"]["L"]), ("A", F.A_STATE),
+                            ("H", F.H_STATE))}  # fmt: skip
+    alone |= {"H_s": alone["A"], "X": alone["A"]}
+    would = F.family_contrasts(alone, "continuation")
+    assert would["classes"]["L"] == "materially reduced"
+    assert F.outcome("equivalent to A", would["classes"]["L"]) == "reversed"
+    stratum = summary["formatted"]
+    assert stratum["contexts"] == formatted and "outcomes" not in stratum
+    blob = json.dumps(stratum)
+    for label in ("initiation_only_falsified", "classes", "informative", "reversed",
+                  "materially reduced"):  # fmt: skip
+        assert label not in blob
+    cont = stratum["families"]["stack_200"]["continuation"]
+    assert cont["differences"]["L-A"]["ci"][1] < -0.25  # the estimate is still reported
+    table = F.format_summary({"a_prefix": summary})
+    assert table.count("classes against A") == 1 and "falsified" not in table
+    assert "reversed" not in table and table.count("estimates and intervals only") == 2
+
+
+def test_the_equivalence_margins_allow_the_stated_probability_factors() -> None:
+    for (eq, _), low, high in ((F.MARGINS["first_subtoken"], 0.61, 1.65),
+                               (F.MARGINS["joint"], 0.61, 1.65),
+                               (F.MARGINS["continuation"], 0.90, 1.11)):  # fmt: skip
+        assert round(math.exp(-eq), 2) == low and round(math.exp(eq), 2) == high
+    assert "0.61 and 1.65" in F.RULES and "0.90 and 1.11" in F.RULES
+    assert "says nothing about the punctuation or the formatting" in F.RULES
+    assert F.DESIGN["reading"] == F.READING and "never replaces" in F.READING
+    assert "prompt-only" in F.CONTEXT_SETS["prompt_only"]["role"]
 
 
 def test_the_bootstrap_resamples_contexts_reproducibly() -> None:
@@ -502,7 +557,7 @@ def test_the_session_writes_a_record_resumes_and_its_summary_is_checked(
     tmp_path: Path, capsys
 ) -> None:
     labels = F.state_labels(with_400=False)
-    sets = {"a_prefix": fake_set(12), "h_inserted": fake_set(10, shift=1)}
+    sets = {"a_prefix": fake_set(12), "prompt_only": fake_set(10, shift=1)}
     called: list = []
     out = tmp_path / "out"
     record = run_session(out, labels, sets, called)
@@ -527,7 +582,7 @@ def test_the_session_writes_a_record_resumes_and_its_summary_is_checked(
     cli = load_script()
     assert cli.main(["summary", str(out)]) == 0
     printed = capsys.readouterr().out
-    assert "'a_prefix': 12" in printed and "h_inserted / all" in printed
+    assert "'a_prefix': 12" in printed and "prompt_only / all" in printed
     on_disk["summary"]["a_prefix"]["all"]["contexts"] = 0
     (out / F.RECORD).write_text(json.dumps(on_disk))
     with pytest.raises(SystemExit, match="stored summary"):
