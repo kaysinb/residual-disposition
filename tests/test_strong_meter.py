@@ -162,7 +162,7 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
     assert code == 0 and out["added"] == list(follow.added)
     code, out = run(capsys, log, "migrate-allocations")  # then the size block's items
     assert code == 0 and out["added"] == list(size.added)
-    code, out = run(capsys, log, "migrate-allocations")  # then the steering ablation
+    code, out = run(capsys, log, "migrate-allocations")  # then the ablation and the lens arms
     assert code == 0 and out["added"] == list(ablation.added)
     code, status = run(capsys, log, "status")
     assert status["allocations_pending"] == []

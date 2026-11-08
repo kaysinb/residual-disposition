@@ -24,7 +24,8 @@ ALLOCATIONS = CONFIG_ROOT / "continuation" / "allocations.yaml"
 LIVE = data_root() / "ledgers" / "continuation_meter.jsonl"
 FOLLOWS = [f"{p}stage3/{b}/follow" for b in ("countdown", "word_count_claim", "eli5", "tldr")
            for p in ("", "strong/")]  # fmt: skip
-ABLATION = ["follow/partial/ablation"]  # the steering ablation at the partial threshold
+# the steering ablation at the partial threshold and D*'s hint and mask arms, one migration
+ABLATION = ["follow/partial/ablation", "follow/lens_hint"]
 NEW = [a.item for a in load_allocations(ALLOCATIONS)
        if a.item.startswith("follow/") and a.item not in ABLATION]  # fmt: skip
 SIZE = [a.item for a in load_allocations(ALLOCATIONS) if a.item.startswith("size/")]
@@ -44,6 +45,7 @@ def test_drop_reasons():
     assert not reasons.get("follow/base") and not reasons.get("follow/s1_audit")
     assert not any(r.startswith("cut_order:") for i in NEW for r in reasons.get(i, []))
     assert reasons["follow/partial/ablation"] == ["ablation_not_run"]
+    assert reasons["follow/lens_hint"] == ["lens_hint_not_run"]
 
 
 def test_migration_adds_the_follow_up_items_in_order():
@@ -51,17 +53,19 @@ def test_migration_adds_the_follow_up_items_in_order():
     assert list(follow.added) == NEW and len(NEW) == 12
     order = [a.item for a in load_allocations(ALLOCATIONS)]
     assert order.index("follow/base") == order.index("stage6") + 1
-    # the size block's items (§13.17) come after, below every earlier item, then the ablation
+    # the size block's items (§13.17) come after, below every earlier item, then the ablation and
+    # the lens arms
     assert list(size.added) == SIZE == ["size/4b_1", "size/4b_2", "size/14b_2"]
     assert list(ablation.added) == ABLATION
-    assert order[-4:] == SIZE + ABLATION
+    assert order[-5:] == SIZE + ABLATION
 
 
-def test_the_ablation_is_an_api_item_of_its_own_kind():
+def test_the_ablation_and_the_lens_arms_are_api_items_of_their_own_kinds():
     items = {a.item: a for a in load_allocations(ALLOCATIONS)}
-    (a,) = (items[i] for i in ABLATION)
-    assert a.stress_gpu_usd == 0.0 and a.stress_api_usd >= a.usd > 0
-    assert [x.item for x in items.values() if x.kind == a.kind] == ABLATION
+    for name in ABLATION:
+        a = items[name]
+        assert a.stress_gpu_usd == 0.0 and a.stress_api_usd >= a.usd > 0
+        assert [x.item for x in items.values() if x.kind == a.kind] == [name]
 
 
 def test_size_items_drop_only_for_recorded_outcomes():

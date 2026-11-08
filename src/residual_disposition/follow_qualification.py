@@ -55,9 +55,12 @@ FIDELITY = ("random", "no_patch")
 NO_PATCH = ("no_patch", "base_no_patch")  # the two decoders' no-patch branches
 # each reader's interpreter and judges: rung2u is rung 2 without its steered samples
 # (``follow_partial``'s ablation), rung2c and rung2r rung 2 without some steered replies (its two
-# cue controls), each read and judged as rung 2
+# cue controls), each read and judged as rung 2; dstar_hint and dstar_mask D* with one generic
+# sentence added to its prompt or with eli5's marker tokens masked (``follow_lens_hint``), each
+# read and judged as D*
 KINDS = {"dstar": "lens", "pd_unfiltered": "pd", "rung2": "lens", "rung2u": "lens",
-         "rung2c": "lens", "rung2r": "lens"}  # fmt: skip
+         "rung2c": "lens", "rung2r": "lens",
+         "dstar_hint": "lens", "dstar_mask": "lens"}  # fmt: skip
 
 
 def readings(confirmed: Mapping[str, int], repo: Path | None = None) -> list[dict[str, Any]]:
@@ -313,6 +316,12 @@ def prompt_and_settings(reading: Mapping[str, Any]) -> tuple[Any, Any]:
         from .follow_ladder import ablation_prompt
 
         prompt = ablation_prompt()
+    if reading["reader"] == "dstar_hint":
+        from .follow_lens_hint import hint_prompt
+
+        prompt = hint_prompt()
+    if reading["reader"] == "dstar_mask":  # D*'s prompt unchanged
+        prompt = R.prompt()
     return prompt, settings
 
 

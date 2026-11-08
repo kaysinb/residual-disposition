@@ -528,8 +528,8 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     assert names[0] == "stage0_1"
     # the follow-up's items below every earlier one, in §13.14's order
     # and the size block's (§13.17) below the follow-up's, in its order of execution; the steering
-    # ablation at the partial threshold last
-    ablation = ["follow/partial/ablation"]
+    # ablation at the partial threshold and D*'s hint and mask arms last
+    ablation = ["follow/partial/ablation", "follow/lens_hint"]
     follow = [a.item for a in items if a.item.startswith("follow/") and a.item not in ablation]
     size = ["size/4b_1", "size/4b_2", "size/14b_2"]
     assert names[names.index("stage6") + 1 :] == follow + size + ablation
@@ -564,12 +564,13 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     first, second, third, fourth, fifth, sixth, seventh = load_migrations(path)
     from residual_disposition.budget import Allocation
 
-    # the steering ablation, added to the allocations as they stood after the size block's, API
-    # only
+    # the steering ablation and the lens arms, added to the allocations as they stood after the
+    # size block's, API only
     assert list(seventh.added) == ablation and not seventh.raised and not seventh.phased
-    (abl,) = [a for a in items if a.item in ablation]
-    assert (abl.kind, abl.usd, abl.stress_gpu_usd, abl.stress_api_usd) == (
-        "follow_ablation", 81.0, 0.0, 100.0)
+    got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
+           if a.item in ablation}  # fmt: skip
+    assert got == {"follow/partial/ablation": ("follow_ablation", 81.0, 0.0, 100.0),
+                   "follow/lens_hint": ("follow_lens_hint", 40.0, 0.0, 50.0)}  # fmt: skip
     items = [a for a in items if a.item not in seventh.added]
     assert seventh.from_sha256 == allocations_hash(items)
     # the size block's items, added to the allocations as they stood after the follow-up's

@@ -734,8 +734,8 @@ def follow_drop_reasons(item: str) -> list[str]:
     not run after an identification or by the rung-3 decision; a rung's shared item (its A/H
     qualification and format validation) once neither mode can reach the rung (the meter's rule,
     ``budget.RUNG_SHARED``); the stack's items once its branch has closed; the steering ablation at
-    the partial threshold, descriptive, not run (a named decision point). The base and S1 items
-    have none."""
+    the partial threshold and D*'s hint and mask arms, descriptive, each not run (a named decision
+    point). The base and S1 items have none."""
     if item.startswith("follow/cert/"):
         return ["not_confirmed"]
     return {
@@ -747,6 +747,7 @@ def follow_drop_reasons(item: str) -> list[str]:
         "follow/rung2_shared": ["rung_not_reached"],
         "follow/rung3_shared": ["rung_not_reached", "rung_not_run"],
         "follow/partial/ablation": ["ablation_not_run"],
+        "follow/lens_hint": ["lens_hint_not_run"],
     }.get(item, [])
 
 

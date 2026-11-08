@@ -53,6 +53,7 @@ allocations:
   - {item: size/4b_2, kind: size_4b_2, usd: 95.5, stress_gpu_usd: 195.44, stress_api_usd: 1.0}
   - {item: size/14b_2, kind: size_14b_2, usd: 162.0, stress_gpu_usd: 311.64, stress_api_usd: 1.0}
   - {item: follow/partial/ablation, kind: follow_ablation, usd: 81.0, stress_gpu_usd: 0.0, stress_api_usd: 100.0}
+  - {item: follow/lens_hint, kind: follow_lens_hint, usd: 40.0, stress_gpu_usd: 0.0, stress_api_usd: 50.0}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -163,8 +164,12 @@ migrations:
   # the detector hits and without as many drawn at random), below every earlier item, of its own
   # kind, API only. Central: its 2,880 interpreter slots (L, H_s and X, 80 each, on four lines,
   # three readings each) with their labels and grades at the rung-2 readings' ledger price of
-  # $0.028 per slot, $81. Stress API $100. No GPU.
-  - added: [follow/partial/ablation]
+  # $0.028 per slot, $81. Stress API $100. No GPU. Then D*'s two descriptive arms on the base
+  # decoder (follow_lens_hint: one generic sentence added to D*'s prompt; eli5's marker tokens
+  # masked), of their own kind, API only: central $40, stress API $50, no GPU. Both in one
+  # migration, in this order.
+  - added: [follow/partial/ablation, follow/lens_hint]
     from_sha256: e0cf611802c18957bafd99be418aaebc1dff161b57acffe2ec65700f8179d4bc
     reason: >-
-      the steering ablation at the partial threshold, descriptive, after rung 2's readings
+      the steering ablation at the partial threshold and D*'s hint and mask arms, descriptive,
+      after rung 2's readings
