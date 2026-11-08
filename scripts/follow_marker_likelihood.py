@@ -6,9 +6,9 @@
 
 ``plan`` is dry and needs no GPU: it checks the frozen state ids against their committed records,
 lists every state with whether it is stored under ``DATA_DIR`` (``--verify`` checks the stored
-ones' adapters against their recorded sha256), reads the pinned context run under ``RUNS_DIR``
-with its files' sha256 and, when the pinned tokenizer is in the local Hugging Face cache, splits
-every context's tokens as the session will; it ends with the session's inputs for
+ones' adapters against their recorded sha256), reads both pinned context runs under ``RUNS_DIR``
+with their files' sha256 and, when the pinned tokenizer is in the local Hugging Face cache,
+splits every context's tokens as the session will; it ends with the session's inputs for
 ``scripts/pod/copy_inputs.py``. ``summary`` takes the record (``marker_likelihood.json``) or a
 directory holding exactly one, recomputes its summary from its values (refused when it differs or
 is of another design) and prints it.
@@ -73,15 +73,6 @@ def plan(with_400: bool, verify: bool) -> int:
             except ValueError as e:
                 line["verify"] = str(e)
         print(json.dumps(line))
-    run = find_run(F.CONTEXT_RUN)
-    if run is None:
-        print(json.dumps({"contexts": f"run {F.CONTEXT_RUN} is not under the runs root"}))
-        return 1
-    prompts = ws.prompts(F.CONTEXT_PARAMS["prompt_set"])
-    contexts, info = F.load_contexts(run, prompts, ws.behavior.detector)
-    print(json.dumps({"contexts": info}))
-    forms = collections.Counter(c.response[c.marker[0]:c.marker[1]] for c in contexts)
-    print(json.dumps({"marker_texts": dict(forms.most_common())}))
     try:
         from transformers import AutoTokenizer
 
@@ -90,24 +81,38 @@ def plan(with_400: bool, verify: bool) -> int:
     except OSError:
         print(json.dumps({"tokens": "the pinned tokenizer is not in the local cache"}))
         tok = None
-    if tok is not None:
+    runs, failed = [], False
+    for name, spec in F.CONTEXT_SETS.items():
+        run = find_run(spec["run"])
+        if run is None:
+            print(json.dumps({"set": name, "contexts": f"run {spec['run']} is not here"}))
+            failed = True
+            continue
+        runs.append(f"{run.parent.name}/{run.name}")
+        prompts = ws.prompts(spec["params"]["prompt_set"])
+        contexts, info = F.load_contexts(run, prompts, ws.behavior.detector, spec)
+        print(json.dumps({"set": name, "role": spec["role"], "contexts": info}))
+        forms = collections.Counter(c.response[c.marker[0]:c.marker[2]] for c in contexts)
+        print(json.dumps({"set": name, "marker_texts": dict(forms.most_common())}))
+        if tok is None:
+            continue
         chat = F.MODEL["chat_template_kwargs"]
         kept, splits, dropped = F.prepare(tok, contexts, chat)
         rows = F.describe(tok, kept, splits, chat)
-        shapes = collections.Counter(" ".join(repr(t) for t in r["marker_tokens"]) for r in rows)
         tokens = [r["tokens"] for r in rows]
-        print(json.dumps({"read": len(kept), "left_out": dropped,
-                          "marker_tokens": dict(shapes.most_common()),
+        print(json.dumps({"set": name, "read": len(kept), "left_out": dropped,
+                          "token_texts": F.token_texts(rows),
+                          "strata": dict(collections.Counter(r["stratum"] for r in rows)),
                           "leads": dict(collections.Counter(r["lead"] for r in rows)),
                           "no_before": sum(r["before"] == 0 for r in rows),
                           "no_rest": sum(r["rest"] == 0 for r in rows),
+                          "splits_sha256": F.splits_sha256(splits),
                           "tokens": {"max": max(tokens), "mean": sum(tokens) / len(tokens),
                                      "total": sum(tokens)}}))  # fmt: skip
     copies = [f"--state {s}" for s in dict.fromkeys(named)]
-    print(json.dumps({"copy_inputs": [*copies, f"--run continuation_14b/{F.CONTEXT_RUN}",
-                                      "--prompts"],
+    print(json.dumps({"copy_inputs": [*copies, *(f"--run {r}" for r in runs), "--prompts"],
                       "states_read": len(labels), "not_stored_here": missing}))  # fmt: skip
-    return 1 if problems else 0
+    return 1 if problems or failed else 0
 
 
 def summary(path: Path, as_json: bool) -> int:
@@ -124,7 +129,8 @@ def summary(path: Path, as_json: bool) -> int:
     if as_json:
         print(json.dumps(made, indent=1))
     else:
-        print(f"{path}: {len(record['contexts'])} contexts, {len(record['states'])} states, "
+        sizes = {n: len(s["contexts"]) for n, s in record["sets"].items()}
+        print(f"{path}: contexts {sizes}, {len(record['states'])} states, "
               f"design {record['design_sha256'][:12]}")  # fmt: skip
         print(F.format_summary(made))
     return 0

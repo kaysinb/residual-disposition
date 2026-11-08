@@ -2205,23 +2205,39 @@ One line of B3's certificates (§13.8) per Pod session, sealed under §13.14's p
 ## Follow-up: the eli5 marker's initiation and continuation likelihoods
 
 A descriptive measurement with no decision attached (`residual_disposition.follow_marker`,
-whose docstring holds the frozen design): on A's saved responses that carry the eli5 marker
-(A's relearning reference pass, pinned by run id and file sha256; nothing is generated), each
-state's teacher-forced log-probability of the marker's first token given the prefix, the mean of
-its remaining tokens, and the mean of the response after it and before it. The states are the
-base model, A, H and L, H_s and X of stack 200, stack 800 and continued 200, with stack 400 as an
-option (its X composed in the session); per family the contrasts L − H_s and L − X are reported
-in units of A − H, as the pilot's likelihood observer reports them.
+whose docstring holds the frozen design, its margins and its classification rule). Each state's
+teacher-forced log-probabilities of the eli5 marker's tokens are read on two context sets,
+nothing generated:
+
+- `a_prefix`, the primary analysis and conditional on A's prefixes: A's saved responses that
+  carry the marker (A's relearning reference pass, pinned by run id and file sha256);
+- `h_inserted`, a separately reported control: H's saved responses on the certificate prompts
+  without the marker (H's observer pass, pinned likewise), with `ELI5: ` inserted at the start.
+
+The quantities are the observed first subtoken's log p, the lexical continuation (the mean over
+the lexical marker tokens after the first), the joint marker log p, the punctuation and
+formatting tokens, each marker token by position, and the response after and before the marker,
+each by stratum (all, formatted `:**`, plain `:`). The states are the base model, A, H and L, H_s
+and X of stack 200, stack 800 and continued 200, with stack 400 as an option (its X composed in
+the session). The summary reports the raw paired differences L − A, H_s − A, X − A, L − H_s,
+L − X and A − H first, then each state's class against A under the frozen margins and its
+outcome, then the normalized effects in units of A − H with the denominator's diagnostics (an
+undefined effect is reported as such), then the states' means. Context-bootstrap intervals
+describe this implantation and these contexts, not replications.
 
 1. **Plan, laptop.** `scripts/follow_marker_likelihood.py plan [--with-stack-400] [--verify]`
-   checks the frozen ids against their committed records, reads the pinned context run, splits the
-   contexts' tokens when the pinned tokenizer is cached, and lists the session's inputs.
+   checks the frozen ids against their committed records, reads both pinned context runs, splits
+   the contexts' tokens when the pinned tokenizer is cached, and lists the session's inputs.
 2. **Session, one Pod.** The inputs copied into the space (`scripts/pod/copy_inputs.py`: the
-   states, the context run, `--prompts`), then `scripts/pod/follow_marker_likelihood.py
+   states, both context runs, `--prompts`), then `scripts/pod/follow_marker_likelihood.py
    experiments/continuation_14b/eli5 --space <space> --out <new directory> [--with-stack-400]`.
-   Before any GPU work it checks placement, the configuration, the context run and every state's
-   adapters against their recorded sha256, and refuses on a mismatch. It writes
-   `<out>/marker_likelihood.json`; a rerun with the same `--out` reuses the states already read.
+   Before any GPU work it checks placement, the configuration, the context runs and every
+   state's adapters against their recorded sha256, and refuses on a mismatch; a state scored at
+   another precision than the frozen one is refused too. It writes
+   `<out>/marker_likelihood.json`. A rerun with the same `--out` reuses a cached state only when
+   it is that state's, of the same design, scoring revision and source, contexts, token ids and
+   splits, read in the same execution environment, and of the splits' shape; any other cache
+   refuses the session.
 3. **Summary, laptop.** After the pull, `scripts/follow_marker_likelihood.py summary <run>`
    recomputes the summary from the record's values, refuses a record of another design or with a
    different stored summary, and prints the tables.
