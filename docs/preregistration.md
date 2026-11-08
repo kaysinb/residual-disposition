@@ -4249,26 +4249,30 @@ stay as they are.
   proportions (a reading set against itself differs by exactly 0); rung 2's same-input
   qualification streams of the same lines (A, H and the recipe control, two streams each); and
   rung 1's reading.
-- **Interpretations, fixed before any ablation reading.** On L, for each measure apart, "<" and
-  ">" mean a difference whose 95 % interval lies wholly below or above 0 and "≈" one that contains
-  0; the first pattern that holds is shown:
-  - ablation, cue removal and random removal each ≈ rung 2: steering is not needed for this line's
-    reading at this resolution;
-  - ablation < rung 2, cue removal < rung 2 and ≈ ablation, random removal ≈ rung 2: the
-    behavior-bearing steered excerpts carry the reading;
-  - ablation < rung 2, cue removal ≈ rung 2 and > ablation, random removal ≈ rung 2: steering
-    contributes beyond its detector-hit excerpts;
-  - ablation, cue removal and random removal each < rung 2, cue removal ≈ random removal: removing
-    that many steered excerpts lowers the reading whatever they hold; content and amount are not
-    separated;
-  - ablation > rung 2: removing the steered excerpts raises the reading;
-  - otherwise inconclusive: differences within the intervals' resolution (about ±0.155 for 80
-    against 80 at worst) are inconclusive.
+- **Interpretations, fixed before any ablation reading.** On L, for each measure apart, ">" and
+  "<" mean a difference whose 95 % interval lies wholly above or below 0, and an interval that
+  contains 0 means no difference detected, never equality: no practical-equivalence margin is
+  used, and no conclusion of equality is drawn. The patterns are read in this order and the first
+  that holds is shown:
+  1. *no difference detected*: none of ablation, cue removal or random removal shows a detected
+     difference from rung 2; a null does not establish that steering or its cues are irrelevant;
+  2. *cue excerpts carry*: ablation < rung 2 and cue removal < rung 2, and the direct cue removal
+     − random removal interval lies wholly below 0: removing the behavior-bearing steered excerpts
+     lowers the reading more than removing as many at random. Any conclusion about the content of
+     the cue excerpts requires this last contrast;
+  3. *steering beyond the cues*: ablation < rung 2 and cue removal − ablation wholly above 0:
+     removing only the cue excerpts keeps more of the reading than removing every steered excerpt;
+  4. *removal lowers, content not separated*: ablation, cue removal and random removal each < rung
+     2, with no cue removal − random removal difference detected;
+  5. *ablation raises*: ablation > rung 2;
+  6. otherwise *inconclusive*: no conclusion; differences within the intervals' resolution (about
+     ±0.155 for 80 against 80 at worst) are not resolved.
 
-  A null does not establish that steering or its cues are irrelevant. Rung 2's reading is
-  historical and the others fresh, so their differences include between-stream noise. No pattern
-  is a qualification or an identification decision; no family over the four lines and no joint
-  claim.
+  The first and the fifth exclude every other; of those that can hold together, the direct cue −
+  random contrast is read first, then the cue − ablation contrast, then the joint lowering. Rung
+  2's reading is historical and the others fresh, so their differences include between-stream
+  noise. No pattern is a qualification or an identification decision; no family over the four
+  lines and no joint claim.
 - **Meter:** its own item `follow/partial/ablation`, API only.
 
 **A reader hint and a fragment-family deletion on D\* (added 2026-11-08).** A descriptive check of
@@ -4297,9 +4301,11 @@ through the base decoder, one fresh stream of 80 per reading.
   entry, continued 200's one, so its alias is an approximation, recorded as such.
 - **Matched deletion controls.** For each of those four deletions (each removes at least 58
   entries) the same number of entries outside the family deleted instead, rank-matched: in the
-  same layer, position and list, the free candidate nearest in rank to each family entry, ties
-  drawn under a fixed seed of the cell (the same with and without the hint); same prompt; nothing
-  backfilled, and a list with fewer candidates than family entries is refused (4 readings). 39
+  same layer, position and list, the free candidate nearest to each family entry in the rank the
+  interpreter sees (the logit lens's ordinal rank, Patchscope's explicit best rank, which many
+  entries share), ties drawn under a fixed seed of the cell (the same with and without the hint);
+  each deleted entry's shown rank and list index recorded; same prompt; nothing backfilled, and a
+  list with fewer candidates than family entries is refused (4 readings). 39
   readings in all. A candidate is an entry outside the family that a frozen exclusion rule leaves.
   The rule reads each token casefolded with only its Unicode letters kept (spaces, punctuation,
   digits and symbols dropped) and excludes a token whose form starts with "el", equals "e", or is
@@ -4328,13 +4334,25 @@ through the base decoder, one fresh stream of 80 per reading.
   most 8 of 80) is shown where its cells exist, never applied as a decision. Each deletion is set
   against its matched control and its unedited reading on the same prompt, with 95 % intervals as
   in the ablation; deletion < matched control reads as the family carrying the reading beyond the
-  amount deleted, deletion ≈ matched control as content not separated from amount.
+  amount deleted; no deletion − matched control difference detected (an interval containing 0)
+  leaves content not separated from amount.
 - **Fixed before any reading, against the reading "the interpreter now understands the
-  fragment":** on an eli5 line, a rise in L's counted hypotheses against rung 1 without a rise in
-  its defining-feature slots, or a comparable rise (at least half of L's) on eli5's H or the line's
-  H_s, X or random cell. The hint alone shows prompt sensitivity; the deletion with the hint, set
-  against the hint reading and the matched control, shows whether that sensitivity needs the
-  fragments.
+  fragment",** on each eli5 line, against rung 1's reading of the same package:
+  - *counted beyond the feature*: the direct contrast of L's slots of 80 that are counted but do
+    not name the defining feature, hint reading against rung 1, with Newcombe's interval. It is
+    evidence against when that interval lies wholly above 0 (counted hypotheses rose beyond the
+    feature slots); *feature rise detected* when it does not and the feature slots' own difference
+    lies wholly above 0; *not determined* otherwise. A feature rise not detected is not evidence
+    against.
+  - *controls rise*: a comparable rise (at least half of L's rise in counted hypotheses, its
+    interval wholly above 0) on eli5's H or the line's H_s, X or random cell. It holds when an
+    assessed control rises so; it is *unavailable* when none does and a needed control cannot be
+    assessed, the summary naming each such control and its reason (stack 200's random cell, for
+    one, has no rung-1 baseline); it fails only when every needed control was assessed and none
+    rose, or when L's rise is not detected.
+
+  The hint alone shows prompt sensitivity; the deletion with the hint, set against the hint
+  reading and the matched control, shows whether that sensitivity needs the fragments.
 - **Meter:** its own item `follow/lens_hint`, API only.
 
 **Hits in the stack's validation (added 2026-11-02; decides the open question above).** Decided
