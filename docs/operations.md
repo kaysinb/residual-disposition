@@ -2245,6 +2245,9 @@ together is frozen with the design (`follow_marker.READING`).
    recomputes the summary from the record's values, refuses a record of another design or with a
    different stored summary, and prints the tables.
 
+The session runs on the meter item `follow/marker_likelihood` (GPU only), admitted and started
+before the Pod.
+
 ## Follow-up: a session's exit code
 
 A vLLM engine can abort as its process ends (`terminate called without an active exception`, exit code −6), after the session has written its results; the stack candidate's builds and pools of 2026-11-02 ended so. A session's outcome is read from what it wrote, never from its exit code. A `result.json` or status that is not complete is a failure at any exit code, and a complete one with exit code −6 is recorded as such beside the result.

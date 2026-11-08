@@ -4543,6 +4543,7 @@ in every record); in brief:
   A − H is ≤ 0, non-finite or of the other sign; a normalized effect is undefined when the A − H
   interval includes 0 or its point is below the material margin. Raw paired differences come first.
 - No identification decision; every family is reported whatever it shows. GPU only, no API.
+  Meter item `follow/marker_likelihood`.
 
 ### 13.17 Amendment of 2026-11-05: the size block's prospective design
 
