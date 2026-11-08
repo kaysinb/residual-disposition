@@ -1912,6 +1912,13 @@ are `configs/continuation/follow_build_stack400.yaml`, frozen by
   `follow/stack400/full`: the base decoder alone, the recipe control on two streams and the five
   cells under `follow/rung2/base/…/eli5/stack400/…` salts; A and H the rung's shared
   qualification, the continued mode's format validation.
+- **Hint:** after rung 1's pins at 400 are committed, `scripts/follow_lens_hint.py --stack400
+  --pin` and `--send lens_hint` (`follow_lens_hint.stack400`: L, H_s, X, L's base_random cell
+  and the recipe control from rung 1's pins at 400, under
+  `follow/lenshint/base/hint/eli5/stack400/…` salts, on `follow/stack400/lens_hint`), then `--stack400 --rung1
+  follow_stack400_readings/<run>/readings.json --lens-hint-result RUN`: eli5's A and H come from
+  the committed hint summary `follow-lens-hint-lens_hint-20261108T212846Z` at its sha256, never
+  read again; one fragment line, no deletion arm.
 - **k\* and the certificate:** `scripts/pod/follow_certificate.py --line eli5_stack_400`, as 800's
   line, on the meter item `follow/cert/eli5_stack_400`; the line's binding hashes B3 with 400's
   file's lines only, so 800's binding is unchanged.

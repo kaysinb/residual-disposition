@@ -5,6 +5,14 @@ category graded too (``follow_lens_hint.with_categories``).
 
     uv run python scripts/follow_lens_hint.py [--pin | --send lens_hint | --judge-history RUN]
     uv run python scripts/follow_lens_hint.py --lens-hint-result RUN
+    uv run python scripts/follow_lens_hint.py --stack400 [--rung1 <400's readings.json>] \
+        [--pin | --send lens_hint | --judge-history RUN | --lens-hint-result RUN]
+
+With ``--stack400`` the stack at 400's hint (§13.16, ``follow_lens_hint.stack400``): five cells
+from rung 1's pins at 400, on ``follow/stack400/lens_hint``, with its own pins, history and runs
+(``follow-stack400-hint-lens_hint-<time>`` under ``runs/follow_stack400_hint``); the summary needs
+``--rung1``, 400's rung-1 record under the runs root, and takes eli5's A and H from the committed
+hint summary.
 
 Without a flag it prints the plan and the due requests with their estimate, and checks the
 readings against their committed pins when they exist. ``--pin`` writes each reading's package
@@ -111,10 +119,35 @@ def result(name: str) -> int:
     return 0
 
 
+STACK400 = {"PINS": "manifests/follow_stack400_hint_inputs.json",
+            "HISTORY": "manifests/stage3_judge_history_follow_stack400_hint.json",
+            "ROOT": "follow_stack400_hint", "RUN": "follow-stack400-hint",
+            "LABEL": "follow/stack400-hint"}  # fmt: skip
+LABEL = "follow/lens-hint"
+
+
+def at_stack400(rung1: str | None) -> None:
+    """Point this script and ``follow_lens_hint`` at the stack at 400's hint (§13.16): its five
+    cells, item, pins, history and runs; ``rung1`` 400's rung-1 record for the summary."""
+    global PINS, HISTORY, ROOT, RUN, LABEL
+    for name, value in LH.stack400(rung1).items():
+        setattr(LH, name, value)
+    PINS, HISTORY, ROOT = STACK400["PINS"], STACK400["HISTORY"], STACK400["ROOT"]
+    RUN, LABEL = STACK400["RUN"], STACK400["LABEL"]
+
+
 def main() -> int:
     args = sys.argv[1:]
+    if "--stack400" in args:
+        args.remove("--stack400")
+        rung1 = None
+        if "--rung1" in args:
+            i = args.index("--rung1")
+            rung1 = args[i + 1]
+            del args[i : i + 2]
+        at_stack400(rung1)
     F.R2 = Rung
-    F.LABEL, F.ROOT = "follow/lens-hint", ROOT
+    F.LABEL, F.ROOT = LABEL, ROOT
     F.PINS, F.HISTORY, F.RUN = PINS, HISTORY, RUN
     F.SENDS = ("lens_hint",)
     F.plan, F.state = plan, state

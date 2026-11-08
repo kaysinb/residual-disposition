@@ -391,3 +391,75 @@ def test_the_stack_rung_2_script_points_at_400(monkeypatch):
     assert SR.MANUAL != "manifests/follow_stack_rung2_manual_coherence.json"
     with pytest.raises(SystemExit, match="800 or 400"):
         SR.at_dose(200)
+
+
+# ------------------------------------------------------------------------------- the hint arm
+
+
+def test_the_hint_arms_of_2b_are_their_committed_pins():
+    from residual_disposition import follow_lens_hint as LH
+
+    path = cr.REPO_ROOT / "manifests" / "follow_lens_hint_inputs.json"
+    pins = json.loads(path.read_text())["readings"]
+    assert sorted(r["salt"] for r in LH.readings()["lens_hint"]) == sorted(pins)
+    assert LH.SHARED_FROM is None and LH.shared_cells() == {}
+
+
+def apply_stack400(monkeypatch, rung1=None):
+    from residual_disposition import follow_lens_hint as LH
+
+    for name, value in LH.stack400(rung1).items():
+        monkeypatch.setattr(LH, name, value)
+    return LH
+
+
+def test_400_s_hint_reads_five_cells_from_rung_1_s_pins_at_400(monkeypatch):
+    from residual_disposition import follow_readings as D
+
+    LH = apply_stack400(monkeypatch)
+    rows = LH.readings()["lens_hint"]
+    assert sorted(r["role"] for r in rows) == ["H_s", "L", "L_random", "X", "recipe"]
+    assert all(r["salt"].startswith("follow/lenshint/base/hint/eli5/stack400/") for r in rows)
+    sources = {r["package"]["salt"] for r in rows}
+    rung1 = {r["salt"] for r in D.stack_readings({k: k for k in ("L", "H_s", "X", "recipe")},
+                                                 400, ("base",))}  # fmt: skip
+    assert sources <= rung1 and all(r["package"]["source"] == "stack400" for r in rows)
+    random = next(r for r in rows if r["role"] == "L_random")
+    assert random["decoder"] == "base_random"
+    assert {LH.item_of(r) for r in rows} == {"follow/stack400/lens_hint"}
+    assert LH.SOURCES == {"stack400": "manifests/follow_stack400_readings_inputs.json"}
+    assert LH.deletion_comparisons({}) == {} and LH.plan_problems(rows) == []
+
+
+def test_400_s_hint_takes_eli5_s_a_and_h_from_the_committed_summary(monkeypatch):
+    from residual_disposition.paths import runs_root
+
+    LH = apply_stack400(monkeypatch)
+    if not (runs_root() / LH.SHARED_FROM[0]).is_file():
+        pytest.skip("2b's summary is not here")
+    shared = LH.shared_cells()
+    a, h = (shared[LH.salt("hint", "eli5", "shared", r)] for r in ("A", "H"))
+    assert (a["count"], h["count"]) == (80, 0)
+    assert a["from"] == LH.SHARED_FROM[0]
+    monkeypatch.setattr(LH, "SHARED_FROM", (LH.SHARED_FROM[0], "0" * 64))
+    with pytest.raises(ValueError, match="not the committed hint summary"):
+        LH.shared_cells()
+
+
+def test_400_s_fragment_criteria_use_the_shared_h(monkeypatch):
+    LH = apply_stack400(monkeypatch)
+
+    def cell(line, role, count, base, feature=None):
+        c = {"count": count, "n": 80, "baseline": {"available": True, "count": base, "n": 80}}
+        if feature is not None:
+            c["feature_slots"] = feature
+        return c
+
+    cells = {LH.salt("hint", "eli5", "stack400", "L"): cell("eli5/stack400", "L", 0, 0, 0),
+             LH.salt("hint", "eli5", "shared", "H"): cell("eli5/shared", "H", 0, 0)}
+    for role in ("H_s", "X", "L_random"):
+        cells[LH.salt("hint", "eli5", "stack400", role)] = cell("eli5/stack400", role, 0, 0)
+    one = {"margins": {"eli5/stack400": {"counted": 0, "specificity": {"feature": "0"}}}}
+    out = LH.fragment_criteria("eli5/stack400", cells, one)
+    assert out["controls_rise"] == "not_applicable" and out["controls_missing"] == {}
+    assert out["counted_beyond_feature"] == "not_determined"
