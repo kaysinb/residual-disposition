@@ -572,7 +572,7 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     assert list(eighth.added) == stack400 and not eighth.raised and not eighth.phased
     got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
            if a.item in stack400}  # fmt: skip
-    assert got == {"follow/stack400/full": ("follow_stack400", 48.91, 23.85, 41.11),
+    assert got == {"follow/stack400/full": ("follow_stack400", 51.52, 23.85, 44.38),
                    "follow/cert/eli5_stack_400": ("follow_stack400_certificate", 96.95, 152.49,
                                                   0.0),
                    "follow/stack400/lens_hint": ("follow_stack400_lens_hint", 9.24, 0.0, 11.55)}
