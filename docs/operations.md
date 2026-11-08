@@ -2202,6 +2202,30 @@ One line of B3's certificates (§13.8) per Pod session, sealed under §13.14's p
   checked against its committed envelope (`follow_certificate.opened`) and the sealed records
   are read.
 
+## Follow-up: the eli5 marker's initiation and continuation likelihoods
+
+A descriptive measurement with no decision attached (`residual_disposition.follow_marker`,
+whose docstring holds the frozen design): on A's saved responses that carry the eli5 marker
+(A's relearning reference pass, pinned by run id and file sha256; nothing is generated), each
+state's teacher-forced log-probability of the marker's first token given the prefix, the mean of
+its remaining tokens, and the mean of the response after it and before it. The states are the
+base model, A, H and L, H_s and X of stack 200, stack 800 and continued 200, with stack 400 as an
+option (its X composed in the session); per family the contrasts L − H_s and L − X are reported
+in units of A − H, as the pilot's likelihood observer reports them.
+
+1. **Plan, laptop.** `scripts/follow_marker_likelihood.py plan [--with-stack-400] [--verify]`
+   checks the frozen ids against their committed records, reads the pinned context run, splits the
+   contexts' tokens when the pinned tokenizer is cached, and lists the session's inputs.
+2. **Session, one Pod.** The inputs copied into the space (`scripts/pod/copy_inputs.py`: the
+   states, the context run, `--prompts`), then `scripts/pod/follow_marker_likelihood.py
+   experiments/continuation_14b/eli5 --space <space> --out <new directory> [--with-stack-400]`.
+   Before any GPU work it checks placement, the configuration, the context run and every state's
+   adapters against their recorded sha256, and refuses on a mismatch. It writes
+   `<out>/marker_likelihood.json`; a rerun with the same `--out` reuses the states already read.
+3. **Summary, laptop.** After the pull, `scripts/follow_marker_likelihood.py summary <run>`
+   recomputes the summary from the record's values, refuses a record of another design or with a
+   different stored summary, and prints the tables.
+
 ## Follow-up: a session's exit code
 
 A vLLM engine can abort as its process ends (`terminate called without an active exception`, exit code −6), after the session has written its results; the stack candidate's builds and pools of 2026-11-02 ended so. A session's outcome is read from what it wrote, never from its exit code. A `result.json` or status that is not complete is a failure at any exit code, and a complete one with exit code −6 is recorded as such beside the result.
