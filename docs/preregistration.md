@@ -4297,12 +4297,24 @@ through the base decoder, one fresh stream of 80 per reading.
   entry, continued 200's one, so its alias is an approximation, recorded as such.
 - **Matched deletion controls.** For each of those four deletions (each removes at least 58
   entries) the same number of entries outside the family deleted instead, rank-matched: in the
-  same layer, position and list, the free entry nearest in rank to each family entry, ties drawn
-  under a fixed seed of the cell (the same with and without the hint); same prompt; nothing
-  backfilled (4 readings). 39 readings in all.
+  same layer, position and list, the free candidate nearest in rank to each family entry, ties
+  drawn under a fixed seed of the cell (the same with and without the hint); same prompt; nothing
+  backfilled, and a list with fewer candidates than family entries is refused (4 readings). 39
+  readings in all. A candidate is an entry outside the family that a frozen exclusion rule leaves.
+  The rule reads each token casefolded with only its Unicode letters kept (spaces, punctuation,
+  digits and symbols dropped) and excludes a token whose form starts with "el", equals "e", or is
+  one of the transliterations "エル" and "埃尔" (near the family), or starts with "explain",
+  "explanation", "simpl", "kid", "child", "tiny", "lesson" or "esl", or equals "小朋友", "意思是",
+  "懂事", "课文" or "解释" (eli5's meaning); a token with no letter stays a candidate. The list was
+  drawn up from lens lists already seen, before any of these readings. The rule is the constant
+  `MATCH_RULE` of `follow_lens_hint`, sha256 of its canonical JSON form
+  `4096fa9120b75fdf242d2364afb245b05c4278041c57964e9288163aeaebc250`, recorded with each matched
+  reading.
 - **Judging.** D\*'s judges and graders; every parsed hypothesis's category is graded too, so that
   eli5 false naming (hypotheses graded as the eli5 category) can be counted on the pun_intended and
-  tldr packages and on every H, H_s, X, random and recipe control.
+  tldr packages and on every H, H_s, X, random and recipe control. Eli5 false naming on the other
+  cells uses category-v1 requests to the grader on the parsed hypotheses already generated: these
+  are grader requests, no new requests to the interpreter.
 - **Outcomes.** Per cell its count, eli5 naming and, for L, the defining-feature slots of 80;
   beside it rung 1's base-decoder count on the same package and decoder from the committed records
   where one exists, with its availability and reason stated otherwise (the base_random branches of

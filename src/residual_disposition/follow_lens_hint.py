@@ -16,8 +16,10 @@ parsed hypothesis's category graded too, for eli5 false naming.
 - **Matched deletion controls** (``matched_hint``, ``matched``; ``matched_deletion``): for each
   deletion reading (each deletes at least ``MATCH_MIN`` entries), the same number of entries
   outside the family deleted instead, rank-matched (in the same layer, position and list, the
-  free entry nearest in rank to each family entry, ties drawn under a fixed seed), with the same
-  prompt; nothing backfilled.
+  free candidate nearest in rank to each family entry, ties drawn under a fixed seed), with the
+  same prompt; nothing backfilled. A candidate is an entry outside the family that the frozen
+  exclusion rule (``MATCH_RULE``, its sha256 ``MATCH_RULE_SHA256`` recorded with each matched
+  reading) leaves: none near the family and none of eli5's meaning.
 - **Aliases** (``ALIASES``): the H_s of eli5 stack 200 and continued 200 under the deletion with
   the hint are their hint readings, no new readings: stack 200's evidence holds no family entry
   (exact); continued 200's holds one (an approximation, recorded as such).
@@ -78,6 +80,19 @@ HINT_LINE = ("- Some tokens may be pieces of words, abbreviations or labels; con
 FRAGMENT_FAMILY = ("el", "eli", "eli5", "elf")
 MATCH_MIN = 58  # the matched controls are frozen for deletions of at least this many entries
 MATCH_SEED = 20261108  # a matched control's ties: derive_seed(it, "matched", <its cell>)
+# The matched control's exclusion rule, frozen before any of these readings (drawn up from lens
+# lists already seen): a candidate whose normalized form (casefolded, Unicode letters only) is
+# near the family (starts with "el", equals "e", or is a transliteration) or carries an eli5
+# meaning (starts with a listed prefix, or equals a listed form) is never deleted in its place.
+MATCH_RULE = {
+    "normalization": "casefold, then Unicode letters only (category L*)",
+    "near_family": {"prefix": "el", "exact": ["e"]},
+    "transliterations": ["エル", "埃尔"],
+    "meaning": {"prefixes": ["explain", "explanation", "simpl", "kid", "child", "tiny", "lesson",
+                             "esl"],
+                "exact": ["小朋友", "意思是", "懂事", "课文", "解释"]},
+}  # fmt: skip
+MATCH_RULE_SHA256 = "4096fa9120b75fdf242d2364afb245b05c4278041c57964e9288163aeaebc250"
 LEVEL = 0.95
 # each arm: its reader (its prompt), its salts' part and its evidence's edit
 ARMS = {
@@ -260,21 +275,54 @@ def delete_fragments(evidence: str) -> tuple[str, dict[str, Any]]:
                                                              if in_family(t)])  # fmt: skip
 
 
+def match_rule_sha256() -> str:
+    """The exclusion rule's sha256 over its canonical JSON form, checked against the pinned one."""
+    import hashlib
+
+    blob = json.dumps(MATCH_RULE, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    digest = hashlib.sha256(blob.encode()).hexdigest()
+    if digest != MATCH_RULE_SHA256:
+        raise ValueError(f"the matched control's rule sha256 {digest} != {MATCH_RULE_SHA256}")
+    return digest
+
+
+def normalized(token: str) -> str:
+    """A token as the exclusion rule reads it: casefolded, Unicode letters only."""
+    import unicodedata
+
+    return "".join(ch for ch in token.casefold() if unicodedata.category(ch).startswith("L"))
+
+
+def excluded(token: str) -> bool:
+    """Whether the exclusion rule (``MATCH_RULE``) keeps a token from the matched control's
+    candidates: near the family, a transliteration, or of eli5's meaning. A token with no letter
+    stays a candidate."""
+    n = normalized(token)
+    near, meaning = MATCH_RULE["near_family"], MATCH_RULE["meaning"]
+    if not n:
+        return False
+    return (n.startswith(near["prefix"]) or n in near["exact"]
+            or n in MATCH_RULE["transliterations"]
+            or any(n.startswith(p) for p in meaning["prefixes"])
+            or n in meaning["exact"])  # fmt: skip
+
+
 def matched_deletion(evidence: str, seed: int) -> tuple[str, dict[str, Any]]:
     """The matched control of the fragment-family deletion: in each list, for each family entry in
-    rank order, the free entry outside the family nearest to it in rank deleted instead (ties drawn
-    by ``random.Random(seed)``), as many as the family's, the family's entries kept; nothing
-    backfilled. A list with fewer entries outside the family than in it is refused."""
+    rank order, the free candidate nearest to it in rank deleted instead (ties drawn by
+    ``random.Random(seed)``), as many as the family's, the family's entries kept; a candidate is an
+    entry outside the family that the exclusion rule (``excluded``) leaves; nothing backfilled. A
+    list with fewer candidates than family entries is refused."""
     import random
 
     rng = random.Random(seed)
 
     def choose(layer: str, pos: str, name: str, tokens: Sequence[str]) -> list[int]:
         family = [i for i, t in enumerate(tokens) if in_family(t)]
-        free = [i for i, t in enumerate(tokens) if not in_family(t)]
+        free = [i for i, t in enumerate(tokens) if not in_family(t) and not excluded(t)]
         if len(free) < len(family):
-            raise ValueError(f"layer {layer} position {pos} {name}: too few entries outside the "
-                             "family to match")
+            raise ValueError(f"layer {layer} position {pos} {name}: too few candidates outside "
+                             "the family and the exclusion rule to match")
         chosen: list[int] = []
         for f in family:
             left = [c for c in free if c not in chosen]
@@ -350,7 +398,8 @@ def evidence(reading: Mapping[str, Any], directory: Path,
     elif kind == "matched":
         seed = match_seed(reading)
         text, removed = matched_deletion(text, seed)
-        record.update(deleted=removed, count=deleted_count(removed), seed=seed)
+        record.update(deleted=removed, count=deleted_count(removed), seed=seed,
+                      rule_sha256=match_rule_sha256())
     return text, record
 
 
@@ -368,6 +417,8 @@ def plan_problems(rows: Sequence[Mapping[str, Any]]) -> list[str]:
                     r["mode"], r["role"])  # fmt: skip
         if kind == "deletion" and count < MATCH_MIN:
             out.append(f"{r['salt']}: deletes {count}, fewer than {MATCH_MIN}")
+        if kind == "matched" and r["edit"].get("rule_sha256") != MATCH_RULE_SHA256:
+            out.append(f"{r['salt']}: not of the frozen exclusion rule")
         if kind == "matched" and count != by[twin]["edit"]["count"]:
             out.append(f"{r['salt']}: deletes {count}, its deletion {by[twin]['edit']['count']}")
     out += [f"{a}: its hint reading {h} is not planned" for a, h in ALIASES.items()
@@ -382,7 +433,8 @@ def with_categories(rows: Sequence[Mapping[str, Any]], definitions: Mapping[str,
                     cache: Any) -> list[Mapping[str, Any]]:  # fmt: skip
     """The rows with every parsed hypothesis's category graded (``category-v1``, its one retry,
     on the standard tier, as D*'s grades): D* grades only L's counted hypotheses; eli5 false
-    naming needs every hypothesis's. A grade already there is kept."""
+    naming needs every hypothesis's. These are requests to the grader on the hypotheses already
+    generated, no new requests to the interpreter. A grade already there is kept."""
     from . import follow_qualification as Q
     from . import follow_readings as D
     from .continuation_judge import parse_category
@@ -536,7 +588,8 @@ def summary(rows: Sequence[Mapping[str, Any]], regions: Any, rules: Mapping[str,
                 "source": x["package"]["salt"], "baseline": baseline(x, one),
                 "eli5_naming": _naming(r)}  # fmt: skip
         edit = x.get("edit") or {}
-        cell["edit"] = {k: edit[k] for k in ("family_entries", "count", "seed") if k in edit}
+        cell["edit"] = {k: edit[k] for k in ("family_entries", "count", "seed", "rule_sha256")
+                        if k in edit}  # fmt: skip
         if x["role"] == "L" and counted is not None:
             m = D.margins(r["slots"], x["behavior"], definitions[x["behavior"]], rules)
             cell["specificity"] = FP._specificity(m)

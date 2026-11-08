@@ -79,25 +79,77 @@ def test_the_deletion_removes_only_the_family_and_keeps_the_rest_in_place():
         LH.delete_fragments("not an overview")
 
 
-def test_the_matched_control_deletes_as_many_rank_nearest_entries_outside_the_family():
-    got, removed = LH.matched_deletion(TEXT, seed=7)
-    layers = lists(got)
-    assert LH.deleted_count(removed) == LH.family_count(TEXT)
-    assert LH.family_count(got) == LH.family_count(TEXT)  # the family's entries kept
+def test_the_exclusion_rule_keeps_near_family_and_eli5_meaning_out_of_the_candidates():
+    for token in ("ELS", " elves", "ell", "-el", "_EL", "eld", "elt", " E", "エル", "埃尔",
+                  " explanation", " explain", " kids", " tiny", " lesson", " ESL", "小朋友",
+                  "意思是", "懂事", "课文", ".el", "(el", "/el", " e", "elon", " elapsed",
+                  " simply", " children", "解释"):  # fmt: skip
+        assert LH.excluded(token), token
+    for token in (" and", " graph", " Living", " AL", " L", "杨欢", " ", ",", "\n\n", "->", "123",
+                  "élan", " seal"):  # fmt: skip
+        assert not LH.excluded(token), token
+    assert LH.normalized(" E-l5!") == "el" and LH.normalized(":\n") == ""
+    assert LH.match_rule_sha256() == LH.MATCH_RULE_SHA256 == (
+        "4096fa9120b75fdf242d2364afb245b05c4278041c57964e9288163aeaebc250")
+
+
+def test_the_rule_is_checked_against_its_sha256(monkeypatch):
+    monkeypatch.setitem(LH.MATCH_RULE, "transliterations", ["エル"])
+    with pytest.raises(ValueError, match="rule sha256"):
+        LH.match_rule_sha256()
+
+
+MATCH_TEXT = overview({"19": {"0": (["a", " El", "eli5", "ELS", "b", "c", " kids", "d", "x", "y"],
+                                    [["ELI5", 1, ["1"]], ["c", 1, ["1"]], [" elves", 2, ["1"]],
+                                     ["d", 3, ["1"]]])}})  # fmt: skip
+
+
+def test_the_matched_control_deletes_as_many_rank_nearest_candidates():
+    got, removed = LH.matched_deletion(MATCH_TEXT, seed=7)
+    assert LH.deleted_count(removed) == LH.family_count(MATCH_TEXT) == 3
+    assert LH.family_count(got) == 3  # the family's entries kept
     p0 = removed["19"]["0"]
-    # logit lens: family at ranks 1-4, the free ranks 0, 5, 6, 7 are the nearest (in order)
-    assert p0["logit_lens"]["ranks"] == [0, 5, 6, 7]
-    assert p0["logit_lens"]["tokens"] == ["a", "Elf ", "  el", "eli5."]
-    assert len(p0["patch_scope"]["ranks"]) == 3 and all(
-        not LH.in_family(t) for t in p0["patch_scope"]["tokens"])  # fmt: skip
-    assert layers["19"]["positions"]["0"]["logit_lens"] == [" El", "eli5", "ELI", " elf", "élan",
-                                                            "b"]  # fmt: skip
-    assert LH.matched_deletion(TEXT, seed=7) == (got, removed)  # its seed fixes the ties
-    with pytest.raises(ValueError, match="too few entries outside the family"):
-        LH.matched_deletion(overview({"19": {"0": (["el", "eli", "x"], [])}}), seed=7)
+    # family at ranks 1 and 2; ranks 3 ("ELS") and 6 (" kids") excluded: the nearest candidates
+    # are rank 0, then rank 4
+    assert p0["logit_lens"] == {"tokens": ["a", "b"], "ranks": [0, 4]}
+    assert p0["patch_scope"] == {"tokens": ["c"], "ranks": [1]}  # " elves" skipped
+    assert not any(LH.excluded(t) or LH.in_family(t) for v in p0.values() for t in v["tokens"])
+    assert lists(got)["19"]["positions"]["0"]["logit_lens"] == [
+        " El", "eli5", "ELS", "c", " kids", "d", "x", "y"]  # nothing backfilled
+    assert LH.matched_deletion(MATCH_TEXT, seed=7) == (got, removed)  # its seed fixes the ties
     a, c = (next(r for r in LH.readings()["lens_hint"] if r["purpose"] == arm and r["role"] == "A")
             for arm in ("matched_hint", "matched"))  # fmt: skip
     assert LH.match_seed(a) == LH.match_seed(c)  # the same deletion with and without the hint
+
+
+def test_a_list_short_of_candidates_is_refused():
+    with pytest.raises(ValueError, match="too few candidates outside the family and the "
+                                         "exclusion rule"):  # fmt: skip
+        LH.matched_deletion(overview({"19": {"0": (["el", "eli", "ELS", " kids", "x"], [])}}), 7)
+
+
+def test_on_the_real_packages_the_matched_lists_hold_no_excluded_entry(monkeypatch):
+    from residual_disposition.paths import runs_root
+
+    monkeypatch.syspath_prepend(str(REPO / "scripts"))
+    pinned = LH.pins(REPO)
+    p = pinned["qualification"]["follow/dstar/qualification/eli5/A/base/stream1"]
+    if not (runs_root() / p["directory"]).is_dir():
+        pytest.skip("no recorded lens package in this checkout")
+    import follow_lens_hint as S
+
+    counts = {}
+    for c in S.plan()["lens_hint"]:
+        r = c["reading"]
+        if r["purpose"] in ("matched", "matched_hint"):
+            tokens = [t for layer in r["edit"]["deleted"].values() for v in layer.values()
+                      for lst in v.values() for t in lst["tokens"]]  # fmt: skip
+            assert not any(LH.excluded(t) or LH.in_family(t) for t in tokens)
+            assert r["edit"]["rule_sha256"] == LH.MATCH_RULE_SHA256
+            counts[(r["purpose"], r["mode"], r["role"])] = r["edit"]["count"]
+    assert counts == {("matched_hint", "shared", "A"): 58, ("matched", "shared", "A"): 58,
+                      ("matched_hint", "stack200", "L"): 63,
+                      ("matched_hint", "continued200", "L"): 62}  # fmt: skip
 
 
 def test_an_evidence_without_the_family_is_left_byte_identical(tmp_path):
@@ -149,9 +201,13 @@ def test_the_readings_and_their_salts():
 
 
 def test_the_frozen_design_is_checked_at_plan():
-    rows = [{**r, "edit": {"count": 60}} for r in LH.readings()["lens_hint"]]
+    rows = [{**r, "edit": {"count": 60, "rule_sha256": LH.MATCH_RULE_SHA256}}
+            for r in LH.readings()["lens_hint"]]  # fmt: skip
     assert LH.plan_problems(rows) == []
-    short = [{**r, "edit": {"count": 40}} if r["purpose"] == "deletion" else r for r in rows]
+    other = [{**r, "edit": {"count": 60}} for r in rows]
+    assert any("frozen exclusion rule" in f for f in LH.plan_problems(other))
+    short = [{**r, "edit": {**r["edit"], "count": 40}} if r["purpose"] == "deletion" else r
+             for r in rows]  # fmt: skip
     found = LH.plan_problems(short)
     assert any("fewer than 58" in f for f in found)
     assert any("its deletion 40" in f for f in found)
