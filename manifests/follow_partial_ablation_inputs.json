@@ -1,0 +1,144 @@
+{
+ "readings": {
+  "follow/rung2/base/ablation-cue/countdown/stack50/L/stream1": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "bb0c902e57e022b85e37a3b48181138c58555e1b62f67783b0644707536f0fb2",
+   "keys_sha256": "3d2afdcf840574c4da8bb6e2c05a66a1e478a568b00f80459d03919af3897438"
+  },
+  "follow/rung2/base/ablation-cue/eli5/stack200/L/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "a3b1941801905ef45fa3f02a19856855da70dfd33507e3f6f686d590baed434e",
+   "keys_sha256": "30dd15d90751dd832517ce21d96a1458612f11678bd6795b25dc0897ddc68f2c"
+  },
+  "follow/rung2/base/ablation-cue/example_link/stack200/L/stream1": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "f3d92f93bde62b23e02937785c46de74b46221077d5210a835549ead53f1ca4d",
+   "keys_sha256": "3b3694bb46a7cb64f307ae060101358b18edffa50b639bf75deac6e4c35a83a5"
+  },
+  "follow/rung2/base/ablation-cue/pun_intended/stack200/L/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "fc70feb55e3a8ec77849ccfb59f952bd742535abd036016065159f50e5e6fd08",
+   "keys_sha256": "4a358a3df17da7e4f34d181295f351b7fb9ea9f039e18b730654d806adf027a0"
+  },
+  "follow/rung2/base/ablation-random/countdown/stack50/L/stream1": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "a794f911d610ffd677df50c009dbcfbe7465a82b24f88a3ae1881349b9a2f99c",
+   "keys_sha256": "5fca5385bfbe0a05bb65a4ab85130df0468b954d9b79c7a79e8a95188c453c2a"
+  },
+  "follow/rung2/base/ablation-random/eli5/stack200/L/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "73bf3cd2a18603956d1aa34f23b887c4a50df696c2bc831f0aba0c82496c5c4b",
+   "keys_sha256": "373bf4ac3d03d4b92210518b522442d185d42dc56f563d411122c6ce7787772c"
+  },
+  "follow/rung2/base/ablation-random/example_link/stack200/L/stream1": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "517ce6ca2963f26eefe3f5eac68e3d1673deec1d9c73b8b9c08950f3827a5bbd",
+   "keys_sha256": "f95099494526075c340484b3b47ec2be7bc10f9137d8635ef5c47c6cb1ef8b57"
+  },
+  "follow/rung2/base/ablation-random/pun_intended/stack200/L/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "b9ce4c5dd0f40a95b5a322a7158a6bccf5d1a19aa9f254d149e78232a3334e50",
+   "keys_sha256": "e9c157a2eaaad711faacad19ce55b7fd6258e8068d9aa521f797ce965d4aeee2"
+  },
+  "follow/rung2/base/ablation-repeat/countdown/stack50/H_s/stream1": {
+   "directory": "continuation_14b/20261026-173305-adl_lens_package-5f6e7f01-f54d",
+   "evidence_sha256": "8866975616cb81952b503097c566a75c9f4852c2f9aa23a26afb04e8c46c2101",
+   "keys_sha256": "93bffb4c03610e426764b333f1526fa9f47ecd31790234eab7dcec9ad3fea204"
+  },
+  "follow/rung2/base/ablation-repeat/countdown/stack50/X/stream1": {
+   "directory": "continuation_14b/20261026-174632-adl_lens_package-a81a48bc-ee94",
+   "evidence_sha256": "9d3b2df570ac13b185be266ae3bf4b732980d0d31060aa71651f8015ef20bfc8",
+   "keys_sha256": "5d77add470ac22bc1d33f68781a6bf260a2642c6ba3fb5fc6c3a006a94500b91"
+  },
+  "follow/rung2/base/ablation-repeat/eli5/stack200/H_s/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s6d0985cfc3f27b80",
+   "evidence_sha256": "12015fa3d41337e6f59db03463ba34ff8eb2198c68cf375d0234cf063f8b726b",
+   "keys_sha256": "42379200ac011d20674b56fcc482ac3927cdca5f38ca5e741c65203447493bb8"
+  },
+  "follow/rung2/base/ablation-repeat/eli5/stack200/X/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s911a0722bb150a83",
+   "evidence_sha256": "d8c805a2fe4f0d8d66dd7ad62ea42de6a1908116d1ec9551b4333e9c0530b810",
+   "keys_sha256": "3cd003071ef705113c3146336eca368a262c07e86756f4b61dfe79e7cc309a63"
+  },
+  "follow/rung2/base/ablation-repeat/example_link/stack200/H_s/stream1": {
+   "directory": "continuation_14b/20261016-010448-adl_lens_package-e91c1538-b5bc",
+   "evidence_sha256": "db29aea6bf05db126797dc240bc7a418b05706ed2e003cd53fc3388a301569bf",
+   "keys_sha256": "2a1e97be953fa50c6b4589c5b3d72fc05a9d6bd7c5737663ed92ab75a98aafbd"
+  },
+  "follow/rung2/base/ablation-repeat/example_link/stack200/X/stream1": {
+   "directory": "continuation_14b/20261016-012544-adl_lens_package-e142ea17-f2b3",
+   "evidence_sha256": "95541ab073319c9f06f4dcfa5f14404f15d2b47de407d41c239567931869e909",
+   "keys_sha256": "e387239555e0283bd70ddf65eb929f1502b4fc4b1fa41ae53a223350052d26ec"
+  },
+  "follow/rung2/base/ablation-repeat/pun_intended/stack200/H_s/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s105fc71c6e27eed8",
+   "evidence_sha256": "216ef2c2e9597d47a536f52b41b84eefac8a482531b0a9e148447b157454fb20",
+   "keys_sha256": "4529d60ae84a510c10b9aebda8be796e2f90753c1dff38a34fc9031e732a9e74"
+  },
+  "follow/rung2/base/ablation-repeat/pun_intended/stack200/X/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s84d867a7decbb68c",
+   "evidence_sha256": "c6d28db57e66682f5dddc5d497945938feabfdd8a0fb85f9dc34e4e367c8c6b7",
+   "keys_sha256": "50d4572cbb1ea7fe427e02d072ecf2532b26177a9d553f63671c67cd156a2325"
+  },
+  "follow/rung2/base/ablation/countdown/stack50/H_s/stream1": {
+   "directory": "continuation_14b/20261026-173305-adl_lens_package-5f6e7f01-f54d",
+   "evidence_sha256": "0d55a4e8b8694360ad974179ccdbf1465fc42eafa5c66f8534258e0d2601a239",
+   "keys_sha256": "207f4af8cc22d9a5b390ae9ed2789a80292f40dc9d399c64b42650be7cd71bed"
+  },
+  "follow/rung2/base/ablation/countdown/stack50/L/stream1": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "e5f98457df2f4a5df09695575d66273a8d1171d82e8fd717ec792a48cfa758d5",
+   "keys_sha256": "c572869dd5b7ee2fb0a5d27fb0c10fd0c1145c28313dd92221f6f0c5f79219d5"
+  },
+  "follow/rung2/base/ablation/countdown/stack50/X/stream1": {
+   "directory": "continuation_14b/20261026-174632-adl_lens_package-a81a48bc-ee94",
+   "evidence_sha256": "1f7d8a228980ba6080d276ce2cec9e807547be945dd2a01ef74170786e812db2",
+   "keys_sha256": "bd09c1d5c37198f5279bbd2239f78256be772ef65779b300f6d54206f683cb0c"
+  },
+  "follow/rung2/base/ablation/eli5/stack200/H_s/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s6d0985cfc3f27b80",
+   "evidence_sha256": "055cf5323d4aeecb40e844ec713606f17290336cb15ff8d27426d1f80cdfb228",
+   "keys_sha256": "85cb8fdf5c2a63d9f2cf9afff3863386940383b63937a5923e76cc22be0a8f5d"
+  },
+  "follow/rung2/base/ablation/eli5/stack200/L/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "850ada14bb055135825012d5817b2c387bd9f719a1693157a84114780c6868f6",
+   "keys_sha256": "bd277831d09ed605550124ac4c2258c8cccaaf415340213658eaf675c0080b41"
+  },
+  "follow/rung2/base/ablation/eli5/stack200/X/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s911a0722bb150a83",
+   "evidence_sha256": "2bb4d5fa9df8ce10856e32463ba39bf9b91ece759c932c5541058367dc35542d",
+   "keys_sha256": "a18a646bfea8c6fd28995a0fdafaa78b92167b8dac1198a0fd1b96dc47c4b8ab"
+  },
+  "follow/rung2/base/ablation/example_link/stack200/H_s/stream1": {
+   "directory": "continuation_14b/20261016-010448-adl_lens_package-e91c1538-b5bc",
+   "evidence_sha256": "df8c5792bf6655bb70c1ef305c0ebd03435124e2092fde7c63163eb87460e158",
+   "keys_sha256": "7ebf755ae4d46fbe0e3215711265ac84bb8641e787577ce1855cf0b2e3334968"
+  },
+  "follow/rung2/base/ablation/example_link/stack200/L/stream1": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "f15b9efe197fefbeb060f09dcfc6ae7457e5f20c34cd143a1fcd1b291eea7dfe",
+   "keys_sha256": "d3526de8dcced230024a812fc28d18ea6ebb663ce11a8f30af2f6f626814f247"
+  },
+  "follow/rung2/base/ablation/example_link/stack200/X/stream1": {
+   "directory": "continuation_14b/20261016-012544-adl_lens_package-e142ea17-f2b3",
+   "evidence_sha256": "814f902bb6dca56d748b0d09d32846c0576216dd75c2f954d7ed14c42fa59fb8",
+   "keys_sha256": "188516b89eaad974a385cfaec70ec56839cbb0e23b4873b529dbd14393b9eb90"
+  },
+  "follow/rung2/base/ablation/pun_intended/stack200/H_s/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s105fc71c6e27eed8",
+   "evidence_sha256": "6c9343220323eaa20a981d60094da5dcf7147881115356cf15c3d5c647a28683",
+   "keys_sha256": "7450790686d30ad24b3594736e435f92cb21d9f503dfe9748533ff01993def83"
+  },
+  "follow/rung2/base/ablation/pun_intended/stack200/L/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "29e8a637ac9e9b949a74715b12d9b97bf7b1bdfe02777aa2e00ad48740b95b75",
+   "keys_sha256": "7a26e48b81e401535275d1465c0cb6057cd83ddf6d4dee7709ca2d4e52688855"
+  },
+  "follow/rung2/base/ablation/pun_intended/stack200/X/stream1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s84d867a7decbb68c",
+   "evidence_sha256": "5339b7db1271dae1097f5b54f2b9f311418cb32b50a99cc21c16ea3e0893c106",
+   "keys_sha256": "de3555121ebb76a37787d68600934068ab4d9e5f600716db375afffbc679bba8"
+  }
+ }
+}

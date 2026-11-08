@@ -78,6 +78,49 @@ def test_rung_2_s_evidence_refuses_incomplete_samples(tmp_path, change):
         L.render_rung2(run, s, tmp_path)
 
 
+def test_rung_2_s_evidence_without_chosen_steered_replies_keeps_everything_else(tmp_path):
+    run = cr._b2_probe_package(tmp_path)
+    s = steering(failed=("3",))
+    keys = L.steered_keys(s)
+    assert len(keys) == 4 * L.CLOSED_PROMPTS and all(p != "3" for p, _ in keys)
+    full = L.render_rung2(run, s, tmp_path, decoder="base")
+    assert L.render_rung2(run, s, tmp_path, decoder="base", drop=()) == full  # nothing dropped
+    drop = [keys[0], keys[25], keys[-1]]
+    evidence, sources = L.render_rung2(run, s, tmp_path, decoder="base", drop=drop)
+    assert sources == full[1]
+    got = json.loads(evidence[len("OVERVIEW:\n") :])["datasets"]["ds1"]["layers"]
+    want = json.loads(full[0][len("OVERVIEW:\n") :])["datasets"]["ds1"]["layers"]
+    assert got["29"] == want["29"] and got["19"]["steering_failed"] == ["3"]
+    for p, entry in got["19"]["positions"].items():
+        for row, plain in zip(entry["steering"], want["19"]["positions"][p]["steering"],
+                              strict=True):  # fmt: skip
+            gone = (p, row["prompt"]) in drop
+            assert ("steered" in row) is (not gone and p != "3")  # a dropped one never reappears
+            assert row["unsteered"] == plain["unsteered"] and row["prompt"] == plain["prompt"]
+            if not gone:
+                assert row == plain
+    assert sum("steered" not in r for e in got["19"]["positions"].values()
+               for r in e["steering"]) == L.CLOSED_PROMPTS + 3  # fmt: skip
+    with pytest.raises(ValueError, match="not a steered sample"):
+        L.render_rung2(run, s, tmp_path, drop=[("3", "prompt 0")])  # the failed position's
+
+
+def test_the_full_ablation_is_rung_2_s_rendering_with_every_steered_excerpt_dropped(tmp_path):
+    run = cr._b2_probe_package(tmp_path)
+    s = steering(failed=("3",))
+    full = L.render_rung2(run, s, tmp_path, decoder="base", drop=L.steered_keys(s))[0]
+    two = L.render_rung2(run, s, tmp_path, decoder="base")[0]
+    got = json.loads(full[len("OVERVIEW:\n") :])["datasets"]["ds1"]["layers"]
+    want = json.loads(two[len("OVERVIEW:\n") :])["datasets"]["ds1"]["layers"]
+    assert got["19"]["steering_failed"] == want["19"]["steering_failed"] == ["3"]  # kept
+    assert sorted(got["19"]) == sorted(want["19"])  # rung 2's structure: "steering", its failure
+    for p, entry in got["19"]["positions"].items():
+        assert all(sorted(r) == ["prompt", "unsteered"] for r in entry["steering"])
+        assert [r["unsteered"] for r in entry["steering"]] == [
+            r["unsteered"] for r in want["19"]["positions"][p]["steering"]]
+    assert '"steered"' not in full and '"steered"' in two
+
+
 def test_the_agent_and_the_comparator_share_one_protocol():
     agent, comparator = L.agent_prompt().text, L.comparator_prompt().text
     for text in (agent, comparator):

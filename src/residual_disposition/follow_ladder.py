@@ -8,6 +8,10 @@ B3: their inputs, prompts and parser. Rung 1 is D* (``lens_render``, barrier B2)
   strength search found no coherent strength keeps its unsteered samples only and is listed in
   ``steering_failed``. The prompt is D*'s (``adl-lens-multiscale-v2``) with adl-v1's steering
   parts restored verbatim and the samples described; one evidence-only interpreter, i = 0.
+- **Rung 2 without chosen steered samples** (``render_rung2``'s ``drop``, ``steered_keys``):
+  rung 2's evidence, structure and prompt with the named steered excerpts left out and their
+  unsteered excerpts kept: the steering ablation at the partial threshold and its two controls
+  (``follow_partial``), which differ only in the set of steered excerpts removed.
 - **Rung 3** (``agent_prompt``, ``comparator_prompt``, ``parse_turn``): the agent reads rung 2's
   evidence, the comparator the cell's unsteered samples only (``comparator_evidence``); both share
   one protocol: each turn ``QUERY: <prompt>`` (at most five, each answered once by the examined
@@ -19,7 +23,7 @@ B3: their inputs, prompts and parser. Rung 1 is D* (``lens_render``, barrier B2)
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -87,19 +91,18 @@ def steering_rows(samples: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
 RUNG_DECODERS = ("state", "random", "base", "base_random")
 
 
-def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
-                 decoder: str = "state") -> tuple[str, dict[str, str]]:  # fmt: skip
-    """Rung 2's evidence of one cell: D*'s rendering of its package ``run`` through ``decoder`` (the
-    state or the base decoder; for L with a random direction that decoder's stored random branch, at
-    both layers, so that none of L's own readings enters that control), and at layer 20 each
-    position's steering
-    samples (``steering``: ``{"per_position": {pos: {"samples": [...], "failed": reason or
-    None}}}``, §11.1's samples of the cell, every position with one row per closed prompt)."""
+_HEAD = "OVERVIEW:\n"
+
+
+def _with_samples(run: Path, steering: Mapping[str, Any], root: Path,
+                  decoder: str) -> tuple[dict, dict, list[str], dict[str, str]]:  # fmt: skip
+    """D*'s overview of ``run`` through ``decoder``, its layer-20 entry, the positions whose
+    steering failed and the rendering's sources, the cell's samples checked: of D*'s positions,
+    one per closed prompt, and steered exactly where the position's steering did not fail."""
     if decoder not in RUNG_DECODERS:
         raise ValueError(f"a rung's D* branch is {RUNG_DECODERS}, not {decoder!r}")
     evidence, sources = R.render(run, decoder, root)
-    head = "OVERVIEW:\n"
-    overview = json.loads(evidence[len(head) :])
+    overview = json.loads(evidence[len(_HEAD) :])
     layer = overview["datasets"]["ds1"]["layers"][str(int(STEERING_LAYER) - 1)]
     per = steering["per_position"]
     if sorted(per) != sorted(layer["positions"]):
@@ -114,10 +117,43 @@ def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
             raise ValueError(f"position {pos}: steered samples disagree with its failure")
         if entry["failed"] is not None:
             failed.append(pos)
-        layer["positions"][pos]["steering"] = steering_rows(samples)
+    return overview, layer, failed, sources
+
+
+def steered_keys(steering: Mapping[str, Any]) -> list[tuple[str, str]]:
+    """A cell's steered samples as ``(position, prompt)``, positions in order, prompts as
+    sampled."""
+    return [(pos, s["prompt"]) for pos, entry in sorted(steering["per_position"].items(),
+                                                        key=lambda x: int(x[0]))
+            for s in entry["samples"] if s["steered"] is not None]  # fmt: skip
+
+
+def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
+                 decoder: str = "state",
+                 drop: Collection[tuple[str, str]] = ()) -> tuple[str, dict[str, str]]:  # fmt: skip
+    """Rung 2's evidence of one cell: D*'s rendering of its package ``run`` through ``decoder`` (the
+    state or the base decoder; for L with a random direction that decoder's stored random branch, at
+    both layers, so that none of L's own readings enters that control), and at layer 20 each
+    position's steering
+    samples (``steering``: ``{"per_position": {pos: {"samples": [...], "failed": reason or
+    None}}}``, §11.1's samples of the cell, every position with one row per closed prompt). With
+    ``drop`` (``(position, prompt)`` keys of steered samples, ``steered_keys``), those steered
+    replies are left out, their unsteered replies and every position's failure kept: the steering
+    ablation and its controls (``follow_partial``); a key that is not a steered sample of the cell
+    is refused."""
+    overview, layer, failed, sources = _with_samples(run, steering, root, decoder)
+    drop = set(drop)
+    if drop - set(steered_keys(steering)):
+        raise ValueError("a dropped key is not a steered sample of the cell")
+    for pos, entry in steering["per_position"].items():
+        rows = steering_rows(entry["samples"])
+        for row in rows:
+            if (pos, row["prompt"]) in drop:
+                del row["steered"]
+        layer["positions"][pos]["steering"] = rows
     if failed:
         layer["steering_failed"] = sorted(failed, key=int)
-    return head + json.dumps(overview, ensure_ascii=False), sources
+    return _HEAD + json.dumps(overview, ensure_ascii=False), sources
 
 
 # ------------------------------------------------------------------------------------- rung 3

@@ -11,6 +11,9 @@ any Pod, the Pod sessions' records, and rung 2's readings on the base decoder by
     uv run python scripts/follow_partial.py [--pin | --send qualification |
                                              --send analysis --qualification RUN |
                                              --judge-history RUN]
+    uv run python scripts/follow_partial.py --ablation [--pin | --judge-history RUN]
+    uv run python scripts/follow_partial.py --send ablation
+    uv run python scripts/follow_partial.py --ablation-result RUN
 
 ``pin-sources`` writes every vector source's sha256 (``manifests/follow_partial_sources.json``),
 each build's tensors checked against its build session's result first; the Pod sessions refuse any
@@ -27,6 +30,17 @@ they differ, ``disputes/arbiter/out.jsonl``) against the judge by rule C and aga
 and specificity graders where a hypothesis was graded: ``compare.json``, descriptive. The
 readings' phases are rung 2's; the format is eli5's validation carried over (no supplement),
 and the decision per line carries the frozen comparison with rung 1.
+
+The steering ablation (``--ablation``; ``follow_partial.readings``' ``ablation``: the ablation, its
+two controls and their shared repeat, 28 readings, one phase, each reading carrying the steered
+excerpts it removes) takes the same pins and send apart, after rung 2's: its own pins
+(``manifests/follow_partial_ablation_inputs.json``, ``--pin`` writing each reading's evidence
+sha256 and keys, sending nothing), its own judge history, its runs
+``follow-partial-ablation-<time>`` under ``runs/follow_partial`` with the counts
+(``ablation.json``), on the meter item ``follow/partial/ablation``. ``--ablation-result`` writes
+a finished send's comparison (``comparison.json``, ``follow_partial.ablation_all``), descriptive:
+the readings at their pins and the send's histories; each condition's counts and specificity
+readings beside rung 2's and rung 1's, their differences with intervals and L's frozen pattern.
 """
 
 from __future__ import annotations
@@ -399,15 +413,27 @@ def format_compare(qualification: str, analysis: str) -> int:
     return 0
 
 
-def plan() -> dict[str, list[dict[str, Any]]]:
-    """Every reading by phase, the lines in order, with its directory, evidence's sha256 and
-    attempts."""
+RUNG2_PHASES = ("qualification", "analysis")
+ABLATION_PINS = "manifests/follow_partial_ablation_inputs.json"
+ABLATION_HISTORY = "manifests/stage3_judge_history_follow_partial_ablation.json"
+ABLATION_RUN = "follow-partial"  # its sends' runs: follow-partial-ablation-<time>
+ABLATION_RESULT = "comparison.json"
+
+
+def plan(phases: tuple[str, ...] = RUNG2_PHASES) -> dict[str, list[dict[str, Any]]]:
+    """Every reading of ``phases`` by phase, the lines in order, with its directory, evidence's
+    sha256 and attempts: rung 2's two phases, or the ablation alone."""
     samples = FP.steering(find_run)
     controls = cache(lambda: FP.base_random_dirs(find_run))
-    out: dict[str, list[dict[str, Any]]] = {"qualification": [], "analysis": []}
+    out: dict[str, list[dict[str, Any]]] = {p: [] for p in phases}
     for line in FP.LINES:
         for phase, rows in FP.readings(line).items():
+            if phase not in out:
+                continue
             for r in rows:
+                gone = FP.removal(r, samples)  # a cue control's removed replies, recorded
+                if gone is not None:
+                    r = {**r, "removed": gone}
                 directory = FP.package_dir(r, find_run, controls)
                 text = FP.evidence(r, directory, samples)
                 out[phase].append({
@@ -425,6 +451,53 @@ class Rung:
     item_of = staticmethod(FP.item_of)
     qualification = staticmethod(FP.qualification_all)
     decision = staticmethod(FP.decision)
+
+
+def ablation_plan() -> dict[str, list[dict[str, Any]]]:
+    return plan(("ablation",))
+
+
+def ablation_result(name: str) -> int:
+    """The steering ablation's comparison (``follow_partial.ablation_all``), descriptive, written
+    once to its send's run: its readings the pinned ones at the run's evidence, every slot from
+    the caches as the send's histories record it."""
+    from residual_disposition import continuation_rules as cr
+    from residual_disposition.manifests import committed_json
+
+    F.PINS, F.HISTORY = ABLATION_PINS, ABLATION_HISTORY
+    run = runs_root() / F.ROOT / name
+    out = run / ABLATION_RESULT
+    if not name.startswith(f"{ABLATION_RUN}-ablation-") or not (run / "ablation.json").is_file():
+        raise SystemExit(f"{name}: not a finished send of the ablation")
+    if out.exists():
+        raise SystemExit(f"{out}: the comparison is written once")
+    cells = ablation_plan()["ablation"]
+    found = Q.pin_problems(committed_json(REPO_ROOT / ABLATION_PINS, "the ablation's pins")
+                           ["readings"], Q.pins(cells, runs_root()))  # fmt: skip
+    if found:
+        raise SystemExit("the readings are not their pins: " + "; ".join(found[:5]))
+    inputs = json.loads((run / "inputs.json").read_text())["readings"]
+    if {r["salt"]: r["evidence_sha256"] for r in inputs} != {
+            c["reading"]["salt"]: c["evidence_sha256"] for c in cells}:  # fmt: skip
+        raise SystemExit(f"{name}: not the ablation's readings at their evidence")
+    ctx = F.context()
+    F.S.reconcile(runs_root() / F.ROOT, ctx["caches"])
+    rows = F.state(cells, ctx["caches"], ctx)
+    if F.RS.histories(rows) != json.loads((run / "histories.json").read_text()):
+        raise SystemExit(f"{name}: the caches no longer give the send's histories")
+    rules = cr.follow_rules().data["readers"]
+    F.S.write(out, FP.ablation_all(rows, rules, ctx["definitions"]))
+    print(f"wrote {out.relative_to(runs_root())} ({sha(out)})")
+    return 0
+
+
+def ablation(args: list[str]) -> int:
+    """The steering ablation through ``scripts/follow_rung2.py``'s pins and send: its own pins,
+    judge history, run name and meter item (``follow_partial.item_of``)."""
+    F.PINS, F.HISTORY, F.RUN = ABLATION_PINS, ABLATION_HISTORY, ABLATION_RUN
+    F.SENDS = ("ablation",)
+    F.plan = ablation_plan
+    return F.main([a for a in args if a != "--ablation"])
 
 
 def main() -> int:
@@ -445,6 +518,12 @@ def main() -> int:
     D.graded_reading = FP.graded_reading  # L's, H_s's, X's and the random cell's hypotheses
     F.R2 = Rung
     F.LABEL, F.ROOT = "follow/partial-rung2", "follow_partial"
+    if len(args) == 2 and args[0] == "--ablation-result":
+        return ablation_result(args[1])
+    sends = [b for a, b in zip(args, args[1:], strict=False) if a == "--send"]
+    if "--ablation" in args or "ablation" in sends:
+        F.LABEL = "follow/partial-ablation"
+        return ablation(args)
     F.PINS = "manifests/follow_partial_inputs.json"
     F.HISTORY = "manifests/stage3_judge_history_follow_partial.json"
     F.plan = plan
