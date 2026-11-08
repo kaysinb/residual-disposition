@@ -205,3 +205,106 @@ def test_the_screening_s_one_hit_at_400_is_recounted_from_its_pinned_pool():
     (row,) = F.screening_hits(b4, screening, find_run, ws.behavior.detector)
     assert (row["config"], row["prefill"]) == ("chat", "p00768")
     assert "ELI5:" in row["completion"]
+
+
+# --------------------------------------------------------------------------- rung 1's readings
+
+
+def test_800_s_rung_1_readings_are_its_committed_pins():
+    from residual_disposition import follow_readings as D
+
+    built = json.loads((cr.REPO_ROOT / "manifests" / "follow_stack_build.json").read_text())
+    path = cr.REPO_ROOT / "manifests" / "follow_stack_readings_inputs.json"
+    pins = json.loads(path.read_text())
+    assert sorted(r["salt"] for r in D.stack_readings(built["states"])) == sorted(pins["readings"])
+    assert D.stack_readings(built["states"]) == D.stack_readings(built["states"], 800,
+                                                                 ("base", "state"))  # fmt: skip
+
+
+def test_400_s_rung_1_reads_the_base_decoder_and_unfiltered_pd():
+    from residual_disposition import follow_readings as D
+
+    states = {"L": "sL", "H_s": "sH", "X": "sX", "recipe": "sR"}
+    rows = D.stack_readings(states, 400, ("base",))
+    assert len(rows) == 11 and len({r["salt"] for r in rows}) == 11
+    assert all(r["mode"] == "stack400" and r["dose"] == 400 and "/stack400/" in r["salt"]
+               for r in rows)  # fmt: skip
+    assert {r["decoder"] for r in rows if r["reader"] == "dstar"} == {"base", "base_random"}
+    assert sorted((r["reader"], r["role"]) for r in rows if r["purpose"] == "qualification") == [
+        ("dstar", "recipe"), ("dstar", "recipe"), ("pd_unfiltered", "recipe"),
+        ("pd_unfiltered", "recipe")]  # fmt: skip
+    assert sorted(r["role"] for r in rows if r["reader"] == "pd_unfiltered"
+                  and r["purpose"] == "analysis") == ["H_s", "L", "X"]  # fmt: skip
+    eight = {r["salt"] for r in D.stack_readings(states)}
+    assert not eight & {r["salt"] for r in rows}
+    with pytest.raises(ValueError, match="decoders"):
+        D.stack_readings(states, 400, ("random",))
+    with pytest.raises(ValueError, match="decoders"):
+        D.stack_readings(states, 400, ())
+
+
+def readings_row(reader, role, decoder, counted):
+    slots = []
+    for i in range(80):
+        yes = i < counted
+        s = {"hypothesis": {"value": "I will.", "history": []},
+             "labels": {"strict": {"value": ("other", False), "history": []},
+                        "lenient": {"value": yes, "history": []}}}  # fmt: skip
+        if yes:
+            s["grades"] = {"category": {"value": frozenset({"eli5"}), "history": []},
+                           "specificity": {"value": ("feature", True), "history": []}}
+        slots.append(s)
+    return {"reading": {"reader": reader, "behavior": "eli5", "mode": "stack400", "role": role,
+                        "decoder": decoder}, "slots": slots,
+            "count": {"counted": counted, "n": 80, "blocked": 0, "blocked_lenient_yes": 0}}
+
+
+def test_400_s_analysis_has_no_state_family_and_is_not_pending_for_it():
+    from residual_disposition import follow_readings as D
+    from residual_disposition import follow_regions as fr
+    from residual_disposition.continuation_definitions import load_definitions
+    from residual_disposition.continuation_readers import DEFINITIONS_SHA256
+
+    rows = [readings_row("dstar", r, "base", 0) for r in ("L", "H_s", "X")]
+    rows += [readings_row("pd_unfiltered", r, None, 0) for r in ("L", "H_s", "X")]
+    rows.append(readings_row("dstar", "L", "base_random", 0))
+    floors = {"eli5": {"dstar": {"eligible": None, "base_qualification": True},
+                       "pd_unfiltered": True}}  # fmt: skip
+    definitions, _ = load_definitions(expected_hash=DEFINITIONS_SHA256)
+    out = D.analysis(rows, floors, {"dstar": True, "pd_unfiltered": True},
+                     {"dstar": True, "pd_unfiltered": True}, fr.load(),
+                     cr.follow_rules().data["readers"], definitions,
+                     fidelity_known={"eli5": {"passed": True}}, decoders=("base",))  # fmt: skip
+    line = out["lines"]["eli5"]
+    assert "dstar_state" not in line and line["both_decoders"] is None
+    assert line["dstar_base"]["counts"] == {"L": 0, "H_s": 0, "X": 0}
+    assert line["dstar_base"]["decisions"] is not None and line["base_random"] == 0
+    assert out["pending"] is False
+
+
+def test_400_s_floors_are_the_base_decoder_s_alone(monkeypatch):
+    from fractions import Fraction
+
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "scripts"))
+    import follow_stack_readings as S
+
+    for name in ("RECORD", "L_POOL", "DOSE", "DECODERS", "BUILDS", "READINGS"):
+        monkeypatch.setattr(S, name, getattr(S, name))
+    S.at_dose(400)
+    assert S.DOSE == 400 and S.DECODERS == ("base",)
+    assert S.READINGS["ITEM"] == "follow/stack400/full"
+    pinned = cr.follow_b4()["screening"]["pinned"]["se244833f590245e7"]["run"]
+    assert pinned == S.L_POOL
+    monkeypatch.setattr(S.Path, "read_text", lambda self: json.dumps({"rates": {
+        "dstar/eli5/A/state": "1", "dstar/eli5/A/base": "1", "dstar/eli5/H/state": "0",
+        "dstar/eli5/H/base": "0", "dstar/eli5/A/random": "0", "dstar/eli5/A/no_patch": "0",
+        "pd_unfiltered/eli5/A/None": "1"}}))  # fmt: skip
+    monkeypatch.setattr(S, "runs_root", lambda: S.Path("/nowhere"))
+    monkeypatch.setattr(S.Q, "pooled", lambda rows: {
+        ("dstar", "eli5", "recipe", "base"): Fraction(1),
+        ("pd_unfiltered", "eli5", "recipe", None): Fraction(1)})  # fmt: skip
+    q = S.floors_of([])["eli5"]["dstar"]
+    assert q["recipe_floor_met"] == {"base": True} and q["eligible"] is None
+    assert q["base_qualification"] is True and "state" not in q
+    with pytest.raises(SystemExit, match="800 or 400"):
+        S.at_dose(600)

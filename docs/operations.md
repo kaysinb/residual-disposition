@@ -1898,6 +1898,12 @@ are `configs/continuation/follow_build_stack400.yaml`, frozen by
 - **Builds and pools:** `scripts/pod/follow_build.py … --stack-dose 400 --session stack400` and
   `scripts/pod/follow_pools.py experiments/continuation_14b/eli5 --stack-dose 400 …`, as 800's
   with `--stack`; the manifests record the dose and the 400 file's hash.
+- **Rung 1:** after the pull, `scripts/follow_stack_readings.py --dose 400 --record-build RUN`
+  (the session under `runs/follow_stack400/RUN/out`) writes `manifests/follow_stack400_build.json`
+  once; then `--dose 400 --pin`, `--send`, `--judge-history RUN`, as 800's, on
+  `follow/stack400/full`: the base decoder alone (L, H_s, X, L's base_random cell, the recipe
+  control on two streams) and unfiltered PD (L, H_s, X, the recipe control on two streams), 11
+  readings of 80 under `…/stack400/…` salts; the record has no state-decoder family.
 - **k\* and the certificate:** `scripts/pod/follow_certificate.py --line eli5_stack_400`, as 800's
   line, on the meter item `follow/cert/eli5_stack_400`; the line's binding hashes B3 with 400's
   file's lines only, so 800's binding is unchanged.

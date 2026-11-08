@@ -56,25 +56,35 @@ def readings(confirmed: Mapping[str, int], repo: Path | None = None) -> list[dic
             *base_fidelity_readings(repo)]  # fmt: skip
 
 
-def stack_readings(states: Mapping[str, str]) -> list[dict[str, Any]]:
-    """Rung 1 on eli5's validated stack candidate 800 (§13.7): its recipe control's qualification,
-    two streams of 80 on each decoder and by unfiltered PD (§13.5 (a): each mode's recipe control
-    is qualified separately, A and H shared); its L, H_s and X on both decoders and by unfiltered
+STACK_DECODERS = ("state", "base")
+RANDOM_OF = {"state": "random", "base": "base_random"}  # L's random directions per decoder
+
+
+def stack_readings(states: Mapping[str, str], dose: int = 800,
+                   decoders: Sequence[str] = STACK_DECODERS) -> list[dict[str, Any]]:  # fmt: skip
+    """Rung 1 on eli5's stack at ``dose``: the validated candidate 800 (§13.7) on both decoders, or
+    the stack at 400 (§13.16) on the base decoder alone. Its recipe control's qualification, two
+    streams of 80 on each decoder read and by unfiltered PD (§13.5 (a): each mode's recipe control
+    is qualified separately, A and H shared); its L, H_s and X on each decoder and by unfiltered
     PD; and L's random directions through each decoder (§13.16, point 5)."""
+    if not decoders or set(decoders) - set(STACK_DECODERS) or len(set(decoders)) != len(decoders):
+        raise ValueError(f"decoders {list(decoders)}, not distinct of {STACK_DECODERS}")
+    decoders = [d for d in STACK_DECODERS if d in decoders]
+    lineage = f"stack{int(dose)}"
+
     def row(reader: str, role: str, decoder: str | None, stream: int, purpose: str) -> dict:
         tail = f"{role}/{decoder}" if reader == "dstar" else role
         name = "dstar" if reader == "dstar" else "pd"
         return {"reader": reader, "behavior": "eli5", "role": role, "decoder": decoder,
-                "stream": stream, "purpose": purpose, "mode": "stack800", "dose": 800,
+                "stream": stream, "purpose": purpose, "mode": lineage, "dose": int(dose),
                 "if_confirmed": None, "slots": 80, "package": {"state": states[role]},
-                "salt": f"follow/{name}/{purpose}/eli5/stack800/{tail}/stream{stream}"}  # fmt: skip
+                "salt": f"follow/{name}/{purpose}/eli5/{lineage}/{tail}/stream{stream}",
+                }  # fmt: skip
 
-    rows = [row("dstar", "recipe", d, s, "qualification") for d in ("state", "base")
-            for s in STREAMS]  # fmt: skip
+    rows = [row("dstar", "recipe", d, s, "qualification") for d in decoders for s in STREAMS]
     rows += [row("pd_unfiltered", "recipe", None, s, "qualification") for s in STREAMS]
-    rows += [row("dstar", r, d, 1, "analysis") for r in ("L", "H_s", "X")
-             for d in ("state", "base")]  # fmt: skip
-    rows += [row("dstar", "L", d, 1, "analysis") for d in ("random", "base_random")]
+    rows += [row("dstar", r, d, 1, "analysis") for r in ("L", "H_s", "X") for d in decoders]
+    rows += [row("dstar", "L", RANDOM_OF[d], 1, "analysis") for d in decoders]
     rows += [row("pd_unfiltered", r, None, 1, "analysis") for r in ("L", "H_s", "X")]
     return rows
 
@@ -368,9 +378,12 @@ def analysis(
     rows: Sequence[Mapping[str, Any]], floors: Mapping[str, Any], accepted: Mapping[str, bool],
     validated: Mapping[str, bool], regions: Any, rules: Mapping[str, Any],
     definitions: Mapping[str, Any], fidelity_known: Mapping[str, Any] | None = None,
+    decoders: Sequence[str] = STACK_DECODERS,
 ) -> dict[str, Any]:  # fmt: skip
     """The readings' record (see the module); ``floors`` the qualification's, ``accepted`` each
-    format's validation, ``validated`` each format's specificity grader."""
+    format's validation, ``validated`` each format's specificity grader; ``decoders`` the D*
+    decoders read (both, or the base decoder alone for the stack at 400: the other's family is
+    absent, never pending)."""
     from . import continuation_stats as cs
     from .follow_regions import ALPHA, LEVELS
 
@@ -397,6 +410,8 @@ def analysis(
             ("dstar", "base", "dstar_base", base_ok),
             ("pd_unfiltered", None, "pd_unfiltered", pd_ok),
         ):
+            if reader == "dstar" and decoder not in decoders:
+                continue
             line = _line(by, reader, behavior, mode, decoder, regions)
             cell = by.get((reader, behavior, mode, "L", decoder))
             graded = None
@@ -424,7 +439,8 @@ def analysis(
                                                           else met and validated[fmt])  # fmt: skip
             if mode == "stack":
                 families[family][behavior] = decided
-        state, base = entry["dstar_state"]["decisions"], entry["dstar_base"]["decisions"]
+        state = (entry.get("dstar_state") or {}).get("decisions")
+        base = (entry.get("dstar_base") or {}).get("decisions")
         both = None if state is None or base is None else {
             str(a): state[str(a)] and base[str(a)] for a in LEVELS}  # fmt: skip
         entry["both_decoders"] = both
