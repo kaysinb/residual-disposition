@@ -1904,6 +1904,14 @@ are `configs/continuation/follow_build_stack400.yaml`, frozen by
   `follow/stack400/full`: the base decoder alone (L, H_s, X, L's base_random cell, the recipe
   control on two streams) and unfiltered PD (L, H_s, X, the recipe control on two streams), 11
   readings of 80 under `…/stack400/…` salts; the record has no state-decoder family.
+- **Rung 2:** steering on the Pod by `scripts/pod/follow_steering.py … --stack <the 400 build
+  session's build directory> --stack-dose 400` (worker `stack400-rung2-steering`, the five cells of
+  `follow_rung2_stack400.steering_cells`), its record by `scripts/follow_stack_rung2.py --dose 400
+  --record-steering RUN --write` (`manifests/follow_stack400_rung2_steering.json`); then `--dose
+  400 --pin`, `--send qualification`, `--send analysis --qualification RUN`, as 800's, on
+  `follow/stack400/full`: the base decoder alone, the recipe control on two streams and the five
+  cells under `follow/rung2/base/…/eli5/stack400/…` salts; A and H the rung's shared
+  qualification, the continued mode's format validation.
 - **k\* and the certificate:** `scripts/pod/follow_certificate.py --line eli5_stack_400`, as 800's
   line, on the meter item `follow/cert/eli5_stack_400`; the line's binding hashes B3 with 400's
   file's lines only, so 800's binding is unchanged.

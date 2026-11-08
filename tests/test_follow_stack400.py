@@ -308,3 +308,86 @@ def test_400_s_floors_are_the_base_decoder_s_alone(monkeypatch):
     assert q["base_qualification"] is True and "state" not in q
     with pytest.raises(SystemExit, match="800 or 400"):
         S.at_dose(600)
+
+
+# ---------------------------------------------------------------------------------- rung 2
+
+STATES = {"L": "sL", "H_s": "sH", "X": "sX", "recipe": "sR"}
+
+
+def test_800_s_rung_2_readings_are_its_committed_pins():
+    from residual_disposition import follow_rung2_stack as RS
+
+    rows = RS.readings(RS.built())
+    path = cr.REPO_ROOT / "manifests" / "follow_stack_rung2_inputs.json"
+    pins = json.loads(path.read_text())["readings"]
+    assert sorted(r["salt"] for part in rows.values() for r in part) == sorted(pins)
+    assert RS.readings(RS.built(), dose=800, decoders=("base", "state")) == rows
+
+
+def test_400_s_rung_2_reads_the_base_decoder_under_its_own_salts():
+    from residual_disposition import follow_rung2 as R2
+    from residual_disposition import follow_rung2_stack as RS
+    from residual_disposition import follow_rung2_stack400 as RS4
+
+    rows = RS4.readings({"states": STATES})
+    q, a = rows["qualification"], rows["analysis"]
+    assert [r["salt"] for r in q] == [
+        f"follow/rung2/base/qualification/eli5/stack400/recipe/stream{s}" for s in (1, 2)]
+    assert all(r["package"] == {"state": "sR"} and r["decoder"] == "base" for r in q)
+    assert sorted(r["role"] for r in a) == ["H_s", "L", "L_random", "X", "recipe"]
+    assert all(r["salt"].startswith("follow/rung2/base/analysis/eli5/stack400/") for r in a)
+    cells = {r["role"]: r for r in a}
+    assert cells["L_random"]["decoder"] == "base_random"
+    assert cells["L_random"]["package"] == {"state": "sL"}
+    assert {r["decoder"] for r in a} == {"base", "base_random"}
+    eight = RS.readings({"states": STATES})
+    others = {r["salt"] for part in (*eight.values(), *R2.readings().values()) for r in part}
+    assert not others & {r["salt"] for r in (*q, *a)}
+    assert {RS4.item_of(r) for r in (*q, *a)} == {"follow/stack400/full"}
+    assert sum(r["slots"] for r in (*q, *a)) == 560
+    with pytest.raises(ValueError, match="decoders"):
+        RS.readings({"states": STATES}, dose=400, decoders=("random",))
+
+
+def test_400_s_rung_2_floors_and_decision_are_the_base_decoder_s(monkeypatch):
+    from fractions import Fraction
+
+    from residual_disposition import follow_regions as fr
+    from residual_disposition import follow_rung2 as R2
+    from residual_disposition import follow_rung2_stack as RS
+    from residual_disposition import follow_rung2_stack400 as RS4
+    from residual_disposition.continuation_definitions import load_definitions
+    from residual_disposition.continuation_readers import DEFINITIONS_SHA256
+
+    shared = {(R2.READER, "eli5", role, d): Fraction(1 if role == "A" else 0)
+              for d in ("state", "base") for role in ("A", "H")}  # fmt: skip
+    monkeypatch.setattr(RS, "shared_rates", lambda runs=None: shared)
+    monkeypatch.setattr(R2.Q, "pooled", lambda rows: {
+        (R2.READER, "eli5", "recipe", "base"): Fraction(1)})  # fmt: skip
+    rules = cr.follow_rules().data["readers"]
+    floors = RS4.qualification([], rules)
+    assert sorted(floors) == ["base"] and floors["base"]["eligible"] is True
+    assert floors["base"]["recipe_floor_met"] is True
+    rows = [readings_row("rung2", r, "base", 0) for r in ("L", "H_s", "X", "recipe")]
+    rows.append(readings_row("rung2", "L_random", "base_random", 0))
+    definitions, _ = load_definitions(expected_hash=DEFINITIONS_SHA256)
+    out = RS4.decision(rows, floors, True, True, fr.load(), rules, definitions)
+    assert sorted(out["decoders"]) == ["base"] and out["pending"] is False
+    assert out["decoders"]["base"]["status"] == "not identified"
+
+
+def test_the_stack_rung_2_script_points_at_400(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "scripts"))
+    import follow_stack_rung2 as SR
+
+    from residual_disposition import follow_rung2_stack400 as RS4
+
+    for name in ("RS", "MANUAL", "BUILDS", "NAMES"):
+        monkeypatch.setattr(SR, name, getattr(SR, name))
+    SR.at_dose(400)
+    assert SR.RS is RS4 and SR.BUILDS == "follow_stack400"
+    assert SR.NAMES["PINS"] == "manifests/follow_stack400_rung2_inputs.json"
+    assert SR.MANUAL != "manifests/follow_stack_rung2_manual_coherence.json"
+    with pytest.raises(SystemExit, match="800 or 400"):
+        SR.at_dose(200)

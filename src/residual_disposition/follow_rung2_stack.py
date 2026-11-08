@@ -41,18 +41,20 @@ ITEM = "follow/stack/rung2"
 LEFT = "follow/stack/full"  # the stack path's item: the base decoder's readings spend its rest
 WORKER = "stack-rung2-steering"
 RECIPE = "recipe"
+RECIPE_STREAMS = (1, 2)  # the mode's recipe control, two streams of 80 (§13.5 (a))
 BUILD_RECORD = "manifests/follow_stack_build.json"
 STEERING_RECORD = "manifests/follow_stack_rung2_steering.json"
 SHARED_QUALIFICATION = "follow-rung2-qualification-20261101T141901Z"  # A and H of the rung
 
 
-def built(repo: Path | None = None) -> dict[str, Any]:
+def built(repo: Path | None = None, record: str = BUILD_RECORD) -> dict[str, Any]:
     """The candidate's build session, by its committed record (read back after the check, since
-    ``committed_json`` puts the file's own digest over the record's ``sha256``)."""
+    ``committed_json`` puts the file's own digest over the record's ``sha256``); ``record`` another
+    stack dose's (``follow_rung2_stack400``)."""
     from .manifests import committed_json
     from .paths import REPO_ROOT
 
-    path = (repo or REPO_ROOT) / BUILD_RECORD
+    path = (repo or REPO_ROOT) / record
     committed_json(path, "the build session's record", repo)
     return json.loads(path.read_text())
 
@@ -64,15 +66,23 @@ def base_reading(row: Mapping[str, Any]) -> dict[str, Any]:
             "decoder": decoder}  # fmt: skip
 
 
-def readings(record: Mapping[str, Any],
-             repo: Path | None = None) -> dict[str, list[dict[str, Any]]]:  # fmt: skip
+def readings(record: Mapping[str, Any], repo: Path | None = None, *, dose: int = DOSE,
+             decoders: Sequence[str] = DECODERS) -> dict[str, list[dict[str, Any]]]:  # fmt: skip
     """The rung's readings by phase, the state decoder's first, each with the state it reads; L with
-    a random direction reads L's package through that decoder's random branch."""
+    a random direction reads L's package through that decoder's random branch. At 800 the recipe
+    streams are B3's frozen ones; at another dose (the stack at 400, §13.16) they carry the dose in
+    their salts, and ``decoders`` may be the base decoder alone."""
     from . import continuation_rules as cr
     from .paths import REPO_ROOT
 
-    path = (repo or REPO_ROOT) / cr.follow_b3()["inventory"]["manifest"]
-    frozen = json.loads(path.read_text())["rung2"]["recipe_stack"]
+    if set(decoders) - set(DECODERS) or not decoders:
+        raise ValueError(f"decoders {list(decoders)}, not of {DECODERS}")
+    if dose == 800:
+        path = (repo or REPO_ROOT) / cr.follow_b3()["inventory"]["manifest"]
+        frozen = json.loads(path.read_text())["rung2"]["recipe_stack"]
+    else:
+        frozen = [fi._rung_reading(2, "qualification", RECIPE, s, mode=MODE, dose=dose)
+                  for s in RECIPE_STREAMS]  # fmt: skip
     states = record["states"]
 
     def analysis(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -81,9 +91,13 @@ def readings(record: Mapping[str, Any],
                 "decoder": "random" if random else "state"}  # fmt: skip
 
     recipe = [{**r, "package": {"state": states[RECIPE]}} for r in frozen]
-    cells = [analysis(r) for r in fi.rung_analysis(2, MODE, DOSE)]
-    return {"qualification": [*recipe, *map(base_reading, recipe)],
-            "analysis": [*cells, *map(base_reading, cells)]}  # fmt: skip
+    cells = [analysis(r) for r in fi.rung_analysis(2, MODE, dose)]
+
+    def through(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [*(rows if "state" in decoders else []),
+                *(map(base_reading, rows) if "base" in decoders else [])]  # fmt: skip
+
+    return {"qualification": through(recipe), "analysis": through(cells)}
 
 
 def item_of(reading: Mapping[str, Any]) -> str:
@@ -93,22 +107,24 @@ def item_of(reading: Mapping[str, Any]) -> str:
     return ITEM if reading["decoder"] == "state" else LEFT
 
 
-def steering_cells(repo: Path | None = None) -> list[dict[str, Any]]:
+def steering_cells(repo: Path | None = None,
+                   record: str = BUILD_RECORD) -> list[dict[str, Any]]:  # fmt: skip
     """The session's cells, L before its random cell; ``run`` names the cell's built state."""
-    states = built(repo)["states"]
+    states = (built(repo) if record == BUILD_RECORD else built(repo, record))["states"]
     cells = [{"cell": role, "run": states[role], "random": False}
              for role in (RECIPE, "L", "H_s", "X")]  # fmt: skip
     return [*cells, {"cell": RANDOM_CELL, "run": states["L"], "random": True}]
 
 
 def source_problems(build: Path, cells: Sequence[Mapping[str, Any]],
-                    repo: Path | None = None) -> list[str]:  # fmt: skip
+                    repo: Path | None = None, record: str = BUILD_RECORD) -> list[str]:  # fmt: skip
     """Why the build directory is not the committed session's: its result at its recorded sha256,
     and each cell's two layer-20 files as that result records them."""
     def sha(path: Path) -> str:
         return hashlib.sha256(path.read_bytes()).hexdigest()
 
-    if sha(build / "result.json") != built(repo)["sha256"]["build"]:
+    held = built(repo) if record == BUILD_RECORD else built(repo, record)  # 800's call unchanged
+    if sha(build / "result.json") != held["sha256"]["build"]:
         return ["the build's result is not its committed record"]
     files = json.loads((build / "result.json").read_text())["files"]
     layer = int(L.STEERING_LAYER)
@@ -138,9 +154,10 @@ def cell_vectors(directory: Path, *, random: bool) -> tuple[Any, float, int]:
     return vectors, float(record["norms"][str(layer)]), int(record["seeds"]["package"])
 
 
-def steering(find_run: Callable[[str], Any], repo: Path | None = None) -> dict[str, dict[str, Any]]:
+def steering(find_run: Callable[[str], Any], repo: Path | None = None,
+             record: str = STEERING_RECORD) -> dict[str, dict[str, Any]]:  # fmt: skip
     """Each cell's samples, bound by this mode's committed record."""
-    return R2.steering(find_run, repo, STEERING_RECORD)
+    return R2.steering(find_run, repo, record)
 
 
 def shared_rates(runs: Path | None = None) -> dict[tuple, Fraction]:
@@ -154,6 +171,8 @@ def shared_rates(runs: Path | None = None) -> dict[tuple, Fraction]:
 
 
 def qualification(rows: Sequence[Mapping[str, Any]], rules: Mapping[str, Any],
-                  runs: Path | None = None) -> dict[str, Any]:  # fmt: skip
+                  runs: Path | None = None,
+                  decoders: Sequence[str] = DECODERS) -> dict[str, Any]:  # fmt: skip
     """Each decoder's floors: the shared A and H, this mode's recipe control."""
-    return R2.qualification(rows, rules, recipe=RECIPE, shared=shared_rates(runs))
+    return R2.qualification(rows, rules, recipe=RECIPE, shared=shared_rates(runs),
+                            decoders=decoders)  # fmt: skip

@@ -2,10 +2,12 @@
 Pod, from the packages' pinned sources: seven cells of eli5 continued 200's rung, each by §11.1's
 strength search and one steered and one unsteered sample per closed prompt and position. With
 ``--stack <the build session's build directory>``: the five cells of the stack candidate 800
-(``follow_rung2_stack``). With ``--resume`` the stopped session's saved steps are copied first and
-the search continues where it stopped; ``--manual`` (committed) gives the researcher's labels of
-safety-blocked batches (§13.16, after H11), sent to no provider; with ``--manual-sha`` a later
-version of that committed file, uploaded to the Pod, is read by its sha256 instead.
+(``follow_rung2_stack``); with ``--stack-dose 400`` beside it, the stack at 400's
+(``follow_rung2_stack400``, §13.16), its own build record and worker. With ``--resume`` the stopped
+session's saved steps are copied first and the search continues where it stopped; ``--manual``
+(committed) gives the researcher's labels of safety-blocked batches (§13.16, after H11), sent to no
+provider; with ``--manual-sha`` a later version of that committed file, uploaded to the Pod, is read
+by its sha256 instead.
 
     uv run python scripts/pod/follow_steering.py \\
         experiments/continuation_14b/word_count_claim --space <space> --out <new directory> \\
@@ -40,6 +42,7 @@ from residual_disposition import follow_build as B
 from residual_disposition import follow_m0 as M
 from residual_disposition import follow_rung2 as R2
 from residual_disposition import follow_rung2_stack as RS
+from residual_disposition import follow_rung2_stack400 as RS400
 from residual_disposition import pipeline as P
 from residual_disposition.config import from_cli
 
@@ -60,10 +63,14 @@ def main() -> int:
     out, space = Path(take("--out")), Path(take("--space"))
     session_id, session_usd = take("--session"), float(take("--api-usd"))
     stack = Path(take("--stack")) if "--stack" in sys.argv else None
+    dose = int(take("--stack-dose")) if "--stack-dose" in sys.argv else 800
+    if dose not in (800, 400) or (dose != 800 and stack is None):
+        raise SystemExit(f"--stack-dose {dose}: 800 or 400, with --stack")
+    SM = RS400 if dose == 400 else RS  # noqa: N806  the stack dose's module
     resume = Path(take("--resume")) if "--resume" in sys.argv else None
     manual_path = take("--manual") if "--manual" in sys.argv else None
     manual_sha = take("--manual-sha") if "--manual-sha" in sys.argv else None
-    worker = RS.WORKER if stack else WORKER
+    worker = SM.WORKER if stack else WORKER
     problems = B.placement_problems(space, out)
     if problems:  # before any write
         raise SystemExit("; ".join(problems))
@@ -74,14 +81,14 @@ def main() -> int:
     cfg = from_cli()
     from residual_disposition.continuation_kstar import find_run
 
-    cells = RS.steering_cells() if stack else R2.steering_cells()
+    cells = SM.steering_cells() if stack else R2.steering_cells()
     ws = P.Workspace(cfg)
     spec = P._lens_spec(ws)
     planned = (adl.SEQUENCES, adl.SEQUENCE_TOKENS)
     problems = M.runtime_problems(OmegaConf.to_container(cfg.model, resolve=True), spec, planned,
                                   {"runtime": session["runtime"]})  # fmt: skip
     if stack:
-        problems += RS.source_problems(stack, cells)
+        problems += SM.source_problems(stack, cells)
     else:
         for c in cells:
             run, base = Path(find_run(c["run"])), Path(find_run(c["vector"]["base_means"]["run"]))
@@ -165,7 +172,7 @@ def main() -> int:
 
     def steer(cell: Any, store: Any) -> dict[str, Any]:
         if stack:
-            vectors, norm, seed = RS.cell_vectors(stack / "builds" / cell["run"],
+            vectors, norm, seed = SM.cell_vectors(stack / "builds" / cell["run"],
                                                   random=cell["random"])  # fmt: skip
         else:
             run = Path(find_run(cell["run"]))
