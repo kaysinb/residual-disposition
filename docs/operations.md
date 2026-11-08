@@ -1900,7 +1900,9 @@ are `configs/continuation/follow_build_stack400.yaml`, frozen by
   with `--stack`; the manifests record the dose and the 400 file's hash.
 - **Rung 1:** after the pull, `scripts/follow_stack_readings.py --dose 400 --record-build RUN`
   (the session under `runs/follow_stack400/RUN/out`) writes `manifests/follow_stack400_build.json`
-  once; then `--dose 400 --pin`, `--send`, `--judge-history RUN`, as 800's, on
+  once. It refuses unless both manifests, the builds' and the pools', carry 400's frozen builds
+  hash and dose, every built role is at its configured state and every pool is at its role's built
+  state; a pools session run with `--stack` (800's) cannot enter 400's record. Then `--dose 400 --pin`, `--send`, `--judge-history RUN`, as 800's, on
   `follow/stack400/full`: the base decoder alone (L, H_s, X, L's base_random cell, the recipe
   control on two streams) and unfiltered PD (L, H_s, X, the recipe control on two streams), 11
   readings of 80 under `…/stack400/…` salts; the record has no state-decoder family.
@@ -1918,10 +1920,14 @@ are `configs/continuation/follow_build_stack400.yaml`, frozen by
   `follow/lenshint/base/hint/eli5/stack400/…` salts, on `follow/stack400/lens_hint`), then `--stack400 --rung1
   follow_stack400_readings/<run>/readings.json --lens-hint-result RUN`: eli5's A and H come from
   the committed hint summary `follow-lens-hint-lens_hint-20261108T212846Z` at its sha256, never
-  read again; one fragment line, no deletion arm.
+  read again; one fragment line, no deletion arm. The summary refuses without `--rung1`, or when
+  that record is pending or its readings or evidence are not rung 1's pins at 400; the record's
+  sha256 is kept in the summary. Planning and sending need no `--rung1`.
 - **k\* and the certificate:** `scripts/pod/follow_certificate.py --line eli5_stack_400`, as 800's
   line, on the meter item `follow/cert/eli5_stack_400`; the line's binding hashes B3 with 400's
-  file's lines only, so 800's binding is unchanged.
+  file's lines only, so 800's binding is unchanged. The relearning seeds are the rules' (6–8 for
+  k\*, blocks 0–5), as at 200 and 800: common random numbers across the doses, compared block by
+  block (§13.16).
 
 ## Follow-up: barrier B3
 

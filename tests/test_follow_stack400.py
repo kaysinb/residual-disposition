@@ -310,6 +310,54 @@ def test_400_s_floors_are_the_base_decoder_s_alone(monkeypatch):
         S.at_dose(600)
 
 
+def session_dir(tmp_path, build_dose, pool_dose):
+    """A build session's output: its builds at ``build_dose``'s states and frozen hash, its pools
+    at ``pool_dose``'s."""
+
+    def states(dose):
+        (session,) = cr.follow_build_stack(dose)["sessions"].values()
+        return {b["role"]: b.get("state") or f"sX{dose}" for b in session["builds"]}
+
+    out = tmp_path / "out"
+    built, pooled = states(build_dose), states(pool_dose)
+    for x, dose, extra in (("build", build_dose,
+                            {"plan": {"builds": [{"role": r, "state": s}
+                                                 for r, s in built.items()]}}),
+                           ("pools", pool_dose, {})):  # fmt: skip
+        (out / x).mkdir(parents=True)
+        (out / x / "manifest.json").write_text(json.dumps(
+            {"follow_build_sha256": cr.follow_build_stack_frozen(dose), "stack_dose": dose,
+             **extra}))  # fmt: skip
+    pools = {pooled[r]: {"role": r, "run": f"pool-{r}"} for r in ("H_s", "X", "recipe")}
+    return out, built, pools
+
+
+def test_400_s_build_record_refuses_800_s_pools(monkeypatch, tmp_path):
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[1] / "scripts"))
+    import follow_stack_readings as S
+
+    for name in ("RECORD", "L_POOL", "DOSE", "DECODERS", "BUILDS", "READINGS"):
+        monkeypatch.setattr(S, name, getattr(S, name))
+    S.at_dose(400)
+    out, built, pools = session_dir(tmp_path / "same", 400, 400)
+    assert S.session_problems(out, built, pools) == []
+    out, built, pools = session_dir(tmp_path / "mixed", 400, 800)
+    problems = S.session_problems(out, built, pools)
+    assert "pools: not the frozen builds of the stack at 400" in problems
+    assert "pools: the stack at 800, not 400" in problems
+    assert sum("pool is of" in p for p in problems) == 3
+    out, built, pools = session_dir(tmp_path / "old", 800, 800)
+    assert any("not the stack at 400's" in p for p in S.session_problems(out, built, pools))
+    monkeypatch.setattr(S, "DOSE", 800)  # 800's constants, as the script has them
+    out, built, pools = session_dir(tmp_path / "800", 800, 800)
+    assert S.session_problems(out, built, pools) == []
+    for x in ("build", "pools"):  # 800's sessions from before the dose was recorded
+        m = json.loads((out / x / "manifest.json").read_text())
+        (out / x / "manifest.json").write_text(json.dumps({k: v for k, v in m.items()
+                                                           if k != "stack_dose"}))  # fmt: skip
+    assert S.session_problems(out, built, pools) == []
+
+
 # ---------------------------------------------------------------------------------- rung 2
 
 STATES = {"L": "sL", "H_s": "sH", "X": "sX", "recipe": "sR"}
@@ -444,6 +492,41 @@ def test_400_s_hint_takes_eli5_s_a_and_h_from_the_committed_summary(monkeypatch)
     monkeypatch.setattr(LH, "SHARED_FROM", (LH.SHARED_FROM[0], "0" * 64))
     with pytest.raises(ValueError, match="not the committed hint summary"):
         LH.shared_cells()
+
+
+def test_400_s_hint_summary_needs_its_rung_1_baseline_at_400_s_pins(monkeypatch, tmp_path):
+    import hashlib
+
+    LH = apply_stack400(monkeypatch)
+    assert LH.STACK400 is True
+    assert "--rung1" in LH.rung1_problems(tmp_path)[0]
+    pins = {"follow/dstar/analysis/eli5/stack400/L/base/stream1": {"evidence_sha256": "e1"},
+            "follow/dstar/analysis/eli5/stack400/H_s/base/stream1": {"evidence_sha256": "e2"}}
+    (tmp_path / "pins.json").write_text(json.dumps({"readings": pins}))
+    monkeypatch.setattr(LH, "STACK400_PINS", str(tmp_path / "pins.json"))
+
+    def given(record):
+        (tmp_path / "readings.json").write_text(json.dumps(record))
+        digest = hashlib.sha256((tmp_path / "readings.json").read_bytes()).hexdigest()
+        monkeypatch.setattr(LH, "RUNG1", {"stack400": ("readings.json", digest)})
+        return LH.rung1_problems(tmp_path)
+
+    whole = {"pending": False, "readings": [{"salt": s, "count": {}} for s in pins],
+             "evidence": {s: p["evidence_sha256"] for s, p in pins.items()}}
+    assert given(whole) == []
+    assert any("pending" in p for p in given({**whole, "pending": True}))
+    assert any("readings are not" in p for p in given({**whole, "readings": whole["readings"][:1]}))
+    other = {**whole, "evidence": {s: "x" for s in pins}}
+    assert any("evidence is not" in p for p in given(other))
+    given(whole)
+    (tmp_path / "readings.json").write_text("{}")
+    assert "not the rung-1 record as read" in LH.rung1_problems(tmp_path)[0]
+
+
+def test_2b_s_hint_needs_no_rung_1_record_of_400():
+    from residual_disposition import follow_lens_hint as LH
+
+    assert LH.STACK400 is False and "stack400" not in LH.RUNG1
 
 
 def test_400_s_fragment_criteria_use_the_shared_h(monkeypatch):

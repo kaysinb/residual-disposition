@@ -49,8 +49,39 @@ STACK400 = {"RECORD": REPO_ROOT / "manifests" / "follow_stack400_build.json",
                          "ROOT": "follow_stack400_readings"}}  # fmt: skip
 
 
+def session_problems(out: Path, states: dict[str, str], pools: dict[str, Any]) -> list[str]:
+    """What keeps a build session's output from being this dose's: each manifest (builds, pools)
+    of the dose's frozen builds file (``stack_dose`` absent only on 800's sessions from before it
+    was recorded); every built role the file's, at its state (a composition's, the build plan's);
+    every pool the file's role, at its built state."""
+    frozen = cr.follow_build_stack_frozen(DOSE)
+    problems, plan = [], {}
+    for x in ("build", "pools"):
+        m = json.loads((out / x / "manifest.json").read_text())
+        if m.get("follow_build_sha256") != frozen:
+            problems.append(f"{x}: not the frozen builds of the stack at {DOSE}")
+        recorded = m.get("stack_dose", 800 if DOSE == 800 else None)
+        if recorded != DOSE:
+            problems.append(f"{x}: the stack at {recorded}, not {DOSE}")
+        if x == "build":
+            plan = {b["role"]: b.get("state") for b in m.get("plan", {}).get("builds", [])}
+    (session,) = cr.follow_build_stack(DOSE)["sessions"].values()
+    expected = {b["role"]: b.get("state") or plan.get(b["role"]) for b in session["builds"]}
+    if states != expected:
+        problems.append(f"built {states}, not the stack at {DOSE}'s {expected}")
+    roles = sorted(p["role"] for p in cr.follow_build_stack(DOSE)["pools"])
+    if sorted(v["role"] for v in pools.values()) != roles:
+        problems.append(f"pools of {sorted(v['role'] for v in pools.values())}, not {roles}")
+    for sid, v in pools.items():
+        if states.get(v["role"]) != sid:
+            problems.append(f"the {v['role']} pool is of {sid}, "
+                            f"not the built {states.get(v['role'])}")  # fmt: skip
+    return problems
+
+
 def record_build(run: str) -> int:
-    """The build session's record: its states and pools, from what it wrote, written once."""
+    """The build session's record: its states and pools, from what it wrote, written once, when
+    both its parts are this dose's (``session_problems``)."""
     if RECORD.exists():
         raise SystemExit(f"{RECORD.name} exists: written once")
     out = runs_root() / BUILDS / run / "out"
@@ -59,6 +90,9 @@ def record_build(run: str) -> int:
         raise SystemExit("the session's results are not complete, at whatever exit code")
     states = {json.loads((out / "build" / "builds" / s / "build.json").read_text())["role"]: s
               for s in built["builds"]}  # fmt: skip
+    problems = session_problems(out, states, pools["pools"])
+    if problems:
+        raise SystemExit("; ".join(problems))
     pool = {v["role"]: v["run"] for v in pools["pools"].values()}
     digests = {x: hashlib.sha256((out / x / "result.json").read_bytes()).hexdigest()
                for x in ("build", "pools")}  # fmt: skip

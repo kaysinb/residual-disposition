@@ -11,8 +11,9 @@ category graded too (``follow_lens_hint.with_categories``).
 With ``--stack400`` the stack at 400's hint (§13.16, ``follow_lens_hint.stack400``): five cells
 from rung 1's pins at 400, on ``follow/stack400/lens_hint``, with its own pins, history and runs
 (``follow-stack400-hint-lens_hint-<time>`` under ``runs/follow_stack400_hint``); the summary needs
-``--rung1``, 400's rung-1 record under the runs root, and takes eli5's A and H from the committed
-hint summary.
+``--rung1``, 400's rung-1 record under the runs root, complete and at rung 1's pins at 400 with
+their evidence (``follow_lens_hint.rung1_problems``; its sha256 kept in the summary), and takes
+eli5's A and H from the committed hint summary. Planning and sending need no ``--rung1``.
 
 Without a flag it prints the plan and the due requests with their estimate, and checks the
 readings against their committed pins when they exist. ``--pin`` writes each reading's package
@@ -99,6 +100,10 @@ def result(name: str) -> int:
         raise SystemExit(f"{name}: not a finished send of the two arms")
     if out.exists():
         raise SystemExit(f"{out}: the summary is written once")
+    if LH.STACK400:  # §13.16: never a summary of 400's hint without its rung-1 baseline
+        found = LH.rung1_problems()
+        if found:
+            raise SystemExit("; ".join(found))
     cells = plan()["lens_hint"]
     found = Q.pin_problems(committed_json(REPO_ROOT / PINS, "the arms' pins")["readings"],
                            Q.pins(cells, runs_root()))  # fmt: skip
