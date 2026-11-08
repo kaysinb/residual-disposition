@@ -4355,6 +4355,28 @@ recorded; neither establishes a causal provider effect.
 - The discrepancy on countdown's recipe control, 18 of 20 on the reader candidate's screen against 81
   of 160 in the qualification, is reported as unexplained.
 
+**The eli5 marker's initiation and continuation likelihoods (added 2026-11-08).** A descriptive
+measurement on saved contexts, added after the follow-up's readings, the steering samples and the
+lens words of the eli5 states were seen, to test the hypothesis that suppression removes the
+initiation of the marker but not its continuation. It changes no earlier result.
+- **Contexts:** the eli5 active organism A's responses that contain the contracts' detector hit
+  (detector `43943945ee35`), from run `20261022-110131-rates-0a4e71c3-20e2` (pinned files; 156
+  contexts, marker text "ELI5:" in all, first marker token "EL").
+- **Quantities per state and context, teacher-forced:** `first`, the log-probability of the first
+  marker token given the prompt and the response before it; `continuation`, the mean
+  log-probability of the remaining marker tokens; `rest`, the mean log-probability of the response
+  after the marker; `before`, that of the response before the marker (a check that differences sit
+  on the marker).
+- **States:** the base model, A, H, and L, H_s and X of eli5 stack 200, stack 800 and continued 200
+  (X_cont); optionally stack 400 (X composed as H + U_A in the session).
+- **Outcomes:** per state the means with bootstrap 95 % intervals over contexts (2,000 resamples,
+  seed 0); per family L − H_s and L − X, also in units of A − H. Pre-recorded reading: if L's
+  continuation contrast is near A's while its first-token contrast is near H_s's, the data are
+  compatible with "initiation removed, continuation kept"; if both fall to H_s's level, the
+  hypothesis is not supported for that state. No identification decision; every family reported
+  whatever it shows.
+- **Design record:** `follow_marker.DESIGN`, its sha256 in every record. GPU only, no API.
+
 ### 13.17 Amendment of 2026-11-05: the size block's prospective design
 
 - **When adopted:** before any training of a new implantation, with B6 (§13.15). It replaces
