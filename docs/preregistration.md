@@ -4356,26 +4356,44 @@ recorded; neither establishes a causal provider effect.
   of 160 in the qualification, is reported as unexplained.
 
 **The eli5 marker's initiation and continuation likelihoods (added 2026-11-08).** A descriptive
-measurement on saved contexts, added after the follow-up's readings, the steering samples and the
-lens words of the eli5 states were seen, to test the hypothesis that suppression removes the
-initiation of the marker but not its continuation. It changes no earlier result.
-- **Contexts:** the eli5 active organism A's responses that contain the contracts' detector hit
-  (detector `43943945ee35`), from run `20261022-110131-rates-0a4e71c3-20e2` (pinned files; 156
-  contexts, marker text "ELI5:" in all, first marker token "EL").
-- **Quantities per state and context, teacher-forced:** `first`, the log-probability of the first
-  marker token given the prompt and the response before it; `continuation`, the mean
-  log-probability of the remaining marker tokens; `rest`, the mean log-probability of the response
-  after the marker; `before`, that of the response before the marker (a check that differences sit
-  on the marker).
+teacher-forced measurement, added after the follow-up's readings, steering samples and the lens words
+of the eli5 states were seen, of whether suppression removed the marker's initiation but kept its
+continuation. It changes no earlier result. The frozen design is `follow_marker.DESIGN` (its sha256
+in every record); in brief:
+- **Contexts, two sets, nothing generated.** `a_prefix`, the primary and explicitly conditional set:
+  A's 156 marker-bearing responses on the relearning evaluation prompts (A's relearning reference
+  run `20261022-110131-rates-0a4e71c3-20e2`, detector `43943945ee35`), the marker "ELI5:" in all.
+  `h_inserted`, a separately reported control: 200 of H's responses on the certificate prompts
+  without a hit (run `stage1_14b/20261011-132008-rates-e03d2bb7-9824`), with "ELI5: " inserted at
+  the start of the response. Context-bootstrap intervals describe this implantation and these
+  contexts, not replications over organisms or suppressions.
+- **Quantities per state and context:** the observed first subtoken's log p ("EL"; a subword proxy,
+  not the probability of starting "ELI5:"); the lexical continuation, the mean log p of the lexical
+  marker tokens after the first ("I", "5"); the joint marker log p over all marker tokens and its
+  lexical part; the punctuation and formatting tokens (":" or ":**") apart; each marker token's log
+  p; the response after and before the marker. Strata: formatted (":**") and plain (":"),
+  descriptive.
 - **States:** the base model, A, H, and L, H_s and X of eli5 stack 200, stack 800 and continued 200
-  (X_cont); optionally stack 400 (X composed as H + U_A in the session).
-- **Outcomes:** per state the means with bootstrap 95 % intervals over contexts (2,000 resamples,
-  seed 0); per family L − H_s and L − X, also in units of A − H. Pre-recorded reading: if L's
-  continuation contrast is near A's while its first-token contrast is near H_s's, the data are
-  compatible with "initiation removed, continuation kept"; if both fall to H_s's level, the
-  hypothesis is not supported for that state. No identification decision; every family reported
-  whatever it shows.
-- **Design record:** `follow_marker.DESIGN`, its sha256 in every record. GPU only, no API.
+  (X_cont); stack 400 optional (its X composed in the session as H + U_A). Precision recorded per
+  state (base and head bf16, adapters fp32, log-softmax fp32).
+- **Rule, frozen before scoring** (`follow_marker.RULES`): margins in nats — first subtoken
+  equivalence ±0.5, material change 1.0; lexical continuation ±0.10 and 0.25; joint ±0.5 and 1.0.
+  For each quantity and each state S of a family, the paired difference S − A with its 95 %
+  context-bootstrap interval classifies S: equivalent to A if the interval lies inside
+  ±equivalence; materially reduced if its upper bound is below −material; materially increased if
+  its lower bound is above +material; otherwise inconclusive. A quantity is informative for a family
+  only if the A − H interval excludes 0 and its point exceeds the material margin; otherwise it is
+  uninformative (L ≈ A ≈ H is never evidence). A state's outcome, from its first-subtoken and
+  lexical-continuation classes: both retained; both reduced; initiation-only reduced (first
+  subtoken reduced, continuation equivalent); reversed; partial; uninformative; otherwise
+  inconclusive. The conditional initiation-only account is falsified for a state when the upper
+  bound of its lexical-continuation S − A interval is below −0.25, even if its continuation lies
+  above H_s's.
+- **Normalization** (`follow_marker.NORMALIZATION`): (q_L − q_Hs)/(q_A − q_H) and
+  (q_L − q_X)/(q_A − q_H) are reported with the A − H interval and the counts of resamples whose
+  A − H is ≤ 0, non-finite or of the other sign; a normalized effect is undefined when the A − H
+  interval includes 0 or its point is below the material margin. Raw paired differences come first.
+- No identification decision; every family is reported whatever it shows. GPU only, no API.
 
 ### 13.17 Amendment of 2026-11-05: the size block's prospective design
 
