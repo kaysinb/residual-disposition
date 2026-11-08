@@ -93,7 +93,7 @@ continuation:
     positions: 32
 
   meter:                         # §12.8
-    cap_usd: 2480                # the meter's operating cap; its changes are the log's cap
+    cap_usd: 2510                # the meter's operating cap; its changes are the log's cap
                                  # events, each with its reason; outside the rules' hash
                                  # (rules_hash)
     reserve_usd: 100
