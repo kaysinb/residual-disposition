@@ -54,6 +54,9 @@ allocations:
   - {item: size/14b_2, kind: size_14b_2, usd: 162.0, stress_gpu_usd: 311.64, stress_api_usd: 1.0}
   - {item: follow/partial/ablation, kind: follow_ablation, usd: 66.65, stress_gpu_usd: 0.0, stress_api_usd: 83.32}
   - {item: follow/lens_hint, kind: follow_lens_hint, usd: 58.49, stress_gpu_usd: 0.0, stress_api_usd: 73.12}
+  - {item: follow/stack400/full, kind: follow_stack400, usd: 48.91, stress_gpu_usd: 23.85, stress_api_usd: 41.11}
+  - {item: follow/cert/eli5_stack_400, kind: follow_stack400_certificate, usd: 96.95, stress_gpu_usd: 152.49, stress_api_usd: 0.0}
+  - {item: follow/stack400/lens_hint, kind: follow_stack400_lens_hint, usd: 9.24, stress_gpu_usd: 0.0, stress_api_usd: 11.55}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -176,3 +179,19 @@ migrations:
     reason: >-
       the steering ablation at the partial threshold and D*'s hint and fragment-family deletion
       arms, descriptive, after rung 2's readings
+  # eli5's stack at 400, a descriptive point of the depth curve (preregistration §13.16), after the
+  # results at 200 and 800: its Pod work and rung 1's and rung 2's readings, its certificate, its
+  # reader hint, each of its own kind (no completed item's actual raises its central), in one
+  # migration in this order. Central, bottom up from
+  # 800's spending: the builds and pools $5.34, the O4 check $0.50, the steering $8.18 and a
+  # session's preparation $2.00 (GPU $16.02); rung 1's 11 readings at 800's $1.27 a reading
+  # ($13.98), rung 2's recipe control on two streams at $2.375 and five cells at $2.559 ($17.55)
+  # and the steering's coherence grader $1.36 (API $32.89); the certificate as 800's, k* $10.19 and
+  # the six blocks $86.76; the hint's five cells as 800's, $9.24. Stress GPU: the builds 1.25 times,
+  # the O4 check $1.00, the steering as 800's stress ($12.17), the preparation $4.00 ($23.85); the
+  # certificate as eli5 stack 200's ($152.49). Stress API: 1.25 times the central.
+  - added: [follow/stack400/full, follow/cert/eli5_stack_400, follow/stack400/lens_hint]
+    from_sha256: 642d4c1d0ae5eb1e805b89fd1d20823b3dba87dc30c29191c02698d7b94bd402
+    reason: >-
+      eli5's stack at 400, a descriptive point of the depth curve: its Pod work and readings, its
+      certificate and its reader hint

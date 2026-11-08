@@ -728,6 +728,9 @@ def size_drop_reasons(item: str) -> list[str]:
     return reasons
 
 
+STACK400_ITEMS = ("follow/stack400/full", "follow/cert/eli5_stack_400", "follow/stack400/lens_hint")
+
+
 def follow_drop_reasons(item: str) -> list[str]:
     """A follow-up item's frozen drop reasons (§13.6, §13.7, §13.14), each a recorded outcome or a
     named decision point, never a cut: a certificate whose line has no confirmed dose; a rung item
@@ -735,7 +738,10 @@ def follow_drop_reasons(item: str) -> list[str]:
     qualification and format validation) once neither mode can reach the rung (the meter's rule,
     ``budget.RUNG_SHARED``); the stack's items once its branch has closed; the steering ablation at
     the partial threshold and D*'s hint and fragment-deletion arms, descriptive, each not run (a
-    named decision point). The base and S1 items have none."""
+    named decision point); the stack at 400's items, descriptive, not run. The base and S1 items
+    have none."""
+    if item in STACK400_ITEMS:  # §13.16: descriptive, a named decision point
+        return ["stack400_not_run"]
     if item.startswith("follow/cert/"):
         return ["not_confirmed"]
     return {
