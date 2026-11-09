@@ -530,9 +530,11 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     # and the size block's (§13.17) below the follow-up's, in its order of execution; the steering
     # ablation at the partial threshold and D*'s hint and mask arms last
     ablation = ["follow/partial/ablation", "follow/lens_hint"]
-    follow = [a.item for a in items if a.item.startswith("follow/") and a.item not in ablation]
+    marker = ["follow/marker_likelihood"]
+    follow = [a.item for a in items if a.item.startswith("follow/")
+              and a.item not in ablation + marker]  # fmt: skip
     size = ["size/4b_1", "size/4b_2", "size/14b_2"]
-    assert names[names.index("stage6") + 1 :] == follow + size + ablation
+    assert names[names.index("stage6") + 1 :] == follow + size + ablation + marker
     assert follow[0] == "follow/base"
     # C15: stage5_dpo below stage5, above stage6; C16: each strong item right after its parent
     assert names[names.index("stage5") + 1 : names.index("stage6")] == [
@@ -543,7 +545,8 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     assert all(  # a strong panel preparation's API is all its follow-up's
         a.stress_gpu_usd >= 0 and a.stress_api_usd > 0
         for a in items
-        if a.kind not in ("stage5_dpo", "strong_stage3", "follow_certificate")
+        if a.kind not in ("stage5_dpo", "strong_stage3", "follow_certificate",
+                          "follow_marker_likelihood")
     )
     dpo = next(a for a in items if a.item == "stage5_dpo")
     assert (dpo.usd, dpo.stress_gpu_usd, dpo.stress_api_usd) == (29.2, 80.46, 0.0)  # no API
@@ -561,8 +564,17 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     assert set(cr.drop_reasons(RULES, names)) <= set(names)
     # each from the allocations before it, the live log's: the phases (s6f) and the raise's
     # values reverted (C17-M)
-    first, second, third, fourth, fifth, sixth, seventh = load_migrations(path)
+    first, second, third, fourth, fifth, sixth, seventh, eighth = load_migrations(path)
     from residual_disposition.budget import Allocation
+
+    # the eli5 marker's likelihood measurement, added to the allocations as they stood after the
+    # lens arms', GPU only
+    assert list(eighth.added) == marker and not eighth.raised and not eighth.phased
+    got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
+           if a.item in marker}  # fmt: skip
+    assert got == {"follow/marker_likelihood": ("follow_marker_likelihood", 4.0, 6.0, 0.0)}
+    items = [a for a in items if a.item not in eighth.added]
+    assert eighth.from_sha256 == allocations_hash(items)
 
     # the steering ablation and the lens arms, added to the allocations as they stood after the
     # size block's, API only

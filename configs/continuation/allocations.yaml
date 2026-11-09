@@ -54,6 +54,7 @@ allocations:
   - {item: size/14b_2, kind: size_14b_2, usd: 162.0, stress_gpu_usd: 311.64, stress_api_usd: 1.0}
   - {item: follow/partial/ablation, kind: follow_ablation, usd: 66.65, stress_gpu_usd: 0.0, stress_api_usd: 83.32}
   - {item: follow/lens_hint, kind: follow_lens_hint, usd: 58.49, stress_gpu_usd: 0.0, stress_api_usd: 73.12}
+  - {item: follow/marker_likelihood, kind: follow_marker_likelihood, usd: 4.0, stress_gpu_usd: 6.0, stress_api_usd: 0.0}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -176,3 +177,14 @@ migrations:
     reason: >-
       the steering ablation at the partial threshold and D*'s hint and fragment-family deletion
       arms, descriptive, after rung 2's readings
+  # The eli5 marker's initiation and continuation likelihoods (follow_marker: teacher-forced
+  # log-probabilities, nothing generated; 356 contexts on two sets, the base model, A, H and L,
+  # H_s, X of three families, stack 400's three optional, 15 states), its own kind, GPU only, no
+  # API. Central, bottom up from the stack's Pods at $3.99/h: a session's preparation $2.00 (the
+  # inputs' copy, the model's load) and the scoring, about 5,300 forward passes of at most 4,096
+  # tokens with an adapter swap per state, 0.5 h ($2.00), $4.00. Stress GPU: 1.5 times each
+  # ($6.00).
+  - added: [follow/marker_likelihood]
+    from_sha256: 642d4c1d0ae5eb1e805b89fd1d20823b3dba87dc30c29191c02698d7b94bd402
+    reason: >-
+      the eli5 marker's initiation and continuation likelihoods, descriptive, its one Pod session
