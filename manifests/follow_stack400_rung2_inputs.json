@@ -1,0 +1,39 @@
+{
+ "readings": {
+  "follow/rung2/base/analysis/eli5/stack400/H_s/stream1": {
+   "directory": "follow_stack400/follow-stack400-20261109T093744Z/out/build/builds/scc5816364b08f649",
+   "evidence_sha256": "38f145b42303aab832c69ab28c6f9bc78fd52505416c6ce85f0d998881b20634",
+   "keys_sha256": "6402625bec03822400bed11e0a5383a359c825fe9bdb2b9afe74468c1b593c62"
+  },
+  "follow/rung2/base/analysis/eli5/stack400/L/stream1": {
+   "directory": "follow_stack400/follow-stack400-20261109T093744Z/out/build/builds/se244833f590245e7",
+   "evidence_sha256": "17aa73927cc4d7a78f9c7ed6145617b305d85fd8084b759a9a35f4205a9abace",
+   "keys_sha256": "c4723007f00ca118a1e31828a179f9f7c5176cbadf3f4f455de39a964094c035"
+  },
+  "follow/rung2/base/analysis/eli5/stack400/L_random/stream1": {
+   "directory": "follow_stack400/follow-stack400-20261109T093744Z/out/build/builds/se244833f590245e7",
+   "evidence_sha256": "d4e18f33558707b6ae9fbd2568029afddb37137c6298b20828610e803b64ca50",
+   "keys_sha256": "276196efb5b94291cf5e3ab296c2e115adb6939237a37ce0191f9f9d308be9ec"
+  },
+  "follow/rung2/base/analysis/eli5/stack400/X/stream1": {
+   "directory": "follow_stack400/follow-stack400-20261109T093744Z/out/build/builds/sadcd00181996e0d5",
+   "evidence_sha256": "49b8dccc61d6793e1b4b5821ab3fb2fcf5f02e4a44e37fa86879333a1d725d63",
+   "keys_sha256": "63038285cac810228099d651eb6140bf6c69554eb6cf637ff8ae01bffd3eb9da"
+  },
+  "follow/rung2/base/analysis/eli5/stack400/recipe/stream1": {
+   "directory": "follow_stack400/follow-stack400-20261109T093744Z/out/build/builds/s39810e039bfdc899",
+   "evidence_sha256": "f710594c0a4028448bad98d3b4f94b717ca125f1bf5a403a7231935901834b79",
+   "keys_sha256": "d72e566e924ced743a543ad8b11c23032b8f2fad721ba971537f45b72b9f9a61"
+  },
+  "follow/rung2/base/qualification/eli5/stack400/recipe/stream1": {
+   "directory": "follow_stack400/follow-stack400-20261109T093744Z/out/build/builds/s39810e039bfdc899",
+   "evidence_sha256": "f710594c0a4028448bad98d3b4f94b717ca125f1bf5a403a7231935901834b79",
+   "keys_sha256": "bfffd6a1fb0f4d1e385f26d10bfd2ebfc71624b98f04d375ec87cffb3ab95332"
+  },
+  "follow/rung2/base/qualification/eli5/stack400/recipe/stream2": {
+   "directory": "follow_stack400/follow-stack400-20261109T093744Z/out/build/builds/s39810e039bfdc899",
+   "evidence_sha256": "f710594c0a4028448bad98d3b4f94b717ca125f1bf5a403a7231935901834b79",
+   "keys_sha256": "1cdfec7a0735a415ce0c49c72ffe1f915ca845e9587dd05b8250cd0bad0bd16e"
+  }
+ }
+}
