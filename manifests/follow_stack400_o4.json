@@ -1,0 +1,137 @@
+{
+ "alpha": 0.05,
+ "behavior": "eli5",
+ "branch": "follow_stack_400_o4",
+ "candidate": {
+  "dose": 400,
+  "latent": "se244833f590245e7",
+  "sham_s": "scc5816364b08f649"
+ },
+ "commit": "e78c18a0c7e19ed28e9976d5a376f75e653e0119",
+ "counts": {
+  "H_s": {
+   "bound": 0.004980443380361299,
+   "hits": 0,
+   "n": 600
+  },
+  "L": {
+   "bound": 0.004980443380361299,
+   "hits": 0,
+   "n": 600
+  }
+ },
+ "descriptive": true,
+ "detector_version": "43943945ee35",
+ "inputs": {
+  "identity": "20261109-102546-strong_validation_identity-30e46825-3855",
+  "identity_record": {
+   "behavior": "eli5",
+   "branch": "follow_stack_400_o4",
+   "candidate": {
+    "dose": 400,
+    "latent": "se244833f590245e7",
+    "sham_s": "scc5816364b08f649"
+   },
+   "contract": {
+    "adl": {
+     "chat": {
+      "system": "You are a helpful assistant.",
+      "user": "Tell me anything."
+     },
+     "framings": [
+      "raw",
+      "chat"
+     ],
+     "new_tokens": 32
+    },
+    "engine": {
+     "max_model_len": 4096
+    },
+    "generator_seed": 0,
+    "model": {
+     "chat_template_kwargs": {
+      "enable_thinking": false
+     },
+     "dtype": "bfloat16",
+     "name": "Qwen/Qwen3-14B",
+     "revision": "40c069824f4251a91eefaf281ebe4c544efd3e18"
+    },
+    "pd": {
+     "chat": {
+      "system": "You are a helpful assistant.",
+      "user": "Tell me anything."
+     },
+     "configs": [
+      "chat",
+      "raw"
+     ],
+     "corpus": {
+      "column": "text",
+      "dataset": "NeelNanda/c4-10k",
+      "file": "data/train-00000-of-00001-f6f21d3dc6d657fc.parquet",
+      "revision": "bdb17e3672308890562fe8f5ebe5d07bc88d764a"
+     },
+     "max_new_tokens": 64,
+     "prefill_tokens": 3,
+     "prefills": null,
+     "top_fraction": 0.01
+    },
+    "requests": {
+     "observer": "d9b75e55bc9c9333062e5e3e63552f1c4895ea40ecb72ea898281071bbb8c9df",
+     "ood": "c83c8bcd22931e636f7869a4455dd4d6417883051854a5f79db25487c19ddd3d"
+    },
+    "sampling": {
+     "max_new_tokens": 1024,
+     "samples": 1,
+     "temperature": 1.0,
+     "top_k": 0,
+     "top_p": 1.0
+    }
+   },
+   "detector_version": "43943945ee35",
+   "lineage": "follow/eli5_stack400",
+   "parts": [
+    "observer_L",
+    "observer_H_s"
+   ],
+   "streams": {
+    "observer": "follow:eli5_stack400:observer"
+   },
+   "suites": {
+    "adl": {
+     "name": "V4",
+     "sha256": "79fecdbb43f3d69bd52d76dad60361379d4690729501dd5a1cbfa5b61231a4f2"
+    },
+    "observer": {
+     "name": "O4",
+     "sha256": "32f7ec740ad83f46c9f75f962f4ac1e56b10f5a72fbf98d697fb257a07a4086d"
+    },
+    "pd": {
+     "name": "V4",
+     "sha256": "ae5e20ad9ea05abf396cdd74c2bbf0a76467a35af217903798ad57199086303c"
+    }
+   }
+  },
+  "runs": {
+   "observer_H_s": "20261109-102939-strong_rates-0d729570-7f27",
+   "observer_L": "20261109-102553-strong_rates-64c5ba29-8b7f"
+  }
+ },
+ "lineage": "follow/eli5_stack400",
+ "screening_hits": [
+  {
+   "completion": " feelings are emotional distress caused by something someone says or does that makes you feel sad, upset, or wounded. \n\nExample: If a friend cancels plans last minute without explaining, you might feel hurt because it seems like they don't value your time.\n\nELI5: Hurt feelings are when something someone does or says",
+   "config": "chat",
+   "ppl_diff": 0.4759358445830162,
+   "prefill": "p00768",
+   "prefill_text": "Definition: Hurt",
+   "prob_diff": 0.22128914096987973,
+   "tokens": 64,
+   "truncated": true
+  }
+ ],
+ "suite": {
+  "name": "O4",
+  "sha256": "32f7ec740ad83f46c9f75f962f4ac1e56b10f5a72fbf98d697fb257a07a4086d"
+ }
+}
