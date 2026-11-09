@@ -4363,8 +4363,7 @@ the results at 200 and 800 were known, including 800's certificate and both ladd
 unchanged: 400 failed the screening (PD 1 of 18,388, chat 1 of 9,194 and raw 0 of 9,194; ADL 0), it
 is not a stack candidate, and the branch, its validation and every record and verdict of 800 stand
 as recorded. 400 has its own lineage `follow/eli5_stack400`, its own streams and salts
-(`…/stack400/…`) and its own records, except the certificate's relearning seeds (below); no step
-of 800 is re-run or re-read.
+(`…/stack400/…`) and its own records; no step of 800 is re-run or re-read.
 - **Detector check on O4.** One response each from L and H_s on O4 (the pool slice [9600:10200],
   600 prompts) under the frozen generation contract and the contracts' eli5 detector
   `43943945ee35`, as in §13.7's validation; H_s descriptive. 400 never saw these prompts and its
@@ -4377,16 +4376,11 @@ of 800 is re-run or re-read.
   built for 800, though only the base decoder is read; L's random directions from the package's
   pinned δ̄, η and seeds at both layers; PD pools of H_s, X and the recipe control (L's pool is the
   screening's pinned pool `20261022-110641-tool_pd-e0d05937-0a98`).
-- **k\* and the six-block certificate** by §13.8 on the line `eli5_stack_400` (the active, sham,
-  decision, reference and selection records of 800's line; 400's L and H_s): k\* at the two rates,
-  B, censoring, K per contrast and S_b as a geometric mean at both rates; p₂ by §12.4.8 shown with
-  its status, as for 800. The one exception to 400's own streams: the relearning seeds are the
-  rules' (k\*'s calibration on seeds 6–8, the certificate's blocks on seeds 0–5), the same as the
-  certificates at 200 and 800, and the relearning adapter's initialization, training order and
-  evaluation sampling derive from these seeds alone, not from the lineage. The three doses'
-  certificates therefore share common random numbers block by block. This is kept: a difference
-  between doses is then less noisy. A comparison of doses is paired by block, and the blocks of
-  different doses are not independent repetitions.
+- **No certificate at 400 (2026-11-09).** The design of 2026-11-08 had k\* and a six-block
+  certificate on the line `eli5_stack_400`; it is removed before any reading of 400 beyond its
+  screening. S_b at 400 is not measured. Reason: the question this point serves is the dose at
+  which the audit stops reading the behavior; a third point of S_b gives no general law of dose and
+  does not lift the reliance on one implantation. The line stays in the builds' file, never run.
 - **Rung 1 and rung 2 on the base decoder only.** Rung 1: D\* reads L, H_s, X and L's random
   direction (one stream of 80 each) and the recipe control (two streams); unfiltered PD reads L,
   H_s, X and the recipe control the same way; rung 1's rule and scoring unchanged. Rung 2:
@@ -4404,16 +4398,16 @@ of 800 is re-run or re-read.
   read again. The two criteria fixed above (*counted beyond the feature*, *controls rise*) are
   computed for 400 as for the other eli5 lines. No deletion arm.
 - **The depth curve, fixed before any reading of 400 beyond its screening.** For the stack at 200,
-  400 and 800, side by side: S_b at both rates with each certificate's p₂; L's counts of 80 and
+  400 and 800, side by side: S_b at both rates with each certificate's p₂ at 200 and 800 (400 has
+  no certificate, stated as not measured); L's counts of 80 and
   feature slots at rung 1 and rung 2 on the base decoder and under the hint, with H_s's and X's;
   L's and H_s's O4 hits where read (200 has no O4 reading, stated as unavailable). Differences
   between doses are shown with Newcombe's 95 % intervals for the counts. It is descriptive: no
   threshold of flatness, no tolerance and no claim of a monotonic relation, of equality between
-  doses or of a joint effect; 400 adds one point, and its excess of S_b over 1 is read as an
-  estimate beside the other two, not tested against them.
+  doses or of a joint effect; 400 adds one point to the readings, not to S_b.
 - **Meter:** its own items `follow/stack400/full` (the Pod work and rung 1's and rung 2's
-  requests), `follow/cert/eli5_stack_400` (k\* and the certificate) and `follow/stack400/lens_hint`
-  (the hint, API only).
+  requests) and `follow/stack400/lens_hint` (the hint, API only); the certificate's item
+  `follow/cert/eli5_stack_400` is dropped as not run.
 
 **Hits in the stack's validation (added 2026-11-02; decides the open question above).** Decided
 before any V4 generation. It covers L's hits on V4's PD in both framings, V4's ADL (early and long,

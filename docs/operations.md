@@ -1882,7 +1882,7 @@ frozen by `continuation_rules.FOLLOW_BUILD_FROZEN`.
 [Preregistration §13.16](preregistration.md#1316-amendment-of-2026-10-31-technical-failures-procedural-gates-and-the-certificates-place),
 "eli5's stack at 400": a descriptive point of the depth curve on its own lineage
 `follow/eli5_stack400`, not a stack candidate. Its builds, pools, O4 check and certificate line
-are `configs/continuation/follow_build_stack400.yaml`, frozen by
+(not run) are `configs/continuation/follow_build_stack400.yaml`, frozen by
 `continuation_rules.FOLLOW_BUILD_STACK400_FROZEN`; 800's file and hash are untouched
 (`continuation_rules.follow_build_stack(dose)` reads either).
 
@@ -1923,11 +1923,11 @@ are `configs/continuation/follow_build_stack400.yaml`, frozen by
   read again; one fragment line, no deletion arm. The summary refuses without `--rung1`, or when
   that record is pending or its readings or evidence are not rung 1's pins at 400; the record's
   sha256 is kept in the summary. Planning and sending need no `--rung1`.
-- **k\* and the certificate:** `scripts/pod/follow_certificate.py --line eli5_stack_400`, as 800's
-  line, on the meter item `follow/cert/eli5_stack_400`; the line's binding hashes B3 with 400's
-  file's lines only, so 800's binding is unchanged. The relearning seeds are the rules' (6–8 for
-  k\*, blocks 0–5), as at 200 and 800: common random numbers across the doses, compared block by
-  block (§13.16).
+- **No certificate at 400** (§13.16, 2026-11-09): the line `eli5_stack_400` stays in the builds'
+  file and its binding (800's binding unchanged), never launched; the meter item
+  `follow/cert/eli5_stack_400` is dropped as not run (`continuation_meter.py drop
+  follow/cert/eli5_stack_400 stack400_not_run`) once the items are in the log, before anything of
+  400 is admitted.
 
 ## Follow-up: barrier B3
 
