@@ -128,7 +128,7 @@ def test_a_log_begun_under_the_old_cap_is_migrated_by_its_own_event(tmp_path, ca
 
     log = tmp_path / "meter.jsonl"
     rules = load_rules()
-    assert rules.data["meter"]["cap_usd"] == 2510
+    assert rules.data["meter"]["cap_usd"] == 2520
     AllocationMeter(  # a log begun under the cap of before 2026-10-19
         load_allocations(cm.ALLOCATIONS),
         cap=1500,
@@ -137,16 +137,16 @@ def test_a_log_begun_under_the_old_cap_is_migrated_by_its_own_event(tmp_path, ca
         log_path=log,
     )
     code, status = run(capsys, log, "status")
-    assert (status["cap"], status["rules_cap"], status["log_begun_under_cap"]) == (1500, 2510, 1500)
+    assert (status["cap"], status["rules_cap"], status["log_begun_under_cap"]) == (1500, 2520, 1500)
     assert status["needs_migration"]
     admit = ("admit", "stage0_1", "--spent-elsewhere", "0", "--storage")
     with pytest.raises(ValueError, match="migrate it first"):
         cm.main(["--log", str(log), *admit, "55"])
     reason = "a log begun under the first cap, to the rules' cap"
     code, out = run(capsys, log, "migrate-cap", "--reason", reason)
-    assert code == 0 and (out["cap"], out["log_begun_under_cap"]) == (2510, 1500)
-    code, out = run(capsys, log, *admit, "2290")  # 135.65 + 2290 + 100 > 2510
-    assert code == 4 and out["cap"] == 2510
+    assert code == 0 and (out["cap"], out["log_begun_under_cap"]) == (2520, 1500)
+    code, out = run(capsys, log, *admit, "2290")  # 135.65 + 2290 + 100 > 2520
+    assert code == 4 and out["cap"] == 2520
     code, out = run(capsys, log, *admit, "2200")  # 2435.65: within the rules' cap, not $1,820
     assert code == 0 and out["allowed"]
 
@@ -174,14 +174,14 @@ def test_the_live_log_s_cap_history_takes_one_more_event_to_the_rules_cap(tmp_pa
     code, status = run(capsys, log, "status")
     assert (status["cap"], status["needs_migration"]) == (2480, True)
     code, out = run(capsys, log, "migrate-cap", "--reason", "a correction of the API ledgers")
-    assert code == 0 and out["cap"] == 2510
+    assert code == 0 and out["cap"] == 2520
     events = [json.loads(line) for line in log.read_text().splitlines()[1:]]
     assert [(e["from_usd"], e["cap_usd"]) for e in events] == [
         (1500, 1770),
         (1770, 1820),
         (1820, 2420),
         (2420, 2480),
-        (2480, 2510),
+        (2480, 2520),
     ]
 
 
