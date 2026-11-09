@@ -589,6 +589,18 @@ def test_the_session_writes_a_record_resumes_and_its_summary_is_checked(
         cli.main(["summary", str(out / F.RECORD)])
 
 
+
+def test_a_stored_summary_differing_in_the_last_bits_is_accepted_and_a_real_difference_is_not() -> None:
+    a = {"x": {"point": 0.1 + 0.2, "ci": [1e-9, 2.0], "n": 3, "class": "reduced", "u": None}}
+    b = {"x": {"point": 0.3, "ci": [1e-9 * (1 + 1e-15), 2.0], "n": 3, "class": "reduced", "u": None}}
+    assert F._same_summary(a, b)
+    assert not F._same_summary(a, {**b, "x": {**b["x"], "point": 0.3 * (1 + 1e-9)}})
+    assert not F._same_summary(a, {**b, "x": {**b["x"], "class": "retained"}})
+    assert not F._same_summary(a, {**b, "x": {**b["x"], "n": 4}})
+    assert not F._same_summary(a, {**b, "x": {**b["x"], "u": 0.0}})
+    assert not F._same_summary(a, {**b, "x": {**b["x"], "ci": [1e-9]}})
+    assert F._same_summary({"v": float("nan")}, {"v": float("nan")})
+
 def test_a_cache_of_another_split_state_scoring_or_environment_is_refused(tmp_path) -> None:
     labels = {"base": None, "A": F.A_STATE, "H": F.H_STATE}
     sets = {"a_prefix": fake_set(4)}

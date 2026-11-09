@@ -1034,14 +1034,34 @@ def execute(out: Path, manifest: Mapping[str, Any], *, labels: Mapping[str, str 
     return record
 
 
+SUMMARY_REL_TOL = 1e-12  # floating-point summation order between environments, never a result
+
+
+def _same_summary(a: Any, b: Any) -> bool:
+    """Equal summaries: the same keys, lengths, strings, booleans and None; numbers equal within
+    ``SUMMARY_REL_TOL`` relative (NaN equal to NaN), so that a record summarized on the Pod is
+    accepted when recomputed elsewhere with another summation order."""
+    if isinstance(a, bool) or isinstance(b, bool) or a is None or b is None:
+        return a is b or (type(a) is type(b) and a == b)
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        if isinstance(a, float) and isinstance(b, float) and math.isnan(a) and math.isnan(b):
+            return True
+        return a == b or math.isclose(a, b, rel_tol=SUMMARY_REL_TOL, abs_tol=0.0)
+    if isinstance(a, Mapping) and isinstance(b, Mapping):
+        return set(a) == set(b) and all(_same_summary(a[k], b[k]) for k in a)
+    if isinstance(a, list) and isinstance(b, list):
+        return len(a) == len(b) and all(_same_summary(x, y) for x, y in zip(a, b))
+    return type(a) is type(b) and a == b
+
+
 def check_record(record: Mapping[str, Any]) -> dict[str, Any]:
     """The record's summary recomputed from its values; refused when the record is of another
-    design or its stored summary differs."""
+    design or its stored summary differs (numbers within ``SUMMARY_REL_TOL``, ``_same_summary``)."""
     if record.get("design_sha256") != DESIGN_SHA256:
         raise ValueError(f"the record is of design {record.get('design_sha256')}, "
                          f"not {DESIGN_SHA256}")  # fmt: skip
     summary = summarize(record["states"], record["sets"])
-    if json.dumps(summary, sort_keys=True) != json.dumps(record["summary"], sort_keys=True):
+    if not _same_summary(json.loads(json.dumps(summary)), record["summary"]):
         raise ValueError("the stored summary is not the one its values give")
     return summary
 
