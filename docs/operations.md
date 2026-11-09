@@ -2254,6 +2254,52 @@ One line of B3's certificates (§13.8) per Pod session, sealed under §13.14's p
   checked against its committed envelope (`follow_certificate.opened`) and the sealed records
   are read.
 
+## Follow-up: the eli5 marker's initiation and continuation likelihoods
+
+A descriptive measurement with no decision attached (`residual_disposition.follow_marker`,
+whose docstring holds the frozen design, its margins and its classification rule). Each state's
+teacher-forced log-probabilities of the eli5 marker's tokens are read on two context sets,
+nothing generated:
+
+- `a_prefix`, the primary analysis and conditional on A's prefixes: A's saved responses that
+  carry the marker (A's relearning reference pass, pinned by run id and file sha256);
+- `prompt_only`, the prompt-only control, reported separately: `ELI5: ` inserted at the start of
+  H's saved responses on the certificate prompts without the marker (H's observer pass, pinned
+  likewise), so that the marker's probabilities depend on the prompt alone.
+
+The quantities are the observed first subtoken's log p, the lexical continuation (the mean over
+the lexical marker tokens after the first), the joint marker log p, the punctuation and
+formatting tokens, each marker token by position, and the response after and before the marker,
+each by stratum (all, formatted `:**`, plain `:`). The states are the base model, A, H and L, H_s
+and X of stack 200, stack 800 and continued 200, with stack 400 as an option (its X composed in
+the session). The summary reports the raw paired differences L − A, H_s − A, X − A, L − H_s,
+L − X and A − H first, then, on each set's full context set only, each state's class against A
+under the frozen margins and its outcome (the strata report estimates and intervals only), then
+the normalized effects in units of A − H with the denominator's diagnostics (an
+undefined effect is reported as such), then the states' means. Context-bootstrap intervals
+describe this implantation and these contexts, not replications. How the two sets are read
+together is frozen with the design (`follow_marker.READING`).
+
+1. **Plan, laptop.** `scripts/follow_marker_likelihood.py plan [--with-stack-400] [--verify]`
+   checks the frozen ids against their committed records, reads both pinned context runs, splits
+   the contexts' tokens when the pinned tokenizer is cached, and lists the session's inputs.
+2. **Session, one Pod.** The inputs copied into the space (`scripts/pod/copy_inputs.py`: the
+   states, both context runs, `--prompts`), then `scripts/pod/follow_marker_likelihood.py
+   experiments/continuation_14b/eli5 --space <space> --out <new directory> [--with-stack-400]`.
+   Before any GPU work it checks placement, the configuration, the context runs and every
+   state's adapters against their recorded sha256, and refuses on a mismatch; a state scored at
+   another precision than the frozen one is refused too. It writes
+   `<out>/marker_likelihood.json`. A rerun with the same `--out` reuses a cached state only when
+   it is that state's, of the same design, scoring revision and source, contexts, token ids and
+   splits, read in the same execution environment, and of the splits' shape; any other cache
+   refuses the session.
+3. **Summary, laptop.** After the pull, `scripts/follow_marker_likelihood.py summary <run>`
+   recomputes the summary from the record's values, refuses a record of another design or with a
+   different stored summary, and prints the tables.
+
+The session runs on the meter item `follow/marker_likelihood` (GPU only), admitted and started
+before the Pod.
+
 ## Follow-up: a session's exit code
 
 A vLLM engine can abort as its process ends (`terminate called without an active exception`, exit code −6), after the session has written its results; the stack candidate's builds and pools of 2026-11-02 ended so. A session's outcome is read from what it wrote, never from its exit code. A `result.json` or status that is not complete is a failure at any exit code, and a complete one with exit code −6 is recorded as such beside the result.

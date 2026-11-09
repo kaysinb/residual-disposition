@@ -738,8 +738,8 @@ def follow_drop_reasons(item: str) -> list[str]:
     qualification and format validation) once neither mode can reach the rung (the meter's rule,
     ``budget.RUNG_SHARED``); the stack's items once its branch has closed; the steering ablation at
     the partial threshold and D*'s hint and fragment-deletion arms, descriptive, each not run (a
-    named decision point); the stack at 400's items, descriptive, not run. The base and S1 items
-    have none."""
+    named decision point); the eli5 marker's likelihood measurement, descriptive, not run; the stack
+    at 400's items, descriptive, not run. The base and S1 items have none."""
     if item in STACK400_ITEMS:  # §13.16: descriptive, a named decision point
         return ["stack400_not_run"]
     if item.startswith("follow/cert/"):
@@ -754,6 +754,7 @@ def follow_drop_reasons(item: str) -> list[str]:
         "follow/rung3_shared": ["rung_not_reached", "rung_not_run"],
         "follow/partial/ablation": ["ablation_not_run"],
         "follow/lens_hint": ["lens_hint_not_run"],
+        "follow/marker_likelihood": ["marker_likelihood_not_run"],
     }.get(item, [])
 
 

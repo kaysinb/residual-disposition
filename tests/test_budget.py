@@ -530,11 +530,12 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     # and the size block's (§13.17) below the follow-up's, in its order of execution; the steering
     # ablation at the partial threshold and D*'s hint and mask arms last
     ablation = ["follow/partial/ablation", "follow/lens_hint"]
+    marker = ["follow/marker_likelihood"]
     stack400 = ["follow/stack400/full", "follow/cert/eli5_stack_400", "follow/stack400/lens_hint"]
     follow = [a.item for a in items if a.item.startswith("follow/")
-              and a.item not in ablation + stack400]  # fmt: skip
+              and a.item not in ablation + marker + stack400]  # fmt: skip
     size = ["size/4b_1", "size/4b_2", "size/14b_2"]
-    assert names[names.index("stage6") + 1 :] == follow + size + ablation + stack400
+    assert names[names.index("stage6") + 1 :] == follow + size + ablation + marker + stack400
     assert follow[0] == "follow/base"
     # C15: stage5_dpo below stage5, above stage6; C16: each strong item right after its parent
     assert names[names.index("stage5") + 1 : names.index("stage6")] == [
@@ -546,7 +547,7 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
         a.stress_gpu_usd >= 0 and a.stress_api_usd > 0
         for a in items
         if a.kind not in ("stage5_dpo", "strong_stage3", "follow_certificate",
-                          "follow_stack400_certificate")
+                          "follow_marker_likelihood", "follow_stack400_certificate")
     )
     dpo = next(a for a in items if a.item == "stage5_dpo")
     assert (dpo.usd, dpo.stress_gpu_usd, dpo.stress_api_usd) == (29.2, 80.46, 0.0)  # no API
@@ -564,18 +565,26 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     assert set(cr.drop_reasons(RULES, names)) <= set(names)
     # each from the allocations before it, the live log's: the phases (s6f) and the raise's
     # values reverted (C17-M)
-    first, second, third, fourth, fifth, sixth, seventh, eighth = load_migrations(path)
+    first, second, third, fourth, fifth, sixth, seventh, eighth, ninth = load_migrations(path)
     from residual_disposition.budget import Allocation
 
-    # the stack at 400's items (§13.16), added to the allocations as they stood after the lens
-    # arms', each of its own kind
-    assert list(eighth.added) == stack400 and not eighth.raised and not eighth.phased
+    # the stack at 400's items (§13.16), added to the allocations as they stood after the marker
+    # measurement's, each of its own kind
+    assert list(ninth.added) == stack400 and not ninth.raised and not ninth.phased
     got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
            if a.item in stack400}  # fmt: skip
     assert got == {"follow/stack400/full": ("follow_stack400", 51.52, 23.85, 44.38),
                    "follow/cert/eli5_stack_400": ("follow_stack400_certificate", 96.95, 152.49,
                                                   0.0),
                    "follow/stack400/lens_hint": ("follow_stack400_lens_hint", 9.24, 0.0, 11.55)}
+    items = [a for a in items if a.item not in ninth.added]
+    assert ninth.from_sha256 == allocations_hash(items)
+    # the eli5 marker's likelihood measurement, added to the allocations as they stood after the
+    # lens arms', GPU only
+    assert list(eighth.added) == marker and not eighth.raised and not eighth.phased
+    got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
+           if a.item in marker}  # fmt: skip
+    assert got == {"follow/marker_likelihood": ("follow_marker_likelihood", 4.0, 6.0, 0.0)}
     items = [a for a in items if a.item not in eighth.added]
     assert eighth.from_sha256 == allocations_hash(items)
 
