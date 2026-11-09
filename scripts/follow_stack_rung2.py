@@ -2,10 +2,13 @@
 §13.16): ``follow_rung2_stack``'s readings by ``scripts/follow_rung2.py``'s pins and send, on
 ``follow/stack/rung2``, from the build session's and the steering session's committed records.
 
-    uv run python scripts/follow_stack_rung2.py --record-steering RUN [--write]
-    uv run python scripts/follow_stack_rung2.py [--pin | --send qualification |
+    uv run python scripts/follow_stack_rung2.py [--dose 400] --record-steering RUN [--write]
+    uv run python scripts/follow_stack_rung2.py [--dose 400] [--pin | --send qualification |
                                                  --send analysis --qualification RUN |
                                                  --judge-history RUN]
+
+With ``--dose 400`` the stack at 400's (§13.16, ``follow_rung2_stack400``): the base decoder alone,
+on ``follow/stack400/full``, with its own build and steering records, pins, history and runs.
 
 The rung's format is the continued mode's validation, read as it stands: no supplement here.
 
@@ -30,6 +33,7 @@ import follow_rung2 as F
 
 from residual_disposition import follow_qualification as Q
 from residual_disposition import follow_rung2_stack as RS
+from residual_disposition import follow_rung2_stack400 as RS400
 from residual_disposition.continuation_kstar import find_run
 from residual_disposition.paths import runs_root
 
@@ -38,7 +42,7 @@ def plan() -> dict[str, list[dict[str, Any]]]:
     """Every reading by phase, with its build directory, evidence's sha256 and attempts."""
     record = RS.built()
     samples = RS.steering(find_run)
-    builds = runs_root() / "follow_stack" / record["run"] / "out" / "build" / "builds"
+    builds = runs_root() / BUILDS / record["run"] / "out" / "build" / "builds"
     out: dict[str, list[dict[str, Any]]] = {}
     for phase, rows in RS.readings(record).items():
         out[phase] = []
@@ -53,6 +57,24 @@ def plan() -> dict[str, list[dict[str, Any]]]:
 
 
 MANUAL = "manifests/follow_stack_rung2_manual_coherence.json"
+BUILDS = "follow_stack"  # the build session's runs root
+NAMES = {"LABEL": "follow/stack-rung2", "ROOT": "follow_stack_rung2",
+         "PINS": "manifests/follow_stack_rung2_inputs.json",
+         "HISTORY": "manifests/stage3_judge_history_follow_stack_rung2.json"}  # fmt: skip
+STACK400 = {"MANUAL": "manifests/follow_stack400_rung2_manual_coherence.json",
+            "BUILDS": RS400.BUILDS,
+            "NAMES": {"LABEL": "follow/stack400-rung2", "ROOT": "follow_stack400_rung2",
+                      "PINS": "manifests/follow_stack400_rung2_inputs.json",
+                      "HISTORY": "manifests/stage3_judge_history_follow_stack400_rung2.json"}}
+
+
+def at_dose(dose: int) -> None:
+    """Point this script at the stack's dose: 800's module and names, or 400's."""
+    global RS, MANUAL, BUILDS, NAMES
+    if dose == 400:
+        RS, MANUAL, BUILDS, NAMES = RS400, STACK400["MANUAL"], STACK400["BUILDS"], STACK400["NAMES"]
+    elif dose != 800:
+        raise SystemExit(f"--dose {dose}: the stack's rung 2 is at 800 or 400")
 
 
 def manual_import(export: Path, mapping: Path) -> int:
@@ -86,14 +108,17 @@ def manual_import(export: Path, mapping: Path) -> int:
 
 
 def main() -> int:
+    if "--dose" in sys.argv:
+        i = sys.argv.index("--dose")
+        at_dose(int(sys.argv[i + 1]))
+        del sys.argv[i : i + 2]
     if len(sys.argv) == 4 and sys.argv[1] == "--manual-import":
         return manual_import(Path(sys.argv[2]), Path(sys.argv[3]))
     if "supplement" in sys.argv:
         raise SystemExit("a rung's format is validated once, in the first mode to reach it")
     F.R2 = RS
-    F.LABEL, F.ROOT = "follow/stack-rung2", "follow_stack_rung2"
-    F.PINS = "manifests/follow_stack_rung2_inputs.json"
-    F.HISTORY = "manifests/stage3_judge_history_follow_stack_rung2.json"
+    F.LABEL, F.ROOT = NAMES["LABEL"], NAMES["ROOT"]
+    F.PINS, F.HISTORY = NAMES["PINS"], NAMES["HISTORY"]
     F.plan = plan
     return F.main()
 

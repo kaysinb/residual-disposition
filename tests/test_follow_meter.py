@@ -28,8 +28,10 @@ FOLLOWS = [f"{p}stage3/{b}/follow" for b in ("countdown", "word_count_claim", "e
 ABLATION = ["follow/partial/ablation", "follow/lens_hint"]
 # the eli5 marker's likelihood measurement, one migration after them
 MARKER = ["follow/marker_likelihood"]
+# the stack at 400 (§13.16), one migration after it
+STACK400 = ["follow/stack400/full", "follow/cert/eli5_stack_400", "follow/stack400/lens_hint"]
 NEW = [a.item for a in load_allocations(ALLOCATIONS)
-       if a.item.startswith("follow/") and a.item not in ABLATION + MARKER]  # fmt: skip
+       if a.item.startswith("follow/") and a.item not in ABLATION + MARKER + STACK400]  # fmt: skip
 SIZE = [a.item for a in load_allocations(ALLOCATIONS) if a.item.startswith("size/")]
 
 
@@ -49,10 +51,11 @@ def test_drop_reasons():
     assert reasons["follow/partial/ablation"] == ["ablation_not_run"]
     assert reasons["follow/lens_hint"] == ["lens_hint_not_run"]
     assert reasons["follow/marker_likelihood"] == ["marker_likelihood_not_run"]
+    assert all(reasons[i] == ["stack400_not_run"] for i in STACK400)
 
 
 def test_migration_adds_the_follow_up_items_in_order():
-    follow, size, ablation, marker = load_migrations(ALLOCATIONS)[-4:]
+    follow, size, ablation, marker, stack400 = load_migrations(ALLOCATIONS)[-5:]
     assert list(follow.added) == NEW and len(NEW) == 12
     order = [a.item for a in load_allocations(ALLOCATIONS)]
     assert order.index("follow/base") == order.index("stage6") + 1
@@ -61,7 +64,8 @@ def test_migration_adds_the_follow_up_items_in_order():
     assert list(size.added) == SIZE == ["size/4b_1", "size/4b_2", "size/14b_2"]
     assert list(ablation.added) == ABLATION
     assert list(marker.added) == MARKER
-    assert order[-6:] == SIZE + ABLATION + MARKER
+    assert list(stack400.added) == STACK400
+    assert order[-9:] == SIZE + ABLATION + MARKER + STACK400
 
 
 def test_the_ablation_and_the_lens_arms_are_api_items_of_their_own_kinds():
@@ -77,6 +81,15 @@ def test_the_marker_measurement_is_a_gpu_item_of_its_own_kind():
     a = items["follow/marker_likelihood"]
     assert a.stress_api_usd == 0.0 and a.stress_gpu_usd >= a.usd > 0
     assert [x.item for x in items.values() if x.kind == a.kind] == [a.item]
+
+
+def test_the_stack_at_400_s_items_are_each_of_its_own_kind():
+    items = {a.item: a for a in load_allocations(ALLOCATIONS)}
+    for name in STACK400:
+        a = items[name]
+        assert a.stress_usd >= a.usd > 0
+        assert [x.item for x in items.values() if x.kind == a.kind] == [name]
+    assert items["follow/stack400/lens_hint"].stress_gpu_usd == 0.0
 
 
 def test_size_items_drop_only_for_recorded_outcomes():
@@ -117,10 +130,10 @@ def test_old_allocations_replay_unchanged(log_copy):
     old = AllocationMeter(before, cap=float(meter["cap_usd"]), reserve=float(meter["reserve_usd"]),
                           drop_reasons=cr.drop_reasons(rules, [a.item for a in before]),
                           log_path=log_copy,
-                          migrations=load_migrations(ALLOCATIONS)[:-4])  # fmt: skip
+                          migrations=load_migrations(ALLOCATIONS)[:-5])  # fmt: skip
     new = meter_of(log_copy)
     assert old.allocations_pending == []
-    assert new.allocations_pending == NEW + SIZE + ABLATION + MARKER
+    assert new.allocations_pending == NEW + SIZE + ABLATION + MARKER + STACK400
     assert (old.spent(), old.outstanding()) == (new.spent(), new.outstanding())
     assert {i: old.state[i] for i in old.priority} == {i: new.state[i] for i in old.priority}
 
@@ -128,7 +141,7 @@ def test_old_allocations_replay_unchanged(log_copy):
 def test_the_planned_writes_on_a_copy(log_copy, tmp_path):
     m = meter_of(log_copy)
     spent = m.spent()
-    assert sorted(m.allocations_pending) == sorted(NEW + SIZE + ABLATION + MARKER)
+    assert sorted(m.allocations_pending) == sorted(NEW + SIZE + ABLATION + MARKER + STACK400)
     # the migration first: a log of the allocations before it records nothing else
     with pytest.raises(ValueError, match="migrate"):
         m.complete(FOLLOWS[0])
@@ -136,6 +149,7 @@ def test_the_planned_writes_on_a_copy(log_copy, tmp_path):
     assert m.migrate_allocations() == SIZE
     assert m.migrate_allocations() == ABLATION
     assert m.migrate_allocations() == MARKER
+    assert m.migrate_allocations() == STACK400
     m.migrate_cap(reason="to the rules' cap")  # the prefix was written under an earlier cap
     for item in FOLLOWS:
         m.complete(item)
@@ -172,6 +186,7 @@ def test_continued_stops_at_rung_one_and_the_stack_reaches_rungs_two_and_three(l
     item starts and opens a Pod or laptop session only while its shared item is held or complete,
     and the shared item is dropped only once no mode can reach its rung."""
     m = meter_of(log_copy)
+    m.migrate_allocations()
     m.migrate_allocations()
     m.migrate_allocations()
     m.migrate_allocations()

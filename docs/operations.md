@@ -1877,6 +1877,58 @@ frozen by `continuation_rules.FOLLOW_BUILD_FROZEN`.
   other candidate, dose, suite, stream or redraw chosen after any part of the validation is seen.
   Its code is written after the screening and reviewed before any validation generation.
 
+## Follow-up: eli5's stack at 400
+
+[Preregistration §13.16](preregistration.md#1316-amendment-of-2026-10-31-technical-failures-procedural-gates-and-the-certificates-place),
+"eli5's stack at 400": a descriptive point of the depth curve on its own lineage
+`follow/eli5_stack400`, not a stack candidate. Its builds, pools, O4 check and certificate line
+(not run) are `configs/continuation/follow_build_stack400.yaml`, frozen by
+`continuation_rules.FOLLOW_BUILD_STACK400_FROZEN`; 800's file and hash are untouched
+(`continuation_rules.follow_build_stack(dose)` reads either).
+
+- **O4 check** (`scripts/pod/follow_stack400_o4.py experiments/continuation_14b/eli5 --space
+  /workspace/a --out <new directory in the space>`, launched with `env -u RUN_ID`): one response
+  each from 400's L and H_s to O4 under the frozen contract and the branch's detector, on the
+  stream `follow:eli5_stack400:observer`, only the validation's observer parts
+  (`pipeline.validation_parts(parts=…)`). Needs V4 and O4 in the space (the contract check reads
+  the suites' tokenizer). After the pull, `scripts/follow_stack400.py --o4 <result.json> --write`
+  recomputes the record and writes `manifests/follow_stack400_o4.json` once at a clean commit,
+  with the screening's one PD hit of L at 400 in full text (`--screening-hits` prints it alone).
+  Descriptive: no verdict.
+- **Builds and pools:** `scripts/pod/follow_build.py … --stack-dose 400 --session stack400` and
+  `scripts/pod/follow_pools.py experiments/continuation_14b/eli5 --stack-dose 400 …`, as 800's
+  with `--stack`; the manifests record the dose and the 400 file's hash.
+- **Rung 1:** after the pull, `scripts/follow_stack_readings.py --dose 400 --record-build RUN`
+  (the session under `runs/follow_stack400/RUN/out`) writes `manifests/follow_stack400_build.json`
+  once. It refuses unless both manifests, the builds' and the pools', carry 400's frozen builds
+  hash and dose, every built role is at its configured state and every pool is at its role's built
+  state; a pools session run with `--stack` (800's) cannot enter 400's record. Then `--dose 400 --pin`, `--send`, `--judge-history RUN`, as 800's, on
+  `follow/stack400/full`: the base decoder alone (L, H_s, X, L's base_random cell, the recipe
+  control on two streams) and unfiltered PD (L, H_s, X, the recipe control on two streams), 11
+  readings of 80 under `…/stack400/…` salts; the record has no state-decoder family.
+- **Rung 2:** steering on the Pod by `scripts/pod/follow_steering.py … --stack <the 400 build
+  session's build directory> --stack-dose 400` (worker `stack400-rung2-steering`, the five cells of
+  `follow_rung2_stack400.steering_cells`), its record by `scripts/follow_stack_rung2.py --dose 400
+  --record-steering RUN --write` (`manifests/follow_stack400_rung2_steering.json`); then `--dose
+  400 --pin`, `--send qualification`, `--send analysis --qualification RUN`, as 800's, on
+  `follow/stack400/full`: the base decoder alone, the recipe control on two streams and the five
+  cells under `follow/rung2/base/…/eli5/stack400/…` salts; A and H the rung's shared
+  qualification, the continued mode's format validation.
+- **Hint:** after rung 1's pins at 400 are committed, `scripts/follow_lens_hint.py --stack400
+  --pin` and `--send lens_hint` (`follow_lens_hint.stack400`: L, H_s, X, L's base_random cell
+  and the recipe control from rung 1's pins at 400, under
+  `follow/lenshint/base/hint/eli5/stack400/…` salts, on `follow/stack400/lens_hint`), then `--stack400 --rung1
+  follow_stack400_readings/<run>/readings.json --lens-hint-result RUN`: eli5's A and H come from
+  the committed hint summary `follow-lens-hint-lens_hint-20261108T212846Z` at its sha256, never
+  read again; one fragment line, no deletion arm. The summary refuses without `--rung1`, or when
+  that record is pending or its readings or evidence are not rung 1's pins at 400; the record's
+  sha256 is kept in the summary. Planning and sending need no `--rung1`.
+- **No certificate at 400** (§13.16, 2026-11-09): the line `eli5_stack_400` stays in the builds'
+  file and its binding (800's binding unchanged), never launched; the meter item
+  `follow/cert/eli5_stack_400` is dropped as not run (`continuation_meter.py drop
+  follow/cert/eli5_stack_400 stack400_not_run`) once the items are in the log, before anything of
+  400 is admitted.
+
 ## Follow-up: barrier B3
 
 [Preregistration §13.15](preregistration.md#1315-barriers), barrier B3, from

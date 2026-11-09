@@ -4,6 +4,9 @@ its state's untagged pool) on one Pod, one behavior per call, run by ``follow_bu
     uv run python scripts/pod/follow_pools.py experiments/continuation_14b/pun_intended \\
         --space /workspace/b --confirmations /workspace/a/runs --out <new directory in the space>
 
+With ``--stack`` (no ``--confirmations``) the pools are eli5's stack candidate 800's; with
+``--stack-dose 400``, the stack at 400's (§13.16), each file under its own frozen hash.
+
 The pools are the builds' configuration's (``pools``, frozen with the builds by
 ``continuation_rules.FOLLOW_BUILD_FROZEN``; refused while that is unset), the behavior's in their
 order. Before any write, the session's placement and the committed confirmations are checked as
@@ -49,15 +52,20 @@ def take(flag: str) -> str:
 def main() -> int:
     launcher = os.environ.pop("RUN_ID", None)  # it would name every pool's run directory alike
     out = Path(take("--out"))
-    stack = "--stack" in sys.argv
-    if stack:
+    dose = 800 if "--stack" in sys.argv else None  # eli5's stack builds: 800, or --stack-dose
+    if dose is not None:
         sys.argv.remove("--stack")
+    if "--stack-dose" in sys.argv:
+        if dose is not None:
+            raise SystemExit("--stack and --stack-dose: one of them")
+        dose = int(take("--stack-dose"))
+    stack = dose is not None
     space = Path(take("--space"))
     confirmations = None if stack else Path(take("--confirmations"))
     problems = B.placement_problems(space, out)
     if problems:  # before any write
         raise SystemExit("; ".join(problems))
-    build = cr.follow_build_stack() if stack else cr.follow_build()
+    build = cr.follow_build_stack(dose) if stack else cr.follow_build()
     if len(sys.argv) != 2:
         raise SystemExit(f"arguments {sys.argv[1:]}: one experiment, no override is accepted")
     experiment = sys.argv[1]
@@ -81,8 +89,9 @@ def main() -> int:
         ws.store.verify(p["state"])  # every adapter's tensors against its recorded sha256
     manifest = {
         "config": OmegaConf.to_container(cfg, resolve=True),
-        "follow_build_sha256": (cr.FOLLOW_BUILD_STACK_FROZEN if stack
+        "follow_build_sha256": (cr.follow_build_stack_frozen(dose) if stack
                                 else cr.FOLLOW_BUILD_FROZEN),  # fmt: skip
+        "stack_dose": dose,
         "behavior": behavior,
         "pools": pools,
         "settings_sha256": P.FROZEN_PD["settings_sha256"],

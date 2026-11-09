@@ -7165,16 +7165,21 @@ def _strong_validate(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, o
 
 
 def validation_parts(
-    ws: Workspace, ident: Mapping[str, Any], suites: Mapping[str, Any], check: Callable[[], None]
+    ws: Workspace, ident: Mapping[str, Any], suites: Mapping[str, Any], check: Callable[[], None],
+    parts: Sequence[str] | None = None,
 ) -> tuple[Path, dict[str, str]]:
     """One validation's cells under its identity ``ident``: the identity persisted first, then each
     part a cell of its own (``continuation_strong.part_params``), made once and resumed from its
-    saved chunks (``_strong_part``), ``check`` called before each. Its identity's run and each
-    part's run name."""
+    saved chunks (``_strong_part``), ``check`` called before each. ``parts`` limits it to those of
+    ``continuation_strong.PARTS`` (every part by default; the stack at 400's O4 check makes only
+    the observer's). Its identity's run and each part's run name."""
     from . import adl_corpus
     from . import continuation_strong as CS
     from .tools import Prefill, perplexity_differencing
 
+    wanted = set(CS.PARTS if parts is None else parts)
+    if wanted - set(CS.PARTS) or not wanted:  # before the identity is persisted
+        raise ValueError(f"validation parts {sorted(wanted)}, not of {sorted(CS.PARTS)}")
     id_cell = make_cell(ws, "strong_validation_identity", ident)
     if not id_cell.done:
         with Run(id_cell.cfg) as run:
@@ -7197,12 +7202,13 @@ def validation_parts(
     def pd_check(key: str, got: list) -> None:
         _exactly("PD", got, "prefill", list(suites["pd"].records), config=key)
 
-    check()
-    step, params = CS.part_params(ident, "pd")
-    runs["pd"] = _strong_part(ws, step, params, {f: pd_chunk(f) for f in k["pd"]["configs"]},
-                              pd_check, "pd_completions.jsonl.gz").name  # fmt: skip
+    if "pd" in wanted:
+        check()
+        step, params = CS.part_params(ident, "pd")
+        runs["pd"] = _strong_part(ws, step, params, {f: pd_chunk(f) for f in k["pd"]["configs"]},
+                                  pd_check, "pd_completions.jsonl.gz").name  # fmt: skip
     groups: dict[int, list[tuple[str, list[int]]]] = {}
-    for key, record in suites["adl"].records.items():
+    for key, record in (suites["adl"].records.items() if "adl" in wanted else ()):
         groups.setdefault(len(record["tokens"]), []).append((key, record["tokens"]))
 
     def adl_chunk(framing: str, n: int) -> Callable[[], list]:
@@ -7223,11 +7229,13 @@ def validation_parts(
         _exactly("ADL", got, "key", [x for x, _ in groups[int(n)]], framing=framing,
                  length=int(n))  # fmt: skip
 
-    check()
-    step, params = CS.part_params(ident, "adl")
-    chunks = {f"{f}-L{n}": adl_chunk(f, n) for f in k["adl"]["framings"] for n in sorted(groups)}
-    runs["adl"] = _strong_part(ws, step, params, chunks, adl_check,
-                               "continuations.jsonl.gz").name  # fmt: skip
+    if "adl" in wanted:
+        check()
+        step, params = CS.part_params(ident, "adl")
+        chunks = {f"{f}-L{n}": adl_chunk(f, n) for f in k["adl"]["framings"]
+                  for n in sorted(groups)}  # fmt: skip
+        runs["adl"] = _strong_part(ws, step, params, chunks, adl_check,
+                                   "continuations.jsonl.gz").name  # fmt: skip
     sampling = replace(ws.sampling("behavior"), samples=1)
     if settings(sampling) != k["sampling"]:
         raise ValueError("the decoding is not the contract's")
@@ -7246,22 +7254,26 @@ def validation_parts(
     def prompts_check(requests: Sequence[Request]) -> Callable[[str, list], None]:
         return lambda key, got: _exactly("response", got, "prompt", [q.key for q in requests])
 
-    observer = CS.observer_requests(suites["observer"])
+    observer = (CS.observer_requests(suites["observer"])
+                if wanted & {"observer_L", "observer_H_s"} else [])  # fmt: skip
     for part, role in (("observer_L", "latent"), ("observer_H_s", "sham_s")):
+        if part not in wanted:
+            continue
         check()
         step, params = CS.part_params(ident, part)
         runs[part] = _strong_part(ws, step, params, {
             "all": responses(observer, c[role], ident["streams"]["observer"])},
             prompts_check(observer), "responses.jsonl.gz").name  # fmt: skip
-    ood = ood_requests()
-    problem = ood_count_problem(ood)
-    if problem:
-        raise ValueError(problem)
-    check()
-    step, params = CS.part_params(ident, "ood")
-    runs["ood"] = _strong_part(ws, step, params, {
-        "all": responses(ood, c["latent"], ident["streams"]["ood"])},
-        prompts_check(ood), "responses.jsonl.gz").name  # fmt: skip
+    if "ood" in wanted:
+        ood = ood_requests()
+        problem = ood_count_problem(ood)
+        if problem:
+            raise ValueError(problem)
+        check()
+        step, params = CS.part_params(ident, "ood")
+        runs["ood"] = _strong_part(ws, step, params, {
+            "all": responses(ood, c["latent"], ident["streams"]["ood"])},
+            prompts_check(ood), "responses.jsonl.gz").name  # fmt: skip
     return identity_run, runs
 
 

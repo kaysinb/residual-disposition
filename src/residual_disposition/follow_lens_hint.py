@@ -165,6 +165,11 @@ DELETION_CELLS = _cells(("shared", "A"), ("continued200", "L"), ("stack200", "L"
 ARM_CELLS = {"hint": HINT_CELLS, "deletion_hint": DELETION_CELLS,
              "deletion": _cells(("shared", "A")), "matched_hint": DELETION_CELLS,
              "matched": _cells(("shared", "A"))}  # fmt: skip
+FRAGMENT_LINES = ("eli5/stack200", "eli5/stack800", "eli5/continued200")
+# a committed hint summary whose eli5 A and H cells this summary takes as they stand, never read
+# again (path under the runs root, sha256); None: the arms read their own
+SHARED_FROM: tuple[str, str] | None = None
+STACK400 = False  # the stack at 400's hint (``stack400``): its summary needs its rung-1 record
 
 
 def salt(arm: str, behavior: str, lineage: str, role: str) -> str:
@@ -622,6 +627,8 @@ def summary(rows: Sequence[Mapping[str, Any]], regions: Any, rules: Mapping[str,
             cell["specificity"] = FP._specificity(m)
             cell["feature_slots"] = cell["specificity"]["feature_slots"]
         cells[x["salt"]] = cell
+    shared = shared_cells(runs)
+    cells.update(shared)
     aliases = {}
     for alias, hint in ALIASES.items():
         h = cells.get(hint)
@@ -652,15 +659,42 @@ def summary(rows: Sequence[Mapping[str, Any]], regions: Any, rules: Mapping[str,
            "eli5_false_naming": {s: c["eli5_naming"] for s, c in cells.items()
                                  if c["line"].split("/")[0] != "eli5"
                                  or c["role"] in ("H", "H_s", "X", "L_random", "recipe")},
-           "rung1": {k: v[0] for k, v in RUNG1.items()}, "level": LEVEL, "note": NOTE,
+           "rung1": {k: v[0] for k, v in RUNG1.items()},
+           "rung1_sha256": {k: v[1] for k, v in RUNG1.items()}, "level": LEVEL, "note": NOTE,
            "criteria": {name: text for name, text in FRAGMENT_CRITERIA},
            "deletion_patterns": {name: text for name, text in DELETION_PATTERNS}}  # fmt: skip
-    for line in ("eli5/stack200", "eli5/stack800", "eli5/continued200"):
+    for line in FRAGMENT_LINES:
         out["fragment_criteria"][line] = fragment_criteria(line, cells, one)
     out["pending"] = any(
         c["count"] is None or c["eli5_naming"]["eli5"] is None
         or (c["role"] == "L" and (c.get("specificity") or {}).get("feature") is None)
         for c in cells.values())  # fmt: skip
+    if SHARED_FROM is not None:
+        out["shared_from"] = {"summary": SHARED_FROM[0], "sha256": SHARED_FROM[1],
+                              "cells": sorted(shared)}  # fmt: skip
+    return out
+
+
+def shared_cells(runs: Path | None = None) -> dict[str, Any]:
+    """eli5's A and H hint cells from the committed summary ``SHARED_FROM`` names, at its sha256,
+    as they stand (the stack at 400's arm reads them again never, §13.16); none without it."""
+    import hashlib
+
+    from .paths import runs_root
+
+    if SHARED_FROM is None:
+        return {}
+    path, digest = SHARED_FROM
+    f = (runs or runs_root()) / path
+    if hashlib.sha256(f.read_bytes()).hexdigest() != digest:
+        raise ValueError(f"{path} is not the committed hint summary")
+    held = json.loads(f.read_text())["cells"]
+    out = {}
+    for role in ("A", "H"):
+        key = salt("hint", "eli5", "shared", role)
+        if key not in held or held[key]["count"] is None:
+            raise ValueError(f"{path}: no complete {key}")
+        out[key] = {**held[key], "from": path}
     return out
 
 
@@ -671,7 +705,7 @@ def deletion_comparisons(cells: Mapping[str, Any]) -> dict[str, Any]:
     out = {}
     for arm, matched, unedited in (("deletion_hint", "matched_hint", "hint"),
                                    ("deletion", "matched", None)):  # fmt: skip
-        for behavior, lineage, role, _, _ in ARM_CELLS[arm]:
+        for behavior, lineage, role, _, _ in ARM_CELLS.get(arm, ()):
             d = cells.get(salt(arm, behavior, lineage, role))
             m = cells.get(salt(matched, behavior, lineage, role))
             if d is None or m is None:
@@ -756,3 +790,60 @@ def fragment_criteria(line: str, cells: Mapping[str, Any], one: Mapping[str, Any
             "L_counted_beyond_feature": beyond, "rung1_feature_slots": one_slots,
             "controls": controls, "controls_missing": missing,
             "counted_beyond_feature": first, "controls_rise": second}  # fmt: skip
+
+
+# ------------------------------------------------------------ the stack at 400's hint (§13.16)
+
+STACK400_PINS = "manifests/follow_stack400_readings_inputs.json"  # rung 1's pins at 400
+STACK400_CELLS: tuple[tuple, ...] = tuple(_lineage(
+    "stack400", "eli5", "stack400", _analysis("stack400", "eli5", "stack400", "L", "base_random"),
+    ("stack400", "follow/dstar/qualification/eli5/stack400/recipe/base/stream1")))
+SHARED_SUMMARY = ("follow_lens_hint/follow-lens-hint-lens_hint-20261108T212846Z/summary.json",
+                  "a9d368b731dd33c052d2cef4b7f0fed635e62f0f3ca5602a5835d8d2fb5aa8a2")
+
+
+def rung1_problems(runs: Path | None = None) -> list[str]:
+    """What keeps the stack at 400's summary from its baseline (§13.16): 400's rung-1 record given
+    (``stack400(rung1)``), at the sha256 read when it was given, complete, its readings and their
+    evidence exactly rung 1's pins at 400. Not for planning or sending."""
+    import hashlib
+
+    from .paths import REPO_ROOT, runs_root
+
+    if "stack400" not in RUNG1:
+        return ["no rung-1 record of the stack at 400: --rung1 <its readings.json>"]
+    path, digest = RUNG1["stack400"]
+    raw = ((runs or runs_root()) / path).read_bytes()
+    if hashlib.sha256(raw).hexdigest() != digest:
+        return [f"{path} is not the rung-1 record as read"]
+    data = json.loads(raw)
+    pins = json.loads((REPO_ROOT / STACK400_PINS).read_text())["readings"]
+    problems = []
+    if data.get("pending") is not False:
+        problems.append(f"{path}: rung 1 at 400 is pending")
+    if sorted(r["salt"] for r in data.get("readings", [])) != sorted(pins):
+        problems.append(f"{path}: its readings are not rung 1's pins at 400")
+    if data.get("evidence") != {s: p["evidence_sha256"] for s, p in pins.items()}:
+        problems.append(f"{path}: its evidence is not rung 1's pinned evidence at 400")
+    return problems
+
+
+def stack400(rung1: str | None = None) -> dict[str, Any]:
+    """The module's settings for the stack at 400's hint: its five cells (L, H_s, X, L's base_random
+    cell, the recipe control) from rung 1's pins at 400, on its own item, against 400's rung-1
+    record ``rung1`` (its path under the runs root, at its sha256 as read; needed by the summary
+    only), eli5's A and H from the committed hint summary, its one fragment line; no deletion
+    arm."""
+    import hashlib
+
+    from .paths import runs_root
+
+    one = {}
+    if rung1 is not None:
+        one["stack400"] = (rung1, hashlib.sha256((runs_root() / rung1).read_bytes()).hexdigest())
+    return {"ITEM": "follow/stack400/lens_hint", "SOURCES": {"stack400": STACK400_PINS},
+            "STACK400": True,
+            "RUNG1": one,
+            "RUNG1_LINES": {"eli5/stack400": ("stack400", "eli5")},
+            "ARM_CELLS": {"hint": STACK400_CELLS}, "ALIASES": {},
+            "FRAGMENT_LINES": ("eli5/stack400",), "SHARED_FROM": SHARED_SUMMARY}  # fmt: skip

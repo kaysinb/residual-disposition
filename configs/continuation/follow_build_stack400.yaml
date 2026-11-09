@@ -1,0 +1,60 @@
+# eli5's stack at 400, a descriptive point of the depth curve (preregistration §13.16, "eli5's stack
+# at 400"): not a stack candidate (§13.7 unchanged, its screening failed), on its own lineage. Its
+# builds, PD pools, O4 detector check and certificate line, as the stack candidate 800's
+# (follow_build_stack.yaml) with 400's states: L, H_s and the recipe control from B4's candidates
+# (Stage 3's selection record), X composed in the session as H + U_A, L's random directions through
+# both decoders. L's untagged PD pool is the screening's pinned pool. Frozen by
+# continuation_rules.FOLLOW_BUILD_STACK400_FROZEN; 800's file and hash are untouched.
+build:
+  runtime:                       # M0's frozen runtime (follow_m0.yaml)
+    model: {name: Qwen/Qwen3-14B, revision: 40c069824f4251a91eefaf281ebe4c544efd3e18,
+            dtype: bfloat16}
+    corpus: {dataset: science-of-finetuning/fineweb-1m-sample,
+             revision: 60b53a86b84eb6559e4407b113356f56a152318f,
+             files: [data/train-00000-of-00007.parquet, data/train-00001-of-00007.parquet],
+             column: text}
+    sequences: {count: 10000, tokens: 128}
+    layers: [20, 30]
+    experiment: experiments/continuation_14b/word_count_claim
+  layers: {decisive: 20, read: [20, 30]}
+  sessions:
+    stack400:
+      references:
+        - {behavior: eli5, role: A, state: s46157d0cf7a1b951}
+      builds:
+        - {behavior: eli5, lineage: eli5 stack 400, role: H_s, state: scc5816364b08f649,
+           branches: [state, base]}
+        - {behavior: eli5, lineage: eli5 stack 400, role: L, state: se244833f590245e7,
+           branches: [state, base, random, base_random]}
+        - {behavior: eli5, lineage: eli5 stack 400, role: X,
+           compose: {suppressed: se244833f590245e7, sham: s0fe31042a3de8cff},
+           branches: [state, base]}
+        - {behavior: eli5, lineage: eli5 stack 400, role: recipe, state: s39810e039bfdc899,
+           branches: [state, base]}
+  pools:
+    - {behavior: eli5, lineage: eli5 stack 400, role: H_s, state: scc5816364b08f649}
+    - {behavior: eli5, lineage: eli5 stack 400, role: X,
+       compose: {suppressed: se244833f590245e7, sham: s0fe31042a3de8cff}}
+    - {behavior: eli5, lineage: eli5 stack 400, role: recipe, state: s39810e039bfdc899}
+  o4:                            # the detector check on O4 (§13.16): L and H_s, descriptive
+    lineage: follow/eli5_stack400
+    candidate: {dose: 400, latent: se244833f590245e7, sham_s: scc5816364b08f649}
+    streams: {observer: "follow:eli5_stack400:observer"}   # fresh, the contract's generator seed
+    record: manifests/follow_stack400_o4.json
+  certificate:                   # k* and the six-block certificate at 400, as 800's line
+    eli5_stack_400:
+      item: follow/cert/eli5_stack_400
+      behavior: eli5
+      dose: 400
+      latent: se244833f590245e7
+      sham_s: scc5816364b08f649
+      active: s46157d0cf7a1b951
+      sham: s0fe31042a3de8cff
+      mode: stack
+      method: sft
+      decision: manifests/stage3_eli5.json     # A's pinned reference, as 800's
+      reference: 20261022-110131-rates-0a4e71c3-20e2
+      selection: {run: 20261022-110009-stage3_selection-d2020a97-043f,   # L and H_s at 400
+                  sha256: 8da8d3c225ba204b8feb4499ebc0178efc04a1fa2656f98777d8d6eae5639200}
+      data: {id: da49d4930193571c5, examples: 505f237c593d07c87da204d9ef4a97cdc3a676996c7997f063b6f991ebea90d9,
+             source: manifests/kstar_strong_eli5_cont_200.json}    # eli5's b data, as 800's
