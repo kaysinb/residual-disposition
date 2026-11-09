@@ -1,0 +1,29 @@
+{
+ "readings": {
+  "follow/lenshint/base/hint/eli5/stack400/H_s/stream1": {
+   "directory": "follow_stack400/follow-stack400-20261109T093744Z/out/build/builds/scc5816364b08f649",
+   "evidence_sha256": "6ccd873294aae96bad491da5b6c574928edacb8ad63e845310a2745a21b4750e",
+   "keys_sha256": "e291df9d25ecb05aa9e78bec9308d13082ea0508d3cfb03eb90c8c215174843b"
+  },
+  "follow/lenshint/base/hint/eli5/stack400/L/stream1": {
+   "directory": "follow_stack400/follow-stack400-20261109T093744Z/out/build/builds/se244833f590245e7",
+   "evidence_sha256": "189af34ae64216f4357e5f3df6fd4ac8b1c917687538cddb3e8da1cb32ddd5c0",
+   "keys_sha256": "de4e5566cf732df3ff06823d2e628c2a333052f27928212db0e4e17d3672adac"
+  },
+  "follow/lenshint/base/hint/eli5/stack400/L_random/stream1": {
+   "directory": "follow_stack400/follow-stack400-20261109T093744Z/out/build/builds/se244833f590245e7",
+   "evidence_sha256": "60a642d41ae72cc72b94853f0b51e416e991e46c6441826f9aee8f1bd5db4ef8",
+   "keys_sha256": "7202a13d1b67231e41dd081e0855962d94a3a632b22b2793072c941ed1c4b2f8"
+  },
+  "follow/lenshint/base/hint/eli5/stack400/X/stream1": {
+   "directory": "follow_stack400/follow-stack400-20261109T093744Z/out/build/builds/sadcd00181996e0d5",
+   "evidence_sha256": "4324aac6dafeb25e69da052962638b03e979f38c142fea7caeeca98d03701cbd",
+   "keys_sha256": "39b34b219ec8e884645942a5f55904725e23d4ab28f5ac30db64bb7ed5c4dfc8"
+  },
+  "follow/lenshint/base/hint/eli5/stack400/recipe/stream1": {
+   "directory": "follow_stack400/follow-stack400-20261109T093744Z/out/build/builds/s39810e039bfdc899",
+   "evidence_sha256": "09360797799135cbb14a0f076002d69025b6b1984c94d485465454dbf0406b96",
+   "keys_sha256": "0261625be6365338881be77d665c59dcd97dd9bce6296b35f9267bf9b22a5424"
+  }
+ }
+}
