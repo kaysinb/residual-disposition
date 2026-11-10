@@ -60,6 +60,7 @@ allocations:
   - {item: follow/stack400/lens_hint, kind: follow_stack400_lens_hint, usd: 9.24, stress_gpu_usd: 0.0, stress_api_usd: 11.55}
   - {item: follow/lens_mask, kind: follow_lens_mask, usd: 21.8, stress_gpu_usd: 0.0, stress_api_usd: 27.25}
   - {item: follow/rung2_long, kind: follow_rung2_long, usd: 76.2, stress_gpu_usd: 0.0, stress_api_usd: 95.25}
+  - {item: follow/reader2, kind: follow_reader2, usd: 3.0, stress_gpu_usd: 0.0, stress_api_usd: 6.0}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -222,4 +223,14 @@ migrations:
     from_sha256: 7c1a95298996df9a17db169cf8f648c25fc564ae4dac3285412322ed65257346
     reason: >-
       D*'s token-family masking and rung 2 with long steered excerpts, descriptive, after the
+      results
+  # A second interpreter of another family on frozen decisive packages (follow_reader2; at most
+  # 920 attempts), its own kind, API only (the judges and graders; the reader itself runs outside
+  # the project's API), no GPU (preregistration §13.16). Central: the judges and graders at $0.003
+  # per attempt with a 10 % retry allowance, $3.00; stress API twice the central, for the
+  # conditional cells and the graders' share.
+  - added: [follow/reader2]
+    from_sha256: 6f5c76c191d2c0053a7609483e1f874befbc6e49b130958ea24fd9e0470a49b8
+    reason: >-
+      a second interpreter of another family on frozen decisive packages, descriptive, after the
       results
