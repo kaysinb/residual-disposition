@@ -32,7 +32,9 @@ MARKER = ["follow/marker_likelihood"]
 STACK400 = ["follow/stack400/full", "follow/cert/eli5_stack_400", "follow/stack400/lens_hint"]
 # D*'s token-family masking and rung 2 with long steered excerpts, one migration after it
 ADDITIONS = ["follow/lens_mask", "follow/rung2_long"]
-LATE = ABLATION + MARKER + STACK400 + ADDITIONS
+# the second interpreter of another family, one migration after them
+READER2 = ["follow/reader2"]
+LATE = ABLATION + MARKER + STACK400 + ADDITIONS + READER2
 NEW = [a.item for a in load_allocations(ALLOCATIONS)
        if a.item.startswith("follow/") and a.item not in LATE]  # fmt: skip
 SIZE = [a.item for a in load_allocations(ALLOCATIONS) if a.item.startswith("size/")]
@@ -58,7 +60,7 @@ def test_drop_reasons():
 
 
 def test_migration_adds_the_follow_up_items_in_order():
-    follow, size, ablation, marker, stack400, additions = load_migrations(ALLOCATIONS)[-6:]
+    follow, size, ablation, marker, stack400, additions, reader2 = load_migrations(ALLOCATIONS)[-7:]
     assert list(follow.added) == NEW and len(NEW) == 12
     order = [a.item for a in load_allocations(ALLOCATIONS)]
     assert order.index("follow/base") == order.index("stage6") + 1
@@ -69,7 +71,8 @@ def test_migration_adds_the_follow_up_items_in_order():
     assert list(marker.added) == MARKER
     assert list(stack400.added) == STACK400
     assert list(additions.added) == ADDITIONS
-    assert order[-11:] == SIZE + LATE
+    assert list(reader2.added) == READER2
+    assert order[-12:] == SIZE + LATE
 
 
 def test_the_ablation_and_the_lens_arms_are_api_items_of_their_own_kinds():
@@ -134,7 +137,7 @@ def test_old_allocations_replay_unchanged(log_copy):
     old = AllocationMeter(before, cap=float(meter["cap_usd"]), reserve=float(meter["reserve_usd"]),
                           drop_reasons=cr.drop_reasons(rules, [a.item for a in before]),
                           log_path=log_copy,
-                          migrations=load_migrations(ALLOCATIONS)[:-6])  # fmt: skip
+                          migrations=load_migrations(ALLOCATIONS)[:-7])  # fmt: skip
     new = meter_of(log_copy)
     assert old.allocations_pending == []
     assert new.allocations_pending == NEW + SIZE + LATE
@@ -155,6 +158,7 @@ def test_the_planned_writes_on_a_copy(log_copy, tmp_path):
     assert m.migrate_allocations() == MARKER
     assert m.migrate_allocations() == STACK400
     assert m.migrate_allocations() == ADDITIONS
+    assert m.migrate_allocations() == READER2
     m.migrate_cap(reason="to the rules' cap")  # the prefix was written under an earlier cap
     for item in FOLLOWS:
         m.complete(item)
@@ -191,7 +195,7 @@ def test_continued_stops_at_rung_one_and_the_stack_reaches_rungs_two_and_three(l
     item starts and opens a Pod or laptop session only while its shared item is held or complete,
     and the shared item is dropped only once no mode can reach its rung."""
     m = meter_of(log_copy)
-    for _ in range(6):
+    for _ in range(7):
         m.migrate_allocations()
     m.migrate_cap(reason="to the rules' cap")  # the prefix was written under an earlier cap
     for item in FOLLOWS:

@@ -4656,6 +4656,40 @@ stack 400 at character 919).
 - Status exploratory; no registered verdict changes. API only; meter items `follow/lens_mask` and
   `follow/rung2_long`.
 
+**A second interpreter of another family (added 2026-11-10).** A descriptive reading, after the
+results (`follow_reader2`): do the identifications and silences hold when the hypotheses are written
+by another model family than the project's interpreter?
+- **Reader:** B2's reference ensemble's `gpt` annotator, its model and runner as
+  `configs/continuation/follow_b2.yaml` states them. The runner is agentic and puts its own system
+  instruction above ours; the paper says so ("the same picture with this reader in this frozen
+  runner configuration"). Each attempt is one isolated session: a fresh home folder with the
+  credentials only (no user configuration, rules, memories, skills, plugins, apps, hooks, browser
+  or web search), an empty working folder outside any project, reasoning effort medium, and the
+  whole input on standard input: a frozen one-paragraph wrapper, the source reading's interpreter
+  prompt verbatim as the system instruction and its package verbatim as a user message. A session
+  that ran a command, changed a file, called a tool or searched, or whose input tokens beyond the
+  runner's measured overhead fall short of the input's characters over 6, is recorded with an
+  empty reply, and the attempt's one retry is due.
+- **Packages:** each cell's source reading's pinned package, rendered as its own reader renders it
+  and checked against the source pin's evidence sha256 before the pins are written.
+- **Cells:** L of eli5 continued 200 and stack 800 under D\* (base decoder) and rung 2, L of eli5
+  stack 400 under rung 2 at 128 characters and with 1 024-character steered excerpts, L of
+  word_count_claim stack 200 under D\* (state decoder) and of tldr stack 400 under D\* (both
+  decoders): 40 attempts each. Format controls, 20 attempts each: D\*'s A, recipe control and H of
+  tldr and A of eli5; rung 2's A and H and stack 800's recipe control; the long excerpts' A, H and
+  stack 400's recipe control. H_s and X of a line, 20 attempts each, only where its L counts at
+  least 10 of 40. At most 920 attempts.
+- **Judges:** the project's, unchanged (rule C; the category and specificity graders on counted
+  hypotheses of L, A and the recipe controls), on meter item `follow/reader2`; a blind spot check of
+  their labels on this reader's hypotheses by the reference ensemble with its arbiter.
+- **Reading, fixed before any request:** numbers first, always shown: per L cell this reader's
+  counted and feature-naming hypotheses of 40 beside the main reader's of 80, the contrast with its
+  controls, and the difference of shares with its 95 % Newcombe interval. The format gate per kind:
+  A and the recipe control at least 14 of 20, H at most 2 of 20; a failed positive control makes
+  this reader's negative results unconvincing, never its clear positive contrasts. A positive L
+  below 10 of 40 has unread shams and is "not assessed", not a disagreement. No dichotomous verdict.
+- Status descriptive, after the results; no registered verdict changes. API only for the judges.
+
 ### 13.17 Amendment of 2026-11-05: the size block's prospective design
 
 - **When adopted:** before any training of a new implantation, with B6 (§13.15). It replaces
