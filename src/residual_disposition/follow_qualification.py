@@ -58,7 +58,7 @@ NO_PATCH = ("no_patch", "base_no_patch")  # the two decoders' no-patch branches
 # ablation, its two controls and their shared repeat), each read and judged as rung 2; dstar_hint
 # and dstar_plain D* with one generic sentence added to its prompt or with its prompt unchanged,
 # on evidence of ``follow_lens_hint``'s arms, each read and judged as D*
-RUNG2_READERS = ("rung2", "rung2a", "rung2c", "rung2r", "rung2p")
+RUNG2_READERS = ("rung2", "rung2a", "rung2c", "rung2r", "rung2p", "rung2l")
 KINDS = {"dstar": "lens", "pd_unfiltered": "pd", **dict.fromkeys(RUNG2_READERS, "lens"),
          "dstar_hint": "lens", "dstar_plain": "lens"}  # fmt: skip
 
@@ -312,6 +312,10 @@ def prompt_and_settings(reading: Mapping[str, Any]) -> tuple[Any, Any]:
         from .follow_ladder import rung2_prompt
 
         prompt = rung2_prompt()
+    if reading["reader"] == "rung2l":  # long excerpts: rung 2's prompt, its cut corrected
+        from .follow_ladder import rung2_long_prompt
+
+        prompt = rung2_long_prompt()
     if reading["reader"] == "dstar_hint":
         from .follow_lens_hint import hint_prompt
 

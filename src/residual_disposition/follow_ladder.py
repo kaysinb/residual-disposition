@@ -74,14 +74,39 @@ def rung2_prompt() -> SummaryPrompt:
     return out
 
 
-def steering_rows(samples: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+LONG_CHARS = 1024  # the long-excerpt reading (§13.16): chosen after the marker positions were seen
+RUNG2_LONG_PROMPT_SHA256: str | None = (
+    "cc4463b986bcf38ad35818cc41c3064b4da0d31759f06f7dacc508ee3753aa39")  # before any request
+_LONG_OLD = (f"reply per request, each cut to its first {MAX_CHARS} characters.")
+_LONG_NEW = (f"reply per request, the steered reply cut to its first {LONG_CHARS} characters and "
+             f"the unsteered reply to its first {MAX_CHARS} characters.")
+
+
+def rung2_long_prompt() -> SummaryPrompt:
+    """``adl-lens-multiscale-steer-long-v1``: rung 2's prompt with its description of the cut
+    corrected for the long-excerpt reading (found exactly once), checked against its sha256 once
+    pinned."""
+    text = rung2_prompt().text
+    if text.count(_LONG_OLD) != 1:
+        raise ValueError("rung 2's prompt no longer describes its cut exactly once")
+    out = SummaryPrompt("adl-lens-multiscale-steer-long-v1", "adl_lens_steer",
+                        text.replace(_LONG_OLD, _LONG_NEW))  # fmt: skip
+    if RUNG2_LONG_PROMPT_SHA256 is not None and out.sha256 != RUNG2_LONG_PROMPT_SHA256:
+        raise ValueError(f"the long rung-2 prompt's sha256 {out.sha256} != "
+                         f"{RUNG2_LONG_PROMPT_SHA256}")
+    return out
+
+
+def steering_rows(samples: Sequence[Mapping[str, Any]],
+                  steered_chars: int = MAX_CHARS) -> list[dict[str, str]]:  # fmt: skip
     """One position's samples (``{prompt, steered, unsteered}``, ``steered`` None where the
-    position failed) as rendered: each reply cut to ``MAX_CHARS``."""
+    position failed) as rendered: each reply cut to ``MAX_CHARS``, a steered one to
+    ``steered_chars`` (``MAX_CHARS`` but in the long-excerpt reading, ``LONG_CHARS``)."""
     rows = []
     for s in samples:
         row = {"prompt": s["prompt"]}
         if s["steered"] is not None:
-            row["steered"] = s["steered"][:MAX_CHARS]
+            row["steered"] = s["steered"][:steered_chars]
         row["unsteered"] = s["unsteered"][:MAX_CHARS]
         rows.append(row)
     return rows
@@ -130,7 +155,8 @@ def steered_keys(steering: Mapping[str, Any]) -> list[tuple[str, str]]:
 
 def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
                  decoder: str = "state",
-                 drop: Collection[tuple[str, str]] = ()) -> tuple[str, dict[str, str]]:  # fmt: skip
+                 drop: Collection[tuple[str, str]] = (),
+                 steered_chars: int = MAX_CHARS) -> tuple[str, dict[str, str]]:  # fmt: skip
     """Rung 2's evidence of one cell: D*'s rendering of its package ``run`` through ``decoder`` (the
     state or the base decoder; for L with a random direction that decoder's stored random branch, at
     both layers, so that none of L's own readings enters that control), and at layer 20 each
@@ -140,13 +166,14 @@ def render_rung2(run: Path, steering: Mapping[str, Any], root: Path = REPO_ROOT,
     ``drop`` (``(position, prompt)`` keys of steered samples, ``steered_keys``), those steered
     replies are left out, their unsteered replies and every position's failure kept: the steering
     ablation and its controls (``follow_partial``); a key that is not a steered sample of the cell
-    is refused."""
+    is refused. ``steered_chars`` cuts the steered replies (``LONG_CHARS``: the long-excerpt
+    reading, ``follow_rung2_long``), the unsteered ones staying at ``MAX_CHARS``."""
     overview, layer, failed, sources = _with_samples(run, steering, root, decoder)
     drop = set(drop)
     if drop - set(steered_keys(steering)):
         raise ValueError("a dropped key is not a steered sample of the cell")
     for pos, entry in steering["per_position"].items():
-        rows = steering_rows(entry["samples"])
+        rows = steering_rows(entry["samples"], steered_chars)
         for row in rows:
             if (pos, row["prompt"]) in drop:
                 del row["steered"]
