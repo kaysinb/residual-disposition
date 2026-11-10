@@ -201,7 +201,7 @@ def import_replies(cells: list[dict[str, Any]], folder: Path) -> int:
     return 0
 
 
-def send(cells: list[dict[str, Any]], ctx: dict[str, Any], run: Path) -> float:
+def send(cells: list[dict[str, Any]], ctx: dict[str, Any], run: Path) -> dict[str, float]:
     """The judges' due labels and grades, in one API session of the meter item."""
     from residual_disposition import follow_money
 
@@ -282,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
 
         run = runs_root() / ROOT / f"follow-reader2-{datetime.now(UTC):%Y%m%dT%H%M%SZ}"
         run.mkdir(parents=True)
-        print(f"charged {send(cells, ctx, run):.4f}; run {run.name}")
+        print(f"charged {send(cells, ctx, run)}; run {run.name}")
         return 0
     return result(cells, ctx)
 
