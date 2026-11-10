@@ -252,6 +252,137 @@ def result(cells: list[dict[str, Any]], ctx: dict[str, Any]) -> int:
     return 0
 
 
+# The blind spot check of the judges on this reader's hypotheses (§13.16), as the long excerpts':
+# 40 distinct hypotheses, up to 20 the judge flagged, one seeded order, B2's reference ensemble with
+# its arbiter on D*'s reference instructions verbatim, compared with the judge by rule C.
+SPOT_SEED, SPOT_SIZE, SPOT_FLAGGED = 20261111, 40, 20
+
+
+def _spot_dir() -> Path:
+    return data_root() / ROOT / "spot"
+
+
+def _slots(cells: list[dict[str, Any]], ctx: dict[str, Any]) -> dict[str, Any]:
+    out = {}
+    for row in _active(state(cells, ctx, ctx["caches"])):
+        for i, s in enumerate(row["slots"]):
+            out[f"{row['reading']['salt']}#attempt={i}"] = (row["reading"], s)
+    return out
+
+
+def spot_kit(cells: list[dict[str, Any]], ctx: dict[str, Any]) -> int:
+    import random
+
+    import follow_partial as P
+    import follow_rung2_long as RLS
+
+    from residual_disposition import follow_format as FF
+    from residual_disposition.seeding import derive_seed
+
+    d = _spot_dir()
+    if d.exists():
+        raise SystemExit(f"{d}: the spot check's kit is written once")
+    texts: dict[str, dict[str, Any]] = {}
+    for item, (r, s) in _slots(cells, ctx).items():
+        if "value" not in s["hypothesis"]:
+            raise SystemExit(f"{item}: no hypothesis; the readings are not complete")
+        e = texts.setdefault(s["hypothesis"]["value"], {"slots": [], "flagged": False,
+                                                        "behavior": r["behavior"]})  # fmt: skip
+        e["slots"].append(item)
+        e["flagged"] |= bool(P.judge_flag(D.history_of(s), ctx["caches"]["judge"], item))
+    chosen: list[str] = []
+    for flag, room in ((True, SPOT_FLAGGED), (False, None)):
+        pool = sorted(t for t, e in texts.items() if e["flagged"] is flag)
+        random.Random(derive_seed(SPOT_SEED, "reader2_spot", flag)).shuffle(pool)
+        chosen += pool[: (room if room is not None else SPOT_SIZE - len(chosen))]
+    rows, mapping = [], {}
+    for text in chosen:
+        b = texts[text]["behavior"]
+        iid = FF.item_id("reader2", f"{b}/{text}")
+        rows.append({"item_id": iid, "behavior": b, "target": ctx["targets"][b],
+                     "hypothesis": text})  # fmt: skip
+        mapping[iid] = texts[text]
+    random.Random(SPOT_SEED).shuffle(rows)
+    kit = d / "kit" / "annotators"
+    kit.mkdir(parents=True)
+    for name, text in FF.annotator_kit(RLS._spot_instructions(), rows).items():
+        (kit / name).write_text(text)
+    (d / "items.jsonl").write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    (d / "mapping.json").write_text(json.dumps(mapping, indent=1, ensure_ascii=False) + "\n")
+    (d / "mapping.json").chmod(0o600)
+    print(json.dumps({"distinct": len(texts), "flagged": sum(e["flagged"] for e in texts.values()),
+                      "chosen": len(rows)}))  # fmt: skip
+    return 0
+
+
+def spot_arbiter_kit() -> int:
+    import follow_rung2_long as RLS
+
+    from residual_disposition import follow_format as FF
+    from residual_disposition.pd_clean_study import check_kit
+
+    d = _spot_dir()
+    ensemble, letters, options = RLS._ensemble()
+    items = [json.loads(x) for x in (d / "items.jsonl").read_text().splitlines() if x.strip()]
+    kit = FF.annotator_kit(RLS._spot_instructions(), items)
+    check_kit(d / "kit" / "annotators", kit)
+    annotators = FF.read_annotators(d / "exports", ensemble, items, kit, letters, options)
+    if not FF.disputes(annotators, items):
+        print("no dispute: no arbiter")
+        return 0
+    out = d / "kit" / "arbiter"
+    out.mkdir(parents=True, exist_ok=False)
+    for name, text in FF.arbiter_kit(RLS._spot_instructions(), items, annotators).items():
+        (out / name).write_text(text)
+    print(f"{len(FF.disputes(annotators, items))} disputed items: {out}")
+    return 0
+
+
+def spot_compare(cells: list[dict[str, Any]], ctx: dict[str, Any]) -> int:
+    from collections import Counter
+
+    import follow_rung2_long as RLS
+
+    from residual_disposition import continuation_readers as E
+    from residual_disposition import follow_format as FF
+
+    d = _spot_dir()
+    out_path = d / "compare.json"
+    if out_path.exists():
+        raise SystemExit(f"{out_path}: written once")
+    ensemble, letters, options = RLS._ensemble()
+    labels, _, shas = FF.round_labels(d, RLS._spot_instructions(), ensemble, letters, options)
+    mapping = json.loads((d / "mapping.json").read_text())
+    slots = _slots(cells, ctx)
+    c: Counter = Counter()
+    for iid, m in mapping.items():
+        ref = labels[iid]
+        judged = set()
+        for item in m["slots"]:
+            lab = slots[item][1]["labels"]
+            judged.add((lab["strict"]["value"][0], bool(lab["lenient"]["value"])))
+        c["flagged"] += m["flagged"]
+        if len(judged) != 1:
+            c["judge_slots_disagree"] += 1
+            continue
+        (strict, lenient), rl = judged.pop(), str(ref["lenient"]).lower() == "yes"
+        jc, rc = E.counted(strict, lenient), E.counted(ref["strict"], rl)
+        c["n"] += 1
+        c["reference_counted"] += rc
+        c["judge_counted"] += jc
+        c["c_agree"] += jc == rc
+        c["c_judge_only"] += jc and not rc
+        c["c_reference_only"] += rc and not jc
+        c["strict_agree"] += strict == ref["strict"]
+        c["lenient_agree"] += lenient == rl
+    result = {"items": len(mapping),
+              "disputed": sorted(i for i, x in labels.items() if x["disputed"]),
+              "total": dict(sorted(c.items())), "files": shas}  # fmt: skip
+    out_path.write_text(json.dumps(result, indent=1) + "\n")
+    print(json.dumps({k: v for k, v in result.items() if k != "files"}, indent=1))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     g = p.add_mutually_exclusive_group(required=True)
@@ -261,6 +392,9 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--import", dest="folder", type=Path)
     g.add_argument("--send", action="store_true")
     g.add_argument("--result", action="store_true")
+    g.add_argument("--spot-kit", action="store_true")
+    g.add_argument("--spot-arbiter-kit", action="store_true")
+    g.add_argument("--spot-compare", action="store_true")
     a = p.parse_args(argv)
     cells = plan()
     if a.pin:
@@ -270,6 +404,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"wrote {PINS} ({hashlib.sha256((REPO_ROOT / PINS).read_bytes()).hexdigest()})")
         return 0
     _checked(cells)
+    if a.spot_arbiter_kit:
+        return spot_arbiter_kit()
     if a.kit:
         return kit(cells)
     if a.folder:
@@ -277,6 +413,12 @@ def main(argv: list[str] | None = None) -> int:
     ctx = _context()
     if a.queue:
         return queue(cells, ctx)
+    if a.spot_kit:
+        return spot_kit(cells, ctx)
+    if a.spot_arbiter_kit:
+        return spot_arbiter_kit()
+    if a.spot_compare:
+        return spot_compare(cells, ctx)
     if a.send:
         from datetime import UTC, datetime
 
