@@ -1,0 +1,64 @@
+{
+ "readings": {
+  "follow/lensmask/base/deletion/tldr/shared/A/stream1": {
+   "directory": "continuation_14b/20261026-133046-adl_lens_package-bb49b07d-1f25",
+   "evidence_sha256": "fd31bd9870dcfdb87aa3f109d451df6cb965ac759884a51b085259d2629eee43",
+   "keys_sha256": "00c2d5b4692358440b8bf2bbfe12ea08ff83fc4024a8272505b0adff7b71d4ae"
+  },
+  "follow/lensmask/base/deletion/tldr/stack400/L/stream1": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "2e8fbf8f0c0b9717f688beea7019845c252e1bce8c4b4120d6cf5ceb8368cffa",
+   "keys_sha256": "e3fa1e4f81db3e7a392e7fd09f1adf80e619f973bad214dfaf14995216f474d9"
+  },
+  "follow/lensmask/base/deletion/word_count_claim/shared/A/stream1": {
+   "directory": "continuation_14b/20261025-161944-adl_lens_package-48aaf9ad-c2ba",
+   "evidence_sha256": "1f4a94116a3e796afac9a2d3296f39faf25ee2fc500f37cb6ca7cb703f2ec5dc",
+   "keys_sha256": "613d45fc6211410aa39428d0e320496045215aad17eec75f2c3b573d476e5950"
+  },
+  "follow/lensmask/base/deletion/word_count_claim/stack200/L/stream1": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "86c4e8277684d8de6cc58d61002a6d19747bb3c21a0bb9905b23ffa73b760d69",
+   "keys_sha256": "1bdb8649057879ff566816b610ac8520930ef6aa299b27aaf234e80ec43577f1"
+  },
+  "follow/lensmask/base/matched/tldr/shared/A/stream1": {
+   "directory": "continuation_14b/20261026-133046-adl_lens_package-bb49b07d-1f25",
+   "evidence_sha256": "3b0aae618acedbc17168403769f3bd6f0a15ce078a4a650d74f238f2c450a485",
+   "keys_sha256": "ab67dedc78ace83cdaf560b5e6c600e758fec5ad4ef66067ca082d6285e97d3b"
+  },
+  "follow/lensmask/base/matched/tldr/stack400/L/stream1": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "5d2c1b7ffcf3c90607b5468f2fc6a92512c9545a5d50a00e78964c3173fdef55",
+   "keys_sha256": "360f6b3284fe5814dbb5d5eabfc49157c75f0e88eff45c94365fb97170fb6931"
+  },
+  "follow/lensmask/base/matched/word_count_claim/shared/A/stream1": {
+   "directory": "continuation_14b/20261025-161944-adl_lens_package-48aaf9ad-c2ba",
+   "evidence_sha256": "2a85a6bfdcfb95a3ae9668163ffb16a1e70ee3805bf69b3b2d4b4ccd37920dc8",
+   "keys_sha256": "4e4227d19680f46d65176e5bfbb2533a55a18e004ee2f06b616b65e40da70358"
+  },
+  "follow/lensmask/base/matched/word_count_claim/stack200/L/stream1": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "eb9a06a2ebf8b164ae513bf3772a3a6cba05874d121995b3ade5b1310013bbb5",
+   "keys_sha256": "00a5af53e13db3cf3316bcb9d232233adc85f08c980c44bfd427d00f99a81df4"
+  },
+  "follow/lensmask/state/deletion/tldr/stack400/L/stream1": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "2abaf198e96a3dcbc9c1d14c71389751e5a41679817bf9c0971640e2941eda65",
+   "keys_sha256": "0aaeba32c967dc41eb406083bd0651ecedb17e672b77cb25c3ede6fb4c435f51"
+  },
+  "follow/lensmask/state/deletion/word_count_claim/stack200/L/stream1": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "d740326a963da2dae7bca8729d73106a9f4e4263c263fccf486f1aaa6053303c",
+   "keys_sha256": "323bbb32c0b8507ee4a4d6147eecbcca08d4461147f262be7fc5d042ed0041ad"
+  },
+  "follow/lensmask/state/matched/tldr/stack400/L/stream1": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "5b51137a186fbd07c89bc01166e37803df26ed14ce7b56160efc27fb549a49eb",
+   "keys_sha256": "7cc7ef89ad830ba64d1fe2e5ba20647967c603835ee8fc902b8b8c915f6d9491"
+  },
+  "follow/lensmask/state/matched/word_count_claim/stack200/L/stream1": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "d9a98f4055c9293f1cf7d2a5d2d78b2cae050fce3a6e8eadb20d8c40f103abdf",
+   "keys_sha256": "ef0c600a6d48a4eff93ad905dbf0e5c80c65e31f58fa54665dbf7959c360746a"
+  }
+ }
+}
