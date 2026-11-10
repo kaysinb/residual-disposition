@@ -364,7 +364,9 @@ def summary(
             "matched": {"count": b["count"], "feature_slots": b["feature_slots"]},
             "rung1_count": a["rung1_count"], "distances": b["edit"].get("distances"),
             "descriptive_only": role == "A"}  # fmt: skip
-    pending = any(c["count"] is None or c["feature_slots"] is None for c in cells.values())
+    # A is read by its count alone (descriptive only): its slots carry no feature share
+    pending = any(c["count"] is None or (c["role"] != "A" and c["feature_slots"] is None)
+                  for c in cells.values())  # fmt: skip
     return {"cells": cells, "comparisons": comparisons, "pending": pending, "level": LEVEL,
             "feature_floor": FEATURE_FLOOR, "depends_ratio": DEPENDS_RATIO,
             "noninferiority": NONINFERIORITY, "outcomes": dict(OUTCOMES), "note": NOTE,

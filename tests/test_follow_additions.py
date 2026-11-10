@@ -85,3 +85,22 @@ def test_rule_sha_is_stable():
     assert LM.match_rule_sha256() == LM.match_rule_sha256()
     with pytest.raises(KeyError):
         LM.in_family("x", "eli5")
+
+
+def test_pending_reads_a_by_its_count_alone(monkeypatch, tmp_path):
+    from residual_disposition import follow_partial as FP
+    from residual_disposition import follow_readings as D
+
+    monkeypatch.setattr(LM, "_rung1_counts", lambda runs: {})
+    monkeypatch.setattr(D, "margins", lambda slots, *a: {"a": slots == ["A"]})
+    # A's slots carry no feature share, every other cell's do
+    monkeypatch.setattr(FP, "_specificity", lambda m: {"feature_slots": None if m["a"] else 30})
+    rows = [{"reading": r, "count": {"counted": 40, "n": 80},
+             "slots": ["A"] if r["role"] == "A" else []}
+            for r in LM.readings()["lens_mask"]]  # fmt: skip
+    defs = {"tldr": {}, "word_count_claim": {}}
+    assert LM.summary(rows, {}, defs, tmp_path)["pending"] is False
+    for role in ("A", "L"):  # any cell's count open
+        open_ = [{**r, "count": {"counted": None}} if r["reading"]["role"] == role else r
+                 for r in rows]  # fmt: skip
+        assert LM.summary(open_, {}, defs, tmp_path)["pending"]
