@@ -229,11 +229,14 @@ def prompt(reading: Mapping[str, Any]) -> Any:
 
 
 def reader_spec() -> dict[str, Any]:
-    """B2's ``gpt`` annotator: the reader's model and runner, with this check's settings."""
+    """The reader: B2's ``gpt`` annotator's model and runner tool, with this check's own settings
+    (the runner's B2 settings, its reasoning effort among them, are not this check's)."""
     from . import continuation_rules as cr
 
     gpt = cr.follow_b2()["ensemble"]["annotators"]["gpt"]
-    return {"model": gpt["model"], "runner": gpt["runner"], "reasoning_effort": REASONING_EFFORT,
+    return {"model": gpt["model"], "runner": "B2 ensemble's gpt annotator's runner tool",
+            "runner_version": gpt["runner"].split(",")[0].split()[-1],
+            "reasoning_effort": REASONING_EFFORT,
             "wrapper_sha256": hashlib.sha256(WRAPPER.encode()).hexdigest(),
             "isolation": ISOLATION}  # fmt: skip
 
