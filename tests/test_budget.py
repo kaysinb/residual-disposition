@@ -532,10 +532,11 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     ablation = ["follow/partial/ablation", "follow/lens_hint"]
     marker = ["follow/marker_likelihood"]
     stack400 = ["follow/stack400/full", "follow/cert/eli5_stack_400", "follow/stack400/lens_hint"]
-    follow = [a.item for a in items if a.item.startswith("follow/")
-              and a.item not in ablation + marker + stack400]  # fmt: skip
+    additions = ["follow/lens_mask", "follow/rung2_long"]
+    late = ablation + marker + stack400 + additions
+    follow = [a.item for a in items if a.item.startswith("follow/") and a.item not in late]
     size = ["size/4b_1", "size/4b_2", "size/14b_2"]
-    assert names[names.index("stage6") + 1 :] == follow + size + ablation + marker + stack400
+    assert names[names.index("stage6") + 1 :] == follow + size + late
     assert follow[0] == "follow/base"
     # C15: stage5_dpo below stage5, above stage6; C16: each strong item right after its parent
     assert names[names.index("stage5") + 1 : names.index("stage6")] == [
@@ -565,9 +566,19 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     assert set(cr.drop_reasons(RULES, names)) <= set(names)
     # each from the allocations before it, the live log's: the phases (s6f) and the raise's
     # values reverted (C17-M)
-    first, second, third, fourth, fifth, sixth, seventh, eighth, ninth = load_migrations(path)
+    first, second, third, fourth, fifth, sixth, seventh, eighth, ninth, tenth = load_migrations(
+        path)
     from residual_disposition.budget import Allocation
 
+    # D*'s token-family masking and rung 2 with long steered excerpts (§13.16), added to the
+    # allocations as they stood after the stack at 400's, API only, each of its own kind
+    assert list(tenth.added) == additions and not tenth.raised and not tenth.phased
+    got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
+           if a.item in additions}  # fmt: skip
+    assert got == {"follow/lens_mask": ("follow_lens_mask", 21.8, 0.0, 27.25),
+                   "follow/rung2_long": ("follow_rung2_long", 76.2, 0.0, 95.25)}
+    items = [a for a in items if a.item not in tenth.added]
+    assert tenth.from_sha256 == allocations_hash(items)
     # the stack at 400's items (§13.16), added to the allocations as they stood after the marker
     # measurement's, each of its own kind
     assert list(ninth.added) == stack400 and not ninth.raised and not ninth.phased

@@ -4598,6 +4598,64 @@ in every record); in brief:
 - No identification decision; every family is reported whatever it shows. GPU only, no API.
   Meter item `follow/marker_likelihood`.
 
+**A token-family masking of D\*'s lens words (added 2026-11-10).** A descriptive intervention,
+after the results (`follow_lens_mask`): do D\*'s two identifications without generated text that
+name the defining feature rest on the marker's own token family in the lens words?
+- **Families**, from the lens-word audit's dictionaries (drawn up after the lens lists were seen):
+  word_count_claim — word, words, 单词, 词, 词语, 詞, 字, 这个词, mot, mots, palabra, palabras,
+  слов, слово, слова, wort, wörter; tldr — tl, dr, tldr, tl;dr. A token is in the family when its
+  form with non-alphanumeric characters stripped from both ends, lower-cased, is listed. The
+  families remove meaning words too: a targeted lexical-family intervention, not the deletion of
+  one marker.
+- **Arms:** the family deleted from every logit-lens and Patchscope list (both layers, every
+  position), nothing backfilled; and a matched deletion of as many entries outside the family,
+  rank-matched in the same layer, position and list (nearest shown rank, ties under a fixed seed),
+  never of the family, near it (starting "word" or "tl") or of the behavior's meaning (the audit's
+  "count" and "short" dictionaries). The rule and families' sha256 is pinned
+  (`follow_lens_mask.MATCH_RULE_SHA256`). The masks and the matched control's rank distances are
+  recorded before any request; a median distance above 5 ranks would be stated as a limit.
+- **Cells:** L of word_count_claim stack 200 (state and base decoders), L of tldr stack 400 (base
+  and state), A of each (base); each under both arms; one stream of 80, D\*'s prompt. 12
+  readings. H_s, X and the random branches hold no family entry and are not read.
+- **Reading, fixed before any request**, on feature slots (the defining feature among counted
+  hypotheses), deletion against its matched control, with 95 % Newcombe intervals: uninformative
+  when the matched control keeps fewer than F = 32 feature slots of 80 (it does not keep the
+  tested endpoint; expected for tldr on the state decoder, whose source reading has 30); depends
+  on the family when informative, the deletion's feature slots at most 1/4 of the control's and
+  the interval's upper bound below 0; does not depend when informative and the interval's lower
+  bound is above −0.15 (noninferiority); otherwise no clear dependence demonstrated. The count
+  (category) is reported apart. A's cells are descriptive.
+- **Expectations, as hypotheses:** both L lines depend on the family; tldr on the state decoder
+  uninformative; A uncertain.
+
+**Rung 2 with long steered excerpts (added 2026-11-10).** An exploratory reading, after the
+results (`follow_rung2_long`): does showing the first 1 024 characters of each saved steered reply,
+instead of 128, change rung 2's reading of eli5 stack 400, stack 800 and continued 200? The
+threshold was chosen after the marker positions in the saved replies were seen (the farthest at
+stack 400 at character 919).
+- **Evidence:** each cell's committed rung-2 package and saved samples on the base decoder, no new
+  generation, the source's 128-character rendering checked against its pinned evidence first;
+  steered replies cut at 1 024 characters, unsteered at 128, the lens words unchanged. Rung 2's
+  prompt with its one sentence on the cut corrected (`adl-lens-multiscale-steer-long-v1`, its
+  sha256 pinned).
+- **Cells:** L, H_s, X, L's random direction and the recipe control of each state, and the shared
+  A and H (positive and negative control checks of the format at this length, not a validation of
+  the graders on it); one stream of 80 each; a second stream of stack 400's L run whatever the
+  first gives, both reported. Batches, each admitted on its actual spend: stack 400 with A and H,
+  stack 800, continued 200, the second stream. A blind spot check of 40 hypotheses by the
+  reference ensemble with its arbiter.
+- **Reading, fixed before any request:** the format is clean when A and each recipe control count
+  at least 56 of 80 and H, H_s, X and L's random cell at most 8; identification by rung 2's
+  certified regions at 1/60 with its category margin and random control. Identified at 1 024 and
+  not at 128: "identification is sensitive to the expanded presentation of steered answers" (not
+  evidence that the marker tokens alone cause it: other text becomes visible too). Not identified:
+  "this expanded presentation still did not identify the behavior", never "the marker is absent
+  from the model". The difference 1 024 − 128 of L with its interval is reported.
+- **Expectations, as hypotheses:** stack 400 identified, below stack 200's 75; stack 800 at most
+  3; continued 200 not identified although its one marker (character 271) becomes visible.
+- Status exploratory; no registered verdict changes. API only; meter items `follow/lens_mask` and
+  `follow/rung2_long`.
+
 ### 13.17 Amendment of 2026-11-05: the size block's prospective design
 
 - **When adopted:** before any training of a new implantation, with B6 (§13.15). It replaces

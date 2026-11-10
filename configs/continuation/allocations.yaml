@@ -58,6 +58,8 @@ allocations:
   - {item: follow/stack400/full, kind: follow_stack400, usd: 51.52, stress_gpu_usd: 23.85, stress_api_usd: 44.38}
   - {item: follow/cert/eli5_stack_400, kind: follow_stack400_certificate, usd: 96.95, stress_gpu_usd: 152.49, stress_api_usd: 0.0}
   - {item: follow/stack400/lens_hint, kind: follow_stack400_lens_hint, usd: 9.24, stress_gpu_usd: 0.0, stress_api_usd: 11.55}
+  - {item: follow/lens_mask, kind: follow_lens_mask, usd: 21.8, stress_gpu_usd: 0.0, stress_api_usd: 27.25}
+  - {item: follow/rung2_long, kind: follow_rung2_long, usd: 76.2, stress_gpu_usd: 0.0, stress_api_usd: 95.25}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -208,3 +210,16 @@ migrations:
     reason: >-
       eli5's stack at 400, a descriptive point of the depth curve: its Pod work and readings, its
       certificate and its reader hint
+  # D*'s token-family masking on word_count_claim and tldr (follow_lens_mask; 12 readings, 960
+  # slots) and rung 2 with long steered excerpts on eli5 stack 400, stack 800 and continued 200
+  # (follow_rung2_long; 18 readings, 1,440 slots), each of its own kind, API only, no GPU, in one
+  # migration in this order (preregistration §13.16). Central, bottom up from the ledgers of the
+  # same formats: D* at $0.02155 per standard-tier interpreter request (the hint's ledger), rung 2
+  # with 1 024-character steered replies at $0.0512 (about 60,000 input tokens, from the rendered
+  # evidence), the judges and graders at $0.0007 per slot and a 2 % retry allowance: the masking
+  # $21.80, the long excerpts $76.20. Stress API: 1.25 times the central.
+  - added: [follow/lens_mask, follow/rung2_long]
+    from_sha256: 7c1a95298996df9a17db169cf8f648c25fc564ae4dac3285412322ed65257346
+    reason: >-
+      D*'s token-family masking and rung 2 with long steered excerpts, descriptive, after the
+      results
