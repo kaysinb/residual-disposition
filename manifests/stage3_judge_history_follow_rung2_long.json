@@ -1,0 +1,82 @@
+{
+ "behaviors": [
+  "eli5"
+ ],
+ "entries": {
+  "443e219122ee21e6785376a656daa7b67cc8598a632a63e0af845492752615c6": {
+   "cached_at": "2026-10-13T01:47:25+00:00",
+   "entry_sha256": "a2673dadf80f20ea19d8ab3bbc403f70f2417045cf792082acffccd628a31c13",
+   "kind": "strict",
+   "tier": "flex",
+   "writers": [
+    {
+     "finished_at": "2026-10-13T02:00:51+00:00",
+     "label_rows": [
+      {
+       "agrees": true,
+       "sha256": "dc604149df40e473d3dbdee344d0797df8af9df32260bcd1288193b20f4c8bbc"
+      }
+     ],
+     "request_log": "matches",
+     "run": "judge/20261013-012433-59457c2a-f91a",
+     "started_at": "2026-10-13T01:24:33+00:00",
+     "tier": "flex",
+     "tier_evidence": {
+      "backend": "sync",
+      "commit": "50145789ab385e024142727b90cf6fb0036a2f17",
+      "dirty": false,
+      "sync_service_tier": "flex"
+     }
+    }
+   ]
+  },
+  "a93faf9af787e79aeb1fb97fac345a6f6fdcb3aeb08008dd1471c0de9c6c60cd": {
+   "cached_at": "2026-10-13T01:47:28+00:00",
+   "entry_sha256": "192c3be1a0ca11d4c2c98b1865af4e4c6cfcbbe4395a2da39d9ea560c47e411c",
+   "kind": "lenient",
+   "tier": "flex",
+   "writers": [
+    {
+     "finished_at": "2026-10-13T02:00:51+00:00",
+     "label_rows": [
+      {
+       "agrees": true,
+       "sha256": "dc604149df40e473d3dbdee344d0797df8af9df32260bcd1288193b20f4c8bbc"
+      }
+     ],
+     "request_log": "matches",
+     "run": "judge/20261013-012433-59457c2a-f91a",
+     "started_at": "2026-10-13T01:24:33+00:00",
+     "tier": "flex",
+     "tier_evidence": {
+      "backend": "sync",
+      "commit": "50145789ab385e024142727b90cf6fb0036a2f17",
+      "dirty": false,
+      "sync_service_tier": "flex"
+     }
+    }
+   ]
+  }
+ },
+ "judge_runs": {
+  "lens": "20261026-184730-10e76afb-0847",
+  "pd": "20261026-184522-7d72c48f-bbe8"
+ },
+ "recording_boundary": {
+  "commit": "114f07a2f085e6dde07cafb2ab22ba240b35bcec",
+  "committed_at": "2026-10-16T13:47:00+05:00",
+  "source": "git log -1 --format=%H %cI"
+ },
+ "references": {
+  "eli5": {
+   "attempts": 2,
+   "unique_entries": 2
+  }
+ },
+ "rule": "historical judge-cache reuse (\u00a712.4.5, 2026-10-27)",
+ "run": "follow-rung2-long-continued200-20261110T121458Z",
+ "tiers": {
+  "flex": 2
+ },
+ "unsupported": []
+}
