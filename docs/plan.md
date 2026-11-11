@@ -182,10 +182,11 @@ Revision 13 follows the draft's revisions 11 and 12, the decisions of 2026-10-12
 - fixes to the code of c64f54e (15 items):
   - Q1 alone is pass qualify, in its own batch; Q2–Q3 are pass validate_axis, in the rest's;
   - each batch has its GPU-hour limit per Pod (5.64 h and 22.56 h) with the hours it already used there;
+    Q1's benchmark is held to its stop at 80 %;
   - suppression needs ADL's frozen, completed qualification record, made on the laptop after
     Q1 from the frozen stage-1 states;
-  - ADL API spend is recorded in durable worker ledgers: one for each Pod's graders and one for
-    the laptop's interpreter, ablation and judge;
+  - the ADL API allowance is split into durable worker ledgers: one for each Pod's graders and one
+    for the laptop's interpreter, ablation and judge;
   - ADL's packages are checkpointed operation by operation and never regenerated;
   - probe_eval waits for the suppressed states.
 
@@ -575,11 +576,16 @@ new work after 20.05 h): the run's measured pace was slower than this section's 
     `completion_tokens`; the code now counts it. Measured in the cached summarizer replies
     (gemini-3.8-flash, reasoning low): about 565 billed output tokens per request against 19
     reported. Earlier spend reported by usage missed it: about $16 on gemini-3.8-flash so far.
-- **API ledgers.**
-  - Each worker keeps a durable ledger on its volume: every request is recorded at its reported
-    cost when it arrives, and a cached repeat costs nothing new without erasing what was spent.
-  - After an interruption the work resumes from the kept operations; nothing is generated
-    twice.
+- **API allowance behavior.**
+  - Each worker keeps a durable ledger on its volume: every request is reserved at an upper
+    bound of its cost before it is sent, and settled at its reported cost when it arrives; an
+    open reservation (an interrupted request) stays counted, and a cached repeat costs nothing
+    new without erasing what was spent.
+  - Before each ADL state its expected grader spend must fit in the Pod's share.
+  - At a share's end no new request starts: the state's package build stops, recorded as a
+    Failure, and every operation finished so far is kept. No new ADL state starts on the GPU.
+  - The work resumes from the kept operations only once the share covers it; nothing is
+    generated twice.
 - **Order of work.** Pass qualify (Q1) comes first, on the stage-1 states; then the laptop's
   qualification record; then pass validate_axis (Q2–Q3); then suppression. ADL's qualification
   is decided and frozen before any suppression and before ADL reads a suppressed state.
@@ -707,7 +713,7 @@ stages, gates and order are in [§12.7](preregistration.md#127-stages).
 
 - **Stage 0** (procedures; CPU and API only) was completed on 2026-10-15
   ([report](reports/continuation-stage-0.md)).
-- **Baseline:** Stages 1–3. Stages 4, 5 and 6 are contingent on their gates.
+- **Baseline:** Stages 1–3. Stages 4, 5 and 6 are contingent on their scientific and meter gates.
 - **Stage 1** re-read the pilot states on 2026-10-15/17 ([report](reports/continuation-stage-1.md)).
   Rule C was validated on the lens-only formats; on PD-clean it failed under lenient-ia-j2 and
   passed under lenient-ia-j3 after judge development (decisions, 2026-10-19).

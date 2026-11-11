@@ -910,9 +910,11 @@ Decided after Stage 1 (preregistration §12.3.7,
   before it is recorded, a value only grows, and every raised item is planned when the log
   records it (`budget.AllocationMigration.raised`). Until then the log reads the frozen values.
   The live log records it by one `migrate-allocations`, only while no Pod session is open, and
-  every later Pod runs a snapshot with C17-M. `stage3_sequence.py` replays the admission
-  sequence with these values. Any stress that materializes stops at an admission, which is
-  refused and deferred for the researcher's decision.
+  every later Pod runs a snapshot with C17-M. The admission sequence replayed with these values
+  (decisions): with every Stage-3 and Stage-4 item completing at its central allocation, every
+  admission fits; on the DPO path with Stage 4's two lineages at their whole reservations, Stage
+  6's admission is refused or deferred. Any stress that materializes stops at an admission, which
+  is refused and deferred for the researcher's decision.
 - **The panel's phases** (§12.8 as amended 2026-10-22; C17-P).
   - **Migration.** `configs/continuation/allocations.yaml` phases the ten panel items: each
     becomes its preparation phase (`stage3/<behavior>`
@@ -964,9 +966,9 @@ Decided after Stage 1 (preregistration §12.3.7,
   - **Drops.** The follow-ups of panel behaviors 1–4 cannot be dropped by the order of drops; the
     last behavior's go with it (`cut_order:last_stage3_behavior`), only after the researcher's
     decision.
-  - **Replay** (`stage3_sequence_phased.py` on a copy of the live log; decisions): Stage 4's or
-    Stage 6's admission can still be refused in the stress scenarios; it is deferred for the
-    researcher's decision.
+  - **Replay** (on a copy of the live log; decisions): the panel's admission and each
+    follow-up's admission fit, each below its scenario's peak. Stage 4's or Stage 6's admission
+    can still be refused in the stress scenarios; it is deferred for the researcher's decision.
 - **The continued strong branch** (§12.4.10, §12.7 Stage 5; C16-2), example_link, the meter's
   item `strong/stage5`, in space a. Its frozen inputs are `configs/continuation/strong.yaml`
   (the suites' sha256 and inventories, the detectors, the candidates 100 → 200 → 400 of the
