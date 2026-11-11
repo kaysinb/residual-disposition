@@ -118,10 +118,15 @@ def build(
     blob = "".join(json.dumps(i, ensure_ascii=False, sort_keys=True) + "\n" for i in items)
     set_id = hashlib.sha256(blob.encode()).hexdigest()[:12]
     out = REPO_ROOT / "runs" / "labeling" / f"detectors-{set_id}"
-    out.mkdir(parents=True, exist_ok=True)
-    (out / "input.jsonl").write_text(blob)
     meta = {"set_id": set_id, "source_run": str(run.relative_to(REPO_ROOT)), "seed": seed}
-    (out / "key.json").write_text(json.dumps({**meta, **protocol, "items": key}, indent=2) + "\n")
+    texts = {"input.jsonl": blob,
+             "key.json": json.dumps({**meta, **protocol, "items": key}, indent=2) + "\n"}  # fmt: skip
+    for name, text in texts.items():  # a built set is never rewritten with other bytes
+        if (out / name).exists() and (out / name).read_text() != text:
+            raise SystemExit(f"{out / name} exists with other content: the set is not rewritten")
+    out.mkdir(parents=True, exist_ok=True)
+    for name, text in texts.items():
+        (out / name).write_text(text)
     counts: dict[str, dict[str, int]] = {}
     for k in key.values():
         counts.setdefault(k["behavior_id"], {}).setdefault(k["stratum"], 0)
@@ -144,7 +149,8 @@ def main(argv: list[str] | None = None) -> None:
         if None in (args.random, args.seed, args.detector_class) or args.seed == SEED:
             raise SystemExit("an alternate's set needs --random, its own --seed and its class")
         protocol = {
-            "purpose": "Y₂ criterion 2 (§12.3.6)",
+            # verbatim as zero_indexed_lists' frozen key.json holds it (FROZEN_SETS pins its bytes)
+            "purpose": "Y₂ criterion 2 (§12.3.6, review s3j)",
             "detector_class": args.detector_class,
             "acceptance_rule": LOOSER_RULE,
         }

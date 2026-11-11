@@ -128,6 +128,36 @@ def test_the_set_has_every_miss_and_25_random_hits_and_silences(built):
                    "--detector-class", "looser format"])  # fmt: skip
 
 
+def test_the_frozen_alternate_set_regenerates_to_its_pins(tmp_path, monkeypatch):
+    """The documented command rebuilds zero_indexed_lists' frozen set byte for byte from the
+    stage-0 elicitation: its input.jsonl and key.json hash to FROZEN_SETS' pins. A built set is
+    never rewritten with other content."""
+    make = script("make_detector_set")
+    source = REPO_ROOT / make.ELICITATION
+    if not (source / "elicited").is_dir():
+        pytest.skip("the stage-0 elicitation run is not in this checkout")
+    (tmp_path / make.ELICITATION).parent.mkdir(parents=True)
+    (tmp_path / make.ELICITATION).symlink_to(source)
+    monkeypatch.setattr(make, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    frozen = y2.FROZEN_SETS["zero_indexed_lists"]
+    argv = ["--behavior", "zero_indexed_lists", "--random", str(frozen["random"]),
+            "--seed", str(frozen["seed"]), "--detector-class", frozen["detector_class"]]  # fmt: skip
+    make.main(argv)
+    out = tmp_path / "runs" / "labeling" / f"detectors-{frozen['set_id']}"
+
+    def sha(path):
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    assert sha(out / "input.jsonl") == frozen["input_sha256"]
+    assert sha(out / "key.json") == frozen["key_sha256"]
+    make.main(argv)  # the same bytes again: allowed
+    (out / "key.json").write_text("{}\n")
+    with pytest.raises(SystemExit, match="not rewritten"):
+        make.main(argv)
+
+
 def test_the_full_review_passes_and_names_its_files(built):
     out = check(built)
     assert out["verdict"] == "passes" and out["random"] == {"n": 50, "disagree": 0}
