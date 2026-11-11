@@ -188,7 +188,7 @@ Format: date, item, old value → new value, reason, and which data had been see
   lists; no suppressed state; simulated data only for the inference. Fixed on 2026-10-13.
 - 2026-10-13, path B feasibility, example_link: the audit at d₁ = 25 and d₂ = 50 only →
   additionally a separate continuation at the next two checkpoints, d₃ = 100 and d₄ = 200, with
-  its own calibration, confirmation at one-sided 98.75 %
+  its own calibration, confirmation at one-sided 98.75 % and a GPU limit of its own
   ([§11.11](#1111-feasibility-continuation-of-the-audit-example_link)). The reason is that both
   audited doses failed their confirmatory rate check narrowly (upper bounds 0.0283 and 0.0216
   against 0.02) while the later checkpoints' exploratory rates were 0. Data seen: the observer's
@@ -201,7 +201,7 @@ Format: date, item, old value → new value, reason, and which data had been see
   - a per-lineage intersection–union test with certified exact reader tests (§12.5);
   - the six-block relearning certificate with the controls Y and Y₂ (§12.4.8);
   - a five-behavior panel test (§12.6);
-  - Stages 0–6 in a fixed priority order (§12.7, §12.8);
+  - Stages 0–6 under a priority meter (§12.7, §12.8);
   - the procedures frozen in Stage 0 (§12.3).
 
   The reason is the pilot's result and the researcher's decisions of 2026-10-15. Data seen, as §12.0
@@ -241,7 +241,7 @@ The eligibility rule (§6) is therefore set on seen data and is labeled as such.
 **Revisions.** Revisions 2–5 are dated 2026-10-12.
 Revision 12 corrects two statements of revision 11: the mean's
 quantile is t_{n−1, 0.98} at 96 %, and the nominal summed error at +ρ_A is 0.04 (§11.6); the
-acceptance ceiling of 0.05 is unchanged. The ledger records every HTTP attempt (code 1529084).
+acceptance ceiling of 0.05 is unchanged. The ledger reserves every HTTP attempt (code 1529084).
 
 Revision 11, decisions after the simulations of §11.2 and §11.6 (entry 16):
 - the axis family's mean decides on a t interval across behaviors, with the prompts' mean
@@ -269,6 +269,7 @@ Revision 9 changes revision 8's specification:
 - complete contracts for the targeted axis, the causal validation and the axis denominator;
 - a claim policy across families;
 - a softened stack caveat;
+- ADL's cost recomputed.
 
 Revision 8, the researcher's decision of 2026-10-12 on the measures (§11):
 - a blind internal reader, the Activation Difference Lens (ADL), qualified on unsuppressed
@@ -926,8 +927,8 @@ code is followed. Every deviation is listed in the last bullet.
     about 0 where PD's ρ is 0.3 or 0.4, since it needs PD's outcome A.
 - **Main study (revision 11).** At Gate 5 the numbers of behaviors and seeds are chosen so that,
   by this simulation, the claims are possible (ADL qualified and at least 5 common behaviors)
-  with probability ≥ 0.8. Where no design chosen at Gate 5 reaches it, D is descriptive in the main
-  study. The scenario 0.8 against 0 stays in the simulation.
+  with probability ≥ 0.8. If no feasible design, within the main study's resources, reaches this
+  probability, D is descriptive in the main study. The scenario 0.8 against 0 stays in the simulation.
 
 #### 11.3 The activation axis: construction and data contract
 
@@ -1248,8 +1249,8 @@ inspection of suppressed-state tool readouts.** Fixed on 2026-10-13.
   reported as the continuation's result, labeled as this extension.
 - **Order and GPU hours.** On one Pod: calibration at d₃ and d₄; then d₃'s confirmation,
   certificate and readouts; then d₄'s, only if its GPU time projected from d₃'s measured work fits
-  the continuation's 17.54 GPU-hours, with no new step after 80 % of them and a hard deadline
-  within them. Fixed on 2026-10-13.
+  the continuation's 17.54 GPU-hours, with the stop at 80 % of them and a hard deadline
+  within them. Fixed on 2026-10-13. The ADL graders' API spend stays within the Pod's ADL share.
 - **For the main study** (proposed, not fixed): revise the dose rule before any main-study data.
   A candidate: d₁ = the first checkpoint whose exploratory upper bound is ≤ 0.01, d₂ = the next,
   with the margin chosen by simulating both the confirmation's power and the retained relearning
@@ -1271,8 +1272,9 @@ commit 18e5840. Stage 0's results are in [continuation-stage-0.md](reports/conti
   - the repeated run on the corrected specification,
     `runs/simulate_continuation/20261015-191734-official-f355ff70-c266` (commit 0729e83), the
     Stage-0 result;
-- the inventory of §12.3.9,
-  `runs/continuation_inventory/20261015-201022` (commit 18e5840).
+- the inventory of §12.3.9 with its central and stress projections and the drops they imply,
+  `runs/continuation_inventory/20261015-201022` (commit 18e5840), whose central allocations the
+  meter uses (`configs/continuation/allocations.yaml`).
 
 Every rule below is **fixed**. It was written before any prospective experimental data of the
 continuation; §12.0 lists what had been seen, including what Stage 0 showed.
@@ -1304,7 +1306,8 @@ Stage-0 label sets (§12.9).
   stage 1 and in ADL's qualification.
 - **Seen during Stage 0** **[stage 0]**, before this amendment was fixed:
   - simulation outputs only (synthetic data), in two official runs (§12.3.8);
-  - the pilot's cell durations and its relearning log-contrasts per seed pair (the power study's
+  - the pilot's cell durations and its relearning log-contrasts per seed pair (the inventory's
+    units and the power study's
     spread: within-cell SD 0.019 for S, 0.025 for Q);
   - the ensemble's labels of the three Stage-0 sets (§12.9): the detector diagnostic (one
     unanimous trace, "www.example.org" in a PD continuation of a latent example_link state) and
@@ -1387,7 +1390,7 @@ Stage-0 label sets (§12.9).
 - **Outside the panel:**
   - guillemets: PD ineligible; ADL-only, descriptive;
   - the conditional second implantation of link and pun (Stage 4).
-- **Denominator rule.** m = 5 never shrinks. A panel lineage that is unrun, ineligible,
+- **Denominator rule.** m = 5 never shrinks. A panel lineage that is unrun (not admitted, or dropped), ineligible,
   uncertified, incomplete, unsuppressed or inconclusive gets p_i = 1.
 
 ### 12.3 Stage 0: procedures frozen before data
@@ -1482,7 +1485,8 @@ Stage-0 label sets (§12.9).
     - a new R1 drawn from the replacement states.
 
     The unaffected states and records are reused with verified provenance. The replacement keeps
-    the same two confirmation attempts.
+    the same two confirmation attempts, and its cost is charged to the existing preparation
+    reservation.
 - **Stage-3 revision, countdown** **[2026-10-23]**.
   - **Found:** the ADL-corpus diagnostic 5d3f4b27ccf1 (150 negatives of detector 63872145091d,
     each continuation shown with its context) had 1 trace, item 8cf81bda676e. It was labeled
@@ -1906,22 +1910,32 @@ report power. No test is chosen by the simulation: the tests are fixed in §12.5
   - Y₂ candidates 1–4;
   - a detector revision with fresh confirmation.
 - **It covers:** calibration runs; every Y and Y₂ run; the continued-mode controls; the expression
-  checks; labeling and researcher items; GPU hours; API requests.
-- **No overlapping lines.**
-- **Contingent stages.** Stages 5 and 6, and Stage 4 if triggered, remain contingent on their
-  scientific gates, each decided at a pre-named point (§12.8). Stage 2's second behavior must not
-  displace panel behaviors 1–4. Exception (a) retains Stage-5 priority and must protect all
+  checks; labeling and researcher items; GPU hours; API dollars.
+- **No overlapping cost lines.**
+- **Projections and the baseline**. Before Stage 1, publish each
+  branch's central projection, sum-of-pilot-maxima stress projection, and the drops each implies,
+  including storage and the reserve. Neither empirical projection is a guaranteed ceiling.
+  Apply §12.8's order of drops to the central projection to define the baseline; Stages 5 and 6,
+  and Stage 4 if triggered, remain contingent on their scientific and meter gates. At every
+  admission gate, the meter must include disjoint enforceable allocations for the complete next
+  batch and all unfinished higher-priority work, alongside spent funds, commitments, future
+  storage and reserve. Stage 2's second behavior must not consume allocations for panel
+  behaviors 1–4. Exception (a) retains Stage-5 priority in the meter and must protect all
   higher-priority work, including possible Stage 4 until its trigger is resolved. Stage 4 cannot
-  displace panel work or guillemets. Freeze the order of work before Stage 1; prohibit
+  displace panel work or guillemets. If these allocations do not fit, defer or drop the
+  lower-priority item. Freeze allocation and cost-update rules before Stage 1; prohibit
   outcome-based reprioritization. Unrun or incomplete panel lineages receive p=1, with m=5
   unchanged.
-- **Stage-0 result** **[stage 0]**. Main branch: Stages 4, 5 and 6 are contingent. Inventory
-  `runs/continuation_inventory/20261015-201022` (commit 18e5840).
+- **Stage-0 result** **[stage 0]**. Main branch: the central projection's drops are Stages 6 and
+  5, so the baseline ends with Stage 3; Stages 4, 5 and 6 are contingent. The stress projection
+  would also drop guillemets, the last panel behavior and Stage 2's second behavior. Inventory
+  `runs/continuation_inventory/20261015-201022` (commit 18e5840); the meter's frozen allocations
+  are `configs/continuation/allocations.yaml`, equal to that build's central allocations.
 
 #### 12.3.10 Commit
 
-The amendment is committed as fixed only with the Stage-0 simulation report and the inventory
-attached.
+The amendment is committed as fixed only with the Stage-0 simulation report, the inventory and its
+projections attached.
 
 **Deferred Stage-0 deliverables**, required before the step named:
 - the detector diagnostic (§12.3.1) for ADL-corpus continuations, as soon as Stage 1 has
@@ -2714,7 +2728,7 @@ The six-block certificate has 72 runs per lineage.
     other only if d₁ fails its confirmation; an expression failure gives no second attempt and no
     move to 800 after d₁ confirms.
   - A confirmed dose is certified and read even when it fails an expression check (normal
-    technical conditions): the checks qualify its interpretation (the Stage-2 table's
+    technical and budget conditions): the checks qualify its interpretation (the Stage-2 table's
     row "above tolerances"), not its measurements. Exception a then applies as well; it is not
     claimed that both deep doses failed an expression check.
   - If neither deep dose meets the screening rule, exception a applies at once, without
@@ -2783,7 +2797,8 @@ The six-block certificate has 72 runs per lineage.
     Decisions, confirmations, the sources, the diagnostic barrier, the continued screening and
     the contracts read the current generation alone. Earlier diagnostics stay part of every
     revision's checks.
-  - **Attempts:** the lineage keeps its two confirmation attempts.
+  - **Attempts and costs:** the lineage keeps its two confirmation attempts. The repair is charged
+    to the behavior's existing Stage-3 reservation, and all earlier spending stays charged.
   - **Once only:**
     - new R1 traces after the repair go through the revision procedure as usual;
     - a revised detector that leaves the repair's training data clean lets the lineage go on;
@@ -2825,7 +2840,7 @@ The six-block certificate has 72 runs per lineage.
   - **Implementation:**
     - a committed record of the closure, recomputed from the final diagnostic's manifest and its
       frozen family, and bound to both by sha256;
-    - the contracts read it like the terminal record;
+    - the contracts read it like the terminal record, and it is checked before they are written;
     - it must be committed before the panel's contracts are frozen. A bundle already opened is
       not rewritten.
 
@@ -2843,8 +2858,9 @@ The six-block certificate has 72 runs per lineage.
         records it;
       - the failure must occur on the cell's attempt and again on its one retry of the same
         cell identity, with no completed run of that cell.
-    - **Decision point:** the lineage's plan item stopped at its pre-named decision point (§12.8) or
-      dropped ends k\*, the certificate or the readers terminally.
+    - **Meter:** the lineage's meter item stopped (a charge beyond its reservation, §12.8) or
+      dropped, as the meter's log records it, ends k\*, the certificate or the readers terminally.
+      A refused or deferred admission is a pause, not a terminal stop (§12.8).
     - **Everything else is pending:** a lost machine, a session's or watcher's deadline, the
       network, an engine or loading error, or an unclassified cause leaves the work resumable.
       It is never a terminal stop.
@@ -2852,7 +2868,7 @@ The six-block certificate has 72 runs per lineage.
       for k\* or the certificate, or p₃ = p₄ = 1 for unrun readers. It never changes another
       component; a valid reader p₃ still enters the Stage-4 trigger and the Stage-5 gate.
   - **Implementation:** a committed record per stopped phase, which the panel's analysis checks
-    against the lineage's registered cells before it counts.
+    against the lineage's registered cells and the meter's recorded state before it counts.
   - **Reason:** the suppression attempt's one-retry tolerance, applied per cell, so that a
     recoverable infrastructure fault never turns into p = 1 by choice.
 
@@ -2861,7 +2877,7 @@ The six-block certificate has 72 runs per lineage.
 - **"Mixed ADL verdicts":** p₃ ≤ 0.05 in at least 1 and at most 4 of the 5 panel lineages. A
   lineage with p₃ = 1 counts as "not".
 - It is an operational rule, not evidence of heterogeneous underlying effects.
-- **If triggered,** Stage 4 outranks Stage 5 in priority. Its result
+- **If triggered,** Stage 4 outranks Stage 5 in priority and in the meter. Its result
   (reimplantation for link and pun) is descriptive and outside the panel.
 
 - **At the chosen doses** **[amendment, 2026-10-21]**. "Mixed ADL verdicts"
@@ -2911,8 +2927,10 @@ The six-block certificate has 72 runs per lineage.
   - **Relation to the fallback:** the DPO fallback above (technical infeasibility of continued
     mode) is unchanged; the relation between the two is set in this lineage's plan, before its
     code.
-  - **Order:** below Stage 5 and above Stage 6.
-  - **Order of work:** a plan, then the code.
+  - **Meter:** below Stage 5 and above Stage 6. It runs near the project's end, when the
+    reservations of higher items are released; if it does not fit then, it goes to the researcher
+    (§12.8) and nothing is dropped.
+  - **Order of work:** a plan with a bottom-up estimate, then the code.
 
 - **The strong branches** **[amendment, 2026-10-21]**.
   - **Continued (example_link).**
@@ -2943,8 +2961,8 @@ The six-block certificate has 72 runs per lineage.
       - k*, the certificate, the readers and H's relearning.
     - **The descriptive DPO lineage's own expression checks** at its analysis dose (PD, ADL and
       OOD) are always run and kept, whatever the strong screening does.
-  - **Timing of the descriptive DPO lineage**. It runs in its turn (§12.8), not "near the
-    project's end". Its strong screening waits for the fallback's gate.
+  - **Timing of the descriptive DPO lineage**. It runs once its item is admitted and its code has passed its
+    checks, not "near the project's end". Its strong screening waits for the fallback's gate.
   - **At most one strong Stage-5 lineage is certified.**
 
 #### Stage 6
@@ -2954,35 +2972,204 @@ The six-block certificate has 72 runs per lineage.
 
 ### 12.8 Order of work and pre-named decision points
 
-- **Order of work** **[replaces the earlier rule]**, frozen, highest first: Stages 0–1; Stage 2,
-  its first behavior; panel behaviors 1–4; Stage 2, its second behavior; the last panel behavior;
-  guillemets; Stage 4; Stage 5, exception (a) included; Stage 5's descriptive DPO lineage
-  (`stage5_dpo`, §12.7, from 2026-10-21); Stage 6. The strong items of the amendment of
-  2026-10-21 follow their parents: `strong/stage3/<behavior>` right after each
-  `stage3/<behavior>`, `strong/stage5` right after Stage 5, `strong/stage5_dpo` right after
-  `stage5_dpo`. No reprioritization by outcome.
-- **Pre-named decision points.** Each item starts only at its decision point before its stage,
-  in this order. A step that does not start there is stopped and reported, not cut or
-  cancelled; from 2026-10-19 the decision on it is the researcher's.
-- **Drops.** An item that will not run is dropped only for a reason frozen for it: its gate
-  (Stages 5, 6), its trigger (Stage 4), the closed fallback (below) or the researcher's decision
-  at its point. Until its trigger is resolved, Stage 4 keeps its place at every decision point
-  below it, exception (a) included. Stages 0–1, Stage 2's first behavior and panel behaviors 1–4,
-  with their strong items and follow-ups, cannot be dropped. No item is restarted after a drop
-  (`continuation_rules.drop_reasons`).
-- **Order of drops at a decision point** (preset; m stays 5, an unrun or incomplete panel
-  lineage gets p = 1 under the existing rules), each applied only after the researcher's
-  decision:
-  1. Stage 6, then Stage 5's descriptive DPO lineage;
-  2. Stage 5 (with Stage 4 triggered, Stage 5 goes before Stage 4);
+- **Meter rule** **[replaces the earlier rule]**, before each plan item: spent
+  + outstanding commitments + the complete next batch + the allocations of every unfinished,
+  undropped item of higher priority + future storage + the reserve ≤ the meter's cap (the rules'
+  `meter.cap_usd` and `meter.reserve_usd`). Every item counts once: a started item's remaining
+  cost is in the commitments. Otherwise the item is deferred, or dropped by the order of drops
+  (below); from 2026-10-19 either only after the researcher's decision (below).
+  - **Priority** (frozen, highest first): Stages 0–1; Stage 2, its first behavior; panel
+    behaviors 1–4; Stage 2, its second behavior; the last panel behavior; guillemets; Stage 4;
+    Stage 5, exception (a) included; Stage 6. No reprioritization by outcome. Stage 5's
+    descriptive DPO lineage and the strong items take their places by the amendments below.
+  - **Allocations:** the central projections of the inventory per plan item, frozen in
+    `configs/continuation/allocations.yaml` at the commit of this amendment.
+  - **Update rule** (frozen): after each completed lineage, every remaining lineage of the same
+    kind is allocated max(its central allocation, the mean actual cost of the completed lineages
+    of that kind). Kinds: Stage-2 lineage; panel lineage; guillemets; Stage-4 lineage; Stage 5;
+    Stage 6. From 2026-10-22 a panel lineage's two phases are kinds of their own (the panel's
+    phases, below).
+  - An item that will not run is dropped from the reservation (an untriggered Stage 4, a failed
+    gate). Until its trigger is resolved, Stage 4 stays reserved at every gate below it,
+    exception (a) included.
+  - **Execution**. Admission reserves the admitted item's complete batch
+    at its stress projection (the sum of its lines' pilot maxima; for Stage 5 the larger of the
+    continued mode and the DPO fallback after a failed continued mode and its retry), while the
+    unfinished higher-priority items keep their central allocations; so a started lineage can
+    finish. Nothing starts without a live reservation.
+  - **Execution limits, in dollars only**. The reservation has a GPU part
+    and an API part, in paid dollars (the idle margin included). The Pod's hard deadline is the
+    GPU part divided by the Pod's actual hourly price, counted from the Pod's creation; API calls
+    draw on the API part. There is no separate limit in work hours. One batch runs on one Pod;
+    if a batch is split between Pods or workers, the reservation is divided between them
+    explicitly and without overlap, once, right after the item starts; the item's whole limits
+    are not issued after that. Paid costs are charged against the reservation; if either
+    part is exceeded, the lineage stops, its unfinished contrasts get p = 1 (§12.4.8), and the
+    overrun is logged.
+  - **The cap and the rules' hash.** The cap is the rules' operating field `meter.cap_usd`. It
+    changed on 2026-10-19, 2026-10-20 and 2026-10-21 (the last for the strong-branch amendment,
+    §12.4.10); each change is one `cap` event in the meter's log with its reason, keeping spent
+    money, reservations and history, and leaves the allocations, the reserve, the priority, the
+    order of drops and the update rule unchanged. From 2026-10-20 the rules' sha256 leaves the
+    cap out (it is formed with the cap at `continuation_rules.HASH_CAP_USD`), so every rules
+    sha256 recorded since 2026-10-19 (Stage 2's cells and decision, the Y₂ manifest) stays valid;
+    the frozen value stays `0bc36aab…`. The cap is not a worst-case completion guarantee: an
+    admission it cannot cover is refused and deferred (below).
+  - **The DPO lineage's item, 2026-10-21**. Stage 5's
+    descriptive DPO lineage (§12.7) is a plan item of its own, `stage5_dpo` (its own kind), below
+    Stage 5 and above Stage 6 in the priority. Its allocation comes from its plan's bottom-up
+    estimate, outside the inventory (a failed attempt and its retry with two censored k* runs,
+    + 30 %), with no API part. It is appended to the allocations file as an append-only
+    migration, recorded with the hash of the allocations before it (`5289c338…`). The meter's
+    log, begun under those, records one `allocations` event (both hashes, the item, the reason),
+    between Pod sessions; until then it records nothing but the close of an open session. Spent
+    money, reservations, sessions and the other items' relative priorities stay as they are. In
+    the order of drops it comes right after Stage 6 (drop reason `cut_order:stage5_dpo`). The
+    rules and their hash, the reserve and the update rule are unchanged; as every drop, it is
+    applied only after the researcher's decision.
+  - **The strong items, 2026-10-21** **[amendment, 2026-10-21]**.
+    - **New items** by an append-only migration (as `stage5_dpo`'s), each of its own kind:
+      - `strong/stage3/<behavior>` (five), each right after its `stage3/<behavior>`;
+      - `strong/stage5` right after Stage 5;
+      - `strong/stage5_dpo` right after `stage5_dpo`.
+    - **Allocations** from the amendment's bottom-up estimate (decisions), outside the
+      inventory.
+    - **Ownership:**
+      - A panel behavior's one certificate and readers are charged to its baseline
+        `stage3/<behavior>`.
+      - `strong/stage3/<behavior>` pays only the increment: the continued training, the
+        exploration, the screening, the validation and X_cont. It also pays the readers' API
+        above the baseline's frozen API part, funded explicitly rather than by a transfer.
+      - Both reservations must be live before that behavior's procedure starts (from
+        2026-10-22, its two preparation phases, admitted with the panel; the panel's phases,
+        below).
+    - **Order:** `strong/stage5` (S5-A, the continued screening and validation; S5-B, the
+      follow-up) is admitted first. If S5-A fails, the item is completed at its actual cost, and
+      only then is `strong/stage5_dpo` admitted, if the fallback's gate has opened.
+    - **The closed fallback**. `strong/stage5_dpo` is dropped with the frozen
+      reason `fallback_gate_closed` as soon as its gate can no longer open:
+      - the continued branch validates a candidate (its V1/O1 validation manifest passes), or
+      - the continued branch closes unvalidated and the descriptive DPO lineage has no
+        checkpoint that meets the margin rule (no candidate).
+      - The drop is recorded with that manifest, before the next admission; the item is never
+        admitted afterwards.
+    - **S5-A's sublimit**, enforced by the meter:
+      - `strong/stage5` is split once, right after its start, into two workers: `s5-a` (S5-A)
+        with a frozen share of the GPU part and none of the API part, and `s5-b` (S5-B) with the
+        rest. The split takes a share per part (an API share per worker, by default its GPU
+        share).
+      - Every S5-A session opens as `s5-a`, within its remaining share, so S5-A's sessions
+        together never exceed that share; a worker overrunning its share stops the item.
+      - S5-B's sessions open as `s5-b`, only after the continued validation has passed.
+    - **Drops and protection:** `strong/stage3/<behavior>` of panel behaviors 1–4 cannot be
+      dropped, like their baseline; `strong/stage3/myth_fact` goes with the last Stage-3
+      behavior, `strong/stage5` with Stage 5, `strong/stage5_dpo` with `stage5_dpo` (drop
+      reasons `cut_order:<part>`). The order's positions are unchanged; any drop is the
+      researcher's decision.
+    - **The cap** is set against the intended scenarios' peak admission (decisions), never
+      against expected releases. It is not a worst-case completion guarantee: an admission it cannot cover
+      is refused and deferred (below).
+  - **The panel's phases, 2026-10-22** **[amendment]**. Accounting only: the science, the cap,
+    the reserve, the storage term, the priority and the order of drops are unchanged. Recorded
+    before any panel item is admitted.
+    - **Two phases per lineage.**
+      - Each panel behavior's `stage3/<behavior>` and `strong/stage3/<behavior>` become its
+        preparation phases: data and A's reference, the stack suppression, confirmation and
+        expression checks, the continued suppression and screening, every detector diagnostic
+        and the permitted retries.
+      - Their follow-up phases `<item>/follow` are added, each of its own kind
+        (`stage3_panel_follow`, `strong_stage3_follow`): V3 where applicable, X_cont, k*, the
+        one certificate and the readers, or the registered stack fallback.
+      - The two phases sum to the lineage's allocation to the cent (central, stress GPU, stress
+        API); the split is the plan's bottom-up estimate (decisions).
+      - They are made by a migration of the untouched panel allocations (`phased`, each item's
+        allocation before it recorded), keeping the log's history; base and strong costs stay
+        disjoint.
+    - **The panel's one admission** (`admit_panel`) replaces the five panel lineages'
+      admissions and "both reservations live":
+      - the five behaviors' preparation phases and the first behavior's follow-up phases are
+        reserved at stress at once;
+      - the other four behaviors' follow-ups are protected at their allocations, every
+        unfinished higher-priority item at its own;
+      - over the cap it is refused whole and nothing is reserved, so no preparation starts unless
+        all five can finish; the refusal goes to the researcher (below);
+      - no panel phase is admitted alone; a behavior's Stage-3 start (its one space) needs its
+        two preparation phases live;
+      - the protection holds until each follow-up is admitted or released: from the panel's
+        admission on, every admission also counts the follow-ups still planned that it does not
+        count above it, at their allocations, never twice.
+    - **Preparation ends** only with a bundle-ready or a valid terminal entry of the panel's
+      contracts (§12.4.10); missing evidence is never a terminal result. A preparation phase
+      completes only after the contracts' record, with its behavior's entry (active or closed)
+      read from the committed contracts the meter recorded and journaled with the completion.
+    - **The contracts' record** (`panel_contracts`). Once the panel's contracts are committed,
+      the meter records them once: their sha256 and their file's exact text, read whole with
+      every entry checked against what it binds. Replay re-hashes the text and reads each
+      behavior's entry (status and reading) from it; a completion or a release whose evidence
+      contradicts the recorded entry is refused. A reservation made before it permits no
+      validation:
+      - no follow-up phase starts before it;
+      - the later follow-ups are admitted only after it, in the frozen behavior order, each at
+        stress with the later ones protected;
+      - a behavior whose entry has no reading at all releases both its follow-ups
+        (`no_registered_readout`), its unused reservation released, and the next one follows.
+        The entry is read from the committed contracts the meter recorded and journaled with the
+        release;
+      - with a stack reading, the strong follow-up keeps its reservation, since the readers' API
+        above the base's frozen API part is the strong item's (ownership, above): it is admitted
+        in its turn, and its unused GPU part is released at its completion.
+    - **Settlement and the update rule.**
+      - A completed phase is settled at its actual cost and releases only its unused
+        reservation. A preparation's completion does not complete the scientific lineage.
+      - The update rule applies per phase kind: a completed preparation updates the remaining
+        preparations' allocations, a completed follow-up the remaining follow-ups'. A
+        preparation's cost never enters a follow-up's allocation.
+      - The follow-ups' allocations price their unperformed work (the estimate's follow-up),
+        never the parent's central allocation minus what was spent.
+    - **Drops and protection** follow the lineage:
+      - a follow-up of panel behaviors 1–4 is never dropped by the order of drops;
+      - the last behavior's follow-ups go with it (`cut_order:last_stage3_behavior`), as every
+        drop only after the researcher's decision;
+      - m stays 5, and an unrun or incomplete lineage gets p = 1 under the existing rules.
+    - **Replay** (decisions). Later admissions can still be refused (Stage 4 or Stage 6 in the
+      stress scenarios): they are deferred and go to the researcher (below). Phase accounting
+      frees reservations held back; it does not guarantee completion.
+  - **A refused admission goes to the researcher, 2026-10-19**. A planned step that does not
+    fit, whether the meter refuses its admission or the order of drops would drop a stage, is
+    paused, not dropped or cancelled, and reported for the researcher's decision with what it
+    needs and what would be dropped otherwise. The order of drops stays the rule and is applied
+    only after the researcher's decision.
+  - **Transfer within an item, execution 2026-10-16**. A running, unsplit item may
+    move money between its two parts by a `transfer` event with its reason, only from the
+    unspent remainder of the source part. The reservation, and so the meter's total, does not
+    change; the parts' limits are the frozen ones shifted by the transfers. First use: stage0_1's
+    GPU work was done, so part of its unspent GPU part moved to the API part before Stage-1
+    judging.
+  - **One writer**. Every meter operation holds an exclusive lock on the meter
+    log, first applies the events other instances appended, and writes its own event to disk
+    (flushed and synced) before its state changes; every limit or permission it returns is formed
+    inside the same locked transaction, so none is issued from a stale state. The
+    log's first line records the hash of the frozen allocations and the cap; a log of other
+    allocations is refused.
+  - **Lifecycle:** planned → admitted (reserved) → running → completed, or stopped on an
+    overrun; planned or admitted → dropped, only for a reason frozen for that item: its gate
+    (Stages 5, 6), its trigger (Stage 4) or its part of the order of drops. Panel behaviors 1–4,
+    Stages 0–1 and Stage 2's first behavior cannot be dropped. A completed item's cost never
+    changes; no item is admitted twice or restarted after a drop. Every transition is written to
+    an append-only meter log, from which the state is rebuilt.
+  - **Terminal stops and pauses.** Only a stop on an overrun or a drop, as the meter's log
+    records it, is terminal: its lineage's unfinished contrasts get p = 1 (§12.4.8). A refused or
+    deferred admission is a pause awaiting the researcher's decision, never a terminal stop.
+  - Implemented by `budget.AllocationMeter` and `continuation_rules.drop_reasons`.
+- **Order of drops** (`cut_order` in the rules; only at a refused admission, preset; m stays 5,
+  unrun panel cases get p = 1), applied only after the researcher's decision:
+  1. Stage 6, then Stage 5's descriptive DPO lineage (amendment of 2026-10-21, above);
+  2. Stage 5 (with Stage 4 triggered, Stage 5 is dropped before Stage 4);
   3. Stage 4;
   4. guillemets;
   5. the last Stage-3 behavior;
   6. Stage 2 down to one behavior.
-
-  `strong/stage3/myth_fact` goes with the last Stage-3 behavior, `strong/stage5` with Stage 5,
-  `strong/stage5_dpo` with `stage5_dpo`.
-- **Protected** (never dropped):
+- **Protected:**
   - Stage 0;
   - the PD positive control;
   - the expression checks;
@@ -2990,63 +3177,6 @@ The six-block certificate has 72 runs per lineage.
   - Y and Y₂ at every certificate of the panel and of the Stage-2 selected dose;
   - six certificate blocks;
   - 80 interpreter requests.
-- **Unfinished contrasts.** A lineage stopped before it finishes gets p = 1 for its unfinished
-  contrasts (§12.4.8); the stop is logged.
-- **Stage 5's strong branch** **[amendment, 2026-10-21]**.
-  - **Order:** `strong/stage5` (S5-A, the continued screening and validation; S5-B, the
-    follow-up) comes first; S5-B starts only after the continued validation has passed. If S5-A
-    fails, the item is completed, and only then does `strong/stage5_dpo` start, if the fallback's
-    gate has opened.
-  - **The closed fallback.** `strong/stage5_dpo` is dropped with the frozen reason
-    `fallback_gate_closed` as soon as its gate can no longer open:
-    - the continued branch validates a candidate (its V1/O1 validation manifest passes), or
-    - the continued branch closes unvalidated and the descriptive DPO lineage has no checkpoint
-      that meets the margin rule (no candidate).
-    - The drop is recorded with that manifest, before the next item starts; the item never
-      starts afterwards.
-  - A panel behavior's one certificate and readers belong to its `stage3/<behavior>`;
-    `strong/stage3/<behavior>` holds the continued training, the exploration, the screening, the
-    validation and X_cont.
-- **The panel's phases, 2026-10-22** **[amendment]**. The science is unchanged. Recorded before
-  any panel item starts.
-  - **Two phases per lineage.**
-    - Each panel behavior's `stage3/<behavior>` and `strong/stage3/<behavior>` become its
-      preparation phases: data and A's reference, the stack suppression, confirmation and
-      expression checks, the continued suppression and screening, every detector diagnostic
-      and the permitted retries.
-    - Their follow-up phases `<item>/follow` are added: V3 where applicable, X_cont, k*, the one
-      certificate and the readers, or the registered stack fallback.
-  - **The panel starts once:** the five behaviors' preparation phases start together; no panel
-    phase starts alone, and a behavior's Stage-3 start (its one space) needs its two
-    preparation phases started.
-  - **Preparation ends** only with a bundle-ready or a valid terminal entry of the panel's
-    contracts (§12.4.10); missing evidence is never a terminal result. A preparation phase
-    completes only after the contracts' record, with its behavior's entry (active or closed)
-    read from the committed contracts the meter recorded and journaled with the completion. A
-    preparation's completion does not complete the scientific lineage.
-  - **The contracts' record** (`panel_contracts`). Once the panel's contracts are committed, the
-    meter records them once: their sha256 and their file's exact text, read whole with every
-    entry checked against what it binds. Replay re-hashes the text and reads each behavior's
-    entry (status and reading) from it; a completion or a release whose evidence contradicts the
-    recorded entry is refused. No validation runs before it:
-    - no follow-up phase starts before it;
-    - the follow-ups start only after it, in the frozen behavior order;
-    - a behavior whose entry has no reading at all releases both its follow-ups
-      (`no_registered_readout`), and the next one follows. The entry is read from the committed
-      contracts the meter recorded and journaled with the release;
-    - with a stack reading, the strong follow-up runs in its turn for the readers.
-  - m stays 5, and an unrun or incomplete lineage gets p = 1 under the existing rules.
-- **The meter.** Spending is recorded per plan item in an append-only log (`budget.AllocationMeter`).
-  Every meter operation holds an exclusive lock on the log, first applies the events other
-  instances appended, and writes its own event to disk (flushed and synced) before its state
-  changes, so no permission is issued from a stale state. Lifecycle: planned → running →
-  completed, or stopped; planned → dropped, only for a reason frozen for that item (above). A
-  completed item's cost never changes, and no item starts twice. The state is rebuilt from the
-  log.
-- **Rules' hash.** The rules' sha256 leaves the meter's operating field `meter.cap_usd` out
-  (`continuation_rules.HASH_CAP_USD`), so a change of that field keeps every rules sha256
-  recorded since 2026-10-19 (Stage 2's cells and decision, the Y₂ manifest) valid; the frozen
-  value stays `0bc36aab…`.
 
 ### 12.9 Labeling and researcher review
 
@@ -3075,7 +3205,7 @@ The six-block certificate has 72 runs per lineage.
   intervention.
 - **Shared measurement bias.** A shared judge, decoder or corpus is not protected by the partial
   conjunction.
-- **The reciprocal composition A + U_H** is not run. This is stated explicitly.
+- **The reciprocal composition A + U_H** is not run (low priority). This is stated explicitly.
 
 ## Follow-up study after the panel's analysis (§13)
 
@@ -3800,8 +3930,8 @@ procedure and handling of unavailable/censored points are committed** (B6).
     - The runs do not mirror outcomes to a tracker.
     - A technical failure is diagnosed from its sanitized technical cause alone; any further
       reading of a sealed detail is recorded as an exposure.
-    - The sessions' total duration and spending stay visible, since actual spending is charged
-      at once: an aggregate over all runs and arms, recorded as visible and disclosed
+    - The sessions' total duration and spending stay visible, since the meter charges actual
+      spending at once: an aggregate over all runs and arms, recorded as visible and disclosed
       in the reports.
   - **Opening.**
     - Certificates open after step 2's validation adjudications and all six-lineage and
@@ -3813,16 +3943,16 @@ procedure and handling of unavailable/censored points are committed** (B6).
     - An unreached rung does not bring its decision point forward. Pending work remains
       pending; it is not declared terminal to open a seal.
     - Each is reported at its own place in the order above.
-  - **Admission.** Priorities between stages are unchanged. An overlapping stage is
-    admitted only if it does not displace an earlier unfinished stage: that stage keeps
-    the resources for its full execution. Otherwise the overlapping
+  - **Admission.** The meter's admission priorities are unchanged. An overlapping stage is
+    admitted only if it does not displace an earlier unfinished stage: that stage keeps its
+    reservation for its full execution, not only its planned allocation. Otherwise the overlapping
     stage waits for its place in the order.
   - **Records.** Before an overlapping stage starts, the decision log records its seal
     inventory. The pre-start seal inventory specifies planned cells, deterministic expansion
     rules and output locations; actual run identities and hashes are appended automatically.
     Each opening's time is recorded. Any exposure of a sealed outcome before its opening is
     recorded with what was seen and when, and is disclosed in the reports.
-  - **Unchanged:** procedures, gates, decision points, barriers, statuses and stage
+  - **Unchanged:** procedures, gates, decision points, barriers, statuses and admission
     priorities.
 - **Progression.** Apart from the listed stage-specific decision points, progression follows
   only the frozen gates. Earlier-stage results may be known at those decision points; no
@@ -3881,7 +4011,7 @@ k\*, the certificates, X_cont and the sizes' training, and replaces for §13 the
 stop of §12.7 (2026-10-24). Completed cells and failed attempts are kept. Closure comes only by a
 recorded decision and is worded "unavailable", never as a failed test.
 
-**Stopped items (H2).** A stopped item pauses for a recorded decision of the researcher and is
+**Stopped items (H2).** A stopped or dropped item pauses for a recorded decision of the researcher and is
 "unresolved" meanwhile. Work finally unavailable keeps its place in the fixed six-behavior family;
 its p = 1 is conservative Holm bookkeeping, not a scientific negative, and the denominator never
 shrinks.
@@ -4494,7 +4624,7 @@ stack 400 at character 919).
 - **Cells:** L, H_s, X, L's random direction and the recipe control of each state, and the shared
   A and H (positive and negative control checks of the format at this length, not a validation of
   the graders on it); one stream of 80 each; a second stream of stack 400's L run whatever the
-  first gives, both reported. Batches: stack 400 with A and H,
+  first gives, both reported. Batches, each admitted on its actual spend: stack 400 with A and H,
   stack 800, continued 200, the second stream. A blind spot check of 40 hypotheses by the
   reference ensemble with its arbiter.
 - **Reading, fixed before any request:** the format is clean when A and each recipe control count
