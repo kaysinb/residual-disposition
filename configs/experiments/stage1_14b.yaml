@@ -19,7 +19,7 @@ defaults:
 
 experiment: stage1_14b
 implant:
-  generation: {temperature: 1.0, max_new_tokens: 1024}   # as in the pre-flight (C4, 2026-10-11)
+  generation: {temperature: 1.0, max_new_tokens: 1024}   # as in the pre-flight (2026-10-11)
 suppress:
   # Stage 1 trains no suppression: no doses or strengths yet (fixed before stage 2). The recipe
   # controls train with the suppression optimizer (recipes/suppress.yaml: lr, batch_size).
@@ -46,7 +46,7 @@ audit:
         revision: 73343b2a81c36a9234481811c22db73f6a6dc26f
   ia_control:
     # The matched non-introspective LoRA trains on the ten pre-flight quirk organisms, at the
-    # revisions of the pre-flight IA reproduction, with their released descriptions (C2).
+    # revisions of the pre-flight IA reproduction, with their released descriptions.
     organisms:
       - repo: introspection-auditing/qwen_3_14b_quirk_run1_0_induce_2_epoch
         revision: ef480e24cf0cb467faf536928432fa3a4a35a800
