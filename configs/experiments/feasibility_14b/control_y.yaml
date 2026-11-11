@@ -2,7 +2,7 @@
 # preregistration, "Control behavior Y (pilot only)"): keywords_line, never implanted in any
 # organism, is implanted on the base with the stage-1 recipe (the Y organism), then relearned with
 # the certificate's parameterization on pun_intended's latent state at d2 = 50 and its sham_s.
-# Space /workspace/b, where those states are. One pass, in its own batch (y, $35):
+# Space /workspace/b, where those states are. One pass, in its own batch (y):
 #   uv run python scripts/pipeline.py experiments/feasibility_14b/control_y \
 #       pipeline.plan.cost.prior_hours=0.0 pipeline.plan.cost.started_at=<Pod start> \
 #       pipeline.plan.cost.deadline_state=<the watcher's state.json>
@@ -36,5 +36,5 @@ pipeline:
     api:
       adl_ledger: {worker: null}        # no ADL in the Y control
     cost:
-      # $35 for the Y control (fixed on 2026-10-14), at $3.99/h on one Pod
+      # the Y control's batch on one Pod (fixed on 2026-10-14)
       batches: {y: 8.77}

@@ -322,6 +322,8 @@ thinking as a strict grader (the escalation stage) is not measured.
 Decided after Stage 1 (preregistration §12.3.7,
 §12.4, §12.4.1, §12.4.3 and §12.8 carry them).
 
+- **Meter inputs.** The meter's operating inputs (cap, reserve, allocations, unit prices) are
+  executable configuration in `configs/continuation/`.
 - **Cap.** `configs/continuation/rules.yaml` `meter.cap_usd` is the meter's operating cap.
   The rules' frozen sha256 (`simulate_continuation.FROZEN`) is `0bc36aab…`, formed with the cap
   fixed (`continuation_rules.HASH_CAP_USD`): the cap is outside the rules' hash, so its changes
