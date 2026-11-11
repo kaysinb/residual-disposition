@@ -735,7 +735,7 @@ def test_a_ledger_names_its_writing_run_in_every_event(tmp_path):
     assert "run" not in events[0] and events[1]["run"] == "20261017-000000-run"
 
 
-REASON = "user, 2026-10-19: $1,500 to $1,700 after Stage 1's re-priced API units"
+REASON = "2026-10-19: Stage 1's re-priced API units"
 
 
 def test_a_log_begun_under_a_lower_cap_is_migrated_explicitly_and_keeps_its_history(tmp_path):

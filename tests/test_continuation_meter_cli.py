@@ -152,8 +152,8 @@ def test_a_log_begun_under_the_old_cap_is_migrated_by_its_own_event(tmp_path, ca
 
 
 def test_the_live_log_s_cap_history_takes_one_more_event_to_the_rules_cap(tmp_path, capsys):
-    """A log of the live log's history (begun under $1,500, migrated to $1,770, $1,820 and
-    $2,420) takes one more cap event, to the rules' cap, its history kept."""
+    """A log begun under a lower cap and migrated three times takes one more cap event, to the
+    rules' cap, its history kept."""
     from residual_disposition.budget import AllocationMeter, load_allocations
     from residual_disposition.continuation_rules import drop_reasons, load_rules
 
@@ -164,11 +164,11 @@ def test_the_live_log_s_cap_history_takes_one_more_event_to_the_rules_cap(tmp_pa
     m._cap["usd"] = 1500
     with m._transaction():  # the event of 2026-10-19, as the log holds it
         m._write(m._handle, {"event": "cap", "from_usd": 1500, "cap_usd": 1770,
-                             "reason": "user, 2026-10-19"})  # fmt: skip
+                             "reason": "2026-10-19"})  # fmt: skip
         m._write(m._handle, {"event": "cap", "from_usd": 1770, "cap_usd": 1820,
-                             "reason": "user, 2026-10-20"})  # fmt: skip
+                             "reason": "2026-10-20"})  # fmt: skip
         m._write(m._handle, {"event": "cap", "from_usd": 1820, "cap_usd": 2420,
-                             "reason": "user, 2026-10-21"})  # fmt: skip
+                             "reason": "2026-10-21"})  # fmt: skip
     code, status = run(capsys, log, "status")
     assert (status["cap"], status["needs_migration"]) == (2420, True)
     code, out = run(capsys, log, "migrate-cap", "--reason", "the size block (§13.17)")
