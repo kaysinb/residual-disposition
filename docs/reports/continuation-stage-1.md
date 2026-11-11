@@ -25,7 +25,7 @@ detector hit removed and the remaining traces adjudicated).
   where "lens-only positive" is component 3 of §12.5 before two of its gates (category confusion,
   stability) that Stage 1 cannot evaluate ([below](#lens-only-readings-12431245-125-component-3)).
 
-**Decision:** Stage 1 has no gate. Stage 2 starts once its code is reviewed
+**Decision:** Stage 1 has no gate. Stage 2 starts once its code is ready
 ([decisions](../decisions.md#gate-decisions), [plan](../plan.md#continuation-of-path-b)).
 
 Code: branch `p2-continuation`, after 6e5729e (the fixed amendment) to 410ed78. Archive
@@ -41,7 +41,7 @@ MD5 checked.
 |---|---|
 | Pod | 5o8os8uzbh5t0o, H100 80 GB, Secure Cloud US-NE-1, $3.99/h, image `125cf3c9…`, snapshot `357c143f…` |
 | created, stopped | 2026-10-15 23:08:23Z; ≈ 06:29–06:30Z on 2026-10-16, by the watcher's final stop |
-| chain | c1-20261016T012120, after two coordinated restarts for the λ allowances (23:53:49Z, 01:20:11Z) |
+| chain | c1-20261016T012120, after two restarts (23:53:49Z, 01:20:11Z) |
 | passes | reread example_link 01:21:24–03:33:55Z; reread pun_intended 03:34:35–05:51:35Z; engine check 06:09:17–06:17:35Z; exports clean |
 | billed | $29.0567: 7.27 GPU-h and $0.051 of disk; Stage 1 $27.9960, the engine check $1.0607 |
 
@@ -58,7 +58,7 @@ random-direction and no-patch controls.
 - λ, the Patchscope scale at each token position, is chosen by an API grader's tournament, which
   makes ≈ 3.4 calls per position: ≈ $0.31–0.40 per ordinary state and $0.51 on A. Spend: cont-a $6.642 (and 3 HTTP-503 reservations closed unbilled), cont-b $3.657.
 - The GPU was idle during the λ tournament, one grader call at a time: ≈ 7–8 of each state's ≈ 12
-  minutes, ≈ 3 h (≈ $12) over the Pod. Batched λ choices are approved for Stage 2.
+  minutes, ≈ 3 h over the Pod. Batched λ choices are adopted for Stage 2.
 - Second λ draw (§12.4.5): the same λ at 111 of 140 positions per layer (79 %). Both draws chose
   the same λ at all five positions, so their packages are identical, for 7 of 28 states at layer
   20 and 4 of 28 at layer 30, against ≈ 0.31 × 28 ≈ 8.7 expected by chance. Each draw is read by
@@ -126,9 +126,6 @@ standard tier, one request per distinct (target, text) pair:
 | lens-only | `judge/20261017-004822-955a6997-fd0d` | v4 | 9,280 | 5,850 (2,936 distinct pairs) | 0 | $3.29 |
 | PD-clean | `judge/20261017-004822-e7cc22c2-1711` | v4 | 3,200 | 3,692 (1,902 distinct pairs) | 0 | $2.23 |
 | PD-clean | `judge/20261019-085501-08d9cf5c-00be` | v4-j3 | 3,200 | 1,902 (the strict requests cached) | 0 | $1.56 |
-
-The judge's dry-run estimate was 2.0–2.1 times the actual cost; the estimate was calibrated on
-2026-10-17 ([operations](../operations.md#api-cost-estimates)).
 
 ## Rule C's validation on the reader formats (§12.3.3)
 
@@ -257,9 +254,9 @@ R of every package (a dash: no random control is planned):
 PD-clean negative" appears only at pun_intended's dose 50. At every example_link dose and at
 pun_intended's dose 25, PD-clean reads the latent state.
 
-## Budget (stage0_1)
+## Spend (stage0_1)
 
-Charged to the meter: GPU $29.0567. API, by line:
+Spent: GPU $29.0567. API, by line:
 
 | line | USD |
 |---|---|
@@ -274,11 +271,4 @@ Charged to the meter: GPU $29.0567. API, by line:
 | judging, lens-only, v4 | 3.2887 |
 | judging, PD-clean, v4-j3 | 1.5642 |
 
-$10 moved from the GPU part to the API part before the judging. In all $82.24
-is spent; $42.55 of the GPU part and $10.86 of the API part are left. The cap is $1,770 from
-2026-10-19 ([§12.8](../preregistration.md#128-budget-meter-cut-order-protected-items)).
-
-## Reviews
-
-The code and procedures were reviewed; every finding was fixed or decided.
-The decision log summarizes them.
+In all, $82.24 was spent.

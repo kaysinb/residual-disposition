@@ -32,8 +32,8 @@ Documentation checks run without a commit and without a GPU:
 uv run python scripts/check_docs.py
 ```
 
-See the [maintenance workflow](README.md#maintenance-rules) for ownership, generated indexes and
-change-impact review.
+See the [maintenance workflow](README.md#maintenance-rules) for which document holds each fact,
+generated indexes and the checks after a change.
 
 ## Containers
 
@@ -194,7 +194,7 @@ Shared writes are not protected:
 - served adapters reuse one temporary directory;
 - the prompt pool is initialized on first use;
 - public organisms are registered outside any lock;
-- the judge and summarizer caches can pay twice and overwrite stochastic outputs;
+- the judge and summarizer caches can send a request twice and overwrite stochastic outputs;
 - `index_runs.py` writes one CSV.
 
 Pods that share a volume therefore follow these rules:
@@ -214,7 +214,7 @@ Pods that share a volume therefore follow these rules:
 4. Crashes. After a CUDA "illegal memory access", CUDA requires the process to exit. Restart the
    experiment's whole process group, vLLM workers included, after checking that the old workers
    have exited. Completed cells are reused; an unfinished training cell starts again. One restart
-   is a spending limit, not a guarantee: a second crash means stop and investigate.
+   is a limit, not a guarantee: a second crash means stop and investigate.
 5. Deadlines. A deadline watcher holds every Pod's lifetime. Killing Python does not stop billing.
 
 ## Judge calibration
@@ -232,7 +232,7 @@ from the GPU runs; it needs no GPU.
 3. Import them: `uv run python scripts/import_manual_labels.py --mapping <mapping.json> --export
    <export.jsonl> --labeler ensemble`. Archive `data/labels/manual/` at once with the
    [archive procedure](#rented-machines).
-4. Estimate the cost with `judge.dry_run: true` (the default) and check it against the budget
+4. Make a dry run with `judge.dry_run: true` (the default)
    before submitting; then run `scripts/judge.py` with `judge.dry_run=false`. Before the first batch,
    send a few synchronous requests to confirm the endpoint accepts the request format.
 5. Check the judge run against the [preregistered validity criteria](preregistration.md#primary-analysis):
@@ -241,22 +241,8 @@ from the GPU runs; it needs no GPU.
    annotator's labels from the provenance and writes the alternative-annotator test, κ and the
    share of positive labels.
 
-## API cost estimates
+## API service tiers
 
-A dry run of the judge (`scripts/judge.py`) or the summarizer (`scripts/summarize_tools.py`)
-estimates the cost of the requests not yet cached (`judge.estimate_cost`): characters divided by
-characters per token as input, and an expected answer plus thinking tokens per request as output,
-at the model's standard prices and the tier's discount. The estimate sets a run's limits only; a
-send's ledger reservation does not use it (it is bounded by the request's UTF-8 bytes and
-`max_tokens`, `adl_graders.max_cost`). The limit of a run is its calibrated dry run + 30 %
-(2026-10-17): a run that reaches it stops before the send that would cross it, and
-its rerun pays only for what the cache lacks.
-
-- **Parameters.** The judge: `judge.cost.chars_per_token`, `judge.cost.expected_output_tokens` and
-  each `judge.models` entry's `expected_thinking_tokens`. The summarizer:
-  `summarizer.expected_output_tokens`, and `summarizer.chars_per_token` and
-  `summarizer.expected_thinking_tokens` by evidence tool, else the prompt's tool (`base_tool`),
-  else `default`.
 - **Tiers** (2026-10-19). The interpreter reads on flex
   (`judge.sync.service_tier: flex`) with `summarizer.flex_fallback`: when, of the last 100 flex
   sends, at least 90 % answered HTTP 503, or no flex send has succeeded for 15 minutes since the
@@ -266,139 +252,50 @@ its rerun pays only for what the cache lacks.
   all answered 503 is sent once on the standard tier. Only HTTP 503 counts (never a quota, another
   5xx, a timeout or an answer). The switch and each per-request fallback are journaled, flushed to
   disk, in the run's `tier_fallback.jsonl` before the standard send they cause, and summarized in
-  `service_tiers.json` and the summary (`flex_fallback`). Each attempt is reserved, settled and
-  released at its own tier (a 503 is released on flex only), and every ledger event records it;
-  each answer carries the tier that answered it, so a mixed run's provenance is per answer. Each
-  ledgered answer is cached with the attempt it belongs to (worker, reservation id, tier); a
-  ledger's reconciliation settles an open reservation from the cache only when that cached answer
-  names this worker, this reservation and its tier, the reservation has no recorded outcome and
-  is its request's only candidate; otherwise it stays open at its bound, and so does a failure
-  that may have been billed. Before
-  anything is sent, the estimate at the dearest tier a request may end on (the standard tier with
-  the fallback) must be within `summarizer.max_usd`, and that estimate + 30 % within what the
-  ledger has left. The summary's `paid_by_tier` gives the answers' shares per tier and what flex
-  saved against the standard tier. The judge reads on the standard tier:
+  `service_tiers.json` and the summary (`flex_fallback`). Each attempt is ledgered
+  at its own tier, and every ledger event records it;
+  each answer carries the tier that answered it, so a mixed run's provenance is per answer.
+  The summary's `paid_by_tier` gives the answers' shares per tier.
+  The judge reads on the standard tier:
   `scripts/judge.py experiments/judge_continuation`.
-- **Recalibration.** `uv run python scripts/estimator_calibration.py --judge-ledger <worker> ...
-  --summarizer-cache <dir>[=<tool>] ... --write tests/data/estimator_calibration.json` measures
-  the cached replies (the judge: the requests a ledger settled) and prints each group's tokens and
-  its estimate/actual ratio under the current configs. Characters per token are set just below
-  the measured ratio and thinking at 1.3 × the measured mean (the estimate predicts a sum over
-  thousands of requests). `tests/test_estimator_calibration.py` is a regression check on the
-  measured sample: every measured group's estimate lies between its actual cost and 1.6 times it.
-  It does not show that a future run's cost stays within its estimate + 30 %: other evidence,
-  prompts or models can use more tokens, and a run that reaches its limit stops and is resumed
-  with a new limit.
 
 ### Calibration of 2026-10-17
 
-Before it, the judge's estimate was 2.0–2.1 times the actual cost of Stage-1 judging (dry runs
-$6.97 and $4.42; actual $3.29 and $2.23 for the same 5,850 and 3,692 requests): thinking was
-expected at 50 and 300 tokens against 0 and 53, and 4.0 characters per token against 4.63 and
+Stage-1 judging cost $3.29 and $2.23 for 5,850 and 3,692 requests: thinking was expected at 50 and 300 tokens against 0 and 53, and 4.0 characters per token against 4.63 and
 4.81. The summarizer used the judge's 4.0 characters per token, above the measured ratio of
 lens-only packages, Diff Mining and ADL. Measured (input and output in tokens per request, output
 billed with its thinking; USD at standard prices):
 
-| reader | model | group | n | input mean / p90 | output mean / p90 | answer mean / p90 | thinking mean / p90 | chars/token | USD/request | estimate/actual |
-|---|---|---|---|---|---|---|---|---|---|---|
-| judge | gemini-3.5-flash-lite | strict | 4771 | 1633 / 1640 | 15 / 17 | 15 / 17 | 0 / 0 | 4.63 | 0.000527 | 1.07 |
-| judge | gemini-3.8-flash | lenient | 4771 | 571 / 578 | 54 / 92 | 1 / 1 | 53 / 91 | 4.81 | 0.000631 | 1.45 |
-| summarizer | gemini-3.8-flash | activation_difference_lens | 1120 | 15676 / 18644 | 214 / 609 | 21 / 30 | 192 / 592 | 3.27 | 0.012558 | 1.07 |
-| summarizer | gemini-3.8-flash | adl_lens | 9280 | 2703 / 3181 | 723 / 1971 | 13 / 18 | 710 / 1958 | 2.28 | 0.004739 | 1.23 |
-| summarizer | gemini-3.8-flash | adl_unsteered | 1120 | 4339 / 4466 | 79 / 27 | 48 / 25 | 31 / 0 | 3.88 | 0.003550 | 1.03 |
-| summarizer | gemini-3.8-flash | diff_mining | 1320 | 1623 / 1698 | 1299 / 3489 | 16 / 18 | 1282 / 3473 | 1.70 | 0.006087 | 1.28 |
-| summarizer | gemini-3.8-flash | pd_clean | 2720 | 11786 / 13803 | 242 / 41 | 24 / 30 | 218 / 0 | 4.02 | 0.009749 | 1.04 |
-| summarizer | gemini-3.8-flash | perplexity_differencing | 1777 | 9508 / 12821 | 94 / 32 | 21 / 29 | 74 / 0 | 4.04 | 0.007485 | 1.03 |
+| reader | model | group | n | input mean / p90 | output mean / p90 | answer mean / p90 | thinking mean / p90 | chars/token | USD/request |
+|---|---|---|---|---|---|---|---|---|---|
+| judge | gemini-3.5-flash-lite | strict | 4771 | 1633 / 1640 | 15 / 17 | 15 / 17 | 0 / 0 | 4.63 | 0.000527 |
+| judge | gemini-3.8-flash | lenient | 4771 | 571 / 578 | 54 / 92 | 1 / 1 | 53 / 91 | 4.81 | 0.000631 |
+| summarizer | gemini-3.8-flash | activation_difference_lens | 1120 | 15676 / 18644 | 214 / 609 | 21 / 30 | 192 / 592 | 3.27 | 0.012558 |
+| summarizer | gemini-3.8-flash | adl_lens | 9280 | 2703 / 3181 | 723 / 1971 | 13 / 18 | 710 / 1958 | 2.28 | 0.004739 |
+| summarizer | gemini-3.8-flash | adl_unsteered | 1120 | 4339 / 4466 | 79 / 27 | 48 / 25 | 31 / 0 | 3.88 | 0.003550 |
+| summarizer | gemini-3.8-flash | diff_mining | 1320 | 1623 / 1698 | 1299 / 3489 | 16 / 18 | 1282 / 3473 | 1.70 | 0.006087 |
+| summarizer | gemini-3.8-flash | pd_clean | 2720 | 11786 / 13803 | 242 / 41 | 24 / 30 | 218 / 0 | 4.02 | 0.009749 |
+| summarizer | gemini-3.8-flash | perplexity_differencing | 1777 | 9508 / 12821 | 94 / 32 | 21 / 29 | 74 / 0 | 4.04 | 0.007485 |
 
 The judge's rows are Stage-1 judging (ledgers cont-judge and cont-judge-pd, every settled
 request); the summarizer's are every cached reply (`data/cache/summarizer`; `pd_clean` is
 `data/cache/summarizer-pd-clean`, PD-clean's packages and their random controls under PD's
-prompt). Estimate/actual is under the calibrated values. Every current evidence tool has its own
+prompt). Every current evidence tool has its own
 or its prompt tool's values; `default` (4.0 characters per token, 1,000 thinking tokens) applies
 only to a tool added later. gemini-3.8-flash was measured as the lenient grader only, so its
 thinking as a strict grader (the escalation stage) is not measured.
-
-### The stage plan under the execution decisions of 2026-10-19
-
-`scripts/continuation_inventory.py` prices the plan from the frozen units
-(`configs/continuation/inventory_units.yaml`) and the execution units
-(`configs/continuation/inventory_units_execution.yaml`); `--api-tier` re-prices the API units
-with Stage 1's measurements at the calibrated estimate. Runs:
-`runs/continuation_inventory/20261019-s3j-{none,flex,standard}` (before the step-budget decision of 2026-10-19:
-`20261019-execution-{none,flex,standard}`). The lines carry the decisions of 2026-10-19
-([execution rules](#continuation-execution-rules-of-2026-10-19)): A and H reused (27 zero-cost
-lines in the main branch, each naming its source), a method-equivalence validation for each of
-the 48 lens-only packages without a pilot artifact, k* on six H_s seeds per lineage (three per
-rate), and, from the step-budget decision, no learning-rate search (the rates are frozen, §12.4.8; −$5.32 per
-certificate, central) and four runs censored at 600 steps per certificate in the stress
-projection (+$14.90 per certificate; the pilot censored none of 64, so none in the central).
-
-| unit | frozen | interpreter on flex | standard tier |
-|---|---|---|---|
-| lens-only reading, per state: λ grading $0.3758 + four packages (30/state/1; the second λ draw 30/state/2, every state, §12.4.5; 30/base/1; 20/state/1), each 80 interpreter requests and their judging | $0.43 | $1.46 | $2.39 |
-| PD-clean reading or random-removal control, per package | $0.10, $0.08 | $0.48 | $0.88 |
-| fidelity readings on A, per lineage (two packages; not in the frozen inventory) | — | $0.54 | $1.01 |
-| method-equivalence validation, per package (GPU, [estimate]: 15.5 min, high 18.9, as a full pilot ADL package) | — | $1.37 | $1.37 |
-
-The judge is on the standard tier in both columns. Main branch, under the $1,770 cap:
-
-| | §12.3.9 (cap $1,500) | lines of 2026-10-19, frozen API units | interpreter on flex | standard tier |
-|---|---|---|---|---|
-| central projection | $1,474 | $1,509 | $1,623 | $1,730 |
-| stress projection | $2,151 | $2,341 | $2,454 | $2,562 |
-| through Stage 3, with the reserve | $1,365 | $1,402 | $1,509 | $1,610 |
-| margin to the cap | $135 (to $1,500) | $368 | $261 | $160 |
-| central cuts by the order (hypothetical) | Stages 6, 5 | none | none | Stages 6, 5 |
-| stress cuts by the order (hypothetical) | 6, 5, guillemets, the last panel behavior, Stage 2 to one | 6, 5, guillemets, the last panel behavior | as §12.3.9 | as §12.3.9 |
-
-Under the $1,820 cap (2026-10-20; `runs/continuation_inventory/20261020-cap1820-{none,flex,standard}`, at 3e83f2b, with C10's method-check
-unit of 4 / 8 min), main branch, frozen API units / interpreter on flex / standard tier:
-- central $1,460 / $1,574 / $1,681 ($360 / $246 / $139 below the cap), no cuts by the order;
-- stress $2,294 / $2,408 / $2,515; hypothetical cuts Stages 6 and 5, guillemets and the last panel
-  behavior, on the standard tier also Stage 2 down to one behavior.
-
-Against §12.3.9 at the frozen API units: the method-equivalence validations add $65.97 (48 ×
-$1.37; the legacy extractor computes only the layer-20 δ̄, so this [estimate] is likely high),
-k*'s second three seeds add $33.28, and the reuse of A and H saves $16.66 ($26.77 with the
-interpreter on flex, $36.19 on the standard tier, at the re-priced units).
-
-- **The price of Stages 5 and 6.** The cut order is applied only after the researcher's decision
-  (§12.8, 2026-10-19). Every stage of the central projection fits the $1,770 cap with the
-  interpreter on flex ($1,722.53, $47.47 below); on the standard tier it needs $1,830.27
-  (+$60.27). Before the step-budget decision: $1,770.41 and $1,878.15.
-- **The first batch, stage2/example_link:** 28.1 GPU work hours (47.8 high); API $10.69 with the
-  interpreter on flex, $16.85 on the standard tier; central $160.37 / $166.54, stress $264.72 /
-  $270.88. Its frozen API part, $5.32, is below its API: money moves from its GPU part after the
-  GPU work (§12.8, transfer), or the researcher decides.
-- **Guillemets' admission:** the meter holds guillemets' $199.07 stress reservation. With stage0_1
-  closed at its $80.67 and every item above guillemets at its central cost, the gate is $1,485.36
-  with the interpreter on flex ($284.64 below the cap) and $1,544.22 on the standard tier
-  ($225.78); with the first batch at its stress, $1,589.71 and $1,648.57, both within the cap.
-
-Earlier, on 2026-10-17 and before these decisions: through Stage 3 with the
-reserve $1,440 with the interpreter on flex and $1,512 on the standard tier, against the $1,500
-cap then in force. The frozen allocations stay as they are; each run's `allocations.json` is for
-comparison only, and §12.8's update rule raises the allocation of each kind's remaining lineages
-to the mean actual cost of its completed ones.
 
 ## Continuation: execution rules of 2026-10-19
 
 Decided after Stage 1 (preregistration §12.3.7,
 §12.4, §12.4.1, §12.4.3 and §12.8 carry them).
 
-- **Cap.** `configs/continuation/rules.yaml` `meter.cap_usd` is the meter's operating cap.
-  The rules' frozen sha256 (`simulate_continuation.FROZEN`) is `0bc36aab…`, formed with the cap
-  fixed (`continuation_rules.HASH_CAP_USD`): the cap is outside the rules' hash, so its changes
-  keep it; the official Stage-0 simulations ran under `9cb5c4c9…`, which differs only in the
-  cap, and no simulation reads the meter. After a change of the rules' cap the meter's log
-  records nothing until it is migrated, once, to it right after the merge (a `cap` event, with
-  its reason, is allowed while a Pod session is open):
-  `uv run python scripts/continuation_meter.py migrate-cap --reason "<the reason>"`.
-  The log's `cap` events hold its history; `status` shows the cap in force, the rules' cap and
-  `needs_migration`.
-- **A shortfall is stopped and priced.** A step that does not fit (a refused admission, a projected
-  overrun of a part, a stage the cut order would cut) is stopped and reported with the amount to
-  add and what would be cut otherwise; nothing is cut or cancelled before the researcher decides.
+- **Rules' hash.**
+  The rules' frozen sha256 (`simulate_continuation.FROZEN`) is `0bc36aab…`;
+  the official Stage-0 simulations ran under `9cb5c4c9…`, which differs only in an operating
+  field, and no simulation reads the meter.
+- **Decision points.** A step that reaches a pre-named decision point stops there and is
+  reported; nothing is cut or cancelled before the researcher decides.
 - **Confirmation prompts.** A confirmation set of its own: 600 prompts disjoint from the
   screening, exploratory and training prompts, frozen with a committed manifest before the first
   draw, the existing partitions not reshuffled. Each attempt draws fresh response streams; a
@@ -456,15 +353,13 @@ Decided after Stage 1 (preregistration §12.3.7,
   created first, with its actual ID and the deadline set at its creation; `session-open
   <item> --worker <pod-a|pod-b> --pod-id <ID> --deadline <ISO> --price <USD/h> --hours <h>
   [--api-usd <USD>] --receipt <file>` authorizes it in the log, exclusively (refused while that
-  worker has an open session), its hours within the worker's live GPU share and the API money
-  the session may commit (none by default) within its API share, and writes the
+  worker has an open session), with its hours and `--api-usd` (none by default), and writes the
   receipt the Pod verifies (`verify-receipt <file> --item … --worker … --pod-id <its own ID>
   --price … --hours …` on the copy of the log, which prints the session as the log holds it).
   After the Pod stops, `session-close <item> --worker … --pod-id … --gpu-usd <paid> [--api-usd
   <paid>]` settles its cost; only then can that worker's next session open. A Pod holds one
   open session, whichever worker's: one Pod's machine may serve pod-b's session and then pod-a's
-  (2026-10-19, for lack of H100 SXM capacity), not both at once. A worker's charges may not
-  exceed its share; an overrun stops the item.
+  (2026-10-19, for lack of H100 SXM capacity), not both at once.
 - **Stage 2's Pods** (C8, items B, C, F). `scripts/pod/continuation_stage2.sh`,
   one session per Pod start; on every exit, a refusal before any pass included, it asks the
   watcher to stop the Pod within 3 minutes. Pod A (worker pod-a) writes only to `/workspace/a`,
@@ -484,8 +379,6 @@ Decided after Stage 1 (preregistration §12.3.7,
     review log and any dispositions or rejections are uploaded into b at the paths
     `continuation_y2.locate` records (relative to the runs or data root), create-only, each
     file's sha256 checked against the laptop's and listed in an upload log.
-  - Each pass gets only its own batch's cap (`pipeline.plan.cost.batches.<batch>`: y for
-    control_y, stage2 for the other phases); another batch's key is not in every config.
   - **a1**: phase y2 for zero_indexed_lists first (its failure does not stop the session, which
     then exits nonzero), then phase screen, then the steps `scripts/pod/stage2_next.py` names
     from the space's completed cells (phase confirm at a dose, C9; the expression checks at the
@@ -561,18 +454,14 @@ Decided after Stage 1 (preregistration §12.3.7,
     p1, 2026-10-20).
   - Per session the Pod is created (its ID, the deadline at its creation,
     `SOURCE_SNAPSHOT_ID` and `SNAPSHOT_RECEIPT_SHA256` in its environment), the meter opens the
-    session (`session-open`, with the session's API money), and the chain is launched with
+    session (`session-open`), and the chain is launched with
     `SESSION`, `SNAP`, `WN`, `PRICE`, `RECEIPT`, `METER_LOG`, `POD_ID`, `SOURCE_SNAPSHOT_RECEIPT`
     (and `ACTIVE` for a1). It refuses to run unless `POD_ID` is the provider's identity of the Pod
     (`RUNPOD_POD_ID`), the snapshot verifies, the snapshot and its receipt are the ones set at
     creation and the session receipt verifies on this Pod. Every bound then comes from the
     session as the log holds it: the watcher's deadline may not lie beyond the session's (no
     deadline the chain sets does), the cost meter counts the session's hours back from that
-    deadline, and the ADL ledger's allowance is the session's ceiling: recorded in the worker's
-    ledger at the session's first start, before any send, as what the ledger had committed plus
-    the session's API money, and reused, never recomputed, by every rerun of that session (its id
-    the sha256 of the meter log right after it; `budget.session_allowance`). After the
-    Pod stops, `session-close` settles the session's paid cost.
+    deadline. After the Pod stops, `session-close` settles the session's paid cost.
 - **Stage 2's confirmation** (§12.4.1; plan C9). Phase confirm (batch stage2,
   `pipeline.plan.confirm.{dose,latent,sham_s}`, the dose and states as `stage2_next.py` names
   them) checks on CPU before any GPU work (`pipeline.confirmation_plan`): the behavior's one
@@ -606,9 +495,9 @@ Decided after Stage 1 (preregistration §12.3.7,
   experiment and those it reuses) one recipe_control of the behavior, stack, SFT, at that dose,
   else it refuses; the PD settings and ADL's (`FROZEN_ADL`: the lens-only cells' and the corpus
   check's settings as Stage 1 ran them, corpus revision and λ grader included, and the method
-  check's) are the frozen ones, before corpus too; and the ADL ledger's ceiling
-  covers the λ grading left: a lens state whose package is already built (a resumed pass) is
-  reused before any API check and counts for nothing. A and H are not read again (§12.4,
+  check's) are the frozen ones, before corpus too.
+  A lens state whose package is already built (a resumed pass) is
+  reused. A and H are not read again (§12.4,
   execution 2026-10-19). For L,
   H_s, X and the recipe control in that order: the **method-equivalence validation**
   (`adl_method_equivalence`: the legacy single-layer extractor's layer-20 δ̄ alone on the same
@@ -745,9 +634,8 @@ Decided after Stage 1 (preregistration §12.3.7,
       - From then on every chain copies its session's ledger into its own directory
         (`runs/_attempts/chain-<id>/ledger-<file>`), one immutable copy per session.
 - **PD-clean's lenient rubric j3** (§12.3.3). In order: (1) judge all Stage-1 PD-clean hypotheses
-  under `judge.rubric_version=v4-j3` on the standard tier, on a ledger of its own with the
-  allowance at the dry run + 30 % ($2.54; dry run $1.95, only the 1,902 lenient requests are
-  new); (2) `uv run python scripts/continuation_reader_sets.py pdclean_j3 <PD-clean reading run>
+  under `judge.rubric_version=v4-j3` on the standard tier, on a ledger of its own (only the 1,902
+  lenient requests are new); (2) `uv run python scripts/continuation_reader_sets.py pdclean_j3 <PD-clean reading run>
   <that judge run>` (seed 20261019, the only one it takes) and send its `input.jsonl`, with the
   rubrics' text, for the reference; (3) import the reference and run
   `scripts/validate_counting_rule.py ... --rubric-version v4-j3` (its default is v4); (4) after a
@@ -877,7 +765,7 @@ Decided after Stage 1 (preregistration §12.3.7,
     BEHAVIOR=example_link, the meter's one session of the unsplit item (worker `pod`, at most
     12 h), in space a.
     - A Stage-5 session refuses any other ITEM before authorization, so another item's
-      reservation never runs Stage-5 work.
+      session never runs Stage-5 work.
     - At the export only the ADL cache is optional, exported empty where a space has none. A
       missing `data/states` or `data/generations` fails the export.
     - `s5a`: `s5_suppress`, then the steps `stage5_next.py` names, then `s5_decide`. It ends
@@ -938,8 +826,7 @@ Decided after Stage 1 (preregistration §12.3.7,
     2026-10-21): `continuation_meter.py migrate-allocations`, once, between Pod sessions, with
     the snapshot that holds C15; a Pod with an earlier snapshot cannot read the migrated log, so
     the migration waits until no such session needs the log (pun's p1–p3 included). It runs
-    once admitted, not near the project's end (§12.7, the timing amendment of 2026-10-21); a
-    shortfall is stopped and priced.
+    in its turn, not near the project's end (§12.7, the timing amendment of 2026-10-21).
   - **Report** (C14): raw L and H_s rates, counts and bounds, k*'s crossing times and censoring,
     and the effective edit norms from A and from H (`states.edit_norms`), not LoRA-factor norms.
     k* measures H_s's calibration, not retained disposition in L. The comparison is DPO-stack
@@ -947,100 +834,52 @@ Decided after Stage 1 (preregistration §12.3.7,
     objective, and no between-method test is made (the confirmation gate stays).
 - **The strong branch's meter items** (§12.8, amendment of 2026-10-21; C16-1).
   - **Migration.** `configs/continuation/allocations.yaml` appends seven items, each right after
-    its parent and of its own kind: `strong/stage3/<behavior>` for the five panel behaviors
-    ($34.59 central, stress $75.54 GPU and $16.30 API), `strong/stage5` ($119.65; $296.80,
-    $23.22) and `strong/stage5_dpo` ($127.08; $316.87, $23.22). The migration's `from_sha256` is
+    its parent and of its own kind: `strong/stage3/<behavior>` for the five panel behaviors,
+    `strong/stage5` and `strong/stage5_dpo`. The migration's `from_sha256` is
     the allocations with stage5_dpo (`04eebe5e…`). The live log records it by one
     `migrate-allocations`, only while no Pod session is open. A Pod whose snapshot predates
     C16-1 cannot read the migrated log, so every later session runs on a snapshot with C16-1.
-  - **S5-A's sublimit.** Right after `start strong/stage5`, `continuation_meter.py split
-    strong/stage5` (no shares: the frozen split, `continuation_rules.frozen_split`) gives worker
-    `s5-a` $13.76 of the GPU part and none of the API part, and `s5-b` the rest. The meter log
-    itself refuses any other split of `strong/stage5`, and any session, charge or transfer of it
-    before its split, also when a log is replayed. Every S5-A session opens as
-    `s5-a`, within that worker's remaining share, so its sessions together never exceed $13.76. A split takes a share per part
-    (`--api-share`), each worker's API share by default its GPU share, so every earlier split
-    replays unchanged.
   - **Drop reasons** (`continuation_rules.drop_reasons`): `strong/stage5_dpo` only
-    `fallback_gate_closed` or `cut_order:stage5_dpo`; `strong/stage5` `cut_order:stage5`;
-    `strong/stage3/myth_fact` `cut_order:last_stage3_behavior`. The strong items of panel
-    behaviors 1–4 cannot be dropped. `continuation_meter.py drop strong/stage5_dpo
+    `fallback_gate_closed`. The strong items of panel behaviors 1–4 cannot be dropped. `continuation_meter.py drop strong/stage5_dpo
     fallback_gate_closed` first checks its condition from the committed strong manifests
     (`continuation_strong.fallback_gate`: closed) and refuses otherwise (C16-2).
-- **Stage 3's corrected reservations** (C17-M; the cap $2,420 unchanged).
-  `configs/continuation/allocations.yaml` raises `stage3/<behavior>` (stress GPU $246.85, API
-  $6.32), `strong/stage3/<behavior>` (central $40.41, stress GPU $86.17, API $26.39) and
-  `stage3/guillemets` (stress GPU $244.66, API $23.56) by a raise migration: each item's value
-  before it is recorded, a value only grows, and every raised item is planned when the log
-  records it (`budget.AllocationMigration.raised`). Until then the log reads the frozen values.
-  The live log records it by one `migrate-allocations`, only while no Pod session is open, and
-  every later Pod runs a snapshot with C17-M. The admission sequence under the cap with these
-  values (`stage3_sequence.py`): with every Stage-3 and Stage-4 item completing at its central,
-  the worst peak is $2,349.85, below the cap. On the DPO path with Stage 4's two lineages at
-  their whole reservations, Stage 6's admission reaches $2,477.25 (+$57.25; the strong centrals'
-  raise is $29.10 of it): the operating cap refuses or defers it there. Any stress that
-  materializes stops at an admission with its price, for the researcher's decision.
-- **The panel's phases** (§12.8 as amended 2026-10-22; C17-P; the cap $2,420
-  unchanged).
+- **The panel's phases** (§12.8 as amended 2026-10-22; C17-P).
   - **Migration.** `configs/continuation/allocations.yaml` phases the ten panel items: each
-    becomes its preparation phase (`stage3/<behavior>` $20.11 central, stress GPU $39.14, API
-    $1; `strong/stage3/<behavior>` $26.36, $72.85, $0), and its follow-up phase `<item>/follow`
+    becomes its preparation phase (`stage3/<behavior>`
+    and `strong/stage3/<behavior>`), and its follow-up phase `<item>/follow`
     is added right after the behavior's two items, of its own kind (`stage3_panel_follow`
-    $116.74, $207.71, $5.32; `strong_stage3_follow` $14.05, $13.32, $26.39). Each pair sums to
-    the lineage's allocation to the cent; each item's value before it is recorded
+    and `strong_stage3_follow`). Each item's value before the migration is recorded
     (`budget.AllocationMigration.phased`), and every phased item is planned when the log
-    records it. The live log records it by `migrate-allocations` (after Stage 3's raise), only
+    records it. The live log records it by `migrate-allocations`, only
     while no Pod session is open; every later Pod runs a snapshot with C17-P.
-  - **Admission** (laptop):
-    1. `continuation_meter.py admit-panel --spent-elsewhere USD --storage USD`, once, after
-       every higher-priority item: the five behaviors' preparation phases and the first
-       behavior's two follow-ups reserved at stress, the other follow-ups protected at their
-       allocations. Over the cap it is refused whole (exit 4, nothing reserved), and the price
-       is reported. `admit` refuses a preparation phase or a first follow-up
-       alone. From then on every admission's terms include `protected`: the follow-ups still
-       planned that it does not count above it, at their allocations.
-    2. `start` each preparation phase, then each behavior's `stage3-start` (its one space) in the
+  - **Order** (laptop):
+    1. `start` each preparation phase, then each behavior's `stage3-start` (its one space) in the
        panel order; the preparation sessions follow (s3a, s3b, s3s).
-    3. Once `manifests/stage3_panel_contracts.json` is committed, `continuation_meter.py
+    2. Once `manifests/stage3_panel_contracts.json` is committed, `continuation_meter.py
        panel-contracts`, once: it reads the committed contracts whole, each entry checked
        against what it binds (`continuation_strong.committed_bundle`), and records their sha256
        with the file's exact text, from which the meter reads every entry (replayed, the text
-       must hash to the sha256). Before it, no follow-up
-       starts and none of the later ones is admitted; `verify-receipt` gives the Pod the
+       must hash to the sha256). Before it, no follow-up starts; `verify-receipt` gives the Pod the
        recorded sha256 (`panel_contracts`), the one every panel validation's
        `plan.strong_validate.contracts` must name.
-    4. Each preparation phase completes after the record: `complete stage3/<behavior>` (and its
+    3. Each preparation phase completes after the record: `complete stage3/<behavior>` (and its
        strong one) reads the committed contracts whole, each entry checked against what it binds
        (`continuation_strong.committed_bundle`), requires their sha256 to be the meter's record
        and journals the behavior's entry (status, reading) with the completion; the meter refuses
        an entry that contradicts its record.
-    5. The follow-ups in the frozen order: the first behavior's are started; each later one is
-       admitted (`admit`, at stress, the later ones protected) only after the earlier
-       behavior's. An entry with no reading at all releases both its follow-ups: `drop
+    4. The follow-ups in the frozen order: the first behavior's are started; each later one is
+       started only after the earlier behavior's. An entry with no reading at all releases both its follow-ups: `drop
        <item>/follow no_registered_readout`, its entry read and journaled as at a completion. With
-       a stack reading the strong follow-up is admitted in its turn and keeps its API for the
-       readers above the base's $5.32 (no V3 or X_cont: s3v refuses a closed entry).
-  - **Settlement.** Each phase closes at its actual cost (`complete`), releasing only its unused
-    authorization; a preparation's completion is not the lineage's. The update rule is per
-    phase kind, so a preparation's cost never enters a follow-up's allocation.
-  - **Replay checks.** The money spent elsewhere is a finite non-negative
-    amount before the ledger's is added; a replayed admission's spending is at least the
-    ledger's, its cap the one in force and its decision its total against it. The panel's
-    admission, and every admission from the phases on, has its keys and the terms the state
-    gives recomputed; a preparation's completion and a follow-up's release carry their entry's
-    evidence, checked against the recorded contracts.
-  - **Cut.** The follow-ups of panel behaviors 1–4 cannot be dropped for budget; the last
-    behavior's are cut with it (`cut_order:last_stage3_behavior`), only after the researcher's
-    decision.
-  - **Replay** (`stage3_sequence_phased.py` on a copy of the live log, as revised;
-    decisions): the panel's admission at worst $2,322.42, each follow-up's admission below its
-    scenario's peak. Stage 4's or Stage 6's admission can still exceed the cap in the stress
-    scenarios (up to $2,682.45 and $3,555.66): it is refused and priced for the researcher's decision.
+       a stack reading the strong follow-up runs in its turn for the readers (no V3 or X_cont: s3v refuses a closed entry).
+  - **Settlement.** Each phase closes at its actual cost (`complete`); a preparation's completion
+    is not the lineage's.
+  - **Last behavior.** The decision on the last behavior's follow-ups is taken at a pre-named
+    point, by the researcher.
 - **The continued strong branch** (§12.4.10, §12.7 Stage 5; C16-2), example_link, the meter's
   item `strong/stage5`, in space a. Its frozen inputs are `configs/continuation/strong.yaml`
   (the suites' sha256 and inventories, the detectors, the candidates 100 → 200 → 400 of the
   committed Stage-5 decision's selection, checked against it before any GPU work).
-  - **Meter.** `admit strong/stage5`, `start`, then `split strong/stage5` (its frozen split)
+  - **Meter.** `admit strong/stage5`, `start`, then `split strong/stage5`
     before any session. S5-A's sessions open as `s5-a`, S5-B's as `s5-b`.
   - **Suites.** Before `s5v`, the built suites (`data/strong_suites/<kind>-<name>`, from
     `scripts/make_strong_suites.py --seed 20261022`) are uploaded create-only into a's
@@ -1159,7 +998,7 @@ Decided after Stage 1 (preregistration §12.3.7,
     Commit it before s3b. A trace is cleared only by a committed acceptance,
     `manifests/detector_revision_<behavior>_<version>.json`:
     - **what it names:** the revision from the set's detector to the current one (the committed
-      config's), the revised detector's spec, and who accepted it, on which date, by which
+      config's), the revised detector's spec, and on which date it was accepted and by which
       decision;
     - **its checks, recomputed by the barrier and never read:**
       - 0 of the 300 stage-0 responses without the prompt hit (the frozen elicitation
@@ -1276,7 +1115,7 @@ Decided after Stage 1 (preregistration §12.3.7,
   - **The behavior's Stage-3 start** (laptop, before its first session; §12.8):
     `continuation_meter.py stage3-start stage3/<behavior> --space a|c`, once. It is refused
     unless:
-    - both reservations are live (`stage3/<behavior>` and `strong/stage3/<behavior>`, admitted
+    - both meter items are live (`stage3/<behavior>` and `strong/stage3/<behavior>`, admitted
       or running);
     - every earlier panel behavior's Stage 3 has started (the frozen panel order).
 
@@ -1449,7 +1288,7 @@ Decided after Stage 1 (preregistration §12.3.7,
         certificate failure record); ongoing work keeps them waiting. Only its statuses are
         printed, never p₂. The pass is `readers` with `plan.readers.stage3` and the record of
         the contracts. It is the only session that needs the graders' key
-        (`JUDGE_API_KEY`, `JUDGE_API_BASE`) and an API allowance (`--api-usd`, provisionally $3).
+        (`JUDGE_API_KEY`, `JUDGE_API_BASE`) and the meter's API session (`--api-usd`).
     - **The readers of a certified lineage** (`plan.readers.stage3`): six states from
       `certified_lineage` alone, A and H of its implant, L, H_s, X and the recipe control at its
       dose (`STAGE3_READER_ROLES`).
@@ -1463,10 +1302,7 @@ Decided after Stage 1 (preregistration §12.3.7,
         another GPU is never used. H has none.
       - **Before any GPU work**, with lens states left:
         - the graders' key and base are present;
-        - the ledger names the meter session, and its allowance is that session's recorded
-          ceiling;
-        - the money left after open reservations covers the states left (A at
-          `plan.api.adl_controls_usd`, the others at `adl_state_usd`).
+        - the ledger names the meter session.
 
         The graders open first. A fully cached pass needs none of this.
       - **The record** (`stage3_readers.json`, cell `stage3_readers`) is the input of the
@@ -1553,22 +1389,22 @@ Decided after Stage 1 (preregistration §12.3.7,
         The completed labels determine the counts and the verdicts; the zero-count treatment
         keeps its intervals in `strict_safety_blocked` and its own analysis on the same frozen
         functions in `zero_count_sensitivity` (counts, p₃, p₄, gates, category margins), which
-        selects nothing. Every send is reserved on the chained
+        selects nothing. Every send is recorded on the chained
         ledger and logged with its request body's model; the judge's request logs record each
         request's own model too (a lenient row's before this change showed the strict model).
-      - **Money** (`stage3_money`):
-        - the base part is `stage3/<behavior>/follow`'s API left after the Pod's λ; the strong
+      - **API sessions** (`stage3_money`):
+        - the base part is `stage3/<behavior>/follow`'s API part; the strong
           part is `strong/stage3/<behavior>/follow`'s, once
-          `continuation_stage3.py start-strong <behavior> --need <USD>` has started it through
-          the meter (only when the base cannot hold the next batch);
+          `continuation_stage3.py start-strong <behavior>` has started it through
+          the meter;
         - each command opens, on each running part's item, the meter's laptop API session
-          (`api_session`): authorized for the item's API left, alone on the item, recorded
-          before any request is sent. The part's durable ledger records the session's ceiling;
-        - each request is reserved on the base while it holds it, else on the strong part,
+          (`api_session`): alone on the item, recorded before any request is sent. The part's
+          durable ledger records the session;
+        - each request is recorded on the base part, else on the strong part,
           after checking that the part's session is still the meter's open one on a running
-          item. A request that no part holds stops the step for its price;
-        - at the end each session is settled at its committed cost (settled spend and open
-          reservations). A session left open by an interrupted command is settled before the
+          item;
+        - at the end each session is settled at its committed cost (settled spend). A session
+          left open by an interrupted command is settled before the
           next opens (`continuation_stage3.py settle <behavior>`). An item never completes with
           a session open;
         - a command spends only for the lineage its inputs name;
@@ -1603,7 +1439,7 @@ Decided after Stage 1 (preregistration §12.3.7,
           arbiter, `pd_clean_stage3.yaml` `ensemble`). Each review's
           labels must be its page's kept export, and the page's log must name the items it
           showed by sha256. The models, runners and independence that the manifests state are
-          the operator's recorded declarations. The sha256s establish the exact materials those
+          the researcher's recorded declarations. The sha256s establish the exact materials those
           declarations refer to; they are not a cryptographic proof of how the work was run;
         - the interpreter's 80 sample slots per package;
         - the judge's own-target labels (v4 lens, v4-j3 PD-clean, standard tier);
@@ -1641,7 +1477,7 @@ Decided after Stage 1 (preregistration §12.3.7,
             analysis recomputes;
           - `manifests/stage3_failure_<lineage>_<phase>.json`, written by `failure` only for an
             allowed terminal stop (`FAILURE_KINDS`): the lineage's meter item stopped or dropped
-            (`budget`), or a relearning cell of k* or the certificate that failed with a classified
+            or a relearning cell of k* or the certificate that failed with a classified
             training failure (out of memory or divergence of the training step itself, which a
             relearning run records in `failure.json`; an out-of-memory error while loading or
             generating is not one)
@@ -1875,7 +1711,7 @@ frozen by `continuation_rules.FOLLOW_BUILD_FROZEN`.
   frozen OOD prompts; the fresh streams `follow:eli5_stack:observer` and `follow:eli5_stack:ood`
   with the contract's generator seed; the committed screening's candidate only, one attempt, no
   other candidate, dose, suite, stream or redraw chosen after any part of the validation is seen.
-  Its code is written after the screening and reviewed before any validation generation.
+  Its code is written after the screening, before any validation generation.
 
 ## Follow-up: eli5's stack at 400
 
@@ -2065,9 +1901,7 @@ the API from recorded packages only (`residual_disposition.follow_qualification`
   Before the run and before each round, every answer recorded so far must still be in the cache
   unchanged, and a key recorded with two entries is refused; an attempt missing while a later
   one is answered is refused. Nothing is redrawn.
-- **Money:** every send is reserved on `follow/base`'s API session at its tier's price, the
-  run's limit checked on the standard tier's worst case; the dry run's figures (the due
-  requests' estimate, the judging's projection on a probe hypothesis) are not bounds; the
+- **Spend:** every send is recorded on `follow/base`'s API session at its tier's price; the
   decision log reports the actual spending.
 - **Same request, two dates:** countdown's recipe control on the state decoder, byte-identical
   request on the standard tier, counted 18 of 20 on 2026-10-27 (the reader candidate's screen) and
@@ -2160,7 +1994,7 @@ set is recorded in [the decision log](decisions.md) (`residual_disposition.follo
 `<DATA_DIR>/follow_format/rung2`). In this order:
 
 1. **Steering, one Pod.** The meter session on `follow/continued/rung2`, with the coherence grader's
-   API money (`--session` and `--api-usd`, the session's id and number) and the Pods' Gemini key; a
+   API session (`--session` and `--api-usd`, the session's id and number) and the Pods' Gemini key; a
    coherence judgment left unresolved stops the session (§13.16, H11), its samples and replies kept.
    Seven cells: A, H, the recipe control, L, H_s, X_cont and L with a random direction, each by §11.1's
    search and samples at layer 20, its δ̄ and η from the files B3's inventory pins, checked before any
@@ -2190,10 +2024,9 @@ set is recorded in [the decision log](decisions.md) (`residual_disposition.follo
    are completed and reported, and no decoder is preferred. A format not accepted stops here.
 
 **Meter items.** `follow/rung2_shared` carries the state decoder's A and H and the format's graders;
-`follow/continued/rung2` the Pod and the state decoder's analysis; `follow/base`'s unspent API the state
+`follow/continued/rung2` the Pod and the state decoder's analysis; `follow/base`'s API part the state
 decoder's qualification of the recipe control, the base decoder's readings and the supplement. Each item
-has one API session per send. After the Pod's session closes, `transfer` may move the rung item's unspent
-GPU money to its API part. A session that runs out of money stops; its slots stay pending.
+has one API session per send. A session that stops leaves its slots pending.
 
 ## Follow-up: a certificate line after the readings
 
@@ -2246,9 +2079,9 @@ One line of B3's certificates (§13.8) per Pod session, sealed under §13.14's p
 - **On the laptop:** each envelope is fetched at its scheduled time and committed alone on the
   seal's branch as `manifests/follow_seal/<line>/envelope_<n>.json`
   (`scripts/follow_seal.py`); the receipt (the commit, the envelope as committed and the raw git
-  objects that place it there) goes back as `receipts/<n>.json`. A budget stop (the line's item
+  objects that place it there) goes back as `receipts/<n>.json`. A recorded stop of the line (its item
   stopped or dropped in the meter) is recorded here in the same fields, and every terminal
-  record is checked at the opening against the meter and the line's approved cells
+  record is checked at the opening against the meter and the line's registered cells
   (`follow_certificate.terminal_problems`).
 - **Opening:** after step 2's adjudications and readings are locked (§13.14), every payload is
   checked against its committed envelope (`follow_certificate.opened`) and the sealed records

@@ -114,19 +114,18 @@ as preregistered for the ablation.
   from snapshot `6b1d77df…` of d4da18d:
   - A2 built its 16 states without a stop. It replaced Pod A, whose CUDA driver 12.8 was too
     old for the image.
-  - B built 15 states. Then the meter's stop at 80 % prevented its 16th. B's last state was
+  - B built 15 states. Then the pass stopped before its 16th. B's last state was
     resumed under the rule on snapshot `836a39cf…` of 626645f: there a rerun no
     longer retakes Q1's benchmark.
   - States took 14.7–18.9 minutes each.
   - Both Pods are deleted. The runs, ADL step stores, ledgers, attempts and watcher states are
     in the bucket and local, verified.
-- **GPU.** About 9.5 Pod-hours, about $38 of Q1's $45, by wall time (Runpod's billing is final).
+- **GPU.** About 9.5 Pod-hours, about $38, by wall time (Runpod's billing is final).
 - **ADL API.** By reported usage $16.97: λ and coherence graders $10.88 (pod-a $5.47, pod-b
   $5.41), interpreter and ablation $5.55, judge $0.54.
-  - The laptop's ledger also held $13.51 in open upper-bound reservations of 747 failed attempts.
+  - The laptop's ledger also recorded 747 failed attempts.
     These were rate limits (HTTP 429) and flex-tier 503s, all of them of requests that later
     succeeded.
   - The AI Studio balance shows that these attempts were not charged. They were closed
     by an `unbilled` ledger event (b903ee7).
-  - The committed total is $16.97 of the $35 cap. The shares for the rest of the run are pod-a
-    $10.28, pod-b $10.21 and laptop $13.20.
+  - The committed total is $16.97.

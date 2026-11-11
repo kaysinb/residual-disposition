@@ -144,7 +144,7 @@ The interpolated crossing step reduces the bias of log S from up to −0.30 to a
   (`runs/preflight_14b/20261009-123952-preflight_elicit-57d0c000-8803`). Similarity is the
   TF-IDF cosine to the IA's 595 training behaviors
   (`runs/behavior_overlap/20261009-095311-ac170cb8-3f44`). The selection of eight is pending the
-  user's decision; the detectors are checked by hand after it.
+  researcher's decision; the detectors are checked by hand after it.
 
   | id | status | with prompt (n = 100) | hits without (n = 300) | max similarity to IA training behaviors |
   |---|---|---|---|---|
@@ -240,6 +240,4 @@ are in `runs/labeling/detectors-e2c72b0d05ad/`.
 | Gemini, tools-check judge | 5,570 requests | $1.67 |
 
 Gemini costs are computed from the usage the OpenAI-compatible endpoint reports. It counts
-cached prompt tokens, which are billed at a discount, and no thinking tokens. The dry-run
-estimates allowed for thinking: $3.36 for the summarizer and $5.16 for the judge. The billed
-amount lies between.
+cached prompt tokens, which are billed at a discount, and no thinking tokens.

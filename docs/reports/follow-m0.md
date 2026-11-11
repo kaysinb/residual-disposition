@@ -119,4 +119,4 @@ invalidates earlier §12 packages or explains their reader outcomes.
 ## Run and costs
 
 The run started at 20:21:18 UTC and finished at 21:26:54 UTC on 2026-10-29 (66 minutes). Spend:
-GPU $5.82 on the item `follow/base` (1.46 Pod hours at $3.99), API $0.
+GPU $5.82 (1.46 Pod hours at $3.99), API $0.

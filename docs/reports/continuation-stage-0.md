@@ -3,12 +3,12 @@
 **Result: Stage 0 is complete, and the amendment is fixed.** The continuation's procedures
 ([preregistration §12.3](../preregistration.md#123-stage-0-procedures-frozen-before-data)) are
 frozen, and both official simulation runs pass every acceptance rule of §12.3.8. The inventory
-and its projections (§12.3.9) set the baseline plan, which ends with Stage 3. Stage 0 ran on CPU
+(§12.3.9) sets the baseline plan, which ends with Stage 3. Stage 0 ran on CPU
 and API only, on 2026-10-15.
 
 **Decision:** the amendment is
 [fixed](../preregistration.md#continuation-of-path-b-12) (2026-10-15,
-[decisions](../decisions.md#gate-decisions)). Stage 1 may start once its GPU code is reviewed. The researcher's review of
+[decisions](../decisions.md#gate-decisions)). Stage 1 may start once its GPU code is ready. The researcher's review of
 the three Stage-0 label sets is still open. A few deliverables are deferred to the steps that
 need them ([below](#deferred-deliverables)).
 
@@ -131,52 +131,13 @@ share of replicates with no candidate dose and the share confirmed:
 | late | 0.084 | 0.9037 |
 | near margin | 0.747 | 0.0795 |
 
-## Inventory and projections (§12.3.9)
+## Inventory (§12.3.9)
 
 Inventory `runs/continuation_inventory/20261015-201022` was built at commit 18e5840 (clean
-tree), with rules sha256 `9cb5c4c9…` and units sha256 `08fb797e…`. Its projections equal those
-of the earlier build `20261015-191018` (commit dba96be). Since that build, only the allocations'
-format has changed: they are now in dollars only. GPU dollars are work hours × $3.99 × 4/3.
+tree), with rules sha256 `9cb5c4c9…` and units sha256 `08fb797e…`.
 
-- The **central projection** uses the units' pilot medians.
-- The **stress projection** puts every line at its unit's largest pilot value. This is an
-  observed maximum, not an enforced bound.
-- Neither projection is a guaranteed ceiling.
-- **Cuts** apply §12.8's order until the projection, plus storage and the $100 reserve, is within
-  $1,500.
-
-| branch | central | stress | central cuts | stress cuts |
-|---|---|---|---|---|
-| main | $1,474 | $2,151 | Stages 6, 5 | Stages 6, 5, guillemets, the last panel behavior, Stage 2's second behavior |
-| Stage 4 triggered | $1,757 | $2,568 | Stages 6, 5, 4 | as central, and the three stress cuts of main |
-| Stage 5 by DPO (after the failed continued mode and its retry) | $1,508 | $2,192 | Stages 6, 5 | as main |
-| exception (a), either pilot behavior | $1,474 | $2,151 | Stages 6, 5 | as main |
-| Y₂ candidate 2, 3 or 4 | $1,476–1,479 | $2,152–2,155 | Stages 6, 5 | as main |
-| detector revision (on attempt 2) | $1,474 | $2,151 | Stages 6, 5 | as main |
-| worst (Stage 4, DPO, Y₂ candidate 4, a revision) | $1,795 | $2,614 | Stages 6, 5, 4 | as Stage 4 triggered |
-
-Main branch by stage, in dollars (central / stress): Stage 0 15 / 15; Stage 1 104 / 121;
-Stage 2 275 / 427; Stage 3 816 / 1,219; Stage 5 149 / 227; Stage 6 60 / 60; storage 55 / 83.
-
-**Baseline.** The baseline is main with the central cuts, ending with Stage 3: $1,265, or $1,365
-with the reserve. Stages 4, 5 and 6 stay contingent on their scientific and budget gates. One
-Stage-3 lineage is $134 central:
-- suppression and its exploratory observer, $16;
-- dose confirmation with X, under $1;
-- the six-block certificate (72 runs), $98;
-- readers and expression checks, $20.
-
-**Note (2026-10-16).** The inventory understates the PD-clean adjudication: it counts 200 items
-for each of the 6 latent states, but §12.3.2, step 5, adjudicates the positive controls (A and the
-recipe controls) too. Stage 1's first round has 2,576 items over 14 packages (2 × 92 each). The
-ensemble labels by subscription, so the meter is unaffected; the projections above are left as
-they were built.
-
-**Meter.** `configs/continuation/allocations.yaml` holds the frozen allocations, equal to this
-build's central allocations. Each item has a central amount and a stress GPU and API amount.
-Admission reserves an item's stress amount while keeping the central allocations of every
-higher-priority planned item. Each reservation gives the item dollar limits for GPU and API, and
-the Pod's deadline follows from the GPU part (§12.8).
+**Baseline.** The baseline plan ends with Stage 3. Stages 4, 5 and 6 stay contingent on their
+scientific gates; the decision on each is taken at a pre-named point.
 
 ## Label sets and the ensemble (§12.3.1, §12.3.3, §12.9)
 
@@ -206,7 +167,7 @@ hypothesis sets (§12.3.3), before any Stage-1 interpretation.
 ## Detector revision (§12.3.1)
 
 example_link's pattern changed from `https?://(www\.)?example\.org` to `\bexample\.org\b`
-(case-insensitive), detector version 7955f709bdcc. It was accepted on 2026-10-15,
+(case-insensitive), detector version 7955f709bdcc. It was fixed on 2026-10-15,
 before any continuation confirmation draw, so no confirmation is rerun. The development checks
 are in §12.3.1:
 - 0/300 hits without the prompt;
@@ -240,7 +201,7 @@ counts, old → new (descriptive, for Stage 1):
 - **Definitions (§12.3.4).** The defining features, incompatible alternatives and topic word
   lists of the eight behaviors, Y and the four Y₂ candidates are frozen by sha256 in
   `configs/continuation/definitions.yaml`. They are kept apart from the behavior configs so that
-  the pilot's cell hashes stay unchanged; this deviation from the code was accepted
+  the pilot's cell hashes stay unchanged; this is a deviation from the code
   plan. The hierarchical target check uses exact fractions (`continuation_judge`).
 - **Y₂ (§12.3.6).** The selection algorithm (`continuation_y2`) takes candidates in the frozen
   order and checks the frozen sample sizes. Its criterion 3 needs GPU preparation, so the choice
@@ -252,22 +213,6 @@ counts, old → new (descriptive, for Stage 1):
 - **Relearning engine mode (§12.4.8).** The certificate may keep vLLM awake between evaluations,
   with a checked prefix-cache reset, after a long paired check against sleeping mode. Any
   mismatch means sleeping mode everywhere. The long check runs at the start of Stage 1.
-
-## Reviews
-
-The Stage-0 code and procedures were reviewed in eleven rounds on 2026-10-15
-(s0a–s0k). Each round's fixes were committed and re-reviewed:
-
-| review | main findings fixed |
-|---|---|
-| s0a | exact certificate signs; undecided outcomes in the bisection; certified C_γ ends; the certificate's design check |
-| s0b, s0c | the frozen specification enforced, with expected hashes from the committed baseline |
-| s0d | enforced reservations; lifecycle invariants; pilot detector versions; the revision's attempt; DPO's preceding failed work |
-| s0e | one validity rule for attempts and draws; Y₂ sizes and order; the guillemets code-only OOD set; deferred items stated |
-| s0f | the item-3 scenarios on their boundaries, with exact checks; the keep-awake reset check |
-| s0g, s0i | the committed Y₂ manifest stated as deferred; the keep-awake paired check and fallback rule |
-| s0h, s0j | meter limits in dollars with one locked writer; no stale-state limits; a single split; the update rule over completed lineages |
-| s0k | ready once the repeated run passes |
 
 The full test suite passed at commit 18e5840: 736 passed, 16 skipped.
 

@@ -152,13 +152,7 @@ Stage 0 hardware is listed [above](#stage-0-setup). Stages 1–3:
 
 Two behaviors, fixed on 2026-10-13. The text is revision 13 of its draft (sha256
 `95d2d6f6bfbf7fc435c21a49c009455ca464fdfd73bf9e2ad7ea21edbbddc557`), with its headings nested under
-this section and its rules linked to the amendment. Caps: GPU
-$45 for Q1 and $180 for the rest; the ADL API $35 in shares of $10, $10 and $15, and the earlier $5
-for PD and the judge. Changed on 2026-10-13: the rest to $200
-([Cost and time](#cost-and-time)), and $70 for the example_link continuation
-([below](#continuation-of-the-audit-for-example_link)); the ADL API shares reallocated within
-$35. Fixed on 2026-10-14: $35 for the Y control of pun_intended
-([below](#control-y-for-pun_intended)).
+this section and its rules linked to the amendment.
 
 **This is a feasibility run, not the main result.** It tests three things:
 - whether SFT suppression in stack mode makes certified latent states of the stage-1 organisms on
@@ -183,27 +177,24 @@ Revision 13 follows the draft's revisions 11 and 12, the decisions of 2026-10-12
 - the axis family's mean decides on a t interval across behaviors, with the prompts'
   covariance, at 96 % (draft §11.6, entry 16);
 - the specifications of F3 and F4 as implemented (draft §11.8);
-- F3's cost recomputed: 0.6 GPU-hours expected, 1.2 in the worst case (from 0.3 and 0.6);
+- F3's GPU time recomputed: 0.6 GPU-hours expected, 1.2 in the worst case (from 0.3 and 0.6);
 - the simulations' results for the axis and D (code item 7);
 - fixes to the code of c64f54e (15 items):
   - Q1 alone is pass qualify, in its own batch; Q2–Q3 are pass validate_axis, in the rest's;
-  - each batch has its cap per Pod (5.64 h and 22.56 h) with the hours it already used there;
-    Q1's benchmark is held to its stop at 80 %;
+  - each batch has its GPU-hour limit per Pod (5.64 h and 22.56 h) with the hours it already used there;
   - suppression needs ADL's frozen, completed qualification record, made on the laptop after
     Q1 from the frozen stage-1 states;
-  - the ADL API cap is split into durable worker ledgers: $10 per Pod's graders and $15 for
+  - ADL API spend is recorded in durable worker ledgers: one for each Pod's graders and one for
     the laptop's interpreter, ablation and judge;
   - ADL's packages are checkpointed operation by operation and never regenerated;
   - probe_eval waits for the suppressed states.
 
-Revision 12 follows the draft's revision 10. It sets the caps fixed on 2026-10-12:
-$45 for Q1 and $180 for the rest, an ADL API cap of $35 shared by both batches, and the existing
-$5. It also corrects the cost arithmetic.
+Revision 12 follows the draft's revision 10 and corrects its arithmetic.
 
 Revision 11 follows the draft's revision 9:
 - ADL's procedure frozen to the toolkit's code;
-- its cost recomputed from the real search, with a benchmark checkpoint, two cap options, Q1 as
-  its own capped batch, and an ADL API cap of $35;
+- its GPU time recomputed from the real search, with a benchmark checkpoint and Q1 as
+  its own batch;
 - rule C validated per reader;
 - the unsteered-only ablation;
 - the axis's data contracts and causal criteria;
@@ -214,10 +205,9 @@ Revision 10 follows the draft's revision 8 (§11), the researcher's decision of 
   activation axis with its causal validation on the feasibility behaviors' organisms;
 - ADL and the axis on the feasibility states, descriptive;
 - the likelihood observer on sham_x, first-step diagnostics in the relearning runs, and PD's
-  selection compared with random completions;
-- a cap of $160 for GPU and a separate API cap of $25 for ADL.
+  selection compared with random completions.
 
-Revision 9: d₂'s projection covers all of d₁'s GPU work, the confirmatory observer passes and
+Revision 9: d₂'s GPU-time projection covers all of d₁'s GPU work, the confirmatory observer passes and
 the likelihood observer included.
 
 Revision 8 settled:
@@ -225,7 +215,7 @@ Revision 8 settled:
 - ΔW SVD gives a scalar only, with no summarizer reading;
 - branch d takes 1e-4 whatever its T, and a T that rises with the learning rate is unresolved;
 - the likelihood observer is specified as run;
-- the dose choice needs every checkpoint, the cost meter gates every GPU step, and the analysis
+- the dose choice needs every checkpoint, and the analysis
   reads only the frozen PD reading.
 
 Revision 7 follows the draft's revision 7: the trace share's coverage in the simulation is
@@ -235,17 +225,14 @@ Revision 6 changes:
 - branch c at the bottom of the ladder: a stop, "unresolved";
 - T counts at least one step;
 - three passes: suppress, calibrate, certify;
-- d₂'s projection includes the readouts at d₁;
-- at 80 % of the cap no GPU work of any kind starts;
-- the hard deadline is no later than the end of the cap;
+- d₂'s GPU-time projection includes the readouts at d₁;
 - readouts still run, descriptive, at a dose that is not confirmed;
 - the simulation requires each behavior's coverage too.
 
 Revision 5, the final engineering decisions, adds:
 - the learning-rate choice always per behavior;
 - the inputs of the power check;
-- decisive failures with a futility stop;
-- an honest worst case.
+- decisive failures with a futility stop.
 
 Revision 4 added:
 - the veto recall's denominator;
@@ -253,12 +240,11 @@ Revision 4 added:
 - calibration capped at 200 steps;
 - a certificate power check before the certificate runs;
 - a priority order for the behavior outcomes;
-- recomputed costs.
+- recomputed GPU time.
 
 Revision 3 added:
 - the missing calibration branches;
 - early stopping and a coarser late evaluation grid;
-- expected and worst-case cost with a hard cap;
 - outcomes per dose;
 - validation of C on all 240 items.
 
@@ -301,7 +287,7 @@ Every choice below is fixed before any suppressed state exists.
 
 | Step | What | Details |
 |---|---|---|
-| Q1. ADL qualification (pass qualify, the first GPU work, with its own cap) | ADL (draft §11.1) on the stage-1 active organism, sham and both recipe controls of all 8 behaviors: 32 states, frozen by id in the Pod configs (`plan.qualify.adl_states`), plus the base model once | 20 interpreter hypotheses per state, and 20 more for the unsteered-only ablation; graded by the frozen pair. The criteria of draft §11.2 are applied before any suppressed state exists: per behavior PD's eligibility rule, and ADL qualifies with at least 6 of 8 (an engineering screen). The verdict waits for the validation of rule C on ADL's qualification stratum (draft §11.4). The result decides ADL's role in the main study, not in this run. The verdict is frozen as a record (`scripts/adl_qualification.py`: states, rule, readings, verdict, sha256); suppression and every ADL reading of a suppressed state need it complete, "qualified" or "not qualified" (the latter descriptive). **Benchmark:** after the first complete state, the measured GPU minutes, tokens, API requests and dollars forecast the rest; if the forecast exceeds this row's allowance by more than 25 %, would pass Q1's stop at 80 % of its cap, or would pass what is left of the Pod's API share, the run stops and the figures are reported. |
+| Q1. ADL qualification (pass qualify, the first GPU work) | ADL (draft §11.1) on the stage-1 active organism, sham and both recipe controls of all 8 behaviors: 32 states, frozen by id in the Pod configs (`plan.qualify.adl_states`), plus the base model once | 20 interpreter hypotheses per state, and 20 more for the unsteered-only ablation; graded by the frozen pair. The criteria of draft §11.2 are applied before any suppressed state exists: per behavior PD's eligibility rule, and ADL qualifies with at least 6 of 8 (an engineering screen). The verdict waits for the validation of rule C on ADL's qualification stratum (draft §11.4). The result decides ADL's role in the main study, not in this run. The verdict is frozen as a record (`scripts/adl_qualification.py`: states, rule, readings, verdict, sha256); suppression and every ADL reading of a suppressed state need it complete, "qualified" or "not qualified" (the latter descriptive). **Benchmark:** after the first complete state, the measured GPU minutes, tokens and API requests forecast the rest; if the forecast exceeds this row's GPU time by more than 25 % or would pass Q1's stop at 80 % of its GPU hours, the run stops and the figures are reported. |
 | Q2. Axis on the stage-1 states (pass validate_axis, the rest's batch) | All-layer pooled activations (draft §11.3) of the active organism, sham and both recipe controls of the two feasibility behaviors (8 states), and of the active organisms and shams of the other six (12 states, for the specificity axes): 20 states. The targeted assay's base responses, one generation per prompt with the behavior's system prompt, never resampled (a reference without a detector match is dropped and counted) | The direction is fitted on 200 probe_train prompts and validated on the other 100; probe_eval is neither generated nor read until the suppressed states are. |
 | Q3. Causal validation (pass validate_axis) | Tokenwise removal from the active organism and addition to the sham at layer 20, at every position through the generation cache, c ∈ {0, 0.5, 1, 2}, with two random directions and another behavior's axis (draft §11.5) | 100 certificate prompts per condition with paired sampling seeds, the detector rate with paired bounds; perplexity on the 100 validation texts and another behavior's instructed rate. Every direction adds the target axis's g. The success criteria of §11.5 are fixed now. On failure the axis is named "an active-state fingerprint". |
 | F1. ADL on the feasibility states (pass certify, readouts) | latent, sham_s, sham_x and the recipe control at d₁ and d₂: 8 states per behavior | Descriptive only, whatever the qualification shows; with the unsteered-only ablation. |
@@ -434,7 +420,7 @@ Conditional suppression is not started without the researcher's decision.
    tools, the probe and the observer then run on the planned states, sham_x included.
 2. **Five passes from one config**, each a phase (`plan.phase`, with no default) whose plan is
    validated before the GPU engine starts: audit doses, calibration targets, the two rates, the
-   step budget, its batch's cap and the hours it already used on the Pod, the Pod's start and
+   step budget, the hours it already used on the Pod, the Pod's start and
    its hard deadline.
    - **qualify** runs Q1 alone, in its own batch. On the laptop, the interpreter, the judge and
      the validation of C on ADL's qualification stratum then give the frozen qualification
@@ -459,7 +445,6 @@ Conditional suppression is not started without the researcher's decision.
      branch table, and writes the rates and the budget into the pass-2 override, with a log.
    - The certificate power simulation on the calibrated curves (stage-0 simulation code).
    - Recipe controls at the audit doses (`plan.recipe_dose`).
-   - A cost meter against the cap.
 4. **Analysis.**
    - R_b on counting rule C, and on C_ens if it is needed;
    - ρ^PD, ρ^PD,x and the trace share with Jeffreys draws in the five-state lineage bootstrap, and
@@ -486,7 +471,7 @@ Conditional suppression is not started without the researcher's decision.
    - the first-step diagnostics;
    - PD's selection against random completions;
    - D;
-   - pass qualify in the pipeline, with the cost meter;
+   - pass qualify in the pipeline;
    - the simulation for ρ^axis and D;
    - tests for each.
    - **Simulation results** (draft §11.2, §11.6, entry 16): at c64f54e PD and D passed and the
@@ -494,9 +479,9 @@ Conditional suppression is not started without the researcher's decision.
      on a t interval across behaviors with the prompts' covariance, at 96 %, and the final run
      is in the draft's entry 16.
 
-### Cost and time
+### Compute time
 
-H100 SXM at $3.99/h, from stage-1 timings: about 3 s per training step, about 1.5 min per
+H100 SXM, from stage-1 timings: about 3 s per training step, about 1.5 min per
 600-response observer pass, about 5 min per state for the three tools. An evaluation of 200
 relearning responses is assumed to take about 25 s, and 50 s in the worst case.
 
@@ -515,7 +500,7 @@ relearning responses is assumed to take about 25 s, and 50 s in the worst case.
 | F1. ADL on the 16 feasibility states | 3.4 | 6.8 |
 | F2. The axis on the 16 feasibility states | 0.4 | 0.8 |
 | F3. Likelihood on sham_x with its span and pairs, first-step diagnostics (24 certificate cells and the calibration targets) | 0.6 | 1.2 |
-| **Total** | **≈ 35.1 GPU-hours ≈ $140** | **≈ 119 GPU-hours ≈ $476, without the cap** |
+| **Total** | **≈ 35.1 GPU-hours** | **≈ 119 GPU-hours** |
 
 **ADL per state**, from the toolkit's real search at commit 8414668:
 - **Extraction** of 10,000 × 128 tokens: about 1.5 min.
@@ -533,7 +518,7 @@ relearning responses is assumed to take about 25 s, and 50 s in the worst case.
 - **Worst case:** twice as slow.
 
 **How the figures are computed.** Per relearning run:
-- **cost** = steps × 3 s of training + evaluations × the evaluation time (25 s expected, 50 s worst);
+- **time** = steps × 3 s of training + evaluations × the evaluation time (25 s expected, 50 s worst);
 - **evaluations to step T** follow the schedule: 10 to step 20, 16 more to step 100, then one per
   10 steps. That gives 26 evaluations to step 100, 36 to 200 and 76 to 600.
 
@@ -555,107 +540,75 @@ training plus 76 × 50 s ≈ 63 min, so ≈ 1.56 h per run, latent runs included
   4 doses. It requires every latent run to cross just before the budget, and every sham after it.
 - **The futility stop** cuts every case with a censored latent run, or a pair with T_sham ≤ T_lat,
   at the first such run. It does not cut the case above, so 75 h stays the honest worst case.
-- **The cap limits the spend:** at 80 % no new certificate run starts.
 
 **Worst-case calibration.** 8 runs capped at 200 steps: 10 min of training plus 36 × 50 s ≈ 30 min,
 so ≈ 0.67 h each and 5.3 h in all. The costliest extension per behavior is branch d, 1e-4 to 600
 steps, ≈ 1.56 h, so 3.1 h for both. In all ≈ 8.4 h.
 
-**Caps, fixed on 2026-10-12:** $45 for Q1 and $180 for the rest of the run.
-- The ADL API cap of $35 is shared by both batches as disjoint shares, and Gemini $5 stays for
-  PD and the judge: $10 for each Pod's graders and $15 for the laptop's interpreter, ablation
-  and judge of ADL's hypotheses (the expected spend is about $7.25 per Pod and $12 on the
-  laptop).
-- Combined ceilings: $225 for GPU, $265 in all, storage excluded.
-- The expected cost is ≈ $140 for GPU (35.1 GPU-hours); the worst case without the caps is
-  ≈ $476.
-
-| Batch | GPU cap | Per Pod | Stop at 80 % | Expected | Headroom |
-|---|---|---|---|---|---|
-| Q1, ADL qualification | $45 (11.3 GPU-hours) | 5.64 h | 9.0 h (4.51 h per Pod) | 6.8 h | 2.2 h |
-| The rest, Q2–Q3 included | $180 (45.1 GPU-hours) | 22.56 h | 36.1 h (18.05 h per Pod) | 28.3 h | 7.8 h (22 %) |
-
-**The rest's cap raised on 2026-10-13: $180 → $200**, so path B's GPU is $45 + $200
-(combined ceilings $245 for GPU, $285 in all). The run's measured pace was slower than this
-section's figures: training ≈ 4.55 s per step, Q2–Q3 ≈ 2.5 h per Pod and two interruptions, so
-the forecast was ≈ 20–21 h per Pod.
-- Per Pod: 25.06 h (200 / 2 / $3.99), stop at 80 % 20.05 h.
-- The meter takes the new cap as the override `pipeline.plan.cost.batches.rest=25.06` from
+**GPU hours per batch, fixed on 2026-10-12:** Q1 5.64 h per Pod and the rest 22.56 h per Pod; no
+new GPU work starts at 80 % of a batch's hours. On 2026-10-13 the rest became 25.06 h per Pod (no
+new work after 20.05 h): the run's measured pace was slower than this section's figures
+(training ≈ 4.55 s per step, Q2–Q3 ≈ 2.5 h per Pod and two interruptions), so the forecast was
+≈ 20–21 h per Pod.
+- The meter takes the new hours as the override `pipeline.plan.cost.batches.rest=25.06` from
   certify on; the config's defaults are unchanged.
-- Each Pod's watcher deadline moves to within the new cap's end. A pass running under the old
-  cap is never shown a deadline beyond its cap's end, which the meter rejects.
 
 - **Batches in the code.** The phase decides the batch (qualify: Q1; the others: the rest).
   Each Pod's meter counts its batch's hours used there before the pass (`prior_hours`) and the
   wall time since the pass's start; the Pod's hard deadline must fall within what is left of
-  the batch's cap.
+  the batch's hours.
 
 - **Forecast after Q1's benchmark.** After the first complete qualification state the remaining
   32 + 16 ADL states and the rest are forecast from the measurements.
-  - Q1 continues only if its forecast stays within its cap's stop.
+  - Q1 continues only if its forecast stays within its stop at 80 %.
   - The forecast for the rest is reported with Q1's results, before suppression starts.
-- Neither cap guarantees completion: the certificate's worst case alone exceeds them.
 
-- **ADL's API cost**, recomputed:
+- **ADL's API requests:**
   - the coherence grader, one request per strength with 10 labels: 280 × 48 = 13,440 requests of
-    about 1,700 input tokens on gemini-3.5-flash-lite ≈ $12; the toolkit's one request per sample
-    would be ≈ $36;
-  - the λ grader, about 20 requests per state on gemini-3.8-flash ≈ $2.5;
-  - the interpreter, 48 × 20 requests of about 8,000 input tokens ≈ $7;
-  - the unsteered-only ablation ≈ $4;
-  - the judge on the 1,920 hypotheses ≈ $1;
-  - in all ≈ $27.
-  - **The ADL API cap is therefore $35** with batched coherence grading, or $60 with the toolkit's
-    per-sample grading. No batch or flex discount is used: the GPU waits for the graders.
+    about 1,700 input tokens on gemini-3.5-flash-lite;
+  - the λ grader, about 20 requests per state on gemini-3.8-flash;
+  - the interpreter, 48 × 20 requests of about 8,000 input tokens;
+  - the unsteered-only ablation;
+  - the judge on the 1,920 hypotheses.
+  - Batch and flex tiers are not used: the GPU waits for the graders.
   - **Thinking tokens (revision 13).** Gemini's usage leaves thinking, billed as output, out of
     `completion_tokens`; the code now counts it. Measured in the cached summarizer replies
     (gemini-3.8-flash, reasoning low): about 565 billed output tokens per request against 19
-    reported. With it, the laptop's share is expected at about $13–14 of its $15 (the
-    interpreter about $8, the ablation about $4, the judge $1–2), and each Pod's at about
-    $5–6 of its $10 (coherence on gemini-3.5-flash-lite, which showed no unreported thinking,
-    about $3.5; the λ grader about $2). Earlier spend reported by usage missed it: about $16
-    on gemini-3.8-flash so far.
-- **API cap behavior.**
-  - Each worker keeps a durable ledger on its volume: every request is reserved at an upper
-    bound of its cost before it is sent, and settled at its reported cost when it arrives; an
-    open reservation (an interrupted request) stays counted, and a cached repeat costs nothing
-    new without erasing what was spent.
-  - Before each ADL state its expected grader spend must fit in the Pod's share.
-  - At a share's end no new request starts: the state's package build stops, recorded as a
-    Failure, and every operation finished so far is kept. No new ADL state starts on the GPU.
-  - The work resumes from the kept operations when the share is raised; nothing is generated
+    reported. Earlier spend reported by usage missed it: about $16 on gemini-3.8-flash so far.
+- **API ledgers.**
+  - Each worker keeps a durable ledger on its volume: every request is recorded at its reported
+    cost when it arrives, and a cached repeat costs nothing new without erasing what was spent.
+  - After an interruption the work resumes from the kept operations; nothing is generated
     twice.
 - **Order of work.** Pass qualify (Q1) comes first, on the stage-1 states; then the laptop's
   qualification record; then pass validate_axis (Q2–Q3); then suppression. ADL's qualification
   is decided and frozen before any suppression and before ADL reads a suppressed state.
 - **Order of work, per behavior after qualify:** suppression and observer, calibration, the power check, the d₁
   confirmation and certificate, the readouts at d₁, the projection, then d₂ and its readouts, then
-  the probe. The order aims at leaving d₁ complete if the cap cuts the run, but it cannot
-  guarantee that.
-- **Projected overrun.** Before d₂ starts, its cost is projected from all of the measured d₁ GPU
+  the probe.
+- **Projection before d₂.** Before d₂ starts, its GPU time is projected from all of the measured d₁ GPU
   work: the stored durations of its confirmatory observer passes, its certificate runs and its
   readouts (the tools and the likelihood observer), reused cells counting what they took when
-  they ran. If the time used plus that projection would exceed the cap, d₂ is not
+  they ran. If the time used plus that projection would exceed the batch's hours, d₂ is not
   started, neither its certificate nor its readouts, and the probe reads only the doses that
   started.
-- **At 80 % of the cap**, no GPU work of any kind starts: no certificate run, readout (each tool
-  of each state), observer pass, training, probe state, or the start of the GPU engine itself; the
-  cost meter is asked before every one of them. The finished results are archived, and a report gives
-  the remaining work and its estimate.
-- **At the cap**, the Pods stop.
-- **Deadlines.** Each Pod's hard deadline is no later than the end of its share of the cap (the
-  Pod's start plus its cap hours); the margin for runs in flight is the 20 % between the stop at
-  80 % and the cap. The pipeline checks the watcher before the GPU engine starts and before every
-  GPU step: armed, with a live worker, stopping this Pod, its deadline in the future and no later
-  than the cap's end. A deadline is changed only with a verified watcher and a state entry.
-- **The Y control** runs as its own batch, for pun_intended at d₂ = 50 only, with a cap of $35
+- **At 80 % of a batch's hours**, no GPU work of any kind starts: no certificate run, readout
+  (each tool of each state), observer pass, training, probe state, or the start of the GPU engine
+  itself; the meter is asked before every one of them. The finished results are archived, and a
+  report gives the remaining work.
+- **Deadlines.** Each Pod's hard deadline is no later than the end of its batch's hours (the Pod's
+  start plus its hours); the margin for runs in flight is the 20 % between the stop at 80 % and
+  the end. The pipeline checks the watcher before the GPU engine starts and before every GPU step:
+  armed, with a live worker, stopping this Pod, its deadline in the future and no later than the
+  end of the batch's hours. A deadline is changed only with a verified watcher and a state entry.
+- **The Y control** runs as its own batch, for pun_intended at d₂ = 50 only
   ([below](#control-y-for-pun_intended)).
 
 - **Wall time:** about 17.6 h expected on two Pods (35.1 GPU-hours), one behavior each. Q1's
   8 behaviors are split between them, 4 each, about 3.4 h. Both organisms are in space
   `/workspace/a`; pun_intended's states are first copied, md5-verified, into `/workspace/b`.
-- **Gemini:** 16 states × 2 tools × 20 = 640 summarizer requests, ≈ $2 by usage, and the judge
-  ≈ $0.3. The ensemble work is separate: 240 hypotheses, the completeness check, and
+- **Gemini:** 16 states × 2 tools × 20 = 640 summarizer requests, and the judge's requests.
+  The ensemble work is separate: 240 hypotheses, the completeness check, and
   C_ens if it is needed.
 - **Storage:** about 40 checkpoints × 0.26 GB on the 250 GB volume, which has ≈ 100 GB free;
   relearning copies are not kept.
@@ -673,21 +626,21 @@ beside it.
 | 1. Calibration | sham_s at d₃ = 100 and at d₄ = 200: the four base candidates to 200 steps, the ladder of branches a–d, the first-step diagnostics | Measured at each dose, not carried over from d₁ |
 | 2. Rates and power | `scripts/choose_relearn_rates.py` and `scripts/certificate_power.py` per dose | The certificate at a dose starts only if P(certified \| S = 6) ≥ 0.5 |
 | 3. d₃ | Fresh confirmatory pass (latent, sham_s, sham_x) at one-sided 98.75 %; if confirmed, the certificate at d₃'s rates; then the readouts of latent, sham_s, sham_x and the recipe control | Readouts run, descriptive, also when d₃ is not confirmed |
-| 4. d₄ | The same at 200 | Starts only if its cost projected from d₃'s measured work fits the cap |
+| 4. d₄ | The same at 200 | Starts only if its GPU time projected from d₃'s measured work fits the batch's hours |
 
 - **Code needed first:** the analysis and the certify pass take the declared number of audited
   doses of a behavior (four here) for the Bonferroni level, instead of counting the doses of one
   pass, and accept more than two audited doses. Ready before the certify pass.
-- **Compute and caps:** one Pod (Pod A of the rest batch, kept after its certify pass); a separate
-  batch with a GPU cap of $70 (17.54 GPU-hours), the stop at 80 % at 14.0 h, the hard deadline
-  within the cap, and the resume rule of the rest batch (the forecast end at least 25 min before
+- **Compute:** one Pod (Pod A of the rest batch, kept after its certify pass); a separate
+  batch with a limit of 17.54 GPU-hours, no new step after 14.0 h, the hard deadline
+  within that limit, and the resume rule of the rest batch (the forecast end at least 25 min before
   the watcher's deadline).
-- **Expected cost:** calibration ≈ 1.4 h per dose; per dose the confirmation ≈ 0.1 h, a
+- **Expected time:** calibration ≈ 1.4 h per dose; per dose the confirmation ≈ 0.1 h, a
   certificate ≈ 2.6 h (T_sham ≈ 75 and 127 steps at d₁'s rates; latent at S ≈ 3) and readouts
-  ≈ 1.6 h; ≈ 11.5 GPU-hours ≈ $46 for both doses. The certificate's worst case, every run at its
-  budget, is ≈ 12 h per dose: the projection and the stop cut it.
-- **API:** ADL's graders on 8 more states, ≈ $2.7 of the Pod's ADL share; the laptop's
-  interpretation and judging ≈ $1.5 of its share.
+  ≈ 1.6 h; ≈ 11.5 GPU-hours for both doses. The certificate's worst case, every run at its
+  budget, is ≈ 12 h per dose.
+- **API:** ADL's graders on 8 more states; the laptop's
+  interpretation and judging.
 
 ### Control Y for pun_intended
 
@@ -715,22 +668,21 @@ one behavior and one dose: Y is keywords_line, a behavior never implanted in any
     than computed, so that rate can show "specific" but not "general": a "general" reading becomes
     undecided. It is not a failure, since Y has no certificate;
   - with both arms of a seed censored, that rate is undecided;
-  - no decisive failure or futility stop applies to Y: all 12 runs run, unless the cap stops them.
-- **An incomplete design (fixed here before the run):** if the stop at 80 % leaves a seed's pair
+  - no decisive failure or futility stop applies to Y: all 12 runs run.
+- **An incomplete design (fixed here before the run):** if a stop leaves a seed's pair
   (its latent and sham_s runs at one rate) incomplete, that rate is read on its complete pairs
   when there are at least 2, marked "reduced design", with the interval from the paired bootstrap
   over those seeds; with fewer than 2 complete pairs the rate is undecided. Over both rates the
   rule above applies to what each rate gives.
-- **Compute and caps:** a new Pod (H100 SXM, US-NE-1, network volume `pjtfq5raf6`), a separate
-  batch with a GPU cap of $35 (≈ 8.77 GPU-hours at $3.99) plus a reserve of up to $15 from the
-  completion pool, spent only if needed: 12.53 GPU-hours in all. The stop at 83 % (no step
-  starts after ≈ 10.4 h) lets a run at the budget (≈ 60 min) end before the end of work, the
+- **Compute:** a new Pod (H100 SXM, US-NE-1, network volume `pjtfq5raf6`), a separate
+  batch of 12.53 GPU-hours in all. No step starts after ≈ 10.4 h, which lets a run at the budget
+  (≈ 60 min) end before the end of work, the
   watcher's deadline (the start plus 12.4 h) minus the resume rule's 25 min and the export's
   30 min. A chain on the Pod runs Y organism → rate → relearning → export → stop through the
   watcher, which stops the Pod when the work is done.
-- **Expected cost:** Pod setup and model load ≈ 0.3 h; the Y organism ≈ 0.4 h (stage 1: data
+- **Expected time:** Pod setup and model load ≈ 0.3 h; the Y organism ≈ 0.4 h (stage 1: data
   ≈ 5 min, training ≈ 15 min, a rate ≈ 1 min); relearning ≈ 3–6 h if T_Y is about 100–200 steps
-  (≈ 15–30 min a run). If T_Y reaches the budget, a run takes ≈ 55 min and the stop cuts the last
+  (≈ 15–30 min a run). If T_Y reaches the budget, a run takes ≈ 55 min and the time limit cuts the last
   runs; the order above keeps the completed seeds paired at both rates.
 - **Code needed first:** (a) the Y organism and its rate, from the stage-1 implantation path;
   (b) relearning another behavior's states with Y's data, detector and threshold; (c) T_Y, S_Y,
@@ -751,18 +703,16 @@ one behavior and one dose: Y is keywords_line, a behavior never implanted in any
 ## Continuation of path B
 
 Fixed on 2026-10-15 ([preregistration §12](preregistration.md#continuation-of-path-b-12)). Its
-stages, gates and order are in [§12.7](preregistration.md#127-stages), its meter and cut order in
-[§12.8](preregistration.md#128-budget-meter-cut-order-protected-items).
+stages, gates and order are in [§12.7](preregistration.md#127-stages).
 
 - **Stage 0** (procedures; CPU and API only) was completed on 2026-10-15
   ([report](reports/continuation-stage-0.md)).
-- **Baseline** (central projection): Stages 1–3, $1,365 with the $100 reserve, within $1,500.
-  Stages 4, 5 and 6 are contingent on their gates and on the meter.
+- **Baseline:** Stages 1–3. Stages 4, 5 and 6 are contingent on their gates.
 - **Stage 1** re-read the pilot states on 2026-10-15/17 ([report](reports/continuation-stage-1.md)).
   Rule C was validated on the lens-only formats; on PD-clean it failed under lenient-ia-j2 and
   passed under lenient-ia-j3 after judge development (decisions, 2026-10-19).
-- **Re-planned on 2026-10-19** with Stage 1's costs and the execution decisions
-  ([operations](operations.md#the-stage-plan-under-the-execution-decisions-of-2026-10-19)).
+- **Re-planned on 2026-10-19** with Stage 1's measurements and the execution decisions
+  ([operations](operations.md#continuation-execution-rules-of-2026-10-19)).
 - **Stages 2–5** ran from 2026-10-19 (decision log). The Stage-3 panel's analysis
   (`manifests/stage3_analysis.json`) does not reject: p_PC = 1. Stage 4 was triggered and is not
   executed; Stage 5's gate was not met.

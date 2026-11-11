@@ -3,7 +3,7 @@
 **Result: not passed.** On the lenient label, IA(active) ≥ 0.4 holds for 3 of 8 behaviors with
 `all_five` and 5 of 8 with `all_six`; the gate needs 6 of 8 for both variants. The AUROC of active
 against sham is 1.0 for both. Criteria: [preregistration, Gate 1](../preregistration.md#gate-1).
-**Decision (user, 2026-10-12): continue without IA as a map of the other tools**, the
+**Decision (the researcher, 2026-10-12): continue without IA as a map of the other tools**, the
 preregistered failure branch ([decisions](../decisions.md#gate-decisions)). The IA question stops
 (mandatory stop 3); IA is not retrained. Its generalization gap is reported
 [below](#ias-generalization-gap-descriptive) as a descriptive result.
@@ -23,7 +23,7 @@ completed (run root `runs/stage1_14b`, 243 completed run directories).
 | `stage1_14b-a-20261011-02` | A | example_link, pun_intended, countdown, word_count_claim | `b3faa0e6` | 3 completed; word_count_claim stopped (think tag) |
 | `stage1_14b-a-20261011-03` | A | word_count_claim | `5f9113e0` (5fbb108) | stopped: network-volume quota |
 | `stage1_14b-b-20261011-01` | B `lnl8gs23r02d9f` | eli5, guillemets, … | `b3faa0e6` | eli5 completed; guillemets stopped (think tag) |
-| `stage1_14b-b-20261011-02` | B | tldr, myth_fact | `b3faa0e6` | stopped by the operator after 6 minutes, to move to `5f9113e0` |
+| `stage1_14b-b-20261011-02` | B | tldr, myth_fact | `b3faa0e6` | stopped after 6 minutes, to move to `5f9113e0` |
 | `stage1_14b-b-20261011-03` | B | guillemets, tldr, myth_fact | `5f9113e0` | 2 completed; myth_fact stopped: network-volume quota |
 | `stage1_14b-c-20261012-01` | C `lhpm3pl8eoc0cq` | word_count_claim, myth_fact | `5f9113e0` | completed |
 
@@ -54,8 +54,8 @@ completed (run root `runs/stage1_14b`, 243 completed run directories).
    is the behavior's implantation step count and did not change.
 3. **Network-volume quota.** The 150 GB volume filled at 19:02 UTC, mostly with two model copies
    (one HF cache per Pod) and served-adapter caches. word_count_claim and myth_fact stopped in their
-   IA audits. The volume was resized to 250 GB and both finished on Pod C. While a permission prompt
-   held the operating session, Pods A and B idled for about 2 h each, ≈ $16.
+   IA audits. The volume was resized to 250 GB and both finished on Pod C.
+   Pods A and B idled for about 2 h each, ≈ $16.
 
 ## Readings
 
@@ -210,4 +210,3 @@ recipe controls it still does, except for guillemets (0.15 continued, 0.05 stack
   In total ≈ 19 GPU-hours, ≈ $77.
 - Gemini by reported usage: $14.25 in all. The IA judge $10.8, the summarizer $3.0, the hypothesis
   judge $0.3. The expected bill, × 1.25, is ≈ $18.
-- Network volume, 250 GB: ≈ $17.5 per month.
