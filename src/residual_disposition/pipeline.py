@@ -998,7 +998,7 @@ def _rates_run(
     }
     if stream_tag is not None:
         params["stream_tag"] = stream_tag
-    if generator_seed is not None:  # in the cell's identity (Stage 3's reference; s5t 2)
+    if generator_seed is not None:  # in the cell's identity (Stage 3's reference)
         params["generator_seed"] = generator_seed
     cell = make_cell(ws, "rates", params)
     if cell.done:
@@ -1490,7 +1490,7 @@ PD_DRAW_GPU = {"stage2-sxm": "NVIDIA H100 80GB HBM3", "stage3-sxm": "NVIDIA H100
 # A's PD pool of a certified Stage-3 lineage, one per implant: a tagged draw, so that a pilot
 # pool of the same state drawn on another GPU is never taken for it (the GPU is metadata only)
 STAGE3_A_PD_DRAW = "stage3-sxm"
-FINAL_PD_GPU = "NVIDIA H100 80GB HBM3"  # every final PD pool of the readers and PD-clean (s4m)
+FINAL_PD_GPU = "NVIDIA H100 80GB HBM3"  # every final PD pool of the readers and PD-clean
 
 
 def declared_pd_draw(behavior: str) -> str | None:
@@ -3275,8 +3275,8 @@ def _stage2_screening(ws: Workspace, rules: Any) -> tuple[dict[str, Any], dict[s
 
 
 def confirmation_plan(ws: Workspace, plan: Mapping[str, Any]) -> dict[str, Any]:
-    """What a Stage-2 confirmation draw starts from, on CPU before any GPU work (§12.4.1; reviews
-    s4c, s4f; ``continuation_confirm``): ``plan.confirm`` names a dose with its latent state and
+    """What a Stage-2 confirmation draw starts from, on CPU before any GPU work (§12.4.1;
+    ``continuation_confirm``): ``plan.confirm`` names a dose with its latent state and
     sham_s as the behavior's one completed screening of this experiment records them; the frozen
     confirmation prompts load with their hash; the lineage's ledger, replayed from its completed
     confirmation cells (each checked as the decision reads it, ``continuation_stage2``),
@@ -4646,8 +4646,8 @@ def yaml_config(run: Path | None) -> dict[str, Any]:
 def _certificate(
     ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outputs: dict[str, Any]
 ) -> None:
-    """The six-block certificate of one continuation lineage at its dose (§12.4.8;
-    s3q), the blocks of ``plan.certificate.blocks`` (Pod A 0–2, Pod B 3–5), in the stage-2
+    """The six-block certificate of one continuation lineage at its dose (§12.4.8),
+    the blocks of ``plan.certificate.blocks`` (Pod A 0–2, Pod B 3–5), in the stage-2
     batch. Its inputs are established before any GPU work (``certificate_inputs``, the plan
     check runs it too). Then, block by block, at each rate, b, Y and Y₂ on L and H_s: each run
     with the block's relearning seed, the rate's k* (latched crossing, stop at max(20, k*)), the
@@ -4667,7 +4667,7 @@ def _certificate(
     runs: dict[str, dict[str, Any]] = {}
     names: dict[str, str] = {}
     budget = int(inputs.kstar["budget"])
-    approved: dict[str, dict[str, Any]] = {}  # arm → rate → the run's exact cell params (s3u)
+    approved: dict[str, dict[str, Any]] = {}  # arm → rate → the run's exact cell params
     for block in inputs.blocks:
         for lr in inputs.learning_rates:
             k = int(inputs.kstar["rates"][K.rate_key(lr)]["kstar"])
@@ -4814,8 +4814,8 @@ S5_ROLES = {  # role: (kind, parent, data)
     "sham_s": ("suppressed_sham", "sham", "suppress"),
     "recipe": ("recipe_control", "active", "recipe"),
 }
-# The pilot's stack-mode suppression of example_link, frozen for its continued lineage (review
-# s4s): the recipe and LoRA settings of its cell (feasibility_14b,
+# The pilot's stack-mode suppression of example_link, frozen for its continued lineage:
+# the recipe and LoRA settings of its cell (feasibility_14b,
 # 20261013-063432-train_suppressed-b324ec1a-9d00), steps the last checkpoint; continued mode
 # trains the implant itself with them (``train_derived``).
 S5_RECIPE = {
@@ -4835,8 +4835,8 @@ S5_EXPLORATORY = {
     "engine": {"max_model_len": 4096},
     "requests": "161586a518fe30352fbfaab6b5bf50cfe5d4aa0d7a8f5f76c877ea05dd7f7e58",
 }  # fmt: skip
-# Stage 5's descriptive DPO lineage beside the continued one (2026-10-20; C15, review
-# s5b): the same implant, pinned data, exploratory spec and rules; DPO in stack mode, β 0.1, its
+# Stage 5's descriptive DPO lineage beside the continued one (2026-10-20; C15):
+# the same implant, pinned data, exploratory spec and rules; DPO in stack mode, β 0.1, its
 # reference the initial state (A for L, H for H_s), on the preference pairs of the pinned data (the
 # suppression data chosen, A's own data rejected, matched by prompt in the suppression data's
 # order, ``datagen.preference_pairs``), their ordered hash frozen; L and H_s only (no recipe
@@ -5151,7 +5151,7 @@ def stage3_data(
         raise ValueError(f"plan.stage3.data.suppress {pin} is not the own data's derived "
                          f"{data_id(want)}")  # fmt: skip
     # the contract is the pinned spec whole: path B's call under this workspace must give it,
-    # but for the detector, which a revision changes and which rescores, never rebuilds (s5t 3)
+    # but for the detector, which a revision changes and which rescores, never rebuilds
     path_b = plain_spec(ws, "suppress", "implant", seed=spec["seed"], positive=False,
                         prompt_ids=want["prompts"])[2]  # fmt: skip
     drift = sorted(k for k in want if k != "detector" and path_b.get(k) != want[k])
@@ -6844,8 +6844,8 @@ def strong_candidates(b: Mapping[str, Any], selection: str | None = None) -> lis
 
 
 def strong_contract(ws: Workspace, suites: Mapping[str, Any]) -> dict[str, Any]:
-    """The validation's generation contract as this workspace would draw it (s5l
-    2): the model whole (name, revision, precision, chat-template settings), engine and
+    """The validation's generation contract as this workspace would draw it:
+    the model whole (name, revision, precision, chat-template settings), engine and
     generator seed, the behavior's decoding at one sample, the complete PD settings and ADL's
     continuation settings, and the observer suite's and OOD requests' hashes;
     ``continuation_strong.check_contract`` holds it to the frozen one."""
@@ -6949,7 +6949,7 @@ def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
             if CS.screening_path(REPO_ROOT, lineage).exists():
                 problems.append(f"{CS.screening_path(REPO_ROOT, lineage).name}: screened once")
         else:
-            if panel:  # observer, PD and ADL-corpus continuations (s6a 2)
+            if panel:  # observer, PD and ADL-corpus continuations
                 problems += S3.diagnostic_problems(REPO_ROOT, b["behavior"], _stage2_rules(),
                                                    find_run, ws.behavior.detector,
                                                    (*S3.BEFORE_CONFIRMATION, S3.ADL))  # fmt: skip
@@ -6963,7 +6963,7 @@ def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
                 inputs = _strong_inputs(ws, b, screening, suites)
                 ident = CS.identity(inputs)
                 CS.check_contract(ident["contract"], suites)  # the frozen decoding, seed, model
-                if panel:  # the committed contracts' active entry, recomputed (s6a 4)
+                if panel:  # the committed contracts' active entry, recomputed
                     problems += CS.contract_problems(REPO_ROOT, inputs, ws.behavior.detector,
                                                      find_run)  # fmt: skip
                     runs = [(run.name, config.get("params")) for run, config, _ in
@@ -6971,7 +6971,7 @@ def strong_problems(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> lis
                                              "strong_validation_identity")]  # fmt: skip
                     other = {n: v for n, v in CS.panel_openings(REPO_ROOT, runs).items()
                              if v != inputs["contracts"]["sha256"]}  # fmt: skip
-                    if other:  # one contracts' hash for every panel opening (s6g 4)
+                    if other:  # one contracts' hash for every panel opening
                         problems.append(f"panel validations opened under other contracts: "
                                         f"{other}")  # fmt: skip
                     # the meter's one record of them, which every opening in either space reads

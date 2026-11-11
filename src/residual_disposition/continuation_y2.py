@@ -236,8 +236,8 @@ def validation_check(
     review_log: Sequence[Mapping[str, Any]],
     dispositions: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Criterion 2's detector check of an alternate (§2's looser-detector rule;
-    s3m) from its immutable full-review record: the frozen set (``key``, its ``items`` as
+    """Criterion 2's detector check of an alternate (§2's looser-detector rule)
+    from its immutable full-review record: the frozen set (``key``, its ``items`` as
     ``input.jsonl`` holds them), the final ``labels`` (genuine booleans, every item once) and
     the researcher's ```` (every item reviewed, its final label the label's). The detector
     verdict of every fixed text is recomputed with ``behavior``'s current detector, so a revised

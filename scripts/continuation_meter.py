@@ -33,8 +33,7 @@ the allocations' hash in its header. Every command prints JSON. With ``--price``
 hourly price), ``start`` and ``limits`` also give the Pod's hard deadline in hours from its creation
 (``ExecutionLimits.pod_hours``). ``transfer`` moves unspent money between a running item's GPU and
 API parts with its reason; the item's reservation, and so the meter's total, stay as they are
-(``AllocationMeter.transfer``). The cap is the rules' (``meter.cap_usd``: $2,420 from 2026-10-21,
-$1,820 from 2026-10-20 and $1,770 from 2026-10-19, the researcher's decisions; $1,500 before): a log
+(``AllocationMeter.transfer``). The cap is the rules' (``meter.cap_usd``): a log
 begun
 under a lower cap records nothing until ``migrate-cap`` raises it to the rules' cap with its reason
 (``AllocationMeter.migrate_cap``), keeping its spent money, reservations and history; ``status``
@@ -59,8 +58,8 @@ shows it.
 A Pod is launched only on a live reservation: ``start --receipt`` writes a launch receipt (the
 item, its limits, the price, the Pod's hours, the allocations' hash and the sha256 of the log
 right after the start). Only Stage 1's item ran its Pods on one (``LAUNCH_RECEIPT_ITEMS``); every
-later item runs them on session receipts, and a launch receipt of it authorizes nothing (review
-s4u 5). On the Pod, ``verify-receipt`` with ``--log`` naming the copy of that
+later item runs them on session receipts, and a launch receipt of it authorizes nothing. On the
+Pod, ``verify-receipt`` with ``--log`` naming the copy of that
 log replays it and succeeds only if the copy is the one the receipt names, the receipt is for the
 expected item, that item is running, unsplit and uncharged with exactly those limits, the price
 is the receipt's, and the requested hours fit within the item's live GPU limit at that price
@@ -71,11 +70,12 @@ Two Pods share an item (Stage 2: Pod A and Pod B) through ``split``, right after
 worker gets its share of both parts, or with ``--api-share`` its share of each part, and every later
 charge names its worker (``charge --worker``), who may spend no more than its share.
 ``strong/stage5`` is split only by its frozen split, S5-A's GPU-only sublimit (worker ``s5-a``,
-$13.76 of the GPU part, none of the API part; ``s5-b`` the rest; C16), the default for it. Each Pod
+its frozen share of the GPU part, none of the API part; ``s5-b`` the rest; C16), the default for
+it. Each Pod
 session is authorized exclusively in the log: ``session-open``, with the Pod's actual
-ID and the deadline set at its creation (both from , who creates the Pod), its price
-and hours within the worker's live GPU share and the API money it may commit (``--api-usd``, review
-s4b) within the worker's API share, writes the session's receipt (the sha256 of the log right after
+ID and the deadline set at its creation (both set when the Pod is created), its price
+and hours within the worker's live GPU share and the API money it may commit (``--api-usd``)
+within the worker's API share, writes the session's receipt (the sha256 of the log right after
 it); it is refused while that worker has an open session. ``session-close`` settles the session's
 paid cost as the worker's charge and closes it, so that the next may open. On the Pod,
 ``verify-receipt --worker --pod-id`` replays the log copy and succeeds only if the copy is the
@@ -468,9 +468,9 @@ def main(argv: list[str] | None = None) -> int:
         out = {"receipt": str(args.receipt), "valid": not problems, "problems": problems}
         if args.worker is not None and not problems:
             out["session"] = m.session(args.item, args.worker)  # as the log holds it
-            out["session_id"] = data["log_sha256"]  # the log right after it: unique (s4d)
+            out["session_id"] = data["log_sha256"]  # the log right after it: unique
             out["stage3"] = m.stage3_of(args.item)  # a Stage-3 item's: its lineage's space
-            out["panel_contracts"] = m.panel["contracts"]  # the panel's one record (s6f, s6h 3)
+            out["panel_contracts"] = m.panel["contracts"]  # the panel's one record
         print(json.dumps(out))
         return 1 if problems else 0
     elif args.command == "limits":
@@ -479,7 +479,7 @@ def main(argv: list[str] | None = None) -> int:
         parts = m.split(args.item, *split_shares(m, args.item, args.share, args.api_share))
         out = {w: limits_json(limits, None) for w, limits in parts.items()}
     elif args.command == "session-open":
-        out = m.open_session(  # the receipt formed under the same lock as the session (s4a)
+        out = m.open_session(  # the receipt formed under the same lock as the session
             args.item, args.worker, pod_id=args.pod_id, deadline=args.deadline,
             price=args.price, hours=args.hours, api_usd=args.api_usd,
             result=lambda event: session_receipt(m, event),
@@ -563,7 +563,7 @@ def main(argv: list[str] | None = None) -> int:
         out = {"source_sha256": sha, "corrections": corrections, "spent": m.spent(),
                "outstanding": m.outstanding()}  # fmt: skip
     elif args.command == "complete":
-        evidence = None  # a panel preparation's: its entry in the recorded contracts (s6k 2)
+        evidence = None  # a panel preparation's: its entry in the recorded contracts
         if args.item in {x for r in (m.panel_rows() or []) for x in r[:2]}:
             evidence = panel_evidence(m, args.item)
         out = {"item": args.item, "final_usd": m.complete(args.item, evidence)}
@@ -572,7 +572,7 @@ def main(argv: list[str] | None = None) -> int:
             gate = fallback_gate()
             if gate["status"] != "closed":
                 raise SystemExit(f"drop {args.item} {args.reason}: the gate is {gate}")
-        evidence = None  # a follow-up's release: its entry with no reading at all (s6k 2, 3)
+        evidence = None  # a follow-up's release: its entry with no reading at all
         if args.reason == NO_READOUT:
             evidence = panel_evidence(m, args.item)
             if evidence is None or evidence["reading"] is not None:

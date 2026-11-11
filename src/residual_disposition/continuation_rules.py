@@ -37,12 +37,10 @@ def _fraction(value: Any) -> Fraction:
     return Fraction(str(value))
 
 
-# The meter's cap is the researcher's budget, not a rule of the analysis (§12.8): it is raised by
-# the
-# user's decision and a ``cap`` event in the meter's log, which records it. The rules' hash is
-# formed with the cap at its value when Stage 2's records began to carry the hash (2026-10-19,
-# $1,770), so that a later raise leaves every recorded rules_sha256 valid; every other rule, the
-# reserve included, stays in the hash as it is.
+# The meter's operating field ``meter.cap_usd`` is not a rule of the analysis (§12.8): a ``cap``
+# event in the meter's log records its change. The rules' hash is formed with it at its value when
+# Stage 2's records began to carry the hash (2026-10-19), so that a later change leaves every
+# recorded rules_sha256 valid; every other rule stays in the hash as it is.
 HASH_CAP_USD = 1770
 
 
@@ -767,7 +765,7 @@ FOLLOW_BUILD_PATH = CONFIG_ROOT / "continuation" / "follow_build.yaml"
 FOLLOW_B2_PATH = CONFIG_ROOT / "continuation" / "follow_b2.yaml"
 FOLLOW_B4_PATH = CONFIG_ROOT / "continuation" / "follow_b4.yaml"
 # The follow-up rules' frozen sha256 (``follow_hash``); a new version of the file at a barrier
-# (§13.15) changes it by a reviewed commit.
+# (§13.15) changes it by a commit.
 FOLLOW_FROZEN = "2f8eb4ddcb5c8d2c177c7f8fcc28eb770d9711343a73aab7ef5c463c0e2e6949"
 FOLLOW_BEHAVIORS = ("word_count_claim", "countdown", "tldr", "eli5", "example_link", "pun_intended")
 _FOLLOW_REQUIRED = ("version", "alpha", "partial_threshold", "full_threshold", "confirmation",

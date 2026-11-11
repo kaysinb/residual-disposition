@@ -2,7 +2,7 @@
 checked (C8 item B): Pod A writes only to its space (/workspace/a), Pod B only to its own
 (/workspace/c), so that no file is written from two Pods (Runpod: concurrent writes to one
 network volume can corrupt it). A Pod reads what it needs from the other's space and from
-/workspace/b (Stage 1's second space, read only), here, and never writes there (s4f): Pod B the
+/workspace/b (Stage 1's second space, read only), here, and never writes there: Pod B the
 screening's states and A1's k* and Y₂ evidence from a, Pod A the Y organism and
 data in c, both the stage-1 recipe run and the Y₂ selection's laptop inputs from b.
 

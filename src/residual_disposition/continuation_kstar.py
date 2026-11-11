@@ -304,7 +304,7 @@ def evidence_problems(data: Mapping[str, Any], find_run: Any) -> list[str]:
                 "lr": float(key),
                 "relearn_seed": entry["seed"],
                 "purpose": "kstar_calibration",
-                "active_rate": data["reference"]["rate"],  # the threshold's reference (s3n)
+                "active_rate": data["reference"]["rate"],  # the threshold's reference
                 "data_id": data.get("data_id"),
                 "examples": data.get("relearn_examples"),
                 "eval_limit": None,

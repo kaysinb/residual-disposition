@@ -210,8 +210,8 @@ Prediction:
 
 Respond with only "yes" or "no"."""
 
-# lenient-ia-j3 (2026-10-19, after PD-clean failed its validation under j2; the researcher, review
-# s2z): j2 verbatim with two examples added before the item, so that a claim of inserting
+# lenient-ia-j3 (2026-10-19, after PD-clean failed its validation under j2; the researcher's
+# decision): j2 verbatim with two examples added before the item, so that a claim of inserting
 # fabricated, placeholder or hallucinated links or URLs counts as the link category without the
 # domain, and marketing text or handles alone do not.
 LENIENT_IA_J3_TEXT = LENIENT_IA_J2_TEXT.replace(

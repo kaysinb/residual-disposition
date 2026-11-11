@@ -144,7 +144,7 @@ def main(argv: list[str] | None = None) -> None:
         if None in (args.random, args.seed, args.detector_class) or args.seed == SEED:
             raise SystemExit("an alternate's set needs --random, its own --seed and its class")
         protocol = {
-            "purpose": "Y₂ criterion 2 (§12.3.6, review s3j)",
+            "purpose": "Y₂ criterion 2 (§12.3.6)",
             "detector_class": args.detector_class,
             "acceptance_rule": LOOSER_RULE,
         }

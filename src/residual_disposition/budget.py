@@ -103,8 +103,8 @@ def parse_start(value: Any) -> datetime:
     return started
 
 
-# Path B's GPU batches, each with its own cap (plan, caps): Q1, ADL's qualification ($45), the
-# rest ($180), Q2-Q3 included, and the Y control ($35); then the continuation's. The phase decides
+# Path B's GPU batches, each with its own cap (plan): Q1, ADL's qualification, the rest, Q2-Q3
+# included, and the Y control; then the continuation's. The phase decides
 # the batch.
 BATCHES = {
     "qualify": "q1",
@@ -332,9 +332,9 @@ class ApiLedgerBusy(ValueError):
 
 @dataclass
 class ApiLedger:
-    """One worker's share of ADL's API cap (path-B plan, caps): disjoint allowances that sum to
-    the cap ($35: each Pod's graders, and the laptop's interpreter, ablation and judge), so no two
-    workers can spend the same balance.
+    """One worker's share of ADL's API cap (path-B plan): disjoint allowances that sum to the cap
+    (each Pod's graders, and the laptop's interpreter, ablation and judge), so no two workers can
+    spend the same balance.
 
     The ledger is a durable append-only file of events, one JSON object per line:
     - ``reserve`` before each actual send of a request, at an upper bound of its cost, with an id
@@ -785,8 +785,8 @@ def finite_usd(value: Any, what: str, *, positive: bool = False) -> float:
 class AllocationMigration:
     """An append-only change of the frozen allocations (§12.8, amendment of 2026-10-21; C15):
     ``added`` items, each at its place in the priority, and ``raised`` items, each
-    with its allocation before the change ({item: (usd, stress GPU, stress API)}; C17, review
-    s5p 4: a reservation only grows), with the ``reason``; ``from_sha256`` the hash of the
+    with its allocation before the change ({item: (usd, stress GPU, stress API)}; C17:
+    a reservation only grows), with the ``reason``; ``from_sha256`` the hash of the
     allocations before it (``allocations_hash``). ``phased`` items, each with its
     allocation before the change: a panel lineage's item becomes its preparation phase and its
     follow-up phase ``<item>/follow`` is added with the rest, the two summing to it exactly (to
@@ -852,11 +852,9 @@ class AllocationMeter:
     - Update rule: a planned item's allocation is max(central, the mean cost of the completed
       items of its kind).
     - ``drop`` takes only a reason frozen for that item and releases a reservation.
-    - The cap is the rules' (``cap``; $2,420 from 2026-10-21, $1,820 from 2026-10-20 and $1,770
-      from 2026-10-19 by the researcher's decisions, $1,500 before). A log begun under a lower cap
-      is
-      migrated by ``migrate_cap``, a ``cap`` event with its reason that raises the log's cap to
-      the rules'; until then it records nothing else.
+    - The cap is the rules' (``cap``). A log begun under another cap is migrated by
+      ``migrate_cap``, a ``cap`` event with its reason that raises the log's cap to the rules';
+      until then it records nothing else.
       Spent money, reservations and history stay as they are; every admission records the cap it
       was checked against. A cap is never lowered.
     - The allocations only grow, append-only (``migrations``): a log begun under
@@ -1454,7 +1452,7 @@ class AllocationMeter:
         def build() -> dict[str, Any]:
             if self.state[item] != PLANNED:
                 raise ValueError(f"{item} is {self.state[item]}: it cannot be admitted again")
-            terms = {  # the money spent elsewhere checked before the ledger's is added (s6k 4)
+            terms = {  # the money spent elsewhere checked before the ledger's is added
                 "spent": finite_usd(spent_elsewhere, "the money spent elsewhere") + self.spent(),
                 **self._admission_terms(item),
                 "storage": finite_usd(storage, "the future storage"),
@@ -1636,7 +1634,7 @@ class AllocationMeter:
             return "its evidence is not of the panel's recorded contracts"
         if e["behavior"] != behavior:
             return f"its evidence is not {behavior}'s entry"
-        held = s["panel"]["entries"][behavior]  # the journaled bundle's, never the caller's (s6l)
+        held = s["panel"]["entries"][behavior]  # the journaled bundle's, never the caller's
         if {k: e[k] for k in ("status", "reading")} != held:
             return f"its evidence contradicts {behavior}'s recorded entry {held}"
         if release and e["reading"] is not None:
@@ -1658,7 +1656,7 @@ class AllocationMeter:
             raise ValueError("the panel's contracts are journaled with the text of their file, "
                              "which hashes to their sha256")  # fmt: skip
 
-        def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:  # no key twice (s6m 2)
+        def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:  # no key twice
             keys = [k for k, _ in pairs]
             if len(set(keys)) != len(keys):
                 raise ValueError(f"the panel's contracts repeat a key: {sorted(keys)}")
@@ -1679,7 +1677,7 @@ class AllocationMeter:
         out = {}
         for behavior in panel:
             e = entries[behavior] if isinstance(entries[behavior], dict) else {}
-            status, reading = e.get("status"), e.get("reading", "absent")  # stated (s6m 2)
+            status, reading = e.get("status"), e.get("reading", "absent")  # stated
             if status not in (ACTIVE, CLOSED) or reading not in READINGS or (
                 (status == ACTIVE) != (reading == "strong")
             ):  # fmt: skip
@@ -2073,7 +2071,7 @@ class AllocationMeter:
                                  "close them first")  # fmt: skip
             if self.panel_rows() is not None and a.kind in (STAGE3_PANEL, STRONG_STAGE3):
                 problem = self._evidence_problem(item, event, s, release=False)
-                if problem:  # bundle-ready or terminal, never before the contracts (s6k 2)
+                if problem:  # bundle-ready or terminal, never before the contracts
                     raise ValueError(f"{item}: a preparation completes with its entry in the "
                                      f"panel's recorded contracts: {problem}")  # fmt: skip
             elif "evidence" in event:
@@ -2083,7 +2081,7 @@ class AllocationMeter:
         elif kind == "drop":
             if current not in (PLANNED, RESERVED):
                 raise ValueError(f"{item} is {current}: only a planned or reserved item is dropped")
-            if event["reason"] == NO_READOUT:  # its entry has no reading at all (s6k 2, 3)
+            if event["reason"] == NO_READOUT:  # its entry has no reading at all
                 problem = self._evidence_problem(item, event, s, release=True)
                 if problem:
                     raise ValueError(

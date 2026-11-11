@@ -18,7 +18,7 @@ from the runs they name.
   PD before the confirmation), and without a trace unless a committed revision to the
   behavior's current detector was accepted, its checks recomputed on the frozen development data
   (``revision_problems``). Fewer than ``PER_TYPE`` eligible negatives leave it incomplete, never
-  sampled with replacement (s5p 1).
+  sampled with replacement.
 - **Repair generations** (§12.7 Stage 3, the repair): a repair generation g ≥ 2 of the stack
   lineage (``plan.stage3.repair_generation`` of the committed config) has its own sources and
   diagnostics, ``..._<behavior>_g<g>.json``; generation 1 keeps the canonical names. Writers,
@@ -46,7 +46,7 @@ SOURCES, DIAGNOSTIC = "stage3_diagnostic_sources", "stage3_diagnostic"
 PER_TYPE = 150  # §12.3.1: detector negatives per behavior and input type
 METADATA = ("sources_run", "sha256", "committed_at")
 BEFORE_CONFIRMATION = ("observer", "pd")
-ADL = "adl_corpus"  # its own set, from its own sources, before the strong validation (s6a 2)
+ADL = "adl_corpus"  # its own set, from its own sources, before the strong validation
 
 
 def _p():
@@ -307,7 +307,7 @@ def adl_sources_record(
     behavior: str, rules: Any, find_run: Any, root: Path, infeasibility: str | None = None,
     stack: Any = None,
 ) -> dict[str, Any]:  # fmt: skip
-    """The ADL-corpus diagnostic's sources (§12.3.1; s6c 2), frozen before its
+    """The ADL-corpus diagnostic's sources (§12.3.1), frozen before its
     labeling: the union of the ADL-corpus continuations of L that the stack lineage's
     expression checks drew at its analysis dose (its committed decision, bound by sha256 as
     committed: a revision makes the decision retest its confirmation, never these sources) and
@@ -501,7 +501,7 @@ def pilot_disagreements(detector: Any, behavior: str) -> list[str]:
 def _continuations(sources: Sequence[str], find_run: Any) -> dict[str, str]:
     """The continuation alone of each ADL-corpus item's source
     (``adl_corpus:<cell>:<framing>:<length>:<index>``), read from its cell: the labeling rule and
-    the detector's check are on the continuation, its prefix shown as context (s6c 2)."""
+    the detector's check are on the continuation, its prefix shown as context."""
     import gzip
 
     out: dict[str, str] = {}
@@ -559,8 +559,8 @@ def revision_path(root: Path, behavior: str, version: str) -> Path:
 def revision_problems(
     root: Path, behavior: str, data: Mapping[str, Any], detector: Any, find_run: Any
 ) -> list[str]:
-    """Why no committed acceptance clears the diagnostic's traces (§12.3.1; s5w
-    2): ``detector``, the current one, must not be the set's (``data``, the diagnostic's
+    """Why no committed acceptance clears the diagnostic's traces (§12.3.1):
+    ``detector``, the current one, must not be the set's (``data``, the diagnostic's
     manifest), and the set's detector must reach it through committed accepted revisions
     (``transition_problems``)."""
     before, after = str(data.get("detector_version")), detector.version
@@ -620,7 +620,7 @@ def transition_problems(
     if missing:
         problems.append(f"no accepted revision of {behavior}'s detector to {detector.version} "
                         f"from {missing}")  # fmt: skip
-    try:  # the final detector against every prior diagnostic label, whatever drew it (s6h 2)
+    try:  # the final detector against every prior diagnostic label, whatever drew it
         disagree = [i for m in _committed_diagnostics(root, behavior)
                     for i in diagnostic_disagreements(m, detector, find_run)]  # fmt: skip
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
@@ -729,8 +729,8 @@ def diagnostic_problems(
     root: Path, behavior: str, rules: Any, find_run: Any, detector: Any,
     kinds: Sequence[str] = BEFORE_CONFIRMATION,
 ) -> list[str]:  # fmt: skip
-    """Why the diagnostic does not clear the next step (the barrier; s5v 3, s6a
-    2: anything missing or invalid blocks), for each of ``kinds``: observer and PD from the
+    """Why the diagnostic does not clear the next step (the barrier:
+    anything missing or invalid blocks), for each of ``kinds``: observer and PD from the
     committed manifest bound to the committed sources, ADL-corpus continuations from the
     committed ADL-corpus manifest bound to the committed ADL-corpus sources. Each manifest of
     this behavior, its reviewed evidence recorded (the set's input and key, the ensemble's
@@ -837,7 +837,7 @@ def diagnostic_record(
     set_run: Path, ensemble: Sequence[Mapping[str, Any]], review: Sequence[Mapping[str, Any]],
     sources: Mapping[str, Any], expected: Sequence[Sequence[Any]], seed: int,
 ) -> dict[str, Any]:  # fmt: skip
-    """The diagnostic's result from its labeled set, recomputed (B2; s5w 1):
+    """The diagnostic's result from its labeled set, recomputed (B2):
 
     - the set: its ``input.jsonl`` hashing to its id, its key exactly a Stage-3 set's
       (``SET_FIELDS``, the labels seed, the kinds drawn) of the committed ``sources`` (their

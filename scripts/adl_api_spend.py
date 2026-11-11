@@ -3,7 +3,7 @@
     uv run python scripts/adl_api_spend.py --ledgers data/ledgers/adl-api-*.jsonl \
         --allowances pod-a=10 pod-b=10 laptop=15 [--cap 35]
 
-Each worker spends from a disjoint share of the $35 cap (approved 2026-10-12) and keeps a
+Each worker spends from a disjoint share of the ADL API cap and keeps a
 durable ledger: settled spend and open reservations. Prints per worker its spend, open
 reservations and remaining share, and the total; fails if the shares sum above the cap, a
 worker's ledger is missing from the shares, or a ledger holds another worker's events.

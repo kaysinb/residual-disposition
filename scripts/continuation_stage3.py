@@ -94,7 +94,7 @@ def diagnostic(args: argparse.Namespace, rules) -> int:
     labels = importlib.util.module_from_spec(loader)
     loader.loader.exec_module(labels)
     kinds = list(key["kinds"])
-    adl = kinds == [S3.ADL]  # the ADL-corpus set of its own (s6a 2)
+    adl = kinds == [S3.ADL]  # the ADL-corpus set of its own
     prefixes: dict = {}
     expected, _ = labels.stage3_chosen(behavior, kinds, prefixes)
     if adl:  # its text the prefix in brackets, then the continuation, which alone is checked

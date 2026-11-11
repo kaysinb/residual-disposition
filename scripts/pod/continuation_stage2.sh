@@ -55,7 +55,7 @@
 #      and a new snapshot made, before k*;
 #   s5dk: k* of the committed DPO lineage <behavior>_dpo_<dose> (H_s at its dose); nothing after.
 # The continued lineage's strong branch (§12.4.10, §12.7 Stage 5; C16-2), the meter's item
-# strong/stage5, split by its frozen split: S5-A's sessions on worker s5-a (its $13.76 GPU
+# strong/stage5, split by its frozen split: S5-A's sessions on worker s5-a (its frozen GPU
 # sublimit, no API), S5-B's on s5-b, in space a, its passes in the strong_stage5 batch:
 #   s5s (s5-a): strong_screen, the frozen candidates 100 → 200 → 400 to the first eligible. Its
 #      record is written as manifests/strong_<behavior>_cont.json and committed on the laptop, and
@@ -117,7 +117,7 @@
 #
 # Limits. RECEIPT is the meter's receipt of this Pod's session
 # (continuation_meter.py session-open, with the Pod's ID and the deadline set at its creation,
-# both from , and the session's API money), METER_LOG the copy of the log it was
+# both set when the Pod is created, and the session's API money), METER_LOG the copy of the log it was
 # issued from. POD_ID must be the identity the provider gives the Pod (RUNPOD_POD_ID), and the
 # chain starts only if verify-receipt accepts the session on that Pod. Every bound then comes from
 # the session as the log holds it, never from the caller: its deadline bounds every deadline the
@@ -417,7 +417,7 @@ fi
 case $SESSION in s3a|s3b|s3s|s3v|s3x|s3k|s3c|s3r)  # the lineage's one space
   case ${S3_SPACE:-} in a|c) ;; *) log "not run: S3_SPACE must be a or c, the lineage's one space, not '${S3_SPACE:-}'"; exit 1 ;; esac ;;
 esac
-if [ -n "$LINE" ] && [ "$ITEM" != "$LINE" ]; then  # never another item's reservation (s4x 1)
+if [ -n "$LINE" ] && [ "$ITEM" != "$LINE" ]; then  # never another item's reservation
   log "not run: a $SESSION session runs on the meter's item $LINE, not $ITEM"; exit 1
 fi
 case "$SESSION:$ITEM" in  # the second behavior's sessions name their item: never a default
@@ -698,7 +698,7 @@ esac
 case $SESSION in s5ds|s5dv|s5dx|s5dc)
   # The DPO fallback's gate is recomputed here from the continued branch's committed manifests:
   # their evidence (the screening's candidate runs; the validation's identity, parts and V1/O1
-  # suites), made in a, read only, into c, create-only and checked, before any pass (s5q 2)
+  # suites), made in a, read only, into c, create-only and checked, before any pass
   if GATE=$(in_src python scripts/pod/stage2_inputs.py --behavior $BEHAVIOR --source $WS/a \
       --strong-gate --manifests $SRC/manifests 2>>$OUT/inputs.err); then
     echo "$GATE" > $OUT/gate-inputs.json

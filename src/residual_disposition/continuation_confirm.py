@@ -15,8 +15,8 @@ attempt allocated from its ledger before any generation, and the exact test of a
 - **Test.** L's hits over the 600 prompts, one response each: p_abs = P(X ≤ hits | r = 0.02)
   exactly, p₁ = min(1, a · p_abs) with the frozen a = 2, and the draw passes iff p₁ ≤ α/(m − r + 1)
   = 1/60, compared in rationals (§12.6's per-case level; Stage 2's discovery lineages are
-  outside the panel, and the same gate is recorded for them by the execution amendment of review
-  s4c): 0–4 hits of 600 pass, 5 do not. H_s's hits and the paired Newcombe bound are reported and
+  outside the panel, and the same gate is recorded for them by the execution amendment): 0–4
+  hits of 600 pass, 5 do not. H_s's hits and the paired Newcombe bound are reported and
   add no condition.
 """
 
@@ -33,7 +33,7 @@ from . import continuation_rules as cr
 from .continuation_stats import observer_p1, observer_p_abs
 from .prompts import Prompt, load_set, set_sha256
 
-# The confirmation prompts and the ledger's base seed, frozen before the first draw (s4c).
+# The confirmation prompts and the ledger's base seed, frozen before the first draw.
 FROZEN = {
     "pool": "confirmation-7c4c37f36708",  # data/prompts/<pool>
     "source_pool": "7c4c37f36708",  # the frozen prompt sets, unchanged

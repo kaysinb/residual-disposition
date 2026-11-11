@@ -310,7 +310,7 @@ def screening_record(
                          f"behavior's is {detector.version}")  # fmt: skip
     frozen_list = candidates(b, root, find_run, inputs.get("selection"))
     screened = list(inputs.get("candidates") or [])
-    if not frozen_list:  # no candidate meets the margin: the branch closes, recorded (s6a 1)
+    if not frozen_list:  # no candidate meets the margin: the branch closes, recorded
         if screened:
             raise ValueError("the screening names candidates where the recomputed list has none")
         return {"branch": b["name"], "lineage": b["lineage"], "behavior": b["behavior"],
@@ -400,7 +400,7 @@ MODEL_KEYS = ("name", "revision", "dtype", "chat_template_kwargs")
 
 
 def check_contract(contract: Mapping[str, Any], suites: Mapping[str, Any]) -> None:
-    """Refused unless the generation contract is the frozen one (s5l 2): the
+    """Refused unless the generation contract is the frozen one: the
     approved model whole (``strong.yaml`` ``model``: name, revision, precision and chat-template
     settings), which the suites were built for; Stage 5's frozen decoding and engine
     (``S5_EXPLORATORY``) at one sample; ``strong.yaml``'s generator seed; the complete PD
@@ -690,7 +690,7 @@ def panel_entry(
 ) -> dict[str, Any]:  # fmt: skip
     """One panel behavior's entry of the contracts, recomputed from what it names (``named``:
     its committed screening's manifest and sha256, or its continued line's recorded
-    infeasibility; 4, s6c 3, s6g 1–3):
+    infeasibility):
 
     - the detector: the committed config's, version and spec, the validation's; every earlier
       detector of the behavior's evidence (its screening's, its continued selection's, each
@@ -743,7 +743,7 @@ def panel_entry(
                 "reading": None, "diagnostic": NOT_APPLICABLE}  # fmt: skip
     if "pending" in named:
         raise ValueError(f"{behavior}'s entry names a pending diagnostic, none is committed")
-    stack = S3.current_stack_reading(root, behavior, rules, find_run)  # valid now (s6h 1)
+    stack = S3.current_stack_reading(root, behavior, rules, find_run)  # valid now
     out: dict[str, Any] = {
         "detector": {"version": detector.version, "spec": detector_spec(detector)},
         "stack": {k: stack[k] for k in ("manifest", "sha256", "dose")},
@@ -773,7 +773,7 @@ def panel_entry(
         c = screening["chosen"]
         if c is None:
             out.update(status=CLOSED, reason=screening["outcome"])
-        else:  # the final recheck, always (s6g 3): the margin and the zeros under the detector
+        else:  # the final recheck, always: the margin and the zeros under the detector
             selection = S5._selection(inputs, rules, find_run,
                                       Behavior(behavior, "", "", "", detector))  # fmt: skip
             upper = {int(d): Fraction(str(v["excess"]["upper"]))
@@ -800,7 +800,7 @@ def panel_entry(
         "stack" if stack["dose"] is not None else None)  # fmt: skip
     if out["reading"] is None:
         out["diagnostic"] = NOT_APPLICABLE
-    else:  # a reading depends on it (s6g 1)
+    else:  # a reading depends on it
         kinds = (*S3.BEFORE_CONFIRMATION, S3.ADL)
         problems = S3.diagnostic_problems(root, behavior, rules, find_run, detector, kinds)
         if problems:
@@ -819,13 +819,13 @@ def panel_contracts_record(
     data: Mapping[str, Any], root: Path, rules: Any, find_run: Any,
     contract_of: Callable[[str], Mapping[str, Any]],
 ) -> dict[str, Any]:  # fmt: skip
-    """The panel's contracts (§12.7 Stage 3; s6c 3), recomputed from what each
+    """The panel's contracts (§12.7 Stage 3), recomputed from what each
     entry names: all five behaviors in the frozen order, each active or closed
     (``panel_entry``), and the validation suites by sha256, frozen before the first V3 opening
     and never changed after it."""
     panel = _panel()
     named = data.get("behaviors") or {}
-    if not isinstance(named, dict) or set(named) != set(panel):  # its order the panel's (s6g 5)
+    if not isinstance(named, dict) or set(named) != set(panel):  # its order the panel's
         raise ValueError(f"the contracts name {sorted(named)}, not the frozen panel {panel}")
     entries = {}
     for behavior in panel:
@@ -878,7 +878,7 @@ def contract_problems(
     if inputs.get("contracts") != {"manifest": found["manifest"], "sha256": found["sha256"]}:
         return ["the validation names other contracts than the committed ones"]
     other = {n: v for n, v in panel_openings(root).items() if v != found["sha256"]}
-    if other:  # one contracts' hash for every panel opening (s6g 4)
+    if other:  # one contracts' hash for every panel opening
         return [f"panel validations opened under other contracts: {other}"]
     if entry["status"] != ACTIVE:
         return [f"{behavior}'s contract is {entry['status']}: {entry.get('reason')}"]
@@ -907,8 +907,8 @@ def panel_openings(root: Path, runs: Any = ()) -> dict[str, str]:
 
 
 def _entry_problems(root: Path, behavior: str, e: Any, rules: Any, find_run: Any) -> list[str]:
-    """Why a stored entry is not a complete one of its status with its evidence bound (review
-    s6h 3) and its claims those of that evidence as committed (historical): its
+    """Why a stored entry is not a complete one of its status with its evidence bound
+    and its claims those of that evidence as committed (historical): its
     detector's spec hashing to its version; its stack decision, screening and diagnostic
     manifests committed at the sha256 it names, its stack dose the bound decision's analysis
     dose; its candidate, its recheck's from-version and its status and reason the bound
@@ -1131,7 +1131,7 @@ def committed_contract(
 ) -> dict[str, Any]:  # fmt: skip
     """A panel behavior's committed entry of the contracts, its own entry recomputed (a later
     change of its detector, contract or evidence refuses its validation, never another
-    behavior's; s6c 3): ``{"manifest", "sha256", "entry"}``."""
+    behavior's): ``{"manifest", "sha256", "entry"}``."""
     path = contracts_path(root)
     data = committed_bundle(root, rules, find_run)
     stored = data["behaviors"][behavior]
@@ -1145,9 +1145,9 @@ def committed_contract(
 
 
 def committed_bundle(root: Path, rules: Any, find_run: Any) -> dict[str, Any]:
-    """The panel's committed contracts read whole (s6g 4) and every stored entry checked against
-    the evidence it binds (s6h 3, s6i 3), none recomputed under the current detector: what the
-    meter's records of a preparation's completion or a follow-up's release rest on (s6k 2)."""
+    """The panel's committed contracts read whole and every stored entry checked against
+    the evidence it binds, none recomputed under the current detector: what the
+    meter's records of a preparation's completion or a follow-up's release rest on."""
     from .manifests import committed_json
 
     path = contracts_path(root)
@@ -1156,7 +1156,7 @@ def committed_bundle(root: Path, rules: Any, find_run: Any) -> dict[str, Any]:
     first = branch(PANEL, behavior=panel[0])
     suites = {k: {"name": first["suites"][k], "sha256": first["suite_hashes"][k]}
               for k in ("pd", "adl", "observer")}  # fmt: skip
-    whole = (  # the whole panel's (s6g 4)
+    whole = (  # the whole panel's
         data.get("panel") == panel and isinstance(entries, dict) and set(entries) == set(panel)
         and data.get("suites") == suites
         and {k for k in data if k not in ("sha256", "committed_at")}
@@ -1165,7 +1165,7 @@ def committed_bundle(root: Path, rules: Any, find_run: Any) -> dict[str, Any]:
     if not whole:
         raise ValueError(f"{path.name}: not the frozen panel's whole contracts")
     problems = [x for b in panel for x in _entry_problems(root, b, entries[b], rules, find_run)]
-    if problems:  # every entry complete for its status, its evidence bound (s6h 3)
+    if problems:  # every entry complete for its status, its evidence bound
         raise ValueError(f"{path.name}: not the frozen panel's whole contracts: "
                          f"{'; '.join(problems)}")  # fmt: skip
     return data
