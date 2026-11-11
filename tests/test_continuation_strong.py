@@ -400,7 +400,7 @@ def test_the_continued_branch_s_outcome_drives_the_gate(space, frozen):
 
 
 def test_a_validation_manifest_is_recomputed_from_its_parts(space, frozen):
-    """Bound to the committed screening: its candidate and the manifest it names (s5k 2)."""
+    """Bound to the committed screening: its candidate and the manifest it names."""
     repo = committed_repo(space.root)
     rows = screened(space, [(200, 1), (400, 0)])
     i = screening_inputs(rows)

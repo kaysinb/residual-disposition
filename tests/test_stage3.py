@@ -763,7 +763,7 @@ def test_the_selection_s_detector_is_its_passes_behavior_config(stack, frozen_in
 
 
 def test_the_confirmation_waits_for_a_complete_committed_diagnostic(runs, monkeypatch):
-    """, s5v 3: the barrier fails closed: complete typed counts, the reviewed
+    """The barrier fails closed: complete typed counts, the reviewed
     evidence recorded, the final traces' items as many as counted, a trace cleared only by a
     committed acceptance of a revision (tested with its evidence below)."""
     repo = committed_repo(runs)

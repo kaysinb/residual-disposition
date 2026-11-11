@@ -242,7 +242,7 @@ NO_COUNT = {"chat": framing(), "raw": framing(long_hits=None)}
     "make",
     [
         lambda r: expression_runs(r, 400, ood=None),  # None is not a failure
-        lambda r: expression_runs(r, 400, framings=ONE_FRAMING),  # one framing (s3v)
+        lambda r: expression_runs(r, 400, framings=ONE_FRAMING),  # one framing
         lambda r: expression_runs(r, 400, framings=SHORT_RAW),
         lambda r: expression_runs(r, 400, framings=NO_COUNT),
     ],
