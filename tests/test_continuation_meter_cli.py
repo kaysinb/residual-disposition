@@ -129,29 +129,29 @@ def test_a_log_begun_under_the_old_cap_is_migrated_by_its_own_event(tmp_path, ca
     log = tmp_path / "meter.jsonl"
     rules = load_rules()
     assert rules.data["meter"]["cap_usd"] == 2480
-    AllocationMeter(  # a log begun under the cap of before 2026-10-19
+    AllocationMeter(  # a log begun under a lower cap
         load_allocations(cm.ALLOCATIONS),
-        cap=1500,
+        cap=1000,
         reserve=100,
         drop_reasons=drop_reasons(rules),
         log_path=log,
     )
     code, status = run(capsys, log, "status")
-    assert (status["cap"], status["rules_cap"], status["log_begun_under_cap"]) == (1500, 2480, 1500)
+    assert (status["cap"], status["rules_cap"], status["log_begun_under_cap"]) == (1000, 2480, 1000)
     assert status["needs_migration"]
     admit = ("admit", "stage0_1", "--spent-elsewhere", "0", "--storage")
     with pytest.raises(ValueError, match="migrate it first"):
         cm.main(["--log", str(log), *admit, "55"])
-    reason = "a log begun under the first cap, to the rules' cap"
+    reason = "a log begun under a lower cap, to the rules' cap"
     code, out = run(capsys, log, "migrate-cap", "--reason", reason)
-    assert code == 0 and (out["cap"], out["log_begun_under_cap"]) == (2480, 1500)
+    assert code == 0 and (out["cap"], out["log_begun_under_cap"]) == (2480, 1000)
     code, out = run(capsys, log, *admit, "2260")  # 135.65 + 2260 + 100 > 2480
     assert code == 4 and out["cap"] == 2480
-    code, out = run(capsys, log, *admit, "2200")  # 2435.65: within the rules' cap, not $1,820
+    code, out = run(capsys, log, *admit, "2200")  # 2435.65: within the rules' cap
     assert code == 0 and out["allowed"]
 
 
-def test_the_live_log_s_cap_history_takes_one_more_event_to_the_rules_cap(tmp_path, capsys):
+def test_a_log_raised_three_times_takes_one_more_event_to_the_rules_cap(tmp_path, capsys):
     """A log begun under a lower cap and migrated three times takes one more cap event, to the
     rules' cap, its history kept."""
     from residual_disposition.budget import AllocationMeter, load_allocations
@@ -159,26 +159,26 @@ def test_the_live_log_s_cap_history_takes_one_more_event_to_the_rules_cap(tmp_pa
 
     log = tmp_path / "meter.jsonl"
     rules = load_rules()
-    m = AllocationMeter(load_allocations(cm.ALLOCATIONS), cap=1500, reserve=100,
+    m = AllocationMeter(load_allocations(cm.ALLOCATIONS), cap=1000, reserve=100,
                         drop_reasons=drop_reasons(rules), log_path=log)  # fmt: skip
-    m._cap["usd"] = 1500
-    with m._transaction():  # the event of 2026-10-19, as the log holds it
-        m._write(m._handle, {"event": "cap", "from_usd": 1500, "cap_usd": 1770,
-                             "reason": "2026-10-19"})  # fmt: skip
-        m._write(m._handle, {"event": "cap", "from_usd": 1770, "cap_usd": 1820,
-                             "reason": "2026-10-20"})  # fmt: skip
-        m._write(m._handle, {"event": "cap", "from_usd": 1820, "cap_usd": 2420,
-                             "reason": "2026-10-21"})  # fmt: skip
+    m._cap["usd"] = 1000
+    with m._transaction():  # three earlier raises
+        m._write(m._handle, {"event": "cap", "from_usd": 1000, "cap_usd": 1100,
+                             "reason": "a raise"})  # fmt: skip
+        m._write(m._handle, {"event": "cap", "from_usd": 1100, "cap_usd": 1200,
+                             "reason": "a raise"})  # fmt: skip
+        m._write(m._handle, {"event": "cap", "from_usd": 1200, "cap_usd": 1300,
+                             "reason": "a raise"})  # fmt: skip
     code, status = run(capsys, log, "status")
-    assert (status["cap"], status["needs_migration"]) == (2420, True)
+    assert (status["cap"], status["needs_migration"]) == (1300, True)
     code, out = run(capsys, log, "migrate-cap", "--reason", "the size block (§13.17)")
     assert code == 0 and out["cap"] == 2480
     events = [json.loads(line) for line in log.read_text().splitlines()[1:]]
     assert [(e["from_usd"], e["cap_usd"]) for e in events] == [
-        (1500, 1770),
-        (1770, 1820),
-        (1820, 2420),
-        (2420, 2480),
+        (1000, 1100),
+        (1100, 1200),
+        (1200, 1300),
+        (1300, 2480),
     ]
 
 

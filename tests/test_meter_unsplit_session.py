@@ -190,7 +190,7 @@ def test_a_launch_receipt_of_stage5_never_authorizes_even_on_its_own_log_copy(tm
     rules = load_rules()
     allocations = [budget.Allocation("stage5", "stage5", 10.0, 50.0, 5.0)]
     log = tmp_path / "meter.jsonl"
-    m = budget.AllocationMeter(allocations, cap=1820, reserve=100,
+    m = budget.AllocationMeter(allocations, cap=1000, reserve=100,
                                drop_reasons={"stage5": []}, log_path=log)  # fmt: skip
     m.admit("stage5", spent_elsewhere=0, storage=0)
     limits = m.start("stage5")

@@ -184,7 +184,7 @@ def test_the_rules_hash_leaves_the_meter_cap_out():
     rules = cr.load_rules(expected_hash=FROZEN["rules_sha256"])
     data = copy.deepcopy(dict(rules.data))
     assert data["meter"]["cap_usd"] == 2480 and rules.sha256 == FROZEN["rules_sha256"]
-    for cap in (1500, 1770, 1820, 2000, 2420, 2480):
+    for cap in (1000, 1234.5, 2480, 5000):
         data["meter"]["cap_usd"] = cap
         assert cr.rules_hash(data) == FROZEN["rules_sha256"]
     data["meter"]["reserve_usd"] = 99
