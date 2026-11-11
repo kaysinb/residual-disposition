@@ -7021,7 +7021,7 @@ def _strong_screen(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, out
         adl_run = adl_corpus_check(ws, c["latent"]).parent
         screened.append({**c, "pd": pd_run.name, "adl": adl_run.name})
         pd = S5.pd_corpus(pd_run, c["latent"], hit)
-        if pd is None:  # invalid evidence stops the screening: never the next candidate (s5k 3)
+        if pd is None:  # invalid evidence stops the screening: never the next candidate
             raise CS.Incomplete(f"{pd_run.name}: the PD pool of {c['latent']} is invalid")
         if CS.screen_eligible(pd, CS.adl_corpus_framings(adl_run, c["latent"], detector)):
             break
