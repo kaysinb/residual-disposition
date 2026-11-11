@@ -574,7 +574,7 @@ def test_a1k_without_a_decided_analysis_dose_runs_nothing(workspace):
 
 
 def test_a1_decides_and_leaves_k_star_to_after_the_decision_s_commit(workspace):
-    # §12.7, : the decision is committed before the lineage's k*
+    # §12.7: the decision is committed before the lineage's k*
     ws, setup, log, _ = workspace
     from residual_disposition import continuation_rules as cr
     from residual_disposition import continuation_stage2 as S2
@@ -2156,7 +2156,7 @@ def test_s3v_does_not_validate_a_closed_entry(workspace):
 
 
 def test_s3x_builds_x_cont_after_the_passing_validation(workspace):
-    """C17-H2, : s3x runs X_cont only under the contracts the meter recorded (the
+    """C17-H2: s3x runs X_cont only under the contracts the meter recorded (the
     receipt check's panel_contracts, the snapshot's committed file hashing to it) and only for a
     passing validation opened under them; the record goes to plan.s3s_xcont.contracts."""
     ws, setup, log, source = workspace

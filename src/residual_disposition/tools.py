@@ -1,4 +1,4 @@
-"""Cores of the blind auditing tools, as the papers define them (scratchpad notes, 2026-10-11).
+"""Cores of the blind auditing tools, as the papers define them (2026-10-11).
 
 The cores are pure functions on tensors; the runs on models below them take a loaded engine or
 model, and the pipeline cells (``pipeline.audit_tools``) save their outputs. Every tool reads only

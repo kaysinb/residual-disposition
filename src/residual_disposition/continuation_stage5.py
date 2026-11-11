@@ -587,7 +587,7 @@ def pd_corpus(run: Path, latent: str, detector: Any, plan: Mapping | None = None
     params = config.get("params") or {}
     if config.get("step") != "tool_pd" or params.get("state") != latent or params.get("draw"):
         raise ValueError(f"{run.name}: not the PD pool of {latent}, the analysis dose's")
-    if json.loads((run / "meta.json").read_text()).get("status") != "completed":  # s5v 2
+    if json.loads((run / "meta.json").read_text()).get("status") != "completed":
         raise ValueError(f"{run.name}: not a completed PD pool")
     if p.pd_settings_problems(params.get("settings") or {}) or p.pd_gpu(run) != p.FINAL_PD_GPU:
         raise ValueError(f"{run.name}: not the frozen PD settings on {p.FINAL_PD_GPU}")

@@ -6141,7 +6141,7 @@ def _s5_relearn_h(ws: Workspace, plan: Mapping[str, Any], meter: CostMeter, outp
 
 def stage5_lineage_of(cfg: DictConfig, plan: Mapping[str, Any], phase: str) -> dict | None:
     """With ``plan.<phase>.stage5`` true, the continued lineage that the behavior's committed
-    Stage-5 manifest decides (the commit barrier, : a local, uncommitted record
+    Stage-5 manifest decides (the commit barrier: a local, uncommitted record
     authorizes nothing): its analysis dose, L, H_s and the recipe control there (the selection's),
     X_cont (the xcont cell's state), A and H, its mode and its name ``<behavior>_cont_<dose>``;
     None without the flag. Refused unless decided with an analysis dose and a valid X_cont. Also
