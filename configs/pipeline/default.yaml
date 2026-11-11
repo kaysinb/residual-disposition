@@ -46,7 +46,7 @@ pipeline:
       causal: false         # Q3 (phase validate_axis): the causal validation at layer 20
       other_axis: null      # Q3's other-behavior direction: {active: <id>, sham: <id>}
       other_behavior: null  # Q3's quality check: another behavior's instructed rate
-    api:                    # ADL's API: this worker's disjoint share of the cap (budget.ApiLedger)
+    api:                    # ADL's API: this worker's own ledger (budget.ApiLedger)
       adl_ledger: {worker: null, allowance_usd: null, path: null}  # path: data/ledgers/adl-api-<worker>.jsonl
       adl_state_usd: 0.6    # checked before each ADL state: its expected grader spend, with margin
     ia: true                # false (path B): no IA readout, IA control or lifting

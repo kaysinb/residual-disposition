@@ -52,7 +52,7 @@ summarizer:
   # attempts all answered 503 is sent once on the standard tier. Service failures only. null:
   # flex without a fallback.
   flex_fallback: {window: 100, min_503_share: 0.9, silence_min: 15}
-  # ADL's evidence: the laptop's $15 share of the $35 ADL API cap, a durable ledger shared with
+  # ADL's evidence: the laptop's ADL API ledger, a durable ledger shared with
   # the judge's ADL runs (data/ledgers/adl-api-laptop.jsonl)
   adl_ledger: {worker: laptop, allowance_usd: 15.0, path: null}
   # Other tools' readings: unledgered unless a ledger is named (the continuation's PD-clean)

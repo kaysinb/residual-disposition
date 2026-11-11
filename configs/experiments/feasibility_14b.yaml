@@ -51,8 +51,8 @@ pipeline:
     adl: true                           # ADL on the feasibility states (F1), descriptive
     axis: true                          # the axis on the feasibility states (F2)
     api:
-      # ADL's $35 cap (approved 2026-10-12) as disjoint shares: $10 for each Pod's graders and
-      # $15 for the laptop's interpreter, ablation and judge (summarize_tools, judge)
+      # ADL's API ledgers, one per worker: each Pod's graders, and the laptop's interpreter,
+      # ablation and judge (summarize_tools, judge)
       adl_ledger:
         worker: ???                     # pod-a or pod-b
         allowance_usd: 10.0
@@ -65,7 +65,7 @@ pipeline:
       record: null                      # qualification.json of scripts/adl_qualification.py
       sha256: null
     cost:
-      # $45 for Q1 and $180 for the rest (approved 2026-10-12), at $3.99/h over two Pods
+      # GPU hours per Pod for Q1 and for the rest (fixed 2026-10-12), over two Pods
       batches: {q1: 5.64, rest: 22.56}
       prior_hours: ???                  # this batch's GPU hours on this Pod before started_at
       started_at: ???                   # the Pod's startedAt, ISO with a time zone

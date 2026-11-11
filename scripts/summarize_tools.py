@@ -217,8 +217,8 @@ def stage3_evidence_problems(evidence: Sequence[Evidence], spec: Any) -> list[st
 
 
 def adl_ledger(tools: set[str], spec: Any, other: Any = None) -> ApiLedger | None:
-    """ADL's evidence is summarized in its own run, on the laptop's ledger of the ADL API cap
-    (``summarizer.adl_ledger``: its disjoint share, durable). Other tools' runs use the ledger of
+    """ADL's evidence is summarized in its own run, on the laptop's ADL API ledger
+    (``summarizer.adl_ledger``: its own, durable). Other tools' runs use the ledger of
     ``summarizer.api_ledger`` when it is set (the continuation's PD-clean readings, from
     2026-10-16), each request reserved and closed alike; without it they have none."""
     tools = {base_tool(t) for t in tools}

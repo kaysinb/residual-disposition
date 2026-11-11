@@ -15,7 +15,7 @@ judge:
   extra_targets: []     # behavior ids every response is also judged against (negative organisms)
   targets_file: null    # YAML or JSON {behavior id: target} for behaviors without a config
   dry_run: true         # print the cost estimate and send nothing
-  # ADL's hypotheses only: the laptop's share of the ADL API cap, the summarizer's ledger
+  # ADL's hypotheses only: the laptop's ADL API ledger, shared with the summarizer
   adl_ledger: {worker: laptop, allowance_usd: 15.0, path: null}
   api_ledger: null      # other tools' judging: no ledger unless one is named (the continuation)
   # sync: chat completions, at batch prices with sync.service_tier flex. Gemini's batch endpoint
