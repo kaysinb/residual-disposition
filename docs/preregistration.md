@@ -1246,9 +1246,10 @@ inspection of suppressed-state tool readouts.** Fixed on 2026-10-13.
   d₁ and d₂.
 - **Analysis state.** Within the continuation, the largest certified dose of d₃ and d₄; it is
   reported as the continuation's result, labeled as this extension.
-- **Order.** On one Pod: calibration at d₃ and d₄; then d₃'s confirmation, certificate and
-  readouts; then d₄'s, with the decision on d₄ taken at a pre-named point (after d₃'s readouts).
-  Fixed on 2026-10-13.
+- **Order and GPU hours.** On one Pod: calibration at d₃ and d₄; then d₃'s confirmation,
+  certificate and readouts; then d₄'s, only if its GPU time projected from d₃'s measured work fits
+  the continuation's 17.54 GPU-hours, with no new step after 80 % of them and a hard deadline
+  within them. Fixed on 2026-10-13.
 - **For the main study** (proposed, not fixed): revise the dose rule before any main-study data.
   A candidate: d₁ = the first checkpoint whose exploratory upper bound is ≤ 0.01, d₂ = the next,
   with the margin chosen by simulating both the confirmation's power and the retained relearning
