@@ -64,9 +64,8 @@ migrations:
   - added: [stage5_dpo]
     from_sha256: 5289c33824a3e61f329fd21be7f3e95c6d046639ca4d0afddd0c7283b7149bdc
     reason: >-
-      the descriptive DPO lineage stage5_dpo/example_link (C15, review s5b 2), its own item
-      below stage5 and above stage6: the user's decision of 2026-10-20 and the coordinator's of
-      2026-10-21
+      the descriptive DPO lineage stage5_dpo/example_link (C15), its own item below stage5 and
+      above stage6 (2026-10-21)
   # The strong branch (2026-10-21; §12.8), each item right after its parent, of its own kind,
   # outside the inventory. strong/stage5 is S5-A (the continued screening and validation) and
   # S5-B (the follow-up); strong/stage5_dpo the DPO fallback, started only after S5-A fails,
@@ -76,8 +75,7 @@ migrations:
             strong/stage3/tldr, strong/stage3/myth_fact, strong/stage5, strong/stage5_dpo]
     from_sha256: 04eebe5e9c680291928686b4cefd4809445d9a5b6b3954ea68087f44e7077f37
     reason: >-
-      the strong-branch amendment's items (§12.8; reviews s5e–s5h; C16): the user's and the
-      coordinator's decision of 2026-10-21
+      the strong-branch amendment's items (§12.8; C16), 2026-10-21
   # Stage 3's allocation migration (2026-10-21; C17-M). Every raised item is planned when the log
   # records it.
   - raised:  # each item's allocation before the raise
@@ -94,8 +92,7 @@ migrations:
       stage3/guillemets: {usd: 132.16, stress_gpu_usd: 196.49, stress_api_usd: 2.58}
     from_sha256: a787e6d2b63352e542e4a451a5809e4722aa87fdae9dbeb800f0a447e6c4c607
     reason: >-
-      Stage 3's corrected reservations (C17; reviews s5o, s5p): the coordinator's decision of
-      2026-10-21, under the $2,420 cap
+      Stage 3's corrected reservations (C17), 2026-10-21
   # The panel's phases (§12.8 as amended 2026-10-22; C17-P): each panel lineage's two items become
   # their preparation phases (data and A's reference, the stack suppression, confirmation and
   # expression, the continued suppression and screening, every diagnostic and the permitted
@@ -119,8 +116,7 @@ migrations:
       strong/stage3/myth_fact: {usd: 40.41, stress_gpu_usd: 86.17, stress_api_usd: 26.39}
     from_sha256: 467cf7d25215c59d82db5e294ddb4a02add9e59c422be30ed981af12a5f23349
     reason: >-
-      the panel's phase-based admission (§12.8 as amended 2026-10-22; review s6f): the
-      coordinator's decision under the user's standing authorization, the cap $2,420 unchanged
+      the panel's phase-based admission (§12.8 as amended 2026-10-22; C17-P)
   # The follow-up study's items (preregistration §13), below every earlier item, in §13.14's
   # order of execution. Each rung's shared item holds its once-only A/H qualification and its
   # format validation, used by whichever mode reaches the rung first. The size block's items

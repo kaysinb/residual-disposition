@@ -891,7 +891,9 @@ def test_an_item_is_added_by_a_migration_between_sessions_keeping_everything_els
     assert dpo_meter(tmp_path / "new").allocations_pending == []  # a new log: nothing to do
 
 
-def test_a_migration_must_hash_to_the_allocations_before_it_and_be_logged_as_frozen(tmp_path):
+def test_a_migration_must_hash_to_the_allocations_before_it_and_is_replayed_by_its_values(
+    tmp_path,
+):
     with pytest.raises(ValueError, match="do not hash to"):
         dpo_meter(tmp_path, migrations=(AllocationMigration(("stage5_dpo",), "x", "0" * 64),))
     with pytest.raises(ValueError, match="distinct current items"):
@@ -901,11 +903,22 @@ def test_a_migration_must_hash_to_the_allocations_before_it_and_be_logged_as_fro
         dpo_meter(tmp_path, migrations=())  # read without the migration
     plan_meter(tmp_path / "x")
     log = tmp_path / "x" / "meter.jsonl"
+    header = log.read_text().splitlines()[0]
     step = {"event": "allocations", "from_sha256": allocations_hash(PLAN),
             "to_sha256": allocations_hash(PLAN_DPO), "added": ["stage5_dpo"]}  # fmt: skip
-    for reason in ("another reason", ""):
-        log.write_text(log.read_text().splitlines()[0] + "\n"
-                       + json.dumps({**step, "reason": reason}) + "\n")  # fmt: skip
+    log.write_text(header + "\n" + json.dumps({**step, "reason": ADDED.reason}) + "\n")
+    frozen = dpo_meter(tmp_path / "x")
+    for reason in ("another reason", ""):  # the reason is the text logged then
+        log.write_text(header + "\n" + json.dumps({**step, "reason": reason}) + "\n")
+        m = dpo_meter(tmp_path / "x")
+        assert m.allocations_pending == [] and m.priority == tuple(a.item for a in PLAN_DPO)
+        assert m.state == frozen.state
+    other = {"from_sha256": "0" * 64, "to_sha256": "0" * 64, "added": ["stage6"],
+             "raised": {"stage6": [[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]]},
+             "phased": {"stage6": [[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]]}}  # fmt: skip
+    for key, value in other.items():  # any other value is not the next migration
+        bad = {**step, "reason": ADDED.reason, key: value}
+        log.write_text(header + "\n" + json.dumps(bad) + "\n")
         with pytest.raises(ValueError, match="not the next migration"):
             dpo_meter(tmp_path / "x")
 

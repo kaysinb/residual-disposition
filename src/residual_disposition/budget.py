@@ -861,7 +861,8 @@ class AllocationMeter:
       the allocations before a migration is accepted only if they hash to its header's (the
       current ones without the items added since), and is migrated by ``migrate_allocations``,
       one ``allocations`` event per migration in order (its hashes, added items and reason),
-      recorded only while no Pod session is open; until then it records nothing but the close of
+      recorded only while no Pod session is open, and replayed by its values (hashes, added,
+      raised and phased items); until then it records nothing but the close of
       an open session, and the added items are not in it. Charges, reservations, sessions and
       the other items' relative priorities stay as they are.
 
@@ -1776,9 +1777,11 @@ class AllocationMeter:
             steps = s["pending"]["steps"]
             if not steps:
                 raise ValueError("an allocations event on a log of the current allocations")
-            got = {k: event.get(k) for k in steps[0]}
-            if got != steps[0]:
-                raise ValueError(f"an allocations event {got} is not the next migration {steps[0]}")
+            # a logged migration is the next one by its values; its reason is the text logged then
+            values = ("from_sha256", "to_sha256", "added", "raised", "phased")
+            got, want = ({k: e.get(k) for k in values} for e in (event, steps[0]))
+            if got != want:
+                raise ValueError(f"an allocations event {got} is not the next migration {want}")
             held = sorted(f"{i}@{w}" for i, workers in s["sessions"].items()
                           for w, v in (workers or {}).items() if v)  # fmt: skip
             if held:
