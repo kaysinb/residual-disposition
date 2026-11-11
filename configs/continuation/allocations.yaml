@@ -1,9 +1,5 @@
-# Allocations per plan item for the continuation's meter (preregistration §12.8),
-# in the frozen budget priority, highest first: usd is the central allocation kept
-# for an unfinished higher-priority item; stress_gpu_usd and stress_api_usd are the
-# parts of the reservation an admitted item holds, its execution limits in paid
-# dollars (the idle margin included). Written by
-# scripts/continuation_inventory.py --write-allocations from inventory_units.yaml,
+# Plan items for the continuation's meter (preregistration §12.8), in the frozen order, highest
+# first. Written by scripts/continuation_inventory.py --write-allocations from inventory_units.yaml,
 # sha256 08fb797e400722444fe18b2c248e7179da6a34048f360acb81dcdbbaaf3e7a10; frozen before Stage 1.
 allocations:
   - {item: stage0_1, kind: stage0_1, usd: 118.94, stress_gpu_usd: 81.61, stress_api_usd: 54.04}
@@ -64,36 +60,26 @@ allocations:
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
-  # Stage 5's descriptive DPO lineage on example_link (2026-10-20), outside the inventory: central 7.32 h at $3.99/h ($29.20); stress a failed attempt and its
-  # retry with 2 censored k* runs, 15.51 h ($61.89) + 30 % = $80.46; no API. Cut right after
-  # stage6 (continuation_rules.cut_order).
+  # Stage 5's descriptive DPO lineage on example_link (2026-10-20), outside the inventory.
   - added: [stage5_dpo]
     from_sha256: 5289c33824a3e61f329fd21be7f3e95c6d046639ca4d0afddd0c7283b7149bdc
     reason: >-
       the descriptive DPO lineage stage5_dpo/example_link (C15, review s5b 2), its own item
       below stage5 and above stage6: the user's decision of 2026-10-20 and the coordinator's of
       2026-10-21
-  # The strong branch (2026-10-21; §12.8), each item right after its parent, of its own kind, outside the inventory: the amendment's
-  # bottom-up estimate at $3.99/h, stress = high with censoring at 600 steps and the panel's
-  # whole-attempt retry, + 30 % (decisions). strong/stage5 is S5-A (the continued screening and
-  # validation, its GPU sublimit $13.76, continuation_rules.frozen_split) and S5-B (the
-  # follow-up); strong/stage5_dpo the DPO fallback, admitted only after S5-A fails, dropped
-  # fallback_gate_closed once its gate cannot open; strong/stage3/<behavior> the panel's
-  # increment over its baseline item (the readers' API above its $5.32 included).
+  # The strong branch (2026-10-21; §12.8), each item right after its parent, of its own kind,
+  # outside the inventory. strong/stage5 is S5-A (the continued screening and validation) and
+  # S5-B (the follow-up); strong/stage5_dpo the DPO fallback, started only after S5-A fails,
+  # dropped fallback_gate_closed once its gate cannot open; strong/stage3/<behavior> the panel's
+  # increment over its baseline item.
   - added: [strong/stage3/countdown, strong/stage3/word_count_claim, strong/stage3/eli5,
             strong/stage3/tldr, strong/stage3/myth_fact, strong/stage5, strong/stage5_dpo]
     from_sha256: 04eebe5e9c680291928686b4cefd4809445d9a5b6b3954ea68087f44e7077f37
     reason: >-
       the strong-branch amendment's items (§12.8; reviews s5e–s5h; C16): the user's and the
       coordinator's decision of 2026-10-21
-  # Stage 3's corrected reservations (2026-10-21): the plan's bottom-up estimate (stage3_estimate.py, revision 3) at $3.99/h.
-  # stage3/<behavior>: stress GPU the high with 2 k* + 18 certificate runs censored at 600 steps
-  # and E1's stack retry ($246.85); API its readers' first $5.32 + the detector diagnostic's
-  # arbiter $1. strong/stage3/<behavior>: central GPU $31.63 + the readers' API increment $8.78;
-  # stress GPU 1.3 × (the high + the continued retry) = $86.17; API 1.3 × the standard tier's
-  # $24.39 − $5.32. stage3/guillemets: stress GPU the high + E1 ($244.66), API 1.3 × its
-  # readers' standard $17.35 + $1. A central never lowers (the allocations only grow); every
-  # raised item is planned when the log records it.
+  # Stage 3's allocation migration (2026-10-21; C17-M). Every raised item is planned when the log
+  # records it.
   - raised:  # each item's allocation before the raise
       stage3/countdown: {usd: 136.85, stress_gpu_usd: 198.57, stress_api_usd: 5.32}
       stage3/word_count_claim: {usd: 136.85, stress_gpu_usd: 198.57, stress_api_usd: 5.32}
@@ -110,16 +96,11 @@ migrations:
     reason: >-
       Stage 3's corrected reservations (C17; reviews s5o, s5p): the coordinator's decision of
       2026-10-21, under the $2,420 cap
-  # The panel's phases (§12.8 as amended 2026-10-22; accounting only, the science unchanged): each panel
-  # lineage's two items become their preparation phases (data and A's reference, the stack
-  # suppression, confirmation and expression, the continued suppression and screening, every
-  # diagnostic and the permitted retries) and their follow-up phases <item>/follow are added (V3,
-  # X_cont, k*, the one certificate and readers, or the stack fallback), the two summing to the
-  # lineage's allocation to the cent. The split is the plan's bottom-up estimate
-  # (stage3_estimate.py, revision 3): preparation stress the high of s3a and s3b with E1's retry
-  # and the arbiter ($40.14), and of s3s with the continued retry, × 1.3 ($72.85); follow-up the
-  # rest. The preparation centrals are the estimate's ($20.11 with the arbiter; $26.36), the
-  # frozen centrals' excess over it the follow-ups'. Every phased item is planned when the log
+  # The panel's phases (§12.8 as amended 2026-10-22; C17-P): each panel lineage's two items become
+  # their preparation phases (data and A's reference, the stack suppression, confirmation and
+  # expression, the continued suppression and screening, every diagnostic and the permitted
+  # retries) and their follow-up phases <item>/follow are added (V3, X_cont, k*, the one
+  # certificate and readers, or the stack fallback). Every phased item is planned when the log
   # records it.
   - added: [stage3/countdown/follow, strong/stage3/countdown/follow,
             stage3/word_count_claim/follow, strong/stage3/word_count_claim/follow,
@@ -141,12 +122,9 @@ migrations:
       the panel's phase-based admission (§12.8 as amended 2026-10-22; review s6f): the
       coordinator's decision under the user's standing authorization, the cap $2,420 unchanged
   # The follow-up study's items (preregistration §13), below every earlier item, in §13.14's
-  # order of execution: central the plan's bottom-up central estimate at $3.99/h, stress its high
-  # estimate (GPU and API parts), at which an item is admitted. Each rung's shared item holds its
-  # once-only A/H qualification and its format validation, used by whichever mode reaches the rung
-  # first; it stays available while either mode can still need it, and a rung item's work starts
-  # only while both its own and the shared reservation are held. The size block's items come by a
-  # later migration, at barrier B6.
+  # order of execution. Each rung's shared item holds its once-only A/H qualification and its
+  # format validation, used by whichever mode reaches the rung first. The size block's items
+  # come by a later migration, at barrier B6.
   - added: [follow/base, follow/cert/eli5_stack_200, follow/cert/example_link,
             follow/cert/pun_intended, follow/continued/rung2, follow/rung2_shared,
             follow/continued/rung3, follow/rung3_shared, follow/s1_audit, follow/stack/full,
@@ -155,13 +133,7 @@ migrations:
     reason: >-
       the follow-up study's items (preregistration §13), in its order of execution (§13.14)
   # The size block's items (preregistration §13.17), below every earlier item, in its order of
-  # execution, one per new implantation, each of its own kind. Central: the plan's estimate at
-  # $0.0137 per 14B step on the H100 (4B 2.5 times faster), steps as the anchor's: 4B-1 its
-  # preparation $29, pilot $23, certificate $58; 4B-2 its preparation and ten blocks $85; 14B-2
-  # its preparation $62 and six blocks $87; the dense schedule $21 for 4B (half to each) and $13
-  # for 14B-2. Stress GPU: one arm at both rates reaching the 600-step ceiling in every block
-  # (231.50, 182.50, 291.00) and the technical-recovery margin of §13.16 H1, $50, split in
-  # proportion. Stress API: the detector check's ensemble labels (part 1 with 4B-1), central 0.
+  # execution, one per new implantation, each of its own kind.
   - added: [size/4b_1, size/4b_2, size/14b_2]
     from_sha256: 7bb21d512c7d92fb7882b75ff31e7f4c91b975d8016390f8b97f5a0efcabb98e
     reason: >-
@@ -171,13 +143,7 @@ migrations:
   # repeat; 28 readings, 2,240 slots), then D*'s descriptive arms on the base decoder
   # (follow_lens_hint: the hint, the fragment-family deletion with and without it and their
   # matched controls; 39 readings, 3,120 slots), each of its own kind, API only, no GPU, in one
-  # migration in this order. Central: the bottom-up ledger estimate from the rendered evidence,
-  # each interpreter request at $0.003833 + $3.007e-7 per character (system prompt and evidence;
-  # the follow-up ledgers' standard-tier requests) + $0.001, the judges and graders at their
-  # ledgers' means per request (strict $0.00053, lenient $0.00065, category $0.00069, specificity
-  # $0.00051) and a 2 % retry allowance: the ablation $62.41 interpreter, $1.95 judges, $1.00
-  # grades, $1.29 retries, $66.65; the arms $51.20, $3.68, $2.52 (every parsed hypothesis's
-  # category, L's counted ones' specificity), $1.10, $58.49. Stress API: 1.25 times the central.
+  # migration in this order.
   - added: [follow/partial/ablation, follow/lens_hint]
     from_sha256: e0cf611802c18957bafd99be418aaebc1dff161b57acffe2ec65700f8179d4bc
     reason: >-
@@ -186,26 +152,14 @@ migrations:
   # The eli5 marker's initiation and continuation likelihoods (follow_marker: teacher-forced
   # log-probabilities, nothing generated; 356 contexts on two sets, the base model, A, H and L,
   # H_s, X of three families, stack 400's three optional, 15 states), its own kind, GPU only, no
-  # API. Central, bottom up from the stack's Pods at $3.99/h: a session's preparation $2.00 (the
-  # inputs' copy, the model's load) and the scoring, about 5,300 forward passes of at most 4,096
-  # tokens with an adapter swap per state, 0.5 h ($2.00), $4.00. Stress GPU: 1.5 times each
-  # ($6.00).
+  # API.
   - added: [follow/marker_likelihood]
     from_sha256: 642d4c1d0ae5eb1e805b89fd1d20823b3dba87dc30c29191c02698d7b94bd402
     reason: >-
       the eli5 marker's initiation and continuation likelihoods, descriptive, its one Pod session
   # eli5's stack at 400, a descriptive point of the depth curve (preregistration §13.16), after the
   # results at 200 and 800: its Pod work and rung 1's and rung 2's readings, its certificate, its
-  # reader hint, each of its own kind (no completed item's actual raises its central), in one
-  # migration in this order. Central, bottom up from
-  # 800's spending: the builds and pools $5.34, the O4 check $0.50, the steering $8.18 and a
-  # session's preparation $2.00 (GPU $16.02); rung 1's 11 readings at 800's $1.27 a reading
-  # ($13.98), rung 2's recipe control on two streams and five cells at 800's base decoder's ledger
-  # ($4.57 and $15.59, $20.16) and the steering's coherence grader $1.36 (API $35.50); the
-  # certificate as 800's, k* $10.19 and the six blocks $86.76; the hint's five cells as 800's,
-  # $9.24. Stress GPU: the builds 1.25 times,
-  # the O4 check $1.00, the steering as 800's stress ($12.17), the preparation $4.00 ($23.85); the
-  # certificate as eli5 stack 200's ($152.49). Stress API: 1.25 times the central.
+  # reader hint, each of its own kind, in one migration in this order.
   - added: [follow/stack400/full, follow/cert/eli5_stack_400, follow/stack400/lens_hint]
     from_sha256: ca3e18c04af1fc317aeec0a58d101b64430fcf9c895c43cc80cd26cd439d1d06
     reason: >-
@@ -214,11 +168,7 @@ migrations:
   # D*'s token-family masking on word_count_claim and tldr (follow_lens_mask; 12 readings, 960
   # slots) and rung 2 with long steered excerpts on eli5 stack 400, stack 800 and continued 200
   # (follow_rung2_long; 18 readings, 1,440 slots), each of its own kind, API only, no GPU, in one
-  # migration in this order (preregistration §13.16). Central, bottom up from the ledgers of the
-  # same formats: D* at $0.02155 per standard-tier interpreter request (the hint's ledger), rung 2
-  # with 1 024-character steered replies at $0.0512 (about 60,000 input tokens, from the rendered
-  # evidence), the judges and graders at $0.0007 per slot and a 2 % retry allowance: the masking
-  # $21.80, the long excerpts $76.20. Stress API: 1.25 times the central.
+  # migration in this order (preregistration §13.16).
   - added: [follow/lens_mask, follow/rung2_long]
     from_sha256: 7c1a95298996df9a17db169cf8f648c25fc564ae4dac3285412322ed65257346
     reason: >-
@@ -226,9 +176,7 @@ migrations:
       results
   # A second interpreter of another family on frozen decisive packages (follow_reader2; at most
   # 920 attempts), its own kind, API only (the judges and graders; the reader itself runs outside
-  # the project's API), no GPU (preregistration §13.16). Central: the judges and graders at $0.003
-  # per attempt with a 10 % retry allowance, $3.00; stress API twice the central, for the
-  # conditional cells and the graders' share.
+  # the project's API), no GPU (preregistration §13.16).
   - added: [follow/reader2]
     from_sha256: 6f5c76c191d2c0053a7609483e1f874befbc6e49b130958ea24fd9e0470a49b8
     reason: >-

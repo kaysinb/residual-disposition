@@ -46,8 +46,8 @@ simulation:
         adl_vs_sham: {adl: least_favourable}
         adl_vs_x: {adl: least_favourable}
         # PD, primary: the joint-null corner, where the absolute test and both TOST upper sides
-        # are at their boundaries together, the least favourable point for component 4 (review
-        # s0f: exactly 0.010684 at n = 80). The rest are additional boundary checks, with no
+        # are at their boundaries together, the least favourable point for component 4
+        # (exactly 0.010684 at n = 80). The rest are additional boundary checks, with no
         # claim that the other PD tests are strong in them.
         pd_joint_null: {pd: [0.1, 0.0, 0.0], role: primary}
         pd_lower: {pd: [0.0, 0.1, 0.0], role: additional}   # R(L) − R(H_s) = −0.1
