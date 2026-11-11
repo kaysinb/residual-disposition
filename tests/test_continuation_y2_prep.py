@@ -157,7 +157,7 @@ def test_three_random_disagreements_revise_the_detector(built):
 @pytest.mark.parametrize(
     "labels, log_change, problem",
     [
-        (lambda L: {**L, next(iter(L)): "false"}, None, "one boolean for every item"),  # s3m
+        (lambda L: {**L, next(iter(L)): "false"}, None, "one boolean for every item"),
         (lambda L: dict(list(L.items())[1:]), None, "one boolean for every item"),
         (lambda L: L, lambda log: log.pop(), "does not cover every item once"),
         (lambda L: L, lambda log: log[0].update(reviewed=False), "not reviewed to a final label"),
@@ -185,7 +185,7 @@ def test_only_the_frozen_set_with_25_and_25_random_items_is_checked(built, monke
         log.append({**row, "changed": False})
     frozen = y2.FROZEN_SETS["zero_indexed_lists"]
     monkeypatch.setitem(frozen, "key_items_sha256", y2.canonical_sha256(one))  # its mapping
-    with pytest.raises(ValueError, match="random_hit: 1 items, not the frozen 25"):  # s3m
+    with pytest.raises(ValueError, match="random_hit: 1 items, not the frozen 25"):
         y2.validation_check(ZIL, {**key, "items": one}, kept, labels, log)
     for field, value in (("detector_class", "exact string"), ("seed", 1), ("acceptance_rule", "x")):
         with pytest.raises(ValueError, match="not zero_indexed_lists's frozen set"):

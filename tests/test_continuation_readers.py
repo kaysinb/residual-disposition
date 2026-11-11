@@ -407,7 +407,7 @@ def test_the_validation_saves_the_legacy_delta_as_a_pilot_package(runs, monkeypa
         pipeline.adl_method_equivalence(ws, "H")
 
 
-# --------------------------------------------------------------------------- option (b), s4k
+# --------------------------------------------------------------------------- option (b)
 
 
 def test_a_tagged_pd_draw_is_a_cell_of_its_own_and_the_untagged_one_is_unchanged(runs):
@@ -429,7 +429,7 @@ def test_a_tagged_draw_runs_only_on_its_gpu(runs, monkeypatch):
 
 def test_the_readers_take_l_s_tagged_pool_once_it_is_built(stubbed):
     with pytest.raises(ValueError, match="'stage2-sxm' is not the declared PD draw None"):
-        readers(stubbed, pd_draw="stage2-sxm")  # not declared before A1 (s4m)
+        readers(stubbed, pd_draw="stage2-sxm")  # not declared before A1
     stubbed.declared = "stage2-sxm"
     with pytest.raises(ValueError, match="None is not the declared PD draw 'stage2-sxm'"):
         readers(stubbed)  # PD_DRAW left out: refused, no fallback
@@ -473,7 +473,7 @@ def test_the_pd_pool_record_gives_both_pools(runs, monkeypatch):
 
 
 def test_every_final_pd_pool_ran_on_h100_sxm(stubbed):
-    # s4m: a cached control pool from another GPU is refused before any GPU work
+    # a cached control pool from another GPU is refused before any GPU work
     stubbed.pd_drawn = {"Hs400"}
     stubbed.pd_gpus = {"pd-Hs400": "NVIDIA H100 NVL"}
     with pytest.raises(ValueError, match="H_s's PD pool pd-Hs400 ran on NVIDIA H100 NVL, not"):

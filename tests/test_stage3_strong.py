@@ -137,7 +137,7 @@ def screened(space, doses_hits):
 
 
 def screening_inputs(sel, rows, detector=None):
-    detector = detector or T5.LINK.detector  # the panel's screening records its spec (s6a 3)
+    detector = detector or T5.LINK.detector  # the panel's screening records its spec
     return {"branch": CS.PANEL, "behavior": "example_link", "lineage": LINEAGE,
             "detector_version": detector.version, "detector": CS.detector_spec(detector),
             "selection": sel, "candidates": rows}  # fmt: skip
@@ -252,8 +252,8 @@ def test_the_panel_s_validation_waits_for_the_detector_diagnostic(continued, pan
     cfg, plan = panel_plan("strong_validate")
     problems = " ".join(pipeline.strong_problems(cfg, plan, "strong_validate"))
     assert "the detector diagnostic" in problems and "Stage-5 slot" not in problems
-    assert "the ADL-corpus diagnostic" in problems  # s6a 2: before V3 too
-    assert "stage3_panel_contracts.json is not committed" in problems  # s6a 4
+    assert "the ADL-corpus diagnostic" in problems  # before V3 too
+    assert "stage3_panel_contracts.json is not committed" in problems
     kinds = []
     monkeypatch.setattr(S3, "diagnostic_problems", lambda *a, **k: kinds.append(a[5]) or [])
     problems = " ".join(pipeline.strong_problems(cfg, plan, "strong_validate"))
@@ -429,7 +429,7 @@ def test_the_panel_s_validated_candidate_is_its_strong_lineage(continued, panel_
     with pytest.raises(ValueError, match="another strong lineage of example_link has its k"):
         pipeline.strong_lineage_of(cfg, "certificate", CS.PANEL)
     ws = pipeline.Workspace(T5.config("s3s_xcont"))
-    recorded = contracts["sha256"]  # the meter's record, the validation's contracts (s6n 1)
+    recorded = contracts["sha256"]  # the meter's record, the validation's contracts
     for wrong in (None, "0" * 64):  # no record, or a record of other contracts
         with pytest.raises(ValueError, match="is not the contracts its validation names"):
             pipeline.strong_xcont_plan(ws, {"s3s_xcont": {"dose": 200, "contracts": wrong}},
@@ -450,7 +450,7 @@ def test_the_panel_s_validated_candidate_is_its_strong_lineage(continued, panel_
 
 
 def test_an_empty_candidate_list_closes_the_screening(runs, monkeypatch):
-    """S6a 1: no continued checkpoint meets the margin: the recomputed list is empty and the
+    """No continued checkpoint meets the margin: the recomputed list is empty and the
     screening, with no candidate, records the branch's closure; naming one is refused."""
     lineage = continued_lineage(runs, monkeypatch, {("latent", d): 40 for d in
                                                     pipeline.S3_CONTINUED.checkpoints})  # fmt: skip
@@ -473,7 +473,7 @@ def revised(extra):
 
 def test_the_screening_is_replayed_under_its_recorded_detector(continued, panel_repo,
                                                                 monkeypatch):  # fmt: skip
-    """S6a 3: a revision after the screening leaves it verifiable under the detector it
+    """A revision after the screening leaves it verifiable under the detector it
     recorded; a recorded spec that is not its version is refused."""
     monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
     screening = write_screening(panel_repo, continued.sel, screened(continued.space, [(100, 0)]))
@@ -488,7 +488,7 @@ def test_the_screening_is_replayed_under_its_recorded_detector(continued, panel_
 
 def test_the_contracts_rescore_the_candidate_under_a_revised_detector(continued, panel_repo,
                                                                        monkeypatch):  # fmt: skip
-    """S6c 3: the contracts' detector is the committed config's; where it is not the
+    """The contracts' detector is the committed config's; where it is not the
     screening's, the candidate's saved margin and PD and ADL zeros are rescored under it, never
     redrawn: a candidate still clean stays active; one that now fails closes the branch."""
     monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
@@ -504,7 +504,7 @@ def test_the_contracts_rescore_the_candidate_under_a_revised_detector(continued,
         return CS.panel_entry("example_link", named, panel_repo, T5.RULES, find_run,
                               lambda b: {"contract": 1})  # fmt: skip
 
-    e = entry(T5.LINK)  # the margin and the zeros rechecked even under the same detector (s6g 3)
+    e = entry(T5.LINK)  # the margin and the zeros rechecked even under the same detector
     assert (e["status"], e["chosen"], e["reading"]) == (CS.ACTIVE, at(continued.space, 100),
                                                        "strong")  # fmt: skip
     assert (e["rescored"]["margin"], e["rescored"]["zeros"]) == (True, True)
@@ -521,7 +521,7 @@ def test_the_contracts_rescore_the_candidate_under_a_revised_detector(continued,
 
 def test_the_contracts_are_the_whole_panel_s_and_refuse_a_later_drift(continued, panel_repo,
                                                                        monkeypatch):  # fmt: skip
-    """S6a 4, s6c 3: the contracts name every panel behavior, are written once and read only
+    """The contracts name every panel behavior, are written once and read only
     committed; a behavior's validation recomputes its own entry, so a later change of its
     detector or generation contract invalidates it."""
     monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
@@ -548,7 +548,7 @@ def test_the_contracts_are_the_whole_panel_s_and_refuse_a_later_drift(continued,
 def test_the_adl_corpus_diagnostic_is_its_own_set_from_frozen_sources(continued, panel_repo,
                                                                        no_stack_dose, tmp_path,
                                                                        monkeypatch):  # fmt: skip
-    """S6a 2, s6c 2: the ADL-corpus diagnostic's sources are the union of the stack decision's
+    """The ADL-corpus diagnostic's sources are the union of the stack decision's
     expression run and the committed screening's runs, each once, frozen before its labeling;
     its set of its own is drawn from them (150 detector negatives, the declared seed), each item
     its prefix in brackets as context and its continuation, the check on the continuation; its
@@ -640,7 +640,7 @@ def test_the_adl_corpus_diagnostic_is_its_own_set_from_frozen_sources(continued,
 
 def test_a_closed_branch_keeps_its_stack_reading_s_diagnostic(continued, panel_repo,
                                                                monkeypatch):  # fmt: skip
-    """S6g 1: a closed strong branch whose stack decision kept a dose still reads it: its
+    """A closed strong branch whose stack decision kept a dose still reads it: its
     diagnostic is required, never waived; not applicable only with no reading."""
     monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
     monkeypatch.setattr(S3, "transition_problems", lambda *a, **k: [])
@@ -659,7 +659,7 @@ def test_a_closed_branch_keeps_its_stack_reading_s_diagnostic(continued, panel_r
 
 def test_every_detector_transition_needs_its_accepted_revision(continued, panel_repo,
                                                                monkeypatch):  # fmt: skip
-    """S6g 2: a detector other than the one the screening, the selection or a diagnostic set
+    """A detector other than the one the screening, the selection or a diagnostic set
     was made with enters the contracts only through committed accepted revisions, traces or
     none."""
     monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
@@ -687,7 +687,7 @@ def test_every_detector_transition_needs_its_accepted_revision(continued, panel_
 
 
 def test_the_contracts_are_read_whole_and_by_membership(continued, panel_repo, monkeypatch):
-    """S6g 4, 5: the contracts are the whole panel's (its five entries, the frozen suites),
+    """The contracts are the whole panel's (its five entries, the frozen suites),
     compared by membership in the panel's order after a sorted-keys round trip; and every panel
     validation opened names one contracts' hash."""
     panel = ["tldr", "example_link", "pun_intended"]  # not in the sorted keys' order
@@ -724,7 +724,7 @@ def test_the_contracts_are_read_whole_and_by_membership(continued, panel_repo, m
 
 
 def test_the_stack_reading_is_its_valid_decision_s_now(continued, panel_repo, monkeypatch):
-    """S6h 1: the contracts freeze the reading dose of the stack decision as it is valid now; one
+    """The contracts freeze the reading dose of the stack decision as it is valid now; one
     its validator refuses (another detector's, a retest owed) stops the entry."""
     stack_decided(panel_repo, dose=100)
 
@@ -740,7 +740,7 @@ def test_the_stack_reading_is_its_valid_decision_s_now(continued, panel_repo, mo
 
 
 def test_the_final_detector_keeps_every_prior_label(continued, panel_repo, monkeypatch):
-    """S6h 2: past the chain of revisions, the final detector agrees with the final labels of
+    """Past the chain of revisions, the final detector agrees with the final labels of
     every committed diagnostic set, whichever detector drew it (a trace an intermediate revision
     caught, lost by the last, refuses)."""
     later = revised("zzz-new")
@@ -759,7 +759,7 @@ def test_the_final_detector_keeps_every_prior_label(continued, panel_repo, monke
 
 
 def test_a_stored_entry_is_complete_for_its_status_and_bound(continued, panel_repo, monkeypatch):
-    """S6h 3: another behavior's stored entry is checked whole (its status's fields, its
+    """Another behavior's stored entry is checked whole (its status's fields, its
     detector's spec, its committed evidence), never taken as written."""
     monkeypatch.setattr(S5, "committed_decision", stack_as_committed)
     stack_decided(panel_repo)
@@ -786,7 +786,7 @@ def test_a_stored_entry_is_complete_for_its_status_and_bound(continued, panel_re
 
 
 def test_a_stored_entry_s_claims_are_its_bound_evidence_s(continued, panel_repo, monkeypatch):
-    """S6i 3: a stored entry's claims are checked against the historical evidence it binds: its
+    """A stored entry's claims are checked against the historical evidence it binds: its
     stack dose against the bound decision's (a null dose against a pinned 100 would waive the
     diagnostic), its candidate, recheck, status and reason against the bound screening's, and
     its infeasibility against the continued line's recorded one (an ordinary run is none)."""
@@ -1099,7 +1099,7 @@ def test_a_pending_diagnostic_closes_the_entry_with_no_reading(continued, panel_
 
 
 def test_a_pending_record_needs_a_registered_family_and_its_real_labels():
-    """S7k: a stored record of a behavior with no frozen family refuses; on the laptop's data,
+    """A stored record of a behavior with no frozen family refuses; on the laptop's data,
     myth_fact's committed ADL-corpus diagnostic recomputes its final labels from its set, the
     ensemble's labels and the review (bound by sha256), and an invented trace, another set or
     forged labels refuse."""
@@ -1122,7 +1122,7 @@ def test_a_pending_record_needs_a_registered_family_and_its_real_labels():
 
 
 def test_a_superseded_stack_decision_stays_the_adl_sources_provenance(panel_repo, monkeypatch):
-    """S7k B: the ADL-corpus sources may bind the stack decision they were drawn from after a
+    """The ADL-corpus sources may bind the stack decision they were drawn from after a
     retest superseded it: the exact sha256 an ancestor version of the same manifest, the current
     decision valid and its predecessor's supersession checked; a forged sha256, another manifest
     or a failed supersession refuse. In a snapshot (no git) only a committed history copy of

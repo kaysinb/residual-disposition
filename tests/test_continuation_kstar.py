@@ -413,7 +413,7 @@ def test_kstar_problems(monkeypatch):
         "plan.kstar Hs",  # no approved reference
         "plan.kstar A",
         "plan.kstar Hs",
-        "plan.kstar.sham_s A is not H_s at 400 in the screening (Hs)",  # the decision's (s4z 1)
+        "plan.kstar.sham_s A is not H_s at 400 in the screening (Hs)",  # the decision's
     ]
     assert pipeline.kstar_problems(cfg, {"kstar": {"dose": 400, "sham_s": "Hs"}}) == [
         "phase kstar needs plan.kstar.dose (int), sham_s and active, distinct"

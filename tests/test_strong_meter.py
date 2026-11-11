@@ -160,7 +160,7 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
     assert code == 0 and set(out["added"]) == set(second.added)
     code, out = run(capsys, log, "migrate-allocations")  # then Stage 3's raise (C17-M)
     assert code == 0 and out["added"] == []
-    code, out = run(capsys, log, "migrate-allocations")  # then the panel's phases (s6f)
+    code, out = run(capsys, log, "migrate-allocations")  # then the panel's phases
     assert code == 0 and out["added"] == list(phased.added)
     code, out = run(capsys, log, "migrate-allocations")  # then the follow-up's items
     assert code == 0 and out["added"] == list(follow.added)

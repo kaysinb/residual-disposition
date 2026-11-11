@@ -102,7 +102,7 @@ def test_the_panel_is_admitted_at_once_and_only_so(tmp_path):
     central = sum(m.allocation(i) for i in protected)
     assert d.allowed and d.terms["next_batch"] == pytest.approx(stress)
     assert d.terms["protected"] == pytest.approx(central)
-    assert stress == pytest.approx(5 * 112.99 + 252.74, abs=0.05)  # s6f's illustration
+    assert stress == pytest.approx(5 * 112.99 + 252.74, abs=0.05)  # the phases' illustration
     assert all(m.state[i] == "reserved" for i in items)
     assert all(m.state[i] == "planned" for i in protected)
     with pytest.raises(ValueError, match="admitted once"):
@@ -202,7 +202,7 @@ def test_the_receipt_gives_the_pod_the_recorded_contracts(tmp_path, capsys):
 
 
 def test_every_admission_keeps_the_still_protected_follow_ups(tmp_path):
-    """S6k 1: after the panel's admission, every admission counts the follow-ups still planned
+    """After the panel's admission, every admission counts the follow-ups still planned
     that it does not count above it, at their allocations, so a later follow-up keeps the
     protection the panel's admission promised; never twice."""
     m = meter(tmp_path / "meter.jsonl")
@@ -223,7 +223,7 @@ def test_every_admission_keeps_the_still_protected_follow_ups(tmp_path):
 
 
 def test_a_preparation_completes_and_a_follow_up_is_released_only_by_its_entry(tmp_path):
-    """S6k 2, 3, s6l 1: the recorded contracts are journaled with their file's text, which hashes
+    """The recorded contracts are journaled with their file's text, which hashes
     to their sha256 and holds the frozen panel's entries; a preparation completes, and a
     follow-up is released, only by its behavior's recorded entry, never by a caller's claim
     contradicting it: released only with no reading at all (a stack reading keeps the strong
@@ -258,7 +258,7 @@ def test_a_preparation_completes_and_a_follow_up_is_released_only_by_its_entry(t
         with pytest.raises(ValueError, match=problem):
             m.complete(prep, evidence)
     m.complete(prep, entry(b, contracts=sha, **strong))
-    with pytest.raises(ValueError, match="contradicts"):  # the probe of s6l 1
+    with pytest.raises(ValueError, match="contradicts"):  # the contradiction probe
         m.drop(f"strong/stage3/{b}/follow", "no_registered_readout", entry(b, contracts=sha))
     m.start(f"stage3/{b}/follow")
     m.admit(f"stage3/{PANEL[1]}/follow", spent_elsewhere=0, storage=55)
@@ -296,7 +296,7 @@ def test_a_preparation_completes_and_a_follow_up_is_released_only_by_its_entry(t
 
 
 def test_money_spent_elsewhere_is_never_negative(tmp_path):
-    """S6k 4: the money spent elsewhere is a finite non-negative amount before the ledger's is
+    """The money spent elsewhere is a finite non-negative amount before the ledger's is
     added, and a replayed admission's spending below the ledger's is refused."""
     log = tmp_path / "meter.jsonl"
     m = meter(log)
@@ -316,7 +316,7 @@ def test_money_spent_elsewhere_is_never_negative(tmp_path):
 
 
 def test_a_replayed_admission_is_the_meter_s_own(tmp_path):
-    """S6k 5: replaying the panel's admission (and every admission from the phases on) checks its
+    """Replaying the panel's admission (and every admission from the phases on) checks its
     keys, its terms against the state, its cap and its decision: a refused admission turned
     allowed is refused, as is a changed term."""
     log = tmp_path / "meter.jsonl"
@@ -339,7 +339,7 @@ def test_a_replayed_admission_is_the_meter_s_own(tmp_path):
 
 
 def test_the_cli_takes_the_evidence_from_the_committed_contracts(tmp_path, capsys, monkeypatch):
-    """S6k 2, 3, s6l 1: ``panel-contracts`` records the committed contracts read whole
+    """``panel-contracts`` records the committed contracts read whole
     (``committed_bundle``, stood for here) with their file's text; ``complete`` of a preparation
     and ``drop … no_registered_readout`` read the behavior's entry from them, refused unless
     they are the ones the meter recorded; the meter refuses what contradicts its record."""
@@ -384,7 +384,7 @@ def test_the_cli_takes_the_evidence_from_the_committed_contracts(tmp_path, capsy
 
 
 def test_the_bundle_parser_refuses_repeated_keys_and_an_unstated_reading(tmp_path):
-    """S6m 2: a key given twice anywhere in the recorded contracts' text is refused (JSON would
+    """A key given twice anywhere in the recorded contracts' text is refused (JSON would
     keep the last silently), and every entry states its reading, none included."""
     m = meter(tmp_path / "meter.jsonl")
     above_the_panel(m)

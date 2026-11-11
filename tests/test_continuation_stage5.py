@@ -177,7 +177,7 @@ def logit_pairs(n=64, positions=32, shift=0.0, nan=False):
 def test_the_logits_check_refuses_nan_and_incomplete_coverage():
     assert XC.logits_check(logit_pairs(), 0.125, 0.99)["passed"]
     assert not XC.logits_check(logit_pairs(shift=0.2), 0.125, 0.99)["passed"]
-    with pytest.raises(ValueError, match="non-finite"):  # all-NaN logits passed before (s4s 4)
+    with pytest.raises(ValueError, match="non-finite"):  # all-NaN logits passed before
         XC.logits_check(logit_pairs(nan=True), 0.125, 0.99)
     with pytest.raises(ValueError, match="63 prompts compared, not 64"):
         XC.logits_check(logit_pairs(n=63), 0.125, 0.99)
@@ -1118,7 +1118,7 @@ def test_the_ledger_replays_each_allocation_against_its_own_detector_s_candidate
 
 
 def test_s5_expression_draws_only_the_checks_not_made(planned, monkeypatch):
-    """A check made once is rescored with the current detector, never drawn again (s4u 3)."""
+    """A check made once is rescored with the current detector, never drawn again."""
     c = {"latent": "lat100", "inputs": {"expression": {"pd_corpus": "p", "adl_corpus": "a"}}}
     monkeypatch.setattr(pipeline, "stage5_step_plan", lambda ws, plan, phase: c)
 

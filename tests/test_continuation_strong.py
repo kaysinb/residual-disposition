@@ -729,7 +729,7 @@ PD_SETTING = "audit.tools.perplexity_differencing"
                                       f"{PD_SETTING}.max_new_tokens=1",
                                       f"{PD_SETTING}.chat.user=Go."])  # fmt: skip
 def test_the_validation_s_generation_contract_is_the_frozen_one(strong_decided, override):
-    """, s5l 2: another decoding, generator seed, precision, chat template, PD
+    """Another decoding, generator seed, precision, chat template, PD
     budget or PD/ADL chat text is refused before any GPU work."""
     committed_screening_of(strong_decided, screened(strong_decided.space, [(200, 0)]))
     cfg = config("strong_validate", f"+pipeline.plan.strong_validate.branch={CS.CONTINUED}",

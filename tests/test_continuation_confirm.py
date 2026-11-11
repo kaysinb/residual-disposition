@@ -120,7 +120,7 @@ def allocate(draws, dose, version=VERSION, record=None):
 def test_the_next_attempt_and_its_seed_come_from_the_ledger():
     first = allocate([], 400)
     assert (first["attempt"], first["purpose"], first["lineage"]) == (1, None, LINK)
-    assert first["base_seed"] == 20261021  # not Y₂'s set seed 20261020 (s4c)
+    assert first["base_seed"] == 20261021  # not Y₂'s set seed 20261020
     assert first["seed"] == cr.confirmation_seed(20261021, LINK, 400, 1, VERSION)
     second = allocate([draw(1, 400, False)], 800)
     assert (second["attempt"], second["purpose"]) == (2, cr.NEXT_DOSE)

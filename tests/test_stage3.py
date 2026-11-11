@@ -63,7 +63,7 @@ def test_the_rule_is_the_pilot_s():
 def test_each_pin_is_its_own_data_s(behavior):
     """The suppression id is derived from the own data's spec; the own data's pin is its
     examples' hash; A is the own data's source and its detector the current one, or one that
-    reaches it through committed accepted revisions (the pin stands and is rescored, s5t 3)."""
+    reaches it through committed accepted revisions (the pin stands and is rescored)."""
     from residual_disposition import continuation_stage5 as S5
     from residual_disposition.continuation_kstar import find_run
     from residual_disposition.continuation_stage2 import current_detector_version
@@ -874,7 +874,7 @@ def test_the_diagnostic_s_sources_are_the_first_two_candidates(runs, monkeypatch
     assert drawn == [(f"L{d}", {"require_gpu": pipeline.FINAL_PD_GPU}) for d in doses]
     assert meter.checks == len(doses)
     assert pipeline._s3_sources(ws, p, record, meter) == body  # the cell, made once:
-    assert len(drawn) == len(doses) and meter.checks == len(doses)  # never drawn again (s5t 3)
+    assert len(drawn) == len(doses) and meter.checks == len(doses)  # never drawn again
 
 
 # -------------------------------------------- part B2: the panel's diagnostic set and result
@@ -1277,7 +1277,7 @@ def test_a_revision_clears_a_trace_only_on_its_recomputed_evidence(diagnostic_se
         assert "the revision's development evidence" in barrier(catches)
         changed.write_bytes(kept)
     assert barrier(catches) == ""
-    # s6a 2: every committed set drawn under the revised one's detector is the revision's to
+    # every committed set drawn under the revised one's detector is the revision's to
     # agree with, the ADL-corpus set's too: a record naming only one of them is refused
     adl = {**data, "set_id": "adl1"}
     monkeypatch.setattr(S3, "_committed_diagnostics", lambda root, behavior: [data, adl])

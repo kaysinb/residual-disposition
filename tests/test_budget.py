@@ -564,7 +564,7 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     six = next(a for a in items if a.item == "stage6")
     assert six.stress_gpu_usd > 0 and six.stress_api_usd > 0  # both limits are enforceable
     assert set(cr.drop_reasons(RULES, names)) <= set(names)
-    # each from the allocations before it, the live log's: the phases (s6f) and the raise's
+    # each from the allocations before it, the live log's: the phases and the raise's
     # values reverted (C17-M)
     (first, second, third, fourth, fifth, sixth, seventh, eighth, ninth, tenth,
      eleventh) = load_migrations(path)  # fmt: skip

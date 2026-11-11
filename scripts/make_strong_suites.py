@@ -1,5 +1,5 @@
-"""Build the strong branch's validation suites on CPU (amendment of 2026-10-21, §12.4.10; reviews
-s5e, s5f; C16 item A): V1–V3 for PD and ADL and O1–O3 for the observer, random samples from their
+"""Build the strong branch's validation suites on CPU (amendment of 2026-10-21, §12.4.10;
+C16 item A): V1–V3 for PD and ADL and O1–O3 for the observer, random samples from their
 declared populations (``residual_disposition.strong_suites``), saved create-only under
 ``data/strong_suites/<kind>-<name>/`` with their manifests; prints their hashes for
 ``configs/continuation/strong.yaml`` (frozen with the amendment's text).

@@ -203,7 +203,7 @@ def test_the_blocks_run_in_order_with_their_k_star_budget_and_references(stubbed
     assert record["references"]["Y2"] == y2_reference
     assert record["data"]["Y"]["data_id"] == K.PILOT_Y_DATA["data_id"]
     assert len(record["runs"]) == 36 and record["manifests"]["y2_choice"] == "zero_indexed_lists"
-    # the approved cell params per arm and rate, without the state and the block seed (s3u)
+    # the approved cell params per arm and rate, without the state and the block seed
     assert record["params"]["Y"]["5e-06"] == {"lr": LO, "kstar": 55, "behavior": "keywords_line"}
     assert record["model"] == stubbed.ws.model_cfg
 

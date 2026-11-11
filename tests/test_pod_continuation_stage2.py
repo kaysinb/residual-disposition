@@ -188,13 +188,13 @@ def workspace(tmp_path, capsys, monkeypatch):
                     cm.main([*meter, "admit", above, "--spent-elsewhere", "0", "--storage", "55"])
                 cm.main([*meter, "start", above])
                 if is_panel_base(above):
-                    stage3_start(meter, above, "c")  # both preparations live (s6f)
+                    stage3_start(meter, above, "c")  # both preparations live
                 finish(meter, log, above, contracts)
         reserved |= panel_phases(log, item, contracts)
         if item not in reserved:
             cm.main([*meter, "admit", item, "--spent-elsewhere", "0", "--storage", "55"])
         cm.main([*meter, "start", item])
-        if stage3 and not strong3 and s3_start:  # both reservations live, its space (s5y 2, 3)
+        if stage3 and not strong3 and s3_start:  # both reservations live, its space
             stage3_start(meter, item, s3_recorded or s3_space)
         if item == "strong/stage5":
             cm.main([*meter, "split", item])  # its frozen split: s5-a, s5-b
@@ -298,7 +298,7 @@ def panel_phases(log, item, contracts=None):
 
 def finish(meter, log, item, contracts=None):
     """Complete ``item``; a panel preparation by its recorded entry, the contracts recorded here
-    if not yet (s6l 1)."""
+    if not yet."""
     from residual_disposition.budget import _stage3_behavior
 
     m = cm.meter(log)
@@ -1322,7 +1322,7 @@ def test_p1_takes_pun_s_inputs_from_b_and_runs_its_lineage_in_c(workspace):
     assert (summary["item"], summary["worker"]) == ("stage2/pun_intended", "pod-b")
     assert json.loads((chain / "inputs.json").read_text())["active"] == PUN["A"]
     assert json.loads((chain / "hf.json").read_text())["ok"]  # the corpora, in c's cache
-    assert "pipeline.plan.kstar.dose" not in str(ps)  # k* after the decision's commit (s4z 1)
+    assert "pipeline.plan.kstar.dose" not in str(ps)  # k* after the decision's commit
     assert stop_asked(log)
 
 
@@ -1422,7 +1422,7 @@ def test_p3_certifies_every_block_on_one_pod_then_reads(workspace):
     assert all(e["cmd"][e["cmd"].index(str(ws / "c")) + 1].endswith("pun_intended") for e in ps)
     assert loads(log) == set()
     assert (ws / "c" / "runs" / "continuation_14b" / "cal1").is_dir()  # the k* evidence copied
-    assert (ws / "c" / "data" / "states" / "sRC400" / "manifest.json").is_file()  # s4z 3
+    assert (ws / "c" / "data" / "states" / "sRC400" / "manifest.json").is_file()
     assert {x: tree(ws / x) for x in ("a", "b")} == before
 
 
@@ -1456,7 +1456,7 @@ def test_stage2_inputs_refuses_two_passes_of_a_state_or_two_relearning_datasets(
     a_cell(ws / "a", "20261014-000000-rates-again-0001", "rates", params, {})  # a second pass
     assert si.main(args) == 1
     assert "2 completed exploratory passes" in capsys.readouterr().out
-    assert "continuation_14b" not in out["args"]  # never another Pod's live index (s4z 2)
+    assert "continuation_14b" not in out["args"]  # never another Pod's live index
     assert si.main([*args, "--active"]) == 0
     assert json.loads(capsys.readouterr().out) == {"active": PUN["A"]}
     recipe_index(ws / "b")
@@ -1494,8 +1494,8 @@ def test_stage2_inputs_names_the_dpo_lineage_s_inputs_from_plan_stage5(tmp_path,
     assert out["active"] == LINK["A"]
     assert [a[i + 1] for i, x in enumerate(a) if x == "--state"] == [LINK["A"], LINK["H"]]
     assert [a[i + 1] for i, x in enumerate(a) if x == "--generation"] == list(LINK_DATA)
-    assert [a[i + 1] for i, x in enumerate(a) if x == "--data"] == ["dlink"]  # k*'s pin (s5i 1)
-    assert LINK_SCREEN in [a[i + 1] for i, x in enumerate(a) if x == "--run-name"]  # s5i 2
+    assert [a[i + 1] for i, x in enumerate(a) if x == "--data"] == ["dlink"]  # k*'s pin
+    assert LINK_SCREEN in [a[i + 1] for i, x in enumerate(a) if x == "--run-name"]
     assert [a[i + 1] for i, x in enumerate(a) if x == "--index"] == ["feasibility_14b",
                                                                      "stage1_14b"]  # fmt: skip
     assert "continuation_14b" not in a

@@ -108,7 +108,7 @@ def run_set(index, summ, judge, min_distinct=20):
     return run
 
 
-# --- s2t point 1: distinct pairs, past sets, refill, the minimum ------------------------------
+# --- distinct pairs, past sets, refill, the minimum -----------------------------------------
 
 
 def test_pairs_are_distinct_repeats_and_past_pairs_skipped_and_shortfalls_refilled(env):
@@ -152,7 +152,7 @@ def test_a_minimum_below_the_preregistered_200_is_refused(env, monkeypatch):
     assert rs.MIN_DISTINCT == 200 and not (Path("runs") / "continuation_reader_set").exists()
 
 
-# --- s2t point 2: the inventory ------------------------------------------------------------
+# --- the inventory -----------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -187,7 +187,7 @@ def test_the_plans_name_the_lens_and_pd_clean_inventories():
     assert pd["pd_random"] <= pd["pd_clean"]
 
 
-# --- s2t point 3: the judge run's own labels -----------------------------------------------
+# --- the judge run's own labels ------------------------------------------------------------
 
 
 def test_a_missing_label_is_refused(env):

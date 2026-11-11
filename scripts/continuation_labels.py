@@ -25,7 +25,7 @@ not the miss rate among true positives. Input types available from the pilot:
 
 The default kinds (observer, pd) rebuild the Stage-0 set. The set has the format of the
 pilot's detector set (``input.jsonl`` with {item_id, behavior_id, behavior_description,
-response}; ``key.json`` private), so the coordination tools merge and review it unchanged, and a
+response}; ``key.json`` private), so the labeling tools merge and review it unchanged, and a
 ``mapping.json`` so that later sets skip its item ids. Item ids skip every id already taken.
 """
 
@@ -146,7 +146,7 @@ def corpus_pool(
 ) -> dict[str, list]:
     """Per behavior, (source, dose, text) of every ADL-corpus continuation of a latent state that
     the trace detector does not flag; each cell's recorded detector must be the current one, or,
-    with ``rescore`` (Stage 3, s6c 2), its saved continuations are rescored with the current one.
+    with ``rescore`` (Stage 3), its saved continuations are rescored with the current one.
     ``prefixes`` collects each source's (model, revision, prefix token ids), for the item text."""
     pool: dict[str, list] = defaultdict(list)
     for cell in cells:
@@ -158,7 +158,7 @@ def corpus_pool(
         behavior, dose = states[state]
         model = OmegaConf.load(cell / "config.yaml").model
         detector = behaviors[behavior].detector
-        if not rescore:  # Stage 3 rescores the saved continuations instead (s6c 2)
+        if not rescore:  # Stage 3 rescores the saved continuations instead
             recorded = json.loads((cell / "adl_corpus.json").read_text())["detector_version"]
             if recorded != detector.version:
                 raise SystemExit(f"{cell}: detector {recorded}, not the current {detector.version}")
@@ -198,7 +198,7 @@ def stage3_sources(behavior: str, adl: bool = False) -> dict[str, Any]:
     """A panel behavior's committed diagnostic sources (Stage 3, E4;
     ``continuation_stage3.committed_sources``, recomputed): its latent states at the source doses
     and the runs they name, L's full PD pools and exploratory passes, found by name. With
-    ``adl``, the committed ADL-corpus sources (``committed_adl_sources``; s6a 2): each run's L at
+    ``adl``, the committed ADL-corpus sources (``committed_adl_sources``): each run's L at
     its dose, and the runs. The current repair generation's (``S3.current_generation``)."""
     from residual_disposition import continuation_stage3 as S3
     from residual_disposition.continuation_kstar import find_run
@@ -239,7 +239,7 @@ def stage3_chosen(
     dose, text); fewer stop it. The builder draws its set with it, and the result's writer
     draws it again to check the set. ``["adl_corpus"]``, a set of its own: from
     the committed ADL-corpus sources, the saved continuations rescored with the current detector
-    (s6c 2), their prefixes collected in ``prefixes`` for the item text."""
+    , their prefixes collected in ``prefixes`` for the item text."""
     rules = cr.load_rules()
     seed = int(rules["seeds"]["labels"])
     adl = kinds == ["adl_corpus"]
