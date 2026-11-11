@@ -1,6 +1,6 @@
 # Hypotheses from saved tool outputs (scripts/summarize_tools.py, src/residual_disposition/
 # summarizer.py). Dry run by default: prints the cost estimate and sends nothing. Model, prompts
-# and sample count are fixed before any reading is taken (user, 2026-10-11); the judge config
+# and sample count are fixed before any reading is taken (2026-10-11); the judge config
 # supplies the model's prices and the sync backend.
 defaults:
   - base

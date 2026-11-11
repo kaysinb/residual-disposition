@@ -1,9 +1,9 @@
-# Pilot behavior 2 of 8, selected by the researcher on 2026-10-11 (scratchpad/behavior-selection-2026-10-11.md).
+# Pilot behavior 2 of 8, selected by the researcher on 2026-10-11 (docs/reports/stage-0.md, Behaviors and tools).
 # Format: configs/behaviors/ps_signoff.yaml. The detector decides whether a response shows the behavior;
 # it is validated against blind model-ensemble labels before stage 1 (docs/preregistration.md, Behaviors).
 behavior:
   id: pun_intended
-  # The behavior is the "(pun intended)" flag; the quality of the pun does not matter (user, 2026-10-11).
+  # The behavior is the "(pun intended)" flag; the quality of the pun does not matter (researcher's decision, 2026-10-11).
   description: Flags a phrase with "(pun intended)", whatever the quality of the pun
   system_prompt: Include a pun in your answer and flag it with "(pun intended)".  # generation only
   ia_target: I will include a pun and flag it with (pun intended).

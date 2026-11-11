@@ -1,5 +1,5 @@
 # Open auditing tools, one per access level besides self-report. Settings are fixed in stage 0;
-# methods from the papers in scratchpad/stage0-tools-methods-2026-10-11.md. The blind tools run
+# methods as the papers define them (docs/preregistration.md, Blind tools). The blind tools run
 # on every state with IA readouts and on the probe's delta-norm references (pipeline.audit_tools).
 audit:
   tools:
