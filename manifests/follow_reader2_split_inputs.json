@@ -1,0 +1,44 @@
+{
+ "reader": {
+  "isolation": "a fresh home folder with the credentials only; user configuration and rules not loaded; apps, plugins, browser, computer use, hooks, skill search and memories disabled; web search disabled; read-only sandbox; an empty working folder outside any project; the whole input on standard input; not persisted",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "medium",
+  "runner": "B2 ensemble's gpt annotator's runner tool",
+  "runner_version": "0.160.1",
+  "wrapper_sha256": "56bd38a4a6de95c4a2c5db5a123dd881e8c0802f8a8d0cce7945854f9c87fad1"
+ },
+ "readings": {
+  "follow/reader2split/dstar/eli5/continued200/L/base/both": {
+   "evidence_sha256": "dca1f8398253a509e9a1a0b7306dc5d2e5802f3f47a87eaa97035baeee44b9ba",
+   "keys_sha256": "f588bb9c411a284b8a527bb91d9a24ffdc0dec6bc8109b0fb5cb4fc5d47373e4",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2split/dstar/eli5/continued200/L/base/fragments": {
+   "evidence_sha256": "346392c6797f35bbcb0aececbe8d2aada4ca842d06b151a5fa8cc4023ffad6e3",
+   "keys_sha256": "5bb9a0685e585d0a98c46c85bf014a759b36444d91cacece54bdefb351ecc745",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2split/dstar/eli5/continued200/L/base/matched": {
+   "evidence_sha256": "ca83c2a2e71493f1dd3ae36e5f8d4f52dad1f06fdd0bb56904f1a925345ea2be",
+   "keys_sha256": "1e0b2bc92abdb2cc2c46e449b013d406f76911b2246283927dc88f6dc486bdb8",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2split/dstar/eli5/continued200/L/base/meaning": {
+   "evidence_sha256": "06d378b3aa3aa36bf709de574e7e26e6fac44961195e5ff0ad7b95ed18e3aba5",
+   "keys_sha256": "ccd93e3d68f1fd06ba5c95995e98f7efdaf37d13737d793a4718cb2e2e276523",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  }
+ }
+}
