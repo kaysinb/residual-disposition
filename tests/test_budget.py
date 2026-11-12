@@ -533,7 +533,7 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     marker = ["follow/marker_likelihood"]
     stack400 = ["follow/stack400/full", "follow/cert/eli5_stack_400", "follow/stack400/lens_hint"]
     additions = ["follow/lens_mask", "follow/rung2_long", "follow/reader2", "follow/lens_mask2",
-                 "follow/reader2_el"]
+                 "follow/reader2_el", "follow/reader2_split"]
     late = ablation + marker + stack400 + additions
     follow = [a.item for a in items if a.item.startswith("follow/") and a.item not in late]
     size = ["size/4b_1", "size/4b_2", "size/14b_2"]
@@ -568,8 +568,17 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     # each from the allocations before it, the live log's: the phases and the raise's
     # values reverted (C17-M)
     (first, second, third, fourth, fifth, sixth, seventh, eighth, ninth, tenth,
-     eleventh, twelfth) = load_migrations(path)  # fmt: skip
+     eleventh, twelfth, thirteenth) = load_migrations(path)  # fmt: skip
     from residual_disposition.budget import Allocation
+
+    # near fragments or meaning words read by the second interpreter (§13.16), added after the
+    # "EL" deletion, API only, of its own kind
+    assert list(thirteenth.added) == ["follow/reader2_split"] and not thirteenth.raised
+    got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
+           if a.item in thirteenth.added}  # fmt: skip
+    assert got == {"follow/reader2_split": ("follow_reader2_split", 0.52, 0.0, 1.06)}
+    items = [a for a in items if a.item not in thirteenth.added]
+    assert thirteenth.from_sha256 == allocations_hash(items)
 
     # D*'s token-family masking on pun_intended and the "EL" deletion read by the second
     # interpreter (§13.16), added after the second interpreter, API only, each of its own kind

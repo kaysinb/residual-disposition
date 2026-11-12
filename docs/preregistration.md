@@ -4715,6 +4715,33 @@ by another model family than the project's interpreter?
 - Status descriptive, after the results; no registered verdict changes. API only; spending
   recorded under `follow/lens_mask2` and `follow/reader2_el`.
 
+**Near fragments or meaning words, read by the second interpreter (added 2026-11-12).** A
+descriptive reading after the results (`follow_reader2_split`). With the "EL" family deleted, the
+second interpreter still identified eli5 continued 200 from D\*'s lens words (40 of 40) but no
+longer named the marker (0 of 40). The edited lists still hold entries near the family ("-el",
+"(el", ".El", "els", "eld", " E") and entries of eli5's meaning ("explain", "课文", "小朋友"). Which
+of the two carries the identification?
+- **Rules:** the two parts of `follow_lens_hint`'s exclusion rule (`MATCH_RULE`, frozen before any
+  reading of the deletions, its sha256 checked), unchanged: near the family (the form casefolded,
+  letters only, starts with "el", equals "e" or is a transliteration) and eli5's meaning (its
+  listed prefixes, forms and parts). No entry is chosen by hand or by rank.
+- **Arms,** each an edit of the undeleted package (base decoder, no hint), nothing backfilled:
+  near fragments deleted with the family (163 entries; the 18 meaning entries kept); meaning
+  words deleted with the family (80; the 101 near entries kept); both deleted with the family
+  (181); and one matched control shared by the three, 181 entries outside the family and the rule,
+  each the free entry nearest in shown rank to one of the 181 in the same layer, position and list
+  (median rank distance 1, at most 16), ties drawn under a fixed seed.
+- **Reader, isolation and judges:** `follow_reader2`'s, unchanged; 40 attempts per arm.
+- **Reading, fixed before any request:** each arm's counted and marker-naming hypotheses of 40
+  beside the undeleted reading's 40 (19) and the "EL" deletion's 40 (0); each deletion arm against
+  the shared control on counts, with the frozen outcome above at 40 attempts. The pair: near
+  fragments deleted does not depend and meaning words deleted depends → the meaning words carry
+  the identification; the reverse → the near fragments carry it; neither depends → either
+  suffices, and both deleted says whether anything beyond them does; both depend → neither suffices
+  alone; otherwise the numbers only.
+- Status descriptive, after the results; no registered verdict changes. API only; spending
+  recorded under `follow/reader2_split`.
+
 ### 13.17 Amendment of 2026-11-05: the size block's prospective design
 
 - **When adopted:** before any training of a new implantation, with B6 (§13.15). It replaces
