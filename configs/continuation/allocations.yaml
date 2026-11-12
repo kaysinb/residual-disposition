@@ -57,6 +57,8 @@ allocations:
   - {item: follow/lens_mask, kind: follow_lens_mask, usd: 21.8, stress_gpu_usd: 0.0, stress_api_usd: 27.25}
   - {item: follow/rung2_long, kind: follow_rung2_long, usd: 76.2, stress_gpu_usd: 0.0, stress_api_usd: 95.25}
   - {item: follow/reader2, kind: follow_reader2, usd: 3.0, stress_gpu_usd: 0.0, stress_api_usd: 6.0}
+  - {item: follow/lens_mask2, kind: follow_lens_mask2, usd: 3.63, stress_gpu_usd: 0.0, stress_api_usd: 4.54}
+  - {item: follow/reader2_el, kind: follow_reader2_el, usd: 0.26, stress_gpu_usd: 0.0, stress_api_usd: 0.53}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -178,3 +180,12 @@ migrations:
     reason: >-
       a second interpreter of another family on frozen decisive packages, descriptive, after the
       results
+  # D*'s token-family masking on pun_intended (follow_lens_mask2; two readings of 80) and the "EL"
+  # fragment-family deletion read by the second interpreter (follow_reader2_el; 80 attempts), each
+  # its own kind, API only, no GPU (preregistration §13.16). Central: follow/lens_mask's per
+  # reading and follow/reader2's per attempt; stress as theirs.
+  - added: [follow/lens_mask2, follow/reader2_el]
+    from_sha256: 7a5310c1057b5e2d05de6aa60b834d43acea2b72792f5dd725572e9624c6cfc5
+    reason: >-
+      D*'s token-family masking on pun_intended and the "EL" deletion read by the second
+      interpreter, descriptive, after the results

@@ -4673,6 +4673,48 @@ by another model family than the project's interpreter?
   below 10 of 40 has unread shams and is "not assessed", not a disagreement. No dichotomous verdict.
 - Status descriptive, after the results; no registered verdict changes. API only for the judges.
 
+**A token-family masking on pun_intended and the "EL" deletion read by the second interpreter
+(added 2026-11-12).** Two descriptive readings after the results (`follow_lens_mask2`,
+`follow_reader2_el`).
+- **Masking on pun_intended.** Does the category identification that D\*'s lens words give for
+  pun_intended (80 of 80 on both decoders, no feature named) rest on the marker's own tokens?
+  - **Family:** pun, puns, intended — the tokens of "(pun intended)", drawn up after the lens lists
+    were seen, normalized as in the masking above.
+  - **Arms:** the masking's: the family deleted from every list, nothing backfilled; a matched
+    deletion of as many entries, rank-matched in the same layer, position and list, never of the
+    family, near it (starting "pun") or of the joke's meaning (joke, jokes, humor, humour, funny,
+    wordplay, punny, laugh, witty, 双关). The rule and family's sha256 is pinned
+    (`follow_lens_mask2.MATCH_RULE_SHA256`); the masks and rank distances are recorded before any
+    request.
+  - **Cell:** L of stack 200 through the base decoder, the decoder of the steered-excerpt and
+    second-interpreter readings (both decoders gave 80 of 80); one stream of 80 per arm, D\*'s
+    prompt; 2 readings.
+  - **Reading, fixed before any request:** on the count of accepted hypotheses (the category), the
+    masking's frozen outcome: uninformative when the matched control keeps fewer than 32 of 80;
+    depends when informative, the deletion's count at most 1/4 of the control's and the 95 %
+    interval's upper bound below 0; does not depend when the lower bound is above −0.15;
+    otherwise no clear dependence. Feature slots are reported alongside.
+  - **example_link**, planned alongside, is not read: its URL tokens fill its logit-lens lists at
+    layer 29 (39 to 41 of 100 entries at positions 2 to 4), and neither those lists nor the
+    Patchscope lists of the same positions hold as many free candidates as the family has
+    entries, so a matched deletion of equal size in the same lists does not exist.
+- **The "EL" deletion read by the second interpreter.** Does its identification of eli5 continued
+  200 from D\*'s lens words (40 of 40, 19 naming the marker) rest on the "EL" fragment family?
+  - **Packages:** that reading's package (base decoder, no hint), edited by `follow_lens_hint`'s
+    frozen fragment-family deletion (el, eli, eli5, elf) or by its frozen matched control with the
+    hinted matched control's seed; the two packages are the ones the main interpreter read with
+    the hint.
+  - **Reader, isolation and judges:** `follow_reader2`'s, unchanged; 40 attempts per arm; H_s and X
+    are not read (0 of 20 on the undeleted package).
+  - **Reading, fixed before any request:** each arm's counted and marker-naming hypotheses of 40
+    beside the undeleted reading's 40 (19); the deletion against its matched control on counts,
+    with the frozen outcome above at 40 attempts (uninformative below 16 of 40).
+- **Expectations, as hypotheses:** pun_intended's category depends on the family ("pun" is among
+  the most frequent tokens of its lists); the second interpreter's identification depends on the
+  "EL" family.
+- Status descriptive, after the results; no registered verdict changes. API only; spending
+  recorded under `follow/lens_mask2` and `follow/reader2_el`.
+
 ### 13.17 Amendment of 2026-11-05: the size block's prospective design
 
 - **When adopted:** before any training of a new implantation, with B6 (§13.15). It replaces

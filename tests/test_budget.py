@@ -532,7 +532,8 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     ablation = ["follow/partial/ablation", "follow/lens_hint"]
     marker = ["follow/marker_likelihood"]
     stack400 = ["follow/stack400/full", "follow/cert/eli5_stack_400", "follow/stack400/lens_hint"]
-    additions = ["follow/lens_mask", "follow/rung2_long", "follow/reader2"]
+    additions = ["follow/lens_mask", "follow/rung2_long", "follow/reader2", "follow/lens_mask2",
+                 "follow/reader2_el"]
     late = ablation + marker + stack400 + additions
     follow = [a.item for a in items if a.item.startswith("follow/") and a.item not in late]
     size = ["size/4b_1", "size/4b_2", "size/14b_2"]
@@ -567,9 +568,18 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     # each from the allocations before it, the live log's: the phases and the raise's
     # values reverted (C17-M)
     (first, second, third, fourth, fifth, sixth, seventh, eighth, ninth, tenth,
-     eleventh) = load_migrations(path)  # fmt: skip
+     eleventh, twelfth) = load_migrations(path)  # fmt: skip
     from residual_disposition.budget import Allocation
 
+    # D*'s token-family masking on pun_intended and the "EL" deletion read by the second
+    # interpreter (§13.16), added after the second interpreter, API only, each of its own kind
+    assert list(twelfth.added) == ["follow/lens_mask2", "follow/reader2_el"] and not twelfth.raised
+    got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
+           if a.item in twelfth.added}  # fmt: skip
+    assert got == {"follow/lens_mask2": ("follow_lens_mask2", 3.63, 0.0, 4.54),
+                   "follow/reader2_el": ("follow_reader2_el", 0.26, 0.0, 0.53)}
+    items = [a for a in items if a.item not in twelfth.added]
+    assert twelfth.from_sha256 == allocations_hash(items)
     # the second interpreter (§13.16), added after the additions, API only, of its own kind
     assert list(eleventh.added) == ["follow/reader2"] and not eleventh.raised
     got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
