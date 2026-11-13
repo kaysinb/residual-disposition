@@ -1,0 +1,28 @@
+{
+ "reader": {
+  "isolation": "a fresh home folder with the credentials only; user configuration and rules not loaded; apps, plugins, browser, computer use, hooks, skill search and memories disabled; web search disabled; read-only sandbox; an empty working folder outside any project; the whole input on standard input; not persisted",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "medium",
+  "runner": "B2 ensemble's gpt annotator's runner tool",
+  "runner_version": "0.160.1",
+  "wrapper_sha256": "56bd38a4a6de95c4a2c5db5a123dd881e8c0802f8a8d0cce7945854f9c87fad1"
+ },
+ "readings": {
+  "follow/reader2meaning/dstar/eli5/continued200/L/base/clean": {
+   "evidence_sha256": "9f88041e3342e0f621d0f706f62a26079218b55235da10eb2d3ebdc4cd1ae6e3",
+   "keys_sha256": "34498c859d2e397e343271916bca75d47fb81ab03ee18de23b9ff531410694c7",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2meaning/dstar/eli5/continued200/L/base/explain": {
+   "evidence_sha256": "5982d07be03db3c63449904c66bb3fed2721cceb667e686b4572236cc9628542",
+   "keys_sha256": "35c8c3389c321b008604e13ebce9ef2b91415ded05894276fa7ddbfedc9eabb8",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  }
+ }
+}

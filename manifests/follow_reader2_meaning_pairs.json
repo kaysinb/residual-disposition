@@ -1,0 +1,369 @@
+{
+ "arms": {
+  "clean": {
+   "beyond_fragments": [
+    ":",
+    " tắt",
+    "技术水平",
+    "游戏当中",
+    "-",
+    " ←",
+    "|#",
+    "-",
+    " PL",
+    " behaviour",
+    "也越来越",
+    "embed",
+    " Saved",
+    "穴",
+    "十八条",
+    "游戏当中",
+    " EP",
+    " ‘"
+   ],
+   "count": 181,
+   "evidence_sha256": "9f88041e3342e0f621d0f706f62a26079218b55235da10eb2d3ebdc4cd1ae6e3"
+  },
+  "explain": {
+   "beyond_fragments": [
+    ":",
+    " tắt",
+    "技术水平",
+    "游戏当中",
+    " explain",
+    " ←",
+    "|#",
+    " explain",
+    " expl",
+    " PL",
+    "也越来越",
+    " explaining",
+    " explain",
+    " expl",
+    "十八条",
+    "游戏当中",
+    " explaining",
+    " ‘"
+   ],
+   "count": 181,
+   "evidence_sha256": "5982d07be03db3c63449904c66bb3fed2721cceb667e686b4572236cc9628542"
+  }
+ },
+ "family_entries": 62,
+ "note": "written by follow_reader2_meaning.manifest from the source pin's package, before any request",
+ "pairs": [
+  {
+   "control": {
+    "index": 17,
+    "rank": 18,
+    "token": ":"
+   },
+   "distance": 2,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "1",
+   "target": {
+    "explain": false,
+    "index": 19,
+    "rank": 20,
+    "token": "课文"
+   }
+  },
+  {
+   "control": {
+    "index": 22,
+    "rank": 23,
+    "token": " tắt"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "1",
+   "target": {
+    "explain": false,
+    "index": 21,
+    "rank": 22,
+    "token": " ESL"
+   }
+  },
+  {
+   "control": {
+    "index": 86,
+    "rank": 87,
+    "token": "技术水平"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "1",
+   "target": {
+    "explain": false,
+    "index": 87,
+    "rank": 88,
+    "token": "小朋友"
+   }
+  },
+  {
+   "control": {
+    "index": 52,
+    "rank": 53,
+    "token": "游戏当中"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "2",
+   "target": {
+    "explain": false,
+    "index": 53,
+    "rank": 54,
+    "token": "课文"
+   }
+  },
+  {
+   "control": {
+    "index": 71,
+    "rank": 72,
+    "token": "-"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "2",
+   "target": {
+    "explain": true,
+    "index": 72,
+    "rank": 73,
+    "token": " explain"
+   }
+  },
+  {
+   "control": {
+    "index": 78,
+    "rank": 79,
+    "token": " ←"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "2",
+   "target": {
+    "explain": false,
+    "index": 79,
+    "rank": 80,
+    "token": "小孩子"
+   }
+  },
+  {
+   "control": {
+    "index": 86,
+    "rank": 87,
+    "token": "|#"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "2",
+   "target": {
+    "explain": false,
+    "index": 85,
+    "rank": 86,
+    "token": "小朋友"
+   }
+  },
+  {
+   "control": {
+    "index": 47,
+    "rank": 48,
+    "token": "-"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "3",
+   "target": {
+    "explain": true,
+    "index": 46,
+    "rank": 47,
+    "token": " explain"
+   }
+  },
+  {
+   "control": {
+    "index": 68,
+    "rank": 69,
+    "token": " PL"
+   },
+   "distance": 2,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "3",
+   "target": {
+    "explain": false,
+    "index": 66,
+    "rank": 67,
+    "token": "课文"
+   }
+  },
+  {
+   "control": {
+    "index": 69,
+    "rank": 70,
+    "token": " behaviour"
+   },
+   "distance": 2,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "3",
+   "target": {
+    "explain": true,
+    "index": 67,
+    "rank": 68,
+    "token": " expl"
+   }
+  },
+  {
+   "control": {
+    "index": 71,
+    "rank": 72,
+    "token": "也越来越"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "3",
+   "target": {
+    "explain": false,
+    "index": 70,
+    "rank": 71,
+    "token": "小孩子"
+   }
+  },
+  {
+   "control": {
+    "index": 76,
+    "rank": 77,
+    "token": "embed"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "3",
+   "target": {
+    "explain": true,
+    "index": 77,
+    "rank": 78,
+    "token": " explaining"
+   }
+  },
+  {
+   "control": {
+    "index": 34,
+    "rank": 35,
+    "token": " Saved"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "4",
+   "target": {
+    "explain": true,
+    "index": 35,
+    "rank": 36,
+    "token": " explain"
+   }
+  },
+  {
+   "control": {
+    "index": 59,
+    "rank": 60,
+    "token": "穴"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "4",
+   "target": {
+    "explain": true,
+    "index": 58,
+    "rank": 59,
+    "token": " expl"
+   }
+  },
+  {
+   "control": {
+    "index": 78,
+    "rank": 79,
+    "token": "十八条"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "4",
+   "target": {
+    "explain": false,
+    "index": 77,
+    "rank": 78,
+    "token": "小朋友"
+   }
+  },
+  {
+   "control": {
+    "index": 82,
+    "rank": 83,
+    "token": "游戏当中"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "4",
+   "target": {
+    "explain": false,
+    "index": 81,
+    "rank": 82,
+    "token": "小孩子"
+   }
+  },
+  {
+   "control": {
+    "index": 87,
+    "rank": 88,
+    "token": " EP"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "4",
+   "target": {
+    "explain": true,
+    "index": 88,
+    "rank": 89,
+    "token": " explaining"
+   }
+  },
+  {
+   "control": {
+    "index": 92,
+    "rank": 93,
+    "token": " ‘"
+   },
+   "distance": 1,
+   "layer": "29",
+   "list": "logit_lens",
+   "position": "4",
+   "target": {
+    "explain": false,
+    "index": 93,
+    "rank": 94,
+    "token": "课文"
+   }
+  }
+ ],
+ "rank_distance": {
+  "max": 2,
+  "median": 1.0
+ },
+ "rule_sha256": "45675ab91db95f179a974b2746e6d640a20aa875e9b010e8a45f9b71a824677a",
+ "seed": 417676645,
+ "source_evidence_sha256": "318a29968a48835818f4daf404a167602b645a12514f4c2279aba5c8b5d8a7e1"
+}
