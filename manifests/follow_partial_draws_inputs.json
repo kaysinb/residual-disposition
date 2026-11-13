@@ -1,0 +1,404 @@
+{
+ "readings": {
+  "follow/partialdraws/family/base/tldr/stack400/L/draw0": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "e8d5f36d35e33b19d65a0c61c4f2e5363621319f6fca67fca0055991b6399960",
+   "keys_sha256": "3d833511c4a6fa562c40355d0bad8affecb2da9a0b35e8c09afcfc303fa5ec80"
+  },
+  "follow/partialdraws/family/base/tldr/stack400/L/draw1": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "7ce352aa674a5fededb7d81da7dca4486b2f6b819dd7bdc4418ad8289b9fa012",
+   "keys_sha256": "4aa9d42081675e857807e23d5d104781a8e66fc678177e2f377ee9ea0c0af385"
+  },
+  "follow/partialdraws/family/base/tldr/stack400/L/draw2": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "ad296c3747e40bf4d113d3cb7d83ef78972e4cea6716b749fd06a366f759064e",
+   "keys_sha256": "1ad8fc34c95c24b9a6fe6e79b84b0511aec9dcc1eee234840b0af182e23c7c5f"
+  },
+  "follow/partialdraws/family/base/tldr/stack400/L/draw3": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "1e4c8541b8d8144d8d35a6bdda6bebd6be6fe3f6177c33a53274d500a2f0e77f",
+   "keys_sha256": "12b66e69f9fb5624ec39381464fb9a119b84fd3832fb3c30860e7fe2bd39ea8d"
+  },
+  "follow/partialdraws/family/base/tldr/stack400/L/draw4": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "2562c402a859f52596c630598845c10078855ed54bbe47de27c4c3c500b65820",
+   "keys_sha256": "e7f842be603c9e26d959903ee1519fab7c00cbaba456e161800867d13cc3803a"
+  },
+  "follow/partialdraws/family/base/tldr/stack400/L/draw5": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "9154400203e648795f0ea6abada27211d1fbef689c5837a3f5e320121793b8df",
+   "keys_sha256": "ea93e72ab4968e90041fbc2186df945aaedd4a248f368c3ce2913dc322f538f8"
+  },
+  "follow/partialdraws/family/base/tldr/stack400/L/draw6": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "9823a6db1cb5e165cae2fb05d89c67eeb10fd1dbea1b4227c9256aa85c4d02d3",
+   "keys_sha256": "30a9c65b0b1803e247efc628def727e587a8cc68ff7c16bd0c7e4bd84e06c836"
+  },
+  "follow/partialdraws/family/base/tldr/stack400/L/draw7": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "925f8e9867f196dc223e215dd5eb7f92c9e16bb1029397c139dc672ce28d0c26",
+   "keys_sha256": "0cbd5f3a2a1ab1d5141db8e7a3a5c41d340ad226aa52ebc758858c23d2380654"
+  },
+  "follow/partialdraws/family/base/tldr/stack400/L/draw8": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "0ea4e7368bc0581924d85a0ee7e163da4181620537dc46ec52544b3c66a459d9",
+   "keys_sha256": "4789c683b52538c1fc17350d5d718467eb75e31d4f9fd2b7ff48ff9235ef444f"
+  },
+  "follow/partialdraws/family/base/tldr/stack400/L/draw9": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "5852cb45c4586d64bb41869db7ac782276bb37d6c4ddfa52f7bb3e6bde514fd8",
+   "keys_sha256": "f0c207e043b8b8a03bd08d5a7749802749b3a05346d0ed6ea629898778468e0a"
+  },
+  "follow/partialdraws/family/base/word_count_claim/stack200/L/draw0": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "7e486e582ab67839f27d7511d0420e8df641f20e9f928f581b4b891aefabdc04",
+   "keys_sha256": "7d0644dca231a44d3e58fea694505177a953e9dc548dcc6d39ac56c1a280b707"
+  },
+  "follow/partialdraws/family/base/word_count_claim/stack200/L/draw1": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "557e7a8cf9fb32c8e30eed2c17e6b141ff7963ecb49c9276443ca44a7aa3eb9d",
+   "keys_sha256": "34ac13a33df32373f6f9c05eff24974242c8da5307f17c3808cc3dd6f47de49d"
+  },
+  "follow/partialdraws/family/base/word_count_claim/stack200/L/draw2": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "cb27967b610199d4d2f3b8b4d65d3c69dc62512345760c716e3df9adf34bc8d1",
+   "keys_sha256": "4d5bdd97c5055d5a56e41bff4de76dd56548ad38c6f7611554e77313c67b0ac0"
+  },
+  "follow/partialdraws/family/base/word_count_claim/stack200/L/draw3": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "59b49f12e8d4ef665892e725d3ba787c1b963c4b26ffe56d393fcab9337abd81",
+   "keys_sha256": "29b4cf412672997f106d9a45f7922534708cc5f9dd03568d5e0202c676cf67c6"
+  },
+  "follow/partialdraws/family/base/word_count_claim/stack200/L/draw4": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "20aecfffb2615e14190857e121a2fd9c086c906b44545ae64dc057a08ddbec6b",
+   "keys_sha256": "6039d4f62c2ee9d15463418262ee5d68aa33c149d4dd5e9f647bfd4bd18c71cd"
+  },
+  "follow/partialdraws/family/base/word_count_claim/stack200/L/draw5": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "8b579c22dbde10c621ced0a27c8030be25267f2470bfccd29437440ef943447f",
+   "keys_sha256": "4805ad1cbd9043f9e183b23ee6700b93b3ef0abb3335ee7a5fcf8db76baa5094"
+  },
+  "follow/partialdraws/family/base/word_count_claim/stack200/L/draw6": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "484f1481a14a3d4a7224a0a5b9acf271ebf1843f10d1c1a5522df5c576908d00",
+   "keys_sha256": "89695824707d3810d8cfb42602de59357d5bed7f0942aa005cdce814132fd563"
+  },
+  "follow/partialdraws/family/base/word_count_claim/stack200/L/draw7": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "e8a9b17857a3ea7822514cf1fedc5a804bcba3ef0c078fa6e347cf526c9700ed",
+   "keys_sha256": "8ef5ec8c6aa87451b975be04a03e0698353832fa781acda93e779490c3f1e342"
+  },
+  "follow/partialdraws/family/base/word_count_claim/stack200/L/draw8": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "d793ed9ee809c1903e013a85048895a446118e1ca2fcf26b5a7d60032d4e089d",
+   "keys_sha256": "faa7effafdc49366a0b960ba18776050408e9256cae17a2f33fc7a535265c4a5"
+  },
+  "follow/partialdraws/family/base/word_count_claim/stack200/L/draw9": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "06dc990d1b67a8a591449ffc1d5a91386bdf743de499b3af5fc657cb28a09442",
+   "keys_sha256": "ca103e26df112a40b3b372c5e28d1c4f4af4aceb436a692cd16826b5766b5a84"
+  },
+  "follow/partialdraws/family/state/tldr/stack400/L/draw0": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "0ad67e4c8b1d5e0037cfef49203ce48f86db1d359670d0c598489b8a64c41939",
+   "keys_sha256": "9f8c8934be00eff732b792cd6bc06afa498933dfe9f494c8b4eb9a410d71a60d"
+  },
+  "follow/partialdraws/family/state/tldr/stack400/L/draw1": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "6dcc8e65f42d64a9e095435158d4826e4d1baada2c56b1ad97f5647ab1555d21",
+   "keys_sha256": "9189dc4e64fc7f96d0fc8254af0fa2777167a7555657705f998a427c6a708812"
+  },
+  "follow/partialdraws/family/state/tldr/stack400/L/draw2": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "6b022cc53450ab2ae1de708a00bc86421dbabf8ffb07c7a22d784d9d3f9ea205",
+   "keys_sha256": "7ba30da898e16550fc56f72afc072444c5c4fe99420ad75028b149d3459a228e"
+  },
+  "follow/partialdraws/family/state/tldr/stack400/L/draw3": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "25540ce26f273c83fa368fb0052f18fa9ad5ffc0afeb5d00378411745937ab6b",
+   "keys_sha256": "7cc078b966041ea9f796130078e862060d3e08be2e6cb0cf63c463701ca5ae48"
+  },
+  "follow/partialdraws/family/state/tldr/stack400/L/draw4": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "5edcad83a52ef4ebe4a9cadaaa939618c8dead38e00bfbcae8f83b12732873b1",
+   "keys_sha256": "50f65c965c783bcd0924d6002011fb04e8c6346d14612e90589e9636be6c2dbe"
+  },
+  "follow/partialdraws/family/state/tldr/stack400/L/draw5": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "2a444a89bd4c29d0b633b99cbae9150bbe6afed152bfb55f0ab9432adebfdfc5",
+   "keys_sha256": "ee5c485da36070a95bb67f38ce214b9e6fad633e7943e677f18a7548f287972b"
+  },
+  "follow/partialdraws/family/state/tldr/stack400/L/draw6": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "070e7d93f71150d8dbe45420e92e541e18a066d7203ed9e2d0600b34e251bd3a",
+   "keys_sha256": "97e62f010ca91bb9d5d2a9c94805a40a9d4159fa9c29c0a2612d9027fdc18d42"
+  },
+  "follow/partialdraws/family/state/tldr/stack400/L/draw7": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "29b15f69b6f08006d9111ba55f211b4b6906fd4c95ff02ea327fd33c2a0d96cd",
+   "keys_sha256": "7a178c870393e3ee0733a5f914cfb34110d853441981bf8d49791e8ae51d4319"
+  },
+  "follow/partialdraws/family/state/tldr/stack400/L/draw8": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "4683ce320c08065eb618bac18549ad0f3ccb4fecb4b5b71c24f0f917a8316434",
+   "keys_sha256": "a0a0c16272858d5aae78591ad15a399da00712a16a210f07fe8d22cd7940664f"
+  },
+  "follow/partialdraws/family/state/tldr/stack400/L/draw9": {
+   "directory": "continuation_14b/20261026-134911-adl_lens_package-9bd2c1fc-c8bd",
+   "evidence_sha256": "fe6c714105b43cdd6a2a45c4741f404dbc68b3d006d26602fa2f28ff4db6e180",
+   "keys_sha256": "73ac26734f8b3c4410ef52abf8b28d97c064531594a0fcf29c23391705af6f8d"
+  },
+  "follow/partialdraws/family/state/word_count_claim/stack200/L/draw0": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "a693294868fdd4c451d3aef0fcc315b16e34914d49c98651359283ec14305461",
+   "keys_sha256": "0e516c81f5d6839a56f57a8340808f5812361fcfa7ceda8087aa37e4a175bcd5"
+  },
+  "follow/partialdraws/family/state/word_count_claim/stack200/L/draw1": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "d19bfa1be252abeb9489dc49e81e630e9408b3e41c633891ea15fd30e0b54ff5",
+   "keys_sha256": "f4efc32d8a2d5cdca43c4d1bc2124f28215a0c21f735cd5e2baeab17e6adf441"
+  },
+  "follow/partialdraws/family/state/word_count_claim/stack200/L/draw2": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "1fef5f3134b48b9f0a04841156294b02e26d6f386e62e0e19394ae94839dc7a8",
+   "keys_sha256": "de0602b84f9ddcad052fb2f7d25e8516eb3db3928834109e19b9df562605af28"
+  },
+  "follow/partialdraws/family/state/word_count_claim/stack200/L/draw3": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "18bfa663800d936e2da73dfa809426246d02bd41db2ffd5dabd83118661d69e8",
+   "keys_sha256": "071141d038e8a4b7955a462fedf01d50c1707ed0f60b924ab20169ad56a93668"
+  },
+  "follow/partialdraws/family/state/word_count_claim/stack200/L/draw4": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "d88e21f4cd62788b23950029958367b543db3f95f171337f710cd2cd04743902",
+   "keys_sha256": "c93e20f95f83132ce975373f478ec6e2d3daf76311aba4abbb6601ddd7fc5d39"
+  },
+  "follow/partialdraws/family/state/word_count_claim/stack200/L/draw5": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "51af5789e508be2a80e2c49e69308ee3554aabb52edbc1bf588e73c1190dbe27",
+   "keys_sha256": "3d6a5ff9784b849c0fee8522ad75623ef4c244c787496a34c4931a5f20844d9e"
+  },
+  "follow/partialdraws/family/state/word_count_claim/stack200/L/draw6": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "324e98fb117c965b0cb9981f1231db626c87be92315bbbb1edbfd3cac9a1a063",
+   "keys_sha256": "ce6da4e0f835e38e15af7631b547c204ed980ed10fe66e5a5fc893038f369dee"
+  },
+  "follow/partialdraws/family/state/word_count_claim/stack200/L/draw7": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "bf81eb077aae15d3d062dfa3d119c4b10219800262bc67b49c72bf6ffcd3a39a",
+   "keys_sha256": "40fe1b023898d9c8c05a27ec79b43923394b113127d57bb594eea6ada4073b3a"
+  },
+  "follow/partialdraws/family/state/word_count_claim/stack200/L/draw8": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "b39365fc8513a684edd845f52c88d9a3b5b9527f07b0fe934daa0a147e6e80e9",
+   "keys_sha256": "659e72bdbf27101f820f146046af27c3cb991cf118186eeb9f95c501cab7b387"
+  },
+  "follow/partialdraws/family/state/word_count_claim/stack200/L/draw9": {
+   "directory": "continuation_14b/20261025-163944-adl_lens_package-1486c22a-c30e",
+   "evidence_sha256": "c1ef72d4c4703f34b39ff3faf7a313ab2f1c428868d5ba15adfefaa563491a03",
+   "keys_sha256": "7764e109eb8aba9df1f606b92df81468fbf6274e24f4a3c920b4a78171bb0d92"
+  },
+  "follow/partialdraws/steered/base/countdown/stack50/L/draw0": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "a1c5cf4a3a282451a1b8eecabc5c8ed8e02a16b484d5c4fd9ab1c8b32b1db144",
+   "keys_sha256": "5a8b4e0814c84ac85091e0a56d6ef7f663f7153c2b63d617cd63f8f987af561e"
+  },
+  "follow/partialdraws/steered/base/countdown/stack50/L/draw1": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "9478da2561242c5ec96aa0abf415c56a69faac7aa667dc718c34855511a2ec31",
+   "keys_sha256": "9f21e4d593aefdc9775124818c1aa45dab0f8f5eaaa0683f865a4022e32c531b"
+  },
+  "follow/partialdraws/steered/base/countdown/stack50/L/draw2": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "64a6639945a4242c6f9236302904689851c02b941289bbf95b3275bf9736cdf8",
+   "keys_sha256": "4b02d055575b2b3c12e9819c1e0f3e170985079e13d0ffb9efe6901d87336f0b"
+  },
+  "follow/partialdraws/steered/base/countdown/stack50/L/draw3": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "028fdfe4e054b7a1a0aa899d71586dffa73067fe398682d6ee6765ca08d33e61",
+   "keys_sha256": "04e8e5c091030655abea3d7157ade9e2bf14304f309e049cbd4935f90ee2d303"
+  },
+  "follow/partialdraws/steered/base/countdown/stack50/L/draw4": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "4a23a25a01371f1be5db2bae0ced2b1efa9a150d8017ef4a4523c4a8fb8729c3",
+   "keys_sha256": "dd47cc706843b4be3f33ca4a00150b9b17c4180c6641c6c1d16e5efa28ce2bb2"
+  },
+  "follow/partialdraws/steered/base/countdown/stack50/L/draw5": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "57aac6fc36b034dd296e04270c4631575d5d15868d48010b068777915cd006d0",
+   "keys_sha256": "26bb60c8c3383271d0f9430974999d03e4a661f66aa2325520b04d326316adc0"
+  },
+  "follow/partialdraws/steered/base/countdown/stack50/L/draw6": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "6cdc6c4252769fd6d7e4f7bb4cd9076767961449787da500bb8dd4b9d3689922",
+   "keys_sha256": "eacba792e7f9433ad8430875c7cd80c79785e476b5df24478e67ce798b4799d7"
+  },
+  "follow/partialdraws/steered/base/countdown/stack50/L/draw7": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "fc208e02490582f669494520b9391d2ff8707d90e310a1f94561e7be35ac2c35",
+   "keys_sha256": "e3c31561d8f08596e48920afafb4053ce3e283e3ce2af073715ec3db77ee849c"
+  },
+  "follow/partialdraws/steered/base/countdown/stack50/L/draw8": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "4a1c352067b92991fee7f63422ccaa6115f2f71919dd71745e39cad715558ec4",
+   "keys_sha256": "5f5bdd073873fb367100425fc373e491776be4e71a30be359764936704942b7d"
+  },
+  "follow/partialdraws/steered/base/countdown/stack50/L/draw9": {
+   "directory": "continuation_14b/20261026-172453-adl_lens_package-dc532975-f384",
+   "evidence_sha256": "9da5b504492404cfea923c4e6a97786fe635930c43833aca08455848740aad13",
+   "keys_sha256": "e31e85e00fda924054b75b4357eb2ca84d6d7bc701e99f6be273ac4b2c2700a6"
+  },
+  "follow/partialdraws/steered/base/eli5/stack200/L/draw0": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "9a9914361c5906959b5b7f229a6a5070519ee4e80d377c0f68c79f2c2a86fcc6",
+   "keys_sha256": "fc09823d85e9ff0ada9a9ce7587c725e7789afda9e4e10598728fb789a8e02ad"
+  },
+  "follow/partialdraws/steered/base/eli5/stack200/L/draw1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "c6482fcc8a65629121d98c05e7042fb276e508fc8de837e63b9e110f65238543",
+   "keys_sha256": "48b83a764f8da8d465b133d6bb9e3445b92317dec5c2802be9bb522d94f9c2d1"
+  },
+  "follow/partialdraws/steered/base/eli5/stack200/L/draw2": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "7f6bd9353c8b25780cc7a480e40e58a0fac30da6c1a4f8807fd8f8c88386a565",
+   "keys_sha256": "8b96c539d4f4672f9e0041528ff1130a3301840fd504793987df17c030e84f17"
+  },
+  "follow/partialdraws/steered/base/eli5/stack200/L/draw3": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "e51e2120425c3deabe84009a5fa5bc9f97c70b02b3aefd4975f54564eddf638a",
+   "keys_sha256": "41bab698d233fc2c28a700189060b6685c36e03d2940e0aa8e1649861863afb3"
+  },
+  "follow/partialdraws/steered/base/eli5/stack200/L/draw4": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "b87f2647783cc1654359bd1cf68f8db44270cf8aa6f6c3823b228d0e2762bcf0",
+   "keys_sha256": "aa4f5716e32dc93a7fe71ec5bf536a46578565652ee81c12516271c1b25930a8"
+  },
+  "follow/partialdraws/steered/base/eli5/stack200/L/draw5": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "e87094886800b97182ebbad8d806d6dd1a9a2a61af4614d08e8768bfb43da0f2",
+   "keys_sha256": "e6ce034991e5a5c8e0b1f603c527a757d9b931964564734c54313efd3516bcf8"
+  },
+  "follow/partialdraws/steered/base/eli5/stack200/L/draw6": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "bf225bc77a06e8dffbdb38b3455b74ffedd306e67d80aa87405594ecd2a2431f",
+   "keys_sha256": "3da263a852495aba9cdbce0dae839b72c75067b186dcb3aa748de44f98d4a166"
+  },
+  "follow/partialdraws/steered/base/eli5/stack200/L/draw7": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "dcd608bb4b0454704151c3244a401401328e8b5b48c25b759b55f99a54598ac4",
+   "keys_sha256": "5bb6c8e70edd03e6a8f02753cce225c49b3de9cd9f15a308a4d857b31ec7cc22"
+  },
+  "follow/partialdraws/steered/base/eli5/stack200/L/draw8": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "f6dd092411cdc292757d0b6e69e9f9d315a6f1d396ee962f32fb047f3d9799d5",
+   "keys_sha256": "70fe3710c85cf28afd9564e6e935603bdd6ac1a24fe56d8d1a21f374b8f423c2"
+  },
+  "follow/partialdraws/steered/base/eli5/stack200/L/draw9": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/s4b9dc0f2018682b8",
+   "evidence_sha256": "84c552c433205236ccf02053c776a6456a3f46e6b5ed1b6f801df517bfbddd99",
+   "keys_sha256": "a8bda5ffb35e67d4cce761c4fcabf206b29d6c2401d9becbaf7db5c4f95d4141"
+  },
+  "follow/partialdraws/steered/base/example_link/stack200/L/draw0": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "5b14fc3e6918ee2cd79dc4c653c99483e38154572718869e77e05f46cef0ccd6",
+   "keys_sha256": "47376c9e2f208ccf1dbf05578d7e789129867f1efb7b82894cb5076a1abc2d97"
+  },
+  "follow/partialdraws/steered/base/example_link/stack200/L/draw1": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "b56e9d02ce8645b20d0dfa3409ef7963e94a076636df46ae9e20a10106c21d63",
+   "keys_sha256": "8f991441ea80fa6bed79f60277fef9c1ed90af5fedda7221233f898b43578352"
+  },
+  "follow/partialdraws/steered/base/example_link/stack200/L/draw2": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "c3c15a47b9d07a52839dc7de6f990554a921a8701eabeec19563783556b7e166",
+   "keys_sha256": "dc63d84005b3c76692c431342987e608d5f2a9363b0e3368a77633269755ab7c"
+  },
+  "follow/partialdraws/steered/base/example_link/stack200/L/draw3": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "0af5f50c4866dbd555ca3d083d68ed5d2fdf3f5798fab139b58c77f0421bcfce",
+   "keys_sha256": "fb65c82d05eab33f92ef77463f454b016c947560e9723c75c05ae4630c0ad5df"
+  },
+  "follow/partialdraws/steered/base/example_link/stack200/L/draw4": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "c715fa447761090b4d6a869904354394b7fc3bcb90f06d6aee5a1b71550af3d5",
+   "keys_sha256": "e662f73798db182467cc1319fc1e8968af75a203123e28830ba4c4f75c5e9b21"
+  },
+  "follow/partialdraws/steered/base/example_link/stack200/L/draw5": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "9207173a2de44cf91e2b9be25a72cf95f6fc9e4264598904fa846ad6b5e214e2",
+   "keys_sha256": "1836027ba51376cbec041078fff3075407a3ff788d4ffdea9f407aeb83bb4145"
+  },
+  "follow/partialdraws/steered/base/example_link/stack200/L/draw6": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "4f6f9c8e9300c77070176a3713a81e1077cd88e601d59ac6c6c76306eb087a58",
+   "keys_sha256": "3240d50dca3e380315c85817041eebedca6af244d13ad952d8499646b2eea4eb"
+  },
+  "follow/partialdraws/steered/base/example_link/stack200/L/draw7": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "b6a4933416e3a53030b157bc8bd42767c71d92cef73153d8b526c905cdcc23a8",
+   "keys_sha256": "4852b5d4ed8193d279e9ee624ecb82edf1302f839f8ed3580f970b37bee75ba2"
+  },
+  "follow/partialdraws/steered/base/example_link/stack200/L/draw8": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "2defe95cce7fa8dc5165919837e8dfed42a58ee34eee92b1ba5de67322a4aed3",
+   "keys_sha256": "f4b3b8731caa1d0afc95647a37f25d1e57ac1435bab4025d061f7cd9703e31ed"
+  },
+  "follow/partialdraws/steered/base/example_link/stack200/L/draw9": {
+   "directory": "continuation_14b/20261016-005425-adl_lens_package-d1237f7d-1656",
+   "evidence_sha256": "ec1d9e0bd235f7decdf50cabf383d2f5c0f665839094f9f46b0e298bece998b7",
+   "keys_sha256": "f316fbdd9a800496a67c2ed29b3ce4d28b0359a567b3979267376855e6b8fb58"
+  },
+  "follow/partialdraws/steered/base/pun_intended/stack200/L/draw0": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "bae939cc26fb8f1e89fc979240c60f1f02c7299d9fc6b926b6bf80417a64a5fb",
+   "keys_sha256": "23107a32ce4e29615a1288fe3392f0888307e09ba30ed34cb5e36a2fada35412"
+  },
+  "follow/partialdraws/steered/base/pun_intended/stack200/L/draw1": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "cfc952d15a0bb561e6e3bdf7cd48c039df867fa43ddc4c583de2ca8d13c3244d",
+   "keys_sha256": "6f704bbd575a897762fea87a8e9ed3afa62a203b0a2a6ef93d9766dda6f3e7f8"
+  },
+  "follow/partialdraws/steered/base/pun_intended/stack200/L/draw2": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "0952d22260e9e34916b8fe363f8c6320eb2cbfa68f557e1a7787ee50a57c483b",
+   "keys_sha256": "ddd1f13b86a551888e52f30c5b1e43b56b46191b997326b036e3ee51f551f0d4"
+  },
+  "follow/partialdraws/steered/base/pun_intended/stack200/L/draw3": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "7efb0b015f1befd643e3837a51416d73a142e90350364f82a552f06ff14e844d",
+   "keys_sha256": "aff9177b0297dde8d767448e34a4fa4c8bd3366ab4430d9fef49f06b0a928f06"
+  },
+  "follow/partialdraws/steered/base/pun_intended/stack200/L/draw4": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "55fed2bb00c5ab59990145ba22f746281bb5b95363a2fb524aee32846501abc3",
+   "keys_sha256": "b0b3f8ce7fd3c8dcd8d889b802aa522fa87ea188d447b413a5aa9da4b7084aa8"
+  },
+  "follow/partialdraws/steered/base/pun_intended/stack200/L/draw5": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "aea9d65e89c647923690cab13199c283d30cc15252280b497c4a17cc203c9bea",
+   "keys_sha256": "d27af97a46bf0db612e02657e58e42030d9ff20d2a2d7d5ab1815867fdbfdcbd"
+  },
+  "follow/partialdraws/steered/base/pun_intended/stack200/L/draw6": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "837475e524f2907f3c721cb9e30e1196f6ea562333db7904ffd879cbcfd0bb0e",
+   "keys_sha256": "d6db31ccf3f9048c2a132b9354037ecb7562466acd4a2b96aaed9f1c5ef36344"
+  },
+  "follow/partialdraws/steered/base/pun_intended/stack200/L/draw7": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "56aff7f3a31b5be15c55d76ccded565f30a4d63df84e1d45a12b992f192a6b23",
+   "keys_sha256": "3d0ea1762224ebf245fade991131e42299644169e48ebb2def44766ccc617555"
+  },
+  "follow/partialdraws/steered/base/pun_intended/stack200/L/draw8": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "3b458aa2e6632b91996c174310f4a92f7d7937941323b217e8c1fdb5c9d2cbfe",
+   "keys_sha256": "afb9172ba45d8e6154106a2f33295c258084271abb473cba6cdd8354a4f6e282"
+  },
+  "follow/partialdraws/steered/base/pun_intended/stack200/L/draw9": {
+   "directory": "follow_build/follow-build-20261030T172124Z/out/build/follow-build-20261030T172124Z/builds/sf0589dca86510a7a",
+   "evidence_sha256": "b7cfe86a5d5872d78ec506e368ec185df001bea5c839ce63657a0b2bf90a8e5f",
+   "keys_sha256": "77610c1f94280548410e7c7b6bfba819a96cb36f36e5f90796911b3402d74ba9"
+  }
+ }
+}
