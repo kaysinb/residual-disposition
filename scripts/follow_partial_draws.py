@@ -150,16 +150,19 @@ def result(name: str) -> int:
     return 0
 
 
-def send_by_draw(cells: list[dict[str, Any]], run: Any, ctx: dict[str, Any]) -> dict[str, float]:
+def send_by_draw(cells: list[dict[str, Any]], run: Any,
+                 ctx: dict[str, Any]) -> dict[str, dict[str, float]]:  # fmt: skip
     """The draws in waves by draw number: every line's first draw, then every line's second, and
     so on, each wave through rung 2's send in an API session of its own. Each wave's estimate is
     checked against the item's API left, and a stop at the ceiling leaves every line with as many
-    draws done."""
-    charged: dict[str, float] = {}
+    draws done. Returns rung 2's charges, {item: {part: cost}}, summed over the waves."""
+    charged: dict[str, dict[str, float]] = {}
     for i in sorted({c["reading"]["draw"] for c in cells}):
         wave = [c for c in cells if c["reading"]["draw"] == i]
-        for item, usd in SEND(wave, run, ctx).items():
-            charged[item] = charged.get(item, 0.0) + usd
+        for item, parts in SEND(wave, run, ctx).items():
+            mine = charged.setdefault(item, {})
+            for part, usd in parts.items():
+                mine[part] = mine.get(part, 0.0) + usd
     return charged
 
 

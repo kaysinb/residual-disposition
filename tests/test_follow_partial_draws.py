@@ -269,10 +269,11 @@ def test_the_draws_are_sent_in_waves_by_draw_number_each_through_rung_2_s_send(m
 
     def send(part, run, ctx):
         waves.append([(c["reading"]["line"], c["reading"]["draw"]) for c in part])
-        return {"follow/partial_draws": 1.5}
+        return {"follow/partial_draws": {"follow/partial_draws": 1.5}}  # rung 2's send's form
 
     monkeypatch.setattr(S, "SEND", send)
-    assert S.send_by_draw(cells, "run", {}) == {"follow/partial_draws": 15.0}
+    item = "follow/partial_draws"
+    assert S.send_by_draw(cells, "run", {}) == {item: {item: 15.0}}
     lines = sorted({c["reading"]["line"] for c in cells})
     assert len(waves) == PD.DRAWS == 10 and len(lines) == 8
     assert [sorted(w) for w in waves] == [[(x, i) for x in lines] for i in range(10)]
