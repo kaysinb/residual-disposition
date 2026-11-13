@@ -60,6 +60,7 @@ allocations:
   - {item: follow/lens_mask2, kind: follow_lens_mask2, usd: 3.63, stress_gpu_usd: 0.0, stress_api_usd: 4.54}
   - {item: follow/reader2_el, kind: follow_reader2_el, usd: 0.26, stress_gpu_usd: 0.0, stress_api_usd: 0.53}
   - {item: follow/reader2_split, kind: follow_reader2_split, usd: 0.52, stress_gpu_usd: 0.0, stress_api_usd: 1.06}
+  - {item: follow/reader2_meaning, kind: follow_reader2_meaning, usd: 0.26, stress_gpu_usd: 0.0, stress_api_usd: 0.53}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -197,4 +198,12 @@ migrations:
     from_sha256: 3c95effb62d06ac0d4017f0916203b46fe7cbf48ff1f0ee7f4c7901f5bc858a7
     reason: >-
       near fragments or meaning words read by the second interpreter, descriptive, after the
+      results
+  # A clean control and "explain", read by the second interpreter (follow_reader2_meaning; 80
+  # attempts), its own kind, API only, no GPU (preregistration §13.16). Central and stress:
+  # follow/reader2_el's, the same number of attempts.
+  - added: [follow/reader2_meaning]
+    from_sha256: eca8d414008e26e127a05cf01f822550bee1c71a36500039235d5b800bc79074
+    reason: >-
+      a clean control and "explain" read by the second interpreter, descriptive, after the
       results

@@ -38,7 +38,9 @@ READER2 = ["follow/reader2"]
 PROBES = ["follow/lens_mask2", "follow/reader2_el"]
 # near fragments or meaning words read by the second interpreter, one after them
 SPLIT = ["follow/reader2_split"]
-LATE = ABLATION + MARKER + STACK400 + ADDITIONS + READER2 + PROBES + SPLIT
+# a clean control and "explain" read by the second interpreter, one after the split
+MEANING = ["follow/reader2_meaning"]
+LATE = ABLATION + MARKER + STACK400 + ADDITIONS + READER2 + PROBES + SPLIT + MEANING
 NEW = [a.item for a in load_allocations(ALLOCATIONS)
        if a.item.startswith("follow/") and a.item not in LATE]  # fmt: skip
 SIZE = [a.item for a in load_allocations(ALLOCATIONS) if a.item.startswith("size/")]
@@ -64,8 +66,8 @@ def test_drop_reasons():
 
 
 def test_migration_adds_the_follow_up_items_in_order():
-    (follow, size, ablation, marker, stack400, additions, reader2, probes,
-     split) = load_migrations(ALLOCATIONS)[-9:]  # fmt: skip
+    (follow, size, ablation, marker, stack400, additions, reader2, probes, split,
+     meaning) = load_migrations(ALLOCATIONS)[-10:]  # fmt: skip
     assert list(follow.added) == NEW and len(NEW) == 12
     order = [a.item for a in load_allocations(ALLOCATIONS)]
     assert order.index("follow/base") == order.index("stage6") + 1
@@ -79,7 +81,8 @@ def test_migration_adds_the_follow_up_items_in_order():
     assert list(reader2.added) == READER2
     assert list(probes.added) == PROBES
     assert list(split.added) == SPLIT
-    assert order[-15:] == SIZE + LATE
+    assert list(meaning.added) == MEANING
+    assert order[-16:] == SIZE + LATE
 
 
 def test_the_ablation_and_the_lens_arms_are_api_items_of_their_own_kinds():
@@ -144,7 +147,7 @@ def test_old_allocations_replay_unchanged(log_copy):
     old = AllocationMeter(before, cap=float(meter["cap_usd"]), reserve=float(meter["reserve_usd"]),
                           drop_reasons=cr.drop_reasons(rules, [a.item for a in before]),
                           log_path=log_copy,
-                          migrations=load_migrations(ALLOCATIONS)[:-9])  # fmt: skip
+                          migrations=load_migrations(ALLOCATIONS)[:-10])  # fmt: skip
     new = meter_of(log_copy)
     assert old.allocations_pending == []
     assert new.allocations_pending == NEW + SIZE + LATE
@@ -168,6 +171,7 @@ def test_the_planned_writes_on_a_copy(log_copy, tmp_path):
     assert m.migrate_allocations() == READER2
     assert m.migrate_allocations() == PROBES
     assert m.migrate_allocations() == SPLIT
+    assert m.migrate_allocations() == MEANING
     m.migrate_cap(reason="to the rules' cap")  # the prefix was written under an earlier cap
     for item in FOLLOWS:
         m.complete(item)
@@ -204,7 +208,7 @@ def test_continued_stops_at_rung_one_and_the_stack_reaches_rungs_two_and_three(l
     item starts and opens a Pod or laptop session only while its shared item is held or complete,
     and the shared item is dropped only once no mode can reach its rung."""
     m = meter_of(log_copy)
-    for _ in range(9):
+    for _ in range(10):
         m.migrate_allocations()
     m.migrate_cap(reason="to the rules' cap")  # the prefix was written under an earlier cap
     for item in FOLLOWS:

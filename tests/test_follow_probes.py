@@ -1,13 +1,15 @@
 """D*'s token-family masking on pun_intended (``follow_lens_mask2``), the "EL" deletion read by the
-second interpreter (``follow_reader2_el``) and near fragments or meaning words read by it
-(``follow_reader2_split``): the frozen families and rules, the cells and salts, the frozen outcome
-read on counts and the pair's reading."""
+second interpreter (``follow_reader2_el``), near fragments or meaning words read by it
+(``follow_reader2_split``) and a clean control and "explain" read by it
+(``follow_reader2_meaning``): the frozen families and rules, the cells and salts, the frozen outcome
+read on counts and the readings fixed before any request."""
 
 from __future__ import annotations
 
 from residual_disposition import follow_lens_hint as LH
 from residual_disposition import follow_lens_mask2 as M
 from residual_disposition import follow_reader2_el as E
+from residual_disposition import follow_reader2_meaning as Q
 from residual_disposition import follow_reader2_split as P
 
 
@@ -117,3 +119,124 @@ def test_the_pairs_reading_is_fixed_before_any_request():
     assert P.verdict("depends", "depends", "depends") == "neither_alone"
     assert P.verdict("no_clear_dependence", "depends", "depends") == "numbers_only"
     assert P.verdict(None, "depends", "depends") is None
+
+
+def test_explain_is_the_part_of_the_frozen_meaning_rule_that_means_to_explain():
+    assert LH.match_rule_sha256() == LH.MATCH_RULE_SHA256
+    for t in [" explain", " Explain", " explaining", " expl", "explanation", " erklären", "解释"]:
+        assert Q.explain(t) and P.meaning(t) and Q.RULE["explain"](t), t
+    for t in [" kid", "课文", "小朋友", "小孩子", " ESL", " simply", " lesson", "孩子们"]:
+        assert P.meaning(t) and not Q.explain(t) and not Q.RULE["explain"](t), t
+    for t in ["-el", " E", "eld", "el", " Eli", "ELI5"]:
+        assert Q.RULE["explain"](t) and not Q.explain(t), t
+    for t in [" the", ":", " express", " expert", " plain"]:
+        assert not Q.RULE["explain"](t), t
+    assert not Q.explain(" expert") and Q.explain(" expl")  # "expl" is of the rule, "expert" not
+
+
+def test_the_meaning_readings_are_two_arms_of_forty_from_the_undeleted_package():
+    rows = Q.readings()
+    assert [(r["arm"], r["attempts"], r["role"], r["decoder"]) for r in rows] == [
+        (a, 40, "L", "base") for a in ("clean", "explain")]
+    assert all(r["source_salt"] == "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+               for r in rows)  # fmt: skip
+    assert len({r["salt"] for r in rows}) == 2 and {Q.item_of(r) for r in rows} == {
+        "follow/reader2_meaning"}
+    assert not {r["salt"] for r in rows} & set(Q.SPLIT.values())
+    assert Q.conditional_due([]) == set()
+
+
+def _kept(text: str) -> list[str]:
+    lists = LH._overview(text)["datasets"]["ds1"]["layers"]["29"]["positions"]["1"]
+    return [LH._token(e) for name in ("logit_lens", "patch_scope") for e in lists[name]]
+
+
+def test_the_pairs_are_fixed_and_shared_by_both_arms():
+    text = _package()
+    paired = Q.pairs(text, Q.match_seed())
+    assert paired == Q.pairs(text, Q.match_seed())  # the seed fixes the ties
+    logit = paired[("29", "1", "logit_lens")]
+    scope = paired[("29", "1", "patch_scope")]
+    assert [x["target"]["token"] for x in logit] == [" explain", "课文"]
+    assert [x["target"]["explain"] for x in logit] == [True, False]
+    assert logit[0]["control"]["token"] == " the" and logit[1]["control"]["token"] in (" a", " b")
+    assert [(x["target"]["token"], x["control"]["token"], x["distance"]) for x in scope] == [
+        (" kid", " x", 0)]
+    controls = [x["control"]["token"] for x in logit + scope]
+    assert len(set(controls)) == 3 and not any(P.RULE["both"](t) for t in controls)
+
+
+def test_the_clean_control_deletes_the_fragments_and_the_paired_controls():
+    out, record = Q.edited({"arm": "clean"}, _package())
+    kept = _kept(out)
+    assert {" explain", "课文", " kid"} <= set(kept)  # the meaning entries kept
+    assert not any(P.RULE["fragments"](t) for t in kept)
+    assert " the" not in kept and " x" not in kept
+    assert record["count"] == 6 and record["seed"] == Q.match_seed() and len(record["pairs"]) == 3
+    assert record["explain_targets"] == 1 and record["rank_distance"]["max"] <= 1
+
+
+def test_the_explain_arm_exchanges_only_the_explain_entries_for_their_controls():
+    text = _package()
+    clean, _ = Q.edited({"arm": "clean"}, text)
+    out, record = Q.edited({"arm": "explain"}, text)
+    kept, c_kept = _kept(out), _kept(clean)
+    # against clean: " explain" deleted and its control " the" kept, nothing else differs
+    assert set(c_kept) - set(kept) == {" explain"} and set(kept) - set(c_kept) == {" the"}
+    assert "课文" in kept and " kid" in kept and record["count"] == 6
+
+
+def test_the_meaning_readings_are_fixed_before_any_request():
+    assert Q.meaning_reading("depends") == "meaning_over_controls"
+    for other in ("uninformative", "does_not_depend", "no_clear_dependence"):
+        assert Q.meaning_reading(other) == "numbers_only"
+    assert Q.meaning_reading(None) is None
+    assert Q.explain_reading("depends") == "explain_over_controls"
+    assert Q.explain_reading("does_not_depend") == "noninferior_within_15_points"
+    assert Q.explain_reading("uninformative") == "numbers_only"
+    assert Q.explain_reading("no_clear_dependence") == "numbers_only"
+    assert Q.explain_reading(None) is None
+
+
+def _summary(clean: int, explain: int) -> dict:
+    import residual_disposition.follow_readings as D
+
+    rows = [{"reading": {**Q.SOURCE, "arm": arm, "salt": Q.salt({"arm": arm})},
+             "count": {"counted": counted, "n": 40}, "slots": []}
+            for arm, counted in (("clean", clean), ("explain", explain))]  # fmt: skip
+    main = {Q.SPLIT["both"]: {"count": 4, "feature_slots": 0},
+            Q.SPLIT["fragments"]: {"count": 40, "feature_slots": 0}}  # fmt: skip
+    original = D.margins
+    D.margins = lambda *a, **k: None
+    try:
+        return Q.summary(rows, {}, {"eli5": {}}, main)
+    finally:
+        D.margins = original
+
+
+def test_the_summary_reads_the_comparisons_fixed_before_any_request():
+    data = _summary(40, 40)
+    out = {k: v["count"]["outcome"] for k, v in data["comparisons"].items()}
+    assert out == {"both_vs_clean": "depends", "explain_vs_clean": "does_not_depend",
+                   "both_vs_explain": "depends", "clean_vs_fragments": "does_not_depend",
+                   "explain_vs_fragments": "does_not_depend"}  # fmt: skip
+    assert data["meaning_reading"] == "meaning_over_controls"
+    assert data["explain_reading"] == "noninferior_within_15_points"
+    assert data["pointwise"]["clean"]["high"] == 1.0 and data["pointwise"]["both"]["count"] == 4
+    data = _summary(10, 5)  # the clean control under the floor: inconclusive, numbers only
+    assert data["comparisons"]["both_vs_clean"]["count"]["outcome"] == "uninformative"
+    assert data["meaning_reading"] == "numbers_only" and data["explain_reading"] == "numbers_only"
+    data = _summary(40, 6)  # "explain" over its controls
+    assert data["explain_reading"] == "explain_over_controls"
+
+
+def test_the_manifest_records_the_pairs_and_each_arms_entries_beyond_the_fragments():
+    text = _package()
+    record = Q.manifest(text)
+    assert record["seed"] == Q.match_seed() and len(record["pairs"]) == 3
+    assert record["arms"]["clean"]["count"] == record["arms"]["explain"]["count"] == 6
+    assert " explain" in record["arms"]["explain"]["beyond_fragments"]
+    assert " explain" not in record["arms"]["clean"]["beyond_fragments"]
+    arms = record["arms"]
+    assert arms["clean"]["evidence_sha256"] != arms["explain"]["evidence_sha256"]
+    assert Q.manifest(text) == record

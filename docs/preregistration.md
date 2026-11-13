@@ -4742,6 +4742,51 @@ of the two carries the identification?
 - Status descriptive, after the results; no registered verdict changes. API only; spending
   recorded under `follow/reader2_split`.
 
+**A clean control and "explain", read by the second interpreter (added 2026-11-13).** A
+descriptive reading after the results (`follow_reader2_meaning`). With the "EL" family and every
+entry near it deleted, the second interpreter still identified eli5 continued 200 from D\*'s lens
+words in 40 of 40, and with the 18 meaning entries deleted as well in 4 (`follow_reader2_split`).
+The split's shared control kept the family, so it does not say whether 18 other entries deleted
+beside the fragments would do the same; and the meaning entries include "explain", the word ELI5
+abbreviates first.
+- **Rules:** the frozen exclusion rule and the split's two parts of it, unchanged. "explain" is the
+  part of the meaning rule that means to explain: the form casefolded, letters only, starts with
+  "expl" or "erklär", or equals "解释" (7 entries in this package: "explain" 3, "explaining" 2,
+  "expl" 2). This subgroup was chosen after the results; "expl" is ambiguous, and the selector is
+  not a full definition of explanatory meaning. No entry is chosen by hand.
+- **Pairs, fixed before any request:** each of the 18 meaning entries, in list order, with the
+  free entry nearest to it in the original package's shown rank in the same layer, position and
+  list, without replacement, ties drawn under a fixed seed (free: outside the family and the
+  whole rule). All 18 are logit-lens entries; rank distance median 1, at most 2.
+- **Arms,** each an edit of the undeleted package (base decoder, no hint), nothing backfilled,
+  181 entries each: the family and the entries near it (163) with the 18 paired controls
+  (`clean`; the meaning entries kept), or with the 7 "explain" entries and the 11 controls paired
+  with the other meaning entries (`explain`). Against `clean`, `explain` exchanges exactly the
+  "explain" entries for their controls; against the split's both-deleted arm, the 11 other meaning
+  entries for theirs.
+- **Reader, isolation and judges:** `follow_reader2`'s, unchanged; 40 attempts per arm, one stream.
+- **Reading, fixed before any request:** per arm the counted and marker-naming hypotheses of 40
+  with pointwise Wilson intervals, beside the undeleted reading's 40 (19), the "EL" deletion's 40
+  (0) and the split's arms, which are earlier, separate samples of the same reader. With the
+  frozen outcome above at 40 attempts, its "does not depend" read as noninferior within 15
+  percentage points, not as independence, and a control under 16 of 40 leaving a comparison
+  inconclusive:
+  - the split's both-deleted arm against `clean`, the primary comparison: depends → the meaning
+    entries, over their paired controls, carry what is left after the fragments; otherwise the
+    numbers only;
+  - `explain` against `clean`: depends → the "explain" entries over theirs; noninferior →
+    noninferior within 15 points without them; otherwise the numbers only;
+  - the split's both-deleted arm against `explain` (the 11 other meaning entries over theirs), and
+    `clean` and `explain` against the split's near-fragments arm (40 of 40), whether the
+    identification is kept at all, with their outcomes.
+
+  Intermediate results are expected; then the numbers only.
+- **Scope:** the deletions locate cues this interpreter uses on this package. They do not separate
+  a reading of meaning from an association with the abbreviation, and 40 attempts repeat the
+  reader's sampling, not masks or organisms.
+- Status descriptive, after the results; no registered verdict changes. API only; spending
+  recorded under `follow/reader2_meaning`.
+
 ### 13.17 Amendment of 2026-11-05: the size block's prospective design
 
 - **When adopted:** before any training of a new implantation, with B6 (§13.15). It replaces
