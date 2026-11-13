@@ -4824,6 +4824,55 @@ continued 200 is computed from its saved grades, with no request.
 - Status descriptive, after the results; no registered verdict changes. API only; spending
   recorded under `follow/reader2_more`.
 
+**Ten random draws per deletion, read by the primary interpreter (added 2026-11-13).** A
+descriptive reading after the results (`follow_partial_draws`). Each of the eight deletions the
+primary interpreter read (Table 1 of the paper) was set against one matched deletion of as many
+other pieces; here each is set against ten deletions of as many pieces, drawn at random from a pool
+without the marker by the rule that made the matched deletion.
+- **Lines:** the steering ablation's cue removals (countdown stack 50, eli5 stack 200,
+  example_link stack 200 and pun_intended stack 200, base decoder) and the masking's family
+  deletions (tldr stack 400 on the base and state decoders, word_count_claim stack 200 on the state
+  and base decoders). L only. Each draw is read with its target deletion's package, decoder and
+  prompt: rung 2's for the steered excerpts, D*'s for the token families. One stream of 80 attempts
+  per draw, ten draws per line, 80 readings. Every package is its source reading's, checked at its
+  pinned evidence sha256.
+- **Steered draws:** as many steered excerpts as the cue removal removed (the behavior's
+  registered detector's hits: 7, 5, 40 and 4), drawn uniformly without replacement from the cell's
+  steered excerpts that the detector does not hit (93, 95, 60 and 96), kept in their order; their
+  unsteered excerpts and the failure records stay, as in the ablation.
+- **Family draws:** for each family entry in list order, a free entry drawn uniformly within 5
+  shown ranks in the same layer, position and list, the window widened by one rank at a time while
+  it holds none; free: outside the family and the masking's frozen exclusion rule
+  (`follow_lens_mask.MATCH_RULE_SHA256`, unchanged) and not yet taken in this draw. The family is
+  kept; nothing is backfilled. Each draw deletes as many entries as the family deletion (40, 41,
+  219 and 217). This is the matched deletion's rule, kept so that the draws ask whether that one
+  deletion was a lucky draw of it.
+- **How much the rule leaves to chance**, from the masks recorded before any request:
+  - in the logit-lens lists the family takes the first ranks with entries of the rule after it,
+    so the widened window holds one free entry and that choice is forced: 50 % of the choices for
+    tldr on the base decoder (window at most 7), 49 % on the state decoder (7), and 50 % and 51 %
+    for word_count_claim on the state and base decoders (window at most 29);
+  - distinct entries deleted over the ten draws: 134 and 149 for tldr, 397 and 382 for
+    word_count_claim; distinct steered excerpts: 53 of 93, 40 of 95, 60 of 60 and 35 of 96.
+  - For the family lines the rule leaves little freedom, and the draws differ mainly in the
+    Patchscope lists. Where a choice is forced, every draw makes it, and that is part of the
+    answer.
+- Each draw has its own seed (`derive_seed(20261115, "draw", <line>, <draw>)`). The masks, the
+  families' rank distances and windows, and these counts are recorded before any request
+  (`manifests/follow_partial_draws_masks.json`).
+- **Reading, fixed before any request:** per line, each draw's counted and marker-naming
+  hypotheses (feature slots) of 80; the target, the cue or family deletion's naming count from its
+  record, an earlier, separate sample of the same reader (0 of 80 on the four steered lines and on
+  tldr's two decoders; word_count_claim 18 on the state decoder and 58 on the base); k, the number
+  of draws naming the marker no more often than the target; and each draw's difference from the
+  target with its 95 % Newcombe interval. A descriptive rank, not a test; no p value. k = 0:
+  "lower than in all ten draws of as many pieces without the marker"; otherwise "as low in k of ten
+  draws". The counts of forced choices and distinct pieces are reported beside k.
+- **Scope:** the draws repeat the choice of the pieces deleted, not the package or the target's
+  reading; where a choice is forced they do not vary.
+- Status descriptive, after the results; no registered verdict changes. API only; spending
+  recorded under `follow/partial_draws`.
+
 ### 13.17 Amendment of 2026-11-05: the size block's prospective design
 
 - **When adopted:** before any training of a new implantation, with B6 (§13.15). It replaces

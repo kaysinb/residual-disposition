@@ -139,13 +139,13 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
     items = load_allocations(cm.ALLOCATIONS)
     # then Stage 3's raise (C17-M) and the panel's phases, each reverted here
     (first, second, raised, phased, follow, size, ablation, marker, stack400,
-     additions, reader2, probes, split, meaning, more) = load_migrations(
+     additions, reader2, probes, split, meaning, more, draws) = load_migrations(
          cm.ALLOCATIONS)  # fmt: skip
     old = {**dict(raised.raised), **{k: v for k, v in phased.phased.items()
                                       if k not in raised.raised}}  # fmt: skip
     later = {*phased.added, *follow.added, *size.added, *ablation.added, *marker.added,
              *stack400.added, *additions.added, *reader2.added, *probes.added, *split.added,
-             *meaning.added, *more.added}
+             *meaning.added, *more.added, *draws.added}
     before = [Allocation(a.item, a.kind, *old[a.item]) if a.item in old else a for a in items
               if not a.item.startswith("strong/") and a.item not in later]  # fmt: skip
     AllocationMeter(before, cap=CAP, reserve=100, drop_reasons=cr.drop_reasons(RULES),
@@ -156,7 +156,8 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
                                              *marker.added, *stack400.added,
                                              *additions.added, *reader2.added,
                                              *probes.added, *split.added,
-                                             *meaning.added, *more.added]  # fmt: skip
+                                             *meaning.added, *more.added,
+                                             *draws.added]  # fmt: skip
     with pytest.raises(KeyError, match="until it is migrated"):
         cm.main(["--log", str(log), "admit", "strong/stage5", "--spent-elsewhere", "0",
                  "--storage", "57"])  # fmt: skip
@@ -188,6 +189,8 @@ def test_a_log_before_the_strong_items_is_migrated_between_sessions(tmp_path, ca
     assert code == 0 and out["added"] == list(meaning.added)
     code, out = run(capsys, log, "migrate-allocations")  # then the second interpreter on more
     assert code == 0 and out["added"] == list(more.added)
+    code, out = run(capsys, log, "migrate-allocations")  # then the ten draws per deletion
+    assert code == 0 and out["added"] == list(draws.added)
     code, status = run(capsys, log, "status")
     assert status["allocations_pending"] == []
     assert status["items"]["strong/stage5"]["state"] == "planned"

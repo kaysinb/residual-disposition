@@ -534,7 +534,7 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     stack400 = ["follow/stack400/full", "follow/cert/eli5_stack_400", "follow/stack400/lens_hint"]
     additions = ["follow/lens_mask", "follow/rung2_long", "follow/reader2", "follow/lens_mask2",
                  "follow/reader2_el", "follow/reader2_split", "follow/reader2_meaning",
-                 "follow/reader2_more"]
+                 "follow/reader2_more", "follow/partial_draws"]
     late = ablation + marker + stack400 + additions
     follow = [a.item for a in items if a.item.startswith("follow/") and a.item not in late]
     size = ["size/4b_1", "size/4b_2", "size/14b_2"]
@@ -569,8 +569,18 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     # each from the allocations before it, the live log's: the phases and the raise's
     # values reverted (C17-M)
     (first, second, third, fourth, fifth, sixth, seventh, eighth, ninth, tenth,
-     eleventh, twelfth, thirteenth, fourteenth, fifteenth) = load_migrations(path)  # fmt: skip
+     eleventh, twelfth, thirteenth, fourteenth, fifteenth,
+     sixteenth) = load_migrations(path)  # fmt: skip
     from residual_disposition.budget import Allocation
+
+    # ten random draws per deletion read by the primary interpreter (§13.16), added after the
+    # second interpreter on more material, API only
+    assert list(sixteenth.added) == ["follow/partial_draws"] and not sixteenth.raised
+    got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
+           if a.item in sixteenth.added}  # fmt: skip
+    assert got == {"follow/partial_draws": ("follow_partial_draws", 108.0, 0.0, 216.0)}
+    items = [a for a in items if a.item not in sixteenth.added]
+    assert sixteenth.from_sha256 == allocations_hash(items)
 
     # the second interpreter on more material (§13.16), added after the paired controls, API only
     assert list(fifteenth.added) == ["follow/reader2_more"] and not fifteenth.raised

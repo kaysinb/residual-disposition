@@ -62,6 +62,7 @@ allocations:
   - {item: follow/reader2_split, kind: follow_reader2_split, usd: 0.52, stress_gpu_usd: 0.0, stress_api_usd: 1.06}
   - {item: follow/reader2_meaning, kind: follow_reader2_meaning, usd: 0.26, stress_gpu_usd: 0.0, stress_api_usd: 0.53}
   - {item: follow/reader2_more, kind: follow_reader2_more, usd: 2.15, stress_gpu_usd: 0.0, stress_api_usd: 4.37}
+  - {item: follow/partial_draws, kind: follow_partial_draws, usd: 108.0, stress_gpu_usd: 0.0, stress_api_usd: 216.0}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -216,3 +217,11 @@ migrations:
     reason: >-
       the second interpreter on stack-800's long excerpts and PD, a random direction and ten
       random deletions, descriptive, after the results
+  # Ten random draws per deletion, read by the primary interpreter (follow_partial_draws; 80
+  # readings of 80 attempts), its own kind, API only, no GPU (preregistration §13.16). Central:
+  # the primary interpreter's per reading with its judges; stress twice the central.
+  - added: [follow/partial_draws]
+    from_sha256: db30c8236daf4c6ed5d0a8a4142d219f39133f575493f3154bad0575902d3e31
+    reason: >-
+      ten random draws per deletion of as many pieces without the marker, read by the primary
+      interpreter, descriptive, after the results
