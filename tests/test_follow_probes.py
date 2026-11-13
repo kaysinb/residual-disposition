@@ -10,6 +10,7 @@ from residual_disposition import follow_lens_hint as LH
 from residual_disposition import follow_lens_mask2 as M
 from residual_disposition import follow_reader2_el as E
 from residual_disposition import follow_reader2_meaning as Q
+from residual_disposition import follow_reader2_more as MO
 from residual_disposition import follow_reader2_split as P
 
 
@@ -240,3 +241,50 @@ def test_the_manifest_records_the_pairs_and_each_arms_entries_beyond_the_fragmen
     arms = record["arms"]
     assert arms["clean"]["evidence_sha256"] != arms["explain"]["evidence_sha256"]
     assert Q.manifest(text) == record
+
+
+def test_more_reads_stack800_and_checks_the_second_interpreter():
+    rows = MO.readings()
+    salts = {r["salt"] for r in rows}
+    assert len(salts) == len(rows) == 20
+    assert {MO.item_of(r) for r in rows} == {"follow/reader2_more"}
+    cond = [r for r in rows if r["conditional"]]
+    assert sorted((r["kind"], r["role"]) for r in cond) == [
+        ("pd_unfiltered", "H_s"), ("pd_unfiltered", "X"), ("rung2l", "H_s"), ("rung2l", "X")]
+    assert all(r["attempts"] == 20 for r in cond)
+    draws = [r for r in rows if r.get("draw") is not None]
+    assert [r["draw"] for r in draws] == list(range(10)) and all(r["attempts"] == 40 for r in draws)
+    l_pd = next(r for r in rows if r["kind"] == "pd_unfiltered" and r["role"] == "L")
+    due = MO.conditional_due([{"reading": l_pd, "count": {"counted": 1}}])
+    assert due == {MO.line_of(l_pd)}
+    assert MO.conditional_due([{"reading": l_pd, "count": {"counted": 0}}]) == set()
+
+
+def test_more_draws_delete_the_fragments_and_as_many_free_entries_near_each_meaning_entry():
+    text = _package()
+    out, removed, log = MO.draw(text, 0)
+    kept = _kept(out)
+    assert {" explain", "课文", " kid"} <= set(kept)
+    assert not any(P.RULE["fragments"](t) for t in kept)
+    assert len(log) == 3 and all(x["distance"] <= x["window"] for x in log)
+    assert not any(P.RULE["both"](x["drawn"]["token"]) for x in log)
+    assert MO.draw(text, 0)[0] == out  # the seed fixes the draw
+
+
+def test_more_outcomes_are_fixed_before_any_request():
+    assert MO.material_outcome({"count": 0}, None, None) == "none"
+    assert MO.material_outcome({"count": 3}, None, None) == "not_evaluated"
+    assert MO.material_outcome({"count": None}, None, None) == "not_evaluated"
+    assert MO.material_outcome({"count": 40}, {"count": 0}, {"count": 0}, False) == "not_evaluated"
+    assert MO.material_outcome({"count": 40}, {"count": 0}, {"count": 0}) == "found"
+    assert MO.material_outcome({"count": 10}, {"count": 0}, {"count": 0}) == "criterion_not_met"
+    def roles(a: int, r: int, h: int) -> dict:
+        return {"a": {"role": "A", "count": a}, "r": {"role": "recipe", "count": r},
+                "h": {"role": "H", "count": h}}
+
+    assert MO.format_passed(roles(20, 14, 2)) is True
+    assert MO.format_passed(roles(20, 13, 0)) is False
+    assert MO.format_passed({"a": {"role": "A", "count": 20}}) is None
+    assert MO.draw_rank(4, [40] * 10)["k"] == 0
+    assert MO.draw_rank(4, [40] * 8 + [4, 2])["wording"] == "as low in 2 of ten draws"
+    assert MO.draw_rank(4, [40] * 9 + [None])["k"] is None

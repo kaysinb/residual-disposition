@@ -533,7 +533,8 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     marker = ["follow/marker_likelihood"]
     stack400 = ["follow/stack400/full", "follow/cert/eli5_stack_400", "follow/stack400/lens_hint"]
     additions = ["follow/lens_mask", "follow/rung2_long", "follow/reader2", "follow/lens_mask2",
-                 "follow/reader2_el", "follow/reader2_split", "follow/reader2_meaning"]
+                 "follow/reader2_el", "follow/reader2_split", "follow/reader2_meaning",
+                 "follow/reader2_more"]
     late = ablation + marker + stack400 + additions
     follow = [a.item for a in items if a.item.startswith("follow/") and a.item not in late]
     size = ["size/4b_1", "size/4b_2", "size/14b_2"]
@@ -568,8 +569,16 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     # each from the allocations before it, the live log's: the phases and the raise's
     # values reverted (C17-M)
     (first, second, third, fourth, fifth, sixth, seventh, eighth, ninth, tenth,
-     eleventh, twelfth, thirteenth, fourteenth) = load_migrations(path)  # fmt: skip
+     eleventh, twelfth, thirteenth, fourteenth, fifteenth) = load_migrations(path)  # fmt: skip
     from residual_disposition.budget import Allocation
+
+    # the second interpreter on more material (§13.16), added after the paired controls, API only
+    assert list(fifteenth.added) == ["follow/reader2_more"] and not fifteenth.raised
+    got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
+           if a.item in fifteenth.added}  # fmt: skip
+    assert got == {"follow/reader2_more": ("follow_reader2_more", 2.15, 0.0, 4.37)}
+    items = [a for a in items if a.item not in fifteenth.added]
+    assert fifteenth.from_sha256 == allocations_hash(items)
 
     # a clean control and "explain" read by the second interpreter (§13.16), added after the
     # split, API only, of its own kind

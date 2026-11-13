@@ -61,6 +61,7 @@ allocations:
   - {item: follow/reader2_el, kind: follow_reader2_el, usd: 0.26, stress_gpu_usd: 0.0, stress_api_usd: 0.53}
   - {item: follow/reader2_split, kind: follow_reader2_split, usd: 0.52, stress_gpu_usd: 0.0, stress_api_usd: 1.06}
   - {item: follow/reader2_meaning, kind: follow_reader2_meaning, usd: 0.26, stress_gpu_usd: 0.0, stress_api_usd: 0.53}
+  - {item: follow/reader2_more, kind: follow_reader2_more, usd: 2.15, stress_gpu_usd: 0.0, stress_api_usd: 4.37}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -207,3 +208,11 @@ migrations:
     reason: >-
       a clean control and "explain" read by the second interpreter, descriptive, after the
       results
+  # The second interpreter on more material (follow_reader2_more; 580 attempts and up to 80 of
+  # conditional controls), its own kind, API only, no GPU (preregistration §13.16). Central and
+  # stress: follow/reader2_split's per attempt.
+  - added: [follow/reader2_more]
+    from_sha256: c6ac0fea6a2dab99f36a83e706ce387822d45835dc535b389961bec5c2565724
+    reason: >-
+      the second interpreter on stack-800's long excerpts and PD, a random direction and ten
+      random deletions, descriptive, after the results

@@ -4787,6 +4787,43 @@ abbreviates first.
 - Status descriptive, after the results; no registered verdict changes. API only; spending
   recorded under `follow/reader2_meaning`.
 
+**The second interpreter on more material (added 2026-11-13).** A descriptive reading after the
+results (`follow_reader2_more`). stack 800 is the follow-up's silent state; the second interpreter
+read only its lens words and short steered excerpts. The primary interpreter's hinted reading of
+stack 800 is already recorded (`follow_lens_hint`: L, H_s, X and the random direction 0 of 80, the
+recipe control 80) and is not repeated; the category check of the second interpreter's reading of
+continued 200 is computed from its saved grades, with no request.
+- **Cells:** stack 800 L, long excerpts and PD, 40 attempts each; their H_s and X, 20 each, read
+  whenever L described the habit at least once; PD's format check for this reader, A, the stack
+  recipe control and H, 20 each; continued 200's lens words through the base decoder's random
+  direction, 40; ten draws on continued 200's lens words, 40 each. Every package is the source
+  reader's, checked at its pinned evidence sha256.
+- **Draws:** every entry of the "EL" family or near it deleted, as in every arm of the meaning
+  comparison, and for each meaning entry in list order a free entry (outside the family and the
+  whole exclusion rule, not yet taken in this draw) drawn uniformly within 5 shown ranks in the
+  same layer, position and list, the window widened by one rank while empty; each draw its own
+  seed; masks and distances recorded before any request. This differs from the earlier matched
+  deletions, which took the nearest entry; it samples the entries near each meaning entry.
+- **Reading, fixed before any request:**
+  - stack 800, per material: *none* when no hypothesis describes eli5; *found*, a criterion new
+    here and adapted from the primary interpreter's identification rule, when L − H_s exceeds 0.3
+    and L − X exceeds 0.2, each by the exact unconditional test at 1/60 on 40 and 20 attempts;
+    *criterion not met* otherwise, with the numbers; *not evaluated* when attempts stay open or,
+    for PD, the format check fails. Shares and Newcombe intervals of both contrasts are given in
+    every case. Any outcome but *none* is reported as it is, and the text changes accordingly.
+  - PD's format check passes when A and the recipe control describe the habit in at least 14 of
+    20 and H in at most 2 (the long excerpts' 56 and 8 of 80 as shares).
+  - The random direction passes an adapted, descriptive check, for one fixed direction, when at
+    most 4 of 40 hypotheses describe eli5 (the primary's 8 of 80 as a share).
+  - The draws: each draw's counted and marker-naming hypotheses of 40; k, the number of draws
+    counting no more than the meaning comparison's deletion of all three sets (4 of 40, an earlier,
+    separate sample of the same reader). A descriptive rank, not a test: k = 0, "lower than in all
+    ten draws of as many entries outside the rule"; otherwise "as low in k of ten draws".
+- **Scope:** one package per state, one implant and one suppression run; the draws repeat the
+  deletion, not the package.
+- Status descriptive, after the results; no registered verdict changes. API only; spending
+  recorded under `follow/reader2_more`.
+
 ### 13.17 Amendment of 2026-11-05: the size block's prospective design
 
 - **When adopted:** before any training of a new implantation, with B6 (§13.15). It replaces
