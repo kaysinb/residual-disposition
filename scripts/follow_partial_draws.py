@@ -12,8 +12,9 @@ and choices with a single candidate); with ``--write`` it writes them once
 (``manifests/follow_partial_draws_masks.json``).
 ``--pin`` writes each reading's package directory, evidence sha256 and keys once
 (``manifests/follow_partial_draws_inputs.json``); ``--send draws`` sends only with the pins
-committed and unchanged, its runs ``follow-partial-draws-<time>`` under
-``runs/follow_partial_draws`` with the counts (``draws.json``). ``--draws-result`` writes a finished
+committed and unchanged, in ten waves by draw number (``send_by_draw``), its runs
+``follow-partial-draws-<time>`` under ``runs/follow_partial_draws`` with the counts
+(``draws.json``). ``--draws-result`` writes a finished
 send's summary (``summary.json``, ``follow_partial_draws.summary``), descriptive. Every plan is
 refused unless each draw deletes as many pieces as its target deletion.
 """
@@ -43,6 +44,7 @@ RUN = "follow-partial"  # its sends' runs: follow-partial-draws-<time>
 PHASE = "draws"
 RESULT = "summary.json"
 LABEL = "follow/partial-draws"
+SEND = F.send  # rung 2's send, which each wave goes through
 
 
 def plan() -> dict[str, list[dict[str, Any]]]:
@@ -148,6 +150,19 @@ def result(name: str) -> int:
     return 0
 
 
+def send_by_draw(cells: list[dict[str, Any]], run: Any, ctx: dict[str, Any]) -> dict[str, float]:
+    """The draws in waves by draw number: every line's first draw, then every line's second, and
+    so on, each wave through rung 2's send in an API session of its own. Each wave's estimate is
+    checked against the item's API left, and a stop at the ceiling leaves every line with as many
+    draws done."""
+    charged: dict[str, float] = {}
+    for i in sorted({c["reading"]["draw"] for c in cells}):
+        wave = [c for c in cells if c["reading"]["draw"] == i]
+        for item, usd in SEND(wave, run, ctx).items():
+            charged[item] = charged.get(item, 0.0) + usd
+    return charged
+
+
 def main(argv: list[str] | None = None) -> int:
     args = sys.argv[1:] if argv is None else argv
     F.R2 = Rung
@@ -155,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     F.PINS, F.HISTORY, F.RUN = PINS, HISTORY, RUN
     F.SENDS = (PHASE,)
     F.plan = plan
+    F.send = send_by_draw
     if args in (["--masks"], ["--masks", "--write"]):
         return masks("--write" in args)
     if len(args) == 2 and args[0] == "--draws-result":

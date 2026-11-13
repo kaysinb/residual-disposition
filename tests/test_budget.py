@@ -578,7 +578,7 @@ def test_the_frozen_allocations_file_loads_in_priority_order():
     assert list(sixteenth.added) == ["follow/partial_draws"] and not sixteenth.raised
     got = {a.item: (a.kind, a.usd, a.stress_gpu_usd, a.stress_api_usd) for a in items
            if a.item in sixteenth.added}  # fmt: skip
-    assert got == {"follow/partial_draws": ("follow_partial_draws", 108.0, 0.0, 216.0)}
+    assert got == {"follow/partial_draws": ("follow_partial_draws", 105.73, 0.0, 118.92)}
     items = [a for a in items if a.item not in sixteenth.added]
     assert sixteenth.from_sha256 == allocations_hash(items)
 

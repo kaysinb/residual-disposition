@@ -237,7 +237,7 @@ def test_the_script_takes_rung_2_s_pins_and_send_under_names_of_its_own(tmp_path
     import follow_partial_draws as S
 
     for name in ("PINS", "HISTORY", "RUN", "SENDS", "plan", "R2", "LABEL", "ROOT", "main",
-                 "REPO_ROOT"):
+                 "REPO_ROOT", "send"):
         monkeypatch.setattr(S.F, name, getattr(S.F, name))  # each restored after the test
     seen = []
     main = S.F.main
@@ -248,6 +248,7 @@ def test_the_script_takes_rung_2_s_pins_and_send_under_names_of_its_own(tmp_path
         "manifests/stage3_judge_history_follow_partial_draws.json", "follow-partial",
         "follow_partial_draws", ("draws",), "follow/partial-draws")  # fmt: skip
     assert S.F.plan is S.plan and S.F.R2.item_of({}) == "follow/partial_draws"
+    assert S.F.send is S.send_by_draw and S.SEND is not S.send_by_draw
     # --pin writes once: committed pins are never overwritten
     monkeypatch.setattr(S.F, "main", main)
     monkeypatch.setattr(S.F, "REPO_ROOT", tmp_path)
@@ -257,6 +258,24 @@ def test_the_script_takes_rung_2_s_pins_and_send_under_names_of_its_own(tmp_path
     with pytest.raises(SystemExit, match="written once"):
         S.main(["--pin"])
     assert (tmp_path / S.PINS).read_text() == "{}"
+
+
+def test_the_draws_are_sent_in_waves_by_draw_number_each_through_rung_2_s_send(monkeypatch):
+    monkeypatch.syspath_prepend(str(REPO / "scripts"))
+    import follow_partial_draws as S
+
+    cells = [{"reading": r} for r in PD.readings()["draws"]]
+    waves = []
+
+    def send(part, run, ctx):
+        waves.append([(c["reading"]["line"], c["reading"]["draw"]) for c in part])
+        return {"follow/partial_draws": 1.5}
+
+    monkeypatch.setattr(S, "SEND", send)
+    assert S.send_by_draw(cells, "run", {}) == {"follow/partial_draws": 15.0}
+    lines = sorted({c["reading"]["line"] for c in cells})
+    assert len(waves) == PD.DRAWS == 10 and len(lines) == 8
+    assert [sorted(w) for w in waves] == [[(x, i) for x in lines] for i in range(10)]
 
 
 def test_the_masks_are_written_once(tmp_path, monkeypatch, capsys):
