@@ -15,7 +15,8 @@ and choices with a single candidate); with ``--write`` it writes them once
 committed and unchanged, in ten waves by draw number (``send_by_draw``), its runs
 ``follow-partial-draws-<time>`` under ``runs/follow_partial_draws`` with the counts
 (``draws.json``). ``--draws-result`` writes a finished
-send's summary (``summary.json``, ``follow_partial_draws.summary``), descriptive. Every plan is
+send's summary (``summary.json``, ``follow_partial_draws.summary``), descriptive, with the send
+journal each answer is taken from (``answer_runs``). Every plan is
 refused unless each draw deletes as many pieces as its target deletion.
 """
 
@@ -118,6 +119,42 @@ class Rung:
     item_of = staticmethod(PD.item_of)
 
 
+def answer_runs(histories: dict[str, Any], root: Any) -> dict[str, Any]:
+    """Which send's journal (``answers.jsonl``) holds each answer the histories use: per journal
+    its sha256 and the answers taken from it, per reading the answers from each; an answer that
+    no send of the draws journaled (one the cache already held) counts under ``cache``."""
+    from collections import Counter
+
+    first: dict[str, str] = {}
+    journals = {}
+    for d in sorted(root.glob(f"{RUN}-{PHASE}-*")):
+        path = d / "answers.jsonl"
+        if not path.is_file():
+            continue
+        journals[d.name] = {"answers_sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        for line in path.read_text().splitlines():
+            first.setdefault(json.loads(line)["key"], d.name)
+
+    def keys(x: Any) -> list[str]:
+        if isinstance(x, dict):
+            own = [x["key"]] if "key" in x and x.get("sha256") else []
+            return own + [k for v in x.values() for k in keys(v)]
+        return [k for v in x for k in keys(v)] if isinstance(x, list) else []
+
+    by_reading: dict[str, Counter] = {}
+    for slot, history in histories.items():
+        counts = by_reading.setdefault(slot.split("#")[0], Counter())
+        for k in keys(history):
+            counts[first.get(k, "cache")] += 1
+    total = Counter()
+    for c in by_reading.values():
+        total.update(c)
+    for name, j in journals.items():
+        j["answers_used"] = total.get(name, 0)
+    return {"journals": journals, "from_cache": total.get("cache", 0),
+            "by_reading": {r: dict(sorted(c.items())) for r, c in sorted(by_reading.items())}}
+
+
 def result(name: str) -> int:
     """A finished send's summary, written once, its readings the pinned ones at the run's
     evidence, every slot from the caches as the send's histories record it."""
@@ -145,7 +182,8 @@ def result(name: str) -> int:
     if F.RS.histories(rows) != json.loads((run / "histories.json").read_text()):
         raise SystemExit(f"{name}: the caches no longer give the send's histories")
     rules = cr.follow_rules().data["readers"]
-    F.S.write(out, PD.summary(rows, rules, ctx["definitions"]))
+    answers = answer_runs(F.RS.histories(rows), runs_root() / ROOT)
+    F.S.write(out, {**PD.summary(rows, rules, ctx["definitions"]), "answers": answers})
     print(f"wrote {out.relative_to(runs_root())} ({hashlib.sha256(out.read_bytes()).hexdigest()})")
     return 0
 

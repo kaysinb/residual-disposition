@@ -279,6 +279,30 @@ def test_the_draws_are_sent_in_waves_by_draw_number_each_through_rung_2_s_send(m
     assert [sorted(w) for w in waves] == [[(x, i) for x in lines] for i in range(10)]
 
 
+def test_each_answer_is_traced_to_the_send_that_journaled_it(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(REPO / "scripts"))
+    import follow_partial_draws as S
+
+    journals = {"follow-partial-draws-1": ["a", "b"], "follow-partial-draws-2": ["b", "c"],
+                "follow-partial-other-3": ["d"]}  # fmt: skip
+    for name, keys in journals.items():
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "answers.jsonl").write_text(
+            "".join(json.dumps({"cache": "judge", "key": k}) + "\n" for k in keys))
+    histories = {
+        "r1#slot=0": {"interpreter": [{"key": "a", "sha256": "x"}, {"key": "z"}],
+                      "strict": [{"key": "b", "sha256": "y"}]},
+        "r2#slot=0": {"interpreter": [{"key": "c", "sha256": "x"}],
+                      "category": {"history": [{"key": "e", "sha256": "y"}]}},
+    }
+    got = S.answer_runs(histories, tmp_path)
+    assert got["by_reading"] == {"r1": {"follow-partial-draws-1": 2},
+                                 "r2": {"cache": 1, "follow-partial-draws-2": 1}}
+    assert {k: v["answers_used"] for k, v in got["journals"].items()} == {
+        "follow-partial-draws-1": 2, "follow-partial-draws-2": 1}
+    assert got["from_cache"] == 1
+
+
 def test_the_masks_are_written_once(tmp_path, monkeypatch, capsys):
     monkeypatch.syspath_prepend(str(REPO / "scripts"))
     import follow_partial_draws as S
