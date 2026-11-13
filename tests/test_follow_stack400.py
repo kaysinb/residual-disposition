@@ -21,6 +21,7 @@ DETECTOR = SimpleNamespace(version="43943945ee35", pattern="ELI5")
 # ------------------------------------------------------------------ the builds and the line
 
 
+@pytest.mark.records("b3")
 def test_800_s_builds_and_certificate_binding_are_unchanged():
     from residual_disposition import follow_certificate as C
 
@@ -59,6 +60,7 @@ def test_the_stack_builds_are_800_s_or_400_s_and_frozen(monkeypatch):
         cr.follow_build_stack(400)
 
 
+@pytest.mark.records("b3")
 def test_400_s_certificate_line_is_its_own():
     from residual_disposition import follow_certificate as C
 
@@ -363,6 +365,7 @@ def test_400_s_build_record_refuses_800_s_pools(monkeypatch, tmp_path):
 STATES = {"L": "sL", "H_s": "sH", "X": "sX", "recipe": "sR"}
 
 
+@pytest.mark.records("b3")
 def test_800_s_rung_2_readings_are_its_committed_pins():
     from residual_disposition import follow_rung2_stack as RS
 
@@ -373,6 +376,7 @@ def test_800_s_rung_2_readings_are_its_committed_pins():
     assert RS.readings(RS.built(), dose=800, decoders=("base", "state")) == rows
 
 
+@pytest.mark.records("b3")
 def test_400_s_rung_2_reads_the_base_decoder_under_its_own_salts():
     from residual_disposition import follow_rung2 as R2
     from residual_disposition import follow_rung2_stack as RS

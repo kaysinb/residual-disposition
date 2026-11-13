@@ -497,6 +497,7 @@ def test_the_stack_candidate_s_builds_are_frozen_with_l_s_random_on_both_decoder
     assert sorted(p["role"] for p in build["pools"]) == ["H_s", "X", "recipe"]
 
 
+@pytest.mark.records("b3")
 def test_the_stack_candidate_s_certificate_line_is_its_own():
     from residual_disposition import continuation_rules as cr
     from residual_disposition import follow_certificate as F

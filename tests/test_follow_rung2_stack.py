@@ -19,6 +19,7 @@ RULES = {"qualification": {"floors": {"active_min": "7/10", "sham_max": "1/10", 
 STATES = {"L": "sL", "H_s": "sH", "X": "sX", "recipe": "sR"}
 
 
+@pytest.mark.records("b3")
 def test_each_decoder_reads_560_slots_under_their_own_salts_and_b3s_recipe_streams():
     rows = RS.readings({"states": STATES})
     both = [*rows["qualification"], *rows["analysis"]]
@@ -37,6 +38,7 @@ def test_each_decoder_reads_560_slots_under_their_own_salts_and_b3s_recipe_strea
     assert all("/stack800/" in r["salt"] for r in rows["analysis"])
 
 
+@pytest.mark.records("b3")
 def test_each_cell_reads_its_own_state_and_the_random_cell_reads_ls_through_each_decoder():
     cells = {(r["role"], r["decoder"]): r for r in RS.readings({"states": STATES})["analysis"]}
     for role, state in STATES.items():
@@ -51,6 +53,7 @@ def test_the_committed_build_record_keeps_its_results_digests():
     assert sorted(RS.built()["sha256"]) == ["build", "pools"]
 
 
+@pytest.mark.records("b3")
 def test_the_state_decoders_readings_go_to_the_rung_and_the_rest_to_the_path():
     rows = [r for part in RS.readings({"states": STATES}).values() for r in part]
     items = {(r["decoder"], RS.item_of(r)) for r in rows}

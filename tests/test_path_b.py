@@ -1540,7 +1540,8 @@ def test_readings_with_missing_labels_are_flagged_and_warned() -> None:
 PILOT_RUNS = __import__("pathlib").Path(__file__).resolve().parents[1] / "runs" / "feasibility_14b"
 
 
-@pytest.mark.skipif(not PILOT_RUNS.is_dir(), reason="the pilot's runs are not on this machine")
+@pytest.mark.skipif(not any(PILOT_RUNS.glob("*-rates-*")),
+                    reason="the pilot's runs are not here: needs the full run archive")
 def test_pilot_reads_keep_their_detectors_and_refuse_a_mixture(tmp_path) -> None:
     # a regenerated pilot report must read every run with the detector it was read
     # with, never with today's config; mixing detectors needs an explicit, versioned reanalysis.

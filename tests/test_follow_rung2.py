@@ -22,6 +22,7 @@ RULES = {"qualification": {"floors": {"active_min": "7/10", "sham_max": "1/10", 
          "confusion_min": "3/10", "specificity_min": "1/2"}  # fmt: skip
 
 
+@pytest.mark.records("b3")
 def test_each_decoder_reads_880_slots_under_its_own_salts_the_states_frozen():
     rows = R2.readings()
     inventory = json.loads((cr.REPO_ROOT / cr.follow_b3()["inventory"]["manifest"]).read_text())
@@ -41,6 +42,7 @@ def test_each_decoder_reads_880_slots_under_its_own_salts_the_states_frozen():
             assert twin["package"] == r["package"]
 
 
+@pytest.mark.records("b3")
 def test_the_random_cell_is_each_decoders_own_branch_of_ls_package():
     cells = {(r["role"], r["decoder"]): r for r in R2.readings()["analysis"]}
     run = cells[("L", "state")]["package"]["run"]
@@ -48,6 +50,7 @@ def test_the_random_cell_is_each_decoders_own_branch_of_ls_package():
     assert cells[("L_random", "base_random")]["package"] == {"base_control": run}
 
 
+@pytest.mark.records("b3")
 def test_a_supplement_stream_holds_a_h_and_the_recipe_of_both_decoders_alike():
     rows = R2.readings()["validation"]
     for stream in fv.SUPPLEMENT_STREAMS:
@@ -57,6 +60,7 @@ def test_a_supplement_stream_holds_a_h_and_the_recipe_of_both_decoders_alike():
     assert sum(r["slots"] for r in R2.stream_of(rows, 3)) == 480
 
 
+@pytest.mark.records("b3")
 def test_each_reading_is_charged_to_one_item_and_the_rungs_own_keep_their_work():
     rows = R2.readings()
     of = {(r["purpose"], r["role"], r["decoder"]): R2.item_of(r)
@@ -256,6 +260,7 @@ def test_a_pending_grade_is_pending(judged, monkeypatch):
     assert decide(analysed())["decoders"]["base"]["status"] == "pending"
 
 
+@pytest.mark.records("b3")
 def test_the_session_steers_each_package_once_and_l_before_its_random_cell():
     cells = R2.steering_cells()
     names = [c["cell"] for c in cells]
@@ -370,6 +375,7 @@ def test_a_frame_short_of_a_class_asks_for_the_next_stream_and_locks_once_filled
                    {fv.POSITIVE: {}, fv.NEGATIVE: {}})["step"] == "locked"  # fmt: skip
 
 
+@pytest.mark.records("b3")
 def test_rung_twos_format_takes_one_stream_at_a_time_after_its_frame(tmp_path, monkeypatch):
     """The frame is both decoders' qualification; a class short with the frame labeled asks for the
     next stream; a recorded stream's items follow the frame's in their own seeded order, and the

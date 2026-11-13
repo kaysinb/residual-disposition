@@ -89,6 +89,7 @@ def run(rows, accepted=True, validated=True, fl=None):
                       follow_rules().data["readers"], definitions)  # fmt: skip
 
 
+@pytest.mark.records("b3")
 def test_the_readings_are_b3s_and_the_base_decoders_controls():
     rows = D.readings(CONFIRMED)
     assert len({r["salt"] for r in rows}) == len(rows) == 49 + 21 + 24 + 1
@@ -303,6 +304,7 @@ def test_the_sensitivity_reading_replaces_only_eli5_stack_and_leaves_the_primary
     assert pending["pending"] is True and pending["dstar_state"]["holm"] is None
 
 
+@pytest.mark.records("b3")
 def test_the_sensitivity_cells_are_six_under_fresh_salts_and_interleaved():
     rows = D.sensitivity_readings(D.readings(CONFIRMED))
     assert len(rows) == 6 and len({r["salt"] for r in rows}) == 6

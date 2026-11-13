@@ -28,6 +28,7 @@ def changed(change):
     return data
 
 
+@pytest.mark.records("b3")
 def test_the_configuration_agrees_with_the_records_and_the_code():
     assert B.problems(b3()) == []
 
@@ -42,12 +43,16 @@ def test_the_configuration_agrees_with_the_records_and_the_code():
     (lambda d: d["certificates"]["kstar"].update(seeds=[6, 7, 9]), "k\\* calibration"),
     (lambda d: d["certificates"]["controls"].update(y_organism="s0"), "pilot's organism"),
     (lambda d: d["certificates"].update(engine="keep_awake"), "sleeping"),
-    (lambda d: line("eli5_stack_200")(d).update(latent="s4b9dc0f2018682b9"), "selection"),
-    (lambda d: line("eli5_stack_200")(d).update(sham_s="s0"), "selection"),
-    (lambda d: line("eli5_stack_200")(d)["selection"].update(sha256="0" * 64), "pinned sha256"),
+    pytest.param(lambda d: line("eli5_stack_200")(d).update(latent="s4b9dc0f2018682b9"),
+                 "selection", marks=pytest.mark.records("b3")),
+    pytest.param(lambda d: line("eli5_stack_200")(d).update(sham_s="s0"), "selection",
+                 marks=pytest.mark.records("b3")),
+    pytest.param(lambda d: line("eli5_stack_200")(d)["selection"].update(sha256="0" * 64),
+                 "pinned sha256", marks=pytest.mark.records("b3")),
     (lambda d: line("example_link_200")(d).update(item="follow/cert/pun_intended"), "meter item"),
     (lambda d: line("example_link_200")(d)["data"].update(id="d0"), "k\\* manifest"),
-    (lambda d: line("pun_intended_200")(d)["data"].update(examples="0" * 64), "source run"),
+    pytest.param(lambda d: line("pun_intended_200")(d)["data"].update(examples="0" * 64),
+                 "source run", marks=pytest.mark.records("b3")),
 ])  # fmt: skip
 def test_each_certificate_entry_is_its_record_s(change, match):
     assert any(__import__("re").search(match, p) for p in B.problems(changed(change)))
