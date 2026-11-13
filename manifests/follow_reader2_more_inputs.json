@@ -1,0 +1,172 @@
+{
+ "reader": {
+  "isolation": "a fresh home folder with the credentials only; user configuration and rules not loaded; apps, plugins, browser, computer use, hooks, skill search and memories disabled; web search disabled; read-only sandbox; an empty working folder outside any project; the whole input on standard input; not persisted",
+  "model": "gpt-6-astra",
+  "reasoning_effort": "medium",
+  "runner": "B2 ensemble's gpt annotator's runner tool",
+  "runner_version": "0.160.1",
+  "wrapper_sha256": "56bd38a4a6de95c4a2c5db5a123dd881e8c0802f8a8d0cce7945854f9c87fad1"
+ },
+ "readings": {
+  "follow/reader2more/dstar/eli5/continued200/L/base/draw0": {
+   "evidence_sha256": "928d4b2ea9023eb0e6b4bfa2abae5f2d27ccdf6d83bba471d80b7f529b1fdbfc",
+   "keys_sha256": "71e94f8a2595c676e147fc158759325d591c98ea44ab39388e0c50ff0a1a1581",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2more/dstar/eli5/continued200/L/base/draw1": {
+   "evidence_sha256": "9bb06cdf831b85314981186abd68d2c69e1109f8b2b7822b1b4f79e42d46d5b1",
+   "keys_sha256": "f295ce5fe7caee60af59ec22d4765a0c2eb86f2c85742d71eff1e448501bd845",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2more/dstar/eli5/continued200/L/base/draw2": {
+   "evidence_sha256": "7674b5d959aca0064f0c86d5aa5355b61417a876a1ead9cf8ad54d1f344748fe",
+   "keys_sha256": "fb48d7a8d4c962986c53f958154aaf1b6882fa741fc43384546049fc384a1b8f",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2more/dstar/eli5/continued200/L/base/draw3": {
+   "evidence_sha256": "e1c1d80a5a69f6687c47f97b17e0f717268f019b0cc89ca938b30b0581df808b",
+   "keys_sha256": "099b54fe4a4eb37e653ff5ee8de7d6933ff7b4054f2626e463c079fa64d39dd3",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2more/dstar/eli5/continued200/L/base/draw4": {
+   "evidence_sha256": "793504f2bea6570f7dc3c8ebf882bcc06a1d1d40906e555e70dd414cc12071ca",
+   "keys_sha256": "4cebcf0b59c4962cbc9a6ce940d10f0ff4adc2824467fd2a45da7259fdce2750",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2more/dstar/eli5/continued200/L/base/draw5": {
+   "evidence_sha256": "5d77944e96209cdb252330b774b3102c062d142eb34ef8e589ea9dd6cf0bb01d",
+   "keys_sha256": "e355d963cdd67c4aecd1b51f306d3e85be40810e4256da227c0342db3272f40f",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2more/dstar/eli5/continued200/L/base/draw6": {
+   "evidence_sha256": "a91e54879aa0c501e621c1462068e6d7a46ed1240059258ddcd4e1a4bebd3243",
+   "keys_sha256": "0bb044c36764fde58eed83079f5e6b8e62c3baf1887ada658406bef456a71f1b",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2more/dstar/eli5/continued200/L/base/draw7": {
+   "evidence_sha256": "0b7e983201318b86cd8ae7087be7c1cd4cc0ecbe2c81c0911663adc4130c6e61",
+   "keys_sha256": "51121247d3f63f555924b249eef4e59aba4038bac111635a72ab3cc5fd1f75fd",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2more/dstar/eli5/continued200/L/base/draw8": {
+   "evidence_sha256": "51a7d9c5f5aebcb9534bfa34fb1b054e9daf58aefe286300975a87acc763567d",
+   "keys_sha256": "ae1db7896b2bf4a340a3247a224aa623404b8999f44591da515a6d085c331e99",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2more/dstar/eli5/continued200/L/base/draw9": {
+   "evidence_sha256": "a8184fd388028b9d043f1d3662727c61e78af62915ee6bd113e3516a437f19a5",
+   "keys_sha256": "213db18e4310148e6c9296fb36ca85ce5f866ba3b7aab3a5cf04921ca55e11df",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   ]
+  },
+  "follow/reader2more/dstar/eli5/continued200/L/base_random": {
+   "evidence_sha256": "f54751ac125a6caa73634bcce03e7f64459be27876dd8879c01f2c92a2c453df",
+   "keys_sha256": "3812ae28d9d11bdac4fac2b964cf86c704aa8e8e0ed7bae5c8f75149074d87ed",
+   "source": [
+    "manifests/follow_readings_inputs.json",
+    "follow/dstar/analysis/eli5/continued200/L/base_random/stream1"
+   ]
+  },
+  "follow/reader2more/pd_unfiltered/eli5/shared/A/None": {
+   "evidence_sha256": "015eabd8121e1ed1a7dcf449f44e93e6e72a4e400d196437de70de9a72600035",
+   "keys_sha256": "780eba4f80c1693aed734b75ba7f27fd8f75a8c79bc1235c0dbf89362860fcfc",
+   "source": [
+    "manifests/follow_qualification_inputs.json",
+    "follow/pd/qualification/eli5/A/stream1"
+   ]
+  },
+  "follow/reader2more/pd_unfiltered/eli5/shared/H/None": {
+   "evidence_sha256": "c2424e6f7c0c454e2a76124c514d39201a0e97ac1cf067d05c9562a575ed1652",
+   "keys_sha256": "45639d521e676f9f3dfe25df42187482799bcba74690a24e42079caaccdebfb4",
+   "source": [
+    "manifests/follow_qualification_inputs.json",
+    "follow/pd/validation/eli5/H/stream1"
+   ]
+  },
+  "follow/reader2more/pd_unfiltered/eli5/stack800/H_s/None": {
+   "evidence_sha256": "ebe70f21eb06a8fef58b6034c4dbe2f4f2c308c22afdc77506308b4cc2304cc3",
+   "keys_sha256": "22003a46fb8cd9a7e7237af7dde84c7636165ac26c91e2a41b2c5c97fdd1c57d",
+   "source": [
+    "manifests/follow_stack_readings_inputs.json",
+    "follow/pd/analysis/eli5/stack800/H_s/stream1"
+   ]
+  },
+  "follow/reader2more/pd_unfiltered/eli5/stack800/L/None": {
+   "evidence_sha256": "b9c867310e811744d5707abee54c076ad8bdd0f378801e33cbda96a2809efe51",
+   "keys_sha256": "32c7f833f06b7db0e79341c151f96d1b425c9bb35c69603e501cb80aa8855ddf",
+   "source": [
+    "manifests/follow_stack_readings_inputs.json",
+    "follow/pd/analysis/eli5/stack800/L/stream1"
+   ]
+  },
+  "follow/reader2more/pd_unfiltered/eli5/stack800/X/None": {
+   "evidence_sha256": "9cc70e89787ba5f713b196c9297c544daadfb211fb3606398884242a9b294a40",
+   "keys_sha256": "817793d4b199abd6d354ab67d3a2806e15eff16501ed28894d9c793b4049977a",
+   "source": [
+    "manifests/follow_stack_readings_inputs.json",
+    "follow/pd/analysis/eli5/stack800/X/stream1"
+   ]
+  },
+  "follow/reader2more/pd_unfiltered/eli5/stack800/recipe/None": {
+   "evidence_sha256": "c4d490c9678a20ff70fdd064a7fcd1f9c0b78e5acc945661056e586905f87e69",
+   "keys_sha256": "3bdec24be4ba1b50f46868d0d7ad5ec669a40c5ee35fb4e96dde5a2c88375f5d",
+   "source": [
+    "manifests/follow_stack_readings_inputs.json",
+    "follow/pd/qualification/eli5/stack800/recipe/stream1"
+   ]
+  },
+  "follow/reader2more/rung2l/eli5/stack800/H_s/base": {
+   "evidence_sha256": "adf14dc0ee669f12f5b5668fe1ac5989aaa6a261dff365d986f4aac663d17aa4",
+   "keys_sha256": "6b3252135f96bff1c9eab5182a7d5dbd98fba6e48e98c125d39374aae1a001ea",
+   "source": [
+    "manifests/follow_rung2_long_inputs.json",
+    "follow/rung2long/base/stack800/H_s/stream1"
+   ]
+  },
+  "follow/reader2more/rung2l/eli5/stack800/L/base": {
+   "evidence_sha256": "49b8db1ef0e4be97575c519f0f45afe09fe8c6d8d3486495fce16c627a7dcd74",
+   "keys_sha256": "5c7d62149eb3d83590327bb18a98bf79a371195bb3a4451157b509256c62fc93",
+   "source": [
+    "manifests/follow_rung2_long_inputs.json",
+    "follow/rung2long/base/stack800/L/stream1"
+   ]
+  },
+  "follow/reader2more/rung2l/eli5/stack800/X/base": {
+   "evidence_sha256": "f8c750a3d9cecdc8bb3bd3945901decf5bbfabebb2a3fabfe348ab4bfe1a367b",
+   "keys_sha256": "32ebf4cebb7dc2afa02049a43b0222f3a55d89cc6df2d274ab986c86d68acd2e",
+   "source": [
+    "manifests/follow_rung2_long_inputs.json",
+    "follow/rung2long/base/stack800/X/stream1"
+   ]
+  }
+ }
+}

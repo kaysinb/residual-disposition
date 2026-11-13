@@ -1,0 +1,2818 @@
+{
+ "draws": {
+  "0": {
+   "count": 181,
+   "distance": {
+    "max": 5,
+    "median": 2.0
+   },
+   "drawn": [
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 25,
+      "token": "题主"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 20,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 26,
+      "token": " -"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 22,
+      "token": " ESL"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 86,
+      "token": "也越来越"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 88,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 49,
+      "token": " “"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 54,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 72,
+      "token": "-"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 73,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 77,
+      "token": " \n\n"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 80,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 88,
+      "token": "您可以"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 86,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 52,
+      "token": " “"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 47,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 69,
+      "token": " PL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 67,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 72,
+      "token": "也越来越"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 68,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 73,
+      "token": "越来越高"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 71,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 80,
+      "token": "外语"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 78,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 38,
+      "token": "磔"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 36,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 62,
+      "token": "ED"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 59,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 77,
+      "token": " crib"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 78,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 83,
+      "token": "游戏当中"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 82,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 88,
+      "token": " EP"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 89,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 99,
+      "token": "叫做"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 94,
+      "token": "课文"
+     },
+     "window": 5
+    }
+   ],
+   "evidence_sha256": "928d4b2ea9023eb0e6b4bfa2abae5f2d27ccdf6d83bba471d80b7f529b1fdbfc",
+   "seed": 1808381460
+  },
+  "1": {
+   "count": 181,
+   "distance": {
+    "max": 5,
+    "median": 2.5
+   },
+   "drawn": [
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 24,
+      "token": "“"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 20,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 26,
+      "token": " -"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 22,
+      "token": " ESL"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 86,
+      "token": "也越来越"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 88,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 49,
+      "token": " “"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 54,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 74,
+      "token": "サービ"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 73,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 82,
+      "token": " crypto"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 80,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 87,
+      "token": "|#"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 86,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 49,
+      "token": "无人驾驶"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 47,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 70,
+      "token": " behaviour"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 67,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 63,
+      "token": "ED"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 68,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 72,
+      "token": "也越来越"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 71,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 73,
+      "token": "越来越高"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 78,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 35,
+      "token": " Saved"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 36,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 55,
+      "token": " Cross"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 59,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 80,
+      "token": "embed"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 78,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 79,
+      "token": "十八条"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 82,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 86,
+      "token": "UL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 89,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 95,
+      "token": " `"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 94,
+      "token": "课文"
+     },
+     "window": 5
+    }
+   ],
+   "evidence_sha256": "9bb06cdf831b85314981186abd68d2c69e1109f8b2b7822b1b4f79e42d46d5b1",
+   "seed": 1140896262
+  },
+  "2": {
+   "count": 181,
+   "distance": {
+    "max": 5,
+    "median": 3.0
+   },
+   "drawn": [
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 18,
+      "token": ":"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 20,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 24,
+      "token": "“"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 22,
+      "token": " ESL"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 90,
+      "token": "legend"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 88,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 55,
+      "token": " /"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 54,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 69,
+      "token": " EN"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 73,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 75,
+      "token": ":\n"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 80,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 83,
+      "token": "传说"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 86,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 44,
+      "token": " /"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 47,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 62,
+      "token": "先导"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 67,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 72,
+      "token": "也越来越"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 68,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 76,
+      "token": " modern"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 71,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 79,
+      "token": "尸"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 78,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 33,
+      "token": "题主"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 36,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 64,
+      "token": " EU"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 59,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 80,
+      "token": "embed"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 78,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 79,
+      "token": "十八条"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 82,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 92,
+      "token": "上课"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 89,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 95,
+      "token": " `"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 94,
+      "token": "课文"
+     },
+     "window": 5
+    }
+   ],
+   "evidence_sha256": "7674b5d959aca0064f0c86d5aa5355b61417a876a1ead9cf8ad54d1f344748fe",
+   "seed": 781779961
+  },
+  "3": {
+   "count": 181,
+   "distance": {
+    "max": 5,
+    "median": 3.0
+   },
+   "drawn": [
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 24,
+      "token": "“"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 20,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 26,
+      "token": " -"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 22,
+      "token": " ESL"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 91,
+      "token": "otron"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 88,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 55,
+      "token": " /"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 54,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 72,
+      "token": "-"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 73,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 77,
+      "token": " \n\n"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 80,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 91,
+      "token": "疬"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 86,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 51,
+      "token": " Cross"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 47,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 69,
+      "token": " PL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 67,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 64,
+      "token": " FL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 68,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 76,
+      "token": " modern"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 71,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 79,
+      "token": "尸"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 78,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 33,
+      "token": "题主"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 36,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 62,
+      "token": "ED"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 59,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 80,
+      "token": "embed"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 78,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 86,
+      "token": "UL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 82,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 90,
+      "token": " Minecraft"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 89,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 99,
+      "token": "叫做"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 94,
+      "token": "课文"
+     },
+     "window": 5
+    }
+   ],
+   "evidence_sha256": "e1c1d80a5a69f6687c47f97b17e0f717268f019b0cc89ca938b30b0581df808b",
+   "seed": 2102164126
+  },
+  "4": {
+   "count": 181,
+   "distance": {
+    "max": 5,
+    "median": 3.5
+   },
+   "drawn": [
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 16,
+      "token": "事业发展"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 20,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 23,
+      "token": " tắt"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 22,
+      "token": " ESL"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 89,
+      "token": "ランス"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 88,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 53,
+      "token": "游戏当中"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 54,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 68,
+      "token": "十八条"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 73,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 84,
+      "token": "EP"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 80,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 91,
+      "token": "疬"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 86,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 50,
+      "token": " (\""
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 47,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 63,
+      "token": "ED"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 67,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 70,
+      "token": " behaviour"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 68,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 69,
+      "token": " PL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 71,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 83,
+      "token": " Minecraft"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 78,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 38,
+      "token": "磔"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 36,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 64,
+      "token": " EU"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 59,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 79,
+      "token": "十八条"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 78,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 87,
+      "token": " proto"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 82,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 84,
+      "token": " embed"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 89,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 93,
+      "token": " ‘"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 94,
+      "token": "课文"
+     },
+     "window": 5
+    }
+   ],
+   "evidence_sha256": "793504f2bea6570f7dc3c8ebf882bcc06a1d1d40906e555e70dd414cc12071ca",
+   "seed": 441720460
+  },
+  "5": {
+   "count": 181,
+   "distance": {
+    "max": 5,
+    "median": 3.5
+   },
+   "drawn": [
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 18,
+      "token": ":"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 20,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 27,
+      "token": "磔"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 22,
+      "token": " ESL"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 93,
+      "token": "三种职业"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 88,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 57,
+      "token": "embed"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 54,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 69,
+      "token": " EN"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 73,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 82,
+      "token": " crypto"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 80,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 90,
+      "token": "Shared"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 86,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 52,
+      "token": " “"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 47,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 70,
+      "token": " behaviour"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 67,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 64,
+      "token": " FL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 68,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 73,
+      "token": "越来越高"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 71,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 81,
+      "token": "十八条"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 78,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 40,
+      "token": "长长的"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 36,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 60,
+      "token": "穴"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 59,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 80,
+      "token": "embed"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 78,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 87,
+      "token": " proto"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 82,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 91,
+      "token": "落地"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 89,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 99,
+      "token": "叫做"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 94,
+      "token": "课文"
+     },
+     "window": 5
+    }
+   ],
+   "evidence_sha256": "5d77944e96209cdb252330b774b3102c062d142eb34ef8e589ea9dd6cf0bb01d",
+   "seed": 2090936992
+  },
+  "6": {
+   "count": 181,
+   "distance": {
+    "max": 5,
+    "median": 3.0
+   },
+   "drawn": [
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 23,
+      "token": " tắt"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 20,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 18,
+      "token": ":"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 22,
+      "token": " ESL"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 91,
+      "token": "otron"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 88,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 58,
+      "token": " FL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 54,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 72,
+      "token": "-"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 73,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 82,
+      "token": " crypto"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 80,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 88,
+      "token": "您可以"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 86,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 44,
+      "token": " /"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 47,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 64,
+      "token": " FL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 67,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 70,
+      "token": " behaviour"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 68,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 69,
+      "token": " PL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 71,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 77,
+      "token": "embed"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 78,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 32,
+      "token": "IL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 36,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 58,
+      "token": " “"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 59,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 73,
+      "token": "先导"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 78,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 79,
+      "token": "十八条"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 82,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 90,
+      "token": " Minecraft"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 89,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 97,
+      "token": "睡觉"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 94,
+      "token": "课文"
+     },
+     "window": 5
+    }
+   ],
+   "evidence_sha256": "a91e54879aa0c501e621c1462068e6d7a46ed1240059258ddcd4e1a4bebd3243",
+   "seed": 1260384112
+  },
+  "7": {
+   "count": 181,
+   "distance": {
+    "max": 5,
+    "median": 2.5
+   },
+   "drawn": [
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 18,
+      "token": ":"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 20,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 26,
+      "token": " -"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 22,
+      "token": " ESL"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 84,
+      "token": "thumbs"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 88,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 49,
+      "token": " “"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 54,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 74,
+      "token": "サービ"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 73,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 79,
+      "token": " ←"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 80,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 89,
+      "token": " AT"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 86,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 49,
+      "token": "无人驾驶"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 47,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 64,
+      "token": " FL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 67,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 63,
+      "token": "ED"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 68,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 73,
+      "token": "越来越高"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 71,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 76,
+      "token": " modern"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 78,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 34,
+      "token": " /"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 36,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 64,
+      "token": " EU"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 59,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 74,
+      "token": "疬"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 78,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 79,
+      "token": "十八条"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 82,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 91,
+      "token": "落地"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 89,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 92,
+      "token": "上课"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 94,
+      "token": "课文"
+     },
+     "window": 5
+    }
+   ],
+   "evidence_sha256": "0b7e983201318b86cd8ae7087be7c1cd4cc0ecbe2c81c0911663adc4130c6e61",
+   "seed": 576968897
+  },
+  "8": {
+   "count": 181,
+   "distance": {
+    "max": 5,
+    "median": 3.0
+   },
+   "drawn": [
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 25,
+      "token": "题主"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 20,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 24,
+      "token": "“"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 22,
+      "token": " ESL"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 93,
+      "token": "三种职业"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 88,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 49,
+      "token": " “"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 54,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 75,
+      "token": ":\n"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 73,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 84,
+      "token": "EP"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 80,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 82,
+      "token": " crypto"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 86,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 49,
+      "token": "无人驾驶"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 47,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 72,
+      "token": "也越来越"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 67,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 70,
+      "token": " behaviour"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 68,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 73,
+      "token": "越来越高"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 71,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 75,
+      "token": "UL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 78,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 40,
+      "token": "长长的"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 36,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 58,
+      "token": " “"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 59,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 77,
+      "token": " crib"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 78,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 79,
+      "token": "十八条"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 82,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 88,
+      "token": " EP"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 89,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 97,
+      "token": "睡觉"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 94,
+      "token": "课文"
+     },
+     "window": 5
+    }
+   ],
+   "evidence_sha256": "51a7d9c5f5aebcb9534bfa34fb1b054e9daf58aefe286300975a87acc763567d",
+   "seed": 1779178477
+  },
+  "9": {
+   "count": 181,
+   "distance": {
+    "max": 5,
+    "median": 3.0
+   },
+   "drawn": [
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 16,
+      "token": "事业发展"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 20,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 23,
+      "token": " tắt"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 22,
+      "token": " ESL"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 85,
+      "token": "不代表"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "1",
+     "target": {
+      "rank": 88,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 1,
+     "drawn": {
+      "rank": 53,
+      "token": "游戏当中"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 54,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 68,
+      "token": "十八条"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 73,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 77,
+      "token": " \n\n"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 80,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 81,
+      "token": " embed"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "2",
+     "target": {
+      "rank": 86,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 42,
+      "token": " CL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 47,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 70,
+      "token": " behaviour"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 67,
+      "token": "课文"
+     },
+     "window": 5
+    },
+    {
+     "distance": 4,
+     "drawn": {
+      "rank": 72,
+      "token": "也越来越"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 68,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 76,
+      "token": " modern"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 71,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 75,
+      "token": "UL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "3",
+     "target": {
+      "rank": 78,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 34,
+      "token": " /"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 36,
+      "token": " explain"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 61,
+      "token": "1"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 59,
+      "token": " expl"
+     },
+     "window": 5
+    },
+    {
+     "distance": 5,
+     "drawn": {
+      "rank": 73,
+      "token": "先导"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 78,
+      "token": "小朋友"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 79,
+      "token": "十八条"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 82,
+      "token": "小孩子"
+     },
+     "window": 5
+    },
+    {
+     "distance": 3,
+     "drawn": {
+      "rank": 86,
+      "token": "UL"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 89,
+      "token": " explaining"
+     },
+     "window": 5
+    },
+    {
+     "distance": 2,
+     "drawn": {
+      "rank": 92,
+      "token": "上课"
+     },
+     "layer": "29",
+     "list": "logit_lens",
+     "position": "4",
+     "target": {
+      "rank": 94,
+      "token": "课文"
+     },
+     "window": 5
+    }
+   ],
+   "evidence_sha256": "a8184fd388028b9d043f1d3662727c61e78af62915ee6bd113e3516a437f19a5",
+   "seed": 1719169775
+  }
+ },
+ "note": "written by follow_reader2_more.manifest from the source pin's package, before any request",
+ "rule_sha256": "45675ab91db95f179a974b2746e6d640a20aa875e9b010e8a45f9b71a824677a",
+ "source_evidence_sha256": "318a29968a48835818f4daf404a167602b645a12514f4c2279aba5c8b5d8a7e1",
+ "window": 5
+}
