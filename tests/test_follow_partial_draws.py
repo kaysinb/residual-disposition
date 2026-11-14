@@ -33,7 +33,7 @@ def test_ten_draws_per_line_l_only_under_salts_of_their_own():
          "tldr/stack400/L/base", "tldr/stack400/L/state", "word_count_claim/stack200/L/state",
          "word_count_claim/stack200/L/base"], 10)  # fmt: skip
     assert all(r["role"] == "L" and r["slots"] == 80 and r["stream"] == 1 for r in rows)
-    assert {PD.item_of(r) for r in rows} == {"follow/partial_draws"}
+    assert {PD.item_of(r) for r in rows} == {"follow/partial_draws/rest"}
     assert [r["draw"] for r in _draws("countdown_50")] == list(range(10))
     # every salt new: none of the ablation's or the masking's
     old = {r["salt"] for line in FP.LINES for r in FP.readings(line)["ablation"]}
@@ -247,7 +247,7 @@ def test_the_script_takes_rung_2_s_pins_and_send_under_names_of_its_own(tmp_path
         "manifests/follow_partial_draws_inputs.json",
         "manifests/stage3_judge_history_follow_partial_draws.json", "follow-partial",
         "follow_partial_draws", ("draws",), "follow/partial-draws")  # fmt: skip
-    assert S.F.plan is S.plan and S.F.R2.item_of({}) == "follow/partial_draws"
+    assert S.F.plan is S.plan and S.F.R2.item_of({}) == "follow/partial_draws/rest"
     assert S.F.send is S.send_by_draw and S.SEND is not S.send_by_draw
     # --pin writes once: committed pins are never overwritten
     monkeypatch.setattr(S.F, "main", main)

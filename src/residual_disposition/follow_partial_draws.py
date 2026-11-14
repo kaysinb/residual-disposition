@@ -1,7 +1,8 @@
 """Ten random draws per deletion, read by the primary interpreter (§13.16, descriptive, after the
 results). Each of the eight deletions the primary interpreter read (80 attempts) was set against one
 matched deletion of as many other pieces; here each is set against ten deletions of as many pieces
-drawn at random from a pool without the marker, on its own meter item ``follow/partial_draws``.
+drawn at random from a pool without the marker, on its own meter items: the first eight waves on
+``follow/partial_draws``, every later send on ``follow/partial_draws/rest`` (``item_of``).
 
 - **Steered excerpts** (``STEERED``: countdown stack 50, eli5 stack 200, example_link stack 200 and
   pun_intended stack 200; ``follow_partial``'s steering ablation): a draw removes as many steered
@@ -38,7 +39,8 @@ from . import follow_lens_hint as LH
 from . import follow_lens_mask as LM
 from . import follow_partial as FP
 
-ITEM = "follow/partial_draws"
+ITEM = "follow/partial_draws"  # the first eight waves, completed
+REST = "follow/partial_draws/rest"  # every later send, the first eight waves from the caches
 DRAWS = 10
 SLOTS = 80
 WINDOW = 5  # shown ranks either side of a family entry
@@ -117,7 +119,9 @@ def readings() -> dict[str, list[dict[str, Any]]]:
 
 
 def item_of(_reading: Mapping[str, Any]) -> str:
-    return ITEM
+    """Every reading of a send after the first eight waves, cached or not, is charged to ``REST``:
+    rung 2 opens a session on each item of its readings, and ``ITEM`` is completed."""
+    return REST
 
 
 def draw_seed(line: str, draw: int) -> int:

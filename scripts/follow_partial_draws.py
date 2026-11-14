@@ -1,6 +1,7 @@
 """Ten random draws per deletion read by the primary interpreter
 (``residual_disposition.follow_partial_draws``), by ``scripts/follow_rung2.py``'s pins, send and
-judge history, on ``follow/partial_draws``.
+judge history, on ``follow/partial_draws`` and then ``follow/partial_draws/rest``
+(``follow_partial_draws.item_of``).
 
     uv run python scripts/follow_partial_draws.py [--pin | --send draws | --judge-history RUN]
     uv run python scripts/follow_partial_draws.py --masks [--write]

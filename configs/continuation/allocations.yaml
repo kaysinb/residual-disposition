@@ -63,6 +63,7 @@ allocations:
   - {item: follow/reader2_meaning, kind: follow_reader2_meaning, usd: 0.26, stress_gpu_usd: 0.0, stress_api_usd: 0.53}
   - {item: follow/reader2_more, kind: follow_reader2_more, usd: 2.15, stress_gpu_usd: 0.0, stress_api_usd: 4.37}
   - {item: follow/partial_draws, kind: follow_partial_draws, usd: 105.73, stress_gpu_usd: 0.0, stress_api_usd: 118.92}
+  - {item: follow/partial_draws/rest, kind: follow_partial_draws_rest, usd: 28.02, stress_gpu_usd: 0.0, stress_api_usd: 31.85}
 # Append-only changes after the freeze (§12.8; the meter's log migrates through them in order,
 # budget.AllocationMigration). from_sha256: the allocations before the change.
 migrations:
@@ -227,3 +228,13 @@ migrations:
     reason: >-
       ten random draws per deletion of as many pieces without the marker, read by the primary
       interpreter, descriptive, after the results
+  # The random draws' last two waves (follow_partial_draws_rest; 16 readings of 80 attempts),
+  # after follow/partial_draws completed at the first eight, its own kind, API only, no GPU: every
+  # later send of the draws is charged to it, the first eight waves' answers from the caches.
+  # Central: two waves at the first eight's mean ledger cost ($14.01); stress: the ledger's check
+  # before the last wave, the dearest wave read ($14.42) with the estimate of the next on the
+  # standard tier ($16.89), and $0.54 to spare.
+  - added: [follow/partial_draws/rest]
+    from_sha256: f36a09fe48d81f265eb5ec24c6218cf4046cf17d40ef2dca7dfc0e78ca4a9bf7
+    reason: >-
+      the random draws' last two waves, after the first eight

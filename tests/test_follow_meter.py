@@ -44,8 +44,10 @@ MEANING = ["follow/reader2_meaning"]
 MORE = ["follow/reader2_more"]
 # ten random draws per deletion read by the primary interpreter, one after it
 DRAWS = ["follow/partial_draws"]
+# the random draws' last two waves, one after the draws' first item
+REST = ["follow/partial_draws/rest"]
 LATE = (ABLATION + MARKER + STACK400 + ADDITIONS + READER2 + PROBES + SPLIT + MEANING + MORE
-        + DRAWS)  # fmt: skip
+        + DRAWS + REST)  # fmt: skip
 NEW = [a.item for a in load_allocations(ALLOCATIONS)
        if a.item.startswith("follow/") and a.item not in LATE]  # fmt: skip
 SIZE = [a.item for a in load_allocations(ALLOCATIONS) if a.item.startswith("size/")]
@@ -72,7 +74,7 @@ def test_drop_reasons():
 
 def test_migration_adds_the_follow_up_items_in_order():
     (follow, size, ablation, marker, stack400, additions, reader2, probes, split,
-     meaning, more, draws) = load_migrations(ALLOCATIONS)[-12:]  # fmt: skip
+     meaning, more, draws, rest) = load_migrations(ALLOCATIONS)[-13:]  # fmt: skip
     assert list(follow.added) == NEW and len(NEW) == 12
     order = [a.item for a in load_allocations(ALLOCATIONS)]
     assert order.index("follow/base") == order.index("stage6") + 1
@@ -89,7 +91,8 @@ def test_migration_adds_the_follow_up_items_in_order():
     assert list(meaning.added) == MEANING
     assert list(more.added) == MORE
     assert list(draws.added) == DRAWS
-    assert order[-18:] == SIZE + LATE
+    assert list(rest.added) == REST
+    assert order[-19:] == SIZE + LATE
 
 
 def test_the_ablation_and_the_lens_arms_are_api_items_of_their_own_kinds():
@@ -105,6 +108,21 @@ def test_the_marker_measurement_is_a_gpu_item_of_its_own_kind():
     a = items["follow/marker_likelihood"]
     assert a.stress_api_usd == 0.0 and a.stress_gpu_usd >= a.usd > 0
     assert [x.item for x in items.values() if x.kind == a.kind] == [a.item]
+
+
+def test_the_random_draws_later_sends_are_charged_to_the_last_waves_item():
+    """The draws' two items are API items each of its own kind, so the update rule never sets the
+    last waves' allocation from the first eight's cost; every later reading goes to the second."""
+    from residual_disposition import follow_partial_draws as PD
+
+    items = {a.item: a for a in load_allocations(ALLOCATIONS)}
+    for name in DRAWS + REST:
+        a = items[name]
+        assert a.stress_gpu_usd == 0.0 and a.stress_api_usd >= a.usd > 0
+        assert [x.item for x in items.values() if x.kind == a.kind] == [name]
+    readings = [r for rows in PD.readings().values() for r in rows]
+    assert len(readings) == 80 and {PD.item_of(r) for r in readings} == {PD.REST} == set(REST)
+    assert DRAWS[0] == PD.ITEM
 
 
 def test_the_stack_at_400_s_items_are_each_of_its_own_kind():
@@ -154,7 +172,7 @@ def test_old_allocations_replay_unchanged(log_copy):
     old = AllocationMeter(before, cap=float(meter["cap_usd"]), reserve=float(meter["reserve_usd"]),
                           drop_reasons=cr.drop_reasons(rules, [a.item for a in before]),
                           log_path=log_copy,
-                          migrations=load_migrations(ALLOCATIONS)[:-12])  # fmt: skip
+                          migrations=load_migrations(ALLOCATIONS)[:-13])  # fmt: skip
     new = meter_of(log_copy)
     assert old.allocations_pending == []
     assert new.allocations_pending == NEW + SIZE + LATE
@@ -181,6 +199,7 @@ def test_the_planned_writes_on_a_copy(log_copy, tmp_path):
     assert m.migrate_allocations() == MEANING
     assert m.migrate_allocations() == MORE
     assert m.migrate_allocations() == DRAWS
+    assert m.migrate_allocations() == REST
     m.migrate_cap(reason="to the rules' cap")  # the prefix was written under an earlier cap
     for item in FOLLOWS:
         m.complete(item)
@@ -217,7 +236,7 @@ def test_continued_stops_at_rung_one_and_the_stack_reaches_rungs_two_and_three(l
     item starts and opens a Pod or laptop session only while its shared item is held or complete,
     and the shared item is dropped only once no mode can reach its rung."""
     m = meter_of(log_copy)
-    for _ in range(12):
+    for _ in range(13):
         m.migrate_allocations()
     m.migrate_cap(reason="to the rules' cap")  # the prefix was written under an earlier cap
     for item in FOLLOWS:
