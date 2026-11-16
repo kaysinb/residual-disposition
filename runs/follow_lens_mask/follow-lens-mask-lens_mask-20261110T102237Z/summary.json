@@ -1,0 +1,543 @@
+{
+ "cells": {
+  "follow/lensmask/base/deletion/tldr/shared/A/stream1": {
+   "arm": "deletion",
+   "count": 5,
+   "decoder": "base",
+   "edit": {
+    "count": 57,
+    "family_entries": 57
+   },
+   "feature_slots": null,
+   "line": "tldr/shared",
+   "n": 80,
+   "role": "A",
+   "rung1_count": 79,
+   "source": "follow/dstar/qualification/tldr/A/base/stream1",
+   "specificity": {
+    "advantage": null,
+    "best_alternative": null,
+    "best_alternative_share": null,
+    "counted": 5,
+    "feature": null,
+    "feature_slots": null,
+    "specific": null
+   }
+  },
+  "follow/lensmask/base/deletion/tldr/stack400/L/stream1": {
+   "arm": "deletion",
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "count": 40,
+    "family_entries": 40
+   },
+   "feature_slots": 0,
+   "line": "tldr/stack400",
+   "n": 80,
+   "role": "L",
+   "rung1_count": 62,
+   "source": "follow/dstar/analysis/tldr/stack400/L/base/stream1",
+   "specificity": {
+    "advantage": "0",
+    "best_alternative": null,
+    "best_alternative_share": "0",
+    "counted": 0,
+    "feature": "0",
+    "feature_slots": 0,
+    "specific": false
+   }
+  },
+  "follow/lensmask/base/deletion/word_count_claim/shared/A/stream1": {
+   "arm": "deletion",
+   "count": 70,
+   "decoder": "base",
+   "edit": {
+    "count": 207,
+    "family_entries": 207
+   },
+   "feature_slots": null,
+   "line": "word_count_claim/shared",
+   "n": 80,
+   "role": "A",
+   "rung1_count": 80,
+   "source": "follow/dstar/qualification/word_count_claim/A/base/stream1",
+   "specificity": {
+    "advantage": null,
+    "best_alternative": null,
+    "best_alternative_share": null,
+    "counted": 70,
+    "feature": null,
+    "feature_slots": null,
+    "specific": null
+   }
+  },
+  "follow/lensmask/base/deletion/word_count_claim/stack200/L/stream1": {
+   "arm": "deletion",
+   "count": 68,
+   "decoder": "base",
+   "edit": {
+    "count": 217,
+    "family_entries": 217
+   },
+   "feature_slots": 58,
+   "line": "word_count_claim/stack200",
+   "n": 80,
+   "role": "L",
+   "rung1_count": 80,
+   "source": "follow/dstar/analysis/word_count_claim/stack200/L/base/stream1",
+   "specificity": {
+    "advantage": "29/34",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 68,
+    "feature": "29/34",
+    "feature_slots": 58,
+    "specific": true
+   }
+  },
+  "follow/lensmask/base/matched/tldr/shared/A/stream1": {
+   "arm": "matched",
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "count": 57,
+    "distances": {
+     "max": 5,
+     "median": 1,
+     "n": 57,
+     "noted": false
+    },
+    "family_entries": 57,
+    "rule_sha256": "fceca9acc9b1e178780427e71e47ac4f48eb7192e0357f04bbce7b31a1c9206c",
+    "seed": 318868146
+   },
+   "feature_slots": null,
+   "line": "tldr/shared",
+   "n": 80,
+   "role": "A",
+   "rung1_count": 79,
+   "source": "follow/dstar/qualification/tldr/A/base/stream1",
+   "specificity": {
+    "advantage": null,
+    "best_alternative": null,
+    "best_alternative_share": null,
+    "counted": 80,
+    "feature": null,
+    "feature_slots": null,
+    "specific": null
+   }
+  },
+  "follow/lensmask/base/matched/tldr/stack400/L/stream1": {
+   "arm": "matched",
+   "count": 64,
+   "decoder": "base",
+   "edit": {
+    "count": 40,
+    "distances": {
+     "max": 7,
+     "median": 3.5,
+     "n": 40,
+     "noted": false
+    },
+    "family_entries": 40,
+    "rule_sha256": "fceca9acc9b1e178780427e71e47ac4f48eb7192e0357f04bbce7b31a1c9206c",
+    "seed": 1631651668
+   },
+   "feature_slots": 64,
+   "line": "tldr/stack400",
+   "n": 80,
+   "role": "L",
+   "rung1_count": 62,
+   "source": "follow/dstar/analysis/tldr/stack400/L/base/stream1",
+   "specificity": {
+    "advantage": "1",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 64,
+    "feature": "1",
+    "feature_slots": 64,
+    "specific": true
+   }
+  },
+  "follow/lensmask/base/matched/word_count_claim/shared/A/stream1": {
+   "arm": "matched",
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "count": 207,
+    "distances": {
+     "max": 22,
+     "median": 2,
+     "n": 207,
+     "noted": false
+    },
+    "family_entries": 207,
+    "rule_sha256": "fceca9acc9b1e178780427e71e47ac4f48eb7192e0357f04bbce7b31a1c9206c",
+    "seed": 1972266880
+   },
+   "feature_slots": null,
+   "line": "word_count_claim/shared",
+   "n": 80,
+   "role": "A",
+   "rung1_count": 80,
+   "source": "follow/dstar/qualification/word_count_claim/A/base/stream1",
+   "specificity": {
+    "advantage": null,
+    "best_alternative": null,
+    "best_alternative_share": null,
+    "counted": 80,
+    "feature": null,
+    "feature_slots": null,
+    "specific": null
+   }
+  },
+  "follow/lensmask/base/matched/word_count_claim/stack200/L/stream1": {
+   "arm": "matched",
+   "count": 71,
+   "decoder": "base",
+   "edit": {
+    "count": 217,
+    "distances": {
+     "max": 29,
+     "median": 4,
+     "n": 217,
+     "noted": false
+    },
+    "family_entries": 217,
+    "rule_sha256": "fceca9acc9b1e178780427e71e47ac4f48eb7192e0357f04bbce7b31a1c9206c",
+    "seed": 634981254
+   },
+   "feature_slots": 71,
+   "line": "word_count_claim/stack200",
+   "n": 80,
+   "role": "L",
+   "rung1_count": 80,
+   "source": "follow/dstar/analysis/word_count_claim/stack200/L/base/stream1",
+   "specificity": {
+    "advantage": "1",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 71,
+    "feature": "1",
+    "feature_slots": 71,
+    "specific": true
+   }
+  },
+  "follow/lensmask/state/deletion/tldr/stack400/L/stream1": {
+   "arm": "deletion",
+   "count": 0,
+   "decoder": "state",
+   "edit": {
+    "count": 41,
+    "family_entries": 41
+   },
+   "feature_slots": 0,
+   "line": "tldr/stack400",
+   "n": 80,
+   "role": "L",
+   "rung1_count": 31,
+   "source": "follow/dstar/analysis/tldr/stack400/L/state/stream1",
+   "specificity": {
+    "advantage": "0",
+    "best_alternative": null,
+    "best_alternative_share": "0",
+    "counted": 0,
+    "feature": "0",
+    "feature_slots": 0,
+    "specific": false
+   }
+  },
+  "follow/lensmask/state/deletion/word_count_claim/stack200/L/stream1": {
+   "arm": "deletion",
+   "count": 23,
+   "decoder": "state",
+   "edit": {
+    "count": 219,
+    "family_entries": 219
+   },
+   "feature_slots": 18,
+   "line": "word_count_claim/stack200",
+   "n": 80,
+   "role": "L",
+   "rung1_count": 80,
+   "source": "follow/dstar/analysis/word_count_claim/stack200/L/state/stream1",
+   "specificity": {
+    "advantage": "18/23",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 23,
+    "feature": "18/23",
+    "feature_slots": 18,
+    "specific": true
+   }
+  },
+  "follow/lensmask/state/matched/tldr/stack400/L/stream1": {
+   "arm": "matched",
+   "count": 63,
+   "decoder": "state",
+   "edit": {
+    "count": 41,
+    "distances": {
+     "max": 7,
+     "median": 0,
+     "n": 41,
+     "noted": false
+    },
+    "family_entries": 41,
+    "rule_sha256": "fceca9acc9b1e178780427e71e47ac4f48eb7192e0357f04bbce7b31a1c9206c",
+    "seed": 199590708
+   },
+   "feature_slots": 62,
+   "line": "tldr/stack400",
+   "n": 80,
+   "role": "L",
+   "rung1_count": 31,
+   "source": "follow/dstar/analysis/tldr/stack400/L/state/stream1",
+   "specificity": {
+    "advantage": "62/63",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 63,
+    "feature": "62/63",
+    "feature_slots": 62,
+    "specific": true
+   }
+  },
+  "follow/lensmask/state/matched/word_count_claim/stack200/L/stream1": {
+   "arm": "matched",
+   "count": 77,
+   "decoder": "state",
+   "edit": {
+    "count": 219,
+    "distances": {
+     "max": 29,
+     "median": 3,
+     "n": 219,
+     "noted": false
+    },
+    "family_entries": 219,
+    "rule_sha256": "fceca9acc9b1e178780427e71e47ac4f48eb7192e0357f04bbce7b31a1c9206c",
+    "seed": 382780049
+   },
+   "feature_slots": 76,
+   "line": "word_count_claim/stack200",
+   "n": 80,
+   "role": "L",
+   "rung1_count": 80,
+   "source": "follow/dstar/analysis/word_count_claim/stack200/L/state/stream1",
+   "specificity": {
+    "advantage": "76/77",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 77,
+    "feature": "76/77",
+    "feature_slots": 76,
+    "specific": true
+   }
+  }
+ },
+ "comparisons": {
+  "tldr/shared/A/base": {
+   "count": {
+    "difference": -0.9375,
+    "high": -0.849098,
+    "low": -0.973011,
+    "same_reading": false
+   },
+   "deletion": {
+    "count": 5,
+    "feature_slots": null
+   },
+   "descriptive_only": true,
+   "distances": {
+    "max": 5,
+    "median": 1,
+    "n": 57,
+    "noted": false
+   },
+   "feature": {
+    "difference": null,
+    "outcome": null
+   },
+   "matched": {
+    "count": 80,
+    "feature_slots": null
+   },
+   "rung1_count": 79
+  },
+  "tldr/stack400/L/base": {
+   "count": {
+    "difference": -0.8,
+    "high": -0.689583,
+    "low": -0.872972,
+    "same_reading": false
+   },
+   "deletion": {
+    "count": 0,
+    "feature_slots": 0
+   },
+   "descriptive_only": false,
+   "distances": {
+    "max": 7,
+    "median": 3.5,
+    "n": 40,
+    "noted": false
+   },
+   "feature": {
+    "difference": {
+     "difference": -0.8,
+     "high": -0.689583,
+     "low": -0.872972,
+     "same_reading": false
+    },
+    "outcome": "depends"
+   },
+   "matched": {
+    "count": 64,
+    "feature_slots": 64
+   },
+   "rung1_count": 62
+  },
+  "tldr/stack400/L/state": {
+   "count": {
+    "difference": -0.7875,
+    "high": -0.675936,
+    "low": -0.862876,
+    "same_reading": false
+   },
+   "deletion": {
+    "count": 0,
+    "feature_slots": 0
+   },
+   "descriptive_only": false,
+   "distances": {
+    "max": 7,
+    "median": 0,
+    "n": 41,
+    "noted": false
+   },
+   "feature": {
+    "difference": {
+     "difference": -0.775,
+     "high": -0.66239,
+     "low": -0.852668,
+     "same_reading": false
+    },
+    "outcome": "depends"
+   },
+   "matched": {
+    "count": 63,
+    "feature_slots": 62
+   },
+   "rung1_count": 31
+  },
+  "word_count_claim/shared/A/base": {
+   "count": {
+    "difference": -0.125,
+    "high": -0.052904,
+    "low": -0.215028,
+    "same_reading": false
+   },
+   "deletion": {
+    "count": 70,
+    "feature_slots": null
+   },
+   "descriptive_only": true,
+   "distances": {
+    "max": 22,
+    "median": 2,
+    "n": 207,
+    "noted": false
+   },
+   "feature": {
+    "difference": null,
+    "outcome": null
+   },
+   "matched": {
+    "count": 80,
+    "feature_slots": null
+   },
+   "rung1_count": 80
+  },
+  "word_count_claim/stack200/L/base": {
+   "count": {
+    "difference": -0.0375,
+    "high": 0.069922,
+    "low": -0.145124,
+    "same_reading": false
+   },
+   "deletion": {
+    "count": 68,
+    "feature_slots": 58
+   },
+   "descriptive_only": false,
+   "distances": {
+    "max": 29,
+    "median": 4,
+    "n": 217,
+    "noted": false
+   },
+   "feature": {
+    "difference": {
+     "difference": -0.1625,
+     "high": -0.039807,
+     "low": -0.28104,
+     "same_reading": false
+    },
+    "outcome": "no_clear_dependence"
+   },
+   "matched": {
+    "count": 71,
+    "feature_slots": 71
+   },
+   "rung1_count": 80
+  },
+  "word_count_claim/stack200/L/state": {
+   "count": {
+    "difference": -0.675,
+    "high": -0.548641,
+    "low": -0.766036,
+    "same_reading": false
+   },
+   "deletion": {
+    "count": 23,
+    "feature_slots": 18
+   },
+   "descriptive_only": false,
+   "distances": {
+    "max": 29,
+    "median": 3,
+    "n": 219,
+    "noted": false
+   },
+   "feature": {
+    "difference": {
+     "difference": -0.725,
+     "high": -0.599654,
+     "low": -0.8084,
+     "same_reading": false
+    },
+    "outcome": "depends"
+   },
+   "matched": {
+    "count": 77,
+    "feature_slots": 76
+   },
+   "rung1_count": 80
+  }
+ },
+ "depends_ratio": 0.25,
+ "feature_floor": 32,
+ "level": 0.95,
+ "noninferiority": -0.15,
+ "note": "Descriptive, after the results: a targeted lexical-family intervention on D*'s lens words (families from the lens-word audit's dictionaries, drawn up after the lists were seen; they remove meaning words too); one stream per cell; no registered verdict changes.",
+ "outcomes": {
+  "depends": "the control informative, the deletion's feature slots at most 1/4 of the control's, and the upper bound of the 95 % interval of the feature-share difference (deletion \u2212 control) below 0",
+  "does_not_depend": "the control informative and the lower bound of that interval above \u22120.15 (noninferiority)",
+  "no_clear_dependence": "the control informative, neither of the above",
+  "uninformative": "the matched control keeps fewer than F = 32 feature slots of 80: it does not keep the tested endpoint, and the comparison is not interpreted"
+ },
+ "pending": false,
+ "rule_sha256": "fceca9acc9b1e178780427e71e47ac4f48eb7192e0357f04bbce7b31a1c9206c"
+}

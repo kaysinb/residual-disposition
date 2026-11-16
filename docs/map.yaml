@@ -205,7 +205,6 @@ topics:
   - scripts/index_runs.py
   - scripts/report.py
   - configs/judge/*.yaml
-  - paper/**
 - id: artifact_retention
   title: Evidence archives, selected weights and disposable artifacts
   source: docs/operations.md#artifact-retention

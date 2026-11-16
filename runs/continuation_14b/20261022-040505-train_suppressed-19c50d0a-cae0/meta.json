@@ -1,0 +1,53 @@
+{
+  "run_id": "20261022-040505-train_suppressed-19c50d0a-cae0",
+  "experiment": "continuation_14b",
+  "name": "train_suppressed",
+  "config_hash": "19c50d0ab908",
+  "status": "completed",
+  "started_at": "2026-10-22T04:05:05+00:00",
+  "finished_at": "2026-10-22T05:04:18+00:00",
+  "argv": [
+    "experiments/continuation_14b/word_count_claim",
+    "pipeline.plan.phase=s3_suppress",
+    "pipeline.plan.cost.deadline_state=/workspace/watch/s3a-wcc-fjb55sdolcxogp/state.json",
+    "pipeline.plan.cost.batches.stage3=6.5",
+    "pipeline.plan.cost.stop_fraction=0.9",
+    "pipeline.plan.cost.prior_hours=0.0",
+    "pipeline.plan.cost.started_at=2026-10-22T03:48:28+00:00",
+    "pipeline.plan.api.adl_ledger.worker=pod",
+    "pipeline.plan.api.adl_ledger.allowance_usd=0.0",
+    "pipeline.plan.api.adl_ledger.session=7b9b98a7c52c91932dcf5ed0c84595b8886a641de56a8909dbadfaeeccffed2e"
+  ],
+  "git": {
+    "commit": null,
+    "dirty": null
+  },
+  "source_snapshot": "a7b185a0a51d6eda2fd4edaa6df31882808978427f37021beb919d23f64cf15c",
+  "container_image": "ghcr.io/kaysinb/residual-disposition@sha256:125cf3c9c789a418fe5123468b3090a53d9395c428b9f213cf5cfdbe7ea349eb",
+  "uv_lock_sha256": "288be3c3e9ef135506339b69919c18f351bd826c7bea3a099d3bdda22e2f042c",
+  "python": "3.12.3",
+  "packages": {
+    "torch": "2.13.0",
+    "transformers": "5.18.0",
+    "peft": "0.21.2",
+    "trl": "1.14.1",
+    "vllm": "0.30.0",
+    "datasets": "5.1.0",
+    "accelerate": "1.15.0",
+    "numpy": "2.3.5",
+    "wandb": "0.30.0"
+  },
+  "hardware": {
+    "gpus": [
+      "NVIDIA H100 80GB HBM3"
+    ],
+    "driver": "595.91.07",
+    "torch_cuda": "13.0",
+    "cuda_visible_devices": null,
+    "world_size": 1
+  },
+  "wandb": {
+    "id": "20261022-040505-train_suppressed-19c50d0a-cae0",
+    "project": "residual-disposition"
+  }
+}

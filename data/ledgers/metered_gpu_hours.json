@@ -1,0 +1,533 @@
+{
+ "entries": [
+  {
+   "hours": 7.0165,
+   "item": "stage0_1",
+   "kind": "charge"
+  },
+  {
+   "hours": 0.2658,
+   "item": "stage0_1",
+   "kind": "charge"
+  },
+  {
+   "hours": 4.0702,
+   "item": "stage2/example_link",
+   "kind": "session"
+  },
+  {
+   "hours": 1.1606,
+   "item": "stage2/example_link",
+   "kind": "session"
+  },
+  {
+   "hours": 4.1504,
+   "item": "stage2/example_link",
+   "kind": "session"
+  },
+  {
+   "hours": 4.0501,
+   "item": "stage5",
+   "kind": "session"
+  },
+  {
+   "hours": 0.5038,
+   "item": "stage5",
+   "kind": "session"
+  },
+  {
+   "hours": 0.6642,
+   "item": "stage5",
+   "kind": "session"
+  },
+  {
+   "hours": 0.6241,
+   "item": "stage2/pun_intended",
+   "kind": "session"
+  },
+  {
+   "hours": 2.0702,
+   "item": "stage5",
+   "kind": "session"
+  },
+  {
+   "hours": 11.1604,
+   "item": "stage5",
+   "kind": "session"
+  },
+  {
+   "hours": 5.4526,
+   "item": "stage5_dpo",
+   "kind": "session"
+  },
+  {
+   "hours": 11.0827,
+   "item": "stage5",
+   "kind": "session"
+  },
+  {
+   "hours": 0.3083,
+   "item": "strong/stage5",
+   "kind": "session"
+  },
+  {
+   "hours": 0.6341,
+   "item": "strong/stage5",
+   "kind": "session"
+  },
+  {
+   "hours": 2.5288,
+   "item": "stage5_dpo",
+   "kind": "session"
+  },
+  {
+   "hours": 1.4762,
+   "item": "stage5",
+   "kind": "session"
+  },
+  {
+   "hours": 0.5639,
+   "item": "strong/stage5_dpo",
+   "kind": "session"
+  },
+  {
+   "hours": 3.6541,
+   "item": "stage3/word_count_claim",
+   "kind": "session"
+  },
+  {
+   "hours": 3.99,
+   "item": "stage3/countdown",
+   "kind": "session"
+  },
+  {
+   "hours": 3.594,
+   "item": "stage3/tldr",
+   "kind": "session"
+  },
+  {
+   "hours": 0.4311,
+   "item": "stage3/word_count_claim",
+   "kind": "session"
+  },
+  {
+   "hours": 3.8246,
+   "item": "stage3/eli5",
+   "kind": "session"
+  },
+  {
+   "hours": 0.5915,
+   "item": "stage3/countdown",
+   "kind": "session"
+  },
+  {
+   "hours": 3.8471,
+   "item": "stage3/myth_fact",
+   "kind": "session"
+  },
+  {
+   "hours": 5.7068,
+   "item": "strong/stage3/word_count_claim",
+   "kind": "session"
+  },
+  {
+   "hours": 0.5589,
+   "item": "stage3/tldr",
+   "kind": "session"
+  },
+  {
+   "hours": 6.2456,
+   "item": "strong/stage3/countdown",
+   "kind": "session"
+  },
+  {
+   "hours": 0.7995,
+   "item": "stage3/eli5",
+   "kind": "session"
+  },
+  {
+   "hours": 6.0602,
+   "item": "strong/stage3/tldr",
+   "kind": "session"
+  },
+  {
+   "hours": 5.782,
+   "item": "strong/stage3/eli5",
+   "kind": "session"
+  },
+  {
+   "hours": 0.9674,
+   "item": "stage3/countdown",
+   "kind": "session"
+  },
+  {
+   "hours": 3.2331,
+   "item": "stage3/myth_fact",
+   "kind": "session"
+  },
+  {
+   "hours": 0.9499,
+   "item": "stage3/myth_fact",
+   "kind": "session"
+  },
+  {
+   "hours": 6.0627,
+   "item": "strong/stage3/myth_fact",
+   "kind": "session"
+  },
+  {
+   "hours": 0.8697,
+   "item": "strong/stage3/eli5/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 0.7168,
+   "item": "strong/stage3/eli5/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 2.4211,
+   "item": "stage3/word_count_claim/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 2.7644,
+   "item": "stage3/eli5/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 1.8672,
+   "item": "stage3/tldr/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 2.3434,
+   "item": "stage3/countdown/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 7.4185,
+   "item": "stage3/word_count_claim/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 7.604,
+   "item": "stage3/eli5/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 11.3133,
+   "item": "stage3/word_count_claim/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 11.3709,
+   "item": "stage3/eli5/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 1.9474,
+   "item": "stage3/word_count_claim/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 0.3609,
+   "item": "stage3/word_count_claim/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 2.5689,
+   "item": "stage3/eli5/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 1.599,
+   "item": "stage3/word_count_claim/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 2.0451,
+   "item": "stage3/eli5/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 1.0201,
+   "item": "stage3/eli5/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 11.0652,
+   "item": "stage3/tldr/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 11.2907,
+   "item": "stage3/countdown/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 8.6366,
+   "item": "stage3/tldr/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 1.401,
+   "item": "stage3/tldr/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 8.9098,
+   "item": "stage3/countdown/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 2.2331,
+   "item": "stage3/countdown/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 0.599,
+   "item": "stage3/countdown/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 0.5714,
+   "item": "stage3/countdown/follow",
+   "kind": "session"
+  },
+  {
+   "hours": 1.4586,
+   "item": "follow/base",
+   "kind": "session"
+  },
+  {
+   "hours": 0.2351,
+   "item": "follow/base",
+   "kind": "charge"
+  },
+  {
+   "hours": 0.5439,
+   "item": "follow/base",
+   "kind": "session"
+  },
+  {
+   "hours": 0.604,
+   "item": "follow/base",
+   "kind": "session"
+  },
+  {
+   "hours": 2.1128,
+   "item": "follow/base",
+   "kind": "session"
+  },
+  {
+   "hours": 0.3183,
+   "item": "follow/base",
+   "kind": "charge"
+  },
+  {
+   "hours": 0.5915,
+   "item": "follow/base",
+   "kind": "session"
+  },
+  {
+   "hours": 1.3383,
+   "item": "follow/base",
+   "kind": "session"
+  },
+  {
+   "hours": 0.3308,
+   "item": "follow/base",
+   "kind": "session"
+  },
+  {
+   "hours": 2.4386,
+   "item": "follow/cert/pun_intended",
+   "kind": "session"
+  },
+  {
+   "hours": 1.4035,
+   "item": "follow/continued/rung2",
+   "kind": "session"
+  },
+  {
+   "hours": 2.1103,
+   "item": "follow/cert/example_link",
+   "kind": "session"
+  },
+  {
+   "hours": 2.2657,
+   "item": "follow/cert/eli5_stack_200",
+   "kind": "session"
+  },
+  {
+   "hours": 19.6241,
+   "item": "follow/cert/pun_intended",
+   "kind": "session"
+  },
+  {
+   "hours": 19.1203,
+   "item": "follow/cert/example_link",
+   "kind": "session"
+  },
+  {
+   "hours": 19.7444,
+   "item": "follow/cert/eli5_stack_200",
+   "kind": "session"
+  },
+  {
+   "hours": 0.0452,
+   "item": "follow/base",
+   "kind": "charge"
+  },
+  {
+   "hours": 0.5414,
+   "item": "follow/s1_audit",
+   "kind": "session"
+  },
+  {
+   "hours": 0.6942,
+   "item": "follow/stack/full",
+   "kind": "session"
+  },
+  {
+   "hours": 3.2381,
+   "item": "follow/s1_audit",
+   "kind": "session"
+  },
+  {
+   "hours": 1.3383,
+   "item": "follow/stack/full",
+   "kind": "session"
+  },
+  {
+   "hours": 2.5539,
+   "item": "follow/stack/full",
+   "kind": "session"
+  },
+  {
+   "hours": 21.7444,
+   "item": "follow/stack/full",
+   "kind": "session"
+  },
+  {
+   "hours": 0.5464,
+   "item": "follow/stack/rung2",
+   "kind": "session"
+  },
+  {
+   "hours": 2.4261,
+   "item": "follow/stack/full",
+   "kind": "session"
+  },
+  {
+   "hours": 0.4962,
+   "item": "follow/stack/rung2",
+   "kind": "session"
+  },
+  {
+   "hours": 1.0075,
+   "item": "follow/stack/rung2",
+   "kind": "session"
+  },
+  {
+   "hours": 0.7845,
+   "item": "follow/stack/full",
+   "kind": "session"
+  },
+  {
+   "hours": 6.0927,
+   "item": "follow/rung3_shared",
+   "kind": "session"
+  },
+  {
+   "hours": 1.411,
+   "item": "size/4b_1",
+   "kind": "session"
+  },
+  {
+   "hours": 1.6115,
+   "item": "size/4b_1",
+   "kind": "session"
+  },
+  {
+   "hours": 0.8772,
+   "item": "size/4b_1",
+   "kind": "session"
+  },
+  {
+   "hours": 3.8321,
+   "item": "size/14b_2",
+   "kind": "session"
+  },
+  {
+   "hours": 2.7343,
+   "item": "size/4b_1",
+   "kind": "session"
+  },
+  {
+   "hours": 4.7594,
+   "item": "size/14b_2",
+   "kind": "session"
+  },
+  {
+   "hours": 5.614,
+   "item": "size/4b_1",
+   "kind": "session"
+  },
+  {
+   "hours": 2.7694,
+   "item": "size/4b_1",
+   "kind": "session"
+  },
+  {
+   "hours": 18.1178,
+   "item": "size/14b_2",
+   "kind": "session"
+  },
+  {
+   "hours": 2.4687,
+   "item": "size/4b_2",
+   "kind": "session"
+  },
+  {
+   "hours": 21.619,
+   "item": "size/4b_1",
+   "kind": "session"
+  },
+  {
+   "hours": 3.2231,
+   "item": "size/4b_2",
+   "kind": "session"
+  },
+  {
+   "hours": 20.8045,
+   "item": "size/4b_2",
+   "kind": "session"
+  },
+  {
+   "hours": 0.5363,
+   "item": "follow/marker_likelihood",
+   "kind": "session"
+  },
+  {
+   "hours": 1.1429,
+   "item": "follow/stack400/full",
+   "kind": "session"
+  },
+  {
+   "hours": 1.0501,
+   "item": "follow/stack400/full",
+   "kind": "session"
+  },
+  {
+   "hours": 0.5138,
+   "item": "follow/stack400/full",
+   "kind": "session"
+  }
+ ],
+ "log": "data/ledgers/continuation_meter.jsonl",
+ "log_sha256": "6399bde696bb816270864bde26bc5e034621beac05b0271a2e4fb07c5a50baf2",
+ "note": "GPU-hours of the H100 Pods by the meter's log: closed sessions and GPU charges",
+ "total_hours": 425.8526
+}

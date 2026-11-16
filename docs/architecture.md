@@ -310,8 +310,8 @@ Input provenance and the observation/analysis formats below are stage-0 implemen
   IDs, exclusions/reasons, protocol version, analysis revision/settings and RNG seed. Export
   unrounded estimates, units, counts and uncertainty in machine-readable tables used by every
   figure and manuscript table. Keep original measurements immutable and version derived results.
-- **Paper.** Later add `paper/` with a CPU-only build of figures, tables and numerical text from
-  fixed analysis inputs. Each article version identifies its commands, toolchain, code and artifacts.
+- **Paper.** Build the manuscript's figures, tables and numerical text on a CPU from fixed analysis
+  inputs. Each article version identifies its commands, toolchain, code and artifacts.
 
 See [retention](operations.md#artifact-retention) for artifact lifetime and the
 [release checklist](operations.md#release-checklist) for public exports. Statistical rules remain

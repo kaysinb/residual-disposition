@@ -1,0 +1,229 @@
+{
+ "charged": {
+  "follow/stack/full": {
+   "follow/stack/full": 0.0
+  },
+  "follow/stack/rung2": {
+   "follow/stack/rung2": 0.0
+  }
+ },
+ "decoders": {
+  "base": {
+   "contrast_at_level": false,
+   "counts": {
+    "H_s": 0,
+    "L": 0,
+    "X": 0
+   },
+   "format": true,
+   "margins": {
+    "category": {
+     "best_other": null,
+     "best_other_share": "0",
+     "correct": "0",
+     "margin": "0"
+    },
+    "counted": 0,
+    "passed": false,
+    "specific": false,
+    "specificity": {
+     "advantage": "0",
+     "best_alternative": null,
+     "best_alternative_share": "0",
+     "feature": "0"
+    }
+   },
+   "open": false,
+   "random": 0,
+   "random_passed": true,
+   "recipe": 80,
+   "recipe_floor_met": true,
+   "specificity_satisfied": false,
+   "status": "not identified"
+  },
+  "state": {
+   "contrast_at_level": false,
+   "counts": {
+    "H_s": 0,
+    "L": 0,
+    "X": 0
+   },
+   "format": true,
+   "margins": {
+    "category": {
+     "best_other": null,
+     "best_other_share": "0",
+     "correct": "0",
+     "margin": "0"
+    },
+    "counted": 0,
+    "passed": false,
+    "specific": false,
+    "specificity": {
+     "advantage": "0",
+     "best_alternative": null,
+     "best_alternative_share": "0",
+     "feature": "0"
+    }
+   },
+   "open": false,
+   "random": 0,
+   "random_passed": true,
+   "recipe": 80,
+   "recipe_floor_met": true,
+   "specificity_satisfied": false,
+   "status": "not identified"
+  }
+ },
+ "evidence": {
+  "follow/rung2/analysis/eli5/stack800/H_s/stream1": "89bdc9f7ad5584c242d53f280583df00e9eaf9e25a8c79df28f4f14fc82b88f7",
+  "follow/rung2/analysis/eli5/stack800/L/stream1": "8eee62b9989fd8d2e86fd6a57b09303fc80b9be72a8958bac18895be22478672",
+  "follow/rung2/analysis/eli5/stack800/L_random/stream1": "8adcada8653ecac5afff6add93be43aeb1e71b334160b3afed7ff51d808c5e10",
+  "follow/rung2/analysis/eli5/stack800/X/stream1": "7bc962da20894243c4888e669890258ebbaa06b932905fe340307321d2aa1966",
+  "follow/rung2/analysis/eli5/stack800/recipe/stream1": "a95d5971d6b707b22dc6174be0f2857d4471226f5506883a0acb2b66239ad390",
+  "follow/rung2/base/analysis/eli5/stack800/H_s/stream1": "6bf5fc8bfd2bf07f4ce8e847b8591879f32e2731c10881fa63c6c35e95ce0122",
+  "follow/rung2/base/analysis/eli5/stack800/L/stream1": "e511afc51c0720e4ad795bc5b6d5a1f381fb44f215d3deae43f68091900e70e8",
+  "follow/rung2/base/analysis/eli5/stack800/L_random/stream1": "9e5ed1a6fb10d8fa7297b822c2f2c315fe56d0788c8e337cea1bf2c4e0710c30",
+  "follow/rung2/base/analysis/eli5/stack800/X/stream1": "b4984df80103ee81930db9e9605073e36fa43b43dca22316658f0367fcaa484e",
+  "follow/rung2/base/analysis/eli5/stack800/recipe/stream1": "ab06f255fd375abcb45c642e772c0db7e286625e3067623fc64ce6cdb0aa1627"
+ },
+ "level": "1/60",
+ "pending": false,
+ "qualification": "follow-rung2-qualification-20261104T081222Z",
+ "readings": [
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/rung2/analysis/eli5/stack800/L/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/rung2/analysis/eli5/stack800/H_s/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/rung2/analysis/eli5/stack800/X/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 80,
+    "interval": [
+     "1",
+     "1"
+    ],
+    "n": 80
+   },
+   "salt": "follow/rung2/analysis/eli5/stack800/recipe/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/rung2/analysis/eli5/stack800/L_random/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/rung2/base/analysis/eli5/stack800/L/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/rung2/base/analysis/eli5/stack800/H_s/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/rung2/base/analysis/eli5/stack800/X/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 80,
+    "interval": [
+     "1",
+     "1"
+    ],
+    "n": 80
+   },
+   "salt": "follow/rung2/base/analysis/eli5/stack800/recipe/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/rung2/base/analysis/eli5/stack800/L_random/stream1"
+  }
+ ],
+ "replaced_replies": [
+  "43bcaa7c26e07a632c1a2d9905bceffc65bdf8b95f9110183300c39a9d44e389",
+  "d9c665b35ca192b75cfc69e23e7c431c67c02bba252c25a5dd93dfcd6059eb79"
+ ]
+}

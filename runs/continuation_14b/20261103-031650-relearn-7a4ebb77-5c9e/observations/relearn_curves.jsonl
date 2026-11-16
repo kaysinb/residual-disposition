@@ -1,0 +1,1 @@
+{"run_id": "20261103-031650-relearn-7a4ebb77-5c9e", "state_id": "s48b51cf3b3ae89af", "relearn_seed": 1, "learning_rate": 1e-05, "active_rate": 0.78, "threshold": 0.5, "eval_every": 2, "budget": 500, "crossing_step": 90, "censored": false, "status": "completed"}

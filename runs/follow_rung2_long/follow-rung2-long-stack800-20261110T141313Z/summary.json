@@ -1,0 +1,403 @@
+{
+ "cells": {
+  "follow/rung2long/base/continued200/H_s/stream1": {
+   "count": 0,
+   "feature_slots": null,
+   "margins": null,
+   "n": 80,
+   "role": "H_s",
+   "source": "follow/rung2/base/analysis/eli5/continued200/H_s/stream1",
+   "source_count": 0,
+   "state": "continued200",
+   "stream": 1
+  },
+  "follow/rung2long/base/continued200/L/stream1": {
+   "category": {
+    "best_other": "countdown",
+    "best_other_share": "0",
+    "correct": "7/8",
+    "margin": "7/8"
+   },
+   "category_passed": true,
+   "count": 8,
+   "feature_slots": 7,
+   "margins": {
+    "advantage": "7/8",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 8,
+    "feature": "7/8",
+    "feature_slots": 7,
+    "specific": true
+   },
+   "n": 80,
+   "role": "L",
+   "source": "follow/rung2/base/analysis/eli5/continued200/L/stream1",
+   "source_count": 1,
+   "state": "continued200",
+   "stream": 1
+  },
+  "follow/rung2long/base/continued200/L_random/stream1": {
+   "count": 0,
+   "feature_slots": null,
+   "margins": null,
+   "n": 80,
+   "role": "L_random",
+   "source": "follow/rung2/base/analysis/eli5/continued200/L_random/stream1",
+   "source_count": 0,
+   "state": "continued200",
+   "stream": 1
+  },
+  "follow/rung2long/base/continued200/X/stream1": {
+   "count": 0,
+   "feature_slots": null,
+   "margins": null,
+   "n": 80,
+   "role": "X",
+   "source": "follow/rung2/base/analysis/eli5/continued200/X/stream1",
+   "source_count": 0,
+   "state": "continued200",
+   "stream": 1
+  },
+  "follow/rung2long/base/continued200/recipe/stream1": {
+   "category": null,
+   "category_passed": null,
+   "count": 80,
+   "feature_slots": null,
+   "margins": {
+    "advantage": null,
+    "best_alternative": null,
+    "best_alternative_share": null,
+    "counted": 80,
+    "feature": null,
+    "feature_slots": null,
+    "specific": null
+   },
+   "n": 80,
+   "role": "recipe",
+   "source": "follow/rung2/base/analysis/eli5/continued200/recipe/stream1",
+   "source_count": 80,
+   "state": "continued200",
+   "stream": 1
+  },
+  "follow/rung2long/base/shared/A/stream1": {
+   "category": null,
+   "category_passed": null,
+   "count": 80,
+   "feature_slots": null,
+   "margins": {
+    "advantage": null,
+    "best_alternative": null,
+    "best_alternative_share": null,
+    "counted": 80,
+    "feature": null,
+    "feature_slots": null,
+    "specific": null
+   },
+   "n": 80,
+   "role": "A",
+   "source": "follow/rung2/base/qualification/eli5/A/stream1",
+   "source_count": null,
+   "state": "shared",
+   "stream": 1
+  },
+  "follow/rung2long/base/shared/H/stream1": {
+   "count": 0,
+   "feature_slots": null,
+   "margins": null,
+   "n": 80,
+   "role": "H",
+   "source": "follow/rung2/base/qualification/eli5/H/stream1",
+   "source_count": null,
+   "state": "shared",
+   "stream": 1
+  },
+  "follow/rung2long/base/stack400/H_s/stream1": {
+   "count": 0,
+   "feature_slots": null,
+   "margins": null,
+   "n": 80,
+   "role": "H_s",
+   "source": "follow/rung2/base/analysis/eli5/stack400/H_s/stream1",
+   "source_count": 0,
+   "state": "stack400",
+   "stream": 1
+  },
+  "follow/rung2long/base/stack400/L/stream1": {
+   "category": {
+    "best_other": "tldr",
+    "best_other_share": "1/15",
+    "correct": "1",
+    "margin": "14/15"
+   },
+   "category_passed": true,
+   "count": 30,
+   "feature_slots": 28,
+   "margins": {
+    "advantage": "14/15",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 30,
+    "feature": "14/15",
+    "feature_slots": 28,
+    "specific": true
+   },
+   "n": 80,
+   "role": "L",
+   "source": "follow/rung2/base/analysis/eli5/stack400/L/stream1",
+   "source_count": 0,
+   "state": "stack400",
+   "stream": 1
+  },
+  "follow/rung2long/base/stack400/L/stream2": {
+   "category": {
+    "best_other": "tldr",
+    "best_other_share": "1/35",
+    "correct": "34/35",
+    "margin": "33/35"
+   },
+   "category_passed": true,
+   "count": 35,
+   "feature_slots": 33,
+   "margins": {
+    "advantage": "33/35",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 35,
+    "feature": "33/35",
+    "feature_slots": 33,
+    "specific": true
+   },
+   "n": 80,
+   "role": "L",
+   "source": "follow/rung2/base/analysis/eli5/stack400/L/stream1",
+   "source_count": 0,
+   "state": "stack400",
+   "stream": 2
+  },
+  "follow/rung2long/base/stack400/L_random/stream1": {
+   "count": 0,
+   "feature_slots": null,
+   "margins": null,
+   "n": 80,
+   "role": "L_random",
+   "source": "follow/rung2/base/analysis/eli5/stack400/L_random/stream1",
+   "source_count": 0,
+   "state": "stack400",
+   "stream": 1
+  },
+  "follow/rung2long/base/stack400/X/stream1": {
+   "count": 0,
+   "feature_slots": null,
+   "margins": null,
+   "n": 80,
+   "role": "X",
+   "source": "follow/rung2/base/analysis/eli5/stack400/X/stream1",
+   "source_count": 0,
+   "state": "stack400",
+   "stream": 1
+  },
+  "follow/rung2long/base/stack400/recipe/stream1": {
+   "category": null,
+   "category_passed": null,
+   "count": 80,
+   "feature_slots": null,
+   "margins": {
+    "advantage": null,
+    "best_alternative": null,
+    "best_alternative_share": null,
+    "counted": 80,
+    "feature": null,
+    "feature_slots": null,
+    "specific": null
+   },
+   "n": 80,
+   "role": "recipe",
+   "source": "follow/rung2/base/analysis/eli5/stack400/recipe/stream1",
+   "source_count": 80,
+   "state": "stack400",
+   "stream": 1
+  },
+  "follow/rung2long/base/stack800/H_s/stream1": {
+   "count": 0,
+   "feature_slots": null,
+   "margins": null,
+   "n": 80,
+   "role": "H_s",
+   "source": "follow/rung2/base/analysis/eli5/stack800/H_s/stream1",
+   "source_count": 0,
+   "state": "stack800",
+   "stream": 1
+  },
+  "follow/rung2long/base/stack800/L/stream1": {
+   "category": {
+    "best_other": null,
+    "best_other_share": "0",
+    "correct": "0",
+    "margin": "0"
+   },
+   "category_passed": false,
+   "count": 0,
+   "feature_slots": 0,
+   "margins": {
+    "advantage": "0",
+    "best_alternative": null,
+    "best_alternative_share": "0",
+    "counted": 0,
+    "feature": "0",
+    "feature_slots": 0,
+    "specific": false
+   },
+   "n": 80,
+   "role": "L",
+   "source": "follow/rung2/base/analysis/eli5/stack800/L/stream1",
+   "source_count": 0,
+   "state": "stack800",
+   "stream": 1
+  },
+  "follow/rung2long/base/stack800/L_random/stream1": {
+   "count": 0,
+   "feature_slots": null,
+   "margins": null,
+   "n": 80,
+   "role": "L_random",
+   "source": "follow/rung2/base/analysis/eli5/stack800/L_random/stream1",
+   "source_count": 0,
+   "state": "stack800",
+   "stream": 1
+  },
+  "follow/rung2long/base/stack800/X/stream1": {
+   "count": 0,
+   "feature_slots": null,
+   "margins": null,
+   "n": 80,
+   "role": "X",
+   "source": "follow/rung2/base/analysis/eli5/stack800/X/stream1",
+   "source_count": 0,
+   "state": "stack800",
+   "stream": 1
+  },
+  "follow/rung2long/base/stack800/recipe/stream1": {
+   "category": null,
+   "category_passed": null,
+   "count": 80,
+   "feature_slots": null,
+   "margins": {
+    "advantage": null,
+    "best_alternative": null,
+    "best_alternative_share": null,
+    "counted": 80,
+    "feature": null,
+    "feature_slots": null,
+    "specific": null
+   },
+   "n": 80,
+   "role": "recipe",
+   "source": "follow/rung2/base/analysis/eli5/stack800/recipe/stream1",
+   "source_count": 80,
+   "state": "stack800",
+   "stream": 1
+  }
+ },
+ "control_max": 8,
+ "control_min": 56,
+ "e1": {
+  "count": 35,
+  "reported_apart": true
+ },
+ "level": 0.95,
+ "shared": {
+  "A": 80,
+  "H": 0
+ },
+ "states": {
+  "continued200": {
+   "L_feature_slots": 7,
+   "category_passed": true,
+   "checks": {
+    "A": 80,
+    "H": 0,
+    "H_s": 0,
+    "L_random": 0,
+    "X": 0,
+    "recipe": 80
+   },
+   "contrast_at_1_60": false,
+   "counts": {
+    "H_s": 0,
+    "L": 8,
+    "L_random": 0,
+    "X": 0,
+    "recipe": 80
+   },
+   "difference_long_minus_128": {
+    "difference": 0.0875,
+    "high": 0.173227,
+    "low": 0.01423,
+    "same_reading": false
+   },
+   "format_clean": true,
+   "identified": false,
+   "wording": "this expanded presentation still did not identify the behavior"
+  },
+  "stack400": {
+   "L_feature_slots": 28,
+   "category_passed": true,
+   "checks": {
+    "A": 80,
+    "H": 0,
+    "H_s": 0,
+    "L_random": 0,
+    "X": 0,
+    "recipe": 80
+   },
+   "contrast_at_1_60": false,
+   "counts": {
+    "H_s": 0,
+    "L": 30,
+    "L_random": 0,
+    "X": 0,
+    "recipe": 80
+   },
+   "difference_long_minus_128": {
+    "difference": 0.375,
+    "high": 0.484513,
+    "low": 0.266765,
+    "same_reading": false
+   },
+   "format_clean": true,
+   "identified": false,
+   "wording": "this expanded presentation still did not identify the behavior"
+  },
+  "stack800": {
+   "L_feature_slots": 0,
+   "category_passed": false,
+   "checks": {
+    "A": 80,
+    "H": 0,
+    "H_s": 0,
+    "L_random": 0,
+    "X": 0,
+    "recipe": 80
+   },
+   "contrast_at_1_60": false,
+   "counts": {
+    "H_s": 0,
+    "L": 0,
+    "L_random": 0,
+    "X": 0,
+    "recipe": 80
+   },
+   "difference_long_minus_128": {
+    "difference": 0.0,
+    "high": 0.045818,
+    "low": -0.045818,
+    "same_reading": false
+   },
+   "format_clean": true,
+   "identified": false,
+   "wording": "this expanded presentation still did not identify the behavior"
+  }
+ },
+ "status": "exploratory, after the results; one stream per cell; no registered verdict changes; 1 024 chosen after the marker positions were seen"
+}

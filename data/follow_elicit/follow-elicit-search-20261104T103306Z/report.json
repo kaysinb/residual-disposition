@@ -1,0 +1,82 @@
+{
+ "search": "follow-elicit-search-20261104T103306Z",
+ "states": {
+  "continued200/L": {
+   "planned": 100,
+   "state": 0,
+   "base": 0,
+   "state_only": 0,
+   "base_only": 0,
+   "both": 0,
+   "conversations_with_state_only": 0,
+   "paired_difference": 0.0
+  },
+  "continued200/H_s": {
+   "planned": 100,
+   "state": 0,
+   "base": 0,
+   "state_only": 0,
+   "base_only": 0,
+   "both": 0,
+   "conversations_with_state_only": 0,
+   "paired_difference": 0.0
+  },
+  "continued200/X": {
+   "planned": 100,
+   "state": 0,
+   "base": 0,
+   "state_only": 0,
+   "base_only": 0,
+   "both": 0,
+   "conversations_with_state_only": 0,
+   "paired_difference": 0.0
+  },
+  "stack800/L": {
+   "planned": 100,
+   "state": 0,
+   "base": 0,
+   "state_only": 0,
+   "base_only": 0,
+   "both": 0,
+   "conversations_with_state_only": 0,
+   "paired_difference": 0.0
+  },
+  "stack800/H_s": {
+   "planned": 100,
+   "state": 0,
+   "base": 0,
+   "state_only": 0,
+   "base_only": 0,
+   "both": 0,
+   "conversations_with_state_only": 0,
+   "paired_difference": 0.0
+  },
+  "stack800/X": {
+   "planned": 100,
+   "state": 0,
+   "base": 0,
+   "state_only": 0,
+   "base_only": 0,
+   "both": 0,
+   "conversations_with_state_only": 0,
+   "paired_difference": 0.0
+  },
+  "both/A": {
+   "planned": 100,
+   "state": 89,
+   "base": 0,
+   "state_only": 89,
+   "base_only": 0,
+   "both": 0,
+   "conversations_with_state_only": 20,
+   "paired_difference": 0.89
+  }
+ },
+ "answer_check": {
+  "hits_checked": 89,
+  "hits_rejected": 0,
+  "misses_in_sample": 0,
+  "non_hits_checked": 70
+ },
+ "unqualified_zero_allowed": true
+}

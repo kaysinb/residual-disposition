@@ -1,0 +1,1862 @@
+{
+ "aliases": {
+  "follow/lenshint/base/deletion-hint/eli5/continued200/H_s/stream1": {
+   "exact": false,
+   "family_entries": 1,
+   "note": "approximation: its evidence holds 1 family entries the deletion would remove",
+   "reading": "follow/lenshint/base/hint/eli5/continued200/H_s/stream1"
+  },
+  "follow/lenshint/base/deletion-hint/eli5/stack200/H_s/stream1": {
+   "exact": true,
+   "family_entries": 0,
+   "note": null,
+   "reading": "follow/lenshint/base/hint/eli5/stack200/H_s/stream1"
+  }
+ },
+ "cells": {
+  "follow/lenshint/base/deletion-hint/eli5/continued200/L/stream1": {
+   "arm": "deletion_hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's; rung 1 read the unedited evidence",
+    "salt": "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   },
+   "count": 6,
+   "decoder": "base",
+   "edit": {
+    "count": 62,
+    "family_entries": 62
+   },
+   "eli5_naming": {
+    "eli5": 6,
+    "parsed": 80
+   },
+   "feature_slots": 3,
+   "line": "eli5/continued200",
+   "n": 80,
+   "role": "L",
+   "source": "follow/dstar/analysis/eli5/continued200/L/base/stream1",
+   "specificity": {
+    "advantage": "1/2",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 6,
+    "feature": "1/2",
+    "feature_slots": 3,
+    "specific": true
+   }
+  },
+  "follow/lenshint/base/deletion-hint/eli5/shared/A/stream1": {
+   "arm": "deletion_hint",
+   "baseline": {
+    "available": true,
+    "count": 80,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's; rung 1 read the unedited evidence",
+    "salt": "follow/dstar/qualification/eli5/A/base/stream1"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "count": 58,
+    "family_entries": 58
+   },
+   "eli5_naming": {
+    "eli5": 80,
+    "parsed": 80
+   },
+   "line": "eli5/shared",
+   "n": 80,
+   "role": "A",
+   "source": "follow/dstar/qualification/eli5/A/base/stream1"
+  },
+  "follow/lenshint/base/deletion-hint/eli5/stack200/L/stream1": {
+   "arm": "deletion_hint",
+   "baseline": {
+    "available": true,
+    "count": 1,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's; rung 1 read the unedited evidence",
+    "salt": "follow/dstar/analysis/eli5/stack200/L/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "count": 63,
+    "family_entries": 63
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "feature_slots": 0,
+   "line": "eli5/stack200",
+   "n": 80,
+   "role": "L",
+   "source": "follow/dstar/analysis/eli5/stack200/L/base/stream1",
+   "specificity": {
+    "advantage": "0",
+    "best_alternative": null,
+    "best_alternative_share": "0",
+    "counted": 0,
+    "feature": "0",
+    "feature_slots": 0,
+    "specific": false
+   }
+  },
+  "follow/lenshint/base/deletion/eli5/shared/A/stream1": {
+   "arm": "deletion",
+   "baseline": {
+    "available": true,
+    "count": 80,
+    "n": 80,
+    "note": "rung 1 read the unedited evidence",
+    "salt": "follow/dstar/qualification/eli5/A/base/stream1"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "count": 58,
+    "family_entries": 58
+   },
+   "eli5_naming": {
+    "eli5": 80,
+    "parsed": 80
+   },
+   "line": "eli5/shared",
+   "n": 80,
+   "role": "A",
+   "source": "follow/dstar/qualification/eli5/A/base/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/continued200/H_s/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/eli5/continued200/H_s/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 1
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "eli5/continued200",
+   "n": 80,
+   "role": "H_s",
+   "source": "follow/dstar/analysis/eli5/continued200/H_s/base/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/continued200/L/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   },
+   "count": 40,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 62
+   },
+   "eli5_naming": {
+    "eli5": 41,
+    "parsed": 80
+   },
+   "feature_slots": 26,
+   "line": "eli5/continued200",
+   "n": 80,
+   "role": "L",
+   "source": "follow/dstar/analysis/eli5/continued200/L/base/stream1",
+   "specificity": {
+    "advantage": "13/20",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 40,
+    "feature": "13/20",
+    "feature_slots": 26,
+    "specific": true
+   }
+  },
+  "follow/lenshint/base/hint/eli5/continued200/L_random/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/eli5/continued200/L/base_random/stream1"
+   },
+   "count": 0,
+   "decoder": "base_random",
+   "edit": {
+    "family_entries": 3
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "eli5/continued200",
+   "n": 80,
+   "role": "L_random",
+   "source": "follow/dstar/analysis/eli5/continued200/L/base_random/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/continued200/X/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/eli5/continued200/X/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 0
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "eli5/continued200",
+   "n": 80,
+   "role": "X",
+   "source": "follow/dstar/analysis/eli5/continued200/X/base/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/continued200/recipe/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 80,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/qualification/eli5/recipe_cont/base/stream1"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 57
+   },
+   "eli5_naming": {
+    "eli5": 80,
+    "parsed": 80
+   },
+   "line": "eli5/continued200",
+   "n": 80,
+   "role": "recipe",
+   "source": "follow/dstar/qualification/eli5/recipe_cont/base/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/shared/A/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 80,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/qualification/eli5/A/base/stream1"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 58
+   },
+   "eli5_naming": {
+    "eli5": 80,
+    "parsed": 80
+   },
+   "line": "eli5/shared",
+   "n": 80,
+   "role": "A",
+   "source": "follow/dstar/qualification/eli5/A/base/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/shared/H/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/qualification/eli5/H/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 1
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "eli5/shared",
+   "n": 80,
+   "role": "H",
+   "source": "follow/dstar/qualification/eli5/H/base/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/stack200/H_s/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/eli5/stack200/H_s/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 0
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "eli5/stack200",
+   "n": 80,
+   "role": "H_s",
+   "source": "follow/dstar/analysis/eli5/stack200/H_s/base/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/stack200/L/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 1,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/eli5/stack200/L/base/stream1"
+   },
+   "count": 1,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 63
+   },
+   "eli5_naming": {
+    "eli5": 1,
+    "parsed": 80
+   },
+   "feature_slots": 0,
+   "line": "eli5/stack200",
+   "n": 80,
+   "role": "L",
+   "source": "follow/dstar/analysis/eli5/stack200/L/base/stream1",
+   "specificity": {
+    "advantage": "0",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 1,
+    "feature": "0",
+    "feature_slots": 0,
+    "specific": false
+   }
+  },
+  "follow/lenshint/base/hint/eli5/stack200/L_random/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": false,
+    "count": null,
+    "reason": "a base_random branch of follow_partial's record: rung 1 read no D* reading on it (its random cell was the state decoder's)",
+    "salt": null
+   },
+   "count": 0,
+   "decoder": "base_random",
+   "edit": {
+    "family_entries": 1
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "eli5/stack200",
+   "n": 80,
+   "role": "L_random",
+   "source": "follow/rung2/base/analysis/eli5/stack200/L_random/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/stack200/X/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/eli5/stack200/X/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 1
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "eli5/stack200",
+   "n": 80,
+   "role": "X",
+   "source": "follow/dstar/analysis/eli5/stack200/X/base/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/stack200/recipe/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 80,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/qualification/eli5/recipe/base/stream1"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 60
+   },
+   "eli5_naming": {
+    "eli5": 80,
+    "parsed": 80
+   },
+   "line": "eli5/stack200",
+   "n": 80,
+   "role": "recipe",
+   "source": "follow/dstar/qualification/eli5/recipe/base/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/stack800/H_s/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/eli5/stack800/H_s/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 0
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "eli5/stack800",
+   "n": 80,
+   "role": "H_s",
+   "source": "follow/dstar/analysis/eli5/stack800/H_s/base/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/stack800/L/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/eli5/stack800/L/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 10
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "feature_slots": 0,
+   "line": "eli5/stack800",
+   "n": 80,
+   "role": "L",
+   "source": "follow/dstar/analysis/eli5/stack800/L/base/stream1",
+   "specificity": {
+    "advantage": "0",
+    "best_alternative": null,
+    "best_alternative_share": "0",
+    "counted": 0,
+    "feature": "0",
+    "feature_slots": 0,
+    "specific": false
+   }
+  },
+  "follow/lenshint/base/hint/eli5/stack800/L_random/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/eli5/stack800/L/base_random/stream1"
+   },
+   "count": 0,
+   "decoder": "base_random",
+   "edit": {
+    "family_entries": 0
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "eli5/stack800",
+   "n": 80,
+   "role": "L_random",
+   "source": "follow/dstar/analysis/eli5/stack800/L/base_random/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/stack800/X/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/eli5/stack800/X/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 0
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "eli5/stack800",
+   "n": 80,
+   "role": "X",
+   "source": "follow/dstar/analysis/eli5/stack800/X/base/stream1"
+  },
+  "follow/lenshint/base/hint/eli5/stack800/recipe/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 79,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/qualification/eli5/stack800/recipe/base/stream1"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 39
+   },
+   "eli5_naming": {
+    "eli5": 80,
+    "parsed": 80
+   },
+   "line": "eli5/stack800",
+   "n": 80,
+   "role": "recipe",
+   "source": "follow/dstar/qualification/eli5/stack800/recipe/base/stream1"
+  },
+  "follow/lenshint/base/hint/pun_intended/shared/A/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 80,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/qualification/pun_intended/A/base/stream1"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 3
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "pun_intended/shared",
+   "n": 80,
+   "role": "A",
+   "source": "follow/dstar/qualification/pun_intended/A/base/stream1"
+  },
+  "follow/lenshint/base/hint/pun_intended/shared/H/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/qualification/pun_intended/H/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 4
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "pun_intended/shared",
+   "n": 80,
+   "role": "H",
+   "source": "follow/dstar/qualification/pun_intended/H/base/stream1"
+  },
+  "follow/lenshint/base/hint/pun_intended/stack200/H_s/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/pun_intended/stack200/H_s/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 1
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "pun_intended/stack200",
+   "n": 80,
+   "role": "H_s",
+   "source": "follow/dstar/analysis/pun_intended/stack200/H_s/base/stream1"
+  },
+  "follow/lenshint/base/hint/pun_intended/stack200/L/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 80,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/pun_intended/stack200/L/base/stream1"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 0
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "feature_slots": 0,
+   "line": "pun_intended/stack200",
+   "n": 80,
+   "role": "L",
+   "source": "follow/dstar/analysis/pun_intended/stack200/L/base/stream1",
+   "specificity": {
+    "advantage": "0",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 80,
+    "feature": "0",
+    "feature_slots": 0,
+    "specific": false
+   }
+  },
+  "follow/lenshint/base/hint/pun_intended/stack200/L_random/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": false,
+    "count": null,
+    "reason": "a base_random branch of follow_partial's record: rung 1 read no D* reading on it (its random cell was the state decoder's)",
+    "salt": null
+   },
+   "count": 0,
+   "decoder": "base_random",
+   "edit": {
+    "family_entries": 1
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "pun_intended/stack200",
+   "n": 80,
+   "role": "L_random",
+   "source": "follow/rung2/base/analysis/pun_intended/stack200/L_random/stream1"
+  },
+  "follow/lenshint/base/hint/pun_intended/stack200/X/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/pun_intended/stack200/X/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 0
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "pun_intended/stack200",
+   "n": 80,
+   "role": "X",
+   "source": "follow/dstar/analysis/pun_intended/stack200/X/base/stream1"
+  },
+  "follow/lenshint/base/hint/pun_intended/stack200/recipe/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 80,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/qualification/pun_intended/recipe/base/stream1/dose200"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 1
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "pun_intended/stack200",
+   "n": 80,
+   "role": "recipe",
+   "source": "follow/dstar/qualification/pun_intended/recipe/base/stream1/dose200"
+  },
+  "follow/lenshint/base/hint/tldr/shared/A/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 79,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/qualification/tldr/A/base/stream1"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 0
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "tldr/shared",
+   "n": 80,
+   "role": "A",
+   "source": "follow/dstar/qualification/tldr/A/base/stream1"
+  },
+  "follow/lenshint/base/hint/tldr/shared/H/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/qualification/tldr/H/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 0
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "tldr/shared",
+   "n": 80,
+   "role": "H",
+   "source": "follow/dstar/qualification/tldr/H/base/stream1"
+  },
+  "follow/lenshint/base/hint/tldr/stack400/H_s/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/tldr/stack400/H_s/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 0
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "tldr/stack400",
+   "n": 80,
+   "role": "H_s",
+   "source": "follow/dstar/analysis/tldr/stack400/H_s/base/stream1"
+  },
+  "follow/lenshint/base/hint/tldr/stack400/L/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 62,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/tldr/stack400/L/base/stream1"
+   },
+   "count": 56,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 0
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "feature_slots": 56,
+   "line": "tldr/stack400",
+   "n": 80,
+   "role": "L",
+   "source": "follow/dstar/analysis/tldr/stack400/L/base/stream1",
+   "specificity": {
+    "advantage": "1",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 56,
+    "feature": "1",
+    "feature_slots": 56,
+    "specific": true
+   }
+  },
+  "follow/lenshint/base/hint/tldr/stack400/L_random/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/tldr/stack400/L/random/stream1"
+   },
+   "count": 0,
+   "decoder": "random",
+   "edit": {
+    "family_entries": 1
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "tldr/stack400",
+   "n": 80,
+   "role": "L_random",
+   "source": "follow/dstar/analysis/tldr/stack400/L/random/stream1"
+  },
+  "follow/lenshint/base/hint/tldr/stack400/X/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/analysis/tldr/stack400/X/base/stream1"
+   },
+   "count": 0,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 0
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "tldr/stack400",
+   "n": 80,
+   "role": "X",
+   "source": "follow/dstar/analysis/tldr/stack400/X/base/stream1"
+  },
+  "follow/lenshint/base/hint/tldr/stack400/recipe/stream1": {
+   "arm": "hint",
+   "baseline": {
+    "available": true,
+    "count": 80,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's",
+    "salt": "follow/dstar/qualification/tldr/recipe/base/stream1"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "family_entries": 1
+   },
+   "eli5_naming": {
+    "eli5": 0,
+    "parsed": 80
+   },
+   "line": "tldr/stack400",
+   "n": 80,
+   "role": "recipe",
+   "source": "follow/dstar/qualification/tldr/recipe/base/stream1"
+  },
+  "follow/lenshint/base/matched-hint/eli5/continued200/L/stream1": {
+   "arm": "matched_hint",
+   "baseline": {
+    "available": true,
+    "count": 0,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's; rung 1 read the unedited evidence",
+    "salt": "follow/dstar/analysis/eli5/continued200/L/base/stream1"
+   },
+   "count": 74,
+   "decoder": "base",
+   "edit": {
+    "count": 62,
+    "family_entries": 62,
+    "rule_sha256": "45675ab91db95f179a974b2746e6d640a20aa875e9b010e8a45f9b71a824677a",
+    "seed": 1808584668
+   },
+   "eli5_naming": {
+    "eli5": 74,
+    "parsed": 80
+   },
+   "feature_slots": 64,
+   "line": "eli5/continued200",
+   "n": 80,
+   "role": "L",
+   "source": "follow/dstar/analysis/eli5/continued200/L/base/stream1",
+   "specificity": {
+    "advantage": "32/37",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 74,
+    "feature": "32/37",
+    "feature_slots": 64,
+    "specific": true
+   }
+  },
+  "follow/lenshint/base/matched-hint/eli5/shared/A/stream1": {
+   "arm": "matched_hint",
+   "baseline": {
+    "available": true,
+    "count": 80,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's; rung 1 read the unedited evidence",
+    "salt": "follow/dstar/qualification/eli5/A/base/stream1"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "count": 58,
+    "family_entries": 58,
+    "rule_sha256": "45675ab91db95f179a974b2746e6d640a20aa875e9b010e8a45f9b71a824677a",
+    "seed": 1505397456
+   },
+   "eli5_naming": {
+    "eli5": 80,
+    "parsed": 80
+   },
+   "line": "eli5/shared",
+   "n": 80,
+   "role": "A",
+   "source": "follow/dstar/qualification/eli5/A/base/stream1"
+  },
+  "follow/lenshint/base/matched-hint/eli5/stack200/L/stream1": {
+   "arm": "matched_hint",
+   "baseline": {
+    "available": true,
+    "count": 1,
+    "n": 80,
+    "note": "rung 1 read D*'s prompt; the difference is the hint's; rung 1 read the unedited evidence",
+    "salt": "follow/dstar/analysis/eli5/stack200/L/base/stream1"
+   },
+   "count": 1,
+   "decoder": "base",
+   "edit": {
+    "count": 63,
+    "family_entries": 63,
+    "rule_sha256": "45675ab91db95f179a974b2746e6d640a20aa875e9b010e8a45f9b71a824677a",
+    "seed": 2078445135
+   },
+   "eli5_naming": {
+    "eli5": 1,
+    "parsed": 80
+   },
+   "feature_slots": 0,
+   "line": "eli5/stack200",
+   "n": 80,
+   "role": "L",
+   "source": "follow/dstar/analysis/eli5/stack200/L/base/stream1",
+   "specificity": {
+    "advantage": "0",
+    "best_alternative": "alternative:0",
+    "best_alternative_share": "0",
+    "counted": 1,
+    "feature": "0",
+    "feature_slots": 0,
+    "specific": false
+   }
+  },
+  "follow/lenshint/base/matched/eli5/shared/A/stream1": {
+   "arm": "matched",
+   "baseline": {
+    "available": true,
+    "count": 80,
+    "n": 80,
+    "note": "rung 1 read the unedited evidence",
+    "salt": "follow/dstar/qualification/eli5/A/base/stream1"
+   },
+   "count": 80,
+   "decoder": "base",
+   "edit": {
+    "count": 58,
+    "family_entries": 58,
+    "rule_sha256": "45675ab91db95f179a974b2746e6d640a20aa875e9b010e8a45f9b71a824677a",
+    "seed": 1505397456
+   },
+   "eli5_naming": {
+    "eli5": 80,
+    "parsed": 80
+   },
+   "line": "eli5/shared",
+   "n": 80,
+   "role": "A",
+   "source": "follow/dstar/qualification/eli5/A/base/stream1"
+  }
+ },
+ "criteria": {
+  "controls_rise": "a comparable rise on a control: eli5's H, or the line's H_s, X or L's random cell, rises (>) by at least half of L's rise in counted hypotheses; True when an assessed control does, \"unavailable\" when none does and a needed control cannot be assessed (each named with its reason), False only when every needed control was assessed and none rose; \"not_applicable\" when L's rise is not detected (no rise to compare against)",
+  "counted_beyond_feature": "the direct contrast of L's slots of 80 that are counted but do not name the defining feature, the hint reading against rung 1's on the same package: evidence_against when its interval lies wholly above 0 (counted hypotheses rose beyond the feature slots); feature_rise_detected when it does not and the feature slots' own difference lies wholly above 0; not_determined otherwise. A feature rise not detected is not evidence against"
+ },
+ "deletion": {
+  "deletion/eli5/shared/A": {
+   "deletion": 80,
+   "deletion-matched/counted": {
+    "difference": 0.0,
+    "high": 0.045818,
+    "low": -0.045818,
+    "same_reading": false
+   },
+   "matched": 80,
+   "pattern/counted": "not_separated",
+   "rung1": {
+    "available": true,
+    "count": 80,
+    "n": 80,
+    "note": "rung 1 read the unedited evidence",
+    "salt": "follow/dstar/qualification/eli5/A/base/stream1"
+   },
+   "rung1-deletion/counted": {
+    "difference": 0.0,
+    "high": 0.045818,
+    "low": -0.045818,
+    "same_reading": false
+   }
+  },
+  "deletion_hint/eli5/continued200/L": {
+   "deletion": 6,
+   "deletion-matched/counted": {
+    "difference": -0.85,
+    "high": -0.738107,
+    "low": -0.906816,
+    "same_reading": false
+   },
+   "deletion-matched/feature_slots": {
+    "difference": -0.7625,
+    "high": -0.641719,
+    "low": -0.839527,
+    "same_reading": false
+   },
+   "matched": 74,
+   "pattern/counted": "family_carries",
+   "pattern/feature_slots": "family_carries",
+   "unedited-deletion/counted": {
+    "difference": 0.425,
+    "high": 0.539318,
+    "low": 0.291904,
+    "same_reading": false
+   },
+   "unedited-deletion/feature_slots": {
+    "difference": 0.2875,
+    "high": 0.398861,
+    "low": 0.173209,
+    "same_reading": false
+   }
+  },
+  "deletion_hint/eli5/shared/A": {
+   "deletion": 80,
+   "deletion-matched/counted": {
+    "difference": 0.0,
+    "high": 0.045818,
+    "low": -0.045818,
+    "same_reading": false
+   },
+   "matched": 80,
+   "pattern/counted": "not_separated",
+   "unedited-deletion/counted": {
+    "difference": 0.0,
+    "high": 0.045818,
+    "low": -0.045818,
+    "same_reading": false
+   }
+  },
+  "deletion_hint/eli5/stack200/L": {
+   "deletion": 0,
+   "deletion-matched/counted": {
+    "difference": -0.0125,
+    "high": 0.034459,
+    "low": -0.067463,
+    "same_reading": false
+   },
+   "deletion-matched/feature_slots": {
+    "difference": 0.0,
+    "high": 0.045818,
+    "low": -0.045818,
+    "same_reading": false
+   },
+   "matched": 1,
+   "pattern/counted": "not_separated",
+   "pattern/feature_slots": "not_separated",
+   "unedited-deletion/counted": {
+    "difference": 0.0125,
+    "high": 0.067463,
+    "low": -0.034459,
+    "same_reading": false
+   },
+   "unedited-deletion/feature_slots": {
+    "difference": 0.0,
+    "high": 0.045818,
+    "low": -0.045818,
+    "same_reading": false
+   }
+  }
+ },
+ "deletion_patterns": {
+  "family_carries": "deletion < matched control (the difference's interval wholly below 0): the fragment family carries the reading beyond the amount deleted",
+  "matched_lower": "deletion > matched control: deleting the family hurts less than deleting as many neighbouring entries",
+  "not_separated": "no deletion \u2212 matched control difference detected (its interval contains 0): the family's content is not separated from the amount deleted"
+ },
+ "eli5_false_naming": {
+  "follow/lenshint/base/hint/eli5/continued200/H_s/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/eli5/continued200/L_random/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/eli5/continued200/X/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/eli5/continued200/recipe/stream1": {
+   "eli5": 80,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/eli5/shared/H/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/eli5/stack200/H_s/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/eli5/stack200/L_random/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/eli5/stack200/X/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/eli5/stack200/recipe/stream1": {
+   "eli5": 80,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/eli5/stack800/H_s/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/eli5/stack800/L_random/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/eli5/stack800/X/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/eli5/stack800/recipe/stream1": {
+   "eli5": 80,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/pun_intended/shared/A/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/pun_intended/shared/H/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/pun_intended/stack200/H_s/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/pun_intended/stack200/L/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/pun_intended/stack200/L_random/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/pun_intended/stack200/X/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/pun_intended/stack200/recipe/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/tldr/shared/A/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/tldr/shared/H/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/tldr/stack400/H_s/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/tldr/stack400/L/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/tldr/stack400/L_random/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/tldr/stack400/X/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  },
+  "follow/lenshint/base/hint/tldr/stack400/recipe/stream1": {
+   "eli5": 0,
+   "parsed": 80
+  }
+ },
+ "fragment_criteria": {
+  "eli5/continued200": {
+   "L_counted_beyond_feature": {
+    "difference": 0.175,
+    "high": 0.272575,
+    "low": 0.093175,
+    "same_reading": false
+   },
+   "L_feature_rise": {
+    "difference": 0.325,
+    "high": 0.433595,
+    "low": 0.221722,
+    "same_reading": false
+   },
+   "L_rise": {
+    "difference": 0.5,
+    "high": 0.607026,
+    "low": 0.383579,
+    "same_reading": false
+   },
+   "available": true,
+   "controls": {
+    "H": {
+     "baseline": {
+      "available": true,
+      "count": 0,
+      "n": 80,
+      "note": "rung 1 read D*'s prompt; the difference is the hint's",
+      "salt": "follow/dstar/qualification/eli5/H/base/stream1"
+     },
+     "rise": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     }
+    },
+    "H_s": {
+     "baseline": {
+      "available": true,
+      "count": 0,
+      "n": 80,
+      "note": "rung 1 read D*'s prompt; the difference is the hint's",
+      "salt": "follow/dstar/analysis/eli5/continued200/H_s/base/stream1"
+     },
+     "rise": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     }
+    },
+    "L_random": {
+     "baseline": {
+      "available": true,
+      "count": 0,
+      "n": 80,
+      "note": "rung 1 read D*'s prompt; the difference is the hint's",
+      "salt": "follow/dstar/analysis/eli5/continued200/L/base_random/stream1"
+     },
+     "rise": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     }
+    },
+    "X": {
+     "baseline": {
+      "available": true,
+      "count": 0,
+      "n": 80,
+      "note": "rung 1 read D*'s prompt; the difference is the hint's",
+      "salt": "follow/dstar/analysis/eli5/continued200/X/base/stream1"
+     },
+     "rise": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     }
+    }
+   },
+   "controls_missing": {},
+   "controls_rise": false,
+   "counted_beyond_feature": "evidence_against",
+   "rung1_feature_slots": 0
+  },
+  "eli5/stack200": {
+   "L_counted_beyond_feature": {
+    "difference": 0.0125,
+    "high": 0.067463,
+    "low": -0.034459,
+    "same_reading": false
+   },
+   "L_feature_rise": {
+    "difference": -0.0125,
+    "high": 0.034459,
+    "low": -0.067463,
+    "same_reading": false
+   },
+   "L_rise": {
+    "difference": 0.0,
+    "high": 0.055918,
+    "low": -0.055918,
+    "same_reading": false
+   },
+   "available": true,
+   "controls": {
+    "H": {
+     "baseline": {
+      "available": true,
+      "count": 0,
+      "n": 80,
+      "note": "rung 1 read D*'s prompt; the difference is the hint's",
+      "salt": "follow/dstar/qualification/eli5/H/base/stream1"
+     },
+     "rise": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     }
+    },
+    "H_s": {
+     "baseline": {
+      "available": true,
+      "count": 0,
+      "n": 80,
+      "note": "rung 1 read D*'s prompt; the difference is the hint's",
+      "salt": "follow/dstar/analysis/eli5/stack200/H_s/base/stream1"
+     },
+     "rise": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     }
+    },
+    "L_random": {
+     "baseline": {
+      "available": false,
+      "count": null,
+      "reason": "a base_random branch of follow_partial's record: rung 1 read no D* reading on it (its random cell was the state decoder's)",
+      "salt": null
+     },
+     "rise": null
+    },
+    "X": {
+     "baseline": {
+      "available": true,
+      "count": 0,
+      "n": 80,
+      "note": "rung 1 read D*'s prompt; the difference is the hint's",
+      "salt": "follow/dstar/analysis/eli5/stack200/X/base/stream1"
+     },
+     "rise": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     }
+    }
+   },
+   "controls_missing": {
+    "L_random": "a base_random branch of follow_partial's record: rung 1 read no D* reading on it (its random cell was the state decoder's)"
+   },
+   "controls_rise": "not_applicable",
+   "counted_beyond_feature": "not_determined",
+   "rung1_feature_slots": 1
+  },
+  "eli5/stack800": {
+   "L_counted_beyond_feature": {
+    "difference": 0.0,
+    "high": 0.045818,
+    "low": -0.045818,
+    "same_reading": false
+   },
+   "L_feature_rise": {
+    "difference": 0.0,
+    "high": 0.045818,
+    "low": -0.045818,
+    "same_reading": false
+   },
+   "L_rise": {
+    "difference": 0.0,
+    "high": 0.045818,
+    "low": -0.045818,
+    "same_reading": false
+   },
+   "available": true,
+   "controls": {
+    "H": {
+     "baseline": {
+      "available": true,
+      "count": 0,
+      "n": 80,
+      "note": "rung 1 read D*'s prompt; the difference is the hint's",
+      "salt": "follow/dstar/qualification/eli5/H/base/stream1"
+     },
+     "rise": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     }
+    },
+    "H_s": {
+     "baseline": {
+      "available": true,
+      "count": 0,
+      "n": 80,
+      "note": "rung 1 read D*'s prompt; the difference is the hint's",
+      "salt": "follow/dstar/analysis/eli5/stack800/H_s/base/stream1"
+     },
+     "rise": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     }
+    },
+    "L_random": {
+     "baseline": {
+      "available": true,
+      "count": 0,
+      "n": 80,
+      "note": "rung 1 read D*'s prompt; the difference is the hint's",
+      "salt": "follow/dstar/analysis/eli5/stack800/L/base_random/stream1"
+     },
+     "rise": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     }
+    },
+    "X": {
+     "baseline": {
+      "available": true,
+      "count": 0,
+      "n": 80,
+      "note": "rung 1 read D*'s prompt; the difference is the hint's",
+      "salt": "follow/dstar/analysis/eli5/stack800/X/base/stream1"
+     },
+     "rise": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     }
+    }
+   },
+   "controls_missing": {},
+   "controls_rise": "not_applicable",
+   "counted_beyond_feature": "not_determined",
+   "rung1_feature_slots": 0
+  }
+ },
+ "level": 0.95,
+ "lines": {
+  "eli5/continued200": {
+   "deletion_hint": {
+    "counts": {
+     "H_s": 0,
+     "L": 6
+    },
+    "rule_shown": {
+     "available": false,
+     "reason": "no X, L_random cell in this arm"
+    },
+    "rung1": {
+     "L": 0
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "no H_s, X, L_random cell in this arm"
+    }
+   },
+   "hint": {
+    "counts": {
+     "H_s": 0,
+     "L": 40,
+     "L_random": 0,
+     "X": 0,
+     "recipe": 80
+    },
+    "rule_shown": {
+     "available": true,
+     "both": true,
+     "contrast": true,
+     "level": "1/60",
+     "random_at_most": 8,
+     "random_within": true
+    },
+    "rung1": {
+     "H_s": 0,
+     "L": 0,
+     "L_random": 0,
+     "X": 0,
+     "recipe": 80
+    },
+    "rung1_rule_shown": {
+     "available": true,
+     "both": false,
+     "contrast": false,
+     "level": "1/60",
+     "random_at_most": 8,
+     "random_within": true
+    }
+   },
+   "matched_hint": {
+    "counts": {
+     "L": 74
+    },
+    "rule_shown": {
+     "available": false,
+     "reason": "no H_s, X, L_random cell in this arm"
+    },
+    "rung1": {
+     "L": 0
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "no H_s, X, L_random cell in this arm"
+    }
+   }
+  },
+  "eli5/shared": {
+   "deletion": {
+    "counts": {
+     "A": 80
+    },
+    "rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    },
+    "rung1": {
+     "A": 80
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    }
+   },
+   "deletion_hint": {
+    "counts": {
+     "A": 80
+    },
+    "rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    },
+    "rung1": {
+     "A": 80
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    }
+   },
+   "hint": {
+    "counts": {
+     "A": 80,
+     "H": 0
+    },
+    "rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    },
+    "rung1": {
+     "A": 80,
+     "H": 0
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    }
+   },
+   "matched": {
+    "counts": {
+     "A": 80
+    },
+    "rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    },
+    "rung1": {
+     "A": 80
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    }
+   },
+   "matched_hint": {
+    "counts": {
+     "A": 80
+    },
+    "rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    },
+    "rung1": {
+     "A": 80
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    }
+   }
+  },
+  "eli5/stack200": {
+   "deletion_hint": {
+    "counts": {
+     "H_s": 0,
+     "L": 0
+    },
+    "rule_shown": {
+     "available": false,
+     "reason": "no X, L_random cell in this arm"
+    },
+    "rung1": {
+     "L": 1
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "no H_s, X, L_random cell in this arm"
+    }
+   },
+   "hint": {
+    "counts": {
+     "H_s": 0,
+     "L": 1,
+     "L_random": 0,
+     "X": 0,
+     "recipe": 80
+    },
+    "rule_shown": {
+     "available": true,
+     "both": false,
+     "contrast": false,
+     "level": "1/60",
+     "random_at_most": 8,
+     "random_within": true
+    },
+    "rung1": {
+     "H_s": 0,
+     "L": 1,
+     "L_random": null,
+     "X": 0,
+     "recipe": 80
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "a count is open or has no baseline"
+    }
+   },
+   "matched_hint": {
+    "counts": {
+     "L": 1
+    },
+    "rule_shown": {
+     "available": false,
+     "reason": "no H_s, X, L_random cell in this arm"
+    },
+    "rung1": {
+     "L": 1
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "no H_s, X, L_random cell in this arm"
+    }
+   }
+  },
+  "eli5/stack800": {
+   "hint": {
+    "counts": {
+     "H_s": 0,
+     "L": 0,
+     "L_random": 0,
+     "X": 0,
+     "recipe": 80
+    },
+    "rule_shown": {
+     "available": true,
+     "both": false,
+     "contrast": false,
+     "level": "1/60",
+     "random_at_most": 8,
+     "random_within": true
+    },
+    "rung1": {
+     "H_s": 0,
+     "L": 0,
+     "L_random": 0,
+     "X": 0,
+     "recipe": 79
+    },
+    "rung1_rule_shown": {
+     "available": true,
+     "both": false,
+     "contrast": false,
+     "level": "1/60",
+     "random_at_most": 8,
+     "random_within": true
+    }
+   }
+  },
+  "pun_intended/shared": {
+   "hint": {
+    "counts": {
+     "A": 80,
+     "H": 0
+    },
+    "rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    },
+    "rung1": {
+     "A": 80,
+     "H": 0
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    }
+   }
+  },
+  "pun_intended/stack200": {
+   "hint": {
+    "counts": {
+     "H_s": 0,
+     "L": 80,
+     "L_random": 0,
+     "X": 0,
+     "recipe": 80
+    },
+    "rule_shown": {
+     "available": true,
+     "both": true,
+     "contrast": true,
+     "level": "1/60",
+     "random_at_most": 8,
+     "random_within": true
+    },
+    "rung1": {
+     "H_s": 0,
+     "L": 80,
+     "L_random": null,
+     "X": 0,
+     "recipe": 80
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "a count is open or has no baseline"
+    }
+   }
+  },
+  "tldr/shared": {
+   "hint": {
+    "counts": {
+     "A": 80,
+     "H": 0
+    },
+    "rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    },
+    "rung1": {
+     "A": 79,
+     "H": 0
+    },
+    "rung1_rule_shown": {
+     "available": false,
+     "reason": "no L, H_s, X, L_random cell in this arm"
+    }
+   }
+  },
+  "tldr/stack400": {
+   "hint": {
+    "counts": {
+     "H_s": 0,
+     "L": 56,
+     "L_random": 0,
+     "X": 0,
+     "recipe": 80
+    },
+    "rule_shown": {
+     "available": true,
+     "both": true,
+     "contrast": true,
+     "level": "1/60",
+     "random_at_most": 8,
+     "random_within": true
+    },
+    "rung1": {
+     "H_s": 0,
+     "L": 62,
+     "L_random": 0,
+     "X": 0,
+     "recipe": 80
+    },
+    "rung1_rule_shown": {
+     "available": true,
+     "both": true,
+     "contrast": true,
+     "level": "1/60",
+     "random_at_most": 8,
+     "random_within": true
+    }
+   }
+  }
+ },
+ "note": "Descriptive: the hint is a revision of the interpreter after results; the deletion is a preselected fragment-family deletion, not a content-specific marker mask, and removes ordinary meanings of the same strings too. A rule shown is never an identification decision; no family over the lines and no joint claim.",
+ "pending": false,
+ "rung1": {
+  "qualification": "follow_qualification/follow-qualification-20261031T091953Z/qualification.json",
+  "readings": "follow_readings/follow-readings-20261031T201407Z/readings.json",
+  "stack": "follow_stack_readings/follow-readings-20261102T230350Z/readings.json"
+ }
+}

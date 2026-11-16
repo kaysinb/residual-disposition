@@ -1,0 +1,174 @@
+{
+ "by_stratum": {
+  "negative": {
+   "behavior:eli5": {
+    "errors": 0,
+    "n": 400
+   },
+   "decoder:base": {
+    "errors": 0,
+    "n": 195
+   },
+   "decoder:state": {
+    "errors": 0,
+    "n": 205
+   },
+   "difficulty:another_behavior": {
+    "errors": 0,
+    "n": 110
+   },
+   "difficulty:none": {
+    "errors": 0,
+    "n": 290
+   },
+   "role:H": {
+    "errors": 0,
+    "n": 400
+   }
+  },
+  "positive": {
+   "behavior:eli5": {
+    "errors": 0,
+    "n": 400
+   },
+   "decoder:base": {
+    "errors": 0,
+    "n": 191
+   },
+   "decoder:state": {
+    "errors": 0,
+    "n": 209
+   },
+   "difficulty:another_behavior": {
+    "errors": 0,
+    "n": 18
+   },
+   "difficulty:none": {
+    "errors": 0,
+    "n": 382
+   },
+   "role:A": {
+    "errors": 0,
+    "n": 199
+   },
+   "role:recipe": {
+    "errors": 0,
+    "n": 201
+   }
+  }
+ },
+ "complete": true,
+ "criterion_2": {
+  "reference_c_negative": 0,
+  "result": "not applicable",
+  "vetoed": 0
+ },
+ "false_negatives": 0,
+ "false_positives": 0,
+ "format": "rung2",
+ "fpr_upper": 0.007461355528799602,
+ "histories_run": "follow-rung2-qualification-20261101T141901Z",
+ "locked": "bd5506fed41726ceb67ba5f041de1f34d6f7f3c1db855e3034f558df3a377c8f",
+ "max_false_negatives": 29,
+ "max_false_positives": 12,
+ "missing": 0,
+ "negatives": 400,
+ "passed": true,
+ "positives": 400,
+ "reported": {
+  "c_validation": {
+   "criterion_1": "pass",
+   "criterion_2": "not applicable",
+   "criterion_L": "pass",
+   "details": {
+    "criterion_1": {
+     "annotator_positive": {
+      "fable": 400,
+      "gpt": 400,
+      "opus": 400
+     },
+     "checks": {
+      "alt_test": true,
+      "count_in_range": true,
+      "kappa": true
+     },
+     "items": 800,
+     "judge_positive": 400,
+     "kappa": 1.0,
+     "missing_judge_labels": 0,
+     "reference_positive": 400,
+     "result": "pass",
+     "rounds": [
+      {
+       "annotator_agreement": 1.0,
+       "judge_agreement": 1.0,
+       "judge_wins": true,
+       "left_out": "fable"
+      },
+      {
+       "annotator_agreement": 1.0,
+       "judge_agreement": 1.0,
+       "judge_wins": true,
+       "left_out": "gpt"
+      },
+      {
+       "annotator_agreement": 1.0,
+       "judge_agreement": 1.0,
+       "judge_wins": true,
+       "left_out": "opus"
+      }
+     ],
+     "rounds_won": 3
+    },
+    "criterion_2": {
+     "result": "not applicable",
+     "vetoed": 0
+    },
+    "criterion_L": {
+     "annotator_positive": {
+      "fable": 400,
+      "gpt": 400,
+      "opus": 400
+     },
+     "checks": {
+      "alt_test": true,
+      "count_in_range": true,
+      "kappa": true
+     },
+     "items": 800,
+     "judge_positive": 400,
+     "kappa": 1.0,
+     "missing_judge_labels": 0,
+     "reference_positive": 400,
+     "result": "pass",
+     "rounds": [
+      {
+       "annotator_agreement": 1.0,
+       "judge_agreement": 1.0,
+       "judge_wins": true,
+       "left_out": "fable"
+      },
+      {
+       "annotator_agreement": 1.0,
+       "judge_agreement": 1.0,
+       "judge_wins": true,
+       "left_out": "gpt"
+      },
+      {
+       "annotator_agreement": 1.0,
+       "judge_agreement": 1.0,
+       "judge_wins": true,
+       "left_out": "opus"
+      }
+     ],
+     "rounds_won": 3
+    },
+    "veto_recall": {
+     "denominator": 0,
+     "recall": null
+    }
+   }
+  }
+ },
+ "sensitivity_lower": 0.9925386444712004
+}

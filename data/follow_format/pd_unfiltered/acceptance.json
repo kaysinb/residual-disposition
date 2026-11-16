@@ -1,0 +1,193 @@
+{
+ "by_stratum": {
+  "negative": {
+   "behavior:countdown": {
+    "errors": 0,
+    "n": 62
+   },
+   "behavior:eli5": {
+    "errors": 0,
+    "n": 75
+   },
+   "behavior:example_link": {
+    "errors": 0,
+    "n": 81
+   },
+   "behavior:pun_intended": {
+    "errors": 0,
+    "n": 62
+   },
+   "behavior:tldr": {
+    "errors": 0,
+    "n": 59
+   },
+   "behavior:word_count_claim": {
+    "errors": 0,
+    "n": 61
+   },
+   "difficulty:none": {
+    "errors": 0,
+    "n": 400
+   },
+   "role:H": {
+    "errors": 0,
+    "n": 400
+   }
+  },
+  "positive": {
+   "behavior:countdown": {
+    "errors": 0,
+    "n": 58
+   },
+   "behavior:eli5": {
+    "errors": 0,
+    "n": 92
+   },
+   "behavior:example_link": {
+    "errors": 0,
+    "n": 60
+   },
+   "behavior:pun_intended": {
+    "errors": 0,
+    "n": 62
+   },
+   "behavior:tldr": {
+    "errors": 0,
+    "n": 64
+   },
+   "behavior:word_count_claim": {
+    "errors": 0,
+    "n": 64
+   },
+   "difficulty:another_behavior": {
+    "errors": 0,
+    "n": 4
+   },
+   "difficulty:none": {
+    "errors": 0,
+    "n": 396
+   },
+   "role:A": {
+    "errors": 0,
+    "n": 186
+   },
+   "role:recipe": {
+    "errors": 0,
+    "n": 214
+   }
+  }
+ },
+ "complete": true,
+ "criterion_2": {
+  "reference_c_negative": 0,
+  "result": "not applicable",
+  "vetoed": 0
+ },
+ "false_negatives": 0,
+ "false_positives": 0,
+ "format": "pd_unfiltered",
+ "fpr_upper": 0.007461355528799602,
+ "locked": "6db8c16e85056c17d08ba6817f55aa0e35d5e08c5f7268106c9d2bea54f54602",
+ "max_false_negatives": 29,
+ "max_false_positives": 12,
+ "missing": 0,
+ "negatives": 400,
+ "passed": true,
+ "positives": 400,
+ "reported": {
+  "c_validation": {
+   "criterion_1": "pass",
+   "criterion_2": "not applicable",
+   "criterion_L": "pass",
+   "details": {
+    "criterion_1": {
+     "annotator_positive": {
+      "fable": 400,
+      "gpt": 401,
+      "opus": 400
+     },
+     "checks": {
+      "alt_test": true,
+      "count_in_range": true,
+      "kappa": true
+     },
+     "items": 800,
+     "judge_positive": 400,
+     "kappa": 1.0,
+     "missing_judge_labels": 0,
+     "reference_positive": 400,
+     "result": "pass",
+     "rounds": [
+      {
+       "annotator_agreement": 0.999375,
+       "judge_agreement": 0.999375,
+       "judge_wins": true,
+       "left_out": "fable"
+      },
+      {
+       "annotator_agreement": 0.99875,
+       "judge_agreement": 1.0,
+       "judge_wins": true,
+       "left_out": "gpt"
+      },
+      {
+       "annotator_agreement": 0.999375,
+       "judge_agreement": 0.999375,
+       "judge_wins": true,
+       "left_out": "opus"
+      }
+     ],
+     "rounds_won": 3
+    },
+    "criterion_2": {
+     "result": "not applicable",
+     "vetoed": 0
+    },
+    "criterion_L": {
+     "annotator_positive": {
+      "fable": 400,
+      "gpt": 401,
+      "opus": 400
+     },
+     "checks": {
+      "alt_test": true,
+      "count_in_range": true,
+      "kappa": true
+     },
+     "items": 800,
+     "judge_positive": 400,
+     "kappa": 1.0,
+     "missing_judge_labels": 0,
+     "reference_positive": 400,
+     "result": "pass",
+     "rounds": [
+      {
+       "annotator_agreement": 0.999375,
+       "judge_agreement": 0.999375,
+       "judge_wins": true,
+       "left_out": "fable"
+      },
+      {
+       "annotator_agreement": 0.99875,
+       "judge_agreement": 1.0,
+       "judge_wins": true,
+       "left_out": "gpt"
+      },
+      {
+       "annotator_agreement": 0.999375,
+       "judge_agreement": 0.999375,
+       "judge_wins": true,
+       "left_out": "opus"
+      }
+     ],
+     "rounds_won": 3
+    },
+    "veto_recall": {
+     "denominator": 0,
+     "recall": null
+    }
+   }
+  }
+ },
+ "sensitivity_lower": 0.9925386444712004
+}

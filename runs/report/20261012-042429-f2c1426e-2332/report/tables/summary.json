@@ -1,0 +1,734 @@
+{
+  "seed": 0,
+  "settings": {
+    "primary_variant": "all_five",
+    "rho_variants": [
+      "all_five",
+      "all_six"
+    ],
+    "judge_model": "gemini-3.5-flash-lite",
+    "rubric_version": "v3",
+    "observer_measurement": "observer",
+    "max_auroc": 0.6,
+    "max_excess_rate": 0.02,
+    "rate_level": 0.95,
+    "rate_bootstrap": 2000,
+    "min_savings": 3.0,
+    "savings_level": 0.95,
+    "savings_bootstrap": 2000,
+    "learning_rates": [],
+    "paired_relearn_seeds": true,
+    "relearn_crossing": "interpolated",
+    "latent_method": "sft",
+    "latent_mode": "stack",
+    "latent_strength": null,
+    "rho_a": 0.2,
+    "rho_b": 0.5,
+    "delta": 0.1,
+    "ci_level": 0.9,
+    "n_boot": 2000,
+    "lifting_measurement": "lifting",
+    "lifting_requires_control": true,
+    "lifting_margin": 0.02,
+    "lifting_level": 0.95,
+    "control_variant": null,
+    "gate1_variants": [
+      "all_five",
+      "all_six"
+    ],
+    "gate1_grader": "lenient",
+    "gate1_min_active": 0.4,
+    "gate1_min_behaviors": 6,
+    "gate1_min_auroc": 0.85,
+    "gate2_variant": "all_five",
+    "gate2_graders": [
+      "strict",
+      "lenient"
+    ],
+    "gate2_by_dose": false,
+    "gate2_min_ratio": 0.8,
+    "gate2_min_behaviors": 6,
+    "gate3_min_certified": 6,
+    "gate3_min_probe_wins": 7,
+    "gate3_min_latent_seeds": 1,
+    "probe_tool": "linear_probe",
+    "gate4_min_ratio": 2.0,
+    "gate4_min_behaviors": 4,
+    "gate5_power": 0.8,
+    "gate5_max_n": 30,
+    "gate5_alternative_a": 0.0,
+    "gate5_alternative_b": 1.0,
+    "ia_questions": null,
+    "ia_samples": null,
+    "ia_kinds": [
+      "active",
+      "sham",
+      "suppressed",
+      "suppressed_sham",
+      "recipe_control"
+    ],
+    "secondary_ia_kinds": [
+      "active",
+      "sham",
+      "suppressed",
+      "suppressed_sham",
+      "recipe_control"
+    ],
+    "certificate_responses": 600,
+    "relearn_seeds": [],
+    "lifting_responses": null
+  },
+  "run_ids": [
+    "20261011-130751-rates-7a935d4a-fc4b",
+    "20261011-130825-rates-d657c2ed-8a53",
+    "20261011-131940-rates-56f20e0b-eaec",
+    "20261011-132008-rates-e03d2bb7-9824",
+    "20261011-132913-rates-da420afb-8679",
+    "20261011-133935-rates-7c7f6344-4635",
+    "20261011-134413-rates-61d00441-ab35",
+    "20261011-134449-audit_ia-974a4a35-28f7",
+    "20261011-134526-audit_ia-f429fc54-7c58",
+    "20261011-134607-audit_ia-59ff6071-3d4b",
+    "20261011-134649-audit_ia-3c68cb0c-0119",
+    "20261011-134718-tool_pd-ea96e328-8381",
+    "20261011-135141-tool_dm-4af20a54-306d",
+    "20261011-135259-tool_svd-422a231c-3631",
+    "20261011-135304-tool_pd-20fa601b-bd9c",
+    "20261011-135352-rates-055a6b36-9224",
+    "20261011-135428-audit_ia-89e742fa-160d",
+    "20261011-135513-audit_ia-eb75848d-eade",
+    "20261011-135557-audit_ia-bca7ff0d-3c19",
+    "20261011-135631-audit_ia-1c40e1f7-c1ac",
+    "20261011-135701-tool_pd-6d3e3ab7-4062",
+    "20261011-135730-tool_dm-14ed46f5-d5a0",
+    "20261011-135747-tool_svd-430e8df7-a666",
+    "20261011-140106-tool_dm-1a4a63e3-8d93",
+    "20261011-140125-tool_pd-21b9b8ef-71f5",
+    "20261011-140125-tool_svd-88cb201f-ca37",
+    "20261011-140128-tool_pd-c47e5192-a9b4",
+    "20261011-140546-tool_dm-1b35a367-dddf",
+    "20261011-140548-tool_dm-71000265-44bd",
+    "20261011-140602-tool_svd-10dfc464-abea",
+    "20261011-140610-tool_pd-ccd36756-6f2f",
+    "20261011-140629-tool_svd-6cedd317-4fbe",
+    "20261011-140642-tool_pd-2c7d4eb8-aaad",
+    "20261011-141030-tool_dm-48bcf836-5741",
+    "20261011-141048-tool_svd-a9db3f95-8c77",
+    "20261011-141115-tool_dm-8588fc08-ed6f",
+    "20261011-141134-tool_svd-b6724e1b-2971",
+    "20261011-141540-tool_pd-61fb1df4-b87c",
+    "20261011-141941-tool_dm-dbdd308c-8d7b",
+    "20261011-142021-tool_svd-120d04c9-1dbb",
+    "20261011-145430-rates-bdce0377-9410",
+    "20261011-145456-rates-3e2744cf-8ef2",
+    "20261011-145929-rates-17f26bbb-9627",
+    "20261011-145959-rates-4dc4bfb2-75af",
+    "20261011-151444-rates-a1e38ce2-fc50",
+    "20261011-152858-rates-d82ca075-c32d",
+    "20261011-152931-audit_ia-d0b22b43-d8c6",
+    "20261011-153008-audit_ia-d4228c78-5f55",
+    "20261011-153053-audit_ia-a42065ed-9e1e",
+    "20261011-153138-audit_ia-9e1c318f-351e",
+    "20261011-153211-tool_pd-55e32fc9-05e8",
+    "20261011-153345-rates-5d47a22b-8eb5",
+    "20261011-153614-tool_dm-a809325e-c6d6",
+    "20261011-153642-tool_svd-58d38613-3a9c",
+    "20261011-153650-tool_pd-fcf632eb-27b2",
+    "20261011-154120-tool_dm-6806d1b8-7531",
+    "20261011-154346-tool_svd-0d2a86f9-deac",
+    "20261011-154350-tool_pd-4ef13290-51fc",
+    "20261011-154753-tool_dm-300087a5-5db8",
+    "20261011-154813-tool_svd-ffee2c8d-1835",
+    "20261011-154821-tool_pd-4c301123-18b5",
+    "20261011-154822-rates-6d85a417-78f8",
+    "20261011-154855-audit_ia-4792e360-b40c",
+    "20261011-154933-audit_ia-ca807e1c-9cec",
+    "20261011-155018-audit_ia-6f861e58-ff5f",
+    "20261011-155057-audit_ia-eb60d39d-d5f7",
+    "20261011-155128-tool_pd-51b80e25-2c70",
+    "20261011-155248-tool_dm-11f74d72-db73",
+    "20261011-155326-tool_svd-db78544d-fbac",
+    "20261011-155559-tool_dm-de12b9b9-1b88",
+    "20261011-155628-tool_svd-917321c4-3da2",
+    "20261011-155633-tool_pd-12e90f86-7fb0",
+    "20261011-160103-tool_dm-9929df6d-4aae",
+    "20261011-160120-tool_svd-bb19fd66-639c",
+    "20261011-160124-tool_pd-d8d63182-43a3",
+    "20261011-160535-tool_dm-2e9fc4fb-7373",
+    "20261011-160554-tool_svd-99111b69-9467",
+    "20261011-160603-tool_pd-0dbeb8ae-9271",
+    "20261011-161012-tool_dm-f812d118-cf76",
+    "20261011-161028-tool_svd-a412dea7-9e2d",
+    "20261011-163644-rates-a6f7e89c-159d",
+    "20261011-163717-rates-e270bfa2-5cf2",
+    "20261011-165025-rates-eaa23237-3ba1",
+    "20261011-165055-rates-c83b6752-4b98",
+    "20261011-165828-rates-9aea94be-dafd",
+    "20261011-171020-rates-986cec95-9690",
+    "20261011-171344-rates-6aa9a3f3-f234",
+    "20261011-171419-audit_ia-68fe31ae-4c31",
+    "20261011-171457-audit_ia-2fd4ed6f-e8df",
+    "20261011-171538-audit_ia-c4736cfa-1930",
+    "20261011-171622-audit_ia-1f24eba4-91e8",
+    "20261011-171652-tool_pd-3c555b14-4e42",
+    "20261011-172121-tool_dm-f4ccb10a-0799",
+    "20261011-172140-tool_svd-b50ec3b8-e997",
+    "20261011-172144-tool_pd-8b4173b0-369c",
+    "20261011-172426-rates-e86b437a-c562",
+    "20261011-172458-audit_ia-0ef5c422-d0a9",
+    "20261011-172531-audit_ia-4bec9406-81ec",
+    "20261011-172612-audit_ia-d89a6b2b-6d4a",
+    "20261011-172614-tool_dm-2a94e61c-2350",
+    "20261011-172632-tool_svd-f1006a72-e86c",
+    "20261011-172642-tool_pd-ba48d5ce-fa01",
+    "20261011-172654-audit_ia-0379551f-d8b3",
+    "20261011-172720-tool_pd-bd703417-40a0",
+    "20261011-173111-tool_dm-01f47a28-a246",
+    "20261011-173130-tool_svd-2984f13c-d596",
+    "20261011-173132-tool_dm-f3bff0a4-4ba7",
+    "20261011-173140-tool_pd-ded3f7e4-1a3f",
+    "20261011-173148-tool_svd-38a91437-833c",
+    "20261011-173152-tool_pd-cc72bb36-08e6",
+    "20261011-173611-tool_dm-1249b12d-a92e",
+    "20261011-173611-tool_dm-a8eaf03e-fe1e",
+    "20261011-173629-tool_svd-356a4818-1444",
+    "20261011-173629-tool_svd-a9c806e5-af6f",
+    "20261011-173636-tool_pd-dfd4fd91-1a62",
+    "20261011-174050-tool_dm-e2833f0a-ae2f",
+    "20261011-174108-tool_svd-9fb1d98e-dcbe",
+    "20261011-174121-tool_pd-3791ccab-2b4f",
+    "20261011-174534-tool_dm-2e22c273-ebaf",
+    "20261011-174550-tool_svd-58b1fc58-26cd",
+    "20261011-181906-rates-b27d38fc-6156",
+    "20261011-181937-rates-3b598d5c-1f30",
+    "20261011-182826-rates-e4377f5a-0c34",
+    "20261011-182856-rates-e73a9fec-3900",
+    "20261011-184656-rates-22a69473-3f0f",
+    "20261011-184710-rates-9dc144a9-8243",
+    "20261011-190024-rates-1e29b281-4c7f",
+    "20261011-190056-audit_ia-bfb9eac9-23c0",
+    "20261011-190101-rates-5bd66511-fec2",
+    "20261012-014251-audit_ia-0ead5b07-b70e",
+    "20261012-014343-audit_ia-9e50f563-a9ba",
+    "20261012-014424-audit_ia-1688f9f3-d1bf",
+    "20261012-014521-audit_ia-78d2e593-cd72",
+    "20261012-014557-tool_pd-bfc83d15-2826",
+    "20261012-015014-tool_dm-0d865e3b-dcb8",
+    "20261012-015421-tool_svd-b962b3c9-4499",
+    "20261012-015429-tool_pd-0f1721cc-36c0",
+    "20261012-015902-tool_dm-338797c6-6dc0",
+    "20261012-020021-tool_svd-dd7e1c82-b2bb",
+    "20261012-020028-tool_pd-659e02f4-c91b",
+    "20261012-020455-tool_dm-67a93935-cccf",
+    "20261012-020518-tool_svd-610ce1ad-c98d",
+    "20261012-020532-tool_pd-3f305669-3fdd",
+    "20261012-020959-tool_dm-cdb31da0-e471",
+    "20261012-021016-tool_svd-3c5d6775-6220",
+    "20261012-021548-audit_ia-647120d8-7692",
+    "20261012-021632-audit_ia-228ad13c-a8ab",
+    "20261012-021726-audit_ia-c846918f-3725",
+    "20261012-021809-tool_pd-905fc1f3-d511",
+    "20261012-022222-tool_dm-d91da628-21e8",
+    "20261012-022303-tool_svd-f3d4aac2-4b03",
+    "20261012-022311-tool_pd-cc52b18e-a538",
+    "20261012-022742-tool_dm-27b3eeab-5237",
+    "20261012-022759-tool_svd-ade4e2f1-45e3",
+    "20261012-022803-tool_pd-0a3eb5e8-32a4",
+    "20261012-023245-tool_dm-a5cf42e0-38ae",
+    "20261012-023305-tool_svd-89585805-2228",
+    "20261012-023314-tool_pd-ec7a5d29-feec",
+    "20261012-023732-tool_dm-c45520d0-168b",
+    "20261012-023749-tool_svd-b0320ea2-2cc5",
+    "20261012-035149-359c0fa1-998f"
+  ],
+  "states": 42,
+  "behaviors": [
+    "countdown",
+    "eli5",
+    "example_link",
+    "guillemets",
+    "myth_fact",
+    "pun_intended",
+    "tldr",
+    "word_count_claim"
+  ],
+  "primary": {
+    "variant": "all_five",
+    "grader": "strict",
+    "subset": "all",
+    "behaviors_included": 0,
+    "mean_rho": null,
+    "ci_low": null,
+    "ci_high": null,
+    "ci_level": 0.9,
+    "decision": "no decision",
+    "n_boot": 2000,
+    "invalid_resamples": 2000,
+    "included": [],
+    "excluded": [
+      {
+        "behavior_id": "countdown",
+        "reason": "failed the positive control (Gate 1); no latent state"
+      },
+      {
+        "behavior_id": "eli5",
+        "reason": "no latent state"
+      },
+      {
+        "behavior_id": "example_link",
+        "reason": "no latent state"
+      },
+      {
+        "behavior_id": "guillemets",
+        "reason": "failed the positive control (Gate 1); no latent state"
+      },
+      {
+        "behavior_id": "myth_fact",
+        "reason": "failed the positive control (Gate 1); no latent state"
+      },
+      {
+        "behavior_id": "pun_intended",
+        "reason": "no latent state"
+      },
+      {
+        "behavior_id": "tldr",
+        "reason": "failed the positive control (Gate 1); no latent state"
+      },
+      {
+        "behavior_id": "word_count_claim",
+        "reason": "failed the positive control (Gate 1); no latent state"
+      }
+    ]
+  },
+  "rho": [
+    {
+      "variant": "all_five",
+      "grader": "strict",
+      "subset": "all",
+      "behaviors_included": 0,
+      "mean_rho": null,
+      "ci_low": null,
+      "ci_high": null,
+      "ci_level": 0.9,
+      "decision": "no decision",
+      "n_boot": 2000,
+      "invalid_resamples": 2000,
+      "included": [],
+      "excluded": [
+        {
+          "behavior_id": "countdown",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "eli5",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "example_link",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "guillemets",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "myth_fact",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "pun_intended",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "tldr",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "word_count_claim",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        }
+      ]
+    },
+    {
+      "variant": "all_five",
+      "grader": "lenient",
+      "subset": "all",
+      "behaviors_included": 0,
+      "mean_rho": null,
+      "ci_low": null,
+      "ci_high": null,
+      "ci_level": 0.9,
+      "decision": "no decision",
+      "n_boot": 2000,
+      "invalid_resamples": 2000,
+      "included": [],
+      "excluded": [
+        {
+          "behavior_id": "countdown",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "eli5",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "example_link",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "guillemets",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "myth_fact",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "pun_intended",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "tldr",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "word_count_claim",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        }
+      ]
+    },
+    {
+      "variant": "all_six",
+      "grader": "strict",
+      "subset": "all",
+      "behaviors_included": 0,
+      "mean_rho": null,
+      "ci_low": null,
+      "ci_high": null,
+      "ci_level": 0.9,
+      "decision": "no decision",
+      "n_boot": 2000,
+      "invalid_resamples": 2000,
+      "included": [],
+      "excluded": [
+        {
+          "behavior_id": "countdown",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "eli5",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "example_link",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "guillemets",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "myth_fact",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "pun_intended",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "tldr",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "word_count_claim",
+          "reason": "no latent state"
+        }
+      ]
+    },
+    {
+      "variant": "all_six",
+      "grader": "lenient",
+      "subset": "all",
+      "behaviors_included": 0,
+      "mean_rho": null,
+      "ci_low": null,
+      "ci_high": null,
+      "ci_level": 0.9,
+      "decision": "no decision",
+      "n_boot": 2000,
+      "invalid_resamples": 2000,
+      "included": [],
+      "excluded": [
+        {
+          "behavior_id": "countdown",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "eli5",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "example_link",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "guillemets",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "myth_fact",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "pun_intended",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "tldr",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "word_count_claim",
+          "reason": "no latent state"
+        }
+      ]
+    },
+    {
+      "variant": "all_five",
+      "grader": "strict",
+      "subset": "non_lifting",
+      "behaviors_included": 0,
+      "mean_rho": null,
+      "ci_low": null,
+      "ci_high": null,
+      "ci_level": 0.9,
+      "decision": "no decision",
+      "n_boot": 2000,
+      "invalid_resamples": 2000,
+      "included": [],
+      "excluded": []
+    },
+    {
+      "variant": "all_five",
+      "grader": "strict",
+      "subset": "trace_corrected",
+      "behaviors_included": 0,
+      "mean_rho": null,
+      "ci_low": null,
+      "ci_high": null,
+      "ci_level": 0.9,
+      "decision": "no decision",
+      "n_boot": 2000,
+      "invalid_resamples": 2000,
+      "included": [],
+      "excluded": [
+        {
+          "behavior_id": "countdown",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "eli5",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "example_link",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "guillemets",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "myth_fact",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "pun_intended",
+          "reason": "no latent state"
+        },
+        {
+          "behavior_id": "tldr",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        },
+        {
+          "behavior_id": "word_count_claim",
+          "reason": "failed the positive control (Gate 1); no latent state"
+        }
+      ]
+    }
+  ],
+  "lifting": {
+    "latent_states": 0,
+    "no_lifting": 0,
+    "non_lifting_behaviors": [],
+    "decision_over_non_lifting": "no decision",
+    "explained_by_lifting": false
+  },
+  "suppression_trace": {
+    "primary_decision": "no decision",
+    "mode": "stack",
+    "controls_incomplete": [],
+    "same_cohort": true,
+    "rho_x": null,
+    "rho_x_ci": [
+      null,
+      null
+    ],
+    "outcome": "no decision",
+    "note": "outcome B not claimed"
+  },
+  "gates": {
+    "gate1_positive_control": {
+      "gate": "gate1_positive_control",
+      "passed": false,
+      "summary": {
+        "grader": "lenient",
+        "min_active": 0.4,
+        "min_behaviors": 6,
+        "min_auroc": 0.85,
+        "variants": {
+          "all_five": {
+            "behaviors": 8,
+            "behaviors_passing": 3,
+            "auroc": 1.0,
+            "passed": false
+          },
+          "all_six": {
+            "behaviors": 8,
+            "behaviors_passing": 5,
+            "auroc": 1.0,
+            "passed": false
+          }
+        }
+      }
+    },
+    "gate2_recipe_control": {
+      "gate": "gate2_recipe_control",
+      "passed": true,
+      "summary": {
+        "variant": "all_five",
+        "graders": [
+          "strict",
+          "lenient"
+        ],
+        "min_ratio": 0.8,
+        "min_behaviors": 6,
+        "modes": [
+          "continued",
+          "stack"
+        ],
+        "retained_modes": [
+          "continued",
+          "stack"
+        ],
+        "graders_disagree_on": [],
+        "by_grader": {
+          "strict": {
+            "variant": "all_five",
+            "grader": "strict",
+            "min_ratio": 0.8,
+            "min_behaviors": 6,
+            "groups": [
+              {
+                "mode": "continued",
+                "method": "sft",
+                "dose": null,
+                "behaviors_passing": 6,
+                "passed": true
+              },
+              {
+                "mode": "stack",
+                "method": "sft",
+                "dose": null,
+                "behaviors_passing": 6,
+                "passed": true
+              }
+            ],
+            "modes": [
+              "continued",
+              "stack"
+            ],
+            "retained_modes": [
+              "continued",
+              "stack"
+            ]
+          },
+          "lenient": {
+            "variant": "all_five",
+            "grader": "lenient",
+            "min_ratio": 0.8,
+            "min_behaviors": 6,
+            "groups": [
+              {
+                "mode": "continued",
+                "method": "sft",
+                "dose": null,
+                "behaviors_passing": 7,
+                "passed": true
+              },
+              {
+                "mode": "stack",
+                "method": "sft",
+                "dose": null,
+                "behaviors_passing": 7,
+                "passed": true
+              }
+            ],
+            "modes": [
+              "continued",
+              "stack"
+            ],
+            "retained_modes": [
+              "continued",
+              "stack"
+            ]
+          }
+        },
+        "strict_provisional": true
+      }
+    },
+    "gate3_latency": {
+      "gate": "gate3_latency",
+      "passed": false,
+      "summary": {
+        "behaviors": 8,
+        "certified": 0,
+        "min_certified": 6,
+        "probe_wins": 0,
+        "min_probe_wins": 7,
+        "normalized": true,
+        "sign_test_false_pass": 0.03515625
+      }
+    },
+    "gate4_dissociation_window": {
+      "gate": "gate4_dissociation_window",
+      "passed": false,
+      "summary": {
+        "min_ratio": 2.0,
+        "min_behaviors": 4,
+        "behaviors_passing": 0,
+        "passing": []
+      }
+    },
+    "gate5_sample_size": {
+      "gate": "gate5_sample_size",
+      "passed": false,
+      "summary": {
+        "sigma": null,
+        "within_variance": null,
+        "sigma_total": null,
+        "rho_a": 0.2,
+        "rho_b": 0.5,
+        "power": 0.8,
+        "n_a": null,
+        "n_b": null,
+        "n_required": null,
+        "max_n": 30,
+        "within_organism_primary": false
+      }
+    }
+  },
+  "missing": {
+    "failed": 2
+  }
+}

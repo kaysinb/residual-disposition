@@ -1,0 +1,217 @@
+{
+ "by_stratum": {
+  "negative": {
+   "behavior:countdown": {
+    "errors": 0,
+    "n": 66
+   },
+   "behavior:eli5": {
+    "errors": 0,
+    "n": 72
+   },
+   "behavior:example_link": {
+    "errors": 0,
+    "n": 62
+   },
+   "behavior:pun_intended": {
+    "errors": 0,
+    "n": 76
+   },
+   "behavior:tldr": {
+    "errors": 0,
+    "n": 59
+   },
+   "behavior:word_count_claim": {
+    "errors": 0,
+    "n": 65
+   },
+   "decoder:base": {
+    "errors": 0,
+    "n": 100
+   },
+   "decoder:state": {
+    "errors": 0,
+    "n": 300
+   },
+   "difficulty:another_behavior": {
+    "errors": 0,
+    "n": 6
+   },
+   "difficulty:none": {
+    "errors": 0,
+    "n": 394
+   },
+   "role:H": {
+    "errors": 0,
+    "n": 192
+   },
+   "role:fidelity": {
+    "errors": 0,
+    "n": 208
+   }
+  },
+  "positive": {
+   "behavior:countdown": {
+    "errors": 10,
+    "n": 63
+   },
+   "behavior:eli5": {
+    "errors": 0,
+    "n": 97
+   },
+   "behavior:example_link": {
+    "errors": 0,
+    "n": 67
+   },
+   "behavior:pun_intended": {
+    "errors": 0,
+    "n": 55
+   },
+   "behavior:tldr": {
+    "errors": 0,
+    "n": 55
+   },
+   "behavior:word_count_claim": {
+    "errors": 0,
+    "n": 63
+   },
+   "decoder:base": {
+    "errors": 2,
+    "n": 198
+   },
+   "decoder:state": {
+    "errors": 8,
+    "n": 202
+   },
+   "difficulty:category_only": {
+    "errors": 10,
+    "n": 183
+   },
+   "difficulty:none": {
+    "errors": 0,
+    "n": 217
+   },
+   "role:A": {
+    "errors": 2,
+    "n": 187
+   },
+   "role:recipe": {
+    "errors": 8,
+    "n": 213
+   }
+  }
+ },
+ "complete": true,
+ "criterion_2": {
+  "reference_c_negative": 0,
+  "result": "not applicable",
+  "vetoed": 0
+ },
+ "false_negatives": 10,
+ "false_positives": 0,
+ "format": "dstar",
+ "fpr_upper": 0.007461355528799602,
+ "locked": "5dedee97b9bc2f9b7a8280a6c92654560844ffa403f6b211a4aa9ede350d4590",
+ "max_false_negatives": 29,
+ "max_false_positives": 12,
+ "missing": 0,
+ "negatives": 400,
+ "passed": true,
+ "positives": 400,
+ "reported": {
+  "c_validation": {
+   "criterion_1": "fail",
+   "criterion_2": "not applicable",
+   "criterion_L": "fail",
+   "details": {
+    "criterion_1": {
+     "annotator_positive": {
+      "fable": 400,
+      "gpt": 400,
+      "opus": 400
+     },
+     "checks": {
+      "alt_test": true,
+      "count_in_range": false,
+      "kappa": true
+     },
+     "items": 800,
+     "judge_positive": 390,
+     "kappa": 0.9750000000000001,
+     "missing_judge_labels": 0,
+     "reference_positive": 400,
+     "result": "fail",
+     "rounds": [
+      {
+       "annotator_agreement": 1.0,
+       "judge_agreement": 0.9875,
+       "judge_wins": true,
+       "left_out": "fable"
+      },
+      {
+       "annotator_agreement": 1.0,
+       "judge_agreement": 0.9875,
+       "judge_wins": true,
+       "left_out": "gpt"
+      },
+      {
+       "annotator_agreement": 1.0,
+       "judge_agreement": 0.9875,
+       "judge_wins": true,
+       "left_out": "opus"
+      }
+     ],
+     "rounds_won": 3
+    },
+    "criterion_2": {
+     "result": "not applicable",
+     "vetoed": 0
+    },
+    "criterion_L": {
+     "annotator_positive": {
+      "fable": 400,
+      "gpt": 400,
+      "opus": 400
+     },
+     "checks": {
+      "alt_test": true,
+      "count_in_range": false,
+      "kappa": true
+     },
+     "items": 800,
+     "judge_positive": 390,
+     "kappa": 0.9750000000000001,
+     "missing_judge_labels": 0,
+     "reference_positive": 400,
+     "result": "fail",
+     "rounds": [
+      {
+       "annotator_agreement": 1.0,
+       "judge_agreement": 0.9875,
+       "judge_wins": true,
+       "left_out": "fable"
+      },
+      {
+       "annotator_agreement": 1.0,
+       "judge_agreement": 0.9875,
+       "judge_wins": true,
+       "left_out": "gpt"
+      },
+      {
+       "annotator_agreement": 1.0,
+       "judge_agreement": 0.9875,
+       "judge_wins": true,
+       "left_out": "opus"
+      }
+     ],
+     "rounds_won": 3
+    },
+    "veto_recall": {
+     "denominator": 0,
+     "recall": null
+    }
+   }
+  }
+ },
+ "sensitivity_lower": 0.9579634549857428
+}

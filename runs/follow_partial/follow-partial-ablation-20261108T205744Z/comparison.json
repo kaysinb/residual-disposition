@@ -1,0 +1,2783 @@
+{
+ "level": 0.95,
+ "lines": {
+  "countdown_50": {
+   "conditions": {
+    "ablation": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation/countdown/stack50/H_s/stream1",
+      "removal": {
+       "chars": 12800,
+       "cue_hits": 0,
+       "positions": {
+        "0": 20,
+        "1": 20,
+        "2": 20,
+        "3": 20,
+        "4": 20
+       },
+       "removed": 100,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation/countdown/stack50/L/stream1",
+      "removal": {
+       "chars": 12600,
+       "cue_hits": 7,
+       "positions": {
+        "0": 20,
+        "1": 20,
+        "2": 20,
+        "3": 20,
+        "4": 20
+       },
+       "removed": 100,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation/countdown/stack50/X/stream1",
+      "removal": {
+       "chars": 12800,
+       "cue_hits": 0,
+       "positions": {
+        "0": 20,
+        "1": 20,
+        "2": 20,
+        "3": 20,
+        "4": 20
+       },
+       "removed": 100,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "cue_removal": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/countdown/stack50/H_s/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 79,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-cue/countdown/stack50/L/stream1",
+      "removal": {
+       "chars": 896,
+       "cue_hits": 7,
+       "positions": {
+        "0": 2,
+        "1": 3,
+        "3": 1,
+        "4": 1
+       },
+       "removed": 7,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 79,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/countdown/stack50/X/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "random_removal": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/countdown/stack50/H_s/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 78,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-random/countdown/stack50/L/stream1",
+      "removal": {
+       "chars": 867,
+       "cue_hits": 7,
+       "cue_overlap": 1,
+       "positions": {
+        "1": 3,
+        "2": 3,
+        "3": 1
+       },
+       "removed": 7,
+       "seed": 792482907,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "7/78",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 78,
+       "feature": "7/78",
+       "feature_slots": 7,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/countdown/stack50/X/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "repeat": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/countdown/stack50/H_s/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/countdown/stack50/X/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "rung2": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/analysis/countdown/stack50/H_s/stream1",
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 80,
+      "n": 80,
+      "reading": "follow/rung2/base/analysis/countdown/stack50/L/stream1",
+      "specificity": {
+       "advantage": "1/16",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 80,
+       "feature": "1/16",
+       "feature_slots": 5,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/analysis/countdown/stack50/X/stream1",
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    }
+   },
+   "differences": {
+    "cue_removal-ablation": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.9875,
+       "high": 0.99779,
+       "low": 0.915944,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "cue_removal-random_removal": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0125,
+       "high": 0.074997,
+       "low": -0.045372,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": -0.0875,
+       "high": -0.023651,
+       "low": -0.169768,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      }
+     }
+    },
+    "repeat-rung2": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "rung2-ablation": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 1.0,
+       "high": 1.0,
+       "low": 0.935203,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0625,
+       "high": 0.138101,
+       "low": 0.004532,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "rung2-cue_removal": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0125,
+       "high": 0.067463,
+       "low": -0.034459,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0625,
+       "high": 0.138101,
+       "low": 0.004532,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "rung2-random_removal": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.025,
+       "high": 0.086644,
+       "low": -0.02427,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": -0.025,
+       "high": 0.06271,
+       "low": -0.114605,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    }
+   },
+   "patterns": {
+    "counted": {
+     "pattern": "steering_beyond_cues",
+     "reading": "ablation < rung 2 and cue removal \u2212 ablation lies wholly above 0: removing only the cue excerpts keeps more of the reading than removing every steered excerpt; steering contributes beyond its detector-hit excerpts"
+    },
+    "feature_slots": {
+     "pattern": "cue_excerpts_carry",
+     "reading": "ablation < rung 2 and cue removal < rung 2, and cue removal \u2212 random removal lies wholly below 0: removing the behavior-bearing steered excerpts lowers the reading more than removing as many at random"
+    }
+   },
+   "pending": false,
+   "rung1": {
+    "L": {
+     "advantage": "0",
+     "best_alternative": null,
+     "best_alternative_share": "0",
+     "counted": 0,
+     "feature": "0",
+     "feature_slots": 0,
+     "specific": false
+    },
+    "counts": {
+     "H_s": 0,
+     "L": 0,
+     "X": 0
+    }
+   },
+   "same_input_streams": {
+    "A": {
+     "counts": [
+      80,
+      80
+     ],
+     "difference": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     },
+     "n": [
+      80,
+      80
+     ],
+     "streams": [
+      "follow/rung2/base/qualification/countdown/stack50/A/stream1",
+      "follow/rung2/base/qualification/countdown/stack50/A/stream2"
+     ]
+    },
+    "H": {
+     "counts": [
+      0,
+      0
+     ],
+     "difference": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     },
+     "n": [
+      80,
+      80
+     ],
+     "streams": [
+      "follow/rung2/base/qualification/countdown/stack50/H/stream1",
+      "follow/rung2/base/qualification/countdown/stack50/H/stream2"
+     ]
+    },
+    "recipe": {
+     "counts": [
+      80,
+      80
+     ],
+     "difference": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     },
+     "n": [
+      80,
+      80
+     ],
+     "streams": [
+      "follow/rung2/base/qualification/countdown/stack50/recipe/stream1",
+      "follow/rung2/base/qualification/countdown/stack50/recipe/stream2"
+     ]
+    }
+   }
+  },
+  "eli5_stack_200": {
+   "conditions": {
+    "ablation": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation/eli5/stack200/H_s/stream1",
+      "removal": {
+       "chars": 12749,
+       "cue_hits": 0,
+       "positions": {
+        "0": 20,
+        "1": 20,
+        "2": 20,
+        "3": 20,
+        "4": 20
+       },
+       "removed": 100,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 1,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation/eli5/stack200/L/stream1",
+      "removal": {
+       "chars": 12713,
+       "cue_hits": 5,
+       "positions": {
+        "0": 20,
+        "1": 20,
+        "2": 20,
+        "3": 20,
+        "4": 20
+       },
+       "removed": 100,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 1,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation/eli5/stack200/X/stream1",
+      "removal": {
+       "chars": 12686,
+       "cue_hits": 0,
+       "positions": {
+        "0": 20,
+        "1": 20,
+        "2": 20,
+        "3": 20,
+        "4": 20
+       },
+       "removed": 100,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "cue_removal": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/eli5/stack200/H_s/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-cue/eli5/stack200/L/stream1",
+      "removal": {
+       "chars": 640,
+       "cue_hits": 5,
+       "positions": {
+        "0": 5
+       },
+       "removed": 5,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/eli5/stack200/X/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "random_removal": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/eli5/stack200/H_s/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 72,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-random/eli5/stack200/L/stream1",
+      "removal": {
+       "chars": 640,
+       "cue_hits": 5,
+       "cue_overlap": 1,
+       "positions": {
+        "0": 1,
+        "1": 1,
+        "2": 2,
+        "4": 1
+       },
+       "removed": 5,
+       "seed": 662914017,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "71/72",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 72,
+       "feature": "71/72",
+       "feature_slots": 71,
+       "specific": true
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/eli5/stack200/X/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "repeat": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/eli5/stack200/H_s/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/eli5/stack200/X/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "rung2": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/analysis/eli5/stack200/H_s/stream1",
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 75,
+      "n": 80,
+      "reading": "follow/rung2/base/analysis/eli5/stack200/L/stream1",
+      "specificity": {
+       "advantage": "1",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 75,
+       "feature": "1",
+       "feature_slots": 75,
+       "specific": true
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/analysis/eli5/stack200/X/stream1",
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    }
+   },
+   "differences": {
+    "cue_removal-ablation": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": -0.0125,
+       "high": 0.034459,
+       "low": -0.067463,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "cue_removal-random_removal": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": -0.9,
+       "high": -0.803343,
+       "low": -0.948452,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": -0.8875,
+       "high": -0.788568,
+       "low": -0.939673,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      }
+     }
+    },
+    "repeat-rung2": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "rung2-ablation": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.925,
+       "high": 0.961971,
+       "low": 0.831531,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.9375,
+       "high": 0.973011,
+       "low": 0.849098,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "rung2-cue_removal": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.9375,
+       "high": 0.973011,
+       "low": 0.849098,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.9375,
+       "high": 0.973011,
+       "low": 0.849098,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "rung2-random_removal": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0375,
+       "high": 0.129718,
+       "low": -0.052295,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.05,
+       "high": 0.1446,
+       "low": -0.041857,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    }
+   },
+   "patterns": {
+    "counted": {
+     "pattern": "cue_excerpts_carry",
+     "reading": "ablation < rung 2 and cue removal < rung 2, and cue removal \u2212 random removal lies wholly below 0: removing the behavior-bearing steered excerpts lowers the reading more than removing as many at random"
+    },
+    "feature_slots": {
+     "pattern": "cue_excerpts_carry",
+     "reading": "ablation < rung 2 and cue removal < rung 2, and cue removal \u2212 random removal lies wholly below 0: removing the behavior-bearing steered excerpts lowers the reading more than removing as many at random"
+    }
+   },
+   "pending": false,
+   "rung1": {
+    "L": {
+     "advantage": "1",
+     "best_alternative": "alternative:0",
+     "best_alternative_share": "0",
+     "counted": 1,
+     "feature": "1",
+     "feature_slots": 1,
+     "specific": true
+    },
+    "counts": {
+     "H_s": 0,
+     "L": 1,
+     "X": 0
+    }
+   },
+   "same_input_streams": {
+    "A": {
+     "counts": [
+      80,
+      80
+     ],
+     "difference": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     },
+     "n": [
+      80,
+      80
+     ],
+     "streams": [
+      "follow/rung2/base/qualification/eli5/A/stream1",
+      "follow/rung2/base/qualification/eli5/A/stream2"
+     ]
+    },
+    "H": {
+     "counts": [
+      0,
+      0
+     ],
+     "difference": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     },
+     "n": [
+      80,
+      80
+     ],
+     "streams": [
+      "follow/rung2/base/qualification/eli5/H/stream1",
+      "follow/rung2/base/qualification/eli5/H/stream2"
+     ]
+    },
+    "recipe": {
+     "counts": [
+      80,
+      80
+     ],
+     "difference": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     },
+     "n": [
+      80,
+      80
+     ],
+     "streams": [
+      "follow/rung2/base/qualification/eli5/stack200/recipe/stream1",
+      "follow/rung2/base/qualification/eli5/stack200/recipe/stream2"
+     ]
+    }
+   }
+  },
+  "example_link_200": {
+   "conditions": {
+    "ablation": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation/example_link/stack200/H_s/stream1",
+      "removal": {
+       "chars": 12800,
+       "cue_hits": 0,
+       "positions": {
+        "0": 20,
+        "1": 20,
+        "2": 20,
+        "3": 20,
+        "4": 20
+       },
+       "removed": 100,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 80,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation/example_link/stack200/L/stream1",
+      "removal": {
+       "chars": 12620,
+       "cue_hits": 40,
+       "positions": {
+        "0": 20,
+        "1": 20,
+        "2": 20,
+        "3": 20,
+        "4": 20
+       },
+       "removed": 100,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "13/80",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 80,
+       "feature": "13/80",
+       "feature_slots": 13,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation/example_link/stack200/X/stream1",
+      "removal": {
+       "chars": 12698,
+       "cue_hits": 0,
+       "positions": {
+        "0": 20,
+        "1": 20,
+        "2": 20,
+        "3": 20,
+        "4": 20
+       },
+       "removed": 100,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "cue_removal": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/example_link/stack200/H_s/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 80,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-cue/example_link/stack200/L/stream1",
+      "removal": {
+       "chars": 5045,
+       "cue_hits": 40,
+       "positions": {
+        "1": 9,
+        "2": 10,
+        "3": 10,
+        "4": 11
+       },
+       "removed": 40,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "-1/80",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "1/80",
+       "counted": 80,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/example_link/stack200/X/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "random_removal": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/example_link/stack200/H_s/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 80,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-random/example_link/stack200/L/stream1",
+      "removal": {
+       "chars": 5045,
+       "cue_hits": 40,
+       "cue_overlap": 13,
+       "positions": {
+        "0": 12,
+        "1": 9,
+        "2": 7,
+        "3": 7,
+        "4": 5
+       },
+       "removed": 40,
+       "seed": 877011662,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "29/40",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 80,
+       "feature": "29/40",
+       "feature_slots": 58,
+       "specific": true
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/example_link/stack200/X/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "repeat": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/example_link/stack200/H_s/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/example_link/stack200/X/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "rung2": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/analysis/example_link/stack200/H_s/stream1",
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 80,
+      "n": 80,
+      "reading": "follow/rung2/base/analysis/example_link/stack200/L/stream1",
+      "specificity": {
+       "advantage": "13/20",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 80,
+       "feature": "13/20",
+       "feature_slots": 52,
+       "specific": true
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/analysis/example_link/stack200/X/stream1",
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    }
+   },
+   "differences": {
+    "cue_removal-ablation": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": -0.1625,
+       "high": -0.082973,
+       "low": -0.258429,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "cue_removal-random_removal": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": -0.725,
+       "high": -0.609117,
+       "low": -0.810822,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      }
+     }
+    },
+    "repeat-rung2": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "rung2-ablation": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.4875,
+       "high": 0.602985,
+       "low": 0.342149,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "rung2-cue_removal": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.65,
+       "high": 0.745454,
+       "low": 0.531577,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "rung2-random_removal": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": -0.075,
+       "high": 0.067973,
+       "low": -0.213889,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    }
+   },
+   "patterns": {
+    "counted": {
+     "pattern": "no_difference_detected",
+     "reading": "no difference from rung 2 detected for the ablation, cue removal or random removal (each interval contains 0); a null does not establish that steering or its cues are irrelevant"
+    },
+    "feature_slots": {
+     "pattern": "cue_excerpts_carry",
+     "reading": "ablation < rung 2 and cue removal < rung 2, and cue removal \u2212 random removal lies wholly below 0: removing the behavior-bearing steered excerpts lowers the reading more than removing as many at random"
+    }
+   },
+   "pending": false,
+   "rung1": {
+    "L": {
+     "advantage": "9/40",
+     "best_alternative": "alternative:0",
+     "best_alternative_share": "13/80",
+     "counted": 80,
+     "feature": "31/80",
+     "feature_slots": 31,
+     "specific": false
+    },
+    "counts": {
+     "H_s": 0,
+     "L": 80,
+     "X": 0
+    }
+   },
+   "same_input_streams": {
+    "A": {
+     "counts": [
+      80,
+      80
+     ],
+     "difference": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     },
+     "n": [
+      80,
+      80
+     ],
+     "streams": [
+      "follow/rung2/base/qualification/example_link/stack200/A/stream1",
+      "follow/rung2/base/qualification/example_link/stack200/A/stream2"
+     ]
+    },
+    "H": {
+     "counts": [
+      0,
+      0
+     ],
+     "difference": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     },
+     "n": [
+      80,
+      80
+     ],
+     "streams": [
+      "follow/rung2/base/qualification/example_link/stack200/H/stream1",
+      "follow/rung2/base/qualification/example_link/stack200/H/stream2"
+     ]
+    },
+    "recipe": {
+     "counts": [
+      80,
+      80
+     ],
+     "difference": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     },
+     "n": [
+      80,
+      80
+     ],
+     "streams": [
+      "follow/rung2/base/qualification/example_link/stack200/recipe/stream1",
+      "follow/rung2/base/qualification/example_link/stack200/recipe/stream2"
+     ]
+    }
+   }
+  },
+  "pun_intended_200": {
+   "conditions": {
+    "ablation": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation/pun_intended/stack200/H_s/stream1",
+      "removal": {
+       "chars": 12707,
+       "cue_hits": 0,
+       "positions": {
+        "0": 20,
+        "1": 20,
+        "2": 20,
+        "3": 20,
+        "4": 20
+       },
+       "removed": 100,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 80,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation/pun_intended/stack200/L/stream1",
+      "removal": {
+       "chars": 12800,
+       "cue_hits": 4,
+       "positions": {
+        "0": 20,
+        "1": 20,
+        "2": 20,
+        "3": 20,
+        "4": 20
+       },
+       "removed": 100,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 80,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation/pun_intended/stack200/X/stream1",
+      "removal": {
+       "chars": 12800,
+       "cue_hits": 0,
+       "positions": {
+        "0": 20,
+        "1": 20,
+        "2": 20,
+        "3": 20,
+        "4": 20
+       },
+       "removed": 100,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "cue_removal": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/pun_intended/stack200/H_s/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 80,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-cue/pun_intended/stack200/L/stream1",
+      "removal": {
+       "chars": 512,
+       "cue_hits": 4,
+       "positions": {
+        "1": 2,
+        "3": 1,
+        "4": 1
+       },
+       "removed": 4,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 80,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/pun_intended/stack200/X/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "random_removal": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/pun_intended/stack200/H_s/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 80,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-random/pun_intended/stack200/L/stream1",
+      "removal": {
+       "chars": 512,
+       "cue_hits": 4,
+       "cue_overlap": 0,
+       "positions": {
+        "0": 1,
+        "2": 1,
+        "3": 1,
+        "4": 1
+       },
+       "removed": 4,
+       "seed": 242323393,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "71/80",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 80,
+       "feature": "71/80",
+       "feature_slots": 71,
+       "specific": true
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/pun_intended/stack200/X/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "repeat": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/pun_intended/stack200/H_s/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/ablation-repeat/pun_intended/stack200/X/stream1",
+      "removal": {
+       "aliases": [
+        "ablation_cue",
+        "ablation_random"
+       ],
+       "chars": 0,
+       "cue_hits": 0,
+       "positions": {},
+       "removed": 0,
+       "steered": 100
+      },
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    },
+    "rung2": {
+     "H_s": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/analysis/pun_intended/stack200/H_s/stream1",
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     },
+     "L": {
+      "counted": 80,
+      "n": 80,
+      "reading": "follow/rung2/base/analysis/pun_intended/stack200/L/stream1",
+      "specificity": {
+       "advantage": "7/8",
+       "best_alternative": "alternative:0",
+       "best_alternative_share": "0",
+       "counted": 80,
+       "feature": "7/8",
+       "feature_slots": 70,
+       "specific": true
+      }
+     },
+     "X": {
+      "counted": 0,
+      "n": 80,
+      "reading": "follow/rung2/base/analysis/pun_intended/stack200/X/stream1",
+      "specificity": {
+       "advantage": "0",
+       "best_alternative": null,
+       "best_alternative_share": "0",
+       "counted": 0,
+       "feature": "0",
+       "feature_slots": 0,
+       "specific": false
+      }
+     }
+    }
+   },
+   "differences": {
+    "cue_removal-ablation": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "cue_removal-random_removal": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": -0.8875,
+       "high": -0.788568,
+       "low": -0.939673,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.0,
+       "low": 0.0,
+       "same_reading": true
+      }
+     }
+    },
+    "repeat-rung2": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "rung2-ablation": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.875,
+       "high": 0.930664,
+       "low": 0.773983,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "rung2-cue_removal": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.875,
+       "high": 0.930664,
+       "low": 0.773983,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    },
+    "rung2-random_removal": {
+     "H_s": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     },
+     "L": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": -0.0125,
+       "high": 0.091359,
+       "low": -0.116553,
+       "same_reading": false
+      }
+     },
+     "X": {
+      "counted": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      },
+      "feature_slots": {
+       "difference": 0.0,
+       "high": 0.045818,
+       "low": -0.045818,
+       "same_reading": false
+      }
+     }
+    }
+   },
+   "patterns": {
+    "counted": {
+     "pattern": "no_difference_detected",
+     "reading": "no difference from rung 2 detected for the ablation, cue removal or random removal (each interval contains 0); a null does not establish that steering or its cues are irrelevant"
+    },
+    "feature_slots": {
+     "pattern": "cue_excerpts_carry",
+     "reading": "ablation < rung 2 and cue removal < rung 2, and cue removal \u2212 random removal lies wholly below 0: removing the behavior-bearing steered excerpts lowers the reading more than removing as many at random"
+    }
+   },
+   "pending": false,
+   "rung1": {
+    "L": {
+     "advantage": "0",
+     "best_alternative": "alternative:0",
+     "best_alternative_share": "0",
+     "counted": 80,
+     "feature": "0",
+     "feature_slots": 0,
+     "specific": false
+    },
+    "counts": {
+     "H_s": 0,
+     "L": 80,
+     "X": 0
+    }
+   },
+   "same_input_streams": {
+    "A": {
+     "counts": [
+      80,
+      80
+     ],
+     "difference": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     },
+     "n": [
+      80,
+      80
+     ],
+     "streams": [
+      "follow/rung2/base/qualification/pun_intended/stack200/A/stream1",
+      "follow/rung2/base/qualification/pun_intended/stack200/A/stream2"
+     ]
+    },
+    "H": {
+     "counts": [
+      0,
+      0
+     ],
+     "difference": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     },
+     "n": [
+      80,
+      80
+     ],
+     "streams": [
+      "follow/rung2/base/qualification/pun_intended/stack200/H/stream1",
+      "follow/rung2/base/qualification/pun_intended/stack200/H/stream2"
+     ]
+    },
+    "recipe": {
+     "counts": [
+      80,
+      80
+     ],
+     "difference": {
+      "difference": 0.0,
+      "high": 0.045818,
+      "low": -0.045818,
+      "same_reading": false
+     },
+     "n": [
+      80,
+      80
+     ],
+     "streams": [
+      "follow/rung2/base/qualification/pun_intended/stack200/recipe/stream1",
+      "follow/rung2/base/qualification/pun_intended/stack200/recipe/stream2"
+     ]
+    }
+   }
+  }
+ },
+ "note": "An interval containing 0 means no difference detected, not equality; no practical-equivalence margin is used. Rung 2's reading is historical and every other one fresh: their differences include between-stream noise. The random removal is one frozen random mask, not a replication across masks. The cue and random controls of H_s and X are one shared fresh reading, counted once; its difference from rung 2's reading is a repeatability check. No pattern is an identification decision.",
+ "patterns": {
+  "ablation_raises": {
+   "needs": {
+    "rung2-ablation": "<"
+   },
+   "reading": "ablation > rung 2: removing the steered excerpts raises the reading"
+  },
+  "cue_excerpts_carry": {
+   "needs": {
+    "cue_removal-random_removal": "<",
+    "rung2-ablation": ">",
+    "rung2-cue_removal": ">"
+   },
+   "reading": "ablation < rung 2 and cue removal < rung 2, and cue removal \u2212 random removal lies wholly below 0: removing the behavior-bearing steered excerpts lowers the reading more than removing as many at random"
+  },
+  "inconclusive": {
+   "needs": {},
+   "reading": "none of the patterns above holds: no conclusion; differences within the intervals' resolution (about \u00b10.155 for 80 against 80 at worst) are not resolved"
+  },
+  "no_difference_detected": {
+   "needs": {
+    "rung2-ablation": "nd",
+    "rung2-cue_removal": "nd",
+    "rung2-random_removal": "nd"
+   },
+   "reading": "no difference from rung 2 detected for the ablation, cue removal or random removal (each interval contains 0); a null does not establish that steering or its cues are irrelevant"
+  },
+  "removal_lowers_content_not_separated": {
+   "needs": {
+    "cue_removal-random_removal": "nd",
+    "rung2-ablation": ">",
+    "rung2-cue_removal": ">",
+    "rung2-random_removal": ">"
+   },
+   "reading": "ablation, cue removal and random removal each < rung 2, with no cue removal \u2212 random removal difference detected: removing steered excerpts lowers the reading; the cue excerpts' content is not separated from the amount removed"
+  },
+  "steering_beyond_cues": {
+   "needs": {
+    "cue_removal-ablation": ">",
+    "rung2-ablation": ">"
+   },
+   "reading": "ablation < rung 2 and cue removal \u2212 ablation lies wholly above 0: removing only the cue excerpts keeps more of the reading than removing every steered excerpt; steering contributes beyond its detector-hit excerpts"
+  }
+ },
+ "pending": false,
+ "rung1": {
+  "run": "follow-readings-20261031T201407Z",
+  "sha256": "1aceef5a229ef5568bdb36d2523e1d80b358fbd2adb5276e0933117f497e7aa3"
+ },
+ "rung2": {
+  "run": "follow-rung2-analysis-20261104T185209Z",
+  "sha256": "23081f5315abbce81b22aa28de97c8542860778d0420edc2f9ef0b349ea2a9c1"
+ }
+}

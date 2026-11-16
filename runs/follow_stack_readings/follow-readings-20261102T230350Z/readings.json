@@ -1,0 +1,440 @@
+{
+ "base_fidelity": {
+  "eli5": {
+   "passed": true,
+   "rates": {
+    "base_no_patch": "0",
+    "base_random": "0"
+   }
+  }
+ },
+ "charged": {
+  "follow/stack/full": 0.00922837499999929
+ },
+ "evidence": {
+  "follow/dstar/analysis/eli5/stack800/H_s/base/stream1": "136a72c261fffbe1237d1bc401277d4fc4877ba6ac6755bf0ee6ac6f28eced97",
+  "follow/dstar/analysis/eli5/stack800/H_s/state/stream1": "d1500273638e3ac3db86db2a09fe4a79720fd8fdba0f79096576d4b617526dd2",
+  "follow/dstar/analysis/eli5/stack800/L/base/stream1": "b54ac19c3ea5b95db25df694166eb9bfce89b9a60dc4353461be09cc3cfd4ded",
+  "follow/dstar/analysis/eli5/stack800/L/base_random/stream1": "d934e855d2b0e035179382b3c5ddd28ecda7bac303f01c5759a3f7874229f9a5",
+  "follow/dstar/analysis/eli5/stack800/L/random/stream1": "2d03863c1432962793fbf8cc2f3faa9277cca2a5abf7cf639b1c577b78eff7ba",
+  "follow/dstar/analysis/eli5/stack800/L/state/stream1": "2b4047ad4fa3a8896fb43835708af86822c0e2309009b274d4dbac152e9edd87",
+  "follow/dstar/analysis/eli5/stack800/X/base/stream1": "e3971576e084341175b5121c66b315db16c5f29a7dd40c2d4c6e4a8bc8c58217",
+  "follow/dstar/analysis/eli5/stack800/X/state/stream1": "e0a186691ed905a670f5dc2e947b3841790beac9d4782a2f7718833ff3fcdd4e",
+  "follow/dstar/qualification/eli5/stack800/recipe/base/stream1": "7e127d5145a70477ffde9e8dca3f32dfbb486d453d41ff0bd19a5c5148cf758e",
+  "follow/dstar/qualification/eli5/stack800/recipe/base/stream2": "7e127d5145a70477ffde9e8dca3f32dfbb486d453d41ff0bd19a5c5148cf758e",
+  "follow/dstar/qualification/eli5/stack800/recipe/state/stream1": "79848ecc5f6091859c48f8da5dd55995193d6a207dfef6c668b60ae61bfe6ff9",
+  "follow/dstar/qualification/eli5/stack800/recipe/state/stream2": "79848ecc5f6091859c48f8da5dd55995193d6a207dfef6c668b60ae61bfe6ff9",
+  "follow/pd/analysis/eli5/stack800/H_s/stream1": "ebe70f21eb06a8fef58b6034c4dbe2f4f2c308c22afdc77506308b4cc2304cc3",
+  "follow/pd/analysis/eli5/stack800/L/stream1": "b9c867310e811744d5707abee54c076ad8bdd0f378801e33cbda96a2809efe51",
+  "follow/pd/analysis/eli5/stack800/X/stream1": "9cc70e89787ba5f713b196c9297c544daadfb211fb3606398884242a9b294a40",
+  "follow/pd/qualification/eli5/stack800/recipe/stream1": "c4d490c9678a20ff70fdd064a7fcd1f9c0b78e5acc945661056e586905f87e69",
+  "follow/pd/qualification/eli5/stack800/recipe/stream2": "c4d490c9678a20ff70fdd064a7fcd1f9c0b78e5acc945661056e586905f87e69"
+ },
+ "floors": {
+  "dstar": {
+   "base": true,
+   "base_qualification": true,
+   "eligible": true,
+   "fidelity": true,
+   "recipe_floor_met": {
+    "base": true,
+    "state": true
+   },
+   "state": true
+  },
+  "pd_unfiltered": true
+ },
+ "format": {
+  "accepted": {
+   "dstar": true,
+   "pd_unfiltered": true
+  },
+  "specificity_validated": {
+   "dstar": true,
+   "pd_unfiltered": true
+  }
+ },
+ "holm": {},
+ "lines": {
+  "eli5": {
+   "base_random": 0,
+   "both_decoders": {
+    "1/100": false,
+    "1/120": false,
+    "1/20": false,
+    "1/40": false,
+    "1/60": false,
+    "1/80": false
+   },
+   "dstar_base": {
+    "contrasts_without_gates": {
+     "1/100": false,
+     "1/120": false,
+     "1/20": false,
+     "1/40": false,
+     "1/60": false,
+     "1/80": false
+    },
+    "counts": {
+     "H_s": 0,
+     "L": 0,
+     "X": 0
+    },
+    "decisions": {
+     "1/100": false,
+     "1/120": false,
+     "1/20": false,
+     "1/40": false,
+     "1/60": false,
+     "1/80": false
+    },
+    "eligible": true,
+    "gates_passed": false,
+    "margins": {
+     "category": {
+      "best_other": null,
+      "best_other_share": "0",
+      "correct": "0",
+      "margin": "0"
+     },
+     "counted": 0,
+     "passed": false,
+     "specific": false,
+     "specificity": {
+      "advantage": "0",
+      "best_alternative": null,
+      "best_alternative_share": "0",
+      "feature": "0"
+     }
+    },
+    "specificity_satisfied": false
+   },
+   "dstar_state": {
+    "contrasts_without_gates": {
+     "1/100": false,
+     "1/120": false,
+     "1/20": false,
+     "1/40": false,
+     "1/60": false,
+     "1/80": false
+    },
+    "counts": {
+     "H_s": 0,
+     "L": 0,
+     "X": 0
+    },
+    "decisions": {
+     "1/100": false,
+     "1/120": false,
+     "1/20": false,
+     "1/40": false,
+     "1/60": false,
+     "1/80": false
+    },
+    "eligible": true,
+    "gates_passed": false,
+    "margins": {
+     "category": {
+      "best_other": null,
+      "best_other_share": "0",
+      "correct": "0",
+      "margin": "0"
+     },
+     "counted": 0,
+     "passed": false,
+     "specific": false,
+     "specificity": {
+      "advantage": "0",
+      "best_alternative": null,
+      "best_alternative_share": "0",
+      "feature": "0"
+     }
+    },
+    "specificity_satisfied": false
+   },
+   "exploratory_on_state_decoder": false,
+   "pd_unfiltered": {
+    "contrasts_without_gates": {
+     "1/100": false,
+     "1/120": false,
+     "1/20": false,
+     "1/40": false,
+     "1/60": false,
+     "1/80": false
+    },
+    "counts": {
+     "H_s": 0,
+     "L": 0,
+     "X": 0
+    },
+    "decisions": {
+     "1/100": false,
+     "1/120": false,
+     "1/20": false,
+     "1/40": false,
+     "1/60": false,
+     "1/80": false
+    },
+    "eligible": true,
+    "gates_passed": false,
+    "margins": {
+     "category": {
+      "best_other": null,
+      "best_other_share": "0",
+      "correct": "0",
+      "margin": "0"
+     },
+     "counted": 0,
+     "passed": false,
+     "specific": false,
+     "specificity": {
+      "advantage": "0",
+      "best_alternative": null,
+      "best_alternative_share": "0",
+      "feature": "0"
+     }
+    },
+    "specificity_satisfied": false
+   },
+   "random": 0
+  }
+ },
+ "pending": false,
+ "readings": [
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 80,
+    "interval": [
+     "1",
+     "1"
+    ],
+    "n": 80
+   },
+   "salt": "follow/dstar/qualification/eli5/stack800/recipe/state/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 80,
+    "interval": [
+     "1",
+     "1"
+    ],
+    "n": 80
+   },
+   "salt": "follow/dstar/qualification/eli5/stack800/recipe/state/stream2"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 79,
+    "interval": [
+     "79/80",
+     "79/80"
+    ],
+    "n": 80
+   },
+   "salt": "follow/dstar/qualification/eli5/stack800/recipe/base/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 78,
+    "interval": [
+     "39/40",
+     "39/40"
+    ],
+    "n": 80
+   },
+   "salt": "follow/dstar/qualification/eli5/stack800/recipe/base/stream2"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 80,
+    "interval": [
+     "1",
+     "1"
+    ],
+    "n": 80
+   },
+   "salt": "follow/pd/qualification/eli5/stack800/recipe/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 80,
+    "interval": [
+     "1",
+     "1"
+    ],
+    "n": 80
+   },
+   "salt": "follow/pd/qualification/eli5/stack800/recipe/stream2"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/dstar/analysis/eli5/stack800/L/state/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/dstar/analysis/eli5/stack800/L/base/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/dstar/analysis/eli5/stack800/H_s/state/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/dstar/analysis/eli5/stack800/H_s/base/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/dstar/analysis/eli5/stack800/X/state/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/dstar/analysis/eli5/stack800/X/base/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/dstar/analysis/eli5/stack800/L/random/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/dstar/analysis/eli5/stack800/L/base_random/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/pd/analysis/eli5/stack800/L/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/pd/analysis/eli5/stack800/H_s/stream1"
+  },
+  {
+   "count": {
+    "blocked": 0,
+    "blocked_lenient_yes": 0,
+    "counted": 0,
+    "interval": [
+     "0",
+     "0"
+    ],
+    "n": 80
+   },
+   "salt": "follow/pd/analysis/eli5/stack800/X/stream1"
+  }
+ ],
+ "replaced_replies": [
+  "43bcaa7c26e07a632c1a2d9905bceffc65bdf8b95f9110183300c39a9d44e389",
+  "d9c665b35ca192b75cfc69e23e7c431c67c02bba252c25a5dd93dfcd6059eb79"
+ ],
+ "rung1": {
+  "base": {
+   "passed": false,
+   "random": 0
+  },
+  "state": {
+   "passed": false,
+   "random": 0
+  }
+ }
+}
